@@ -176,22 +176,14 @@ jobs:
         env:
           INSTALLER_IDENTITY: ${{ secrets.MACOS_INSTALLER_IDENTITY }}
         run: |
-          # PKG aus der signierten .app erstellen
+          # PKG aus der signierten .app erstellen (--component statt --root)
           pkgbuild \
-            --root dist/VideoEditor.app \
-            --install-location /Applications/VideoEditor.app \
+            --component dist/VideoEditor.app \
+            --install-location /Applications \
             --identifier com.videoeditor.app \
             --version 1.0.0 \
             --sign "$INSTALLER_IDENTITY" \
-            dist/VideoEditor-component.pkg
-
-          # Produktarchiv mit Installer-UI
-          productbuild \
-            --package dist/VideoEditor-component.pkg \
-            --sign "$INSTALLER_IDENTITY" \
             dist/VideoEditor.pkg
-
-          rm dist/VideoEditor-component.pkg
 
       - name: Create DMG
         env:
