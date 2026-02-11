@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.pyo
+
+# Virtual Environments
+venv/
+.venv/
+env/
+
+# Build Output
+dist/
+output/
+input/
+build/
+*.build/
+*.onefile-build/
+gui.build/
+gui.dist/
+
+# macOS
+.DS_Store
+*.app
+*.dmg
+*.pkg
+
+# Binaries
+bin/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Secrets / Certificates
+*.p12
+*.cer
+*.pem
+
+# Temp
+*.tmp
+temp-*.m4a
+
+# OS
+Thumbs.db
+Desktop.ini

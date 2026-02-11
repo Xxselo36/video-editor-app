@@ -1,0 +1,3 @@
+# Build-Dependencies fuer Nuitka macOS App Bundle
+nuitka>=2.1
+ordered-set>=4.1.0

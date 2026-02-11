@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- JIT compilation (Python ctypes, NumPy) -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- Unsigned executable memory (torch, scipy, numpy) -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- Disable library validation (Nuitka .so files) -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- Apple Events (subprocess "open" command) -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>
