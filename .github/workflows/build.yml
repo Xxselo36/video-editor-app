@@ -184,7 +184,6 @@ jobs:
             --install-location /Applications \
             --identifier com.videoeditor.app \
             --version 1.0.0 \
-            --compress none \
             --sign "$INSTALLER_IDENTITY" \
             dist/VideoEditor.pkg
 
