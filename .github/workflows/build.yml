@@ -114,6 +114,7 @@ jobs:
             --nofollow-import-to=torch.testing \
             --nofollow-import-to=torch.utils.benchmark \
             --nofollow-import-to=sympy \
+            --nofollow-import-to=torch.utils._config_module \
             --output-dir=dist \
             gui.py
 
@@ -302,6 +303,7 @@ jobs:
             --nofollow-import-to=torch.testing `
             --nofollow-import-to=torch.utils.benchmark `
             --nofollow-import-to=sympy `
+            --nofollow-import-to=torch.utils._config_module `
             --output-dir=dist `
             gui.py
 
@@ -386,6 +388,7 @@ jobs:
             --nofollow-import-to=torch.testing \
             --nofollow-import-to=torch.utils.benchmark \
             --nofollow-import-to=sympy \
+            --nofollow-import-to=torch.utils._config_module \
             --output-dir=dist \
             gui.py
 
