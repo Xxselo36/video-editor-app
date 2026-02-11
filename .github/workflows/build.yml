@@ -115,6 +115,7 @@ jobs:
             --nofollow-import-to=torch.utils.benchmark \
             --nofollow-import-to=sympy \
             --nofollow-import-to=torch.utils._config_module \
+            --nofollow-import-to=scipy.integrate._lebedev \
             --output-dir=dist \
             gui.py
 
@@ -176,12 +177,14 @@ jobs:
         env:
           INSTALLER_IDENTITY: ${{ secrets.MACOS_INSTALLER_IDENTITY }}
         run: |
-          # PKG aus der signierten .app erstellen (--component statt --root)
+          # PKG aus der signierten .app erstellen
+          # --compress none: verhindert stundenlanges Komprimieren der ~2GB App
           pkgbuild \
             --component dist/VideoEditor.app \
             --install-location /Applications \
             --identifier com.videoeditor.app \
             --version 1.0.0 \
+            --compress none \
             --sign "$INSTALLER_IDENTITY" \
             dist/VideoEditor.pkg
 
@@ -333,6 +336,7 @@ jobs:
             --nofollow-import-to=torch.utils.benchmark `
             --nofollow-import-to=sympy `
             --nofollow-import-to=torch.utils._config_module `
+            --nofollow-import-to=scipy.integrate._lebedev `
             --output-dir=dist `
             gui.py
 
@@ -418,6 +422,7 @@ jobs:
             --nofollow-import-to=torch.utils.benchmark \
             --nofollow-import-to=sympy \
             --nofollow-import-to=torch.utils._config_module \
+            --nofollow-import-to=scipy.integrate._lebedev \
             --output-dir=dist \
             gui.py
 
