@@ -84,6 +84,7 @@ jobs:
         run: |
           python -m nuitka \
             --standalone \
+            --assume-yes-for-downloads \
             --macos-create-app-bundle \
             --macos-app-name="VideoEditor" \
             --macos-signed-app-name="com.videoeditor.app" \
@@ -306,6 +307,7 @@ jobs:
         run: |
           python -m nuitka `
             --standalone `
+            --assume-yes-for-downloads `
             --windows-console-mode=disable `
             --enable-plugin=tk-inter `
             --include-package=customtkinter `
@@ -394,6 +396,7 @@ jobs:
         run: |
           python -m nuitka \
             --standalone \
+            --assume-yes-for-downloads \
             --enable-plugin=tk-inter \
             --include-package=customtkinter \
             --include-package=whisper \
