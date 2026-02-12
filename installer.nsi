@@ -12,8 +12,6 @@ RequestExecutionLevel admin
 
 ; --- Interface ---
 !define MUI_ABORTWARNING
-!define MUI_ICON "icon.ico"
-!define MUI_UNICON "icon.ico"
 
 ; --- Seiten ---
 !insertmacro MUI_PAGE_WELCOME
