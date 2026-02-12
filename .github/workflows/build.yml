@@ -311,10 +311,11 @@ jobs:
             --output-dir=dist `
             gui.py
 
+      - name: Install NSIS
+        run: choco install nsis -y
+
       - name: Create NSIS Installer
-        uses: joncloud/makensis-action@v4
-        with:
-          script-file: installer.nsi
+        run: makensis installer.nsi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
