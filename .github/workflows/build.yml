@@ -370,11 +370,20 @@ jobs:
           key: nuitka-linux-${{ hashFiles('gui.py', 'src/*.py') }}
           restore-keys: nuitka-linux-
 
+      - name: Add swap space
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo "Swap enabled: $(swapon --show)"
+
       - name: Build with Nuitka
         run: |
           python -m nuitka \
             --standalone \
             --assume-yes-for-downloads \
+            --jobs=2 \
             --enable-plugin=tk-inter \
             --include-package=customtkinter \
             --include-package=whisper \

@@ -11,6 +11,8 @@ InstallDirRegKey HKLM "Software\VideoEditor" "InstallDir"
 RequestExecutionLevel admin
 
 ; --- Interface ---
+!define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
+!define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
 !define MUI_ABORTWARNING
 
 ; --- Seiten ---
