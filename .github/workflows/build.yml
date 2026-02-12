@@ -426,16 +426,8 @@ jobs:
           fi
           chmod +x AppDir/usr/bin/gui
 
-          # Desktop-Datei erstellen (KEINE fuehrenden Leerzeichen!)
-          cat > AppDir/usr/share/applications/videoeditor.desktop <<'DESKTOP'
-[Desktop Entry]
-Name=Video Editor
-Exec=gui
-Icon=videoeditor
-Type=Application
-Categories=AudioVideo;Video;
-DESKTOP
-
+          # Desktop-Datei erstellen
+          printf '%s\n' '[Desktop Entry]' 'Name=Video Editor' 'Exec=gui' 'Icon=videoeditor' 'Type=Application' 'Categories=AudioVideo;Video;' > AppDir/usr/share/applications/videoeditor.desktop
           cp AppDir/usr/share/applications/videoeditor.desktop AppDir/
 
           # Platzhalter-Icon (wird durch echtes Icon ersetzt wenn vorhanden)
