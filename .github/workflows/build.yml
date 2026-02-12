@@ -167,10 +167,15 @@ jobs:
               --sign "$SIGNING_IDENTITY" "$APP_PATH/Contents/MacOS/ffprobe"
           fi
 
-          # .app Bundle signieren
-          codesign --force --deep --timestamp --options runtime \
-            --entitlements entitlements.plist \
-            --sign "$SIGNING_IDENTITY" "$APP_PATH"
+          # .app Bundle signieren (mit Retry fuer Timestamp-Server)
+          for i in 1 2 3 4 5; do
+            echo "Signing attempt $i..."
+            codesign --force --deep --timestamp --options runtime \
+              --entitlements entitlements.plist \
+              --sign "$SIGNING_IDENTITY" "$APP_PATH" && break
+            echo "Attempt $i failed, waiting 30s..."
+            sleep 30
+          done
 
           codesign --verify --verbose "$APP_PATH"
 
@@ -312,7 +317,9 @@ jobs:
             gui.py
 
       - name: Install NSIS
-        run: choco install nsis -y
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Create NSIS Installer
         run: makensis installer.nsi
@@ -413,15 +420,21 @@ jobs:
           # Nuitka Output kopieren
           cp -r dist/gui.dist/* AppDir/usr/bin/
 
-          # Desktop-Datei erstellen
-          cat > AppDir/usr/share/applications/videoeditor.desktop << 'DESKTOP'
-          [Desktop Entry]
-          Name=Video Editor
-          Exec=gui
-          Icon=videoeditor
-          Type=Application
-          Categories=AudioVideo;Video;
-          DESKTOP
+          # Binary umbenennen falls noetig (Nuitka erzeugt gui.bin auf Linux)
+          if [ -f AppDir/usr/bin/gui.bin ] && [ ! -f AppDir/usr/bin/gui ]; then
+            mv AppDir/usr/bin/gui.bin AppDir/usr/bin/gui
+          fi
+          chmod +x AppDir/usr/bin/gui
+
+          # Desktop-Datei erstellen (KEINE fuehrenden Leerzeichen!)
+          cat > AppDir/usr/share/applications/videoeditor.desktop <<'DESKTOP'
+[Desktop Entry]
+Name=Video Editor
+Exec=gui
+Icon=videoeditor
+Type=Application
+Categories=AudioVideo;Video;
+DESKTOP
 
           cp AppDir/usr/share/applications/videoeditor.desktop AppDir/
 
