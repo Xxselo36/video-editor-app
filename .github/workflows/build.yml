@@ -436,17 +436,20 @@ jobs:
 
       - name: Create AppImage
         run: |
+          echo "Disk space before AppImage:"
+          df -h /
+
+          # Build-Artefakte loeschen um Platz zu sparen
+          rm -rf dist/gui.build
+
           # linuxdeploy herunterladen
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage
 
-          # AppDir Struktur erstellen
-          mkdir -p AppDir/usr/bin
+          # AppDir Struktur erstellen — mv statt cp um Disk Space zu sparen
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-
-          # Nuitka Output kopieren
-          cp -r dist/gui.dist/* AppDir/usr/bin/
+          mv dist/gui.dist AppDir/usr/bin
 
           # Binary umbenennen falls noetig (Nuitka erzeugt gui.bin auf Linux)
           if [ -f AppDir/usr/bin/gui.bin ] && [ ! -f AppDir/usr/bin/gui ]; then
@@ -458,19 +461,16 @@ jobs:
           printf '%s\n' '[Desktop Entry]' 'Name=Video Editor' 'Exec=gui' 'Icon=videoeditor' 'Type=Application' 'Categories=AudioVideo;Video;' > AppDir/usr/share/applications/videoeditor.desktop
           cp AppDir/usr/share/applications/videoeditor.desktop AppDir/
 
-          # Platzhalter-Icon (wird durch echtes Icon ersetzt wenn vorhanden)
-          if [ -f icon.png ]; then
-            cp icon.png AppDir/usr/share/icons/hicolor/256x256/apps/videoeditor.png
-            cp icon.png AppDir/videoeditor.png
-          else
-            # Einfaches Platzhalter-Icon generieren
-            python3 -c "
+          # Platzhalter-Icon
+          python3 -c "
           from PIL import Image
           img = Image.new('RGBA', (256, 256), (41, 128, 185, 255))
           img.save('AppDir/videoeditor.png')
           img.save('AppDir/usr/share/icons/hicolor/256x256/apps/videoeditor.png')
-          "
-          fi
+          " || convert -size 256x256 xc:'#2980B9' AppDir/videoeditor.png 2>/dev/null || true
+
+          echo "Disk space before linuxdeploy:"
+          df -h /
 
           # AppImage erstellen
           ARCH=x86_64 ./linuxdeploy-x86_64.AppImage \
@@ -478,9 +478,10 @@ jobs:
             --desktop-file AppDir/usr/share/applications/videoeditor.desktop \
             --output appimage
 
-          mv VideoEditor*.AppImage VideoEditor-x86_64.AppImage || \
-          mv Video_Editor*.AppImage VideoEditor-x86_64.AppImage || \
-          mv *.AppImage VideoEditor-x86_64.AppImage || true
+          mv Video_Editor*.AppImage VideoEditor-x86_64.AppImage 2>/dev/null || \
+          mv Video*.AppImage VideoEditor-x86_64.AppImage 2>/dev/null || true
+
+          ls -lh VideoEditor-x86_64.AppImage
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
