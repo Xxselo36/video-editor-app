@@ -382,17 +382,17 @@ jobs:
 
       - name: Build with Nuitka
         run: |
+          echo "=== Starting Nuitka build at $(date) ==="
+          echo "Memory: $(free -h)"
           python -m nuitka \
             --standalone \
             --assume-yes-for-downloads \
-            --jobs=2 \
+            --jobs=1 \
             --enable-plugin=tk-inter \
             --include-package=customtkinter \
             --include-package=whisper \
-            --include-package=torch \
             --include-package=moviepy \
             --include-package=cv2 \
-            --include-package=scipy \
             --include-package=imageio_ffmpeg \
             --include-package=src \
             --include-data-files=yolov8n.pt=yolov8n.pt \
@@ -411,11 +411,15 @@ jobs:
             --nofollow-import-to=torch.distributed \
             --nofollow-import-to=torch.testing \
             --nofollow-import-to=torch.utils.benchmark \
+            --nofollow-import-to=torch.cuda \
+            --nofollow-import-to=torch.backends.cudnn \
+            --nofollow-import-to=torch.backends.cuda \
             --nofollow-import-to=sympy \
             --nofollow-import-to=torch.utils._config_module \
             --nofollow-import-to=scipy.integrate._lebedev \
             --output-dir=dist \
             gui.py
+          echo "=== Nuitka build finished at $(date) ==="
 
       - name: Create AppImage
         run: |
