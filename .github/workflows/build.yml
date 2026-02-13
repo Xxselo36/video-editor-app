@@ -434,60 +434,31 @@ jobs:
             gui.py
           echo "=== Nuitka build finished at $(date) ==="
 
-      - name: Create AppImage
+      - name: Package Linux build
         run: |
-          echo "Disk space before AppImage:"
+          echo "Disk space:"
           df -h /
 
           # Build-Artefakte loeschen um Platz zu sparen
           rm -rf dist/gui.build
 
-          # linuxdeploy herunterladen
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
-
-          # AppDir Struktur erstellen — mv statt cp um Disk Space zu sparen
-          mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          mv dist/gui.dist AppDir/usr/bin
-
-          # Binary umbenennen falls noetig (Nuitka erzeugt gui.bin auf Linux)
-          if [ -f AppDir/usr/bin/gui.bin ] && [ ! -f AppDir/usr/bin/gui ]; then
-            mv AppDir/usr/bin/gui.bin AppDir/usr/bin/gui
+          # Binary umbenennen
+          if [ -f dist/gui.dist/gui.bin ]; then
+            mv dist/gui.dist/gui.bin dist/gui.dist/VideoEditor
           fi
-          chmod +x AppDir/usr/bin/gui
+          chmod +x dist/gui.dist/VideoEditor
 
-          # Desktop-Datei erstellen
-          printf '%s\n' '[Desktop Entry]' 'Name=Video Editor' 'Exec=gui' 'Icon=videoeditor' 'Type=Application' 'Categories=AudioVideo;Video;' > AppDir/usr/share/applications/videoeditor.desktop
-          cp AppDir/usr/share/applications/videoeditor.desktop AppDir/
+          # Verzeichnis umbenennen und als tar.gz packen
+          mv dist/gui.dist dist/VideoEditor-Linux
+          tar czf VideoEditor-Linux.tar.gz -C dist VideoEditor-Linux
 
-          # Platzhalter-Icon
-          python3 -c "
-          from PIL import Image
-          img = Image.new('RGBA', (256, 256), (41, 128, 185, 255))
-          img.save('AppDir/videoeditor.png')
-          img.save('AppDir/usr/share/icons/hicolor/256x256/apps/videoeditor.png')
-          " || convert -size 256x256 xc:'#2980B9' AppDir/videoeditor.png 2>/dev/null || true
-
-          echo "Disk space before linuxdeploy:"
-          df -h /
-
-          # AppImage erstellen
-          ARCH=x86_64 ./linuxdeploy-x86_64.AppImage \
-            --appdir AppDir \
-            --desktop-file AppDir/usr/share/applications/videoeditor.desktop \
-            --output appimage
-
-          mv Video_Editor*.AppImage VideoEditor-x86_64.AppImage 2>/dev/null || \
-          mv Video*.AppImage VideoEditor-x86_64.AppImage 2>/dev/null || true
-
-          ls -lh VideoEditor-x86_64.AppImage
+          ls -lh VideoEditor-Linux.tar.gz
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: VideoEditor-Linux
-          path: VideoEditor-x86_64.AppImage
+          path: VideoEditor-Linux.tar.gz
 
   # ============================================================================
   # Release
@@ -514,4 +485,4 @@ jobs:
           files: |
             artifacts/VideoEditor-macOS/VideoEditor.dmg
             artifacts/VideoEditor-Windows/VideoEditor-Setup.exe
-            artifacts/VideoEditor-Linux/VideoEditor-x86_64.AppImage
+            artifacts/VideoEditor-Linux/VideoEditor-Linux.tar.gz
