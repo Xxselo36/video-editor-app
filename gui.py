@@ -10,13 +10,13 @@ import threading
 import subprocess
 from pathlib import Path
 
-# Projekt-Root ermitteln
+# Determine project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
 
-# FFmpeg fuer moviepy im Bundle verfuegbar machen
+# Make FFmpeg available for moviepy in bundle
 def _setup_ffmpeg_env():
-    """Setzt IMAGEIO_FFMPEG_EXE wenn im Nuitka Bundle."""
+    """Sets IMAGEIO_FFMPEG_EXE when running in Nuitka bundle."""
     try:
         from src.ffmpeg_utils import get_ffmpeg_path, _is_bundled
         ffmpeg_path = get_ffmpeg_path()
@@ -33,7 +33,7 @@ from tkinter import filedialog, messagebox
 from src.styles import STYLES, get_style_info
 from src.platform_utils import open_file_manager
 
-# Output-Verzeichnis: im .app Bundle ist SCRIPT_DIR read-only
+# Output directory: SCRIPT_DIR is read-only in .app bundle
 OUTPUT_DIR = Path.home() / "Movies" / "VideoEditor"
 
 
@@ -66,7 +66,7 @@ class VideoEditorApp(ctk.CTk):
         self._build_ui()
 
     # ========================================================================
-    # UI AUFBAU
+    # UI SETUP
     # ========================================================================
 
     def _build_ui(self):
@@ -74,21 +74,21 @@ class VideoEditorApp(ctk.CTk):
         self.grid_columnconfigure(0, weight=1)
         row = 0
 
-        # --- Titel ---
+        # --- Title ---
         title = ctk.CTkLabel(self, text="VIDEO EDITOR",
                              font=ctk.CTkFont(size=22, weight="bold"))
         title.grid(row=row, column=0, padx=20, pady=(18, 10), sticky="w")
         row += 1
 
-        # --- Video-Auswahl ---
+        # --- Video Selection ---
         vid_frame = ctk.CTkFrame(self, fg_color="transparent")
         vid_frame.grid(row=row, column=0, padx=20, pady=4, sticky="ew")
         vid_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(vid_frame, text="Video:").grid(row=0, column=0, padx=(0, 8))
-        self.video_entry = ctk.CTkEntry(vid_frame, placeholder_text="Video-Datei auswaehlen...")
+        self.video_entry = ctk.CTkEntry(vid_frame, placeholder_text="Select video file...")
         self.video_entry.grid(row=0, column=1, sticky="ew")
-        ctk.CTkButton(vid_frame, text="Auswaehlen", width=100,
+        ctk.CTkButton(vid_frame, text="Browse", width=100,
                       command=self._pick_video).grid(row=0, column=2, padx=(8, 0))
         row += 1
 
@@ -111,21 +111,21 @@ class VideoEditorApp(ctk.CTk):
         self.style_menu.grid(row=0, column=1, sticky="ew")
         row += 1
 
-        # Style-Beschreibung
+        # Style description
         self.style_desc = ctk.CTkLabel(self, text="", font=ctk.CTkFont(size=12),
                                        text_color="gray")
         self.style_desc.grid(row=row, column=0, padx=28, pady=(0, 4), sticky="w")
         self._on_style_changed(None)
         row += 1
 
-        # --- Modell ---
+        # --- Model ---
         model_frame = ctk.CTkFrame(self, fg_color="transparent")
         model_frame.grid(row=row, column=0, padx=20, pady=4, sticky="ew")
         model_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(model_frame, text="Modell:").grid(row=0, column=0, padx=(0, 8))
-        self.model_var = ctk.StringVar(value="medium (empfohlen)")
-        model_options = ["tiny (schnell)", "base", "small", "medium (empfohlen)", "large (langsam)"]
+        ctk.CTkLabel(model_frame, text="Model:").grid(row=0, column=0, padx=(0, 8))
+        self.model_var = ctk.StringVar(value="medium (recommended)")
+        model_options = ["tiny (fast)", "base", "small", "medium (recommended)", "large (slow)"]
         self.model_menu = ctk.CTkOptionMenu(model_frame, variable=self.model_var,
                                             values=model_options)
         self.model_menu.grid(row=0, column=1, sticky="ew")
@@ -133,17 +133,17 @@ class VideoEditorApp(ctk.CTk):
 
         # --- Fast Mode ---
         self.fast_var = ctk.BooleanVar(value=False)
-        self.fast_check = ctk.CTkCheckBox(self, text="Fast Mode (nur clean Style, schneller)",
+        self.fast_check = ctk.CTkCheckBox(self, text="Fast Mode (clean style only, faster)",
                                           variable=self.fast_var)
         self.fast_check.grid(row=row, column=0, padx=24, pady=4, sticky="w")
         row += 1
 
-        # --- Fortschritt ---
+        # --- Progress ---
         prog_frame = ctk.CTkFrame(self)
         prog_frame.grid(row=row, column=0, padx=20, pady=(10, 4), sticky="ew")
         prog_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(prog_frame, text="Fortschritt",
+        ctk.CTkLabel(prog_frame, text="Progress",
                      font=ctk.CTkFont(size=13, weight="bold")).grid(
             row=0, column=0, padx=10, pady=(8, 2), sticky="w")
 
@@ -158,7 +158,7 @@ class VideoEditorApp(ctk.CTk):
         self.progress_pct = ctk.CTkLabel(bar_frame, text="0%", width=45)
         self.progress_pct.grid(row=0, column=1, padx=(6, 0))
 
-        self.progress_label = ctk.CTkLabel(prog_frame, text="Bereit.",
+        self.progress_label = ctk.CTkLabel(prog_frame, text="Ready.",
                                            font=ctk.CTkFont(size=12),
                                            text_color="gray")
         self.progress_label.grid(row=2, column=0, padx=10, pady=(2, 8), sticky="w")
@@ -170,12 +170,12 @@ class VideoEditorApp(ctk.CTk):
         btn_frame.grid_columnconfigure(0, weight=1)
         btn_frame.grid_columnconfigure(1, weight=1)
 
-        self.start_btn = ctk.CTkButton(btn_frame, text="Starten",
+        self.start_btn = ctk.CTkButton(btn_frame, text="Start",
                                        font=ctk.CTkFont(size=14, weight="bold"),
                                        height=38, command=self._start)
         self.start_btn.grid(row=0, column=0, padx=(0, 6), sticky="ew")
 
-        self.cancel_btn = ctk.CTkButton(btn_frame, text="Abbrechen",
+        self.cancel_btn = ctk.CTkButton(btn_frame, text="Cancel",
                                         height=38, state="disabled",
                                         fg_color="#b22222",
                                         hover_color="#8b0000",
@@ -183,7 +183,7 @@ class VideoEditorApp(ctk.CTk):
         self.cancel_btn.grid(row=0, column=1, padx=(6, 0), sticky="ew")
         row += 1
 
-        self.open_btn = ctk.CTkButton(self, text="Ausgabe-Ordner oeffnen",
+        self.open_btn = ctk.CTkButton(self, text="Open Output Folder",
                                       height=32, fg_color="transparent",
                                       border_width=1,
                                       command=self._open_output)
@@ -195,10 +195,10 @@ class VideoEditorApp(ctk.CTk):
 
     def _pick_video(self):
         path = filedialog.askopenfilename(
-            title="Video auswaehlen",
+            title="Select Video",
             filetypes=[
-                ("Video-Dateien", "*.mp4 *.mov *.avi *.mkv *.webm *.m4v"),
-                ("Alle Dateien", "*.*"),
+                ("Video Files", "*.mp4 *.mov *.avi *.mkv *.webm *.m4v"),
+                ("All Files", "*.*"),
             ],
         )
         if path:
@@ -225,7 +225,7 @@ class VideoEditorApp(ctk.CTk):
 
     def _get_selected_model(self) -> str:
         raw = self.model_var.get()
-        return raw.split(" ")[0]  # "small (empfohlen)" -> "small"
+        return raw.split(" ")[0]  # "small (recommended)" -> "small"
 
     # ========================================================================
     # START / CANCEL
@@ -234,10 +234,10 @@ class VideoEditorApp(ctk.CTk):
     def _start(self):
         video_path = self.video_entry.get().strip()
         if not video_path:
-            messagebox.showwarning("Kein Video", "Bitte waehle zuerst ein Video aus.")
+            messagebox.showwarning("No Video", "Please select a video file first.")
             return
         if not os.path.isfile(video_path):
-            messagebox.showerror("Nicht gefunden", f"Datei nicht gefunden:\n{video_path}")
+            messagebox.showerror("Not Found", f"File not found:\n{video_path}")
             return
 
         self._cancel_flag = False
@@ -246,7 +246,7 @@ class VideoEditorApp(ctk.CTk):
         self.cancel_btn.configure(state="normal")
         self.progress_bar.set(0)
         self.progress_pct.configure(text="0%")
-        self.progress_label.configure(text="Starte...", text_color="white")
+        self.progress_label.configure(text="Starting...", text_color="white")
 
         style = self._get_selected_style()
         model = self._get_selected_model()
@@ -263,7 +263,7 @@ class VideoEditorApp(ctk.CTk):
     def _cancel(self):
         self._cancel_flag = True
         self.cancel_btn.configure(state="disabled")
-        self.progress_label.configure(text="Abbrechen...", text_color="orange")
+        self.progress_label.configure(text="Cancelling...", text_color="orange")
 
     def _open_output(self):
         out_dir = str(OUTPUT_DIR)
@@ -271,15 +271,15 @@ class VideoEditorApp(ctk.CTk):
         open_file_manager(out_dir)
 
     # ========================================================================
-    # PROGRESS CALLBACK (vom Worker-Thread)
+    # PROGRESS CALLBACK (from worker thread)
     # ========================================================================
 
     def _progress_callback(self, message, step=None, total_steps=None, progress=None):
-        """Wird vom Editor aufgerufen (im Worker-Thread)."""
+        """Called by the editor (in worker thread)."""
         def _update():
             if step is not None and total_steps is not None:
                 self.progress_label.configure(
-                    text=f"Schritt {step}/{total_steps}: {message}",
+                    text=f"Step {step}/{total_steps}: {message}",
                     text_color="white")
                 if progress is None:
                     pct = step / total_steps
@@ -288,7 +288,7 @@ class VideoEditorApp(ctk.CTk):
                 self.progress_bar.set(pct)
                 self.progress_pct.configure(text=f"{int(pct * 100)}%")
             else:
-                # Nur Text-Update
+                # Text-only update
                 short = message.strip().lstrip("\n")
                 if short:
                     self.progress_label.configure(text=short, text_color="white")
@@ -303,9 +303,9 @@ class VideoEditorApp(ctk.CTk):
     # ========================================================================
 
     def _worker(self, video_path, style, model, fast, output_dir):
-        """Laeuft im Hintergrund-Thread."""
+        """Runs in background thread."""
         try:
-            # Whisper-Modell pruefen und ggf. herunterladen
+            # Check and download Whisper model if needed
             self._ensure_whisper_model(model)
 
             if fast:
@@ -339,44 +339,44 @@ class VideoEditorApp(ctk.CTk):
         self.progress_bar.set(1.0)
         self.progress_pct.configure(text="100%")
         self.progress_label.configure(
-            text=f"Fertig!  {output_path}",
+            text=f"Done!  {output_path}",
             text_color="#32cd32")
         self.start_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
 
     def _on_cancelled(self):
-        self.progress_label.configure(text="Abgebrochen.", text_color="orange")
+        self.progress_label.configure(text="Cancelled.", text_color="orange")
         self.progress_bar.set(0)
         self.progress_pct.configure(text="0%")
         self.start_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
 
     def _ensure_whisper_model(self, model_name: str):
-        """Prueft ob das Whisper-Modell vorhanden ist, laedt es ggf. herunter."""
+        """Checks if the Whisper model is available, downloads it if needed."""
         try:
             import whisper
             model_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
-            # Whisper benennt Modelle z.B. "medium.pt"
+            # Whisper names models e.g. "medium.pt"
             model_file = os.path.join(model_dir, f"{model_name}.pt")
             if not os.path.isfile(model_file):
                 self._progress_callback(
-                    f"Lade Whisper-Modell '{model_name}' herunter (einmalig)...",
+                    f"Downloading Whisper model '{model_name}' (one-time)...",
                     step=0, total_steps=6
                 )
-                # whisper.load_model laedt automatisch herunter
+                # whisper.load_model downloads automatically
                 whisper.load_model(model_name)
                 self._progress_callback(
-                    f"Whisper-Modell '{model_name}' bereit.",
+                    f"Whisper model '{model_name}' ready.",
                     step=0, total_steps=6
                 )
         except Exception:
-            pass  # Whisper wird spaeter vom Editor geladen
+            pass  # Whisper will be loaded later by the editor
 
     def _on_error(self, msg):
-        self.progress_label.configure(text=f"Fehler: {msg[:80]}", text_color="#ff4444")
+        self.progress_label.configure(text=f"Error: {msg[:80]}", text_color="#ff4444")
         self.start_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
-        messagebox.showerror("Fehler", f"Video-Verarbeitung fehlgeschlagen:\n\n{msg}")
+        messagebox.showerror("Error", f"Video processing failed:\n\n{msg}")
 
 
 # ============================================================================
