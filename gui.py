@@ -187,7 +187,15 @@ class VideoEditorApp(ctk.CTk):
                                       height=32, fg_color="transparent",
                                       border_width=1,
                                       command=self._open_output)
-        self.open_btn.grid(row=row, column=0, padx=20, pady=(4, 14), sticky="ew")
+        self.open_btn.grid(row=row, column=0, padx=20, pady=(4, 4), sticky="ew")
+        row += 1
+
+        # --- Plugins ---
+        self.plugins_btn = ctk.CTkButton(self, text="Plugins",
+                                         height=32, fg_color="transparent",
+                                         border_width=1,
+                                         command=self._open_plugins)
+        self.plugins_btn.grid(row=row, column=0, padx=20, pady=(0, 14), sticky="ew")
 
     # ========================================================================
     # EVENTS
@@ -377,6 +385,243 @@ class VideoEditorApp(ctk.CTk):
         self.start_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
         messagebox.showerror("Error", f"Video processing failed:\n\n{msg}")
+
+    # ========================================================================
+    # PLUGIN MANAGER
+    # ========================================================================
+
+    def _open_plugins(self):
+        PluginManagerWindow(self)
+
+
+class PluginManagerWindow(ctk.CTkToplevel):
+    """Plugin installation window with auto-detection of installed NLEs."""
+
+    # Plugin install paths per platform
+    PLUGIN_PATHS = {
+        "DaVinci Resolve": {
+            "darwin": os.path.expanduser(
+                "~/Library/Application Support/Blackmagic Design"
+                "/DaVinci Resolve/Fusion/Scripts/Utility"
+            ),
+            "win32": os.path.join(
+                os.environ.get("APPDATA", ""),
+                "Blackmagic Design", "DaVinci Resolve",
+                "Fusion", "Scripts", "Utility"
+            ),
+            "linux": os.path.expanduser(
+                "~/.local/share/DaVinciResolve/Fusion/Scripts/Utility"
+            ),
+        },
+        "Premiere Pro": {
+            "darwin": os.path.expanduser(
+                "~/Library/Application Support/Adobe/CEP/extensions"
+                "/com.videoeditor.panel"
+            ),
+            "win32": os.path.join(
+                os.environ.get("APPDATA", ""),
+                "Adobe", "CEP", "extensions", "com.videoeditor.panel"
+            ),
+            "linux": "",
+        },
+    }
+
+    # Paths to check if the NLE is installed
+    NLE_DETECT = {
+        "DaVinci Resolve": {
+            "darwin": "/Applications/DaVinci Resolve",
+            "win32": "C:\\Program Files\\Blackmagic Design\\DaVinci Resolve",
+            "linux": "/opt/resolve",
+        },
+        "Premiere Pro": {
+            "darwin": "/Applications/Adobe Premiere Pro",
+            "win32": "C:\\Program Files\\Adobe\\Adobe Premiere Pro",
+            "linux": "",
+        },
+    }
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Plugins")
+        self.geometry("420x340")
+        self.resizable(False, False)
+
+        # Focus this window
+        self.after(100, self.lift)
+        self.after(100, self.focus_force)
+
+        self._build_ui()
+
+    def _build_ui(self):
+        self.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(self, text="PLUGINS",
+                     font=ctk.CTkFont(size=18, weight="bold")).grid(
+            row=0, column=0, padx=20, pady=(16, 4), sticky="w")
+        ctk.CTkLabel(self, text="Install plugins for your video editing software",
+                     font=ctk.CTkFont(size=12), text_color="gray").grid(
+            row=1, column=0, padx=20, pady=(0, 12), sticky="w")
+
+        row = 2
+        for nle_name in ["DaVinci Resolve", "Premiere Pro"]:
+            self._add_plugin_row(nle_name, row)
+            row += 1
+
+        # Status label
+        self.status_label = ctk.CTkLabel(self, text="",
+                                         font=ctk.CTkFont(size=12))
+        self.status_label.grid(row=row, column=0, padx=20, pady=(12, 8), sticky="w")
+
+    def _add_plugin_row(self, nle_name, row):
+        frame = ctk.CTkFrame(self)
+        frame.grid(row=row, column=0, padx=20, pady=4, sticky="ew")
+        frame.grid_columnconfigure(1, weight=1)
+
+        detected = self._is_nle_installed(nle_name)
+        installed = self._is_plugin_installed(nle_name)
+
+        # NLE name + status
+        name_text = nle_name
+        ctk.CTkLabel(frame, text=name_text,
+                     font=ctk.CTkFont(size=14, weight="bold")).grid(
+            row=0, column=0, padx=(12, 8), pady=(10, 2), sticky="w", columnspan=2)
+
+        if installed:
+            status_text = "Installed"
+            status_color = "#32cd32"
+        elif detected:
+            status_text = "Detected - Ready to install"
+            status_color = "#4a9eff"
+        else:
+            status_text = "Not detected"
+            status_color = "gray"
+
+        ctk.CTkLabel(frame, text=status_text,
+                     font=ctk.CTkFont(size=11),
+                     text_color=status_color).grid(
+            row=1, column=0, padx=12, pady=(0, 10), sticky="w")
+
+        # Install/Uninstall button
+        if installed:
+            btn = ctk.CTkButton(frame, text="Uninstall", width=90,
+                                height=28, fg_color="#555",
+                                command=lambda n=nle_name: self._uninstall_plugin(n))
+        else:
+            btn = ctk.CTkButton(frame, text="Install", width=90,
+                                height=28,
+                                state="normal" if detected else "disabled",
+                                command=lambda n=nle_name: self._install_plugin(n))
+
+        btn.grid(row=0, column=2, rowspan=2, padx=12, pady=8)
+
+    def _is_nle_installed(self, nle_name):
+        """Check if the NLE application is installed."""
+        platform = sys.platform
+        detect_paths = self.NLE_DETECT.get(nle_name, {})
+        base_path = detect_paths.get(platform, "")
+        if not base_path:
+            return False
+
+        # Check for partial matches (versioned folders)
+        parent = os.path.dirname(base_path)
+        basename = os.path.basename(base_path)
+        if os.path.isdir(parent):
+            for entry in os.listdir(parent):
+                if entry.startswith(basename):
+                    return True
+        return os.path.isdir(base_path) or os.path.exists(base_path)
+
+    def _is_plugin_installed(self, nle_name):
+        """Check if our plugin is already installed."""
+        platform = sys.platform
+        install_paths = self.PLUGIN_PATHS.get(nle_name, {})
+        install_path = install_paths.get(platform, "")
+        if not install_path:
+            return False
+
+        if nle_name == "DaVinci Resolve":
+            return os.path.isfile(
+                os.path.join(install_path, "video_editor_resolve.py"))
+        elif nle_name == "Premiere Pro":
+            return os.path.isdir(install_path)
+        return False
+
+    def _install_plugin(self, nle_name):
+        """Install the plugin for the given NLE."""
+        import shutil
+        platform = sys.platform
+        install_paths = self.PLUGIN_PATHS.get(nle_name, {})
+        install_path = install_paths.get(platform, "")
+
+        if not install_path:
+            self._set_status(f"Platform not supported for {nle_name}", "orange")
+            return
+
+        try:
+            os.makedirs(install_path, exist_ok=True)
+            plugin_src = SCRIPT_DIR / "plugins"
+
+            if nle_name == "DaVinci Resolve":
+                src = plugin_src / "davinci" / "video_editor_resolve.py"
+                dst = os.path.join(install_path, "video_editor_resolve.py")
+                shutil.copy2(str(src), dst)
+
+                # Write the Video Editor path so the plugin can find it
+                config_path = os.path.join(install_path, "video_editor_config.json")
+                import json
+                with open(config_path, "w") as f:
+                    json.dump({"video_editor_path": str(SCRIPT_DIR)}, f)
+
+            elif nle_name == "Premiere Pro":
+                src = plugin_src / "premiere" / "panel"
+                if os.path.isdir(install_path):
+                    shutil.rmtree(install_path)
+                shutil.copytree(str(src), install_path)
+
+                # Also copy the backend server script
+                shutil.copy2(
+                    str(plugin_src / "premiere" / "video_editor_premiere.py"),
+                    os.path.join(install_path, "video_editor_premiere.py"))
+
+            self._set_status(f"{nle_name} plugin installed!", "#32cd32")
+            self._refresh()
+
+        except Exception as e:
+            self._set_status(f"Install failed: {e}", "#ff4444")
+
+    def _uninstall_plugin(self, nle_name):
+        """Uninstall the plugin."""
+        import shutil
+        platform = sys.platform
+        install_paths = self.PLUGIN_PATHS.get(nle_name, {})
+        install_path = install_paths.get(platform, "")
+
+        try:
+            if nle_name == "DaVinci Resolve":
+                script_path = os.path.join(install_path, "video_editor_resolve.py")
+                config_path = os.path.join(install_path, "video_editor_config.json")
+                if os.path.isfile(script_path):
+                    os.remove(script_path)
+                if os.path.isfile(config_path):
+                    os.remove(config_path)
+            elif nle_name == "Premiere Pro":
+                if os.path.isdir(install_path):
+                    shutil.rmtree(install_path)
+
+            self._set_status(f"{nle_name} plugin uninstalled.", "orange")
+            self._refresh()
+
+        except Exception as e:
+            self._set_status(f"Uninstall failed: {e}", "#ff4444")
+
+    def _set_status(self, text, color="white"):
+        self.status_label.configure(text=text, text_color=color)
+
+    def _refresh(self):
+        """Rebuild UI to reflect current state."""
+        for widget in self.winfo_children():
+            widget.destroy()
+        self._build_ui()
 
 
 # ============================================================================
