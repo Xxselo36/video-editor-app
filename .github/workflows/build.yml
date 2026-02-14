@@ -85,6 +85,7 @@ jobs:
           python -m nuitka \
             --standalone \
             --assume-yes-for-downloads \
+            --no-deployment-flag=excluded-module-usage \
             --macos-create-app-bundle \
             --macos-app-name="VideoEditor" \
             --macos-signed-app-name="com.videoeditor.app" \
@@ -280,6 +281,7 @@ jobs:
           python -m nuitka `
             --standalone `
             --assume-yes-for-downloads `
+            --no-deployment-flag=excluded-module-usage `
             --windows-console-mode=disable `
             --enable-plugin=tk-inter `
             --include-package=customtkinter `
@@ -395,6 +397,7 @@ jobs:
           python -m nuitka \
             --standalone \
             --assume-yes-for-downloads \
+            --no-deployment-flag=excluded-module-usage \
             --jobs=1 \
             --enable-plugin=tk-inter \
             --include-package=customtkinter \
