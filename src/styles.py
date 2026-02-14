@@ -1,28 +1,28 @@
 """
-Stil-Definitionen v5.0 - Alle Effekte
+Style Definitions v5.0 - All Effects
 
-Stile:
-- ruhig: Blur-Übergänge, Karaoke-Untertitel, sanft
-- balanced: Swipe-Übergänge, moderne Untertitel, ausgewogen
-- dynamisch: Glitch-Übergänge, VHS, RGB Split, intensiv
-- cinematic: Filmischer Look mit Letterbox
-- retro: VHS/Vintage Effekte
-- music: Beat-Sync Effekte
-- clean: Schlichte weiße Untertitel mit Phrase-Kontext (TikTok Style)
+Styles:
+- ruhig: Blur transitions, karaoke subtitles, calm
+- balanced: Swipe transitions, modern subtitles, balanced
+- dynamisch: Glitch transitions, VHS, RGB Split, intense
+- cinematic: Film look with letterbox
+- retro: VHS/Vintage effects
+- music: Beat-sync effects
+- clean: Clean white subtitles with phrase context (TikTok Style)
 """
 
 STYLES = {
     "ruhig": {
-        "name": "Ruhig",
-        "description": "Blur-Übergänge, sanfte Zooms, Karaoke-Untertitel",
+        "name": "Calm",
+        "description": "Blur transitions, smooth zooms, karaoke subtitles",
 
-        # Schnitte
+        # Cuts
         "remove_silence": True,
         "silence_threshold": 0.02,
         "min_silence_to_cut": 1.0,
         "keep_padding": 0.3,
 
-        # Übergänge
+        # Transitions
         "transition_in": "blur",
         "transition_out": "blur",
         "transition_duration": 0.5,
@@ -32,7 +32,7 @@ STYLES = {
         "smart_zoom": True,
         "zoom_intensity": 1.08,
 
-        # Visuelle Effekte
+        # Visual effects
         "vignette_intensity": 0.2,
         "color_grade": "ruhig",
         "cinematic_bars": False,
@@ -44,12 +44,12 @@ STYLES = {
         "echo": False,
         "mirror": False,
 
-        # Untertitel
+        # Subtitles
         "enable_subtitles": True,
         "subtitle_style": "karaoke",
-        "subtitle_color": (255, 255, 255),  # Weiß
+        "subtitle_color": (255, 255, 255),
         "subtitle_fontsize": None,
-        "subtitle_effect": None,  # "highlight", "box", "pop" oder None
+        "subtitle_effect": None,
         "subtitle_stroke_width": 4,
 
         # Emojis
@@ -69,15 +69,15 @@ STYLES = {
 
     "balanced": {
         "name": "Balanced",
-        "description": "Swipe-Übergänge, moderne Untertitel, ausgewogen",
+        "description": "Swipe transitions, modern subtitles, balanced",
 
-        # Schnitte
+        # Cuts
         "remove_silence": True,
         "silence_threshold": 0.025,
         "min_silence_to_cut": 0.7,
         "keep_padding": 0.2,
 
-        # Übergänge
+        # Transitions
         "transition_in": "swipe",
         "transition_out": "swipe",
         "transition_duration": 0.4,
@@ -87,7 +87,7 @@ STYLES = {
         "smart_zoom": True,
         "zoom_intensity": 1.12,
 
-        # Visuelle Effekte
+        # Visual effects
         "vignette_intensity": 0.25,
         "color_grade": "balanced",
         "cinematic_bars": False,
@@ -100,12 +100,12 @@ STYLES = {
         "echo": False,
         "mirror": False,
 
-        # Untertitel
+        # Subtitles
         "enable_subtitles": True,
         "subtitle_style": "modern",
         "subtitle_color": (255, 255, 255),
         "subtitle_fontsize": None,
-        "subtitle_effect": None,  # "highlight", "box", "pop" oder None
+        "subtitle_effect": None,
         "subtitle_stroke_width": 4,
 
         # Emojis
@@ -124,16 +124,16 @@ STYLES = {
     },
 
     "dynamisch": {
-        "name": "Dynamisch",
-        "description": "Glitch-Übergänge, RGB Split, intensive Effekte",
+        "name": "Dynamic",
+        "description": "Glitch transitions, RGB Split, intense effects",
 
-        # Schnitte - energisch aber sauber
+        # Cuts
         "remove_silence": True,
         "silence_threshold": 0.03,
         "min_silence_to_cut": 0.55,
         "keep_padding": 0.25,
 
-        # Übergänge
+        # Transitions
         "transition_in": "glitch",
         "transition_out": "zoom",
         "transition_duration": 0.25,
@@ -143,7 +143,7 @@ STYLES = {
         "smart_zoom": True,
         "zoom_intensity": 1.18,
 
-        # Visuelle Effekte
+        # Visual effects
         "vignette_intensity": 0.3,
         "color_grade": "dynamisch",
         "cinematic_bars": False,
@@ -159,12 +159,12 @@ STYLES = {
         "echo": False,
         "mirror": False,
 
-        # Untertitel
+        # Subtitles
         "enable_subtitles": True,
         "subtitle_style": "modern",
         "subtitle_color": (255, 255, 255),
         "subtitle_fontsize": None,
-        "subtitle_effect": None,  # "highlight", "box", "pop" oder None
+        "subtitle_effect": None,
         "subtitle_stroke_width": 4,
 
         # Emojis
@@ -185,15 +185,15 @@ STYLES = {
 
     "cinematic": {
         "name": "Cinematic",
-        "description": "Filmischer Look mit Letterbox und Farbkorrektur",
+        "description": "Film look with letterbox and color grading",
 
-        # Schnitte
+        # Cuts
         "remove_silence": True,
         "silence_threshold": 0.02,
         "min_silence_to_cut": 0.8,
         "keep_padding": 0.25,
 
-        # Übergänge
+        # Transitions
         "transition_in": "fade",
         "transition_out": "fade",
         "transition_duration": 0.6,
@@ -203,7 +203,7 @@ STYLES = {
         "smart_zoom": True,
         "zoom_intensity": 1.1,
 
-        # Visuelle Effekte
+        # Visual effects
         "vignette_intensity": 0.35,
         "color_grade": "cinematic",
         "cinematic_bars": True,
@@ -217,12 +217,12 @@ STYLES = {
         "echo": False,
         "mirror": False,
 
-        # Untertitel
+        # Subtitles
         "enable_subtitles": True,
         "subtitle_style": "box",
         "subtitle_color": (255, 255, 255),
         "subtitle_fontsize": None,
-        "subtitle_effect": None,  # "highlight", "box", "pop" oder None
+        "subtitle_effect": None,
         "subtitle_stroke_width": 4,
 
         # Emojis
@@ -242,15 +242,15 @@ STYLES = {
 
     "retro": {
         "name": "Retro",
-        "description": "VHS-Effekt, Film Grain, Vintage-Look",
+        "description": "VHS effect, film grain, vintage look",
 
-        # Schnitte
+        # Cuts
         "remove_silence": True,
         "silence_threshold": 0.025,
         "min_silence_to_cut": 0.6,
         "keep_padding": 0.2,
 
-        # Übergänge
+        # Transitions
         "transition_in": "pixelate",
         "transition_out": "blur",
         "transition_duration": 0.4,
@@ -260,7 +260,7 @@ STYLES = {
         "smart_zoom": False,
         "zoom_intensity": 1.1,
 
-        # Visuelle Effekte
+        # Visual effects
         "vignette_intensity": 0.4,
         "color_grade": "vintage",
         "cinematic_bars": False,
@@ -276,12 +276,12 @@ STYLES = {
         "echo": False,
         "mirror": False,
 
-        # Untertitel
+        # Subtitles
         "enable_subtitles": True,
         "subtitle_style": "modern",
         "subtitle_color": (255, 255, 255),
         "subtitle_fontsize": None,
-        "subtitle_effect": None,  # "highlight", "box", "pop" oder None
+        "subtitle_effect": None,
         "subtitle_stroke_width": 4,
 
         # Emojis
@@ -301,15 +301,15 @@ STYLES = {
 
     "music": {
         "name": "Music",
-        "description": "Beat-Sync Effekte, Zoom Pulse, Schnitte auf Beat",
+        "description": "Beat-sync effects, zoom pulse, beat-matched cuts",
 
-        # Schnitte
+        # Cuts
         "remove_silence": False,
         "silence_threshold": 0.02,
         "min_silence_to_cut": 0.5,
         "keep_padding": 0.1,
 
-        # Übergänge
+        # Transitions
         "transition_in": "zoom",
         "transition_out": "zoom",
         "transition_duration": 0.2,
@@ -319,7 +319,7 @@ STYLES = {
         "smart_zoom": True,
         "zoom_intensity": 1.15,
 
-        # Visuelle Effekte
+        # Visual effects
         "vignette_intensity": 0.3,
         "color_grade": "dynamisch",
         "cinematic_bars": False,
@@ -336,12 +336,12 @@ STYLES = {
         "echo_count": 3,
         "mirror": False,
 
-        # Untertitel
+        # Subtitles
         "enable_subtitles": False,
         "subtitle_style": "modern",
         "subtitle_color": (255, 255, 255),
         "subtitle_fontsize": None,
-        "subtitle_effect": None,  # "highlight", "box", "pop" oder None
+        "subtitle_effect": None,
         "subtitle_stroke_width": 4,
 
         # Emojis
@@ -354,7 +354,7 @@ STYLES = {
         "sound_emojis": False,
         "sound_cuts": True,
 
-        # Beat-Sync (Hauptfeature!)
+        # Beat-Sync (main feature!)
         "beat_sync": True,
         "beat_sync_cuts": True,
         "beat_zoom": True,
@@ -365,15 +365,15 @@ STYLES = {
 
     "tiktok": {
         "name": "TikTok",
-        "description": "Schnelle Schnitte, RGB Split, Glitch, 9:16 Format",
+        "description": "Fast cuts, RGB Split, glitch, 9:16 format",
 
-        # Schnitte - dynamisch aber natürlich
+        # Cuts
         "remove_silence": True,
         "silence_threshold": 0.03,
         "min_silence_to_cut": 0.5,
         "keep_padding": 0.2,
 
-        # Übergänge
+        # Transitions
         "transition_in": "glitch",
         "transition_out": "swipe",
         "transition_duration": 0.15,
@@ -383,7 +383,7 @@ STYLES = {
         "smart_zoom": True,
         "zoom_intensity": 1.2,
 
-        # Visuelle Effekte
+        # Visual effects
         "vignette_intensity": 0.2,
         "color_grade": "dynamisch",
         "cinematic_bars": False,
@@ -399,16 +399,16 @@ STYLES = {
         "echo": False,
         "mirror": False,
 
-        # Auto-Reframe für Hochformat
+        # Auto-reframe for vertical format
         "auto_reframe": True,
         "target_ratio": "9:16",
 
-        # Untertitel
+        # Subtitles
         "enable_subtitles": True,
         "subtitle_style": "karaoke",
         "subtitle_color": (255, 255, 255),
         "subtitle_fontsize": None,
-        "subtitle_effect": None,  # "highlight", "box", "pop" oder None
+        "subtitle_effect": None,
         "subtitle_stroke_width": 4,
 
         # Emojis
@@ -429,15 +429,15 @@ STYLES = {
 
     "viral": {
         "name": "Viral",
-        "description": "TikTok/Reels Style - Wort-für-Wort Untertitel, Lila-Tint, Wort-Highlights",
+        "description": "TikTok/Reels style - word-by-word subtitles, purple tint, highlights",
 
-        # Schnitte - viral aber natürlich
+        # Cuts
         "remove_silence": True,
         "silence_threshold": 0.025,
         "min_silence_to_cut": 0.55,
         "keep_padding": 0.3,
 
-        # Übergänge
+        # Transitions
         "transition_in": "fade",
         "transition_out": "fade",
         "transition_duration": 0.2,
@@ -447,9 +447,9 @@ STYLES = {
         "smart_zoom": True,
         "zoom_intensity": 1.15,
 
-        # Visuelle Effekte
+        # Visual effects
         "vignette_intensity": 0.2,
-        "color_grade": "viral",  # Lila/Blau Tint
+        "color_grade": "viral",
         "cinematic_bars": False,
         "rgb_split": False,
         "vhs_effect": False,
@@ -459,15 +459,15 @@ STYLES = {
         "echo": False,
         "mirror": False,
 
-        # Untertitel - Wort für Wort, zentriert
+        # Subtitles - word by word, centered
         "enable_subtitles": True,
         "subtitle_style": "modern",
-        "subtitle_color": (255, 255, 255),  # Weiß als Standard
-        "subtitle_fontsize": None,  # Auto (basierend auf Video-Höhe)
-        "subtitle_effect": None,  # "highlight", "box", "pop" oder None  # Kein Glow für normale Untertitel
-        "subtitle_stroke_width": 4,  # Outline-Dicke
+        "subtitle_color": (255, 255, 255),
+        "subtitle_fontsize": None,
+        "subtitle_effect": None,
+        "subtitle_stroke_width": 4,
 
-        # Wort-Highlights (Farbe + Sound für bestimmte Wörter)
+        # Word highlights (color + sound for certain words)
         "enable_highlights": True,
 
         # Emojis
@@ -475,13 +475,13 @@ STYLES = {
 
         # Sounds
         "enable_sounds": True,
-        "sound_intro": True,   # Swoosh am Anfang
+        "sound_intro": True,
         "sound_outro": False,
         "sound_emojis": False,
         "sound_cuts": False,
 
         # Audio
-        "audio_fade_in": 0.1,  # Kurzes Fade-In gegen Stimmenbruch
+        "audio_fade_in": 0.1,
 
         # Beat-Sync
         "beat_sync": False,
@@ -490,9 +490,9 @@ STYLES = {
 
     "clean": {
         "name": "Clean",
-        "description": "TikTok Style - Harte Schnitte, Clean Untertitel, 9:16",
+        "description": "TikTok Style - Hard cuts, clean subtitles, 9:16",
 
-        # Schnitte - TikTok Style (ausgewogen)
+        # Cuts - TikTok style (balanced)
         "remove_silence": True,
         "silence_threshold": 0.035,
         "min_silence_to_cut": 0.35,
@@ -501,12 +501,12 @@ STYLES = {
         "min_segment_length": 0.5,
         "merge_gap": 0.25,
 
-        # Übergänge - KEINE (harte Cuts)
+        # Transitions - NONE (hard cuts)
         "transition_in": "none",
         "transition_out": "none",
         "transition_duration": 0,
 
-        # Auto-Reframe für TikTok/Reels (9:16)
+        # Auto-reframe for TikTok/Reels (9:16)
         "auto_reframe": True,
         "target_ratio": "9:16",
 
@@ -515,9 +515,9 @@ STYLES = {
         "smart_zoom": True,
         "zoom_intensity": 1.05,
 
-        # Visuelle Effekte - TikTok Premium Look
+        # Visual effects - TikTok premium look
         "vignette_intensity": 0.12,
-        "color_grade": "tiktok",  # Subtiler Lila/Blau-Stich
+        "color_grade": "tiktok",
         "cinematic_bars": False,
         "rgb_split": False,
         "vhs_effect": False,
@@ -527,17 +527,17 @@ STYLES = {
         "echo": False,
         "mirror": False,
 
-        # Untertitel - Clean Style
+        # Subtitles - Clean style
         "enable_subtitles": True,
-        "subtitle_style": "clean",  # NEU: Clean phrase-style
+        "subtitle_style": "clean",
         "subtitle_color": (255, 255, 255),
         "subtitle_fontsize": None,
         "subtitle_fontsize_multiplier": 1.0,
         "subtitle_effect": None,
         "subtitle_stroke_width": 2,
-        "clean_words_per_phrase": 4,  # Wörter pro Phrase
+        "clean_words_per_phrase": 4,
 
-        # Highlights deaktivieren für sauberen Look
+        # Disable highlights for clean look
         "enable_highlights": False,
 
         # Emojis
@@ -560,15 +560,15 @@ STYLES = {
 
     "minimal": {
         "name": "Minimal",
-        "description": "Nur Stille entfernen, keine Effekte",
+        "description": "Silence removal only, no effects",
 
-        # Schnitte
+        # Cuts
         "remove_silence": True,
         "silence_threshold": 0.02,
         "min_silence_to_cut": 0.5,
         "keep_padding": 0.2,
 
-        # Übergänge
+        # Transitions
         "transition_in": "fade",
         "transition_out": "fade",
         "transition_duration": 0.3,
@@ -578,7 +578,7 @@ STYLES = {
         "smart_zoom": False,
         "zoom_intensity": 1.0,
 
-        # Visuelle Effekte - alles aus
+        # Visual effects - all off
         "vignette_intensity": 0,
         "color_grade": "none",
         "cinematic_bars": False,
@@ -590,12 +590,12 @@ STYLES = {
         "echo": False,
         "mirror": False,
 
-        # Untertitel
+        # Subtitles
         "enable_subtitles": False,
         "subtitle_style": "modern",
         "subtitle_color": (255, 255, 255),
         "subtitle_fontsize": None,
-        "subtitle_effect": None,  # "highlight", "box", "pop" oder None
+        "subtitle_effect": None,
         "subtitle_stroke_width": 4,
 
         # Emojis
@@ -616,20 +616,20 @@ STYLES = {
 
 
 def get_style(style_name: str) -> dict:
-    """Gibt die Stil-Konfiguration zurück."""
+    """Returns the style configuration."""
     if style_name not in STYLES:
         available = ", ".join(STYLES.keys())
-        raise ValueError(f"Unbekannter Stil: {style_name}. Verfügbar: {available}")
+        raise ValueError(f"Unknown style: {style_name}. Available: {available}")
     return STYLES[style_name].copy()
 
 
 def list_styles() -> list:
-    """Gibt alle verfügbaren Stile zurück."""
+    """Returns all available style names."""
     return list(STYLES.keys())
 
 
 def get_style_info() -> dict:
-    """Gibt Info über alle Stile zurück."""
+    """Returns info about all styles."""
     return {
         name: {
             "name": style["name"],
@@ -641,14 +641,14 @@ def get_style_info() -> dict:
 
 def create_custom_style(base_style: str = "balanced", **overrides) -> dict:
     """
-    Erstellt einen benutzerdefinierten Stil basierend auf einem bestehenden.
+    Creates a custom style based on an existing one.
 
     Args:
-        base_style: Basis-Stil
-        **overrides: Zu überschreibende Einstellungen
+        base_style: Base style name
+        **overrides: Settings to override
 
     Returns:
-        Neuer Stil als dict
+        New style as dict
     """
     style = get_style(base_style)
     style.update(overrides)
