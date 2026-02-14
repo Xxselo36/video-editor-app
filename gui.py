@@ -64,6 +64,7 @@ class VideoEditorApp(ctk.CTk):
         self._output_path = None
 
         self._build_ui()
+        self._auto_install_plugins()
 
     # ========================================================================
     # UI SETUP
@@ -389,6 +390,67 @@ class VideoEditorApp(ctk.CTk):
     # ========================================================================
     # PLUGIN MANAGER
     # ========================================================================
+
+    def _auto_install_plugins(self):
+        """Auto-install plugins for detected NLEs on first launch."""
+        for nle_name in ["DaVinci Resolve", "Premiere Pro"]:
+            platform = sys.platform
+            detect_paths = PluginManagerWindow.NLE_DETECT.get(nle_name, {})
+            base_path = detect_paths.get(platform, "")
+            if not base_path:
+                continue
+
+            # Check if NLE is installed
+            nle_found = False
+            parent = os.path.dirname(base_path)
+            basename = os.path.basename(base_path)
+            if os.path.isdir(parent):
+                for entry in os.listdir(parent):
+                    if entry.startswith(basename):
+                        nle_found = True
+                        break
+            if not nle_found:
+                nle_found = os.path.isdir(base_path)
+
+            if not nle_found:
+                continue
+
+            # Check if already installed
+            install_paths = PluginManagerWindow.PLUGIN_PATHS.get(nle_name, {})
+            install_path = install_paths.get(platform, "")
+            already_installed = False
+            if nle_name == "DaVinci Resolve":
+                already_installed = os.path.isfile(
+                    os.path.join(install_path, "video_editor_resolve.py"))
+            elif nle_name == "Premiere Pro":
+                already_installed = os.path.isdir(install_path)
+
+            if already_installed:
+                continue
+
+            # Auto-install silently
+            try:
+                import shutil
+                os.makedirs(install_path, exist_ok=True)
+                plugin_src = SCRIPT_DIR / "plugins"
+
+                if nle_name == "DaVinci Resolve":
+                    src = plugin_src / "davinci" / "video_editor_resolve.py"
+                    shutil.copy2(str(src), os.path.join(install_path, "video_editor_resolve.py"))
+                    import json
+                    with open(os.path.join(install_path, "video_editor_config.json"), "w") as f:
+                        json.dump({"video_editor_path": str(SCRIPT_DIR)}, f)
+
+                elif nle_name == "Premiere Pro":
+                    src = plugin_src / "premiere" / "panel"
+                    shutil.copytree(str(src), install_path)
+                    shutil.copy2(
+                        str(plugin_src / "premiere" / "video_editor_premiere.py"),
+                        os.path.join(install_path, "video_editor_premiere.py"))
+
+                print(f"Auto-installed {nle_name} plugin")
+            except Exception as e:
+                print(f"Could not auto-install {nle_name} plugin: {e}")
 
     def _open_plugins(self):
         PluginManagerWindow(self)
