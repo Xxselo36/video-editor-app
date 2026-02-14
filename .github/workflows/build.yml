@@ -427,6 +427,9 @@ jobs:
             --nofollow-import-to=torch.cuda \
             --nofollow-import-to=torch.backends.cudnn \
             --nofollow-import-to=torch.backends.cuda \
+            --nofollow-import-to=torch.onnx \
+            --nofollow-import-to=torch.optim \
+            --nofollow-import-to=torch.profiler \
             --nofollow-import-to=sympy \
             --nofollow-import-to=torch.utils._config_module \
             --nofollow-import-to=scipy.integrate._lebedev \
@@ -446,7 +449,7 @@ jobs:
           find dist/gui.dist -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true
           find dist/gui.dist -name "*.so.*" -exec strip --strip-debug {} \; 2>/dev/null || true
 
-          # Remove CUDA libraries (not needed for CPU-only)
+          # Remove CUDA/NVIDIA libraries (not needed for CPU-only)
           find dist/gui.dist -name "libcudart*" -delete 2>/dev/null || true
           find dist/gui.dist -name "libcublas*" -delete 2>/dev/null || true
           find dist/gui.dist -name "libcufft*" -delete 2>/dev/null || true
@@ -456,6 +459,12 @@ jobs:
           find dist/gui.dist -name "libnvrtc*" -delete 2>/dev/null || true
           find dist/gui.dist -name "libnvJitLink*" -delete 2>/dev/null || true
           find dist/gui.dist -name "libcudnn*" -delete 2>/dev/null || true
+          find dist/gui.dist -name "libnvToolsExt*" -delete 2>/dev/null || true
+          find dist/gui.dist -name "libnvidia*" -delete 2>/dev/null || true
+          # Remove nvidia pip package .so files
+          find dist/gui.dist -path "*/nvidia/*" -name "*.so*" -delete 2>/dev/null || true
+          # Remove torch CUDA-specific .so files
+          find dist/gui.dist -name "*_cuda*" -name "*.so" -delete 2>/dev/null || true
 
           echo "Size after cleanup:"
           du -sh dist/gui.dist
@@ -466,24 +475,24 @@ jobs:
           fi
           chmod +x dist/gui.dist/VideoEditor
 
-          # Rename directory and create tar.gz
+          # Rename directory and create compressed archive
           mv dist/gui.dist dist/VideoEditor-Linux
-          tar czf VideoEditor-Linux.tar.gz -C dist VideoEditor-Linux
+          tar cf - -C dist VideoEditor-Linux | xz -3 -T0 > VideoEditor-Linux.tar.xz
 
-          ls -lh VideoEditor-Linux.tar.gz
+          ls -lh VideoEditor-Linux.tar.xz
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: VideoEditor-Linux
-          path: VideoEditor-Linux.tar.gz
+          path: VideoEditor-Linux.tar.xz
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload ${{ github.ref_name }} VideoEditor-Linux.tar.gz --repo ${{ github.repository }} --clobber || true
+          gh release upload ${{ github.ref_name }} VideoEditor-Linux.tar.xz --repo ${{ github.repository }} --clobber
 
   # ============================================================================
   # Release
