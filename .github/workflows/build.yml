@@ -114,6 +114,7 @@ jobs:
             --nofollow-import-to=torch._inductor \
             --nofollow-import-to=torch.testing \
             --nofollow-import-to=torch.utils.benchmark \
+            --nofollow-import-to=torch.distributed \
             --nofollow-import-to=sympy \
             --nofollow-import-to=scipy.integrate._lebedev \
             --output-dir=dist \
@@ -308,6 +309,7 @@ jobs:
             --nofollow-import-to=torch._inductor `
             --nofollow-import-to=torch.testing `
             --nofollow-import-to=torch.utils.benchmark `
+            --nofollow-import-to=torch.distributed `
             --nofollow-import-to=sympy `
             --nofollow-import-to=scipy.integrate._lebedev `
             --output-dir=dist `
@@ -421,6 +423,7 @@ jobs:
             --nofollow-import-to=torch._inductor \
             --nofollow-import-to=torch.testing \
             --nofollow-import-to=torch.utils.benchmark \
+            --nofollow-import-to=torch.distributed \
             --nofollow-import-to=torch.cuda \
             --nofollow-import-to=torch.backends.cudnn \
             --nofollow-import-to=torch.backends.cuda \

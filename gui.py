@@ -54,8 +54,8 @@ class VideoEditorApp(ctk.CTk):
         super().__init__()
 
         self.title("Video Editor")
-        self.geometry("620x520")
-        self.minsize(560, 480)
+        self.geometry("620x560")
+        self.minsize(560, 520)
         self.resizable(True, True)
 
         # State
