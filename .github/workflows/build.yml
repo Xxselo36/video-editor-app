@@ -92,6 +92,7 @@ jobs:
             --include-package=customtkinter \
             --include-package=whisper \
             --include-package=torch \
+            --include-package=torch.nn \
             --include-package=moviepy \
             --include-package=cv2 \
             --include-package=scipy \
@@ -110,8 +111,6 @@ jobs:
             --nofollow-import-to=jupyter \
             --nofollow-import-to=torch._dynamo \
             --nofollow-import-to=torch._inductor \
-            --nofollow-import-to=torch._functorch \
-            \
             --nofollow-import-to=torch.testing \
             --nofollow-import-to=torch.utils.benchmark \
             --nofollow-import-to=sympy \
@@ -120,7 +119,6 @@ jobs:
             --output-dir=dist \
             gui.py
 
-          # Umbenennen
           mv dist/gui.app dist/VideoEditor.app
 
       - name: Import Signing Certificate
@@ -288,6 +286,7 @@ jobs:
             --include-package=customtkinter `
             --include-package=whisper `
             --include-package=torch `
+            --include-package=torch.nn `
             --include-package=moviepy `
             --include-package=cv2 `
             --include-package=scipy `
@@ -306,8 +305,6 @@ jobs:
             --nofollow-import-to=jupyter `
             --nofollow-import-to=torch._dynamo `
             --nofollow-import-to=torch._inductor `
-            --nofollow-import-to=torch._functorch `
-            `
             --nofollow-import-to=torch.testing `
             --nofollow-import-to=torch.utils.benchmark `
             --nofollow-import-to=sympy `
@@ -404,6 +401,7 @@ jobs:
             --enable-plugin=tk-inter \
             --include-package=customtkinter \
             --include-package=whisper \
+            --include-package=torch.nn \
             --include-package=moviepy \
             --include-package=cv2 \
             --include-package=imageio_ffmpeg \
@@ -420,8 +418,6 @@ jobs:
             --nofollow-import-to=jupyter \
             --nofollow-import-to=torch._dynamo \
             --nofollow-import-to=torch._inductor \
-            --nofollow-import-to=torch._functorch \
-            \
             --nofollow-import-to=torch.testing \
             --nofollow-import-to=torch.utils.benchmark \
             --nofollow-import-to=torch.cuda \
