@@ -178,45 +178,36 @@ jobs:
 
           codesign --verify --verbose "$APP_PATH"
 
-      - name: Create DMG
+      - name: Create PKG
         env:
           SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
         run: |
-          DMG_TEMP="dist/dmg_temp"
-          mkdir -p "$DMG_TEMP"
-          cp -R dist/VideoEditor.app "$DMG_TEMP/"
-          ln -s /Applications "$DMG_TEMP/Applications"
-
-          hdiutil create -volname "VideoEditor" \
-            -srcfolder "$DMG_TEMP" \
-            -ov -format UDZO \
-            dist/VideoEditor.dmg
-
-          rm -rf "$DMG_TEMP"
-
-          codesign --force --timestamp \
+          pkgbuild --root dist/VideoEditor.app \
+            --identifier com.videoeditor.app \
+            --version 1.0.0 \
+            --install-location /Applications/VideoEditor.app \
             --sign "$SIGNING_IDENTITY" \
-            dist/VideoEditor.dmg
+            dist/VideoEditor.pkg
 
-      - name: Notarize DMG
+      - name: Notarize PKG
         env:
           MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
           MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
           MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
         run: |
-          xcrun notarytool submit dist/VideoEditor.dmg \
+          xcrun notarytool submit dist/VideoEditor.pkg \
             --apple-id "$MACOS_NOTARY_APPLE_ID" \
             --password "$MACOS_NOTARY_PASSWORD" \
             --team-id "$MACOS_NOTARY_TEAM_ID" \
             --wait
 
-          xcrun stapler staple dist/VideoEditor.dmg
+          xcrun stapler staple dist/VideoEditor.pkg
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: VideoEditor-macOS
-          path: dist/VideoEditor.dmg
+          path: dist/VideoEditor.pkg
 
   # ============================================================================
   # Windows Build
@@ -517,4 +508,5 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/VideoEditor-Windows/VideoEditor-Setup.exe
+            artifacts/VideoEditor-macOS/VideoEditor.pkg
           overwrite_files: true
