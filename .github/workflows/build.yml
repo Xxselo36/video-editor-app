@@ -114,7 +114,6 @@ jobs:
             --nofollow-import-to=torch.testing \
             --nofollow-import-to=torch.utils.benchmark \
             --nofollow-import-to=sympy \
-            --nofollow-import-to=torch.utils._config_module \
             --nofollow-import-to=scipy.integrate._lebedev \
             --output-dir=dist \
             gui.py
@@ -308,7 +307,6 @@ jobs:
             --nofollow-import-to=torch.testing `
             --nofollow-import-to=torch.utils.benchmark `
             --nofollow-import-to=sympy `
-            --nofollow-import-to=torch.utils._config_module `
             --nofollow-import-to=scipy.integrate._lebedev `
             --output-dir=dist `
             gui.py
@@ -427,7 +425,6 @@ jobs:
             --nofollow-import-to=torch.optim \
             --nofollow-import-to=torch.profiler \
             --nofollow-import-to=sympy \
-            --nofollow-import-to=torch.utils._config_module \
             --nofollow-import-to=scipy.integrate._lebedev \
             --output-dir=dist \
             gui.py
