@@ -439,16 +439,34 @@ jobs:
           echo "Disk space:"
           df -h /
 
-          # Build-Artefakte loeschen um Platz zu sparen
+          # Remove build artifacts to save space
           rm -rf dist/gui.build
 
-          # Binary umbenennen
+          # Strip debug symbols from all .so files to reduce size
+          find dist/gui.dist -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true
+          find dist/gui.dist -name "*.so.*" -exec strip --strip-debug {} \; 2>/dev/null || true
+
+          # Remove CUDA libraries (not needed for CPU-only)
+          find dist/gui.dist -name "libcudart*" -delete 2>/dev/null || true
+          find dist/gui.dist -name "libcublas*" -delete 2>/dev/null || true
+          find dist/gui.dist -name "libcufft*" -delete 2>/dev/null || true
+          find dist/gui.dist -name "libcurand*" -delete 2>/dev/null || true
+          find dist/gui.dist -name "libcusparse*" -delete 2>/dev/null || true
+          find dist/gui.dist -name "libcusolver*" -delete 2>/dev/null || true
+          find dist/gui.dist -name "libnvrtc*" -delete 2>/dev/null || true
+          find dist/gui.dist -name "libnvJitLink*" -delete 2>/dev/null || true
+          find dist/gui.dist -name "libcudnn*" -delete 2>/dev/null || true
+
+          echo "Size after cleanup:"
+          du -sh dist/gui.dist
+
+          # Rename binary
           if [ -f dist/gui.dist/gui.bin ]; then
             mv dist/gui.dist/gui.bin dist/gui.dist/VideoEditor
           fi
           chmod +x dist/gui.dist/VideoEditor
 
-          # Verzeichnis umbenennen und als tar.gz packen
+          # Rename directory and create tar.gz
           mv dist/gui.dist dist/VideoEditor-Linux
           tar czf VideoEditor-Linux.tar.gz -C dist VideoEditor-Linux
 
@@ -490,6 +508,5 @@ jobs:
           prerelease: ${{ contains(github.ref, '-test') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
           generate_release_notes: true
           files: |
-            artifacts/VideoEditor-macOS/VideoEditor.dmg
             artifacts/VideoEditor-Windows/VideoEditor-Setup.exe
-            artifacts/VideoEditor-Linux/VideoEditor-Linux.tar.gz
+          overwrite_files: true
