@@ -179,11 +179,14 @@ jobs:
           codesign --verify --verbose "$APP_PATH"
 
       - name: Create PKG
+        env:
+          INSTALLER_IDENTITY: ${{ secrets.MACOS_INSTALLER_IDENTITY }}
         run: |
           pkgbuild --root dist/VideoEditor.app \
             --identifier com.videoeditor.app \
             --version 1.0.0 \
             --install-location /Applications/VideoEditor.app \
+            --sign "$INSTALLER_IDENTITY" \
             dist/VideoEditor.pkg
 
       - name: Notarize PKG
