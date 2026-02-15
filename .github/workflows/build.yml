@@ -186,8 +186,13 @@ jobs:
             --identifier com.videoeditor.app \
             --version 1.0.0 \
             --install-location /Applications \
-            --sign "$INSTALLER_IDENTITY" \
+            dist/VideoEditor-unsigned.pkg
+
+          productsign --sign "$INSTALLER_IDENTITY" \
+            dist/VideoEditor-unsigned.pkg \
             dist/VideoEditor.pkg
+
+          rm dist/VideoEditor-unsigned.pkg
 
       - name: Notarize PKG
         env:
