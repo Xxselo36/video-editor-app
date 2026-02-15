@@ -182,10 +182,10 @@ jobs:
         env:
           INSTALLER_IDENTITY: ${{ secrets.MACOS_INSTALLER_IDENTITY }}
         run: |
-          pkgbuild --root dist/VideoEditor.app \
+          pkgbuild --component dist/VideoEditor.app \
             --identifier com.videoeditor.app \
             --version 1.0.0 \
-            --install-location /Applications/VideoEditor.app \
+            --install-location /Applications \
             --sign "$INSTALLER_IDENTITY" \
             dist/VideoEditor.pkg
 
