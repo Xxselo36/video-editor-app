@@ -114,8 +114,8 @@ jobs:
             --nofollow-import-to=torch._inductor \
             --nofollow-import-to=torch.testing \
             --nofollow-import-to=torch.utils.benchmark \
-            --nofollow-import-to=torch.distributed.elastic
-            --nofollow-import-to=torch.distributed.pipeline
+            --nofollow-import-to=torch.distributed.elastic \
+            --nofollow-import-to=torch.distributed.pipeline \
             --nofollow-import-to=torch.distributed.rpc \
             --nofollow-import-to=sympy \
             --nofollow-import-to=scipy.integrate._lebedev \
@@ -307,8 +307,8 @@ jobs:
             --nofollow-import-to=torch._inductor `
             --nofollow-import-to=torch.testing `
             --nofollow-import-to=torch.utils.benchmark `
-            --nofollow-import-to=torch.distributed.elastic
-            --nofollow-import-to=torch.distributed.pipeline
+            --nofollow-import-to=torch.distributed.elastic `
+            --nofollow-import-to=torch.distributed.pipeline `
             --nofollow-import-to=torch.distributed.rpc `
             --nofollow-import-to=sympy `
             --nofollow-import-to=scipy.integrate._lebedev `
@@ -423,8 +423,8 @@ jobs:
             --nofollow-import-to=torch._inductor \
             --nofollow-import-to=torch.testing \
             --nofollow-import-to=torch.utils.benchmark \
-            --nofollow-import-to=torch.distributed.elastic
-            --nofollow-import-to=torch.distributed.pipeline
+            --nofollow-import-to=torch.distributed.elastic \
+            --nofollow-import-to=torch.distributed.pipeline \
             --nofollow-import-to=torch.distributed.rpc \
             --nofollow-import-to=torch.cuda \
             --nofollow-import-to=torch.backends.cudnn \
