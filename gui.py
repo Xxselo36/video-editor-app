@@ -11,18 +11,33 @@ import threading
 import subprocess
 from pathlib import Path
 
-# Register dummy modules for torch.distributed sub-packages that crash
-# in Nuitka standalone mode (pybind11 double-registration) but are not
-# needed for video editing / inference.
-for _mod_name in [
-    'torch.distributed.rpc',
-    'torch.distributed.elastic',
-    'torch.distributed.pipeline',
-]:
-    if _mod_name not in sys.modules:
-        _dummy = types.ModuleType(_mod_name)
-        _dummy.__path__ = []
-        sys.modules[_mod_name] = _dummy
+# Block torch.distributed sub-packages that crash in Nuitka standalone mode
+# (pybind11 double-registration). Uses a meta_path finder which is more
+# robust than sys.modules dummies — it intercepts Nuitka's compiled imports.
+class _BlockedModuleFinder:
+    _BLOCKED = frozenset([
+        'torch.distributed.rpc', 'torch.distributed.elastic',
+        'torch.distributed.pipeline',
+    ])
+
+    def find_module(self, fullname, path=None):
+        if fullname in self._BLOCKED or any(
+            fullname.startswith(b + '.') for b in self._BLOCKED
+        ):
+            return self
+        return None
+
+    def load_module(self, fullname):
+        if fullname in sys.modules:
+            return sys.modules[fullname]
+        mod = types.ModuleType(fullname)
+        mod.__path__ = []
+        mod.__loader__ = self
+        mod.__spec__ = None
+        sys.modules[fullname] = mod
+        return mod
+
+sys.meta_path.insert(0, _BlockedModuleFinder())
 
 # Determine project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -327,6 +342,7 @@ class VideoEditorApp(ctk.CTk):
 
     def _worker(self, video_path, style, model, fast, output_dir):
         """Runs in background thread."""
+        result = None
         try:
             # Check and download Whisper model if needed
             self._ensure_whisper_model(model)
@@ -355,6 +371,12 @@ class VideoEditorApp(ctk.CTk):
 
         except InterruptedError:
             self.after(0, self._on_cancelled)
+        except ModuleNotFoundError as e:
+            if 'torch.distributed' in str(e) and result and os.path.isfile(result):
+                self._output_path = result
+                self.after(0, self._on_done, result)
+            else:
+                self.after(0, self._on_error, str(e))
         except Exception as e:
             self.after(0, self._on_error, str(e))
 
