@@ -6,9 +6,23 @@ Video Editor GUI - CustomTkinter Interface
 import multiprocessing
 import os
 import sys
+import types
 import threading
 import subprocess
 from pathlib import Path
+
+# Register dummy modules for torch.distributed sub-packages that crash
+# in Nuitka standalone mode (pybind11 double-registration) but are not
+# needed for video editing / inference.
+for _mod_name in [
+    'torch.distributed.rpc',
+    'torch.distributed.elastic',
+    'torch.distributed.pipeline',
+]:
+    if _mod_name not in sys.modules:
+        _dummy = types.ModuleType(_mod_name)
+        _dummy.__path__ = []
+        sys.modules[_mod_name] = _dummy
 
 # Determine project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
