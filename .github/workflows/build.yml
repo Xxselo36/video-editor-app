@@ -329,6 +329,12 @@ jobs:
           name: VideoEditor-Windows
           path: VideoEditor-Setup.exe
 
+      - name: Upload to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload v1.0.0 VideoEditor-Setup.exe --repo ${{ github.repository }} --clobber
+
   # ============================================================================
   # Linux Build
   # ============================================================================
@@ -489,11 +495,10 @@ jobs:
           path: VideoEditor-Linux.tar.xz
 
       - name: Upload to Release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload ${{ github.ref_name }} VideoEditor-Linux.tar.xz --repo ${{ github.repository }} --clobber
+          gh release upload v1.0.0 VideoEditor-Linux.tar.xz --repo ${{ github.repository }} --clobber
 
   # ============================================================================
   # Release
