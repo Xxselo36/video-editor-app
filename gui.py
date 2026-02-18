@@ -336,9 +336,18 @@ class VideoEditorApp(ctk.CTk):
     def _worker(self, video_path, style, model, fast, output_dir):
         """Runs in background thread."""
         result = None
+        self._last_output_path = None
+
+        def _tracking_callback(progress, message=""):
+            # Track output path from "Fertig! Output: ..." messages
+            if isinstance(message, str) and "Fertig! Output:" in message:
+                path = message.split("Fertig! Output:")[-1].strip()
+                if os.path.isfile(path):
+                    self._last_output_path = path
+            self._progress_callback(progress, message)
+
         try:
             _install_torch_blockers()
-            # Check and download Whisper model if needed
             self._ensure_whisper_model(model)
 
             if fast:
@@ -346,7 +355,7 @@ class VideoEditorApp(ctk.CTk):
                 editor = FastVideoEditor(
                     video_path, output_dir,
                     whisper_model=model,
-                    progress_callback=self._progress_callback,
+                    progress_callback=_tracking_callback,
                     cancel_check=self._cancel_check,
                 )
                 result = editor.edit_fast(style=style)
@@ -355,7 +364,7 @@ class VideoEditorApp(ctk.CTk):
                 editor = VideoEditor(
                     video_path, output_dir,
                     whisper_model=model,
-                    progress_callback=self._progress_callback,
+                    progress_callback=_tracking_callback,
                     cancel_check=self._cancel_check,
                 )
                 try:
@@ -373,17 +382,10 @@ class VideoEditorApp(ctk.CTk):
         except InterruptedError:
             self.after(0, self._on_cancelled)
         except Exception as e:
-            # result may be None if error occurred inside edit_video()
-            # after processing finished. Scan output dir for recent files.
-            if not result:
-                import glob, time
-                mp4s = sorted(glob.glob(os.path.join(output_dir, "*.mp4")),
-                              key=os.path.getmtime, reverse=True)
-                if mp4s and (time.time() - os.path.getmtime(mp4s[0])) < 600:
-                    result = mp4s[0]
-            if result and os.path.isfile(result):
-                self._output_path = result
-                self.after(0, self._on_done, result)
+            fallback = result or self._last_output_path
+            if fallback and os.path.isfile(fallback):
+                self._output_path = fallback
+                self.after(0, self._on_done, fallback)
             else:
                 self.after(0, self._on_error, str(e))
 
