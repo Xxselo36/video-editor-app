@@ -352,13 +352,20 @@ class VideoEditorApp(ctk.CTk):
                 result = editor.edit_fast(style=style)
             else:
                 from src.editor import VideoEditor
-                with VideoEditor(
+                editor = VideoEditor(
                     video_path, output_dir,
                     whisper_model=model,
                     progress_callback=self._progress_callback,
                     cancel_check=self._cancel_check,
-                ) as editor:
+                )
+                try:
+                    editor.__enter__()
                     result = editor.edit_video(style)
+                finally:
+                    try:
+                        editor.__exit__(None, None, None)
+                    except Exception:
+                        pass
 
             self._output_path = result
             self.after(0, self._on_done, result)
