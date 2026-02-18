@@ -372,7 +372,7 @@ class VideoEditorApp(ctk.CTk):
         except InterruptedError:
             self.after(0, self._on_cancelled)
         except ModuleNotFoundError as e:
-            if 'torch.distributed' in str(e) and result and os.path.isfile(result):
+            if result and os.path.isfile(result):
                 self._output_path = result
                 self.after(0, self._on_done, result)
             else:
