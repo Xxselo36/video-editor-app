@@ -373,6 +373,14 @@ class VideoEditorApp(ctk.CTk):
         except InterruptedError:
             self.after(0, self._on_cancelled)
         except Exception as e:
+            # result may be None if error occurred inside edit_video()
+            # after processing finished. Scan output dir for recent files.
+            if not result:
+                import glob, time
+                mp4s = sorted(glob.glob(os.path.join(output_dir, "*.mp4")),
+                              key=os.path.getmtime, reverse=True)
+                if mp4s and (time.time() - os.path.getmtime(mp4s[0])) < 600:
+                    result = mp4s[0]
             if result and os.path.isfile(result):
                 self._output_path = result
                 self.after(0, self._on_done, result)
