@@ -11,33 +11,26 @@ import threading
 import subprocess
 from pathlib import Path
 
-# Block torch.distributed sub-packages that crash in Nuitka standalone mode
-# (pybind11 double-registration). Uses a meta_path finder which is more
-# robust than sys.modules dummies — it intercepts Nuitka's compiled imports.
-class _BlockedModuleFinder:
-    _BLOCKED = frozenset([
+# Suppress torch.distributed sub-package errors in Nuitka standalone mode.
+# Installed lazily (after torch loads) to avoid circular import issues.
+def _install_torch_blockers():
+    """Register dummy modules for excluded torch.distributed sub-packages."""
+    for name in [
         'torch.distributed.rpc', 'torch.distributed.elastic',
         'torch.distributed.pipeline',
-    ])
-
-    def find_module(self, fullname, path=None):
-        if fullname in self._BLOCKED or any(
-            fullname.startswith(b + '.') for b in self._BLOCKED
-        ):
-            return self
-        return None
-
-    def load_module(self, fullname):
-        if fullname in sys.modules:
-            return sys.modules[fullname]
-        mod = types.ModuleType(fullname)
-        mod.__path__ = []
-        mod.__loader__ = self
-        mod.__spec__ = None
-        sys.modules[fullname] = mod
-        return mod
-
-sys.meta_path.insert(0, _BlockedModuleFinder())
+    ]:
+        if name not in sys.modules:
+            mod = types.ModuleType(name)
+            mod.__path__ = []
+            mod.__spec__ = None
+            sys.modules[name] = mod
+        for sub in [name + '.api', name + '.backend_registry',
+                     name + '.constants', name + '.internal']:
+            if sub not in sys.modules:
+                mod = types.ModuleType(sub)
+                mod.__path__ = []
+                mod.__spec__ = None
+                sys.modules[sub] = mod
 
 # Determine project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -344,6 +337,7 @@ class VideoEditorApp(ctk.CTk):
         """Runs in background thread."""
         result = None
         try:
+            _install_torch_blockers()
             # Check and download Whisper model if needed
             self._ensure_whisper_model(model)
 
@@ -371,14 +365,12 @@ class VideoEditorApp(ctk.CTk):
 
         except InterruptedError:
             self.after(0, self._on_cancelled)
-        except ModuleNotFoundError as e:
+        except Exception as e:
             if result and os.path.isfile(result):
                 self._output_path = result
                 self.after(0, self._on_done, result)
             else:
                 self.after(0, self._on_error, str(e))
-        except Exception as e:
-            self.after(0, self._on_error, str(e))
 
     def _on_done(self, output_path):
         self.progress_bar.set(1.0)
