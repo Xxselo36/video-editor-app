@@ -9,27 +9,42 @@ import sys
 import types
 import threading
 import subprocess
+import importlib.abc
+import importlib.machinery
 from pathlib import Path
 
 
-def _install_torch_blockers():
-    """Pre-register dummy modules so Nuitka doesn't crash on excluded torch subpackages."""
-    for name in [
-        'torch.distributed.rpc', 'torch.distributed.elastic',
+class _TorchDistBlocker(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Lazily intercepts imports of excluded torch subpackages in Nuitka builds.
+
+    Unlike pre-populating sys.modules with dummy modules (which causes
+    "partially initialized module" circular-import errors), this finder
+    only creates modules on-demand when the import is actually attempted.
+    """
+    _BLOCKED_PREFIXES = (
+        'torch.distributed.rpc',
+        'torch.distributed.elastic',
         'torch.distributed.pipeline',
-    ]:
-        if name not in sys.modules:
-            mod = types.ModuleType(name)
-            mod.__path__ = []
-            mod.__spec__ = None
-            sys.modules[name] = mod
-        for sub in [name + '.api', name + '.backend_registry',
-                     name + '.constants', name + '.internal']:
-            if sub not in sys.modules:
-                mod = types.ModuleType(sub)
-                mod.__path__ = []
-                mod.__spec__ = None
-                sys.modules[sub] = mod
+    )
+
+    def find_spec(self, fullname, path, target=None):
+        for prefix in self._BLOCKED_PREFIXES:
+            if fullname == prefix or fullname.startswith(prefix + '.'):
+                return importlib.machinery.ModuleSpec(
+                    fullname, self, is_package=True,
+                )
+        return None
+
+    def create_module(self, spec):
+        return types.ModuleType(spec.name)
+
+    def exec_module(self, module):
+        module.__path__ = []
+        module.is_available = lambda: False
+
+
+# Install BEFORE any torch import to intercept excluded subpackages
+sys.meta_path.insert(0, _TorchDistBlocker())
 
 
 # Determine project root
@@ -347,7 +362,6 @@ class VideoEditorApp(ctk.CTk):
             self._progress_callback(message, step, total_steps, progress)
 
         try:
-            _install_torch_blockers()
             self._ensure_whisper_model(model)
 
             if fast:
