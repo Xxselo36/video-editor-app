@@ -6,9 +6,31 @@ Video Editor GUI - CustomTkinter Interface
 import multiprocessing
 import os
 import sys
+import types
 import threading
 import subprocess
 from pathlib import Path
+
+
+def _install_torch_blockers():
+    """Pre-register dummy modules so Nuitka doesn't crash on excluded torch subpackages."""
+    for name in [
+        'torch.distributed.rpc', 'torch.distributed.elastic',
+        'torch.distributed.pipeline',
+    ]:
+        if name not in sys.modules:
+            mod = types.ModuleType(name)
+            mod.__path__ = []
+            mod.__spec__ = None
+            sys.modules[name] = mod
+        for sub in [name + '.api', name + '.backend_registry',
+                     name + '.constants', name + '.internal']:
+            if sub not in sys.modules:
+                mod = types.ModuleType(sub)
+                mod.__path__ = []
+                mod.__spec__ = None
+                sys.modules[sub] = mod
+
 
 # Determine project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -325,6 +347,7 @@ class VideoEditorApp(ctk.CTk):
             self._progress_callback(message, step, total_steps, progress)
 
         try:
+            _install_torch_blockers()
             self._ensure_whisper_model(model)
 
             if fast:
@@ -360,9 +383,18 @@ class VideoEditorApp(ctk.CTk):
             self.after(0, self._on_cancelled)
         except Exception as e:
             fallback = result or self._last_output_path
-            if fallback and os.path.isfile(fallback):
-                self._output_path = fallback
-                self.after(0, self._on_done, fallback)
+            # Last resort: check for expected output file by name
+            if not (fallback and os.path.isfile(str(fallback))):
+                try:
+                    base = os.path.splitext(os.path.basename(video_path))[0]
+                    expected = os.path.join(output_dir, f"{base}_clean.mp4")
+                    if os.path.isfile(expected):
+                        fallback = expected
+                except Exception:
+                    pass
+            if fallback and os.path.isfile(str(fallback)):
+                self._output_path = str(fallback)
+                self.after(0, self._on_done, str(fallback))
             else:
                 self.after(0, self._on_error, str(e))
 
