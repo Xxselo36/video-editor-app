@@ -6,31 +6,9 @@ Video Editor GUI - CustomTkinter Interface
 import multiprocessing
 import os
 import sys
-import types
 import threading
 import subprocess
 from pathlib import Path
-
-# Suppress torch.distributed sub-package errors in Nuitka standalone mode.
-# Installed lazily (after torch loads) to avoid circular import issues.
-def _install_torch_blockers():
-    """Register dummy modules for excluded torch.distributed sub-packages."""
-    for name in [
-        'torch.distributed.rpc', 'torch.distributed.elastic',
-        'torch.distributed.pipeline',
-    ]:
-        if name not in sys.modules:
-            mod = types.ModuleType(name)
-            mod.__path__ = []
-            mod.__spec__ = None
-            sys.modules[name] = mod
-        for sub in [name + '.api', name + '.backend_registry',
-                     name + '.constants', name + '.internal']:
-            if sub not in sys.modules:
-                mod = types.ModuleType(sub)
-                mod.__path__ = []
-                mod.__spec__ = None
-                sys.modules[sub] = mod
 
 # Determine project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -338,16 +316,15 @@ class VideoEditorApp(ctk.CTk):
         result = None
         self._last_output_path = None
 
-        def _tracking_callback(progress, message=""):
+        def _tracking_callback(message, step=None, total_steps=None, progress=None):
             # Track output path from "Fertig! Output: ..." messages
             if isinstance(message, str) and "Fertig! Output:" in message:
                 path = message.split("Fertig! Output:")[-1].strip()
                 if os.path.isfile(path):
                     self._last_output_path = path
-            self._progress_callback(progress, message)
+            self._progress_callback(message, step, total_steps, progress)
 
         try:
-            _install_torch_blockers()
             self._ensure_whisper_model(model)
 
             if fast:
