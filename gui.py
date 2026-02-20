@@ -3,45 +3,59 @@
 Video Editor GUI - CustomTkinter Interface
 """
 
+import builtins
 import multiprocessing
 import os
 import sys
 import types
 import threading
 import subprocess
-import importlib.abc
-import importlib.machinery
 from pathlib import Path
 
 
-class _TorchRpcFallback(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    """Fallback finder for torch.distributed.rpc excluded from Nuitka build.
-
-    torch.distributed.rpc has C++ pybind11 bindings that fail in Nuitka
-    standalone builds ("cannot initialize type RpcBackendOptions").
-    This finder provides a minimal stub with is_available()=False so
-    torch._jit_internal skips RPC code paths.
-
-    MUST be appended (not inserted at 0) to sys.meta_path so Nuitka's
-    own import mechanism handles all compiled modules first.
-    """
-    _BLOCKED = 'torch.distributed.rpc'
-
-    def find_spec(self, fullname, path, target=None):
-        if fullname == self._BLOCKED or fullname.startswith(self._BLOCKED + '.'):
-            return importlib.machinery.ModuleSpec(fullname, self, is_package=True)
-        return None
-
-    def create_module(self, spec):
-        return types.ModuleType(spec.name)
-
-    def exec_module(self, module):
-        module.__path__ = []
-        module.is_available = lambda: False
+# ---------------------------------------------------------------------------
+# Nuitka torch.distributed.rpc fix
+#
+# torch.distributed.rpc has C++ pybind11 bindings that fail in Nuitka with
+# "cannot initialize type RpcBackendOptions" (when included) or ImportError
+# (when excluded). Both MetaPathFinder approaches (position 0 and append)
+# break Nuitka's compiled import chain for torch.nn.
+#
+# This wrapper operates ABOVE the import machinery: it lets Nuitka handle
+# everything normally, only catches failures related to rpc, stubs the
+# module in sys.modules, and retries the original import.
+# ---------------------------------------------------------------------------
+_orig_import = builtins.__import__
 
 
-# Append as FALLBACK — Nuitka's compiled finder must run first
-sys.meta_path.append(_TorchRpcFallback())
+def _safe_import(name, *args, **kwargs):
+    try:
+        return _orig_import(name, *args, **kwargs)
+    except (RuntimeError, ImportError) as e:
+        err = str(e)
+        if 'RpcBackendOptions' in err or 'generic_type' in err or (
+                isinstance(e, ImportError) and 'torch.distributed.rpc' in err):
+            # Stub torch.distributed.rpc and its submodules
+            for mod_name in [
+                'torch.distributed.rpc',
+                'torch.distributed.rpc.api',
+                'torch.distributed.rpc.backend_registry',
+                'torch.distributed.rpc.constants',
+                'torch.distributed.rpc.internal',
+            ]:
+                if mod_name not in sys.modules:
+                    stub = types.ModuleType(mod_name)
+                    stub.__path__ = []
+                    stub.is_available = lambda: False
+                    sys.modules[mod_name] = stub
+            # Return partially-initialised module if available, else retry
+            if name in sys.modules:
+                return sys.modules[name]
+            return _orig_import(name, *args, **kwargs)
+        raise
+
+
+builtins.__import__ = _safe_import
 
 
 # Determine project root
