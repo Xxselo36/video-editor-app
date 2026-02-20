@@ -6,9 +6,42 @@ Video Editor GUI - CustomTkinter Interface
 import multiprocessing
 import os
 import sys
+import types
 import threading
 import subprocess
+import importlib.abc
+import importlib.machinery
 from pathlib import Path
+
+
+class _TorchRpcFallback(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Fallback finder for torch.distributed.rpc excluded from Nuitka build.
+
+    torch.distributed.rpc has C++ pybind11 bindings that fail in Nuitka
+    standalone builds ("cannot initialize type RpcBackendOptions").
+    This finder provides a minimal stub with is_available()=False so
+    torch._jit_internal skips RPC code paths.
+
+    MUST be appended (not inserted at 0) to sys.meta_path so Nuitka's
+    own import mechanism handles all compiled modules first.
+    """
+    _BLOCKED = 'torch.distributed.rpc'
+
+    def find_spec(self, fullname, path, target=None):
+        if fullname == self._BLOCKED or fullname.startswith(self._BLOCKED + '.'):
+            return importlib.machinery.ModuleSpec(fullname, self, is_package=True)
+        return None
+
+    def create_module(self, spec):
+        return types.ModuleType(spec.name)
+
+    def exec_module(self, module):
+        module.__path__ = []
+        module.is_available = lambda: False
+
+
+# Append as FALLBACK — Nuitka's compiled finder must run first
+sys.meta_path.append(_TorchRpcFallback())
 
 
 # Determine project root
