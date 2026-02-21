@@ -3,59 +3,12 @@
 Video Editor GUI - CustomTkinter Interface
 """
 
-import builtins
 import multiprocessing
 import os
 import sys
-import types
 import threading
 import subprocess
 from pathlib import Path
-
-
-# ---------------------------------------------------------------------------
-# Nuitka torch.distributed.rpc fix
-#
-# torch.distributed.rpc has C++ pybind11 bindings that fail in Nuitka with
-# "cannot initialize type RpcBackendOptions" (when included) or ImportError
-# (when excluded). Both MetaPathFinder approaches (position 0 and append)
-# break Nuitka's compiled import chain for torch.nn.
-#
-# This wrapper operates ABOVE the import machinery: it lets Nuitka handle
-# everything normally, only catches failures related to rpc, stubs the
-# module in sys.modules, and retries the original import.
-# ---------------------------------------------------------------------------
-_orig_import = builtins.__import__
-
-
-def _safe_import(name, *args, **kwargs):
-    try:
-        return _orig_import(name, *args, **kwargs)
-    except (RuntimeError, ImportError) as e:
-        err = str(e)
-        if 'RpcBackendOptions' in err or 'generic_type' in err or (
-                isinstance(e, ImportError) and 'torch.distributed.rpc' in err):
-            # Stub torch.distributed.rpc and its submodules
-            for mod_name in [
-                'torch.distributed.rpc',
-                'torch.distributed.rpc.api',
-                'torch.distributed.rpc.backend_registry',
-                'torch.distributed.rpc.constants',
-                'torch.distributed.rpc.internal',
-            ]:
-                if mod_name not in sys.modules:
-                    stub = types.ModuleType(mod_name)
-                    stub.__path__ = []
-                    stub.is_available = lambda: False
-                    sys.modules[mod_name] = stub
-            # Return partially-initialised module if available, else retry
-            if name in sys.modules:
-                return sys.modules[name]
-            return _orig_import(name, *args, **kwargs)
-        raise
-
-
-builtins.__import__ = _safe_import
 
 
 # Determine project root
