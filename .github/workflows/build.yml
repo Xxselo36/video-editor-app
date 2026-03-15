@@ -207,9 +207,10 @@ jobs:
             patchelf \
             libgirepository1.0-dev
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (CPU-only torch)
         run: |
           pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
           pip install -r build-requirements.txt
 
@@ -217,8 +218,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/Nuitka
-          key: nuitka-linux-${{ hashFiles('gui.py', 'src/*.py') }}
-          restore-keys: nuitka-linux-
+          key: nuitka-linux-v2-${{ hashFiles('gui.py', 'src/*.py') }}
+          restore-keys: nuitka-linux-v2-
 
       - name: Add swap space
         run: |
@@ -279,34 +280,56 @@ jobs:
             cp -R "$TORCHGEN_SRC" "$DIST_DIR/torchgen"
           fi
 
-          # Cleanup unnecessary files
+          # Cleanup unnecessary torch files
           rm -rf "$DIST_DIR/torch/include" 2>/dev/null || true
           rm -rf "$DIST_DIR/torch/distributed" 2>/dev/null || true
           rm -rf "$DIST_DIR/torch/share" 2>/dev/null || true
           rm -rf "$DIST_DIR/torch/csrc" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/testing" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/_dynamo" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/_inductor" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/_export" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/_functorch" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/onnx" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/optim" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/profiler" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/ao" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/compiler" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/fx" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/package" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/cuda" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/backends/cudnn" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/backends/cuda" 2>/dev/null || true
           find "$DIST_DIR/torch" -name "*.pyi" -delete 2>/dev/null || true
           find "$DIST_DIR/torch" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-          # Remove CUDA/NVIDIA libraries (CPU-only)
-          find "$DIST_DIR/torch" -name "libcudart*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "libcublas*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "libcufft*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "libcurand*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "libcusparse*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "libcusolver*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "libnvrtc*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "libnvJitLink*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "libcudnn*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "libnvidia*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -path "*/nvidia/*" -name "*.so*" -delete 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "*_cuda*" -name "*.so" -delete 2>/dev/null || true
+          # Remove ALL CUDA/NVIDIA libraries from entire dist (CPU-only)
+          find "$DIST_DIR" -name "libcudart*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "libcublas*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "libcufft*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "libcurand*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "libcusparse*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "libcusolver*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "libnvrtc*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "libnvJitLink*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "libcudnn*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "libnvidia*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "libnvToolsExt*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -path "*/nvidia/*" -name "*.so*" -delete 2>/dev/null || true
+          find "$DIST_DIR" -name "*_cuda*" -name "*.so" -delete 2>/dev/null || true
+          rm -rf "$DIST_DIR/nvidia" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/lib/libcaffe2_nvrtc.so" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/lib/libc10_cuda.so" 2>/dev/null || true
+          rm -rf "$DIST_DIR/torch/lib/libtorch_cuda*.so" 2>/dev/null || true
 
-          # Strip debug symbols
-          find "$DIST_DIR/torch" -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true
-          find "$DIST_DIR/torch" -name "*.so.*" -exec strip --strip-debug {} \; 2>/dev/null || true
+          # Strip debug symbols from everything
+          find "$DIST_DIR" -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true
+          find "$DIST_DIR" -name "*.so.*" -exec strip --strip-debug {} \; 2>/dev/null || true
 
           echo "torch size after cleanup:"
           du -sh "$DIST_DIR/torch"
+          echo "total dist size:"
+          du -sh "$DIST_DIR"
 
       - name: Package Linux build
         run: |
@@ -315,19 +338,18 @@ jobs:
           # Remove build artifacts
           rm -rf dist/gui.build
 
-          # Strip all .so files in dist
-          find "$DIST_DIR" -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true
-          find "$DIST_DIR" -name "*.so.*" -exec strip --strip-debug {} \; 2>/dev/null || true
-
           # Rename binary
           if [ -f "$DIST_DIR/gui.bin" ]; then
             mv "$DIST_DIR/gui.bin" "$DIST_DIR/VideoEditor"
           fi
           chmod +x "$DIST_DIR/VideoEditor"
 
-          # Rename directory and create compressed archive
+          echo "Final dist size:"
+          du -sh "$DIST_DIR"
+
+          # Rename directory and create compressed archive (xz -6 for better compression)
           mv "$DIST_DIR" dist/VideoEditor-Linux
-          tar cf - -C dist VideoEditor-Linux | xz -3 -T0 > VideoEditor-Linux.tar.xz
+          tar cf - -C dist VideoEditor-Linux | xz -6 -T0 > VideoEditor-Linux.tar.xz
 
           ls -lh VideoEditor-Linux.tar.xz
 
