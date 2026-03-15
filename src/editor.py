@@ -259,7 +259,7 @@ class VideoEditor:
         if not self.input_path.exists():
             raise FileNotFoundError(f"Video nicht gefunden: {input_path}")
 
-        self._report(f"Lade Video: {self.input_path}")
+        self._report(f"Loading video: {self.input_path}")
 
         # Video-Info holen (Rotation und Dimensionen)
         rotation = self._get_video_rotation(str(self.input_path))
@@ -290,13 +290,13 @@ class VideoEditor:
                 # Auf gerade Zahlen runden (wichtig für Encoder)
                 target_width = target_width - (target_width % 2)
                 target_height = target_height - (target_height % 2)
-                self._report(f"  Skaliere: {display_width}x{display_height} -> {target_width}x{target_height}")
+                self._report(f"  Scaling: {display_width}x{display_height} -> {target_width}x{target_height}")
             else:
                 target_width = display_width - (display_width % 2)
                 target_height = display_height - (display_height % 2)
 
             if rotation != 0:
-                self._report(f"  Normalisiere Rotation ({rotation}°)...")
+                self._report(f"  Normalizing rotation ({rotation}°)...")
 
             # FFmpeg-Befehl mit expliziten Dimensionen
             cmd = [
@@ -318,7 +318,7 @@ class VideoEditor:
         self.duration = self.original_clip.duration
         self.size = self.original_clip.size
         self.fps = self.original_clip.fps
-        self._report(f"  Arbeits-Video: {self.size[0]}x{self.size[1]}, {self.fps:.0f}fps, {self.duration:.1f}s")
+        self._report(f"  Working video: {self.size[0]}x{self.size[1]}, {self.fps:.0f}fps, {self.duration:.1f}s")
 
         # Lazy-loaded
         self._audio_analyzer = None
@@ -434,16 +434,16 @@ class VideoEditor:
     def _get_subtitles(self):
         self._check_cancel()
         if self._subtitles is None:
-            self._report("\n[1/6] Transkribiere Audio...", step=1, total_steps=6)
+            self._report("\n[1/6] Transcribing audio...", step=1, total_steps=6)
             self._subtitles = self.audio_analyzer.transcribe()
             if self._subtitles:
-                self._report(f"  {len(self._subtitles)} Untertitel-Segmente erkannt")
+                self._report(f"  {len(self._subtitles)} subtitle segments detected")
                 for i, sub in enumerate(self._subtitles[:3]):
                     self._report(f"    {i+1}. [{sub.start:.1f}s - {sub.end:.1f}s]: {sub.text[:50]}...")
                 if len(self._subtitles) > 3:
-                    self._report(f"    ... und {len(self._subtitles) - 3} weitere")
+                    self._report(f"    ... and {len(self._subtitles) - 3} more")
             else:
-                self._report("  WARNUNG: Keine Sprache im Video erkannt!")
+                self._report("  WARNING: No speech detected in video!")
         return self._subtitles
 
     def _get_speech_segments(self, config):
@@ -451,7 +451,7 @@ class VideoEditor:
         if not config.get("remove_silence", False):
             return [(0, self.duration)]
 
-        self._report("\n[2/6] Analysiere Stille...", step=2, total_steps=6)
+        self._report("\n[2/6] Analyzing silence...", step=2, total_steps=6)
         segments = self.audio_analyzer.detect_silence(
             silence_threshold=config.get("silence_threshold", 0.025),  # Etwas toleranter
             min_silence_duration=config.get("min_silence_to_cut", 0.6)  # Längere Stille nötig
@@ -499,7 +499,7 @@ class VideoEditor:
             final[-1] = (final[-1][0], last[1])
 
         removed = self.duration - sum(e - s for s, e in final)
-        self._report(f"  {len(final)} Segmente, {removed:.1f}s entfernt")
+        self._report(f"  {len(final)} segments, {removed:.1f}s removed")
         return final
 
     def _get_beat_times(self, config):
@@ -508,9 +508,9 @@ class VideoEditor:
             return []
 
         if self._beat_times is None:
-            self._report("\n[3/6] Analysiere Beats...", step=3, total_steps=6)
+            self._report("\n[3/6] Analyzing beats...", step=3, total_steps=6)
             self._beat_times = self.audio_analyzer.get_beat_times(min_strength=0.3)
-            self._report(f"  {len(self._beat_times)} Beats erkannt")
+            self._report(f"  {len(self._beat_times)} beats detected")
 
         return self._beat_times
 
@@ -540,7 +540,7 @@ class VideoEditor:
 
             cap.release()
         except Exception as e:
-            self._report(f"    Gesichtserkennung: {e}")
+            self._report(f"    Face detection: {e}")
         finally:
             detector.close()
 
@@ -565,7 +565,7 @@ class VideoEditor:
             if sentiment.emotion != "neutral":
                 ts = (sub.start + sub.end) / 2
                 events.append((ts, sentiment.emoji, 1.5))
-                self._report(f"    Emoji erkannt: {sentiment.emoji} ({sentiment.emotion}) bei {ts:.1f}s")
+                self._report(f"    Emoji detected: {sentiment.emoji} ({sentiment.emotion}) at {ts:.1f}s")
         return events
 
     # =========================================================================
@@ -736,8 +736,8 @@ class VideoEditor:
         # Log subtitle config
         color = subtitle_config["subtitle_color"]
         effect = subtitle_config["subtitle_effect"]
-        self._report(f"    Untertitel: {len(subtitles)} Segmente, Stil: {style}")
-        self._report(f"    Farbe: RGB{color}, Effekt: {effect}, Highlights: {enable_highlights}")
+        self._report(f"    Subtitles: {len(subtitles)} segments, style: {style}")
+        self._report(f"    Color: RGB{color}, Effect: {effect}, Highlights: {enable_highlights}")
 
         all_clips = []
         highlight_sounds = []  # Sammelt (timestamp, sound_type) für Highlight-Sounds
@@ -753,7 +753,7 @@ class VideoEditor:
             valid_subs = [s for s in subtitles if (s.end - s.start) >= 0.15 and s.text.strip()]
 
             if not valid_subs:
-                self._report("    Keine gültigen Untertitel für Clean-Style")
+                self._report("    No valid subtitles for clean style")
                 return clip
 
             # Gruppiere in Phrasen
@@ -762,7 +762,7 @@ class VideoEditor:
                 phrase_subs = valid_subs[i:i + words_per_phrase]
                 phrases.append(phrase_subs)
 
-            self._report(f"    Clean-Style: {len(phrases)} Phrasen mit je bis zu {words_per_phrase} Wörtern")
+            self._report(f"    Clean style: {len(phrases)} phrases with up to {words_per_phrase} words")
 
             # Erstelle Clips für jede Phrase
             for phrase_idx, phrase_subs in enumerate(phrases):
@@ -788,7 +788,7 @@ class VideoEditor:
                             all_clips.append(phrase_clip)
 
                     except Exception as e:
-                        self._report(f"    Clean-Style Fehler bei Phrase {phrase_idx}, Wort {word_idx}: {e}")
+                        self._report(f"    Clean style error at phrase {phrase_idx}, word {word_idx}: {e}")
 
         # =====================================================================
         # ANDERE STYLES: Wort-für-Wort
@@ -822,7 +822,7 @@ class VideoEditor:
                             # Sound für dieses Highlight merken
                             if highlight_config.get("sound"):
                                 highlight_sounds.append((sub.start, highlight_config["sound"]))
-                            self._report(f"      Highlight: '{sub.text}' mit Farbe {highlight_config.get('color')}")
+                            self._report(f"      Highlight: '{sub.text}' with color {highlight_config.get('color')}")
                     else:
                         # Normaler Untertitel mit Config
                         if style == "karaoke":
@@ -845,16 +845,16 @@ class VideoEditor:
                                 all_clips.append(sc)
 
                 except Exception as e:
-                    self._report(f"    Fehler bei '{sub.text[:20]}...': {e}")
+                    self._report(f"    Error at '{sub.text[:20]}...': {e}")
 
         if not all_clips:
-            self._report("    Keine Untertitel erstellt")
+            self._report("    No subtitles created")
             return clip
 
         # Speichere Highlight-Sounds für spätere Verwendung
         self._highlight_sounds = highlight_sounds
 
-        self._report(f"    {len(all_clips)} Untertitel hinzugefügt ({len(highlight_sounds)} Highlights)")
+        self._report(f"    {len(all_clips)} subtitles added ({len(highlight_sounds)} highlights)")
         return CompositeVideoClip([clip] + all_clips)
 
     # =========================================================================
@@ -909,16 +909,16 @@ class VideoEditor:
                             vol = volumes.get(sound_type, 0.25)
                             highlight_sound = highlight_sound.set_start(ts).volumex(vol)
                             sounds.append(highlight_sound)
-                            self._report(f"      Highlight-Sound: {sound_type} bei {ts:.1f}s")
+                            self._report(f"      Highlight sound: {sound_type} at {ts:.1f}s")
                         except Exception as e:
-                            self._report(f"      Highlight-Sound Fehler ({sound_type}): {e}")
+                            self._report(f"      Highlight sound error ({sound_type}): {e}")
 
             if sounds:
                 combined = CompositeAudioClip([original] + sounds)
                 return clip.set_audio(combined)
 
         except Exception as e:
-            self._report(f"    Sound-Fehler: {e}")
+            self._report(f"    Sound error: {e}")
 
         return clip
 
@@ -942,7 +942,7 @@ class VideoEditor:
             return clip
 
         duration = config.get("intro_duration", 0.5)
-        self._report(f"    Intro-Animation: {intro_type} ({duration}s)")
+        self._report(f"    Intro animation: {intro_type} ({duration}s)")
 
         try:
             if intro_type == "slide":
@@ -973,7 +973,7 @@ class VideoEditor:
                 return apply_blur_slide_in(clip, duration, direction)
 
         except Exception as e:
-            self._report(f"    Intro-Animation Fehler: {e}")
+            self._report(f"    Intro animation error: {e}")
 
         return clip
 
@@ -992,7 +992,7 @@ class VideoEditor:
             return clip
 
         duration = config.get("outro_duration", 0.5)
-        self._report(f"    Outro-Animation: {outro_type} ({duration}s)")
+        self._report(f"    Outro animation: {outro_type} ({duration}s)")
 
         try:
             if outro_type == "slide":
@@ -1009,7 +1009,7 @@ class VideoEditor:
                 return apply_scale_out(clip, duration, origin)
 
         except Exception as e:
-            self._report(f"    Outro-Animation Fehler: {e}")
+            self._report(f"    Outro animation error: {e}")
 
         return clip
 
@@ -1076,7 +1076,7 @@ class VideoEditor:
             elif position == "word" and word_trigger:
                 start_time = self._find_word_time(subtitles, word_trigger)
                 if start_time < 0:
-                    self._report(f"    Wort '{word_trigger}' nicht gefunden, überspringe Effekt")
+                    self._report(f"    Word '{word_trigger}' not found, skipping effect")
                     continue
             elif position == "absolute" and time_value is not None:
                 start_time = time_value
@@ -1088,7 +1088,7 @@ class VideoEditor:
                 continue
             duration = min(duration, clip.duration - start_time)
 
-            self._report(f"    Timed-Effekt: {effect} bei {start_time:.1f}s für {duration:.1f}s")
+            self._report(f"    Timed effect: {effect} at {start_time:.1f}s for {duration:.1f}s")
 
             try:
                 # Wende Effekt an
@@ -1131,7 +1131,7 @@ class VideoEditor:
                     clip = apply_blur_segment(clip, start_time, duration, max_blur)
 
             except Exception as e:
-                self._report(f"    Timed-Effekt Fehler ({effect}): {e}")
+                self._report(f"    Timed effect error ({effect}): {e}")
 
         return clip
 
@@ -1154,14 +1154,14 @@ class VideoEditor:
         if not action_effects:
             return clip
 
-        self._report("    Analysiere Video für Actions...")
+        self._report("    Analyzing video for actions...")
 
         try:
             detector = ActionDetector(use_pose=False)
             all_events = detector.detect_events(str(video_path))
             detector.close()
 
-            self._report(f"    {len(all_events)} Action-Events erkannt")
+            self._report(f"    {len(all_events)} action events detected")
 
             for ae_data in action_effects:
                 action = ae_data.get("action", "")
@@ -1173,10 +1173,10 @@ class VideoEditor:
                 matching_events = [e for e in all_events if e.action == action]
 
                 if not matching_events:
-                    self._report(f"    Keine '{action}' Events gefunden")
+                    self._report(f"    No '{action}' events found")
                     continue
 
-                self._report(f"    {len(matching_events)} '{action}' Events gefunden")
+                self._report(f"    {len(matching_events)} '{action}' events found")
 
                 # Wende Effekt auf jeden passenden Event an
                 for event in matching_events:
@@ -1187,7 +1187,7 @@ class VideoEditor:
 
                     actual_duration = min(duration, clip.duration - start_time)
 
-                    self._report(f"      -> {effect} bei {start_time:.1f}s für {actual_duration:.1f}s")
+                    self._report(f"      -> {effect} at {start_time:.1f}s for {actual_duration:.1f}s")
 
                     try:
                         if effect == "desaturate":
@@ -1215,10 +1215,10 @@ class VideoEditor:
                             clip = apply_blur_segment(clip, start_time, actual_duration, 20)
 
                     except Exception as e:
-                        self._report(f"      Effekt Fehler: {e}")
+                        self._report(f"      Effect error: {e}")
 
         except Exception as e:
-            self._report(f"    Action-Detection Fehler: {e}")
+            self._report(f"    Action detection error: {e}")
 
         return clip
 
@@ -1241,14 +1241,14 @@ class VideoEditor:
         if not object_effects:
             return clip
 
-        self._report("    Initialisiere Objekterkennung...")
+        self._report("    Initializing object detection...")
 
         try:
             detector = ObjectDetector(confidence_threshold=0.4)
 
             if not detector.is_available():
-                self._report("    WARNUNG: Objekterkennung nicht verfügbar!")
-                self._report("    Installiere: pip install ultralytics")
+                self._report("    WARNING: Object detection not available!")
+                self._report("    Install: pip install ultralytics")
                 return clip
 
             for oe_data in object_effects:
@@ -1257,16 +1257,16 @@ class VideoEditor:
                 duration = oe_data.get("duration", 2.0)
                 trigger = oe_data.get("trigger", "visible")
 
-                self._report(f"    Suche nach '{object_name}'...")
+                self._report(f"    Searching for '{object_name}'...")
 
                 # Finde Objekt-Erscheinungen
                 events = detector.detect_object_appearances(str(video_path), object_name)
 
                 if not events:
-                    self._report(f"    Kein '{object_name}' im Video gefunden")
+                    self._report(f"    No '{object_name}' found in video")
                     continue
 
-                self._report(f"    {len(events)} '{object_name}' Erscheinungen gefunden")
+                self._report(f"    {len(events)} '{object_name}' appearances found")
 
                 # Wende Effekt auf jede Erscheinung an
                 for event in events:
@@ -1278,7 +1278,7 @@ class VideoEditor:
                     # Nutze entweder die angegebene Dauer oder die Sichtbarkeitsdauer
                     actual_duration = min(duration, event.duration, clip.duration - start_time)
 
-                    self._report(f"      -> {effect} bei {start_time:.1f}s für {actual_duration:.1f}s")
+                    self._report(f"      -> {effect} at {start_time:.1f}s for {actual_duration:.1f}s")
 
                     try:
                         if effect == "freeze_frame":
@@ -1306,12 +1306,12 @@ class VideoEditor:
                             clip = apply_blur_segment(clip, start_time, actual_duration, 20)
 
                     except Exception as e:
-                        self._report(f"      Effekt Fehler: {e}")
+                        self._report(f"      Effect error: {e}")
 
             detector.close()
 
         except Exception as e:
-            self._report(f"    Objekterkennung Fehler: {e}")
+            self._report(f"    Object detection error: {e}")
             import traceback
             traceback.print_exc()
 
@@ -1326,7 +1326,7 @@ class VideoEditor:
         if not audio_effects:
             return clip
 
-        self._report("    Wende Audio-reaktive Effekte an...")
+        self._report("    Applying audio-reactive effects...")
 
         try:
             # Erweiterte Audio-Analyse
@@ -1337,7 +1337,7 @@ class VideoEditor:
                 effect = ae_data.get("effect", "zoom")
                 intensity = ae_data.get("intensity", 1.0)
 
-                self._report(f"      {effect} bei {trigger}")
+                self._report(f"      {effect} at {trigger}")
 
                 if trigger == "beat":
                     beat_times = analyzer.get_beat_times(min_strength=0.3)
@@ -1367,7 +1367,7 @@ class VideoEditor:
                             clip = apply_beat_shake(clip, loud_times, intensity * 12)
                         elif effect == "zoom":
                             clip = apply_beat_zoom(clip, loud_times, intensity * 0.1)
-                        self._report(f"        -> {len(loud_times)} laute Momente")
+                        self._report(f"        -> {len(loud_times)} loud moments")
 
                 elif trigger == "cut":
                     # Flash/Effekt bei jedem Schnitt
@@ -1383,7 +1383,7 @@ class VideoEditor:
                         self._report(f"        -> {len(cut_times)} Cuts")
 
         except Exception as e:
-            self._report(f"    Audio-Effekte Fehler: {e}")
+            self._report(f"    Audio effects error: {e}")
 
         return clip
 
@@ -1396,23 +1396,23 @@ class VideoEditor:
         if not face_effects:
             return clip
 
-        self._report("    Wende Gesichts-Effekte an...")
+        self._report("    Applying face-based effects...")
 
         try:
             detector = FaceDetector()
             face_positions = detector.get_face_positions_for_effects(video_path)
 
             if not face_positions:
-                self._report("      Keine Gesichter gefunden")
+                self._report("      No faces found")
                 return clip
 
-            self._report(f"      {len(face_positions)} Gesichtspositionen erkannt")
+            self._report(f"      {len(face_positions)} face positions detected")
 
             for fe_data in face_effects:
                 effect = fe_data.get("effect", "zoom")
                 intensity = fe_data.get("intensity", 1.0)
 
-                self._report(f"      Effekt: {effect}")
+                self._report(f"      Effect: {effect}")
 
                 if effect == "zoom":
                     clip = apply_face_zoom(clip, face_positions, zoom_factor=intensity)
@@ -1424,7 +1424,7 @@ class VideoEditor:
             detector.close()
 
         except Exception as e:
-            self._report(f"    Gesichts-Effekte Fehler: {e}")
+            self._report(f"    Face effects error: {e}")
 
         return clip
 
@@ -1485,17 +1485,17 @@ class VideoEditor:
             return clip
 
         if not DIFFUSERS_AVAILABLE:
-            self._report("    WARNUNG: Bildgenerierung nicht verfügbar!")
-            self._report("    Installiere: pip install diffusers torch accelerate transformers")
+            self._report("    WARNING: Image generation not available!")
+            self._report("    Install: pip install diffusers torch accelerate transformers")
             return clip
 
-        self._report("    Initialisiere Bildgenerierung...")
+        self._report("    Initializing image generation...")
 
         try:
             generator = ImageGenerator()
 
             if not generator.is_available():
-                self._report("    Bildgenerierung nicht verfügbar")
+                self._report("    Image generation not available")
                 return clip
 
             position = image_gen_config.get("position", "center")
@@ -1507,7 +1507,7 @@ class VideoEditor:
 
             if manual_images:
                 # MANUELLER MODUS: Generiere spezifische Bilder zu bestimmten Zeiten
-                self._report(f"    Generiere {len(manual_images)} manuelle Bilder...")
+                self._report(f"    Generating {len(manual_images)} manual images...")
 
                 # Bildgröße für 9:16
                 vid_w, vid_h = clip.size
@@ -1524,10 +1524,10 @@ class VideoEditor:
 
                     # Prüfe ob Timestamp im Video-Bereich
                     if timestamp >= clip.duration:
-                        self._report(f"      Überspringe {keyword}@{timestamp}s (Video nur {clip.duration:.1f}s)")
+                        self._report(f"      Skipping {keyword}@{timestamp}s (video only {clip.duration:.1f}s)")
                         continue
 
-                    self._report(f"      Generiere '{keyword}' für Sekunde {timestamp}...")
+                    self._report(f"      Generating '{keyword}' for second {timestamp}...")
                     image = generator.generate_for_keyword(keyword, img_w, img_h)
 
                     if image is not None:
@@ -1538,14 +1538,14 @@ class VideoEditor:
                             'keyword': keyword
                         })
                     else:
-                        self._report(f"      '{keyword}' fehlgeschlagen")
+                        self._report(f"      '{keyword}' failed")
 
             else:
                 # AUTOMATISCHER MODUS: Keywords in Untertiteln suchen
                 keywords = image_gen_config.get("keywords", [])
                 max_images = image_gen_config.get("max_images", 3)
 
-                self._report(f"    Suche Keywords in {len(subtitles)} Untertiteln...")
+                self._report(f"    Searching keywords in {len(subtitles)} subtitles...")
                 generated = generator.generate_images_for_subtitles(
                     subtitles,
                     keywords=keywords if keywords else None,
@@ -1554,7 +1554,7 @@ class VideoEditor:
                 )
 
             if generated:
-                self._report(f"    {len(generated)} Bilder generiert!")
+                self._report(f"    {len(generated)} images generated!")
 
                 # Als Overlays hinzufügen
                 clip = add_generated_image_overlays(
@@ -1565,12 +1565,12 @@ class VideoEditor:
                     style=style
                 )
             else:
-                self._report("    Keine Bilder generiert")
+                self._report("    No images generated")
 
             generator.close()
 
         except Exception as e:
-            self._report(f"    Bildgenerierung Fehler: {e}")
+            self._report(f"    Image generation error: {e}")
             import traceback
             traceback.print_exc()
 
@@ -1602,7 +1602,7 @@ class VideoEditor:
 
         self._report(f"\n{'='*60}")
         self._report(f"  {config['name']}: {config['description']}")
-        self._report(f"  [PARALLEL MODE - {mp.cpu_count()} Kerne]")
+        self._report(f"  [PARALLEL MODE - {mp.cpu_count()} cores]")
         self._report(f"{'='*60}")
 
         # Analyse
@@ -1611,7 +1611,7 @@ class VideoEditor:
 
         segments = self._get_speech_segments(config)
 
-        self._report("\n[4/6] Vorbereitung...", step=4, total_steps=6)
+        self._report("\n[4/6] Preparing...", step=4, total_steps=6)
 
         # Untertitel pro Segment vorbereiten
         # Subtitle-Offset korrigiert Whisper-Latenz (negativ = früher anzeigen)
@@ -1644,7 +1644,7 @@ class VideoEditor:
 
         # Temp-Verzeichnis erstellen
         temp_dir = tempfile.mkdtemp(prefix="video_edit_")
-        self._report(f"  Temp-Verzeichnis: {temp_dir}")
+        self._report(f"  Temp directory: {temp_dir}")
 
         # Worker-Argumente vorbereiten
         # Nutze das normalisierte Video (skaliert) falls vorhanden
@@ -1665,7 +1665,7 @@ class VideoEditor:
             worker_args.append(args)
 
         # Parallele Verarbeitung
-        self._report(f"\n[5/6] Verarbeite {len(segments)} Segmente parallel...", step=5, total_steps=6)
+        self._report(f"\n[5/6] Processing {len(segments)} segments in parallel...", step=5, total_steps=6)
 
         num_workers = 1  # Nur 1 Worker um RAM-Überlastung zu vermeiden
         temp_files = [None] * len(segments)
@@ -1677,23 +1677,28 @@ class VideoEditor:
 
             completed = 0
             for future in as_completed(futures):
-                self._check_cancel()
+                # Check cancel — if cancelled, kill remaining futures
+                if self.cancel_check and self.cancel_check():
+                    for f in futures:
+                        f.cancel()
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise InterruptedError("Processing cancelled")
                 segment_idx = futures[future]
                 try:
-                    idx, temp_path, error = future.result()
+                    idx, temp_path, error = future.result(timeout=300)
                     if error:
                         errors.append(f"Segment {idx}: {error}")
-                        self._report(f"  Segment {idx+1}/{len(segments)} fehlgeschlagen: {error}")
+                        self._report(f"  Segment {idx+1}/{len(segments)} failed: {error}")
                     else:
                         temp_files[idx] = temp_path
                         completed += 1
-                        self._report(f"  Segment {idx+1}/{len(segments)} fertig ({completed}/{len(segments)})", step=5, total_steps=6, progress=completed/len(segments))
+                        self._report(f"  Segment {idx+1}/{len(segments)} done ({completed}/{len(segments)})", step=5, total_steps=6, progress=completed/len(segments))
                 except Exception as e:
                     errors.append(f"Segment {segment_idx}: {str(e)}")
                     self._report(f"  Segment {segment_idx+1} Exception: {e}")
 
         if errors:
-            self._report(f"\n  WARNUNG: {len(errors)} Fehler aufgetreten")
+            self._report(f"\n  WARNING: {len(errors)} errors occurred")
             for err in errors[:5]:
                 self._report(f"    - {err}")
 
@@ -1701,10 +1706,10 @@ class VideoEditor:
         valid_temp_files = [f for f in temp_files if f is not None]
 
         if not valid_temp_files:
-            raise RuntimeError("Keine Segmente erfolgreich verarbeitet!")
+            raise RuntimeError("No segments processed successfully!")
 
         # Mit FFmpeg zusammenfügen (kein Re-Encoding = sehr schnell)
-        self._report(f"\n[6/6] Füge {len(valid_temp_files)} Segmente zusammen...", step=6, total_steps=6)
+        self._report(f"\n[6/6] Merging {len(valid_temp_files)} segments...", step=6, total_steps=6)
 
         out_path = self.output_dir / f"{self.input_path.stem}_{style_name}.mp4"
 
@@ -1724,7 +1729,7 @@ class VideoEditor:
 
         result = subprocess.run(concat_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            self._report(f"  FFmpeg concat Fehler: {result.stderr}")
+            self._report(f"  FFmpeg concat error: {result.stderr}")
             # Fallback: mit Re-Encoding (hohe Qualität)
             concat_cmd = [
                 get_ffmpeg_path(), '-y', '-f', 'concat', '-safe', '0',
@@ -1745,19 +1750,19 @@ class VideoEditor:
 
             if is_landscape:
                 # Querformat -> KEIN automatisches Cropping (zu viel Bildverlust)
-                self._report(f"  Video ist Querformat ({video_width}x{video_height}) - kein Crop zu 9:16")
-                self._report(f"  (Cropping würde zu viel Bild abschneiden)")
+                self._report(f"  Video is landscape ({video_width}x{video_height}) - no crop to 9:16")
+                self._report(f"  (Cropping would cut too much of the image)")
             else:
                 # Hochformat -> prüfen ob bereits 9:16
                 current_ratio = video_width / video_height
                 target_ratio_val = 9 / 16  # 0.5625
 
                 if abs(current_ratio - target_ratio_val) < 0.05:
-                    self._report(f"  Video ist bereits ~9:16 - kein Reframe nötig")
+                    self._report(f"  Video is already ~9:16 - no reframe needed")
                 else:
                     # Leichtes Cropping für exaktes 9:16
                     target_ratio = config.get("target_ratio", "9:16")
-                    self._report(f"  Reframe zu {target_ratio}...")
+                    self._report(f"  Reframe to {target_ratio}...")
 
                     reframe_temp = os.path.join(temp_dir, "reframed.mp4")
                     reframe_cmd = [
@@ -1773,9 +1778,9 @@ class VideoEditor:
                     if result.returncode == 0:
                         import shutil
                         shutil.move(reframe_temp, str(out_path))
-                        self._report(f"  Reframe erfolgreich!")
+                        self._report(f"  Reframe successful!")
                     else:
-                        self._report(f"  Reframe fehlgeschlagen")
+                        self._report(f"  Reframe failed")
 
         # Cleanup temp files
         import shutil
@@ -1787,8 +1792,8 @@ class VideoEditor:
         # Finale Statistik
         if out_path.exists():
             final_size = out_path.stat().st_size / (1024 * 1024)
-            self._report(f"\n  Fertig! Output: {out_path}")
-            self._report(f"  Dateigröße: {final_size:.1f} MB")
+            self._report(f"\n  Done! Output: {out_path}")
+            self._report(f"  File size: {final_size:.1f} MB")
 
         return str(out_path)
 
@@ -1807,8 +1812,8 @@ class VideoEditor:
         segments = self._get_speech_segments(config)
         beat_times = self._get_beat_times(config)
 
-        self._report("\n[4/6] Analysiere Gesichter...", step=4, total_steps=6)
-        self._report("\n[5/6] Erstelle Segmente...", step=5, total_steps=6)
+        self._report("\n[4/6] Analyzing faces...", step=4, total_steps=6)
+        self._report("\n[5/6] Creating segments...", step=5, total_steps=6)
 
         clips = []
         all_subs = []
@@ -1854,47 +1859,47 @@ class VideoEditor:
             current_time += c.duration
             cut_times.append(current_time)
 
-        self._report("\n[6/6] Finalisiere...", step=6, total_steps=6)
+        self._report("\n[6/6] Finalizing...", step=6, total_steps=6)
         final = concatenate_videoclips(clips, method="compose") if len(clips) > 1 else clips[0]
 
         if config.get("auto_reframe", False):
             target_ratio = config.get("target_ratio", "9:16")
-            self._report(f"  Reframe zu {target_ratio}...")
+            self._report(f"  Reframe to {target_ratio}...")
             final = apply_auto_reframe(final, target_ratio)
 
         timed_effects = config.get("timed_effects", [])
         if timed_effects:
-            self._report(f"  {len(timed_effects)} zeitbasierte Effekte...")
+            self._report(f"  {len(timed_effects)} timed effects...")
             final = self._apply_timed_effects(final, timed_effects, all_subs)
 
         action_effects = config.get("action_effects", [])
         if action_effects:
-            self._report(f"  {len(action_effects)} action-basierte Effekte...")
+            self._report(f"  {len(action_effects)} action-based effects...")
             final = self._apply_action_effects(final, action_effects, self.input_path)
 
         object_effects = config.get("object_effects", [])
         if object_effects:
-            self._report(f"  {len(object_effects)} objekt-basierte Effekte...")
+            self._report(f"  {len(object_effects)} object-based effects...")
             final = self._apply_object_effects(final, object_effects, self.input_path)
 
         audio_effects = config.get("audio_effects", [])
         if audio_effects:
-            self._report(f"  {len(audio_effects)} audio-reaktive Effekte...")
+            self._report(f"  {len(audio_effects)} audio-reactive effects...")
             final = self._apply_audio_effects(final, audio_effects, self.input_path, cut_times)
 
         face_effects = config.get("face_effects", [])
         if face_effects:
-            self._report(f"  {len(face_effects)} gesichts-basierte Effekte...")
+            self._report(f"  {len(face_effects)} face-based effects...")
             final = self._apply_face_effects(final, face_effects, self.input_path)
 
         final = self._apply_advanced_visual_effects(final, config)
 
         if config.get("image_gen", {}).get("enabled"):
-            self._report("  Generiere KI-Bilder...")
+            self._report("  Generating AI images...")
             final = self._apply_generated_images(final, config, all_subs)
 
         if all_subs and config.get("enable_subtitles"):
-            self._report(f"  {len(all_subs)} Untertitel...")
+            self._report(f"  {len(all_subs)} subtitles...")
             final = self._add_subtitles(final, all_subs, config)
 
         if all_emojis and config.get("enable_emojis"):
@@ -1905,7 +1910,7 @@ class VideoEditor:
         final = self._add_sounds(final, config, emoji_ts)
 
         out_path = self.output_dir / f"{self.input_path.stem}_{style_name}.mp4"
-        self._report(f"  Exportiere: {out_path}")
+        self._report(f"  Exporting: {out_path}")
 
         final.write_videofile(
             str(out_path),
@@ -1921,7 +1926,7 @@ class VideoEditor:
         )
 
         reduction = (1 - final.duration / self.duration) * 100
-        self._report(f"\n  Fertig! {self.duration:.1f}s -> {final.duration:.1f}s ({reduction:.0f}% kuerzer)")
+        self._report(f"\n  Done! {self.duration:.1f}s -> {final.duration:.1f}s ({reduction:.0f}% shorter)")
 
         final.close()
         for c in clips:
@@ -1972,13 +1977,13 @@ class VideoEditor:
         analysis = engine.analyze(prompt)
 
         self._report(f"\n{'='*60}")
-        self._report(f"  PROMPT-BASIERTE BEARBEITUNG")
+        self._report(f"  PROMPT-BASED EDITING")
         self._report(f"{'='*60}")
         self._report(f"  Prompt: \"{prompt}\"")
-        self._report(f"  Erkannter Stil: {analysis.base_style}")
+        self._report(f"  Detected style: {analysis.base_style}")
         if analysis.detected_keywords:
-            self._report(f"  Erkannte Effekte: {', '.join(analysis.detected_keywords)}")
-        self._report(f"  Konfidenz: {analysis.confidence * 100:.0f}%")
+            self._report(f"  Detected effects: {', '.join(analysis.detected_keywords)}")
+        self._report(f"  Confidence: {analysis.confidence * 100:.0f}%")
         self._report(f"{'='*60}")
 
         # Verwende die generierte Konfiguration
@@ -1989,7 +1994,7 @@ class VideoEditor:
         # Custom Highlights aus Prompt-Analyse übernehmen
         if analysis.custom_highlights:
             config["custom_highlights"] = analysis.custom_highlights
-            self._report(f"  Wort-Highlights: {list(analysis.custom_highlights.keys())}")
+            self._report(f"  Word highlights: {list(analysis.custom_highlights.keys())}")
 
         return self._edit_with_config(config, "prompt")
 
@@ -2023,8 +2028,8 @@ class VideoEditor:
         segments = self._get_speech_segments(config)
         beat_times = self._get_beat_times(config)
 
-        self._report("\n[4/6] Analysiere Gesichter...", step=4, total_steps=6)
-        self._report("\n[5/6] Erstelle Segmente...", step=5, total_steps=6)
+        self._report("\n[4/6] Analyzing faces...", step=4, total_steps=6)
+        self._report("\n[5/6] Creating segments...", step=5, total_steps=6)
 
         clips = []
         all_subs = []
@@ -2070,7 +2075,7 @@ class VideoEditor:
             current_time += c.duration
             cut_times.append(current_time)
 
-        self._report("\n[6/6] Finalisiere...", step=6, total_steps=6)
+        self._report("\n[6/6] Finalizing...", step=6, total_steps=6)
         final = concatenate_videoclips(clips, method="compose") if len(clips) > 1 else clips[0]
 
         if config.get("auto_reframe", False):
@@ -2111,7 +2116,7 @@ class VideoEditor:
         final = self._add_sounds(final, config, emoji_ts)
 
         out_path = self.output_dir / f"{self.input_path.stem}_{output_suffix}.mp4"
-        self._report(f"  Exportiere: {out_path}")
+        self._report(f"  Exporting: {out_path}")
 
         final.write_videofile(
             str(out_path),
@@ -2127,7 +2132,7 @@ class VideoEditor:
         )
 
         reduction = (1 - final.duration / self.duration) * 100
-        self._report(f"\n  Fertig! {self.duration:.1f}s -> {final.duration:.1f}s ({reduction:.0f}% kuerzer)")
+        self._report(f"\n  Done! {self.duration:.1f}s -> {final.duration:.1f}s ({reduction:.0f}% shorter)")
 
         final.close()
         for c in clips:

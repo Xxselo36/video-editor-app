@@ -2,20 +2,27 @@
 <html>
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval'; connect-src * http://127.0.0.1:*; img-src * data:;">
     <title>Video Editor</title>
+    <script src="CSInterface.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
-            background: #232323;
-            color: #e0e0e0;
+            background: #0d0d0f;
+            color: #f0f0f2;
             margin: 0;
             padding: 16px;
             font-size: 13px;
         }
         h2 {
-            margin: 0 0 12px 0;
+            margin: 0 0 4px 0;
             font-size: 16px;
-            color: #ffffff;
+            font-weight: 700;
+        }
+        .subtitle {
+            color: #5a5a64;
+            font-size: 11px;
+            margin-bottom: 16px;
         }
         .group {
             margin-bottom: 12px;
@@ -23,114 +30,138 @@
         label {
             display: block;
             margin-bottom: 4px;
-            color: #aaa;
+            color: #8e8e96;
             font-size: 11px;
+            font-weight: 600;
             text-transform: uppercase;
         }
-        select, input[type="text"] {
+        select {
             width: 100%;
-            padding: 6px 8px;
-            background: #1a1a1a;
-            border: 1px solid #444;
-            color: #e0e0e0;
-            border-radius: 4px;
+            padding: 8px 10px;
+            background: #222228;
+            border: 1px solid #2a2a32;
+            color: #f0f0f2;
+            border-radius: 8px;
             font-size: 13px;
             box-sizing: border-box;
+            appearance: none;
+            -webkit-appearance: none;
         }
-        select:focus, input:focus {
-            border-color: #4a9eff;
+        select:focus {
+            border-color: #6c5ce7;
             outline: none;
         }
         button {
             width: 100%;
-            padding: 10px;
+            padding: 12px;
             border: none;
-            border-radius: 4px;
+            border-radius: 8px;
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             margin-top: 8px;
         }
         .btn-primary {
-            background: #4a9eff;
+            background: #6c5ce7;
             color: white;
+            font-size: 14px;
+            padding: 14px;
         }
         .btn-primary:hover {
-            background: #3a8eef;
+            background: #7c6cf7;
         }
         .btn-primary:disabled {
-            background: #555;
+            background: #2d2640;
+            color: #5a5a64;
             cursor: not-allowed;
         }
         .btn-secondary {
-            background: #333;
-            color: #ccc;
-            border: 1px solid #555;
+            background: #1a1a1f;
+            color: #8e8e96;
+            border: 1px solid #2a2a32;
+        }
+        .btn-secondary:hover {
+            background: #222228;
+        }
+        .clip-info {
+            background: #1a1a1f;
+            border: 1px solid #2a2a32;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: #8e8e96;
+        }
+        .clip-info .name {
+            color: #f0f0f2;
+            font-weight: 600;
         }
         .status {
             margin-top: 12px;
-            padding: 8px;
-            border-radius: 4px;
+            padding: 10px 12px;
+            border-radius: 8px;
             font-size: 12px;
             display: none;
         }
-        .status.info { display: block; background: #1a3a5c; color: #7ab8ff; }
-        .status.success { display: block; background: #1a3c1a; color: #7aff7a; }
-        .status.error { display: block; background: #3c1a1a; color: #ff7a7a; }
+        .status.info { display: block; background: #1a1a3c; color: #7a8eff; }
+        .status.success { display: block; background: #0a2a0a; color: #00c853; }
+        .status.error { display: block; background: #2a0a0a; color: #ef5350; }
         .progress-bar {
             width: 100%;
             height: 4px;
-            background: #333;
+            background: #2d2640;
             border-radius: 2px;
-            margin-top: 8px;
+            margin-top: 10px;
             overflow: hidden;
             display: none;
         }
         .progress-bar.active { display: block; }
         .progress-fill {
             height: 100%;
-            background: #4a9eff;
+            background: #6c5ce7;
             width: 0%;
             transition: width 0.3s;
         }
+        .connection {
+            font-size: 10px;
+            color: #5a5a64;
+            text-align: center;
+            margin-top: 16px;
+        }
+        .connection .dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+        .connection .dot.ok { background: #00c853; }
+        .connection .dot.off { background: #ef5350; }
     </style>
 </head>
 <body>
     <h2>VIDEO EDITOR</h2>
+    <div class="subtitle">AI-powered video editing</div>
 
-    <div class="group">
-        <label>Style</label>
-        <select id="style">
-            <option value="clean">clean - Hard Cuts, Clean Subtitles</option>
-            <option value="viral">viral - Viral Content Style</option>
-            <option value="balanced">balanced - General Purpose</option>
-            <option value="cinematic">cinematic - Film Look</option>
-            <option value="tiktok">tiktok - TikTok Format</option>
-            <option value="minimal">minimal - Minimal Editing</option>
-        </select>
+    <div class="clip-info" id="clipInfo">
+        No clip detected — select a clip on the timeline
     </div>
 
     <div class="group">
-        <label>Whisper Model</label>
-        <select id="model">
-            <option value="tiny">tiny (fast)</option>
-            <option value="base">base</option>
-            <option value="small">small</option>
-            <option value="medium" selected>medium (recommended)</option>
-            <option value="large">large (slow)</option>
+        <label>Style</label>
+        <select id="style" onchange="updateStyleDesc()">
+            <option value="clean">Clean</option>
+            <option value="fast">Fast</option>
+            <option value="balanced">Balanced</option>
+            <option value="smooth">Smooth</option>
+            <option value="minimal">Minimal</option>
         </select>
+        <div id="styleDesc" style="color:#5a5a64;font-size:10px;margin-top:4px;"></div>
     </div>
 
     <button class="btn-primary" id="processBtn" onclick="processVideo()">
         Process Selected Clip
-    </button>
-
-    <button class="btn-secondary" onclick="exportXML()">
-        Export as Premiere XML
-    </button>
-
-    <button class="btn-secondary" onclick="exportEDL()">
-        Export as EDL
     </button>
 
     <div class="progress-bar" id="progressBar">
@@ -139,166 +170,264 @@
 
     <div class="status" id="status"></div>
 
+    <div class="connection" id="connection">
+        <span class="dot off" id="connDot"></span> Checking backend...
+    </div>
+    <div style="font-size:11px;color:#6c5ce7;text-align:center;margin-top:8px;font-weight:bold;">v35</div>
+
     <script>
-        const API_URL = 'http://127.0.0.1:8456';
-        let lastResult = null;
+        var API_URL = 'http://127.0.0.1:8456';
+        var csInterface = null;
+        var _lastVideoPath = '';
+        var _lastStyle = '';
 
+        try { csInterface = new CSInterface(); } catch (e) {}
+
+        // Force-reload host.jsx to ensure latest functions (CEP caches ExtendScript)
+        if (csInterface) {
+            try {
+                var extPath = csInterface.getSystemPath(SystemPath.EXTENSION);
+                csInterface.evalScript('$.evalFile("' + extPath.replace(/\\/g, '/') + '/host.jsx")');
+            } catch (e) {}
+        }
+
+        // --- HTTP helper using XMLHttpRequest (more compatible than fetch in CEP) ---
+        function apiFetch(path, timeoutMs) {
+            timeoutMs = timeoutMs || 10000;
+            return new Promise(function(resolve, reject) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', API_URL + path, true);
+                xhr.timeout = timeoutMs;
+                xhr.onload = function() {
+                    try {
+                        resolve(JSON.parse(xhr.responseText));
+                    } catch (e) {
+                        reject(new Error('Bad JSON from ' + path));
+                    }
+                };
+                xhr.onerror = function() {
+                    reject(new Error('Network error: ' + path));
+                };
+                xhr.ontimeout = function() {
+                    reject(new Error('Timeout: ' + path));
+                };
+                xhr.send();
+            });
+        }
+
+        // --- ExtendScript helper ---
+        function evalScript(script) {
+            return new Promise(function(resolve, reject) {
+                if (!csInterface) { reject(new Error('No CSInterface')); return; }
+                csInterface.evalScript(script, function(result) {
+                    if (result === 'EvalScript error.' || result === undefined) {
+                        reject(new Error('ExtendScript error'));
+                    } else {
+                        resolve(result);
+                    }
+                });
+            });
+        }
+
+        // --- Connection check ---
+        async function checkConnection() {
+            var el = document.getElementById('connection');
+            try {
+                var data = await apiFetch('/health', 5000);
+                if (data.status === 'ok') {
+                    el.innerHTML = '<span class="dot ok"></span> Connected to Video Editor';
+                } else {
+                    el.innerHTML = '<span class="dot off"></span> Backend error';
+                }
+            } catch (e) {
+                el.innerHTML = '<span class="dot off"></span> Open Video Editor app to connect';
+            }
+        }
+        checkConnection();
+        setInterval(checkConnection, 10000);
+
+        // --- Detect selected clip ---
+        function getSelectedClipPath() {
+            return new Promise(function(resolve, reject) {
+                if (!csInterface) { reject(new Error('No CSInterface')); return; }
+                csInterface.evalScript('getSelectedClipPath()', function(result) {
+                    if (result && result !== 'undefined' && result !== 'null' && result !== '' && result !== 'EvalScript error.') {
+                        resolve(result);
+                    } else {
+                        reject(new Error('No clip selected'));
+                    }
+                });
+            });
+        }
+
+        async function detectClip() {
+            var el = document.getElementById('clipInfo');
+            try {
+                var path = await getSelectedClipPath();
+                if (path) {
+                    var name = path.split('/').pop().split('\\').pop();
+                    el.innerHTML = '<span class="name">' + name + '</span>';
+                }
+            } catch (e) {}
+        }
+        detectClip();
+        setInterval(detectClip, 3000);
+
+        // --- Process video ---
         async function processVideo() {
-            const btn = document.getElementById('processBtn');
-            const status = document.getElementById('status');
-            const progressBar = document.getElementById('progressBar');
-            const progressFill = document.getElementById('progressFill');
+            var btn = document.getElementById('processBtn');
+            var progressBar = document.getElementById('progressBar');
+            var progressFill = document.getElementById('progressFill');
 
-            // Get selected clip path from Premiere
-            let videoPath = '';
+            var videoPath = '';
             try {
                 videoPath = await getSelectedClipPath();
             } catch (e) {
-                setStatus('error', 'Could not get selected clip. Select a clip in the timeline first.');
-                return;
-            }
-
-            if (!videoPath) {
-                setStatus('error', 'No clip selected. Select a clip in the timeline first.');
+                setStatus('error', 'Select a clip on the timeline first.');
                 return;
             }
 
             btn.disabled = true;
             btn.textContent = 'Processing...';
             progressBar.classList.add('active');
-            progressFill.style.width = '30%';
-            setStatus('info', 'Analyzing video...');
+            progressFill.style.width = '5%';
+            setStatus('info', 'Starting analysis...');
 
             try {
-                const response = await fetch(`${API_URL}/analyze`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        video_path: videoPath,
-                        whisper_model: document.getElementById('model').value,
-                        style: document.getElementById('style').value,
-                    })
-                });
+                var style = document.getElementById('style').value;
+                _lastVideoPath = videoPath;
+                _lastStyle = style;
+                var url = '/analyze?video_path=' + encodeURIComponent(videoPath) + '&style=' + style + '&whisper_model=medium';
 
-                const result = await response.json();
-                progressFill.style.width = '80%';
+                // Start async analysis (returns immediately)
+                var startData = await apiFetch(url, 15000);
 
-                if (response.ok) {
-                    lastResult = result;
-                    // Apply to timeline via ExtendScript
-                    await applyToTimeline(result);
-                    progressFill.style.width = '100%';
-                    setStatus('success',
-                        `Done! ${result.segments.length} cuts, ${result.subtitles.length} subtitles applied.`);
-                } else {
-                    setStatus('error', `Error: ${result.error}`);
+                if (startData.error) {
+                    setStatus('error', startData.error);
+                    resetProcessBtn(btn, progressBar, progressFill);
+                    return;
                 }
-            } catch (e) {
-                setStatus('error',
-                    `Cannot connect to Video Editor backend. Make sure it is running on ${API_URL}`);
-            }
 
-            btn.disabled = false;
-            btn.textContent = 'Process Selected Clip';
-            setTimeout(() => {
-                progressBar.classList.remove('active');
-                progressFill.style.width = '0%';
+                // Poll job status every 2 seconds
+                pollJobStatus(btn, progressBar, progressFill);
+
+            } catch (e) {
+                setStatus('error', 'Error: ' + e.message);
+                resetProcessBtn(btn, progressBar, progressFill);
+            }
+        }
+
+        function pollJobStatus(btn, progressBar, progressFill) {
+            setTimeout(async function check() {
+                try {
+                    var data = await apiFetch('/job-status', 5000);
+
+                    progressFill.style.width = (data.progress || 0) + '%';
+                    if (data.message) setStatus('info', data.message);
+
+                    if (data.status === 'done') {
+                        onAnalysisDone(data, btn, progressBar, progressFill);
+                    } else if (data.status === 'error') {
+                        setStatus('error', data.error || 'Analysis failed');
+                        resetProcessBtn(btn, progressBar, progressFill);
+                    } else {
+                        setTimeout(check, 2000);
+                    }
+                } catch (e) {
+                    // Network blip — show and retry
+                    setStatus('info', 'Reconnecting... (' + e.message + ')');
+                    setTimeout(check, 3000);
+                }
             }, 2000);
         }
 
-        async function getSelectedClipPath() {
-            // Use CSInterface to get selected clip via ExtendScript
-            if (typeof CSInterface !== 'undefined') {
-                return new Promise((resolve, reject) => {
-                    const cs = new CSInterface();
-                    cs.evalScript('getSelectedClipPath()', (result) => {
-                        if (result && result !== 'undefined' && result !== 'null') {
-                            resolve(result);
-                        } else {
-                            reject(new Error('No clip selected'));
-                        }
-                    });
+        // Use host.jsx functions (persistent ExtendScript context — globals + $.sleep work)
+        function hostImportXML(xmlPath, clipName, styleName) {
+            return new Promise(function(resolve, reject) {
+                if (!csInterface) { reject(new Error('No CSInterface')); return; }
+                var script = 'importXMLSequence("' + xmlPath + '","' + clipName + '","' + styleName + '")';
+                csInterface.evalScript(script, function(r) {
+                    if (r && r.indexOf('ok:') === 0) resolve(r);
+                    else reject(new Error(r || 'empty'));
                 });
-            }
-            // Fallback: prompt user
-            return prompt('Enter video file path:');
+            });
         }
 
-        async function applyToTimeline(result) {
-            if (typeof CSInterface !== 'undefined') {
-                const cs = new CSInterface();
-                const data = JSON.stringify(result);
-                cs.evalScript(`applyVideoEditorResult('${data.replace(/'/g, "\\'")}')`, () => {});
-            }
+        function hostImportCaptions(srtPath) {
+            return new Promise(function(resolve, reject) {
+                if (!csInterface) { reject(new Error('No CSInterface')); return; }
+                csInterface.evalScript('importCaptions("' + srtPath + '")', function(r) {
+                    resolve(r || 'error:empty');
+                });
+            });
         }
 
-        async function exportXML() {
-            if (!lastResult) {
-                setStatus('error', 'Process a video first before exporting.');
-                return;
-            }
+        async function onAnalysisDone(jobData, btn, progressBar, progressFill) {
+            progressFill.style.width = '90%';
+            setStatus('info', 'Creating edited sequence...');
 
             try {
-                const response = await fetch(`${API_URL}/export-xml`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(lastResult)
-                });
+                var xmlData = await apiFetch('/export-xml', 30000);
 
-                const data = await response.json();
-                if (data.xml) {
-                    // Save XML file
-                    downloadText(data.xml, 'video_editor_export.xml');
-                    setStatus('success', 'XML exported! Import it into Premiere Pro.');
+                if (xmlData.xml_path && csInterface) {
+                    var xmlPath = xmlData.xml_path.replace(/\\/g, '/');
+                    var srtPath = xmlData.srt_path ? xmlData.srt_path.replace(/\\/g, '/') : '';
+                    var styleNames = {clean:'Clean', fast:'Fast', balanced:'Balanced', smooth:'Smooth', minimal:'Minimal'};
+                    var styleLabel = styleNames[_lastStyle] || _lastStyle;
+                    var cuts = jobData.segments_count || 0;
+
+                    // Step 1: Import XML + create bin + open new sequence (host.jsx — persistent context)
+                    var clipName = _lastVideoPath.split('/').pop().split('\\').pop();
+                    var importRes = await hostImportXML(xmlPath, clipName, styleLabel);
+
+                    // Step 2: If style has captions, add to the new sequence (host.jsx uses _currentSeqID)
+                    if (srtPath) {
+                        var capRes = await hostImportCaptions(srtPath);
+                        progressFill.style.width = '100%';
+                        var capMsg = (capRes && capRes.indexOf('ok') === 0) ? ' + captions' : '';
+                        setStatus('success', 'Done! ' + cuts + ' cuts' + capMsg + '. (' + styleLabel + ')');
+                    } else {
+                        progressFill.style.width = '100%';
+                        setStatus('success', 'Done! ' + cuts + ' cuts. (' + styleLabel + ')');
+                    }
+                    resetProcessBtn(btn, progressBar, progressFill);
+                } else {
+                    setStatus('error', xmlData.error || 'Could not generate sequence.');
+                    resetProcessBtn(btn, progressBar, progressFill);
                 }
             } catch (e) {
-                setStatus('error', 'Export failed. Is the backend running?');
+                setStatus('error', 'Error: ' + e.message);
+                resetProcessBtn(btn, progressBar, progressFill);
             }
         }
 
-        async function exportEDL() {
-            if (!lastResult) {
-                setStatus('error', 'Process a video first before exporting.');
-                return;
-            }
-
-            try {
-                const response = await fetch(`${API_URL}/export-edl`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(lastResult)
-                });
-
-                const data = await response.json();
-                if (data.edl) {
-                    downloadText(data.edl, 'video_editor_export.edl');
-                    setStatus('success', 'EDL exported! Import it into Premiere Pro.');
-                }
-            } catch (e) {
-                setStatus('error', 'Export failed. Is the backend running?');
-            }
-        }
-
-        function downloadText(content, filename) {
-            if (typeof CSInterface !== 'undefined') {
-                const cs = new CSInterface();
-                const path = cs.getSystemPath(SystemPath.USER_DATA) + '/' + filename;
-                cs.evalScript(`saveFile('${path}', '${btoa(content)}')`);
-                setStatus('success', `Saved to: ${path}`);
-            } else {
-                const blob = new Blob([content], { type: 'text/plain' });
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = filename;
-                a.click();
-            }
+        function resetProcessBtn(btn, progressBar, progressFill) {
+            btn.disabled = false;
+            btn.textContent = 'Process Selected Clip';
+            setTimeout(function() {
+                progressBar.classList.remove('active');
+                progressFill.style.width = '0%';
+            }, 5000);
         }
 
         function setStatus(type, message) {
-            const el = document.getElementById('status');
-            el.className = `status ${type}`;
+            var el = document.getElementById('status');
+            el.className = 'status ' + type;
             el.textContent = message;
         }
+
+        var styleDescs = {
+            clean: 'Tight cuts, phrase subtitles (4 words accumulating)',
+            fast: 'Fast cuts, word-by-word subtitles',
+            balanced: 'Balanced cuts, word-by-word subtitles',
+            smooth: 'Smooth cuts, word-by-word subtitles',
+            minimal: 'Tight cuts, no subtitles'
+        };
+        function updateStyleDesc() {
+            var val = document.getElementById('style').value;
+            document.getElementById('styleDesc').textContent = styleDescs[val] || '';
+        }
+        updateStyleDesc();
     </script>
 </body>
 </html>

@@ -14,7 +14,7 @@ Styles:
 STYLES = {
     "ruhig": {
         "name": "Calm",
-        "description": "Blur transitions, smooth zooms, karaoke subtitles",
+        "description": "Smooth and relaxed with soft transitions",
 
         # Cuts
         "remove_silence": True,
@@ -69,7 +69,7 @@ STYLES = {
 
     "balanced": {
         "name": "Balanced",
-        "description": "Swipe transitions, modern subtitles, balanced",
+        "description": "A good mix of style and subtlety",
 
         # Cuts
         "remove_silence": True,
@@ -125,7 +125,7 @@ STYLES = {
 
     "dynamisch": {
         "name": "Dynamic",
-        "description": "Glitch transitions, RGB Split, intense effects",
+        "description": "High energy with bold visual effects",
 
         # Cuts
         "remove_silence": True,
@@ -185,7 +185,7 @@ STYLES = {
 
     "cinematic": {
         "name": "Cinematic",
-        "description": "Film look with letterbox and color grading",
+        "description": "Movie-like feel with cinematic bars",
 
         # Cuts
         "remove_silence": True,
@@ -242,7 +242,7 @@ STYLES = {
 
     "retro": {
         "name": "Retro",
-        "description": "VHS effect, film grain, vintage look",
+        "description": "Old-school vintage vibes",
 
         # Cuts
         "remove_silence": True,
@@ -301,7 +301,7 @@ STYLES = {
 
     "music": {
         "name": "Music",
-        "description": "Beat-sync effects, zoom pulse, beat-matched cuts",
+        "description": "Effects synced to the beat of your audio",
 
         # Cuts
         "remove_silence": False,
@@ -365,7 +365,7 @@ STYLES = {
 
     "tiktok": {
         "name": "TikTok",
-        "description": "Fast cuts, RGB Split, glitch, 9:16 format",
+        "description": "Vertical format, fast cuts, eye-catching",
 
         # Cuts
         "remove_silence": True,
@@ -429,7 +429,7 @@ STYLES = {
 
     "viral": {
         "name": "Viral",
-        "description": "TikTok/Reels style - word-by-word subtitles, purple tint, highlights",
+        "description": "Optimized for going viral on social media",
 
         # Cuts
         "remove_silence": True,
@@ -490,7 +490,7 @@ STYLES = {
 
     "clean": {
         "name": "Clean",
-        "description": "TikTok Style - Hard cuts, clean subtitles, 9:16",
+        "description": "Clean white subtitles, 9:16 format",
 
         # Cuts - TikTok style (balanced)
         "remove_silence": True,
@@ -558,27 +558,30 @@ STYLES = {
         "beat_zoom": False,
     },
 
-    "minimal": {
-        "name": "Minimal",
-        "description": "Silence removal only, no effects",
+    "fast": {
+        "name": "Fast",
+        "description": "Fast cuts with word-by-word subtitles",
 
-        # Cuts
+        # Cuts - aggressive
         "remove_silence": True,
-        "silence_threshold": 0.02,
-        "min_silence_to_cut": 0.5,
-        "keep_padding": 0.2,
+        "silence_threshold": 0.03,
+        "min_silence_to_cut": 0.3,
+        "keep_padding": 0.1,
+        "keep_padding_after": 0.08,
+        "min_segment_length": 0.4,
+        "merge_gap": 0.2,
 
         # Transitions
-        "transition_in": "fade",
-        "transition_out": "fade",
-        "transition_duration": 0.3,
+        "transition_in": "none",
+        "transition_out": "none",
+        "transition_duration": 0,
 
         # Zoom
         "enable_zoom": False,
         "smart_zoom": False,
         "zoom_intensity": 1.0,
 
-        # Visual effects - all off
+        # Visual effects - off
         "vignette_intensity": 0,
         "color_grade": "none",
         "cinematic_bars": False,
@@ -590,7 +593,181 @@ STYLES = {
         "echo": False,
         "mirror": False,
 
-        # Subtitles
+        # Subtitles - word by word
+        "enable_subtitles": True,
+        "subtitle_style": "modern",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_fontsize": None,
+        "subtitle_effect": None,
+        "subtitle_stroke_width": 4,
+
+        # Emojis
+        "enable_emojis": False,
+
+        # Sounds
+        "enable_sounds": False,
+        "sound_intro": False,
+        "sound_outro": False,
+        "sound_emojis": False,
+        "sound_cuts": False,
+
+        # Beat-Sync
+        "beat_sync": False,
+        "beat_zoom": False,
+    },
+
+    "balanced": {
+        "name": "Balanced",
+        "description": "Balanced cuts with word-by-word subtitles",
+
+        # Cuts - medium
+        "remove_silence": True,
+        "silence_threshold": 0.025,
+        "min_silence_to_cut": 0.6,
+        "keep_padding": 0.2,
+        "keep_padding_after": 0.15,
+        "min_segment_length": 0.5,
+        "merge_gap": 0.3,
+
+        # Transitions
+        "transition_in": "none",
+        "transition_out": "none",
+        "transition_duration": 0,
+
+        # Zoom
+        "enable_zoom": False,
+        "smart_zoom": False,
+        "zoom_intensity": 1.0,
+
+        # Visual effects - off
+        "vignette_intensity": 0,
+        "color_grade": "none",
+        "cinematic_bars": False,
+        "rgb_split": False,
+        "vhs_effect": False,
+        "film_grain": False,
+        "light_leak": False,
+        "shake": False,
+        "echo": False,
+        "mirror": False,
+
+        # Subtitles - word by word
+        "enable_subtitles": True,
+        "subtitle_style": "modern",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_fontsize": None,
+        "subtitle_effect": None,
+        "subtitle_stroke_width": 4,
+
+        # Emojis
+        "enable_emojis": False,
+
+        # Sounds
+        "enable_sounds": False,
+        "sound_intro": False,
+        "sound_outro": False,
+        "sound_emojis": False,
+        "sound_cuts": False,
+
+        # Beat-Sync
+        "beat_sync": False,
+        "beat_zoom": False,
+    },
+
+    "smooth": {
+        "name": "Smooth",
+        "description": "Smooth cuts with word-by-word subtitles",
+
+        # Cuts - gentle
+        "remove_silence": True,
+        "silence_threshold": 0.02,
+        "min_silence_to_cut": 0.9,
+        "keep_padding": 0.3,
+        "keep_padding_after": 0.25,
+        "min_segment_length": 0.6,
+        "merge_gap": 0.4,
+
+        # Transitions
+        "transition_in": "none",
+        "transition_out": "none",
+        "transition_duration": 0,
+
+        # Zoom
+        "enable_zoom": False,
+        "smart_zoom": False,
+        "zoom_intensity": 1.0,
+
+        # Visual effects - off
+        "vignette_intensity": 0,
+        "color_grade": "none",
+        "cinematic_bars": False,
+        "rgb_split": False,
+        "vhs_effect": False,
+        "film_grain": False,
+        "light_leak": False,
+        "shake": False,
+        "echo": False,
+        "mirror": False,
+
+        # Subtitles - word by word
+        "enable_subtitles": True,
+        "subtitle_style": "modern",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_fontsize": None,
+        "subtitle_effect": None,
+        "subtitle_stroke_width": 4,
+
+        # Emojis
+        "enable_emojis": False,
+
+        # Sounds
+        "enable_sounds": False,
+        "sound_intro": False,
+        "sound_outro": False,
+        "sound_emojis": False,
+        "sound_cuts": False,
+
+        # Beat-Sync
+        "beat_sync": False,
+        "beat_zoom": False,
+    },
+
+    "minimal": {
+        "name": "Minimal",
+        "description": "Tight cuts, no subtitles",
+
+        # Cuts - same as clean (tight)
+        "remove_silence": True,
+        "silence_threshold": 0.035,
+        "min_silence_to_cut": 0.35,
+        "keep_padding": 0.12,
+        "keep_padding_after": 0.1,
+        "min_segment_length": 0.5,
+        "merge_gap": 0.25,
+
+        # Transitions
+        "transition_in": "none",
+        "transition_out": "none",
+        "transition_duration": 0,
+
+        # Zoom
+        "enable_zoom": False,
+        "smart_zoom": False,
+        "zoom_intensity": 1.0,
+
+        # Visual effects - off
+        "vignette_intensity": 0,
+        "color_grade": "none",
+        "cinematic_bars": False,
+        "rgb_split": False,
+        "vhs_effect": False,
+        "film_grain": False,
+        "light_leak": False,
+        "shake": False,
+        "echo": False,
+        "mirror": False,
+
+        # Subtitles - off
         "enable_subtitles": False,
         "subtitle_style": "modern",
         "subtitle_color": (255, 255, 255),

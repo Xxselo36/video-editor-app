@@ -40,10 +40,10 @@ def analyze_video(
     video_path: str,
     whisper_model: str = "medium",
     style: str = "clean",
-    silence_threshold: float = 0.025,
-    min_silence_duration: float = 0.6,
-    padding_before: float = 0.35,
-    padding_after: float = 0.25,
+    silence_threshold: float = None,
+    min_silence_duration: float = None,
+    padding_before: float = None,
+    padding_after: float = None,
     progress_callback=None,
     cancel_check=None,
 ) -> AnalysisResult:
@@ -74,6 +74,10 @@ def analyze_video(
         silence_threshold = config.get("silence_threshold", 0.025)
     if min_silence_duration is None:
         min_silence_duration = config.get("min_silence_to_cut", 0.6)
+    if padding_before is None:
+        padding_before = config.get("keep_padding", 0.35)
+    if padding_after is None:
+        padding_after = config.get("keep_padding_after", config.get("keep_padding", 0.25))
 
     analyzer = AudioAnalyzer(
         video_path,
@@ -111,9 +115,10 @@ def analyze_video(
             segments.append((round(start, 3), round(end, 3)))
 
     # Merge segments that are very close together
+    merge_gap = config.get("merge_gap", 0.4)
     merged = []
     for start, end in segments:
-        if merged and start - merged[-1][1] < 0.4:
+        if merged and start - merged[-1][1] < merge_gap:
             merged[-1] = (merged[-1][0], end)
         else:
             merged.append((start, end))
