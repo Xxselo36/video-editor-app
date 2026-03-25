@@ -66,6 +66,23 @@ try:
 except Exception:
     pass
 
+# Stub torch.distributed (removed in build to save space)
+try:
+    import types as _t
+    _dist = _t.ModuleType('torch.distributed')
+    _dist.is_available = lambda: False
+    _dist.is_initialized = lambda: False
+    _rpc = _t.ModuleType('torch.distributed.rpc')
+    _rpc.is_available = lambda: False
+    _nn = _t.ModuleType('torch.distributed.nn')
+    _dist.rpc = _rpc
+    _dist.nn = _nn
+    sys.modules['torch.distributed'] = _dist
+    sys.modules['torch.distributed.rpc'] = _rpc
+    sys.modules['torch.distributed.nn'] = _nn
+except Exception:
+    pass
+
 try:
     import torch  # noqa: F401
 except Exception:
