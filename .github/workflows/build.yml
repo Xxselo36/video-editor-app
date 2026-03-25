@@ -359,6 +359,12 @@ jobs:
           name: VideoEditor-Linux
           path: VideoEditor-Linux.tar.xz
 
+      - name: Upload to Release v1.0.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload v1.0.0 VideoEditor-Linux.tar.xz --repo ${{ github.repository }} --clobber || echo "Release upload skipped"
+
   # ============================================================================
   # Release
   # ============================================================================
