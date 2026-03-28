@@ -66,25 +66,99 @@ try:
 except Exception:
     pass
 
-# Stub torch.distributed (removed in build to save space)
+# Stub torch.distributed and all submodules (removed in build to save space).
+# torch internally imports many torch.distributed.* submodules even for CPU-only
+# inference. A meta-path finder auto-creates stubs for ANY torch.distributed.* import.
+# Stubs use __getattr__ so `from torch.distributed.X import Y` returns a safe dummy.
 try:
     import types as _t
-    _dist = _t.ModuleType('torch.distributed')
-    _dist.is_available = lambda: False
-    _dist.is_initialized = lambda: False
-    _rpc = _t.ModuleType('torch.distributed.rpc')
-    _rpc.is_available = lambda: False
-    _nn = _t.ModuleType('torch.distributed.nn')
-    _dist.rpc = _rpc
-    _dist.nn = _nn
-    sys.modules['torch.distributed'] = _dist
-    sys.modules['torch.distributed.rpc'] = _rpc
-    sys.modules['torch.distributed.nn'] = _nn
+    import importlib.machinery
+    import builtins as _builtins
+
+    class _Dummy:
+        """Catch-all dummy: works as base class, callable, decorator, etc."""
+        def __init_subclass__(cls, **kw): pass
+        def __init__(self, *a, **kw): pass
+        def __call__(self, *a, **kw): return _Dummy()
+        def __getattr__(self, name): return _Dummy()
+        def __mro_entries__(self, bases): return (object,)
+        def __bool__(self): return False
+        def __iter__(self): return iter([])
+
+    _dist_stubs = {}
+
+    def _make_dist_stub(name):
+        if name in _dist_stubs:
+            return _dist_stubs[name]
+        m = _t.ModuleType(name)
+        m.is_available = lambda: False
+        m.is_initialized = lambda: False
+        m.__file__ = __file__
+        m.__path__ = []
+        m.__all__ = []
+        def _mod_getattr(attr):
+            if attr.startswith('__') and attr.endswith('__'):
+                raise AttributeError(attr)
+            return _Dummy()
+        m.__getattr__ = _mod_getattr
+        _dist_stubs[name] = m
+        sys.modules[name] = m
+        parts = name.split('.')
+        parent = '.'.join(parts[:-1])
+        if parent in sys.modules:
+            setattr(sys.modules[parent], parts[-1], m)
+        return m
+
+    class _DistLoader:
+        @staticmethod
+        def create_module(spec):
+            return _dist_stubs.get(spec.name) or _make_dist_stub(spec.name)
+        @staticmethod
+        def exec_module(module):
+            pass
+
+    class _DistFinder:
+        """Meta-path finder: auto-stubs any torch.distributed.* import."""
+        @classmethod
+        def find_spec(cls, name, path=None, target=None):
+            if name == 'torch.distributed' or name.startswith('torch.distributed.'):
+                return importlib.machinery.ModuleSpec(
+                    name, _DistLoader, is_package=True)
+            return None
+
+    sys.meta_path.insert(0, _DistFinder)
+
+    _dist = _make_dist_stub('torch.distributed')
+    _dist.is_mpi_available = lambda: False
+    _dist.is_nccl_available = lambda: False
+    _dist.is_gloo_available = lambda: False
+
+    # Hook __import__ to wire torch.distributed onto the torch module object
+    # (torch accesses it as an attribute, not just via import)
+    _orig_import = _builtins.__import__
+
+    def _patching_import(name, *args, **kwargs):
+        result = _orig_import(name, *args, **kwargs)
+        if name == 'torch' or name.startswith('torch.'):
+            _torch = sys.modules.get('torch')
+            if _torch is not None and not hasattr(_torch, 'distributed'):
+                _d = sys.modules.get('torch.distributed')
+                if _d is not None:
+                    _torch.distributed = _d
+        return result
+
+    _builtins.__import__ = _patching_import
 except Exception:
     pass
 
 try:
     import torch  # noqa: F401
+except Exception:
+    pass
+
+# Restore original __import__ after torch is loaded
+try:
+    _builtins.__import__ = _orig_import
 except Exception:
     pass
 
