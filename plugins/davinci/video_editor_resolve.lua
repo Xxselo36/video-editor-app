@@ -137,7 +137,8 @@ local API_URL = "http://127.0.0.1:8456"
 local function call_backend(path, timeout)
     timeout = timeout or 10
     local url = API_URL .. path
-    local cmd = string.format('curl -s --max-time %d "%s" 2>/dev/null', timeout, url)
+    local nul = (package.config:sub(1,1) == "\\") and "2>NUL" or "2>/dev/null"
+    local cmd = string.format('curl -s --max-time %d "%s" %s', timeout, url, nul)
     local handle = io.popen(cmd)
     if not handle then return nil end
     local result = handle:read("*a")
@@ -224,33 +225,143 @@ local function show_settings_dialog()
         return nil  -- User cancelled
     end
 
-    -- Fallback: native macOS dialog via AppleScript
+    -- Fallback: native OS dialog
+    local is_win = (package.config:sub(1,1) == "\\")
     local items = {}
-    for _, s in ipairs(STYLES) do
-        table.insert(items, '"' .. s.label .. " — " .. s.desc .. '"')
-    end
-    local list_str = table.concat(items, ", ")
-    local cmd = 'osascript -e \'choose from list {' .. list_str .. '} '
-        .. 'with title "Video Editor" '
-        .. 'with prompt "Choose a style:" '
-        .. 'default items {"' .. STYLES[1].label .. " — " .. STYLES[1].desc .. '"}\' 2>/dev/null'
+    local result
 
-    local handle = io.popen(cmd)
-    if not handle then return "clean" end
-    local result = handle:read("*a"):gsub("%s+$", "")
-    handle:close()
+    if is_win then
+        -- Windows: Write PowerShell script to temp file, execute it
+        local tmp = os.getenv("TEMP") or "C:\\Temp"
+        local ps_file = tmp .. "\\ve_style_picker.ps1"
+        local result_file = tmp .. "\\ve_style_result.txt"
 
-    if not result or result == "" or result == "false" then
-        return nil  -- User cancelled
-    end
-
-    -- Match selection back to style key
-    for _, s in ipairs(STYLES) do
-        if result:find(s.label, 1, true) then
-            return s.key
+        -- Build style items for the script
+        local ps_items = {}
+        for _, s in ipairs(STYLES) do
+            local desc = s.desc:gsub("[%(%)%[%]]", "")
+            table.insert(ps_items, "    '" .. s.label .. " - " .. desc .. "'")
         end
+
+        -- Write .ps1 file
+        local f = io.open(ps_file, "w")
+        if not f then
+            print("[Video Editor] Cannot write style picker script")
+            return STYLES[1] and STYLES[1].key or "clean"
+        end
+        f:write('Add-Type -AssemblyName System.Windows.Forms\n')
+        f:write('Add-Type -AssemblyName System.Drawing\n')
+        f:write('[System.Windows.Forms.Application]::EnableVisualStyles()\n')
+        f:write('$form = New-Object System.Windows.Forms.Form\n')
+        f:write('$form.Text = "Video Editor - Style"\n')
+        f:write('$form.Size = New-Object System.Drawing.Size(420,200)\n')
+        f:write('$form.StartPosition = "CenterScreen"\n')
+        f:write('$form.TopMost = $true\n')
+        f:write('$form.FormBorderStyle = "FixedDialog"\n')
+        f:write('$form.MaximizeBox = $false\n')
+        f:write('$label = New-Object System.Windows.Forms.Label\n')
+        f:write('$label.Location = New-Object System.Drawing.Point(20,20)\n')
+        f:write('$label.Size = New-Object System.Drawing.Size(360,20)\n')
+        f:write('$label.Text = "Choose a style:"\n')
+        f:write('$form.Controls.Add($label)\n')
+        f:write('$combo = New-Object System.Windows.Forms.ComboBox\n')
+        f:write('$combo.Location = New-Object System.Drawing.Point(20,50)\n')
+        f:write('$combo.Size = New-Object System.Drawing.Size(360,30)\n')
+        f:write('$combo.DropDownStyle = "DropDownList"\n')
+        f:write('$items = @(\n')
+        f:write(table.concat(ps_items, ",\n") .. '\n')
+        f:write(')\n')
+        f:write('foreach ($i in $items) { $combo.Items.Add($i) | Out-Null }\n')
+        f:write('$combo.SelectedIndex = 0\n')
+        f:write('$form.Controls.Add($combo)\n')
+        f:write('$ok = New-Object System.Windows.Forms.Button\n')
+        f:write('$ok.Location = New-Object System.Drawing.Point(200,110)\n')
+        f:write('$ok.Size = New-Object System.Drawing.Size(80,30)\n')
+        f:write('$ok.Text = "OK"\n')
+        f:write('$ok.DialogResult = "OK"\n')
+        f:write('$form.Controls.Add($ok)\n')
+        f:write('$form.AcceptButton = $ok\n')
+        f:write('$cancel = New-Object System.Windows.Forms.Button\n')
+        f:write('$cancel.Location = New-Object System.Drawing.Point(300,110)\n')
+        f:write('$cancel.Size = New-Object System.Drawing.Size(80,30)\n')
+        f:write('$cancel.Text = "Cancel"\n')
+        f:write('$cancel.DialogResult = "Cancel"\n')
+        f:write('$form.Controls.Add($cancel)\n')
+        f:write('$form.CancelButton = $cancel\n')
+        f:write('$r = $form.ShowDialog()\n')
+        f:write('$out = ""\n')
+        f:write('if ($r -eq "OK") { $out = $combo.SelectedItem }\n')
+        f:write('Set-Content -Path "' .. result_file:gsub("\\", "\\\\") .. '" -Value $out -NoNewline\n')
+        f:close()
+
+        -- Run the script and wait for it to finish
+        -- Use io.popen (no visible console window) and poll for result file
+        local done_file = tmp .. "\\ve_style_done.txt"
+        -- Add done marker to end of PS script
+        local df = io.open(ps_file, "a")
+        if df then
+            df:write('Set-Content -Path "' .. done_file:gsub("\\", "\\\\") .. '" -Value "done" -NoNewline\n')
+            df:close()
+        end
+        io.popen('powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' .. ps_file .. '"')
+        -- Wait for dialog to complete
+        while true do
+            local check = io.open(done_file, "r")
+            if check then check:close(); break end
+            sleep(0.2)
+        end
+        os.remove(done_file)
+
+        -- Read result
+        local rf = io.open(result_file, "r")
+        if rf then
+            result = rf:read("*a"):gsub("%s+$", "")
+            rf:close()
+            os.remove(result_file)
+        else
+            result = ""
+        end
+        os.remove(ps_file)
+
+        if not result or result == "" then
+            return nil  -- User cancelled
+        end
+
+        -- Match selection back to style key
+        for _, s in ipairs(STYLES) do
+            if result:find(s.label, 1, true) then
+                return s.key
+            end
+        end
+        return "clean"
+    else
+        -- macOS: AppleScript dialog
+        for _, s in ipairs(STYLES) do
+            table.insert(items, '"' .. s.label .. " — " .. s.desc .. '"')
+        end
+        local list_str = table.concat(items, ", ")
+        local cmd = 'osascript -e \'choose from list {' .. list_str .. '} '
+            .. 'with title "Video Editor" '
+            .. 'with prompt "Choose a style:" '
+            .. 'default items {"' .. STYLES[1].label .. " — " .. STYLES[1].desc .. '"}\' 2>/dev/null'
+
+        local handle = io.popen(cmd)
+        if not handle then return "clean" end
+        result = handle:read("*a"):gsub("%s+$", "")
+        handle:close()
+
+        if not result or result == "" or result == "false" then
+            return nil  -- User cancelled
+        end
+
+        -- Match selection back to style key
+        for _, s in ipairs(STYLES) do
+            if result:find(s.label, 1, true) then
+                return s.key
+            end
+        end
+        return "clean"
     end
-    return "clean"
 end
 
 
@@ -299,14 +410,26 @@ end
 local function render_subtitle_overlay(srt_path, width, height, duration_sec, fps)
     -- Find Python (try venv, then system)
     local python = nil
-    local try_pythons = {
-        os.getenv("HOME") .. "/video-editor-app/venv313/bin/python3",
-        "/usr/local/bin/python3",
-        "/opt/homebrew/bin/python3",
-        "python3",
-    }
+    local home = os.getenv("USERPROFILE") or os.getenv("HOME") or ""
+    local is_win = (package.config:sub(1,1) == "\\")
+    local try_pythons
+    if is_win then
+        try_pythons = {
+            home .. "\\video-editor-app\\venv\\Scripts\\python.exe",
+            "python",
+            "py",
+        }
+    else
+        try_pythons = {
+            home .. "/video-editor-app/venv313/bin/python3",
+            "/usr/local/bin/python3",
+            "/opt/homebrew/bin/python3",
+            "python3",
+        }
+    end
+    local nul = is_win and "2>NUL" or "2>/dev/null"
     for _, p in ipairs(try_pythons) do
-        local test = io.popen(p .. ' -c "print(1)" 2>/dev/null')
+        local test = io.popen(p .. ' -c "print(1)" ' .. nul)
         if test then
             local out = test:read("*a"):gsub("%s+", "")
             test:close()
@@ -319,10 +442,17 @@ local function render_subtitle_overlay(srt_path, width, height, duration_sec, fp
     end
 
     -- Find render script
-    local script_paths = {
-        "/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Edit/render_srt_overlay.py",
-        os.getenv("HOME") .. "/video-editor-app/plugins/davinci/render_srt_overlay.py",
-    }
+    local script_paths
+    if is_win then
+        script_paths = {
+            home .. "\\video-editor-app\\plugins\\davinci\\render_srt_overlay.py",
+        }
+    else
+        script_paths = {
+            "/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Edit/render_srt_overlay.py",
+            home .. "/video-editor-app/plugins/davinci/render_srt_overlay.py",
+        }
+    end
     local render_script = nil
     for _, sp in ipairs(script_paths) do
         local tf = io.open(sp, "r")
@@ -333,7 +463,9 @@ local function render_subtitle_overlay(srt_path, width, height, duration_sec, fp
         return nil
     end
 
-    local overlay_path = "/tmp/ve_subtitle_overlay_" .. os.time() .. ".mov"
+    local tmp = os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp"
+    local sep = (package.config:sub(1,1) == "\\") and "\\" or "/"
+    local overlay_path = tmp .. sep .. "ve_subtitle_overlay_" .. os.time() .. ".mov"
     print("[Video Editor] Rendering subtitle overlay (" .. width .. "x" .. height .. ", " .. string.format("%.1f", duration_sec) .. "s)...")
     local cmd = string.format('%s "%s" "%s" "%s" %d %d %.3f %d 2>&1',
         python, render_script, srt_path, overlay_path, width, height, duration_sec, fps)

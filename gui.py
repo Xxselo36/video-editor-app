@@ -731,7 +731,7 @@ class VideoEditorApp(ctk.CTk):
 
     def _open_video(self):
         if self._output_path and os.path.isfile(str(self._output_path)):
-            subprocess.Popen(["open", str(self._output_path)])
+            open_file_manager(str(self._output_path))
         self._reset_start_btn()
 
     def _on_done(self, output_path):

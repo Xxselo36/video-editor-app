@@ -513,8 +513,13 @@ def _fps_to_timebase_ntsc(fps):
 def _make_pathurl(video_path):
     """Convert a local file path to a file://localhost/ URL."""
     abs_path = os.path.abspath(video_path)
-    # URL-encode the path (spaces -> %20, etc.) but keep /
-    encoded = quote(abs_path, safe="/")
+    # Normalize to forward slashes (Windows backslashes break FCP7 XML)
+    abs_path = abs_path.replace("\\", "/")
+    # On Windows, prepend / before drive letter (C:/... -> /C:/...)
+    if not abs_path.startswith("/"):
+        abs_path = "/" + abs_path
+    # URL-encode the path (spaces -> %20, etc.) but keep / and :
+    encoded = quote(abs_path, safe="/:")
     return f"file://localhost{encoded}"
 
 
