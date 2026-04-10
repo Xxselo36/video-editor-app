@@ -334,7 +334,7 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
         """Export analysis results as EDL (Edit Decision List)."""
         segments = data.get("segments", [])
         fps = data.get("fps", 24)
-        title = data.get("title", "Video Editor Export")
+        title = data.get("title", "SmartCut Export")
 
         edl = generate_edl(segments, fps, title)
         self._respond(200, {"edl": edl})
@@ -1155,7 +1155,7 @@ def generate_premiere_xml(video_path, segments, subtitles, fps=None, target_rati
             <timebase>{timebase}</timebase>
             <ntsc>{ntsc_str}</ntsc>
         </rate>
-        <name>Video Editor - {filename}</name>
+        <name>SmartCut - {filename}</name>
         <media>
             <video>
                 <format>
@@ -1203,7 +1203,7 @@ def generate_premiere_xml(video_path, segments, subtitles, fps=None, target_rati
     return xml
 
 
-def generate_edl(segments, fps=24, title="Video Editor Export"):
+def generate_edl(segments, fps=24, title="SmartCut Export"):
     """
     Generate an EDL (Edit Decision List) from speech segments.
 
@@ -1250,7 +1250,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 def start_server(port=8456):
     """Start the local backend server."""
     server = ThreadedHTTPServer(("127.0.0.1", port), VideoEditorHandler)
-    print(f"Video Editor backend running on http://127.0.0.1:{port}")
+    print(f"SmartCut backend running on http://127.0.0.1:{port}")
     print("Waiting for Premiere Pro plugin requests...")
     print("Endpoints:")
     print(f"  GET  /health    - Health check")
@@ -1267,7 +1267,7 @@ def start_server(port=8456):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Video Editor - Premiere Pro Backend")
+    parser = argparse.ArgumentParser(description="SmartCut - Premiere Pro Backend")
     parser.add_argument("--port", type=int, default=8456)
     args = parser.parse_args()
     start_server(port=args.port)

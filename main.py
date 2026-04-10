@@ -31,7 +31,7 @@ from src.styles import list_styles, STYLES, get_style_info
 def print_banner():
     print("""
 ╔════════════════════════════════════════════════════════════════╗
-║                     VIDEO EDITOR v5.0                          ║
+║                     SMARTCUT v5.0                               ║
 ║  RGB Split · VHS · Glitch · Beat-Sync · Karaoke-Untertitel     ║
 ╚════════════════════════════════════════════════════════════════╝
     """)

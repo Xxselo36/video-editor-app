@@ -11,7 +11,7 @@ cd "$SCRIPT_DIR"
 
 echo ""
 echo "============================================"
-echo "  VIDEO EDITOR - Installation"
+echo "  SMARTCUT - Installation"
 echo "============================================"
 echo ""
 

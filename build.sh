@@ -2,12 +2,12 @@
 set -e
 
 # ============================================================================
-# Video Editor - macOS App Bundle Build Script
+# SmartCut - macOS App Bundle Build Script
 # Nuitka + Code Signing + DMG + Notarization
 # ============================================================================
 
 # --- Konfiguration ---
-APP_NAME="VideoEditor"
+APP_NAME="SmartCut"
 BUNDLE_ID="com.videoeditor.app"
 ICON_FILE="icon.icns"                          # Optional: App Icon
 ENTITLEMENTS="entitlements.plist"
@@ -126,6 +126,7 @@ step_build() {
         --include-package=src \
         --include-package-data=whisper \
         --include-data-files=yolov8n.pt=yolov8n.pt \
+        --include-data-files=logo.png=logo.png \
         --include-data-files=bin/ffprobe=ffprobe \
         --include-data-dir=src=src \
         --nofollow-import-to=diffusers \
@@ -142,7 +143,7 @@ step_build() {
 
     APP_PATH="${DIST_DIR}/gui.app"
 
-    # Umbenennen von gui.app -> VideoEditor.app
+    # Umbenennen von gui.app -> SmartCut.app
     if [ -d "$APP_PATH" ]; then
         rm -rf "${DIST_DIR}/${APP_NAME}.app" 2>/dev/null || true
         mv "$APP_PATH" "${DIST_DIR}/${APP_NAME}.app"
@@ -477,7 +478,7 @@ step_notarize() {
 main() {
     echo ""
     echo "============================================"
-    echo "  Video Editor - macOS App Bundle Build"
+    echo "  SmartCut - macOS App Bundle Build"
     echo "============================================"
     echo ""
 

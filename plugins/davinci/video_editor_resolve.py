@@ -176,7 +176,7 @@ def import_into_resolve(resolve_app, xml_path, srt_path, clip_name, style_name):
             media_pool.SetCurrentFolder(root)
 
         # Import FCP7 XML as new timeline
-        timeline_name = "Video Editor - {}".format(clip_name)
+        timeline_name = "SmartCut - {}".format(clip_name)
         new_timeline = media_pool.ImportTimelineFromFile(xml_path, {
             "timelineName": timeline_name,
             "importSourceClips": True,
@@ -273,14 +273,14 @@ _STYLESHEET = """
 # Build window
 win = dispatcher.AddWindow({
     'ID': winID,
-    'WindowTitle': "Video Editor",
+    'WindowTitle': "SmartCut",
     'Geometry': [300, 200, 350, 460],
     'StyleSheet': _STYLESHEET,
 }, [
     ui.VGroup({'Spacing': 8, 'Weight': 0}, [
         # Header
         ui.Label({
-            'Text': "<b style='font-size:16px; color:#f0f0f2;'>VIDEO EDITOR</b>",
+            'Text': "<b style='font-size:16px; color:#f0f0f2;'>SMARTCUT</b>",
             'Alignment': { 'AlignLeft': True },
             'Weight': 0,
         }),
@@ -430,9 +430,9 @@ def update_clip_info():
 def update_connection():
     ok = check_backend()
     if ok:
-        itm['connLabel'].Text = "<span style='font-size:10px; color:#00c853;'>● Connected to Video Editor</span>"
+        itm['connLabel'].Text = "<span style='font-size:10px; color:#00c853;'>● Connected to SmartCut</span>"
     else:
-        itm['connLabel'].Text = "<span style='font-size:10px; color:#ef5350;'>● Open Video Editor app to connect</span>"
+        itm['connLabel'].Text = "<span style='font-size:10px; color:#ef5350;'>● Open SmartCut app to connect</span>"
 
 
 # ============================================================================
@@ -458,7 +458,7 @@ def OnProcess(ev):
         return
 
     if not check_backend():
-        set_status("error", "Backend offline — start the Video Editor app first.")
+        set_status("error", "Backend offline — start the SmartCut app first.")
         return
 
     _processing = True

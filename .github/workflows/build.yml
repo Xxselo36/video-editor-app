@@ -90,6 +90,7 @@ jobs:
             --assume-yes-for-downloads `
             --no-deployment-flag=excluded-module-usage `
             --windows-console-mode=disable `
+            --windows-icon-from-ico=icon.ico `
             --enable-plugin=tk-inter `
             --include-package=customtkinter `
             --include-package=whisper `
@@ -100,6 +101,7 @@ jobs:
             --include-package=src `
             --include-package-data=whisper `
             --include-data-files=yolov8n.pt=yolov8n.pt `
+            --include-data-files=logo.png=logo.png `
             --include-data-files=bin/ffprobe.exe=ffprobe.exe `
             --include-data-dir=src=src `
             --nofollow-import-to=diffusers `
@@ -247,6 +249,7 @@ jobs:
             --include-package=src \
             --include-package-data=whisper \
             --include-data-files=yolov8n.pt=yolov8n.pt \
+            --include-data-files=logo.png=logo.png \
             --include-data-dir=src=src \
             --nofollow-import-to=diffusers \
             --nofollow-import-to=accelerate \
@@ -331,7 +334,7 @@ jobs:
           echo "total dist size:"
           du -sh "$DIST_DIR"
 
-      - name: Package Linux build
+      - name: Package Linux build as AppImage
         run: |
           DIST_DIR="dist/gui.dist"
 
@@ -340,30 +343,90 @@ jobs:
 
           # Rename binary
           if [ -f "$DIST_DIR/gui.bin" ]; then
-            mv "$DIST_DIR/gui.bin" "$DIST_DIR/VideoEditor"
+            mv "$DIST_DIR/gui.bin" "$DIST_DIR/SmartCut"
           fi
-          chmod +x "$DIST_DIR/VideoEditor"
+          chmod +x "$DIST_DIR/SmartCut"
 
           echo "Final dist size:"
           du -sh "$DIST_DIR"
 
-          # Rename directory and create compressed archive (xz -6 for better compression)
-          mv "$DIST_DIR" dist/VideoEditor-Linux
-          tar cf - -C dist VideoEditor-Linux | xz -6 -T0 > VideoEditor-Linux.tar.xz
+          # --- Build AppImage ---
+          APPDIR="dist/SmartCut.AppDir"
+          mkdir -p "$APPDIR/usr/bin"
+          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 
-          ls -lh VideoEditor-Linux.tar.xz
+          # Move all dist contents into AppDir
+          cp -R "$DIST_DIR"/* "$APPDIR/usr/bin/"
+
+          # Create .desktop file
+          cat > "$APPDIR/SmartCut.desktop" <<'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=SmartCut
+          Exec=SmartCut
+          Icon=smartcut
+          Categories=AudioVideo;Video;
+          Comment=AI-powered video editing
+          DESKTOP
+          # Fix indentation
+          sed -i 's/^          //' "$APPDIR/SmartCut.desktop"
+
+          # Create a simple icon (use logo.png if available, otherwise generate one)
+          if [ -f "logo.png" ]; then
+            cp logo.png "$APPDIR/smartcut.png"
+            cp logo.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/smartcut.png"
+          else
+            # Generate a minimal 1x1 PNG as fallback
+            python -c "
+          from PIL import Image
+          img = Image.new('RGBA', (256, 256), (108, 92, 231, 255))
+          img.save('$APPDIR/smartcut.png')
+          " || true
+            cp "$APPDIR/smartcut.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/smartcut.png" 2>/dev/null || true
+          fi
+
+          # Create AppRun script
+          cat > "$APPDIR/AppRun" <<'APPRUN'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export PATH="${HERE}/usr/bin:${PATH}"
+          export LD_LIBRARY_PATH="${HERE}/usr/bin:${LD_LIBRARY_PATH}"
+          exec "${HERE}/usr/bin/SmartCut" "$@"
+          APPRUN
+          sed -i 's/^          //' "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+
+          # Download appimagetool
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
+          chmod +x appimagetool
+
+          # Build AppImage
+          ARCH=x86_64 ./appimagetool --no-appstream "$APPDIR" SmartCut-Linux.AppImage || {
+            # Fallback: try with --appimage-extract-and-run for environments without FUSE
+            ARCH=x86_64 ./appimagetool --appimage-extract-and-run --no-appstream "$APPDIR" SmartCut-Linux.AppImage
+          }
+
+          ls -lh SmartCut-Linux.AppImage
+
+          # Also keep tar.xz as fallback
+          mv "$DIST_DIR" dist/SmartCut-Linux 2>/dev/null || true
+          tar cf - -C dist SmartCut-Linux | xz -6 -T0 > SmartCut-Linux.tar.xz 2>/dev/null || true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VideoEditor-Linux
-          path: VideoEditor-Linux.tar.xz
+          name: SmartCut-Linux
+          path: |
+            SmartCut-Linux.AppImage
+            SmartCut-Linux.tar.xz
 
       - name: Upload to Release v1.0.0
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload v1.0.0 VideoEditor-Linux.tar.xz --repo ${{ github.repository }} --clobber || echo "Release upload skipped"
+          gh release upload v1.0.0 SmartCut-Linux.AppImage --repo ${{ github.repository }} --clobber || echo "AppImage upload skipped"
+          gh release upload v1.0.0 SmartCut-Linux.tar.xz --repo ${{ github.repository }} --clobber || echo "tar.xz upload skipped"
 
   # ============================================================================
   # Release

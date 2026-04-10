@@ -180,6 +180,7 @@ from tkinter import filedialog, messagebox
 
 from src.styles import STYLES, get_style_info
 from src.platform_utils import open_file_manager
+from src.license import activate_license, check_license, deactivate_license, get_saved_key
 
 # Output directory: SCRIPT_DIR is read-only in .app bundle
 OUTPUT_DIR = Path.home() / "Movies" / "VideoEditor"
@@ -217,11 +218,22 @@ class VideoEditorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Video Editor")
+        self.title("SmartCut")
         self.geometry("620x580")
         self.minsize(560, 540)
         self.resizable(True, True)
         self.configure(fg_color=THEME["bg"])
+
+        # Set window icon
+        try:
+            from PIL import Image
+            icon_path = SCRIPT_DIR / "logo.png"
+            if icon_path.is_file():
+                icon_img = Image.open(str(icon_path))
+                self._icon_photo = ctk.CTkImage(light_image=icon_img, dark_image=icon_img, size=(32, 32))
+                self.iconphoto(False, self._icon_photo._get_image("dark", (32, 32), 1.0))
+        except Exception:
+            pass
 
         # State
         self._worker_thread = None
@@ -229,6 +241,115 @@ class VideoEditorApp(ctk.CTk):
         self._output_path = None
         self._start_time = None
 
+        # Check license before building UI
+        ok, msg = check_license()
+        if ok:
+            self._init_app()
+        else:
+            self._build_license_screen()
+
+    def _build_license_screen(self):
+        """Show license key input directly in main window."""
+        self.geometry("420x360")
+        self.minsize(380, 340)
+        self.grid_columnconfigure(0, weight=1)
+
+        self._lic_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self._lic_frame.grid(row=0, column=0, sticky="nsew")
+        self._lic_frame.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # Logo on license screen
+        try:
+            from PIL import Image
+            icon_path = SCRIPT_DIR / "logo.png"
+            if icon_path.is_file():
+                self._lic_logo_img = ctk.CTkImage(
+                    light_image=Image.open(str(icon_path)),
+                    dark_image=Image.open(str(icon_path)),
+                    size=(220, 138))
+                ctk.CTkLabel(
+                    self._lic_frame, image=self._lic_logo_img, text="",
+                ).grid(row=0, column=0, padx=24, pady=(20, 4))
+        except Exception:
+            ctk.CTkLabel(
+                self._lic_frame, text="SMARTCUT",
+                font=ctk.CTkFont(size=22, weight="bold"),
+                text_color=THEME["text"],
+            ).grid(row=0, column=0, padx=24, pady=(40, 4))
+
+        ctk.CTkLabel(
+            self._lic_frame, text="Enter your license key to get started",
+            font=ctk.CTkFont(size=12),
+            text_color=THEME["text_muted"],
+        ).grid(row=1, column=0, padx=24, pady=(0, 20))
+
+        self._lic_entry = ctk.CTkEntry(
+            self._lic_frame, placeholder_text="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
+            font=ctk.CTkFont(size=13),
+            fg_color=THEME["surface_2"],
+            border_color=THEME["border"],
+            text_color=THEME["text"],
+            corner_radius=8,
+            height=40,
+        )
+        self._lic_entry.grid(row=2, column=0, padx=32, sticky="ew")
+        self._lic_entry.bind("<Return>", lambda e: self._activate_key())
+
+        self._lic_btn = ctk.CTkButton(
+            self._lic_frame, text="Activate",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            height=42,
+            fg_color=THEME["accent"],
+            hover_color=THEME["accent_hover"],
+            text_color="#ffffff",
+            corner_radius=8,
+            command=self._activate_key,
+        )
+        self._lic_btn.grid(row=3, column=0, padx=32, pady=(12, 4), sticky="ew")
+
+        self._lic_status = ctk.CTkLabel(
+            self._lic_frame, text="",
+            font=ctk.CTkFont(size=12),
+            text_color=THEME["text_muted"],
+        )
+        self._lic_status.grid(row=4, column=0, padx=24, pady=(4, 20))
+
+        self.after(200, self._lic_entry.focus)
+
+    def _activate_key(self):
+        key = self._lic_entry.get().strip()
+        if not key:
+            self._lic_status.configure(text="Please enter a license key.", text_color=THEME["warning"])
+            return
+
+        self._lic_btn.configure(state="disabled", text="Activating...")
+        self._lic_status.configure(text="Checking license...", text_color=THEME["text_muted"])
+        self.update()
+
+        def _do():
+            ok, msg = activate_license(key)
+            self.after(0, lambda: self._on_activate_result(ok, msg))
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _on_activate_result(self, ok, msg):
+        self._lic_btn.configure(state="normal", text="Activate")
+        if ok:
+            self._lic_status.configure(text=msg, text_color=THEME["success"])
+            self.after(600, self._switch_to_app)
+        else:
+            self._lic_status.configure(text=msg, text_color=THEME["danger"])
+
+    def _switch_to_app(self):
+        """Remove license screen, show full app."""
+        self._lic_frame.destroy()
+        self.geometry("620x580")
+        self.minsize(560, 540)
+        self._init_app()
+
+    def _init_app(self):
+        """Build UI and start services (only after license check passes)."""
         self._build_ui()
         self._auto_install_plugins()
         self._start_plugin_server()
@@ -253,7 +374,7 @@ class VideoEditorApp(ctk.CTk):
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color=THEME["text_sec"],
         )
-        lbl.grid(row=row, column=0, columnspan=3, padx=16, pady=(12, 8), sticky="w")
+        lbl.grid(row=row, column=0, columnspan=3, padx=16, pady=(8, 4), sticky="w")
         return lbl
 
     # ========================================================================
@@ -264,24 +385,37 @@ class VideoEditorApp(ctk.CTk):
         self.grid_columnconfigure(0, weight=1)
         row = 0
 
-        # --- Title (no card) ---
-        ctk.CTkLabel(
-            self, text="VIDEO EDITOR",
-            font=ctk.CTkFont(size=24, weight="bold"),
-            text_color=THEME["text"],
-        ).grid(row=row, column=0, padx=24, pady=(20, 0), sticky="w")
-        row += 1
+        # --- Logo centered ---
+        try:
+            from PIL import Image
+            icon_path = SCRIPT_DIR / "logo.png"
+            if icon_path.is_file():
+                self._title_logo = ctk.CTkImage(
+                    light_image=Image.open(str(icon_path)),
+                    dark_image=Image.open(str(icon_path)),
+                    size=(180, 112))
+                ctk.CTkLabel(
+                    self, image=self._title_logo, text="",
+                ).grid(row=row, column=0, pady=(2, 0))
+                row += 1
+        except Exception:
+            ctk.CTkLabel(
+                self, text="SMARTCUT",
+                font=ctk.CTkFont(size=24, weight="bold"),
+                text_color=THEME["text"],
+            ).grid(row=row, column=0, padx=24, pady=(4, 0), sticky="w")
+            row += 1
 
         ctk.CTkLabel(
             self, text="AI-powered video editing",
             font=ctk.CTkFont(size=12),
             text_color=THEME["text_muted"],
-        ).grid(row=row, column=0, padx=24, pady=(0, 12), sticky="w")
+        ).grid(row=row, column=0, pady=(0, 0))
         row += 1
 
         # ── Settings Card ──────────────────────────────────────────────────
         settings = self._make_card(self)
-        settings.grid(row=row, column=0, padx=20, pady=(0, 8), sticky="ew")
+        settings.grid(row=row, column=0, padx=20, pady=(0, 2), sticky="ew")
         settings.grid_columnconfigure(1, weight=1)
         self._card_header(settings, "SETTINGS")
         row += 1
@@ -298,7 +432,7 @@ class VideoEditorApp(ctk.CTk):
             settings,
             fg_color=THEME["surface_2"],
             corner_radius=8,
-            height=56,
+            height=40,
         )
         self._drop_frame.grid(row=1, column=1, columnspan=2, padx=(0, 16), pady=4, sticky="ew")
         self._drop_frame.grid_columnconfigure(0, weight=1)
@@ -369,11 +503,11 @@ class VideoEditorApp(ctk.CTk):
         self._on_style_changed(None)
 
         # Bottom padding for settings card (style desc already has some)
-        self.style_desc.grid(row=3, column=1, columnspan=2, padx=(4, 16), pady=(0, 12), sticky="w")
+        self.style_desc.grid(row=3, column=1, columnspan=2, padx=(4, 16), pady=(0, 6), sticky="w")
 
         # ── Progress Card ──────────────────────────────────────────────────
         progress = self._make_card(self)
-        progress.grid(row=row, column=0, padx=20, pady=(0, 8), sticky="ew")
+        progress.grid(row=row, column=0, padx=20, pady=(0, 2), sticky="ew")
         progress.grid_columnconfigure(0, weight=1)
         progress.grid_columnconfigure(1, weight=0)
         self._card_header(progress, "PROGRESS")
@@ -409,7 +543,7 @@ class VideoEditorApp(ctk.CTk):
 
         # Status + ETA row
         eta_row = ctk.CTkFrame(progress, fg_color="transparent")
-        eta_row.grid(row=3, column=0, columnspan=2, padx=16, pady=(0, 12), sticky="ew")
+        eta_row.grid(row=3, column=0, columnspan=2, padx=16, pady=(0, 6), sticky="ew")
         eta_row.grid_columnconfigure(0, weight=1)
 
         self.progress_label = ctk.CTkLabel(
@@ -430,20 +564,20 @@ class VideoEditorApp(ctk.CTk):
         self.start_btn = ctk.CTkButton(
             self, text="\u25B6  Start",
             font=ctk.CTkFont(size=15, weight="bold"),
-            height=46,
+            height=40,
             fg_color=THEME["accent"],
             hover_color=THEME["accent_hover"],
             text_color="#ffffff",
             corner_radius=10,
             command=self._start,
         )
-        self.start_btn.grid(row=row, column=0, padx=20, pady=(0, 4), sticky="ew")
+        self.start_btn.grid(row=row, column=0, padx=20, pady=(0, 2), sticky="ew")
         row += 1
 
         self.cancel_btn = ctk.CTkButton(
             self, text="Cancel",
             font=ctk.CTkFont(size=13),
-            height=36,
+            height=32,
             fg_color="transparent",
             hover_color=THEME["surface"],
             text_color=THEME["danger"],
@@ -453,14 +587,14 @@ class VideoEditorApp(ctk.CTk):
             state="disabled",
             command=self._cancel,
         )
-        self.cancel_btn.grid(row=row, column=0, padx=20, pady=(0, 8), sticky="ew")
+        self.cancel_btn.grid(row=row, column=0, padx=20, pady=(0, 2), sticky="ew")
         row += 1
 
         # ── Videos Button ──────────────────────────────────────────────────
         self.open_btn = ctk.CTkButton(
             self, text="Videos",
             font=ctk.CTkFont(size=13),
-            height=36,
+            height=32,
             fg_color=THEME["surface"],
             hover_color=THEME["surface_2"],
             text_color=THEME["text_sec"],
@@ -469,7 +603,7 @@ class VideoEditorApp(ctk.CTk):
             corner_radius=8,
             command=self._open_output,
         )
-        self.open_btn.grid(row=row, column=0, padx=20, pady=(0, 6), sticky="ew")
+        self.open_btn.grid(row=row, column=0, padx=20, pady=(0, 2), sticky="ew")
         row += 1
 
         # ── Info + Plugins (top right) ────────────────────────────────────
@@ -498,6 +632,19 @@ class VideoEditorApp(ctk.CTk):
             command=self._open_plugins,
         )
         self.plugins_btn.place(relx=1.0, y=8, x=-12, anchor="ne")
+
+        self.license_btn = ctk.CTkButton(
+            self, text="License",
+            font=ctk.CTkFont(size=11),
+            width=60,
+            height=24,
+            fg_color="transparent",
+            hover_color=THEME["surface"],
+            text_color=THEME["text_muted"],
+            corner_radius=6,
+            command=self._show_license,
+        )
+        self.license_btn.place(relx=1.0, y=8, x=-140, anchor="ne")
 
     # ========================================================================
     # EVENTS
@@ -833,7 +980,7 @@ class VideoEditorApp(ctk.CTk):
 
         sections = [
             ("HOW IT WORKS", (
-                "The app analyzes your video in 5 steps:\n\n"
+                "SmartCut analyzes your video in 5 steps:\n\n"
                 "1. Transcribe — Speech recognition using AI\n"
                 "2. Silence detection — Finds pauses to cut\n"
                 "3. Preparation — Sets up the edit\n"
@@ -849,23 +996,30 @@ class VideoEditorApp(ctk.CTk):
                 "• If it seems stuck, wait — it's likely\n"
                 "  still processing in the background."
             )),
+            ("STYLES", (
+                "• Clean — Tight cuts, phrase subtitles\n"
+                "• Fast — Fast cuts, word-by-word subtitles\n"
+                "• Balanced — Balanced cuts + subtitles\n"
+                "• Smooth — Smooth cuts + subtitles\n"
+                "• Minimal — Tight cuts, no subtitles"
+            )),
             ("PLUGINS", (
                 "Use the Plugins button (top right) to install\n"
                 "editor plugins for your video editing software.\n"
-                "The app must be running in the background.\n\n"
+                "SmartCut must be running in the background.\n\n"
                 "Premiere Pro:\n"
                 "  Install via Plugins, then open in Premiere:\n"
-                "  Window > Extensions > Video Editor\n\n"
-                "DaVinci Resolve (Free + Studio):\n"
+                "  Window > Extensions > SmartCut\n\n"
+                "DaVinci Resolve:\n"
                 "  Install via Plugins, then open in Resolve:\n"
-                "  Workspace > Scripts > Edit > video_editor_resolve\n"
-                "  Select a clip on the timeline before running."
+                "  Workspace > Scripts > Edit > video_editor_resolve"
             )),
             ("TIPS", (
-                "• Don't open the app multiple times.\n"
                 "• Use Cancel to stop processing.\n"
                 "• Output files are saved to:\n"
-                "  ~/Movies/VideoEditor/"
+                "  ~/Movies/VideoEditor/\n"
+                "• License can be managed via the\n"
+                "  License button (top right)."
             )),
         ]
 
@@ -975,6 +1129,71 @@ class VideoEditorApp(ctk.CTk):
 
     def _open_plugins(self):
         PluginManagerWindow(self)
+
+    def _show_license(self):
+        """Show license info dialog with option to deactivate."""
+        win = ctk.CTkToplevel(self)
+        win.title("License")
+        win.geometry("380x200")
+        win.resizable(False, False)
+        win.configure(fg_color=THEME["bg"])
+        win.transient(self)
+        win.grab_set()
+        win.grid_columnconfigure(0, weight=1)
+
+        key = get_saved_key()
+        masked = key[:5] + "..." + key[-5:] if key and len(key) > 10 else (key or "None")
+
+        ctk.CTkLabel(
+            win, text="LICENSE",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=THEME["text"],
+        ).grid(row=0, column=0, padx=20, pady=(16, 4), sticky="w")
+
+        ok, msg = check_license()
+        status_color = THEME["success"] if ok else THEME["danger"]
+        ctk.CTkLabel(
+            win, text=f"Status: {msg}",
+            font=ctk.CTkFont(size=12),
+            text_color=status_color,
+        ).grid(row=1, column=0, padx=20, pady=(0, 2), sticky="w")
+
+        ctk.CTkLabel(
+            win, text=f"Key: {masked}",
+            font=ctk.CTkFont(size=12),
+            text_color=THEME["text_muted"],
+        ).grid(row=2, column=0, padx=20, pady=(0, 12), sticky="w")
+
+        def _deactivate():
+            deactivate_license()
+            win.grab_release()
+            win.destroy()
+            messagebox.showinfo("License", "License deactivated. The app will close.")
+            self.destroy()
+
+        ctk.CTkButton(
+            win, text="Deactivate License",
+            font=ctk.CTkFont(size=13),
+            height=34,
+            fg_color=THEME["surface"],
+            hover_color=THEME["surface_2"],
+            text_color=THEME["danger"],
+            border_width=1,
+            border_color=THEME["danger"],
+            corner_radius=8,
+            command=_deactivate,
+        ).grid(row=3, column=0, padx=20, pady=(0, 8), sticky="ew")
+
+        ctk.CTkButton(
+            win, text="Close",
+            font=ctk.CTkFont(size=13),
+            height=30,
+            fg_color="transparent",
+            hover_color=THEME["surface"],
+            text_color=THEME["text_sec"],
+            corner_radius=8,
+            command=win.destroy,
+        ).grid(row=4, column=0, padx=20, pady=(0, 12), sticky="ew")
 
 
 class PluginManagerWindow(ctk.CTkToplevel):
@@ -1225,7 +1444,27 @@ class PluginManagerWindow(ctk.CTkToplevel):
 # MAIN
 # ============================================================================
 
+def _acquire_lock():
+    """Ensure only one instance of the app runs at a time."""
+    lock_dir = os.path.join(os.path.expanduser("~"), ".videoeditor")
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_path = os.path.join(lock_dir, ".lock")
+
+    # Try to bind a socket to a fixed port — fails if already in use
+    import socket
+    _lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        _lock_socket.bind(("127.0.0.1", 48721))
+        return _lock_socket
+    except OSError:
+        messagebox.showwarning("SmartCut", "SmartCut is already running.")
+        return None
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+    _lock = _acquire_lock()
+    if _lock is None:
+        sys.exit(0)
     app = VideoEditorApp()
     app.mainloop()

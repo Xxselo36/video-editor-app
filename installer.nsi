@@ -4,7 +4,7 @@
 !include "MUI2.nsh"
 
 ; --- Allgemein ---
-Name "Video Editor"
+Name "SmartCut"
 OutFile "VideoEditor-Setup.exe"
 InstallDir "$PROGRAMFILES\VideoEditor"
 InstallDirRegKey HKLM "Software\VideoEditor" "InstallDir"
@@ -41,11 +41,11 @@ Section "VideoEditor" SecMain
 
     ; Startmenue-Verknuepfung
     CreateDirectory "$SMPROGRAMS\VideoEditor"
-    CreateShortCut "$SMPROGRAMS\VideoEditor\Video Editor.lnk" "$INSTDIR\gui.exe"
+    CreateShortCut "$SMPROGRAMS\VideoEditor\SmartCut.lnk" "$INSTDIR\gui.exe"
     CreateShortCut "$SMPROGRAMS\VideoEditor\Deinstallieren.lnk" "$INSTDIR\uninstall.exe"
 
     ; Desktop-Verknuepfung
-    CreateShortCut "$DESKTOP\Video Editor.lnk" "$INSTDIR\gui.exe"
+    CreateShortCut "$DESKTOP\SmartCut.lnk" "$INSTDIR\gui.exe"
 
     ; Uninstaller
     WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -53,7 +53,7 @@ Section "VideoEditor" SecMain
     ; Registry
     WriteRegStr HKLM "Software\VideoEditor" "InstallDir" "$INSTDIR"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\VideoEditor" \
-        "DisplayName" "Video Editor"
+        "DisplayName" "SmartCut"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\VideoEditor" \
         "UninstallString" "$INSTDIR\uninstall.exe"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\VideoEditor" \
@@ -66,10 +66,10 @@ Section "Uninstall"
     RMDir /r "$INSTDIR"
 
     ; Verknuepfungen loeschen
-    Delete "$SMPROGRAMS\VideoEditor\Video Editor.lnk"
+    Delete "$SMPROGRAMS\VideoEditor\SmartCut.lnk"
     Delete "$SMPROGRAMS\VideoEditor\Deinstallieren.lnk"
     RMDir "$SMPROGRAMS\VideoEditor"
-    Delete "$DESKTOP\Video Editor.lnk"
+    Delete "$DESKTOP\SmartCut.lnk"
 
     ; Registry loeschen
     DeleteRegKey HKLM "Software\VideoEditor"

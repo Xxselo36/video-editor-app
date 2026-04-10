@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval'; connect-src * http://127.0.0.1:*; img-src * data:;">
-    <title>Video Editor</title>
+    <title>SmartCut</title>
     <script src="CSInterface.js"></script>
     <style>
         body {
@@ -16,8 +16,9 @@
         }
         h2 {
             margin: 0 0 4px 0;
-            font-size: 16px;
+            font-size: 18px;
             font-weight: 700;
+            letter-spacing: 0.5px;
         }
         .subtitle {
             color: #5a5a64;
@@ -87,10 +88,17 @@
             background: #1a1a1f;
             border: 1px solid #2a2a32;
             border-radius: 8px;
-            padding: 10px 12px;
-            margin-bottom: 12px;
+            padding: 12px 14px;
+            margin-bottom: 14px;
             font-size: 12px;
             color: #8e8e96;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .clip-info .icon {
+            font-size: 16px;
+            opacity: 0.6;
         }
         .clip-info .name {
             color: #f0f0f2;
@@ -106,27 +114,39 @@
         .status.info { display: block; background: #1a1a3c; color: #7a8eff; }
         .status.success { display: block; background: #0a2a0a; color: #00c853; }
         .status.error { display: block; background: #2a0a0a; color: #ef5350; }
+        .progress-wrap {
+            margin-top: 10px;
+            display: none;
+        }
+        .progress-wrap.active { display: block; }
+        .progress-pct {
+            font-size: 11px;
+            color: #8e8e96;
+            text-align: right;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
         .progress-bar {
             width: 100%;
             height: 4px;
             background: #2d2640;
             border-radius: 2px;
-            margin-top: 10px;
             overflow: hidden;
-            display: none;
         }
-        .progress-bar.active { display: block; }
         .progress-fill {
             height: 100%;
-            background: #6c5ce7;
+            background: linear-gradient(90deg, #6c5ce7, #7c6cf7);
             width: 0%;
             transition: width 0.3s;
+            border-radius: 2px;
         }
         .connection {
             font-size: 10px;
             color: #5a5a64;
             text-align: center;
-            margin-top: 16px;
+            margin-top: 20px;
+            padding-top: 12px;
+            border-top: 1px solid #1a1a1f;
         }
         .connection .dot {
             display: inline-block;
@@ -136,16 +156,17 @@
             margin-right: 4px;
             vertical-align: middle;
         }
-        .connection .dot.ok { background: #00c853; }
+        .connection .dot.ok { background: #00c853; box-shadow: 0 0 4px #00c85380; }
         .connection .dot.off { background: #ef5350; }
     </style>
 </head>
 <body>
-    <h2>VIDEO EDITOR</h2>
-    <div class="subtitle">AI-powered video editing</div>
+    <div style="text-align:center;margin-bottom:8px;">
+        <img src="logo.png" alt="SmartCut" style="height:80px;margin-top:4px;">
+    </div>
 
     <div class="clip-info" id="clipInfo">
-        No clip detected — select a clip on the timeline
+        <span class="icon">🎬</span> No clip detected — select a clip on the timeline
     </div>
 
     <div class="group">
@@ -164,8 +185,11 @@
         Process Selected Clip
     </button>
 
-    <div class="progress-bar" id="progressBar">
-        <div class="progress-fill" id="progressFill"></div>
+    <div class="progress-wrap" id="progressWrap">
+        <div class="progress-pct" id="progressPct">0%</div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
     </div>
 
     <div class="status" id="status"></div>
@@ -173,8 +197,6 @@
     <div class="connection" id="connection">
         <span class="dot off" id="connDot"></span> Checking backend...
     </div>
-    <div style="font-size:11px;color:#6c5ce7;text-align:center;margin-top:8px;font-weight:bold;">v35</div>
-
     <script>
         var API_URL = 'http://127.0.0.1:8456';
         var csInterface = null;
@@ -235,12 +257,12 @@
             try {
                 var data = await apiFetch('/health', 5000);
                 if (data.status === 'ok') {
-                    el.innerHTML = '<span class="dot ok"></span> Connected to Video Editor';
+                    el.innerHTML = '<span class="dot ok"></span> Connected to SmartCut';
                 } else {
                     el.innerHTML = '<span class="dot off"></span> Backend error';
                 }
             } catch (e) {
-                el.innerHTML = '<span class="dot off"></span> Open Video Editor app to connect';
+                el.innerHTML = '<span class="dot off"></span> Open SmartCut app to connect';
             }
         }
         checkConnection();
@@ -266,7 +288,7 @@
                 var path = await getSelectedClipPath();
                 if (path) {
                     var name = path.split('/').pop().split('\\').pop();
-                    el.innerHTML = '<span class="name">' + name + '</span>';
+                    el.innerHTML = '<span class="icon">🎬</span> <span class="name">' + name + '</span>';
                 }
             } catch (e) {}
         }
@@ -276,8 +298,9 @@
         // --- Process video ---
         async function processVideo() {
             var btn = document.getElementById('processBtn');
-            var progressBar = document.getElementById('progressBar');
+            var progressWrap = document.getElementById('progressWrap');
             var progressFill = document.getElementById('progressFill');
+            var progressPct = document.getElementById('progressPct');
 
             var videoPath = '';
             try {
@@ -289,8 +312,9 @@
 
             btn.disabled = true;
             btn.textContent = 'Processing...';
-            progressBar.classList.add('active');
+            progressWrap.classList.add('active');
             progressFill.style.width = '5%';
+            progressPct.textContent = '5%';
             setStatus('info', 'Starting analysis...');
 
             try {
@@ -304,32 +328,34 @@
 
                 if (startData.error) {
                     setStatus('error', startData.error);
-                    resetProcessBtn(btn, progressBar, progressFill);
+                    resetProcessBtn(btn, progressWrap, progressFill, progressPct);
                     return;
                 }
 
                 // Poll job status every 2 seconds
-                pollJobStatus(btn, progressBar, progressFill);
+                pollJobStatus(btn, progressWrap, progressFill, progressPct);
 
             } catch (e) {
                 setStatus('error', 'Error: ' + e.message);
-                resetProcessBtn(btn, progressBar, progressFill);
+                resetProcessBtn(btn, progressWrap, progressFill, progressPct);
             }
         }
 
-        function pollJobStatus(btn, progressBar, progressFill) {
+        function pollJobStatus(btn, progressWrap, progressFill, progressPct) {
             setTimeout(async function check() {
                 try {
                     var data = await apiFetch('/job-status', 5000);
 
-                    progressFill.style.width = (data.progress || 0) + '%';
+                    var pct = data.progress || 0;
+                    progressFill.style.width = pct + '%';
+                    progressPct.textContent = Math.round(pct) + '%';
                     if (data.message) setStatus('info', data.message);
 
                     if (data.status === 'done') {
-                        onAnalysisDone(data, btn, progressBar, progressFill);
+                        onAnalysisDone(data, btn, progressWrap, progressFill, progressPct);
                     } else if (data.status === 'error') {
                         setStatus('error', data.error || 'Analysis failed');
-                        resetProcessBtn(btn, progressBar, progressFill);
+                        resetProcessBtn(btn, progressWrap, progressFill, progressPct);
                     } else {
                         setTimeout(check, 2000);
                     }
@@ -362,8 +388,9 @@
             });
         }
 
-        async function onAnalysisDone(jobData, btn, progressBar, progressFill) {
+        async function onAnalysisDone(jobData, btn, progressWrap, progressFill, progressPct) {
             progressFill.style.width = '90%';
+            progressPct.textContent = '90%';
             setStatus('info', 'Creating edited sequence...');
 
             try {
@@ -383,30 +410,31 @@
                     // Step 2: If style has captions, add to the new sequence (host.jsx uses _currentSeqID)
                     if (srtPath) {
                         var capRes = await hostImportCaptions(srtPath);
-                        progressFill.style.width = '100%';
+                        progressFill.style.width = '100%'; progressPct.textContent = '100%';
                         var capMsg = (capRes && capRes.indexOf('ok') === 0) ? ' + captions' : '';
                         setStatus('success', 'Done! ' + cuts + ' cuts' + capMsg + '. (' + styleLabel + ')');
                     } else {
-                        progressFill.style.width = '100%';
+                        progressFill.style.width = '100%'; progressPct.textContent = '100%';
                         setStatus('success', 'Done! ' + cuts + ' cuts. (' + styleLabel + ')');
                     }
-                    resetProcessBtn(btn, progressBar, progressFill);
+                    resetProcessBtn(btn, progressWrap, progressFill, progressPct);
                 } else {
                     setStatus('error', xmlData.error || 'Could not generate sequence.');
-                    resetProcessBtn(btn, progressBar, progressFill);
+                    resetProcessBtn(btn, progressWrap, progressFill, progressPct);
                 }
             } catch (e) {
                 setStatus('error', 'Error: ' + e.message);
-                resetProcessBtn(btn, progressBar, progressFill);
+                resetProcessBtn(btn, progressWrap, progressFill, progressPct);
             }
         }
 
-        function resetProcessBtn(btn, progressBar, progressFill) {
+        function resetProcessBtn(btn, progressWrap, progressFill, progressPct) {
             btn.disabled = false;
             btn.textContent = 'Process Selected Clip';
             setTimeout(function() {
-                progressBar.classList.remove('active');
+                progressWrap.classList.remove('active');
                 progressFill.style.width = '0%';
+                progressPct.textContent = '0%';
             }, 5000);
         }
 

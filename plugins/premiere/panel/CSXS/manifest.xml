@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ExtensionManifest Version="6.0" ExtensionBundleId="com.videoeditor.panel"
     ExtensionBundleVersion="1.0.0"
-    ExtensionBundleName="Video Editor">
+    ExtensionBundleName="SmartCut">
 
     <ExtensionList>
         <Extension Id="com.videoeditor.panel" Version="1.0.0" />
@@ -37,7 +37,7 @@
                 </Lifecycle>
                 <UI>
                     <Type>Panel</Type>
-                    <Menu>Video Editor</Menu>
+                    <Menu>SmartCut</Menu>
                     <Geometry>
                         <Size>
                             <Height>500</Height>

@@ -183,7 +183,7 @@ function importXMLSequence(xmlPath, clipName, styleName) {
             if (!_currentSeqID) {
                 for (var q2 = seqCountAfter - 1; q2 >= 0; q2--) {
                     var seq2 = app.project.sequences[q2];
-                    if (seq2.name.indexOf("Video Editor") === 0) {
+                    if (seq2.name.indexOf("SmartCut") === 0) {
                         _currentSeqID = seq2.sequenceID;
                         foundMethod = "name_match:" + seq2.name;
                         break;
@@ -242,7 +242,7 @@ function importCaptions(srtPath) {
         }
         if (!seq) {
             var active = app.project.activeSequence;
-            if (active && active.name.indexOf("Video Editor") === 0) {
+            if (active && active.name.indexOf("SmartCut") === 0) {
                 seq = active;
             }
         }
@@ -385,7 +385,7 @@ function styleSubtitles(yPercent) {
         // Find the Video Editor sequence (might not be activeSequence yet)
         var seq = null;
         for (var s = 0; s < app.project.sequences.numSequences; s++) {
-            if (app.project.sequences[s].name.indexOf("Video Editor") === 0) {
+            if (app.project.sequences[s].name.indexOf("SmartCut") === 0) {
                 seq = app.project.sequences[s];
             }
         }
@@ -458,7 +458,7 @@ function rotateClips(degrees) {
         // Find the latest "Video Editor" sequence by name — most reliable method
         var seq = null;
         for (var s = app.project.sequences.numSequences - 1; s >= 0; s--) {
-            if (app.project.sequences[s].name.indexOf("Video Editor") === 0) {
+            if (app.project.sequences[s].name.indexOf("SmartCut") === 0) {
                 seq = app.project.sequences[s];
                 break;
             }
@@ -511,7 +511,7 @@ function addMarkersToTimeline(jsonStr) {
             var marker = markers.createMarker(sub.start);
             marker.name = sub.text;
             marker.end = sub.end;
-            marker.comments = "Video Editor Subtitle";
+            marker.comments = "SmartCut Subtitle";
             marker.setColorByIndex(3); // Green
         }
 

@@ -212,7 +212,7 @@ local function show_settings_dialog()
     end
 
     local dlg_ok, ret = pcall(function()
-        return fusion:AskUser("Video Editor", {
+        return fusion:AskUser("SmartCut", {
             {"Style", Name = "Style", "Dropdown", Options = style_options, Default = 0},
         })
     end)
@@ -246,14 +246,14 @@ local function show_settings_dialog()
         -- Write .ps1 file
         local f = io.open(ps_file, "w")
         if not f then
-            print("[Video Editor] Cannot write style picker script")
+            print("[SmartCut] Cannot write style picker script")
             return STYLES[1] and STYLES[1].key or "clean"
         end
         f:write('Add-Type -AssemblyName System.Windows.Forms\n')
         f:write('Add-Type -AssemblyName System.Drawing\n')
         f:write('[System.Windows.Forms.Application]::EnableVisualStyles()\n')
         f:write('$form = New-Object System.Windows.Forms.Form\n')
-        f:write('$form.Text = "Video Editor - Style"\n')
+        f:write('$form.Text = "SmartCut - Style"\n')
         f:write('$form.Size = New-Object System.Drawing.Size(420,200)\n')
         f:write('$form.StartPosition = "CenterScreen"\n')
         f:write('$form.TopMost = $true\n')
@@ -341,7 +341,7 @@ local function show_settings_dialog()
         end
         local list_str = table.concat(items, ", ")
         local cmd = 'osascript -e \'choose from list {' .. list_str .. '} '
-            .. 'with title "Video Editor" '
+            .. 'with title "SmartCut" '
             .. 'with prompt "Choose a style:" '
             .. 'default items {"' .. STYLES[1].label .. " — " .. STYLES[1].desc .. '"}\' 2>/dev/null'
 
@@ -437,7 +437,7 @@ local function render_subtitle_overlay(srt_path, width, height, duration_sec, fp
         end
     end
     if not python then
-        print("[Video Editor] Python not found — skipping subtitles")
+        print("[SmartCut] Python not found — skipping subtitles")
         return nil
     end
 
@@ -459,14 +459,14 @@ local function render_subtitle_overlay(srt_path, width, height, duration_sec, fp
         if tf then tf:close(); render_script = sp; break end
     end
     if not render_script then
-        print("[Video Editor] render_srt_overlay.py not found — skipping subtitles")
+        print("[SmartCut] render_srt_overlay.py not found — skipping subtitles")
         return nil
     end
 
     local tmp = os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp"
     local sep = (package.config:sub(1,1) == "\\") and "\\" or "/"
     local overlay_path = tmp .. sep .. "ve_subtitle_overlay_" .. os.time() .. ".mov"
-    print("[Video Editor] Rendering subtitle overlay (" .. width .. "x" .. height .. ", " .. string.format("%.1f", duration_sec) .. "s)...")
+    print("[SmartCut] Rendering subtitle overlay (" .. width .. "x" .. height .. ", " .. string.format("%.1f", duration_sec) .. "s)...")
     local cmd = string.format('%s "%s" "%s" "%s" %d %d %.3f %d 2>&1',
         python, render_script, srt_path, overlay_path, width, height, duration_sec, fps)
     local handle = io.popen(cmd)
@@ -476,10 +476,10 @@ local function render_subtitle_overlay(srt_path, width, height, duration_sec, fp
 
     local ok, result = pcall(json_decode, json_out)
     if not ok or not result or result.error then
-        print("[Video Editor] Subtitle overlay failed: " .. (result and result.error or json_out:sub(1, 200)))
+        print("[SmartCut] Subtitle overlay failed: " .. (result and result.error or json_out:sub(1, 200)))
         return nil
     end
-    print("[Video Editor] Subtitle overlay: " .. string.format("%.1f", result.size_mb or 0) .. " MB")
+    print("[SmartCut] Subtitle overlay: " .. string.format("%.1f", result.size_mb or 0) .. " MB")
     return overlay_path
 end
 
@@ -504,7 +504,7 @@ local function import_into_resolve(xml_path, srt_path, clip_name, style_name)
     end
 
     -- Step 1: Import XML as timeline (V1 cuts)
-    local tl_name = "Video Editor - " .. clip_name .. " " .. os.date("%H%M%S")
+    local tl_name = "SmartCut - " .. clip_name .. " " .. os.date("%H%M%S")
     local new_tl = media_pool:ImportTimelineFromFile(xml_path, {
         timelineName = tl_name,
         importSourceClips = true,
@@ -527,7 +527,7 @@ local function import_into_resolve(xml_path, srt_path, clip_name, style_name)
     local duration_sec = duration_frames / fps
 
     if duration_sec <= 0 then
-        print("[Video Editor] Could not determine timeline duration — skipping subtitles")
+        print("[SmartCut] Could not determine timeline duration — skipping subtitles")
         return true, tl_name, 0
     end
 
@@ -535,10 +535,10 @@ local function import_into_resolve(xml_path, srt_path, clip_name, style_name)
     if not overlay_path then return true, tl_name, 0 end
 
     -- Step 3: Import overlay into media pool
-    print("[Video Editor] Importing overlay into media pool...")
+    print("[SmartCut] Importing overlay into media pool...")
     local overlay_items = media_pool:ImportMedia({overlay_path})
     if not overlay_items or #overlay_items == 0 then
-        print("[Video Editor] Failed to import overlay into media pool")
+        print("[SmartCut] Failed to import overlay into media pool")
         return true, tl_name, 0
     end
 
@@ -548,7 +548,7 @@ local function import_into_resolve(xml_path, srt_path, clip_name, style_name)
         new_tl:AddTrack("video")
     end
 
-    print("[Video Editor] Placing subtitles on V2...")
+    print("[SmartCut] Placing subtitles on V2...")
     local result = media_pool:AppendToTimeline({{
         mediaPoolItem = overlay_items[1],
         startFrame = 0,
@@ -561,9 +561,9 @@ local function import_into_resolve(xml_path, srt_path, clip_name, style_name)
     local sub_count = 0
     if result and #result > 0 then
         sub_count = 1
-        print("[Video Editor] Subtitles placed on V2")
+        print("[SmartCut] Subtitles placed on V2")
     else
-        print("[Video Editor] Could not place subtitles on V2")
+        print("[SmartCut] Could not place subtitles on V2")
     end
 
     return true, tl_name, sub_count
@@ -576,50 +576,50 @@ end
 
 print("")
 print("========================================")
-print("  VIDEO EDITOR - DaVinci Resolve")
+print("  SMARTCUT - DaVinci Resolve")
 print("========================================")
 print("")
 
 -- 1. Check backend
-print("[Video Editor] Checking backend...")
+print("[SmartCut] Checking backend...")
 if not check_backend() then
-    print("[Video Editor] ERROR: Backend not running!")
-    print("[Video Editor] Start the Video Editor app first.")
+    print("[SmartCut] ERROR: Backend not running!")
+    print("[SmartCut] Start the SmartCut app first.")
     return
 end
-print("[Video Editor] Backend connected.")
+print("[SmartCut] Backend connected.")
 
 -- 2. Detect clip on timeline
 local clip_path = get_current_clip_path()
 if not clip_path then
-    print("[Video Editor] ERROR: No clip on timeline V1.")
-    print("[Video Editor] Add a video clip to the timeline first.")
+    print("[SmartCut] ERROR: No clip on timeline V1.")
+    print("[SmartCut] Add a video clip to the timeline first.")
     return
 end
 local clip_name = clip_path:match("([^/]+)%.[^%.]+$") or "clip"
-print("[Video Editor] Clip: " .. clip_name)
+print("[SmartCut] Clip: " .. clip_name)
 
 -- 3. Show style picker
 local style = show_settings_dialog()
 if not style then
-    print("[Video Editor] Cancelled.")
+    print("[SmartCut] Cancelled.")
     return
 end
-print("[Video Editor] Style: " .. style)
+print("[SmartCut] Style: " .. style)
 
 -- 4. Start analysis
-print("[Video Editor] Starting analysis...")
+print("[SmartCut] Starting analysis...")
 local url = "/analyze?video_path=" .. url_encode(clip_path)
     .. "&style=" .. url_encode(style)
     .. "&whisper_model=medium"
 local data = call_backend(url, 15)
 
 if not data then
-    print("[Video Editor] ERROR: Could not reach backend.")
+    print("[SmartCut] ERROR: Could not reach backend.")
     return
 end
 if data.error then
-    print("[Video Editor] ERROR: " .. tostring(data.error))
+    print("[SmartCut] ERROR: " .. tostring(data.error))
     return
 end
 
@@ -634,7 +634,7 @@ while true do
         local msg = st.message or ""
 
         if msg ~= "" and msg ~= last_msg then
-            print(string.format("[Video Editor] [%d%%] %s", pct, msg))
+            print(string.format("[SmartCut] [%d%%] %s", pct, msg))
             last_msg = msg
         end
 
@@ -642,11 +642,11 @@ while true do
             local cuts = st.segments_count or 0
 
             -- 6. Export XML + SRT
-            print("[Video Editor] Creating edited timeline...")
+            print("[SmartCut] Creating edited timeline...")
             local xml_data = call_backend("/export-xml", 30)
 
             if not xml_data or xml_data.error then
-                print("[Video Editor] ERROR: " .. ((xml_data and xml_data.error) or "Export failed"))
+                print("[SmartCut] ERROR: " .. ((xml_data and xml_data.error) or "Export failed"))
                 return
             end
 
@@ -655,6 +655,15 @@ while true do
                 xml_data.xml_path or "", xml_data.srt_path,
                 clip_name, style)
 
+            -- Cleanup temporary subtitle overlay files
+            local tmp_dir = os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp"
+            local is_win = (package.config:sub(1,1) == "\\")
+            if is_win then
+                os.execute('del /q "' .. tmp_dir .. '\\ve_subtitle_overlay_*.mov" 2>NUL')
+            else
+                os.execute('rm -f "' .. tmp_dir .. '"/ve_subtitle_overlay_*.mov 2>/dev/null')
+            end
+
             if ok then
                 local style_labels = {clean="Clean", fast="Fast", balanced="Balanced", smooth="Smooth", minimal="Minimal"}
                 local label = style_labels[style] or style
@@ -662,16 +671,16 @@ while true do
                 if sub_count > 0 then msg = msg .. " + " .. sub_count .. " subtitles" end
                 msg = msg .. " (" .. label .. ")"
                 print("")
-                print("[Video Editor] " .. msg)
-                print("[Video Editor] Timeline: " .. tostring(tl_name))
+                print("[SmartCut] " .. msg)
+                print("[SmartCut] Timeline: " .. tostring(tl_name))
                 print("")
             else
-                print("[Video Editor] ERROR: " .. tostring(tl_name))
+                print("[SmartCut] ERROR: " .. tostring(tl_name))
             end
             return
 
         elseif st.status == "error" then
-            print("[Video Editor] ERROR: " .. (st.error or "Analysis failed"))
+            print("[SmartCut] ERROR: " .. (st.error or "Analysis failed"))
             return
         end
     end
