@@ -5,9 +5,9 @@
 
 ; --- Allgemein ---
 Name "SmartCut"
-OutFile "VideoEditor-Setup.exe"
-InstallDir "$PROGRAMFILES\VideoEditor"
-InstallDirRegKey HKLM "Software\VideoEditor" "InstallDir"
+OutFile "SmartCut-Setup.exe"
+InstallDir "$PROGRAMFILES\SmartCut"
+InstallDirRegKey HKLM "Software\SmartCut" "InstallDir"
 RequestExecutionLevel admin
 
 ; --- Interface ---
