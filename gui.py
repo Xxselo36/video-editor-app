@@ -1083,7 +1083,7 @@ class VideoEditorApp(ctk.CTk):
             already_installed = False
             if nle_name == "DaVinci Resolve":
                 already_installed = os.path.isfile(
-                    os.path.join(install_path, "video_editor_resolve.lua"))
+                    os.path.join(install_path, "smartcut.lua"))
             elif nle_name == "Premiere Pro":
                 already_installed = os.path.isdir(install_path)
 
@@ -1097,8 +1097,8 @@ class VideoEditorApp(ctk.CTk):
                 plugin_src = SCRIPT_DIR / "plugins"
 
                 if nle_name == "DaVinci Resolve":
-                    src = plugin_src / "davinci" / "video_editor_resolve.lua"
-                    shutil.copy2(str(src), os.path.join(install_path, "video_editor_resolve.lua"))
+                    src = plugin_src / "davinci" / "smartcut.lua"
+                    shutil.copy2(str(src), os.path.join(install_path, "smartcut.lua"))
 
                 elif nle_name == "Premiere Pro":
                     src = plugin_src / "premiere" / "panel"
@@ -1366,7 +1366,7 @@ class PluginManagerWindow(ctk.CTkToplevel):
 
         if nle_name == "DaVinci Resolve":
             return os.path.isfile(
-                os.path.join(install_path, "video_editor_resolve.lua"))
+                os.path.join(install_path, "smartcut.lua"))
         elif nle_name == "Premiere Pro":
             return os.path.isdir(install_path)
         return False
@@ -1387,8 +1387,8 @@ class PluginManagerWindow(ctk.CTkToplevel):
             plugin_src = SCRIPT_DIR / "plugins"
 
             if nle_name == "DaVinci Resolve":
-                src = plugin_src / "davinci" / "video_editor_resolve.lua"
-                dst = os.path.join(install_path, "video_editor_resolve.lua")
+                src = plugin_src / "davinci" / "smartcut.lua"
+                dst = os.path.join(install_path, "smartcut.lua")
                 shutil.copy2(str(src), dst)
 
             elif nle_name == "Premiere Pro":
@@ -1417,7 +1417,7 @@ class PluginManagerWindow(ctk.CTkToplevel):
 
         try:
             if nle_name == "DaVinci Resolve":
-                script_path = os.path.join(install_path, "video_editor_resolve.lua")
+                script_path = os.path.join(install_path, "smartcut.lua")
                 if os.path.isfile(script_path):
                     os.remove(script_path)
             elif nle_name == "Premiere Pro":
