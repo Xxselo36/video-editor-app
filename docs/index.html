@@ -143,6 +143,138 @@
             color: #8e8e96;
         }
 
+        /* DEMO */
+        .demo {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 80px 24px;
+        }
+        .demo h2 {
+            text-align: center;
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 48px;
+        }
+        .demo-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+        .demo-item {
+            text-align: center;
+        }
+        .demo-item video {
+            width: 100%;
+            border-radius: 16px;
+            border: 1px solid #2a2a32;
+            background: #000;
+        }
+        .demo-label {
+            margin-top: 12px;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .demo-label.before { color: #8e8e96; }
+        .demo-label.after { color: #6c5ce7; }
+        .demo-video-wrap {
+            position: relative;
+            cursor: pointer;
+        }
+        .demo-video-wrap .overlay-btn {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 60px;
+            background: rgba(108, 92, 231, 0.85);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: #fff;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+        }
+        .demo-video-wrap:hover .overlay-btn {
+            opacity: 1;
+        }
+        .demo-progress {
+            width: 100%;
+            height: 4px;
+            background: #2a2a32;
+            border-radius: 0 0 16px 16px;
+            overflow: hidden;
+            margin-top: -4px;
+        }
+        .demo-progress-bar {
+            height: 100%;
+            width: 0%;
+            background: #6c5ce7;
+            transition: width 0.1s linear;
+        }
+        .demo-time {
+            font-size: 13px;
+            color: #5a5a64;
+            margin-top: 6px;
+            font-variant-numeric: tabular-nums;
+        }
+        .demo-stats {
+            display: flex;
+            justify-content: center;
+            gap: 48px;
+            margin-top: 32px;
+            flex-wrap: wrap;
+        }
+        .demo-stat {
+            text-align: center;
+        }
+        .demo-stat .value {
+            font-size: 36px;
+            font-weight: 800;
+            color: #6c5ce7;
+        }
+        .demo-stat .label {
+            font-size: 14px;
+            color: #8e8e96;
+            margin-top: 4px;
+        }
+        .demo-hint {
+            text-align: center;
+            margin-top: 16px;
+            font-size: 14px;
+            color: #6c5ce7;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        .demo-hint.visible { opacity: 1; }
+        .demo-controls {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-top: 32px;
+        }
+        .demo-controls button {
+            background: #6c5ce7;
+            color: #fff;
+            border: none;
+            padding: 14px 40px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .demo-controls button:hover { background: #7c6cf7; transform: translateY(-2px); }
+        .demo-controls .btn-sound {
+            background: #1a1a1f;
+            border: 1px solid #2a2a32;
+            padding: 14px 24px;
+        }
+        .demo-controls .btn-sound:hover { border-color: #6c5ce7; background: #222228; }
+
         /* HOW IT WORKS */
         .how {
             max-width: 800px;
@@ -332,6 +464,7 @@
             .hero h1 { font-size: 32px; }
             .hero p { font-size: 16px; }
             .feature-grid { grid-template-columns: 1fr; }
+            .demo-grid { grid-template-columns: 1fr; }
             .style-grid { grid-template-columns: repeat(2, 1fr); }
             .plugin-logos { flex-direction: column; align-items: center; }
         }
@@ -344,6 +477,7 @@
         <img src="logo.png" alt="SmartCut">
         <div>
             <a href="#features">Features</a>
+            <a href="#demo">Demo</a>
             <a href="#how">How it works</a>
             <a href="#download">Download</a>
             <a href="https://discord.gg/mGmKnE4H">Discord</a>
@@ -398,6 +532,121 @@
                 <p>Available for macOS, Windows, and Linux. Runs locally — your videos never leave your machine.</p>
             </div>
         </div>
+    </section>
+
+    <!-- DEMO -->
+    <section class="demo" id="demo">
+        <h2>See the difference</h2>
+        <div class="demo-grid">
+            <div class="demo-item">
+                <div class="demo-video-wrap" onclick="toggleVideo('raw')">
+                    <video id="vid-raw" src="raw.mp4" playsinline muted preload="auto"></video>
+                    <div class="overlay-btn" id="overlay-raw">&#9654;</div>
+                    <div class="demo-progress"><div class="demo-progress-bar" id="prog-raw"></div></div>
+                </div>
+                <div class="demo-label before">Before — Raw footage</div>
+                <div class="demo-time" id="time-raw">0:00 / 0:30</div>
+            </div>
+            <div class="demo-item">
+                <div class="demo-video-wrap" onclick="toggleVideo('edited')">
+                    <video id="vid-edited" src="edited.mp4" playsinline muted preload="auto"></video>
+                    <div class="overlay-btn" id="overlay-edited">&#9654;</div>
+                    <div class="demo-progress"><div class="demo-progress-bar" id="prog-edited"></div></div>
+                </div>
+                <div class="demo-label after">After — SmartCut edit</div>
+                <div class="demo-time" id="time-edited">0:00 / 0:30</div>
+            </div>
+        </div>
+        <div class="demo-stats" id="demo-stats">
+            <div class="demo-stat">
+                <div class="value">~30s</div>
+                <div class="label">per minute of footage</div>
+            </div>
+            <div class="demo-stat">
+                <div class="value">10x</div>
+                <div class="label">faster than manual editing</div>
+            </div>
+        </div>
+        <div class="demo-hint" id="demo-hint">Notice the auto-generated subtitles burned into the video</div>
+        <div class="demo-controls">
+            <button id="btn-play" onclick="playBoth()">&#9654; Play both</button>
+            <button class="btn-sound" id="btn-sound" onclick="toggleSound()">&#128263; Sound off</button>
+        </div>
+        <script>
+        const raw = document.getElementById('vid-raw');
+        const edited = document.getElementById('vid-edited');
+        const progRaw = document.getElementById('prog-raw');
+        const progEdited = document.getElementById('prog-edited');
+        const timeRaw = document.getElementById('time-raw');
+        const timeEdited = document.getElementById('time-edited');
+        const hint = document.getElementById('demo-hint');
+        let soundOn = false;
+
+        function fmt(s) {
+            const m = Math.floor(s / 60);
+            const sec = Math.floor(s % 60);
+            return m + ':' + String(sec).padStart(2, '0');
+        }
+
+        function updateProgress() {
+            if (raw.duration) {
+                progRaw.style.width = (raw.currentTime / raw.duration * 100) + '%';
+                timeRaw.textContent = fmt(raw.currentTime) + ' / ' + fmt(raw.duration);
+            }
+            if (edited.duration) {
+                progEdited.style.width = (edited.currentTime / edited.duration * 100) + '%';
+                timeEdited.textContent = fmt(edited.currentTime) + ' / ' + fmt(edited.duration);
+            }
+            requestAnimationFrame(updateProgress);
+        }
+        requestAnimationFrame(updateProgress);
+
+        function updateOverlay(id, vid) {
+            document.getElementById('overlay-' + id).innerHTML = vid.paused ? '&#9654;' : '&#10074;&#10074;';
+        }
+
+        raw.addEventListener('pause', () => updateOverlay('raw', raw));
+        raw.addEventListener('play', () => updateOverlay('raw', raw));
+        edited.addEventListener('pause', () => updateOverlay('edited', edited));
+        edited.addEventListener('play', () => updateOverlay('edited', edited));
+
+        function toggleVideo(id) {
+            const vid = document.getElementById('vid-' + id);
+            if (vid.paused) {
+                vid.play();
+            } else {
+                vid.pause();
+            }
+        }
+
+        function playBoth() {
+            raw.currentTime = 0;
+            edited.currentTime = 0;
+            raw.play();
+            edited.play();
+            document.getElementById('btn-play').innerHTML = '&#8635; Replay both';
+            setTimeout(() => hint.classList.add('visible'), 2000);
+        }
+
+        function toggleSound() {
+            soundOn = !soundOn;
+            raw.muted = !soundOn;
+            edited.muted = !soundOn;
+            document.getElementById('btn-sound').innerHTML = soundOn ? '&#128264; Sound on' : '&#128263; Sound off';
+        }
+
+        // Autoplay when scrolled into view
+        let autoPlayed = false;
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting && !autoPlayed) {
+                    autoPlayed = true;
+                    playBoth();
+                }
+            });
+        }, { threshold: 0.5 });
+        observer.observe(document.querySelector('.demo-grid'));
+        </script>
     </section>
 
     <!-- HOW IT WORKS -->
