@@ -616,64 +616,6 @@ STYLES = {
         "beat_zoom": False,
     },
 
-    "balanced": {
-        "name": "Balanced",
-        "description": "Balanced cuts with word-by-word subtitles",
-
-        # Cuts - medium
-        "remove_silence": True,
-        "silence_threshold": 0.025,
-        "min_silence_to_cut": 0.6,
-        "keep_padding": 0.2,
-        "keep_padding_after": 0.15,
-        "min_segment_length": 0.5,
-        "merge_gap": 0.3,
-
-        # Transitions
-        "transition_in": "none",
-        "transition_out": "none",
-        "transition_duration": 0,
-
-        # Zoom
-        "enable_zoom": False,
-        "smart_zoom": False,
-        "zoom_intensity": 1.0,
-
-        # Visual effects - off
-        "vignette_intensity": 0,
-        "color_grade": "none",
-        "cinematic_bars": False,
-        "rgb_split": False,
-        "vhs_effect": False,
-        "film_grain": False,
-        "light_leak": False,
-        "shake": False,
-        "echo": False,
-        "mirror": False,
-
-        # Subtitles - word by word
-        "enable_subtitles": True,
-        "subtitle_style": "modern",
-        "subtitle_color": (255, 255, 255),
-        "subtitle_fontsize": None,
-        "subtitle_effect": None,
-        "subtitle_stroke_width": 4,
-
-        # Emojis
-        "enable_emojis": False,
-
-        # Sounds
-        "enable_sounds": False,
-        "sound_intro": False,
-        "sound_outro": False,
-        "sound_emojis": False,
-        "sound_cuts": False,
-
-        # Beat-Sync
-        "beat_sync": False,
-        "beat_zoom": False,
-    },
-
     "smooth": {
         "name": "Smooth",
         "description": "Smooth cuts with word-by-word subtitles",

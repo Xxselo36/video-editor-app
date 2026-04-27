@@ -139,6 +139,7 @@ step_build() {
         --nofollow-import-to=notebook \
         --nofollow-import-to=jupyter \
         --nofollow-import-to=torch \
+        --nofollow-import-to=sympy \
         --output-dir="${DIST_DIR}" \
         gui.py
 

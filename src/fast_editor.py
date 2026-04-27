@@ -244,9 +244,17 @@ class FastVideoEditor:
             if new_start is None or new_end is None:
                 continue
 
+            # Plattform-spezifischer Font
+            if sys.platform == "darwin":
+                fontfile = "/System/Library/Fonts/Helvetica.ttc"
+            elif sys.platform == "win32":
+                fontfile = "C\\:/Windows/Fonts/arial.ttf"
+            else:
+                fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
             # Drawtext Filter - einfach gehalten
             dt = (f"drawtext=text='{phrase_text}':"
-                  f"fontfile=/System/Library/Fonts/Helvetica.ttc:"
+                  f"fontfile={fontfile}:"
                   f"fontsize={fontsize}:fontcolor=white:"
                   f"borderw=4:bordercolor=black:"
                   f"x=(w-text_w)/2:y={y_pos}:"

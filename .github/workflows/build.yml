@@ -215,6 +215,12 @@ jobs:
             patchelf \
             libgirepository1.0-dev
 
+      - name: Prepare ffprobe
+        run: |
+          mkdir -p bin
+          cp $(which ffprobe) bin/ffprobe
+          chmod +x bin/ffprobe
+
       - name: Install Python dependencies (CPU-only torch)
         run: |
           pip install --upgrade pip
@@ -256,6 +262,7 @@ jobs:
             --include-package-data=whisper \
             --include-data-files=yolov8n.pt=yolov8n.pt \
             --include-data-files=logo.png=logo.png \
+            --include-data-files=bin/ffprobe=ffprobe \
             --include-data-dir=src=src \
             --include-data-dir=plugins=plugins \
             --nofollow-import-to=diffusers \
