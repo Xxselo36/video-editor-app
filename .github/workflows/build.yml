@@ -114,7 +114,6 @@ jobs:
             --nofollow-import-to=jupyter `
             --nofollow-import-to=torch `
             --nofollow-import-to=sympy `
-            --nofollow-import-to=scipy.integrate._lebedev `
             --output-dir=dist `
             gui.py
 
@@ -267,7 +266,6 @@ jobs:
             --nofollow-import-to=jupyter \
             --nofollow-import-to=torch \
             --nofollow-import-to=sympy \
-            --nofollow-import-to=scipy.integrate._lebedev \
             --output-dir=dist \
             gui.py
 
