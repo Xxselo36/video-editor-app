@@ -104,6 +104,7 @@ jobs:
             --include-data-files=logo.png=logo.png `
             --include-data-files=bin/ffprobe.exe=ffprobe.exe `
             --include-data-dir=src=src `
+            --include-data-dir=plugins=plugins `
             --nofollow-import-to=diffusers `
             --nofollow-import-to=accelerate `
             --nofollow-import-to=transformers `
@@ -256,6 +257,7 @@ jobs:
             --include-data-files=yolov8n.pt=yolov8n.pt \
             --include-data-files=logo.png=logo.png \
             --include-data-dir=src=src \
+            --include-data-dir=plugins=plugins \
             --nofollow-import-to=diffusers \
             --nofollow-import-to=accelerate \
             --nofollow-import-to=transformers \

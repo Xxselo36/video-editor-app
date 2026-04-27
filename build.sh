@@ -129,6 +129,7 @@ step_build() {
         --include-data-files=logo.png=logo.png \
         --include-data-files=bin/ffprobe=ffprobe \
         --include-data-dir=src=src \
+        --include-data-dir=plugins=plugins \
         --nofollow-import-to=diffusers \
         --nofollow-import-to=accelerate \
         --nofollow-import-to=transformers \
