@@ -130,6 +130,7 @@ step_build() {
         --include-data-files=bin/ffprobe=ffprobe \
         --include-data-dir=src=src \
         --include-data-dir=plugins=plugins \
+        --include-data-files=plugins/premiere/video_editor_premiere.py=plugins/premiere/video_editor_premiere.py \
         --nofollow-import-to=diffusers \
         --nofollow-import-to=accelerate \
         --nofollow-import-to=transformers \
@@ -428,18 +429,52 @@ step_pkg() {
         --install-location "/" \
         "${DIST_DIR}/${APP_NAME}-component.pkg"
 
-    # Installer PKG mit Signing erstellen
+    # Distribution XML erstellen (deaktiviert Bundle Relocation)
+    DIST_XML="${DIST_DIR}/distribution.xml"
+    cat > "$DIST_XML" << 'DISTEOF'
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="1">
+    <pkg-ref id="com.videoeditor.app">
+        <bundle-version>
+            <bundle CFBundleShortVersionString="1.0" id="com.videoeditor.app" path="Applications/SmartCut.app"/>
+        </bundle-version>
+    </pkg-ref>
+    <options customize="never" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.videoeditor.app"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.videoeditor.app" visible="false">
+        <pkg-ref id="com.videoeditor.app"/>
+    </choice>
+    <pkg-ref id="com.videoeditor.app" version="1.0" onConclusion="none">#SmartCut-component.pkg</pkg-ref>
+    <relocate>
+        <bundle id="com.videoeditor.app">
+            <search-path>/Applications</search-path>
+        </bundle>
+    </relocate>
+</installer-gui-script>
+DISTEOF
+
+    # Installer PKG mit Distribution XML und Signing erstellen
     if [[ "$INSTALLER_IDENTITY" != *"DEIN NAME"* ]]; then
         productbuild \
-            --package "${DIST_DIR}/${APP_NAME}-component.pkg" \
+            --distribution "$DIST_XML" \
+            --package-path "${DIST_DIR}" \
             --sign "$INSTALLER_IDENTITY" \
             "$PKG_PATH"
     else
         productbuild \
-            --package "${DIST_DIR}/${APP_NAME}-component.pkg" \
+            --distribution "$DIST_XML" \
+            --package-path "${DIST_DIR}" \
             "$PKG_PATH"
         warn "PKG nicht signiert (keine Installer Identity)"
     fi
+
+    rm -f "$DIST_XML"
 
     # Aufraeumen
     rm -f "${DIST_DIR}/${APP_NAME}-component.pkg"

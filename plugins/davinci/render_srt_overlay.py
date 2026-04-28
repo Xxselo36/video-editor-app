@@ -54,24 +54,16 @@ def main():
     # Escape SRT path for ffmpeg filter (colons and backslashes)
     escaped_srt = srt_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
-    # Render on black background, then use luminance as alpha channel.
-    # The subtitles filter only affects RGB, not alpha, so we need this workaround.
-    filter_complex = (
-        f"[0]subtitles='{escaped_srt}':force_style='{style}'[subs];"
-        f"[subs]split[rgb][alpha];"
-        f"[alpha]format=gray[alphamask];"
-        f"[rgb][alphamask]alphamerge,format=yuva444p10le[out]"
-    )
-
+    # Render white text on black background (no alpha needed).
+    # DaVinci Resolve composite mode "Screen" makes black transparent.
     cmd = [
         ffmpeg, "-y",
         "-f", "lavfi",
         "-i", f"color=black:s={width}x{height}:d={duration}:r={fps}",
-        "-filter_complex", filter_complex,
-        "-map", "[out]",
+        "-vf", f"subtitles='{escaped_srt}':force_style='{style}'",
         "-c:v", "prores_ks",
-        "-profile:v", "4444",
-        "-pix_fmt", "yuva444p10le",
+        "-profile:v", "0",
+        "-pix_fmt", "yuv422p10le",
         output_path,
     ]
 

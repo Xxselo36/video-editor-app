@@ -463,9 +463,11 @@ local function render_subtitle_overlay(srt_path, width, height, duration_sec, fp
         return nil
     end
 
-    local tmp = os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp"
+    local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "/tmp"
     local sep = (package.config:sub(1,1) == "\\") and "\\" or "/"
-    local overlay_path = tmp .. sep .. "ve_subtitle_overlay_" .. os.time() .. ".mov"
+    local overlay_dir = home .. sep .. "Movies" .. sep .. "Videos"
+    os.execute('mkdir -p "' .. overlay_dir .. '"')
+    local overlay_path = overlay_dir .. sep .. "ve_subtitle_overlay_" .. os.time() .. ".mov"
     print("[SmartCut] Rendering subtitle overlay (" .. width .. "x" .. height .. ", " .. string.format("%.1f", duration_sec) .. "s)...")
     local cmd = string.format('%s "%s" "%s" "%s" %d %d %.3f %d 2>&1',
         python, render_script, srt_path, overlay_path, width, height, duration_sec, fps)
@@ -560,8 +562,52 @@ local function import_into_resolve(xml_path, srt_path, clip_name, style_name)
 
     local sub_count = 0
     if result and #result > 0 then
+        -- Set composite mode to "Screen" so black background becomes transparent
+        local composite_set = false
+
+        -- Try on the returned timeline item
+        pcall(function()
+            result[1]:SetProperty("CompositeMode", 5)  -- 6 = Screen
+            composite_set = true
+        end)
+
+        -- Try string variant
+        if not composite_set then
+            pcall(function()
+                result[1]:SetProperty("CompositeMode", "Screen")
+                composite_set = true
+            end)
+        end
+
+        -- Try via GetItemListInTrack
+        if not composite_set then
+            pcall(function()
+                local clips_v2 = new_tl:GetItemListInTrack("video", 2)
+                if clips_v2 and #clips_v2 > 0 then
+                    local item = clips_v2[#clips_v2]
+                    item:SetProperty("CompositeMode", 5)
+                    composite_set = true
+                end
+            end)
+        end
+
+        if not composite_set then
+            pcall(function()
+                local clips_v2 = new_tl:GetItemListInTrack("video", 2)
+                if clips_v2 and #clips_v2 > 0 then
+                    clips_v2[#clips_v2]:SetProperty("CompositeMode", "Screen")
+                    composite_set = true
+                end
+            end)
+        end
+
+        if composite_set then
+            print("[SmartCut] Subtitles on V2 (Screen composite)")
+        else
+            print("[SmartCut] WARNING: Could not set Screen composite mode automatically.")
+            print("[SmartCut] Please set it manually: Right-click V2 clip > Inspector > Composite > Screen")
+        end
         sub_count = 1
-        print("[SmartCut] Subtitles placed on V2")
     else
         print("[SmartCut] Could not place subtitles on V2")
     end
@@ -655,14 +701,7 @@ while true do
                 xml_data.xml_path or "", xml_data.srt_path,
                 clip_name, style)
 
-            -- Cleanup temporary subtitle overlay files
-            local tmp_dir = os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp"
-            local is_win = (package.config:sub(1,1) == "\\")
-            if is_win then
-                os.execute('del /q "' .. tmp_dir .. '\\ve_subtitle_overlay_*.mov" 2>NUL')
-            else
-                os.execute('rm -f "' .. tmp_dir .. '"/ve_subtitle_overlay_*.mov 2>/dev/null')
-            end
+            -- Note: Do NOT delete overlay files — Resolve references them on disk
 
             if ok then
                 local style_labels = {clean="Clean", fast="Fast", balanced="Balanced", smooth="Smooth", minimal="Minimal"}

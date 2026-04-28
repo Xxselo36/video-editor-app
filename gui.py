@@ -183,7 +183,7 @@ from src.platform_utils import open_file_manager
 from src.license import activate_license, check_license, deactivate_license, get_saved_key
 
 # Output directory: SCRIPT_DIR is read-only in .app bundle
-OUTPUT_DIR = Path.home() / "Movies" / "VideoEditor"
+OUTPUT_DIR = Path.home() / "Movies" / "Videos"
 
 
 # ============================================================================
@@ -1017,7 +1017,7 @@ class VideoEditorApp(ctk.CTk):
             ("TIPS", (
                 "• Use Cancel to stop processing.\n"
                 "• Output files are saved to:\n"
-                "  ~/Movies/VideoEditor/\n"
+                "  ~/Movies/Videos/\n"
                 "• License can be managed via the\n"
                 "  License button (top right)."
             )),
@@ -1128,7 +1128,11 @@ class VideoEditorApp(ctk.CTk):
         server_thread.start()
 
     def _open_plugins(self):
-        PluginManagerWindow(self)
+        if hasattr(self, '_plugin_window') and self._plugin_window and self._plugin_window.winfo_exists():
+            self._plugin_window.lift()
+            self._plugin_window.focus_force()
+            return
+        self._plugin_window = PluginManagerWindow(self)
 
     def _show_license(self):
         """Show license info dialog with option to deactivate."""
@@ -1383,18 +1387,21 @@ class PluginManagerWindow(ctk.CTkToplevel):
             return
 
         try:
-            os.makedirs(install_path, exist_ok=True)
             plugin_src = SCRIPT_DIR / "plugins"
 
             if nle_name == "DaVinci Resolve":
+                os.makedirs(install_path, exist_ok=True)
                 src = plugin_src / "davinci" / "smartcut.lua"
                 dst = os.path.join(install_path, "smartcut.lua")
                 shutil.copy2(str(src), dst)
 
             elif nle_name == "Premiere Pro":
                 src = plugin_src / "premiere" / "panel"
+                # Remove old installation if exists
                 if os.path.isdir(install_path):
                     shutil.rmtree(install_path)
+                # Ensure parent directory exists
+                os.makedirs(os.path.dirname(install_path), exist_ok=True)
                 shutil.copytree(str(src), install_path)
 
                 # Also copy the backend server script
