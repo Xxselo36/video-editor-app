@@ -105,6 +105,7 @@ jobs:
             --include-data-files=bin/ffprobe.exe=ffprobe.exe `
             --include-data-dir=src=src `
             --include-data-dir=plugins=plugins `
+            --include-data-files=plugins/premiere/video_editor_premiere.py=plugins/premiere/video_editor_premiere.py `
             --nofollow-import-to=diffusers `
             --nofollow-import-to=accelerate `
             --nofollow-import-to=transformers `
@@ -265,6 +266,7 @@ jobs:
             --include-data-files=bin/ffprobe=ffprobe \
             --include-data-dir=src=src \
             --include-data-dir=plugins=plugins \
+            --include-data-files=plugins/premiere/video_editor_premiere.py=plugins/premiere/video_editor_premiere.py \
             --nofollow-import-to=diffusers \
             --nofollow-import-to=accelerate \
             --nofollow-import-to=transformers \
