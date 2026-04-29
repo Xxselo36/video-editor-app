@@ -14,6 +14,9 @@ import subprocess
 import traceback
 from pathlib import Path
 
+# App version
+APP_VERSION = "1.0.1"
+
 # Determine project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -353,6 +356,55 @@ class VideoEditorApp(ctk.CTk):
         self._build_ui()
         self._auto_install_plugins()
         self._start_plugin_server()
+        self.after(3000, self._check_for_updates)
+
+    def _check_for_updates(self):
+        """Check GitHub for a newer release in background."""
+        def _check():
+            try:
+                import urllib.request, json
+                url = "https://api.github.com/repos/Xxselo36/video-editor-app/releases/latest"
+                req = urllib.request.Request(url, headers={"User-Agent": "SmartCut"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read().decode())
+                tag = data.get("tag_name", "").lstrip("v")
+                if tag and tag != APP_VERSION and tag > APP_VERSION:
+                    self.after(0, lambda: self._show_update_banner(tag))
+            except Exception:
+                pass
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _show_update_banner(self, new_version):
+        """Show update available banner at top of window."""
+        banner = ctk.CTkFrame(self, fg_color=THEME["accent"], corner_radius=0, height=36)
+        banner.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
+        banner.grid_columnconfigure(1, weight=1)
+        banner.lift()
+
+        ctk.CTkLabel(
+            banner, text=f"Update available: v{new_version}",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#ffffff",
+        ).grid(row=0, column=0, padx=(12, 4), pady=6)
+
+        def _open_download():
+            import webbrowser
+            webbrowser.open("https://getsmartcut.app")
+
+        ctk.CTkButton(
+            banner, text="Download", width=80, height=24,
+            fg_color="#ffffff", hover_color="#e0e0e0",
+            text_color=THEME["accent"], corner_radius=6,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=_open_download,
+        ).grid(row=0, column=1, padx=4, pady=6, sticky="e")
+
+        ctk.CTkButton(
+            banner, text="✕", width=24, height=24,
+            fg_color="transparent", hover_color=THEME["accent_hover"],
+            text_color="#ffffff", corner_radius=6,
+            command=banner.destroy,
+        ).grid(row=0, column=2, padx=(0, 8), pady=6)
 
     # ========================================================================
     # HELPERS
