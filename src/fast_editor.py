@@ -342,12 +342,18 @@ class FastVideoEditor:
             final = clip
 
         # Export mit Hardware-Encoding (hohe Qualität)
+        # temp_audiofile explizit setzen — sonst landet die moviepy-Temp-Datei
+        # im CWD (= Program Files beim gepackten Build, nicht beschreibbar).
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        out_stem = os.path.splitext(os.path.basename(output_path))[0]
         final.write_videofile(
             output_path,
             codec=get_video_codec(),
             audio_codec="aac",
             audio_bitrate="192k",
             bitrate="12M",
+            temp_audiofile=os.path.join(out_dir, f"temp-{out_stem}.m4a"),
+            remove_temp=True,
             verbose=False,
             logger=None,
             ffmpeg_params=get_codec_params()

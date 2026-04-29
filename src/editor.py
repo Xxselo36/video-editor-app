@@ -223,11 +223,16 @@ def _process_segment_worker(args):
                 segment = CompositeVideoClip([segment] + all_clips)
 
         # Export als temp-Datei (Software-Encoding für Worker-Kompatibilität)
+        # temp_audiofile explizit setzen, sonst schreibt moviepy mit relativem
+        # Pfad ins CWD — das ist beim gepackten Build "Program Files" und
+        # nicht beschreibbar.
         temp_path = os.path.join(temp_dir, f"segment_{segment_idx:04d}.mp4")
+        temp_audio = os.path.join(temp_dir, f"segment_{segment_idx:04d}_audio.m4a")
         segment.write_videofile(
             temp_path,
             codec="libx264",  # Software-Encoding (funktioniert in Subprocess)
             audio_codec="aac",
+            temp_audiofile=temp_audio,
             bitrate="12M",
             verbose=False,
             logger=None,
@@ -1932,7 +1937,7 @@ class VideoEditor:
             audio_codec="aac",
             audio_bitrate="192k",
             bitrate="12M",
-            temp_audiofile=f"temp-{style_name}.m4a",
+            temp_audiofile=str(self.output_dir / f"temp-{style_name}.m4a"),
             remove_temp=True,
             verbose=False,
             logger=None,
@@ -2138,7 +2143,7 @@ class VideoEditor:
             audio_codec="aac",
             audio_bitrate="192k",
             bitrate="12M",
-            temp_audiofile=f"temp-{output_suffix}.m4a",
+            temp_audiofile=str(self.output_dir / f"temp-{output_suffix}.m4a"),
             remove_temp=True,
             verbose=False,
             logger=None,
