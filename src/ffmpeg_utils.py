@@ -37,17 +37,19 @@ def get_ffmpeg_path() -> str:
     """Gibt den Pfad zu ffmpeg zurueck."""
     bundle_dir = _get_bundle_dir()
 
-    # 1. Nuitka Bundle: imageio_ffmpeg Binary liegt im Bundle
+    # 1. Nuitka Bundle: search for ffmpeg binary in bundle directory
     if _is_bundled():
-        try:
-            import imageio_ffmpeg
-            path = imageio_ffmpeg.get_ffmpeg_exe()
-            if path and os.path.isfile(path):
-                return path
-        except (ImportError, Exception):
-            pass
+        import glob
+        for pattern in [
+            str(bundle_dir / 'imageio_ffmpeg' / 'binaries' / 'ffmpeg*'),
+            str(bundle_dir / 'ffmpeg*'),
+        ]:
+            matches = glob.glob(pattern)
+            for m in matches:
+                if os.path.isfile(m) and os.access(m, os.X_OK):
+                    return m
 
-    # 2. imageio_ffmpeg (Entwicklung)
+    # 2. imageio_ffmpeg (Entwicklung + Bundle)
     try:
         import imageio_ffmpeg
         path = imageio_ffmpeg.get_ffmpeg_exe()
