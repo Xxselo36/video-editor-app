@@ -110,6 +110,11 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
             # GET /subtitle-data - returns subtitle timing/text as JSON for MOGRT placement
             self._handle_subtitle_data()
 
+        elif parsed.path == "/render-srt-overlay":
+            # GET /render-srt-overlay - render SRT to ProRes 4444 overlay (for DaVinci Resolve plugin)
+            data = {k: v[0] for k, v in params.items()}
+            self._handle_render_srt_overlay(data)
+
         else:
             self._respond(404, {"error": "Not found"})
 
@@ -329,6 +334,80 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
         # Return simplified list with start, end, text
         subs = [{"start": s["start"], "end": s["end"], "text": s.get("text", "").upper()} for s in subtitles if s.get("text", "").strip()]
         self._respond(200, {"subtitles": subs, "count": len(subs)})
+
+    def _handle_render_srt_overlay(self, data):
+        """Render SRT subtitles to a ProRes 4444 overlay video.
+
+        Used by the DaVinci Resolve Lua plugin so it does not need a local
+        Python interpreter. Same logic as plugins/davinci/render_srt_overlay.py.
+        """
+        try:
+            srt_path = data.get("srt_path", "")
+            output_path = data.get("output_path", "")
+            width = int(data.get("width", 1920))
+            height = int(data.get("height", 1080))
+            duration = float(data.get("duration", 0))
+            fps = int(data.get("fps", 30))
+
+            if not srt_path or not os.path.isfile(srt_path):
+                self._respond(400, {"error": f"SRT not found: {srt_path}"})
+                return
+            if not output_path:
+                self._respond(400, {"error": "output_path required"})
+                return
+            if duration <= 0:
+                self._respond(400, {"error": "duration must be > 0"})
+                return
+
+            try:
+                from imageio_ffmpeg import get_ffmpeg_exe
+                ffmpeg = get_ffmpeg_exe()
+            except Exception:
+                ffmpeg = "ffmpeg"
+
+            fontsize = max(16, int(height * 0.028))
+            margin_v = max(20, int(height * 0.05))
+            outline = max(1, int(fontsize * 0.08))
+
+            style = (
+                f"PlayResX={width},"
+                f"PlayResY={height},"
+                f"FontName=Helvetica,"
+                f"FontSize={fontsize},"
+                f"PrimaryColour=&H00FFFFFF,"
+                f"OutlineColour=&H80000000,"
+                f"Outline={outline},"
+                f"Alignment=2,"
+                f"MarginV={margin_v},"
+                f"Bold=1"
+            )
+
+            escaped_srt = srt_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+            cmd = [
+                ffmpeg, "-y",
+                "-f", "lavfi",
+                "-i", f"color=black:s={width}x{height}:d={duration}:r={fps}",
+                "-vf", f"subtitles='{escaped_srt}':force_style='{style}'",
+                "-c:v", "prores_ks",
+                "-profile:v", "0",
+                "-pix_fmt", "yuv422p10le",
+                output_path,
+            ]
+
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, **kwargs)
+            if result.returncode == 0 and os.path.isfile(output_path):
+                size_mb = os.path.getsize(output_path) / (1024 * 1024)
+                self._respond(200, {"path": output_path, "size_mb": round(size_mb, 1)})
+            else:
+                err = result.stderr[-500:] if result.stderr else "ffmpeg failed"
+                self._respond(500, {"error": err})
+        except Exception as e:
+            self._respond(500, {"error": f"render_srt_overlay failed: {e}"})
 
     def _handle_export_edl(self, data):
         """Export analysis results as EDL (Edit Decision List)."""

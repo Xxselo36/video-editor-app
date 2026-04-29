@@ -408,81 +408,31 @@ end
 -- ============================================================================
 
 local function render_subtitle_overlay(srt_path, width, height, duration_sec, fps)
-    -- Find Python (try venv, then system)
-    local python = nil
-    local home = os.getenv("USERPROFILE") or os.getenv("HOME") or ""
-    local is_win = (package.config:sub(1,1) == "\\")
-    local try_pythons
-    if is_win then
-        try_pythons = {
-            home .. "\\video-editor-app\\venv\\Scripts\\python.exe",
-            "python",
-            "py",
-        }
-    else
-        try_pythons = {
-            home .. "/video-editor-app/venv313/bin/python3",
-            "/usr/local/bin/python3",
-            "/opt/homebrew/bin/python3",
-            "python3",
-        }
-    end
-    local nul = is_win and "2>NUL" or "2>/dev/null"
-    for _, p in ipairs(try_pythons) do
-        local test = io.popen(p .. ' -c "print(1)" ' .. nul)
-        if test then
-            local out = test:read("*a"):gsub("%s+", "")
-            test:close()
-            if out == "1" then python = p; break end
-        end
-    end
-    if not python then
-        print("[SmartCut] Python not found — skipping subtitles")
-        return nil
-    end
-
-    -- Find render script
-    local script_paths
-    if is_win then
-        script_paths = {
-            home .. "\\video-editor-app\\plugins\\davinci\\render_srt_overlay.py",
-        }
-    else
-        script_paths = {
-            "/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Edit/render_srt_overlay.py",
-            home .. "/video-editor-app/plugins/davinci/render_srt_overlay.py",
-        }
-    end
-    local render_script = nil
-    for _, sp in ipairs(script_paths) do
-        local tf = io.open(sp, "r")
-        if tf then tf:close(); render_script = sp; break end
-    end
-    if not render_script then
-        print("[SmartCut] render_srt_overlay.py not found — skipping subtitles")
-        return nil
-    end
-
+    -- The SmartCut backend (port 8456) renders the overlay so the user does
+    -- not need a local Python interpreter or render script.
     local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "/tmp"
     local sep = (package.config:sub(1,1) == "\\") and "\\" or "/"
     local overlay_dir = home .. sep .. "Movies" .. sep .. "Videos"
     os.execute('mkdir -p "' .. overlay_dir .. '"')
     local overlay_path = overlay_dir .. sep .. "ve_subtitle_overlay_" .. os.time() .. ".mov"
-    print("[SmartCut] Rendering subtitle overlay (" .. width .. "x" .. height .. ", " .. string.format("%.1f", duration_sec) .. "s)...")
-    local cmd = string.format('%s "%s" "%s" "%s" %d %d %.3f %d 2>&1',
-        python, render_script, srt_path, overlay_path, width, height, duration_sec, fps)
-    local handle = io.popen(cmd)
-    if not handle then return nil end
-    local json_out = handle:read("*a")
-    handle:close()
 
-    local ok, result = pcall(json_decode, json_out)
-    if not ok or not result or result.error then
-        print("[SmartCut] Subtitle overlay failed: " .. (result and result.error or json_out:sub(1, 200)))
+    print("[SmartCut] Rendering subtitle overlay (" .. width .. "x" .. height .. ", " .. string.format("%.1f", duration_sec) .. "s)...")
+
+    local path = "/render-srt-overlay"
+        .. "?srt_path=" .. url_encode(srt_path)
+        .. "&output_path=" .. url_encode(overlay_path)
+        .. "&width=" .. width
+        .. "&height=" .. height
+        .. "&duration=" .. string.format("%.3f", duration_sec)
+        .. "&fps=" .. fps
+
+    local result = call_backend(path, 300)
+    if not result or result.error then
+        print("[SmartCut] Subtitle overlay failed: " .. ((result and result.error) or "no response"))
         return nil
     end
     print("[SmartCut] Subtitle overlay: " .. string.format("%.1f", result.size_mb or 0) .. " MB")
-    return overlay_path
+    return result.path or overlay_path
 end
 
 
