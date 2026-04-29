@@ -85,7 +85,7 @@ from .effects import (
 )
 from .audio import AudioAnalyzer, Subtitle, AdvancedAudioAnalyzer
 from .ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
-from .platform_utils import get_video_codec, get_codec_params
+from .platform_utils import get_video_codec, get_codec_params, get_subprocess_kwargs
 
 
 def _process_segment_worker(args):
@@ -239,8 +239,9 @@ def _process_segment_worker(args):
 
         return (segment_idx, temp_path, None)
 
-    except Exception as e:
-        return (segment_idx, None, str(e))
+    except Exception:
+        import traceback as _tb
+        return (segment_idx, None, _tb.format_exc())
 
 
 class VideoEditor:
@@ -309,7 +310,7 @@ class VideoEditor:
                 normalized_path
             ]
 
-            subprocess.run(cmd, capture_output=True)
+            subprocess.run(cmd, capture_output=True, **get_subprocess_kwargs())
             self.original_clip = VideoFileClip(normalized_path)
             self._temp_normalized = normalized_path
         else:
@@ -351,7 +352,7 @@ class VideoEditor:
                 '-of', 'csv=p=0',
                 video_path
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, **get_subprocess_kwargs())
             if result.stdout.strip():
                 rotation = int(float(result.stdout.strip()))
                 if rotation != 0:
@@ -368,7 +369,7 @@ class VideoEditor:
                 '-of', 'csv=p=0',
                 video_path
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, **get_subprocess_kwargs())
             if result.stdout.strip():
                 rotation = int(float(result.stdout.strip()))
                 if rotation != 0:
@@ -379,7 +380,7 @@ class VideoEditor:
         # Methode 3: Volle Stream-Info mit grep
         try:
             cmd = [get_ffprobe_path(), '-v', 'error', '-show_streams', '-select_streams', 'v:0', video_path]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, **get_subprocess_kwargs())
             for line in result.stdout.split('\n'):
                 if 'rotation=' in line:
                     rotation = int(float(line.split('=')[1]))
@@ -400,7 +401,7 @@ class VideoEditor:
                 '-of', 'csv=p=0',
                 video_path
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, **get_subprocess_kwargs())
             if result.stdout.strip():
                 parts = result.stdout.strip().split(',')
                 if len(parts) >= 2:
@@ -1705,8 +1706,21 @@ class VideoEditor:
         # Nur erfolgreiche Segmente
         valid_temp_files = [f for f in temp_files if f is not None]
 
+        if errors:
+            try:
+                log_path = os.path.join(os.path.expanduser("~"), "VideoEditor_segment_errors.log")
+                from datetime import datetime
+                with open(log_path, "w", encoding="utf-8") as f:
+                    f.write(f"Segment errors at {datetime.now().isoformat()}\n")
+                    f.write(f"Input: {self.input_path}\n")
+                    f.write(f"Total segments: {len(temp_files)}, failed: {len(errors)}\n\n")
+                    for err in errors:
+                        f.write(err + "\n" + ("-" * 60) + "\n")
+            except Exception:
+                pass
+
         if not valid_temp_files:
-            raise RuntimeError("No segments processed successfully!")
+            raise RuntimeError("No segments processed successfully! See ~/VideoEditor_segment_errors.log")
 
         # Mit FFmpeg zusammenfügen (kein Re-Encoding = sehr schnell)
         self._report(f"\n[6/6] Merging {len(valid_temp_files)} segments...", step=6, total_steps=6)
@@ -1727,7 +1741,7 @@ class VideoEditor:
             str(out_path)
         ]
 
-        result = subprocess.run(concat_cmd, capture_output=True, text=True)
+        result = subprocess.run(concat_cmd, capture_output=True, text=True, **get_subprocess_kwargs())
         if result.returncode != 0:
             self._report(f"  FFmpeg concat error: {result.stderr}")
             # Fallback: mit Re-Encoding (hohe Qualität)
@@ -1740,7 +1754,7 @@ class VideoEditor:
                 '-c:a', 'aac', '-b:a', '192k',
                 str(out_path)
             ]
-            subprocess.run(concat_cmd, capture_output=True)
+            subprocess.run(concat_cmd, capture_output=True, **get_subprocess_kwargs())
 
         # Auto-Reframe für 9:16 (TikTok/Reels) - NUR wenn Video im Querformat ist
         # und das Cropping sinnvoll wäre (nicht zu viel Bildverlust)
@@ -1773,7 +1787,7 @@ class VideoEditor:
                         '-c:a', 'copy',
                         reframe_temp
                     ]
-                    result = subprocess.run(reframe_cmd, capture_output=True)
+                    result = subprocess.run(reframe_cmd, capture_output=True, **get_subprocess_kwargs())
 
                     if result.returncode == 0:
                         import shutil

@@ -31,6 +31,13 @@ def get_codec_params() -> list:
     return ["-preset", "medium", "-crf", "18"]
 
 
+def get_subprocess_kwargs() -> dict:
+    """Subprocess kwargs that suppress the console window flash on Windows."""
+    if platform.system() == "Windows":
+        return {"creationflags": 0x08000000}  # CREATE_NO_WINDOW
+    return {}
+
+
 def open_file_manager(path: str):
     """Oeffnet den plattform-spezifischen Dateimanager."""
     system = platform.system()

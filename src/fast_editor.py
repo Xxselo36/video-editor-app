@@ -18,7 +18,7 @@ from typing import List, Tuple, Optional
 
 from .audio import AudioAnalyzer, Subtitle
 from .ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
-from .platform_utils import get_video_codec, get_codec_params
+from .platform_utils import get_video_codec, get_codec_params, get_subprocess_kwargs
 
 
 @dataclass
@@ -81,7 +81,7 @@ class FastVideoEditor:
             '-of', 'json',
             str(self.input_path)
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, **get_subprocess_kwargs())
         data = json.loads(result.stdout)
 
         stream = data['streams'][0]
@@ -501,7 +501,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 '-avoid_negative_ts', 'make_zero',
                 segment_path
             ]
-            subprocess.run(cmd, capture_output=True)
+            subprocess.run(cmd, capture_output=True, **get_subprocess_kwargs())
             segment_files.append(segment_path)
             self._check_cancel()
             seg_progress = (i + 1) / len(segments) * 0.5 + 0.5  # 50-100%
@@ -522,7 +522,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             '-c', 'copy',
             concat_output
         ]
-        subprocess.run(cmd, capture_output=True)
+        subprocess.run(cmd, capture_output=True, **get_subprocess_kwargs())
 
         self._check_cancel()
         self._report("Finalisiere...", step=4, total_steps=4)
@@ -569,7 +569,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 str(out_path)
             ]
             self._report("  Untertitel brennen...")
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, **get_subprocess_kwargs())
             if result.returncode != 0:
                 self._report(f"  FFmpeg Fehler: {result.stderr}")
         else:
@@ -584,7 +584,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 str(out_path)
             ]
             self._report("  Finalisiere...")
-            subprocess.run(cmd, capture_output=True)
+            subprocess.run(cmd, capture_output=True, **get_subprocess_kwargs())
 
         # Cleanup
         import shutil
