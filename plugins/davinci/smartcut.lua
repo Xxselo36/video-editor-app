@@ -638,8 +638,12 @@ while true do
             local cuts = st.segments_count or 0
 
             -- 6. Export XML + SRT
+            -- match_filenames=true tells the backend to put the actual on-disk
+            -- filename in the XML <name> field (instead of the original) so
+            -- DaVinci's strict clip lookup succeeds when the source has been
+            -- normalised to a temp file.
             print("[SmartCut] Creating edited timeline...")
-            local xml_data = call_backend("/export-xml", 30)
+            local xml_data = call_backend("/export-xml?match_filenames=true", 30)
 
             if not xml_data or xml_data.error then
                 print("[SmartCut] ERROR: " .. ((xml_data and xml_data.error) or "Export failed"))

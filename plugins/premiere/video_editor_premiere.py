@@ -283,8 +283,16 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
 
             import tempfile
 
-            # Use original filename for display in Premiere (not normalized temp name)
-            original_name = os.path.basename(video_path)
+            # Use original filename for display in Premiere (not normalized temp name).
+            # When match_filenames=true (passed by the DaVinci Lua plugin), use the
+            # basename of the actual file the XML points to, so DaVinci's stricter
+            # clip lookup matches the on-disk filename instead of failing with
+            # "clip not found". Premiere callers do not pass this flag, so their
+            # behaviour is unchanged.
+            if str(data.get("match_filenames", "")).lower() in ("1", "true", "yes"):
+                original_name = os.path.basename(xml_video_path)
+            else:
+                original_name = os.path.basename(video_path)
 
             # For styles with subtitles disabled (e.g. minimal), discard all subtitle data
             enable_subs = config.get("enable_subtitles", True)
