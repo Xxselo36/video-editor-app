@@ -270,7 +270,14 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
 
             # Normalize rotation: if video has rotation metadata, create a copy
             # with rotation baked into pixels so Premiere shows it correctly.
-            xml_video_path = _normalize_rotation(video_path)
+            # The DaVinci Lua plugin passes skip_normalize=true because DaVinci
+            # handles rotation itself and chokes on the large high-bitrate H.264
+            # produced by ultrafast x264 in the normalize step. Premiere callers
+            # do not pass this flag and keep their existing behaviour.
+            if str(data.get("skip_normalize", "")).lower() in ("1", "true", "yes"):
+                xml_video_path = video_path
+            else:
+                xml_video_path = _normalize_rotation(video_path)
 
             # Get target ratio from style config (e.g. Clean has "9:16")
             # Only apply vertical reframing if the source video is already vertical (portrait)

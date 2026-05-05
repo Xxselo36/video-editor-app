@@ -638,12 +638,14 @@ while true do
             local cuts = st.segments_count or 0
 
             -- 6. Export XML + SRT
-            -- match_filenames=true tells the backend to put the actual on-disk
-            -- filename in the XML <name> field (instead of the original) so
-            -- DaVinci's strict clip lookup succeeds when the source has been
-            -- normalised to a temp file.
+            -- match_filenames=true: put the actual on-disk filename in <name>
+            --   (DaVinci's strict clip lookup matches names exactly).
+            -- skip_normalize=true: bypass the rotation pre-bake step. DaVinci
+            --   handles rotation itself and chokes on the large high-bitrate
+            --   H.264 produced by ultrafast x264, so we point straight at the
+            --   original source instead.
             print("[SmartCut] Creating edited timeline...")
-            local xml_data = call_backend("/export-xml?match_filenames=true", 30)
+            local xml_data = call_backend("/export-xml?match_filenames=true&skip_normalize=true", 30)
 
             if not xml_data or xml_data.error then
                 print("[SmartCut] ERROR: " .. ((xml_data and xml_data.error) or "Export failed"))
