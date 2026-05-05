@@ -249,8 +249,11 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
         if not VideoEditorHandler._last_result:
             self._respond(400, {"error": "No analysis result. Run /analyze first."})
             return
-        result = VideoEditorHandler._last_result
-        self._handle_export_xml(result)
+        # Merge URL query params on top of the stored analysis result so callers
+        # can pass options like match_filenames=true (used by the DaVinci plugin).
+        merged = dict(VideoEditorHandler._last_result)
+        merged.update(data)
+        self._handle_export_xml(merged)
 
     def _handle_export_xml(self, data):
         """Export analysis results as Premiere Pro XML and save to file."""
