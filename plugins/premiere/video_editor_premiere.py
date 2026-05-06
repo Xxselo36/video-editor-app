@@ -377,6 +377,15 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
                 self._respond(400, {"error": "duration must be > 0"})
                 return
 
+            # Cap overlay resolution at 1920px on the long side. ProRes 4444 at
+            # 4K + 60fps for 30s would be ~4GB and frequently fails to render.
+            # DaVinci scales the overlay to timeline resolution at composite.
+            MAX_DIM = 1920
+            if max(width, height) > MAX_DIM:
+                scale = MAX_DIM / max(width, height)
+                width = int(width * scale) // 2 * 2  # keep even (encoder requirement)
+                height = int(height * scale) // 2 * 2
+
             try:
                 from imageio_ffmpeg import get_ffmpeg_exe
                 ffmpeg = get_ffmpeg_exe()
