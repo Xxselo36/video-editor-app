@@ -245,11 +245,11 @@
         }
 
         /* DEMO */
-        .demo { max-width: 1100px; margin: 0 auto; }
+        .demo { max-width: 900px; margin: 0 auto; }
         .demo-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 24px;
+            gap: 16px;
             margin-bottom: 48px;
         }
         .demo-item { text-align: center; }
@@ -512,78 +512,7 @@
             margin-top: 4px;
         }
 
-        /* PRICING / CTA */
-        .cta-section {
-            max-width: 700px;
-            margin: 0 auto;
-            text-align: center;
-            padding: 100px 24px;
-        }
-        .cta-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 24px;
-            padding: 64px 48px;
-            position: relative;
-            overflow: hidden;
-        }
-        .cta-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, var(--purple), var(--purple-light), transparent);
-        }
-        .cta-card h2 {
-            font-size: 36px;
-            font-weight: 800;
-            margin-bottom: 12px;
-        }
-        .cta-card .price {
-            font-size: 56px;
-            font-weight: 900;
-            margin: 24px 0 8px;
-            letter-spacing: -2px;
-        }
-        .cta-card .price span {
-            font-size: 18px;
-            font-weight: 500;
-            color: var(--text-muted);
-            letter-spacing: 0;
-        }
-        .cta-card .price-sub {
-            font-size: 15px;
-            color: var(--text-muted);
-            margin-bottom: 32px;
-        }
-        .cta-card ul {
-            list-style: none;
-            text-align: left;
-            max-width: 320px;
-            margin: 0 auto 36px;
-        }
-        .cta-card ul li {
-            padding: 8px 0;
-            font-size: 15px;
-            color: var(--text-muted);
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .cta-card ul li .check {
-            color: #22c55e;
-            font-weight: 700;
-            font-size: 16px;
-        }
-
-        /* DOWNLOAD */
-        .download {
-            max-width: 800px;
-            margin: 0 auto;
-            text-align: center;
-        }
+        /* DOWNLOAD (inside get-started) */
         .download-grid {
             display: flex;
             gap: 16px;
@@ -615,6 +544,120 @@
             font-weight: 400;
         }
 
+        /* GET STARTED */
+        .get-started {
+            max-width: 560px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .get-started-flow {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+        .gs-step { text-align: left; }
+        .gs-step-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 16px;
+        }
+        .gs-step-num {
+            width: 36px;
+            height: 36px;
+            min-width: 36px;
+            background: var(--purple);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 800;
+            color: #fff;
+        }
+        .gs-step-header h3 {
+            font-size: 18px;
+            font-weight: 700;
+        }
+        .gs-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 36px 32px;
+        }
+        .gs-card-buy {
+            position: relative;
+            overflow: hidden;
+        }
+        .gs-card-buy::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--purple), var(--purple-light), transparent);
+        }
+        .gs-price {
+            font-size: 44px;
+            font-weight: 900;
+            letter-spacing: -2px;
+            margin-bottom: 4px;
+        }
+        .gs-price span {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-muted);
+            letter-spacing: 0;
+        }
+        .gs-price-sub {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+        }
+        .gs-features {
+            list-style: none;
+            margin-bottom: 28px;
+        }
+        .gs-features li {
+            padding: 6px 0;
+            font-size: 14px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .gs-features .check {
+            color: #22c55e;
+            font-weight: 700;
+            font-size: 15px;
+        }
+        .gs-arrow {
+            text-align: center;
+            font-size: 28px;
+            color: var(--purple);
+            padding: 20px 0;
+            opacity: 0.6;
+        }
+        .gs-card-download { text-align: center; }
+        .gs-card-download .download-grid {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .gs-card-download .dl-btn {
+            flex: 1;
+            min-width: 140px;
+            padding: 20px 16px;
+            font-size: 15px;
+        }
+        .gs-hint {
+            margin-top: 20px;
+            font-size: 13px;
+            color: var(--text-dim);
+        }
+
         /* FOOTER */
         footer {
             text-align: center;
@@ -633,7 +676,7 @@
             .hero p { font-size: 17px; }
             .section-title { font-size: 32px; }
             .feature-grid { grid-template-columns: 1fr; }
-            .demo-grid { grid-template-columns: 1fr; }
+            .demo-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
             .style-grid { grid-template-columns: repeat(2, 1fr); }
             .plugin-logos { flex-direction: column; align-items: center; }
             .stats-grid { gap: 40px; }
@@ -660,7 +703,7 @@
             <a href="#how">How it works</a>
             <a href="#download">Download</a>
             <a href="https://discord.gg/mGmKnE4H">Discord</a>
-            <a href="https://veditor.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="nav-cta">Get SmartCut</a>
+            <a href="https://scut.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="nav-cta">Get SmartCut</a>
         </div>
     </nav>
 
@@ -671,9 +714,9 @@
             Runs 100% locally on your machine
         </div>
         <h1 class="reveal reveal-delay-1">Edit videos with <span class="gradient">AI</span></h1>
-        <p class="reveal reveal-delay-2">Drop a video, pick a style, click start. SmartCut removes silences, adds subtitles, and exports a clean edit — in minutes.</p>
+        <p class="reveal reveal-delay-2">Select a video, pick a style, click start. SmartCut removes silences, adds subtitles, and exports a clean edit — in minutes.</p>
         <div class="hero-buttons reveal reveal-delay-3">
-            <a href="https://veditor.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="btn btn-primary">Get SmartCut &rarr;</a>
+            <a href="https://scut.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="btn btn-primary">Get SmartCut &rarr;</a>
             <a href="#demo" class="btn btn-secondary">See it in action</a>
         </div>
         <p class="hero-price reveal reveal-delay-4"><strong>$9.99/month</strong> &middot; cancel anytime</p>
@@ -777,7 +820,7 @@
                 <div class="step-num">1</div>
                 <div class="step-content">
                     <h3>Select your video</h3>
-                    <p>Drag and drop or browse. Supports MP4, MOV, AVI, MKV and more.</p>
+                    <p>Browse and select any video file. Supports MP4, MOV, AVI, MKV and more.</p>
                 </div>
             </div>
             <div class="step reveal">
@@ -850,43 +893,60 @@
         </div>
     </section>
 
-    <!-- CTA / PRICING -->
-    <section class="cta-section" id="pricing">
-        <div class="cta-card reveal">
-            <div class="section-label">Start now</div>
-            <h2>Stop editing manually</h2>
-            <div class="price">$9.99 <span>/month</span></div>
-            <div class="price-sub">Cancel anytime. No contracts.</div>
-            <ul>
-                <li><span class="check">&#10003;</span> All 5 editing styles</li>
-                <li><span class="check">&#10003;</span> AI subtitles included</li>
-                <li><span class="check">&#10003;</span> Premiere Pro + Resolve plugins</li>
-                <li><span class="check">&#10003;</span> macOS, Windows, Linux</li>
-                <li><span class="check">&#10003;</span> Runs 100% locally</li>
-                <li><span class="check">&#10003;</span> Updates included</li>
-            </ul>
-            <a href="https://veditor.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="btn btn-primary" style="width: 100%; justify-content: center; font-size: 17px; padding: 18px;">Get SmartCut &rarr;</a>
-        </div>
-    </section>
+    <!-- GET STARTED — combined pricing + download -->
+    <section class="get-started" id="download">
+        <div class="section-label reveal">Get started</div>
+        <h2 class="section-title reveal">Start editing smarter</h2>
+        <p class="section-subtitle reveal">Two steps — get your license, download the app, done.</p>
 
-    <!-- DOWNLOAD -->
-    <section class="download" id="download">
-        <div class="section-label reveal">Download</div>
-        <h2 class="section-title reveal">Get SmartCut</h2>
-        <p class="section-subtitle reveal">Get your license key first, then download for your platform.</p>
-        <div class="download-grid">
-            <a href="https://github.com/Xxselo36/video-editor-app/releases/download/v1.0.0/SmartCut.pkg" class="dl-btn reveal">
-                macOS
-                <span class="os">.pkg Installer</span>
-            </a>
-            <a href="https://github.com/Xxselo36/video-editor-app/releases/download/v1.0.0/SmartCut-Setup.exe" class="dl-btn reveal reveal-delay-1">
-                Windows
-                <span class="os">.exe Installer</span>
-            </a>
-            <a href="https://github.com/Xxselo36/video-editor-app/releases/download/v1.0.0/SmartCut-Linux.AppImage" class="dl-btn reveal reveal-delay-2">
-                Linux
-                <span class="os">AppImage</span>
-            </a>
+        <div class="get-started-flow reveal">
+            <!-- Step 1: Buy -->
+            <div class="gs-step">
+                <div class="gs-step-header">
+                    <div class="gs-step-num">1</div>
+                    <h3>Get your license key</h3>
+                </div>
+                <div class="gs-card gs-card-buy">
+                    <div class="gs-price">$9.99 <span>/month</span></div>
+                    <div class="gs-price-sub">Cancel anytime. No contracts.</div>
+                    <ul class="gs-features">
+                        <li><span class="check">&#10003;</span> All 5 editing styles</li>
+                        <li><span class="check">&#10003;</span> AI subtitles included</li>
+                        <li><span class="check">&#10003;</span> Premiere Pro + Resolve plugins</li>
+                        <li><span class="check">&#10003;</span> Runs 100% locally</li>
+                        <li><span class="check">&#10003;</span> Updates included</li>
+                    </ul>
+                    <a href="https://scut.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="btn btn-primary" style="width: 100%; justify-content: center; font-size: 16px; padding: 16px;">Get License Key &rarr;</a>
+                </div>
+            </div>
+
+            <!-- Arrow -->
+            <div class="gs-arrow reveal">&#8595;</div>
+
+            <!-- Step 2: Download -->
+            <div class="gs-step">
+                <div class="gs-step-header">
+                    <div class="gs-step-num">2</div>
+                    <h3>Download for your platform</h3>
+                </div>
+                <div class="gs-card gs-card-download">
+                    <div class="download-grid">
+                        <a href="https://github.com/Xxselo36/video-editor-app/releases/download/v1.0.0/SmartCut.pkg" class="dl-btn">
+                            macOS
+                            <span class="os">.pkg Installer</span>
+                        </a>
+                        <a href="https://github.com/Xxselo36/video-editor-app/releases/download/v1.0.0/SmartCut-Setup.exe" class="dl-btn">
+                            Windows
+                            <span class="os">.exe Installer</span>
+                        </a>
+                        <a href="https://github.com/Xxselo36/video-editor-app/releases/download/v1.0.0/SmartCut-Linux.AppImage" class="dl-btn">
+                            Linux
+                            <span class="os">AppImage</span>
+                        </a>
+                    </div>
+                    <p class="gs-hint">Install the app, enter your license key, and start editing.</p>
+                </div>
+            </div>
         </div>
     </section>
 
