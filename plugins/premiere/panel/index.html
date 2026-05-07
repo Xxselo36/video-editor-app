@@ -158,6 +158,207 @@
         }
         .connection .dot.ok { background: #00c853; box-shadow: 0 0 4px #00c85380; }
         .connection .dot.off { background: #ef5350; }
+        .option-row { padding: 0; margin-top: 12px; }
+        .toggle-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: #ccc; text-transform: none; font-weight: 400; margin-bottom: 0; }
+        .toggle-label input[type="checkbox"] { accent-color: #6c5ce7; width: 16px; height: 16px; cursor: pointer; }
+        #fillerInfo { font-size: 11px; color: #aaa; margin-top: 8px; }
+
+        /* Enhanced progress panel */
+        .enhanced-progress {
+            display: none;
+            margin-top: 12px;
+            padding: 12px;
+            background: #12121a;
+            border: 1px solid #1e1e2e;
+            border-radius: 10px;
+        }
+        .enhanced-progress.active { display: block; }
+
+        /* Phase indicators */
+        .phases {
+            margin-bottom: 10px;
+        }
+        .phase {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #5a5a64;
+            padding: 3px 0;
+            transition: color 0.3s, opacity 0.3s;
+        }
+        .phase.running { color: #7a8eff; }
+        .phase.done { color: #00c853; }
+        .phase-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #2a2a32;
+            flex-shrink: 0;
+            transition: background 0.3s, box-shadow 0.3s;
+        }
+        .phase.running .phase-dot {
+            background: #6c5ce7;
+            box-shadow: 0 0 6px #6c5ce780;
+            animation: phasePulse 1.2s ease-in-out infinite;
+        }
+        .phase.done .phase-dot {
+            background: #00c853;
+            box-shadow: 0 0 4px #00c85360;
+        }
+        .phase-check {
+            display: none;
+            font-size: 10px;
+        }
+        .phase.done .phase-check { display: inline; }
+        .phase.done .phase-dot { display: none; }
+        .phase-detail {
+            font-size: 10px;
+            color: #5a5a64;
+            margin-left: auto;
+            max-width: 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        @keyframes phasePulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        /* Timeline visualization */
+        .timeline-section {
+            margin: 10px 0;
+        }
+        .timeline-label {
+            font-size: 10px;
+            color: #5a5a64;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        .timeline-bar {
+            width: 100%;
+            height: 18px;
+            background: #1a1a2e;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+        }
+        .timeline-segment {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            transition: left 0.3s, width 0.3s;
+        }
+        .timeline-segment.speech {
+            background: #00b894;
+            opacity: 0.85;
+        }
+        .timeline-segment.silence {
+            background: #1a1a2e;
+        }
+        .timeline-segment.filler {
+            background: #e17055;
+            opacity: 0.9;
+            z-index: 1;
+        }
+        .timeline-markers {
+            display: flex;
+            justify-content: space-between;
+            font-size: 9px;
+            color: #3a3a48;
+            margin-top: 2px;
+            padding: 0 1px;
+        }
+
+        /* Stats row */
+        .stats-row {
+            display: flex;
+            gap: 6px;
+            margin: 10px 0;
+        }
+        .stat {
+            flex: 1;
+            background: #16161f;
+            border-radius: 6px;
+            padding: 8px 6px;
+            text-align: center;
+        }
+        .stat-value {
+            display: block;
+            font-size: 16px;
+            font-weight: 700;
+            color: #f0f0f2;
+            line-height: 1.2;
+        }
+        .stat-label {
+            display: block;
+            font-size: 9px;
+            color: #5a5a64;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+
+        /* Transcript area */
+        .transcript-section {
+            margin-top: 10px;
+        }
+        .transcript-area {
+            background: #0d0d14;
+            border: 1px solid #1a1a2e;
+            border-radius: 6px;
+            padding: 8px;
+            max-height: 80px;
+            overflow-y: auto;
+            font-size: 11px;
+            line-height: 1.6;
+            color: #b0b0ba;
+        }
+        .transcript-area::-webkit-scrollbar {
+            width: 4px;
+        }
+        .transcript-area::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .transcript-area::-webkit-scrollbar-thumb {
+            background: #2a2a36;
+            border-radius: 2px;
+        }
+        .transcript-word {
+            display: inline;
+            opacity: 0;
+            animation: wordFadeIn 0.3s ease forwards;
+        }
+        .transcript-word.filler {
+            color: #e17055;
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+        @keyframes wordFadeIn {
+            from { opacity: 0; transform: translateY(2px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Duration display */
+        .duration-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #8e8e96;
+            margin-top: 6px;
+        }
+        .duration-row .arrow {
+            color: #6c5ce7;
+            font-weight: 700;
+        }
+        .duration-row .dur-value {
+            font-weight: 600;
+            color: #f0f0f2;
+        }
     </style>
 </head>
 <body>
@@ -181,6 +382,13 @@
         <div id="styleDesc" style="color:#5a5a64;font-size:10px;margin-top:4px;"></div>
     </div>
 
+    <div class="option-row">
+        <label class="toggle-label">
+            <input type="checkbox" id="removeFillers" checked>
+            <span class="toggle-text">Remove filler words (um, uh, like...)</span>
+        </label>
+    </div>
+
     <button class="btn-primary" id="processBtn" onclick="processVideo()">
         Process Selected Clip
     </button>
@@ -192,7 +400,47 @@
         </div>
     </div>
 
+    <div class="enhanced-progress" id="enhancedProgress">
+        <div class="phases" id="phasesContainer"></div>
+
+        <div class="timeline-section">
+            <div class="timeline-label">Timeline</div>
+            <div class="timeline-bar" id="timelineBar"></div>
+            <div class="timeline-markers" id="timelineMarkers"></div>
+        </div>
+
+        <div class="stats-row">
+            <div class="stat">
+                <span class="stat-value" id="cutCount">0</span>
+                <span class="stat-label">cuts</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="timeRemoved">0s</span>
+                <span class="stat-label">removed</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="editedDuration">--</span>
+                <span class="stat-label">edited</span>
+            </div>
+        </div>
+
+        <div class="duration-row" id="durationRow" style="display:none;">
+            <span class="dur-value" id="origDur">0:00</span>
+            <span class="arrow">&rarr;</span>
+            <span class="dur-value" id="editDur">0:00</span>
+        </div>
+
+        <div class="transcript-section">
+            <div class="timeline-label">Transcript</div>
+            <div class="transcript-area" id="transcriptArea"></div>
+        </div>
+    </div>
+
     <div class="status" id="status"></div>
+
+    <div id="fillerInfo" style="display:none;">
+        <span id="fillerCount"></span> filler words detected (<span id="fillerDuration"></span>s)
+    </div>
 
     <div class="connection" id="connection">
         <span class="dot off" id="connDot"></span> Checking backend...
@@ -202,6 +450,7 @@
         var csInterface = null;
         var _lastVideoPath = '';
         var _lastStyle = '';
+        var _lastWordCount = 0;  // Track displayed transcript words to avoid duplication
 
         try { csInterface = new CSInterface(); } catch (e) {}
 
@@ -312,16 +561,21 @@
 
             btn.disabled = true;
             btn.textContent = 'Processing...';
+            document.getElementById('fillerInfo').style.display = 'none';
             progressWrap.classList.add('active');
             progressFill.style.width = '5%';
             progressPct.textContent = '5%';
             setStatus('info', 'Starting analysis...');
+            // Show enhanced progress panel and reset state
+            _lastWordCount = 0;
+            showEnhancedProgress(true);
 
             try {
                 var style = document.getElementById('style').value;
+                var removeFillers = document.getElementById('removeFillers').checked;
                 _lastVideoPath = videoPath;
                 _lastStyle = style;
-                var url = '/analyze?video_path=' + encodeURIComponent(videoPath) + '&style=' + style + '&whisper_model=medium';
+                var url = '/analyze?video_path=' + encodeURIComponent(videoPath) + '&style=' + style + '&whisper_model=medium&remove_fillers=' + (removeFillers ? '1' : '0');
 
                 // Start async analysis (returns immediately)
                 var startData = await apiFetch(url, 15000);
@@ -351,10 +605,14 @@
                     progressPct.textContent = Math.round(pct) + '%';
                     if (data.message) setStatus('info', data.message);
 
+                    // Update enhanced progress UI
+                    updateEnhancedProgress(data);
+
                     if (data.status === 'done') {
                         onAnalysisDone(data, btn, progressWrap, progressFill, progressPct);
                     } else if (data.status === 'error') {
                         setStatus('error', data.error || 'Analysis failed');
+                        showEnhancedProgress(false);
                         resetProcessBtn(btn, progressWrap, progressFill, progressPct);
                     } else {
                         setTimeout(check, 2000);
@@ -389,6 +647,20 @@
         }
 
         async function onAnalysisDone(jobData, btn, progressWrap, progressFill, progressPct) {
+            // Show filler word info if available
+            var fillerInfoEl = document.getElementById('fillerInfo');
+            if (jobData.fillers && jobData.fillers.length > 0) {
+                document.getElementById('fillerCount').textContent = jobData.fillers.length;
+                var totalDuration = 0;
+                for (var i = 0; i < jobData.fillers.length; i++) {
+                    totalDuration += (jobData.fillers[i].end - jobData.fillers[i].start);
+                }
+                document.getElementById('fillerDuration').textContent = totalDuration.toFixed(1);
+                fillerInfoEl.style.display = 'block';
+            } else {
+                fillerInfoEl.style.display = 'none';
+            }
+
             progressFill.style.width = '90%';
             progressPct.textContent = '90%';
             setStatus('info', 'Creating edited sequence...');
@@ -435,6 +707,7 @@
                 progressWrap.classList.remove('active');
                 progressFill.style.width = '0%';
                 progressPct.textContent = '0%';
+                showEnhancedProgress(false);
             }, 5000);
         }
 
@@ -456,6 +729,146 @@
             document.getElementById('styleDesc').textContent = styleDescs[val] || '';
         }
         updateStyleDesc();
+
+        // --- Enhanced Progress Functions ---
+
+        function showEnhancedProgress(show) {
+            var el = document.getElementById('enhancedProgress');
+            if (show) {
+                el.classList.add('active');
+                // Reset contents
+                document.getElementById('phasesContainer').innerHTML = '';
+                document.getElementById('timelineBar').innerHTML = '';
+                document.getElementById('timelineMarkers').innerHTML = '';
+                document.getElementById('transcriptArea').innerHTML = '';
+                document.getElementById('cutCount').textContent = '0';
+                document.getElementById('timeRemoved').textContent = '0s';
+                document.getElementById('editedDuration').textContent = '--';
+                document.getElementById('durationRow').style.display = 'none';
+            } else {
+                el.classList.remove('active');
+            }
+        }
+
+        function updateEnhancedProgress(data) {
+            // Update phases
+            if (data.phases && data.phases.length > 0) {
+                updatePhases(data.phases);
+            }
+
+            // Update timeline
+            if (data.segments && data.segments.length > 0 && data.stats) {
+                updateTimeline(data.segments, data.stats.original_duration || 0);
+            }
+
+            // Update stats
+            if (data.stats) {
+                updateStats(data.stats);
+            }
+
+            // Update transcript
+            if (data.transcript_words && data.transcript_words.length > 0) {
+                updateTranscript(data.transcript_words);
+            }
+        }
+
+        function updatePhases(phases) {
+            var container = document.getElementById('phasesContainer');
+            var html = '';
+            for (var i = 0; i < phases.length; i++) {
+                var p = phases[i];
+                var cls = 'phase';
+                if (p.status === 'running') cls += ' running';
+                else if (p.status === 'done') cls += ' done';
+                var icon = p.status === 'done' ? '<span class="phase-check">&#10003;</span>' : '';
+                html += '<div class="' + cls + '">'
+                    + '<span class="phase-dot"></span>'
+                    + icon
+                    + '<span>' + escapeHtml(p.name) + '</span>'
+                    + '</div>';
+            }
+            container.innerHTML = html;
+        }
+
+        function updateTimeline(segments, duration) {
+            if (!duration || duration <= 0) return;
+            var bar = document.getElementById('timelineBar');
+            var html = '';
+
+            // Separate speech/silence from filler (filler overlays on top)
+            for (var i = 0; i < segments.length; i++) {
+                var seg = segments[i];
+                var leftPct = (seg.start / duration) * 100;
+                var widthPct = ((seg.end - seg.start) / duration) * 100;
+                if (widthPct < 0.1) continue; // skip tiny segments
+                html += '<div class="timeline-segment ' + seg.type + '" '
+                    + 'style="left:' + leftPct.toFixed(2) + '%;width:' + widthPct.toFixed(2) + '%;"></div>';
+            }
+            bar.innerHTML = html;
+
+            // Update time markers
+            var markers = document.getElementById('timelineMarkers');
+            var markerCount = 5;
+            var markerHtml = '';
+            for (var m = 0; m < markerCount; m++) {
+                var t = (duration / (markerCount - 1)) * m;
+                markerHtml += '<span>' + formatTime(t) + '</span>';
+            }
+            markers.innerHTML = markerHtml;
+        }
+
+        function updateStats(stats) {
+            document.getElementById('cutCount').textContent = stats.cuts || 0;
+
+            var totalRemoved = (stats.silence_removed || 0) + (stats.fillers_removed || 0);
+            document.getElementById('timeRemoved').textContent = totalRemoved.toFixed(1) + 's';
+
+            if (stats.edited_duration > 0) {
+                document.getElementById('editedDuration').textContent = formatTime(stats.edited_duration);
+            }
+
+            // Show duration comparison
+            if (stats.original_duration > 0 && stats.edited_duration > 0) {
+                var row = document.getElementById('durationRow');
+                row.style.display = 'flex';
+                document.getElementById('origDur').textContent = formatTime(stats.original_duration);
+                document.getElementById('editDur').textContent = formatTime(stats.edited_duration);
+            }
+        }
+
+        function updateTranscript(words) {
+            var area = document.getElementById('transcriptArea');
+
+            // Only append new words
+            if (words.length <= _lastWordCount) return;
+
+            for (var i = _lastWordCount; i < words.length; i++) {
+                var w = words[i];
+                var span = document.createElement('span');
+                span.className = 'transcript-word' + (w.is_filler ? ' filler' : '');
+                span.textContent = w.word + ' ';
+                // Stagger animation delay for new words
+                var delay = (i - _lastWordCount) * 0.02;
+                span.style.animationDelay = delay.toFixed(2) + 's';
+                area.appendChild(span);
+            }
+            _lastWordCount = words.length;
+
+            // Auto-scroll to bottom
+            area.scrollTop = area.scrollHeight;
+        }
+
+        function formatTime(seconds) {
+            var mins = Math.floor(seconds / 60);
+            var secs = Math.floor(seconds % 60);
+            return mins + ':' + (secs < 10 ? '0' : '') + secs;
+        }
+
+        function escapeHtml(text) {
+            var div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
     </script>
 </body>
 </html>

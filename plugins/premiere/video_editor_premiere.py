@@ -40,7 +40,19 @@ _current_job = {
     "message": "",
     "segments_count": 0,
     "subtitles_count": 0,
+    "fillers_count": 0,
     "error": None,
+    # Enhanced progress tracking
+    "transcript_words": [],   # [{"word": str, "is_filler": bool, "start": float, "end": float}]
+    "segments": [],           # [{"start": float, "end": float, "type": "speech"|"silence"|"filler"}]
+    "stats": {
+        "cuts": 0,
+        "silence_removed": 0.0,
+        "fillers_removed": 0.0,
+        "original_duration": 0.0,
+        "edited_duration": 0.0,
+    },
+    "phases": [],             # [{"name": str, "status": "pending"|"running"|"done", "detail": str}]
 }
 
 # German → English translations for progress messages shown in the panel
@@ -74,6 +86,141 @@ def _translate_progress(msg):
     for de, en in _TRANSLATIONS:
         result = result.replace(de, en)
     return result
+
+
+def _parse_bool(value, default=True):
+    """Parse a bool from request data (handles str, bool, None)."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("1", "true", "yes")
+    return bool(value)
+
+
+def _update_phases(message, phases):
+    """Update phase statuses based on progress message keywords."""
+    msg_lower = message.lower()
+
+    # Phase detection mapping: keyword -> phase index
+    phase_triggers = [
+        (["transcrib", "whisper", "loading whisper", "extracting audio"], 0),
+        (["detecting speech", "silence detection", "speech segments", "silence segments", "analyzing audio", "analyzing silence"], 1),
+        (["filler word", "detecting filler", "removing filler"], 2),
+        (["optimizing cut", "smart cut", "mapping subtitle"], 3),
+    ]
+
+    for keywords, idx in phase_triggers:
+        if idx < len(phases):
+            for kw in keywords:
+                if kw in msg_lower:
+                    # Mark this phase as running
+                    if phases[idx]["status"] != "done":
+                        phases[idx]["status"] = "running"
+                        phases[idx]["detail"] = message
+                    # Mark all previous phases as done
+                    for prev in range(idx):
+                        if phases[prev]["status"] != "done":
+                            phases[prev]["status"] = "done"
+                    break
+
+    # Extract numeric details from messages
+    for idx, phase in enumerate(phases):
+        if phase["status"] == "running":
+            # Try to extract counts from messages like "Found 15 silence segments"
+            import re
+            count_match = re.search(r'(\d+)\s+(speech|silence|subtitle|filler)', msg_lower)
+            if count_match:
+                phase["detail"] = message
+
+
+def _build_transcript_words(subtitles, fillers):
+    """Build transcript word list from subtitles, marking fillers."""
+    filler_words_set = set()
+    filler_ranges = []
+    for f in fillers:
+        filler_words_set.add(f["word"].lower().strip())
+        filler_ranges.append((f["start"], f["end"]))
+
+    words = []
+    for sub in subtitles:
+        # Use original timestamps if available, otherwise mapped timestamps
+        orig_start = sub.get("original_start", sub["start"])
+        orig_end = sub.get("original_end", sub["end"])
+        text = sub.get("text", "").strip()
+        if not text:
+            continue
+
+        # Check if this word overlaps with any filler range
+        is_filler = False
+        for fs, fe in filler_ranges:
+            if orig_start < fe and orig_end > fs:
+                is_filler = True
+                break
+
+        words.append({
+            "word": text,
+            "is_filler": is_filler,
+            "start": round(orig_start, 3),
+            "end": round(orig_end, 3),
+        })
+    return words
+
+
+def _build_timeline_segments(speech_segments, fillers, duration):
+    """Build timeline segments with types for visualization."""
+    if not speech_segments or duration <= 0:
+        return []
+
+    # Build filler ranges for overlap checking
+    filler_ranges = [(f["start"], f["end"]) for f in fillers]
+
+    timeline = []
+    prev_end = 0.0
+
+    for start, end in sorted(speech_segments):
+        # Add silence gap before this speech segment
+        if start > prev_end + 0.01:
+            timeline.append({
+                "start": round(prev_end, 3),
+                "end": round(start, 3),
+                "type": "silence",
+            })
+
+        # Check if this speech segment contains filler overlap
+        # Split into sub-segments if needed (simplified: mark whole segment)
+        has_filler = False
+        for fs, fe in filler_ranges:
+            if start < fe and end > fs:
+                has_filler = True
+                break
+
+        timeline.append({
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "type": "speech",
+        })
+
+        prev_end = end
+
+    # Add trailing silence
+    if prev_end < duration - 0.01:
+        timeline.append({
+            "start": round(prev_end, 3),
+            "end": round(duration, 3),
+            "type": "silence",
+        })
+
+    # Add filler segments as separate entries for visualization
+    for f in fillers:
+        timeline.append({
+            "start": round(f["start"], 3),
+            "end": round(f["end"], 3),
+            "type": "filler",
+        })
+
+    return timeline
 
 
 class VideoEditorHandler(BaseHTTPRequestHandler):
@@ -147,6 +294,9 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
 
         whisper_model = data.get("whisper_model", "medium")
         style = data.get("style", "clean")
+        remove_fillers = _parse_bool(data.get("remove_fillers"), default=True)
+        smart_cut = _parse_bool(data.get("smart_cut"), default=True)
+        filler_sensitivity = data.get("filler_sensitivity", "medium")
 
         try:
             from src.plugin_api import analyze_video
@@ -155,6 +305,9 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
                 video_path=video_path,
                 whisper_model=whisper_model,
                 style=style,
+                remove_fillers=remove_fillers,
+                smart_cut=smart_cut,
+                filler_sensitivity=filler_sensitivity,
                 progress_callback=lambda msg, step=None, total_steps=None, progress=None: print(f"  {msg}"),
             )
 
@@ -177,6 +330,9 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
 
         whisper_model = data.get("whisper_model", "medium")
         style = data.get("style", "clean")
+        remove_fillers = _parse_bool(data.get("remove_fillers"), default=True)
+        smart_cut = _parse_bool(data.get("smart_cut"), default=True)
+        filler_sensitivity = data.get("filler_sensitivity", "medium")
 
         with _job_lock:
             if _current_job["status"] == "processing":
@@ -188,7 +344,23 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
                 "message": "Starting analysis...",
                 "segments_count": 0,
                 "subtitles_count": 0,
+                "fillers_count": 0,
                 "error": None,
+                "transcript_words": [],
+                "segments": [],
+                "stats": {
+                    "cuts": 0,
+                    "silence_removed": 0.0,
+                    "fillers_removed": 0.0,
+                    "original_duration": 0.0,
+                    "edited_duration": 0.0,
+                },
+                "phases": [
+                    {"name": "Transcribing audio", "status": "pending", "detail": ""},
+                    {"name": "Detecting speech segments", "status": "pending", "detail": ""},
+                    {"name": "Detecting filler words", "status": "pending", "detail": ""},
+                    {"name": "Optimizing cuts", "status": "pending", "detail": ""},
+                ],
             })
 
         def run_analysis():
@@ -204,12 +376,17 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
                             _current_job["progress"] = min(pct, 99)
                         elif step and total_steps:
                             _current_job["progress"] = min(int((step / total_steps) * 100), 99)
+                        # Update phases based on progress message
+                        _update_phases(translated, _current_job["phases"])
                     print(f"  {translated}")
 
                 result = analyze_video(
                     video_path=video_path,
                     whisper_model=whisper_model,
                     style=style,
+                    remove_fillers=remove_fillers,
+                    smart_cut=smart_cut,
+                    filler_sensitivity=filler_sensitivity,
                     progress_callback=progress_cb,
                 )
 
@@ -217,13 +394,43 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
                 result_dict["style"] = style
                 VideoEditorHandler._last_result = result_dict
 
+                # Build enhanced progress data from result
+                duration = result_dict.get("duration", 0)
+                segments = result_dict.get("segments", [])
+                fillers = result_dict.get("fillers", []) or []
+                subtitles = result_dict.get("subtitles", [])
+
+                # Build transcript words list from subtitles with filler marking
+                transcript_words = _build_transcript_words(subtitles, fillers)
+
+                # Build timeline segments (speech/silence/filler)
+                timeline_segments = _build_timeline_segments(segments, fillers, duration)
+
+                # Calculate stats
+                edited_duration = sum(e - s for s, e in segments)
+                silence_removed = duration - edited_duration
+                filler_duration = sum(f["end"] - f["start"] for f in fillers)
+
                 with _job_lock:
+                    # Mark all phases done
+                    for phase in _current_job["phases"]:
+                        phase["status"] = "done"
                     _current_job.update({
                         "status": "done",
                         "progress": 100,
                         "message": "Analysis complete",
-                        "segments_count": len(result_dict.get("segments", [])),
-                        "subtitles_count": len(result_dict.get("subtitles", [])),
+                        "segments_count": len(segments),
+                        "subtitles_count": len(subtitles),
+                        "fillers_count": len(fillers),
+                        "transcript_words": transcript_words,
+                        "segments": timeline_segments,
+                        "stats": {
+                            "cuts": len(segments),
+                            "silence_removed": round(silence_removed, 1),
+                            "fillers_removed": round(filler_duration, 1),
+                            "original_duration": round(duration, 1),
+                            "edited_duration": round(edited_duration, 1),
+                        },
                     })
 
             except Exception as e:
@@ -240,9 +447,16 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
         self._respond(200, {"status": "started"})
 
     def _handle_job_status(self):
-        """Return current async job status."""
+        """Return current async job status with enhanced progress data."""
         with _job_lock:
-            self._respond(200, dict(_current_job))
+            response = dict(_current_job)
+            # Deep-copy mutable nested fields so JSON serialization is safe
+            response["stats"] = dict(_current_job.get("stats", {}))
+            response["phases"] = [dict(p) for p in _current_job.get("phases", [])]
+            # Include fillers from last result when done (needed by onAnalysisDone)
+            if response["status"] == "done" and VideoEditorHandler._last_result:
+                response["fillers"] = VideoEditorHandler._last_result.get("fillers")
+            self._respond(200, response)
 
     def _handle_export_xml_from_last(self, data):
         """Export last analysis result as XML (for GET-based workflow)."""
@@ -562,7 +776,10 @@ def _normalize_rotation(video_path):
     probe = _probe_video(video_path)
     rot = probe.get("rotation", 0)
 
-    if rot == 0:
+    # macOS: always normalize to bake rotation into pixels (ffmpeg autorotation)
+    # On other platforms, only normalize if rotation is detected
+    import platform
+    if rot == 0 and platform.system() != 'Darwin':
         return video_path
 
     import hashlib

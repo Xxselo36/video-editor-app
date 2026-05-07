@@ -1182,7 +1182,7 @@ class ObjectDetector:
             from ultralytics import YOLO
             # Nutze YOLOv8 nano (schnell und klein)
             # Im Nuitka Bundle liegt das Modell neben der Binary
-            if getattr(sys, 'frozen', False) or '__compiled__' in dir():
+            if getattr(sys, 'frozen', False) or '__compiled__' in globals():
                 yolo_path = str(Path(sys.executable).parent / 'yolov8n.pt')
             else:
                 yolo_path = str(Path(__file__).parent.parent / 'yolov8n.pt')

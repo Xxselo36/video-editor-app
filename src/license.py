@@ -12,6 +12,7 @@ import uuid
 # Only applies when the network is unreachable. If LemonSqueezy
 # explicitly says the license is invalid, the app blocks immediately.
 GRACE_PERIOD_SECS = 86400
+TRIAL_MAX_EDITS = 3
 
 ACTIVATE_URL = "https://api.lemonsqueezy.com/v1/licenses/activate"
 VALIDATE_URL = "https://api.lemonsqueezy.com/v1/licenses/validate"
@@ -275,6 +276,88 @@ def deactivate_license():
     return True, "License deactivated."
 
 
+def _get_trial_file():
+    """Get path to local trial file."""
+    if platform.system() == "Windows":
+        base = os.environ.get("APPDATA", os.path.expanduser("~"))
+    else:
+        base = os.path.expanduser("~")
+    trial_dir = os.path.join(base, ".videoeditor")
+    os.makedirs(trial_dir, exist_ok=True)
+    return os.path.join(trial_dir, ".trial")
+
+
+def _load_trial():
+    """Load trial data from local storage."""
+    path = _get_trial_file()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            encoded = f.read().strip()
+        data = json.loads(_deobfuscate(encoded))
+        # Prevent copying trial file between machines
+        if data.get("machine_id") != _get_machine_id():
+            return None
+        # Detect clock manipulation
+        if time.time() < data.get("first_use", 0):
+            return None
+        return data
+    except Exception:
+        return None
+
+
+def _save_trial(data):
+    """Save trial data locally."""
+    path = _get_trial_file()
+    encoded = _obfuscate(json.dumps(data))
+    with open(path, "w") as f:
+        f.write(encoded)
+
+
+def check_trial():
+    """Check if trial usage is allowed. Returns (allowed, remaining, message)."""
+    data = _load_trial()
+    if data is None:
+        data = {
+            "edits": 0,
+            "first_use": time.time(),
+            "machine_id": _get_machine_id(),
+        }
+        _save_trial(data)
+
+    edits = data.get("edits", 0)
+    if edits >= TRIAL_MAX_EDITS:
+        return False, 0, "Free trial ended."
+
+    remaining = TRIAL_MAX_EDITS - edits
+    return True, remaining, f"Trial: {remaining} edits remaining"
+
+
+def increment_trial():
+    """Increment trial edit count. Returns (remaining, total)."""
+    data = _load_trial()
+    if data is None:
+        data = {
+            "edits": 0,
+            "first_use": time.time(),
+            "machine_id": _get_machine_id(),
+        }
+    data["edits"] = data.get("edits", 0) + 1
+    _save_trial(data)
+    remaining = max(0, TRIAL_MAX_EDITS - data["edits"])
+    return remaining, TRIAL_MAX_EDITS
+
+
+def is_trial_mode():
+    """Return True if no valid license exists and trial edits remain."""
+    data = _load_license()
+    if data and data.get("valid"):
+        return False
+    trial_ok, _, _ = check_trial()
+    return trial_ok
+
+
 def check_license():
     """
     Check if the app should be allowed to run.
@@ -291,7 +374,10 @@ def check_license():
     """
     data = _load_license()
     if not data:
-        return False, "No license key entered."
+        trial_ok, remaining, trial_msg = check_trial()
+        if trial_ok:
+            return True, trial_msg
+        return False, "Free trial ended. Enter a license key to continue."
 
     if not data.get("valid"):
         return False, "License is no longer valid."

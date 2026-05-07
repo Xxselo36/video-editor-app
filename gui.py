@@ -169,10 +169,11 @@ except Exception:
 def _setup_ffmpeg_env():
     """Sets IMAGEIO_FFMPEG_EXE when running in Nuitka bundle."""
     try:
-        from src.ffmpeg_utils import get_ffmpeg_path, _is_bundled
+        from src.ffmpeg_utils import get_ffmpeg_path, ensure_ffmpeg_in_path
         ffmpeg_path = get_ffmpeg_path()
         if ffmpeg_path and ffmpeg_path != 'ffmpeg':
             os.environ['IMAGEIO_FFMPEG_EXE'] = ffmpeg_path
+        ensure_ffmpeg_in_path()
     except Exception:
         pass
 
@@ -247,14 +248,20 @@ class VideoEditorApp(ctk.CTk):
         # Check license before building UI
         ok, msg = check_license()
         if ok:
+            # Detect if running in trial mode (no license, trial edits remaining)
+            if "Trial" in msg or "trial" in msg:
+                self._trial_mode = True
+                import re as _re
+                _m = _re.search(r'(\d+)', msg)
+                self._trial_remaining = int(_m.group(1)) if _m else 0
             self._init_app()
         else:
             self._build_license_screen()
 
     def _build_license_screen(self):
         """Show license key input directly in main window."""
-        self.geometry("420x360")
-        self.minsize(380, 340)
+        self.geometry("420x420")
+        self.minsize(380, 400)
         self.grid_columnconfigure(0, weight=1)
 
         self._lic_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -316,7 +323,23 @@ class VideoEditorApp(ctk.CTk):
             font=ctk.CTkFont(size=12),
             text_color=THEME["text_muted"],
         )
-        self._lic_status.grid(row=4, column=0, padx=24, pady=(4, 20))
+        self._lic_status.grid(row=4, column=0, padx=24, pady=(4, 10))
+
+        # Trial button
+        self._trial_btn = ctk.CTkButton(
+            self._lic_frame,
+            text="Try 3 Free Edits — No License Needed",
+            command=self._start_trial,
+            fg_color="transparent",
+            border_color=(THEME["accent"], THEME["accent"]),
+            border_width=2,
+            text_color=(THEME["accent"], "#a29bfe"),
+            hover_color=(THEME["surface_2"], THEME["surface_2"]),
+            height=42,
+            corner_radius=8,
+            font=ctk.CTkFont(size=14, weight="bold"),
+        )
+        self._trial_btn.grid(row=5, column=0, padx=32, pady=(0, 20), sticky="ew")
 
         self.after(200, self._lic_entry.focus)
 
@@ -343,6 +366,24 @@ class VideoEditorApp(ctk.CTk):
             self.after(600, self._switch_to_app)
         else:
             self._lic_status.configure(text=msg, text_color=THEME["danger"])
+
+    def _start_trial(self):
+        """Start trial mode — 3 free edits without a license."""
+        from src.license import check_trial
+        ok, remaining, msg = check_trial()
+        if ok:
+            self._trial_mode = True
+            self._trial_remaining = remaining
+            self._lic_frame.destroy()
+            self.geometry("620x600")
+            self.minsize(560, 560)
+            self._init_app()
+        else:
+            if hasattr(self, '_trial_btn'):
+                self._trial_btn.configure(
+                    text="Trial Ended — Enter License Key",
+                    state="disabled",
+                )
 
     def _switch_to_app(self):
         """Remove license screen, show full app."""
@@ -555,7 +596,112 @@ class VideoEditorApp(ctk.CTk):
         self._on_style_changed(None)
 
         # Bottom padding for settings card (style desc already has some)
-        self.style_desc.grid(row=3, column=1, columnspan=2, padx=(4, 16), pady=(0, 6), sticky="w")
+        self.style_desc.grid(row=3, column=1, columnspan=2, padx=(4, 16), pady=(0, 2), sticky="w")
+
+        # Filler word removal checkbox
+        self.filler_var = ctk.BooleanVar(value=True)
+        self.filler_check = ctk.CTkCheckBox(
+            settings,
+            text="Remove filler words (um, uh, like...)",
+            variable=self.filler_var,
+            font=ctk.CTkFont(size=13),
+            checkbox_width=20,
+            checkbox_height=20,
+            fg_color=THEME["accent"],
+            hover_color=THEME["accent_hover"],
+            border_color=THEME["border"],
+            text_color=THEME["text_sec"],
+        )
+        self.filler_check.grid(row=4, column=0, columnspan=3, padx=16, pady=(0, 4), sticky="w")
+
+        # ── Caption Settings (collapsible) ─────────────────────────────────
+        self._caption_expanded = False
+        self._caption_header = ctk.CTkButton(
+            settings,
+            text="\u25B6 Caption Settings",
+            command=self._toggle_caption_settings,
+            fg_color="transparent",
+            text_color=THEME["text_muted"],
+            hover_color=THEME["surface_2"],
+            anchor="w",
+            font=ctk.CTkFont(size=13),
+            height=28,
+        )
+        self._caption_header.grid(row=5, column=0, columnspan=3, padx=12, pady=(0, 2), sticky="ew")
+
+        self._caption_frame = ctk.CTkFrame(settings, fg_color="transparent")
+        # _caption_frame is NOT gridded initially (collapsed)
+        self._caption_frame.grid_columnconfigure(1, weight=1)
+
+        # -- Font selector --
+        ctk.CTkLabel(
+            self._caption_frame, text="Font",
+            font=ctk.CTkFont(size=12), text_color=THEME["text_sec"],
+        ).grid(row=0, column=0, padx=(16, 8), pady=3, sticky="w")
+        fonts = ["Arial Black", "Arial", "Helvetica", "Impact", "Futura", "Montserrat", "Roboto"]
+        self.font_var = ctk.StringVar(value="Arial Black")
+        ctk.CTkOptionMenu(
+            self._caption_frame, variable=self.font_var, values=fonts,
+            fg_color=THEME["surface_2"], button_color=THEME["surface_2"],
+            button_hover_color=THEME["border"],
+            dropdown_fg_color=THEME["surface"], dropdown_hover_color=THEME["border"],
+            text_color=THEME["text"], corner_radius=8, height=30,
+        ).grid(row=0, column=1, padx=(0, 16), pady=3, sticky="ew")
+
+        # -- Color buttons row --
+        color_row = ctk.CTkFrame(self._caption_frame, fg_color="transparent")
+        color_row.grid(row=1, column=0, columnspan=2, padx=16, pady=3, sticky="ew")
+        color_row.grid_columnconfigure(0, weight=1)
+        color_row.grid_columnconfigure(1, weight=1)
+
+        self.text_color_var = "#FFFFFF"
+        self.text_color_btn = ctk.CTkButton(
+            color_row, text="Text Color", width=100, height=28,
+            fg_color=self.text_color_var, text_color="#000000",
+            hover_color="#E0E0E0", corner_radius=6,
+            font=ctk.CTkFont(size=11),
+            command=self._pick_text_color,
+        )
+        self.text_color_btn.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+
+        self.highlight_color_var = "#6c5ce7"
+        self.highlight_color_btn = ctk.CTkButton(
+            color_row, text="Highlight", width=100, height=28,
+            fg_color=self.highlight_color_var, text_color="#FFFFFF",
+            hover_color="#7c6cf7", corner_radius=6,
+            font=ctk.CTkFont(size=11),
+            command=self._pick_highlight_color,
+        )
+        self.highlight_color_btn.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+
+        # -- Position selector --
+        ctk.CTkLabel(
+            self._caption_frame, text="Position",
+            font=ctk.CTkFont(size=12), text_color=THEME["text_sec"],
+        ).grid(row=2, column=0, padx=(16, 8), pady=3, sticky="w")
+        self.position_var = ctk.StringVar(value="Bottom")
+        ctk.CTkOptionMenu(
+            self._caption_frame, variable=self.position_var,
+            values=["Bottom", "Center", "Top"],
+            fg_color=THEME["surface_2"], button_color=THEME["surface_2"],
+            button_hover_color=THEME["border"],
+            dropdown_fg_color=THEME["surface"], dropdown_hover_color=THEME["border"],
+            text_color=THEME["text"], corner_radius=8, height=30,
+        ).grid(row=2, column=1, padx=(0, 16), pady=3, sticky="ew")
+
+        # -- Background toggle --
+        self.bg_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            self._caption_frame, text="Text background",
+            variable=self.bg_var,
+            font=ctk.CTkFont(size=12),
+            checkbox_width=18, checkbox_height=18,
+            fg_color=THEME["accent"], hover_color=THEME["accent_hover"],
+            border_color=THEME["border"], text_color=THEME["text_sec"],
+        ).grid(row=3, column=0, columnspan=2, padx=16, pady=(3, 6), sticky="w")
+
+        # Sync caption controls to default style
+        self._sync_caption_to_style()
 
         # ── Progress Card ──────────────────────────────────────────────────
         progress = self._make_card(self)
@@ -698,6 +844,17 @@ class VideoEditorApp(ctk.CTk):
         )
         self.license_btn.place(relx=1.0, y=8, x=-140, anchor="ne")
 
+        # Trial mode banner
+        if getattr(self, '_trial_mode', False):
+            self._trial_banner = ctk.CTkLabel(
+                self,
+                text=f"\u26a1 Trial Mode: {self._trial_remaining} free edits remaining",
+                font=ctk.CTkFont(size=12),
+                text_color=THEME["warning"],
+            )
+            self._trial_banner.grid(row=row, column=0, padx=20, pady=(2, 4))
+            row += 1
+
     # ========================================================================
     # EVENTS
     # ========================================================================
@@ -723,6 +880,80 @@ class VideoEditorApp(ctk.CTk):
         self.style_desc.configure(text=desc)
         if hasattr(self, "start_btn"):
             self._reset_start_btn()
+        if hasattr(self, "font_var"):
+            self._sync_caption_to_style()
+
+    def _sync_caption_to_style(self):
+        """Update caption controls to match the current style defaults."""
+        from src.styles import get_style
+        key = self._get_selected_style()
+        cfg = get_style(key)
+        self.font_var.set(cfg.get("subtitle_font", "Arial Black"))
+        # Text color: convert RGB tuple to hex
+        rgb = cfg.get("subtitle_color", (255, 255, 255))
+        self.text_color_var = "#{:02X}{:02X}{:02X}".format(*rgb)
+        self.text_color_btn.configure(
+            fg_color=self.text_color_var,
+            text_color="#000000" if sum(rgb) > 384 else "#FFFFFF",
+        )
+        # Highlight color
+        hl = cfg.get("subtitle_highlight_color_hex")
+        self.highlight_color_var = hl if hl else "#6c5ce7"
+        self.highlight_color_btn.configure(fg_color=self.highlight_color_var)
+        # Position
+        pos = cfg.get("subtitle_position", "bottom").capitalize()
+        if pos not in ("Bottom", "Center", "Top"):
+            pos = "Bottom"
+        self.position_var.set(pos)
+        # Background
+        self.bg_var.set(cfg.get("subtitle_bg_enabled", False))
+
+    def _toggle_caption_settings(self):
+        self._caption_expanded = not self._caption_expanded
+        if self._caption_expanded:
+            self._caption_header.configure(text="\u25BC Caption Settings")
+            self._caption_frame.grid(row=6, column=0, columnspan=3, sticky="ew")
+        else:
+            self._caption_header.configure(text="\u25B6 Caption Settings")
+            self._caption_frame.grid_forget()
+
+    def _pick_text_color(self):
+        from tkinter import colorchooser
+        color = colorchooser.askcolor(title="Text Color", initialcolor=self.text_color_var)
+        if color[1]:
+            self.text_color_var = color[1]
+            rgb = color[0]
+            self.text_color_btn.configure(
+                fg_color=color[1],
+                text_color="#000000" if sum(rgb) > 384 else "#FFFFFF",
+            )
+
+    def _pick_highlight_color(self):
+        from tkinter import colorchooser
+        color = colorchooser.askcolor(title="Highlight Color", initialcolor=self.highlight_color_var)
+        if color[1]:
+            self.highlight_color_var = color[1]
+            rgb = color[0]
+            self.highlight_color_btn.configure(
+                fg_color=color[1],
+                text_color="#000000" if sum(rgb) > 384 else "#FFFFFF",
+            )
+
+    def _get_caption_overrides(self) -> dict:
+        """Gather caption settings as style overrides."""
+        pos_map = {"Bottom": 0.85, "Center": 0.50, "Top": 0.15}
+        pos_name = self.position_var.get()
+        # Convert hex text color to RGB tuple
+        hex_c = self.text_color_var.lstrip("#")
+        rgb = tuple(int(hex_c[i:i+2], 16) for i in (0, 2, 4))
+        return {
+            "subtitle_font": self.font_var.get(),
+            "subtitle_color": rgb,
+            "subtitle_highlight_color_hex": self.highlight_color_var,
+            "subtitle_position": pos_name.lower(),
+            "subtitle_position_y": pos_map.get(pos_name, 0.85),
+            "subtitle_bg_enabled": self.bg_var.get(),
+        }
 
     def _get_selected_style(self) -> str:
         display_name = self.style_var.get()
@@ -789,10 +1020,12 @@ class VideoEditorApp(ctk.CTk):
         style = self._get_selected_style()
         model = "medium"
         output_dir = str(OUTPUT_DIR)
+        remove_fillers = self.filler_var.get()
+        caption_overrides = self._get_caption_overrides()
 
         self._worker_thread = threading.Thread(
             target=self._worker,
-            args=(video_path, style, model, output_dir),
+            args=(video_path, style, model, output_dir, remove_fillers, caption_overrides),
             daemon=True,
         )
         self._worker_thread.start()
@@ -853,7 +1086,7 @@ class VideoEditorApp(ctk.CTk):
     # WORKER THREAD
     # ========================================================================
 
-    def _worker(self, video_path, style, model, output_dir):
+    def _worker(self, video_path, style, model, output_dir, remove_fillers=True, caption_overrides=None):
         """Runs in background thread."""
         result = None
         self._last_output_path = None
@@ -891,7 +1124,7 @@ class VideoEditorApp(ctk.CTk):
             )
             try:
                 editor.__enter__()
-                result = editor.edit_video(style)
+                result = editor.edit_video(style, remove_fillers=remove_fillers, style_overrides=caption_overrides)
             finally:
                 try:
                     editor.__exit__(None, None, None)
@@ -899,6 +1132,19 @@ class VideoEditorApp(ctk.CTk):
                     pass
 
             self._output_path = result
+
+            # Increment trial counter after successful edit
+            if getattr(self, '_trial_mode', False):
+                from src.license import increment_trial
+                remaining, total = increment_trial()
+                self._trial_remaining = remaining
+                if hasattr(self, '_trial_banner'):
+                    self.after(0, lambda r=remaining: self._trial_banner.configure(
+                        text=f"\u26a1 Trial Mode: {r} free edits remaining"
+                    ))
+                if remaining <= 0:
+                    self.after(0, self._show_trial_ended)
+
             self.after(0, self._on_done, result)
 
         except InterruptedError:
@@ -1011,6 +1257,19 @@ class VideoEditorApp(ctk.CTk):
         self._reset_start_btn()
         self.cancel_btn.configure(state="disabled")
         messagebox.showerror("Error", f"Video processing failed:\n\n{msg}")
+
+    def _show_trial_ended(self):
+        """Show trial ended message and redirect to license screen."""
+        messagebox.showinfo(
+            "Trial Ended",
+            "You've used all 3 free edits.\n\n"
+            "Enter a license key to continue using SmartCut."
+        )
+        # Destroy all main UI and show license screen
+        for widget in self.winfo_children():
+            widget.destroy()
+        self._trial_mode = False
+        self._build_license_screen()
 
     # ========================================================================
     # INFO

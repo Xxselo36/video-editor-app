@@ -9,6 +9,7 @@ Nutzt FFmpeg direkt statt MoviePy für:
 """
 
 import os
+import sys
 import subprocess
 import json
 import tempfile
@@ -19,6 +20,36 @@ from typing import List, Tuple, Optional
 from .audio import AudioAnalyzer, Subtitle
 from .ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
 from .platform_utils import get_video_codec, get_codec_params, get_subprocess_kwargs
+
+
+def _rgb_to_ass_bgr(r: int, g: int, b: int, alpha: int = 0) -> str:
+    """Convert RGB tuple to ASS color format &HAABBGGRR.
+    alpha: 0=opaque, 255=transparent (ASS convention)."""
+    return f"&H{alpha:02X}{b:02X}{g:02X}{r:02X}"
+
+
+def _hex_to_ass_bgr(hex_color: str, alpha: int = 0) -> str:
+    """Convert hex color (#RRGGBB) to ASS color format &HAABBGGRR.
+    alpha: 0=opaque, 255=transparent (ASS convention)."""
+    hex_color = hex_color.lstrip('#')
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return _rgb_to_ass_bgr(r, g, b, alpha)
+
+
+def _hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
+    """Convert hex color (#RRGGBB) to RGB tuple."""
+    hex_color = hex_color.lstrip('#')
+    return (int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16))
+
+
+def _position_to_ass_alignment(position: str) -> int:
+    """Map position string to ASS alignment value.
+    ASS: 1-3=bottom, 4-6=middle, 7-9=top (numpad layout).
+    Center column: 2=bottom-center, 5=middle-center, 8=top-center."""
+    mapping = {"bottom": 2, "center": 5, "top": 8}
+    return mapping.get(position, 2)
 
 
 @dataclass
@@ -143,7 +174,10 @@ class FastVideoEditor:
         return self._subtitles or []
 
     def _detect_silence(self, threshold: float = 0.025,
-                        min_silence: float = 0.6) -> List[Tuple[float, float]]:
+                        min_silence: float = 0.6,
+                        smart_cut: bool = False,
+                        remove_fillers: bool = False,
+                        filler_sensitivity: str = "medium") -> List[Tuple[float, float]]:
         """Erkennt Sprach-Segmente (nicht-Stille)."""
         self._check_cancel()
         self._report("Analysiere Stille...", step=2, total_steps=4)
@@ -191,13 +225,61 @@ class FastVideoEditor:
             last = final.pop()
             final[-1] = (final[-1][0], last[1])
 
+        # Smart cut: enhance with word-level intelligence
+        if smart_cut:
+            transcription = self.audio_analyzer._transcription
+            if transcription is None:
+                self.audio_analyzer.transcribe()
+                transcription = self.audio_analyzer._transcription
+
+            if transcription and transcription.get("segments"):
+                from .smart_cut import SmartCutter
+                cutter = SmartCutter(transcription, self.info.duration)
+
+                # Get word-based speech regions
+                word_segments = cutter.compute_speech_regions()
+
+                # Hybrid: combine RMS and word-based detection
+                final = cutter.hybrid_detect(final, word_segments)
+
+                # Optimize cut points to sentence/clause boundaries
+                final = cutter.optimize_cuts(final)
+
+                # Final merge
+                final = cutter.merge_segments(final)
+
+                print(f"[FastEditor] Smart cut: optimized to {len(final)} segments")
+
+        # Filler word removal
+        if remove_fillers:
+            transcription = self.audio_analyzer._transcription
+            if transcription is None:
+                self.audio_analyzer.transcribe()
+                transcription = self.audio_analyzer._transcription
+
+            if transcription:
+                from .filler_detection import FillerDetector
+                detector = FillerDetector(
+                    language=transcription.get("language", "en"),
+                    sensitivity=filler_sensitivity
+                )
+                filler_segments = detector.get_filler_segments(transcription)
+                if filler_segments:
+                    n = len(filler_segments)
+                    total_filler = sum(e - s for s, e in filler_segments)
+                    final = detector.filter_segments(final, filler_segments)
+                    self._report(f"[FastEditor] Removed {n} filler words ({total_filler:.1f}s of filler content)")
+
         removed = self.info.duration - sum(e - s for s, e in final)
         self._report(f"  {len(final)} Segmente, {removed:.1f}s Stille entfernt")
         return final
 
     def _create_drawtext_filters(self, subtitles: List[Subtitle],
-                                   segments: List[Tuple[float, float]]) -> List[str]:
+                                   segments: List[Tuple[float, float]],
+                                   config: dict = None) -> List[str]:
         """Erstellt FFmpeg drawtext Filter für Untertitel."""
+        if config is None:
+            config = {}
 
         # Zeit-Mapping berechnen
         offset_map = []
@@ -212,9 +294,27 @@ class FastVideoEditor:
                     return new_start + (t - orig_start)
             return None
 
-        # Fontgröße und Position (für 9:16 Video)
-        fontsize = int(self.info.display_width * 0.07)  # Basierend auf Breite für 9:16
-        y_pos = int(self.info.display_height * 0.80)
+        # Fontgröße und Position from config
+        fontsize_multiplier = config.get("subtitle_fontsize_multiplier", 1.0)
+        fontsize = int(self.info.display_width * 0.07 * fontsize_multiplier)
+        position_y = config.get("subtitle_position_y", 0.80)
+        y_pos = int(self.info.display_height * position_y)
+
+        # Colors from config
+        sub_color = config.get("subtitle_color", (255, 255, 255))
+        fontcolor = f"#{sub_color[0]:02X}{sub_color[1]:02X}{sub_color[2]:02X}"
+        outline_hex = config.get("subtitle_outline_color", "#000000")
+        bordercolor = outline_hex
+        borderw = config.get("subtitle_stroke_width", 4)
+
+        # Background box
+        bg_enabled = config.get("subtitle_bg_enabled", False)
+        box_params = ""
+        if bg_enabled:
+            bg_hex = config.get("subtitle_bg_color", "#000000")
+            bg_opacity = config.get("subtitle_bg_opacity", 0.6)
+            # drawtext box uses 0x format with @opacity
+            box_params = f":box=1:boxcolor={bg_hex}@{bg_opacity:.2f}:boxborderw=8"
 
         filters = []
         words_per_phrase = 5
@@ -244,19 +344,27 @@ class FastVideoEditor:
             if new_start is None or new_end is None:
                 continue
 
-            # Plattform-spezifischer Font
-            if sys.platform == "darwin":
-                fontfile = "/System/Library/Fonts/Helvetica.ttc"
-            elif sys.platform == "win32":
-                fontfile = "C\\:/Windows/Fonts/arial.ttf"
+            # Font from config or platform-specific fallback
+            configured_font = config.get("subtitle_font", "")
+            if configured_font:
+                # Use font by name (FFmpeg supports font name lookup via fontconfig)
+                font_param = f"font='{configured_font}'"
             else:
-                fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                # Plattform-spezifischer Font file fallback
+                if sys.platform == "darwin":
+                    fontfile = "/System/Library/Fonts/Helvetica.ttc"
+                elif sys.platform == "win32":
+                    fontfile = "C\\:/Windows/Fonts/arial.ttf"
+                else:
+                    fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                font_param = f"fontfile={fontfile}"
 
-            # Drawtext Filter - einfach gehalten
+            # Drawtext Filter
             dt = (f"drawtext=text='{phrase_text}':"
-                  f"fontfile={fontfile}:"
-                  f"fontsize={fontsize}:fontcolor=white:"
-                  f"borderw=4:bordercolor=black:"
+                  f"{font_param}:"
+                  f"fontsize={fontsize}:fontcolor={fontcolor}:"
+                  f"borderw={borderw}:bordercolor={bordercolor}"
+                  f"{box_params}:"
                   f"x=(w-text_w)/2:y={y_pos}:"
                   f"enable='between(t\\,{new_start:.2f}\\,{new_end:.2f})'")
             filters.append(dt)
@@ -364,8 +472,11 @@ class FastVideoEditor:
 
     def _create_ass_subtitles_to_file(self, subtitles: List[Subtitle],
                                        segments: List[Tuple[float, float]],
-                                       ass_path: str) -> None:
-        """Erstellt ASS-Untertiteldatei mit Clean-Style."""
+                                       ass_path: str,
+                                       config: dict = None) -> None:
+        """Erstellt ASS-Untertiteldatei mit konfigurierbarem Style."""
+        if config is None:
+            config = {}
 
         # Berechne Offset-Mapping für Segmente
         # (original_time -> new_time nach Silence-Removal)
@@ -386,8 +497,60 @@ class FastVideoEditor:
         video_width = self.info.display_width
         video_height = self.info.display_height
 
-        # Fontgröße basierend auf Video-Höhe
-        fontsize = int(video_height * 0.045)
+        # --- Config-driven style parameters ---
+        # Font
+        font_name = config.get("subtitle_font", "Arial Black")
+
+        # Font size
+        fontsize_multiplier = config.get("subtitle_fontsize_multiplier", 1.0)
+        fontsize = int(video_height * 0.045 * fontsize_multiplier)
+
+        # Primary color (subtitle_color is RGB tuple)
+        sub_color = config.get("subtitle_color", (255, 255, 255))
+        primary_colour = _rgb_to_ass_bgr(sub_color[0], sub_color[1], sub_color[2])
+
+        # Outline color
+        outline_hex = config.get("subtitle_outline_color", "#000000")
+        outline_colour = _hex_to_ass_bgr(outline_hex)
+
+        # Outline width
+        outline_width = config.get("subtitle_stroke_width", 3)
+
+        # Position / Alignment
+        position = config.get("subtitle_position", "bottom")
+        alignment = _position_to_ass_alignment(position)
+
+        # MarginV from subtitle_position_y (fraction of video height)
+        position_y = config.get("subtitle_position_y", 0.85)
+        # For bottom alignment, MarginV is distance from bottom edge
+        # For top alignment, MarginV is distance from top edge
+        if position == "top":
+            margin_v = int(video_height * position_y)
+        elif position == "center":
+            # For center, MarginV has less effect; use a small value
+            margin_v = 0
+        else:
+            # bottom: margin from bottom = (1 - position_y) * height
+            margin_v = int(video_height * (1.0 - position_y))
+
+        # Background / border style
+        bg_enabled = config.get("subtitle_bg_enabled", False)
+        if bg_enabled:
+            border_style = 3  # Opaque box
+            bg_hex = config.get("subtitle_bg_color", "#000000")
+            bg_opacity = config.get("subtitle_bg_opacity", 0.6)
+            # ASS alpha: 00=opaque, FF=transparent; invert from opacity
+            bg_alpha = int((1.0 - bg_opacity) * 255)
+            back_colour = _hex_to_ass_bgr(bg_hex, alpha=bg_alpha)
+        else:
+            border_style = 1  # Outline + shadow
+            back_colour = "&H80000000"
+
+        # Highlight color for active word
+        highlight_hex = config.get("subtitle_highlight_color_hex", None)
+
+        # Secondary colour (used for karaoke in some renderers)
+        secondary_colour = "&H000000FF"
 
         ass_content = f"""[Script Info]
 Title: Video Subtitles
@@ -398,11 +561,21 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,{fontsize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,0,2,10,10,50,1
+Style: Default,{font_name},{fontsize},{primary_colour},{secondary_colour},{outline_colour},{back_colour},1,0,0,0,100,100,0,0,{border_style},{outline_width},0,{alignment},10,10,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+        # Prepare active/inactive word colors for inline overrides
+        # Active word: primary color (or highlight color if set)
+        if highlight_hex:
+            active_color_ass = _hex_to_ass_bgr(highlight_hex)
+        else:
+            active_color_ass = primary_colour
+
+        # Inactive words: grey
+        inactive_color_ass = "&H00808080"
 
         # Clean-Style: Gruppiere Wörter in Phrasen
         words_per_phrase = 4
@@ -438,11 +611,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 text_parts = []
                 for j, word in enumerate(words):
                     if j == word_idx:
-                        # Aktives Wort - weiß
-                        text_parts.append(f"{{\\c&HFFFFFF&}}{word}")
+                        # Aktives Wort - highlight color (or primary)
+                        text_parts.append(f"{{\\c{active_color_ass}}}{word}")
                     else:
                         # Inaktives Wort - grau
-                        text_parts.append(f"{{\\c&H808080&}}{word}")
+                        text_parts.append(f"{{\\c{inactive_color_ass}}}{word}")
 
                 text = " ".join(text_parts)
                 ass_content += f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text}\n"
@@ -453,7 +626,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def edit_fast(self, style: str = "clean",
                   remove_silence: bool = True,
-                  add_subtitles: bool = True) -> str:
+                  add_subtitles: bool = True,
+                  smart_cut: bool = False,
+                  remove_fillers: bool = False,
+                  filler_sensitivity: str = "medium",
+                  **kwargs) -> str:
         """
         Schnelle Video-Bearbeitung mit FFmpeg.
 
@@ -461,10 +638,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             style: Stil (aktuell nur "clean" unterstützt)
             remove_silence: Stille entfernen
             add_subtitles: Untertitel hinzufügen
+            smart_cut: Intelligente Schnitte an Satz-/Klauselgrenzen
+            remove_fillers: Filler-Wörter (um, uh, like...) entfernen
+            filler_sensitivity: Empfindlichkeit für Filler-Erkennung (low, medium, high)
 
         Returns:
             Pfad zum Output-Video
         """
+        # Allow kwargs/config overrides for remove_fillers and filler_sensitivity
+        remove_fillers = kwargs.get('remove_fillers', remove_fillers)
+        filler_sensitivity = kwargs.get('filler_sensitivity', filler_sensitivity)
+
+        # Load style config for subtitle customization
+        try:
+            from .styles import get_style
+            style_config = get_style(style)
+        except (ImportError, ValueError):
+            style_config = {}
+        # Allow kwargs to override style config
+        style_config.update({k: v for k, v in kwargs.items() if k.startswith("subtitle_")})
+
         self._check_cancel()
         self._report(f"FAST EDITOR - FFmpeg Direct")
         self._report(f"  {self.info.display_width}x{self.info.display_height} @ {self.info.fps:.0f}fps")
@@ -476,7 +669,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         # Silence Detection
         if remove_silence:
-            segments = self._detect_silence()
+            segments = self._detect_silence(smart_cut=smart_cut,
+                                            remove_fillers=remove_fillers,
+                                            filler_sensitivity=filler_sensitivity)
         else:
             segments = [(0, self.info.duration)]
 
@@ -539,7 +734,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Drawtext-Filter für Untertitel erstellen
         drawtext_filters = []
         if subtitles:
-            drawtext_filters = self._create_drawtext_filters(subtitles, segments)
+            drawtext_filters = self._create_drawtext_filters(subtitles, segments, config=style_config)
             self._report(f"  {len(drawtext_filters)} Untertitel")
 
         # Rotation-Filter - KEINE manuelle Rotation, FFmpeg macht das automatisch
@@ -557,7 +752,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if subtitles:
             # ASS-Datei erstellen
             ass_path = os.path.join(temp_dir, "subtitles.ass")
-            self._create_ass_subtitles_to_file(subtitles, segments, ass_path)
+            self._create_ass_subtitles_to_file(subtitles, segments, ass_path, config=style_config)
             self._report(f"  {len(subtitles)} Untertitel")
 
             # FFmpeg: Rotation + Untertitel in EINEM Pass (frame-genau)

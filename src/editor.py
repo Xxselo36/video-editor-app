@@ -267,47 +267,22 @@ class VideoEditor:
 
         self._report(f"Loading video: {self.input_path}")
 
-        # Video-Info holen (Rotation und Dimensionen)
-        rotation = self._get_video_rotation(str(self.input_path))
-        orig_width, orig_height = self._get_video_dimensions(str(self.input_path))
-
-        # Nach Rotation die tatsächlichen Display-Dimensionen berechnen
-        if abs(rotation) in [90, 270, -90, -270]:
-            display_width, display_height = orig_height, orig_width
-        else:
-            display_width, display_height = orig_width, orig_height
-
-        self._report(f"  Original: {display_width}x{display_height}, Rotation: {rotation}°")
-
-        # Prüfe ob Skalierung auf 1080p nötig ist (längere Seite > 1920)
-        max_dimension = 1920
-        needs_scale = max(display_width, display_height) > max_dimension
-        needs_normalize = rotation != 0 or needs_scale
-
-        if needs_normalize:
+        # macOS: IMMER mit FFmpeg vorverarbeiten um Rotation korrekt zu handhaben.
+        # MoviePy ignoriert Rotation-Metadata, FFmpeg wendet autorotation an.
+        # Windows/Linux: MoviePy handled das korrekt, kein Preprocessing nötig.
+        import platform
+        if platform.system() == 'Darwin':
             import tempfile
             normalized_path = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
 
-            # Ziel-Dimensionen berechnen (proportional, durch 2 teilbar)
-            if needs_scale:
-                scale_factor = max_dimension / max(display_width, display_height)
-                target_width = int(display_width * scale_factor)
-                target_height = int(display_height * scale_factor)
-                # Auf gerade Zahlen runden (wichtig für Encoder)
-                target_width = target_width - (target_width % 2)
-                target_height = target_height - (target_height % 2)
-                self._report(f"  Scaling: {display_width}x{display_height} -> {target_width}x{target_height}")
-            else:
-                target_width = display_width - (display_width % 2)
-                target_height = display_height - (display_height % 2)
+            max_dimension = 1920
+            scale_filter = f"scale='if(gt(iw,ih),min({max_dimension},iw),-2)':'if(gt(ih,iw),min({max_dimension},ih),-2)'"
 
-            if rotation != 0:
-                self._report(f"  Normalizing rotation ({rotation}°)...")
+            self._report(f"  Normalizing video with FFmpeg...")
 
-            # FFmpeg-Befehl mit expliziten Dimensionen
             cmd = [
                 get_ffmpeg_path(), '-y', '-i', str(self.input_path),
-                '-vf', f'scale={target_width}:{target_height}',
+                '-vf', scale_filter,
                 '-c:v', get_video_codec(),
                 '-b:v', '12M',
                 ] + get_codec_params() + [
@@ -315,9 +290,14 @@ class VideoEditor:
                 normalized_path
             ]
 
-            subprocess.run(cmd, capture_output=True, **get_subprocess_kwargs())
-            self.original_clip = VideoFileClip(normalized_path)
-            self._temp_normalized = normalized_path
+            norm_result = subprocess.run(cmd, capture_output=True, **get_subprocess_kwargs())
+            if norm_result.returncode == 0 and os.path.isfile(normalized_path) and os.path.getsize(normalized_path) > 0:
+                self.original_clip = VideoFileClip(normalized_path)
+                self._temp_normalized = normalized_path
+                self._report(f"  Result: {self.original_clip.size[0]}x{self.original_clip.size[1]}")
+            else:
+                self._report(f"  FFmpeg normalization failed, using original directly")
+                self.original_clip = VideoFileClip(str(self.input_path))
         else:
             self.original_clip = VideoFileClip(str(self.input_path))
 
@@ -1586,16 +1566,21 @@ class VideoEditor:
     # MAIN EDIT
     # =========================================================================
 
-    def edit_video(self, style_name: str, parallel: bool = True) -> str:
+    def edit_video(self, style_name: str, parallel: bool = True, remove_fillers: bool = True, style_overrides: dict = None) -> str:
         """
         Bearbeitet das Video mit dem angegebenen Stil.
 
         Args:
             style_name: Name des Stils
             parallel: Wenn True, parallele Verarbeitung (viel schneller)
+            remove_fillers: Wenn True, Füllwörter (um, uh, like...) entfernen
+            style_overrides: Optional dict of style config overrides (e.g. caption settings)
         """
+        self._remove_fillers = remove_fillers
         self._check_cancel()
         config = get_style(style_name)
+        if style_overrides:
+            config.update(style_overrides)
 
         if parallel:
             return self._edit_video_parallel(config, style_name)

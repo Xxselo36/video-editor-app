@@ -21,9 +21,10 @@ class AnalysisResult:
     segments: list  # [(start, end), ...] speech segments
     subtitles: list  # [{"start", "end", "text"}, ...]
     style: str
+    fillers: list = None  # [{"start", "end", "word"}, ...] detected filler words
 
     def to_dict(self):
-        return {
+        d = {
             "video_path": self.video_path,
             "duration": self.duration,
             "segments": self.segments,
@@ -31,6 +32,9 @@ class AnalysisResult:
                           for s in self.subtitles],
             "style": self.style,
         }
+        if self.fillers is not None:
+            d["fillers"] = self.fillers
+        return d
 
     def to_json(self, indent=2):
         return json.dumps(self.to_dict(), indent=indent)
@@ -46,6 +50,9 @@ def analyze_video(
     padding_after: float = None,
     progress_callback=None,
     cancel_check=None,
+    remove_fillers: bool = None,
+    smart_cut: bool = None,
+    filler_sensitivity: str = None,
 ) -> AnalysisResult:
     """
     Analyze a video and return structured data for NLE plugins.
@@ -63,9 +70,12 @@ def analyze_video(
         padding_after: Padding after speech segments (seconds).
         progress_callback: Optional callback(message, step, total_steps, progress).
         cancel_check: Optional callable that returns True to cancel.
+        remove_fillers: Whether to detect and remove filler words (default from style).
+        smart_cut: Whether to use smart cut optimization (default from style).
+        filler_sensitivity: Filler detection sensitivity: "low", "medium", "high" (default from style).
 
     Returns:
-        AnalysisResult with segments and subtitles.
+        AnalysisResult with segments, subtitles, and optional filler data.
     """
     from src.styles import get_style
 
@@ -79,15 +89,31 @@ def analyze_video(
     if padding_after is None:
         padding_after = config.get("keep_padding_after", config.get("keep_padding", 0.25))
 
+    # Filler and smart cut settings — fall back to style config
+    if remove_fillers is None:
+        remove_fillers = config.get("remove_fillers", True)
+    if smart_cut is None:
+        smart_cut = config.get("smart_cut", True)
+    if filler_sensitivity is None:
+        filler_sensitivity = config.get("filler_sensitivity", "medium")
+
     analyzer = AudioAnalyzer(
         video_path,
         whisper_model=whisper_model,
         progress_callback=progress_callback,
     )
 
+    total_steps = 3
+    if remove_fillers:
+        total_steps += 1
+    if smart_cut:
+        total_steps += 1
+    current_step = 0
+
     # Step 1: Transcribe
+    current_step += 1
     if progress_callback:
-        progress_callback("Transcribing audio...", step=1, total_steps=3)
+        progress_callback("Transcribing audio...", step=current_step, total_steps=total_steps)
 
     if cancel_check and cancel_check():
         raise InterruptedError("Cancelled")
@@ -95,8 +121,9 @@ def analyze_video(
     subtitles = analyzer.transcribe()
 
     # Step 2: Detect silence / speech segments
+    current_step += 1
     if progress_callback:
-        progress_callback("Detecting speech segments...", step=2, total_steps=3)
+        progress_callback("Detecting speech segments...", step=current_step, total_steps=total_steps)
 
     if cancel_check and cancel_check():
         raise InterruptedError("Cancelled")
@@ -124,15 +151,52 @@ def analyze_video(
             merged.append((start, end))
     segments = merged
 
+    # Filler word detection and removal
+    filler_data = None
+    if remove_fillers:
+        current_step += 1
+        if progress_callback:
+            progress_callback("Detecting filler words...", step=current_step, total_steps=total_steps)
+
+        if cancel_check and cancel_check():
+            raise InterruptedError("Cancelled")
+
+        fillers = analyzer.get_filler_words(sensitivity=filler_sensitivity)
+        filler_data = [
+            {"start": round(f.start, 3), "end": round(f.end, 3), "word": f.word}
+            for f in fillers
+        ]
+
+        # Remove filler time ranges from speech segments
+        if fillers:
+            from src.filler_detection import FillerDetector
+            detector = FillerDetector(sensitivity=filler_sensitivity)
+            filler_segments = [(f.start, f.end) for f in fillers]
+            segments = detector.filter_segments(segments, filler_segments)
+
     # Get video duration
     from moviepy.editor import VideoFileClip
     clip = VideoFileClip(video_path)
     duration = clip.duration
     clip.close()
 
-    # Step 3: Map subtitles to new timeline (after cuts)
+    # Smart cut optimization — snap cuts to natural break points
+    if smart_cut and analyzer._transcription:
+        current_step += 1
+        if progress_callback:
+            progress_callback("Optimizing cut points...", step=current_step, total_steps=total_steps)
+
+        if cancel_check and cancel_check():
+            raise InterruptedError("Cancelled")
+
+        from src.smart_cut import SmartCutter
+        cutter = SmartCutter(analyzer._transcription, duration)
+        segments = cutter.optimize_cuts(segments)
+
+    # Map subtitles to new timeline (after cuts)
+    current_step += 1
     if progress_callback:
-        progress_callback("Mapping subtitles...", step=3, total_steps=3)
+        progress_callback("Mapping subtitles...", step=current_step, total_steps=total_steps)
 
     mapped_subtitles = _map_subtitles_to_segments(subtitles, segments)
 
@@ -142,6 +206,7 @@ def analyze_video(
         segments=segments,
         subtitles=mapped_subtitles,
         style=style,
+        fillers=filler_data,
     )
 
 

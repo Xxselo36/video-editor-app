@@ -51,6 +51,19 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
+
+        # Filler & Smart Cut
+        "remove_fillers": True,
+        "filler_sensitivity": "medium",
+        "smart_cut": True,
 
         # Emojis
         "enable_emojis": True,
@@ -107,6 +120,19 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": "#0984e3",
+
+        # Filler & Smart Cut
+        "remove_fillers": True,
+        "filler_sensitivity": "medium",
+        "smart_cut": True,
 
         # Emojis
         "enable_emojis": True,
@@ -166,6 +192,19 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
+
+        # Filler & Smart Cut
+        "remove_fillers": True,
+        "filler_sensitivity": "medium",
+        "smart_cut": True,
 
         # Emojis
         "enable_emojis": True,
@@ -224,6 +263,19 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
+
+        # Filler & Smart Cut
+        "remove_fillers": True,
+        "filler_sensitivity": "medium",
+        "smart_cut": True,
 
         # Emojis
         "enable_emojis": False,
@@ -283,6 +335,19 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
+
+        # Filler & Smart Cut
+        "remove_fillers": True,
+        "filler_sensitivity": "medium",
+        "smart_cut": True,
 
         # Emojis
         "enable_emojis": True,
@@ -343,6 +408,19 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
+
+        # Filler & Smart Cut
+        "remove_fillers": False,
+        "filler_sensitivity": "medium",
+        "smart_cut": False,
 
         # Emojis
         "enable_emojis": False,
@@ -410,6 +488,19 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
+
+        # Filler & Smart Cut
+        "remove_fillers": True,
+        "filler_sensitivity": "medium",
+        "smart_cut": True,
 
         # Emojis
         "enable_emojis": True,
@@ -466,9 +557,22 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
 
         # Word highlights (color + sound for certain words)
         "enable_highlights": True,
+
+        # Filler & Smart Cut
+        "remove_fillers": True,
+        "filler_sensitivity": "medium",
+        "smart_cut": True,
 
         # Emojis
         "enable_emojis": False,
@@ -536,9 +640,22 @@ STYLES = {
         "subtitle_effect": None,
         "subtitle_stroke_width": 2,
         "clean_words_per_phrase": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.50,
+        "subtitle_bg_enabled": True,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": "#6c5ce7",
 
         # Disable highlights for clean look
         "enable_highlights": False,
+
+        # Filler & Smart Cut
+        "remove_fillers": True,
+        "filler_sensitivity": "medium",
+        "smart_cut": True,
 
         # Emojis
         "enable_emojis": False,
@@ -600,6 +717,19 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.90,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
+
+        # Filler & Smart Cut
+        "remove_fillers": True,
+        "filler_sensitivity": "medium",
+        "smart_cut": True,
 
         # Emojis
         "enable_emojis": False,
@@ -658,6 +788,19 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": "#00b894",
+
+        # Filler & Smart Cut
+        "remove_fillers": True,
+        "filler_sensitivity": "medium",
+        "smart_cut": True,
 
         # Emojis
         "enable_emojis": False,
@@ -716,6 +859,19 @@ STYLES = {
         "subtitle_fontsize": None,
         "subtitle_effect": None,
         "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
+
+        # Filler & Smart Cut
+        "remove_fillers": False,
+        "filler_sensitivity": "medium",
+        "smart_cut": False,
 
         # Emojis
         "enable_emojis": False,

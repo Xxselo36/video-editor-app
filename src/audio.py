@@ -65,6 +65,7 @@ class AudioAnalyzer:
         self._beats = []
         self._audio_data = None
         self._sample_rate = None
+        self._filler_words = None
 
     def _report(self, message, step=None, total_steps=None, progress=None):
         """Gibt Status aus und ruft optional den Callback auf."""
@@ -201,6 +202,18 @@ class AudioAnalyzer:
                 os.unlink(audio_path)
 
         return self._subtitles
+
+    def get_filler_words(self, sensitivity="medium"):
+        """Returns detected filler words from transcription."""
+        if not hasattr(self, '_filler_words') or self._filler_words is None:
+            self.transcribe()  # ensure transcription exists
+            from .filler_detection import FillerDetector
+            detector = FillerDetector(
+                language=self._transcription.get("language", "en"),
+                sensitivity=sensitivity
+            )
+            self._filler_words = detector.detect_fillers(self._transcription)
+        return self._filler_words
 
     def detect_silence(self, silence_threshold: float = 0.02,
                        min_silence_duration: float = 0.5) -> list[SpeechSegment]:
