@@ -575,9 +575,21 @@ def _normalize_rotation(video_path):
     basename = os.path.splitext(os.path.basename(video_path))[0][:20]
     norm_path = os.path.join(tempfile.gettempdir(), f"ve_norm_{basename}_{hash_str}.mp4")
 
+    source_duration = probe.get("duration", 0)
+
+    # Validate cache: file must exist AND have a duration close to the source.
+    # A previous run could have been killed mid-encode and left a truncated
+    # file in the cache; the previous "size > 0" check let those through.
     if os.path.exists(norm_path) and os.path.getsize(norm_path) > 0:
-        print(f"[VideoEditor] Using cached normalized video: {norm_path}")
-        return norm_path
+        cached_duration = _probe_video(norm_path).get("duration", 0)
+        if source_duration > 0 and cached_duration >= source_duration * 0.95:
+            print(f"[VideoEditor] Using cached normalized video: {norm_path}")
+            return norm_path
+        print(f"[VideoEditor] Cached normalized video truncated ({cached_duration:.1f}s vs source {source_duration:.1f}s) — re-rendering")
+        try:
+            os.remove(norm_path)
+        except OSError:
+            pass
 
     try:
         from src.ffmpeg_utils import get_ffmpeg_path
@@ -597,7 +609,25 @@ def _normalize_rotation(video_path):
 
     if result.returncode != 0:
         print(f"[VideoEditor] Normalization failed: {result.stderr[-200:]}")
+        try:
+            if os.path.exists(norm_path):
+                os.remove(norm_path)  # do not let a partial file poison the cache
+        except OSError:
+            pass
         return video_path
+
+    # Final defence: even if ffmpeg returned 0, verify the output covers the
+    # full source duration. Some ffmpeg builds report success on truncated
+    # output (e.g. when the encoder was killed by Windows OOM mid-write).
+    if source_duration > 0:
+        out_duration = _probe_video(norm_path).get("duration", 0)
+        if out_duration < source_duration * 0.95:
+            print(f"[VideoEditor] Normalized output truncated ({out_duration:.1f}s vs source {source_duration:.1f}s) — discarding")
+            try:
+                os.remove(norm_path)
+            except OSError:
+                pass
+            return video_path
 
     print(f"[VideoEditor] Normalized video saved: {norm_path}")
     return norm_path
