@@ -32,6 +32,75 @@ VIDEO_EDITOR_PATH = os.environ.get(
 if VIDEO_EDITOR_PATH not in sys.path:
     sys.path.insert(0, VIDEO_EDITOR_PATH)
 
+# Caption preset configurations — override style subtitle settings
+CAPTION_PRESETS = {
+    "classic": {
+        "subtitle_font": "Arial Black",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_outline_color": "#000000",
+        "subtitle_stroke_width": 3,
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_highlight_color_hex": None,
+    },
+    "karaoke": {
+        "subtitle_font": "Arial Black",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_highlight_color_hex": "#6c5ce7",
+        "subtitle_position": "center",
+        "subtitle_position_y": 0.50,
+        "subtitle_bg_enabled": False,
+    },
+    "boxed": {
+        "subtitle_font": "Arial",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": True,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.7,
+        "subtitle_stroke_width": 0,
+    },
+    "neon": {
+        "subtitle_font": "Arial Black",
+        "subtitle_color": (0, 255, 213),
+        "subtitle_outline_color": "#00ffd5",
+        "subtitle_stroke_width": 0,
+        "subtitle_position": "center",
+        "subtitle_position_y": 0.50,
+        "subtitle_bg_enabled": False,
+    },
+    "bold": {
+        "subtitle_font": "Impact",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_stroke_width": 2,
+        "subtitle_position": "center",
+        "subtitle_position_y": 0.50,
+        "subtitle_bg_enabled": False,
+    },
+    "minimal": {
+        "subtitle_font": "Arial",
+        "subtitle_color": (180, 180, 180),
+        "subtitle_stroke_width": 1,
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.90,
+        "subtitle_fontsize_multiplier": 0.7,
+        "subtitle_bg_enabled": False,
+    },
+    "gradient": {
+        "subtitle_font": "Arial Black",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_highlight_color_hex": "#e84393",
+        "subtitle_position": "center",
+        "subtitle_position_y": 0.50,
+        "subtitle_bg_enabled": False,
+    },
+    "none": {
+        "enable_subtitles": False,
+    },
+}
+
 # Async job tracking for non-blocking analysis
 _job_lock = threading.Lock()
 _current_job = {
@@ -333,6 +402,7 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
         remove_fillers = _parse_bool(data.get("remove_fillers"), default=True)
         smart_cut = _parse_bool(data.get("smart_cut"), default=True)
         filler_sensitivity = data.get("filler_sensitivity", "medium")
+        caption_preset = data.get("caption_preset", "classic")
 
         with _job_lock:
             if _current_job["status"] == "processing":
@@ -392,6 +462,7 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
 
                 result_dict = result.to_dict()
                 result_dict["style"] = style
+                result_dict["caption_preset"] = caption_preset
                 VideoEditorHandler._last_result = result_dict
 
                 # Build enhanced progress data from result
@@ -497,6 +568,12 @@ class VideoEditorHandler(BaseHTTPRequestHandler):
             # Only apply vertical reframing if the source video is already vertical (portrait)
             from src.styles import get_style
             config = get_style(style)
+
+            # Apply caption preset overrides
+            caption_preset = data.get("caption_preset", "classic")
+            if caption_preset in CAPTION_PRESETS:
+                config.update(CAPTION_PRESETS[caption_preset])
+
             target_ratio = None
             if config.get("auto_reframe"):
                 probe = _probe_video(xml_video_path)
