@@ -768,6 +768,8 @@ def _probe_video(video_path):
     info = {
         "width": 1920, "height": 1080, "fps": 24.0, "duration": 0.0,
         "audio_channels": 2, "audio_sample_rate": 48000,
+        "codec_name": "", "color_range": "", "color_space": "",
+        "color_transfer": "", "color_primaries": "",
     }
 
     try:
@@ -818,6 +820,13 @@ def _probe_video(video_path):
         info["duration"] = float(stream.get("duration", 0))
         if info["duration"] <= 0:
             info["duration"] = float(fmt.get("duration", 0))
+
+        # Color metadata
+        info["codec_name"] = stream.get("codec_name", "")
+        info["color_range"] = stream.get("color_range", "")
+        info["color_space"] = stream.get("color_space", "")
+        info["color_transfer"] = stream.get("color_transfer", "")
+        info["color_primaries"] = stream.get("color_primaries", "")
     except Exception:
         pass
 
@@ -853,10 +862,8 @@ def _normalize_rotation(video_path):
     probe = _probe_video(video_path)
     rot = probe.get("rotation", 0)
 
-    # macOS: always normalize to bake rotation into pixels (ffmpeg autorotation)
-    # On other platforms, only normalize if rotation is detected
-    import platform
-    if rot == 0 and platform.system() != 'Darwin':
+    # Only normalize if rotation is detected — skip re-encoding to avoid color shifts
+    if rot == 0:
         return video_path
 
     import hashlib
@@ -891,9 +898,22 @@ def _normalize_rotation(video_path):
     except Exception:
         ffmpeg = "ffmpeg"
 
+    # Preserve color metadata to prevent brightness shift
+    color_args = []
+    if probe.get("color_range"):
+        cr = "tv" if probe["color_range"] == "tv" else "pc"
+        color_args += ["-color_range", cr]
+    if probe.get("color_space"):
+        color_args += ["-colorspace", probe["color_space"]]
+    if probe.get("color_transfer"):
+        color_args += ["-color_trc", probe["color_transfer"]]
+    if probe.get("color_primaries"):
+        color_args += ["-color_primaries", probe["color_primaries"]]
+
     cmd = [
         ffmpeg, "-i", video_path,
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+    ] + color_args + [
         "-c:a", "copy",
         "-y", norm_path,
     ]
@@ -1357,6 +1377,38 @@ def generate_premiere_xml(video_path, segments, subtitles, fps=None, target_rati
         except (ValueError, ZeroDivisionError):
             pass
 
+    # Color / codec metadata for XML
+    codec_name = info.get("codec_name", "")
+    color_range = info.get("color_range", "")
+
+    # Map ffprobe codec to FCP7 XML codec name/appspecificdata
+    # This tells Premiere how to interpret levels correctly
+    _codec_map = {
+        "h264": ("AVC Coding", "avc1"),
+        "hevc": ("HEVC Coding", "hvc1"),
+        "prores": ("Apple ProRes", "apch"),
+        "mjpeg": ("Photo - JPEG", "jpeg"),
+    }
+    fcp_codec_name, fcp_codec_type = _codec_map.get(codec_name, ("", ""))
+
+    # Build codec XML block (if we know the codec)
+    codec_xml = ""
+    if fcp_codec_name:
+        codec_xml = f"""<codec>
+                                            <name>{fcp_codec_name}</name>
+                                            <appspecificdata>
+                                                <appname>Final Cut Pro</appname>
+                                                <appmanufacturer>Apple Inc.</appmanufacturer>
+                                                <data>
+                                                    <qtcodec>
+                                                        <codecname>{fcp_codec_name}</codecname>
+                                                        <codectypename>{fcp_codec_type}</codectypename>
+                                                        <codecvendor>appl</codecvendor>
+                                                    </qtcodec>
+                                                </data>
+                                            </appspecificdata>
+                                        </codec>"""
+
     timebase, ntsc = _fps_to_timebase_ntsc(fps)
     ntsc_str = "TRUE" if ntsc else "FALSE"
 
@@ -1416,6 +1468,7 @@ def generate_premiere_xml(video_path, segments, subtitles, fps=None, target_rati
                                         <anamorphic>FALSE</anamorphic>
                                         <pixelaspectratio>square</pixelaspectratio>
                                         <fielddominance>none</fielddominance>
+                                        {codec_xml}
                                     </samplecharacteristics>
                                 </video>
                                 <audio>
@@ -1600,6 +1653,7 @@ def generate_premiere_xml(video_path, segments, subtitles, fps=None, target_rati
                         <pixelaspectratio>square</pixelaspectratio>
                         <fielddominance>none</fielddominance>
                         <colordepth>24</colordepth>
+                        {codec_xml}
                     </samplecharacteristics>
                 </format>
                 <track>{"".join(video_clips)}

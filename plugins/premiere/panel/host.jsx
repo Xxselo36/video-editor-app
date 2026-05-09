@@ -144,6 +144,15 @@ function importXMLSequence(xmlPath, clipName, styleName) {
             return "error: file not found: " + xmlPath;
         }
 
+        // Save the active (source) sequence settings BEFORE import
+        var sourceSeq = app.project.activeSequence;
+        var sourceSettings = null;
+        if (sourceSeq) {
+            try {
+                sourceSettings = sourceSeq.getSettings();
+            } catch (e) {}
+        }
+
         // Create unique bin named after clip + style
         var bin = createUniqueBin(clipName, styleName);
 
@@ -169,11 +178,13 @@ function importXMLSequence(xmlPath, clipName, styleName) {
             _currentSeqID = null;
             var seqCountAfter = app.project.sequences.numSequences;
             var foundMethod = "none";
+            var newSeq = null;
 
             for (var q = 0; q < seqCountAfter; q++) {
                 var seq = app.project.sequences[q];
                 if (!oldIds[seq.sequenceID]) {
                     _currentSeqID = seq.sequenceID;
+                    newSeq = seq;
                     foundMethod = "id_compare:" + seq.name;
                     break;
                 }
@@ -185,9 +196,22 @@ function importXMLSequence(xmlPath, clipName, styleName) {
                     var seq2 = app.project.sequences[q2];
                     if (seq2.name.indexOf("SmartCut") === 0) {
                         _currentSeqID = seq2.sequenceID;
+                        newSeq = seq2;
                         foundMethod = "name_match:" + seq2.name;
                         break;
                     }
+                }
+            }
+
+            // Copy ALL sequence settings from original to prevent color/brightness shift.
+            // FCP7 XML cannot specify Premiere-specific settings like working color space,
+            // composite in linear color, maximum bit depth, etc. Applying the source
+            // sequence's settings ensures the new sequence renders identically.
+            if (newSeq && sourceSettings) {
+                try {
+                    newSeq.setSettings(sourceSettings);
+                } catch (e) {
+                    // Settings copy failed — continue without it
                 }
             }
 
