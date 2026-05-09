@@ -476,60 +476,68 @@ class VideoEditorApp(ctk.CTk):
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # Scrollable container for all content
+        self._scroll = ctk.CTkScrollableFrame(
+            self, fg_color="transparent",
+            scrollbar_button_color=THEME["surface_2"],
+            scrollbar_button_hover_color=THEME["border"],
+        )
+        self._scroll.grid(row=0, column=0, sticky="nsew")
+        self._scroll.grid_columnconfigure(0, weight=1)
         row = 0
 
-        # --- Logo centered ---
+        # --- Banner header (like Premiere panel) ---
         try:
             from PIL import Image
-            icon_path = SCRIPT_DIR / "logo.png"
-            if icon_path.is_file():
-                self._title_logo = ctk.CTkImage(
-                    light_image=Image.open(str(icon_path)),
-                    dark_image=Image.open(str(icon_path)),
-                    size=(180, 112))
+            banner_path = SCRIPT_DIR / "plugins" / "premiere" / "panel" / "banner.png"
+            if not banner_path.is_file():
+                banner_path = SCRIPT_DIR / "banner.png"
+            if banner_path.is_file():
+                pil_img = Image.open(str(banner_path))
+                # Scale banner to window width, sharp on Retina
+                aspect = pil_img.width / pil_img.height
+                banner_w = 340
+                banner_h = int(banner_w / aspect)
+                self._banner_img = ctk.CTkImage(
+                    light_image=pil_img, dark_image=pil_img,
+                    size=(banner_w, banner_h))
                 ctk.CTkLabel(
-                    self, image=self._title_logo, text="",
-                ).grid(row=row, column=0, pady=(2, 0))
+                    self._scroll, image=self._banner_img, text="",
+                ).grid(row=row, column=0, sticky="ew")
                 row += 1
+            else:
+                raise FileNotFoundError
         except Exception:
             ctk.CTkLabel(
-                self, text="SMARTCUT",
+                self._scroll, text="SMARTCUT",
                 font=ctk.CTkFont(size=24, weight="bold"),
                 text_color=THEME["text"],
-            ).grid(row=row, column=0, padx=24, pady=(4, 0), sticky="w")
+            ).grid(row=row, column=0, padx=24, pady=(12, 0))
+            row += 1
+            ctk.CTkLabel(
+                self._scroll, text="AI-powered video editing",
+                font=ctk.CTkFont(size=12),
+                text_color=THEME["text_muted"],
+            ).grid(row=row, column=0, pady=(0, 4))
             row += 1
 
-        ctk.CTkLabel(
-            self, text="AI-powered video editing",
-            font=ctk.CTkFont(size=12),
-            text_color=THEME["text_muted"],
-        ).grid(row=row, column=0, pady=(0, 0))
-        row += 1
-
-        # ── Settings Card ──────────────────────────────────────────────────
-        settings = self._make_card(self)
-        settings.grid(row=row, column=0, padx=20, pady=(0, 2), sticky="ew")
-        settings.grid_columnconfigure(1, weight=1)
-        self._card_header(settings, "SETTINGS")
-        row += 1
-
-        # Video row
-        ctk.CTkLabel(
-            settings, text="Video",
-            font=ctk.CTkFont(size=13),
-            text_color=THEME["text_sec"],
-        ).grid(row=1, column=0, padx=(16, 8), pady=4, sticky="w")
-
+        # ── Drop zone (file selection) ─────────────────────────────────────
         self._video_path = ""
         self._drop_frame = ctk.CTkFrame(
-            settings,
-            fg_color=THEME["surface_2"],
-            corner_radius=8,
-            height=40,
+            self._scroll,
+            fg_color=THEME["surface"],
+            corner_radius=12,
+            border_width=1,
+            border_color=THEME["border"],
+            height=44,
         )
-        self._drop_frame.grid(row=1, column=1, columnspan=2, padx=(0, 16), pady=4, sticky="ew")
+        self._drop_frame.grid(row=row, column=0, padx=20, pady=(20, 6), sticky="ew")
         self._drop_frame.grid_columnconfigure(0, weight=1)
+        self._drop_frame.grid_rowconfigure(0, weight=1)
         self._drop_frame.grid_propagate(False)
+        row += 1
 
         self.video_label = ctk.CTkLabel(
             self._drop_frame,
@@ -538,27 +546,26 @@ class VideoEditorApp(ctk.CTk):
             font=ctk.CTkFont(size=12),
             fg_color="transparent",
         )
-        self.video_label.grid(row=0, column=0, padx=12, sticky="ew")
+        self.video_label.grid(row=0, column=0, padx=14, sticky="ew")
         self.video_label.bind("<Button-1>", lambda e: self._pick_video())
         self._drop_frame.bind("<Button-1>", lambda e: self._pick_video())
 
-        # Drag & Drop via TkDND (tkinterdnd2) or fallback
         try:
             self._drop_frame.drop_target_register("DND_Files")
             self._drop_frame.dnd_bind("<<Drop>>", self._on_drop)
         except Exception:
             pass
 
-        # Style row
+        # ── Style cards (vertical list like Premiere panel) ────────────────
         ctk.CTkLabel(
-            settings, text="Style",
-            font=ctk.CTkFont(size=13),
-            text_color=THEME["text_sec"],
-        ).grid(row=2, column=0, padx=(16, 8), pady=4, sticky="w")
+            self._scroll, text="STYLE",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color=THEME["text_muted"],
+        ).grid(row=row, column=0, padx=24, pady=(4, 4), sticky="w")
+        row += 1
 
         style_info = get_style_info()
         visible_styles = ("clean", "fast", "balanced", "smooth", "minimal")
-        # Map English display name -> internal key
         self._style_display_to_key = {}
         style_display_names = []
         for key, info in style_info.items():
@@ -568,291 +575,243 @@ class VideoEditorApp(ctk.CTk):
             self._style_display_to_key[display] = key
             style_display_names.append(display)
 
+        # Style descriptions and icons
+        _style_meta = {
+            "clean":    {"icon": "\u2702\uFE0F", "desc": "Tight cuts, phrase subtitles"},
+            "fast":     {"icon": "\u26A1",       "desc": "Fast cuts, word-by-word subtitles"},
+            "balanced": {"icon": "\u2696\uFE0F", "desc": "Balanced cuts, word subtitles"},
+            "smooth":   {"icon": "\U0001F30A",   "desc": "Smooth cuts, word subtitles"},
+            "minimal":  {"icon": "\u25CF",       "desc": "Tight cuts, no subtitles"},
+        }
+
+        self._style_cards_frame = ctk.CTkFrame(
+            self._scroll, fg_color=THEME["surface"],
+            corner_radius=14,
+            border_width=1,
+            border_color=THEME["border"],
+        )
+        self._style_cards_frame.grid(row=row, column=0, padx=20, pady=(0, 6), sticky="ew")
+        self._style_cards_frame.grid_columnconfigure(0, weight=1)
+        row += 1
+
         default_key = "clean"
         default_display = style_info.get(default_key, {}).get("name", style_display_names[0])
         self.style_var = ctk.StringVar(value=default_display)
-        self.style_menu = ctk.CTkOptionMenu(
-            settings, variable=self.style_var,
-            values=style_display_names,
-            fg_color=THEME["surface_2"],
-            button_color=THEME["surface_2"],
-            button_hover_color=THEME["border"],
-            dropdown_fg_color=THEME["surface"],
-            dropdown_hover_color=THEME["border"],
-            text_color=THEME["text"],
-            corner_radius=8,
-            height=36,
-            command=self._on_style_changed,
-        )
-        self.style_menu.grid(row=2, column=1, columnspan=2, padx=(0, 16), pady=4, sticky="ew")
+        self._style_card_widgets = {}
 
-        # Style description
-        self.style_desc = ctk.CTkLabel(
-            settings, text="",
-            font=ctk.CTkFont(size=11),
-            text_color=THEME["text_muted"],
-        )
-        self.style_desc.grid(row=3, column=1, columnspan=2, padx=(4, 16), pady=(0, 4), sticky="w")
-        self._on_style_changed(None)
+        for i, key in enumerate(visible_styles):
+            info = style_info.get(key, {})
+            display = info.get("name", key.capitalize())
+            meta = _style_meta.get(key, {"icon": "", "desc": ""})
 
-        # Bottom padding for settings card (style desc already has some)
-        self.style_desc.grid(row=3, column=1, columnspan=2, padx=(4, 16), pady=(0, 2), sticky="w")
+            card = ctk.CTkFrame(
+                self._style_cards_frame,
+                fg_color="transparent",
+                corner_radius=10,
+            )
+            card.grid(row=i, column=0, padx=4, pady=1, sticky="ew")
+            card.grid_columnconfigure(2, weight=1)
 
-        # Filler word removal checkbox
+            # Icon (fixed width for alignment)
+            icon_lbl = ctk.CTkLabel(
+                card, text=meta["icon"],
+                font=ctk.CTkFont(size=13),
+                width=32, height=32,
+                fg_color=THEME["surface_2"],
+                corner_radius=8,
+            )
+            icon_lbl.grid(row=0, column=0, padx=(8, 0), pady=4)
+
+            # Name (fixed width so descriptions align)
+            name_lbl = ctk.CTkLabel(
+                card, text=display,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=THEME["text_sec"],
+                anchor="w", width=80,
+            )
+            name_lbl.grid(row=0, column=1, padx=(8, 0), sticky="w")
+
+            # Description
+            desc_lbl = ctk.CTkLabel(
+                card, text=meta["desc"],
+                font=ctk.CTkFont(size=10),
+                text_color=THEME["text_muted"],
+                anchor="w",
+            )
+            desc_lbl.grid(row=0, column=2, padx=(4, 4), sticky="w")
+
+            # Radio indicator
+            radio = ctk.CTkRadioButton(
+                card, text="",
+                variable=self.style_var,
+                value=display,
+                fg_color=THEME["accent"],
+                border_color=THEME["border"],
+                hover_color=THEME["accent_hover"],
+                width=18, height=18,
+                command=lambda: self._on_style_changed(None),
+            )
+            radio.grid(row=0, column=3, padx=(0, 10), pady=4)
+
+            # Make whole card clickable
+            def _select(d=display, r=radio):
+                self.style_var.set(d)
+                self._on_style_changed(None)
+            for w in [card, icon_lbl, name_lbl, desc_lbl]:
+                w.bind("<Button-1>", lambda e, s=_select: s())
+
+            self._style_card_widgets[key] = {
+                "card": card, "name": name_lbl, "desc": desc_lbl,
+                "icon": icon_lbl, "radio": radio,
+            }
+
+        # Hidden style description label (for compatibility)
+        self.style_desc = ctk.CTkLabel(self._scroll, text="", height=0, fg_color="transparent")
+
+        # Filler var (always True, no checkbox)
         self.filler_var = ctk.BooleanVar(value=True)
-        self.filler_check = ctk.CTkCheckBox(
-            settings,
-            text="Remove filler words (um, uh, like...)",
-            variable=self.filler_var,
-            font=ctk.CTkFont(size=13),
-            checkbox_width=20,
-            checkbox_height=20,
-            fg_color=THEME["accent"],
-            hover_color=THEME["accent_hover"],
-            border_color=THEME["border"],
-            text_color=THEME["text_sec"],
-        )
-        self.filler_check.grid(row=4, column=0, columnspan=3, padx=16, pady=(0, 4), sticky="w")
 
-        # ── Caption Settings (collapsible) ─────────────────────────────────
-        self._caption_expanded = False
-        self._caption_header = ctk.CTkButton(
-            settings,
-            text="\u25B6 Caption Settings",
-            command=self._toggle_caption_settings,
-            fg_color="transparent",
-            text_color=THEME["text_muted"],
-            hover_color=THEME["surface_2"],
-            anchor="w",
-            font=ctk.CTkFont(size=13),
-            height=28,
-        )
-        self._caption_header.grid(row=5, column=0, columnspan=3, padx=12, pady=(0, 2), sticky="ew")
-
-        self._caption_frame = ctk.CTkFrame(settings, fg_color="transparent")
-        # _caption_frame is NOT gridded initially (collapsed)
-        self._caption_frame.grid_columnconfigure(1, weight=1)
-
-        # -- Font selector --
-        ctk.CTkLabel(
-            self._caption_frame, text="Font",
-            font=ctk.CTkFont(size=12), text_color=THEME["text_sec"],
-        ).grid(row=0, column=0, padx=(16, 8), pady=3, sticky="w")
-        fonts = ["Arial Black", "Arial", "Helvetica", "Impact", "Futura", "Montserrat", "Roboto"]
+        # Caption defaults (no UI, use style defaults)
         self.font_var = ctk.StringVar(value="Arial Black")
-        ctk.CTkOptionMenu(
-            self._caption_frame, variable=self.font_var, values=fonts,
-            fg_color=THEME["surface_2"], button_color=THEME["surface_2"],
-            button_hover_color=THEME["border"],
-            dropdown_fg_color=THEME["surface"], dropdown_hover_color=THEME["border"],
-            text_color=THEME["text"], corner_radius=8, height=30,
-        ).grid(row=0, column=1, padx=(0, 16), pady=3, sticky="ew")
-
-        # -- Color buttons row --
-        color_row = ctk.CTkFrame(self._caption_frame, fg_color="transparent")
-        color_row.grid(row=1, column=0, columnspan=2, padx=16, pady=3, sticky="ew")
-        color_row.grid_columnconfigure(0, weight=1)
-        color_row.grid_columnconfigure(1, weight=1)
-
         self.text_color_var = "#FFFFFF"
-        self.text_color_btn = ctk.CTkButton(
-            color_row, text="Text Color", width=100, height=28,
-            fg_color=self.text_color_var, text_color="#000000",
-            hover_color="#E0E0E0", corner_radius=6,
-            font=ctk.CTkFont(size=11),
-            command=self._pick_text_color,
-        )
-        self.text_color_btn.grid(row=0, column=0, padx=(0, 4), sticky="ew")
-
         self.highlight_color_var = "#6c5ce7"
-        self.highlight_color_btn = ctk.CTkButton(
-            color_row, text="Highlight", width=100, height=28,
-            fg_color=self.highlight_color_var, text_color="#FFFFFF",
-            hover_color="#7c6cf7", corner_radius=6,
-            font=ctk.CTkFont(size=11),
-            command=self._pick_highlight_color,
-        )
-        self.highlight_color_btn.grid(row=0, column=1, padx=(4, 0), sticky="ew")
-
-        # -- Position selector --
-        ctk.CTkLabel(
-            self._caption_frame, text="Position",
-            font=ctk.CTkFont(size=12), text_color=THEME["text_sec"],
-        ).grid(row=2, column=0, padx=(16, 8), pady=3, sticky="w")
         self.position_var = ctk.StringVar(value="Bottom")
-        ctk.CTkOptionMenu(
-            self._caption_frame, variable=self.position_var,
-            values=["Bottom", "Center", "Top"],
-            fg_color=THEME["surface_2"], button_color=THEME["surface_2"],
-            button_hover_color=THEME["border"],
-            dropdown_fg_color=THEME["surface"], dropdown_hover_color=THEME["border"],
-            text_color=THEME["text"], corner_radius=8, height=30,
-        ).grid(row=2, column=1, padx=(0, 16), pady=3, sticky="ew")
-
-        # -- Background toggle --
         self.bg_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
-            self._caption_frame, text="Text background",
-            variable=self.bg_var,
-            font=ctk.CTkFont(size=12),
-            checkbox_width=18, checkbox_height=18,
-            fg_color=THEME["accent"], hover_color=THEME["accent_hover"],
-            border_color=THEME["border"], text_color=THEME["text_sec"],
-        ).grid(row=3, column=0, columnspan=2, padx=16, pady=(3, 6), sticky="w")
-
-        # Sync caption controls to default style
         self._sync_caption_to_style()
 
-        # ── Progress Card ──────────────────────────────────────────────────
-        progress = self._make_card(self)
-        progress.grid(row=row, column=0, padx=20, pady=(0, 2), sticky="ew")
-        progress.grid_columnconfigure(0, weight=1)
-        progress.grid_columnconfigure(1, weight=0)
-        self._card_header(progress, "PROGRESS")
+        # ── Progress Panel (hidden until processing starts) ──────────────
+        self._progress_card = ctk.CTkFrame(
+            self._scroll,
+            fg_color=THEME["surface"],
+            corner_radius=12,
+            border_width=1,
+            border_color=THEME["border"],
+        )
+        self._progress_card_row = row
+        # Not gridded yet — shown when processing starts
         row += 1
 
-        # Step + Percent row
-        step_row = ctk.CTkFrame(progress, fg_color="transparent")
-        step_row.grid(row=1, column=0, columnspan=2, padx=16, pady=(0, 4), sticky="ew")
-        step_row.grid_columnconfigure(0, weight=1)
+        self._progress_card.grid_columnconfigure(0, weight=1)
 
-        self.step_label = ctk.CTkLabel(
-            step_row, text="Ready",
-            font=ctk.CTkFont(size=13),
+        # Status text (e.g. "Analyzing audio...")
+        self._progress_status = ctk.CTkLabel(
+            self._progress_card, text="Processing...",
+            font=ctk.CTkFont(size=12),
             text_color=THEME["text_sec"],
+            anchor="w",
         )
-        self.step_label.grid(row=0, column=0, sticky="w")
+        self._progress_status.grid(row=0, column=0, padx=16, pady=(12, 2), sticky="w")
 
+        # Percent label
         self.progress_pct = ctk.CTkLabel(
-            step_row, text="0%",
-            font=ctk.CTkFont(size=15, weight="bold"),
+            self._progress_card, text="0%",
+            font=ctk.CTkFont(size=20, weight="bold"),
             text_color=THEME["text"],
+            anchor="w",
         )
-        self.progress_pct.grid(row=0, column=1, sticky="e")
+        self.progress_pct.grid(row=1, column=0, padx=16, pady=(0, 4), sticky="w")
 
         # Progress bar
         self.progress_bar = ctk.CTkProgressBar(
-            progress, height=6, corner_radius=3,
+            self._progress_card, height=6, corner_radius=3,
             fg_color=THEME["accent_dim"],
             progress_color=THEME["accent"],
         )
-        self.progress_bar.grid(row=2, column=0, columnspan=2, padx=16, pady=(0, 4), sticky="ew")
+        self.progress_bar.grid(row=2, column=0, padx=16, pady=(0, 12), sticky="ew")
         self.progress_bar.set(0)
 
-        # Status + ETA row
-        eta_row = ctk.CTkFrame(progress, fg_color="transparent")
-        eta_row.grid(row=3, column=0, columnspan=2, padx=16, pady=(0, 6), sticky="ew")
-        eta_row.grid_columnconfigure(0, weight=1)
+        # Hidden labels for compatibility (used by callbacks)
+        self.step_label = ctk.CTkLabel(self._progress_card, text="", height=0, fg_color="transparent")
+        self.progress_label = self._progress_status  # reuse status label
+        self.eta_label = ctk.CTkLabel(self._progress_card, text="", height=0, fg_color="transparent")
 
-        self.progress_label = ctk.CTkLabel(
-            eta_row, text="",
-            font=ctk.CTkFont(size=12),
-            text_color=THEME["text_muted"],
-        )
-        self.progress_label.grid(row=0, column=0, sticky="w")
-
-        self.eta_label = ctk.CTkLabel(
-            eta_row, text="",
-            font=ctk.CTkFont(size=12),
-            text_color=THEME["text_muted"],
-        )
-        self.eta_label.grid(row=0, column=1, sticky="e")
-
-        # ── Buttons ────────────────────────────────────────────────────────
+        # ── Start Button (gradient style like panel) ───────────────────────
         self.start_btn = ctk.CTkButton(
-            self, text="\u25B6  Start",
-            font=ctk.CTkFont(size=15, weight="bold"),
-            height=40,
+            self._scroll, text="Process Video",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            height=44,
             fg_color=THEME["accent"],
             hover_color=THEME["accent_hover"],
             text_color="#ffffff",
-            corner_radius=10,
+            corner_radius=12,
             command=self._start,
         )
-        self.start_btn.grid(row=row, column=0, padx=20, pady=(0, 2), sticky="ew")
+        self.start_btn.grid(row=row, column=0, padx=20, pady=(4, 4), sticky="ew")
+        row += 1
+
+        # Cancel + Videos row (side by side)
+        btn_row = ctk.CTkFrame(self._scroll, fg_color="transparent")
+        btn_row.grid(row=row, column=0, padx=20, pady=(0, 4), sticky="ew")
+        btn_row.grid_columnconfigure(0, weight=1)
+        btn_row.grid_columnconfigure(1, weight=1)
         row += 1
 
         self.cancel_btn = ctk.CTkButton(
-            self, text="Cancel",
-            font=ctk.CTkFont(size=13),
+            btn_row, text="Cancel",
+            font=ctk.CTkFont(size=12),
             height=32,
             fg_color="transparent",
             hover_color=THEME["surface"],
-            text_color=THEME["danger"],
+            text_color=THEME["text_muted"],
             border_width=1,
-            border_color=THEME["danger"],
+            border_color=THEME["border"],
             corner_radius=8,
             state="disabled",
             command=self._cancel,
         )
-        self.cancel_btn.grid(row=row, column=0, padx=20, pady=(0, 2), sticky="ew")
-        row += 1
+        self.cancel_btn.grid(row=0, column=0, padx=(0, 4), sticky="ew")
 
-        # ── Videos Button ──────────────────────────────────────────────────
         self.open_btn = ctk.CTkButton(
-            self, text="Videos",
-            font=ctk.CTkFont(size=13),
+            btn_row, text="Videos",
+            font=ctk.CTkFont(size=12),
             height=32,
-            fg_color=THEME["surface"],
-            hover_color=THEME["surface_2"],
-            text_color=THEME["text_sec"],
+            fg_color="transparent",
+            hover_color=THEME["surface"],
+            text_color=THEME["text_muted"],
             border_width=1,
             border_color=THEME["border"],
             corner_radius=8,
             command=self._open_output,
         )
-        self.open_btn.grid(row=row, column=0, padx=20, pady=(0, 2), sticky="ew")
+        self.open_btn.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+
+        # ── Footer (version + utility buttons) ────────────────────────────
+        footer = ctk.CTkFrame(self._scroll, fg_color="transparent", height=28)
+        footer.grid(row=row, column=0, padx=20, pady=(4, 8), sticky="ew")
+        footer.grid_columnconfigure(1, weight=1)
         row += 1
 
-        # ── Info + Plugins (top right) ────────────────────────────────────
-        self.info_btn = ctk.CTkButton(
-            self, text="ⓘ",
-            font=ctk.CTkFont(size=14),
-            width=28,
-            height=24,
-            fg_color="transparent",
-            hover_color=THEME["surface"],
+        ctk.CTkLabel(
+            footer, text=f"SmartCut v{APP_VERSION}",
+            font=ctk.CTkFont(size=10),
             text_color=THEME["text_muted"],
-            corner_radius=6,
-            command=self._show_info,
-        )
-        self.info_btn.place(relx=1.0, y=8, x=-76, anchor="ne")
+        ).grid(row=0, column=0, sticky="w")
 
-        self.plugins_btn = ctk.CTkButton(
-            self, text="Plugins",
-            font=ctk.CTkFont(size=11),
-            width=60,
-            height=24,
-            fg_color="transparent",
-            hover_color=THEME["surface"],
-            text_color=THEME["text_muted"],
-            corner_radius=6,
-            command=self._open_plugins,
-        )
-        self.plugins_btn.place(relx=1.0, y=8, x=-12, anchor="ne")
+        # Right side: License | Info | Plugins
+        right_btns = ctk.CTkFrame(footer, fg_color="transparent")
+        right_btns.grid(row=0, column=1, sticky="e")
 
-        self.license_btn = ctk.CTkButton(
-            self, text="License",
-            font=ctk.CTkFont(size=11),
-            width=60,
-            height=24,
-            fg_color="transparent",
-            hover_color=THEME["surface"],
-            text_color=THEME["text_muted"],
-            corner_radius=6,
-            command=self._show_license,
-        )
-        self.license_btn.place(relx=1.0, y=8, x=-140, anchor="ne")
+        for text, cmd in [("License", self._show_license), ("Info", self._show_info), ("Plugins", self._open_plugins)]:
+            ctk.CTkButton(
+                right_btns, text=text,
+                font=ctk.CTkFont(size=10),
+                width=50, height=22,
+                fg_color="transparent",
+                hover_color=THEME["surface"],
+                text_color=THEME["text_muted"],
+                corner_radius=6,
+                command=cmd,
+            ).pack(side="left", padx=2)
 
         # Trial mode banner
         if getattr(self, '_trial_mode', False):
             self._trial_banner = ctk.CTkLabel(
-                self,
+                self._scroll,
                 text=f"\u26a1 Trial Mode: {self._trial_remaining} free edits remaining",
                 font=ctk.CTkFont(size=12),
                 text_color=THEME["warning"],
             )
-            self._trial_banner.grid(row=row, column=0, padx=20, pady=(2, 4))
+            self._trial_banner.grid(row=row, column=0, padx=20, pady=(0, 4))
             row += 1
 
     # ========================================================================
@@ -892,14 +851,9 @@ class VideoEditorApp(ctk.CTk):
         # Text color: convert RGB tuple to hex
         rgb = cfg.get("subtitle_color", (255, 255, 255))
         self.text_color_var = "#{:02X}{:02X}{:02X}".format(*rgb)
-        self.text_color_btn.configure(
-            fg_color=self.text_color_var,
-            text_color="#000000" if sum(rgb) > 384 else "#FFFFFF",
-        )
         # Highlight color
         hl = cfg.get("subtitle_highlight_color_hex")
         self.highlight_color_var = hl if hl else "#6c5ce7"
-        self.highlight_color_btn.configure(fg_color=self.highlight_color_var)
         # Position
         pos = cfg.get("subtitle_position", "bottom").capitalize()
         if pos not in ("Bottom", "Center", "Top"):
@@ -907,37 +861,6 @@ class VideoEditorApp(ctk.CTk):
         self.position_var.set(pos)
         # Background
         self.bg_var.set(cfg.get("subtitle_bg_enabled", False))
-
-    def _toggle_caption_settings(self):
-        self._caption_expanded = not self._caption_expanded
-        if self._caption_expanded:
-            self._caption_header.configure(text="\u25BC Caption Settings")
-            self._caption_frame.grid(row=6, column=0, columnspan=3, sticky="ew")
-        else:
-            self._caption_header.configure(text="\u25B6 Caption Settings")
-            self._caption_frame.grid_forget()
-
-    def _pick_text_color(self):
-        from tkinter import colorchooser
-        color = colorchooser.askcolor(title="Text Color", initialcolor=self.text_color_var)
-        if color[1]:
-            self.text_color_var = color[1]
-            rgb = color[0]
-            self.text_color_btn.configure(
-                fg_color=color[1],
-                text_color="#000000" if sum(rgb) > 384 else "#FFFFFF",
-            )
-
-    def _pick_highlight_color(self):
-        from tkinter import colorchooser
-        color = colorchooser.askcolor(title="Highlight Color", initialcolor=self.highlight_color_var)
-        if color[1]:
-            self.highlight_color_var = color[1]
-            rgb = color[0]
-            self.highlight_color_btn.configure(
-                fg_color=color[1],
-                text_color="#000000" if sum(rgb) > 384 else "#FFFFFF",
-            )
 
     def _get_caption_overrides(self) -> dict:
         """Gather caption settings as style overrides."""
@@ -1001,21 +924,21 @@ class VideoEditorApp(ctk.CTk):
         self._cancel_flag = False
         self._output_path = None
         self._start_time = time.time()
-        # Reset start button to default state
+        # Show progress card
+        self._progress_card.grid(row=self._progress_card_row, column=0, padx=20, pady=(6, 6), sticky="ew")
+        self._progress_status.configure(text="Starting...", text_color=THEME["text_sec"])
+        self.progress_pct.configure(text="0%", text_color=THEME["text"])
+        self.progress_bar.configure(progress_color=THEME["accent"])
+        self.progress_bar.set(0)
+        # Update buttons
         self.start_btn.configure(
             state="disabled",
-            text="\u25B6  Start",
+            text="Processing...",
             fg_color=THEME["accent"],
             hover_color=THEME["accent_hover"],
             command=self._start,
         )
         self.cancel_btn.configure(state="normal")
-        self.progress_bar.configure(progress_color=THEME["accent"])
-        self.progress_bar.set(0)
-        self.progress_pct.configure(text="0%")
-        self.step_label.configure(text="Starting...", text_color=THEME["text"])
-        self.progress_label.configure(text="", text_color=THEME["text_muted"])
-        self.eta_label.configure(text="")
 
         style = self._get_selected_style()
         model = "medium"
@@ -1033,7 +956,7 @@ class VideoEditorApp(ctk.CTk):
     def _cancel(self):
         self._cancel_flag = True
         self.cancel_btn.configure(state="disabled")
-        self.progress_label.configure(text="Cancelling...", text_color=THEME["warning"])
+        self._progress_status.configure(text="Cancelling...", text_color=THEME["warning"])
 
     def _open_output(self):
         out_dir = str(OUTPUT_DIR)
@@ -1044,23 +967,51 @@ class VideoEditorApp(ctk.CTk):
     # PROGRESS CALLBACK (from worker thread)
     # ========================================================================
 
+    # Map technical messages to user-friendly labels
+    _FRIENDLY_MESSAGES = [
+        ("normaliz",        "Preparing video..."),
+        ("ffmpeg",          "Preparing video..."),
+        ("silence",         "Removing silences..."),
+        ("audio",           "Analyzing audio..."),
+        ("whisper",         "Transcribing speech..."),
+        ("transcri",        "Transcribing speech..."),
+        ("loading",         "Loading AI model..."),
+        ("model",           "Loading AI model..."),
+        ("filler",          "Removing filler words..."),
+        ("subtitle",        "Adding subtitles..."),
+        ("caption",         "Adding subtitles..."),
+        ("render",          "Rendering video..."),
+        ("export",          "Exporting video..."),
+        ("cut",             "Cutting video..."),
+        ("segment",         "Cutting video..."),
+        ("assembl",         "Assembling final video..."),
+        ("concat",          "Assembling final video..."),
+        ("merg",            "Assembling final video..."),
+        ("done",            "Finishing up..."),
+    ]
+
+    def _friendly_message(self, msg):
+        """Convert technical progress message to user-friendly text."""
+        lower = msg.lower()
+        for keyword, friendly in self._FRIENDLY_MESSAGES:
+            if keyword in lower:
+                return friendly
+        return "Processing..."
+
     def _progress_callback(self, message, step=None, total_steps=None, progress=None):
         """Called by the editor (in worker thread)."""
         def _update():
             if step is not None and total_steps is not None:
-                self.step_label.configure(
-                    text=f"Step {step} of {total_steps}",
-                    text_color=THEME["text"],
-                )
                 pct = progress if progress is not None else step / total_steps
                 self.progress_bar.set(pct)
                 self.progress_pct.configure(text=f"{int(pct * 100)}%")
 
-                # Clean message: strip step prefix like "[3/6] "
+                # Show user-friendly message
                 clean_msg = re.sub(r'^\s*\[?\d+/\d+\]?\s*', '', message).strip()
                 if clean_msg:
-                    self.progress_label.configure(
-                        text=clean_msg, text_color=THEME["text_muted"])
+                    friendly = self._friendly_message(clean_msg)
+                    self._progress_status.configure(
+                        text=friendly, text_color=THEME["text_sec"])
 
                 # ETA calculation
                 if self._start_time and pct > 0.01:
@@ -1074,8 +1025,9 @@ class VideoEditorApp(ctk.CTk):
             else:
                 short = message.strip().lstrip("\n")
                 if short:
-                    self.progress_label.configure(
-                        text=short, text_color=THEME["text_muted"])
+                    friendly = self._friendly_message(short)
+                    self._progress_status.configure(
+                        text=friendly, text_color=THEME["text_sec"])
 
         self.after(0, _update)
 
@@ -1180,28 +1132,15 @@ class VideoEditorApp(ctk.CTk):
         self._reset_start_btn()
 
     def _on_done(self, output_path):
-        elapsed = time.time() - self._start_time if self._start_time else 0
+        self._progress_status.configure(text="Done!", text_color=THEME["success"])
+        self.progress_pct.configure(text="100%", text_color=THEME["success"])
         self.progress_bar.configure(progress_color=THEME["success"])
         self.progress_bar.set(1.0)
-        self.progress_pct.configure(text="100%")
-        self.step_label.configure(text="Complete", text_color=THEME["success"])
-        # Build summary text
-        summary = f"Completed in {self._format_time(elapsed)}"
-        parts = []
-        if self._cut_count > 0:
-            parts.append(f"{self._cut_count} cuts")
-        if self._has_subtitles:
-            parts.append("subtitles added")
-        if parts:
-            summary += "\n" + ", ".join(parts)
-        self.progress_label.configure(
-            text=summary,
-            text_color=THEME["success"])
-        self.eta_label.configure(text="")
+        self._progress_card.configure(border_color=THEME["success"])
         # Replace start button with "Open Video"
         self.start_btn.configure(
             state="normal",
-            text="\u25B6  Open Video",
+            text="Open Video",
             fg_color=THEME["success"],
             hover_color="#00a844",
             command=self._open_video,
@@ -1209,21 +1148,21 @@ class VideoEditorApp(ctk.CTk):
         self.cancel_btn.configure(state="disabled")
 
     def _reset_start_btn(self):
+        self._progress_card.grid_forget()
+        self._progress_card.configure(border_color=THEME["border"])
         self.start_btn.configure(
             state="normal",
-            text="\u25B6  Start",
+            text="Process Video",
             fg_color=THEME["accent"],
             hover_color=THEME["accent_hover"],
             command=self._start,
         )
 
     def _on_cancelled(self):
+        self._progress_status.configure(text="Cancelled", text_color=THEME["warning"])
         self.progress_bar.configure(progress_color=THEME["warning"])
         self.progress_bar.set(0)
         self.progress_pct.configure(text="0%")
-        self.step_label.configure(text="Cancelled", text_color=THEME["warning"])
-        self.progress_label.configure(text="", text_color=THEME["text_muted"])
-        self.eta_label.configure(text="")
         self._reset_start_btn()
         self.cancel_btn.configure(state="disabled")
 

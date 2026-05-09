@@ -3,8 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SmartCut — AI-powered video editing</title>
-    <meta name="description" content="SmartCut automatically cuts silences, adds subtitles, and creates a ready-to-publish edit in minutes.">
+    <title>SmartCut — AI Video Editor | Cut Silences, Filler Words & Bad Takes Automatically</title>
+    <meta name="description" content="SmartCut is an AI video editor that removes silences, filler words, and bad takes automatically. $9.99/mo unlimited, 100% local processing, works with Premiere Pro & DaVinci Resolve. Try 3 free edits.">
+    <link rel="canonical" href="https://getsmartcut.app">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://getsmartcut.app">
+    <meta property="og:title" content="SmartCut — Cut Silences, Filler Words & Bad Takes Automatically">
+    <meta property="og:description" content="AI video editor that runs 100% locally. Remove silences, filler words, add subtitles. $9.99/mo unlimited. Works with Premiere Pro & DaVinci Resolve.">
+    <meta property="og:image" content="https://getsmartcut.app/og-image.png">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="SmartCut — Cut Silences, Filler Words & Bad Takes Automatically">
+    <meta name="twitter:description" content="AI video editor that runs 100% locally. Remove silences, filler words, add subtitles. $9.99/mo unlimited. Works with Premiere Pro & DaVinci Resolve.">
+    <meta name="twitter:image" content="https://getsmartcut.app/og-image.png">
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
@@ -21,6 +36,8 @@
             --text: #f0f0f2;
             --text-muted: #71717a;
             --text-dim: #52525b;
+            --green: #22c55e;
+            --red: #ef4444;
         }
 
         html { scroll-behavior: smooth; }
@@ -124,7 +141,7 @@
             font-size: 13px;
             font-weight: 600;
             color: var(--purple-light);
-            margin-bottom: 32px;
+            margin-bottom: 16px;
         }
         .hero-badge .dot {
             width: 6px;
@@ -132,6 +149,19 @@
             background: #22c55e;
             border-radius: 50%;
             animation: pulse-dot 2s ease-in-out infinite;
+        }
+        .hero-new-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.25);
+            border-radius: 100px;
+            padding: 6px 18px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--green);
+            margin-bottom: 32px;
         }
         @keyframes pulse-dot {
             0%, 100% { opacity: 1; }
@@ -195,6 +225,16 @@
             background: var(--surface-2);
             transform: translateY(-2px);
             border-color: rgba(255,255,255,0.1);
+        }
+        .btn-trial {
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--green);
+            border: 1px solid rgba(34, 197, 94, 0.25);
+        }
+        .btn-trial:hover {
+            background: rgba(34, 197, 94, 0.15);
+            transform: translateY(-2px);
+            border-color: rgba(34, 197, 94, 0.4);
         }
         .hero-price {
             margin-top: 24px;
@@ -367,6 +407,21 @@
             transform: translateY(-4px);
         }
         .feature-card:hover::before { opacity: 1; }
+        .feature-card.feature-new { border-color: rgba(34, 197, 94, 0.2); }
+        .feature-card.feature-new::after {
+            content: 'NEW';
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            color: var(--green);
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
         .feature-icon {
             width: 48px;
             height: 48px;
@@ -387,6 +442,129 @@
             font-size: 14px;
             color: var(--text-muted);
             line-height: 1.7;
+        }
+
+        /* COMPARISON TABLE */
+        .comparison { max-width: 700px; margin: 0 auto; }
+        .comparison-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            background: var(--surface);
+        }
+        .comparison-table th,
+        .comparison-table td {
+            padding: 16px 24px;
+            text-align: center;
+            font-size: 15px;
+            border-bottom: 1px solid var(--border);
+        }
+        .comparison-table th {
+            font-weight: 700;
+            font-size: 16px;
+            padding: 20px 24px;
+        }
+        .comparison-table thead tr {
+            background: var(--surface-2);
+        }
+        .comparison-table th:first-child,
+        .comparison-table td:first-child {
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+        .comparison-table tbody tr:nth-child(even) {
+            background: rgba(255,255,255,0.015);
+        }
+        .comparison-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+        .comparison-table tbody tr {
+            transition: background 0.2s;
+        }
+        .comparison-table tbody tr:hover {
+            background: rgba(108, 92, 231, 0.04);
+        }
+        .col-smartcut {
+            background: rgba(108, 92, 231, 0.06);
+            border-left: 1px solid rgba(108, 92, 231, 0.15);
+            border-right: 1px solid rgba(108, 92, 231, 0.15);
+        }
+        th.col-smartcut {
+            color: var(--purple-light);
+            background: rgba(108, 92, 231, 0.12);
+        }
+        .col-others {
+            color: var(--text-muted);
+        }
+        .check-yes { color: var(--green); font-weight: 700; font-size: 18px; }
+        .check-no { color: var(--red); font-weight: 700; font-size: 18px; }
+        .comparison-table .price-cell { font-weight: 700; font-size: 14px; }
+        .col-smartcut .price-cell { color: var(--green); }
+        .col-others .price-cell { color: var(--red); }
+
+        /* PRIVACY */
+        .privacy { max-width: 700px; margin: 0 auto; }
+        .privacy-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 56px 48px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .privacy-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--green), transparent);
+        }
+        .privacy-icon {
+            width: 72px;
+            height: 72px;
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            margin: 0 auto 24px;
+        }
+        .privacy-card h3 {
+            font-size: 24px;
+            font-weight: 800;
+            margin-bottom: 12px;
+        }
+        .privacy-card p {
+            font-size: 16px;
+            color: var(--text-muted);
+            line-height: 1.8;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .privacy-badges {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 28px;
+            flex-wrap: wrap;
+        }
+        .privacy-badge {
+            background: rgba(34, 197, 94, 0.08);
+            border: 1px solid rgba(34, 197, 94, 0.15);
+            border-radius: 100px;
+            padding: 8px 18px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--green);
         }
 
         /* HOW IT WORKS */
@@ -546,7 +724,7 @@
 
         /* GET STARTED */
         .get-started {
-            max-width: 560px;
+            max-width: 620px;
             margin: 0 auto;
             text-align: center;
         }
@@ -615,6 +793,12 @@
             color: var(--text-muted);
             margin-bottom: 24px;
         }
+        .gs-price-compare {
+            font-size: 13px;
+            color: var(--text-dim);
+            margin-bottom: 20px;
+            font-style: italic;
+        }
         .gs-features {
             list-style: none;
             margin-bottom: 28px;
@@ -657,6 +841,15 @@
             font-size: 13px;
             color: var(--text-dim);
         }
+        .gs-no-cc {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--green);
+        }
 
         /* FOOTER */
         footer {
@@ -672,7 +865,7 @@
         /* RESPONSIVE */
         @media (max-width: 768px) {
             .hero { padding: 140px 20px 80px; }
-            .hero h1 { font-size: 38px; letter-spacing: -1px; }
+            .hero h1 { font-size: 34px; letter-spacing: -1px; }
             .hero p { font-size: 17px; }
             .section-title { font-size: 32px; }
             .feature-grid { grid-template-columns: 1fr; }
@@ -686,6 +879,11 @@
             .nav-links a:not(.nav-cta) { display: none; }
             .steps::before { left: 23px; }
             .step-num { width: 48px; height: 48px; min-width: 48px; font-size: 16px; }
+            .comparison-table th,
+            .comparison-table td { padding: 12px 14px; font-size: 13px; }
+            .privacy-card { padding: 40px 24px; }
+            .privacy-card h3 { font-size: 20px; }
+            .privacy-card p { font-size: 15px; }
         }
     </style>
 </head>
@@ -700,42 +898,45 @@
         <div class="nav-links">
             <a href="#features">Features</a>
             <a href="#demo">Demo</a>
-            <a href="#how">How it works</a>
+            <a href="#compare">Compare</a>
             <a href="#download">Download</a>
             <a href="https://discord.gg/mGmKnE4H">Discord</a>
-            <a href="https://scut.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="nav-cta">Get SmartCut</a>
+            <a href="#download" class="nav-cta">Try Free</a>
         </div>
     </nav>
 
     <!-- HERO -->
     <section class="hero">
+        <img src="banner.png" alt="SmartCut" style="max-width: 480px; width: 80%; margin-bottom: 20px;" class="reveal">
         <div class="hero-badge reveal">
             <span class="dot"></span>
             Runs 100% locally on your machine
         </div>
-        <h1 class="reveal reveal-delay-1">Edit videos with <span class="gradient">AI</span></h1>
-        <p class="reveal reveal-delay-2">Select a video, pick a style, click start. SmartCut removes silences, adds subtitles, and exports a clean edit — in minutes.</p>
+        <div class="hero-new-badge reveal">NEW: Filler Word Removal &amp; Smart Cuts</div>
+        <h1 class="reveal reveal-delay-1">Cut Silences, Filler Words &amp; Bad Takes &mdash; <span class="gradient">Automatically</span></h1>
+        <p class="reveal reveal-delay-2">Select a video, click start. SmartCut removes silences, filler words like "um" and "uh", cuts at natural sentence boundaries, adds subtitles, and exports a polished edit &mdash; in minutes.</p>
         <div class="hero-buttons reveal reveal-delay-3">
-            <a href="https://scut.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="btn btn-primary">Get SmartCut &rarr;</a>
+            <a href="#download" class="btn btn-trial">Try 3 Free Edits</a>
+            <a href="https://scut.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="btn btn-primary">Get SmartCut &mdash; $9.99/mo &rarr;</a>
             <a href="#demo" class="btn btn-secondary">See it in action</a>
         </div>
-        <p class="hero-price reveal reveal-delay-4"><strong>$9.99/month</strong> &middot; cancel anytime</p>
+        <p class="hero-price reveal reveal-delay-4"><strong>$9.99/month</strong> &middot; unlimited edits &middot; cancel anytime &middot; no credit card for trial</p>
     </section>
 
     <!-- STATS -->
     <div class="stats reveal">
         <div class="stats-grid">
             <div class="stat">
-                <div class="value">10x</div>
-                <div class="label">faster than manual editing</div>
-            </div>
-            <div class="stat">
-                <div class="value">~30s</div>
-                <div class="label">per minute of footage</div>
-            </div>
-            <div class="stat">
                 <div class="value">100%</div>
-                <div class="label">local &middot; your data stays yours</div>
+                <div class="label">Local &middot; your data stays yours</div>
+            </div>
+            <div class="stat">
+                <div class="value">0</div>
+                <div class="label">Cloud uploads required</div>
+            </div>
+            <div class="stat">
+                <div class="value">$9.99</div>
+                <div class="label">per month &middot; unlimited</div>
             </div>
         </div>
     </div>
@@ -777,35 +978,131 @@
         <h2 class="section-title reveal">Everything you need</h2>
         <p class="section-subtitle reveal">No timeline, no learning curve. Just results.</p>
         <div class="feature-grid">
-            <div class="feature-card reveal">
-                <div class="feature-icon">&#9986;</div>
-                <h3>Auto-cut silences</h3>
-                <p>AI detects and removes pauses, "uhms", and dead air from your videos automatically.</p>
+            <div class="feature-card feature-new reveal">
+                <div class="feature-icon">&#128172;</div>
+                <h3>Filler Word Removal</h3>
+                <p>Automatically detects and removes "um", "uh", "like" and other filler words. Supports English and German.</p>
             </div>
-            <div class="feature-card reveal reveal-delay-1">
-                <div class="feature-icon">&#127916;</div>
-                <h3>Smart subtitles</h3>
-                <p>Generates accurate subtitles using AI speech recognition and burns them into your video.</p>
+            <div class="feature-card feature-new reveal reveal-delay-1">
+                <div class="feature-icon">&#9996;</div>
+                <h3>Smart Cuts</h3>
+                <p>AI-powered cuts at natural sentence boundaries instead of mid-word. Your edits sound professional, not choppy.</p>
             </div>
             <div class="feature-card reveal reveal-delay-2">
-                <div class="feature-icon">&#9889;</div>
-                <h3>One click</h3>
-                <p>Select a video, pick a style, click Start. That's it. Done in minutes.</p>
+                <div class="feature-icon">&#9986;</div>
+                <h3>Silence Removal</h3>
+                <p>Detects and removes pauses, dead air, and awkward silences from your videos automatically.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">&#127916;</div>
+                <h3>Auto Subtitles</h3>
+                <p>Generates accurate subtitles using AI speech recognition and burns them into your video.</p>
             </div>
             <div class="feature-card reveal reveal-delay-1">
                 <div class="feature-icon">&#127912;</div>
-                <h3>5 editing styles</h3>
+                <h3>5 Editing Styles</h3>
                 <p>From Clean to Fast to Minimal. Choose the style that fits your content.</p>
             </div>
             <div class="feature-card reveal reveal-delay-2">
                 <div class="feature-icon">&#128268;</div>
-                <h3>Plugin support</h3>
+                <h3>Plugin Support</h3>
                 <p>Works standalone or as a plugin inside Premiere Pro and DaVinci Resolve.</p>
             </div>
-            <div class="feature-card reveal reveal-delay-3">
+            <div class="feature-card reveal">
+                <div class="feature-icon">&#9889;</div>
+                <h3>One Click Edit</h3>
+                <p>Select a video, pick a style, click Start. Done in minutes, not hours.</p>
+            </div>
+            <div class="feature-card reveal reveal-delay-1">
                 <div class="feature-icon">&#128187;</div>
-                <h3>All platforms</h3>
-                <p>macOS, Windows, and Linux. Runs locally — your videos never leave your machine.</p>
+                <h3>All Platforms</h3>
+                <p>macOS, Windows, and Linux. Runs locally &mdash; your videos never leave your machine.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- COMPARISON -->
+    <section class="comparison" id="compare">
+        <div class="section-label reveal">Compare</div>
+        <h2 class="section-title reveal">Why SmartCut?</h2>
+        <p class="section-subtitle reveal">See how SmartCut compares to other AI video editors.</p>
+        <div class="reveal">
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th class="col-smartcut">SmartCut</th>
+                        <th class="col-others">Others</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Price</td>
+                        <td class="col-smartcut"><span class="price-cell">$9.99/mo unlimited</span></td>
+                        <td class="col-others"><span class="price-cell">$29&ndash;199/mo limited hours</span></td>
+                    </tr>
+                    <tr>
+                        <td>Processing</td>
+                        <td class="col-smartcut"><span style="color:var(--green);font-weight:600;">Local (private)</span></td>
+                        <td class="col-others"><span style="color:var(--text-dim);">Cloud (upload required)</span></td>
+                    </tr>
+                    <tr>
+                        <td>Silence Removal</td>
+                        <td class="col-smartcut"><span class="check-yes">&#10003;</span></td>
+                        <td class="col-others"><span class="check-yes">&#10003;</span></td>
+                    </tr>
+                    <tr>
+                        <td>Filler Word Removal</td>
+                        <td class="col-smartcut"><span class="check-yes">&#10003;</span></td>
+                        <td class="col-others"><span class="check-yes">&#10003;</span></td>
+                    </tr>
+                    <tr>
+                        <td>Smart Cuts</td>
+                        <td class="col-smartcut"><span class="check-yes">&#10003;</span></td>
+                        <td class="col-others"><span class="check-no">&#10007;</span></td>
+                    </tr>
+                    <tr>
+                        <td>Auto Subtitles</td>
+                        <td class="col-smartcut"><span class="check-yes">&#10003;</span></td>
+                        <td class="col-others"><span class="check-yes">&#10003;</span></td>
+                    </tr>
+                    <tr>
+                        <td>Premiere Pro</td>
+                        <td class="col-smartcut"><span class="check-yes">&#10003;</span></td>
+                        <td class="col-others"><span class="check-yes">&#10003;</span></td>
+                    </tr>
+                    <tr>
+                        <td>DaVinci Resolve</td>
+                        <td class="col-smartcut"><span class="check-yes">&#10003;</span></td>
+                        <td class="col-others"><span class="check-no">&#10007;</span></td>
+                    </tr>
+                    <tr>
+                        <td>Standalone App</td>
+                        <td class="col-smartcut"><span class="check-yes">&#10003;</span></td>
+                        <td class="col-others"><span class="check-no">&#10007;</span></td>
+                    </tr>
+                    <tr>
+                        <td>Free Trial</td>
+                        <td class="col-smartcut"><span style="color:var(--green);font-weight:600;">3 free edits</span></td>
+                        <td class="col-others"><span style="color:var(--text-dim);">Credit card required</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- PRIVACY -->
+    <section class="privacy">
+        <div class="section-label reveal">Privacy</div>
+        <h2 class="section-title reveal">Privacy First</h2>
+        <div class="privacy-card reveal">
+            <div class="privacy-icon">&#128274;</div>
+            <h3>Your videos never leave your computer</h3>
+            <p>No cloud uploads, no data collection, no privacy concerns. SmartCut processes everything locally on your machine. Your footage is yours &mdash; always.</p>
+            <div class="privacy-badges">
+                <span class="privacy-badge">No cloud uploads</span>
+                <span class="privacy-badge">No data collection</span>
+                <span class="privacy-badge">No account required</span>
             </div>
         </div>
     </section>
@@ -834,7 +1131,7 @@
                 <div class="step-num">3</div>
                 <div class="step-content">
                     <h3>Click Start</h3>
-                    <p>SmartCut analyzes speech, detects silences, cuts the video, and adds subtitles.</p>
+                    <p>SmartCut analyzes speech, detects silences, removes filler words, makes smart cuts, and adds subtitles.</p>
                 </div>
             </div>
             <div class="step reveal">
@@ -897,37 +1194,14 @@
     <section class="get-started" id="download">
         <div class="section-label reveal">Get started</div>
         <h2 class="section-title reveal">Start editing smarter</h2>
-        <p class="section-subtitle reveal">Two steps — get your license, download the app, done.</p>
+        <p class="section-subtitle reveal">Download free, try 3 edits, then go unlimited. No credit card for trial.</p>
 
         <div class="get-started-flow reveal">
-            <!-- Step 1: Buy -->
+            <!-- Step 1: Download -->
             <div class="gs-step">
                 <div class="gs-step-header">
                     <div class="gs-step-num">1</div>
-                    <h3>Get your license key</h3>
-                </div>
-                <div class="gs-card gs-card-buy">
-                    <div class="gs-price">$9.99 <span>/month</span></div>
-                    <div class="gs-price-sub">Cancel anytime. No contracts.</div>
-                    <ul class="gs-features">
-                        <li><span class="check">&#10003;</span> All 5 editing styles</li>
-                        <li><span class="check">&#10003;</span> AI subtitles included</li>
-                        <li><span class="check">&#10003;</span> Premiere Pro + Resolve plugins</li>
-                        <li><span class="check">&#10003;</span> Runs 100% locally</li>
-                        <li><span class="check">&#10003;</span> Updates included</li>
-                    </ul>
-                    <a href="https://scut.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="btn btn-primary" style="width: 100%; justify-content: center; font-size: 16px; padding: 16px;">Get License Key &rarr;</a>
-                </div>
-            </div>
-
-            <!-- Arrow -->
-            <div class="gs-arrow reveal">&#8595;</div>
-
-            <!-- Step 2: Download -->
-            <div class="gs-step">
-                <div class="gs-step-header">
-                    <div class="gs-step-num">2</div>
-                    <h3>Download for your platform</h3>
+                    <h3>Download Free</h3>
                 </div>
                 <div class="gs-card gs-card-download">
                     <div class="download-grid">
@@ -944,7 +1218,49 @@
                             <span class="os">AppImage</span>
                         </a>
                     </div>
-                    <p class="gs-hint">Install the app, enter your license key, and start editing.</p>
+                    <p class="gs-hint">Install the app and start editing immediately.</p>
+                </div>
+            </div>
+
+            <!-- Arrow -->
+            <div class="gs-arrow reveal">&#8595;</div>
+
+            <!-- Step 2: Try Free -->
+            <div class="gs-step">
+                <div class="gs-step-header">
+                    <div class="gs-step-num">2</div>
+                    <h3>Try 3 Free Edits</h3>
+                </div>
+                <div class="gs-card" style="text-align:center;">
+                    <p style="font-size:16px;color:var(--text-muted);margin-bottom:8px;">Open SmartCut, select a video, and experience the full power of AI editing.</p>
+                    <div class="gs-no-cc">&#10003; No credit card required</div>
+                </div>
+            </div>
+
+            <!-- Arrow -->
+            <div class="gs-arrow reveal">&#8595;</div>
+
+            <!-- Step 3: Unlimited -->
+            <div class="gs-step">
+                <div class="gs-step-header">
+                    <div class="gs-step-num">3</div>
+                    <h3>Get Unlimited for $9.99/mo</h3>
+                </div>
+                <div class="gs-card gs-card-buy">
+                    <div class="gs-price">$9.99 <span>/month</span></div>
+                    <div class="gs-price-sub">Cancel anytime. No contracts.</div>
+                    <div class="gs-price-compare">Why pay $29+/mo for limited hours?</div>
+                    <ul class="gs-features">
+                        <li><span class="check">&#10003;</span> Unlimited edits</li>
+                        <li><span class="check">&#10003;</span> Filler word removal</li>
+                        <li><span class="check">&#10003;</span> Smart cuts at sentence boundaries</li>
+                        <li><span class="check">&#10003;</span> AI subtitles included</li>
+                        <li><span class="check">&#10003;</span> All 5 editing styles</li>
+                        <li><span class="check">&#10003;</span> Premiere Pro + Resolve plugins</li>
+                        <li><span class="check">&#10003;</span> Runs 100% locally</li>
+                        <li><span class="check">&#10003;</span> Updates included</li>
+                    </ul>
+                    <a href="https://scut.lemonsqueezy.com/checkout/buy/0a91ff7c-5dea-4e72-a742-d2656f460b22" class="btn btn-primary" style="width: 100%; justify-content: center; font-size: 16px; padding: 16px;">Get License Key &rarr;</a>
                 </div>
             </div>
         </div>
