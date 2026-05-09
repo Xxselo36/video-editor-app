@@ -6,114 +6,236 @@
     <title>SmartCut</title>
     <script src="CSInterface.js"></script>
     <style>
+        * { box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
-            background: #0d0d0f;
-            color: #f0f0f2;
+            background: #0a0a0e;
+            color: #e8e8ec;
             margin: 0;
             padding: 16px;
             font-size: 13px;
+            box-shadow: inset 0 0 40px rgba(108,92,231,0.06), inset 0 0 80px rgba(108,92,231,0.03);
+            min-height: 100vh;
         }
-        h2 {
-            margin: 0 0 4px 0;
-            font-size: 18px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
+
+        /* --- Glassmorphism base --- */
+        .glass {
+            background: rgba(255,255,255,0.03);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
         }
-        .subtitle {
-            color: #5a5a64;
-            font-size: 11px;
-            margin-bottom: 16px;
+
+        /* --- Header --- */
+        .header {
+            margin: -16px -16px 16px -16px;
+            border-radius: 0;
+            overflow: hidden;
+            line-height: 0;
         }
-        .group {
-            margin-bottom: 12px;
-        }
-        label {
+        .header img {
+            width: 100%;
+            height: auto;
             display: block;
-            margin-bottom: 4px;
-            color: #8e8e96;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
         }
-        select {
-            width: 100%;
-            padding: 8px 10px;
-            background: #222228;
-            border: 1px solid #2a2a32;
-            color: #f0f0f2;
-            border-radius: 8px;
-            font-size: 13px;
-            box-sizing: border-box;
-            appearance: none;
-            -webkit-appearance: none;
-        }
-        select:focus {
-            border-color: #6c5ce7;
-            outline: none;
-        }
-        button {
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            margin-top: 8px;
-        }
-        .btn-primary {
-            background: #6c5ce7;
-            color: white;
-            font-size: 14px;
-            padding: 14px;
-        }
-        .btn-primary:hover {
-            background: #7c6cf7;
-        }
-        .btn-primary:disabled {
-            background: #2d2640;
-            color: #5a5a64;
-            cursor: not-allowed;
-        }
-        .btn-secondary {
-            background: #1a1a1f;
-            color: #8e8e96;
-            border: 1px solid #2a2a32;
-        }
-        .btn-secondary:hover {
-            background: #222228;
-        }
+
+        /* --- Clip info --- */
         .clip-info {
-            background: #1a1a1f;
-            border: 1px solid #2a2a32;
-            border-radius: 8px;
-            padding: 12px 14px;
+            padding: 10px 14px;
             margin-bottom: 14px;
             font-size: 12px;
-            color: #8e8e96;
+            color: #7a7a86;
             display: flex;
             align-items: center;
             gap: 8px;
+            transition: border-color 0.3s, background 0.3s;
         }
-        .clip-info .icon {
-            font-size: 16px;
-            opacity: 0.6;
+        .clip-info.has-clip {
+            border-color: rgba(108,92,231,0.25);
+            background: rgba(108,92,231,0.04);
         }
-        .clip-info .name {
-            color: #f0f0f2;
+        .clip-info .icon { font-size: 15px; opacity: 0.7; }
+        .clip-info .name { color: #e8e8ec; font-weight: 600; }
+        .clip-info .clip-meta { font-size: 10px; color: #5a5a66; margin-left: auto; white-space: nowrap; }
+
+        /* --- Style list --- */
+        .style-label {
+            display: block;
+            margin-bottom: 8px;
+            color: #6a6a76;
+            font-size: 10px;
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
-        .status {
-            margin-top: 12px;
+        .style-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 16px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.04);
+            border-radius: 14px;
+            padding: 4px;
+        }
+        .style-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: transparent;
+            border: 1.5px solid transparent;
+            border-radius: 10px;
             padding: 10px 12px;
-            border-radius: 8px;
-            font-size: 12px;
-            display: none;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            position: relative;
+            overflow: hidden;
         }
-        .status.info { display: block; background: #1a1a3c; color: #7a8eff; }
-        .status.success { display: block; background: #0a2a0a; color: #00c853; }
-        .status.error { display: block; background: #2a0a0a; color: #ef5350; }
+        .style-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, rgba(108,92,231,0.1), transparent 70%);
+            opacity: 0;
+            transition: opacity 0.3s;
+            border-radius: 10px;
+        }
+        .style-card:hover {
+            background: rgba(255,255,255,0.025);
+        }
+        .style-card.selected {
+            border-color: rgba(108,92,231,0.35);
+            background: rgba(108,92,231,0.06);
+            box-shadow: 0 2px 12px rgba(108,92,231,0.08);
+        }
+        .style-card.selected::before { opacity: 1; }
+        .style-card-icon {
+            font-size: 16px;
+            width: 34px;
+            height: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.04);
+            border-radius: 9px;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 1;
+            transition: all 0.3s;
+        }
+        .style-card.selected .style-card-icon {
+            background: rgba(108,92,231,0.1);
+            border-color: rgba(108,92,231,0.2);
+            box-shadow: 0 0 10px rgba(108,92,231,0.1);
+        }
+        .style-card-text {
+            flex: 1;
+            min-width: 0;
+            position: relative;
+            z-index: 1;
+        }
+        .style-card-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: #9a9aa4;
+            display: block;
+            transition: color 0.3s;
+            letter-spacing: 0.2px;
+        }
+        .style-card.selected .style-card-name { color: #e8e8f0; }
+        .style-card-desc {
+            font-size: 10px;
+            color: #3e3e4a;
+            margin-top: 1px;
+            display: block;
+            transition: color 0.3s;
+        }
+        .style-card.selected .style-card-desc { color: #6a6a7a; }
+        .style-card-check {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(255,255,255,0.08);
+            flex-shrink: 0;
+            position: relative;
+            z-index: 1;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .style-card.selected .style-card-check {
+            border-color: transparent;
+            background: linear-gradient(135deg, #6c5ce7, #8b5cf6);
+            box-shadow: 0 0 10px rgba(108,92,231,0.3);
+            transform: scale(1.05);
+        }
+        .style-card-check::after {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: white;
+            opacity: 0;
+            transform: scale(0);
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .style-card.selected .style-card-check::after {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+
+        /* --- Process button --- */
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            color: white;
+            background: linear-gradient(135deg, #6c5ce7, #8b5cf6);
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.15s, box-shadow 0.3s;
+            box-shadow: 0 4px 16px rgba(108,92,231,0.25);
+            letter-spacing: 0.3px;
+        }
+        .btn-primary::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.12), transparent, rgba(255,255,255,0.06));
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 24px rgba(108,92,231,0.35);
+        }
+        .btn-primary:hover::before { opacity: 1; }
+        .btn-primary:active { transform: translateY(0); }
+        .btn-primary:disabled {
+            background: #1e1a2e;
+            color: #4a4a56;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+        .btn-primary:disabled::before { display: none; }
+        .btn-primary.processing {
+            animation: btnPulse 2s ease-in-out infinite;
+        }
+        @keyframes btnPulse {
+            0%, 100% { box-shadow: 0 4px 16px rgba(108,92,231,0.25); }
+            50% { box-shadow: 0 4px 28px rgba(108,92,231,0.5); }
+        }
+
+        /* --- Progress bar --- */
         .progress-wrap {
             margin-top: 10px;
             display: none;
@@ -121,186 +243,106 @@
         .progress-wrap.active { display: block; }
         .progress-pct {
             font-size: 11px;
-            color: #8e8e96;
+            color: #7a7a86;
             text-align: right;
             margin-bottom: 4px;
             font-weight: 600;
+            font-variant-numeric: tabular-nums;
         }
         .progress-bar {
             width: 100%;
             height: 4px;
-            background: #2d2640;
+            background: rgba(108,92,231,0.12);
             border-radius: 2px;
             overflow: hidden;
         }
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #6c5ce7, #7c6cf7);
+            background: linear-gradient(90deg, #6c5ce7, #a78bfa);
             width: 0%;
-            transition: width 0.3s;
+            transition: width 0.4s ease;
             border-radius: 2px;
+            box-shadow: 0 0 8px rgba(108,92,231,0.4);
         }
-        .connection {
-            font-size: 10px;
-            color: #5a5a64;
-            text-align: center;
-            margin-top: 20px;
-            padding-top: 12px;
-            border-top: 1px solid #1a1a1f;
-        }
-        .connection .dot {
-            display: inline-block;
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            margin-right: 4px;
-            vertical-align: middle;
-        }
-        .connection .dot.ok { background: #00c853; box-shadow: 0 0 4px #00c85380; }
-        .connection .dot.off { background: #ef5350; }
-        .caption-presets {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-            margin-top: 6px;
-        }
-        .caption-card {
-            background: #16161f;
-            border: 2px solid #2a2a32;
-            border-radius: 8px;
-            padding: 6px;
-            cursor: pointer;
-            transition: border-color 0.2s, box-shadow 0.2s;
-            text-align: center;
-        }
-        .caption-card:hover {
-            border-color: #3a3a4a;
-        }
-        .caption-card.selected {
-            border-color: #6c5ce7;
-            box-shadow: 0 0 8px #6c5ce730;
-        }
-        .caption-preview {
-            height: 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            border-radius: 4px;
-            background: #0d0d12;
-            margin-bottom: 4px;
-        }
-        .caption-card-name {
-            font-size: 10px;
-            color: #8e8e96;
-            font-weight: 600;
-        }
-        .option-row { padding: 0; margin-top: 12px; }
-        .toggle-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: #ccc; text-transform: none; font-weight: 400; margin-bottom: 0; }
-        .toggle-label input[type="checkbox"] { accent-color: #6c5ce7; width: 16px; height: 16px; cursor: pointer; }
-        #fillerInfo { font-size: 11px; color: #aaa; margin-top: 8px; }
 
-        /* Enhanced progress panel */
+
+        /* --- Enhanced progress panel --- */
         .enhanced-progress {
             display: none;
             margin-top: 12px;
-            padding: 12px;
-            background: #12121a;
-            border: 1px solid #1e1e2e;
-            border-radius: 10px;
+            padding: 14px;
+            border-radius: 14px;
+            background: rgba(255,255,255,0.02);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.05);
         }
         .enhanced-progress.active { display: block; }
 
         /* Phase indicators */
-        .phases {
-            margin-bottom: 10px;
-        }
+        .phases { margin-bottom: 10px; }
         .phase {
             display: flex;
             align-items: center;
             gap: 6px;
             font-size: 11px;
-            color: #5a5a64;
+            color: #4a4a56;
             padding: 3px 0;
-            transition: color 0.3s, opacity 0.3s;
+            transition: color 0.3s;
         }
-        .phase.running { color: #7a8eff; }
-        .phase.done { color: #00c853; }
+        .phase.running { color: #a78bfa; }
+        .phase.done { color: #4ade80; }
         .phase-dot {
             display: inline-block;
-            width: 8px;
-            height: 8px;
+            width: 8px; height: 8px;
             border-radius: 50%;
             background: #2a2a32;
             flex-shrink: 0;
-            transition: background 0.3s, box-shadow 0.3s;
+            transition: all 0.3s;
         }
         .phase.running .phase-dot {
             background: #6c5ce7;
-            box-shadow: 0 0 6px #6c5ce780;
+            box-shadow: 0 0 8px rgba(108,92,231,0.6);
             animation: phasePulse 1.2s ease-in-out infinite;
         }
-        .phase.done .phase-dot {
-            background: #00c853;
-            box-shadow: 0 0 4px #00c85360;
-        }
-        .phase-check {
-            display: none;
-            font-size: 10px;
-        }
+        .phase.done .phase-dot { background: #4ade80; box-shadow: 0 0 4px rgba(74,222,128,0.4); }
+        .phase-check { display: none; font-size: 10px; }
         .phase.done .phase-check { display: inline; }
         .phase.done .phase-dot { display: none; }
-        .phase-detail {
-            font-size: 10px;
-            color: #5a5a64;
-            margin-left: auto;
-            max-width: 100px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
         @keyframes phasePulse {
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.5; transform: scale(0.8); }
         }
 
-        /* Timeline visualization */
-        .timeline-section {
-            margin: 10px 0;
-        }
-        .timeline-label {
+        /* Timeline */
+        .timeline-section { margin: 10px 0; }
+        .section-label {
             font-size: 10px;
-            color: #5a5a64;
+            color: #4a4a56;
             margin-bottom: 4px;
             text-transform: uppercase;
             font-weight: 600;
+            letter-spacing: 0.5px;
         }
         .timeline-bar {
             width: 100%;
-            height: 18px;
-            background: #1a1a2e;
-            border-radius: 4px;
+            height: 20px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 6px;
             position: relative;
             overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.04);
         }
         .timeline-segment {
             position: absolute;
             top: 0;
             height: 100%;
             transition: left 0.3s, width 0.3s;
+            border-radius: 2px;
         }
-        .timeline-segment.speech {
-            background: #00b894;
-            opacity: 0.85;
-        }
-        .timeline-segment.silence {
-            background: #1a1a2e;
-        }
-        .timeline-segment.filler {
-            background: #e17055;
-            opacity: 0.9;
-            z-index: 1;
-        }
+        .timeline-segment.speech { background: linear-gradient(180deg, #00b894, #00a382); opacity: 0.85; }
+        .timeline-segment.silence { background: transparent; }
+        .timeline-segment.filler { background: linear-gradient(180deg, #e17055, #d35400); opacity: 0.9; z-index: 1; }
         .timeline-markers {
             display: flex;
             justify-content: space-between;
@@ -308,9 +350,10 @@
             color: #3a3a48;
             margin-top: 2px;
             padding: 0 1px;
+            font-variant-numeric: tabular-nums;
         }
 
-        /* Stats row */
+        /* Stats */
         .stats-row {
             display: flex;
             gap: 6px;
@@ -318,150 +361,240 @@
         }
         .stat {
             flex: 1;
-            background: #16161f;
-            border-radius: 6px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.04);
+            border-radius: 8px;
             padding: 8px 6px;
             text-align: center;
+            transition: border-color 0.3s;
         }
         .stat-value {
             display: block;
             font-size: 16px;
             font-weight: 700;
-            color: #f0f0f2;
+            color: #e8e8ec;
             line-height: 1.2;
+            font-variant-numeric: tabular-nums;
         }
         .stat-label {
             display: block;
             font-size: 9px;
-            color: #5a5a64;
+            color: #4a4a56;
             text-transform: uppercase;
             margin-top: 2px;
+            letter-spacing: 0.3px;
         }
 
-        /* Transcript area */
-        .transcript-section {
-            margin-top: 10px;
+        /* Duration row */
+        .duration-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 11px;
+            color: #7a7a86;
+            margin-top: 6px;
         }
+        .duration-row .arrow { color: #6c5ce7; font-weight: 700; font-size: 14px; }
+        .duration-row .dur-value { font-weight: 600; color: #e8e8ec; font-variant-numeric: tabular-nums; }
+
+        /* Transcript */
+        .transcript-section { margin-top: 10px; }
         .transcript-area {
-            background: #0d0d14;
-            border: 1px solid #1a1a2e;
-            border-radius: 6px;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.04);
+            border-radius: 8px;
             padding: 8px;
             max-height: 80px;
             overflow-y: auto;
             font-size: 11px;
             line-height: 1.6;
-            color: #b0b0ba;
+            color: #a0a0aa;
         }
-        .transcript-area::-webkit-scrollbar {
-            width: 4px;
-        }
-        .transcript-area::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        .transcript-area::-webkit-scrollbar-thumb {
-            background: #2a2a36;
-            border-radius: 2px;
-        }
-        .transcript-word {
-            display: inline;
-            opacity: 0;
-            animation: wordFadeIn 0.3s ease forwards;
-        }
-        .transcript-word.filler {
-            color: #e17055;
-            text-decoration: line-through;
-            opacity: 0.7;
-        }
+        .transcript-area::-webkit-scrollbar { width: 4px; }
+        .transcript-area::-webkit-scrollbar-track { background: transparent; }
+        .transcript-area::-webkit-scrollbar-thumb { background: #2a2a36; border-radius: 2px; }
+        .transcript-word { display: inline; opacity: 0; animation: wordFadeIn 0.3s ease forwards; }
+        .transcript-word.filler { color: #f87171; text-decoration: line-through; opacity: 0.7; }
         @keyframes wordFadeIn {
             from { opacity: 0; transform: translateY(2px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
-        /* Duration display */
-        .duration-row {
+        /* --- Footer / branding --- */
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.04);
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 6px;
-            font-size: 11px;
-            color: #8e8e96;
-            margin-top: 6px;
         }
-        .duration-row .arrow {
-            color: #6c5ce7;
+        .footer .dot {
+            display: inline-block;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            vertical-align: middle;
+            flex-shrink: 0;
+        }
+        .footer .dot.ok { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.5); }
+        .footer .dot.off { background: #f87171; box-shadow: 0 0 4px rgba(248,113,113,0.3); }
+        .footer .conn-text { font-size: 10px; color: #4a4a56; }
+        .footer .version { font-size: 9px; color: #3a3a44; margin-left: auto; }
+
+        /* --- Done overlay --- */
+        .done-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(10,10,14,0.92);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            animation: overlayFadeIn 0.4s ease;
+        }
+        .done-overlay.active { display: flex; }
+        @keyframes overlayFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .done-card {
+            text-align: center;
+            padding: 32px 28px;
+            border-radius: 18px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(108,92,231,0.15);
+            max-width: 280px;
+            width: 90%;
+            animation: doneCardIn 0.5s ease 0.15s both;
+        }
+        @keyframes doneCardIn {
+            from { opacity: 0; transform: scale(0.92) translateY(12px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .done-checkmark {
+            width: 56px; height: 56px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, rgba(108,92,231,0.15), rgba(74,222,128,0.1));
+            border: 2px solid rgba(74,222,128,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            margin: 0 auto 14px;
+            animation: checkPop 0.4s ease 0.4s both;
+        }
+        @keyframes checkPop {
+            from { transform: scale(0); }
+            60% { transform: scale(1.15); }
+            to { transform: scale(1); }
+        }
+        .done-title {
+            font-size: 18px;
             font-weight: 700;
+            color: #e8e8ec;
+            margin-bottom: 4px;
         }
-        .duration-row .dur-value {
+        .done-subtitle {
+            font-size: 12px;
+            color: #7a7a86;
+            margin-bottom: 16px;
+        }
+        .done-stats {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 18px;
+        }
+        .done-stat {
+            flex: 1;
+            padding: 10px 6px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 10px;
+        }
+        .done-stat-value {
+            display: block;
+            font-size: 18px;
+            font-weight: 700;
+            color: #e8e8ec;
+        }
+        .done-stat-label {
+            display: block;
+            font-size: 9px;
+            color: #5a5a66;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+        .done-close {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            font-size: 13px;
             font-weight: 600;
-            color: #f0f0f2;
+            cursor: pointer;
+            background: rgba(108,92,231,0.15);
+            color: #a78bfa;
+            transition: background 0.2s;
         }
+        .done-close:hover { background: rgba(108,92,231,0.25); }
     </style>
 </head>
 <body>
-    <div style="text-align:center;margin-bottom:8px;">
-        <img src="logo.png" alt="SmartCut" style="height:80px;margin-top:4px;">
+    <div class="header">
+        <img src="banner.png" alt="SmartCut">
     </div>
 
-    <div class="clip-info" id="clipInfo">
-        <span class="icon">🎬</span> No clip detected — select a clip on the timeline
+    <div class="clip-info glass" id="clipInfo">
+        <span class="icon">&#127916;</span> No clip detected — select a clip on the timeline
     </div>
 
-    <div class="group">
-        <label>Style</label>
-        <select id="style" onchange="updateStyleDesc()">
-            <option value="clean">Clean</option>
-            <option value="fast">Fast</option>
-            <option value="balanced">Balanced</option>
-            <option value="smooth">Smooth</option>
-            <option value="minimal">Minimal</option>
-        </select>
-        <div id="styleDesc" style="color:#5a5a64;font-size:10px;margin-top:4px;"></div>
-    </div>
-
-    <div class="group">
-        <label>Captions</label>
-        <div class="caption-presets">
-            <div class="caption-card" id="cap-classic" onclick="selectCaptionPreset('classic')">
-                <div class="caption-preview"><span style="color:#fff;font-family:Arial Black;font-size:13px;text-shadow:1px 1px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000;">Hello World</span></div>
-                <div class="caption-card-name">Classic</div>
+    <span class="style-label">Style</span>
+    <div class="style-cards" id="styleCards">
+        <div class="style-card selected" data-style="clean" onclick="selectStyle('clean')">
+            <span class="style-card-icon">&#9986;</span>
+            <div class="style-card-text">
+                <span class="style-card-name">Clean</span>
+                <span class="style-card-desc">Tight cuts, phrase subtitles</span>
             </div>
-            <div class="caption-card selected" id="cap-karaoke" onclick="selectCaptionPreset('karaoke')">
-                <div class="caption-preview"><span><span style="color:#6c5ce7;font-weight:700;font-size:13px;">Hello</span> <span style="color:#fff;font-weight:700;font-size:13px;">World</span></span></div>
-                <div class="caption-card-name">Karaoke</div>
-            </div>
-            <div class="caption-card" id="cap-boxed" onclick="selectCaptionPreset('boxed')">
-                <div class="caption-preview"><span style="background:rgba(0,0,0,0.7);color:#fff;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;">Hello World</span></div>
-                <div class="caption-card-name">Boxed</div>
-            </div>
-            <div class="caption-card" id="cap-neon" onclick="selectCaptionPreset('neon')">
-                <div class="caption-preview"><span style="color:#00ffd5;font-size:13px;font-weight:700;text-shadow:0 0 8px #00ffd580,0 0 16px #00ffd540;">Hello World</span></div>
-                <div class="caption-card-name">Neon</div>
-            </div>
-            <div class="caption-card" id="cap-bold" onclick="selectCaptionPreset('bold')">
-                <div class="caption-preview"><span style="font-family:Impact;font-size:16px;color:#fff;letter-spacing:1px;">HELLO WORLD</span></div>
-                <div class="caption-card-name">Bold</div>
-            </div>
-            <div class="caption-card" id="cap-minimal" onclick="selectCaptionPreset('minimal')">
-                <div class="caption-preview"><span style="font-size:10px;color:#999;font-weight:300;">Hello World</span></div>
-                <div class="caption-card-name">Minimal</div>
-            </div>
-            <div class="caption-card" id="cap-gradient" onclick="selectCaptionPreset('gradient')">
-                <div class="caption-preview"><span style="font-size:13px;font-weight:700;background:linear-gradient(90deg,#6c5ce7,#e84393);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">Hello World</span></div>
-                <div class="caption-card-name">Gradient</div>
-            </div>
-            <div class="caption-card" id="cap-none" onclick="selectCaptionPreset('none')">
-                <div class="caption-preview"><span style="color:#5a5a64;font-size:18px;">&Oslash;</span></div>
-                <div class="caption-card-name">None</div>
-            </div>
+            <span class="style-card-check"></span>
         </div>
-    </div>
-
-    <div class="option-row">
-        <label class="toggle-label">
-            <input type="checkbox" id="removeFillers" checked>
-            <span class="toggle-text">Remove filler words (um, uh, like...)</span>
-        </label>
+        <div class="style-card" data-style="fast" onclick="selectStyle('fast')">
+            <span class="style-card-icon">&#9889;</span>
+            <div class="style-card-text">
+                <span class="style-card-name">Fast</span>
+                <span class="style-card-desc">Fast cuts, word-by-word subtitles</span>
+            </div>
+            <span class="style-card-check"></span>
+        </div>
+        <div class="style-card" data-style="balanced" onclick="selectStyle('balanced')">
+            <span class="style-card-icon">&#9878;</span>
+            <div class="style-card-text">
+                <span class="style-card-name">Balanced</span>
+                <span class="style-card-desc">Balanced cuts, word subtitles</span>
+            </div>
+            <span class="style-card-check"></span>
+        </div>
+        <div class="style-card" data-style="smooth" onclick="selectStyle('smooth')">
+            <span class="style-card-icon">&#127754;</span>
+            <div class="style-card-text">
+                <span class="style-card-name">Smooth</span>
+                <span class="style-card-desc">Smooth cuts, word subtitles</span>
+            </div>
+            <span class="style-card-check"></span>
+        </div>
+        <div class="style-card" data-style="minimal" onclick="selectStyle('minimal')">
+            <span class="style-card-icon">&#9898;</span>
+            <div class="style-card-text">
+                <span class="style-card-name">Minimal</span>
+                <span class="style-card-desc">Tight cuts, no subtitles</span>
+            </div>
+            <span class="style-card-check"></span>
+        </div>
     </div>
 
     <button class="btn-primary" id="processBtn" onclick="processVideo()">
@@ -479,7 +612,7 @@
         <div class="phases" id="phasesContainer"></div>
 
         <div class="timeline-section">
-            <div class="timeline-label">Timeline</div>
+            <div class="section-label">Timeline</div>
             <div class="timeline-bar" id="timelineBar"></div>
             <div class="timeline-markers" id="timelineMarkers"></div>
         </div>
@@ -506,35 +639,59 @@
         </div>
 
         <div class="transcript-section">
-            <div class="timeline-label">Transcript</div>
+            <div class="section-label">Transcript</div>
             <div class="transcript-area" id="transcriptArea"></div>
         </div>
     </div>
 
-    <div class="status" id="status"></div>
 
-    <div id="fillerInfo" style="display:none;">
-        <span id="fillerCount"></span> filler words detected (<span id="fillerDuration"></span>s)
+    <div class="footer" id="connection">
+        <span class="dot off" id="connDot"></span>
+        <span class="conn-text">Checking backend...</span>
+        <span class="version">SmartCut v1.0</span>
     </div>
 
-    <div class="connection" id="connection">
-        <span class="dot off" id="connDot"></span> Checking backend...
+    <!-- Done overlay -->
+    <div class="done-overlay" id="doneOverlay">
+        <div class="done-card">
+            <div class="done-checkmark">&#10003;</div>
+            <div class="done-title">Edit Complete</div>
+            <div class="done-subtitle" id="doneSubtitle">Your clip has been processed</div>
+            <div class="done-stats">
+                <div class="done-stat">
+                    <span class="done-stat-value" id="doneCuts">0</span>
+                    <span class="done-stat-label">cuts</span>
+                </div>
+                <div class="done-stat">
+                    <span class="done-stat-value" id="doneSaved">0s</span>
+                    <span class="done-stat-label">saved</span>
+                </div>
+                <div class="done-stat">
+                    <span class="done-stat-value" id="doneDuration">--</span>
+                    <span class="done-stat-label">duration</span>
+                </div>
+            </div>
+            <button class="done-close" onclick="closeDoneOverlay()">Close</button>
+        </div>
     </div>
+
     <script>
         var API_URL = 'http://127.0.0.1:8456';
         var csInterface = null;
         var _lastVideoPath = '';
-        var _lastStyle = '';
-        var _lastWordCount = 0;  // Track displayed transcript words to avoid duplication
+        var _lastStyle = 'clean';
+        var _lastWordCount = 0;
         var _selectedCaptionPreset = 'karaoke';
+        var _selectedStyle = 'clean';
 
-        function selectCaptionPreset(presetName) {
-            _selectedCaptionPreset = presetName;
-            var cards = document.querySelectorAll('.caption-card');
+        function selectStyle(styleName) {
+            _selectedStyle = styleName;
+            var cards = document.querySelectorAll('.style-card');
             for (var i = 0; i < cards.length; i++) {
                 cards[i].classList.remove('selected');
             }
-            document.getElementById('cap-' + presetName).classList.add('selected');
+            var card = document.querySelector('.style-card[data-style="' + styleName + '"]');
+            if (card) card.classList.add('selected');
         }
 
         try { csInterface = new CSInterface(); } catch (e) {}
@@ -588,15 +745,19 @@
         // --- Connection check ---
         async function checkConnection() {
             var el = document.getElementById('connection');
+            var dot = document.getElementById('connDot');
             try {
                 var data = await apiFetch('/health', 5000);
                 if (data.status === 'ok') {
-                    el.innerHTML = '<span class="dot ok"></span> Connected to SmartCut';
+                    dot.className = 'dot ok';
+                    el.querySelector('.conn-text').textContent = 'Connected';
                 } else {
-                    el.innerHTML = '<span class="dot off"></span> Backend error';
+                    dot.className = 'dot off';
+                    el.querySelector('.conn-text').textContent = 'Backend error';
                 }
             } catch (e) {
-                el.innerHTML = '<span class="dot off"></span> Open SmartCut app to connect';
+                dot.className = 'dot off';
+                el.querySelector('.conn-text').textContent = 'Open SmartCut to connect';
             }
         }
         checkConnection();
@@ -622,9 +783,13 @@
                 var path = await getSelectedClipPath();
                 if (path) {
                     var name = path.split('/').pop().split('\\').pop();
-                    el.innerHTML = '<span class="icon">🎬</span> <span class="name">' + name + '</span>';
+                    el.innerHTML = '<span class="icon">&#127916;</span> <span class="name">' + escapeHtml(name) + '</span>';
+                    el.classList.add('has-clip');
                 }
-            } catch (e) {}
+            } catch (e) {
+                el.innerHTML = '<span class="icon">&#127916;</span> No clip detected \u2014 select a clip on the timeline';
+                el.classList.remove('has-clip');
+            }
         }
         detectClip();
         setInterval(detectClip, 3000);
@@ -646,23 +811,21 @@
 
             btn.disabled = true;
             btn.textContent = 'Processing...';
-            document.getElementById('fillerInfo').style.display = 'none';
+            btn.classList.add('processing');
             progressWrap.classList.add('active');
             progressFill.style.width = '5%';
             progressPct.textContent = '5%';
-            setStatus('info', 'Starting analysis...');
-            // Show enhanced progress panel and reset state
+            setStatus('info', 'Analyzing...');
             _lastWordCount = 0;
             showEnhancedProgress(true);
 
             try {
-                var style = document.getElementById('style').value;
-                var removeFillers = document.getElementById('removeFillers').checked;
+                var style = _selectedStyle;
+                var removeFillers = true;
                 _lastVideoPath = videoPath;
                 _lastStyle = style;
                 var url = '/analyze?video_path=' + encodeURIComponent(videoPath) + '&style=' + style + '&whisper_model=medium&remove_fillers=' + (removeFillers ? '1' : '0') + '&caption_preset=' + _selectedCaptionPreset;
 
-                // Start async analysis (returns immediately)
                 var startData = await apiFetch(url, 15000);
 
                 if (startData.error) {
@@ -671,7 +834,6 @@
                     return;
                 }
 
-                // Poll job status every 2 seconds
                 pollJobStatus(btn, progressWrap, progressFill, progressPct);
 
             } catch (e) {
@@ -688,9 +850,8 @@
                     var pct = data.progress || 0;
                     progressFill.style.width = pct + '%';
                     progressPct.textContent = Math.round(pct) + '%';
-                    if (data.message) setStatus('info', data.message);
+                    // Show only simple progress — no technical backend messages
 
-                    // Update enhanced progress UI
                     updateEnhancedProgress(data);
 
                     if (data.status === 'done') {
@@ -703,14 +864,12 @@
                         setTimeout(check, 2000);
                     }
                 } catch (e) {
-                    // Network blip — show and retry
-                    setStatus('info', 'Reconnecting... (' + e.message + ')');
+                    setStatus('info', 'Reconnecting...');
                     setTimeout(check, 3000);
                 }
             }, 2000);
         }
 
-        // Use host.jsx functions (persistent ExtendScript context — globals + $.sleep work)
         function hostImportXML(xmlPath, clipName, styleName) {
             return new Promise(function(resolve, reject) {
                 if (!csInterface) { reject(new Error('No CSInterface')); return; }
@@ -731,24 +890,15 @@
             });
         }
 
+        // Store final job data for done overlay
+        var _lastJobData = null;
+
         async function onAnalysisDone(jobData, btn, progressWrap, progressFill, progressPct) {
-            // Show filler word info if available
-            var fillerInfoEl = document.getElementById('fillerInfo');
-            if (jobData.fillers && jobData.fillers.length > 0) {
-                document.getElementById('fillerCount').textContent = jobData.fillers.length;
-                var totalDuration = 0;
-                for (var i = 0; i < jobData.fillers.length; i++) {
-                    totalDuration += (jobData.fillers[i].end - jobData.fillers[i].start);
-                }
-                document.getElementById('fillerDuration').textContent = totalDuration.toFixed(1);
-                fillerInfoEl.style.display = 'block';
-            } else {
-                fillerInfoEl.style.display = 'none';
-            }
+            _lastJobData = jobData;
 
             progressFill.style.width = '90%';
             progressPct.textContent = '90%';
-            setStatus('info', 'Creating edited sequence...');
+            setStatus('info', 'Finishing up...');
 
             try {
                 var xmlData = await apiFetch('/export-xml', 30000);
@@ -760,20 +910,18 @@
                     var styleLabel = styleNames[_lastStyle] || _lastStyle;
                     var cuts = jobData.segments_count || 0;
 
-                    // Step 1: Import XML + create bin + open new sequence (host.jsx — persistent context)
                     var clipName = _lastVideoPath.split('/').pop().split('\\').pop();
                     var importRes = await hostImportXML(xmlPath, clipName, styleLabel);
 
-                    // Step 2: If style has captions, add to the new sequence (host.jsx uses _currentSeqID)
                     if (srtPath) {
                         var capRes = await hostImportCaptions(srtPath);
-                        progressFill.style.width = '100%'; progressPct.textContent = '100%';
-                        var capMsg = (capRes && capRes.indexOf('ok') === 0) ? ' + captions' : '';
-                        setStatus('success', 'Done! ' + cuts + ' cuts' + capMsg + '. (' + styleLabel + ')');
-                    } else {
-                        progressFill.style.width = '100%'; progressPct.textContent = '100%';
-                        setStatus('success', 'Done! ' + cuts + ' cuts. (' + styleLabel + ')');
                     }
+                    progressFill.style.width = '100%'; progressPct.textContent = '100%';
+                    setStatus('success', 'Done! Your edited sequence is ready.');
+
+                    // Show done overlay
+                    showDoneOverlay(jobData, styleLabel);
+
                     resetProcessBtn(btn, progressWrap, progressFill, progressPct);
                 } else {
                     setStatus('error', xmlData.error || 'Could not generate sequence.');
@@ -785,9 +933,29 @@
             }
         }
 
+        function showDoneOverlay(jobData, styleLabel) {
+            var stats = jobData.stats || {};
+            var cuts = jobData.segments_count || stats.cuts || 0;
+            var origDur = stats.original_duration || 0;
+            var editDur = stats.edited_duration || 0;
+            var saved = origDur - editDur;
+
+            document.getElementById('doneCuts').textContent = cuts;
+            document.getElementById('doneSaved').textContent = saved > 0 ? saved.toFixed(1) + 's' : '0s';
+            document.getElementById('doneDuration').textContent = editDur > 0 ? formatTime(editDur) : '--';
+            document.getElementById('doneSubtitle').textContent = styleLabel + ' style applied';
+
+            document.getElementById('doneOverlay').classList.add('active');
+        }
+
+        function closeDoneOverlay() {
+            document.getElementById('doneOverlay').classList.remove('active');
+        }
+
         function resetProcessBtn(btn, progressWrap, progressFill, progressPct) {
             btn.disabled = false;
             btn.textContent = 'Process Selected Clip';
+            btn.classList.remove('processing');
             setTimeout(function() {
                 progressWrap.classList.remove('active');
                 progressFill.style.width = '0%';
@@ -797,23 +965,8 @@
         }
 
         function setStatus(type, message) {
-            var el = document.getElementById('status');
-            el.className = 'status ' + type;
-            el.textContent = message;
+            // Status messages removed — progress bar + done overlay are enough
         }
-
-        var styleDescs = {
-            clean: 'Tight cuts, phrase subtitles (4 words accumulating)',
-            fast: 'Fast cuts, word-by-word subtitles',
-            balanced: 'Balanced cuts, word-by-word subtitles',
-            smooth: 'Smooth cuts, word-by-word subtitles',
-            minimal: 'Tight cuts, no subtitles'
-        };
-        function updateStyleDesc() {
-            var val = document.getElementById('style').value;
-            document.getElementById('styleDesc').textContent = styleDescs[val] || '';
-        }
-        updateStyleDesc();
 
         // --- Enhanced Progress Functions ---
 
@@ -821,7 +974,6 @@
             var el = document.getElementById('enhancedProgress');
             if (show) {
                 el.classList.add('active');
-                // Reset contents
                 document.getElementById('phasesContainer').innerHTML = '';
                 document.getElementById('timelineBar').innerHTML = '';
                 document.getElementById('timelineMarkers').innerHTML = '';
@@ -836,22 +988,15 @@
         }
 
         function updateEnhancedProgress(data) {
-            // Update phases
             if (data.phases && data.phases.length > 0) {
                 updatePhases(data.phases);
             }
-
-            // Update timeline
             if (data.segments && data.segments.length > 0 && data.stats) {
                 updateTimeline(data.segments, data.stats.original_duration || 0);
             }
-
-            // Update stats
             if (data.stats) {
                 updateStats(data.stats);
             }
-
-            // Update transcript
             if (data.transcript_words && data.transcript_words.length > 0) {
                 updateTranscript(data.transcript_words);
             }
@@ -879,19 +1024,16 @@
             if (!duration || duration <= 0) return;
             var bar = document.getElementById('timelineBar');
             var html = '';
-
-            // Separate speech/silence from filler (filler overlays on top)
             for (var i = 0; i < segments.length; i++) {
                 var seg = segments[i];
                 var leftPct = (seg.start / duration) * 100;
                 var widthPct = ((seg.end - seg.start) / duration) * 100;
-                if (widthPct < 0.1) continue; // skip tiny segments
+                if (widthPct < 0.1) continue;
                 html += '<div class="timeline-segment ' + seg.type + '" '
                     + 'style="left:' + leftPct.toFixed(2) + '%;width:' + widthPct.toFixed(2) + '%;"></div>';
             }
             bar.innerHTML = html;
 
-            // Update time markers
             var markers = document.getElementById('timelineMarkers');
             var markerCount = 5;
             var markerHtml = '';
@@ -904,15 +1046,11 @@
 
         function updateStats(stats) {
             document.getElementById('cutCount').textContent = stats.cuts || 0;
-
             var totalRemoved = (stats.silence_removed || 0) + (stats.fillers_removed || 0);
             document.getElementById('timeRemoved').textContent = totalRemoved.toFixed(1) + 's';
-
             if (stats.edited_duration > 0) {
                 document.getElementById('editedDuration').textContent = formatTime(stats.edited_duration);
             }
-
-            // Show duration comparison
             if (stats.original_duration > 0 && stats.edited_duration > 0) {
                 var row = document.getElementById('durationRow');
                 row.style.display = 'flex';
@@ -923,23 +1061,17 @@
 
         function updateTranscript(words) {
             var area = document.getElementById('transcriptArea');
-
-            // Only append new words
             if (words.length <= _lastWordCount) return;
-
             for (var i = _lastWordCount; i < words.length; i++) {
                 var w = words[i];
                 var span = document.createElement('span');
                 span.className = 'transcript-word' + (w.is_filler ? ' filler' : '');
                 span.textContent = w.word + ' ';
-                // Stagger animation delay for new words
                 var delay = (i - _lastWordCount) * 0.02;
                 span.style.animationDelay = delay.toFixed(2) + 's';
                 area.appendChild(span);
             }
             _lastWordCount = words.length;
-
-            // Auto-scroll to bottom
             area.scrollTop = area.scrollHeight;
         }
 
