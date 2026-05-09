@@ -91,6 +91,8 @@ else:
 # ============================================================================
 step_clean() {
     info "[1/6] Bereinige vorherige Builds..."
+    # Code-signed files are read-only, fix permissions before removing
+    chmod -R u+rwx "${DIST_DIR}" 2>/dev/null || true
     rm -rf gui.build gui.dist gui.onefile-build "${DIST_DIR}"
     mkdir -p "${DIST_DIR}"
     ok "Bereinigt"
@@ -111,6 +113,7 @@ step_build() {
     fi
 
     "$VENV_PYTHON" -m nuitka \
+        --assume-yes-for-downloads \
         --standalone \
         --macos-create-app-bundle \
         --macos-app-name="${APP_NAME}" \
@@ -451,11 +454,6 @@ step_pkg() {
         <pkg-ref id="com.videoeditor.app"/>
     </choice>
     <pkg-ref id="com.videoeditor.app" version="1.0" onConclusion="none">#SmartCut-component.pkg</pkg-ref>
-    <relocate>
-        <bundle id="com.videoeditor.app">
-            <search-path>/Applications</search-path>
-        </bundle>
-    </relocate>
 </installer-gui-script>
 DISTEOF
 
@@ -527,6 +525,15 @@ main() {
     step_clean
     step_build
     step_copy_torch
+
+    # Create ffmpeg symlink so whisper and other libs can find it via PATH
+    info "Creating ffmpeg symlink in bundle..."
+    FFMPEG_BIN=$(find "${DIST_DIR}/${APP_NAME}.app/Contents/MacOS/imageio_ffmpeg/binaries" -name "ffmpeg-*" -type f 2>/dev/null | head -1)
+    if [ -n "$FFMPEG_BIN" ]; then
+        ln -sf "$(basename "$FFMPEG_BIN")" "$(dirname "$FFMPEG_BIN")/ffmpeg"
+        info "  Symlink: ffmpeg -> $(basename "$FFMPEG_BIN")"
+    fi
+
     step_sign
     step_pkg
     step_notarize
