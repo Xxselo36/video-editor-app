@@ -609,8 +609,11 @@ class VideoEditorApp(ctk.CTk):
                 fg_color="transparent",
                 corner_radius=10,
             )
-            card.grid(row=i, column=0, padx=4, pady=1, sticky="ew")
-            card.grid_columnconfigure(2, weight=1)
+            card.grid(row=i, column=0, padx=4, pady=2, sticky="ew")
+            # Column 1 (text block) takes the slack; radio sits flush right.
+            card.grid_columnconfigure(0, weight=0)
+            card.grid_columnconfigure(1, weight=1)
+            card.grid_columnconfigure(2, weight=0)
 
             # Icon (fixed width for alignment)
             icon_lbl = ctk.CTkLabel(
@@ -620,27 +623,26 @@ class VideoEditorApp(ctk.CTk):
                 fg_color=THEME["surface_2"],
                 corner_radius=8,
             )
-            icon_lbl.grid(row=0, column=0, padx=(8, 0), pady=4)
+            icon_lbl.grid(row=0, column=0, rowspan=2, padx=(8, 10), pady=6)
 
-            # Name (fixed width so descriptions align)
+            # Name (top) and description (under) stacked, both left-aligned.
             name_lbl = ctk.CTkLabel(
                 card, text=display,
-                font=ctk.CTkFont(size=12, weight="bold"),
+                font=ctk.CTkFont(size=13, weight="bold"),
                 text_color=THEME["text_sec"],
-                anchor="w", width=80,
+                anchor="w",
             )
-            name_lbl.grid(row=0, column=1, padx=(8, 0), sticky="w")
+            name_lbl.grid(row=0, column=1, padx=0, pady=(6, 0), sticky="w")
 
-            # Description
             desc_lbl = ctk.CTkLabel(
                 card, text=meta["desc"],
                 font=ctk.CTkFont(size=10),
                 text_color=THEME["text_muted"],
                 anchor="w",
             )
-            desc_lbl.grid(row=0, column=2, padx=(4, 4), sticky="w")
+            desc_lbl.grid(row=1, column=1, padx=0, pady=(0, 6), sticky="w")
 
-            # Radio indicator
+            # Radio indicator (right edge, vertically centred)
             radio = ctk.CTkRadioButton(
                 card, text="",
                 variable=self.style_var,
@@ -651,7 +653,7 @@ class VideoEditorApp(ctk.CTk):
                 width=18, height=18,
                 command=lambda: self._on_style_changed(None),
             )
-            radio.grid(row=0, column=3, padx=(0, 10), pady=4)
+            radio.grid(row=0, column=2, rowspan=2, padx=(8, 12), pady=6)
 
             # Make whole card clickable
             def _select(d=display, r=radio):
