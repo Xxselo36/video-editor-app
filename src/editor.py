@@ -267,38 +267,37 @@ class VideoEditor:
 
         self._report(f"Loading video: {self.input_path}")
 
-        # macOS: IMMER mit FFmpeg vorverarbeiten um Rotation korrekt zu handhaben.
-        # MoviePy ignoriert Rotation-Metadata, FFmpeg wendet autorotation an.
-        # Windows/Linux: MoviePy handled das korrekt, kein Preprocessing nötig.
-        import platform
-        if platform.system() == 'Darwin':
-            import tempfile
-            normalized_path = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
+        # IMMER mit FFmpeg vorverarbeiten um Rotation korrekt zu handhaben.
+        # MoviePy 1.0.3 ignoriert Rotation-Metadata auf allen Plattformen
+        # (also auch Windows/Linux), FFmpeg wendet autorotation an.
+        # Ohne dieses Preprocessing wird ein iPhone 4K Hochformat-Video als
+        # 4K Querformat verarbeitet — Encoding dauert dann ewig und das
+        # Ergebnis hat falsche Orientierung.
+        import tempfile
+        normalized_path = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
 
-            max_dimension = 1920
-            scale_filter = f"scale='if(gt(iw,ih),min({max_dimension},iw),-2)':'if(gt(ih,iw),min({max_dimension},ih),-2)'"
+        max_dimension = 1920
+        scale_filter = f"scale='if(gt(iw,ih),min({max_dimension},iw),-2)':'if(gt(ih,iw),min({max_dimension},ih),-2)'"
 
-            self._report(f"  Normalizing video with FFmpeg...")
+        self._report(f"  Normalizing video with FFmpeg...")
 
-            cmd = [
-                get_ffmpeg_path(), '-y', '-i', str(self.input_path),
-                '-vf', scale_filter,
-                '-c:v', get_video_codec(),
-                '-b:v', '12M',
-                ] + get_codec_params() + [
-                '-c:a', 'aac', '-b:a', '192k',
-                normalized_path
-            ]
+        cmd = [
+            get_ffmpeg_path(), '-y', '-i', str(self.input_path),
+            '-vf', scale_filter,
+            '-c:v', get_video_codec(),
+            '-b:v', '12M',
+            ] + get_codec_params() + [
+            '-c:a', 'aac', '-b:a', '192k',
+            normalized_path
+        ]
 
-            norm_result = subprocess.run(cmd, capture_output=True, **get_subprocess_kwargs())
-            if norm_result.returncode == 0 and os.path.isfile(normalized_path) and os.path.getsize(normalized_path) > 0:
-                self.original_clip = VideoFileClip(normalized_path)
-                self._temp_normalized = normalized_path
-                self._report(f"  Result: {self.original_clip.size[0]}x{self.original_clip.size[1]}")
-            else:
-                self._report(f"  FFmpeg normalization failed, using original directly")
-                self.original_clip = VideoFileClip(str(self.input_path))
+        norm_result = subprocess.run(cmd, capture_output=True, **get_subprocess_kwargs())
+        if norm_result.returncode == 0 and os.path.isfile(normalized_path) and os.path.getsize(normalized_path) > 0:
+            self.original_clip = VideoFileClip(normalized_path)
+            self._temp_normalized = normalized_path
+            self._report(f"  Result: {self.original_clip.size[0]}x{self.original_clip.size[1]}")
         else:
+            self._report(f"  FFmpeg normalization failed, using original directly")
             self.original_clip = VideoFileClip(str(self.input_path))
 
         self.duration = self.original_clip.duration
