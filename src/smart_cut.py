@@ -193,7 +193,7 @@ class SmartCutter:
     def optimize_cuts(
         self,
         segments: list[tuple[float, float]],
-        max_adjust: float = 0.3,
+        max_adjust: float = 0.5,
     ) -> list[tuple[float, float]]:
         """Snap segment boundaries to the nearest natural break point.
 
@@ -266,6 +266,29 @@ class SmartCutter:
                 _clamp(new_start, 0.0, self.duration),
                 _clamp(new_end, 0.0, self.duration),
             ))
+
+        # Word-aware safety: jedes Whisper-Wort, das zu mindestens 50 %
+        # in einem Segment liegt, muss komplett enthalten sein. Sonst
+        # werden kurze End-Wörter wie "leid", "auch", "und" reproducibly
+        # abgeschnitten, weil die silence-detection den Auslaut als
+        # Stille interpretiert.
+        if words:
+            expanded: list[tuple[float, float]] = []
+            for s, e in optimized:
+                ns, ne = s, e
+                for w in words:
+                    overlap_start = max(ns, w.start)
+                    overlap_end = min(ne, w.end)
+                    w_dur = max(0.001, w.end - w.start)
+                    if (overlap_end - overlap_start) / w_dur >= 0.5:
+                        # Wort gehört zu diesem Segment — Boundary expandieren
+                        ns = min(ns, w.start)
+                        ne = max(ne, w.end)
+                expanded.append((
+                    _clamp(ns, 0.0, self.duration),
+                    _clamp(ne, 0.0, self.duration),
+                ))
+            optimized = expanded
 
         return _merge_overlapping(optimized)
 

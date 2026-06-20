@@ -1,0 +1,35 @@
+# Web backend deps. Separate from the desktop app's requirements.txt
+# (which has customtkinter/tkinterdnd2 we don't need on a Linux server).
+
+# ── Server framework ──
+fastapi==0.137.1
+uvicorn[standard]==0.49.0
+python-multipart==0.0.32
+python-dotenv==1.2.2
+
+# ── LLM ──
+anthropic==0.111.0
+
+# ── Audio / video pipeline ──
+moviepy==1.0.3
+numpy>=1.21.0
+Pillow>=9.0.0
+faster-whisper>=1.2.0
+pydub>=0.25.1
+scipy>=1.9.0
+imageio_ffmpeg>=0.4.9
+
+# Headless OpenCV (no GUI/X11 deps) keeps the Linux image small.
+opencv-python-headless>=4.8.0
+
+# YuNet face detection (SmartCam).
+ultralytics>=8.0.0
+
+# CPU-only torch — much smaller than CUDA build. Install via the wheel
+# index from the deploy host (Railway/Render) since pip won't pick the
+# CPU build by default. See Dockerfile for the exact install line.
+torch>=2.0.0
+torchvision
+
+# Process utils.
+psutil>=5.9.0

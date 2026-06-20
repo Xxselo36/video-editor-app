@@ -22,6 +22,7 @@ class AnalysisResult:
     subtitles: list  # [{"start", "end", "text"}, ...]
     style: str
     fillers: list = None  # [{"start", "end", "word"}, ...] detected filler words
+    language: str = None  # Whisper-detected ISO-Code (e.g. "de", "en")
 
     def to_dict(self):
         d = {
@@ -34,6 +35,8 @@ class AnalysisResult:
         }
         if self.fillers is not None:
             d["fillers"] = self.fillers
+        if self.language is not None:
+            d["language"] = self.language
         return d
 
     def to_json(self, indent=2):
@@ -53,6 +56,9 @@ def analyze_video(
     remove_fillers: bool = None,
     smart_cut: bool = None,
     filler_sensitivity: str = None,
+    voice_triggers: bool = False,
+    cut_keywords: list[str] | None = None,
+    continue_keywords: list[str] | None = None,
 ) -> AnalysisResult:
     """
     Analyze a video and return structured data for NLE plugins.
@@ -180,6 +186,45 @@ def analyze_video(
     duration = clip.duration
     clip.close()
 
+    # Voice triggers — user said "cut" / "weiter" during the take,
+    # remove those ranges from the speech segments.
+    detected_trigger_pairs = []
+    if voice_triggers and analyzer._transcription:
+        if progress_callback:
+            progress_callback("Detecting voice triggers (cut/weiter)…",
+                              step=current_step, total_steps=total_steps)
+        try:
+            from src.voice_triggers import (
+                collect_whisper_words,
+                detect_voice_triggers,
+                apply_voice_triggers_to_segments,
+                apply_voice_triggers_to_subtitles,
+            )
+            ww = collect_whisper_words(analyzer._transcription)
+            detected_trigger_pairs = detect_voice_triggers(
+                ww,
+                cut_keywords=cut_keywords,
+                continue_keywords=continue_keywords,
+                clip_duration=duration,
+            )
+            if detected_trigger_pairs:
+                print(f"[voice-triggers] {len(detected_trigger_pairs)} "
+                      f"cut→continue pair(s) detected:")
+                for p in detected_trigger_pairs:
+                    print(f"  '{p.cut_word}' @ {p.cut_start:.2f}s → "
+                          f"'{p.continue_word}' @ {p.continue_end:.2f}s",
+                          flush=True)
+                segments = apply_voice_triggers_to_segments(
+                    segments, detected_trigger_pairs,
+                )
+                # Also drop subtitles inside cut ranges so they don't
+                # come back via the editor.
+                subtitles = apply_voice_triggers_to_subtitles(
+                    subtitles, detected_trigger_pairs,
+                )
+        except Exception as e:
+            print(f"[voice-triggers] error: {e}", flush=True)
+
     # Smart cut optimization — snap cuts to natural break points
     if smart_cut and analyzer._transcription:
         current_step += 1
@@ -198,7 +243,41 @@ def analyze_video(
     if progress_callback:
         progress_callback("Mapping subtitles...", step=current_step, total_steps=total_steps)
 
+    # Collect raw word-level confidence (Whisper probability per word)
+    # so the editor can flag low-confidence phrases for manual review.
+    raw_words: list[dict] = []
+    try:
+        for seg in (analyzer._transcription or {}).get("segments", []):
+            for w in seg.get("words") or []:
+                if w.get("start") is None or w.get("end") is None:
+                    continue
+                raw_words.append({
+                    "start": float(w["start"]),
+                    "end": float(w["end"]),
+                    "probability": float(w.get("probability", 1.0)),
+                })
+    except Exception:
+        raw_words = []
+
     mapped_subtitles = _map_subtitles_to_segments(subtitles, segments)
+    # Attach avg Whisper probability per subtitle based on word overlap.
+    for sub in mapped_subtitles:
+        os_ = sub.get("original_start", sub["start"])
+        oe_ = sub.get("original_end", sub["end"])
+        overlapping = [
+            w["probability"] for w in raw_words
+            if w["start"] < oe_ and w["end"] > os_
+        ]
+        sub["confidence"] = (
+            sum(overlapping) / len(overlapping) if overlapping else 1.0
+        )
+
+    # Whisper-detected language (ISO code: "de", "en", "fr", ...)
+    _detected_lang = None
+    try:
+        _detected_lang = (analyzer._transcription or {}).get("language")
+    except Exception:
+        pass
 
     return AnalysisResult(
         video_path=str(video_path),
@@ -207,6 +286,7 @@ def analyze_video(
         subtitles=mapped_subtitles,
         style=style,
         fillers=filler_data,
+        language=_detected_lang,
     )
 
 

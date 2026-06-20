@@ -407,10 +407,11 @@ class FastVideoEditor:
         }
 
         # Clean-Style: Gruppiere Wörter in Phrasen
-        words_per_phrase = 4
-        valid_subs = [s for s in subtitles if (s.end - s.start) >= 0.1 and s.text.strip()]
+        words_per_phrase = 6
+        valid_subs = [s for s in subtitles if (s.end - s.start) >= 0.05 and s.text.strip()]
 
         all_clips = []
+        # Multi-state CompositeVideoClip — original behaviour.
         for i in range(0, len(valid_subs), words_per_phrase):
             phrase_subs = valid_subs[i:i + words_per_phrase]
             words = [s.text.strip() for s in phrase_subs]
@@ -418,31 +419,25 @@ class FastVideoEditor:
             for word_idx, sub in enumerate(phrase_subs):
                 new_start = map_time(sub.start)
                 new_end = map_time(sub.end)
-
                 if new_start is None or new_end is None:
                     continue
-
                 dur = new_end - new_start
                 if dur < 0.1:
                     dur = 0.1
-
-                # Untertitel anzeigen (kleiner Delay für Re-Encoding-Sync)
                 display_start = new_start + 0.05
-
                 try:
                     phrase_clip = create_clean_phrase_subtitle(
                         words=words,
                         active_index=word_idx,
                         duration=dur,
                         video_size=clip.size,
-                        subtitle_config=subtitle_config
+                        subtitle_config=subtitle_config,
                     )
-
                     if phrase_clip is not None:
                         phrase_clip = phrase_clip.set_start(display_start)
                         all_clips.append(phrase_clip)
-                except Exception as e:
-                    pass  # Skip problematic subtitles
+                except Exception:
+                    pass
 
         if all_clips:
             final = CompositeVideoClip([clip] + all_clips)
@@ -577,48 +572,110 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Inactive words: grey
         inactive_color_ass = "&H00808080"
 
-        # Clean-Style: Gruppiere Wörter in Phrasen
-        words_per_phrase = 4
+        # Determine subtitle rendering style
+        subtitle_style = config.get("subtitle_style", "clean")
+
+        # Format time as H:MM:SS.CC
+        def format_ass_time(t):
+            h = int(t // 3600)
+            m = int((t % 3600) // 60)
+            s = t % 60
+            return f"{h}:{m:02d}:{s:05.2f}"
+
+        words_per_phrase = config.get("clean_words_per_phrase", 4)
         valid_subs = [s for s in subtitles if (s.end - s.start) >= 0.1 and s.text.strip()]
 
-        for i in range(0, len(valid_subs), words_per_phrase):
-            phrase_subs = valid_subs[i:i + words_per_phrase]
-            words = [s.text.strip() for s in phrase_subs]
+        if subtitle_style == "elegant":
+            # Elegant style: nouns+verbs in script font + accent color, rest in default
+            from .pos_tagger import tag_phrase
 
-            for word_idx, sub in enumerate(phrase_subs):
-                new_start = map_time(sub.start)
-                new_end = map_time(sub.end)
+            # Detect language from transcription if available
+            elegant_lang = config.get("_detected_language", "de")
 
-                if new_start is None or new_end is None:
-                    continue
+            # Script font per platform
+            if sys.platform == "darwin":
+                script_font = "Snell Roundhand"
+            elif sys.platform == "win32":
+                script_font = "Segoe Script"
+            else:
+                script_font = "URW Chancery L"
 
-                # Whisper-Korrektur: Wörter werden etwas früher erkannt
-                subtitle_delay = 0.08  # 80ms später anzeigen
-                new_start = max(0, new_start + subtitle_delay)
-                new_end = new_end + subtitle_delay
+            # Accent color for nouns/verbs (golden)
+            accent_hex = config.get("subtitle_highlight_color_hex", "#E8A838")
+            accent_ass = _hex_to_ass_bgr(accent_hex)
 
-                # Format time as H:MM:SS.CC
-                def format_ass_time(t):
-                    h = int(t // 3600)
-                    m = int((t % 3600) // 60)
-                    s = t % 60
-                    return f"{h}:{m:02d}:{s:05.2f}"
+            # Verb color (same as accent by default, can be overridden)
+            verb_hex = config.get("subtitle_verb_color_hex", accent_hex)
+            verb_ass = _hex_to_ass_bgr(verb_hex)
 
-                start_str = format_ass_time(new_start)
-                end_str = format_ass_time(new_end)
+            for i in range(0, len(valid_subs), words_per_phrase):
+                phrase_subs = valid_subs[i:i + words_per_phrase]
+                words = [s.text.strip() for s in phrase_subs]
+                tags = tag_phrase(words, language=elegant_lang)
 
-                # Baue Text mit aktivem Wort hervorgehoben
-                text_parts = []
-                for j, word in enumerate(words):
-                    if j == word_idx:
-                        # Aktives Wort - highlight color (or primary)
-                        text_parts.append(f"{{\\c{active_color_ass}}}{word}")
-                    else:
-                        # Inaktives Wort - grau
-                        text_parts.append(f"{{\\c{inactive_color_ass}}}{word}")
+                for word_idx, sub in enumerate(phrase_subs):
+                    new_start = map_time(sub.start)
+                    new_end = map_time(sub.end)
+                    if new_start is None or new_end is None:
+                        continue
 
-                text = " ".join(text_parts)
-                ass_content += f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text}\n"
+                    subtitle_delay = 0.08
+                    new_start = max(0, new_start + subtitle_delay)
+                    new_end = new_end + subtitle_delay
+
+                    start_str = format_ass_time(new_start)
+                    end_str = format_ass_time(new_end)
+
+                    # Build text with per-word font+color overrides
+                    text_parts = []
+                    for j, (word, tag) in enumerate(zip(words, tags)):
+                        if j == word_idx:
+                            # Active word
+                            if tag == "NOUN":
+                                text_parts.append(f"{{\\fn{script_font}\\c{accent_ass}\\i1}}{word}{{\\i0}}")
+                            elif tag == "VERB":
+                                text_parts.append(f"{{\\fn{script_font}\\c{verb_ass}\\i1}}{word}{{\\i0}}")
+                            else:
+                                text_parts.append(f"{{\\fn{font_name}\\c{primary_colour}}}{word}")
+                        else:
+                            # Inactive word
+                            if tag in ("NOUN", "VERB"):
+                                text_parts.append(f"{{\\fn{script_font}\\c{inactive_color_ass}\\i1}}{word}{{\\i0}}")
+                            else:
+                                text_parts.append(f"{{\\fn{font_name}\\c{inactive_color_ass}}}{word}")
+
+                    text = " ".join(text_parts)
+                    ass_content += f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text}\n"
+
+        else:
+            # Default clean style: grouped phrases with active word highlight
+            for i in range(0, len(valid_subs), words_per_phrase):
+                phrase_subs = valid_subs[i:i + words_per_phrase]
+                words = [s.text.strip() for s in phrase_subs]
+
+                for word_idx, sub in enumerate(phrase_subs):
+                    new_start = map_time(sub.start)
+                    new_end = map_time(sub.end)
+
+                    if new_start is None or new_end is None:
+                        continue
+
+                    subtitle_delay = 0.08
+                    new_start = max(0, new_start + subtitle_delay)
+                    new_end = new_end + subtitle_delay
+
+                    start_str = format_ass_time(new_start)
+                    end_str = format_ass_time(new_end)
+
+                    text_parts = []
+                    for j, word in enumerate(words):
+                        if j == word_idx:
+                            text_parts.append(f"{{\\c{active_color_ass}}}{word}")
+                        else:
+                            text_parts.append(f"{{\\c{inactive_color_ass}}}{word}")
+
+                    text = " ".join(text_parts)
+                    ass_content += f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text}\n"
 
         # Schreibe ASS-Datei
         with open(ass_path, 'w', encoding='utf-8') as f:
@@ -696,7 +753,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 '-ss', str(start),
                 '-t', str(duration),
                 '-c:v', get_video_codec(),
-                '-b:v', '12M',
+                '-b:v', '8M',
                 ] + get_codec_params() + [
                 '-c:a', 'aac', '-b:a', '192k',
                 '-avoid_negative_ts', 'make_zero',
@@ -729,7 +786,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         self._report("Finalisiere...", step=4, total_steps=4)
 
         # Output-Pfad
-        out_path = self.output_dir / f"{self.input_path.stem}_{style}_fast.mp4"
+        # Match editor.py: don't overwrite previous exports of the same input
+        base = self.output_dir / f"{self.input_path.stem}_{style}_fast.mp4"
+        if base.exists():
+            for i in range(2, 1000):
+                candidate = base.parent / f"{base.stem}_{i}{base.suffix}"
+                if not candidate.exists():
+                    base = candidate
+                    break
+        out_path = base
 
         # Drawtext-Filter für Untertitel erstellen
         drawtext_filters = []
@@ -764,7 +829,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 '-i', concat_output,
                 '-vf', f"ass='{ass_path_escaped}'",
                 '-c:v', get_video_codec(),
-                '-b:v', '12M',
+                '-b:v', '8M',
                 ] + get_codec_params() + [
                 '-c:a', 'aac', '-b:a', '192k',
                 str(out_path)
@@ -779,7 +844,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 get_ffmpeg_path(), '-y',
                 '-i', concat_output,
                 '-c:v', get_video_codec(),
-                '-b:v', '12M',
+                '-b:v', '8M',
                 ] + get_codec_params() + [
                 '-c:a', 'aac', '-b:a', '192k',
                 str(out_path)

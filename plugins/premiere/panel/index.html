@@ -6,6 +6,13 @@
     <title>SmartCut</title>
     <script src="CSInterface.js"></script>
     <style>
+        @font-face {
+            font-family: "Bangers";
+            src: url("fonts/Bangers-Regular.ttf") format("truetype");
+            font-weight: 400;
+            font-style: normal;
+            font-display: block;
+        }
         * { box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -54,11 +61,12 @@
 
         /* --- Clip info --- */
         .clip-info {
-            padding: 10px 14px;
+            padding: 14px 12px 12px 12px;
             margin-bottom: 14px;
             font-size: 12px;
             color: #7a7a86;
             display: flex;
+            flex-direction: column;
             align-items: center;
             gap: 8px;
             transition: border-color 0.3s, background 0.3s;
@@ -67,8 +75,29 @@
             border-color: rgba(108,92,231,0.25);
             background: rgba(108,92,231,0.04);
         }
-        .clip-info .icon { font-size: 15px; opacity: 0.7; }
-        .clip-info .name { color: #e8e8ec; font-weight: 600; }
+        .clip-info .icon { font-size: 24px; opacity: 0.5; }
+        .clip-info .name {
+            color: #e8e8ec;
+            font-weight: 600;
+            font-size: 12px;
+            text-align: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 100%;
+        }
+        .clip-info .clip-thumb {
+            max-width: 240px;
+            max-height: 240px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: #0a0a0e;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            display: block;
+        }
         .clip-info .clip-meta { font-size: 10px; color: #5a5a66; margin-left: auto; white-space: nowrap; }
 
         /* --- Style list --- */
@@ -205,6 +234,31 @@
             transform: none;
         }
         .btn-primary:disabled::before { display: none; }
+
+        /* Cancel button — shown next to progress while processing */
+        .btn-cancel {
+            display: block;
+            width: 100%;
+            margin-top: 10px;
+            padding: 8px 12px;
+            border: 1px solid rgba(239,68,68,0.4);
+            border-radius: 8px;
+            background: transparent;
+            color: #ef4444;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        .btn-cancel:hover {
+            background: rgba(239,68,68,0.12);
+            color: #ff6464;
+        }
+        .btn-cancel:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
         .btn-primary.processing {
             animation: btnPulse 2s ease-in-out infinite;
         }
@@ -520,6 +574,653 @@
             transition: background 0.2s;
         }
         .done-close:hover { background: rgba(108,92,231,0.25); }
+
+        /* ── SmartCam card ────────────────────────────────────────── */
+        .smartcam-card {
+            margin: 12px 12px 6px 12px;
+            padding: 12px 14px;
+            border-radius: 14px;
+        }
+        .smartcam-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .smartcam-icon {
+            font-size: 26px;
+            color: #5a5a64;
+            transition: color 0.2s;
+        }
+        .smartcam-card.sc-on .smartcam-icon { color: #22c55e; }
+        .vt-beta {
+            display: inline-block;
+            font-size: 8px;
+            font-weight: 700;
+            color: #7c5cff;
+            background: rgba(124,92,255,0.15);
+            border: 1px solid rgba(124,92,255,0.35);
+            padding: 1px 5px;
+            border-radius: 4px;
+            margin-left: 6px;
+            vertical-align: middle;
+            letter-spacing: 0.5px;
+        }
+        #voiceTriggerCard.sc-on .smartcam-icon { color: #7c5cff; }
+        .vt-keywords {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .vt-kw-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .vt-kw-label {
+            flex: 0 0 90px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.7);
+            font-weight: 500;
+        }
+        .vt-kw-input {
+            flex: 1;
+            background: rgba(0,0,0,0.35);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 6px;
+            padding: 6px 8px;
+            color: #fff;
+            font-size: 11px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .vt-kw-input:focus { border-color: rgba(124,92,255,0.6); }
+        .vt-kw-input::placeholder { color: rgba(255,255,255,0.3); }
+        .vt-kw-hint {
+            font-size: 10px;
+            color: rgba(255,255,255,0.4);
+            line-height: 1.35;
+            padding-top: 2px;
+        }
+        .smartcam-text {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .smartcam-title { font-size: 14px; font-weight: 700; color: #f0f0f2; }
+        .smartcam-sub { font-size: 10px; color: #6a6a72; margin-top: 1px; }
+        .smartcam-toggle {
+            display: inline-flex;
+            background: #222228;
+            border-radius: 8px;
+            padding: 2px;
+        }
+        .sc-seg {
+            padding: 4px 12px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #f0f0f2;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .sc-seg-active.sc-seg { background: #22c55e; color: #fff; }
+        #scOff.sc-seg-active { background: #3a3a48; }
+        .smartcam-formats {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .sc-tile {
+            flex: 1;
+            background: #222228;
+            border: 2px solid #222228;
+            border-radius: 12px;
+            padding: 14px 8px 10px 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+        .sc-tile:hover { border-color: #3a3a48; }
+        .sc-tile-active { border-color: #7c5cff; }
+        .sc-tile-disabled { opacity: 0.35; cursor: not-allowed; }
+        .sc-tile-disabled:hover { border-color: #222228; }
+        .sc-shape {
+            border: 2px solid #7c5cff;
+            border-radius: 3px;
+            background: transparent;
+        }
+        .sc-tile-active .sc-shape { background: #7c5cff; }
+        .sc-tile-disabled .sc-shape { border-color: #5a5a64; }
+        .sc-shape-portrait { width: 32px; height: 56px; }
+        .sc-shape-landscape { width: 72px; height: 40px; }
+        .sc-tile-name {
+            font-size: 12px; font-weight: 700; color: #f0f0f2;
+            margin-top: 8px;
+        }
+        .sc-tile-ratio {
+            font-size: 10px; color: #6a6a72; margin-top: 2px;
+            font-family: ui-monospace, Menlo, monospace;
+        }
+
+        /* ── Section labels (CUT STYLE, CAPTION STYLE, etc.) ──────── */
+        .section-label {
+            display: block;
+            margin: 14px 4px 6px 4px;
+            color: #6a6a76;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .section-label-inline { margin-top: 0; }
+
+        /* ── Cut Style picker ─────────────────────────────────────── */
+        .cut-card {
+            background: rgba(255,255,255,0.025);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 14px;
+            padding: 10px 8px 12px 8px;
+        }
+        .cut-options {
+            display: flex;
+            gap: 4px;
+        }
+        .cut-opt {
+            flex: 1;
+            text-align: center;
+            padding: 8px 4px;
+            background: transparent;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .cut-opt:hover { background: rgba(255,255,255,0.04); }
+        .cut-opt-active {
+            background: rgba(124,92,255,0.15);
+            box-shadow: 0 0 0 1px rgba(124,92,255,0.4);
+        }
+        .cut-emoji { display: block; font-size: 18px; line-height: 1.1; }
+        .cut-name {
+            display: block; margin-top: 2px;
+            font-size: 11px; font-weight: 600;
+            color: #9a9aa4;
+        }
+        .cut-opt-active .cut-name { color: #e8e8ec; }
+        .cut-desc {
+            text-align: center;
+            margin-top: 8px;
+            font-size: 11px;
+            color: #6a6a76;
+            font-weight: 500;
+        }
+
+        /* ── Caption Preview Stage ────────────────────────────────── */
+        .sub-preview-wrap {
+            margin: 12px 0 14px 0;
+        }
+        .cpb-stage {
+            margin-top: 8px;
+            display: flex;
+            justify-content: center;
+            padding: 14px 0;
+            background: linear-gradient(180deg,
+                rgba(255,255,255,0.02) 0%,
+                rgba(255,255,255,0) 100%);
+            border-radius: 12px;
+        }
+        .cpb-frame {
+            position: relative;
+            background: #0a0a0e;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 14px;
+            overflow: hidden;
+            cursor: grab;
+            user-select: none;
+            transition: aspect-ratio 0.2s;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.55),
+                        inset 0 0 0 1px rgba(255,255,255,0.04);
+        }
+        .cpb-frame.portrait {
+            aspect-ratio: 9 / 16;
+            width: 145px;
+        }
+        .cpb-frame.landscape {
+            aspect-ratio: 16 / 9;
+            width: 260px;
+        }
+        .cpb-frame.dragging { cursor: grabbing; }
+        .cpb-thumb {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            position: absolute;
+            inset: 0;
+        }
+        .cpb-placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #5a5a66;
+            font-size: 10px;
+            text-align: center;
+            padding: 12px;
+            pointer-events: none;
+        }
+        .cpb-text {
+            position: absolute;
+            left: 50%;
+            top: 85%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-weight: 700;
+            font-size: 11px;
+            line-height: 1.1;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.85),
+                         0 0 4px rgba(0,0,0,0.5);
+            white-space: nowrap;
+            text-align: center;
+            pointer-events: none;
+            letter-spacing: 0.2px;
+            will-change: top, transform;
+            /* Safe-Area: gleicher Anteil wie im echten Render (78 %). */
+            max-width: 78%;
+        }
+        /* Safe-Area-Markierung im Portrait: zeigt wo die Untertitel
+           später passen (78 % Breite mittig), damit der User sieht
+           dass TikTok/Insta-UI nicht überlappt. */
+        .cpb-frame.portrait::before {
+            content: "";
+            position: absolute;
+            top: 0; bottom: 0;
+            left: 11%; right: 11%;
+            border-left: 1px dashed rgba(255,255,255,0.08);
+            border-right: 1px dashed rgba(255,255,255,0.08);
+            pointer-events: none;
+            z-index: 1;
+        }
+        /* Caption-Style Mocks — geben den echten Render-Look so nah
+           wie möglich wieder. Browser kann den echten PIL/MoviePy-
+           Renderer nicht ausführen, also approximieren wir die
+           charakteristischen Eigenschaften jedes Styles. */
+
+        /* Clean: weiß auf schwarzer Box, lila aktives Wort */
+        .cpb-text.cap-clean {
+            color: #fff;
+            font-family: "Arial Black", "Helvetica Neue", sans-serif;
+            font-weight: 900;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 3px 9px;
+            border-radius: 3px;
+        }
+        .cpb-text.cap-clean > .hl { color: #6c5ce7; }
+
+        /* Classic: weiß, kräftiger schwarzer Outline, kein Highlight */
+        .cpb-text.cap-classic {
+            color: #fff;
+            font-family: "Arial Black", "Helvetica Neue", sans-serif;
+            font-weight: 900;
+            -webkit-text-stroke: 0.9px #000;
+            text-shadow: 0 0 2px #000, 0 1px 2px #000;
+        }
+
+        /* Highlight: UPPERCASE Impact, rote Box hinter aktivem Wort */
+        .cpb-text.cap-highlight {
+            color: #fff;
+            font-family: "Impact", "Arial Black", sans-serif;
+            text-transform: uppercase;
+            font-weight: 900;
+            letter-spacing: 0.4px;
+            -webkit-text-stroke: 0.6px #000;
+        }
+        .cpb-text.cap-highlight > .hl {
+            background: #B11020;
+            color: #fff;
+            padding: 1px 6px;
+            border-radius: 2px;
+        }
+
+        /* Elegant: weiß sans, Hervorhebung in Schreibschrift + Gold */
+        .cpb-text.cap-elegant {
+            color: #fff;
+            font-family: "Arial Black", "Helvetica Neue", sans-serif;
+            font-weight: 800;
+        }
+        .cpb-text.cap-elegant > .hl {
+            color: #E8A838;
+            font-family: "Snell Roundhand", "Brush Script MT", cursive;
+            font-style: italic;
+            font-weight: 400;
+            font-size: 1.25em;
+            letter-spacing: 0.5px;
+        }
+
+        /* Clipper: Bangers UPPERCASE, neon-grünes aktives Wort,
+           dicker schwarzer Outline. Größen-Boost via styleBoost im
+           JS — siehe _renderSubPreview. */
+        .cpb-text.cap-clipper {
+            color: #fff;
+            font-family: "Bangers", "Impact", "Arial Black", sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 400;
+            -webkit-text-stroke: 1px #000;
+            paint-order: stroke fill;
+            /* Schwarzer Drop unten gibt Tiefe, ohne den Rand zu
+               verdoppeln. */
+            text-shadow: 0 2px 1px rgba(0,0,0,0.7);
+        }
+        /* scaleX wird vom JS auf den Container gesetzt (translate +
+           scaleX kombiniert), damit der Text zentriert bleibt. Die
+           Spans bleiben inline → normales Whitespace-Verhalten. */
+        .cpb-text.cap-clipper > .hl { color: #39FF14; }
+
+        /* Flash: Avenir Heavy Italic, UPPERCASE, blaues aktives Wort.
+           Outline schmal (0.6px) damit das Wort-Innere voll sichtbar
+           bleibt; Heavy via font-weight + zusätzlichem black-shadow
+           für Fett-Eindruck. */
+        .cpb-text.cap-flash {
+            color: #fff;
+            font-weight: 900;
+            font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+            text-transform: uppercase;
+            letter-spacing: -0.4px;
+            -webkit-text-stroke: 0.6px #000;
+            text-shadow:
+                0 0 1px #fff,
+                0 1px 1px #000,
+                0 -1px 0 #000;
+        }
+        .cpb-text.cap-flash > * { display: inline-block; transform: skewX(-6deg); }
+        .cpb-text.cap-flash > .hl { color: #0088CC; }
+
+        /* Punch: gelbes 1-Wort, Gill Sans, schwarzer Glow */
+        .cpb-text.cap-punch {
+            color: #fde047;
+            font-family: "Gill Sans", "Helvetica Neue", sans-serif;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            text-shadow: 0 0 4px #000, 0 0 8px #000, 0 0 12px #000;
+        }
+
+        /* Subtle: schlicht weiß, kein Highlight, kleiner */
+        .cpb-text.cap-subtle {
+            color: #fff;
+            font-family: "Arial Black", "Helvetica Neue", sans-serif;
+            font-weight: 700;
+            -webkit-text-stroke: 0.3px #000;
+        }
+        .cpb-drag-hint {
+            position: absolute;
+            top: 6px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 9px;
+            color: rgba(255,255,255,0.55);
+            background: rgba(0,0,0,0.55);
+            padding: 2px 7px;
+            border-radius: 8px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .cpb-frame:hover .cpb-drag-hint { opacity: 0.85; }
+        .cpb-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .cpb-mini-btn {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            color: #9a9aa6;
+            font-size: 13px;
+            padding: 5px 9px;
+            border-radius: 7px;
+            cursor: pointer;
+            text-align: center;
+        }
+        .cpb-mini-btn:hover { background: rgba(255,255,255,0.08); color: #e8e8ec; }
+        .cpb-mini-btn:active { background: rgba(124,92,255,0.2); }
+        .cpb-val {
+            font-size: 10px;
+            color: #9a9aa6;
+            font-family: ui-monospace, Menlo, monospace;
+            min-width: 40px;
+            text-align: center;
+        }
+        .cpb-size-label {
+            font-size: 10px;
+            color: #6a6a76;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            font-weight: 600;
+        }
+        .cpb-size-group {
+            display: flex;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 8px;
+            padding: 2px;
+            gap: 1px;
+        }
+        .cpb-size-btn {
+            background: transparent;
+            border: none;
+            color: #9a9aa6;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 5px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            min-width: 32px;
+            text-align: center;
+            transition: background 0.12s, color 0.12s;
+        }
+        .cpb-size-btn:hover { color: #e8e8ec; }
+        .cpb-size-btn.cpb-size-active {
+            background: rgba(124,92,255,0.22);
+            color: #fff;
+        }
+
+        /* ── Caption Style 3x3 grid ───────────────────────────────── */
+        .caption-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 14px;
+            padding: 4px;
+        }
+        .cap-tile {
+            background: rgba(255,255,255,0.02);
+            border: 2px solid transparent;
+            border-radius: 10px;
+            padding: 12px 4px 8px 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .cap-tile:hover { border-color: rgba(255,255,255,0.08); }
+        .cap-tile-active {
+            border-color: rgba(124,92,255,0.5);
+            background: rgba(124,92,255,0.08);
+        }
+        .cap-icon {
+            font-size: 22px;
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+        .cap-name {
+            font-size: 10px;
+            font-weight: 700;
+            color: #9a9aa4;
+            letter-spacing: 0.3px;
+        }
+        .cap-tile-active .cap-name { color: #e8e8ec; }
+
+        /* ── Quality + Resolution side-by-side ────────────────────── */
+        .qr-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .qr-col { flex: 1; min-width: 0; }
+        .seg-group {
+            display: flex;
+            background: rgba(255,255,255,0.04);
+            border-radius: 8px;
+            padding: 2px;
+            gap: 2px;
+        }
+        .seg-btn {
+            flex: 1;
+            padding: 6px 4px;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: #9a9aa4;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        .seg-btn:hover { color: #e8e8ec; }
+        .seg-btn.seg-active {
+            background: #7c5cff;
+            color: #fff;
+            box-shadow: 0 1px 4px rgba(124,92,255,0.3);
+        }
+        .qr-desc {
+            text-align: center;
+            margin-top: 4px;
+            font-size: 10px;
+            color: #6a6a76;
+        }
+
+        /* ── Subtitle Editor ───────────────────────────────────────── */
+        .sub-editor {
+            margin-top: 12px;
+            padding: 14px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 14px;
+        }
+        .sub-editor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 10px;
+        }
+        .sub-editor-title {
+            font-size: 13px; font-weight: 700; color: #f0f0f2;
+        }
+        .sub-editor-count {
+            font-size: 11px; color: #7a7a86;
+        }
+        .sub-editor-list {
+            max-height: 420px;
+            overflow-y: auto;
+            margin-bottom: 12px;
+        }
+        .sub-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 5px;
+            padding: 5px 6px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 7px;
+            margin-bottom: 3px;
+        }
+        .sub-ts {
+            font-size: 9px;
+            color: #6a6a72;
+            font-family: ui-monospace, Menlo, monospace;
+            width: 34px;
+            padding-top: 4px;
+            flex-shrink: 0;
+            letter-spacing: -0.2px;
+        }
+        .sub-input {
+            flex: 1;
+            min-width: 0;
+            min-height: 24px;
+            background: rgba(255,255,255,0.025);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 6px;
+            padding: 4px 7px;
+            color: #e8e8ec;
+            font-size: 11px;
+            font-weight: 400;
+            font-family: inherit;
+            line-height: 1.4;
+            resize: none;
+            overflow: hidden;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+            display: block;
+            box-sizing: border-box;
+        }
+        .sub-input:focus {
+            outline: none;
+            border-color: rgba(124,92,255,0.4);
+            background: rgba(255,255,255,0.04);
+        }
+        .sub-del {
+            width: 20px; height: 20px;
+            margin-top: 2px;
+            border: none;
+            background: transparent;
+            color: #5a5a64;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .sub-del:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
+        .sub-editor-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .btn-secondary {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            background: transparent;
+            color: #9a9aa4;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-secondary:hover { background: rgba(255,255,255,0.04); }
+        .sub-editor-actions .btn-primary {
+            flex: 2;
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -531,47 +1232,185 @@
         <span class="icon">&#127916;</span> No clip detected — select a clip on the timeline
     </div>
 
-    <span class="style-label">Style</span>
-    <div class="style-cards" id="styleCards">
-        <div class="style-card selected" data-style="clean" onclick="selectStyle('clean')">
-            <span class="style-card-icon">&#9986;</span>
-            <div class="style-card-text">
-                <span class="style-card-name">Clean</span>
-                <span class="style-card-desc">Tight cuts, phrase subtitles</span>
+    <div id="configSections">
+    <!-- CUT STYLE — slider with 3 stops (Smooth → Balanced → Tight) -->
+    <span class="section-label">CUT STYLE</span>
+    <div class="cut-card">
+        <div class="cut-options">
+            <div class="cut-opt cut-opt-active" data-cut="smooth" onclick="selectCut('smooth')">
+                <span class="cut-emoji">&#128034;</span>
+                <span class="cut-name">Smooth</span>
             </div>
-            <span class="style-card-check"></span>
+            <div class="cut-opt" data-cut="balanced" onclick="selectCut('balanced')">
+                <span class="cut-emoji">&#128694;</span>
+                <span class="cut-name">Balanced</span>
+            </div>
+            <div class="cut-opt" data-cut="tight" onclick="selectCut('tight')">
+                <span class="cut-emoji">&#127939;</span>
+                <span class="cut-name">Tight</span>
+            </div>
         </div>
-        <div class="style-card" data-style="fast" onclick="selectStyle('fast')">
-            <span class="style-card-icon">&#9889;</span>
-            <div class="style-card-text">
-                <span class="style-card-name">Fast</span>
-                <span class="style-card-desc">Fast cuts, word-by-word subtitles</span>
-            </div>
-            <span class="style-card-check"></span>
+        <div class="cut-desc" id="cutDesc">Natural flow preserved</div>
+    </div>
+
+    <!-- CAPTION STYLE — 3x3 tile grid -->
+    <span class="section-label">CAPTION STYLE</span>
+    <div class="caption-grid" id="captionGrid">
+        <div class="cap-tile" data-cap="classic" onclick="selectCaption('classic')">
+            <span class="cap-icon">&#128290;</span>
+            <span class="cap-name">Classic</span>
         </div>
-        <div class="style-card" data-style="balanced" onclick="selectStyle('balanced')">
-            <span class="style-card-icon">&#9878;</span>
-            <div class="style-card-text">
-                <span class="style-card-name">Balanced</span>
-                <span class="style-card-desc">Balanced cuts, word subtitles</span>
-            </div>
-            <span class="style-card-check"></span>
+        <div class="cap-tile cap-tile-active" data-cap="clean" onclick="selectCaption('clean')">
+            <span class="cap-icon">&#9986;&#65039;</span>
+            <span class="cap-name">Clean</span>
         </div>
-        <div class="style-card" data-style="smooth" onclick="selectStyle('smooth')">
-            <span class="style-card-icon">&#127754;</span>
-            <div class="style-card-text">
-                <span class="style-card-name">Smooth</span>
-                <span class="style-card-desc">Smooth cuts, word subtitles</span>
-            </div>
-            <span class="style-card-check"></span>
+        <div class="cap-tile" data-cap="elegant" onclick="selectCaption('elegant')">
+            <span class="cap-icon">&#10024;</span>
+            <span class="cap-name">Elegant</span>
         </div>
-        <div class="style-card" data-style="minimal" onclick="selectStyle('minimal')">
-            <span class="style-card-icon">&#9898;</span>
-            <div class="style-card-text">
-                <span class="style-card-name">Minimal</span>
-                <span class="style-card-desc">Tight cuts, no subtitles</span>
+        <div class="cap-tile" data-cap="highlight" onclick="selectCaption('highlight')">
+            <span class="cap-icon">&#128204;</span>
+            <span class="cap-name">Highlight</span>
+        </div>
+        <div class="cap-tile" data-cap="clipper" onclick="selectCaption('clipper')">
+            <span class="cap-icon">&#127916;</span>
+            <span class="cap-name">Clipper</span>
+        </div>
+        <div class="cap-tile" data-cap="flash" onclick="selectCaption('flash')">
+            <span class="cap-icon">&#9889;</span>
+            <span class="cap-name">Flash</span>
+        </div>
+        <div class="cap-tile" data-cap="punch" onclick="selectCaption('punch')">
+            <span class="cap-icon">&#129354;</span>
+            <span class="cap-name">Punch</span>
+        </div>
+        <div class="cap-tile" data-cap="subtle" onclick="selectCaption('subtle')">
+            <span class="cap-icon">&#128172;</span>
+            <span class="cap-name">Subtle</span>
+        </div>
+        <div class="cap-tile" data-cap="none" onclick="selectCaption('none')">
+            <span class="cap-icon">&#9899;</span>
+            <span class="cap-name">None</span>
+        </div>
+    </div>
+
+    <!-- CAPTION PREVIEW — Live preview in target aspect ratio -->
+    <div class="sub-preview-wrap" id="subSliders">
+        <span class="section-label">CAPTION PREVIEW</span>
+        <div class="cpb-stage">
+            <div class="cpb-frame" id="subPreviewBox">
+                <img class="cpb-thumb" id="subPreviewThumb" alt="">
+                <div class="cpb-placeholder" id="subPreviewPlaceholder">
+                    Select a clip on the timeline
+                </div>
+                <div class="cpb-text" id="subPreviewText">Your captions</div>
+                <div class="cpb-drag-hint" id="subPreviewHint">
+                    <span>⇅</span> drag to position
+                </div>
             </div>
-            <span class="style-card-check"></span>
+        </div>
+        <div class="cpb-controls">
+            <span class="cpb-size-label">Size</span>
+            <div class="cpb-size-group">
+                <button class="cpb-size-btn" data-size="0.75" onclick="setSubSize(0.75)">S</button>
+                <button class="cpb-size-btn cpb-size-active" data-size="1.0" onclick="setSubSize(1.0)">M</button>
+                <button class="cpb-size-btn" data-size="1.25" onclick="setSubSize(1.25)">L</button>
+                <button class="cpb-size-btn" data-size="1.5" onclick="setSubSize(1.5)">XL</button>
+            </div>
+            <button class="cpb-mini-btn cpb-reset" onclick="resetSubLayout()" title="Reset position + size">↻</button>
+        </div>
+    </div>
+
+    <!-- QUALITY + RESOLUTION (side-by-side segmented buttons) -->
+    <div class="qr-row">
+        <div class="qr-col">
+            <span class="section-label section-label-inline">QUALITY</span>
+            <div class="seg-group">
+                <button class="seg-btn seg-active" data-q="standard" onclick="selectQuality('standard')">Standard</button>
+                <button class="seg-btn" data-q="high" onclick="selectQuality('high')">High Quality</button>
+            </div>
+            <div class="qr-desc" id="qDesc">Faster · lower RAM</div>
+        </div>
+        <div class="qr-col">
+            <span class="section-label section-label-inline">RESOLUTION</span>
+            <div class="seg-group">
+                <button class="seg-btn" data-r="720" onclick="selectResolution('720')">720p</button>
+                <button class="seg-btn seg-active" data-r="1080" onclick="selectResolution('1080')">1080p</button>
+            </div>
+            <div class="qr-desc" id="rDesc">Best quality</div>
+        </div>
+    </div>
+    </div>
+    <!-- /#configSections -->
+
+    <!-- SmartCam — face-tracking reframe (+ Speaker Focus for same-aspect) -->
+    <div class="smartcam-card glass" id="smartcamCard">
+        <div class="smartcam-header">
+            <span class="smartcam-icon">&#128247;</span>
+            <div class="smartcam-text">
+                <span class="smartcam-title">SmartCam</span>
+                <span class="smartcam-sub" id="smartcamSub">Face tracking + smart reframe</span>
+            </div>
+            <div class="smartcam-toggle">
+                <button class="sc-seg sc-seg-active" id="scOff" onclick="setSmartCam(false)">Off</button>
+                <button class="sc-seg" id="scOn" onclick="setSmartCam(true)">On</button>
+            </div>
+        </div>
+        <div class="smartcam-formats" id="smartcamFormats" style="display:none;">
+            <div class="sc-tile sc-tile-active" id="scPortrait" data-format="portrait" onclick="setSmartCamFormat('portrait')">
+                <div class="sc-shape sc-shape-portrait"></div>
+                <span class="sc-tile-name">Portrait</span>
+                <span class="sc-tile-ratio">9 : 16</span>
+            </div>
+            <div class="sc-tile" id="scLandscape" data-format="landscape" onclick="setSmartCamFormat('landscape')">
+                <div class="sc-shape sc-shape-landscape"></div>
+                <span class="sc-tile-name">Landscape</span>
+                <span class="sc-tile-ratio">16 : 9</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Voice Triggers: User sagt selbstdefinierte Keywords während der
+         Aufnahme (Default: "cut" → "go") um Fehlversuche zu markieren. -->
+    <div class="smartcam-card glass" id="voiceTriggerCard">
+        <div class="smartcam-header">
+            <span class="smartcam-icon">&#127908;</span>
+            <div class="smartcam-text">
+                <span class="smartcam-title">Voice Triggers <span class="vt-beta">BETA</span></span>
+                <span class="smartcam-sub">Say "Cleo cut" → "Cleo go" (fast or slow) to auto-remove takes</span>
+            </div>
+            <div class="smartcam-toggle">
+                <button class="sc-seg sc-seg-active" id="vtOff" onclick="setVoiceTriggers(false)">Off</button>
+                <button class="sc-seg" id="vtOn" onclick="setVoiceTriggers(true)">On</button>
+            </div>
+        </div>
+        <div class="vt-keywords" id="vtKeywords" style="display:none;">
+            <div class="vt-kw-row">
+                <label class="vt-kw-label" for="vtCutKw">Cut keywords</label>
+                <input type="text" class="vt-kw-input" id="vtCutKw"
+                       placeholder="cleo cut" autocomplete="off"
+                       oninput="onVtKeywordsChange()">
+            </div>
+            <div class="vt-kw-row">
+                <label class="vt-kw-label" for="vtContKw">Go keywords</label>
+                <input type="text" class="vt-kw-input" id="vtContKw"
+                       placeholder="cleo go" autocomplete="off"
+                       oninput="onVtKeywordsChange()">
+            </div>
+            <div class="vt-kw-hint">Default: say "Cleo cut" to mark a failed take, "Cleo go" to start the new take. Leave empty to use defaults, or comma-separate your own phrases.</div>
+        </div>
+    </div>
+
+    <!-- Subtitle Editor (hidden until /analyze succeeds) -->
+    <div class="sub-editor" id="subEditor" style="display:none;">
+        <div class="sub-editor-header">
+            <span class="sub-editor-title">Review Subtitles</span>
+            <span class="sub-editor-count" id="subEditorCount">0 subtitles</span>
+        </div>
+        <div class="sub-editor-list" id="subEditorList"></div>
+        <div class="sub-editor-actions">
+            <button class="btn-secondary" id="editorCancelBtn" onclick="cancelEditor()">Cancel</button>
+            <button class="btn-primary" id="editorApplyBtn" onclick="applyEditorAndRender()">Apply &amp; Render</button>
         </div>
     </div>
 
@@ -584,6 +1423,10 @@
         <div class="progress-bar">
             <div class="progress-fill" id="progressFill"></div>
         </div>
+        <!-- Cancel button removed for v1 — Python threads in OpenCV /
+             MoviePy can't be killed reliably, so half-cancelled jobs
+             corrupted state. If you really need to abort, quit and
+             relaunch the SmartCut standalone app. -->
     </div>
 
     <div class="enhanced-progress" id="enhancedProgress">
@@ -622,7 +1465,7 @@
     <div class="footer" id="connection">
         <span class="dot off" id="connDot"></span>
         <span class="conn-text">Checking backend...</span>
-        <span class="version">SmartCut v1.0</span>
+        <span class="version">SmartCut v1.0 · ui-51</span>
     </div>
 
     <!-- Done overlay -->
@@ -653,19 +1496,395 @@
         var API_URL = 'http://127.0.0.1:8456';
         var csInterface = null;
         var _lastVideoPath = '';
+        // Separates Feld für den Pfad der gerade VERARBEITET wird (nach
+        // Pre-Render). _lastVideoPath wird vom detectClip-Polling alle
+        // 3 s mit dem aktuell ausgewählten Timeline-Clip überschrieben
+        // — was beim Apply & Render dazu führte, dass das Original-File
+        // statt dem pre-rendered File ans Backend ging.
+        var _processingVideoPath = '';
         var _lastStyle = 'clean';
         var _lastWordCount = 0;
-        var _selectedCaptionPreset = 'karaoke';
-        var _selectedStyle = 'clean';
+        // Restore last-used settings from localStorage so the panel
+        // opens with whatever the user had on previous time — same UX
+        // as the standalone app's `_settings`.
+        var _LS_KEY = 'smartcut_panel_settings_v1';
+        var _persisted = {};
+        try {
+            var raw = localStorage.getItem(_LS_KEY);
+            if (raw) _persisted = JSON.parse(raw) || {};
+        } catch (e) { _persisted = {}; }
 
-        function selectStyle(styleName) {
-            _selectedStyle = styleName;
-            var cards = document.querySelectorAll('.style-card');
-            for (var i = 0; i < cards.length; i++) {
-                cards[i].classList.remove('selected');
+        var _selectedCut = _persisted.cut || 'smooth';
+        var _selectedCaptionPreset = _persisted.caption || 'clean';
+        var _selectedQuality = _persisted.quality || 'standard';
+        var _selectedResolution = _persisted.resolution || '1080';
+        var _smartcamEnabled = !!_persisted.smartcam_enabled;
+        var _smartcamFormat = _persisted.smartcam_format || 'portrait';
+        // Voice-Triggers: User sagt "cut" / "weiter" während der
+        // Aufnahme um Fehlversuche zu markieren — wird im Backend
+        // erkannt und der Bereich entfernt.
+        var _voiceTriggers = !!_persisted.voice_triggers;
+        // Comma-separated keyword lists (User-defined via panel).
+        // Empty string → backend uses its own defaults ("cut" / "go").
+        var _vtCutKeywords = (typeof _persisted.vt_cut_keywords === 'string')
+                                ? _persisted.vt_cut_keywords : '';
+        var _vtContinueKeywords = (typeof _persisted.vt_continue_keywords === 'string')
+                                ? _persisted.vt_continue_keywords : '';
+        // Untertitel-Position (0.10 = ganz oben, 0.95 = ganz unten) und
+        // Größe (0.6 .. 1.6 als Multiplier auf Default-Fontsize).
+        var _subtitlePos = (typeof _persisted.sub_pos === 'number')
+                             ? _persisted.sub_pos : 0.72;
+        var _subtitleSize = (typeof _persisted.sub_size === 'number')
+                             ? _persisted.sub_size : 1.0;
+
+        function _persistSettings() {
+            try {
+                localStorage.setItem(_LS_KEY, JSON.stringify({
+                    cut: _selectedCut,
+                    caption: _selectedCaptionPreset,
+                    quality: _selectedQuality,
+                    resolution: _selectedResolution,
+                    smartcam_enabled: _smartcamEnabled,
+                    smartcam_format: _smartcamFormat,
+                    voice_triggers: _voiceTriggers,
+                    vt_cut_keywords: _vtCutKeywords,
+                    vt_continue_keywords: _vtContinueKeywords,
+                    sub_pos: _subtitlePos,
+                    sub_size: _subtitleSize,
+                }));
+            } catch (e) { /* localStorage full / disabled — ignore */ }
+        }
+
+        // Legacy alias — onAnalysisDone still references _selectedStyle.
+        // Keep it in sync with the cut-style choice.
+        var _selectedStyle = _selectedCut;
+        var _lastStyle = _selectedCut;
+
+        var _cutDescMap = {
+            smooth:   'Natural flow preserved',
+            balanced: 'Good compromise',
+            tight:    'Maximum silence removal'
+        };
+        var _qDescMap = {
+            standard: 'Faster · lower RAM',
+            high:     'Best accuracy'
+        };
+        var _rDescMap = {
+            '720':  '~50% faster',
+            '1080': 'Best quality'
+        };
+
+        function _setActiveAttr(selector, attrName, value) {
+            var els = document.querySelectorAll(selector);
+            for (var i = 0; i < els.length; i++) {
+                if (els[i].getAttribute(attrName) === value)
+                    els[i].classList.add(_classForSelector(selector));
+                else
+                    els[i].classList.remove(_classForSelector(selector));
             }
-            var card = document.querySelector('.style-card[data-style="' + styleName + '"]');
-            if (card) card.classList.add('selected');
+        }
+        function _classForSelector(sel) {
+            if (sel === '.cut-opt') return 'cut-opt-active';
+            if (sel === '.cap-tile') return 'cap-tile-active';
+            if (sel === '.seg-btn') return 'seg-active';
+            return 'selected';
+        }
+
+        function selectCut(name) {
+            _selectedCut = name;
+            _selectedStyle = name;
+            _lastStyle = name;
+            _setActiveAttr('.cut-opt', 'data-cut', name);
+            var d = document.getElementById('cutDesc');
+            if (d) d.textContent = _cutDescMap[name] || '';
+            _persistSettings();
+        }
+        function selectCaption(name) {
+            _selectedCaptionPreset = name;
+            _setActiveAttr('.cap-tile', 'data-cap', name);
+            // Bei "none" ist die Preview-Box sinnlos — wegblenden.
+            if (typeof _updateSubPreviewVisibility === 'function') {
+                _updateSubPreviewVisibility();
+            }
+            if (typeof _renderSubPreview === 'function') {
+                _renderSubPreview();
+            }
+            _persistSettings();
+        }
+        // ─── Caption Preview: Drag + Size ─────────────────────────────
+        // Einheitlicher Sample-Text "Your captions" für ALLE Styles.
+        // Beim Style-Wechsel ändert sich nur das Aussehen, der Text
+        // bleibt identisch. Highlight-Wort ist konsistent "captions".
+        var _SAMPLE = 'Your captions';
+        // Punch zeigt im echten Render IMMER nur 1 Wort gleichzeitig
+        var _SAMPLE_PUNCH = 'PUNCH';
+        // Welche Styles markieren das Highlight-Wort (Wort als Span
+        // umschließen — Style entscheidet was visuell passiert).
+        var _CAP_HIGHLIGHTERS = ['clean', 'highlight', 'clipper', 'flash', 'elegant'];
+        function _sampleForStyle(style) {
+            if (style === 'none') return '';
+            if (style === 'punch') return _SAMPLE_PUNCH;
+            if (_CAP_HIGHLIGHTERS.indexOf(style) >= 0) {
+                // Beide Wörter in eigenen Spans, damit Style-CSS
+                // (z.B. Flash skewX) jedes Wort gleich behandelt.
+                return '<span>Your</span> <span class="hl">captions</span>';
+            }
+            return _SAMPLE;
+        }
+        function _renderSubPreview() {
+            var txt = document.getElementById('subPreviewText');
+            var frame = document.getElementById('subPreviewBox');
+            if (txt) {
+                txt.style.top = (_subtitlePos * 100).toFixed(1) + '%';
+                // Preview-Skala um eine Stufe nach oben verschoben:
+                // S zeigt visuell wie das alte M, M wie altes L, L
+                // wie altes XL, XL eine weitere Stufe (+0.25) drüber.
+                // Backend-Multiplier (_subtitleSize) bleibt unverändert.
+                var previewMul = {
+                    0.75: 1.0,   // S → wie altes M
+                    1.0:  1.25,  // M → wie altes L
+                    1.25: 1.5,   // L → wie altes XL
+                    1.5:  1.75   // XL → neue, größere Stufe
+                };
+                // Clipper braucht etwas mehr Font-Size weil Bangers
+                // schmal/hoch ist und sonst klein wirkt — gleicht das
+                // ohne Verzerrung aus.
+                var styleBoost = _selectedCaptionPreset === 'clipper'
+                    ? 1.25 : 1.0;
+                var effMul = (previewMul[_subtitleSize] || _subtitleSize) * styleBoost;
+                var rect = frame ? frame.getBoundingClientRect() : null;
+                var base = rect ? (rect.height * 0.030) : 9;
+                txt.style.fontSize = (base * effMul).toFixed(2) + 'px';
+                // Caption-Style anwenden: class umsetzen + Sample-Text
+                txt.className = 'cpb-text cap-' + _selectedCaptionPreset;
+                txt.innerHTML = _sampleForStyle(_selectedCaptionPreset);
+                // Reines Translate — kein scaleX mehr für Clipper
+                // (würde Bangers horizontal verzerren, der echte
+                // Render macht das nicht).
+                txt.style.transform = 'translate(-50%, -50%)';
+            }
+            _updateSubPreviewAspect();
+        }
+        function _updateSubPreviewAspect() {
+            // Frame-Aspect richtet sich nach SmartCam-Output: Portrait
+            // bei SmartCam-Portrait, Landscape sonst. So sieht der User
+            // den Frame in der Ziel-Auflösung.
+            var frame = document.getElementById('subPreviewBox');
+            if (!frame) return;
+            var isPortrait = _smartcamEnabled
+                ? (_smartcamFormat === 'portrait')
+                : false;
+            frame.classList.toggle('portrait', isPortrait);
+            frame.classList.toggle('landscape', !isPortrait);
+        }
+        function _syncSizeButtons() {
+            // Snap auf nächste Stufe und Active-State setzen
+            var btns = document.querySelectorAll('.cpb-size-btn');
+            var best = null;
+            var bestDist = 999;
+            for (var i = 0; i < btns.length; i++) {
+                var v = parseFloat(btns[i].getAttribute('data-size'));
+                var d = Math.abs(v - _subtitleSize);
+                if (d < bestDist) { bestDist = d; best = btns[i]; }
+            }
+            for (var j = 0; j < btns.length; j++) {
+                btns[j].classList.toggle('cpb-size-active', btns[j] === best);
+            }
+        }
+        function setSubSize(v) {
+            _subtitleSize = v;
+            _syncSizeButtons();
+            _renderSubPreview();
+            _persistSettings();
+        }
+        function resetSubLayout() {
+            _subtitlePos = 0.72;
+            _subtitleSize = 1.0;
+            _syncSizeButtons();
+            _renderSubPreview();
+            _persistSettings();
+        }
+        (function _setupSubDrag() {
+            var box = document.getElementById('subPreviewBox');
+            if (!box) return;
+            var dragging = false;
+            var pendingPos = null;
+            var rafScheduled = false;
+            var cachedRect = null;
+            var txtEl = null;
+            function _flush() {
+                rafScheduled = false;
+                if (!dragging || pendingPos === null) return;
+                _subtitlePos = pendingPos;
+                pendingPos = null;
+                if (!txtEl) txtEl = document.getElementById('subPreviewText');
+                // Direkt nur den Top-Style schreiben — kein voller
+                // Re-Render mit Caption-Klassen + Sample-Text-Reload,
+                // das wäre für 60 fps zu teuer.
+                if (txtEl) txtEl.style.top = (_subtitlePos * 100).toFixed(2) + '%';
+            }
+            function _onMove(e) {
+                if (!dragging) return;
+                e.preventDefault();
+                if (!cachedRect) cachedRect = box.getBoundingClientRect();
+                var y = e.clientY - cachedRect.top;
+                var pct = y / cachedRect.height;
+                pendingPos = Math.max(0.05, Math.min(0.95, pct));
+                if (!rafScheduled) {
+                    rafScheduled = true;
+                    requestAnimationFrame(_flush);
+                }
+            }
+            function _onUp() {
+                if (!dragging) return;
+                dragging = false;
+                cachedRect = null;
+                box.classList.remove('dragging');
+                _persistSettings();
+                document.removeEventListener('mousemove', _onMove);
+                document.removeEventListener('mouseup', _onUp);
+            }
+            box.addEventListener('mousedown', function(e) {
+                dragging = true;
+                cachedRect = box.getBoundingClientRect();
+                txtEl = document.getElementById('subPreviewText');
+                box.classList.add('dragging');
+                document.addEventListener('mousemove', _onMove);
+                document.addEventListener('mouseup', _onUp);
+                _onMove(e);
+            });
+        })();
+        function _updateSubPreviewVisibility() {
+            var wrap = document.getElementById('subSliders');
+            if (wrap) {
+                wrap.style.display = (_selectedCaptionPreset === 'none')
+                    ? 'none' : '';
+            }
+        }
+        function _updateSubPreviewThumb() {
+            var img = document.getElementById('subPreviewThumb');
+            var ph = document.getElementById('subPreviewPlaceholder');
+            if (!img) return;
+            var src = (typeof _thumbCache === 'object' && _lastVideoPath)
+                ? _thumbCache[_lastVideoPath] : null;
+            if (src) {
+                img.src = src;
+                img.style.display = 'block';
+                if (ph) ph.style.display = 'none';
+            } else {
+                img.removeAttribute('src');
+                img.style.display = 'none';
+                if (ph) ph.style.display = 'flex';
+            }
+        }
+        _syncSizeButtons();
+        _renderSubPreview();
+        _updateSubPreviewVisibility();
+        function selectQuality(q) {
+            _selectedQuality = q;
+            var btns = document.querySelectorAll('.seg-btn[data-q]');
+            for (var i = 0; i < btns.length; i++) {
+                btns[i].classList.toggle('seg-active',
+                    btns[i].getAttribute('data-q') === q);
+            }
+            var d = document.getElementById('qDesc');
+            if (d) d.textContent = _qDescMap[q] || '';
+            _persistSettings();
+        }
+        function selectResolution(r) {
+            _selectedResolution = r;
+            var btns = document.querySelectorAll('.seg-btn[data-r]');
+            for (var i = 0; i < btns.length; i++) {
+                btns[i].classList.toggle('seg-active',
+                    btns[i].getAttribute('data-r') === r);
+            }
+            var d = document.getElementById('rDesc');
+            if (d) d.textContent = _rDescMap[r] || '';
+            _persistSettings();
+        }
+        // Back-compat shim — onAnalysisDone and other older code may still
+        // call selectStyle(). Map it to the new cut-style picker.
+        function selectStyle(styleName) {
+            if (['smooth', 'balanced', 'tight'].indexOf(styleName) !== -1) {
+                selectCut(styleName);
+            } else {
+                _selectedStyle = styleName;
+                _lastStyle = styleName;
+            }
+        }
+
+        function setVoiceTriggers(on) {
+            _voiceTriggers = !!on;
+            var card = document.getElementById('voiceTriggerCard');
+            var btnOff = document.getElementById('vtOff');
+            var btnOn = document.getElementById('vtOn');
+            var kw = document.getElementById('vtKeywords');
+            if (on) {
+                card.classList.add('sc-on');
+                btnOff.classList.remove('sc-seg-active');
+                btnOn.classList.add('sc-seg-active');
+                if (kw) kw.style.display = 'flex';
+            } else {
+                card.classList.remove('sc-on');
+                btnOn.classList.remove('sc-seg-active');
+                btnOff.classList.add('sc-seg-active');
+                if (kw) kw.style.display = 'none';
+            }
+            _persistSettings();
+        }
+
+        function onVtKeywordsChange() {
+            var cutEl = document.getElementById('vtCutKw');
+            var contEl = document.getElementById('vtContKw');
+            if (cutEl) _vtCutKeywords = cutEl.value || '';
+            if (contEl) _vtContinueKeywords = contEl.value || '';
+            _persistSettings();
+        }
+
+        // Initial: persisted state auf Buttons + Input-Felder spiegeln
+        (function _initVT() {
+            var cutEl = document.getElementById('vtCutKw');
+            var contEl = document.getElementById('vtContKw');
+            if (cutEl) cutEl.value = _vtCutKeywords;
+            if (contEl) contEl.value = _vtContinueKeywords;
+            if (_voiceTriggers) {
+                setTimeout(function() { setVoiceTriggers(true); }, 0);
+            }
+        })();
+
+        function setSmartCam(on) {
+            _smartcamEnabled = !!on;
+            var card = document.getElementById('smartcamCard');
+            var fmts = document.getElementById('smartcamFormats');
+            var btnOff = document.getElementById('scOff');
+            var btnOn = document.getElementById('scOn');
+            if (on) {
+                card.classList.add('sc-on');
+                fmts.style.display = 'flex';
+                btnOff.classList.remove('sc-seg-active');
+                btnOn.classList.add('sc-seg-active');
+            } else {
+                card.classList.remove('sc-on');
+                fmts.style.display = 'none';
+                btnOn.classList.remove('sc-seg-active');
+                btnOff.classList.add('sc-seg-active');
+            }
+            _persistSettings();
+            if (typeof _renderSubPreview === 'function') _renderSubPreview();
+        }
+
+        function setSmartCamFormat(fmt) {
+            var landTile = document.getElementById('scLandscape');
+            if (fmt === 'landscape' && landTile.classList.contains('sc-tile-disabled')) {
+                // Landscape disabled (portrait input) — ignore click silently;
+                // the disabled visual already communicates the state.
+                return;
+            }
+            _smartcamFormat = fmt;
+            document.getElementById('scPortrait').classList.toggle('sc-tile-active', fmt === 'portrait');
+            document.getElementById('scLandscape').classList.toggle('sc-tile-active', fmt === 'landscape');
+            _persistSettings();
+            if (typeof _renderSubPreview === 'function') _renderSubPreview();
         }
 
         try { csInterface = new CSInterface(); } catch (e) {}
@@ -686,6 +1905,21 @@
                 xhr.open('GET', API_URL + path, true);
                 xhr.timeout = timeoutMs;
                 xhr.onload = function() {
+                    // 403 with structured error means "SmartCut backend
+                    // is up but unlicensed". Surface this as a specific
+                    // LicenseError so callers can show a friendly prompt.
+                    if (xhr.status === 403) {
+                        try {
+                            var body = JSON.parse(xhr.responseText) || {};
+                            if (body.error === 'license_required') {
+                                var err = new Error(body.message ||
+                                    'SmartCut license inactive. Please open SmartCut and re-activate.');
+                                err.code = 'license_required';
+                                reject(err);
+                                return;
+                            }
+                        } catch (e) { /* fallthrough */ }
+                    }
                     try {
                         resolve(JSON.parse(xhr.responseText));
                     } catch (e) {
@@ -716,57 +1950,186 @@
             });
         }
 
+        // --- Try to launch SmartCut.app via ExtendScript ---
+        // Used when the backend is unreachable (app not running) so the
+        // user doesn't have to manually find and open it.
+        var _launchAttempted = false;
+        function launchSmartCutApp() {
+            if (_launchAttempted) return;   // only auto-launch once per panel session
+            _launchAttempted = true;
+            if (!csInterface) return;
+            // macOS: "open -a SmartCut" uses Launch Services to find the app
+            // Windows: try a few common install paths
+            var script = (
+                '$.global.system && '
+                + 'app.system && '
+                + '($.os && $.os.indexOf("Windows") !== -1 '
+                + '  ? app.system("cmd /c start \\"\\" \\"SmartCut.exe\\"") '
+                + '  : app.system("open -a SmartCut"))'
+            );
+            try { csInterface.evalScript(script); } catch (e) {}
+        }
+
         // --- Connection check ---
         async function checkConnection() {
             var el = document.getElementById('connection');
             var dot = document.getElementById('connDot');
             try {
                 var data = await apiFetch('/health', 5000);
-                if (data.status === 'ok') {
-                    dot.className = 'dot ok';
-                    el.querySelector('.conn-text').textContent = 'Connected';
-                } else {
+                if (data.status !== 'ok') {
                     dot.className = 'dot off';
                     el.querySelector('.conn-text').textContent = 'Backend error';
+                    return;
+                }
+                // Backend reachable — check license status from the same payload
+                if (data.licensed === false) {
+                    dot.className = 'dot off';
+                    el.querySelector('.conn-text').textContent =
+                        'License inactive — open SmartCut to re-activate';
+                } else {
+                    dot.className = 'dot ok';
+                    el.querySelector('.conn-text').textContent = 'Connected';
                 }
             } catch (e) {
                 dot.className = 'dot off';
-                el.querySelector('.conn-text').textContent = 'Open SmartCut to connect';
+                el.querySelector('.conn-text').textContent = 'Opening SmartCut…';
+                launchSmartCutApp();
             }
         }
+        // Apply persisted settings to the UI on load so the panel opens
+        // showing whatever the user had selected last time.
+        try {
+            selectCut(_selectedCut);
+            selectCaption(_selectedCaptionPreset);
+            selectQuality(_selectedQuality);
+            selectResolution(_selectedResolution);
+            setSmartCam(_smartcamEnabled);
+            setSmartCamFormat(_smartcamFormat);
+        } catch (e) {
+            // Defaults already in HTML — if a select* fails, panel still
+            // works with the hardcoded initial state.
+        }
+
         checkConnection();
         setInterval(checkConnection, 10000);
 
         // --- Detect selected clip ---
         function getSelectedClipPath() {
+            // Legacy helper — resolves to just the path string.
+            return getSelectedClipInfo().then(function(info) { return info.path; });
+        }
+
+        // Resolves to { path, inPoint, outPoint, duration, trimmed }.
+        // inPoint/outPoint are SECONDS into the source media (not timeline).
+        // `trimmed` indicates the user has trimmed the clip in Premiere so
+        // /analyze should only see that range.
+        var _lastClipInfo = null;
+        function getSelectedClipInfo() {
             return new Promise(function(resolve, reject) {
                 if (!csInterface) { reject(new Error('No CSInterface')); return; }
-                csInterface.evalScript('getSelectedClipPath()', function(result) {
-                    if (result && result !== 'undefined' && result !== 'null' && result !== '' && result !== 'EvalScript error.') {
-                        resolve(result);
-                    } else {
+                csInterface.evalScript('getSelectedClipInfo()', function(result) {
+                    if (!result || result === 'undefined' || result === 'null'
+                        || result === '' || result === 'EvalScript error.') {
                         reject(new Error('No clip selected'));
+                        return;
+                    }
+                    try {
+                        var info = JSON.parse(result);
+                        if (!info || !info.path) {
+                            reject(new Error('Empty clip info'));
+                            return;
+                        }
+                        _lastClipInfo = info;
+                        resolve(info);
+                    } catch (e) {
+                        reject(new Error('Bad clip info JSON: ' + e.message));
                     }
                 });
             });
         }
 
+        var _thumbCache = {};   // path -> data URL, so we don't re-extract every 3s
         async function detectClip() {
             var el = document.getElementById('clipInfo');
             try {
                 var path = await getSelectedClipPath();
                 if (path) {
                     var name = path.split('/').pop().split('\\').pop();
-                    el.innerHTML = '<span class="icon">&#127916;</span> <span class="name">' + escapeHtml(name) + '</span>';
+                    // If we have a cached thumb for this path, render
+                    // immediately so the panel doesn't flash a no-thumb
+                    // state between polls.
+                    var cached = _thumbCache[path];
+                    el.innerHTML =
+                        (cached
+                            ? '<img class="clip-thumb" src="' + cached + '">'
+                            : '<span class="icon">&#127916;</span>')
+                        + '<span class="name">' + escapeHtml(name) + '</span>';
                     el.classList.add('has-clip');
+                    // Path changed? Re-probe orientation + fetch thumbnail.
+                    if (path !== _lastVideoPath) {
+                        _lastVideoPath = path;
+                        probeOrientationAndUpdateSmartCam(path);
+                        if (!cached) fetchAndShowThumbnail(path);
+                    }
+                    // Preview-Thumbnail aktualisieren (auch bei cached hit)
+                    if (typeof _updateSubPreviewThumb === 'function') {
+                        _updateSubPreviewThumb();
+                    }
                 }
             } catch (e) {
                 el.innerHTML = '<span class="icon">&#127916;</span> No clip detected \u2014 select a clip on the timeline';
                 el.classList.remove('has-clip');
+                _lastVideoPath = '';
+                setLandscapeTileEnabled(true);
             }
+        }
+
+        function fetchAndShowThumbnail(path) {
+            apiFetch('/thumbnail?video_path=' + encodeURIComponent(path), 8000)
+                .then(function(resp) {
+                    if (!resp || !resp.thumbnail) return;
+                    _thumbCache[path] = resp.thumbnail;
+                    // Only update the DOM if THIS path is still the
+                    // currently-displayed clip \u2014 the user may have
+                    // switched clips while ffmpeg was extracting.
+                    if (_lastVideoPath !== path) return;
+                    var el = document.getElementById('clipInfo');
+                    var name = path.split('/').pop().split('\\').pop();
+                    el.innerHTML =
+                        '<img class="clip-thumb" src="' + resp.thumbnail + '">'
+                        + '<span class="name">' + escapeHtml(name) + '</span>';
+                    el.classList.add('has-clip');
+                    // Caption-Preview-Thumbnail mit-updaten
+                    if (typeof _updateSubPreviewThumb === 'function') {
+                        _updateSubPreviewThumb();
+                    }
+                })
+                .catch(function(){ /* silent \u2014 fall back to filename only */ });
         }
         detectClip();
         setInterval(detectClip, 3000);
+
+        // Disable / enable the Landscape SmartCam tile based on the clip's
+        // actual displayed orientation. Portrait input \u2192 Landscape is greyed
+        // out + clicks ignored; format is forced to portrait.
+        function setLandscapeTileEnabled(enabled) {
+            var tile = document.getElementById('scLandscape');
+            if (!tile) return;
+            if (enabled) {
+                tile.classList.remove('sc-tile-disabled');
+            } else {
+                tile.classList.add('sc-tile-disabled');
+                if (_smartcamFormat === 'landscape') setSmartCamFormat('portrait');
+            }
+        }
+        function probeOrientationAndUpdateSmartCam(path) {
+            apiFetch('/probe-orientation?video_path=' + encodeURIComponent(path), 5000)
+                .then(function(resp) {
+                    var orient = (resp && resp.orientation) || 'landscape';
+                    setLandscapeTileEnabled(orient !== 'portrait');
+                })
+                .catch(function() { setLandscapeTileEnabled(true); });
+        }
 
         // --- Process video ---
         async function processVideo() {
@@ -775,11 +2138,35 @@
             var progressFill = document.getElementById('progressFill');
             var progressPct = document.getElementById('progressPct');
 
-            var videoPath = '';
+            // Drop ALL state from any previous run before we kick off a
+            // new one. Otherwise the subtitle editor can briefly flash
+            // the previous run's subtitles before the new analyze
+            // completes — looks like "subtitles piled up".
+            _editorSubs = [];
+            _lastJobData = null;
+            var subList = document.getElementById('subEditorList');
+            if (subList) subList.innerHTML = '';
+            var subCount = document.getElementById('subEditorCount');
+            if (subCount) subCount.textContent = '0 subtitles';
+
+            var clipInfo = null;
             try {
-                videoPath = await getSelectedClipPath();
+                clipInfo = await getSelectedClipInfo();
             } catch (e) {
                 setStatus('error', 'Select a clip on the timeline first.');
+                return;
+            }
+            var videoPath = clipInfo.path;
+
+            // Guard: if the user's selected clip is a SmartCut output
+            // (i.e. lives in our own cache dir), processing it again
+            // would burn subtitles ON TOP of subtitles and confuse the
+            // pipeline. Refuse early with a clear message.
+            if (videoPath.indexOf('.smartcut_plugin_cache') !== -1) {
+                setStatus('error',
+                    'Select the ORIGINAL clip, not a SmartCut output. '
+                    + '(SmartCut output clips already have cuts + subtitles baked in.)'
+                );
                 return;
             }
 
@@ -794,11 +2181,139 @@
             showEnhancedProgress(true);
 
             try {
+                // ─── Auto-Pre-Render bei Effekten ──────────────────────
+                // Wenn der Clip in Premiere Effekte hat (Crop, Color,
+                // Bewegung verändert etc.), würde das Plugin sonst die
+                // Roh-Datei lesen und die Effekte ignorieren. Wir lassen
+                // Premiere selbst den Clip-Bereich rendern und übergeben
+                // dem Plugin das gerenderte Temp-File.
+                // IMMER pre-rendern — die Effekt-Detection im host.jsx
+                // sieht zwar extra Components und Keyframes, aber NICHT
+                // veränderte Default-Werte (z.B. Skalierung auf 120 % ohne
+                // Keyframes). Damit der User sich nie sorgen muss ob seine
+                // Edits berücksichtigt werden: Premiere rendert IMMER vor,
+                // das Plugin nimmt das gerenderte File. Kostet pro Job
+                // ein paar Sekunden mehr, dafür 100 % verlässlich.
+                if (true) {
+                    // 1) gecachten Pfad nutzen (verifizieren dass Datei noch da ist)
+                    var preset = localStorage.getItem('smartcut_h264_preset') || '';
+                    // Cache invalidieren bei: (a) Proxy-Presets (kein
+                    // Audio → Whisper crashes) und (b) ProRes (10× langsamer
+                    // als H.264 für unseren Pre-Render-Zweck).
+                    if (preset && (preset.indexOf('/Proxy/') !== -1
+                                || preset.indexOf('ProRes') !== -1)) {
+                        console.log('[smartcut] invalidating slow/audio-less preset:', preset);
+                        localStorage.removeItem('smartcut_h264_preset');
+                        preset = '';
+                    }
+                    // 2) Auto-search nach einem Premiere built-in Preset
+                    if (!preset) {
+                        preset = await new Promise(function(resolve) {
+                            csInterface.evalScript('findBuiltInPreset()',
+                                function(r) { resolve(r || ''); });
+                        });
+                        if (preset) {
+                            localStorage.setItem('smartcut_h264_preset', preset);
+                            console.log('[smartcut] auto-found preset:', preset);
+                        }
+                    }
+                    // 3) Falls auto-search nichts gefunden hat — File-Picker
+                    if (!preset) {
+                        setStatus('info', 'Wähle eine H.264 Export-Vorgabe (.epr)…');
+                        var picked = await new Promise(function(resolve) {
+                            csInterface.evalScript('pickH264Preset()',
+                                function(r) { resolve(r || ''); });
+                        });
+                        if (picked) {
+                            preset = picked;
+                            localStorage.setItem('smartcut_h264_preset', preset);
+                        } else {
+                            setStatus('error',
+                                'Kein Preset verfügbar — Effekte werden ignoriert.');
+                        }
+                    }
+                    if (preset) {
+                        setStatus('info', 'Pre-Rendere Clip mit Effekten…');
+                        progressFill.style.width = '5%';
+                        progressPct.textContent = '5%';
+                        var rendered = await new Promise(function(resolve) {
+                            var script = 'renderSelectedClipToTemp("'
+                                + preset.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+                                + '")';
+                            csInterface.evalScript(script, function(r) {
+                                resolve(r || '');
+                            });
+                        });
+                        console.log('[smartcut] pre-render result:', rendered);
+                        if (rendered && rendered.indexOf('ok:') === 0) {
+                            var prePath = rendered.substring(3);
+                            // Verify file is reachable via the backend
+                            try {
+                                var probe = await apiFetch(
+                                    '/probe-orientation?video_path='
+                                    + encodeURIComponent(prePath), 5000);
+                                if (probe && (probe.orientation || probe.error)) {
+                                    videoPath = prePath;
+                                    setStatus('info', 'Pre-Render OK — analysiere…');
+                                    progressFill.style.width = '10%';
+                                    progressPct.textContent = '10%';
+                                    console.log('[smartcut] using pre-render →', prePath);
+                                } else {
+                                    throw new Error('backend cannot read pre-render');
+                                }
+                            } catch (eVer) {
+                                console.log('[smartcut] verify failed:', eVer);
+                                setStatus('error',
+                                    'Pre-Render unauffindbar — verwende Roh-Datei. '
+                                    + 'Path: ' + prePath);
+                            }
+                        } else {
+                            setStatus('error',
+                                'Pre-Render fehlgeschlagen ('
+                                + (rendered || 'kein Result') + ').');
+                            // Process abbrechen — sonst läuft analyze auf
+                            // Roh-Datei und User sieht keine Effekte
+                            resetProcessBtn(btn, progressWrap, progressFill, progressPct);
+                            return;
+                        }
+                    }
+                }
+
                 var style = _selectedStyle;
                 var removeFillers = true;
                 _lastVideoPath = videoPath;
+                // Pin den verarbeiteten Pfad ab — detectClip-Polling
+                // resetet _lastVideoPath sonst aufs Original-Source.
+                _processingVideoPath = videoPath;
                 _lastStyle = style;
-                var url = '/analyze?video_path=' + encodeURIComponent(videoPath) + '&style=' + style + '&whisper_model=medium&remove_fillers=' + (removeFillers ? '1' : '0') + '&caption_preset=' + _selectedCaptionPreset;
+                // Quality drives whisper model: "high" → medium model
+                // (better accuracy, slower), "standard" → small (faster,
+                // lower RAM) — same mapping the standalone uses.
+                var whisperModel = (_selectedQuality === 'high') ? 'medium' : 'small';
+                var url = '/analyze?video_path=' + encodeURIComponent(videoPath)
+                    + '&style=' + _selectedCut
+                    + '&whisper_model=' + whisperModel
+                    + '&remove_fillers=' + (removeFillers ? '1' : '0')
+                    + '&caption_preset=' + _selectedCaptionPreset
+                    + '&quality=' + _selectedQuality
+                    + '&smartcam_enabled=' + (_smartcamEnabled ? '1' : '0')
+                    + '&voice_triggers=' + (_voiceTriggers ? '1' : '0')
+                    + '&cut_keywords=' + encodeURIComponent(_vtCutKeywords || '')
+                    + '&continue_keywords=' + encodeURIComponent(_vtContinueKeywords || '')
+                    + '&smartcam_format=' + _smartcamFormat
+                    + '&resolution=' + _selectedResolution
+                    + '&sub_pos=' + _subtitlePos.toFixed(3)
+                    + '&sub_size=' + _subtitleSize.toFixed(3);
+                // If the user trimmed the clip in Premiere, only analyze
+                // that range — backend pre-extracts it via ffmpeg stream
+                // copy before running the SmartCut pipeline.
+                if (clipInfo && clipInfo.trimmed
+                    && typeof clipInfo.inPoint === 'number'
+                    && typeof clipInfo.outPoint === 'number'
+                    && clipInfo.outPoint > clipInfo.inPoint) {
+                    url += '&trim_start=' + clipInfo.inPoint
+                        + '&trim_end=' + clipInfo.outPoint;
+                }
 
                 var startData = await apiFetch(url, 15000);
 
@@ -811,12 +2326,68 @@
                 pollJobStatus(btn, progressWrap, progressFill, progressPct);
 
             } catch (e) {
-                setStatus('error', 'Error: ' + e.message);
+                if (e && e.code === 'license_required') {
+                    // Friendly path: backend told us the license isn't active.
+                    setStatus(
+                        'error',
+                        'License inactive. Opening SmartCut to re-activate…'
+                    );
+                    launchSmartCutApp();
+                } else {
+                    setStatus('error', 'Error: ' + e.message);
+                }
                 resetProcessBtn(btn, progressWrap, progressFill, progressPct);
             }
         }
 
+        // Cancel flow — single-click guarded. /cancel itself is now
+        // blocking on the backend (it joins the worker thread + waits
+        // for any in-flight finalize before responding), so the panel
+        // just awaits its response and resets in one step. While we're
+        // awaiting, EVERY interactive button is disabled so the user
+        // can't fire Process / Apply mid-cancel and produce a race.
+        var _cancelInFlight = false;
+        async function cancelProcessing() {
+            if (_cancelInFlight) return;       // ignore repeat clicks
+            _cancelInFlight = true;
+
+            var cBtn = document.getElementById('cancelBtn');
+            var eaBtn = document.getElementById('editorApplyBtn');
+            var ecBtn = document.getElementById('editorCancelBtn');
+            var pBtn = document.getElementById('processBtn');
+
+            if (cBtn) { cBtn.disabled = true; cBtn.textContent = 'Cancelling…'; }
+            if (eaBtn) { eaBtn.disabled = true; }
+            if (ecBtn) { ecBtn.disabled = true; }
+            if (pBtn)  { pBtn.disabled = true; pBtn.textContent = 'Cancelling…'; }
+            setStatus('info', 'Cancelling — waiting for backend…');
+
+            // /cancel blocks on the backend (up to ~15s) until the
+            // worker is dead and finalize is unwound. By the time it
+            // responds, we know there's nothing left to race against.
+            try { await apiPost('/cancel', '', 30000); } catch (e) {}
+
+            if (typeof showEnhancedProgress === 'function') showEnhancedProgress(false);
+            if (typeof showSubtitleEditor === 'function') showSubtitleEditor(false);
+            var pw = document.getElementById('progressWrap');
+            var pf = document.getElementById('progressFill');
+            var pp = document.getElementById('progressPct');
+            resetProcessBtn(pBtn, pw, pf, pp, true);
+            if (eaBtn) { eaBtn.disabled = false; eaBtn.textContent = 'Apply & Render'; }
+            if (ecBtn) { ecBtn.disabled = false; }
+            if (cBtn) { cBtn.disabled = false; cBtn.textContent = 'Cancel'; }
+            setStatus('info', 'Cancelled — ready for a new run.');
+            _cancelInFlight = false;
+        }
+
         function pollJobStatus(btn, progressWrap, progressFill, progressPct) {
+            // Track how many consecutive "idle" polls we see. If the backend
+            // goes idle (e.g. standalone app was restarted mid-job) the panel
+            // would otherwise spin forever showing the last progress value.
+            // After a few idle polls in a row we treat the job as lost and
+            // reset the panel so the user can click Process again.
+            var idleStreak = 0;
+            var sawProcessing = false;
             setTimeout(async function check() {
                 try {
                     var data = await apiFetch('/job-status', 5000);
@@ -824,19 +2395,43 @@
                     var pct = data.progress || 0;
                     progressFill.style.width = pct + '%';
                     progressPct.textContent = Math.round(pct) + '%';
-                    // Show only simple progress — no technical backend messages
 
                     updateEnhancedProgress(data);
 
                     if (data.status === 'done') {
                         onAnalysisDone(data, btn, progressWrap, progressFill, progressPct);
+                        return;
                     } else if (data.status === 'error') {
                         setStatus('error', data.error || 'Analysis failed');
                         showEnhancedProgress(false);
-                        resetProcessBtn(btn, progressWrap, progressFill, progressPct);
+                        resetProcessBtn(btn, progressWrap, progressFill, progressPct, true);
+                        return;
+                    } else if (data.status === 'cancelled') {
+                        // Backend reports a clean cancel — reset immediately
+                        // so the user can start a new run without waiting
+                        // for the 3-poll "idle streak" heuristic to kick in.
+                        // instant=true hides the Cancel button at the same
+                        // moment Process re-enables.
+                        setStatus('info', 'Cancelled.');
+                        showEnhancedProgress(false);
+                        resetProcessBtn(btn, progressWrap, progressFill, progressPct, true);
+                        return;
+                    } else if (data.status === 'cancelling') {
+                        setStatus('info', 'Cancelling — backend winding down…');
+                    } else if (data.status === 'processing') {
+                        sawProcessing = true;
+                        idleStreak = 0;
                     } else {
-                        setTimeout(check, 2000);
+                        // idle / unknown — count it
+                        idleStreak += 1;
+                        if (sawProcessing && idleStreak >= 3) {
+                            setStatus('error', 'Backend reset — please try again.');
+                            showEnhancedProgress(false);
+                            resetProcessBtn(btn, progressWrap, progressFill, progressPct);
+                            return;
+                        }
                     }
+                    setTimeout(check, 2000);
                 } catch (e) {
                     setStatus('info', 'Reconnecting...');
                     setTimeout(check, 3000);
@@ -844,10 +2439,11 @@
             }, 2000);
         }
 
-        function hostImportXML(xmlPath, clipName, styleName) {
+        function hostImportXML(xmlPath, clipName, styleName, preserveDims) {
             return new Promise(function(resolve, reject) {
                 if (!csInterface) { reject(new Error('No CSInterface')); return; }
-                var script = 'importXMLSequence("' + xmlPath + '","' + clipName + '","' + styleName + '")';
+                var preserveArg = preserveDims ? ',true' : '';
+                var script = 'importXMLSequence("' + xmlPath + '","' + clipName + '","' + styleName + '"' + preserveArg + ')';
                 csInterface.evalScript(script, function(r) {
                     if (r && r.indexOf('ok:') === 0) resolve(r);
                     else reject(new Error(r || 'empty'));
@@ -867,44 +2463,383 @@
         // Store final job data for done overlay
         var _lastJobData = null;
 
+        // Subtitle editor state — populated when analyze finishes, sent
+        // back to /finalize-with-overlay when user clicks "Apply & Render".
+        var _editorSubs = [];
+
         async function onAnalysisDone(jobData, btn, progressWrap, progressFill, progressPct) {
             _lastJobData = jobData;
+            progressFill.style.width = '100%';
+            progressPct.textContent = '100%';
+            setStatus('info', 'Review subtitles before rendering…');
 
-            progressFill.style.width = '90%';
-            progressPct.textContent = '90%';
-            setStatus('info', 'Finishing up...');
+            // Pull subtitles for editor view
+            try {
+                var subsData = await apiFetch('/subtitles', 5000);
+                _editorSubs = (subsData && subsData.subtitles) || [];
+            } catch (e) {
+                _editorSubs = jobData.subtitles || [];
+            }
+            // WICHTIG: zuerst Editor sichtbar machen, DANN rendern. Sonst
+            // ist die textarea noch in einem display:none-Container und
+            // scrollHeight liefert 0 → leere/winzige Editor-Zeilen.
+            showSubtitleEditor(true);
+            renderSubtitleEditor(_editorSubs);
+        }
+
+        // ─── Subtitle editor ──────────────────────────────────────────
+        // Whisper liefert die Subs wortweise. Im Editor wäre eine
+        // Zeile-pro-Wort unbenutzbar (50+ Zeilen für ein 30s-Clip), also
+        // gruppieren wir zu Sätzen / Phrasen. Pro Phrase merken wir uns
+        // welche Wort-Indizes sie repräsentiert, damit beim Speichern
+        // die feinen Whisper-Timings erhalten bleiben.
+        function buildPhrases(subs) {
+            var phrases = [];
+            var cur = null;
+            // Whisper liefert pro Sub oft schon 1-3 Wörter, also zählen
+            // wir nach echten Wörtern, nicht nach Subs. Tight-cut entfernt
+            // außerdem Stillen — die Lücken zwischen Subs können danach
+            // 1-2s lang sein, ohne dass es ein echter Satzbruch ist.
+            var MAX_WORDS = 10;
+            var MAX_GAP = 1.5;
+            var sentenceEnd = /[.!?…]["'»)\]]*\s*$/;
+            function wordsIn(text) {
+                return (text || '').trim().split(/\s+/).filter(function(w){return w;}).length;
+            }
+            for (var i = 0; i < subs.length; i++) {
+                var s = subs[i];
+                var text = (s.text || '').trim();
+                if (!text) continue;
+                var startNew = false;
+                if (cur === null) {
+                    startNew = true;
+                } else {
+                    var lastSub = subs[cur.indices[cur.indices.length - 1]];
+                    var prevText = (lastSub.text || '').trim();
+                    var prevEnd = lastSub.end || 0;
+                    var gap = (s.start || 0) - prevEnd;
+                    var endsSentence = sentenceEnd.test(prevText);
+                    var curWordCount = cur.indices.reduce(function(n, idx) {
+                        return n + wordsIn(subs[idx].text);
+                    }, 0);
+                    if (endsSentence || gap > MAX_GAP
+                            || curWordCount + wordsIn(text) > MAX_WORDS) {
+                        startNew = true;
+                    }
+                }
+                if (startNew) {
+                    cur = {
+                        start: s.start || 0,
+                        end: s.end || 0,
+                        indices: [i],
+                    };
+                    phrases.push(cur);
+                } else {
+                    cur.indices.push(i);
+                    cur.end = s.end || 0;
+                }
+            }
+            phrases.forEach(function(p) {
+                p.text = p.indices.map(function(i){
+                    return (subs[i].text || '').trim();
+                }).join(' ');
+            });
+            return phrases;
+        }
+
+        var _editorPhrases = [];
+
+        function applyPhraseEdit(phraseIdx, newText) {
+            var p = _editorPhrases[phraseIdx];
+            if (!p) return;
+            var newWords = newText.trim().split(/\s+/).filter(function(w){return w;});
+            var origCount = p.indices.length;
+            var firstIdx = p.indices[0];
+            if (newWords.length === origCount) {
+                // 1:1 — einfach die Wörter ersetzen, Timings bleiben.
+                for (var i = 0; i < newWords.length; i++) {
+                    _editorSubs[p.indices[i]].text = newWords[i];
+                }
+            } else if (newWords.length === 0) {
+                // Leerer Text → ganze Phrase löschen.
+                _editorSubs.splice(firstIdx, origCount);
+            } else {
+                // Wortanzahl verändert → Phrase neu aufteilen, Timings
+                // gleichmäßig über das ursprüngliche Phrasen-Intervall
+                // verteilen. Quelltimings (original_*) genauso.
+                var lastIdx = p.indices[p.indices.length - 1];
+                var s0 = _editorSubs[firstIdx];
+                var sN = _editorSubs[lastIdx];
+                var t0 = s0.start || 0;
+                var tE = sN.end || (t0 + 0.5);
+                var ot0 = (s0.original_start != null ? s0.original_start : t0);
+                var otE = (sN.original_end != null ? sN.original_end : tE);
+                var dur = Math.max(0.2, tE - t0);
+                var odur = Math.max(0.2, otE - ot0);
+                var newSubs = [];
+                for (var k = 0; k < newWords.length; k++) {
+                    newSubs.push({
+                        start: t0 + (k * dur / newWords.length),
+                        end:   t0 + ((k+1) * dur / newWords.length),
+                        original_start: ot0 + (k * odur / newWords.length),
+                        original_end:   ot0 + ((k+1) * odur / newWords.length),
+                        text: newWords[k],
+                    });
+                }
+                _editorSubs.splice.apply(_editorSubs,
+                    [firstIdx, origCount].concat(newSubs));
+            }
+            _editorPhrases = buildPhrases(_editorSubs);
+        }
+
+        function renderSubtitleEditor(subs) {
+            _editorPhrases = buildPhrases(subs);
+            var list = document.getElementById('subEditorList');
+            if (!list) return;
+            list.innerHTML = '';
+            var autoGrow = function(el) {
+                el.style.height = 'auto';
+                var h = el.scrollHeight;
+                // scrollHeight == 0 wenn der Container kurz vorm Layout-
+                // pass noch unsichtbar war — dann lieber min-height aus
+                // dem CSS greifen lassen, nicht 0 setzen.
+                if (h > 0) el.style.height = h + 'px';
+            };
+            _editorPhrases.forEach(function(p, idx) {
+                var row = document.createElement('div');
+                row.className = 'sub-row';
+                var ts = document.createElement('span');
+                ts.className = 'sub-ts';
+                ts.textContent = formatTime(p.start || 0);
+                var inp = document.createElement('textarea');
+                inp.className = 'sub-input';
+                inp.rows = 1;
+                inp.value = p.text;
+                inp.oninput = function() {
+                    applyPhraseEdit(idx, inp.value);
+                    autoGrow(inp);
+                };
+                var del = document.createElement('button');
+                del.className = 'sub-del';
+                del.title = 'Remove this sentence';
+                del.innerHTML = '&times;';
+                del.onclick = function() {
+                    var ph = _editorPhrases[idx];
+                    if (!ph) return;
+                    _editorSubs.splice(ph.indices[0], ph.indices.length);
+                    renderSubtitleEditor(_editorSubs);
+                };
+                row.appendChild(ts);
+                row.appendChild(inp);
+                row.appendChild(del);
+                list.appendChild(row);
+                // Initial height nach Mount — scrollHeight ist erst nach
+                // dem Anhängen ans DOM korrekt.
+                autoGrow(inp);
+            });
+            var count = document.getElementById('subEditorCount');
+            if (count) {
+                var n = _editorPhrases.length;
+                count.textContent = n + ' sentence' + (n === 1 ? '' : 's');
+            }
+            // Nach dem nächsten Layout-Pass alle textareas neu vermessen.
+            // Schützt gegen den Fall, dass scrollHeight beim ersten Mount
+            // noch 0 war (Container war eben noch hidden).
+            setTimeout(function() {
+                var areas = list.querySelectorAll('textarea.sub-input');
+                for (var i = 0; i < areas.length; i++) autoGrow(areas[i]);
+            }, 0);
+        }
+
+        function showSubtitleEditor(show) {
+            var ed = document.getElementById('subEditor');
+            if (!ed) return;
+            ed.style.display = show ? 'block' : 'none';
+            // Hide the config panels + progress while the editor is open
+            var hide = ['configSections', 'smartcamCard', 'progressWrap',
+                        'enhancedProgress', 'processBtn'];
+            hide.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) el.style.display = show ? 'none' : '';
+            });
+        }
+
+        // Fake-Progress während des Burn-Schritts. Das Backend hat
+        // für /finalize-with-overlay (noch) keinen Live-Fortschritt,
+        // also animieren wir den Balken 0→90 % über grob-geschätzte
+        // Render-Dauer und springen auf 100 %, sobald der Call return.
+        var _renderProgressTimer = null;
+        function startRenderFakeProgress(estSeconds) {
+            stopRenderFakeProgress();
+            var pf = document.getElementById('progressFill');
+            var pp = document.getElementById('progressPct');
+            var t0 = Date.now();
+            var est = Math.max(8, estSeconds || 25);
+            _renderProgressTimer = setInterval(function() {
+                var elapsed = (Date.now() - t0) / 1000;
+                // Logistic-ish: schnell hoch, dann zäh bis 90 %
+                var pct = Math.min(90, (elapsed / est) * 85 + (elapsed > est ? 5 : 0));
+                if (pf) pf.style.width = pct.toFixed(1) + '%';
+                if (pp) pp.textContent = Math.round(pct) + '%';
+            }, 250);
+        }
+        function stopRenderFakeProgress() {
+            if (_renderProgressTimer) {
+                clearInterval(_renderProgressTimer);
+                _renderProgressTimer = null;
+            }
+        }
+
+        async function applyEditorAndRender() {
+            var btn = document.getElementById('editorApplyBtn');
+            var pf = document.getElementById('progressFill');
+            var pp = document.getElementById('progressPct');
+            var pw = document.getElementById('progressWrap');
+            btn.disabled = true;
+            btn.textContent = 'Rendering subtitles…';
+
+            // Filter out empty subs
+            var subs = _editorSubs.filter(function(s){ return (s.text || '').trim().length > 0; });
+
+            // Editor sofort wegblenden und Progress-Panel zeigen — der
+            // Render dauert ein paar Sekunden, der User soll während-
+            // dessen den Prozess sehen, nicht den nutzlosen Editor.
+            showSubtitleEditor(false);
+            var configEl = document.getElementById('configSections');
+            var smartEl  = document.getElementById('smartcamCard');
+            var procBtn  = document.getElementById('processBtn');
+            if (configEl) configEl.style.display = 'none';
+            if (smartEl)  smartEl.style.display  = 'none';
+            if (procBtn)  procBtn.style.display  = 'none';
+            if (pw) { pw.style.display = ''; pw.classList.add('active'); }
+            if (pf) pf.style.width = '0%';
+            if (pp) pp.textContent = '0%';
+            showEnhancedProgress(true);
+            // Eine sichtbare "Burning subtitles…" Phase einblenden, da-
+            // mit das Panel nicht leer wirkt.
+            updatePhases([{name: 'Burning subtitles into clips', status: 'running'}]);
+            // Geschätzte Dauer: ~3 s pro Segment, plus 5 s Sockel.
+            var estSec = 5 + (subs.length > 0 ? 3 : 0) * 5;
+            startRenderFakeProgress(estSec);
 
             try {
-                var xmlData = await apiFetch('/export-xml', 30000);
+                var payload = JSON.stringify({
+                    subtitles: subs,
+                    style: _selectedStyle,
+                    caption_preset: _selectedCaptionPreset,
+                    video_path: _processingVideoPath || _lastVideoPath,
+                    sub_pos: _subtitlePos,
+                    sub_size: _subtitleSize,
+                });
 
-                if (xmlData.xml_path && csInterface) {
-                    var xmlPath = xmlData.xml_path.replace(/\\/g, '/');
-                    var srtPath = xmlData.srt_path ? xmlData.srt_path.replace(/\\/g, '/') : '';
-                    var styleNames = {clean:'Clean', fast:'Fast', balanced:'Balanced', smooth:'Smooth', minimal:'Minimal'};
-                    var styleLabel = styleNames[_lastStyle] || _lastStyle;
-                    var cuts = jobData.segments_count || 0;
+                btn.textContent = 'Burning subtitles into clip…';
+                var resp = await apiPost('/finalize-with-overlay', payload, 600000);
+                if (!resp || resp.error) {
+                    throw new Error((resp && resp.error) || 'finalize failed');
+                }
 
-                    var clipName = _lastVideoPath.split('/').pop().split('\\').pop();
-                    var importRes = await hostImportXML(xmlPath, clipName, styleLabel);
+                // Burn-in produces a single finished clip — import XML and
+                // we're done. No V2 overlay placement needed.
+                var xmlPath = resp.xml_path.replace(/\\/g, '/');
+                var styleNames = {clean:'Clean', fast:'Fast', balanced:'Balanced', smooth:'Smooth', minimal:'Minimal'};
+                var styleLabel = styleNames[_lastStyle] || _lastStyle;
+                var clipName = _lastVideoPath.split('/').pop().split('\\').pop();
 
-                    if (srtPath) {
-                        var capRes = await hostImportCaptions(srtPath);
-                    }
-                    progressFill.style.width = '100%'; progressPct.textContent = '100%';
-                    setStatus('success', 'Done! Your edited sequence is ready.');
+                // Burn ist durch — Fake-Progress stoppen und auf 100 %.
+                stopRenderFakeProgress();
+                if (pf) pf.style.width = '100%';
+                if (pp) pp.textContent = '100%';
+                updatePhases([{name: 'Burning subtitles into clips', status: 'done'}]);
 
-                    // Show done overlay
-                    showDoneOverlay(jobData, styleLabel);
-
-                    resetProcessBtn(btn, progressWrap, progressFill, progressPct);
+                btn.textContent = 'Importing into Premiere…';
+                // Preserve XML-defined dimensions when SmartCam reframed
+                // the input (otherwise host.jsx copies the user's working
+                // sequence settings and overrides our portrait/landscape
+                // dimensions).
+                var preserveDims = !!_smartcamEnabled;
+                var importRes = await hostImportXML(xmlPath, clipName, styleLabel, preserveDims);
+                if (importRes && importRes.indexOf('ok') === 0) {
+                    setStatus('success', 'Done! Open Premiere — your SmartCut sequence is ready.');
+                    showDoneOverlay(_lastJobData, styleLabel);
                 } else {
-                    setStatus('error', xmlData.error || 'Could not generate sequence.');
-                    resetProcessBtn(btn, progressWrap, progressFill, progressPct);
+                    throw new Error('XML import: ' + importRes);
                 }
             } catch (e) {
-                setStatus('error', 'Error: ' + e.message);
-                resetProcessBtn(btn, progressWrap, progressFill, progressPct);
+                stopRenderFakeProgress();
+                setStatus('error', 'Render error: ' + (e.message || e));
+            } finally {
+                stopRenderFakeProgress();
+                // Always tidy up — Apply button restored, progress bar +
+                // Cancel button hidden immediately (instant=true). Without
+                // this the user sees Process / Cancel / 100% bar / stats
+                // all stacked on top of each other after a successful run.
+                btn.disabled = false;
+                btn.textContent = 'Apply & Render';
+                var rbtn = document.getElementById('processBtn');
+                var pw  = document.getElementById('progressWrap');
+                var pf  = document.getElementById('progressFill');
+                var pp  = document.getElementById('progressPct');
+                if (rbtn && pw && pf && pp) {
+                    resetProcessBtn(rbtn, pw, pf, pp, true);
+                }
+                // Config-Panels wieder einblenden, sodass das Panel im
+                // Ruhezustand wie vor dem Run aussieht.
+                var cfg = document.getElementById('configSections');
+                var sm  = document.getElementById('smartcamCard');
+                if (cfg) cfg.style.display = '';
+                if (sm)  sm.style.display  = '';
+                if (rbtn) rbtn.style.display = '';
             }
+        }
+
+        function cancelEditor() {
+            // Just dismiss the editor and reset the panel UI. We do NOT
+            // try to kill backend work here — by the time the editor is
+            // showing, analyze has already finished and there's nothing
+            // running on the backend. (Backend cancellation was removed
+            // in v1 because Python OpenCV/MoviePy threads can't be
+            // killed reliably and produced more state-corruption than
+            // it was worth.)
+            showSubtitleEditor(false);
+            var btn = document.getElementById('processBtn');
+            var pw = document.getElementById('progressWrap');
+            var pf = document.getElementById('progressFill');
+            var pp = document.getElementById('progressPct');
+            if (btn && pw && pf && pp) {
+                resetProcessBtn(btn, pw, pf, pp, true);
+            }
+            // Clear the editor state so the next run starts fresh.
+            _editorSubs = [];
+            _lastJobData = null;
+        }
+
+        function hostImportOverlayOnV2(overlayPath, clipName) {
+            return new Promise(function(resolve, reject) {
+                if (!csInterface) { reject(new Error('No CSInterface')); return; }
+                var script = 'importOverlayOnV2("' + overlayPath + '","' + clipName + '")';
+                csInterface.evalScript(script, function(r) {
+                    if (r && r.indexOf('ok') === 0) resolve(r);
+                    else reject(new Error(r || 'empty'));
+                });
+            });
+        }
+
+        // POST helper (mirrors apiFetch but with JSON body)
+        function apiPost(path, body, timeoutMs) {
+            timeoutMs = timeoutMs || 30000;
+            return new Promise(function(resolve, reject) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', API_URL + path, true);
+                xhr.timeout = timeoutMs;
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.onload = function() {
+                    try { resolve(JSON.parse(xhr.responseText)); }
+                    catch (e) { reject(new Error('Bad JSON from ' + path)); }
+                };
+                xhr.onerror = function() { reject(new Error('Network error: ' + path)); };
+                xhr.ontimeout = function() { reject(new Error('Timeout: ' + path)); };
+                xhr.send(body || '');
+            });
         }
 
         function showDoneOverlay(jobData, styleLabel) {
@@ -919,23 +2854,50 @@
             document.getElementById('doneDuration').textContent = editDur > 0 ? formatTime(editDur) : '--';
             document.getElementById('doneSubtitle').textContent = styleLabel + ' style applied';
 
+            // Clean the underlying panel BEFORE showing the overlay so
+            // if the user closes it, they land on a tidy default state.
+            var btn = document.getElementById('processBtn');
+            var pw = document.getElementById('progressWrap');
+            var pf = document.getElementById('progressFill');
+            var pp = document.getElementById('progressPct');
+            if (btn && pw && pf && pp) {
+                resetProcessBtn(btn, pw, pf, pp, true);
+            }
+            showEnhancedProgress(false);
+
             document.getElementById('doneOverlay').classList.add('active');
         }
 
         function closeDoneOverlay() {
             document.getElementById('doneOverlay').classList.remove('active');
+            // Make sure the underlying panel is clean — progress bar +
+            // Cancel button removed, Process button fresh and clickable.
+            var btn = document.getElementById('processBtn');
+            var pw = document.getElementById('progressWrap');
+            var pf = document.getElementById('progressFill');
+            var pp = document.getElementById('progressPct');
+            if (btn && pw && pf && pp) {
+                resetProcessBtn(btn, pw, pf, pp, true);
+            }
+            showEnhancedProgress(false);
+            showSubtitleEditor(false);
         }
 
-        function resetProcessBtn(btn, progressWrap, progressFill, progressPct) {
+        function resetProcessBtn(btn, progressWrap, progressFill, progressPct, instant) {
             btn.disabled = false;
             btn.textContent = 'Process Selected Clip';
             btn.classList.remove('processing');
-            setTimeout(function() {
+            var hide = function() {
                 progressWrap.classList.remove('active');
                 progressFill.style.width = '0%';
                 progressPct.textContent = '0%';
                 showEnhancedProgress(false);
-            }, 5000);
+            };
+            // Cancel / error paths pass instant=true: hide progress AND
+            // the Cancel button immediately. Success path keeps the
+            // 5-second delay so the user gets to see the final 100% +
+            // "Done!" before the bar collapses.
+            if (instant) hide(); else setTimeout(hide, 5000);
         }
 
         function setStatus(type, message) {
@@ -946,16 +2908,35 @@
 
         function showEnhancedProgress(show) {
             var el = document.getElementById('enhancedProgress');
+            if (!el) return;
+            // State-Machine reset wenn wir frisch anfangen, sonst kann
+            // die nächste updatePhases() denken wir sind schon mitten
+            // in einer Animation und springt sofort durch.
+            _phaseDisplay = null;
+            _phaseTarget = null;
+            if (_phaseAnimTimer) {
+                clearTimeout(_phaseAnimTimer);
+                _phaseAnimTimer = null;
+            }
             if (show) {
                 el.classList.add('active');
-                document.getElementById('phasesContainer').innerHTML = '';
-                document.getElementById('timelineBar').innerHTML = '';
-                document.getElementById('timelineMarkers').innerHTML = '';
-                document.getElementById('transcriptArea').innerHTML = '';
-                document.getElementById('cutCount').textContent = '0';
-                document.getElementById('timeRemoved').textContent = '0s';
-                document.getElementById('editedDuration').textContent = '--';
-                document.getElementById('durationRow').style.display = 'none';
+                // Null-safe element clearing — some IDs were removed from the
+                // panel HTML during a redesign but the JS still references
+                // them. Without these guards, a single missing element
+                // crashed processVideo before it could fire /analyze.
+                var clear = function(id, attr, val) {
+                    var n = document.getElementById(id);
+                    if (n) n[attr] = val;
+                };
+                clear('phasesContainer', 'innerHTML', '');
+                clear('timelineBar', 'innerHTML', '');
+                clear('timelineMarkers', 'innerHTML', '');
+                clear('transcriptArea', 'innerHTML', '');
+                clear('cutCount', 'textContent', '0');
+                clear('timeRemoved', 'textContent', '0s');
+                clear('editedDuration', 'textContent', '--');
+                var dr = document.getElementById('durationRow');
+                if (dr) dr.style.display = 'none';
             } else {
                 el.classList.remove('active');
             }
@@ -976,8 +2957,19 @@
             }
         }
 
-        function updatePhases(phases) {
+        // Phase-UI mit min-step-time Animation. Das Backend erledigt
+        // die letzten 3 Phasen oft in <100ms und springt vom ersten
+        // direkt zu "alle done" — visuell sah das aus wie "ein Schritt
+        // erfolgt, vier werden übersprungen". Wir halten lokal einen
+        // displayed-State, der min PHASE_STEP_MS pro Übergang braucht.
+        var _phaseDisplay = null;
+        var _phaseTarget = null;
+        var _phaseAnimTimer = null;
+        var PHASE_STEP_MS = 500;
+
+        function renderPhasesDOM(phases) {
             var container = document.getElementById('phasesContainer');
+            if (!container) return;
             var html = '';
             for (var i = 0; i < phases.length; i++) {
                 var p = phases[i];
@@ -992,6 +2984,47 @@
                     + '</div>';
             }
             container.innerHTML = html;
+        }
+
+        function advancePhasesOneStep() {
+            if (_phaseAnimTimer || !_phaseDisplay || !_phaseTarget) return;
+            var d = _phaseDisplay, t = _phaseTarget;
+            var changed = false;
+            for (var i = 0; i < d.length && i < t.length; i++) {
+                if (d[i].status === t[i].status) continue;
+                if (d[i].status === 'pending') {
+                    d[i].status = 'running';
+                    changed = true;
+                    break;
+                }
+                if (d[i].status === 'running' && t[i].status === 'done') {
+                    d[i].status = 'done';
+                    changed = true;
+                    break;
+                }
+            }
+            if (changed) {
+                renderPhasesDOM(d);
+                _phaseAnimTimer = setTimeout(function() {
+                    _phaseAnimTimer = null;
+                    advancePhasesOneStep();
+                }, PHASE_STEP_MS);
+            }
+        }
+
+        function updatePhases(phases) {
+            // Reset wenn die Phasen-Liste neu ist (z.B. neuer Run).
+            if (!_phaseDisplay || _phaseDisplay.length !== phases.length
+                    || _phaseDisplay[0].name !== phases[0].name) {
+                _phaseDisplay = phases.map(function(p) {
+                    return {name: p.name, status: 'pending'};
+                });
+                renderPhasesDOM(_phaseDisplay);
+            }
+            _phaseTarget = phases.map(function(p) {
+                return {name: p.name, status: p.status};
+            });
+            advancePhasesOneStep();
         }
 
         function updateTimeline(segments, duration) {
@@ -1035,6 +3068,7 @@
 
         function updateTranscript(words) {
             var area = document.getElementById('transcriptArea');
+            if (!area) return;       // transcriptArea was removed in redesign — skip silently
             if (words.length <= _lastWordCount) return;
             for (var i = _lastWordCount; i < words.length; i++) {
                 var w = words[i];

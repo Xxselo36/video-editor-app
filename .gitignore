@@ -47,3 +47,14 @@ temp-*.m4a
 # OS
 Thumbs.db
 Desktop.ini
+
+# Web frontend
+web/node_modules/
+web/.next/
+web/out/
+web/.turbo/
+
+# Local env
+.env
+.env.local
+nuitka-crash-report.xml

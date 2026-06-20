@@ -93,13 +93,13 @@ jobs:
             --windows-icon-from-ico=icon.ico `
             --enable-plugin=tk-inter `
             --include-package=customtkinter `
-            --include-package=whisper `
+            --include-package=faster_whisper `
+            --include-package=huggingface_hub `
             --include-package=moviepy `
             --include-package=cv2 `
             --include-package=scipy `
             --include-package=imageio_ffmpeg `
             --include-package=src `
-            --include-package-data=whisper `
             --include-data-files=yolov8n.pt=yolov8n.pt `
             --include-data-files=logo.png=logo.png `
             --include-data-files=bin/ffprobe.exe=ffprobe.exe `
@@ -116,6 +116,11 @@ jobs:
             --nofollow-import-to=jupyter `
             --nofollow-import-to=torch `
             --nofollow-import-to=sympy `
+            --nofollow-import-to=ctranslate2 `
+            --nofollow-import-to=tokenizers `
+            --nofollow-import-to=av `
+            --nofollow-import-to=hf_xet `
+            --nofollow-import-to=onnxruntime `
             --output-dir=dist `
             gui.py
 
@@ -159,6 +164,20 @@ jobs:
 
           echo "torch size after cleanup:"
           du -sh "$DIST_DIR/torch"
+
+      - name: Copy faster-whisper stack into build (hybrid approach)
+        shell: bash
+        run: |
+          DIST_DIR="dist/gui.dist"
+          for pkg in ctranslate2 tokenizers av hf_xet; do
+            SRC=$(python -c "import ${pkg}, os; print(os.path.dirname(${pkg}.__file__))")
+            echo "Copying $pkg from $SRC..."
+            cp -R "$SRC" "$DIST_DIR/$pkg"
+            find "$DIST_DIR/$pkg" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+            find "$DIST_DIR/$pkg" -name "*.pyi" -delete 2>/dev/null || true
+          done
+          echo "faster-whisper stack size:"
+          du -sh "$DIST_DIR/ctranslate2" "$DIST_DIR/tokenizers" "$DIST_DIR/av" "$DIST_DIR/hf_xet"
 
       - name: Install NSIS
         run: |
@@ -254,13 +273,13 @@ jobs:
             --jobs=1 \
             --enable-plugin=tk-inter \
             --include-package=customtkinter \
-            --include-package=whisper \
+            --include-package=faster_whisper \
+            --include-package=huggingface_hub \
             --include-package=moviepy \
             --include-package=cv2 \
             --include-package=scipy \
             --include-package=imageio_ffmpeg \
             --include-package=src \
-            --include-package-data=whisper \
             --include-data-files=yolov8n.pt=yolov8n.pt \
             --include-data-files=logo.png=logo.png \
             --include-data-files=bin/ffprobe=ffprobe \
@@ -277,6 +296,11 @@ jobs:
             --nofollow-import-to=jupyter \
             --nofollow-import-to=torch \
             --nofollow-import-to=sympy \
+            --nofollow-import-to=ctranslate2 \
+            --nofollow-import-to=tokenizers \
+            --nofollow-import-to=av \
+            --nofollow-import-to=hf_xet \
+            --nofollow-import-to=onnxruntime \
             --output-dir=dist \
             gui.py
 
@@ -348,6 +372,21 @@ jobs:
           du -sh "$DIST_DIR/torch"
           echo "total dist size:"
           du -sh "$DIST_DIR"
+
+      - name: Copy faster-whisper stack into build (hybrid approach)
+        run: |
+          DIST_DIR="dist/gui.dist"
+          for pkg in ctranslate2 tokenizers av hf_xet; do
+            SRC=$(python -c "import ${pkg}, os; print(os.path.dirname(${pkg}.__file__))")
+            echo "Copying $pkg from $SRC..."
+            cp -R "$SRC" "$DIST_DIR/$pkg"
+            find "$DIST_DIR/$pkg" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+            find "$DIST_DIR/$pkg" -name "*.pyi" -delete 2>/dev/null || true
+            # Strip debug symbols
+            find "$DIST_DIR/$pkg" -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true
+          done
+          echo "faster-whisper stack size:"
+          du -sh "$DIST_DIR/ctranslate2" "$DIST_DIR/tokenizers" "$DIST_DIR/av" "$DIST_DIR/hf_xet"
 
       - name: Package Linux build as AppImage
         run: |

@@ -28,7 +28,7 @@ def get_codec_params() -> list:
     """
     if get_video_codec() == "h264_videotoolbox":
         return ["-profile:v", "high", "-level", "4.2"]
-    return ["-preset", "medium", "-crf", "18"]
+    return ["-preset", "fast", "-crf", "20"]
 
 
 def get_subprocess_kwargs() -> dict:

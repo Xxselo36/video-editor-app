@@ -87,10 +87,10 @@ else:
 }
 
 # ============================================================================
-# [1/6] Clean
+# [1/7] Clean
 # ============================================================================
 step_clean() {
-    info "[1/6] Bereinige vorherige Builds..."
+    info "[1/7] Bereinige vorherige Builds..."
     # Code-signed files are read-only, fix permissions before removing
     chmod -R u+rwx "${DIST_DIR}" 2>/dev/null || true
     rm -rf gui.build gui.dist gui.onefile-build "${DIST_DIR}"
@@ -99,10 +99,10 @@ step_clean() {
 }
 
 # ============================================================================
-# [2/6] Nuitka Build
+# [2/7] Nuitka Build
 # ============================================================================
 step_build() {
-    info "[2/6] Starte Nuitka Build..."
+    info "[2/7] Starte Nuitka Build..."
 
     # Nuitka Icon-Flag nur setzen wenn Icon vorhanden
     ICON_FLAG=""
@@ -121,13 +121,13 @@ step_build() {
         --macos-signed-app-name="${BUNDLE_ID}" \
         --enable-plugin=tk-inter \
         --include-package=customtkinter \
-        --include-package=whisper \
+        --include-package=faster_whisper \
+        --include-package=huggingface_hub \
         --include-package=moviepy \
         --include-package=cv2 \
         --include-package=scipy \
         --include-package=imageio_ffmpeg \
         --include-package=src \
-        --include-package-data=whisper \
         --include-data-files=yolov8n.pt=yolov8n.pt \
         --include-data-files=logo.png=logo.png \
         --include-data-files=bin/ffprobe=ffprobe \
@@ -144,6 +144,11 @@ step_build() {
         --nofollow-import-to=jupyter \
         --nofollow-import-to=torch \
         --nofollow-import-to=sympy \
+        --nofollow-import-to=ctranslate2 \
+        --nofollow-import-to=tokenizers \
+        --nofollow-import-to=av \
+        --nofollow-import-to=hf_xet \
+        --nofollow-import-to=onnxruntime \
         --output-dir="${DIST_DIR}" \
         gui.py
 
@@ -167,7 +172,7 @@ step_build() {
 }
 
 # ============================================================================
-# [3/6] Torch als Raw-Python in App Bundle kopieren
+# [3/7] Torch als Raw-Python in App Bundle kopieren
 # ============================================================================
 step_copy_torch() {
     APP_PATH="${DIST_DIR}/${APP_NAME}.app"
@@ -175,7 +180,7 @@ step_copy_torch() {
     TORCH_SRC="$(cd "$(dirname "$0")" && pwd)/venv313/lib/python3.13/site-packages/torch"
     TORCH_DST="$MACOS_DIR/torch"
 
-    info "[3/6] Kopiere torch in App Bundle (Hybrid-Ansatz)..."
+    info "[3/7] Kopiere torch in App Bundle (Hybrid-Ansatz)..."
 
     if [ ! -d "$TORCH_SRC" ]; then
         error "torch nicht gefunden in: $TORCH_SRC"
@@ -364,11 +369,54 @@ PYEOF
 }
 
 # ============================================================================
-# [4/6] Code Signing
+# [4/7] faster-whisper Stack als Raw-Python in App Bundle kopieren
+# ============================================================================
+step_copy_faster_whisper() {
+    APP_PATH="${DIST_DIR}/${APP_NAME}.app"
+    MACOS_DIR="$APP_PATH/Contents/MacOS"
+    SITE_PACKAGES="$(cd "$(dirname "$0")" && pwd)/venv313/lib/python3.13/site-packages"
+
+    info "[4/7] Kopiere faster-whisper Stack (Hybrid-Ansatz)..."
+
+    # Packages mit kompilierten Extensions (.so/.dylib) — können nicht von Nuitka kompiliert werden
+    local PACKAGES=(ctranslate2 tokenizers av hf_xet)
+
+    for pkg in "${PACKAGES[@]}"; do
+        local SRC="$SITE_PACKAGES/$pkg"
+        local DST="$MACOS_DIR/$pkg"
+        if [ ! -d "$SRC" ]; then
+            error "$pkg nicht gefunden in: $SRC"
+        fi
+        info "  Kopiere $pkg..."
+        cp -R "$SRC" "$DST"
+        find "$DST" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+        find "$DST" -name "*.pyi" -delete 2>/dev/null || true
+    done
+
+    # Pre-compile .py -> .pyc (schnellerer Start)
+    "$VENV_PYTHON" -m compileall -b -q "$MACOS_DIR/ctranslate2" 2>/dev/null || true
+
+    # Kritische kompilierte Dateien verifizieren
+    [ -f "$MACOS_DIR/ctranslate2/_ext.cpython-313-darwin.so" ] || error "ctranslate2/_ext.so fehlt"
+    [ -f "$MACOS_DIR/tokenizers/tokenizers.abi3.so" ]         || error "tokenizers .so fehlt"
+    [ -f "$MACOS_DIR/hf_xet/hf_xet.abi3.so" ]                 || error "hf_xet .so fehlt"
+
+    # av (PyAV) dylib check
+    local AV_SO_COUNT
+    AV_SO_COUNT=$(find "$MACOS_DIR/av" -name "*.so" | wc -l | tr -d ' ')
+    [ "$AV_SO_COUNT" -ge 5 ] || error "av (PyAV) hat zu wenige .so Dateien ($AV_SO_COUNT)"
+
+    local TOTAL_SIZE
+    TOTAL_SIZE=$(du -sh "$MACOS_DIR/ctranslate2" "$MACOS_DIR/tokenizers" "$MACOS_DIR/av" "$MACOS_DIR/hf_xet" 2>/dev/null | awk '{sum+=$1} END {print sum"M"}')
+    ok "faster-whisper Stack kopiert (~${TOTAL_SIZE})"
+}
+
+# ============================================================================
+# [5/7] Code Signing
 # ============================================================================
 step_sign() {
     APP_PATH="${DIST_DIR}/${APP_NAME}.app"
-    info "[4/6] Code Signing (bottom-up)..."
+    info "[5/7] Code Signing (bottom-up)..."
 
     if [[ "$SIGNING_IDENTITY" == *"DEIN NAME"* ]]; then
         warn "Keine Signing Identity konfiguriert - ueberspringe Signing"
@@ -381,20 +429,23 @@ step_sign() {
     chmod -R u+rw "$APP_PATH"
     xattr -cr "$APP_PATH"
 
-    # 2. Ad-hoc sign: ALLE Dateien in Contents/ (macOS 26 verlangt das)
+    # 2. Remove non-essential files that cause signing issues
+    find "$APP_PATH/Contents" -name ".debug" -delete 2>/dev/null || true
+
+    # 3. Ad-hoc sign ALL files first (baseline, non-Mach-O files like .html, .json, .py)
     info "  Ad-hoc Signierung fuer alle Dateien..."
     find "$APP_PATH/Contents" -type f | while read f; do
         codesign --force --sign - "$f" 2>/dev/null || true
     done
 
-    # 3. Developer ID sign: ALLE Mach-O Dateien (.so, .dylib, Binaries ohne Extension)
-    info "  Signiere alle Mach-O Dateien mit Developer ID..."
+    # 4. Developer ID sign: ALL Mach-O binaries (overrides ad-hoc for these)
+    info "  Signiere alle Mach-O Binaries mit Developer ID..."
     find "$APP_PATH/Contents" -type f | while read f; do
         if file "$f" | grep -q "Mach-O"; then
             codesign --force --timestamp --options runtime \
                 --entitlements "$ENTITLEMENTS" \
                 --sign "$SIGNING_IDENTITY" \
-                "$f" 2>/dev/null || true
+                "$f" || warn "  Konnte nicht signieren: $f"
         fi
     done
 
@@ -411,7 +462,7 @@ step_sign() {
 }
 
 # ============================================================================
-# [5/6] PKG erstellen
+# [6/7] PKG erstellen
 # ============================================================================
 step_pkg() {
     APP_PATH="${DIST_DIR}/${APP_NAME}.app"
@@ -483,7 +534,7 @@ DISTEOF
 }
 
 # ============================================================================
-# [6/6] Notarisierung
+# [7/7] Notarisierung
 # ============================================================================
 step_notarize() {
     PKG_PATH="${DIST_DIR}/${PKG_NAME}"
@@ -525,8 +576,9 @@ main() {
     step_clean
     step_build
     step_copy_torch
+    step_copy_faster_whisper
 
-    # Create ffmpeg symlink so whisper and other libs can find it via PATH
+    # Create ffmpeg symlink so moviepy and other libs can find it via PATH
     info "Creating ffmpeg symlink in bundle..."
     FFMPEG_BIN=$(find "${DIST_DIR}/${APP_NAME}.app/Contents/MacOS/imageio_ffmpeg/binaries" -name "ffmpeg-*" -type f 2>/dev/null | head -1)
     if [ -n "$FFMPEG_BIN" ]; then
@@ -553,11 +605,12 @@ main() {
 
 # Erlaube einzelne Schritte: ./build.sh [clean|build|sign|dmg|notarize]
 case "${1:-}" in
-    clean)       step_clean ;;
-    build)       check_prerequisites && ensure_ffprobe && step_build ;;
-    copy_torch)  step_copy_torch ;;
-    sign)        step_sign ;;
-    pkg)         step_pkg ;;
-    notarize)    step_notarize ;;
-    *)           main ;;
+    clean)               step_clean ;;
+    build)               check_prerequisites && ensure_ffprobe && step_build ;;
+    copy_torch)          step_copy_torch ;;
+    copy_faster_whisper) step_copy_faster_whisper ;;
+    sign)                step_sign ;;
+    pkg)                 step_pkg ;;
+    notarize)            step_notarize ;;
+    *)                   main ;;
 esac

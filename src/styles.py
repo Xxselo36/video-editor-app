@@ -372,7 +372,7 @@ STYLES = {
         "remove_silence": False,
         "silence_threshold": 0.02,
         "min_silence_to_cut": 0.5,
-        "keep_padding": 0.1,
+        "keep_padding": 0.15,
 
         # Transitions
         "transition_in": "zoom",
@@ -600,8 +600,8 @@ STYLES = {
         "remove_silence": True,
         "silence_threshold": 0.035,
         "min_silence_to_cut": 0.35,
-        "keep_padding": 0.12,
-        "keep_padding_after": 0.1,
+        "keep_padding": 0.18,
+        "keep_padding_after": 0.18,
         "min_segment_length": 0.5,
         "merge_gap": 0.25,
 
@@ -683,8 +683,8 @@ STYLES = {
         "remove_silence": True,
         "silence_threshold": 0.03,
         "min_silence_to_cut": 0.3,
-        "keep_padding": 0.1,
-        "keep_padding_after": 0.08,
+        "keep_padding": 0.15,
+        "keep_padding_after": 0.15,
         "min_segment_length": 0.4,
         "merge_gap": 0.2,
 
@@ -825,8 +825,8 @@ STYLES = {
         "remove_silence": True,
         "silence_threshold": 0.035,
         "min_silence_to_cut": 0.35,
-        "keep_padding": 0.12,
-        "keep_padding_after": 0.1,
+        "keep_padding": 0.18,
+        "keep_padding_after": 0.18,
         "min_segment_length": 0.5,
         "merge_gap": 0.25,
 
@@ -928,3 +928,237 @@ def create_custom_style(base_style: str = "balanced", **overrides) -> dict:
     style = get_style(base_style)
     style.update(overrides)
     return style
+
+
+# ========================================================================
+# Standalone GUI: separate Cut Styles + Caption Styles
+# ========================================================================
+
+CUT_STYLES = {
+    "tight": {
+        "name": "Tight",
+        "description": "Maximum silence removal",
+        "silence_threshold": 0.035,
+        "min_silence_to_cut": 0.35,
+        "keep_padding": 0.18,
+        "keep_padding_after": 0.18,
+        "min_segment_length": 0.5,
+        "merge_gap": 0.25,
+    },
+    "balanced": {
+        "name": "Balanced",
+        "description": "Good compromise",
+        "silence_threshold": 0.025,
+        "min_silence_to_cut": 0.6,
+        "keep_padding": 0.2,
+        "keep_padding_after": 0.15,
+        "min_segment_length": 0.5,
+        "merge_gap": 0.3,
+    },
+    "smooth": {
+        "name": "Smooth",
+        "description": "Natural flow preserved",
+        "silence_threshold": 0.02,
+        "min_silence_to_cut": 0.9,
+        "keep_padding": 0.3,
+        "keep_padding_after": 0.25,
+        "min_segment_length": 0.6,
+        "merge_gap": 0.4,
+    },
+}
+
+CAPTION_STYLES = {
+    "clean": {
+        "name": "Clean",
+        "description": "Phrase subtitles, highlight, background",
+        "enable_subtitles": True,
+        "subtitle_style": "clean",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_fontsize_multiplier": 0.85,
+        "subtitle_stroke_width": 2,
+        # 5 Wörter pro Phrase → typisch 2 Zeilen (2+3 wrap), stabile
+        # Größe durch den auf "shrink ab 3 Zeilen" gestellten Loop.
+        "clean_words_per_phrase": 5,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.50,
+        "subtitle_bg_enabled": True,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": "#6c5ce7",
+    },
+    "classic": {
+        "name": "Classic",
+        "description": "White text, black outline",
+        "enable_subtitles": True,
+        "subtitle_style": "modern",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_stroke_width": 4,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.85,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
+        # Up to 3 consecutive words shown together (width-permitting).
+        # Editor will pack words greedily and fall back to fewer per row
+        # when the combined text would overflow the video frame.
+        "modern_words_per_phrase": 3,
+    },
+    "highlight": {
+        "name": "Highlight",
+        "description": "Red box behind active word",
+        "enable_subtitles": True,
+        "subtitle_style": "highlight",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_fontsize_multiplier": 0.65,
+        "subtitle_stroke_width": 3,
+        "clean_words_per_phrase": 3,
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.75,
+        "subtitle_bg_enabled": False,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": "#B11020",
+        "_highlight_mode": "box",
+        "_highlight_box_radius": 14,
+        "_highlight_font": "impact",
+        "subtitle_uppercase": True,
+    },
+    "subtle": {
+        "name": "Subtle",
+        "description": "Small, unobtrusive",
+        "enable_subtitles": True,
+        "subtitle_style": "modern",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_fontsize_multiplier": 0.75,
+        "subtitle_stroke_width": 2,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.90,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": None,
+    },
+    "elegant": {
+        "name": "Elegant",
+        "description": "Script font for nouns & verbs, golden accent",
+        "enable_subtitles": True,
+        "subtitle_style": "elegant",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_fontsize_multiplier": 1.0,
+        "subtitle_stroke_width": 3,
+        # Match Clean: 6 words/phrase → typically wraps to 2 lines (3+3).
+        "clean_words_per_phrase": 6,
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.75,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": "#E8A838",
+    },
+    "clipper": {
+        "name": "Clipper",
+        "description": "Bold comic font, bounce-in, word highlight",
+        "enable_subtitles": True,
+        "subtitle_style": "highlight",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_fontsize_multiplier": 0.99,
+        "subtitle_stroke_width": 5,
+        "clean_words_per_phrase": 3,
+        "subtitle_font": "Bangers",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.75,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": "#39FF14",
+        "_highlight_font": "bangers",
+    },
+    "flash": {
+        "name": "Flash",
+        "description": "Heavy italic, bounce-in, word highlight",
+        "enable_subtitles": True,
+        "subtitle_style": "highlight",
+        "subtitle_color": (255, 255, 255),
+        "subtitle_fontsize_multiplier": 0.7,
+        "subtitle_stroke_width": 5,
+        "clean_words_per_phrase": 3,
+        "subtitle_font": "Avenir Next Heavy Italic",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.75,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.6,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": "#0088CC",
+        "_highlight_font": "avenir_italic",
+    },
+    "punch": {
+        "name": "Punch",
+        "description": "Bold yellow, one word at a time",
+        "enable_subtitles": True,
+        "subtitle_style": "modern",
+        "subtitle_color": (255, 220, 0),
+        "subtitle_fontsize_multiplier": 0.85,
+        "subtitle_stroke_width": 0,
+        "clean_words_per_phrase": 1,
+        "subtitle_uppercase": True,
+        "subtitle_glow": {"radius": 16, "alpha": 160, "color": (0, 0, 0)},
+        "_font_candidates": [
+            ("/System/Library/Fonts/Supplemental/GillSans.ttc", 1),
+            ("/System/Library/Fonts/Supplemental/Arial Black.ttf", 0),
+            ("C:/Windows/Fonts/arialbd.ttf", 0),
+            ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 0),
+        ],
+        "subtitle_font": "Arial Black",
+        "subtitle_position": "bottom",
+        "subtitle_position_y": 0.72,
+        "subtitle_bg_enabled": False,
+        "subtitle_bg_color": "#000000",
+        "subtitle_bg_opacity": 0.0,
+        "subtitle_outline_color": "#000000",
+        "subtitle_highlight_color_hex": "#FFDC00",
+    },
+    "none": {
+        "name": "None",
+        "description": "No subtitles",
+        "enable_subtitles": False,
+    },
+}
+
+
+def build_combined_style(cut_key: str, caption_key: str) -> dict:
+    """Build a full style config by combining a cut style + caption style on top of a base."""
+    # Start from 'minimal' as base (no effects, no subtitles, tight cuts)
+    config = get_style("minimal")
+
+    # Apply cut overrides
+    if cut_key in CUT_STYLES:
+        for k, v in CUT_STYLES[cut_key].items():
+            if k not in ("name", "description"):
+                config[k] = v
+
+    # Apply caption overrides
+    if caption_key in CAPTION_STYLES:
+        for k, v in CAPTION_STYLES[caption_key].items():
+            if k not in ("name", "description"):
+                config[k] = v
+
+    # Remember which caption style was selected — useful downstream to
+    # route between the legacy MoviePy compositor and the fast ASS renderer.
+    config["_caption_key"] = caption_key
+
+    # Always enable silence removal and smart cut for standalone
+    config["remove_silence"] = True
+    config["smart_cut"] = True
+    config["remove_fillers"] = True
+
+    return config

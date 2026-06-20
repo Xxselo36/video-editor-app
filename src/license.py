@@ -277,7 +277,7 @@ def deactivate_license():
 
 
 def _get_trial_file():
-    """Get path to local trial file."""
+    """Get path to the primary trial file."""
     if platform.system() == "Windows":
         base = os.environ.get("APPDATA", os.path.expanduser("~"))
     else:
@@ -287,32 +287,77 @@ def _get_trial_file():
     return os.path.join(trial_dir, ".trial")
 
 
-def _load_trial():
-    """Load trial data from local storage."""
-    path = _get_trial_file()
+def _get_trial_backup_file():
+    """Secondary trial file in a different location. A casual bypass that
+    deletes one file will be defeated because we take the MAX of both."""
+    if platform.system() == "Windows":
+        base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+        d = os.path.join(base, "SmartCut", "cache")
+    elif platform.system() == "Darwin":
+        d = os.path.expanduser("~/Library/Caches/com.smartcut.app")
+    else:
+        d = os.path.expanduser("~/.cache/smartcut")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    return os.path.join(d, ".tc")
+
+
+def _read_one_trial(path):
+    """Read + validate one trial file. Returns dict or None."""
     if not os.path.isfile(path):
         return None
     try:
         with open(path, "r") as f:
             encoded = f.read().strip()
         data = json.loads(_deobfuscate(encoded))
-        # Prevent copying trial file between machines
+        # Prevent copying between machines
         if data.get("machine_id") != _get_machine_id():
             return None
-        # Detect clock manipulation
-        if time.time() < data.get("first_use", 0):
+        # Detect clock manipulation (current time before recorded first_use)
+        if time.time() < data.get("first_use", 0) - 300:  # 5 min skew tolerance
             return None
         return data
     except Exception:
         return None
 
 
+def _load_trial():
+    """Load trial data — merge primary + backup, take the max of edits.
+    This means deleting one file does NOT reset the trial counter."""
+    primary = _read_one_trial(_get_trial_file())
+    backup = _read_one_trial(_get_trial_backup_file())
+
+    if primary is None and backup is None:
+        return None
+
+    if primary is None:
+        return backup
+    if backup is None:
+        return primary
+
+    # Both valid — merge with max(edits) and earliest first_use
+    merged = dict(primary)
+    merged["edits"] = max(primary.get("edits", 0), backup.get("edits", 0))
+    merged["first_use"] = min(
+        primary.get("first_use", time.time()),
+        backup.get("first_use", time.time()),
+    )
+    return merged
+
+
 def _save_trial(data):
-    """Save trial data locally."""
-    path = _get_trial_file()
+    """Save trial data to BOTH locations (defense in depth against deletion)."""
     encoded = _obfuscate(json.dumps(data))
-    with open(path, "w") as f:
-        f.write(encoded)
+    for path in (_get_trial_file(), _get_trial_backup_file()):
+        try:
+            with open(path, "w") as f:
+                f.write(encoded)
+        except OSError:
+            # Some sandboxed setups may block one location; ignore and keep
+            # the other working.
+            pass
 
 
 def check_trial():

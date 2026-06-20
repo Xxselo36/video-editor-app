@@ -46,9 +46,9 @@ class FillerDetector:
     }
 
     SENSITIVITY_THRESHOLDS: dict[str, float] = {
-        "low": 0.3,
-        "medium": 0.5,
-        "high": 0.7,
+        "low": 0.5,
+        "medium": 0.3,
+        "high": 0.1,
     }
 
     def __init__(self, language: str = "auto", sensitivity: str = "medium") -> None:
@@ -111,12 +111,13 @@ class FillerDetector:
             if not words:
                 continue
 
-            # Clean words: strip leading/trailing whitespace
+            # Clean words: strip whitespace and punctuation
             cleaned = []
             for w in words:
                 text = w.get("word", "")
+                text = text.strip().lower().strip(".,!?;:\"'()[]…–—-")
                 cleaned.append({
-                    "text": text.strip().lower(),
+                    "text": text,
                     "start": w.get("start", 0.0),
                     "end": w.get("end", 0.0),
                     "probability": w.get("probability", 0.0),
@@ -270,3 +271,111 @@ class FillerDetector:
 def get_supported_languages() -> list[str]:
     """Return list of language codes with filler word support."""
     return sorted(FillerDetector.FILLER_WORDS.keys())
+
+
+def detect_fillers_audio(sample_rate: int, audio_data, speech_segments: list[tuple[float, float]],
+                         min_duration: float = 0.2, max_duration: float = 1.5) -> list[tuple[float, float]]:
+    """Detect filler sounds directly from audio signal.
+
+    Filler sounds (ähm, uh, um) have characteristic properties:
+    - Low energy compared to normal speech
+    - Low spectral variation (monotone)
+    - Duration typically 0.2-1.5s
+    - Occur within speech segments (not silence)
+
+    Args:
+        sample_rate: Audio sample rate.
+        audio_data: Numpy audio array (mono, float).
+        speech_segments: List of (start, end) speech time ranges.
+        min_duration: Minimum filler duration in seconds.
+        max_duration: Maximum filler duration in seconds.
+
+    Returns:
+        List of (start, end) tuples for detected filler sounds.
+    """
+    import numpy as np
+
+    fillers = []
+    window_ms = 50  # 50ms analysis window
+    window_size = int(sample_rate * window_ms / 1000)
+    hop_size = window_size // 2
+
+    for seg_start, seg_end in speech_segments:
+        i_start = int(seg_start * sample_rate)
+        i_end = int(seg_end * sample_rate)
+        seg_audio = audio_data[i_start:i_end]
+
+        if len(seg_audio) < window_size * 2:
+            continue
+
+        # Compute RMS energy for each window
+        rms_values = []
+        for i in range(0, len(seg_audio) - window_size, hop_size):
+            w = seg_audio[i:i + window_size]
+            rms_values.append(np.sqrt(np.mean(w ** 2)))
+
+        if not rms_values:
+            continue
+
+        rms_arr = np.array(rms_values)
+        median_rms = np.median(rms_arr)
+
+        if median_rms < 1e-6:
+            continue
+
+        # Compute spectral flatness for each window (monotone = high flatness)
+        flatness_values = []
+        for i in range(0, len(seg_audio) - window_size, hop_size):
+            w = seg_audio[i:i + window_size]
+            spectrum = np.abs(np.fft.rfft(w * np.hanning(len(w))))
+            spectrum = spectrum[1:]  # skip DC
+            spectrum = np.maximum(spectrum, 1e-10)
+            geo_mean = np.exp(np.mean(np.log(spectrum)))
+            arith_mean = np.mean(spectrum)
+            flatness_values.append(geo_mean / arith_mean if arith_mean > 0 else 0)
+
+        flatness_arr = np.array(flatness_values)
+
+        # Detect filler candidates: low-ish energy + high spectral flatness (monotone)
+        # Filler = energy between 15-60% of median AND flatness > 0.3
+        filler_mask = (
+            (rms_arr > median_rms * 0.15) &
+            (rms_arr < median_rms * 0.6) &
+            (flatness_arr > 0.25)
+        )
+
+        # Find contiguous runs
+        in_filler = False
+        filler_start_idx = 0
+        for j in range(len(filler_mask)):
+            if filler_mask[j] and not in_filler:
+                filler_start_idx = j
+                in_filler = True
+            elif not filler_mask[j] and in_filler:
+                in_filler = False
+                t_start = seg_start + filler_start_idx * hop_size / sample_rate
+                t_end = seg_start + j * hop_size / sample_rate
+                dur = t_end - t_start
+                if min_duration <= dur <= max_duration:
+                    fillers.append((t_start, t_end))
+
+        # Handle filler at end of segment
+        if in_filler:
+            t_start = seg_start + filler_start_idx * hop_size / sample_rate
+            t_end = seg_end
+            dur = t_end - t_start
+            if min_duration <= dur <= max_duration:
+                fillers.append((t_start, t_end))
+
+    # Merge close fillers
+    if not fillers:
+        return []
+    fillers.sort()
+    merged = [fillers[0]]
+    for s, e in fillers[1:]:
+        if s <= merged[-1][1] + 0.1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+
+    return merged

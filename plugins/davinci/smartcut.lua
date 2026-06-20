@@ -154,6 +154,44 @@ local function check_backend()
     return data ~= nil and data.status == "ok"
 end
 
+local function get_license_status()
+    local data = call_backend("/license-status", 3)
+    if data == nil then return nil, "Backend unreachable" end
+    return data.licensed == true, data.message or ""
+end
+
+-- Try to launch SmartCut.app so the backend starts. Best-effort; returns
+-- nothing. The caller should re-poll /health after a short delay.
+local function launch_smartcut_app()
+    local sep = package.config:sub(1,1)
+    if sep == "\\" then
+        -- Windows: start the app via shell. The installed location varies;
+        -- "start SmartCut" relies on it being on PATH, but try a few.
+        os.execute('start "" "SmartCut.exe" 2>NUL')
+        os.execute('start "" "C:\\Program Files\\SmartCut\\SmartCut.exe" 2>NUL')
+    else
+        -- macOS uses Launch Services to find the app by display name.
+        os.execute('open -a "SmartCut" 2>/dev/null')
+        -- Linux fallback
+        os.execute('which smartcut >/dev/null 2>&1 && smartcut & 2>/dev/null')
+    end
+end
+
+local function ensure_backend_ready()
+    if check_backend() then return true end
+    print("[SmartCut] Backend not reachable — launching SmartCut.app...")
+    launch_smartcut_app()
+    -- Poll for up to ~12 s while the app spins up its HTTP server
+    for i = 1, 24 do
+        os.execute(package.config:sub(1,1) == "\\" and "ping -n 1 127.0.0.1 >NUL" or "sleep 0.5")
+        if check_backend() then
+            print("[SmartCut] Backend up after auto-launch.")
+            return true
+        end
+    end
+    return false
+end
+
 local function url_encode(str)
     return str:gsub("([^%w%-%.%_%~])", function(c)
         return string.format("%%%02X", string.byte(c))
@@ -412,7 +450,10 @@ local function render_subtitle_overlay(srt_path, width, height, duration_sec, fp
     -- not need a local Python interpreter or render script.
     local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "/tmp"
     local sep = (package.config:sub(1,1) == "\\") and "\\" or "/"
-    local overlay_dir = home .. sep .. "Movies" .. sep .. "Videos"
+    -- Hidden subfolder so overlay temp files don't pollute the user's videos
+    -- list. SmartCut auto-cleans this folder of files older than 30 days at
+    -- app startup.
+    local overlay_dir = home .. sep .. "Movies" .. sep .. "Videos" .. sep .. ".smartcut_overlays"
     os.execute('mkdir -p "' .. overlay_dir .. '"')
     local overlay_path = overlay_dir .. sep .. "ve_subtitle_overlay_" .. os.time() .. ".mov"
 
@@ -576,14 +617,25 @@ print("  SMARTCUT - DaVinci Resolve")
 print("========================================")
 print("")
 
--- 1. Check backend
+-- 1. Check backend (and try to auto-launch SmartCut.app if needed)
 print("[SmartCut] Checking backend...")
-if not check_backend() then
-    print("[SmartCut] ERROR: Backend not running!")
-    print("[SmartCut] Start the SmartCut app first.")
+if not ensure_backend_ready() then
+    print("[SmartCut] ERROR: Could not reach SmartCut backend.")
+    print("[SmartCut] Please open SmartCut.app manually, then run again.")
     return
 end
 print("[SmartCut] Backend connected.")
+
+-- License gate — backend is reachable but check whether it's actually
+-- licensed. Without a valid license the /analyze endpoint will 403; show
+-- a friendly message instead of letting it fail later.
+local licensed, lic_msg = get_license_status()
+if licensed == false then
+    print("[SmartCut] License inactive: " .. tostring(lic_msg))
+    print("[SmartCut] Opening SmartCut.app so you can re-activate...")
+    launch_smartcut_app()
+    return
+end
 
 -- 2. Detect clip on timeline
 local clip_path = get_current_clip_path()
@@ -603,11 +655,65 @@ if not style then
 end
 print("[SmartCut] Style: " .. style)
 
+-- 3b. Probe orientation so the SmartCam picker can omit Landscape for
+-- portrait input (avoids letterboxing in 16:9 output).
+local probe = call_backend("/probe-orientation?video_path=" .. url_encode(clip_path), 8)
+local input_orient = (probe and probe.orientation) or "landscape"
+print("[SmartCut] Input orientation: " .. input_orient)
+
+-- 3c. SmartCam picker (Fusion AskUser only — falls silently to Off if
+-- AskUser is unavailable, e.g. on Resolve free without Fusion module).
+local smartcam_enabled = false
+local smartcam_format = "portrait"
+do
+    local sc_options
+    if input_orient == "portrait" then
+        sc_options = {
+            "Off — keep video as-is",
+            "Portrait 9:16 — Speaker Focus zoom",
+        }
+    else
+        sc_options = {
+            "Off — keep video as-is",
+            "Portrait 9:16 — reframe for TikTok/Reels",
+            "Landscape 16:9 — Speaker Focus zoom",
+        }
+    end
+    local sc_ok, sc_ret = pcall(function()
+        return fusion:AskUser("SmartCut — SmartCam", {
+            {"SmartCam", Name = "SmartCam", "Dropdown",
+             Options = sc_options, Default = 0},
+        })
+    end)
+    if sc_ok and sc_ret then
+        local sc_idx = (sc_ret.SmartCam or 0) + 1
+        if sc_idx == 2 then
+            smartcam_enabled = true
+            smartcam_format = "portrait"
+        elseif sc_idx == 3 then
+            smartcam_enabled = true
+            smartcam_format = "landscape"
+        end
+    elseif sc_ok and not sc_ret then
+        print("[SmartCut] Cancelled at SmartCam picker.")
+        return
+    end
+    -- pcall failed (no Fusion AskUser available) → keep defaults (Off)
+end
+if smartcam_enabled then
+    print("[SmartCut] SmartCam: " .. smartcam_format)
+else
+    print("[SmartCut] SmartCam: off")
+end
+
 -- 4. Start analysis
 print("[SmartCut] Starting analysis...")
 local url = "/analyze?video_path=" .. url_encode(clip_path)
     .. "&style=" .. url_encode(style)
     .. "&whisper_model=medium"
+    .. "&smartcam_enabled=" .. (smartcam_enabled and "1" or "0")
+    .. "&smartcam_format=" .. url_encode(smartcam_format)
+    .. "&resolution=1080"
 local data = call_backend(url, 15)
 
 if not data then

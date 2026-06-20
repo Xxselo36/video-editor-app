@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-import whisper
+from faster_whisper import WhisperModel
 from moviepy.editor import VideoFileClip, AudioFileClip
 from scipy.io import wavfile
 from scipy import signal
@@ -75,10 +75,14 @@ class AudioAnalyzer:
 
     @property
     def whisper_model(self):
-        """Lazy-Loading des Whisper Modells."""
+        """Lazy-Loading des Whisper Modells (faster-whisper)."""
         if self._whisper_model is None:
             self._report(f"Lade Whisper Modell '{self.whisper_model_name}'...")
-            self._whisper_model = whisper.load_model(self.whisper_model_name)
+            self._whisper_model = WhisperModel(
+                self.whisper_model_name,
+                device="auto",
+                compute_type="int8",
+            )
         return self._whisper_model
 
     def extract_audio(self, target_sr: int = 16000) -> str:
@@ -136,15 +140,67 @@ class AudioAnalyzer:
 
         try:
             self._report("Transkribiere Audio mit Whisper...")
-            result = self.whisper_model.transcribe(
+            segments_iter, info = self.whisper_model.transcribe(
                 audio_path,
                 language=None,  # Automatische Spracherkennung
                 task="transcribe",
-                verbose=False,
                 word_timestamps=True,  # Wort-genaue Timestamps
                 condition_on_previous_text=True,  # Besserer Kontext
                 no_speech_threshold=0.6,  # Weniger Fehler bei Stille
+                initial_prompt="ähm, äh, hmm, um, uh, like, you know, also, halt",  # Force filler word recognition
             )
+
+            # Build openai-whisper-compatible dict so downstream code
+            # (filler_detection, subtitle generation) keeps working unchanged.
+            # Emit throttled live progress as faster-whisper yields segments.
+            segments_list = []
+            text_parts = []
+            total_duration = info.duration if info.duration else 0.0
+            last_report_t = 0.0
+            for seg in segments_iter:
+                seg_dict = {
+                    "id": seg.id,
+                    "seek": seg.seek,
+                    "start": float(seg.start),
+                    "end": float(seg.end),
+                    "text": seg.text,
+                    "tokens": list(seg.tokens) if seg.tokens else [],
+                    "avg_logprob": float(seg.avg_logprob),
+                    "compression_ratio": float(seg.compression_ratio),
+                    "no_speech_prob": float(seg.no_speech_prob),
+                    "words": [
+                        {
+                            "word": w.word,
+                            "start": float(w.start),
+                            "end": float(w.end),
+                            "probability": float(w.probability),
+                        }
+                        for w in (seg.words or [])
+                    ],
+                }
+                segments_list.append(seg_dict)
+                text_parts.append(seg.text)
+
+                # Throttle at ~300 ms so the GUI's batched word ticker
+                # gets enough new text to keep animating without flooding.
+                if total_duration > 0:
+                    import time as _t
+                    now = _t.monotonic()
+                    if now - last_report_t > 0.3:
+                        last_report_t = now
+                        prog = min(0.99, seg.end / total_duration)
+                        latest = (seg.text or "").strip()
+                        if latest:
+                            self._report(
+                                f"Transcribing speech: {latest}",
+                                step=1, total_steps=6, progress=prog,
+                            )
+
+            result = {
+                "text": "".join(text_parts),
+                "segments": segments_list,
+                "language": info.language,
+            }
             self._transcription = result
 
             # Wort-für-Wort Untertitel (TikTok-Style)
