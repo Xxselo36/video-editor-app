@@ -55,4 +55,7 @@ EXPOSE 8000
 # Single worker is fine for Phase 4: Whisper + ffmpeg are CPU-bound,
 # more workers just contend. Phase 3 (real queue) will add concurrency
 # via separate worker processes.
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+#
+# Bind to $PORT when set (Railway, Fly, Heroku all assign one
+# dynamically); fall back to 8000 for local Docker runs.
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
