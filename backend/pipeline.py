@@ -194,10 +194,19 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
         "afftdn=nr=12:nf=-25,"  # light denoise, transparent on speech
         "loudnorm=I=-14:TP=-1.5:LRA=11"
     )
+    # Cap longest side at 1920 (= 1080p output). iPhone 4K (2160×3840
+    # portrait) on a small Railway container kills the libx264 encode
+    # within minutes — 5-10× more pixels than 1080p with no visible
+    # quality gain after the burn step re-encodes anyway. Aspect ratio
+    # preserved. Even/odd-safe via -2.
+    scale_filter = (
+        "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(ih,iw),min(1920,ih),-2)'"
+    )
     cmd = [
         get_ffmpeg_path(), "-y",
         "-i", input_path,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-vf", scale_filter,
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22",
         "-pix_fmt", "yuv420p",
         "-af", audio_chain,
         "-c:a", "aac", "-b:a", "192k",
