@@ -1,26 +1,97 @@
 @import "tailwindcss";
 
+/* ── Design tokens ──────────────────────────────────────────────
+ * Semantic names so we can retheme without touching components.
+ * Keep the palette tight — one accent (violet), one neutral scale.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surfaces */
+  --surface-0: #000000;      /* page bg */
+  --surface-1: #0a0a0a;      /* card bg */
+  --surface-2: #171717;      /* elevated bg (nested cards) */
+
+  /* Text */
+  --text-strong: #ffffff;
+  --text-body: #d4d4d8;      /* zinc-300 */
+  --text-muted: #71717a;     /* zinc-500 */
+  --text-faint: #52525b;     /* zinc-600 */
+
+  /* Borders */
+  --border: #27272a;         /* zinc-800 */
+  --border-hover: #52525b;   /* zinc-600 */
+
+  /* Brand accent */
+  --brand: #8b5cf6;          /* violet-500 */
+  --brand-hover: #a78bfa;    /* violet-400 */
+  --brand-dim: rgba(139, 92, 246, 0.1);
+  --brand-glow: rgba(139, 92, 246, 0.4);
+
+  /* Feedback */
+  --danger: #f87171;         /* red-400 */
+  --warn: #fbbf24;           /* amber-400 */
+  --success: #10b981;        /* emerald-500 */
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--surface-0);
+  --color-foreground: var(--text-strong);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+html,
+body {
+  background: var(--surface-0);
+  color: var(--text-strong);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Motion ─────────────────────────────────────────────────────
+ * Phase-change fade-up. Applied via .phase-fade class on the
+ * container that mounts/unmounts a screen.
+ */
+@keyframes phase-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.phase-fade {
+  animation: phase-fade-in 240ms ease-out both;
+}
+
+/* Skeleton shimmer */
+@keyframes skeleton-shimmer {
+  from {
+    background-position: -400px 0;
+  }
+  to {
+    background-position: 400px 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-1) 25%,
+    var(--surface-2) 50%,
+    var(--surface-1) 75%
+  );
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.6s linear infinite;
+  border-radius: 8px;
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  .phase-fade,
+  .skeleton {
+    animation: none;
+  }
 }

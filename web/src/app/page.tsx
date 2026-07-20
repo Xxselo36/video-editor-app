@@ -1,20 +1,27 @@
 import Link from "next/link";
+import { LogoWord } from "@/components/Logo";
 
 export default function Landing() {
   return (
     <main className="flex min-h-screen flex-col bg-black text-white">
       <header className="flex items-center justify-between border-b border-zinc-900 px-6 py-4">
-        <span className="text-xl font-bold tracking-tight">Cleo</span>
-        <nav className="flex items-center gap-6 text-sm text-zinc-400">
-          <Link href="/#features" className="hover:text-white">
+        <Link
+          href="/"
+          className="transition-opacity hover:opacity-80"
+          aria-label="Cleo home"
+        >
+          <LogoWord />
+        </Link>
+        <nav className="flex items-center gap-4 text-sm text-zinc-400 sm:gap-6">
+          <Link href="/#features" className="hidden transition-colors hover:text-white sm:inline">
             Features
           </Link>
-          <Link href="/#pricing" className="hover:text-white">
+          <Link href="/#pricing" className="hidden transition-colors hover:text-white sm:inline">
             Pricing
           </Link>
           <Link
             href="/app"
-            className="rounded-lg bg-violet-500 px-4 py-2 font-medium text-white hover:bg-violet-400"
+            className="rounded-lg bg-violet-500 px-4 py-2 font-medium text-white transition-colors hover:bg-violet-400"
           >
             Try free
           </Link>
@@ -22,7 +29,7 @@ export default function Landing() {
       </header>
 
       {/* Hero */}
-      <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 py-24 text-center">
+      <section className="phase-fade mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 py-24 text-center">
         <div className="mb-3 text-xs uppercase tracking-[0.3em] text-zinc-500">
           Voice-first video editing
         </div>
@@ -158,8 +165,24 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="border-t border-zinc-900 px-6 py-8 text-center text-xs text-zinc-600">
-        © 2026 Cleo · Voice-first video editing
+      <footer className="border-t border-zinc-900 px-6 py-10">
+        <div className="mx-auto flex max-w-3xl flex-col items-center gap-4 sm:flex-row sm:justify-between">
+          <LogoWord size={22} />
+          <div className="flex items-center gap-6 text-xs text-zinc-500">
+            <Link href="/app" className="transition-colors hover:text-white">
+              App
+            </Link>
+            <Link href="/app/library" className="transition-colors hover:text-white">
+              Library
+            </Link>
+            <Link href="/#features" className="transition-colors hover:text-white">
+              Features
+            </Link>
+          </div>
+          <div className="text-[11px] text-zinc-600">
+            © 2026 Cleo · Voice-first video editing
+          </div>
+        </div>
       </footer>
     </main>
   );

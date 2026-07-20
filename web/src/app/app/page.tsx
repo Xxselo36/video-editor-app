@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { LogoMark } from "@/components/Logo";
 import { saveEntry, type LibraryHookClip } from "@/lib/library";
 
 // Backend host: explicit env wins, else use the page's hostname on
@@ -483,13 +484,20 @@ export default function Home() {
     <main className="flex min-h-screen flex-col bg-black text-white">
       <header className="flex items-center justify-between border-b border-zinc-900 px-6 py-4">
         <div className="flex items-center gap-3">
-          <span className="text-xl font-bold tracking-tight">Cleo</span>
+          <Link
+            href="/"
+            className="flex items-center gap-2 transition-opacity hover:opacity-80"
+            aria-label="Cleo home"
+          >
+            <LogoMark size={24} />
+            <span className="text-xl font-bold tracking-tight">Cleo</span>
+          </Link>
           {currentPreset && phase !== "picker" && (
             <>
               <span className="text-zinc-700">/</span>
               <button
                 onClick={reset}
-                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-white"
+                className="flex items-center gap-1.5 text-xs text-zinc-500 transition-colors hover:text-white"
               >
                 <span>{currentPreset.icon}</span>
                 <span>{currentPreset.label}</span>
@@ -512,7 +520,8 @@ export default function Home() {
       </header>
 
       <div
-        className={`mx-auto w-full flex-1 px-5 py-8 ${
+        key={phase}
+        className={`phase-fade mx-auto w-full flex-1 px-5 py-8 ${
           phase === "picker" ? "max-w-2xl" : "max-w-md"
         }`}
       >

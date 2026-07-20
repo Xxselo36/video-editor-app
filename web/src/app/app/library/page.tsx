@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { LogoMark } from "@/components/Logo";
 import {
   deleteEntry,
   formatRelativeTime,
@@ -40,15 +41,19 @@ export default function Library() {
     <main className="flex min-h-screen flex-col bg-black text-white">
       <header className="flex items-center justify-between border-b border-zinc-900 px-6 py-4">
         <div className="flex items-center gap-3">
-          <Link href="/app" className="text-xl font-bold tracking-tight">
-            Cleo
+          <Link
+            href="/app"
+            className="flex items-center gap-2 transition-opacity hover:opacity-80"
+          >
+            <LogoMark size={24} />
+            <span className="text-xl font-bold tracking-tight">Cleo</span>
           </Link>
           <span className="text-zinc-700">/</span>
           <span className="text-xs text-zinc-500">Library</span>
         </div>
         <Link
           href="/app"
-          className="rounded-lg bg-violet-500 px-4 py-2 text-xs font-medium text-white hover:bg-violet-400"
+          className="rounded-lg bg-violet-500 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-violet-400"
         >
           + New project
         </Link>
@@ -56,8 +61,18 @@ export default function Library() {
 
       <div className="mx-auto w-full max-w-3xl flex-1 px-5 py-8">
         {entries === null ? (
-          <div className="mt-32 text-center text-sm text-zinc-500">
-            Loading…
+          <div className="flex flex-col gap-3">
+            <div className="mb-2 skeleton h-3 w-24" />
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                <div className="mb-3 skeleton h-4 w-40" />
+                <div className="mb-4 skeleton h-3 w-64" />
+                <div className="flex gap-2">
+                  <div className="skeleton h-7 w-24" />
+                  <div className="skeleton h-7 w-20" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : entries.length === 0 ? (
           <EmptyState />
