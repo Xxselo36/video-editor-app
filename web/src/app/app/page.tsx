@@ -33,6 +33,7 @@ const CUT_STYLES = [
 ];
 
 type Phase =
+  | "picker"
   | "idle"
   | "configuring"
   | "uploading"
@@ -41,6 +42,112 @@ type Phase =
   | "rendering"
   | "done"
   | "error";
+
+// Workflow presets — Tool-Picker cards on the /app landing.
+// Each preset pre-loads a bundle of settings tuned for a use case.
+// "custom" opens the full Configure screen for tinkerers.
+type PresetId = "tiktok" | "podcast" | "captions" | "vlog" | "custom";
+
+const PRESETS: Record<
+  PresetId,
+  {
+    label: string;
+    icon: string;
+    tagline: string;
+    desc: string;
+    settings: {
+      captionPreset: string;
+      cutStyle: string;
+      voiceTriggers: boolean;
+      removeFillers: boolean;
+      smartcamEnabled: boolean;
+      smartcamFormat: "portrait" | "landscape";
+      outputFormats: string[];
+    };
+    skipConfigure: boolean;
+  }
+> = {
+  tiktok: {
+    label: "TikTok / Reels",
+    icon: "📱",
+    tagline: "Vertical short-form",
+    desc: "Voice-triggers, Clipper captions, auto-vertical crop",
+    settings: {
+      captionPreset: "clipper",
+      cutStyle: "tight",
+      voiceTriggers: true,
+      removeFillers: true,
+      smartcamEnabled: true,
+      smartcamFormat: "portrait",
+      outputFormats: ["9:16"],
+    },
+    skipConfigure: true,
+  },
+  podcast: {
+    label: "Podcast Long-Form",
+    icon: "🎙",
+    tagline: "Full episode + clips",
+    desc: "AI cleanup, hook detection, multi-format export",
+    settings: {
+      captionPreset: "clean",
+      cutStyle: "smooth",
+      voiceTriggers: true,
+      removeFillers: true,
+      smartcamEnabled: false,
+      smartcamFormat: "landscape",
+      outputFormats: ["16:9", "9:16"],
+    },
+    skipConfigure: true,
+  },
+  vlog: {
+    label: "Vlog Cleanup",
+    icon: "✂️",
+    tagline: "Solo talking-head",
+    desc: "Remove fillers, subtle captions, keep aspect",
+    settings: {
+      captionPreset: "subtle",
+      cutStyle: "balanced",
+      voiceTriggers: true,
+      removeFillers: true,
+      smartcamEnabled: false,
+      smartcamFormat: "portrait",
+      outputFormats: [],
+    },
+    skipConfigure: true,
+  },
+  captions: {
+    label: "Just Captions",
+    icon: "💬",
+    tagline: "Add captions only",
+    desc: "Burn captions on your video — no cuts, no cleanup",
+    settings: {
+      captionPreset: "clean",
+      cutStyle: "smooth",
+      voiceTriggers: false,
+      removeFillers: false,
+      smartcamEnabled: false,
+      smartcamFormat: "portrait",
+      outputFormats: [],
+    },
+    skipConfigure: true,
+  },
+  custom: {
+    label: "Custom",
+    icon: "🎛",
+    tagline: "Configure everything",
+    desc: "Full settings — pick every knob yourself",
+    settings: {
+      captionPreset: "clean",
+      cutStyle: "balanced",
+      voiceTriggers: true,
+      removeFillers: true,
+      smartcamEnabled: false,
+      smartcamFormat: "portrait",
+      outputFormats: [],
+    },
+    skipConfigure: false,
+  },
+};
 
 type JobStatus = {
   id: string;
@@ -155,7 +262,8 @@ function buildPhrases(subs: Subtitle[]): Phrase[] {
 }
 
 export default function Home() {
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [phase, setPhase] = useState<Phase>("picker");
+  const [selectedPreset, setSelectedPreset] = useState<PresetId | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [captionPreset, setCaptionPreset] = useState("clean");
   const [cutStyle, setCutStyle] = useState("balanced");
@@ -173,12 +281,33 @@ export default function Home() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const pickPreset = (id: PresetId) => {
+    const p = PRESETS[id];
+    setSelectedPreset(id);
+    setCaptionPreset(p.settings.captionPreset);
+    setCutStyle(p.settings.cutStyle);
+    setVoiceTriggers(p.settings.voiceTriggers);
+    setRemoveFillers(p.settings.removeFillers);
+    setSmartcamEnabled(p.settings.smartcamEnabled);
+    setSmartcamFormat(p.settings.smartcamFormat);
+    setOutputFormats(p.settings.outputFormats);
+    setPhase("idle");
+  };
+
   const onPickFile = () => fileInputRef.current?.click();
 
   const onFileChange = (f: File | null) => {
     if (!f) return;
     setFile(f);
-    setPhase("configuring");
+    // Skip Configure screen when a non-custom preset was picked — settings
+    // are already applied. Custom preset shows the Configure UI so the
+    // user can tinker with every knob.
+    const skip = selectedPreset && PRESETS[selectedPreset].skipConfigure;
+    if (skip) {
+      onProcess(f);
+    } else {
+      setPhase("configuring");
+    }
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -187,25 +316,37 @@ export default function Home() {
     if (f) onFileChange(f);
   };
 
-  const onProcess = async () => {
-    if (!file) return;
+  const onProcess = async (fileOverride?: File) => {
+    const targetFile = fileOverride ?? file;
+    if (!targetFile) return;
+    if (!fileOverride) setFile(targetFile);
     setPhase("uploading");
     setErrorMsg(null);
 
+    // Resolve settings from preset when we're on the skip-configure path
+    // (state may not have flushed yet when pickPreset + onFileChange
+    // fire in rapid succession).
+    const p = selectedPreset ? PRESETS[selectedPreset] : null;
+    const applyPreset = p?.skipConfigure ?? false;
+
     const settings = {
-      caption_preset: captionPreset,
-      style: cutStyle,
-      voice_triggers: voiceTriggers,
-      remove_fillers: removeFillers,
+      caption_preset: applyPreset ? p!.settings.captionPreset : captionPreset,
+      style: applyPreset ? p!.settings.cutStyle : cutStyle,
+      voice_triggers: applyPreset ? p!.settings.voiceTriggers : voiceTriggers,
+      remove_fillers: applyPreset ? p!.settings.removeFillers : removeFillers,
       whisper_model: "small",
-      smartcam_enabled: smartcamEnabled,
-      smartcam_format: smartcamFormat,
+      smartcam_enabled: applyPreset
+        ? p!.settings.smartcamEnabled
+        : smartcamEnabled,
+      smartcam_format: applyPreset
+        ? p!.settings.smartcamFormat
+        : smartcamFormat,
       resolution: "1080",
-      output_formats: outputFormats,
+      output_formats: applyPreset ? p!.settings.outputFormats : outputFormats,
     };
 
     const form = new FormData();
-    form.append("file", file);
+    form.append("file", targetFile);
     form.append("settings", JSON.stringify(settings));
 
     try {
@@ -303,19 +444,43 @@ export default function Home() {
     setDisabledCuts([]);
     setErrorMsg(null);
     setUploadPct(0);
-    setPhase("idle");
+    setSelectedPreset(null);
+    setPhase("picker");
   };
+
+  const currentPreset = selectedPreset ? PRESETS[selectedPreset] : null;
 
   return (
     <main className="flex min-h-screen flex-col bg-black text-white">
       <header className="flex items-center justify-between border-b border-zinc-900 px-6 py-4">
-        <span className="text-xl font-bold tracking-tight">Cleo</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xl font-bold tracking-tight">Cleo</span>
+          {currentPreset && phase !== "picker" && (
+            <>
+              <span className="text-zinc-700">/</span>
+              <button
+                onClick={reset}
+                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-white"
+              >
+                <span>{currentPreset.icon}</span>
+                <span>{currentPreset.label}</span>
+                <span className="text-zinc-600">✕</span>
+              </button>
+            </>
+          )}
+        </div>
         <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-600">
           beta
         </span>
       </header>
 
-      <div className="mx-auto w-full max-w-md flex-1 px-5 py-8">
+      <div
+        className={`mx-auto w-full flex-1 px-5 py-8 ${
+          phase === "picker" ? "max-w-2xl" : "max-w-md"
+        }`}
+      >
+        {phase === "picker" && <PickerScreen onPick={pickPreset} />}
+
         {phase === "idle" && <IdleScreen onPick={onPickFile} onDrop={onDrop} />}
 
         {phase === "configuring" && file && (
@@ -401,6 +566,48 @@ export default function Home() {
         />
       </div>
     </main>
+  );
+}
+
+function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
+  const order: PresetId[] = ["tiktok", "podcast", "vlog", "captions", "custom"];
+  return (
+    <div className="flex flex-col items-center">
+      <div className="mb-2 text-xs uppercase tracking-[0.3em] text-zinc-500">
+        Pick your workflow
+      </div>
+      <h1 className="mb-3 text-4xl font-bold tracking-tight">What are you making?</h1>
+      <p className="mb-10 max-w-md text-center text-sm text-zinc-400">
+        Each preset tunes captions, cuts and format for the platform. Pick
+        Custom if you want to configure every knob.
+      </p>
+
+      <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+        {order.map((id) => {
+          const p = PRESETS[id];
+          return (
+            <button
+              key={id}
+              onClick={() => onPick(id)}
+              className="group flex items-start gap-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5 text-left transition-colors hover:border-violet-400 hover:bg-zinc-900"
+            >
+              <div className="mt-0.5 text-2xl">{p.icon}</div>
+              <div className="flex-1">
+                <div className="mb-0.5 text-base font-semibold text-white">
+                  {p.label}
+                </div>
+                <div className="mb-2 text-[11px] uppercase tracking-wider text-violet-400">
+                  {p.tagline}
+                </div>
+                <div className="text-xs leading-relaxed text-zinc-500 group-hover:text-zinc-300">
+                  {p.desc}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
