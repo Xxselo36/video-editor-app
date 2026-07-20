@@ -92,7 +92,7 @@ In Railway → dein Projekt → Service "video-editor-app":
 ```
 ANTHROPIC_API_KEY = <dein neuer Anthropic-Key>
 CLEO_CACHE_DIR    = /data/cache
-CLEO_ALLOWED_ORIGINS = https://<DEINE-DOMAIN>,https://www.<DEINE-DOMAIN>
+CLEO_ALLOWED_ORIGINS = https://cleocuts.com,https://www.cleocuts.com
 PYTHONUNBUFFERED  = 1
 ```
 
