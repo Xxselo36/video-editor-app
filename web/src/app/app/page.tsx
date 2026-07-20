@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { saveEntry, type LibraryHookClip } from "@/lib/library";
 
 // Backend host: explicit env wins, else use the page's hostname on
 // port 8000. This way iPhone (192.168.178.155:3000) hits
@@ -385,7 +387,34 @@ export default function Home() {
         if (!r.ok) return;
         const s: JobStatus = await r.json();
         setJob(s);
-        if (s.status === "done") setPhase("done");
+        if (s.status === "done") {
+          setPhase("done");
+          // Persist to library so the user can find this render later
+          // even after tab-close. Backend keeps files for a while.
+          try {
+            const p = selectedPreset ? PRESETS[selectedPreset] : null;
+            const withOutputs = s as JobStatus & {
+              outputs?: string[];
+              social_caption?: string;
+              social_hashtags?: string[];
+              hook_clips?: LibraryHookClip[];
+            };
+            saveEntry({
+              jobId: s.id,
+              timestamp: Date.now(),
+              presetId: selectedPreset,
+              presetIcon: p?.icon ?? null,
+              presetLabel: p?.label ?? null,
+              filename: file?.name ?? "Untitled",
+              outputs: withOutputs.outputs ?? ["primary"],
+              hookClips: withOutputs.hook_clips ?? [],
+              socialCaption: withOutputs.social_caption ?? "",
+              socialHashtags: withOutputs.social_hashtags ?? [],
+            });
+          } catch {
+            /* library-save failure is non-fatal */
+          }
+        }
         else if (s.status === "error") {
           setErrorMsg(s.error ?? s.message);
           setPhase("error");
@@ -469,9 +498,17 @@ export default function Home() {
             </>
           )}
         </div>
-        <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-600">
-          beta
-        </span>
+        <div className="flex items-center gap-4">
+          <Link
+            href="/app/library"
+            className="text-xs text-zinc-500 hover:text-white"
+          >
+            Library
+          </Link>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-600">
+            beta
+          </span>
+        </div>
       </header>
 
       <div
