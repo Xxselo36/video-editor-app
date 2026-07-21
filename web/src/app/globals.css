@@ -1,35 +1,43 @@
 @import "tailwindcss";
 
-/* ── Design tokens ──────────────────────────────────────────────
- * Semantic names so we can retheme without touching components.
- * Keep the palette tight — one accent (violet), one neutral scale.
+/* ── Warm Design Tokens ─────────────────────────────────────────
+ * Light cream background, amber accent, warm neutrals.
+ * Feels like a helpful colleague, not a tech-bro tool.
  */
 :root {
-  /* Surfaces */
-  --surface-0: #000000;      /* page bg */
-  --surface-1: #0a0a0a;      /* card bg */
-  --surface-2: #171717;      /* elevated bg (nested cards) */
+  /* Surfaces — warm off-whites */
+  --surface-0: #faf6ef;      /* page bg — warm cream */
+  --surface-1: #ffffff;      /* card bg */
+  --surface-2: #fff9ee;      /* elevated / accent bg */
+  --surface-tint: #fdf3e0;   /* very light amber wash */
 
-  /* Text */
-  --text-strong: #ffffff;
-  --text-body: #d4d4d8;      /* zinc-300 */
-  --text-muted: #71717a;     /* zinc-500 */
-  --text-faint: #52525b;     /* zinc-600 */
+  /* Text — warm darks, no pure black */
+  --text-strong: #2b241d;    /* headings, buttons */
+  --text-body: #5d5147;      /* body copy */
+  --text-muted: #8b7f75;     /* secondary */
+  --text-faint: #b3a89c;     /* placeholders, timestamps */
 
-  /* Borders */
-  --border: #27272a;         /* zinc-800 */
-  --border-hover: #52525b;   /* zinc-600 */
+  /* Borders — warm neutrals */
+  --border: #ecdfc9;         /* subtle warm border */
+  --border-hover: #d8c4a0;   /* hover state */
+  --border-strong: #b89b70;  /* active/focus */
 
-  /* Brand accent */
-  --brand: #8b5cf6;          /* violet-500 */
-  --brand-hover: #a78bfa;    /* violet-400 */
-  --brand-dim: rgba(139, 92, 246, 0.1);
-  --brand-glow: rgba(139, 92, 246, 0.4);
+  /* Brand — warm amber */
+  --brand: #d99551;          /* warm amber, primary accent */
+  --brand-hover: #c47f36;    /* darker on hover */
+  --brand-tint: #fce9c8;     /* light amber for backgrounds */
+  --brand-strong: #a5651e;   /* dark for text-on-tint */
+  --brand-glow: rgba(217, 149, 81, 0.35);
 
   /* Feedback */
-  --danger: #f87171;         /* red-400 */
-  --warn: #fbbf24;           /* amber-400 */
-  --success: #10b981;        /* emerald-500 */
+  --danger: #c14e35;
+  --warn: #d99551;
+  --success: #4d8b6f;
+
+  /* Shadows — warm */
+  --shadow-sm: 0 1px 2px rgba(120, 80, 30, 0.06);
+  --shadow-md: 0 4px 12px rgba(120, 80, 30, 0.08);
+  --shadow-lg: 0 12px 32px rgba(120, 80, 30, 0.12);
 }
 
 @theme inline {
@@ -45,16 +53,16 @@ body {
   color: var(--text-strong);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv11", "ss01";  /* tightens Geist for editorial feel */
 }
 
 /* ── Motion ─────────────────────────────────────────────────────
- * Phase-change fade-up. Applied via .phase-fade class on the
- * container that mounts/unmounts a screen.
+ * Soft ease-out phase-fade for screen transitions.
  */
 @keyframes phase-fade-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -63,10 +71,10 @@ body {
 }
 
 .phase-fade {
-  animation: phase-fade-in 240ms ease-out both;
+  animation: phase-fade-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Skeleton shimmer */
+/* Skeleton */
 @keyframes skeleton-shimmer {
   from {
     background-position: -400px 0;
@@ -79,16 +87,15 @@ body {
 .skeleton {
   background: linear-gradient(
     90deg,
-    var(--surface-1) 25%,
-    var(--surface-2) 50%,
-    var(--surface-1) 75%
+    var(--surface-2) 25%,
+    var(--surface-tint) 50%,
+    var(--surface-2) 75%
   );
   background-size: 800px 100%;
   animation: skeleton-shimmer 1.6s linear infinite;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
-/* Reduce motion for users who prefer it */
 @media (prefers-reduced-motion: reduce) {
   .phase-fade,
   .skeleton {

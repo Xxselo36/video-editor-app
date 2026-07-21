@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { LogoMark } from "@/components/Logo";
+import { IconArrowRight } from "@/components/Icons";
 import {
   deleteEntry,
   formatRelativeTime,
@@ -38,38 +39,63 @@ export default function Library() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col bg-black text-white">
-      <header className="flex items-center justify-between border-b border-zinc-900 px-6 py-4">
+    <main
+      className="flex min-h-screen flex-col"
+      style={{ background: "var(--surface-0)", color: "var(--text-strong)" }}
+    >
+      <header
+        className="flex items-center justify-between px-6 py-4"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
         <div className="flex items-center gap-3">
           <Link
             href="/app"
             className="flex items-center gap-2 transition-opacity hover:opacity-80"
           >
             <LogoMark size={24} />
-            <span className="text-xl font-bold tracking-tight">Cleo</span>
+            <span
+              className="text-xl font-bold tracking-tight"
+              style={{ color: "var(--text-strong)" }}
+            >
+              Cleo
+            </span>
           </Link>
-          <span className="text-zinc-700">/</span>
-          <span className="text-xs text-zinc-500">Library</span>
+          <span style={{ color: "var(--text-faint)" }}>/</span>
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+            Library
+          </span>
         </div>
         <Link
           href="/app"
-          className="rounded-lg bg-violet-500 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-violet-400"
+          className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-medium transition-transform hover:scale-105"
+          style={{
+            background: "var(--brand)",
+            color: "white",
+            boxShadow: "var(--shadow-md)",
+          }}
         >
-          + New project
+          New project <IconArrowRight size={14} />
         </Link>
       </header>
 
-      <div className="mx-auto w-full max-w-3xl flex-1 px-5 py-8">
+      <div className="phase-fade mx-auto w-full max-w-3xl flex-1 px-5 py-10">
         {entries === null ? (
           <div className="flex flex-col gap-3">
             <div className="mb-2 skeleton h-3 w-24" />
             {[0, 1, 2].map((i) => (
-              <div key={i} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+              <div
+                key={i}
+                className="rounded-2xl p-5"
+                style={{
+                  background: "var(--surface-1)",
+                  border: "1px solid var(--border)",
+                }}
+              >
                 <div className="mb-3 skeleton h-4 w-40" />
                 <div className="mb-4 skeleton h-3 w-64" />
                 <div className="flex gap-2">
-                  <div className="skeleton h-7 w-24" />
-                  <div className="skeleton h-7 w-20" />
+                  <div className="skeleton h-8 w-24" />
+                  <div className="skeleton h-8 w-20" />
                 </div>
               </div>
             ))}
@@ -77,8 +103,11 @@ export default function Library() {
         ) : entries.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="flex flex-col gap-3">
-            <div className="mb-2 text-[11px] uppercase tracking-[0.15em] text-zinc-500">
+          <div className="flex flex-col gap-4">
+            <div
+              className="mb-1 text-xs font-semibold uppercase tracking-[0.15em]"
+              style={{ color: "var(--text-muted)" }}
+            >
               {entries.length} project{entries.length === 1 ? "" : "s"}
             </div>
             {entries.map((e) => (
@@ -93,18 +122,46 @@ export default function Library() {
 
 function EmptyState() {
   return (
-    <div className="mx-auto mt-24 max-w-sm text-center">
-      <div className="mb-4 text-5xl">📁</div>
-      <div className="mb-2 text-xl font-semibold">No projects yet</div>
-      <div className="mb-8 text-sm text-zinc-500">
-        Renders you finish will show up here so you can re-download outputs and
-        share captions later.
+    <div className="mx-auto mt-20 max-w-md text-center">
+      <div
+        className="mx-auto mb-6 inline-flex h-16 w-16 items-center justify-center rounded-2xl"
+        style={{
+          background: "var(--brand-tint)",
+          color: "var(--brand-strong)",
+        }}
+      >
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M3 7l3-3h5l2 2h8v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+      <div
+        className="mb-2 text-2xl font-bold"
+        style={{ color: "var(--text-strong)" }}
+      >
+        Your library is empty
+      </div>
+      <div
+        className="mb-8 text-base leading-relaxed"
+        style={{ color: "var(--text-body)" }}
+      >
+        Every video you finish here shows up in this space. You can
+        re-download, grab your captions, and share hook clips whenever.
       </div>
       <Link
         href="/app"
-        className="inline-block rounded-xl bg-violet-500 px-6 py-3 text-sm font-semibold hover:bg-violet-400"
+        className="inline-flex items-center gap-1.5 rounded-full px-6 py-3 text-sm font-semibold transition-transform hover:scale-105"
+        style={{
+          background: "var(--brand)",
+          color: "white",
+          boxShadow: "var(--shadow-lg)",
+        }}
       >
-        Pick a workflow
+        Start your first project <IconArrowRight size={16} />
       </Link>
     </div>
   );
@@ -137,27 +194,51 @@ function LibraryCard({
   const mainOutputs = entry.outputs.filter((f) => !f.startsWith("hook_"));
 
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+    <div
+      className="rounded-2xl p-5"
+      style={{
+        background: "var(--surface-1)",
+        border: "1px solid var(--border)",
+        boxShadow: "var(--shadow-sm)",
+      }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="mb-1 flex items-center gap-2">
-            {entry.presetIcon && (
-              <span className="text-lg">{entry.presetIcon}</span>
-            )}
-            <span className="text-sm font-semibold text-white">
+          <div className="mb-1 flex items-center gap-2 flex-wrap">
+            <span
+              className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+              style={{
+                background: "var(--brand-tint)",
+                color: "var(--brand-strong)",
+              }}
+            >
               {entry.presetLabel ?? "Custom"}
             </span>
-            <span className="text-zinc-700">·</span>
-            <span className="text-[11px] text-zinc-500">
+            <span
+              className="text-[11px]"
+              style={{ color: "var(--text-muted)" }}
+            >
               {formatRelativeTime(entry.timestamp)}
             </span>
           </div>
-          <div className="truncate text-xs text-zinc-500">{entry.filename}</div>
+          <div
+            className="truncate text-sm"
+            style={{ color: "var(--text-body)" }}
+          >
+            {entry.filename}
+          </div>
         </div>
         <button
           onClick={() => onDelete(entry.jobId)}
-          className="shrink-0 text-zinc-700 hover:text-red-400"
+          className="shrink-0 transition-colors"
+          style={{ color: "var(--text-faint)" }}
           aria-label="Delete project"
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.color = "var(--danger)")
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.color = "var(--text-faint)")
+          }
         >
           ✕
         </button>
@@ -169,19 +250,33 @@ function LibraryCard({
             key={f}
             href={`${backendUrl()}/jobs/${entry.jobId}/download?format=${encodeURIComponent(f)}`}
             download
-            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+            className="rounded-full px-3.5 py-1.5 text-xs font-semibold transition-transform hover:scale-105"
+            style={
               f === "primary"
-                ? "bg-violet-500 text-white hover:bg-violet-400"
-                : "border border-violet-400/40 text-violet-100 hover:bg-violet-500/10"
-            }`}
+                ? {
+                    background: "var(--brand)",
+                    color: "white",
+                    boxShadow: "var(--shadow-sm)",
+                  }
+                : {
+                    background: "var(--surface-2)",
+                    color: "var(--brand-strong)",
+                    border: "1px solid var(--border-hover)",
+                  }
+            }
           >
-            ⬇ {formatLabel(f)}
+            ↓ {formatLabel(f)}
           </a>
         ))}
         {entry.hookClips.length > 0 && (
           <button
             onClick={() => setExpanded((v) => !v)}
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500"
+            className="rounded-full px-3 py-1.5 text-xs transition-colors"
+            style={{
+              background: "var(--surface-2)",
+              color: "var(--text-body)",
+              border: "1px solid var(--border)",
+            }}
           >
             {entry.hookClips.length} hook{entry.hookClips.length === 1 ? "" : "s"}{" "}
             {expanded ? "▲" : "▼"}
@@ -190,22 +285,40 @@ function LibraryCard({
       </div>
 
       {expanded && entry.hookClips.length > 0 && (
-        <div className="mt-3 flex flex-col gap-2 border-t border-zinc-800 pt-3">
+        <div
+          className="mt-3 flex flex-col gap-2 pt-3"
+          style={{ borderTop: "1px solid var(--border)" }}
+        >
           {entry.hookClips.map((h) => (
             <a
               key={h.key}
               href={`${backendUrl()}/jobs/${entry.jobId}/download?format=${encodeURIComponent(h.key)}`}
               download
-              className="block rounded-lg border border-zinc-800 p-2 hover:border-violet-400/60"
+              className="block rounded-xl p-3 transition-colors"
+              style={{
+                background: "var(--surface-2)",
+                border: "1px solid var(--border)",
+              }}
             >
-              <div className="mb-0.5 flex items-center justify-between text-xs">
-                <div className="font-semibold text-white">{h.title}</div>
-                <div className="text-[10px] text-zinc-500">
+              <div className="mb-0.5 flex items-center justify-between text-sm">
+                <div
+                  className="font-semibold"
+                  style={{ color: "var(--text-strong)" }}
+                >
+                  {h.title}
+                </div>
+                <div
+                  className="text-[11px]"
+                  style={{ color: "var(--text-muted)" }}
+                >
                   {(h.end - h.start).toFixed(0)}s
                 </div>
               </div>
               {h.reason && (
-                <div className="line-clamp-2 text-[11px] text-zinc-500">
+                <div
+                  className="line-clamp-2 text-xs"
+                  style={{ color: "var(--text-body)" }}
+                >
                   {h.reason}
                 </div>
               )}
@@ -215,23 +328,37 @@ function LibraryCard({
       )}
 
       {(entry.socialCaption || hashtagLine) && (
-        <div className="mt-3 border-t border-zinc-800 pt-3">
+        <div
+          className="mt-4 pt-4"
+          style={{ borderTop: "1px solid var(--border)" }}
+        >
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+            <span
+              className="text-[10px] font-semibold uppercase tracking-wider"
+              style={{ color: "var(--text-muted)" }}
+            >
               Caption
             </span>
             <button
               onClick={copyCaption}
-              className="text-[10px] uppercase tracking-wider text-violet-400 hover:text-violet-300"
+              className="text-[11px] font-semibold uppercase tracking-wider transition-colors"
+              style={{ color: "var(--brand-strong)" }}
             >
               {copied ? "copied" : "copy"}
             </button>
           </div>
           {entry.socialCaption && (
-            <div className="text-xs text-zinc-300">{entry.socialCaption}</div>
+            <div className="text-sm" style={{ color: "var(--text-strong)" }}>
+              {entry.socialCaption}
+            </div>
           )}
           {hashtagLine && (
-            <div className="mt-1 text-[11px] text-violet-300">{hashtagLine}</div>
+            <div
+              className="mt-1 text-xs font-medium"
+              style={{ color: "var(--brand-strong)" }}
+            >
+              {hashtagLine}
+            </div>
           )}
         </div>
       )}

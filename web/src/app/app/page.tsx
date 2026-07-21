@@ -3,6 +3,15 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { LogoMark } from "@/components/Logo";
+import {
+  IconArrowRight,
+  IconCaptions,
+  IconCheck,
+  IconMic,
+  IconPhone,
+  IconSliders,
+  IconVlog,
+} from "@/components/Icons";
 import { saveEntry, type LibraryHookClip } from "@/lib/library";
 
 // Backend host: explicit env wins, else use the page's hostname on
@@ -481,8 +490,14 @@ export default function Home() {
   const currentPreset = selectedPreset ? PRESETS[selectedPreset] : null;
 
   return (
-    <main className="flex min-h-screen flex-col bg-black text-white">
-      <header className="flex items-center justify-between border-b border-zinc-900 px-6 py-4">
+    <main
+      className="flex min-h-screen flex-col"
+      style={{ background: "var(--surface-0)", color: "var(--text-strong)" }}
+    >
+      <header
+        className="flex items-center justify-between px-6 py-4"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
         <div className="flex items-center gap-3">
           <Link
             href="/"
@@ -494,14 +509,17 @@ export default function Home() {
           </Link>
           {currentPreset && phase !== "picker" && (
             <>
-              <span className="text-zinc-700">/</span>
+              <span style={{ color: "var(--text-faint)" }}>/</span>
               <button
                 onClick={reset}
-                className="flex items-center gap-1.5 text-xs text-zinc-500 transition-colors hover:text-white"
+                className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors"
+                style={{
+                  color: "var(--brand-strong)",
+                  background: "var(--brand-tint)",
+                }}
               >
-                <span>{currentPreset.icon}</span>
                 <span>{currentPreset.label}</span>
-                <span className="text-zinc-600">✕</span>
+                <span style={{ color: "var(--brand-strong)", opacity: 0.6 }}>✕</span>
               </button>
             </>
           )}
@@ -509,12 +527,19 @@ export default function Home() {
         <div className="flex items-center gap-4">
           <Link
             href="/app/library"
-            className="text-xs text-zinc-500 hover:text-white"
+            className="text-xs transition-colors hover:opacity-70"
+            style={{ color: "var(--text-body)" }}
           >
             Library
           </Link>
-          <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-600">
-            beta
+          <span
+            className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest"
+            style={{
+              background: "var(--brand-tint)",
+              color: "var(--brand-strong)",
+            }}
+          >
+            Beta
           </span>
         </div>
       </header>
@@ -615,43 +640,168 @@ export default function Home() {
   );
 }
 
-function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
-  const order: PresetId[] = ["tiktok", "podcast", "vlog", "captions", "custom"];
-  return (
-    <div className="flex flex-col items-center">
-      <div className="mb-2 text-xs uppercase tracking-[0.3em] text-zinc-500">
-        Pick your workflow
-      </div>
-      <h1 className="mb-3 text-4xl font-bold tracking-tight">What are you making?</h1>
-      <p className="mb-10 max-w-md text-center text-sm text-zinc-400">
-        Each preset tunes captions, cuts and format for the platform. Pick
-        Custom if you want to configure every knob.
-      </p>
+// Maps preset ids → icon component. Emoji-free so the picker reads
+// professional instead of like a Notion doc.
+const PRESET_ICONS: Record<PresetId, (p: { size?: number; className?: string; strokeWidth?: number }) => React.ReactNode> = {
+  tiktok: IconPhone,
+  podcast: IconMic,
+  vlog: IconVlog,
+  captions: IconCaptions,
+  custom: IconSliders,
+};
 
-      <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
-        {order.map((id) => {
+// What each preset actually does — used as feature bullets in the card
+// so the user sees the value up front, not just a vague label.
+const PRESET_BULLETS: Record<PresetId, string[]> = {
+  tiktok: [
+    "Voice-triggers on: say &ldquo;Cleo cut&rdquo; to redo",
+    "Bold Clipper-style captions",
+    "Auto vertical 9:16 with face tracking",
+  ],
+  podcast: [
+    "AI cleanup on your transcript",
+    "3 hook clips picked automatically",
+    "Full episode + 9:16 clips exported",
+  ],
+  vlog: [
+    "Removes &ldquo;ähm&rdquo;, &ldquo;uh&rdquo;, long pauses",
+    "Subtle captions that don&apos;t distract",
+    "Keeps your original aspect",
+  ],
+  captions: [
+    "Burns captions in your picked style",
+    "No cuts, no cleanup",
+    "Fastest — just captions",
+  ],
+  custom: [
+    "Every setting exposed",
+    "Pick captions, cuts, format yourself",
+    "For when you know what you want",
+  ],
+};
+
+function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
+  const featured: PresetId[] = ["tiktok", "podcast", "vlog", "captions"];
+  return (
+    <div className="flex flex-col">
+      <div className="mb-8 text-center">
+        <div
+          className="mb-2 text-xs font-semibold uppercase tracking-[0.2em]"
+          style={{ color: "var(--brand-strong)" }}
+        >
+          Let&apos;s get started
+        </div>
+        <h1
+          className="mb-3 text-4xl font-bold tracking-tight sm:text-5xl"
+          style={{ color: "var(--text-strong)" }}
+        >
+          What are you working on?
+        </h1>
+        <p
+          className="mx-auto max-w-lg text-base"
+          style={{ color: "var(--text-body)" }}
+        >
+          Pick what fits — I&apos;ll set the right captions, cuts and format
+          for you. You can still tweak everything in the next step if you want.
+        </p>
+      </div>
+
+      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
+        {featured.map((id) => {
           const p = PRESETS[id];
+          const Icon = PRESET_ICONS[id];
+          const bullets = PRESET_BULLETS[id];
           return (
             <button
               key={id}
               onClick={() => onPick(id)}
-              className="group flex items-start gap-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5 text-left transition-colors hover:border-violet-400 hover:bg-zinc-900"
+              className="group flex flex-col rounded-2xl p-6 text-left transition-all hover:-translate-y-0.5"
+              style={{
+                background: "var(--surface-1)",
+                border: "1px solid var(--border)",
+                boxShadow: "var(--shadow-sm)",
+              }}
             >
-              <div className="mt-0.5 text-2xl">{p.icon}</div>
-              <div className="flex-1">
-                <div className="mb-0.5 text-base font-semibold text-white">
-                  {p.label}
-                </div>
-                <div className="mb-2 text-[11px] uppercase tracking-wider text-violet-400">
-                  {p.tagline}
-                </div>
-                <div className="text-xs leading-relaxed text-zinc-500 group-hover:text-zinc-300">
-                  {p.desc}
-                </div>
+              <div
+                className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl"
+                style={{
+                  background: "var(--brand-tint)",
+                  color: "var(--brand-strong)",
+                }}
+              >
+                <Icon size={22} strokeWidth={2} />
+              </div>
+              <div
+                className="mb-1 text-lg font-semibold"
+                style={{ color: "var(--text-strong)" }}
+              >
+                {p.label}
+              </div>
+              <div
+                className="mb-4 text-xs font-medium uppercase tracking-wider"
+                style={{ color: "var(--brand-strong)" }}
+              >
+                {p.tagline}
+              </div>
+              <ul className="mb-5 space-y-2">
+                {bullets.map((b, i) => (
+                  <li
+                    key={i}
+                    className="flex items-start gap-2 text-sm"
+                    style={{ color: "var(--text-body)" }}
+                  >
+                    <span
+                      className="mt-0.5 shrink-0"
+                      style={{ color: "var(--brand)" }}
+                    >
+                      <IconCheck size={16} strokeWidth={2.5} />
+                    </span>
+                    <span dangerouslySetInnerHTML={{ __html: b }} />
+                  </li>
+                ))}
+              </ul>
+              <div
+                className="mt-auto inline-flex items-center gap-1.5 text-sm font-semibold transition-transform group-hover:translate-x-1"
+                style={{ color: "var(--brand)" }}
+              >
+                Pick this <IconArrowRight size={16} />
               </div>
             </button>
           );
         })}
+      </div>
+
+      {/* Custom lives below as a subtle escape hatch for power users. */}
+      <div
+        className="mt-8 flex flex-col items-center gap-2 rounded-2xl p-6 text-center sm:flex-row sm:justify-between sm:text-left"
+        style={{
+          background: "var(--surface-2)",
+          border: "1px dashed var(--border-hover)",
+        }}
+      >
+        <div>
+          <div
+            className="mb-0.5 text-sm font-semibold"
+            style={{ color: "var(--text-strong)" }}
+          >
+            Prefer to configure everything yourself?
+          </div>
+          <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+            You&apos;ll see every knob — captions, format, cuts, all of it.
+          </div>
+        </div>
+        <button
+          onClick={() => onPick("custom")}
+          className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            background: "var(--surface-1)",
+            color: "var(--text-strong)",
+            border: "1px solid var(--border-hover)",
+          }}
+        >
+          <IconSliders size={16} strokeWidth={2} />
+          Custom setup
+        </button>
       </div>
     </div>
   );
@@ -666,26 +816,58 @@ function IdleScreen({
 }) {
   return (
     <div className="flex flex-col items-center">
-      <div className="mb-2 text-xs uppercase tracking-[0.3em] text-zinc-500">
-        Voice-first video editing
+      <div
+        className="mb-2 text-xs font-semibold uppercase tracking-[0.2em]"
+        style={{ color: "var(--brand-strong)" }}
+      >
+        Almost there
       </div>
-      <h1 className="mb-3 text-5xl font-bold tracking-tight">Cleo</h1>
-      <p className="mb-12 max-w-sm text-center text-base text-zinc-400">
-        Talk freely. Say{" "}
-        <span className="text-white">&ldquo;Cleo cut&rdquo;</span> when you mess
-        up, <span className="text-white">&ldquo;Cleo go&rdquo;</span> to start
-        over.
+      <h1
+        className="mb-3 text-4xl font-bold tracking-tight"
+        style={{ color: "var(--text-strong)" }}
+      >
+        Drop your video in
+      </h1>
+      <p
+        className="mb-10 max-w-sm text-center text-base"
+        style={{ color: "var(--text-body)" }}
+      >
+        I&apos;ll take it from here. Remember — if you said{" "}
+        <span style={{ color: "var(--text-strong)", fontWeight: 500 }}>
+          &ldquo;Cleo cut&rdquo;
+        </span>{" "}
+        while recording, I&apos;ll find those and clean them up.
       </p>
 
       <button
         onClick={onPick}
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
-        className="w-full rounded-2xl border-2 border-dashed border-zinc-700 px-6 py-12 text-center transition-colors hover:border-violet-400 hover:bg-zinc-950/50 active:scale-[0.99]"
+        className="group w-full rounded-2xl px-6 py-14 text-center transition-all hover:-translate-y-0.5"
+        style={{
+          background: "var(--surface-1)",
+          border: "2px dashed var(--border-hover)",
+          boxShadow: "var(--shadow-sm)",
+        }}
       >
-        <div className="mb-3 text-3xl">📹</div>
-        <div className="text-base font-medium">Pick a video</div>
-        <div className="mt-1 text-xs text-zinc-500">or drag and drop here</div>
+        <div
+          className="mx-auto mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full transition-transform group-hover:scale-110"
+          style={{
+            background: "var(--brand-tint)",
+            color: "var(--brand-strong)",
+          }}
+        >
+          <IconPhone size={26} strokeWidth={2} />
+        </div>
+        <div
+          className="text-base font-semibold"
+          style={{ color: "var(--text-strong)" }}
+        >
+          Pick a video
+        </div>
+        <div className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+          or drop it right here
+        </div>
       </button>
     </div>
   );
