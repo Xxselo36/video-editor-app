@@ -684,38 +684,22 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
   const featured: PresetId[] = ["tiktok", "podcast", "vlog", "captions"];
   return (
     <div className="relative z-10 flex flex-col">
-      <div className="mb-10">
-        <div
-          className="mb-3 text-xs font-semibold uppercase tracking-[0.2em]"
-          style={{ color: "var(--brand)" }}
-        >
-          Pick a workflow
-        </div>
-        <h1
-          className="mb-3 text-4xl font-bold tracking-tight sm:text-5xl"
-          style={{ color: "var(--text-strong)" }}
-        >
-          Which one are you shipping?
-        </h1>
-        <p
-          className="max-w-lg text-base"
-          style={{ color: "var(--text-body)" }}
-        >
-          Cleo pre-tunes captions, cuts and format for your platform. Change
-          anything in the next step.
-        </p>
-      </div>
+      <h1
+        className="mb-8 text-4xl font-bold tracking-tight sm:text-5xl"
+        style={{ color: "var(--text-strong)" }}
+      >
+        What are you shipping?
+      </h1>
 
       <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
         {featured.map((id) => {
           const p = PRESETS[id];
           const Icon = PRESET_ICONS[id];
-          const bullets = PRESET_BULLETS[id];
           return (
             <button
               key={id}
               onClick={() => onPick(id)}
-              className="group relative flex flex-col rounded-2xl p-6 text-left transition-all hover:-translate-y-1"
+              className="group relative flex items-center gap-4 rounded-2xl p-5 text-left transition-all hover:-translate-y-0.5"
               style={{
                 background: "var(--surface-1)",
                 border: "1px solid var(--border)",
@@ -727,66 +711,40 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
                 e.currentTarget.style.borderColor = "var(--border)";
               }}
             >
-              <div className="mb-5 flex items-center justify-between">
-                <div
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-xl"
-                  style={{
-                    background: "var(--brand-tint)",
-                    color: "var(--brand)",
-                  }}
-                >
-                  <Icon size={22} strokeWidth={2} />
-                </div>
-                <span
-                  className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-                  style={{
-                    background: "var(--surface-2)",
-                    color: "var(--text-muted)",
-                    border: "1px solid var(--border-hover)",
-                  }}
-                >
-                  {p.tagline}
-                </span>
-              </div>
               <div
-                className="mb-3 text-xl font-bold"
-                style={{ color: "var(--text-strong)" }}
+                className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
+                style={{
+                  background: "var(--brand-tint)",
+                  color: "var(--brand)",
+                }}
               >
-                {p.label}
+                <Icon size={24} strokeWidth={2} />
               </div>
-              <ul className="mb-6 space-y-1.5">
-                {bullets.map((b, i) => (
-                  <li
-                    key={i}
-                    className="flex items-start gap-2 text-sm leading-relaxed"
-                    style={{ color: "var(--text-body)" }}
-                  >
-                    <span
-                      className="mt-0.5 shrink-0"
-                      style={{ color: "var(--brand)" }}
-                    >
-                      <IconCheck size={14} strokeWidth={2.5} />
-                    </span>
-                    <span dangerouslySetInnerHTML={{ __html: b }} />
-                  </li>
-                ))}
-              </ul>
-              <div
-                className="mt-auto inline-flex items-center gap-1.5 text-sm font-semibold transition-transform group-hover:translate-x-1"
+              <div className="flex-1">
+                <div
+                  className="text-lg font-bold"
+                  style={{ color: "var(--text-strong)" }}
+                >
+                  {p.label}
+                </div>
+                <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  {p.tagline}
+                </div>
+              </div>
+              <span
+                className="transition-transform group-hover:translate-x-1"
                 style={{ color: "var(--brand)" }}
               >
-                Use this
-                <IconArrowRight size={16} strokeWidth={2.5} />
-              </div>
+                <IconArrowRight size={18} strokeWidth={2.5} />
+              </span>
             </button>
           );
         })}
       </div>
 
-      {/* Custom — subtle escape hatch */}
       <button
         onClick={() => onPick("custom")}
-        className="mt-4 flex items-center justify-between rounded-2xl p-5 text-left transition-colors"
+        className="mt-3 flex items-center gap-3 rounded-2xl p-4 text-left transition-colors"
         style={{
           background: "transparent",
           border: "1px dashed var(--border-hover)",
@@ -800,27 +758,17 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
           e.currentTarget.style.background = "transparent";
         }}
       >
-        <div className="flex items-center gap-3">
-          <div
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg"
-            style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
-          >
-            <IconSliders size={18} strokeWidth={2} />
-          </div>
-          <div>
-            <div
-              className="text-sm font-semibold"
-              style={{ color: "var(--text-strong)" }}
-            >
-              Custom setup
-            </div>
-            <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Configure every knob yourself
-            </div>
-          </div>
+        <div
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg"
+          style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
+        >
+          <IconSliders size={16} strokeWidth={2} />
         </div>
+        <span className="flex-1 text-sm" style={{ color: "var(--text-body)" }}>
+          Custom setup
+        </span>
         <span style={{ color: "var(--text-muted)" }}>
-          <IconArrowRight size={16} strokeWidth={2} />
+          <IconArrowRight size={14} strokeWidth={2} />
         </span>
       </button>
     </div>
@@ -836,26 +784,12 @@ function IdleScreen({
 }) {
   return (
     <div className="relative z-10 flex flex-col">
-      <div className="mb-8 text-center">
-        <div
-          className="mb-3 text-xs font-semibold uppercase tracking-[0.2em]"
-          style={{ color: "var(--brand)" }}
-        >
-          Step 2 of 3
-        </div>
-        <h1
-          className="mb-3 text-4xl font-bold tracking-tight sm:text-5xl"
-          style={{ color: "var(--text-strong)" }}
-        >
-          Drop the video.
-        </h1>
-        <p
-          className="mx-auto max-w-md text-base"
-          style={{ color: "var(--text-body)" }}
-        >
-          Any format, any length. Cleo handles rotation, resolution and audio.
-        </p>
-      </div>
+      <h1
+        className="mb-8 text-4xl font-bold tracking-tight sm:text-5xl"
+        style={{ color: "var(--text-strong)" }}
+      >
+        Drop the video.
+      </h1>
 
       <button
         onClick={onPick}
@@ -886,33 +820,12 @@ function IdleScreen({
           className="text-base font-bold"
           style={{ color: "var(--text-strong)" }}
         >
-          Tap to choose a video
+          Tap to choose
         </div>
-        <div
-          className="mt-1.5 text-xs"
-          style={{ color: "var(--text-muted)" }}
-        >
+        <div className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
           Or drag one in
         </div>
       </button>
-
-      <div
-        className="mt-6 rounded-xl p-4 text-xs leading-relaxed"
-        style={{
-          background: "var(--brand-tint)",
-          border: "1px solid var(--border)",
-          color: "var(--text-body)",
-        }}
-      >
-        <span
-          className="mr-1 font-semibold"
-          style={{ color: "var(--brand-strong)" }}
-        >
-          Heads up:
-        </span>
-        for the smoothest run, record at <strong>1080p</strong> on your phone.
-        4K works too but takes noticeably longer.
-      </div>
     </div>
   );
 }
