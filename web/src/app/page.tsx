@@ -39,7 +39,7 @@ export default function Landing() {
             className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 font-semibold transition-transform hover:scale-105"
             style={{
               background: "var(--brand)",
-              color: "#1a1208",
+              color: "white",
               boxShadow: "var(--shadow-glow)",
             }}
           >
@@ -106,7 +106,7 @@ export default function Landing() {
               className="group inline-flex w-full items-center justify-center gap-2 rounded-full px-7 py-4 text-base font-semibold transition-transform hover:scale-[1.02] sm:w-auto"
               style={{
                 background: "var(--brand)",
-                color: "#1a1208",
+                color: "white",
                 boxShadow: "var(--shadow-glow)",
               }}
             >
@@ -271,7 +271,7 @@ export default function Landing() {
             className="inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-semibold transition-transform hover:scale-[1.02]"
             style={{
               background: "var(--brand)",
-              color: "#1a1208",
+              color: "white",
               boxShadow: "var(--shadow-glow)",
             }}
           >
@@ -358,7 +358,7 @@ function PhoneMockup() {
             className="relative flex-1 overflow-hidden"
             style={{
               background:
-                "linear-gradient(135deg, #2a2118 0%, #3a2a1c 60%, #221b13 100%)",
+                "linear-gradient(135deg, #1a1830 0%, #2a1f4a 60%, #14122a 100%)",
             }}
           >
             {/* Fake face silhouette */}
@@ -367,7 +367,7 @@ function PhoneMockup() {
                 className="mx-auto h-32 w-32 rounded-full"
                 style={{
                   background:
-                    "radial-gradient(circle at 40% 40%, #ffd396, #d99551 40%, #7a4d24 100%)",
+                    "radial-gradient(circle at 40% 40%, #ddd6fe, #a78bfa 40%, #5b21b6 100%)",
                   opacity: 0.85,
                 }}
               />
@@ -375,7 +375,7 @@ function PhoneMockup() {
                 className="mx-auto -mt-6 h-40 w-56 rounded-[40%]"
                 style={{
                   background:
-                    "linear-gradient(180deg, #3a2a1c 0%, #221b13 100%)",
+                    "linear-gradient(180deg, #2a1f4a 0%, #14122a 100%)",
                 }}
               />
             </div>
@@ -388,7 +388,7 @@ function PhoneMockup() {
                   background: "rgba(0,0,0,0.65)",
                   color: "#ffffff",
                   textShadow: "0 2px 6px rgba(0,0,0,0.6)",
-                  border: "1px solid rgba(245,176,84,0.35)",
+                  border: "1px solid rgba(167,139,250,0.4)",
                   boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
                 }}
               >

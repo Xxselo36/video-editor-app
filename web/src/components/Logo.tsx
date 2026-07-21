@@ -24,8 +24,8 @@ export function LogoMark({
     >
       <defs>
         <linearGradient id="cleoBrand" x1="0" y1="0" x2="32" y2="32">
-          <stop offset="0%" stopColor="#f3c58b" />
-          <stop offset="100%" stopColor="#c47f36" />
+          <stop offset="0%" stopColor="#c4b5fd" />
+          <stop offset="100%" stopColor="#7c3aed" />
         </linearGradient>
       </defs>
       <path
