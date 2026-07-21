@@ -683,30 +683,30 @@ const PRESET_BULLETS: Record<PresetId, string[]> = {
 function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
   const featured: PresetId[] = ["tiktok", "podcast", "vlog", "captions"];
   return (
-    <div className="flex flex-col">
-      <div className="mb-8 text-center">
+    <div className="relative z-10 flex flex-col">
+      <div className="mb-10">
         <div
-          className="mb-2 text-xs font-semibold uppercase tracking-[0.2em]"
-          style={{ color: "var(--brand-strong)" }}
+          className="mb-3 text-xs font-semibold uppercase tracking-[0.2em]"
+          style={{ color: "var(--brand)" }}
         >
-          Let&apos;s get started
+          Pick a workflow
         </div>
         <h1
           className="mb-3 text-4xl font-bold tracking-tight sm:text-5xl"
           style={{ color: "var(--text-strong)" }}
         >
-          What are you working on?
+          Which one are you shipping?
         </h1>
         <p
-          className="mx-auto max-w-lg text-base"
+          className="max-w-lg text-base"
           style={{ color: "var(--text-body)" }}
         >
-          Pick what fits — I&apos;ll set the right captions, cuts and format
-          for you. You can still tweak everything in the next step if you want.
+          Cleo pre-tunes captions, cuts and format for your platform. Change
+          anything in the next step.
         </p>
       </div>
 
-      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
         {featured.map((id) => {
           const p = PRESETS[id];
           const Icon = PRESET_ICONS[id];
@@ -715,46 +715,57 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
             <button
               key={id}
               onClick={() => onPick(id)}
-              className="group flex flex-col rounded-2xl p-6 text-left transition-all hover:-translate-y-0.5"
+              className="group relative flex flex-col rounded-2xl p-6 text-left transition-all hover:-translate-y-1"
               style={{
                 background: "var(--surface-1)",
                 border: "1px solid var(--border)",
-                boxShadow: "var(--shadow-sm)",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "var(--border-strong)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "var(--border)";
               }}
             >
-              <div
-                className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl"
-                style={{
-                  background: "var(--brand-tint)",
-                  color: "var(--brand-strong)",
-                }}
-              >
-                <Icon size={22} strokeWidth={2} />
+              <div className="mb-5 flex items-center justify-between">
+                <div
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-xl"
+                  style={{
+                    background: "var(--brand-tint)",
+                    color: "var(--brand)",
+                  }}
+                >
+                  <Icon size={22} strokeWidth={2} />
+                </div>
+                <span
+                  className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                  style={{
+                    background: "var(--surface-2)",
+                    color: "var(--text-muted)",
+                    border: "1px solid var(--border-hover)",
+                  }}
+                >
+                  {p.tagline}
+                </span>
               </div>
               <div
-                className="mb-1 text-lg font-semibold"
+                className="mb-3 text-xl font-bold"
                 style={{ color: "var(--text-strong)" }}
               >
                 {p.label}
               </div>
-              <div
-                className="mb-4 text-xs font-medium uppercase tracking-wider"
-                style={{ color: "var(--brand-strong)" }}
-              >
-                {p.tagline}
-              </div>
-              <ul className="mb-5 space-y-2">
+              <ul className="mb-6 space-y-1.5">
                 {bullets.map((b, i) => (
                   <li
                     key={i}
-                    className="flex items-start gap-2 text-sm"
+                    className="flex items-start gap-2 text-sm leading-relaxed"
                     style={{ color: "var(--text-body)" }}
                   >
                     <span
                       className="mt-0.5 shrink-0"
                       style={{ color: "var(--brand)" }}
                     >
-                      <IconCheck size={16} strokeWidth={2.5} />
+                      <IconCheck size={14} strokeWidth={2.5} />
                     </span>
                     <span dangerouslySetInnerHTML={{ __html: b }} />
                   </li>
@@ -764,45 +775,54 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
                 className="mt-auto inline-flex items-center gap-1.5 text-sm font-semibold transition-transform group-hover:translate-x-1"
                 style={{ color: "var(--brand)" }}
               >
-                Pick this <IconArrowRight size={16} />
+                Use this
+                <IconArrowRight size={16} strokeWidth={2.5} />
               </div>
             </button>
           );
         })}
       </div>
 
-      {/* Custom lives below as a subtle escape hatch for power users. */}
-      <div
-        className="mt-8 flex flex-col items-center gap-2 rounded-2xl p-6 text-center sm:flex-row sm:justify-between sm:text-left"
+      {/* Custom — subtle escape hatch */}
+      <button
+        onClick={() => onPick("custom")}
+        className="mt-4 flex items-center justify-between rounded-2xl p-5 text-left transition-colors"
         style={{
-          background: "var(--surface-2)",
+          background: "transparent",
           border: "1px dashed var(--border-hover)",
         }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.borderColor = "var(--border-strong)";
+          e.currentTarget.style.background = "var(--surface-1)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.borderColor = "var(--border-hover)";
+          e.currentTarget.style.background = "transparent";
+        }}
       >
-        <div>
+        <div className="flex items-center gap-3">
           <div
-            className="mb-0.5 text-sm font-semibold"
-            style={{ color: "var(--text-strong)" }}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg"
+            style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
           >
-            Prefer to configure everything yourself?
+            <IconSliders size={18} strokeWidth={2} />
           </div>
-          <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-            You&apos;ll see every knob — captions, format, cuts, all of it.
+          <div>
+            <div
+              className="text-sm font-semibold"
+              style={{ color: "var(--text-strong)" }}
+            >
+              Custom setup
+            </div>
+            <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+              Configure every knob yourself
+            </div>
           </div>
         </div>
-        <button
-          onClick={() => onPick("custom")}
-          className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-colors"
-          style={{
-            background: "var(--surface-1)",
-            color: "var(--text-strong)",
-            border: "1px solid var(--border-hover)",
-          }}
-        >
-          <IconSliders size={16} strokeWidth={2} />
-          Custom setup
-        </button>
-      </div>
+        <span style={{ color: "var(--text-muted)" }}>
+          <IconArrowRight size={16} strokeWidth={2} />
+        </span>
+      </button>
     </div>
   );
 }
@@ -815,60 +835,84 @@ function IdleScreen({
   onDrop: (e: React.DragEvent) => void;
 }) {
   return (
-    <div className="flex flex-col items-center">
-      <div
-        className="mb-2 text-xs font-semibold uppercase tracking-[0.2em]"
-        style={{ color: "var(--brand-strong)" }}
-      >
-        Almost there
+    <div className="relative z-10 flex flex-col">
+      <div className="mb-8 text-center">
+        <div
+          className="mb-3 text-xs font-semibold uppercase tracking-[0.2em]"
+          style={{ color: "var(--brand)" }}
+        >
+          Step 2 of 3
+        </div>
+        <h1
+          className="mb-3 text-4xl font-bold tracking-tight sm:text-5xl"
+          style={{ color: "var(--text-strong)" }}
+        >
+          Drop the video.
+        </h1>
+        <p
+          className="mx-auto max-w-md text-base"
+          style={{ color: "var(--text-body)" }}
+        >
+          Any format, any length. Cleo handles rotation, resolution and audio.
+        </p>
       </div>
-      <h1
-        className="mb-3 text-4xl font-bold tracking-tight"
-        style={{ color: "var(--text-strong)" }}
-      >
-        Drop your video in
-      </h1>
-      <p
-        className="mb-10 max-w-sm text-center text-base"
-        style={{ color: "var(--text-body)" }}
-      >
-        I&apos;ll take it from here. Remember — if you said{" "}
-        <span style={{ color: "var(--text-strong)", fontWeight: 500 }}>
-          &ldquo;Cleo cut&rdquo;
-        </span>{" "}
-        while recording, I&apos;ll find those and clean them up.
-      </p>
 
       <button
         onClick={onPick}
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
-        className="group w-full rounded-2xl px-6 py-14 text-center transition-all hover:-translate-y-0.5"
+        className="group w-full rounded-2xl px-6 py-16 text-center transition-all hover:scale-[1.01]"
         style={{
           background: "var(--surface-1)",
-          border: "2px dashed var(--border-hover)",
-          boxShadow: "var(--shadow-sm)",
+          border: "2px dashed var(--border-strong)",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.borderColor = "var(--brand)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.borderColor = "var(--border-strong)";
         }}
       >
         <div
-          className="mx-auto mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full transition-transform group-hover:scale-110"
+          className="mx-auto mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl transition-transform group-hover:scale-110"
           style={{
             background: "var(--brand-tint)",
-            color: "var(--brand-strong)",
+            color: "var(--brand)",
           }}
         >
           <IconPhone size={26} strokeWidth={2} />
         </div>
         <div
-          className="text-base font-semibold"
+          className="text-base font-bold"
           style={{ color: "var(--text-strong)" }}
         >
-          Pick a video
+          Tap to choose a video
         </div>
-        <div className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
-          or drop it right here
+        <div
+          className="mt-1.5 text-xs"
+          style={{ color: "var(--text-muted)" }}
+        >
+          Or drag one in
         </div>
       </button>
+
+      <div
+        className="mt-6 rounded-xl p-4 text-xs leading-relaxed"
+        style={{
+          background: "var(--brand-tint)",
+          border: "1px solid var(--border)",
+          color: "var(--text-body)",
+        }}
+      >
+        <span
+          className="mr-1 font-semibold"
+          style={{ color: "var(--brand-strong)" }}
+        >
+          Heads up:
+        </span>
+        for the smoothest run, record at <strong>1080p</strong> on your phone.
+        4K works too but takes noticeably longer.
+      </div>
     </div>
   );
 }

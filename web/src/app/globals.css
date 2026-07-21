@@ -1,43 +1,47 @@
 @import "tailwindcss";
 
-/* ── Warm Design Tokens ─────────────────────────────────────────
- * Light cream background, amber accent, warm neutrals.
- * Feels like a helpful colleague, not a tech-bro tool.
+/* ── Dark-warm creator palette ─────────────────────────────────
+ * Near-black with warm undertones. Amber for the primary accent
+ * (pops on dark), rose for energy on CTAs. No cold zinc/gray.
  */
 :root {
-  /* Surfaces — warm off-whites */
-  --surface-0: #faf6ef;      /* page bg — warm cream */
-  --surface-1: #ffffff;      /* card bg */
-  --surface-2: #fff9ee;      /* elevated / accent bg */
-  --surface-tint: #fdf3e0;   /* very light amber wash */
+  /* Surfaces */
+  --surface-0: #0d0b09;      /* page bg — warm near-black */
+  --surface-1: #17130f;      /* card bg */
+  --surface-2: #211b15;      /* elevated */
+  --surface-tint: #2a2118;   /* subtle warm wash */
 
-  /* Text — warm darks, no pure black */
-  --text-strong: #2b241d;    /* headings, buttons */
-  --text-body: #5d5147;      /* body copy */
-  --text-muted: #8b7f75;     /* secondary */
-  --text-faint: #b3a89c;     /* placeholders, timestamps */
+  /* Text */
+  --text-strong: #f6efde;    /* warm off-white for headings */
+  --text-body: #c8bda8;      /* warm mid for body */
+  --text-muted: #8a7f6d;     /* warm muted */
+  --text-faint: #4d443a;     /* warm dim */
 
-  /* Borders — warm neutrals */
-  --border: #ecdfc9;         /* subtle warm border */
-  --border-hover: #d8c4a0;   /* hover state */
-  --border-strong: #b89b70;  /* active/focus */
+  /* Borders */
+  --border: #251f18;         /* almost invisible */
+  --border-hover: #3a3025;
+  --border-strong: #56463a;
 
-  /* Brand — warm amber */
-  --brand: #d99551;          /* warm amber, primary accent */
-  --brand-hover: #c47f36;    /* darker on hover */
-  --brand-tint: #fce9c8;     /* light amber for backgrounds */
-  --brand-strong: #a5651e;   /* dark for text-on-tint */
-  --brand-glow: rgba(217, 149, 81, 0.35);
+  /* Brand — bright amber pops on dark */
+  --brand: #f5b054;
+  --brand-hover: #ffc274;
+  --brand-tint: rgba(245, 176, 84, 0.12);
+  --brand-strong: #ffd396;
+  --brand-glow: rgba(245, 176, 84, 0.45);
+
+  /* Secondary accent — warm coral for energy */
+  --accent: #ee7767;
+  --accent-tint: rgba(238, 119, 103, 0.14);
 
   /* Feedback */
-  --danger: #c14e35;
-  --warn: #d99551;
-  --success: #4d8b6f;
+  --danger: #ef6b57;
+  --warn: #f5b054;
+  --success: #6dbfa1;
 
-  /* Shadows — warm */
-  --shadow-sm: 0 1px 2px rgba(120, 80, 30, 0.06);
-  --shadow-md: 0 4px 12px rgba(120, 80, 30, 0.08);
-  --shadow-lg: 0 12px 32px rgba(120, 80, 30, 0.12);
+  /* Shadows — warm glow */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.35);
+  --shadow-glow: 0 0 0 1px rgba(245, 176, 84, 0.25), 0 8px 32px rgba(245, 176, 84, 0.18);
 }
 
 @theme inline {
@@ -53,12 +57,21 @@ body {
   color: var(--text-strong);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: "cv11", "ss01";  /* tightens Geist for editorial feel */
 }
 
-/* ── Motion ─────────────────────────────────────────────────────
- * Soft ease-out phase-fade for screen transitions.
- */
+/* Soft warm radial glow at top of page — subtle, adds depth */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 40% at 50% 0%, rgba(245, 176, 84, 0.08), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 90% 10%, rgba(238, 119, 103, 0.06), transparent 70%);
+  z-index: 0;
+}
+
+/* Motion */
 @keyframes phase-fade-in {
   from {
     opacity: 0;
@@ -71,25 +84,29 @@ body {
 }
 
 .phase-fade {
-  animation: phase-fade-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: phase-fade-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Skeleton */
+@keyframes soft-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.pulse-dot {
+  animation: soft-pulse 2s ease-in-out infinite;
+}
+
 @keyframes skeleton-shimmer {
-  from {
-    background-position: -400px 0;
-  }
-  to {
-    background-position: 400px 0;
-  }
+  from { background-position: -400px 0; }
+  to { background-position: 400px 0; }
 }
 
 .skeleton {
   background: linear-gradient(
     90deg,
-    var(--surface-2) 25%,
-    var(--surface-tint) 50%,
-    var(--surface-2) 75%
+    var(--surface-1) 25%,
+    var(--surface-2) 50%,
+    var(--surface-1) 75%
   );
   background-size: 800px 100%;
   animation: skeleton-shimmer 1.6s linear infinite;
@@ -97,8 +114,5 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .phase-fade,
-  .skeleton {
-    animation: none;
-  }
+  .phase-fade, .skeleton, .pulse-dot { animation: none; }
 }
