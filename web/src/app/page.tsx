@@ -1,9 +1,11 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { LogoWord } from "@/components/Logo";
 import {
   IconArrowRight,
   IconCaptions,
-  IconCheck,
   IconMic,
   IconPhone,
   IconSparkle,
@@ -97,7 +99,7 @@ export default function Landing() {
         </div>
 
         <div className="phase-fade flex justify-center lg:justify-end">
-          <PhoneMockup />
+          <CaptionShowcase />
         </div>
       </section>
 
@@ -174,9 +176,125 @@ export default function Landing() {
   );
 }
 
-function PhoneMockup() {
+/* ── Caption Showcase ──
+ * Rotates through caption styles inside a video-preview frame. No fake
+ * face, no fake progress bar — just the actual product feature (caption
+ * variety) rendered live. Reads as: "here's what Cleo makes."
+ */
+type Style = {
+  label: string;
+  text: string;
+  render: (t: string) => React.ReactNode;
+};
+
+const STYLES: Style[] = [
+  {
+    label: "Clipper",
+    text: "TALK IS THE EDITOR",
+    render: (t) => {
+      const words = t.split(" ");
+      return (
+        <div className="text-center leading-tight">
+          {words.map((w, i) => (
+            <span
+              key={i}
+              className="mx-1 inline-block text-[32px] font-black tracking-wide sm:text-[38px]"
+              style={{
+                color: i === 1 ? "var(--brand)" : "#ffffff",
+                textShadow:
+                  "0 0 6px rgba(0,0,0,.85), 2px 2px 0 #000, -2px 2px 0 #000, 2px -2px 0 #000, -2px -2px 0 #000",
+              }}
+            >
+              {w}
+            </span>
+          ))}
+        </div>
+      );
+    },
+  },
+  {
+    label: "Highlight",
+    text: "READY TO POST",
+    render: (t) => (
+      <div
+        className="rounded-md px-3 py-1.5 text-center text-[26px] font-bold uppercase sm:text-[32px]"
+        style={{
+          background: "var(--accent)",
+          color: "#ffffff",
+          letterSpacing: "0.02em",
+        }}
+      >
+        {t}
+      </div>
+    ),
+  },
+  {
+    label: "Flash",
+    text: "SAY CUT",
+    render: (t) => (
+      <div
+        className="text-center text-[32px] font-black italic sm:text-[40px]"
+        style={{
+          color: "#ffffff",
+          textShadow:
+            "0 2px 8px rgba(139,92,246,.85), 0 0 24px rgba(139,92,246,.5)",
+          letterSpacing: "0.01em",
+        }}
+      >
+        {t}
+      </div>
+    ),
+  },
+  {
+    label: "Punch",
+    text: "NAILED IT",
+    render: (t) => (
+      <div
+        className="text-center text-[36px] font-black uppercase sm:text-[44px]"
+        style={{
+          color: "var(--brand-hover)",
+          textShadow: "0 0 10px #000, 3px 3px 0 #000, -3px -3px 0 #000",
+          letterSpacing: "0.02em",
+        }}
+      >
+        {t}
+      </div>
+    ),
+  },
+  {
+    label: "Elegant",
+    text: "It just listens.",
+    render: (t) => (
+      <div
+        className="text-center italic sm:text-[30px]"
+        style={{
+          fontFamily: "Georgia, 'Times New Roman', serif",
+          fontSize: "26px",
+          color: "#ffffff",
+          textShadow: "0 2px 6px rgba(0,0,0,.7)",
+        }}
+      >
+        {t}
+      </div>
+    ),
+  },
+];
+
+function CaptionShowcase() {
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIdx((i) => (i + 1) % STYLES.length);
+    }, 2400);
+    return () => clearInterval(timer);
+  }, []);
+
+  const style = STYLES[idx];
+
   return (
     <div className="relative">
+      {/* Glow */}
       <div
         aria-hidden
         className="absolute inset-0 -z-10 blur-3xl"
@@ -185,97 +303,78 @@ function PhoneMockup() {
             "radial-gradient(ellipse at center, var(--brand-glow) 0%, transparent 60%)",
         }}
       />
+
       <div
-        className="relative overflow-hidden rounded-[2.5rem] p-2"
+        className="relative flex flex-col overflow-hidden rounded-3xl"
         style={{
-          background: "var(--surface-2)",
-          border: "1px solid var(--border-strong)",
+          background:
+            "linear-gradient(135deg, #14122a 0%, #1c1735 40%, #12112a 100%)",
+          border: "1px solid var(--border-hover)",
           boxShadow: "var(--shadow-md)",
-          width: "min(300px, 80vw)",
-          aspectRatio: "9 / 19",
+          width: "min(440px, 90vw)",
+          aspectRatio: "4 / 5",
         }}
       >
+        {/* Subtle dotted texture — evokes "video content" without being a fake person */}
         <div
-          className="flex h-full flex-col overflow-hidden rounded-[2rem]"
-          style={{ background: "var(--surface-0)" }}
-        >
-          <div className="flex items-center justify-center py-2">
-            <div className="h-4 w-20 rounded-full" style={{ background: "#000" }} />
-          </div>
+          aria-hidden
+          className="absolute inset-0 opacity-40"
+          style={{
+            background:
+              "radial-gradient(rgba(139,92,246,0.18) 1px, transparent 1px)",
+            backgroundSize: "18px 18px",
+          }}
+        />
 
-          <div
-            className="relative flex-1 overflow-hidden"
-            style={{
-              background:
-                "linear-gradient(135deg, #1a1830 0%, #2a1f4a 60%, #14122a 100%)",
-            }}
+        {/* Top-right: listening indicator */}
+        <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
+          <span
+            className="pulse-dot inline-block h-2 w-2 rounded-full"
+            style={{ background: "var(--brand)" }}
+          />
+          <span
+            className="text-[10px] font-semibold uppercase tracking-widest"
+            style={{ color: "var(--brand-strong)" }}
           >
-            <div className="absolute inset-x-8 top-8">
-              <div
-                className="mx-auto h-32 w-32 rounded-full"
-                style={{
-                  background:
-                    "radial-gradient(circle at 40% 40%, #ddd6fe, #a78bfa 40%, #5b21b6 100%)",
-                  opacity: 0.85,
-                }}
-              />
-              <div
-                className="mx-auto -mt-6 h-40 w-56 rounded-[40%]"
-                style={{
-                  background: "linear-gradient(180deg, #2a1f4a 0%, #14122a 100%)",
-                }}
-              />
-            </div>
+            Cleo listening
+          </span>
+        </div>
 
-            <div className="absolute inset-x-6 bottom-24 flex justify-center">
-              <div
-                className="rounded-lg px-3 py-1.5 text-center text-[13px] font-black italic tracking-wide"
-                style={{
-                  background: "rgba(0,0,0,0.65)",
-                  color: "#ffffff",
-                  textShadow: "0 2px 6px rgba(0,0,0,0.6)",
-                  border: "1px solid rgba(167,139,250,0.4)",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-                }}
-              >
-                POST-READY IN <span style={{ color: "var(--brand)" }}>SECONDS</span>
-              </div>
-            </div>
-
-            <div className="absolute inset-x-4 top-4 flex items-center gap-2">
-              <span
-                className="pulse-dot inline-block h-2 w-2 rounded-full"
-                style={{ background: "var(--brand)" }}
-              />
-              <span
-                className="text-[10px] font-semibold uppercase tracking-widest"
-                style={{ color: "var(--brand)" }}
-              >
-                Listening
-              </span>
-            </div>
+        {/* Center: rotating caption */}
+        <div className="relative z-10 flex flex-1 items-center justify-center px-8">
+          <div key={idx} className="phase-fade max-w-full">
+            {style.render(style.text)}
           </div>
+        </div>
 
-          <div
-            className="flex items-center gap-2 px-4 py-3"
-            style={{ borderTop: "1px solid var(--border)" }}
-          >
-            <IconMic size={16} className="shrink-0" strokeWidth={2} />
+        {/* Bottom: style name + step dots */}
+        <div className="relative z-10 flex items-center justify-between px-5 pb-5">
+          <div className="flex items-center gap-2">
             <div
-              className="h-1 flex-1 overflow-hidden rounded-full"
-              style={{ background: "var(--surface-2)" }}
+              className="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider"
+              style={{
+                background: "var(--brand-tint)",
+                color: "var(--brand-strong)",
+              }}
             >
+              {style.label}
+            </div>
+            <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+              caption style
+            </span>
+          </div>
+
+          <div className="flex gap-1">
+            {STYLES.map((_, i) => (
               <div
-                className="h-full w-2/3 rounded-full"
+                key={i}
+                className="h-1 w-4 rounded-full transition-colors"
                 style={{
                   background:
-                    "linear-gradient(90deg, var(--brand) 0%, var(--accent) 100%)",
+                    i === idx ? "var(--brand)" : "rgba(255,255,255,0.15)",
                 }}
               />
-            </div>
-            <div className="text-[10px] font-semibold" style={{ color: "var(--brand)" }}>
-              67%
-            </div>
+            ))}
           </div>
         </div>
       </div>
