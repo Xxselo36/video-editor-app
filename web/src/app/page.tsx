@@ -107,7 +107,6 @@ export default function Landing() {
       <section
         className="relative z-10 px-6 py-16"
         style={{
-          background: "var(--surface-1)",
           borderTop: "1px solid var(--border)",
         }}
       >
@@ -155,7 +154,6 @@ export default function Landing() {
         className="relative z-10 px-6 py-8"
         style={{
           borderTop: "1px solid var(--border)",
-          background: "var(--surface-1)",
         }}
       >
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-3 sm:flex-row sm:justify-between">
@@ -393,8 +391,10 @@ function Feat({
     <div
       className="flex items-center gap-3 rounded-xl px-4 py-3.5 transition-colors hover:-translate-y-0.5"
       style={{
-        background: "var(--surface-0)",
-        border: "1px solid var(--border)",
+        background: "rgba(19, 18, 23, 0.5)",
+        border: "1px solid var(--border-hover)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
       }}
     >
       <div
@@ -415,8 +415,10 @@ function Step({ n, title, body }: { n: string; title: string; body: string }) {
     <div
       className="rounded-2xl p-5"
       style={{
-        background: "var(--surface-1)",
-        border: "1px solid var(--border)",
+        background: "rgba(19, 18, 23, 0.5)",
+        border: "1px solid var(--border-hover)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
       }}
     >
       <div
