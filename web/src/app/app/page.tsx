@@ -862,11 +862,11 @@ function ConfigureScreen(props: {
       <div className="flex items-center justify-between">
         <button
           onClick={props.onBack}
-          className="text-xs text-zinc-500 hover:text-white"
+          className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
         >
           ← back
         </button>
-        <div className="truncate text-xs text-zinc-400">
+        <div className="truncate text-xs text-[var(--text-body)]">
           {props.file.name} · {sizeMB} MB
         </div>
       </div>
@@ -881,15 +881,15 @@ function ConfigureScreen(props: {
                 onClick={() => props.setCaptionPreset(p.id)}
                 className={`overflow-hidden rounded-xl border text-left transition-colors ${
                   selected
-                    ? "border-violet-400 bg-violet-400/10"
-                    : "border-zinc-800 hover:border-zinc-600"
+                    ? "border-[var(--brand)] bg-[var(--brand-tint)]"
+                    : "border-[var(--border)] hover:border-[var(--border-strong)]"
                 }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={`${backendUrl()}/caption-previews/${p.id}.png?w=320&h=110`}
                   alt={`${p.label} caption preview`}
-                  className="block h-[64px] w-full bg-zinc-950 object-cover"
+                  className="block h-[64px] w-full bg-[var(--surface-1)] object-cover"
                   loading="lazy"
                 />
                 <div className="px-3 py-2 text-xs font-medium">{p.label}</div>
@@ -907,12 +907,12 @@ function ConfigureScreen(props: {
               onClick={() => props.setCutStyle(s.id)}
               className={`rounded-xl border px-2 py-3 text-left transition-colors ${
                 props.cutStyle === s.id
-                  ? "border-violet-400 bg-violet-400/10"
-                  : "border-zinc-800 hover:border-zinc-600"
+                  ? "border-[var(--brand)] bg-[var(--brand-tint)]"
+                  : "border-[var(--border)] hover:border-[var(--border-strong)]"
               }`}
             >
               <div className="text-xs font-medium">{s.label}</div>
-              <div className="text-[10px] text-zinc-500">{s.desc}</div>
+              <div className="text-[10px] text-[var(--text-muted)]">{s.desc}</div>
             </button>
           ))}
         </div>
@@ -948,12 +948,12 @@ function ConfigureScreen(props: {
                 onClick={() => props.setSmartcamFormat(f)}
                 className={`rounded-xl border px-3 py-3 text-left text-xs transition-colors ${
                   props.smartcamFormat === f
-                    ? "border-violet-400 bg-violet-400/10"
-                    : "border-zinc-800 hover:border-zinc-600"
+                    ? "border-[var(--brand)] bg-[var(--brand-tint)]"
+                    : "border-[var(--border)] hover:border-[var(--border-strong)]"
                 }`}
               >
                 <div className="font-medium capitalize">{f}</div>
-                <div className="text-[10px] text-zinc-500">
+                <div className="text-[10px] text-[var(--text-muted)]">
                   {f === "portrait" ? "Vertical 9:16" : "Horizontal 16:9"}
                 </div>
               </button>
@@ -963,7 +963,7 @@ function ConfigureScreen(props: {
       </Section>
 
       <Section title="Extra output formats">
-        <div className="text-[10px] text-zinc-500 -mt-1">
+        <div className="text-[10px] text-[var(--text-muted)] -mt-1">
           Primary export is your SmartCam format (or original aspect). Pick
           extra letterbox-padded versions for other platforms.
         </div>
@@ -982,12 +982,12 @@ function ConfigureScreen(props: {
                 }
                 className={`rounded-xl border px-2 py-3 text-left transition-colors ${
                   on
-                    ? "border-violet-400 bg-violet-400/10"
-                    : "border-zinc-800 hover:border-zinc-600"
+                    ? "border-[var(--brand)] bg-[var(--brand-tint)]"
+                    : "border-[var(--border)] hover:border-[var(--border-strong)]"
                 }`}
               >
                 <div className="text-xs font-medium">{f.label}</div>
-                <div className="text-[10px] text-zinc-500">{f.desc}</div>
+                <div className="text-[10px] text-[var(--text-muted)]">{f.desc}</div>
               </button>
             );
           })}
@@ -996,7 +996,7 @@ function ConfigureScreen(props: {
 
       <button
         onClick={props.onProcess}
-        className="mt-2 w-full rounded-xl bg-violet-500 px-6 py-4 text-base font-semibold hover:bg-violet-400 active:scale-[0.99]"
+        className="mt-2 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99]"
       >
         Process video
       </button>
@@ -1013,7 +1013,7 @@ function Section({
 }) {
   return (
     <div>
-      <div className="mb-2 text-[11px] uppercase tracking-[0.15em] text-zinc-500">
+      <div className="mb-2 text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
         {title}
       </div>
       <div className="flex flex-col gap-2">{children}</div>
@@ -1035,15 +1035,15 @@ function ToggleRow({
   return (
     <button
       onClick={() => onChange(!checked)}
-      className="flex w-full items-center justify-between rounded-xl border border-zinc-800 px-4 py-3 text-left hover:border-zinc-600"
+      className="flex w-full items-center justify-between rounded-xl border border-[var(--border)] px-4 py-3 text-left hover:border-[var(--border-strong)]"
     >
       <div>
         <div className="text-sm">{label}</div>
-        {desc && <div className="text-[10px] text-zinc-500">{desc}</div>}
+        {desc && <div className="text-[10px] text-[var(--text-muted)]">{desc}</div>}
       </div>
       <div
         className={`h-6 w-10 rounded-full p-0.5 transition-colors ${
-          checked ? "bg-violet-500" : "bg-zinc-800"
+          checked ? "bg-[var(--brand)]" : "bg-[var(--surface-tint)]"
         }`}
       >
         <div
@@ -1059,14 +1059,14 @@ function ToggleRow({
 function ProgressScreen({ label, pct }: { label: string; pct: number }) {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center">
-      <div className="mb-8 text-base text-zinc-400">{label}</div>
-      <div className="mb-3 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-zinc-900">
+      <div className="mb-8 text-base text-[var(--text-body)]">{label}</div>
+      <div className="mb-3 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-[var(--surface-2)]">
         <div
-          className="h-full bg-violet-500 transition-all duration-300"
+          className="h-full bg-[var(--brand)] transition-all duration-300"
           style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
         />
       </div>
-      <div className="text-xs text-zinc-600">{Math.round(pct)}%</div>
+      <div className="text-xs text-[var(--text-faint)]">{Math.round(pct)}%</div>
     </div>
   );
 }
@@ -1109,25 +1109,25 @@ function DoneScreen({
       <div className="text-2xl font-semibold">Ready</div>
 
       {(socialCaption || hashtagLine) && (
-        <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-left">
+        <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4 text-left">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-[0.15em] text-zinc-500">
+            <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
               Caption suggestion
             </span>
             <button
               onClick={() => copyText(`${socialCaption}\n\n${hashtagLine}`.trim())}
-              className="text-[10px] uppercase tracking-wider text-violet-400 hover:text-violet-300"
+              className="text-[10px] uppercase tracking-wider text-[var(--brand)] hover:text-[var(--brand-hover)]"
             >
               copy
             </button>
           </div>
           {socialCaption && (
-            <div className="whitespace-pre-wrap text-sm leading-relaxed text-white">
+            <div className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-strong)]">
               {socialCaption}
             </div>
           )}
           {hashtagLine && (
-            <div className="mt-2 text-xs text-violet-300">{hashtagLine}</div>
+            <div className="mt-2 text-xs text-[var(--brand-hover)]">{hashtagLine}</div>
           )}
         </div>
       )}
@@ -1142,12 +1142,12 @@ function DoneScreen({
               download
               className={`rounded-xl px-5 py-3 text-center font-semibold ${
                 f === "primary"
-                  ? "bg-violet-500 hover:bg-violet-400"
-                  : "border border-violet-400/40 text-violet-100 hover:bg-violet-500/10"
+                  ? "bg-[var(--brand)] hover:bg-[var(--brand-hover)]"
+                  : "border border-[var(--brand)] text-[var(--brand-strong)] hover:bg-[var(--brand)]/10"
               }`}
             >
               <div className="text-sm">{formatLabel(f)}</div>
-              <div className="text-[10px] font-normal text-zinc-300/70">
+              <div className="text-[10px] font-normal text-[var(--text-strong)]/70">
                 {formatSub(f)}
               </div>
             </a>
@@ -1156,9 +1156,9 @@ function DoneScreen({
 
       {hookClips.length > 0 && (
         <div className="w-full max-w-md">
-          <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.15em] text-zinc-500">
+          <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
             <span>Bonus clips</span>
-            <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-violet-300">
+            <span className="rounded bg-[var(--brand)]/15 px-1.5 py-0.5 text-[var(--brand-hover)]">
               AI-picked
             </span>
           </div>
@@ -1170,18 +1170,18 @@ function DoneScreen({
                   key={h.key}
                   href={`${backendUrl()}/jobs/${jobId}/download?format=${encodeURIComponent(h.key)}`}
                   download
-                  className="block rounded-xl border border-zinc-800 bg-zinc-950 p-3 hover:border-violet-400/60"
+                  className="block rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:border-[var(--brand)]"
                 >
                   <div className="mb-0.5 flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-white">
+                    <div className="text-sm font-semibold text-[var(--text-strong)]">
                       {h.title}
                     </div>
-                    <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                    <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
                       {dur.toFixed(0)}s
                     </div>
                   </div>
                   {h.reason && (
-                    <div className="line-clamp-2 text-xs text-zinc-500">
+                    <div className="line-clamp-2 text-xs text-[var(--text-muted)]">
                       {h.reason}
                     </div>
                   )}
@@ -1193,7 +1193,7 @@ function DoneScreen({
       )}
       <button
         onClick={onReset}
-        className="text-xs text-zinc-500 hover:text-white"
+        className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
       >
         Process another
       </button>
@@ -1273,17 +1273,17 @@ function ReviewScreen({
       <div className="flex items-center justify-between">
         <button
           onClick={onBack}
-          className="text-xs text-zinc-500 hover:text-white"
+          className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
         >
           ← cancel
         </button>
-        <div className="text-xs text-zinc-400">
+        <div className="text-xs text-[var(--text-body)]">
           {phrases.length} sentence{phrases.length === 1 ? "" : "s"}
         </div>
       </div>
 
       {audioWarnings.length > 0 && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+        <div className="rounded-xl border border-[var(--warn)]/30 bg-[var(--warn)]/10 p-3 text-xs text-[var(--warn)]">
           <div className="mb-1 font-semibold uppercase tracking-wider">
             Audio heads-up
           </div>
@@ -1298,19 +1298,19 @@ function ReviewScreen({
       {/* Cut video preview — captions will be burned in by the final
           render, not approximated here. The style sample below shows
           the user what to expect visually. */}
-      <div className="overflow-hidden rounded-xl bg-zinc-950">
+      <div className="overflow-hidden rounded-xl bg-[var(--surface-1)]">
         <video
           ref={videoRef}
           src={`${backendUrl()}/jobs/${jobId}/preview-video`}
           controls
           playsInline
           onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-          className="block max-h-[55vh] w-full bg-black"
+          className="block max-h-[55vh] w-full bg-[var(--surface-0)]"
         />
       </div>
 
       {captionPreset !== "none" && (
-        <div className="flex items-center gap-3 rounded-xl border border-zinc-800 px-3 py-2">
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] px-3 py-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${backendUrl()}/caption-previews/${captionPreset}.png?w=200&h=72`}
@@ -1318,7 +1318,7 @@ function ReviewScreen({
             className="h-10 w-28 rounded-md object-cover"
           />
           <div className="flex-1">
-            <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+            <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
               Captions will look like
             </div>
             <div className="text-sm font-medium capitalize">{captionPreset}</div>
@@ -1342,10 +1342,10 @@ function ReviewScreen({
       )}
 
       <div>
-        <div className="mb-1 text-[11px] uppercase tracking-[0.15em] text-zinc-500">
+        <div className="mb-1 text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
           Review captions
         </div>
-        <div className="text-xs text-zinc-500">
+        <div className="text-xs text-[var(--text-muted)]">
           Play the video, fix typos as they go by. Tap ✕ to drop a line, tap a
           card to jump to that moment.
         </div>
@@ -1353,16 +1353,16 @@ function ReviewScreen({
 
       <div className="flex max-h-[40vh] flex-col gap-2 overflow-y-auto pr-1">
         {phrases.length === 0 && (
-          <div className="rounded-xl border border-zinc-800 p-6 text-center text-xs text-zinc-500">
+          <div className="rounded-xl border border-[var(--border)] p-6 text-center text-xs text-[var(--text-muted)]">
             No captions. Output will be video only.
           </div>
         )}
         {phrases.map((p, i) => {
           const isActive = i === activeIdx;
           const lowConfidence = p.confidence < 0.6;
-          let borderClass = "border-zinc-800";
-          if (isActive) borderClass = "border-violet-400 bg-violet-400/5";
-          else if (lowConfidence) borderClass = "border-amber-500/60 bg-amber-500/[0.04]";
+          let borderClass = "border-[var(--border)]";
+          if (isActive) borderClass = "border-[var(--brand)] bg-[var(--brand-tint)]";
+          else if (lowConfidence) borderClass = "border-[var(--warn)]/60 bg-[var(--warn)]/[0.04]";
           return (
             <div
               key={i}
@@ -1374,19 +1374,19 @@ function ReviewScreen({
               <div className="mb-1.5 flex items-center justify-between">
                 <button
                   onClick={() => seekToPhrase(p)}
-                  className="text-[10px] uppercase tracking-wider text-zinc-500 hover:text-white"
+                  className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-strong)]"
                 >
                   ▸ {fmtTime(p.original_start)}
                 </button>
                 <div className="flex items-center gap-2">
                   {lowConfidence && (
-                    <span className="text-[9px] uppercase tracking-wider text-amber-400">
+                    <span className="text-[9px] uppercase tracking-wider text-[var(--warn)]">
                       verify
                     </span>
                   )}
                   <button
                     onClick={() => remove(i)}
-                    className="text-zinc-600 hover:text-red-400"
+                    className="text-[var(--text-faint)] hover:text-[var(--danger)]"
                     aria-label="delete sentence"
                   >
                     ✕
@@ -1397,7 +1397,7 @@ function ReviewScreen({
                 value={p.text}
                 onChange={(e) => updateText(i, e.target.value)}
                 rows={Math.min(4, Math.max(1, Math.ceil(p.text.length / 38)))}
-                className="w-full resize-none bg-transparent text-base leading-snug text-white focus:outline-none"
+                className="w-full resize-none bg-transparent text-base leading-snug text-[var(--text-strong)] focus:outline-none"
               />
             </div>
           );
@@ -1406,7 +1406,7 @@ function ReviewScreen({
 
       <button
         onClick={onApply}
-        className="mt-1 w-full rounded-xl bg-violet-500 px-6 py-4 text-base font-semibold hover:bg-violet-400 active:scale-[0.99]"
+        className="mt-1 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99]"
       >
         Apply &amp; render
       </button>
@@ -1437,14 +1437,14 @@ function Timeline({
     .reduce((acc, c) => acc + (c.end - c.start), 0);
   return (
     <div>
-      <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-[0.15em] text-zinc-500">
+      <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
         <span>Cuts</span>
-        <span className="text-zinc-600">
+        <span className="text-[var(--text-faint)]">
           {totalCutSeconds.toFixed(1)}s removed
           {disabled.length > 0 && ` · ${disabled.length} restored`}
         </span>
       </div>
-      <div className="relative h-3 overflow-visible rounded-full bg-emerald-500/30">
+      <div className="relative h-3 overflow-visible rounded-full bg-[var(--success)]/30">
         {cuts.map((c) => {
           const leftPct = (c.start / duration) * 100;
           const widthPct = Math.max(
@@ -1461,8 +1461,8 @@ function Timeline({
               })`}
               className={`absolute top-1/2 -translate-y-1/2 h-5 cursor-pointer rounded-sm border border-black/40 transition-colors ${
                 isOff
-                  ? "bg-emerald-500/70 hover:bg-emerald-400"
-                  : "bg-red-500/85 hover:bg-red-400"
+                  ? "bg-[var(--success)]/70 hover:bg-[var(--success)]"
+                  : "bg-[var(--danger)]/85 hover:bg-[var(--danger)]"
               }`}
               style={{
                 left: `${leftPct}%`,
@@ -1473,7 +1473,7 @@ function Timeline({
           );
         })}
       </div>
-      <div className="mt-1 text-[10px] text-zinc-600">
+      <div className="mt-1 text-[10px] text-[var(--text-faint)]">
         Red = removed · tap to restore. Green dashes = kept.
       </div>
     </div>
@@ -1491,10 +1491,10 @@ function ErrorScreen({
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
       <div className="text-5xl">⚠️</div>
       <div className="text-base font-semibold">Something went wrong</div>
-      <div className="max-w-xs text-center text-xs text-zinc-500">{message}</div>
+      <div className="max-w-xs text-center text-xs text-[var(--text-muted)]">{message}</div>
       <button
         onClick={onReset}
-        className="mt-2 rounded-xl border border-zinc-700 px-5 py-2 text-sm hover:border-white"
+        className="mt-2 rounded-xl border border-[var(--border-hover)] px-5 py-2 text-sm hover:border-[var(--brand)]"
       >
         Try again
       </button>
