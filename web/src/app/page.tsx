@@ -16,7 +16,7 @@ export default function Landing() {
   return (
     <main
       className="relative flex min-h-screen flex-col"
-      style={{ background: "var(--surface-0)", color: "var(--text-strong)" }}
+      style={{ color: "var(--text-strong)" }}
     >
       {/* ── Header ─── */}
       <header

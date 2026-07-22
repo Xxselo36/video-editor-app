@@ -492,7 +492,7 @@ export default function Home() {
   return (
     <main
       className="flex min-h-screen flex-col"
-      style={{ background: "var(--surface-0)", color: "var(--text-strong)" }}
+      style={{ color: "var(--text-strong)" }}
     >
       <header
         className="flex items-center justify-between px-6 py-4"

@@ -62,8 +62,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Soft violet + magenta radial glow at top of page — subtle depth,
- * Runway-style iridescence without going overboard.
+/* Ambient violet + magenta radial glow — visible on every screen
+ * because it sits behind `body` at fixed z=0. Section backgrounds that
+ * want to punch through the glow can use `background: transparent`.
+ * Strengthened from the earlier 0.12/0.06 → 0.22/0.12 so it actually
+ * reads through opaque surfaces.
  */
 body::before {
   content: "";
@@ -71,8 +74,9 @@ body::before {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 60% 40% at 50% 0%, rgba(139, 92, 246, 0.12), transparent 70%),
-    radial-gradient(ellipse 40% 30% at 90% 10%, rgba(236, 72, 153, 0.06), transparent 70%);
+    radial-gradient(ellipse 70% 50% at 50% 0%, rgba(139, 92, 246, 0.22), transparent 70%),
+    radial-gradient(ellipse 50% 35% at 90% 15%, rgba(236, 72, 153, 0.12), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 10% 20%, rgba(139, 92, 246, 0.10), transparent 70%);
   z-index: 0;
 }
 
