@@ -1,5 +1,5 @@
 /**
- * Cleo brand mark.
+ * CleoCuts brand mark.
  *
  * Rounded confident C with a glowing spark inside — the "listening"
  * moment when you say "Cleo cut". The spark uses a radial gradient so
@@ -77,7 +77,7 @@ export function LogoWord({
         className="text-xl font-bold tracking-tight"
         style={{ color: "var(--text-strong)", letterSpacing: "-0.02em" }}
       >
-        Cleo
+        CleoCuts
       </span>
     </span>
   );

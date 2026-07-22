@@ -502,10 +502,10 @@ export default function Home() {
           <Link
             href="/"
             className="flex items-center gap-2 transition-opacity hover:opacity-80"
-            aria-label="Cleo home"
+            aria-label="CleoCuts home"
           >
             <LogoMark size={24} />
-            <span className="text-xl font-bold tracking-tight">Cleo</span>
+            <span className="text-xl font-bold tracking-tight">CleoCuts</span>
           </Link>
           {currentPreset && phase !== "picker" && (
             <>

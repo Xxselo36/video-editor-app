@@ -13,21 +13,21 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Cleo — Voice-first video editing",
+  title: "CleoCuts — Voice-first video editing",
   description:
     "Talk freely. Say 'Cleo cut' when you mess up, 'Cleo go' to start over. AI cleans the rest — captions, cuts, ready-to-post clips.",
   metadataBase: new URL("https://cleocuts.com"),
   openGraph: {
-    title: "Cleo — Talk freely. Cleo cuts.",
+    title: "CleoCuts — Talk freely. Cleo cuts.",
     description:
       "Voice-controlled video editor. Say 'Cleo cut' when you mess up. AI cleans it, adds captions, and gives you ready-to-post clips.",
     url: "https://cleocuts.com",
-    siteName: "Cleo",
+    siteName: "CleoCuts",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Cleo — Talk freely. Cleo cuts.",
+    title: "CleoCuts — Talk freely. Cleo cuts.",
     description:
       "Voice-controlled video editor. Say 'Cleo cut' when you mess up.",
   },

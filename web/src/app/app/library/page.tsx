@@ -57,7 +57,7 @@ export default function Library() {
               className="text-xl font-bold tracking-tight"
               style={{ color: "var(--text-strong)" }}
             >
-              Cleo
+              CleoCuts
             </span>
           </Link>
           <span style={{ color: "var(--text-faint)" }}>/</span>

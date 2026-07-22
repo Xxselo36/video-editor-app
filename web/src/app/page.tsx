@@ -23,7 +23,7 @@ export default function Landing() {
         className="relative z-10 flex items-center justify-between px-6 py-4"
         style={{ borderBottom: "1px solid var(--border)" }}
       >
-        <Link href="/" className="transition-opacity hover:opacity-80" aria-label="Cleo home">
+        <Link href="/" className="transition-opacity hover:opacity-80" aria-label="CleoCuts home">
           <LogoWord />
         </Link>
         <Link
@@ -93,7 +93,7 @@ export default function Landing() {
               boxShadow: "var(--shadow-glow)",
             }}
           >
-            Try Cleo
+            Try CleoCuts
             <IconArrowRight size={18} strokeWidth={2.5} />
           </Link>
         </div>
@@ -113,7 +113,7 @@ export default function Landing() {
             className="mb-10 text-2xl font-bold tracking-tight sm:text-3xl"
             style={{ color: "var(--text-strong)" }}
           >
-            What Cleo does.
+            What CleoCuts does.
           </h2>
 
           <div className="grid gap-3 sm:grid-cols-6">
@@ -121,7 +121,7 @@ export default function Landing() {
             <BentoCard
               Icon={IconMic}
               title="Voice triggers"
-              body='Say "Cleo cut" mid-take. Cleo removes the failed attempt.'
+              body='Say "Cleo cut" mid-take. CleoCuts removes the failed attempt.'
               span={4}
               decoration={<VoiceWaveDecoration />}
               accent="var(--brand)"
@@ -161,7 +161,7 @@ export default function Landing() {
             <BentoCard
               Icon={IconArrowRight}
               title="Hook clip picker"
-              body="Cleo finds the 3 best moments in your long-form and cuts them as standalone reels."
+              body="CleoCuts finds the 3 best moments in your long-form and cuts them as standalone reels."
               span={6}
               decoration={<HookClipStrip />}
               accent="var(--brand)"
@@ -207,7 +207,7 @@ export default function Landing() {
             <Link href="/app/library" className="hover:opacity-70">Library</Link>
           </div>
           <div className="text-[11px]" style={{ color: "var(--text-faint)" }}>
-            © 2026 Cleo
+            © 2026 CleoCuts
           </div>
         </div>
       </footer>
@@ -218,7 +218,7 @@ export default function Landing() {
 /* ── Caption Showcase ──
  * Rotates through caption styles inside a video-preview frame. No fake
  * face, no fake progress bar — just the actual product feature (caption
- * variety) rendered live. Reads as: "here's what Cleo makes."
+ * variety) rendered live. Reads as: "here's what CleoCuts makes."
  */
 type Style = {
   label: string;
@@ -375,7 +375,7 @@ function CaptionShowcase() {
             className="text-[10px] font-semibold uppercase tracking-widest"
             style={{ color: "var(--brand-strong)" }}
           >
-            Cleo listening
+            CleoCuts listening
           </span>
         </div>
 
