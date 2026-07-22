@@ -103,12 +103,10 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── Features — icon grid, minimal copy ─── */}
+      {/* ── Features — bento grid, mixed sizes, each with its own visual note ─── */}
       <section
-        className="relative z-10 px-6 py-16"
-        style={{
-          borderTop: "1px solid var(--border)",
-        }}
+        className="relative z-10 px-6 py-20"
+        style={{ borderTop: "1px solid var(--border)" }}
       >
         <div className="mx-auto max-w-5xl">
           <h2
@@ -118,13 +116,56 @@ export default function Landing() {
             What Cleo does.
           </h2>
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Feat Icon={IconMic} label="Voice triggers" />
-            <Feat Icon={IconSparkle} label="AI cleanup" />
-            <Feat Icon={IconCaptions} label="9 caption styles" />
-            <Feat Icon={IconPhone} label="Auto vertical" />
-            <Feat Icon={IconVlog} label="Multi-format export" />
-            <Feat Icon={IconArrowRight} label="Hook clip picker" />
+          <div className="grid gap-3 sm:grid-cols-6">
+            {/* Row 1: hero feature (wide) + accent card */}
+            <BentoCard
+              Icon={IconMic}
+              title="Voice triggers"
+              body='Say "Cleo cut" mid-take. Cleo removes the failed attempt.'
+              span={4}
+              decoration={<VoiceWaveDecoration />}
+              accent="var(--brand)"
+            />
+            <BentoCard
+              Icon={IconSparkle}
+              title="AI cleanup"
+              body="Fixes typos, brand names, homophones."
+              span={2}
+              accent="var(--accent)"
+            />
+
+            {/* Row 2: three equal */}
+            <BentoCard
+              Icon={IconCaptions}
+              title="9 caption styles"
+              body="Clean to Clipper. Real fonts."
+              span={2}
+              decoration={<CaptionMiniPreview />}
+            />
+            <BentoCard
+              Icon={IconPhone}
+              title="Auto vertical"
+              body="Landscape → 9:16 with face tracking."
+              span={2}
+              decoration={<FaceFrameDecoration />}
+            />
+            <BentoCard
+              Icon={IconVlog}
+              title="Multi-format"
+              body="9:16, 1:1, 16:9 in one render."
+              span={2}
+              decoration={<FormatStackDecoration />}
+            />
+
+            {/* Row 3: wide feature */}
+            <BentoCard
+              Icon={IconArrowRight}
+              title="Hook clip picker"
+              body="Cleo finds the 3 best moments in your long-form and cuts them as standalone reels."
+              span={6}
+              decoration={<HookClipStrip />}
+              accent="var(--brand)"
+            />
           </div>
         </div>
       </section>
@@ -380,32 +421,195 @@ function CaptionShowcase() {
   );
 }
 
-function Feat({
+/* ── Bento grid components ── */
+
+function BentoCard({
   Icon,
-  label,
+  title,
+  body,
+  span,
+  decoration,
+  accent,
 }: {
   Icon: (p: { size?: number; className?: string; strokeWidth?: number }) => React.ReactNode;
-  label: string;
+  title: string;
+  body: string;
+  span: 2 | 3 | 4 | 6;
+  decoration?: React.ReactNode;
+  accent?: string;
 }) {
+  const spanClass = {
+    2: "sm:col-span-3 lg:col-span-2",
+    3: "sm:col-span-3",
+    4: "sm:col-span-6 lg:col-span-4",
+    6: "sm:col-span-6",
+  }[span];
+
   return (
     <div
-      className="flex items-center gap-3 rounded-xl px-4 py-3.5 transition-colors hover:-translate-y-0.5"
+      className={`group relative flex flex-col overflow-hidden rounded-2xl p-5 transition-all hover:-translate-y-0.5 ${spanClass}`}
       style={{
         background: "rgba(19, 18, 23, 0.5)",
         border: "1px solid var(--border-hover)",
         backdropFilter: "blur(8px)",
         WebkitBackdropFilter: "blur(8px)",
+        minHeight: "160px",
       }}
     >
-      <div
-        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-        style={{ background: "var(--brand-tint)", color: "var(--brand)" }}
-      >
-        <Icon size={16} strokeWidth={2} />
+      {/* Decoration sits behind text, absolute */}
+      {decoration && (
+        <div aria-hidden className="pointer-events-none absolute inset-0 z-0">
+          {decoration}
+        </div>
+      )}
+
+      <div className="relative z-10 flex flex-col">
+        <div
+          className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg"
+          style={{
+            background: "var(--brand-tint)",
+            color: accent ?? "var(--brand)",
+          }}
+        >
+          <Icon size={18} strokeWidth={2} />
+        </div>
+        <div
+          className="mb-1 text-base font-bold"
+          style={{ color: "var(--text-strong)" }}
+        >
+          {title}
+        </div>
+        <div
+          className="text-sm leading-relaxed"
+          style={{ color: "var(--text-body)" }}
+        >
+          {body}
+        </div>
       </div>
-      <span className="text-sm font-semibold" style={{ color: "var(--text-strong)" }}>
-        {label}
-      </span>
+    </div>
+  );
+}
+
+/* ── Decorations ── */
+
+function VoiceWaveDecoration() {
+  return (
+    <svg
+      className="absolute -right-8 top-1/2 h-24 -translate-y-1/2 opacity-60"
+      viewBox="0 0 200 100"
+      preserveAspectRatio="none"
+    >
+      <defs>
+        <linearGradient id="wave-grad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="var(--brand)" stopOpacity="0" />
+          <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.7" />
+        </linearGradient>
+      </defs>
+      {[10, 30, 50, 70, 90, 110, 130, 150, 170, 190].map((x, i) => {
+        const h = [30, 50, 20, 70, 40, 55, 30, 45, 60, 25][i];
+        return (
+          <rect
+            key={x}
+            x={x}
+            y={50 - h / 2}
+            width="8"
+            height={h}
+            rx="3"
+            fill="url(#wave-grad)"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+function CaptionMiniPreview() {
+  return (
+    <div className="absolute inset-0 flex items-end justify-center pb-4 opacity-70">
+      <div
+        className="rounded-md px-2 py-1 text-[10px] font-black italic"
+        style={{
+          background: "rgba(0,0,0,0.5)",
+          color: "#ffffff",
+          textShadow: "0 1px 3px rgba(0,0,0,.7)",
+          border: "1px solid rgba(139,92,246,0.35)",
+        }}
+      >
+        REAL FONTS
+      </div>
+    </div>
+  );
+}
+
+function FaceFrameDecoration() {
+  return (
+    <div
+      className="absolute right-4 top-4 h-10 w-10 rounded"
+      style={{ border: "2px solid var(--brand)", opacity: 0.7 }}
+    >
+      <div
+        className="absolute -top-1 -left-1 h-2 w-2 rounded-full"
+        style={{ background: "var(--brand)" }}
+      />
+      <div
+        className="absolute -bottom-1 -right-1 h-2 w-2 rounded-full"
+        style={{ background: "var(--accent)" }}
+      />
+    </div>
+  );
+}
+
+function FormatStackDecoration() {
+  return (
+    <div className="absolute -bottom-2 -right-2 flex items-end gap-1 opacity-70">
+      <div
+        className="rounded-sm"
+        style={{
+          width: 14,
+          height: 24,
+          border: "1.5px solid var(--brand)",
+        }}
+      />
+      <div
+        className="rounded-sm"
+        style={{
+          width: 20,
+          height: 20,
+          border: "1.5px solid var(--brand-hover)",
+        }}
+      />
+      <div
+        className="rounded-sm"
+        style={{
+          width: 30,
+          height: 18,
+          border: "1.5px solid var(--accent)",
+        }}
+      />
+    </div>
+  );
+}
+
+function HookClipStrip() {
+  return (
+    <div className="absolute inset-y-0 right-0 flex items-center overflow-hidden opacity-60">
+      <div
+        className="flex gap-1"
+        style={{ transform: "translateX(20%)" }}
+      >
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div
+            key={i}
+            className="rounded"
+            style={{
+              width: 40,
+              height: 68,
+              background: `linear-gradient(180deg, rgba(139,92,246,${0.15 + i * 0.08}) 0%, rgba(236,72,153,${0.1 + i * 0.05}) 100%)`,
+              border: "1px solid var(--border-strong)",
+            }}
+          />
+        ))}
+      </div>
     </div>
   );
 }
