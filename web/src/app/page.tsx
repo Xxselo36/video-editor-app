@@ -58,12 +58,11 @@ export default function Landing() {
           </div>
 
           <h1
-            className="mb-6 text-5xl font-bold leading-[1.02] tracking-tight sm:text-6xl lg:text-7xl"
+            className="mb-6 text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl"
             style={{ color: "var(--text-strong)" }}
           >
-            Talk.
+            World&apos;s first
             <br />
-            That&apos;s{" "}
             <span
               style={{
                 background: "linear-gradient(120deg, var(--brand) 0%, var(--accent) 100%)",
@@ -72,15 +71,17 @@ export default function Landing() {
                 WebkitTextFillColor: "transparent",
               }}
             >
-              the editor.
+              voice-controlled
             </span>
+            <br />
+            AI video editor.
           </h1>
 
           <p
             className="mb-8 max-w-md text-lg"
             style={{ color: "var(--text-body)" }}
           >
-            Say <span style={{ color: "var(--brand)", fontWeight: 600 }}>&ldquo;Cleo cut&rdquo;</span>{" "}
+            Just say <span style={{ color: "var(--brand)", fontWeight: 600 }}>&ldquo;Cleo cut&rdquo;</span>{" "}
             when you mess up. Get a post-ready video in seconds.
           </p>
 
