@@ -6,6 +6,7 @@ import { LogoWord } from "@/components/Logo";
 import {
   IconArrowRight,
   IconCaptions,
+  IconCheck,
   IconMic,
   IconPhone,
   IconSparkle,
@@ -171,22 +172,81 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── How — 3 steps, single line each ─── */}
+      {/* ── How — 3 steps as a connected timeline flow ─── */}
       <section
-        className="relative z-10 px-6 py-16"
+        className="relative z-10 px-6 py-20"
         style={{ borderTop: "1px solid var(--border)" }}
       >
         <div className="mx-auto max-w-5xl">
           <h2
-            className="mb-10 text-2xl font-bold tracking-tight sm:text-3xl"
+            className="mb-2 text-2xl font-bold tracking-tight sm:text-3xl"
             style={{ color: "var(--text-strong)" }}
           >
             Three steps.
           </h2>
-          <div className="grid gap-4 md:grid-cols-3">
-            <Step n="01" title="Record" body='Say "Cleo cut" when you mess up.' />
-            <Step n="02" title="Upload" body="Pick a workflow." />
-            <Step n="03" title="Post" body="Download for TikTok, IG, YouTube." />
+          <p
+            className="mb-14 text-sm"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Record. Talk to CleoCuts. Post.
+          </p>
+
+          <div className="relative">
+            {/* Horizontal connector — only on md+ where steps are side-by-side */}
+            <div
+              aria-hidden
+              className="absolute left-0 right-0 hidden h-px md:block"
+              style={{
+                top: "36px",
+                background:
+                  "linear-gradient(90deg, transparent 0%, var(--brand-hover) 18%, var(--accent) 50%, var(--brand-hover) 82%, transparent 100%)",
+                opacity: 0.5,
+              }}
+            />
+
+            <div className="relative grid gap-12 md:grid-cols-3 md:gap-8">
+              <Step
+                n="01"
+                title="Record"
+                body={
+                  <>
+                    Say{" "}
+                    <span style={{ color: "var(--brand-strong)", fontWeight: 600 }}>
+                      &ldquo;Cleo cut&rdquo;
+                    </span>{" "}
+                    when you mess up. No re-takes.
+                  </>
+                }
+                hint="Any length take"
+                Icon={IconMic}
+              />
+              <Step
+                n="02"
+                title="Upload"
+                body={
+                  <>
+                    Drop the video. Pick a workflow. AI does the rest.
+                  </>
+                }
+                hint="Under 60 seconds"
+                Icon={IconUploadInline}
+              />
+              <Step
+                n="03"
+                title="Post"
+                body={
+                  <>
+                    Get{" "}
+                    <span style={{ color: "var(--brand-strong)", fontWeight: 600 }}>
+                      9:16, 1:1, 16:9
+                    </span>{" "}
+                    ready for TikTok, IG, YouTube.
+                  </>
+                }
+                hint="Instant download"
+                Icon={IconCheck}
+              />
+            </div>
           </div>
         </div>
       </section>
@@ -615,31 +675,98 @@ function HookClipStrip() {
   );
 }
 
-function Step({ n, title, body }: { n: string; title: string; body: string }) {
+function IconUploadInline({
+  size = 22,
+  strokeWidth = 1.75,
+}: {
+  size?: number;
+  strokeWidth?: number;
+}) {
   return (
-    <div
-      className="rounded-2xl p-5"
-      style={{
-        background: "rgba(19, 18, 23, 0.5)",
-        border: "1px solid var(--border-hover)",
-        backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
-      }}
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
     >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function Step({
+  n,
+  title,
+  body,
+  hint,
+  Icon,
+}: {
+  n: string;
+  title: string;
+  body: React.ReactNode;
+  hint: string;
+  Icon: (p: { size?: number; strokeWidth?: number }) => React.ReactNode;
+}) {
+  return (
+    <div className="relative flex flex-col items-start">
+      {/* Icon badge that sits ON the timeline connector */}
       <div
-        className="mb-3 font-mono text-xs font-semibold"
-        style={{ color: "var(--brand)" }}
+        className="relative mb-6 flex h-[72px] w-[72px] items-center justify-center rounded-full"
+        style={{
+          background: "var(--surface-1)",
+          border: "1.5px solid var(--border-hover)",
+          color: "var(--brand)",
+          boxShadow:
+            "0 0 0 6px var(--surface-0), 0 8px 24px rgba(139, 92, 246, 0.25), inset 0 0 0 1px rgba(139, 92, 246, 0.08)",
+        }}
       >
-        {n}
+        <Icon size={26} strokeWidth={1.75} />
+        {/* Step number chip pinned bottom-right of icon */}
+        <div
+          className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full font-mono text-[10px] font-bold"
+          style={{
+            background: "var(--brand)",
+            color: "white",
+            border: "2px solid var(--surface-0)",
+          }}
+        >
+          {n}
+        </div>
       </div>
+
       <div
-        className="mb-1 text-lg font-bold"
+        className="mb-2 text-xl font-bold"
         style={{ color: "var(--text-strong)" }}
       >
         {title}
       </div>
-      <div className="text-sm" style={{ color: "var(--text-body)" }}>
+
+      <div
+        className="mb-4 text-sm leading-relaxed"
+        style={{ color: "var(--text-body)" }}
+      >
         {body}
+      </div>
+
+      <div
+        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em]"
+        style={{
+          background: "var(--brand-tint)",
+          color: "var(--brand-strong)",
+        }}
+      >
+        <span
+          className="inline-block h-1 w-1 rounded-full"
+          style={{ background: "var(--brand)" }}
+        />
+        {hint}
       </div>
     </div>
   );
