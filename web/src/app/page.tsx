@@ -58,7 +58,7 @@ export default function Landing() {
           </div>
 
           <h1
-            className="mb-6 text-5xl font-bold leading-[1.02] tracking-tight sm:text-6xl lg:text-7xl"
+            className="mb-6 text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl"
             style={{ color: "var(--text-strong)" }}
           >
             World&apos;s first
@@ -71,17 +71,18 @@ export default function Landing() {
                 WebkitTextFillColor: "transparent",
               }}
             >
-              voice-controlled.
-            </span>
+              voice-controlled
+            </span>{" "}
+            editor.
           </h1>
 
           <p
             className="mb-8 max-w-md text-lg"
             style={{ color: "var(--text-body)" }}
           >
-            The AI video editor you talk to. Just say{" "}
+            Just say{" "}
             <span style={{ color: "var(--brand)", fontWeight: 600 }}>&ldquo;Cleo cut&rdquo;</span>{" "}
-            when you mess up — get a post-ready clip in seconds.
+            when you mess up. AI does the rest — captions, cuts, ready-to-post clips.
           </p>
 
           <Link
