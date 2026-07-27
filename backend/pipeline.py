@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
-from src.ffmpeg_utils import get_ffmpeg_path
+from src.ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
 from src.plugin_api import analyze_video
 from plugins.premiere.video_editor_premiere import (
     _multi_clip_burn,
@@ -25,6 +25,54 @@ EXPORT_FORMATS: dict[str, tuple[int, int]] = {
     "1:1": (1080, 1080),
     "16:9": (1920, 1080),
 }
+
+
+# HDR transfer functions we tone-map to SDR. iPhone Dolby Vision is
+# smpte2084 (PQ); iPhone HDR Video (HLG mode) is arib-std-b67. Both must
+# be tone-mapped or the 4K→1080p re-encode clips highlights to pure
+# white (skin blown out, walls solid #FFFFFF, no highlight roll-off).
+_HDR_TRANSFERS = {"smpte2084", "arib-std-b67"}
+
+
+def _probe_hdr(input_path: str) -> bool:
+    """Return True if the input video is HDR (PQ or HLG).
+
+    ffprobe returns the transfer characteristics; if it's a known HDR
+    transfer function, we need the tonemap chain in the encode step.
+    Falls back to False on any probe failure — safer to skip tonemap
+    than to accidentally apply it to SDR content.
+    """
+    cmd = [
+        get_ffprobe_path(), "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=color_transfer,color_primaries",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        input_path,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode != 0:
+            return False
+        output = result.stdout.strip().lower()
+        for line in output.splitlines():
+            if line.strip() in _HDR_TRANSFERS:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+# Filter chain that maps HDR (BT.2020 + PQ/HLG) to SDR (BT.709 + gamma).
+# Uses the `hable` operator — the closest-to-Rec-709-camera-neutral
+# tonemap, avoids the "grey wash" of `reinhard` and the "crushed shadows"
+# of `mobius`. `npl=100` is the SDR display peak luminance in nits.
+# `desat=0` keeps saturation — we want the color grade to survive the
+# down-conversion, not get flattened.
+_HDR_TONEMAP_CHAIN = (
+    "zscale=t=linear:npl=100,"
+    "tonemap=tonemap=hable:desat=0,"
+    "zscale=p=bt709:t=bt709:m=bt709:r=tv"
+)
 
 
 def _smartcam_reframe(
@@ -202,12 +250,27 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
     scale_filter = (
         "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(ih,iw),min(1920,ih),-2)'"
     )
+
+    # HDR → SDR tonemap. iPhone videos (Dolby Vision / HLG) will clip to
+    # pure white without this, because the 8-bit yuv420p output truncates
+    # anything above SDR peak. Detect via ffprobe; skip on SDR input to
+    # avoid unnecessary color-space round-trip on already-Rec709 content.
+    is_hdr = _probe_hdr(input_path)
+    vf = (
+        f"{_HDR_TONEMAP_CHAIN},{scale_filter}" if is_hdr else scale_filter
+    )
+
     cmd = [
         get_ffmpeg_path(), "-y",
         "-i", input_path,
-        "-vf", scale_filter,
+        "-vf", vf,
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22",
         "-pix_fmt", "yuv420p",
+        # Tag output as BT.709 SDR so downstream players don't re-interpret
+        # our tonemapped pixels as still-HDR.
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-colorspace", "bt709",
         "-af", audio_chain,
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
@@ -216,7 +279,9 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         tail = result.stderr[-800:] if result.stderr else "(no stderr)"
-        raise RuntimeError(f"ffmpeg orientation-normalize failed:\n{tail}")
+        raise RuntimeError(
+            f"ffmpeg orientation-normalize failed (hdr={is_hdr}):\n{tail}"
+        )
 
 
 def _ffmpeg_cuts_preview(
