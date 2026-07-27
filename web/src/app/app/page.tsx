@@ -12,7 +12,13 @@ import {
   IconSliders,
   IconVlog,
 } from "@/components/Icons";
-import { saveEntry, type LibraryHookClip } from "@/lib/library";
+import {
+  formatRelativeTime,
+  getLibrary,
+  saveEntry,
+  type LibraryEntry,
+  type LibraryHookClip,
+} from "@/lib/library";
 
 // Backend host: explicit env wins, else use the page's hostname on
 // port 8000. This way iPhone (192.168.178.155:3000) hits
@@ -680,71 +686,181 @@ const PRESET_BULLETS: Record<PresetId, string[]> = {
   ],
 };
 
+// Per-preset ambient accent — colored radial glow on each card's
+// top-right corner. Gives each workflow a distinct visual identity
+// without changing the base surface color.
+const PRESET_ACCENTS: Record<PresetId, string> = {
+  tiktok: "rgba(236, 72, 153, 0.55)",   // pink — TikTok energy
+  podcast: "rgba(139, 92, 246, 0.55)",  // violet — brand
+  vlog: "rgba(56, 189, 248, 0.45)",     // sky — outdoor / camera
+  captions: "rgba(168, 85, 247, 0.5)",  // purple — text focus
+  custom: "rgba(139, 92, 246, 0.35)",
+};
+
+function getPresetChips(p: (typeof PRESETS)[PresetId]): string[] {
+  const chips: string[] = [];
+
+  // Aspect ratios — primary is smartcam format if enabled, else outputs
+  const ratios = new Set<string>();
+  if (p.settings.smartcamEnabled) {
+    ratios.add(p.settings.smartcamFormat === "portrait" ? "9:16" : "16:9");
+  }
+  p.settings.outputFormats.forEach((f) => ratios.add(f));
+  if (ratios.size > 0) {
+    chips.push(Array.from(ratios).join(" · "));
+  }
+
+  // Caption style
+  const captionLabel = CAPTION_PRESETS.find(
+    (c) => c.id === p.settings.captionPreset,
+  )?.label;
+  if (captionLabel && p.settings.captionPreset !== "none") {
+    chips.push(`${captionLabel} captions`);
+  } else if (p.settings.captionPreset === "none") {
+    chips.push("No captions");
+  }
+
+  // Voice triggers indicator
+  if (p.settings.voiceTriggers) {
+    chips.push('"Cleo cut" on');
+  }
+
+  return chips;
+}
+
 function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
   const featured: PresetId[] = ["tiktok", "podcast", "vlog", "captions"];
+  const [recent, setRecent] = useState<LibraryEntry[] | null>(null);
+
+  useEffect(() => {
+    setRecent(getLibrary().slice(0, 3));
+  }, []);
+
   return (
     <div className="relative z-10 flex flex-col">
-      <h1
-        className="mb-8 text-4xl font-bold tracking-tight sm:text-5xl"
-        style={{ color: "var(--text-strong)" }}
-      >
-        What are you shipping?
-      </h1>
+      {/* Hero */}
+      <div className="mb-10">
+        <div
+          className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+          style={{
+            background: "var(--surface-2)",
+            border: "1px solid var(--border-hover)",
+            color: "var(--text-body)",
+          }}
+        >
+          <span
+            className="pulse-dot inline-block h-1.5 w-1.5 rounded-full"
+            style={{ background: "var(--brand)" }}
+          />
+          Free during beta
+        </div>
 
+        <h1
+          className="mb-3 text-4xl font-bold tracking-tight sm:text-5xl"
+          style={{ color: "var(--text-strong)" }}
+        >
+          What are you shipping?
+        </h1>
+        <p
+          className="max-w-md text-base leading-relaxed"
+          style={{ color: "var(--text-body)" }}
+        >
+          Pick a workflow — CleoCuts pre-configures captions, format, and
+          cleanup for the platform.
+        </p>
+      </div>
+
+      {/* Preset grid — big cards with per-preset accent glow + config chips */}
       <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
         {featured.map((id) => {
           const p = PRESETS[id];
           const Icon = PRESET_ICONS[id];
+          const accent = PRESET_ACCENTS[id];
+          const chips = getPresetChips(p);
           return (
             <button
               key={id}
               onClick={() => onPick(id)}
-              className="group relative flex items-center gap-4 rounded-2xl p-5 text-left transition-all hover:-translate-y-0.5"
+              className="group relative flex flex-col overflow-hidden rounded-2xl p-5 text-left transition-all hover:-translate-y-0.5"
               style={{
                 background: "var(--surface-1)",
                 border: "1px solid var(--border)",
+                minHeight: "180px",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = "var(--border-strong)";
+                e.currentTarget.style.borderColor = "var(--brand-hover)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.borderColor = "var(--border)";
               }}
             >
+              {/* Ambient accent glow — top-right corner */}
               <div
-                className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
-                style={{
-                  background: "var(--brand-tint)",
-                  color: "var(--brand)",
-                }}
-              >
-                <Icon size={24} strokeWidth={2} />
-              </div>
-              <div className="flex-1">
+                aria-hidden
+                className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full opacity-40 blur-2xl transition-opacity group-hover:opacity-70"
+                style={{ background: accent }}
+              />
+
+              {/* Icon + hover-arrow */}
+              <div className="relative z-10 mb-4 flex items-start justify-between">
                 <div
-                  className="text-lg font-bold"
+                  className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
+                  style={{
+                    background: "var(--brand-tint)",
+                    color: "var(--brand)",
+                  }}
+                >
+                  <Icon size={24} strokeWidth={2} />
+                </div>
+                <span
+                  className="translate-x-0 opacity-0 transition-all group-hover:translate-x-1 group-hover:opacity-100"
+                  style={{ color: "var(--brand)" }}
+                >
+                  <IconArrowRight size={18} strokeWidth={2.5} />
+                </span>
+              </div>
+
+              {/* Title + tagline */}
+              <div className="relative z-10 mb-4 flex-1">
+                <div
+                  className="mb-1 text-base font-bold"
                   style={{ color: "var(--text-strong)" }}
                 >
                   {p.label}
                 </div>
-                <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                <div
+                  className="text-xs leading-relaxed"
+                  style={{ color: "var(--text-muted)" }}
+                >
                   {p.tagline}
                 </div>
               </div>
-              <span
-                className="transition-transform group-hover:translate-x-1"
-                style={{ color: "var(--brand)" }}
-              >
-                <IconArrowRight size={18} strokeWidth={2.5} />
-              </span>
+
+              {/* Config chips — actual settings this preset applies */}
+              <div className="relative z-10 flex flex-wrap items-center gap-1.5">
+                {chips.map((chip) => (
+                  <span
+                    key={chip}
+                    className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                    style={{
+                      background: "var(--surface-2)",
+                      color: "var(--text-body)",
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    {chip}
+                  </span>
+                ))}
+              </div>
             </button>
           );
         })}
       </div>
 
+      {/* Custom setup — separated, distinct dashed treatment */}
       <button
         onClick={() => onPick("custom")}
-        className="mt-3 flex items-center gap-3 rounded-2xl p-4 text-left transition-colors"
+        className="mt-4 flex items-center gap-3 rounded-2xl p-4 text-left transition-colors"
         style={{
           background: "transparent",
           border: "1px dashed var(--border-hover)",
@@ -759,18 +875,84 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
         }}
       >
         <div
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
           style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
         >
-          <IconSliders size={16} strokeWidth={2} />
+          <IconSliders size={18} strokeWidth={2} />
         </div>
-        <span className="flex-1 text-sm" style={{ color: "var(--text-body)" }}>
-          Custom setup
-        </span>
+        <div className="flex-1">
+          <div
+            className="text-sm font-semibold"
+            style={{ color: "var(--text-strong)" }}
+          >
+            Custom setup
+          </div>
+          <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+            Pick every knob yourself — captions, cuts, formats
+          </div>
+        </div>
         <span style={{ color: "var(--text-muted)" }}>
           <IconArrowRight size={14} strokeWidth={2} />
         </span>
       </button>
+
+      {/* Recent projects — only shown if the user has library entries */}
+      {recent && recent.length > 0 && (
+        <div className="mt-10">
+          <div className="mb-3 flex items-center justify-between">
+            <div
+              className="text-[11px] font-semibold uppercase tracking-[0.15em]"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Recent projects
+            </div>
+            <Link
+              href="/app/library"
+              className="text-xs transition-opacity hover:opacity-70"
+              style={{ color: "var(--brand-strong)" }}
+            >
+              View all →
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {recent.map((entry) => (
+              <Link
+                key={entry.jobId}
+                href="/app/library"
+                className="flex flex-col rounded-xl p-3 transition-colors hover:border-[var(--border-hover)]"
+                style={{
+                  background: "var(--surface-1)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                <div className="mb-1 flex items-center gap-1.5">
+                  <span
+                    className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
+                    style={{
+                      background: "var(--brand-tint)",
+                      color: "var(--brand-strong)",
+                    }}
+                  >
+                    {entry.presetLabel ?? "Custom"}
+                  </span>
+                </div>
+                <div
+                  className="mb-1 truncate text-xs font-semibold"
+                  style={{ color: "var(--text-strong)" }}
+                >
+                  {entry.filename}
+                </div>
+                <div
+                  className="text-[10px]"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  {formatRelativeTime(entry.timestamp)}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
