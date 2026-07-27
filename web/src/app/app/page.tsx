@@ -19,6 +19,12 @@ import {
   type LibraryEntry,
   type LibraryHookClip,
 } from "@/lib/library";
+import {
+  clearActiveJob,
+  getActiveJob,
+  saveActiveJob,
+  updateActiveJob,
+} from "@/lib/activeJob";
 
 // Backend host: explicit env wins, else use the page's hostname on
 // port 8000. This way iPhone (192.168.178.155:3000) hits
@@ -299,6 +305,67 @@ export default function Home() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Resume an in-flight job on mount. If we find a saved activeJob,
+  // ask the backend where it is and drop back into the right phase.
+  // Runs once — deliberately empty deps.
+  useEffect(() => {
+    const active = getActiveJob();
+    if (!active) return;
+
+    (async () => {
+      try {
+        const r = await fetch(`${backendUrl()}/jobs/${active.jobId}`);
+        if (!r.ok) {
+          // Backend forgot the job (expired, restart, unknown ID). Give
+          // the user a clean slate rather than an infinite spinner.
+          clearActiveJob();
+          return;
+        }
+        const s: JobStatus = await r.json();
+        // Rehydrate preset context so headers + Library-save work
+        if (active.presetId && (active.presetId in PRESETS)) {
+          setSelectedPreset(active.presetId as PresetId);
+        }
+        setCaptionPreset(active.captionPreset);
+        setJob(s);
+
+        // Fake a File so downstream screens that read file.name still
+        // work. We can't recover the original bytes, but we know the
+        // filename — that's what the Library entry uses.
+        setFile(new File([], active.filename));
+
+        if (s.status === "done") {
+          setPhase("done");
+          clearActiveJob();
+        } else if (s.status === "error") {
+          setErrorMsg(s.error ?? s.message);
+          setPhase("error");
+          clearActiveJob();
+        } else if (s.status === "awaiting_review") {
+          const subRes = await fetch(
+            `${backendUrl()}/jobs/${active.jobId}/subtitles`,
+          );
+          if (subRes.ok) {
+            const data = await subRes.json();
+            const subs: Subtitle[] = data.subtitles ?? [];
+            setPhrases(buildPhrases(subs));
+            setPhase("reviewing");
+            updateActiveJob({ phase: "reviewing" });
+          } else {
+            setPhase("analyzing");
+          }
+        } else {
+          // pending / processing → back into polling
+          setPhase(active.phase === "rendering" ? "rendering" : "analyzing");
+        }
+      } catch {
+        // Network / parse failure on resume — swallow, user gets picker
+        clearActiveJob();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const pickPreset = (id: PresetId) => {
     const p = PRESETS[id];
     setSelectedPreset(id);
@@ -387,9 +454,24 @@ export default function Home() {
       const initial: JobStatus = JSON.parse(res.responseText);
       setJob(initial);
       setPhase("analyzing");
+
+      // Persist so the user can navigate away and come back without
+      // losing the job. Backend keeps processing regardless.
+      const presetInfo = selectedPreset ? PRESETS[selectedPreset] : null;
+      saveActiveJob({
+        jobId: initial.id,
+        phase: "analyzing",
+        timestamp: Date.now(),
+        filename: targetFile.name,
+        presetId: selectedPreset,
+        presetLabel: presetInfo?.label ?? null,
+        presetIcon: presetInfo?.icon ?? null,
+        captionPreset: settings.caption_preset,
+      });
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
       setPhase("error");
+      clearActiveJob();
     }
   };
 
@@ -405,6 +487,8 @@ export default function Home() {
         setJob(s);
         if (s.status === "done") {
           setPhase("done");
+          // Job finished — remove from active tracking, promote to Library
+          clearActiveJob();
           // Persist to library so the user can find this render later
           // even after tab-close. Backend keeps files for a while.
           try {
@@ -434,6 +518,7 @@ export default function Home() {
         else if (s.status === "error") {
           setErrorMsg(s.error ?? s.message);
           setPhase("error");
+          clearActiveJob();
         } else if (s.status === "awaiting_review" && phase === "analyzing") {
           const subRes = await fetch(
             `${backendUrl()}/jobs/${job.id}/subtitles`,
@@ -443,6 +528,7 @@ export default function Home() {
             const subs: Subtitle[] = data.subtitles ?? [];
             setPhrases(buildPhrases(subs));
             setPhase("reviewing");
+            updateActiveJob({ phase: "reviewing" });
           }
         }
       } catch {
@@ -476,9 +562,11 @@ export default function Home() {
       });
       if (!r.ok) throw new Error(await r.text());
       setPhase("rendering");
+      updateActiveJob({ phase: "rendering" });
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
       setPhase("error");
+      clearActiveJob();
     }
   };
 
@@ -491,6 +579,7 @@ export default function Home() {
     setUploadPct(0);
     setSelectedPreset(null);
     setPhase("picker");
+    clearActiveJob();
   };
 
   const currentPreset = selectedPreset ? PRESETS[selectedPreset] : null;
