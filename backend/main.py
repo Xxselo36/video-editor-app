@@ -352,3 +352,43 @@ def download_job(job_id: str, format: str = "primary"):
         media_type="video/mp4",
         filename=f"cleo_{job_id}_{safe}.mp4",
     )
+
+
+@app.get("/jobs/{job_id}/watch")
+def watch_job(job_id: str, format: str = "primary"):
+    """Same file as /download but without the attachment header, so
+    the Library modal can play it inline via <video src=...>. Supports
+    HTTP Range so seeking works without downloading the whole file."""
+    job = store.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    path = job.outputs.get(format) or (
+        job.output_path if format == "primary" else None
+    )
+    if not path or not Path(path).exists():
+        raise HTTPException(409, "requested format not ready")
+    return FileResponse(
+        path=path,
+        media_type="video/mp4",
+        headers={"Accept-Ranges": "bytes"},
+    )
+
+
+@app.get("/jobs/{job_id}/thumbnail")
+def job_thumbnail(job_id: str):
+    """Serve the poster-frame JPG generated at render time. The file
+    lives next to the primary output at a fixed filename so we can
+    derive the path without storing it on the Job."""
+    job = store.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if not job.output_path:
+        raise HTTPException(409, "thumbnail not ready")
+    thumb = Path(job.output_path).parent / "cleo_thumbnail.jpg"
+    if not thumb.exists():
+        raise HTTPException(404, "thumbnail not ready")
+    return FileResponse(
+        path=str(thumb),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )

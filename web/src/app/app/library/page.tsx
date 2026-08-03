@@ -29,11 +29,27 @@ function formatLabel(f: string): string {
 export default function Library() {
   const [entries, setEntries] = useState<LibraryEntry[] | null>(null);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
+  const [playingJobId, setPlayingJobId] = useState<string | null>(null);
 
   useEffect(() => {
     setEntries(getLibrary());
     setActiveJob(getActiveJob());
   }, []);
+
+  useEffect(() => {
+    // Lock body scroll + close on Escape while modal is open
+    if (!playingJobId) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPlayingJobId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [playingJobId]);
 
   const remove = (jobId: string) => {
     if (!confirm("Delete this project from your library?")) return;
@@ -172,12 +188,73 @@ export default function Library() {
               {entries.length} project{entries.length === 1 ? "" : "s"}
             </div>
             {entries.map((e) => (
-              <LibraryCard key={e.jobId} entry={e} onDelete={remove} />
+              <LibraryCard
+                key={e.jobId}
+                entry={e}
+                onDelete={remove}
+                onPlay={setPlayingJobId}
+              />
             ))}
           </div>
         )}
       </div>
+
+      {playingJobId && (
+        <VideoModal
+          jobId={playingJobId}
+          onClose={() => setPlayingJobId(null)}
+        />
+      )}
     </main>
+  );
+}
+
+/* ── Inline video preview modal ──
+ * Full-screen overlay; click backdrop or press Escape to close.
+ * Uses /jobs/:id/watch (no attachment header) so <video> can stream
+ * the file inline with HTTP Range support for smooth seeking.
+ */
+function VideoModal({
+  jobId,
+  onClose,
+}: {
+  jobId: string;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(6px)" }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative flex max-h-[92vh] w-full max-w-[440px] flex-col items-center"
+      >
+        <button
+          onClick={onClose}
+          className="absolute -top-10 right-0 flex items-center gap-1.5 text-xs text-white/70 transition-opacity hover:opacity-100"
+          aria-label="Close preview"
+        >
+          Close ✕
+        </button>
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+        <video
+          src={`${backendUrl()}/jobs/${jobId}/watch`}
+          controls
+          autoPlay
+          playsInline
+          className="max-h-[92vh] w-full rounded-2xl"
+          style={{
+            background: "#000",
+            boxShadow:
+              "0 0 0 1px rgba(139,92,246,0.35), 0 12px 60px rgba(139,92,246,0.35)",
+          }}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -231,10 +308,13 @@ function EmptyState() {
 function LibraryCard({
   entry,
   onDelete,
+  onPlay,
 }: {
   entry: LibraryEntry;
   onDelete: (jobId: string) => void;
+  onPlay: (jobId: string) => void;
 }) {
+  const [thumbFailed, setThumbFailed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const hashtagLine = entry.socialHashtags
@@ -263,7 +343,57 @@ function LibraryCard({
         boxShadow: "var(--shadow-sm)",
       }}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start gap-4">
+        {/* Thumbnail — click to open inline video modal. Falls back to
+            a plain preset-color tile if the thumbnail didn't render. */}
+        <button
+          onClick={() => onPlay(entry.jobId)}
+          className="group relative shrink-0 overflow-hidden rounded-xl transition-transform hover:scale-[1.02]"
+          style={{
+            width: "88px",
+            aspectRatio: "9 / 16",
+            background: "var(--surface-2)",
+            border: "1px solid var(--border)",
+          }}
+          aria-label={`Play preview of ${entry.filename}`}
+        >
+          {!thumbFailed && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={`${backendUrl()}/jobs/${entry.jobId}/thumbnail`}
+              alt=""
+              className="h-full w-full object-cover"
+              onError={() => setThumbFailed(true)}
+              loading="lazy"
+            />
+          )}
+          {thumbFailed && (
+            <div
+              className="flex h-full w-full items-center justify-center text-[10px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--text-faint)" }}
+            >
+              no preview
+            </div>
+          )}
+          {/* Play triangle overlay */}
+          <div
+            className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 transition-opacity group-hover:opacity-100"
+            aria-hidden
+          >
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-full"
+              style={{
+                background: "rgba(0,0,0,0.6)",
+                backdropFilter: "blur(4px)",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
+          </div>
+        </button>
+
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex items-center gap-2 flex-wrap">
             <span

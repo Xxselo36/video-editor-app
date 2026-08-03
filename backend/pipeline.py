@@ -341,6 +341,32 @@ def _ffmpeg_cuts_preview(
         raise RuntimeError(f"ffmpeg preview-cut failed:\n{tail}")
 
 
+def _generate_thumbnail(input_path: str, output_path: str, at_seconds: float = 1.0) -> None:
+    """Extract a JPG poster frame from the rendered video.
+
+    ~320px wide, aspect-preserving. Used by the Library UI so we can
+    show a visual for each project without loading the whole video.
+    Silent on any failure — a missing thumbnail just means the card
+    falls back to the plain text layout, nothing breaks.
+    """
+    cmd = [
+        get_ffmpeg_path(), "-y",
+        "-ss", str(at_seconds),
+        "-i", input_path,
+        "-frames:v", "1",
+        "-vf", "scale=320:-2",
+        "-q:v", "3",
+        output_path,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if result.returncode != 0 and at_seconds > 0:
+            # Fallback: very short clips can't seek to 1s — try frame 0
+            _generate_thumbnail(input_path, output_path, at_seconds=0.0)
+    except Exception as e:
+        print(f"[thumbnail] extract failed: {e}", flush=True)
+
+
 def _ffmpeg_concat(clip_paths: list[str], output_path: str) -> None:
     """Concatenate clips losslessly via ffmpeg concat-demuxer.
 
@@ -660,6 +686,12 @@ def render_only(
 
     _stage("Stitching clips…", 80)
     _ffmpeg_concat(clip_paths, primary_path)
+
+    # Poster-frame thumbnail for the Library card — one JPG per job
+    # at a fixed filename beside the primary output so the endpoint
+    # can find it without needing a schema field.
+    thumbnail_path = str(Path(output_dir) / "cleo_thumbnail.jpg")
+    _generate_thumbnail(primary_path, thumbnail_path)
 
     # Multi-format export: keep the primary as-is, derive additional
     # aspect ratios via simple letterbox pad. User picks which ones in
