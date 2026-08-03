@@ -25,6 +25,7 @@ import {
   saveActiveJob,
   updateActiveJob,
 } from "@/lib/activeJob";
+import { VideoModal } from "@/components/VideoModal";
 
 // Backend host: explicit env wins, else use the page's hostname on
 // port 8000. This way iPhone (192.168.178.155:3000) hits
@@ -820,6 +821,7 @@ function getPresetChips(p: (typeof PRESETS)[PresetId]): string[] {
 function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
   const featured: PresetId[] = ["tiktok", "podcast", "vlog", "captions"];
   const [recent, setRecent] = useState<LibraryEntry[] | null>(null);
+  const [playingJobId, setPlayingJobId] = useState<string | null>(null);
 
   useEffect(() => {
     setRecent(getLibrary().slice(0, 3));
@@ -1003,46 +1005,118 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
               View all →
             </Link>
           </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {recent.map((entry) => (
-              <Link
+              <RecentProjectCard
                 key={entry.jobId}
-                href="/app/library"
-                className="flex flex-col rounded-xl p-3 transition-colors hover:border-[var(--border-hover)]"
-                style={{
-                  background: "var(--surface-1)",
-                  border: "1px solid var(--border)",
-                }}
-              >
-                <div className="mb-1 flex items-center gap-1.5">
-                  <span
-                    className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
-                    style={{
-                      background: "var(--brand-tint)",
-                      color: "var(--brand-strong)",
-                    }}
-                  >
-                    {entry.presetLabel ?? "Custom"}
-                  </span>
-                </div>
-                <div
-                  className="mb-1 truncate text-xs font-semibold"
-                  style={{ color: "var(--text-strong)" }}
-                >
-                  {entry.filename}
-                </div>
-                <div
-                  className="text-[10px]"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {formatRelativeTime(entry.timestamp)}
-                </div>
-              </Link>
+                entry={entry}
+                onPlay={setPlayingJobId}
+              />
             ))}
           </div>
         </div>
       )}
+
+      {playingJobId && (
+        <VideoModal
+          jobId={playingJobId}
+          onClose={() => setPlayingJobId(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/* Recent-project tile: thumbnail on top, meta below. Click plays the
+ * video in the shared modal — same UX as the Library cards. */
+function RecentProjectCard({
+  entry,
+  onPlay,
+}: {
+  entry: LibraryEntry;
+  onPlay: (jobId: string) => void;
+}) {
+  const [thumbFailed, setThumbFailed] = useState(false);
+  return (
+    <button
+      onClick={() => onPlay(entry.jobId)}
+      className="group flex flex-col overflow-hidden rounded-xl text-left transition-all hover:-translate-y-0.5"
+      style={{
+        background: "var(--surface-1)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <div
+        className="relative w-full overflow-hidden"
+        style={{
+          aspectRatio: "9 / 16",
+          background: "var(--surface-2)",
+        }}
+      >
+        {!thumbFailed && (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={`${backendUrl()}/jobs/${entry.jobId}/thumbnail`}
+            alt=""
+            className="h-full w-full object-cover"
+            onError={() => setThumbFailed(true)}
+            loading="lazy"
+          />
+        )}
+        {thumbFailed && (
+          <div
+            className="flex h-full w-full items-center justify-center text-[9px] font-semibold uppercase tracking-widest"
+            style={{ color: "var(--text-faint)" }}
+          >
+            no preview
+          </div>
+        )}
+        {/* Preset chip pinned bottom-left over the thumbnail */}
+        <div className="absolute bottom-1.5 left-1.5">
+          <span
+            className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
+            style={{
+              background: "rgba(0,0,0,0.7)",
+              color: "var(--brand-strong)",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            {entry.presetLabel ?? "Custom"}
+          </span>
+        </div>
+        {/* Play triangle on hover */}
+        <div
+          className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100"
+          aria-hidden
+        >
+          <div
+            className="flex h-9 w-9 items-center justify-center rounded-full"
+            style={{
+              background: "rgba(0,0,0,0.7)",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div className="p-2">
+        <div
+          className="mb-0.5 truncate text-xs font-semibold"
+          style={{ color: "var(--text-strong)" }}
+        >
+          {entry.filename}
+        </div>
+        <div
+          className="text-[10px]"
+          style={{ color: "var(--text-muted)" }}
+        >
+          {formatRelativeTime(entry.timestamp)}
+        </div>
+      </div>
+    </button>
   );
 }
 

@@ -11,6 +11,7 @@ import {
   type LibraryEntry,
 } from "@/lib/library";
 import { getActiveJob, type ActiveJob } from "@/lib/activeJob";
+import { VideoModal } from "@/components/VideoModal";
 
 function backendUrl(): string {
   if (process.env.NEXT_PUBLIC_BACKEND_URL) {
@@ -35,21 +36,6 @@ export default function Library() {
     setEntries(getLibrary());
     setActiveJob(getActiveJob());
   }, []);
-
-  useEffect(() => {
-    // Lock body scroll + close on Escape while modal is open
-    if (!playingJobId) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPlayingJobId(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [playingJobId]);
 
   const remove = (jobId: string) => {
     if (!confirm("Delete this project from your library?")) return;
@@ -209,54 +195,6 @@ export default function Library() {
   );
 }
 
-/* ── Inline video preview modal ──
- * Full-screen overlay; click backdrop or press Escape to close.
- * Uses /jobs/:id/watch (no attachment header) so <video> can stream
- * the file inline with HTTP Range support for smooth seeking.
- */
-function VideoModal({
-  jobId,
-  onClose,
-}: {
-  jobId: string;
-  onClose: () => void;
-}) {
-  return (
-    <div
-      onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(6px)" }}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="relative flex max-h-[92vh] w-full max-w-[440px] flex-col items-center"
-      >
-        <button
-          onClick={onClose}
-          className="absolute -top-10 right-0 flex items-center gap-1.5 text-xs text-white/70 transition-opacity hover:opacity-100"
-          aria-label="Close preview"
-        >
-          Close ✕
-        </button>
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <video
-          src={`${backendUrl()}/jobs/${jobId}/watch`}
-          controls
-          autoPlay
-          playsInline
-          className="max-h-[92vh] w-full rounded-2xl"
-          style={{
-            background: "#000",
-            boxShadow:
-              "0 0 0 1px rgba(139,92,246,0.35), 0 12px 60px rgba(139,92,246,0.35)",
-          }}
-        />
-      </div>
-    </div>
-  );
-}
 
 function EmptyState() {
   return (
