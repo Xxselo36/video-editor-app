@@ -166,6 +166,21 @@ def detect_voice_triggers(
     cut_keywords = sorted(cut_keywords, key=lambda p: -len(p.split()))
     continue_keywords = sorted(continue_keywords, key=lambda p: -len(p.split()))
 
+    # Debug: log all whisper words + trigger keywords so we can diagnose
+    # when triggers don't fire. Prints once at start of scan.
+    try:
+        wl = [
+            _normalize(w.get("word", "") or w.get("text", "")).strip()
+            for w in whisper_words
+        ]
+        print(f"[voice-triggers] scanning {len(wl)} words for "
+              f"cut={cut_keywords[:3]}… continue={continue_keywords[:3]}…",
+              flush=True)
+        print(f"[voice-triggers] whisper words: {' '.join(wl)}",
+              flush=True)
+    except Exception:
+        pass
+
     pairs: list[VoiceTriggerPair] = []
     i = 0
     while i < len(whisper_words):
