@@ -102,7 +102,7 @@ def cleanup_and_detect_bad_takes(
 
 Two tasks, one JSON response:
 
-1. CLEAN UP each phrase:
+1. CLEAN UP each phrase — CONSERVATIVE EDITING ONLY:
    - Fix obvious speech-to-text typos (homophones, missed words).
    - Canonicalize brand names. The product is called "{brand}" — replace
      misheard variants like "Clio", "Cleyo", "Klio", "Kleo" with "{brand}".
@@ -110,10 +110,16 @@ Two tasks, one JSON response:
    - REMOVE filler vocalisations from the visible text:
        DE: äh, ähm, ähhh, öh, öhm, ehm, hm, hmm, mhm, mmh
        EN: um, uh, uhm, uhh, hmm, hm, er, mhm
-     Also collapse the resulting extra whitespace. Keep meaningful
-     discourse markers ("also", "quasi", "you know") — they're only
-     fillers when the speech-cut pipeline agrees.
-   - DO NOT paraphrase, rewrite, or change meaning. Keep speaker's voice.
+     Also collapse the resulting extra whitespace.
+   - HARD RULES — violating any means you must return the input unchanged:
+     * NEVER add words that weren't in the source. If a sentence feels
+       incomplete, KEEP IT INCOMPLETE. The user's speech was cut mid-
+       thought; do not invent a completion.
+     * NEVER paraphrase, rewrite, or replace one phrasing with another.
+     * NEVER add "Sprachbefehl", "Kommando", "Cut", or explanatory nouns
+       the source doesn't already contain.
+     * If unsure whether an edit is safe, RETURN THE ORIGINAL UNCHANGED.
+   - Keep the speaker's voice, register, and word order exactly.
 
 2. DETECT BAD TAKES — phrases where the speaker abandoned an attempt
    and re-said the same thing better in a later phrase:
@@ -151,13 +157,35 @@ Respond with ONLY a JSON object in this exact shape:
     if not isinstance(parsed, dict):
         return {"cleaned": {}, "bad_takes": []}
 
+    # Similarity guard: if the LLM invented new content, revert to the
+    # original. Compare token sets — cleanup should REMOVE fillers /
+    # canonicalize existing words, never introduce nouns like "Cut" or
+    # "Sprachbefehl" that weren't in the source. If the cleaned version
+    # has >30% new tokens the model wasn't supposed to know, drop it.
+    orig_by_id = {int(p.get("id", i)): (p.get("text") or "").strip()
+                  for i, p in enumerate(phrases)}
+
+    def _tokens(s: str) -> set[str]:
+        return {t for t in re.findall(r"\w+", s.lower()) if len(t) > 1}
+
     cleaned: dict[int, str] = {}
     for entry in parsed.get("phrases", []) or []:
         try:
             pid = int(entry["id"])
             txt = str(entry.get("cleaned", "")).strip()
-            if txt:
-                cleaned[pid] = txt
+            if not txt:
+                continue
+            orig = orig_by_id.get(pid, "")
+            if orig:
+                orig_toks = _tokens(orig)
+                new_toks = _tokens(txt) - orig_toks
+                # Allow a small number of edits (typo fixes swap tokens),
+                # but reject anything that looks like hallucinated content.
+                if orig_toks and len(new_toks) / max(1, len(orig_toks)) > 0.3:
+                    print(f"[llm] rejected cleanup for phrase {pid}: "
+                          f"added tokens {new_toks}", flush=True)
+                    continue
+            cleaned[pid] = txt
         except (KeyError, TypeError, ValueError):
             continue
 
