@@ -147,7 +147,14 @@ class AudioAnalyzer:
                 word_timestamps=True,  # Wort-genaue Timestamps
                 condition_on_previous_text=True,  # Besserer Kontext
                 no_speech_threshold=0.6,  # Weniger Fehler bei Stille
-                initial_prompt="ähm, äh, hmm, um, uh, like, you know, also, halt",  # Force filler word recognition
+                initial_prompt=(
+                    # Force-recognise the wake word so 'Cleo cut' / 'Cleo go'
+                    # get transcribed reliably instead of Whisper guessing
+                    # 'Clio', 'Kleo', 'clear cut', etc. Filler words also
+                    # included so faster-whisper doesn't skip them.
+                    "Cleo cut. Cleo go. Cleo cut. Cleo go. "
+                    "ähm, äh, hmm, um, uh, like, you know, also, halt"
+                ),
             )
 
             # Build openai-whisper-compatible dict so downstream code

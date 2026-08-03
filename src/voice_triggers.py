@@ -60,13 +60,56 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
+def _is_cleo_ish(tok: str) -> bool:
+    """Whisper mishears 'Cleo' as cleo/clio/kleo/klio/cleyo/kleu/clia/leo
+    and even 'leo'. All start with 'c/k/l' + vowel-ish and are 3-6 chars.
+    """
+    tok = tok.lower().strip()
+    if not (3 <= len(tok) <= 6):
+        return False
+    if tok[0] not in "ckl":
+        return False
+    return any(v in tok for v in "aeouiä")
+
+
+def _is_cut_ish(tok: str) -> bool:
+    """'Cut' variants: cut, cat, cot, cart, caught, gut, kut, gud."""
+    tok = tok.lower().strip()
+    if not (2 <= len(tok) <= 7):
+        return False
+    if tok[0] not in "ckg":
+        return False
+    return any(t in tok for t in "utd")
+
+
+def _is_go_ish(tok: str) -> bool:
+    """'Go' variants: go, goh, goal, gau, gou."""
+    tok = tok.lower().strip()
+    if not (2 <= len(tok) <= 5):
+        return False
+    return tok[0] == "g" and any(v in tok for v in "oöeau")
+
+
 def _token_matches(whisper_tok: str, target_tok: str) -> bool:
-    """True if Whisper's token matches a trigger token exactly OR is
-    within 1 edit (handles Whisper's typical drift on wake words)."""
+    """True if Whisper's token matches a trigger token.
+
+    Multi-tiered: exact match → Levenshtein-based → heuristic 'ish'
+    match for the wake/action words we care most about. Fuzzy enough
+    to swallow Whisper's typical drift on short spoken commands.
+    """
     if whisper_tok == target_tok:
         return True
-    # Allow 1 edit for short words, 2 for longer ones
-    max_edits = 1 if len(target_tok) <= 4 else 2
+
+    # Heuristic for the words we CARE about
+    if target_tok in ("cleo", "kleo", "clio", "klio", "cleyo", "kleu", "leo"):
+        return _is_cleo_ish(whisper_tok)
+    if target_tok in ("cut", "cat", "cart", "kut", "caught", "goh", "cot"):
+        return _is_cut_ish(whisper_tok)
+    if target_tok in ("go", "goh", "goal", "gou"):
+        return _is_go_ish(whisper_tok)
+
+    # Fallback: Levenshtein for anything else
+    max_edits = 2 if len(target_tok) <= 4 else 3
     return _levenshtein(whisper_tok, target_tok) <= max_edits
 
 
