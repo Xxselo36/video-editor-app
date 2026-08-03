@@ -368,55 +368,31 @@ def _generate_thumbnail(input_path: str, output_path: str, at_seconds: float = 1
 
 
 def _ffmpeg_concat(clip_paths: list[str], output_path: str) -> None:
-    """Concatenate clips with a single-pass filter_complex re-encode.
+    """Concatenate clips through the concat demuxer, re-encoding output.
 
-    Previously used the concat demuxer with `-c copy` for speed, but
-    that produced three visible artifacts at every cut boundary:
-      1) audible clicks/crackles (raw AAC frame joins)
-      2) black frames (segment I-frame gaps)
-      3) AV drift (per-segment timebase rounding accumulates)
+    The old `-c copy` version was fast but produced three visible
+    artifacts at every cut boundary: audible clicks (raw AAC frame
+    joins), occasional black frames (segment I-frame gaps), and AV
+    drift (per-segment timebase rounding accumulates).
 
-    Single filter_complex pass fixes all three by re-encoding the
-    concatenated stream with a unified timebase and consistent codec
-    params. Adds ~10-20s to render time but eliminates the artifacts.
+    Re-encoding on the output side fixes all three by re-writing every
+    frame with a unified timebase and consistent codec params. Adds
+    ~10-20s per render but the artifacts are gone.
     """
     if not clip_paths:
         raise ValueError("no clips to concat")
 
-    # Build filter_complex: trim + concat + audio-fade at every join to
-    # scrub any residual click even from re-encoded segments.
-    n = len(clip_paths)
-    inputs: list[str] = []
-    for p in clip_paths:
-        inputs.extend(["-i", p])
-
-    filter_parts: list[str] = []
-    for i in range(n):
-        # 5ms fade-in at start of every clip except the first, and
-        # 5ms fade-out at end of every clip except the last. This
-        # window is short enough to be inaudible but wide enough to
-        # kill the discontinuity click.
-        afilter_chain = ["asetpts=PTS-STARTPTS"]
-        if i > 0:
-            afilter_chain.append("afade=t=in:st=0:d=0.005")
-        filter_parts.append(
-            f"[{i}:v]setpts=PTS-STARTPTS[v{i}]"
-        )
-        filter_parts.append(
-            f"[{i}:a]{','.join(afilter_chain)}[a{i}]"
-        )
-
-    concat_pairs = "".join(f"[v{i}][a{i}]" for i in range(n))
-    filter_parts.append(
-        f"{concat_pairs}concat=n={n}:v=1:a=1[outv][outa]"
-    )
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False
+    ) as f:
+        list_path = f.name
+        for p in clip_paths:
+            f.write(f"file '{p}'\n")
 
     cmd = [
         get_ffmpeg_path(), "-y",
-        *inputs,
-        "-filter_complex", ";".join(filter_parts),
-        "-map", "[outv]",
-        "-map", "[outa]",
+        "-f", "concat", "-safe", "0",
+        "-i", list_path,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
@@ -426,7 +402,7 @@ def _ffmpeg_concat(clip_paths: list[str], output_path: str) -> None:
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(
-            f"ffmpeg concat failed: {result.stderr[-600:]}"
+            f"ffmpeg concat failed: {result.stderr[-800:]}"
         )
 
 
