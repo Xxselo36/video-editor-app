@@ -107,6 +107,12 @@ Two tasks, one JSON response:
    - Canonicalize brand names. The product is called "{brand}" — replace
      misheard variants like "Clio", "Cleyo", "Klio", "Kleo" with "{brand}".
    - Restore proper capitalization and end-of-sentence punctuation.
+   - REMOVE filler vocalisations from the visible text:
+       DE: äh, ähm, ähhh, öh, öhm, ehm, hm, hmm, mhm, mmh
+       EN: um, uh, uhm, uhh, hmm, hm, er, mhm
+     Also collapse the resulting extra whitespace. Keep meaningful
+     discourse markers ("also", "quasi", "you know") — they're only
+     fillers when the speech-cut pipeline agrees.
    - DO NOT paraphrase, rewrite, or change meaning. Keep speaker's voice.
 
 2. DETECT BAD TAKES — phrases where the speaker abandoned an attempt

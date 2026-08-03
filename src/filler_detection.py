@@ -39,10 +39,22 @@ class FillerDetector:
             "i mean", "so yeah", "you see", "well",
         },
         "de": {
-            "ähm", "äh", "hm", "hmm", "also", "halt", "quasi",
-            "sozusagen", "irgendwie", "na ja", "naja", "genau",
-            "eben", "ja",
+            # Whisper transcribes "äh"-sounds in many spellings — cover them.
+            "ähm", "äh", "ähhh", "ähhm", "öh", "öhm", "ehm", "eh",
+            "hm", "hmm", "mhh", "mhm", "mmh",
+            # Meta-fillers ("also", "halt", "quasi") only kill if confident.
+            "also", "halt", "quasi", "sozusagen", "irgendwie",
+            "na ja", "naja", "genau", "eben",
         },
+    }
+
+    # Words we're SURE are fillers regardless of Whisper's probability.
+    # These are pure vocalisations that have no semantic meaning — if
+    # transcribed at all, they're almost always real fillers.
+    ALWAYS_FILLER: dict[str, set[str]] = {
+        "en": {"um", "uh", "uhm", "uhh", "hmm", "hm", "mm", "mhm", "er"},
+        "de": {"ähm", "äh", "ähhh", "ähhm", "öh", "öhm", "ehm", "eh",
+               "hm", "hmm", "mhh", "mhm", "mmh"},
     }
 
     SENSITIVITY_THRESHOLDS: dict[str, float] = {
@@ -148,18 +160,26 @@ class FillerDetector:
                             for j in range(i, i + n):
                                 consumed.add(j)
 
-            # Check single-word fillers
+            # Check single-word fillers.
+            # ALWAYS_FILLER words (pure vocalisations like "äh", "um")
+            # bypass the probability threshold — if Whisper transcribed
+            # them at all, they're fillers, and the "small" model gives
+            # low confidence for these tokens which was hiding them
+            # entirely.
+            always_filler_set = self.ALWAYS_FILLER.get(language, set())
             for i, w in enumerate(cleaned):
                 if i in consumed:
                     continue
-                if w["text"] in filler_set:
-                    if w["probability"] >= self.confidence_threshold:
-                        detected.append(FillerWord(
-                            start=w["start"],
-                            end=w["end"],
-                            word=w["text"],
-                            confidence=w["probability"],
-                        ))
+                if w["text"] not in filler_set:
+                    continue
+                is_always_filler = w["text"] in always_filler_set
+                if is_always_filler or w["probability"] >= self.confidence_threshold:
+                    detected.append(FillerWord(
+                        start=w["start"],
+                        end=w["end"],
+                        word=w["text"],
+                        confidence=w["probability"],
+                    ))
 
         detected.sort(key=lambda f: f.start)
         return detected
