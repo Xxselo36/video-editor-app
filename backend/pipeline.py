@@ -238,10 +238,10 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
 
     Uses libx264 because bundled imageio_ffmpeg's videotoolbox is broken.
     """
-    audio_chain = (
-        "afftdn=nr=12:nf=-25,"  # light denoise, transparent on speech
-        "loudnorm=I=-14:TP=-1.5:LRA=11"
-    )
+    # afftdn removed: spectral-subtraction denoise stripped voice
+    # harmonics and made clean recordings sound hollow / underwater.
+    # loudnorm alone gets us to the -14 LUFS streaming target.
+    audio_chain = "loudnorm=I=-14:TP=-1.5:LRA=11"
     # Cap longest side at 1920 (= 1080p output). iPhone 4K (2160×3840
     # portrait) on a small Railway container kills the libx264 encode
     # within minutes — 5-10× more pixels than 1080p with no visible
