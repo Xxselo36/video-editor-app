@@ -29,15 +29,45 @@ import re
 from dataclasses import dataclass
 
 
-# Cleo-Wake-Word plus die häufigsten Whisper-Mishears als Phrasen.
-# "Clio" (Renault-Auto), "Cleyo" und "Klio" tauchen in normaler Sprache
-# nicht in Kombi mit "cut"/"go" auf — sicher als Trigger.
+# Cleo-Wake-Word plus Whisper-Mishears. We accept anything within
+# Levenshtein-1 of these below, so even "kleu kut" or "clear cat"
+# still fires. "Clio" (Renault car) never appears with cut/go in
+# normal speech — safe as a trigger.
 DEFAULT_CUT_KEYWORDS = [
     "cleo cut", "clio cut", "cleyo cut", "klio cut", "kleo cut",
+    "clea cut", "leo cut", "kleu cut", "cleo cat", "cleo cart",
+    "cleo caught", "clear cut",
 ]
 DEFAULT_CONTINUE_KEYWORDS = [
     "cleo go", "clio go", "cleyo go", "klio go", "kleo go",
+    "clea go", "leo go", "kleu go", "cleo goh", "cleo goal",
 ]
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Small edit-distance for fuzzy trigger matching (words only)."""
+    if a == b:
+        return 0
+    if not a or not b:
+        return max(len(a), len(b))
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        curr = [i]
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            curr.append(min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost))
+        prev = curr
+    return prev[-1]
+
+
+def _token_matches(whisper_tok: str, target_tok: str) -> bool:
+    """True if Whisper's token matches a trigger token exactly OR is
+    within 1 edit (handles Whisper's typical drift on wake words)."""
+    if whisper_tok == target_tok:
+        return True
+    # Allow 1 edit for short words, 2 for longer ones
+    max_edits = 1 if len(target_tok) <= 4 else 2
+    return _levenshtein(whisper_tok, target_tok) <= max_edits
 
 
 @dataclass
@@ -77,13 +107,13 @@ def _match_phrase_at(word_idx: int, whisper_words: list[dict],
     if not phrase_tokens or word_idx >= len(whisper_words):
         return None
 
-    # 1) Multi-token sequence match
+    # 1) Multi-token sequence match — with fuzzy per-token compare
     if word_idx + len(phrase_tokens) <= len(whisper_words):
         ok = True
         for i, tok in enumerate(phrase_tokens):
             w = whisper_words[word_idx + i]
             ww = _normalize(w.get("word", "") or w.get("text", "")).strip()
-            if ww != tok:
+            if not _token_matches(ww, tok):
                 ok = False
                 break
         if ok:
@@ -97,7 +127,7 @@ def _match_phrase_at(word_idx: int, whisper_words: list[dict],
         concat = "".join(phrase_tokens)
         w = whisper_words[word_idx]
         ww = _normalize(w.get("word", "") or w.get("text", "")).strip()
-        if ww == concat:
+        if _token_matches(ww, concat):
             start_t = float(w.get("start", 0))
             end_t = float(w.get("end", start_t))
             return (word_idx + 1, start_t, end_t)
