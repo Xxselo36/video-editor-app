@@ -1449,9 +1449,36 @@ function DoneScreen({
   };
 
   return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-5 py-4">
-      <div className="text-5xl">✨</div>
-      <div className="text-2xl font-semibold">Ready</div>
+    <div className="flex min-h-[60vh] flex-col items-center gap-5 py-4">
+      {/* Peak-moment preview: user sees their finished video inline
+          before scrolling to Download. Autoplay muted + playsInline
+          works in iOS Safari; poster falls back to the thumbnail. */}
+      <div
+        className="w-full max-w-[360px] overflow-hidden rounded-2xl"
+        style={{
+          background: "#000",
+          border: "1px solid var(--border-hover)",
+          boxShadow:
+            "0 0 0 1px rgba(139,92,246,0.25), 0 12px 40px rgba(139,92,246,0.28)",
+        }}
+      >
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+        <video
+          src={`${backendUrl()}/jobs/${jobId}/watch`}
+          poster={`${backendUrl()}/jobs/${jobId}/thumbnail`}
+          controls
+          autoPlay
+          muted
+          loop
+          playsInline
+          className="block w-full"
+          style={{ maxHeight: "60vh" }}
+        />
+      </div>
+
+      <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--brand-strong)" }}>
+        <span className="text-base">✨</span> Ready to post
+      </div>
 
       {(socialCaption || hashtagLine) && (
         <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4 text-left">
