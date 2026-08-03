@@ -188,12 +188,21 @@ def detect_voice_triggers(
 
         # Clean continue boundary: start of the FIRST word AFTER "go"
         # so the trigger itself and any breath/silence after it are cut.
+        # Whisper often ends "go" ~100-200ms before the actual audio tail
+        # finishes, so extend the cut by 150ms — inaudibly clips the next
+        # word's leading silence but reliably swallows the "go" residue.
+        TAIL_BUFFER = 0.15
         if cont_next_idx < len(whisper_words):
-            continue_end = float(whisper_words[cont_next_idx].get("start", 0))
+            next_word_start = float(whisper_words[cont_next_idx].get("start", 0))
+            trigger_end = float(whisper_words[cont_next_idx - 1].get("end", 0))
+            continue_end = min(
+                next_word_start,
+                trigger_end + TAIL_BUFFER,
+            )
         else:
-            # Continue-phrase is the very last word — fall back to its own end
+            # Continue-phrase is the very last word — extend beyond its end
             last = whisper_words[cont_next_idx - 1]
-            continue_end = float(last.get("end", 0))
+            continue_end = float(last.get("end", 0)) + TAIL_BUFFER
 
         pairs.append(VoiceTriggerPair(
             cut_start=cut_start,

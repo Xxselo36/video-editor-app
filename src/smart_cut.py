@@ -193,12 +193,15 @@ class SmartCutter:
     def optimize_cuts(
         self,
         segments: list[tuple[float, float]],
-        max_adjust: float = 0.5,
+        max_adjust: float = 1.0,
     ) -> list[tuple[float, float]]:
         """Snap segment boundaries to the nearest natural break point.
 
         Priority: sentence boundary > clause boundary > word boundary > original.
         Adjustments are limited to *max_adjust* seconds in either direction.
+        Bumped from 0.5s to 1.0s — the tighter window sometimes left
+        silence-based cuts mid-word when the nearest word boundary was
+        further away, producing garbled fragments in the output.
         """
         if not segments:
             return []
