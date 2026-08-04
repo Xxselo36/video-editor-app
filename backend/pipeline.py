@@ -429,7 +429,10 @@ def analyze_only(
 
     voice_triggers = settings.get("voice_triggers", True)
     remove_fillers = settings.get("remove_fillers", True)
-    whisper_model = settings.get("whisper_model", "small")
+    # 'medium' catches short wake words ('Cleo cut', 'Cleo go') that
+    # 'small' regularly swallows. Slower (~2x) but the voice-trigger
+    # feature simply doesn't work reliably on 'small'.
+    whisper_model = settings.get("whisper_model", "medium")
     cut_keywords = settings.get("cut_keywords")
     continue_keywords = settings.get("continue_keywords")
 

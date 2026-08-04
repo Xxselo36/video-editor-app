@@ -420,7 +420,7 @@ export default function Home() {
       style: applyPreset ? p!.settings.cutStyle : cutStyle,
       voice_triggers: applyPreset ? p!.settings.voiceTriggers : voiceTriggers,
       remove_fillers: applyPreset ? p!.settings.removeFillers : removeFillers,
-      whisper_model: "small",
+      whisper_model: "medium",
       smartcam_enabled: applyPreset
         ? p!.settings.smartcamEnabled
         : smartcamEnabled,
