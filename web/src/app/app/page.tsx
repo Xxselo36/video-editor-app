@@ -1756,20 +1756,35 @@ function ReviewScreen({
         />
       )}
 
-      <div>
-        <div className="mb-1 text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
-          Review captions
-        </div>
-        <div className="text-xs text-[var(--text-muted)]">
-          Play the video, fix typos as they go by. Tap ✕ to drop a line, tap a
-          card to jump to that moment.
-        </div>
-      </div>
-
+      {/* Transcript panel — its own bordered container so the scrolling
+          feels contained (was previously loose blocks bleeding into
+          the surrounding layout). Header is sticky inside the panel. */}
       <div
-        ref={transcriptScrollRef}
-        className="flex max-h-[40vh] flex-col gap-2 overflow-y-auto pr-1"
+        className="overflow-hidden rounded-2xl"
+        style={{
+          background: "var(--surface-1)",
+          border: "1px solid var(--border)",
+        }}
       >
+        <div
+          className="border-b px-4 pt-3 pb-2"
+          style={{
+            borderColor: "var(--border)",
+            background: "var(--surface-1)",
+          }}
+        >
+          <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+            Review captions
+          </div>
+          <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
+            Play the video, fix typos as they go by. Tap ✕ to drop a line,
+            tap a card to jump to that moment.
+          </div>
+        </div>
+        <div
+          ref={transcriptScrollRef}
+          className="flex max-h-[45vh] flex-col gap-2 overflow-y-auto p-3"
+        >
         {phrases.length === 0 && (
           <div className="rounded-xl border border-[var(--border)] p-6 text-center text-xs text-[var(--text-muted)]">
             No captions. Output will be video only.
@@ -1835,6 +1850,7 @@ function ReviewScreen({
             </div>
           );
         })}
+        </div>
       </div>
 
       <button
