@@ -186,8 +186,27 @@ def analyze_video(
     duration = clip.duration
     clip.close()
 
+    # Smart cut optimization — snap silence-based cuts to natural break
+    # points. MUST run BEFORE voice-triggers because it re-snaps every
+    # segment boundary to the nearest word/sentence within ±1s. Running
+    # it after voice-triggers would drag the trigger cuts back to a
+    # nearby word boundary, effectively undoing the trigger removal
+    # and leaving the failed take in the final video.
+    if smart_cut and analyzer._transcription:
+        current_step += 1
+        if progress_callback:
+            progress_callback("Optimizing cut points...", step=current_step, total_steps=total_steps)
+
+        if cancel_check and cancel_check():
+            raise InterruptedError("Cancelled")
+
+        from src.smart_cut import SmartCutter
+        cutter = SmartCutter(analyzer._transcription, duration)
+        segments = cutter.optimize_cuts(segments)
+
     # Voice triggers — user said "cut" / "weiter" during the take,
-    # remove those ranges from the speech segments.
+    # remove those ranges from the speech segments. Runs LAST so the
+    # trigger cuts are authoritative (nothing snaps them back).
     detected_trigger_pairs = []
     if voice_triggers and analyzer._transcription:
         if progress_callback:
@@ -224,19 +243,6 @@ def analyze_video(
                 )
         except Exception as e:
             print(f"[voice-triggers] error: {e}", flush=True)
-
-    # Smart cut optimization — snap cuts to natural break points
-    if smart_cut and analyzer._transcription:
-        current_step += 1
-        if progress_callback:
-            progress_callback("Optimizing cut points...", step=current_step, total_steps=total_steps)
-
-        if cancel_check and cancel_check():
-            raise InterruptedError("Cancelled")
-
-        from src.smart_cut import SmartCutter
-        cutter = SmartCutter(analyzer._transcription, duration)
-        segments = cutter.optimize_cuts(segments)
 
     # Map subtitles to new timeline (after cuts)
     current_step += 1
