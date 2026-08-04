@@ -181,6 +181,49 @@ def detect_voice_triggers(
     except Exception:
         pass
 
+    # Silence guards for single-word fallback triggers ("cut", "go").
+    # Whisper regularly drops the "Cleo" wake word entirely; without
+    # these fallbacks the feature is dead in the water. Guards ensure
+    # the single word looks like a deliberate command (bookended by
+    # audible silence) rather than a stray word in normal speech.
+    SINGLE_CUT_TOKENS = {"cut", "kot", "kut"}
+    SINGLE_GO_TOKENS = {"go", "goh"}
+    SILENCE_BEFORE = 0.35  # required pause before word to count as command
+    SILENCE_AFTER = 0.25   # required pause after word
+
+    def _has_silence_gap(prev_idx: int, curr_idx: int, min_gap: float) -> bool:
+        """True if there's at least `min_gap` seconds of silence between
+        prev_idx and curr_idx in the whisper word list."""
+        if prev_idx < 0:
+            return True  # start of clip counts as silence
+        try:
+            prev_end = float(whisper_words[prev_idx].get("end", 0))
+            curr_start = float(whisper_words[curr_idx].get("start", 0))
+            return curr_start - prev_end >= min_gap
+        except Exception:
+            return False
+
+    def _match_single_word_trigger(idx: int, allowed: set[str]) -> tuple[int, float, float] | None:
+        """Match a bare 'cut' or 'go' at whisper_words[idx] as a command.
+        Requires silence gaps before AND after to avoid matching normal
+        speech ('I hit the cut button', 'let's go home')."""
+        if idx >= len(whisper_words):
+            return None
+        w = whisper_words[idx]
+        tok = _normalize(w.get("word", "") or w.get("text", "")).strip()
+        if tok not in allowed:
+            return None
+        # Guard: audible pause before
+        if not _has_silence_gap(idx - 1, idx, SILENCE_BEFORE):
+            return None
+        # Guard: audible pause after (or clip end)
+        if idx + 1 < len(whisper_words):
+            if not _has_silence_gap(idx, idx + 1, SILENCE_AFTER):
+                return None
+        start_t = float(w.get("start", 0))
+        end_t = float(w.get("end", start_t))
+        return (idx + 1, start_t, end_t)
+
     pairs: list[VoiceTriggerPair] = []
     i = 0
     while i < len(whisper_words):
@@ -194,6 +237,16 @@ def detect_voice_triggers(
                 cut_next_idx, cut_phrase_start_t, _ = m
                 matched_cut = kw
                 break
+
+        # Fallback: single-word "cut" surrounded by silence
+        if not matched_cut:
+            m = _match_single_word_trigger(i, SINGLE_CUT_TOKENS)
+            if m is not None:
+                cut_next_idx, cut_phrase_start_t, _ = m
+                matched_cut = "<cut>"
+                print(f"[voice-triggers] single-word 'cut' at "
+                      f"{cut_phrase_start_t:.2f}s (silence-guarded)",
+                      flush=True)
 
         if not matched_cut:
             i += 1
@@ -218,6 +271,14 @@ def detect_voice_triggers(
                     cont_next_idx, _, _ = m
                     matched_continue = kw
                     break
+            # Fallback: single-word "go" surrounded by silence
+            if matched_continue is None:
+                m = _match_single_word_trigger(j, SINGLE_GO_TOKENS)
+                if m is not None:
+                    cont_next_idx, _, _ = m
+                    matched_continue = "<go>"
+                    print(f"[voice-triggers] single-word 'go' at word {j} "
+                          f"(silence-guarded)", flush=True)
             if matched_continue is not None:
                 break
             j += 1

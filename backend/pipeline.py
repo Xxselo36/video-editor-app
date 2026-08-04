@@ -6,6 +6,7 @@ per-segment clips into a single MP4 for the web user to download.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -498,6 +499,9 @@ def analyze_only(
     # LLM cleanup + bad-take detection. Runs only if ANTHROPIC_API_KEY
     # is set; soft-fails to no-op otherwise so dev works without a key.
     _stage("Polishing transcript…", 85)
+    has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    print(f"[llm] cleanup starting — API key present: {has_key}, "
+          f"{len(subtitles)} subtitles to process", flush=True)
     try:
         from backend.llm import cleanup_and_detect_bad_takes
         llm_input = [
@@ -512,6 +516,9 @@ def analyze_only(
         llm_res = cleanup_and_detect_bad_takes(
             llm_input, language=result.language,
         )
+        print(f"[llm] cleanup response — "
+              f"cleaned={len(llm_res.get('cleaned', {}))} phrases, "
+              f"bad_takes={llm_res.get('bad_takes', [])}", flush=True)
         # Apply cleaned text in place
         for i, s in enumerate(subtitles):
             cleaned = llm_res.get("cleaned", {}).get(i)
@@ -530,13 +537,15 @@ def analyze_only(
                     bad_take_cut_ranges.append((bs, be))
         # Apply bad-take cuts to segments + drop flagged subtitles.
         if bad_take_cut_ranges:
-            print(f"[llm] {len(bad_take_cut_ranges)} bad-take range(s) flagged",
-                  flush=True)
+            print(f"[llm] {len(bad_take_cut_ranges)} bad-take range(s) "
+                  f"applied: {bad_take_cut_ranges}", flush=True)
             segments = _apply_extra_cuts(segments, bad_take_cut_ranges)
             flagged = set(llm_res.get("bad_takes", []) or [])
             subtitles = [s for i, s in enumerate(subtitles) if i not in flagged]
     except Exception as e:
-        print(f"[llm] cleanup pass failed (soft): {e}", flush=True)
+        import traceback
+        print(f"[llm] cleanup pass failed (soft): {e}\n"
+              f"{traceback.format_exc()}", flush=True)
 
     # Compute the cut ranges (inverse of kept segments) so the user can
     # see exactly what's being removed, and tap to disable individual
