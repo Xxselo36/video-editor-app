@@ -1642,28 +1642,25 @@ function ReviewScreen({
     setActiveIdx(idx === -1 ? null : idx);
   }, [currentTime, phrases]);
 
-  // Scroll the active phrase into view WITHIN the transcript container
-  // only. Manual scrollTop math so it never scrolls the outer window
-  // (which was yanking the video out of view every phrase change).
+  // Keep the active phrase visible in the transcript container. Uses
+  // getBoundingClientRect (not offsetTop) so it works regardless of
+  // the container's positioned ancestor, and always scrolls so the
+  // active block sits at ~30% from the top — upcoming lines stay in
+  // sight, past lines fall off cleanly.
   useEffect(() => {
     if (activeIdx === null) return;
     if (videoRef.current?.paused) return;
     const container = transcriptScrollRef.current;
     const el = phraseRefs.current[activeIdx];
     if (!container || !el) return;
-    const elTop = el.offsetTop;
-    const elBottom = elTop + el.offsetHeight;
-    const viewTop = container.scrollTop;
-    const viewBottom = viewTop + container.clientHeight;
-    // Only scroll if the phrase isn't fully visible in the container
-    if (elTop < viewTop) {
-      container.scrollTo({ top: elTop, behavior: "smooth" });
-    } else if (elBottom > viewBottom) {
-      container.scrollTo({
-        top: elBottom - container.clientHeight,
-        behavior: "smooth",
-      });
-    }
+    const cRect = container.getBoundingClientRect();
+    const eRect = el.getBoundingClientRect();
+    const relativeTop = (eRect.top - cRect.top) + container.scrollTop;
+    const desiredOffset = container.clientHeight * 0.3;
+    container.scrollTo({
+      top: Math.max(0, relativeTop - desiredOffset),
+      behavior: "smooth",
+    });
   }, [activeIdx]);
 
   const updateText = (idx: number, text: string) => {
