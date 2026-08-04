@@ -1778,17 +1778,32 @@ function ReviewScreen({
         {phrases.map((p, i) => {
           const isActive = i === activeIdx;
           const lowConfidence = p.confidence < 0.6;
-          let borderClass = "border-[var(--border)]";
-          if (isActive) borderClass = "border-[var(--brand)] bg-[var(--brand-tint)]";
-          else if (lowConfidence) borderClass = "border-[var(--warn)]/60 bg-[var(--warn)]/[0.04]";
+          let extraClass = "border border-[var(--border)]";
+          if (isActive) {
+            extraClass =
+              "border border-[var(--brand)] bg-[var(--brand-tint)] " +
+              "ring-2 ring-[var(--brand-hover)]/50 shadow-[0_0_20px_var(--brand-glow)]";
+          } else if (lowConfidence) {
+            extraClass = "border border-[var(--warn)]/60 bg-[var(--warn)]/[0.04]";
+          }
           return (
             <div
               key={i}
               ref={(el) => {
                 phraseRefs.current[i] = el;
               }}
-              className={`rounded-xl border p-3 transition-colors ${borderClass}`}
+              className={`relative rounded-xl p-3 transition-all ${extraClass}`}
             >
+              {isActive && (
+                <span
+                  aria-hidden
+                  className="absolute -left-1 top-1/2 -translate-y-1/2 h-8 w-1 rounded-full"
+                  style={{
+                    background: "var(--brand-hover)",
+                    boxShadow: "0 0 8px var(--brand-glow)",
+                  }}
+                />
+              )}
               <div className="mb-1.5 flex items-center justify-between">
                 <button
                   onClick={() => seekToPhrase(p)}
@@ -1899,15 +1914,17 @@ function Timeline({
         {playheadPct !== null && (
           <div
             aria-hidden
-            className="pointer-events-none absolute top-1/2 -translate-y-1/2"
+            className="pointer-events-none absolute"
             style={{
               left: `${playheadPct}%`,
-              height: "26px",
+              top: "-6px",
+              bottom: "-6px",
               width: "2px",
               background: "var(--brand-hover)",
-              boxShadow: "0 0 6px var(--brand-glow)",
-              transform: "translate(-50%, -50%)",
+              boxShadow: "0 0 8px var(--brand-glow)",
+              transform: "translateX(-50%)",
               zIndex: 10,
+              borderRadius: "1px",
             }}
           />
         )}
