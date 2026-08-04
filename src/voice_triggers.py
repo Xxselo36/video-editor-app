@@ -252,13 +252,43 @@ def detect_voice_triggers(
             i += 1
             continue
 
-        # Clean cut boundary: end of the word BEFORE the trigger phrase
-        # so the last spoken word stays intact, but breath/silence right
-        # before "cleo" gets removed for a hard, clean cut.
-        if i > 0:
-            cut_start = float(whisper_words[i - 1].get("end", cut_phrase_start_t))
+        # Cut range starts at the beginning of the FAILED TAKE, not right
+        # before the trigger. Walk backwards from the trigger looking for
+        # the previous natural speech pause (>=800ms silence) — the word
+        # right AFTER that pause is where the failed take started.
+        #
+        # Bounded so we don't walk past the end of a PREVIOUS cut→continue
+        # pair's continue-marker (i.e. don't nuke content from earlier
+        # good takes).
+        FAILED_TAKE_PAUSE = 0.8
+        prev_pair_end_time = pairs[-1].continue_end if pairs else 0.0
+
+        # Default: if no prior pause found, cut from the trigger itself.
+        # (Same as old behaviour — safer than nuking the whole intro.)
+        cut_start = cut_phrase_start_t
+        for k in range(i - 1, 0, -1):
+            prev_end = float(whisper_words[k - 1].get("end", 0))
+            curr_start = float(whisper_words[k].get("start", 0))
+            # Stop if we've walked back into an earlier good take.
+            if prev_end < prev_pair_end_time:
+                cut_start = max(prev_pair_end_time,
+                                float(whisper_words[k].get("start", cut_phrase_start_t)))
+                break
+            gap = curr_start - prev_end
+            if gap >= FAILED_TAKE_PAUSE:
+                # Word k is the start of the failed take
+                cut_start = float(whisper_words[k].get("start", cut_phrase_start_t))
+                print(f"[voice-triggers] failed-take starts at word {k} "
+                      f"(t={cut_start:.2f}s, {gap:.2f}s pause before)",
+                      flush=True)
+                break
         else:
-            cut_start = cut_phrase_start_t
+            # No pause found walking all the way back — failed take may
+            # extend from the very start of the clip.
+            if whisper_words:
+                cut_start = float(whisper_words[0].get("start", 0))
+                print(f"[voice-triggers] failed-take reaches back to clip start "
+                      f"(t={cut_start:.2f}s)", flush=True)
 
         # Search for continue-keyword after the cut-phrase
         j = cut_next_idx
