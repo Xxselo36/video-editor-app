@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LogoMark } from "@/components/Logo";
 import {
   IconArrowRight,
@@ -1599,9 +1599,38 @@ function ReviewScreen({
   onBack: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const phraseRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+  // Convert the preview video's currentTime (which runs on the CUT
+  // timeline — kept segments concatenated) into a position on the
+  // ORIGINAL timeline so the cuts strip playhead lines up with the
+  // right removed section.
+  const keptSegments = useMemo<[number, number][]>(() => {
+    if (!duration) return [];
+    const sorted = [...cutRanges].sort((a, b) => a.start - b.start);
+    const kept: [number, number][] = [];
+    let cursor = 0;
+    for (const c of sorted) {
+      if (c.start > cursor) kept.push([cursor, c.start]);
+      cursor = c.end;
+    }
+    if (cursor < duration) kept.push([cursor, duration]);
+    return kept;
+  }, [cutRanges, duration]);
+
+  const originalTime = useMemo(() => {
+    if (!keptSegments.length) return currentTime;
+    let acc = 0;
+    for (const [s, e] of keptSegments) {
+      const segDur = e - s;
+      if (acc + segDur >= currentTime) return s + (currentTime - acc);
+      acc += segDur;
+    }
+    return duration;
+  }, [currentTime, keptSegments, duration]);
 
   // The preview video is the SOURCE already cut to the kept segments,
   // so phrase.start / phrase.end (cut-timeline) match video.currentTime
@@ -1613,15 +1642,28 @@ function ReviewScreen({
     setActiveIdx(idx === -1 ? null : idx);
   }, [currentTime, phrases]);
 
-  // Auto-scroll the active phrase into view (only when video is playing,
-  // so manual editing doesn't yank focus around).
+  // Scroll the active phrase into view WITHIN the transcript container
+  // only. Manual scrollTop math so it never scrolls the outer window
+  // (which was yanking the video out of view every phrase change).
   useEffect(() => {
     if (activeIdx === null) return;
     if (videoRef.current?.paused) return;
-    phraseRefs.current[activeIdx]?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-    });
+    const container = transcriptScrollRef.current;
+    const el = phraseRefs.current[activeIdx];
+    if (!container || !el) return;
+    const elTop = el.offsetTop;
+    const elBottom = elTop + el.offsetHeight;
+    const viewTop = container.scrollTop;
+    const viewBottom = viewTop + container.clientHeight;
+    // Only scroll if the phrase isn't fully visible in the container
+    if (elTop < viewTop) {
+      container.scrollTo({ top: elTop, behavior: "smooth" });
+    } else if (elBottom > viewBottom) {
+      container.scrollTo({
+        top: elBottom - container.clientHeight,
+        behavior: "smooth",
+      });
+    }
   }, [activeIdx]);
 
   const updateText = (idx: number, text: string) => {
@@ -1703,6 +1745,7 @@ function ReviewScreen({
           duration={duration}
           cuts={cutRanges}
           disabled={disabledCuts}
+          playhead={originalTime}
           onToggle={(id) =>
             setDisabledCuts(
               disabledCuts.includes(id)
@@ -1723,7 +1766,10 @@ function ReviewScreen({
         </div>
       </div>
 
-      <div className="flex max-h-[40vh] flex-col gap-2 overflow-y-auto pr-1">
+      <div
+        ref={transcriptScrollRef}
+        className="flex max-h-[40vh] flex-col gap-2 overflow-y-auto pr-1"
+      >
         {phrases.length === 0 && (
           <div className="rounded-xl border border-[var(--border)] p-6 text-center text-xs text-[var(--text-muted)]">
             No captions. Output will be video only.
@@ -1797,16 +1843,22 @@ function Timeline({
   cuts,
   disabled,
   onToggle,
+  playhead,
 }: {
   duration: number;
   cuts: CutRange[];
   disabled: number[];
   onToggle: (id: number) => void;
+  playhead?: number;
 }) {
   const disabledSet = new Set(disabled);
   const totalCutSeconds = cuts
     .filter((c) => !disabledSet.has(c.id))
     .reduce((acc, c) => acc + (c.end - c.start), 0);
+  const playheadPct =
+    playhead !== undefined && duration > 0
+      ? Math.max(0, Math.min(100, (playhead / duration) * 100))
+      : null;
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
@@ -1844,6 +1896,21 @@ function Timeline({
             />
           );
         })}
+        {playheadPct !== null && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 -translate-y-1/2"
+            style={{
+              left: `${playheadPct}%`,
+              height: "26px",
+              width: "2px",
+              background: "var(--brand-hover)",
+              boxShadow: "0 0 6px var(--brand-glow)",
+              transform: "translate(-50%, -50%)",
+              zIndex: 10,
+            }}
+          />
+        )}
       </div>
       <div className="mt-1 text-[10px] text-[var(--text-faint)]">
         Red = removed · tap to restore. Green dashes = kept.
