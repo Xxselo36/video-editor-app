@@ -239,10 +239,15 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
 
     Uses libx264 because bundled imageio_ffmpeg's videotoolbox is broken.
     """
-    # afftdn removed: spectral-subtraction denoise stripped voice
-    # harmonics and made clean recordings sound hollow / underwater.
-    # loudnorm alone gets us to the -14 LUFS streaming target.
-    audio_chain = "loudnorm=I=-14:TP=-1.5:LRA=11"
+    # Audio processing removed entirely:
+    # - afftdn was making clean voice hollow / underwater (spectral-
+    #   subtraction stripped harmonics).
+    # - loudnorm was subtly shifting audio characteristics before
+    #   Whisper transcribed it, hurting accuracy on short wake words
+    #   like 'Cleo'. Whisper was trained on natural unprocessed audio.
+    # Original audio passes through untouched; users get streaming
+    # normalisation from TikTok/YouTube's own upload processing.
+    audio_chain = None
     # Cap longest side at 1920 (= 1080p output). iPhone 4K (2160×3840
     # portrait) on a small Railway container kills the libx264 encode
     # within minutes — 5-10× more pixels than 1080p with no visible
@@ -272,7 +277,8 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
         "-color_primaries", "bt709",
         "-color_trc", "bt709",
         "-colorspace", "bt709",
-        "-af", audio_chain,
+        # Audio: pass-through re-encode to AAC, no filters. Whisper gets
+        # natural audio (see comment above audio_chain).
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         output_path,
