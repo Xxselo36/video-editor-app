@@ -396,7 +396,12 @@ def _ffmpeg_concat(clip_paths: list[str], output_path: str) -> None:
         "-i", list_path,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "192k",
+        # Stream-copy audio (no second AAC re-encode). Second AAC pass
+        # was producing HF hissing artifacts in the final render. All
+        # segments share the same AAC params from the per-segment burn,
+        # so copy joins them without click issues that raw-copy would
+        # have on inconsistent inputs.
+        "-c:a", "copy",
         "-movflags", "+faststart",
         output_path,
     ]
