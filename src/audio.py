@@ -145,8 +145,17 @@ class AudioAnalyzer:
                 language=None,  # Automatische Spracherkennung
                 task="transcribe",
                 word_timestamps=True,  # Wort-genaue Timestamps
-                condition_on_previous_text=True,  # Besserer Kontext
-                no_speech_threshold=0.6,  # Weniger Fehler bei Stille
+                # condition_on_previous_text OFF: with it ON, Whisper
+                # biases short standalone segments (wake commands after
+                # a pause) toward the surrounding sentence context and
+                # drops the command. Voice triggers were dying here.
+                condition_on_previous_text=False,
+                # no_speech_threshold near-max: at 0.6 Whisper would
+                # DISCARD entire 30s segments if the majority looked
+                # like silence — which nuked isolated 'Cleo cut'
+                # commands surrounded by pauses. 0.98 means only
+                # truly-silent-full-segment gets skipped.
+                no_speech_threshold=0.98,
                 initial_prompt=(
                     # Force-recognise the wake word so 'Cleo cut' / 'Cleo go'
                     # get transcribed reliably instead of Whisper guessing
