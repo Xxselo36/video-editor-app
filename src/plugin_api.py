@@ -226,16 +226,37 @@ def analyze_video(
                 continue_keywords=continue_keywords,
                 clip_duration=duration,
             )
+            # Dump whisper words so we can see exactly what was heard
+            print(f"[voice-triggers] whisper heard "
+                  f"({len(ww)} words):", flush=True)
+            print("[voice-triggers] " + " ".join(
+                w.get("word", "").strip() for w in ww
+            ), flush=True)
+            print(f"[voice-triggers] {len(detected_trigger_pairs)} "
+                  f"pair(s) detected:", flush=True)
+            for p in detected_trigger_pairs:
+                print(f"  '{p.cut_word}' @ {p.cut_start:.2f}s → "
+                      f"'{p.continue_word}' @ {p.continue_end:.2f}s "
+                      f"(range={p.continue_end - p.cut_start:.2f}s)",
+                      flush=True)
             if detected_trigger_pairs:
-                print(f"[voice-triggers] {len(detected_trigger_pairs)} "
-                      f"cut→continue pair(s) detected:")
-                for p in detected_trigger_pairs:
-                    print(f"  '{p.cut_word}' @ {p.cut_start:.2f}s → "
-                          f"'{p.continue_word}' @ {p.continue_end:.2f}s",
-                          flush=True)
+                print(f"[voice-triggers] segments BEFORE apply: "
+                      f"{len(segments)} kept, "
+                      f"total={sum(e - s for s, e in segments):.2f}s",
+                      flush=True)
+                for i, (s, e) in enumerate(segments[:20]):
+                    print(f"  seg{i}: {s:.2f}→{e:.2f}s "
+                          f"({e - s:.2f}s)", flush=True)
                 segments = apply_voice_triggers_to_segments(
                     segments, detected_trigger_pairs,
                 )
+                print(f"[voice-triggers] segments AFTER apply: "
+                      f"{len(segments)} kept, "
+                      f"total={sum(e - s for s, e in segments):.2f}s",
+                      flush=True)
+                for i, (s, e) in enumerate(segments[:20]):
+                    print(f"  seg{i}: {s:.2f}→{e:.2f}s "
+                          f"({e - s:.2f}s)", flush=True)
                 # Also drop subtitles inside cut ranges so they don't
                 # come back via the editor.
                 subtitles = apply_voice_triggers_to_subtitles(

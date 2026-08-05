@@ -29,45 +29,15 @@ import re
 from dataclasses import dataclass
 
 
-# Cleo-Wake-Word plus Whisper-Mishears. We accept anything within
-# Levenshtein-1 of these below, so even "kleu kut" or "clear cat"
-# still fires. "Clio" (Renault car) never appears with cut/go in
-# normal speech — safe as a trigger.
+# Cleo-Wake-Word plus die häufigsten Whisper-Mishears als Phrasen.
+# "Clio" (Renault-Auto), "Cleyo" und "Klio" tauchen in normaler Sprache
+# nicht in Kombi mit "cut"/"go" auf — sicher als Trigger.
 DEFAULT_CUT_KEYWORDS = [
     "cleo cut", "clio cut", "cleyo cut", "klio cut", "kleo cut",
-    "clea cut", "leo cut", "kleu cut", "cleo cat", "cleo cart",
-    "cleo caught", "clear cut",
 ]
 DEFAULT_CONTINUE_KEYWORDS = [
     "cleo go", "clio go", "cleyo go", "klio go", "kleo go",
-    "clea go", "leo go", "kleu go", "cleo goh", "cleo goal",
 ]
-
-
-def _levenshtein(a: str, b: str) -> int:
-    """Small edit-distance for fuzzy trigger matching (words only)."""
-    if a == b:
-        return 0
-    if not a or not b:
-        return max(len(a), len(b))
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        curr = [i]
-        for j, cb in enumerate(b, 1):
-            cost = 0 if ca == cb else 1
-            curr.append(min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost))
-        prev = curr
-    return prev[-1]
-
-
-def _token_matches(whisper_tok: str, target_tok: str) -> bool:
-    """Exact match only. Fuzzy heuristics fired on too many normal
-    German words ("kann", "geht", "leck" all matched "Cleo cut") and
-    destroyed unrelated content. Until we can look at Whisper's actual
-    output for a failing take (see debug log at scan start), we stay
-    strict: only match what Whisper literally transcribed.
-    """
-    return whisper_tok == target_tok
 
 
 @dataclass
@@ -107,13 +77,13 @@ def _match_phrase_at(word_idx: int, whisper_words: list[dict],
     if not phrase_tokens or word_idx >= len(whisper_words):
         return None
 
-    # 1) Multi-token sequence match — with fuzzy per-token compare
+    # 1) Multi-token sequence match
     if word_idx + len(phrase_tokens) <= len(whisper_words):
         ok = True
         for i, tok in enumerate(phrase_tokens):
             w = whisper_words[word_idx + i]
             ww = _normalize(w.get("word", "") or w.get("text", "")).strip()
-            if not _token_matches(ww, tok):
+            if ww != tok:
                 ok = False
                 break
         if ok:
@@ -127,7 +97,7 @@ def _match_phrase_at(word_idx: int, whisper_words: list[dict],
         concat = "".join(phrase_tokens)
         w = whisper_words[word_idx]
         ww = _normalize(w.get("word", "") or w.get("text", "")).strip()
-        if _token_matches(ww, concat):
+        if ww == concat:
             start_t = float(w.get("start", 0))
             end_t = float(w.get("end", start_t))
             return (word_idx + 1, start_t, end_t)
@@ -166,64 +136,6 @@ def detect_voice_triggers(
     cut_keywords = sorted(cut_keywords, key=lambda p: -len(p.split()))
     continue_keywords = sorted(continue_keywords, key=lambda p: -len(p.split()))
 
-    # Debug: log all whisper words + trigger keywords so we can diagnose
-    # when triggers don't fire. Prints once at start of scan.
-    try:
-        wl = [
-            _normalize(w.get("word", "") or w.get("text", "")).strip()
-            for w in whisper_words
-        ]
-        print(f"[voice-triggers] scanning {len(wl)} words for "
-              f"cut={cut_keywords[:3]}… continue={continue_keywords[:3]}…",
-              flush=True)
-        print(f"[voice-triggers] whisper words: {' '.join(wl)}",
-              flush=True)
-    except Exception:
-        pass
-
-    # Silence guards for single-word fallback triggers ("cut", "go").
-    # Whisper regularly drops the "Cleo" wake word entirely; without
-    # these fallbacks the feature is dead in the water. Guards ensure
-    # the single word looks like a deliberate command (bookended by
-    # audible silence) rather than a stray word in normal speech.
-    SINGLE_CUT_TOKENS = {"cut", "kot", "kut"}
-    SINGLE_GO_TOKENS = {"go", "goh"}
-    SILENCE_BEFORE = 0.35  # required pause before word to count as command
-    SILENCE_AFTER = 0.25   # required pause after word
-
-    def _has_silence_gap(prev_idx: int, curr_idx: int, min_gap: float) -> bool:
-        """True if there's at least `min_gap` seconds of silence between
-        prev_idx and curr_idx in the whisper word list."""
-        if prev_idx < 0:
-            return True  # start of clip counts as silence
-        try:
-            prev_end = float(whisper_words[prev_idx].get("end", 0))
-            curr_start = float(whisper_words[curr_idx].get("start", 0))
-            return curr_start - prev_end >= min_gap
-        except Exception:
-            return False
-
-    def _match_single_word_trigger(idx: int, allowed: set[str]) -> tuple[int, float, float] | None:
-        """Match a bare 'cut' or 'go' at whisper_words[idx] as a command.
-        Requires silence gaps before AND after to avoid matching normal
-        speech ('I hit the cut button', 'let's go home')."""
-        if idx >= len(whisper_words):
-            return None
-        w = whisper_words[idx]
-        tok = _normalize(w.get("word", "") or w.get("text", "")).strip()
-        if tok not in allowed:
-            return None
-        # Guard: audible pause before
-        if not _has_silence_gap(idx - 1, idx, SILENCE_BEFORE):
-            return None
-        # Guard: audible pause after (or clip end)
-        if idx + 1 < len(whisper_words):
-            if not _has_silence_gap(idx, idx + 1, SILENCE_AFTER):
-                return None
-        start_t = float(w.get("start", 0))
-        end_t = float(w.get("end", start_t))
-        return (idx + 1, start_t, end_t)
-
     pairs: list[VoiceTriggerPair] = []
     i = 0
     while i < len(whisper_words):
@@ -238,57 +150,17 @@ def detect_voice_triggers(
                 matched_cut = kw
                 break
 
-        # Fallback: single-word "cut" surrounded by silence
-        if not matched_cut:
-            m = _match_single_word_trigger(i, SINGLE_CUT_TOKENS)
-            if m is not None:
-                cut_next_idx, cut_phrase_start_t, _ = m
-                matched_cut = "<cut>"
-                print(f"[voice-triggers] single-word 'cut' at "
-                      f"{cut_phrase_start_t:.2f}s (silence-guarded)",
-                      flush=True)
-
         if not matched_cut:
             i += 1
             continue
 
-        # Cut range starts at the beginning of the FAILED TAKE, not right
-        # before the trigger. Walk backwards from the trigger looking for
-        # the previous natural speech pause (>=800ms silence) — the word
-        # right AFTER that pause is where the failed take started.
-        #
-        # Bounded so we don't walk past the end of a PREVIOUS cut→continue
-        # pair's continue-marker (i.e. don't nuke content from earlier
-        # good takes).
-        FAILED_TAKE_PAUSE = 0.8
-        prev_pair_end_time = pairs[-1].continue_end if pairs else 0.0
-
-        # Default: if no prior pause found, cut from the trigger itself.
-        # (Same as old behaviour — safer than nuking the whole intro.)
-        cut_start = cut_phrase_start_t
-        for k in range(i - 1, 0, -1):
-            prev_end = float(whisper_words[k - 1].get("end", 0))
-            curr_start = float(whisper_words[k].get("start", 0))
-            # Stop if we've walked back into an earlier good take.
-            if prev_end < prev_pair_end_time:
-                cut_start = max(prev_pair_end_time,
-                                float(whisper_words[k].get("start", cut_phrase_start_t)))
-                break
-            gap = curr_start - prev_end
-            if gap >= FAILED_TAKE_PAUSE:
-                # Word k is the start of the failed take
-                cut_start = float(whisper_words[k].get("start", cut_phrase_start_t))
-                print(f"[voice-triggers] failed-take starts at word {k} "
-                      f"(t={cut_start:.2f}s, {gap:.2f}s pause before)",
-                      flush=True)
-                break
+        # Clean cut boundary: end of the word BEFORE the trigger phrase
+        # so the last spoken word stays intact, but breath/silence right
+        # before "cleo" gets removed for a hard, clean cut.
+        if i > 0:
+            cut_start = float(whisper_words[i - 1].get("end", cut_phrase_start_t))
         else:
-            # No pause found walking all the way back — failed take may
-            # extend from the very start of the clip.
-            if whisper_words:
-                cut_start = float(whisper_words[0].get("start", 0))
-                print(f"[voice-triggers] failed-take reaches back to clip start "
-                      f"(t={cut_start:.2f}s)", flush=True)
+            cut_start = cut_phrase_start_t
 
         # Search for continue-keyword after the cut-phrase
         j = cut_next_idx
@@ -301,14 +173,6 @@ def detect_voice_triggers(
                     cont_next_idx, _, _ = m
                     matched_continue = kw
                     break
-            # Fallback: single-word "go" surrounded by silence
-            if matched_continue is None:
-                m = _match_single_word_trigger(j, SINGLE_GO_TOKENS)
-                if m is not None:
-                    cont_next_idx, _, _ = m
-                    matched_continue = "<go>"
-                    print(f"[voice-triggers] single-word 'go' at word {j} "
-                          f"(silence-guarded)", flush=True)
             if matched_continue is not None:
                 break
             j += 1
@@ -324,21 +188,12 @@ def detect_voice_triggers(
 
         # Clean continue boundary: start of the FIRST word AFTER "go"
         # so the trigger itself and any breath/silence after it are cut.
-        # Whisper often ends "go" ~100-200ms before the actual audio tail
-        # finishes, so extend the cut by 150ms — inaudibly clips the next
-        # word's leading silence but reliably swallows the "go" residue.
-        TAIL_BUFFER = 0.15
         if cont_next_idx < len(whisper_words):
-            next_word_start = float(whisper_words[cont_next_idx].get("start", 0))
-            trigger_end = float(whisper_words[cont_next_idx - 1].get("end", 0))
-            continue_end = min(
-                next_word_start,
-                trigger_end + TAIL_BUFFER,
-            )
+            continue_end = float(whisper_words[cont_next_idx].get("start", 0))
         else:
-            # Continue-phrase is the very last word — extend beyond its end
+            # Continue-phrase is the very last word — fall back to its own end
             last = whisper_words[cont_next_idx - 1]
-            continue_end = float(last.get("end", 0)) + TAIL_BUFFER
+            continue_end = float(last.get("end", 0))
 
         pairs.append(VoiceTriggerPair(
             cut_start=cut_start,
