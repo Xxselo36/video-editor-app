@@ -701,6 +701,7 @@ def render_only(
         cut_style=settings.get("style", "balanced"),
         cancel_check=cancel_check,
         language=language,
+        progress_cb=_stage,
     )
 
     if not clip_outputs:

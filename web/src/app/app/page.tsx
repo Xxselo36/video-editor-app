@@ -673,11 +673,11 @@ export default function Home() {
         )}
 
         {phase === "uploading" && (
-          <ProgressScreen label="Uploading…" pct={uploadPct} />
+          <ProgressScreen label="Uploading…" pct={uploadPct} phase="uploading" />
         )}
 
         {phase === "analyzing" && job && (
-          <ProgressScreen label={job.message} pct={job.progress} />
+          <ProgressScreen label={job.message} pct={job.progress} phase="analyzing" />
         )}
 
         {phase === "reviewing" && job && (
@@ -697,7 +697,7 @@ export default function Home() {
         )}
 
         {phase === "rendering" && job && (
-          <ProgressScreen label={job.message} pct={job.progress} />
+          <ProgressScreen label={job.message} pct={job.progress} phase="rendering" />
         )}
 
         {phase === "done" && job && (
@@ -1401,17 +1401,130 @@ function ToggleRow({
   );
 }
 
-function ProgressScreen({ label, pct }: { label: string; pct: number }) {
+/* Named stages so the user sees WHAT is happening, not raw ffmpeg
+ * messages. Percentages match the backend's _stage() reports:
+ *   analyze pipeline: 1→10 prep, 10→80 whisper, 80→95 cuts+LLM, 95→100 preview
+ *   render pipeline:  0→80 segment burn, 80→95 stitch+formats, 95→100 hooks+done
+ */
+const ANALYZE_STAGES = [
+  { key: "prep", label: "Preparing your video", from: 0, to: 10 },
+  { key: "listen", label: "Listening to your voice", from: 10, to: 80 },
+  { key: "polish", label: "Finding the good takes", from: 80, to: 95 },
+  { key: "preview", label: "Almost ready", from: 95, to: 100 },
+];
+
+const RENDER_STAGES = [
+  { key: "burn", label: "Applying your edits", from: 0, to: 70 },
+  { key: "stitch", label: "Stitching it together", from: 70, to: 90 },
+  { key: "finish", label: "Final touches", from: 90, to: 100 },
+];
+
+function ProgressScreen({
+  label,
+  pct,
+  phase,
+}: {
+  label: string;
+  pct: number;
+  phase?: "analyzing" | "rendering" | "uploading";
+}) {
+  const stages =
+    phase === "rendering" ? RENDER_STAGES
+    : phase === "analyzing" ? ANALYZE_STAGES
+    : null;
+
   return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center">
-      <div className="mb-8 text-base text-[var(--text-body)]">{label}</div>
-      <div className="mb-3 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-[var(--surface-2)]">
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-8">
+      {/* Big overall percentage */}
+      <div className="text-center">
         <div
-          className="h-full bg-[var(--brand)] transition-all duration-300"
-          style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
+          className="text-5xl font-bold tabular-nums"
+          style={{ color: "var(--brand)" }}
+        >
+          {Math.round(pct)}
+          <span className="text-2xl" style={{ color: "var(--text-muted)" }}>
+            %
+          </span>
+        </div>
+        <div
+          className="mt-1 text-xs uppercase tracking-[0.2em]"
+          style={{ color: "var(--text-muted)" }}
+        >
+          {phase === "uploading" ? "Uploading" : phase === "rendering" ? "Rendering" : "Processing"}
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div
+        className="h-2 w-full max-w-sm overflow-hidden rounded-full"
+        style={{ background: "var(--surface-2)" }}
+      >
+        <div
+          className="h-full transition-all duration-500 ease-out"
+          style={{
+            width: `${Math.max(0, Math.min(100, pct))}%`,
+            background:
+              "linear-gradient(90deg, var(--brand) 0%, var(--brand-hover) 100%)",
+            boxShadow: "0 0 12px var(--brand-glow)",
+          }}
         />
       </div>
-      <div className="text-xs text-[var(--text-faint)]">{Math.round(pct)}%</div>
+
+      {/* Named stages checklist */}
+      {stages && (
+        <div className="flex w-full max-w-sm flex-col gap-2">
+          {stages.map((s) => {
+            const done = pct >= s.to;
+            const active = pct >= s.from && pct < s.to;
+            return (
+              <div
+                key={s.key}
+                className="flex items-center gap-3 rounded-lg px-3 py-2 transition-all"
+                style={{
+                  background: active ? "var(--brand-tint)" : "transparent",
+                  border: active
+                    ? "1px solid var(--brand-hover)"
+                    : "1px solid transparent",
+                  opacity: !done && !active ? 0.35 : 1,
+                }}
+              >
+                <div
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                  style={{
+                    background: done
+                      ? "var(--brand)"
+                      : active
+                        ? "var(--brand-tint)"
+                        : "var(--surface-2)",
+                    color: done ? "white" : "var(--text-muted)",
+                    border: active ? "2px solid var(--brand)" : "none",
+                  }}
+                >
+                  {done ? "✓" : active ? (
+                    <span
+                      className="pulse-dot inline-block h-1.5 w-1.5 rounded-full"
+                      style={{ background: "var(--brand)" }}
+                    />
+                  ) : ""}
+                </div>
+                <span
+                  className="text-sm"
+                  style={{
+                    color: active
+                      ? "var(--text-strong)"
+                      : done
+                        ? "var(--text-body)"
+                        : "var(--text-muted)",
+                    fontWeight: active ? 600 : 400,
+                  }}
+                >
+                  {s.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

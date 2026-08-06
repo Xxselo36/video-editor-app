@@ -2008,10 +2008,12 @@ def _bundled_fonts_dir():
 def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                      output_dir, cut_style="balanced", cancel_check=None,
                      sub_pos=None, sub_size=None, clip_name_prefix=None,
-                     language=None):
+                     language=None, progress_cb=None):
     """Per-Segment MoviePy render mit fresh VideoFileClip pro Segment.
 
     Returns list of (file_path, duration) tuples in timeline order.
+    progress_cb(msg: str, pct: float) is called before each segment
+    so the web UI can move its bar smoothly instead of jumping 0→80%.
     """
     if not segments:
         return []
@@ -2023,11 +2025,17 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
         return []
 
     outputs = []
+    n_segments = len(segments)
     for i, (s_start, s_end) in enumerate(segments):
         if cancel_check and cancel_check():
             print("[multi-clip] cancelled — stopping render loop",
                   flush=True)
             return outputs
+        # Report per-segment progress to the caller. Reserve 0-70% for
+        # the burn loop; render_only spends 70-100% on stitch+formats.
+        if progress_cb:
+            pct = (i / n_segments) * 70
+            progress_cb(f"Clip {i + 1}/{n_segments}…", pct)
         seg_dur = s_end - s_start
         if seg_dur <= 0:
             continue
