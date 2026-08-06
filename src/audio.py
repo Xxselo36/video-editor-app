@@ -126,6 +126,51 @@ class AudioAnalyzer:
 
         return self._sample_rate, self._audio_data
 
+    def _build_subtitles_from_transcription(self) -> None:
+        """Turn self._transcription (Whisper dict) into TikTok-style
+        word-level Subtitle objects. Shared by Groq + local Whisper
+        paths so we produce identical downstream output either way.
+        """
+        if not self._transcription:
+            return
+        for segment in self._transcription.get("segments", []):
+            words = segment.get("words", [])
+            if words:
+                i = 0
+                while i < len(words):
+                    word1 = words[i]
+                    text1 = word1.get("word", "").strip()
+                    # Combine short words (≤3 chars) with the next
+                    if len(text1) <= 3 and i + 1 < len(words):
+                        word2 = words[i + 1]
+                        text2 = word2.get("word", "").strip()
+                        combined = f"{text1} {text2}".strip()
+                        self._subtitles.append(Subtitle(
+                            start=word1.get("start", segment["start"]),
+                            end=word2.get("end", segment["end"]),
+                            text=combined,
+                        ))
+                        i += 2
+                    else:
+                        if text1:
+                            self._subtitles.append(Subtitle(
+                                start=word1.get("start", segment["start"]),
+                                end=word1.get("end", segment["end"]),
+                                text=text1,
+                            ))
+                        i += 1
+            else:
+                # No word-level timestamps — split evenly across segment
+                words_list = segment["text"].strip().split()
+                dur = segment["end"] - segment["start"]
+                word_dur = dur / max(len(words_list), 1)
+                for j, word in enumerate(words_list):
+                    self._subtitles.append(Subtitle(
+                        start=segment["start"] + j * word_dur,
+                        end=segment["start"] + (j + 1) * word_dur,
+                        text=word.strip(),
+                    ))
+
     def transcribe(self) -> list[Subtitle]:
         """
         Transkribiert das Audio und erstellt Untertitel.
@@ -138,8 +183,35 @@ class AudioAnalyzer:
 
         audio_path = self.extract_audio()
 
+        wake_prompt = (
+            "Cleo cut. Cleo go. Cleo cut. Cleo go. "
+            "ähm, äh, hmm, um, uh, like, you know, also, halt"
+        )
+
+        # Try Groq first: cloud Whisper, ~10x faster than local CPU.
+        # Silently falls back to local if GROQ_API_KEY is missing or
+        # any error occurs — same interface either way.
         try:
-            self._report("Transkribiere Audio mit Whisper...")
+            from backend.whisper_groq import transcribe_via_groq
+            self._report("Transkribiere Audio mit Whisper (Groq)...")
+            groq_result = transcribe_via_groq(
+                audio_path,
+                initial_prompt=wake_prompt,
+            )
+            if groq_result is not None:
+                print(f"[whisper] Groq returned "
+                      f"{len(groq_result.get('segments', []))} segments, "
+                      f"language={groq_result.get('language')}", flush=True)
+                self._transcription = groq_result
+                # Build subtitles from Groq result then skip the local
+                # Whisper path.
+                self._build_subtitles_from_transcription()
+                return self._subtitles
+        except Exception as e:
+            print(f"[whisper] Groq failed, using local: {e}", flush=True)
+
+        try:
+            self._report("Transkribiere Audio mit Whisper (local)...")
             segments_iter, info = self.whisper_model.transcribe(
                 audio_path,
                 language=None,  # Automatische Spracherkennung
@@ -156,14 +228,7 @@ class AudioAnalyzer:
                 # commands surrounded by pauses. 0.98 means only
                 # truly-silent-full-segment gets skipped.
                 no_speech_threshold=0.98,
-                initial_prompt=(
-                    # Force-recognise the wake word so 'Cleo cut' / 'Cleo go'
-                    # get transcribed reliably instead of Whisper guessing
-                    # 'Clio', 'Kleo', 'clear cut', etc. Filler words also
-                    # included so faster-whisper doesn't skip them.
-                    "Cleo cut. Cleo go. Cleo cut. Cleo go. "
-                    "ähm, äh, hmm, um, uh, like, you know, also, halt"
-                ),
+                initial_prompt=wake_prompt,
             )
 
             # Build openai-whisper-compatible dict so downstream code
@@ -219,53 +284,7 @@ class AudioAnalyzer:
             }
             self._transcription = result
 
-            # Wort-für-Wort Untertitel (TikTok-Style)
-            # Max 1-2 Wörter pro Untertitel
-            for segment in result.get("segments", []):
-                words = segment.get("words", [])
-
-                if words:
-                    i = 0
-                    while i < len(words):
-                        word1 = words[i]
-                        text1 = word1.get("word", "").strip()
-
-                        # Kurze Wörter (<=3 Zeichen) mit nächstem kombinieren
-                        if len(text1) <= 3 and i + 1 < len(words):
-                            word2 = words[i + 1]
-                            text2 = word2.get("word", "").strip()
-                            combined = f"{text1} {text2}".strip()
-
-                            subtitle = Subtitle(
-                                start=word1.get("start", segment["start"]),
-                                end=word2.get("end", segment["end"]),
-                                text=combined
-                            )
-                            self._subtitles.append(subtitle)
-                            i += 2
-                        else:
-                            # Einzelnes Wort
-                            if text1:
-                                subtitle = Subtitle(
-                                    start=word1.get("start", segment["start"]),
-                                    end=word1.get("end", segment["end"]),
-                                    text=text1
-                                )
-                                self._subtitles.append(subtitle)
-                            i += 1
-                else:
-                    # Fallback: Wörter manuell splitten
-                    words_list = segment["text"].strip().split()
-                    dur = segment["end"] - segment["start"]
-                    word_dur = dur / max(len(words_list), 1)
-
-                    for j, word in enumerate(words_list):
-                        subtitle = Subtitle(
-                            start=segment["start"] + j * word_dur,
-                            end=segment["start"] + (j + 1) * word_dur,
-                            text=word.strip()
-                        )
-                        self._subtitles.append(subtitle)
+            self._build_subtitles_from_transcription()
 
             self._report(f"  {len(self._subtitles)} Untertitel-Segmente erstellt")
 

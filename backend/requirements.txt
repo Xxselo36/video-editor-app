@@ -10,6 +10,10 @@ python-dotenv==1.2.2
 # ── LLM ──
 anthropic==0.111.0
 
+# ── Groq (Whisper via cloud, ~10x faster than local CPU) ──
+# Uses openai-compatible SDK.
+openai>=1.50.0
+
 # ── Audio / video pipeline ──
 moviepy==1.0.3
 numpy>=1.21.0
