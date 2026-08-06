@@ -15,10 +15,12 @@ import type { FFmpeg } from "@ffmpeg/ffmpeg";
 let _ffmpeg: FFmpeg | null = null;
 let _loading: Promise<FFmpeg> | null = null;
 
-// Single-threaded WASM core. The -mt version would be 2-3x faster but
-// requires COOP/COEP headers + SharedArrayBuffer, which weren't being
-// applied by Vercel — upgrade path is fix headers → swap to -mt later.
-const WASM_CDN =
+// Try multi-threaded WASM first (2-3x faster with SharedArrayBuffer),
+// fall back to single-thread if COOP/COEP isn't in effect. Detection
+// via `typeof SharedArrayBuffer !== 'undefined' && crossOriginIsolated`.
+const WASM_CDN_MT =
+  "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/umd";
+const WASM_CDN_ST =
   "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
 
 async function getFFmpeg(): Promise<FFmpeg> {
@@ -29,13 +31,31 @@ async function getFFmpeg(): Promise<FFmpeg> {
     const { FFmpeg } = await import("@ffmpeg/ffmpeg");
     const { toBlobURL } = await import("@ffmpeg/util");
     const ff = new FFmpeg();
-    await ff.load({
-      coreURL: await toBlobURL(`${WASM_CDN}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(
-        `${WASM_CDN}/ffmpeg-core.wasm`,
-        "application/wasm",
-      ),
-    });
+
+    // Multi-thread requires SharedArrayBuffer + cross-origin isolation
+    const canUseMT =
+      typeof SharedArrayBuffer !== "undefined" &&
+      typeof self !== "undefined" &&
+      (self as unknown as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
+
+    const cdn = canUseMT ? WASM_CDN_MT : WASM_CDN_ST;
+    console.log(`[ffmpeg.wasm] loading ${canUseMT ? "multi" : "single"}-thread core`);
+
+    const loadOpts: {
+      coreURL: string;
+      wasmURL: string;
+      workerURL?: string;
+    } = {
+      coreURL: await toBlobURL(`${cdn}/ffmpeg-core.js`, "text/javascript"),
+      wasmURL: await toBlobURL(`${cdn}/ffmpeg-core.wasm`, "application/wasm"),
+    };
+    if (canUseMT) {
+      loadOpts.workerURL = await toBlobURL(
+        `${cdn}/ffmpeg-core.worker.js`,
+        "text/javascript",
+      );
+    }
+    await ff.load(loadOpts);
     _ffmpeg = ff;
     return ff;
   })();
