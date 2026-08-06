@@ -73,32 +73,60 @@ def transcribe_via_groq(
     top_words = data.get("words") or []
     segments = data.get("segments") or []
 
-    # Groq returns words at the top level (flat list). faster-whisper's
-    # format nests words inside each segment. Reshape by time-overlap so
-    # downstream code that reads seg.words keeps working unchanged.
-    for i, seg in enumerate(segments):
-        seg_start = float(seg.get("start", 0))
-        seg_end = float(seg.get("end", 0))
-        seg["words"] = [
-            {
-                "word": w.get("word", ""),
-                "start": float(w.get("start", 0)),
-                "end": float(w.get("end", 0)),
-                "probability": float(w.get("probability", 1.0)),
-            }
-            for w in top_words
-            if (
-                float(w.get("start", 0)) >= seg_start - 0.15
-                and float(w.get("end", 0)) <= seg_end + 0.15
+    # Normalize word entries once
+    normalized_words = [
+        {
+            "word": w.get("word", ""),
+            "start": float(w.get("start", 0)),
+            "end": float(w.get("end", 0)),
+            "probability": float(w.get("probability", 1.0)),
+        }
+        for w in top_words
+    ]
+
+    # Groq returns words as a flat top-level list; faster-whisper nests
+    # them per segment. Assign each word to the segment whose midpoint
+    # is closest (guarantees every word lands in exactly one segment so
+    # nothing gets dropped by an overlap-boundary miss).
+    if segments:
+        for i, seg in enumerate(segments):
+            seg["words"] = []
+            seg.setdefault("tokens", [])
+            seg.setdefault("avg_logprob", 0.0)
+            seg.setdefault("compression_ratio", 1.0)
+            seg.setdefault("no_speech_prob", 0.0)
+            seg.setdefault("id", i)
+            seg.setdefault("seek", 0)
+
+        for w in normalized_words:
+            w_mid = (w["start"] + w["end"]) / 2.0
+            best_seg = min(
+                segments,
+                key=lambda s: abs(
+                    ((float(s.get("start", 0)) + float(s.get("end", 0))) / 2.0)
+                    - w_mid
+                ),
             )
-        ]
-        # Fill in any fields faster-whisper always populates but Groq skips
-        seg.setdefault("tokens", [])
-        seg.setdefault("avg_logprob", 0.0)
-        seg.setdefault("compression_ratio", 1.0)
-        seg.setdefault("no_speech_prob", 0.0)
-        seg.setdefault("id", i)
-        seg.setdefault("seek", 0)
+            best_seg["words"].append(w)
+    else:
+        # No segments returned — synthesize one big segment holding all
+        # words so downstream code still finds them.
+        if normalized_words:
+            segments = [{
+                "id": 0,
+                "seek": 0,
+                "start": normalized_words[0]["start"],
+                "end": normalized_words[-1]["end"],
+                "text": data.get("text", ""),
+                "tokens": [],
+                "avg_logprob": 0.0,
+                "compression_ratio": 1.0,
+                "no_speech_prob": 0.0,
+                "words": normalized_words,
+            }]
+
+    print(f"[groq] mapped {len(normalized_words)} words into "
+          f"{len(segments)} segments", flush=True)
 
     return {
         "text": data.get("text", ""),

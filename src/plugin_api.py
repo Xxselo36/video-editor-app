@@ -138,6 +138,12 @@ def analyze_video(
         silence_threshold=silence_threshold,
         min_silence_duration=min_silence_duration,
     )
+    speech_only = [s for s in speech_segments if s.has_speech]
+    total_speech = sum(s.end - s.start for s in speech_only)
+    print(f"[silence] threshold={silence_threshold} "
+          f"min_gap={min_silence_duration}s → "
+          f"{len(speech_only)} speech regions, "
+          f"total speech={total_speech:.1f}s", flush=True)
 
     # Convert speech segments to (start, end) tuples with padding
     segments = []
@@ -156,6 +162,8 @@ def analyze_video(
         else:
             merged.append((start, end))
     segments = merged
+    print(f"[silence] after padding+merge: {len(segments)} segments, "
+          f"total kept={sum(e - s for s, e in segments):.1f}s", flush=True)
 
     # Filler word detection and removal
     filler_data = None
@@ -168,6 +176,8 @@ def analyze_video(
             raise InterruptedError("Cancelled")
 
         fillers = analyzer.get_filler_words(sensitivity=filler_sensitivity)
+        print(f"[filler] {len(fillers)} filler word(s) detected: "
+              f"{[f.word for f in fillers[:20]]}", flush=True)
         filler_data = [
             {"start": round(f.start, 3), "end": round(f.end, 3), "word": f.word}
             for f in fillers
@@ -178,7 +188,14 @@ def analyze_video(
             from src.filler_detection import FillerDetector
             detector = FillerDetector(sensitivity=filler_sensitivity)
             filler_segments = [(f.start, f.end) for f in fillers]
+            segments_before = len(segments)
+            total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, filler_segments)
+            total_after = sum(e - s for s, e in segments)
+            print(f"[filler] segments {segments_before}→{len(segments)}, "
+                  f"time {total_before:.1f}s→{total_after:.1f}s "
+                  f"(removed {total_before - total_after:.1f}s of filler)",
+                  flush=True)
 
     # Get video duration
     from moviepy.editor import VideoFileClip
