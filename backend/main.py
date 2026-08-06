@@ -89,6 +89,18 @@ else:
     )
 
 
+# Cross-Origin-Resource-Policy on every response so the frontend
+# (which runs with COEP=require-corp for ffmpeg.wasm's SharedArrayBuffer)
+# can load /jobs/*/thumbnail, /jobs/*/watch, and POST uploads to us.
+# Without this the browser blocks the response at the network layer
+# and the upload just hangs at 0%.
+@app.middleware("http")
+async def add_corp_header(request, call_next):
+    response = await call_next(request)
+    response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    return response
+
+
 @app.get("/")
 def root():
     return {
