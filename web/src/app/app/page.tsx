@@ -1486,6 +1486,18 @@ function ProgressScreen({
         >
           {phase === "uploading" ? "Uploading" : phase === "rendering" ? "Rendering" : "Processing"}
         </div>
+        {/* Live message — tells the user WHAT is happening right now
+            (e.g. 'Optimizing video (56%)…', 'Clip 3/12…'). Was passed
+            in as label but never rendered — user only saw the phase
+            name so long transcode steps looked frozen. */}
+        {label && (
+          <div
+            className="mt-3 text-sm"
+            style={{ color: "var(--text-body)" }}
+          >
+            {label}
+          </div>
+        )}
       </div>
 
       {/* Progress bar */}
