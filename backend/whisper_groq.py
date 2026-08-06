@@ -128,8 +128,24 @@ def transcribe_via_groq(
     print(f"[groq] mapped {len(normalized_words)} words into "
           f"{len(segments)} segments", flush=True)
 
+    # Normalize language to ISO-639 short code. Groq sometimes returns
+    # full names ('german', 'english') which break downstream code that
+    # keys off {'de', 'en'} (e.g. filler detection).
+    LANG_MAP = {
+        "german": "de", "deutsch": "de", "de": "de",
+        "english": "en", "en": "en",
+        "spanish": "es", "es": "es",
+        "french": "fr", "fr": "fr",
+        "italian": "it", "it": "it",
+    }
+    raw_lang = str(data.get("language") or language or "en").lower()
+    norm_lang = LANG_MAP.get(raw_lang, raw_lang[:2])
+
+    print(f"[groq] language raw='{raw_lang}' → normalised='{norm_lang}'",
+          flush=True)
+
     return {
         "text": data.get("text", ""),
         "segments": segments,
-        "language": data.get("language", language or "en"),
+        "language": norm_lang,
     }
