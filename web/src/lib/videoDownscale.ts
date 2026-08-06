@@ -15,8 +15,11 @@ import type { FFmpeg } from "@ffmpeg/ffmpeg";
 let _ffmpeg: FFmpeg | null = null;
 let _loading: Promise<FFmpeg> | null = null;
 
+// Multi-threaded WASM build — uses SharedArrayBuffer + Web Workers to
+// spread the encode across CPU cores. ~2-3x faster than single-thread
+// core for libx264 transcodes. Requires COOP/COEP (already set).
 const WASM_CDN =
-  "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+  "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/umd";
 
 async function getFFmpeg(): Promise<FFmpeg> {
   if (_ffmpeg) return _ffmpeg;
@@ -31,6 +34,10 @@ async function getFFmpeg(): Promise<FFmpeg> {
       wasmURL: await toBlobURL(
         `${WASM_CDN}/ffmpeg-core.wasm`,
         "application/wasm",
+      ),
+      workerURL: await toBlobURL(
+        `${WASM_CDN}/ffmpeg-core.worker.js`,
+        "text/javascript",
       ),
     });
     _ffmpeg = ff;
@@ -88,14 +95,19 @@ export async function downscaleVideo(
     await ff.writeFile(inputName, await fetchFile(file));
 
     // Downscale: longest side to 1920 (= 1080p in either orientation).
-    // -2 keeps aspect and ensures even dimensions (h264 requirement).
-    // Preset ultrafast + CRF 24 keeps the transcode fast; the backend
-    // re-encodes anyway so a bit of quality loss here is fine.
+    // - preset ultrafast + CRF 26: cheapest H.264 encode, backend re-
+    //   encodes anyway so quality loss here is invisible
+    // - -threads 0: use all CPU cores (works with core-mt build)
+    // - audio stream-copy: skip the AAC re-encode entirely, saves time
+    // - -pix_fmt yuv420p: some iPhone videos are yuv420p10le (10-bit),
+    //   the backend expects 8-bit for libx264 anyway
     await ff.exec([
       "-i", inputName,
       "-vf", "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(ih,iw),min(1920,ih),-2)'",
-      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24",
-      "-c:a", "aac", "-b:a", "128k",
+      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+      "-threads", "0",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "copy",
       "-movflags", "+faststart",
       outputName,
     ]);
