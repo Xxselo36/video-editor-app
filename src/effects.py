@@ -3359,41 +3359,56 @@ def smartcam_reframe_file(input_path: str, output_path: str,
     crop_w = max(2, min(crop_w, src_w))
     crop_h = max(2, min(crop_h, src_h))
 
-    # YuNet face detector (CNN, deutlich besser als Haar). Wenn das ONNX-
-    # Modell nicht gefunden wird, kommt None zurück und SmartCam fällt auf
-    # einen statischen mittigen Crop zurück — kein Crash.
-    yu_det = _get_yunet_detector(src_w, src_h)
+    # Speed: (1) detect on a downscaled copy of the frame so YuNet's
+    # ONNX inference runs on ~480p pixels instead of 4K/1080p, then
+    # scale the face coords back to source-res. (2) seek forward to
+    # the next sample frame instead of decoding every frame — for a
+    # step of 9 that skips 8× the decode work per detection.
+    DETECT_MAX_DIM = 480
+    if max(src_w, src_h) > DETECT_MAX_DIM:
+        det_scale = DETECT_MAX_DIM / float(max(src_w, src_h))
+        det_w = max(1, int(round(src_w * det_scale)))
+        det_h = max(1, int(round(src_h * det_scale)))
+    else:
+        det_scale = 1.0
+        det_w, det_h = src_w, src_h
+    yu_det = _get_yunet_detector(det_w, det_h)
 
     def _largest_face(frame_bgr):
         if yu_det is None:
             return None
-        face = _yunet_largest_face(yu_det, frame_bgr)
+        if det_scale < 1.0:
+            small = _cv2.resize(
+                frame_bgr, (det_w, det_h),
+                interpolation=_cv2.INTER_AREA,
+            )
+        else:
+            small = frame_bgr
+        face = _yunet_largest_face(yu_det, small)
         if face is None:
             return None
-        return (face[0], face[1])
+        # Scale detected centre back into source pixel space.
+        return (face[0] / det_scale, face[1] / det_scale)
 
     step = max(1, int(round(fps * sample_interval)))
     timeline = []  # (time_seconds, cx, cy)
     frame_idx = 0
     last_pct = -1
-    while True:
-        # Bail out fast if a caller (Premiere plugin) flipped its cancel
-        # flag. Standalone callers don't pass cancel_check so this is a
-        # no-op for the GUI.
+    while frame_idx < total_frames:
         if cancel_check and cancel_check():
             cap.release()
             return False
+        # Seek to the sample frame instead of decoding every one.
+        cap.set(_cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = cap.read()
         if not ret:
             break
-        if frame_idx % step == 0:
-            try:
-                # YuNet braucht BGR direkt — kein gray conversion mehr.
-                face = _largest_face(frame)
-                if face is not None:
-                    timeline.append((frame_idx / fps, face[0], face[1]))
-            except Exception:
-                pass
+        try:
+            face = _largest_face(frame)
+            if face is not None:
+                timeline.append((frame_idx / fps, face[0], face[1]))
+        except Exception:
+            pass
         if progress_cb and total_frames > 0:
             pct = int((frame_idx / total_frames) * 50)
             if pct != last_pct:
@@ -3402,7 +3417,7 @@ def smartcam_reframe_file(input_path: str, output_path: str,
                     progress_cb("track", frame_idx, total_frames)
                 except Exception:
                     pass
-        frame_idx += 1
+        frame_idx += step
     cap.release()
 
     # Outlier rejection: YuNet detected hin und wieder eine Hand, einen
