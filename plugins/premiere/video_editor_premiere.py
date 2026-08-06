@@ -2008,12 +2008,15 @@ def _bundled_fonts_dir():
 def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                      output_dir, cut_style="balanced", cancel_check=None,
                      sub_pos=None, sub_size=None, clip_name_prefix=None,
-                     language=None, progress_cb=None):
+                     language=None, progress_cb=None, parallelism=4):
     """Per-Segment MoviePy render mit fresh VideoFileClip pro Segment.
 
     Returns list of (file_path, duration) tuples in timeline order.
-    progress_cb(msg: str, pct: float) is called before each segment
-    so the web UI can move its bar smoothly instead of jumping 0→80%.
+    Segments are burned in parallel via a thread pool — each ffmpeg
+    call is its own subprocess, so `parallelism` workers run at once.
+    On Railway's shared CPU tier 4 is a sweet spot; higher just
+    contends and doesn't help. Output order is preserved regardless
+    of completion order.
     """
     if not segments:
         return []
@@ -2024,23 +2027,17 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
         print(f"[multi-clip] MoviePy import failed: {e}", flush=True)
         return []
 
-    outputs = []
-    n_segments = len(segments)
-    for i, (s_start, s_end) in enumerate(segments):
-        if cancel_check and cancel_check():
-            print("[multi-clip] cancelled — stopping render loop",
-                  flush=True)
-            return outputs
-        # Report per-segment progress to the caller. Reserve 0-70% for
-        # the burn loop; render_only spends 70-100% on stitch+formats.
-        if progress_cb:
-            pct = (i / n_segments) * 70
-            progress_cb(f"Clip {i + 1}/{n_segments}…", pct)
-        seg_dur = s_end - s_start
-        if seg_dur <= 0:
-            continue
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
 
-        clip_subs = []
+    n_segments = len(segments)
+    print(f"[multi-clip] burning {n_segments} segments with "
+          f"parallelism={parallelism}", flush=True)
+
+    # Pre-compute per-segment work items so the worker function is
+    # small and self-contained.
+    def _subs_for(s_start, s_end, seg_dur):
+        out = []
         for sub in subtitles:
             os_ = sub.get("original_start", sub.get("start", 0))
             oe_ = sub.get("original_end", sub.get("end", 0))
@@ -2053,29 +2050,37 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
             ce = min(seg_dur, oe_ - s_start)
             if ce - cs <= 0.05:
                 continue
-            clip_subs.append({"start": cs, "end": ce, "text": text})
+            out.append({"start": cs, "end": ce, "text": text})
+        return out
 
+    def _out_path(i):
+        if clip_name_prefix:
+            return os.path.join(
+                output_dir, f"{clip_name_prefix}_part_{i+1:02d}.mp4"
+            )
+        return os.path.join(output_dir, f"seg_{i:03d}.mp4")
+
+    progress_lock = threading.Lock()
+    completed_count = [0]
+
+    def _burn_one(i, s_start, s_end):
+        """Run in a worker thread. Returns (i, out_path, duration) or None."""
+        if cancel_check and cancel_check():
+            return None
+        seg_dur = s_end - s_start
+        if seg_dur <= 0:
+            return None
+        clip_subs = _subs_for(s_start, s_end, seg_dur)
         try:
             full_clip = VideoFileClip(input_video)
             sub_clip = full_clip.subclip(s_start, s_end)
-            if i == 0:
-                print(f"[multi-clip] master.size={full_clip.size}, "
-                      f"sub.size={sub_clip.size}", flush=True)
         except Exception as e:
             print(f"[multi-clip] seg {i} open/subclip failed: {e}",
                   flush=True)
             try: full_clip.close()
             except Exception: pass
-            continue
-
-        # Lesbarer File-/Clip-Name in Premiere: <SourceName>_part_01.mp4
-        # statt seg_001.mp4. Fallback bleibt "seg" wenn kein Prefix da ist.
-        if clip_name_prefix:
-            out_path = os.path.join(
-                output_dir, f"{clip_name_prefix}_part_{i+1:02d}.mp4"
-            )
-        else:
-            out_path = os.path.join(output_dir, f"seg_{i:03d}.mp4")
+            return None
+        out_path = _out_path(i)
         try:
             ok = _render_segment_with_standalone_captions(
                 input_video, out_path, clip_subs, cut_style,
@@ -2086,14 +2091,45 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
         finally:
             try: full_clip.close()
             except Exception: pass
-
         if not ok or not os.path.isfile(out_path):
             print(f"[multi-clip] seg {i} render failed", flush=True)
-            continue
-
+            return None
         actual_dur = _probe_video(out_path).get("duration", seg_dur)
-        outputs.append((out_path, actual_dur))
-    return outputs
+        # Report progress from the worker so the UI bar moves as each
+        # segment finishes (not in submission order).
+        if progress_cb:
+            with progress_lock:
+                completed_count[0] += 1
+                pct = (completed_count[0] / n_segments) * 70
+                try:
+                    progress_cb(
+                        f"Clip {completed_count[0]}/{n_segments}…", pct,
+                    )
+                except Exception:
+                    pass
+        return (i, out_path, actual_dur)
+
+    results: list[tuple[int, str, float] | None] = [None] * n_segments
+    with ThreadPoolExecutor(max_workers=parallelism) as executor:
+        futures = {
+            executor.submit(_burn_one, i, s, e): i
+            for i, (s, e) in enumerate(segments)
+        }
+        for fut in as_completed(futures):
+            if cancel_check and cancel_check():
+                for f in futures:
+                    f.cancel()
+                break
+            try:
+                r = fut.result()
+            except Exception as e:
+                print(f"[multi-clip] worker crashed: {e}", flush=True)
+                continue
+            if r is not None:
+                results[r[0]] = r
+
+    # Preserve original timeline order — drop failed segments (None).
+    return [(p, d) for r in results if r is not None for (_i, p, d) in [r]]
 
 
 def _cut_concat_burn(input_video, segments, srt_path, output_path,
