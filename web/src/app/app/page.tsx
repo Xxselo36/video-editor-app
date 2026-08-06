@@ -26,6 +26,7 @@ import {
   updateActiveJob,
 } from "@/lib/activeJob";
 import { VideoModal } from "@/components/VideoModal";
+import { downscaleVideo, shouldDownscale } from "@/lib/videoDownscale";
 
 // Backend host: explicit env wins, else use the page's hostname on
 // port 8000. This way iPhone (192.168.178.155:3000) hits
@@ -402,12 +403,37 @@ export default function Home() {
     if (f) onFileChange(f);
   };
 
+  const [downscalePct, setDownscalePct] = useState<number | null>(null);
+
   const onProcess = async (fileOverride?: File) => {
-    const targetFile = fileOverride ?? file;
+    let targetFile = fileOverride ?? file;
     if (!targetFile) return;
     if (!fileOverride) setFile(targetFile);
     setPhase("uploading");
     setErrorMsg(null);
+    setDownscalePct(null);
+
+    // Client-side downscale for 4K / large files. Cuts ~200-400 MB
+    // uploads down to ~30-50 MB via ffmpeg.wasm. Falls back to raw
+    // upload if downscale errors out (unsupported browser, WASM load
+    // failure, etc.) so the flow keeps working either way.
+    if (shouldDownscale(targetFile)) {
+      try {
+        setDownscalePct(0);
+        const smaller = await downscaleVideo(targetFile, (p) => {
+          setDownscalePct(p.pct);
+        });
+        console.log(
+          `[downscale] ${(targetFile.size / 1024 / 1024).toFixed(1)} MB → ` +
+          `${(smaller.size / 1024 / 1024).toFixed(1)} MB`,
+        );
+        targetFile = smaller;
+        setDownscalePct(null);
+      } catch (err) {
+        console.warn("[downscale] failed, uploading original:", err);
+        setDownscalePct(null);
+      }
+    }
 
     // Resolve settings from preset when we're on the skip-configure path
     // (state may not have flushed yet when pickPreset + onFileChange
@@ -673,7 +699,15 @@ export default function Home() {
         )}
 
         {phase === "uploading" && (
-          <ProgressScreen label="Uploading…" pct={uploadPct} phase="uploading" />
+          downscalePct !== null ? (
+            <ProgressScreen
+              label={`Optimizing video (${downscalePct}%)…`}
+              pct={downscalePct}
+              phase="uploading"
+            />
+          ) : (
+            <ProgressScreen label="Uploading…" pct={uploadPct} phase="uploading" />
+          )
         )}
 
         {phase === "analyzing" && job && (
