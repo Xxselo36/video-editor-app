@@ -15,11 +15,11 @@ import type { FFmpeg } from "@ffmpeg/ffmpeg";
 let _ffmpeg: FFmpeg | null = null;
 let _loading: Promise<FFmpeg> | null = null;
 
-// Multi-threaded WASM build — uses SharedArrayBuffer + Web Workers to
-// spread the encode across CPU cores. ~2-3x faster than single-thread
-// core for libx264 transcodes. Requires COOP/COEP (already set).
+// Single-threaded WASM core. The -mt version would be 2-3x faster but
+// requires COOP/COEP headers + SharedArrayBuffer, which weren't being
+// applied by Vercel — upgrade path is fix headers → swap to -mt later.
 const WASM_CDN =
-  "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/umd";
+  "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
 
 async function getFFmpeg(): Promise<FFmpeg> {
   if (_ffmpeg) return _ffmpeg;
@@ -34,10 +34,6 @@ async function getFFmpeg(): Promise<FFmpeg> {
       wasmURL: await toBlobURL(
         `${WASM_CDN}/ffmpeg-core.wasm`,
         "application/wasm",
-      ),
-      workerURL: await toBlobURL(
-        `${WASM_CDN}/ffmpeg-core.worker.js`,
-        "text/javascript",
       ),
     });
     _ffmpeg = ff;
