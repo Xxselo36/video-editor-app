@@ -414,35 +414,11 @@ export default function Home() {
     setErrorMsg(null);
     setDownscalePct(null);
 
-    // Client-side downscale for 4K / large files. Cuts ~200-400 MB
-    // uploads down to ~30-50 MB via ffmpeg.wasm. Falls back to raw
-    // upload if downscale errors out (unsupported browser, WASM load
-    // failure, etc.) so the flow keeps working either way.
-    if (shouldDownscale(targetFile)) {
-      try {
-        setDownscalePct(0);
-        setDownscaleLabel("Loading video processor (first time only, ~30s)…");
-        const smaller = await downscaleVideo(targetFile, (p) => {
-          setDownscalePct(p.pct);
-          setDownscaleLabel(
-            p.phase === "loading"
-              ? "Loading video processor (first time only, ~30s)…"
-              : `Optimizing video (${p.pct}%)…`,
-          );
-        });
-        console.log(
-          `[downscale] ${(targetFile.size / 1024 / 1024).toFixed(1)} MB → ` +
-          `${(smaller.size / 1024 / 1024).toFixed(1)} MB`,
-        );
-        targetFile = smaller;
-        setDownscalePct(null);
-        setDownscaleLabel(null);
-      } catch (err) {
-        console.warn("[downscale] failed, uploading original:", err);
-        setDownscalePct(null);
-        setDownscaleLabel(null);
-      }
-    }
+    // Client-side downscale removed: WASM ffmpeg was slower for a
+    // typical user (2-5 min transcode) than just uploading raw and
+    // letting the server's native ffmpeg downscale (~30-60s). Kept
+    // the helper module in case we ever bring it back for extreme
+    // low-bandwidth scenarios.
 
     // Resolve settings from preset when we're on the skip-configure path
     // (state may not have flushed yet when pickPreset + onFileChange
