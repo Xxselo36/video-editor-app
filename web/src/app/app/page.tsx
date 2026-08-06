@@ -404,6 +404,7 @@ export default function Home() {
   };
 
   const [downscalePct, setDownscalePct] = useState<number | null>(null);
+  const [downscaleLabel, setDownscaleLabel] = useState<string | null>(null);
 
   const onProcess = async (fileOverride?: File) => {
     let targetFile = fileOverride ?? file;
@@ -420,8 +421,14 @@ export default function Home() {
     if (shouldDownscale(targetFile)) {
       try {
         setDownscalePct(0);
+        setDownscaleLabel("Loading video processor (first time only, ~30s)…");
         const smaller = await downscaleVideo(targetFile, (p) => {
           setDownscalePct(p.pct);
+          setDownscaleLabel(
+            p.phase === "loading"
+              ? "Loading video processor (first time only, ~30s)…"
+              : `Optimizing video (${p.pct}%)…`,
+          );
         });
         console.log(
           `[downscale] ${(targetFile.size / 1024 / 1024).toFixed(1)} MB → ` +
@@ -429,9 +436,11 @@ export default function Home() {
         );
         targetFile = smaller;
         setDownscalePct(null);
+        setDownscaleLabel(null);
       } catch (err) {
         console.warn("[downscale] failed, uploading original:", err);
         setDownscalePct(null);
+        setDownscaleLabel(null);
       }
     }
 
@@ -701,7 +710,7 @@ export default function Home() {
         {phase === "uploading" && (
           downscalePct !== null ? (
             <ProgressScreen
-              label={`Optimizing video (${downscalePct}%)…`}
+              label={downscaleLabel ?? `Optimizing video (${downscalePct}%)…`}
               pct={downscalePct}
               phase="uploading"
             />
