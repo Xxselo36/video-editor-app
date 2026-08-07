@@ -27,6 +27,7 @@ import {
 } from "@/lib/activeJob";
 import { VideoModal } from "@/components/VideoModal";
 import { downscaleVideo, shouldDownscale } from "@/lib/videoDownscale";
+import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
 
 // Backend host: explicit env wins, else use the page's hostname on
 // port 8000. This way iPhone (192.168.178.155:3000) hits
@@ -467,6 +468,11 @@ export default function Home() {
       setJob(initial);
       setPhase("analyzing");
 
+      // Ask for notification permission on job start — user won't be
+      // interrupted mid-task, and gets pinged when the render is done
+      // even if the tab is in the background.
+      requestNotificationPermission();
+
       // Persist so the user can navigate away and come back without
       // losing the job. Backend keeps processing regardless.
       const presetInfo = selectedPreset ? PRESETS[selectedPreset] : null;
@@ -499,6 +505,10 @@ export default function Home() {
         setJob(s);
         if (s.status === "done") {
           setPhase("done");
+          notifyIfHidden(
+            "CleoCuts — your video is ready",
+            file?.name ?? "Click to view",
+          );
           // Job finished — remove from active tracking, promote to Library
           clearActiveJob();
           // Persist to library so the user can find this render later
@@ -541,6 +551,10 @@ export default function Home() {
             setPhrases(buildPhrases(subs));
             setPhase("reviewing");
             updateActiveJob({ phase: "reviewing" });
+            notifyIfHidden(
+              "CleoCuts — ready for your review",
+              "Cuts + transcript are done. Tap to review.",
+            );
           }
         }
       } catch {

@@ -724,18 +724,25 @@ def render_only(
     # settings; default is just the primary.
     outputs: dict[str, str] = {"primary": primary_path}
     formats = settings.get("output_formats") or []
-    if isinstance(formats, list) and formats:
-        total = len([f for f in formats if f in EXPORT_FORMATS])
-        for i, fmt in enumerate(formats):
-            if fmt not in EXPORT_FORMATS:
-                continue
+    valid_formats = [f for f in formats if f in EXPORT_FORMATS] if isinstance(formats, list) else []
+    if valid_formats:
+        # Run all extra-format exports in parallel — each is an independent
+        # ffmpeg pass off the same primary file, so they don't contend
+        # on shared state. Cuts multi-format export time roughly Nx.
+        from concurrent.futures import ThreadPoolExecutor
+        _stage(f"Exporting {len(valid_formats)} extra format(s)…", 85)
+
+        def _do_export(fmt: str) -> tuple[str, str]:
             tw, th = EXPORT_FORMATS[fmt]
-            _stage(f"Exporting {fmt}…", 80 + int(15 * (i + 1) / max(1, total)))
             fmt_path = str(
                 Path(output_dir) / f"cleo_output_{fmt.replace(':', '-')}.mp4"
             )
             _export_format(primary_path, fmt_path, tw, th)
-            outputs[fmt] = fmt_path
+            return fmt, fmt_path
+
+        with ThreadPoolExecutor(max_workers=min(4, len(valid_formats))) as ex:
+            for fmt, path in ex.map(_do_export, valid_formats):
+                outputs[fmt] = path
 
     # Optional hook-clip generation: LLM picks the top short-form moments
     # out of the final timeline, ffmpeg slices them as standalone MP4s.
