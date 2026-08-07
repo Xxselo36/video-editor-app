@@ -1748,6 +1748,24 @@ function ReviewScreen({
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const phraseRefs = useRef<Array<HTMLDivElement | null>>([]);
 
+  // Poll video.currentTime every animation frame while playing.
+  // onTimeUpdate only fires ~4x/sec (browser throttle) which lags the
+  // active-phrase highlight visibly behind the spoken word. rAF hits
+  // ~60fps so the highlight lands on the syllable.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    let rafId = 0;
+    const tick = () => {
+      if (!video.paused && !video.ended) {
+        setCurrentTime(video.currentTime);
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
+
   // Convert the preview video's currentTime (which runs on the CUT
   // timeline — kept segments concatenated) into a position on the
   // ORIGINAL timeline so the cuts strip playhead lines up with the
