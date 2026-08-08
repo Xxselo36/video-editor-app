@@ -20,6 +20,16 @@ import modal
 
 app = modal.App("cleocuts-render")
 
+# Modal Volume for large-file transfer between Railway and Modal.
+# The backend writes normalized.mp4 into the volume (streamed, no
+# Railway RAM spike); the function reads it from the mounted path
+# and writes outputs back. Volumes persist across function calls
+# so cleanup is a separate step.
+render_volume = modal.Volume.from_name(
+    "cleocuts-render-volume", create_if_missing=True,
+)
+VOLUME_MOUNT = "/vol"
+
 image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("ffmpeg", "libgl1", "libglib2.0-0", "libsndfile1")
@@ -45,9 +55,10 @@ image = (
     cpu=8.0,           # 8 vCPUs — enough parallelism for per-segment burn
     memory=8192,       # 8 GB RAM — MoviePy + ffmpeg for 4K sources
     timeout=1800,      # 30 min hard cap per render
+    volumes={VOLUME_MOUNT: render_volume},
 )
 def render_burn_concat(
-    input_bytes: bytes,
+    job_id: str,
     input_filename: str,
     segments: list[list[float]],
     subtitles: list[dict],
@@ -55,11 +66,13 @@ def render_burn_concat(
     cut_style: str,
     language: str | None,
     output_formats: list[str],
-) -> dict[str, bytes]:
+) -> dict[str, str]:
     """Run the burn + concat + multi-format-export pipeline on Modal.
 
-    Returns {"primary": <bytes>, "9:16": <bytes>, "1:1": <bytes>, ...}
-    with only the formats the user requested (plus "primary" always).
+    Reads input from /vol/<job_id>/<input_filename>, writes outputs to
+    /vol/<job_id>/output.mp4 (+ extra formats + thumbnail). Returns a
+    dict mapping format-name → filename inside the job's volume dir.
+    Backend downloads them afterwards via the Volume SDK.
     """
     import os
     import sys
@@ -69,11 +82,13 @@ def render_burn_concat(
     # Make bundled source importable
     sys.path.insert(0, "/app")
 
-    # Write input video to disk so ffmpeg / moviepy can read it
+    # Read input from Modal Volume — no bytes-through-Python transfer,
+    # so Railway never has to hold the whole file in memory.
+    job_dir = Path(VOLUME_MOUNT) / job_id
+    input_path = job_dir / input_filename
+    if not input_path.exists():
+        raise FileNotFoundError(f"input not found at {input_path}")
     work_dir = Path(tempfile.mkdtemp(prefix="cleo_modal_"))
-    input_path = work_dir / input_filename
-    with open(input_path, "wb") as f:
-        f.write(input_bytes)
 
     from plugins.premiere.video_editor_premiere import _multi_clip_burn
     from backend.pipeline import (
@@ -105,34 +120,31 @@ def render_burn_concat(
         raise RuntimeError("Modal render produced no output clips.")
 
     clip_paths = [p for p, _dur in clip_outputs]
-    primary_path = str(work_dir / "cleo_output.mp4")
-    _ffmpeg_concat(clip_paths, primary_path)
+    # Write outputs directly into the volume — backend downloads them
+    # via the Volume SDK afterwards, no bytes-through-Python return.
+    primary_out = job_dir / "output.mp4"
+    _ffmpeg_concat(clip_paths, str(primary_out))
 
-    thumbnail_path = str(work_dir / "cleo_thumbnail.jpg")
-    _generate_thumbnail(primary_path, thumbnail_path)
+    thumbnail_out = job_dir / "thumbnail.jpg"
+    _generate_thumbnail(str(primary_out), str(thumbnail_out))
 
-    outputs: dict[str, bytes] = {}
-    with open(primary_path, "rb") as f:
-        outputs["primary"] = f.read()
-    if os.path.exists(thumbnail_path):
-        with open(thumbnail_path, "rb") as f:
-            outputs["_thumbnail"] = f.read()
+    result_map: dict[str, str] = {"primary": "output.mp4"}
+    if thumbnail_out.exists():
+        result_map["_thumbnail"] = "thumbnail.jpg"
 
-    # Extra formats — encode in parallel too (all read from primary)
+    # Extra formats — parallel encode from primary
     from concurrent.futures import ThreadPoolExecutor
     valid = [f for f in output_formats if f in EXPORT_FORMATS]
     if valid:
-        def _do_export(fmt: str) -> tuple[str, bytes]:
+        def _do_export(fmt: str) -> tuple[str, str]:
             tw, th = EXPORT_FORMATS[fmt]
-            fmt_path = str(
-                work_dir / f"cleo_output_{fmt.replace(':', '-')}.mp4"
-            )
-            _export_format(primary_path, fmt_path, tw, th)
-            with open(fmt_path, "rb") as f:
-                return fmt, f.read()
+            fname = f"output_{fmt.replace(':', '-')}.mp4"
+            _export_format(str(primary_out), str(job_dir / fname), tw, th)
+            return fmt, fname
 
         with ThreadPoolExecutor(max_workers=min(4, len(valid))) as ex:
-            for fmt, data in ex.map(_do_export, valid):
-                outputs[fmt] = data
+            for fmt, fname in ex.map(_do_export, valid):
+                result_map[fmt] = fname
 
-    return outputs
+    render_volume.commit()  # persist writes so backend can read them
+    return result_map

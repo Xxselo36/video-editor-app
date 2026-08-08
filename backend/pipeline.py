@@ -605,15 +605,23 @@ def _try_modal_render(
         return False
 
     try:
-        _stage("Uploading to Modal worker…", 5)
-        with open(normalized_path, "rb") as f:
-            input_bytes = f.read()
+        import uuid
+        job_id = uuid.uuid4().hex[:12]
+        input_filename = os.path.basename(normalized_path)
+
+        _stage("Uploading to Modal storage…", 5)
+        # Stream file into Modal Volume — no Railway RAM spike from
+        # reading the whole file. Volume SDK chunks it internally.
+        vol = modal.Volume.from_name("cleocuts-render-volume")
+        remote_path = f"/{job_id}/{input_filename}"
+        with vol.batch_upload() as batch:
+            batch.put_file(normalized_path, remote_path)
 
         _stage(f"Rendering {len(segments)} clip(s) on Modal…", 10)
         fn = modal.Function.lookup("cleocuts-render", "render_burn_concat")
-        result = fn.remote(
-            input_bytes=input_bytes,
-            input_filename=os.path.basename(normalized_path),
+        result_map = fn.remote(
+            job_id=job_id,
+            input_filename=input_filename,
             segments=[[float(s), float(e)] for s, e in segments],
             subtitles=subtitles,
             caption_preset=caption_preset,
@@ -621,31 +629,37 @@ def _try_modal_render(
             language=language,
             output_formats=list(output_formats),
         )
-        _stage("Downloading from Modal…", 88)
 
-        # result is {"primary": bytes, "_thumbnail": bytes, "9:16": bytes, ...}
-        primary = result.get("primary")
-        if not primary:
+        _stage("Downloading from Modal…", 88)
+        # result_map is {"primary": "output.mp4", "_thumbnail": "thumbnail.jpg", "9:16": "output_9-16.mp4", ...}
+        primary_fname = result_map.get("primary")
+        if not primary_fname:
             print("[modal] returned no primary output", flush=True)
             return False
-        with open(primary_out_path, "wb") as f:
-            f.write(primary)
 
-        thumb = result.get("_thumbnail")
-        if thumb:
-            with open(thumbnail_out_path, "wb") as f:
-                f.write(thumb)
+        # Stream each result file out of the volume
+        for fmt, fname in result_map.items():
+            remote_file = f"/{job_id}/{fname}"
+            if fmt == "primary":
+                local_out = primary_out_path
+            elif fmt == "_thumbnail":
+                local_out = thumbnail_out_path
+            else:
+                local_out = str(
+                    Path(output_dir) / f"cleo_output_{fmt.replace(':', '-')}.mp4"
+                )
+            with open(local_out, "wb") as out_f:
+                for chunk in vol.read_file(remote_file):
+                    out_f.write(chunk)
 
-        for fmt, data in result.items():
-            if fmt in ("primary", "_thumbnail") or not isinstance(data, bytes):
-                continue
-            fmt_path = str(
-                Path(output_dir) / f"cleo_output_{fmt.replace(':', '-')}.mp4"
-            )
-            with open(fmt_path, "wb") as f:
-                f.write(data)
+        # Cleanup: drop this job's files from the volume so it doesn't
+        # accumulate. Non-fatal on error.
+        try:
+            vol.remove_file(f"/{job_id}", recursive=True)
+        except Exception:
+            pass
 
-        print(f"[modal] render complete — primary={len(primary)} bytes", flush=True)
+        print(f"[modal] render complete for job {job_id}", flush=True)
         return True
     except Exception as e:
         import traceback
