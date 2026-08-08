@@ -2028,7 +2028,7 @@ def _merge_tiny_segments(segments, min_gap=0.3):
 def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                      output_dir, cut_style="balanced", cancel_check=None,
                      sub_pos=None, sub_size=None, clip_name_prefix=None,
-                     language=None, progress_cb=None, parallelism=6):
+                     language=None, progress_cb=None, parallelism=3):
     """Per-Segment MoviePy render mit fresh VideoFileClip pro Segment.
 
     Returns list of (file_path, duration) tuples in timeline order.

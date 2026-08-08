@@ -618,7 +618,8 @@ def _try_modal_render(
             batch.put_file(normalized_path, remote_path)
 
         _stage(f"Rendering {len(segments)} clip(s) on Modal…", 10)
-        fn = modal.Function.lookup("cleocuts-render", "render_burn_concat")
+        # Modal 1.x renamed lookup → from_name
+        fn = modal.Function.from_name("cleocuts-render", "render_burn_concat")
         result_map = fn.remote(
             job_id=job_id,
             input_filename=input_filename,
