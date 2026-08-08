@@ -577,6 +577,83 @@ def analyze_only(
     }
 
 
+def _try_modal_render(
+    normalized_path: str,
+    segments: list[tuple[float, float]],
+    subtitles: list[dict],
+    caption_preset: str,
+    cut_style: str,
+    language: str | None,
+    output_formats: list[str],
+    primary_out_path: str,
+    thumbnail_out_path: str,
+    output_dir: str,
+    _stage,
+) -> bool:
+    """Offload the burn+concat step to a Modal.com worker.
+
+    Returns True on success (files written to disk), False if Modal
+    isn't configured or the call failed — caller then falls back to
+    local rendering. Never raises.
+    """
+    if not os.environ.get("MODAL_TOKEN_ID"):
+        return False
+    try:
+        import modal
+    except ImportError:
+        print("[modal] modal package not installed", flush=True)
+        return False
+
+    try:
+        _stage("Uploading to Modal worker…", 5)
+        with open(normalized_path, "rb") as f:
+            input_bytes = f.read()
+
+        _stage(f"Rendering {len(segments)} clip(s) on Modal…", 10)
+        fn = modal.Function.lookup("cleocuts-render", "render_burn_concat")
+        result = fn.remote(
+            input_bytes=input_bytes,
+            input_filename=os.path.basename(normalized_path),
+            segments=[[float(s), float(e)] for s, e in segments],
+            subtitles=subtitles,
+            caption_preset=caption_preset,
+            cut_style=cut_style,
+            language=language,
+            output_formats=list(output_formats),
+        )
+        _stage("Downloading from Modal…", 88)
+
+        # result is {"primary": bytes, "_thumbnail": bytes, "9:16": bytes, ...}
+        primary = result.get("primary")
+        if not primary:
+            print("[modal] returned no primary output", flush=True)
+            return False
+        with open(primary_out_path, "wb") as f:
+            f.write(primary)
+
+        thumb = result.get("_thumbnail")
+        if thumb:
+            with open(thumbnail_out_path, "wb") as f:
+                f.write(thumb)
+
+        for fmt, data in result.items():
+            if fmt in ("primary", "_thumbnail") or not isinstance(data, bytes):
+                continue
+            fmt_path = str(
+                Path(output_dir) / f"cleo_output_{fmt.replace(':', '-')}.mp4"
+            )
+            with open(fmt_path, "wb") as f:
+                f.write(data)
+
+        print(f"[modal] render complete — primary={len(primary)} bytes", flush=True)
+        return True
+    except Exception as e:
+        import traceback
+        print(f"[modal] render failed, falling back to local: {e}\n"
+              f"{traceback.format_exc()}", flush=True)
+        return False
+
+
 def _apply_extra_cuts(
     segments: list[tuple[float, float]],
     extra_cuts: list[tuple[float, float]],
@@ -690,42 +767,66 @@ def render_only(
         if progress_cb:
             progress_cb(msg, pct)
 
-    _stage(f"Rendering {len(segments)} clip(s)…", 0)
-    burn_dir = tempfile.mkdtemp(prefix="cleo_burn_", dir=output_dir)
-    clip_outputs = _multi_clip_burn(
-        input_video=normalized_path,
+    # Modal offload: if MODAL_TOKEN_ID is set, ship the render step to
+    # Modal.com's pay-per-second workers. 3-5× faster than Railway CPU
+    # (more parallelism + better CPUs) at ~1/3 the cost. Falls back to
+    # local rendering if Modal isn't configured or the call fails.
+    primary_path = str(Path(output_dir) / "cleo_output.mp4")
+    thumbnail_path = str(Path(output_dir) / "cleo_thumbnail.jpg")
+    modal_ok = _try_modal_render(
+        normalized_path=normalized_path,
         segments=segments,
         subtitles=subtitles,
         caption_preset=caption_preset,
-        output_dir=burn_dir,
         cut_style=settings.get("style", "balanced"),
-        cancel_check=cancel_check,
         language=language,
-        progress_cb=_stage,
+        output_formats=settings.get("output_formats") or [],
+        primary_out_path=primary_path,
+        thumbnail_out_path=thumbnail_path,
+        output_dir=output_dir,
+        _stage=_stage,
     )
 
-    if not clip_outputs:
-        raise RuntimeError("Render produced no output clips.")
+    if not modal_ok:
+        # Local fallback path — same code as before
+        _stage(f"Rendering {len(segments)} clip(s)…", 0)
+        burn_dir = tempfile.mkdtemp(prefix="cleo_burn_", dir=output_dir)
+        clip_outputs = _multi_clip_burn(
+            input_video=normalized_path,
+            segments=segments,
+            subtitles=subtitles,
+            caption_preset=caption_preset,
+            output_dir=burn_dir,
+            cut_style=settings.get("style", "balanced"),
+            cancel_check=cancel_check,
+            language=language,
+            progress_cb=_stage,
+        )
 
-    clip_paths = [p for (p, _dur) in clip_outputs]
-    primary_path = str(Path(output_dir) / "cleo_output.mp4")
+        if not clip_outputs:
+            raise RuntimeError("Render produced no output clips.")
 
-    _stage("Stitching clips…", 80)
-    _ffmpeg_concat(clip_paths, primary_path)
+        clip_paths = [p for (p, _dur) in clip_outputs]
 
-    # Poster-frame thumbnail for the Library card — one JPG per job
-    # at a fixed filename beside the primary output so the endpoint
-    # can find it without needing a schema field.
-    thumbnail_path = str(Path(output_dir) / "cleo_thumbnail.jpg")
-    _generate_thumbnail(primary_path, thumbnail_path)
+        _stage("Stitching clips…", 80)
+        _ffmpeg_concat(clip_paths, primary_path)
 
-    # Multi-format export: keep the primary as-is, derive additional
-    # aspect ratios via simple letterbox pad. User picks which ones in
-    # settings; default is just the primary.
+        _generate_thumbnail(primary_path, thumbnail_path)
+
+    # Assemble outputs dict. Modal path already wrote extra-format files
+    # to output_dir; local path still needs to encode them below.
     outputs: dict[str, str] = {"primary": primary_path}
     formats = settings.get("output_formats") or []
     valid_formats = [f for f in formats if f in EXPORT_FORMATS] if isinstance(formats, list) else []
-    if valid_formats:
+    if modal_ok:
+        # Just pick up whatever Modal already wrote — no re-encoding.
+        for fmt in valid_formats:
+            fmt_path = str(
+                Path(output_dir) / f"cleo_output_{fmt.replace(':', '-')}.mp4"
+            )
+            if Path(fmt_path).exists():
+                outputs[fmt] = fmt_path
+    elif valid_formats:
         # Run all extra-format exports in parallel — each is an independent
         # ffmpeg pass off the same primary file, so they don't contend
         # on shared state. Cuts multi-format export time roughly Nx.
