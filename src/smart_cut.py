@@ -193,7 +193,7 @@ class SmartCutter:
     def optimize_cuts(
         self,
         segments: list[tuple[float, float]],
-        max_adjust: float = 1.0,
+        max_adjust: float = 0.5,
     ) -> list[tuple[float, float]]:
         """Snap segment boundaries to the nearest natural break point.
 
