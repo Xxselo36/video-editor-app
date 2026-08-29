@@ -232,23 +232,35 @@ class SmartCutter:
             return best
 
         def _snap(ts: float, is_end: bool) -> float:
-            """Snap *ts* to the best nearby boundary within max_adjust."""
+            """Snap *ts* to the best nearby boundary within max_adjust.
+
+            OUTWARD-only: for a kept-segment START we only accept
+            boundaries at or BEFORE ts (widen left); for a kept-segment
+            END we only accept boundaries at or AFTER ts (widen right).
+            Inward snaps would shrink the segment and clip edge words
+            like 'Ja' at the very start of a take.
+            """
             candidates: list[tuple[float, int]] = []  # (time, priority)
+
+            def _accept(b: float) -> bool:
+                if is_end:
+                    return b >= ts   # end snaps only later
+                return b <= ts       # start snaps only earlier
 
             # Sentence boundaries (highest priority = 0)
             b = _nearest(ts, sentence_bounds)
-            if b is not None and abs(b - ts) <= max_adjust:
+            if b is not None and _accept(b) and abs(b - ts) <= max_adjust:
                 candidates.append((b, 0))
 
             # Clause boundaries (priority 1)
             b = _nearest(ts, clause_bounds)
-            if b is not None and abs(b - ts) <= max_adjust:
+            if b is not None and _accept(b) and abs(b - ts) <= max_adjust:
                 candidates.append((b, 1))
 
             # Word boundaries (priority 2)
             pool = word_ends if is_end else word_starts
             b = _nearest(ts, pool)
-            if b is not None and abs(b - ts) <= max_adjust:
+            if b is not None and _accept(b) and abs(b - ts) <= max_adjust:
                 candidates.append((b, 2))
 
             if not candidates:
