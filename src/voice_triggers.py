@@ -186,24 +186,35 @@ def detect_voice_triggers(
                   flush=True)
             break
 
-        # Clean continue boundary: start of the FIRST word AFTER "go"
-        # so the trigger itself and any breath/silence after it are cut.
+        # End boundary: start of the FIRST word AFTER "go" (before buffer)
         if cont_next_idx < len(whisper_words):
-            continue_end = float(whisper_words[cont_next_idx].get("start", 0))
+            next_word_start = float(whisper_words[cont_next_idx].get("start", 0))
         else:
-            # Continue-phrase is the very last word — fall back to its own end
-            last = whisper_words[cont_next_idx - 1]
-            continue_end = float(last.get("end", 0))
+            next_word_start = float(
+                whisper_words[cont_next_idx - 1].get("end", 0)
+            ) + 1.0  # far in the future
 
-        # Lead + tail buffers to compensate for Whisper timestamp drift.
-        # Whisper's word.start is typically 100-200ms LATER than the
-        # actual audio onset, and word.end 100-200ms EARLIER than the
-        # audio tail. Without the buffers you hear the beginning of
-        # "Cleo cut" and the end of "go" in the final render.
-        LEAD_BUFFER = 0.20   # start cut this much earlier
-        TAIL_BUFFER = 0.20   # extend cut this much later
-        cut_start = max(0.0, cut_start - LEAD_BUFFER)
-        continue_end = continue_end + TAIL_BUFFER
+        # Lead + tail buffers compensate for Whisper timestamp drift
+        # (word.start is often 100-200ms after actual audio onset).
+        # But cap at neighbouring words minus 50ms safety so the buffer
+        # never clips into the previous / next real content word.
+        LEAD_BUFFER = 0.20
+        TAIL_BUFFER = 0.20
+        SAFETY_MARGIN = 0.05
+
+        # cut_start: allow shifting earlier, but not past the previous
+        # kept word (its end time — the walk-back default is already
+        # this value; LEAD_BUFFER may push earlier into that word).
+        if i > 0:
+            prev_word_end = float(whisper_words[i - 1].get("end", cut_start))
+            cut_start_min = prev_word_end + SAFETY_MARGIN
+        else:
+            cut_start_min = 0.0
+        cut_start = max(cut_start_min, cut_start - LEAD_BUFFER)
+
+        # continue_end: allow shifting later, but not INTO the next word.
+        continue_end_max = max(continue_end, next_word_start - SAFETY_MARGIN)
+        continue_end = min(continue_end_max, continue_end + TAIL_BUFFER)
 
         pairs.append(VoiceTriggerPair(
             cut_start=cut_start,
