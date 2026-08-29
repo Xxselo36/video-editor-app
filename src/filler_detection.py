@@ -42,9 +42,12 @@ class FillerDetector:
             # Whisper transcribes "äh"-sounds in many spellings — cover them.
             "ähm", "äh", "ähhh", "ähhm", "öh", "öhm", "ehm", "eh",
             "hm", "hmm", "mhh", "mhm", "mmh",
-            # Meta-fillers ("also", "halt", "quasi") only kill if confident.
-            "also", "halt", "quasi", "sozusagen", "irgendwie",
-            "na ja", "naja", "genau", "eben",
+            # Meta-fillers REMOVED — words like "halt", "also", "quasi",
+            # "genau", "eben", "irgendwie" are legitimate sentence
+            # content in ~50% of contexts (e.g. "halt deine Fresse",
+            # "also nochmal", "eben genau das"). Rule-based removal
+            # created too many false positives. LLM cleanup handles
+            # them context-aware.
         },
     }
 
