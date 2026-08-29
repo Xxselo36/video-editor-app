@@ -282,17 +282,14 @@ def apply_voice_triggers_to_subtitles(
     kept = []
     for s in subtitles:
         start = _start(s)
-        end = _end(s, start)
-        # Drop if subtitle overlaps a cut range at ALL. Midpoint-check
-        # was letting "go" through when it got combined with the next
-        # word in the caption builder — the combined subtitle's mid
-        # fell outside the cut range even though "go" itself was in it.
-        # Overlap = start < range_end AND end > range_start.
-        overlaps = any(
-            start < p.continue_end and end > p.cut_start
-            for p in pairs
-        )
-        if not overlaps:
+        # Drop if the subtitle STARTS inside a cut range. Overlap-check
+        # was too aggressive — kept-side subtitles like 'Alhamdulillah'
+        # ending 100ms past the cut boundary got dropped even though
+        # their actual content was fully OUTSIDE the cut. Start-inside
+        # is precise: 'Cleo cut' and 'Cleo go' start inside; kept-side
+        # subtitles start outside.
+        in_cut = any(p.cut_start <= start < p.continue_end for p in pairs)
+        if not in_cut:
             kept.append(s)
     return kept
 
