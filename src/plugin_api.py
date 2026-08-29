@@ -145,6 +145,27 @@ def analyze_video(
           f"{len(speech_only)} speech regions, "
           f"total speech={total_speech:.1f}s", flush=True)
 
+    # Drop Whisper hallucinations: subtitles that fall entirely in
+    # silence-detected regions. Common pattern is 'Ja' at t=0.0-0.3s
+    # when the audio actually starts with silence — Whisper's decoder
+    # guesses common German intros when it's not sure.
+    if speech_only:
+        speech_ranges = [(s.start, s.end) for s in speech_only]
+        def _has_speech_overlap(sub_start: float, sub_end: float) -> bool:
+            for ss, se in speech_ranges:
+                if sub_start < se and sub_end > ss:
+                    return True
+            return False
+        before = len(subtitles)
+        subtitles = [
+            sub for sub in subtitles
+            if _has_speech_overlap(sub.start, sub.end)
+        ]
+        dropped = before - len(subtitles)
+        if dropped > 0:
+            print(f"[hallucination-filter] dropped {dropped} subtitle(s) "
+                  f"outside any speech region", flush=True)
+
     # Convert speech segments to (start, end) tuples with padding
     segments = []
     for seg in speech_segments:
