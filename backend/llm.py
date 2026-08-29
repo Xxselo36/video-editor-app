@@ -116,21 +116,15 @@ Two tasks, one JSON response:
    - DO NOT paraphrase, rewrite, or change meaning. Keep speaker's voice.
 
 2. DETECT BAD TAKES — phrases where the speaker abandoned an attempt
-   and re-said the same thing (in different words) shortly after:
-   - Look for CONSECUTIVE or NEAR-consecutive phrases where the speaker
-     tried to express the same idea multiple times. Common signal:
-     a phrase that trails off, feels incomplete, contains "äh"/"halt"/
-     "beispielsweise" and is immediately followed by a cleaner phrase
-     covering the same thought.
-   - Mark the WORSE version (more filler, cut off, less fluent, or
-     containing the phrase "verspreche" / "nochmal" / "moment").
-   - You DON'T need to be 100% sure — if two adjacent phrases feel
-     like variants of the same attempt, mark the earlier one.
-   - Do NOT mark intentional repetition (lists, refrains, emphasis
-     where the speaker is deliberately repeating a word for effect).
-   - Example: phrase A "Stellen dann, wenn ich mich verspreche, ich das"
-     followed by phrase B "wenn ich mich jetzt verspreche, würde er
-     beispielsweise" — both attempts at the same sentence. Mark A.
+   and re-said the same thing better in a later phrase:
+   - Mark only the WORSE version (more fillers, incomplete, less fluent).
+   - Be VERY CONSERVATIVE: only mark if you are ≥90% sure the two
+     phrases are the SAME sentence attempted twice — not just related
+     content on the same topic.
+   - Never mark intentional repetition (emphasis, lists, refrains).
+   - If in doubt, KEEP BOTH. Better to leave one extra sentence in the
+     final video than to delete real content. Prefer bad_takes=[] over
+     wrong flags.
 
 {lang_hint}
 
