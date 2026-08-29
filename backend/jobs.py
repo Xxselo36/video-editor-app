@@ -1,13 +1,20 @@
-"""In-memory job store for the web backend.
+"""SQLite-backed job store for the web backend.
 
-Phase 2 is single-process, single-worker, no persistence. Phase 3 will
-swap this for Redis + RQ without changing the API surface.
+Persists across container restarts so a Railway deploy doesn't nuke
+in-flight jobs (which was killing users mid-render). Same API surface
+as the old in-memory version — callers use store.create / .get / .update.
+
+DB file lives at CLEO_JOB_DB (default /data/cleo_jobs.db). On Railway
+that's a mounted persistent volume; locally it defaults to /tmp.
 """
 from __future__ import annotations
 
+import json
+import os
+import sqlite3
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Literal
 
@@ -64,30 +71,106 @@ class Job:
         }
 
 
+def _db_path() -> str:
+    return os.environ.get("CLEO_JOB_DB", "/tmp/cleo_jobs.db")
+
+
+# Fields that hold structured (list/dict) data — JSON-encode on write,
+# JSON-decode on read.
+_JSON_FIELDS = {
+    "settings", "subtitles", "segments", "cut_ranges",
+    "audio_warnings", "audio_levels", "outputs",
+    "social_hashtags", "hook_clips",
+}
+
+
 class JobStore:
+    """SQLite-backed job store. Thread-safe via a single connection lock.
+    Writes are synchronous so the current job survives a hard crash /
+    OOM kill mid-render.
+    """
     def __init__(self) -> None:
-        self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        db_path = _db_path()
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._init_schema()
+
+    def _init_schema(self) -> None:
+        with self._lock:
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, data TEXT NOT NULL)"
+            )
+            self._conn.commit()
+
+    def _serialize(self, job: Job) -> str:
+        d = asdict(job)
+        for k in _JSON_FIELDS:
+            if k in d and not isinstance(d[k], str):
+                d[k] = json.dumps(d[k])
+        return json.dumps(d)
+
+    def _deserialize(self, row_data: str) -> Job:
+        d = json.loads(row_data)
+        for k in _JSON_FIELDS:
+            if k in d and isinstance(d[k], str):
+                try:
+                    d[k] = json.loads(d[k])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        # Reconstruct segments as tuples (JSON gives lists)
+        if isinstance(d.get("segments"), list):
+            d["segments"] = [tuple(s) for s in d["segments"]]
+        # Filter to known Job fields (schema-tolerant reads)
+        known = {f.name for f in fields(Job)}
+        d = {k: v for k, v in d.items() if k in known}
+        return Job(**d)
 
     def create(self, input_path: str, settings: dict[str, Any]) -> Job:
         job_id = uuid.uuid4().hex[:12]
         job = Job(id=job_id, input_path=input_path, settings=settings)
         with self._lock:
-            self._jobs[job_id] = job
+            self._conn.execute(
+                "INSERT INTO jobs (id, data) VALUES (?, ?)",
+                (job_id, self._serialize(job)),
+            )
+            self._conn.commit()
         return job
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
-            return self._jobs.get(job_id)
+            row = self._conn.execute(
+                "SELECT data FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return self._deserialize(row["data"])
+        except Exception as e:
+            print(f"[jobstore] deserialize failed for {job_id}: {e}",
+                  flush=True)
+            return None
 
-    def update(self, job_id: str, **fields: Any) -> None:
+    def update(self, job_id: str, **fields_to_update: Any) -> None:
         with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
+            row = self._conn.execute(
+                "SELECT data FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if row is None:
                 return
-            for k, v in fields.items():
+            try:
+                job = self._deserialize(row["data"])
+            except Exception:
+                return
+            for k, v in fields_to_update.items():
                 setattr(job, k, v)
+            self._conn.execute(
+                "UPDATE jobs SET data = ? WHERE id = ?",
+                (self._serialize(job), job_id),
+            )
+            self._conn.commit()
 
 
-# Singleton — one store per process is fine for Phase 2
+# Singleton — one store per process
 store = JobStore()
