@@ -44,6 +44,56 @@ class Beat:
     strength: float  # 0-1, wie stark der Beat ist
 
 
+def _dedupe_subtitles(subs: list) -> list:
+    """Drop duplicate / overlapping Whisper subtitles.
+
+    Whisper produces two common junk patterns:
+      1. A phrase transcribed twice back-to-back in adjacent decode
+         windows ('Ja was geht ab' + 'geht ab, Leute').
+      2. A single hallucinated word at the very start ('Ja') when the
+         audio actually opens with something else.
+
+    Rules:
+      - Two subtitles whose text is identical (after normalisation) or
+        one is a suffix of the other → keep the LONGER one, drop the
+        other.
+      - Two adjacent subtitles that overlap in TIME by more than 50%
+        of the shorter → same treatment.
+    """
+    import re
+    def _norm(t: str) -> str:
+        return re.sub(r"[^\w\s]", "", t.lower()).strip()
+
+    def _is_suffix(shorter: str, longer: str) -> bool:
+        s = _norm(shorter)
+        l = _norm(longer)
+        if not s or s == l:
+            return True
+        # 'geht ab leute' is a suffix of 'ja was geht ab leute'
+        return l.endswith(s) or l.startswith(s)
+
+    if not subs:
+        return subs
+    kept = [subs[0]]
+    for cur in subs[1:]:
+        prev = kept[-1]
+        cur_dur = max(0.001, cur.end - cur.start)
+        prev_dur = max(0.001, prev.end - prev.start)
+        # time overlap
+        overlap = max(0.0, min(cur.end, prev.end) - max(cur.start, prev.start))
+        overlap_ratio = overlap / min(cur_dur, prev_dur)
+        # text similarity
+        similar = _is_suffix(cur.text, prev.text) or _is_suffix(prev.text, cur.text)
+
+        if similar and (overlap_ratio > 0.3 or cur.start - prev.end < 0.4):
+            # Same content — keep the longer one (usually the fuller phrase)
+            if len(cur.text) > len(prev.text):
+                kept[-1] = cur
+            continue
+        kept.append(cur)
+    return kept
+
+
 class AudioAnalyzer:
     """Analysiert Audio für Schnitte, Untertitel und Beat-Sync."""
 
@@ -170,6 +220,13 @@ class AudioAnalyzer:
                         end=segment["start"] + (j + 1) * word_dur,
                         text=word.strip(),
                     ))
+
+        # Post-process: drop duplicate / overlapping subtitles.
+        # Whisper occasionally emits the same phrase twice in adjacent
+        # segments (esp. with condition_on_previous_text=False), leaving
+        # 'Ja, was geht ab' + 'geht ab' back-to-back. Also hallucinates
+        # a single word like 'Ja' at the very start.
+        self._subtitles = _dedupe_subtitles(self._subtitles)
 
     def transcribe(self) -> list[Subtitle]:
         """
