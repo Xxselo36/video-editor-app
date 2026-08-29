@@ -40,6 +40,14 @@ image = (
         "opencv-python-headless>=4.8.0",
         "imageio_ffmpeg>=0.4.9",
         "scipy>=1.9.0",
+        # src/audio.py imports faster_whisper at top-level even though
+        # the render step never uses it — needed so pipeline.py imports
+        # don't ModuleNotFoundError on the Modal side.
+        "faster-whisper>=1.2.0",
+        "pydub>=0.25.1",
+        "ultralytics>=8.0.0",
+        "anthropic==0.111.0",
+        "openai>=1.50.0",
     )
     # Bundle the SmartCut source so _multi_clip_burn + _ffmpeg_concat
     # + _export_format can all run inside the Modal container without

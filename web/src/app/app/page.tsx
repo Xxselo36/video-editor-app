@@ -587,6 +587,10 @@ export default function Home() {
         }),
       });
       if (!r.ok) throw new Error(await r.text());
+      // Reset job.progress to 0 BEFORE flipping phase — otherwise the
+      // progress bar briefly shows 100 (leftover from analyze phase)
+      // before the first render-progress poll drops it to ~5.
+      setJob((prev) => prev ? { ...prev, progress: 0, message: "Starting render…" } : prev);
       setPhase("rendering");
       updateActiveJob({ phase: "rendering" });
     } catch (err) {

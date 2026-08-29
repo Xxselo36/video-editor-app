@@ -195,6 +195,16 @@ def detect_voice_triggers(
             last = whisper_words[cont_next_idx - 1]
             continue_end = float(last.get("end", 0))
 
+        # Lead + tail buffers to compensate for Whisper timestamp drift.
+        # Whisper's word.start is typically 100-200ms LATER than the
+        # actual audio onset, and word.end 100-200ms EARLIER than the
+        # audio tail. Without the buffers you hear the beginning of
+        # "Cleo cut" and the end of "go" in the final render.
+        LEAD_BUFFER = 0.20   # start cut this much earlier
+        TAIL_BUFFER = 0.20   # extend cut this much later
+        cut_start = max(0.0, cut_start - LEAD_BUFFER)
+        continue_end = continue_end + TAIL_BUFFER
+
         pairs.append(VoiceTriggerPair(
             cut_start=cut_start,
             continue_end=continue_end,
@@ -273,11 +283,16 @@ def apply_voice_triggers_to_subtitles(
     for s in subtitles:
         start = _start(s)
         end = _end(s, start)
-        # Subtitle is "in" a cut range if its midpoint is inside the
-        # cut. This is robust against tiny boundary mismatches.
-        mid = (start + end) / 2.0
-        in_cut = any(p.cut_start <= mid <= p.continue_end for p in pairs)
-        if not in_cut:
+        # Drop if subtitle overlaps a cut range at ALL. Midpoint-check
+        # was letting "go" through when it got combined with the next
+        # word in the caption builder — the combined subtitle's mid
+        # fell outside the cut range even though "go" itself was in it.
+        # Overlap = start < range_end AND end > range_start.
+        overlaps = any(
+            start < p.continue_end and end > p.cut_start
+            for p in pairs
+        )
+        if not overlaps:
             kept.append(s)
     return kept
 
