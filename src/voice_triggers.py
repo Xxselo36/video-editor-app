@@ -170,7 +170,7 @@ def detect_voice_triggers(
             for kw in continue_keywords:
                 m = _match_phrase_at(j, whisper_words, kw)
                 if m is not None:
-                    cont_next_idx, _, _ = m
+                    cont_next_idx, _, continue_end = m
                     matched_continue = kw
                     break
             if matched_continue is not None:
