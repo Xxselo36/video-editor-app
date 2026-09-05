@@ -510,11 +510,11 @@ def analyze_only(
     try:
         from backend.llm import (
             cleanup_transcript,
-            find_bad_take_candidates,
-            detect_bad_takes,
+            find_duplicate_bad_takes,
         )
-        # Build LLM input from RAW subtitles (before cleanup) — the
-        # bad-take filter needs disfluencies + failure cues intact.
+        # Build phrase list from RAW subtitles (before cleanup rewrites
+        # text). Duplicate detection runs on raw text; cleanup is text-
+        # only and doesn't gate cuts.
         llm_input = [
             {
                 "id": i,
@@ -525,13 +525,8 @@ def analyze_only(
             for i, s in enumerate(subtitles)
         ]
 
-        # Step 1: Python filter for bad-take candidates on RAW text.
-        # This runs BEFORE cleanup so it can see 'äh scheiße nochmal'.
-        candidates = find_bad_take_candidates(llm_input)
-        print(f"[llm] python-filter found {len(candidates)} bad-take "
-              f"candidate(s): {candidates}", flush=True)
-
-        # Step 2: Text cleanup (Haiku) — typos, brand names, fillers.
+        # Text cleanup (Haiku): typos, brand names, filler vocalisations.
+        # Does NOT decide any cuts — that's the duplicate detector below.
         cleaned = cleanup_transcript(llm_input, language=result.language)
         print(f"[llm] cleanup — {len(cleaned)} phrase(s) rewritten",
               flush=True)
@@ -540,18 +535,18 @@ def analyze_only(
             if c:
                 s["text"] = c
 
-        # Step 3: LLM second-opinion on bad-take candidates (Sonnet,
-        # only if candidates exist — skipped call otherwise saves cost).
-        # Uses llm_input which still has raw text with failure cues.
-        confirmed_bad_takes = detect_bad_takes(
-            llm_input, candidates, language=result.language,
-        )
-        print(f"[llm] bad-take confirmed by LLM: {confirmed_bad_takes} "
-              f"(out of {len(candidates)} candidate pair(s))", flush=True)
+        # Deterministic near-duplicate detection: cuts only when a
+        # phrase is near-identical to a later one and spoken within 3s.
+        # No LLM, no judgment — pure math. Zero false positives, at the
+        # cost of missing subtle restarts (those need voice triggers).
+        duplicates = find_duplicate_bad_takes(llm_input)
+        print(f"[dup] {len(duplicates)} near-duplicate pair(s): "
+              f"{[(a, b, f'{s:.0%}') for a, b, s in duplicates]}",
+              flush=True)
 
-        # Step 4: Apply confirmed bad-take cuts + drop flagged subtitles.
+        drop_ids = {a_id for (a_id, _b, _s) in duplicates}
         bad_take_cut_ranges: list[tuple[float, float]] = []
-        for pid in confirmed_bad_takes:
+        for pid in drop_ids:
             if 0 <= pid < len(subtitles):
                 s = subtitles[pid]
                 bs = float(s.get("original_start") or s.get("start") or 0)
@@ -559,11 +554,11 @@ def analyze_only(
                 if be > bs:
                     bad_take_cut_ranges.append((bs, be))
         if bad_take_cut_ranges:
-            print(f"[llm] {len(bad_take_cut_ranges)} bad-take range(s) "
-                  f"applied: {bad_take_cut_ranges}", flush=True)
+            print(f"[dup] applying {len(bad_take_cut_ranges)} "
+                  f"duplicate cut range(s): {bad_take_cut_ranges}",
+                  flush=True)
             segments = _apply_extra_cuts(segments, bad_take_cut_ranges)
-            flagged = set(confirmed_bad_takes)
-            subtitles = [s for i, s in enumerate(subtitles) if i not in flagged]
+            subtitles = [s for i, s in enumerate(subtitles) if i not in drop_ids]
     except Exception as e:
         import traceback
         print(f"[llm] cleanup pass failed (soft): {e}\n"

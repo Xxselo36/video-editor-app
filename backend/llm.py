@@ -28,9 +28,7 @@ except ImportError:
 
 _MODEL = "claude-haiku-4-5"
 _MODEL_CLEANUP = "claude-haiku-4-5"       # fast + cheap, good enough for typo/filler fix
-_MODEL_BAD_TAKE = "claude-sonnet-4-6"     # smarter model for judgment call on restarts
 _MAX_TOKENS_CLEANUP = 4000
-_MAX_TOKENS_BAD_TAKE = 1500
 _MAX_TOKENS_SOCIAL = 800
 
 
@@ -58,7 +56,7 @@ _STOPWORDS_DE = frozenset([
     "in", "an", "auf", "für", "mit", "von", "bei", "zu",
     "nach", "aus", "durch", "über", "unter", "vor", "hinter", "zwischen",
     "als", "wie", "so", "sehr", "auch", "noch", "nur", "mal", "schon",
-    "dann", "jetzt", "hier", "da", "dort", "heute", "gestern", "morgen",
+    "dann", "jetzt", "hier", "da", "dort",
     "ja", "nein", "doch", "nicht", "kein", "keine",
     "man", "etwas", "nichts", "alles", "ganz", "eigentlich", "halt",
 ])
@@ -74,23 +72,9 @@ _STOPWORDS_EN = frozenset([
     "my", "your", "his", "our", "their", "its",
     "in", "on", "at", "for", "with", "from", "to", "of", "by", "about",
     "as", "like", "so", "very", "also", "still", "only", "just",
-    "then", "now", "here", "there", "today", "yesterday", "tomorrow",
+    "then", "now", "here", "there",
     "yes", "no", "not", "none", "some", "any", "all",
 ])
-
-# Failure cues — words that suggest the speaker abandoned an attempt.
-# Strong cues alone are enough (rare in normal speech unless restarting).
-# Medium cues can be emphasis/rant — need corroboration.
-_FAILURE_CUES_STRONG = frozenset([
-    "nochmal", "moment", "warte", "sekunde", "stop",
-    "wait", "hold", "again", "restart", "sorry",
-])
-
-_FAILURE_CUES_MEDIUM = frozenset([
-    "scheiße", "scheisse", "mist", "verdammt", "kacke",
-    "shit", "fuck", "damn", "crap",
-])
-
 
 def _tokenize(text: str) -> list[str]:
     """Lowercase, strip punctuation, split on whitespace."""
@@ -100,83 +84,83 @@ def _tokenize(text: str) -> list[str]:
     return [t for t in cleaned.split() if t]
 
 
+# Filler vocalisations — dropped from content-word extraction so
+# "Heute geht es um äh Selbstdisziplin" and "Heute geht es um
+# Selbstdisziplin" have identical content sets (100% Jaccard).
+_FILLERS = frozenset([
+    "äh", "ähm", "ähhh", "öh", "öhm", "ehm",
+    "hm", "hmm", "mhm", "mmh", "hä",
+    "um", "uh", "uhm", "uhh", "er", "erm",
+])
+
+
 def _content_words(text: str) -> set[str]:
-    """Return the set of content words (non-stopword, len>1)."""
-    stopwords = _STOPWORDS_DE | _STOPWORDS_EN
+    """Return the set of content words (non-stopword, non-filler, len>1)."""
+    stopwords = _STOPWORDS_DE | _STOPWORDS_EN | _FILLERS
     return {t for t in _tokenize(text) if t not in stopwords and len(t) > 1}
 
 
-def _failure_score(text: str) -> int:
-    """Score how much a phrase looks like an abandoned take.
-
-    Strong cue = 2 pts. Medium cue = 1 pt. Both types co-occurring in
-    the same phrase = +1 bonus (e.g. 'scheiße nochmal' is a much
-    stronger restart signal than either alone). Score >= 2 counts as
-    a real failure signal.
-    """
-    tokens = set(_tokenize(text))
-    strong = tokens & _FAILURE_CUES_STRONG
-    medium = tokens & _FAILURE_CUES_MEDIUM
-    score = 2 * len(strong) + len(medium)
-    if strong and medium:
-        score += 1
-    return score
-
-
-def find_bad_take_candidates(
+def find_duplicate_bad_takes(
     phrases: list[dict],
-    max_gap_seconds: float = 2.0,
-    strong_overlap_threshold: float = 0.7,
-    weak_overlap_threshold: float = 0.3,
+    similarity_threshold: float = 0.85,
+    max_gap_seconds: float = 3.0,
+    min_content_words: int = 2,
     lookahead: int = 3,
-) -> list[tuple[int, int, str]]:
-    """Pre-filter for bad-take detection.
+) -> list[tuple[int, int, float]]:
+    """Deterministic near-duplicate detection — no LLM, no judgment.
 
-    Returns list of (worse_id, better_id, reason) candidate pairs where:
-    - B starts within max_gap_seconds after A ends (restarts are prompt)
-    - Either:
-      a) content-word overlap between A and B >= strong_overlap_threshold
-         (clean restart with same words), OR
-      b) A's failure score >= 2 AND overlap >= weak_overlap_threshold
-         (A stumbled with 'scheiße nochmal' + B rephrases the intent)
+    Returns list of (drop_id, keep_id, similarity) tuples where an
+    earlier phrase A should be dropped in favour of a later phrase B
+    because they are near-identical text spoken close in time.
 
-    The LLM only judges pairs that pass this filter — so the LLM never
-    even sees phrases that are obviously not restarts, cutting cost +
-    false-positive risk.
+    All three conditions must hold:
+    1. Jaccard overlap of content words (stopwords ignored) >= threshold
+    2. B starts within max_gap_seconds of A ending (restarts are prompt)
+    3. Both A and B have at least min_content_words content words
+       (avoids cutting duplicate short interjections like "ja ja")
+
+    This catches only OBVIOUS restarts where the user said essentially
+    the same sentence twice. Subtler bad takes ("scheiße nochmal" +
+    a rephrase with different words) are NOT caught — that's the
+    intentional tradeoff for zero-false-positive behavior.
     """
-    candidates: list[tuple[int, int, str]] = []
+    to_drop: list[tuple[int, int, float]] = []
+    dropped_ids: set[int] = set()
+
     for i, a in enumerate(phrases):
-        a_end = float(a.get("end") or 0)
-        a_text = a.get("text", "") or ""
-        a_words = _content_words(a_text)
-        if not a_words:
+        a_id = int(a.get("id", i))
+        if a_id in dropped_ids:
             continue
-        a_cue = _failure_score(a_text)
+        a_content = _content_words(a.get("text", "") or "")
+        if len(a_content) < min_content_words:
+            continue
+        a_end = float(a.get("end") or 0)
 
         for j in range(i + 1, min(i + 1 + lookahead, len(phrases))):
             b = phrases[j]
+            b_id = int(b.get("id", j))
+            if b_id in dropped_ids:
+                continue
             b_start = float(b.get("start") or 0)
-            gap = b_start - a_end
-            if gap > max_gap_seconds:
-                break  # too far — restarts don't wait long
-            b_words = _content_words(b.get("text", "") or "")
-            if not b_words:
+            if b_start - a_end > max_gap_seconds:
+                break
+            b_content = _content_words(b.get("text", "") or "")
+            if len(b_content) < min_content_words:
                 continue
 
-            overlap = len(a_words & b_words) / min(len(a_words), len(b_words))
+            # Jaccard: |A ∩ B| / |A ∪ B| — symmetric, rewards near-
+            # identity, penalises when one phrase has extra content
+            # words the other lacks.
+            intersection = len(a_content & b_content)
+            union = len(a_content | b_content)
+            jaccard = intersection / union if union > 0 else 0.0
 
-            reason = None
-            if overlap >= strong_overlap_threshold:
-                reason = f"overlap {overlap:.0%}"
-            elif a_cue >= 2 and overlap >= weak_overlap_threshold:
-                reason = f"failure-cue score {a_cue} + overlap {overlap:.0%}"
+            if jaccard >= similarity_threshold:
+                to_drop.append((a_id, b_id, jaccard))
+                dropped_ids.add(a_id)
+                break  # A is dropped, don't compare further
 
-            if reason:
-                a_id = int(a.get("id", i))
-                b_id = int(b.get("id", j))
-                candidates.append((a_id, b_id, reason))
-
-    return candidates
+    return to_drop
 
 
 def _client():
@@ -288,152 +272,6 @@ Respond with ONLY a JSON object in this exact shape:
         except (KeyError, TypeError, ValueError):
             continue
     return cleaned
-
-
-def detect_bad_takes(
-    phrases: list[dict],
-    candidates: list[tuple[int, int, str]],
-    language: str | None = None,
-) -> list[int]:
-    """LLM second-opinion on pre-filtered bad-take candidates.
-
-    Uses Sonnet (bigger model, better judgment) but only when the
-    Python filter has surfaced actual candidates — no candidates → no
-    call, no cost.
-
-    Args:
-        phrases: full phrase list with RAW text (fillers and failure
-            cues MUST still be in there — they're the LLM's evidence).
-        candidates: (worse_id, better_id, python_reason) tuples from
-            find_bad_take_candidates().
-        language: ISO code hint.
-
-    Returns: list of phrase_ids the LLM confirms as bad takes.
-    """
-    if not candidates:
-        return []
-    client = _client()
-    if client is None:
-        return []
-
-    by_id = {int(p.get("id", i)): p for i, p in enumerate(phrases)}
-    pids_sorted = sorted(by_id.keys())
-
-    # Include 1 phrase of neighboring context around each candidate so
-    # the LLM sees flow (was this an emotional rant → follow-up, or a
-    # genuine restart?).
-    context_ids: set[int] = set()
-    for (a_id, b_id, _reason) in candidates:
-        context_ids.update([a_id, b_id])
-        for pid in (a_id, b_id):
-            try:
-                idx = pids_sorted.index(pid)
-                if idx > 0:
-                    context_ids.add(pids_sorted[idx - 1])
-                if idx + 1 < len(pids_sorted):
-                    context_ids.add(pids_sorted[idx + 1])
-            except ValueError:
-                pass
-
-    context_phrases = [
-        {"id": pid, "text": (by_id[pid].get("text", "") or "").strip()}
-        for pid in sorted(context_ids)
-    ]
-    candidate_pairs = [
-        {"worse_id": a_id, "better_id": b_id, "python_reason": reason}
-        for (a_id, b_id, reason) in candidates
-    ]
-    lang_hint = f"The spoken language is {language}." if language else ""
-
-    system = f"""You judge bad-take restarts in short-form video transcripts.
-
-A Python heuristic has already flagged candidate pairs. Your job is to
-CONFIRM or REJECT each — you have the final say. Reject aggressively
-when in doubt: leaving one extra sentence in the video is far less
-damaging than deleting real content.
-
-A bad take is when the speaker abandoned an attempt (usually stumbled
-with "äh", "scheiße", "nochmal", or trailed off) and re-said the SAME
-intended thought in a later phrase. Only remove the WORSE version.
-
-DO NOT flag these (they look similar but are NOT bad takes):
-
-1. Emotional outburst / rant / cursing followed by a CONTINUATION of
-   the thought (not a rephrase of the same sentence):
-     A: "Ich hasse es wenn Leute zu spät kommen, verdammt nochmal"
-     B: "Deshalb sag ich immer: sei pünktlich"
-   → B is a follow-up conclusion, NOT a restart of A. REJECT.
-
-2. Intentional repetition for emphasis / rhetorical effect:
-     A: "Das ist wichtig."
-     B: "Das ist WIRKLICH wichtig."
-   → Rhetorical device. REJECT.
-
-3. Two related sentences on the same topic that use similar words but
-   make DIFFERENT points:
-     A: "Löwen sind gefährlich"
-     B: "Tiger sind sogar gefährlicher als Löwen"
-   → Different comparison, not a restart. REJECT.
-
-4. Lists, refrains, callbacks to earlier phrases:
-     A: "Erstens: früh aufstehen."
-     B: "Zweitens: früh anfangen."
-   → Structured list. REJECT.
-
-CONFIRM as bad take only when B is a CLEANER RE-EXPRESSION of the
-same intended thought A was trying to convey. Prototypical case:
-   A: "Der wichtigste Trick ist scheiße wie war das nochmal"
-   B: "Der wichtigste Trick ist morgens um 6 aufzustehen"
-→ A trails off + B completes the same intended sentence. CONFIRM.
-
-{lang_hint}
-
-Respond with ONLY a JSON object:
-{{
-  "confirmed_bad_takes": [worse_id, ...],
-  "reasons": {{"worse_id_as_string": "one-line reason for confirm or reject"}}
-}}
-
-Include a reason for EVERY candidate (both confirmed and rejected),
-so we can debug false-positives / false-negatives later.
-"""
-
-    user_msg = json.dumps({
-        "context_phrases": context_phrases,
-        "candidate_pairs": candidate_pairs,
-    }, ensure_ascii=False)
-
-    try:
-        resp = client.messages.create(
-            model=_MODEL_BAD_TAKE,
-            max_tokens=_MAX_TOKENS_BAD_TAKE,
-            system=system,
-            messages=[{"role": "user", "content": user_msg}],
-        )
-        text = "".join(
-            getattr(b, "text", "") for b in (resp.content or [])
-            if getattr(b, "type", None) == "text"
-        )
-    except Exception as e:
-        print(f"[llm] bad-take call failed: {e}", flush=True)
-        return []
-
-    parsed = _extract_json(text)
-    if not isinstance(parsed, dict):
-        return []
-
-    confirmed: list[int] = []
-    for x in parsed.get("confirmed_bad_takes", []) or []:
-        try:
-            confirmed.append(int(x))
-        except (TypeError, ValueError):
-            continue
-
-    reasons = parsed.get("reasons") or {}
-    if reasons:
-        print(f"[llm] bad-take reasoning: {reasons}", flush=True)
-
-    return confirmed
 
 
 def detect_hook_moments(
