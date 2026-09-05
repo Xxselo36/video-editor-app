@@ -508,7 +508,13 @@ def analyze_only(
     print(f"[llm] cleanup starting — API key present: {has_key}, "
           f"{len(subtitles)} subtitles to process", flush=True)
     try:
-        from backend.llm import cleanup_and_detect_bad_takes
+        from backend.llm import (
+            cleanup_transcript,
+            find_bad_take_candidates,
+            detect_bad_takes,
+        )
+        # Build LLM input from RAW subtitles (before cleanup) — the
+        # bad-take filter needs disfluencies + failure cues intact.
         llm_input = [
             {
                 "id": i,
@@ -518,45 +524,45 @@ def analyze_only(
             }
             for i, s in enumerate(subtitles)
         ]
-        llm_res = cleanup_and_detect_bad_takes(
-            llm_input, language=result.language,
-        )
-        print(f"[llm] cleanup response — "
-              f"cleaned={len(llm_res.get('cleaned', {}))} phrases, "
-              f"bad_takes={llm_res.get('bad_takes', [])}", flush=True)
-        # Apply cleaned text in place
+
+        # Step 1: Python filter for bad-take candidates on RAW text.
+        # This runs BEFORE cleanup so it can see 'äh scheiße nochmal'.
+        candidates = find_bad_take_candidates(llm_input)
+        print(f"[llm] python-filter found {len(candidates)} bad-take "
+              f"candidate(s): {candidates}", flush=True)
+
+        # Step 2: Text cleanup (Haiku) — typos, brand names, fillers.
+        cleaned = cleanup_transcript(llm_input, language=result.language)
+        print(f"[llm] cleanup — {len(cleaned)} phrase(s) rewritten",
+              flush=True)
         for i, s in enumerate(subtitles):
-            cleaned = llm_res.get("cleaned", {}).get(i)
-            if cleaned:
-                s["text"] = cleaned
-        # Build bad-take removal ranges from flagged phrase ids.
-        # These get added to cut_ranges so the user can see + undo them
-        # alongside the rule-based cuts in the timeline.
-        # TEMP DISABLED (2026-09-05): testing whether bad-take removal
-        # is what makes end-of-video feel weird. LLM still runs for
-        # transcript cleanup (typos/canonicalization), just skips the
-        # apply step. Flip back to True to re-enable.
-        BAD_TAKE_REMOVAL_ENABLED = False
+            c = cleaned.get(i)
+            if c:
+                s["text"] = c
+
+        # Step 3: LLM second-opinion on bad-take candidates (Sonnet,
+        # only if candidates exist — skipped call otherwise saves cost).
+        # Uses llm_input which still has raw text with failure cues.
+        confirmed_bad_takes = detect_bad_takes(
+            llm_input, candidates, language=result.language,
+        )
+        print(f"[llm] bad-take confirmed by LLM: {confirmed_bad_takes} "
+              f"(out of {len(candidates)} candidate pair(s))", flush=True)
+
+        # Step 4: Apply confirmed bad-take cuts + drop flagged subtitles.
         bad_take_cut_ranges: list[tuple[float, float]] = []
-        if BAD_TAKE_REMOVAL_ENABLED:
-            for pid in llm_res.get("bad_takes", []) or []:
-                if 0 <= pid < len(subtitles):
-                    s = subtitles[pid]
-                    bs = float(s.get("original_start") or s.get("start") or 0)
-                    be = float(s.get("original_end") or s.get("end") or bs)
-                    if be > bs:
-                        bad_take_cut_ranges.append((bs, be))
-        else:
-            skipped = llm_res.get("bad_takes", []) or []
-            if skipped:
-                print(f"[llm] bad-take removal DISABLED — LLM flagged "
-                      f"phrase ids {skipped} but not applying", flush=True)
-        # Apply bad-take cuts to segments + drop flagged subtitles.
+        for pid in confirmed_bad_takes:
+            if 0 <= pid < len(subtitles):
+                s = subtitles[pid]
+                bs = float(s.get("original_start") or s.get("start") or 0)
+                be = float(s.get("original_end") or s.get("end") or bs)
+                if be > bs:
+                    bad_take_cut_ranges.append((bs, be))
         if bad_take_cut_ranges:
             print(f"[llm] {len(bad_take_cut_ranges)} bad-take range(s) "
                   f"applied: {bad_take_cut_ranges}", flush=True)
             segments = _apply_extra_cuts(segments, bad_take_cut_ranges)
-            flagged = set(llm_res.get("bad_takes", []) or [])
+            flagged = set(confirmed_bad_takes)
             subtitles = [s for i, s in enumerate(subtitles) if i not in flagged]
     except Exception as e:
         import traceback
