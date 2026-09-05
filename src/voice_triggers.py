@@ -160,7 +160,7 @@ def detect_voice_triggers(
         # stretched prev_word.end past cleo's actual onset (common),
         # we'd otherwise leak a "cle…" fragment. Clean-before-cleo
         # beats preserving the previous word's trailing decay.
-        BREATH_TRIM = 0.05
+        BREATH_TRIM = 0.02
         CUT_LEAD_CAP = 0.10
         cleo_cap = cut_phrase_start_t - CUT_LEAD_CAP
         if i > 0:
@@ -208,7 +208,7 @@ def detect_voice_triggers(
         # the next word sits very close. If Whisper stretched go past
         # the next word's start, we accept clipping the next word's
         # onset — clean-into-next-word beats preserving go's decay.
-        NEXT_LEAD = 0.05
+        NEXT_LEAD = 0.02
         continue_end = max(continue_end, next_word_start - NEXT_LEAD)
 
         pairs.append(VoiceTriggerPair(
