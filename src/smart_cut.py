@@ -282,28 +282,32 @@ class SmartCutter:
                 _clamp(new_end, 0.0, self.duration),
             ))
 
-        # Word-aware safety: jedes Whisper-Wort, das zu mindestens 50 %
-        # in einem Segment liegt, muss komplett enthalten sein. Sonst
-        # werden kurze End-Wörter wie "leid", "auch", "und" reproducibly
-        # abgeschnitten, weil die silence-detection den Auslaut als
-        # Stille interpretiert.
+        # HARD INVARIANT: no segment boundary sits inside a Whisper
+        # word. If start or end falls strictly between a word's start
+        # and end, expand outward to include the whole word. This is
+        # stricter than the previous 50%-overlap rule (which let words
+        # with small overlap get clipped mid-syllable) and provably
+        # eliminates mid-word cuts by construction: after this pass,
+        # every word is either fully inside a kept segment or fully
+        # outside all of them.
+        #
+        # Tradeoff: preserves up to one extra word of content per cut
+        # side vs. shipping fragments like "leid" → "lei-". Words are
+        # semantic units — we don't cut them ever.
         if words:
-            expanded: list[tuple[float, float]] = []
+            enforced: list[tuple[float, float]] = []
             for s, e in optimized:
                 ns, ne = s, e
                 for w in words:
-                    overlap_start = max(ns, w.start)
-                    overlap_end = min(ne, w.end)
-                    w_dur = max(0.001, w.end - w.start)
-                    if (overlap_end - overlap_start) / w_dur >= 0.5:
-                        # Wort gehört zu diesem Segment — Boundary expandieren
-                        ns = min(ns, w.start)
-                        ne = max(ne, w.end)
-                expanded.append((
+                    if w.start < ns < w.end:
+                        ns = w.start
+                    if w.start < ne < w.end:
+                        ne = w.end
+                enforced.append((
                     _clamp(ns, 0.0, self.duration),
                     _clamp(ne, 0.0, self.duration),
                 ))
-            optimized = expanded
+            optimized = enforced
 
         return _merge_overlapping(optimized)
 
