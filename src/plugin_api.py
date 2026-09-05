@@ -258,11 +258,22 @@ def analyze_video(
                 apply_voice_triggers_to_subtitles,
             )
             ww = collect_whisper_words(analyzer._transcription)
+            # Pass raw silence ranges so trigger boundaries snap to
+            # actual audio silence instead of Whisper's stretched word
+            # timestamps (kills perceptible pauses in the kept audio).
+            silence_ranges = [
+                (round(s.start, 3), round(s.end, 3))
+                for s in (analyzer._speech_segments or [])
+                if not s.has_speech
+            ]
+            print(f"[voice-triggers] {len(silence_ranges)} silence "
+                  f"range(s) available for snapping", flush=True)
             detected_trigger_pairs = detect_voice_triggers(
                 ww,
                 cut_keywords=cut_keywords,
                 continue_keywords=continue_keywords,
                 clip_duration=duration,
+                silence_ranges=silence_ranges,
             )
             # Dump whisper words so we can see exactly what was heard
             print(f"[voice-triggers] whisper heard "

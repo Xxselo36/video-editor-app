@@ -110,6 +110,7 @@ def detect_voice_triggers(
     cut_keywords: list[str] | None = None,
     continue_keywords: list[str] | None = None,
     clip_duration: float | None = None,
+    silence_ranges: list[tuple[float, float]] | None = None,
 ) -> list[VoiceTriggerPair]:
     """Scan a Whisper word-list for cut→continue trigger pairs.
 
@@ -123,6 +124,11 @@ def detect_voice_triggers(
         clip_duration: if no continue-marker follows a cut-marker,
             we extend the removal range to this duration (or the end of
             the last word if not given).
+        silence_ranges: optional list of (start, end) audio silence
+            ranges from silence detection. If supplied, cut/continue
+            boundaries snap to actual silence edges instead of trusting
+            Whisper's word.end / word.start (which regularly drift into
+            silence and cause perceptible pauses in the kept audio).
 
     Returns: list of VoiceTriggerPair. Empty list if no triggers found.
     """
@@ -154,21 +160,37 @@ def detect_voice_triggers(
             i += 1
             continue
 
-        # Cut boundary: end the kept side ~50ms after the previous
-        # spoken word so we don't drag a long breath/silence into the
-        # cut. But cap 100ms BEFORE "cleo" starts — if Whisper
-        # stretched prev_word.end past cleo's actual onset (common),
-        # we'd otherwise leak a "cle…" fragment. Clean-before-cleo
-        # beats preserving the previous word's trailing decay.
+        # Cut boundary — two strategies, silence snap preferred:
+        # 1) If audio-silence detection identifies a silence range that
+        #    abuts cleo, snap cut_start to end-of-speech-before-silence
+        #    (silence.start + tiny breath). This gives a tight, natural
+        #    flow because it ignores Whisper's stretched word.end.
+        # 2) Fallback: end kept side ~20ms after Whisper's prev word,
+        #    capped 100ms before cleo starts so a stretched prev_word.end
+        #    can't leak a "cle…" fragment into the kept audio.
         BREATH_TRIM = 0.02
         CUT_LEAD_CAP = 0.10
         cleo_cap = cut_phrase_start_t - CUT_LEAD_CAP
-        if i > 0:
-            prev_word_end = float(whisper_words[i - 1].get("end", cleo_cap))
-            cut_start = min(prev_word_end + BREATH_TRIM, cleo_cap)
-        else:
-            cut_start = cleo_cap
-        cut_start = max(0.0, cut_start)
+
+        # Strategy 1: silence snap
+        cut_start = None
+        if silence_ranges:
+            for (sil_start, sil_end) in silence_ranges:
+                # silence that ends within 500ms of cleo start (= gap
+                # before cleo). Snap to its start = last speech before
+                # cleo actually ended.
+                if sil_start < cut_phrase_start_t and sil_end + 0.5 >= cut_phrase_start_t:
+                    cut_start = max(0.0, sil_start + BREATH_TRIM)
+                    break
+
+        # Strategy 2: Whisper fallback
+        if cut_start is None:
+            if i > 0:
+                prev_word_end = float(whisper_words[i - 1].get("end", cleo_cap))
+                cut_start = min(prev_word_end + BREATH_TRIM, cleo_cap)
+            else:
+                cut_start = cleo_cap
+            cut_start = max(0.0, cut_start)
 
         # Search for continue-keyword after the cut-phrase
         j = cut_next_idx
@@ -202,14 +224,28 @@ def detect_voice_triggers(
                 whisper_words[cont_next_idx - 1].get("end", 0)
             ) + 1.0  # far in the future
 
-        # continue_end: resume the kept side ~50ms before the next
-        # spoken word so we don't drag a long silence/breath in after
-        # "go". Floor at go's reported end so we never leak "…o" if
-        # the next word sits very close. If Whisper stretched go past
-        # the next word's start, we accept clipping the next word's
-        # onset — clean-into-next-word beats preserving go's decay.
+        # continue_end — mirror of cut side, silence snap preferred:
+        # 1) Silence range that starts near go's reported end → snap
+        #    continue_end to silence.end - tiny lead. Kept side resumes
+        #    right at start-of-next-speech, no dragged silence.
+        # 2) Fallback: 20ms before Whisper's next word start; floored at
+        #    go's reported end so we never leak "…o".
         NEXT_LEAD = 0.02
-        continue_end = max(continue_end, next_word_start - NEXT_LEAD)
+        go_end = continue_end  # Whisper's reported end of "go"
+
+        snapped = None
+        if silence_ranges:
+            for (sil_start, sil_end) in silence_ranges:
+                # silence that starts within 500ms of go's end (= gap
+                # after go). Snap to its end = next speech begins.
+                if sil_end > go_end and sil_start - 0.5 <= go_end:
+                    snapped = max(0.0, sil_end - NEXT_LEAD)
+                    break
+
+        if snapped is not None:
+            continue_end = max(go_end, snapped)
+        else:
+            continue_end = max(continue_end, next_word_start - NEXT_LEAD)
 
         pairs.append(VoiceTriggerPair(
             cut_start=cut_start,
