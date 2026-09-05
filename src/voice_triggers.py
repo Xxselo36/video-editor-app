@@ -154,13 +154,15 @@ def detect_voice_triggers(
             i += 1
             continue
 
-        # Clean cut boundary: end of the word BEFORE the trigger phrase
-        # so the last spoken word stays intact, but breath/silence right
-        # before "cleo" gets removed for a hard, clean cut.
-        if i > 0:
-            cut_start = float(whisper_words[i - 1].get("end", cut_phrase_start_t))
-        else:
-            cut_start = cut_phrase_start_t
+        # Cut boundary: 100ms BEFORE the trigger phrase starts. We
+        # anchor to the trigger's own start time rather than
+        # prev_word.end because Whisper regularly stretches
+        # prev_word.end past the actual onset of "cleo", which leaks a
+        # "cle…" fragment into the kept audio. If prev_word's reported
+        # tail overlaps this cut point, we deliberately clip a few ms
+        # off it — clean-before-cleo beats preserving prev word decay.
+        CUT_LEAD_MARGIN = 0.10
+        cut_start = max(0.0, cut_phrase_start_t - CUT_LEAD_MARGIN)
 
         # Search for continue-keyword after the cut-phrase
         j = cut_next_idx
@@ -194,25 +196,10 @@ def detect_voice_triggers(
                 whisper_words[cont_next_idx - 1].get("end", 0)
             ) + 1.0  # far in the future
 
-        # Lead + tail buffers compensate for Whisper timestamp drift
-        # (word.start is often 100-200ms after actual audio onset).
-        # But cap at neighbouring words minus 50ms safety so the buffer
-        # never clips into the previous / next real content word.
-        LEAD_BUFFER = 0.20
+        # continue_end: shift a bit past "go" to catch its decay, but
+        # never INTO the next kept word.
         TAIL_BUFFER = 0.20
         SAFETY_MARGIN = 0.05
-
-        # cut_start: allow shifting earlier, but not past the previous
-        # kept word (its end time — the walk-back default is already
-        # this value; LEAD_BUFFER may push earlier into that word).
-        if i > 0:
-            prev_word_end = float(whisper_words[i - 1].get("end", cut_start))
-            cut_start_min = prev_word_end + SAFETY_MARGIN
-        else:
-            cut_start_min = 0.0
-        cut_start = max(cut_start_min, cut_start - LEAD_BUFFER)
-
-        # continue_end: allow shifting later, but not INTO the next word.
         continue_end_max = max(continue_end, next_word_start - SAFETY_MARGIN)
         continue_end = min(continue_end_max, continue_end + TAIL_BUFFER)
 
