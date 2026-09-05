@@ -532,14 +532,25 @@ def analyze_only(
         # Build bad-take removal ranges from flagged phrase ids.
         # These get added to cut_ranges so the user can see + undo them
         # alongside the rule-based cuts in the timeline.
+        # TEMP DISABLED (2026-09-05): testing whether bad-take removal
+        # is what makes end-of-video feel weird. LLM still runs for
+        # transcript cleanup (typos/canonicalization), just skips the
+        # apply step. Flip back to True to re-enable.
+        BAD_TAKE_REMOVAL_ENABLED = False
         bad_take_cut_ranges: list[tuple[float, float]] = []
-        for pid in llm_res.get("bad_takes", []) or []:
-            if 0 <= pid < len(subtitles):
-                s = subtitles[pid]
-                bs = float(s.get("original_start") or s.get("start") or 0)
-                be = float(s.get("original_end") or s.get("end") or bs)
-                if be > bs:
-                    bad_take_cut_ranges.append((bs, be))
+        if BAD_TAKE_REMOVAL_ENABLED:
+            for pid in llm_res.get("bad_takes", []) or []:
+                if 0 <= pid < len(subtitles):
+                    s = subtitles[pid]
+                    bs = float(s.get("original_start") or s.get("start") or 0)
+                    be = float(s.get("original_end") or s.get("end") or bs)
+                    if be > bs:
+                        bad_take_cut_ranges.append((bs, be))
+        else:
+            skipped = llm_res.get("bad_takes", []) or []
+            if skipped:
+                print(f"[llm] bad-take removal DISABLED — LLM flagged "
+                      f"phrase ids {skipped} but not applying", flush=True)
         # Apply bad-take cuts to segments + drop flagged subtitles.
         if bad_take_cut_ranges:
             print(f"[llm] {len(bad_take_cut_ranges)} bad-take range(s) "
