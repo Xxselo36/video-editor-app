@@ -1984,7 +1984,8 @@ function ReviewScreen({
               ref={(el) => {
                 phraseRefs.current[i] = el;
               }}
-              className={`relative rounded-xl p-3 transition-all ${extraClass}`}
+              onClick={() => seekToPhrase(p)}
+              className={`relative cursor-pointer rounded-xl p-3 transition-all ${extraClass}`}
             >
               {isActive && (
                 <span
@@ -2010,7 +2011,10 @@ function ReviewScreen({
                     </span>
                   )}
                   <button
-                    onClick={() => remove(i)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      remove(i);
+                    }}
                     className="text-[var(--text-faint)] hover:text-[var(--danger)]"
                     aria-label="delete sentence"
                   >
