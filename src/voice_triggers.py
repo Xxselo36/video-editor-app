@@ -154,15 +154,21 @@ def detect_voice_triggers(
             i += 1
             continue
 
-        # Cut boundary: 100ms BEFORE the trigger phrase starts. We
-        # anchor to the trigger's own start time rather than
-        # prev_word.end because Whisper regularly stretches
-        # prev_word.end past the actual onset of "cleo", which leaks a
-        # "cle…" fragment into the kept audio. If prev_word's reported
-        # tail overlaps this cut point, we deliberately clip a few ms
-        # off it — clean-before-cleo beats preserving prev word decay.
-        CUT_LEAD_MARGIN = 0.10
-        cut_start = max(0.0, cut_phrase_start_t - CUT_LEAD_MARGIN)
+        # Cut boundary: end the kept side ~50ms after the previous
+        # spoken word so we don't drag a long breath/silence into the
+        # cut. But cap 100ms BEFORE "cleo" starts — if Whisper
+        # stretched prev_word.end past cleo's actual onset (common),
+        # we'd otherwise leak a "cle…" fragment. Clean-before-cleo
+        # beats preserving the previous word's trailing decay.
+        BREATH_TRIM = 0.05
+        CUT_LEAD_CAP = 0.10
+        cleo_cap = cut_phrase_start_t - CUT_LEAD_CAP
+        if i > 0:
+            prev_word_end = float(whisper_words[i - 1].get("end", cleo_cap))
+            cut_start = min(prev_word_end + BREATH_TRIM, cleo_cap)
+        else:
+            cut_start = cleo_cap
+        cut_start = max(0.0, cut_start)
 
         # Search for continue-keyword after the cut-phrase
         j = cut_next_idx
@@ -196,12 +202,14 @@ def detect_voice_triggers(
                 whisper_words[cont_next_idx - 1].get("end", 0)
             ) + 1.0  # far in the future
 
-        # continue_end: shift a bit past "go" to catch its decay, but
-        # never INTO the next kept word.
-        TAIL_BUFFER = 0.20
-        SAFETY_MARGIN = 0.05
-        continue_end_max = max(continue_end, next_word_start - SAFETY_MARGIN)
-        continue_end = min(continue_end_max, continue_end + TAIL_BUFFER)
+        # continue_end: resume the kept side ~50ms before the next
+        # spoken word so we don't drag a long silence/breath in after
+        # "go". Floor at go's reported end so we never leak "…o" if
+        # the next word sits very close. If Whisper stretched go past
+        # the next word's start, we accept clipping the next word's
+        # onset — clean-into-next-word beats preserving go's decay.
+        NEXT_LEAD = 0.05
+        continue_end = max(continue_end, next_word_start - NEXT_LEAD)
 
         pairs.append(VoiceTriggerPair(
             cut_start=cut_start,
