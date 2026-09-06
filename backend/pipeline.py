@@ -508,13 +508,11 @@ def analyze_only(
     print(f"[llm] cleanup starting — API key present: {has_key}, "
           f"{len(subtitles)} subtitles to process", flush=True)
     try:
-        from backend.llm import (
-            cleanup_transcript,
-            find_duplicate_bad_takes,
-        )
-        # Build phrase list from RAW subtitles (before cleanup rewrites
-        # text). Duplicate detection runs on raw text; cleanup is text-
-        # only and doesn't gate cuts.
+        from backend.llm import cleanup_transcript
+        # Text cleanup only — typos, brand names, filler vocalisations
+        # in the visible transcript. Does NOT decide any cuts. Failed
+        # takes are handled by voice triggers ("Cleo cut/go"), which
+        # the user controls explicitly during recording.
         llm_input = [
             {
                 "id": i,
@@ -524,9 +522,6 @@ def analyze_only(
             }
             for i, s in enumerate(subtitles)
         ]
-
-        # Text cleanup (Haiku): typos, brand names, filler vocalisations.
-        # Does NOT decide any cuts — that's the duplicate detector below.
         cleaned = cleanup_transcript(llm_input, language=result.language)
         print(f"[llm] cleanup — {len(cleaned)} phrase(s) rewritten",
               flush=True)
@@ -534,31 +529,6 @@ def analyze_only(
             c = cleaned.get(i)
             if c:
                 s["text"] = c
-
-        # Deterministic near-duplicate detection: cuts only when a
-        # phrase is near-identical to a later one and spoken within 3s.
-        # No LLM, no judgment — pure math. Zero false positives, at the
-        # cost of missing subtle restarts (those need voice triggers).
-        duplicates = find_duplicate_bad_takes(llm_input)
-        print(f"[dup] {len(duplicates)} near-duplicate pair(s): "
-              f"{[(a, b, f'{s:.0%}') for a, b, s in duplicates]}",
-              flush=True)
-
-        drop_ids = {a_id for (a_id, _b, _s) in duplicates}
-        bad_take_cut_ranges: list[tuple[float, float]] = []
-        for pid in drop_ids:
-            if 0 <= pid < len(subtitles):
-                s = subtitles[pid]
-                bs = float(s.get("original_start") or s.get("start") or 0)
-                be = float(s.get("original_end") or s.get("end") or bs)
-                if be > bs:
-                    bad_take_cut_ranges.append((bs, be))
-        if bad_take_cut_ranges:
-            print(f"[dup] applying {len(bad_take_cut_ranges)} "
-                  f"duplicate cut range(s): {bad_take_cut_ranges}",
-                  flush=True)
-            segments = _apply_extra_cuts(segments, bad_take_cut_ranges)
-            subtitles = [s for i, s in enumerate(subtitles) if i not in drop_ids]
     except Exception as e:
         import traceback
         print(f"[llm] cleanup pass failed (soft): {e}\n"
