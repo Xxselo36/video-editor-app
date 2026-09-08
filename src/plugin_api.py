@@ -336,6 +336,23 @@ def analyze_video(
         except Exception as e:
             print(f"[voice-triggers] error: {e}", flush=True)
 
+    # Final consolidation — after ALL cut passes (silence, filler,
+    # stutter, smart_cut, voice_triggers), any segment shorter than
+    # MIN_FINAL_SEGMENT is a fragment: an orphan word/syllable left
+    # between two aggressive cuts. Keeping them makes the flow feel
+    # choppy (user report). Drop them.
+    MIN_FINAL_SEGMENT = 0.4
+    if segments:
+        before_n = len(segments)
+        before_t = sum(e - s for s, e in segments)
+        segments = [(s, e) for (s, e) in segments if (e - s) >= MIN_FINAL_SEGMENT]
+        dropped = before_n - len(segments)
+        if dropped:
+            after_t = sum(e - s for s, e in segments)
+            print(f"[consolidate] dropped {dropped} fragment(s) "
+                  f"<{MIN_FINAL_SEGMENT}s (removed {before_t - after_t:.2f}s)",
+                  flush=True)
+
     # Map subtitles to new timeline (after cuts)
     current_step += 1
     if progress_callback:
