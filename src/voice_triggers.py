@@ -306,6 +306,15 @@ def extend_pairs_for_pre_restart(
             updated.append(p)
             continue
 
+        pre_last4 = [_normalize(w.get("word", "") or "").strip()
+                     for w in pre[-4:]]
+        post_first4 = [_normalize(w.get("word", "") or "").strip()
+                       for w in post[:4]]
+        print(f"[voice-triggers] pre-restart check @cut_start="
+              f"{p.cut_start:.2f}s → continue_end={p.continue_end:.2f}s | "
+              f"pre_tail={pre_last4} post_head={post_first4}",
+              flush=True)
+
         new_cut_start = p.cut_start
         for n in range(min(max_ngram_size, len(pre), len(post)),
                        min_ngram_size - 1, -1):
