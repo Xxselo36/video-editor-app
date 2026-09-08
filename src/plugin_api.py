@@ -240,6 +240,30 @@ def analyze_video(
                   f"(removed {total_before - total_after:.1f}s)",
                   flush=True)
 
+    # Mumble cleanup — phrases where Whisper's word-level confidence is
+    # so low it's essentially guessing at the audio. Deterministic
+    # threshold, no LLM. Won't catch confident mis-transcriptions of
+    # gibberish (no signal for that in text), but reliably drops
+    # blurry / unintelligible passages.
+    if remove_fillers and analyzer._transcription:
+        from src.mumble_detection import find_mumble_cuts
+        mumble_data = find_mumble_cuts(analyzer._transcription)
+        if mumble_data:
+            from src.filler_detection import FillerDetector
+            detector = FillerDetector()
+            mumble_ranges = [(s, e) for (s, e, _c, _t) in mumble_data]
+            segments_before = len(segments)
+            total_before = sum(e - s for s, e in segments)
+            segments = detector.filter_segments(segments, mumble_ranges)
+            total_after = sum(e - s for s, e in segments)
+            for (s, e, c, t) in mumble_data:
+                print(f"[mumble] cut {s:.2f}-{e:.2f}s "
+                      f"(avg conf {c:.2f}): {t!r}", flush=True)
+            print(f"[mumble] segments {segments_before}→{len(segments)}, "
+                  f"time {total_before:.1f}s→{total_after:.1f}s "
+                  f"(removed {total_before - total_after:.1f}s)",
+                  flush=True)
+
     # Get video duration
     from moviepy.editor import VideoFileClip
     clip = VideoFileClip(video_path)
