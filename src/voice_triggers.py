@@ -259,6 +259,80 @@ def detect_voice_triggers(
     return pairs
 
 
+def extend_pairs_for_pre_restart(
+    pairs: list[VoiceTriggerPair],
+    whisper_words: list[dict],
+    max_ngram_size: int = 4,
+    min_ngram_size: int = 2,
+    lookback_seconds: float = 4.0,
+    lookforward_seconds: float = 4.0,
+) -> list[VoiceTriggerPair]:
+    """Extend each trigger cut backward if the same phrase repeats
+    across the cut.
+
+    Common pattern: user says a phrase, realizes the take is bad,
+    calls "Cleo cut", then after "Cleo go" says the same phrase
+    again and continues cleanly. Example:
+
+        "...das Testvideo. Cleo cut. Ich weiß nicht. Cleo go. Das
+         Testvideo wird ganz gut."
+
+    The base voice-trigger cut removes "Cleo cut ... Cleo go". This
+    post-pass ALSO removes the pre-cut "das Testvideo" because the
+    post-cut side starts with the same phrase — a 100% signal that
+    the pre-cut words were the abandoned attempt's start.
+
+    Greedy on N — tries longer matches first so a 4-word overlap
+    wins over a 2-word one.
+    """
+    if not pairs or not whisper_words:
+        return list(pairs)
+
+    updated: list[VoiceTriggerPair] = []
+    for p in pairs:
+        # Whisper words just BEFORE cut_start (last few, within lookback)
+        pre = [
+            w for w in whisper_words
+            if w.get("end", 0) <= p.cut_start
+            and w.get("end", 0) >= p.cut_start - lookback_seconds
+        ]
+        # Whisper words just AFTER continue_end (first few, within lookforward)
+        post = [
+            w for w in whisper_words
+            if w.get("start", 0) >= p.continue_end
+            and w.get("start", 0) <= p.continue_end + lookforward_seconds
+        ]
+        if not pre or not post:
+            updated.append(p)
+            continue
+
+        new_cut_start = p.cut_start
+        for n in range(min(max_ngram_size, len(pre), len(post)),
+                       min_ngram_size - 1, -1):
+            pre_tail = pre[-n:]
+            post_head = post[:n]
+            pre_tokens = [_normalize(w.get("word", "") or "").strip()
+                          for w in pre_tail]
+            post_tokens = [_normalize(w.get("word", "") or "").strip()
+                           for w in post_head]
+            if pre_tokens == post_tokens and all(pre_tokens):
+                # Extend cut_start backward to swallow the pre-tail.
+                new_cut_start = float(pre_tail[0].get("start", p.cut_start))
+                break
+
+        if new_cut_start < p.cut_start:
+            updated.append(VoiceTriggerPair(
+                cut_start=new_cut_start,
+                continue_end=p.continue_end,
+                cut_word=p.cut_word,
+                continue_word=p.continue_word,
+            ))
+        else:
+            updated.append(p)
+
+    return updated
+
+
 def apply_voice_triggers_to_segments(
     segments: list[tuple[float, float]],
     pairs: list[VoiceTriggerPair],

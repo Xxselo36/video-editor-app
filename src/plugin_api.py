@@ -300,6 +300,7 @@ def analyze_video(
             from src.voice_triggers import (
                 collect_whisper_words,
                 detect_voice_triggers,
+                extend_pairs_for_pre_restart,
                 apply_voice_triggers_to_segments,
                 apply_voice_triggers_to_subtitles,
             )
@@ -321,6 +322,19 @@ def analyze_video(
                 clip_duration=duration,
                 silence_ranges=silence_ranges,
             )
+            # If user said the same phrase before "Cleo cut" and after
+            # "Cleo go", the pre-cut occurrence is guaranteed to be a
+            # restart — extend the cut backward to swallow it too.
+            extended = extend_pairs_for_pre_restart(
+                detected_trigger_pairs, ww,
+            )
+            for old, new in zip(detected_trigger_pairs, extended):
+                if new.cut_start < old.cut_start:
+                    print(f"[voice-triggers] extended cut backward "
+                          f"{old.cut_start:.2f}s → {new.cut_start:.2f}s "
+                          f"(pre-restart phrase matches post-continue)",
+                          flush=True)
+            detected_trigger_pairs = extended
             # Dump whisper words so we can see exactly what was heard
             print(f"[voice-triggers] whisper heard "
                   f"({len(ww)} words):", flush=True)
