@@ -33,21 +33,26 @@ class FillerDetector:
 
     FILLER_WORDS: dict[str, set[str]] = {
         "en": {
-            "um", "uh", "uhm", "uhh", "hmm", "hm", "mm", "mhm",
-            "ah", "oh", "er", "like", "you know", "basically",
-            "literally", "actually", "right", "kind of", "sort of",
-            "i mean", "so yeah", "you see", "well",
+            # Single-word vocalisations
+            "um", "uh", "uhm", "uhh", "hmm", "hm", "mm", "mmm", "mhm", "mhmm",
+            "ah", "oh", "er", "erm",
+            # Common English filler markers (single-word)
+            "like", "basically", "literally", "actually",
+            # Multi-word combos — almost always fillers together, low
+            # false-positive risk vs single-word "well" / "right".
+            "um yeah", "so um", "and um", "like um", "you know",
+            "i mean", "kind of", "sort of", "so yeah", "you see",
+            "well um", "um well",
         },
         "de": {
             # Whisper transcribes "äh"-sounds in many spellings — cover them.
-            "ähm", "äh", "ähhh", "ähhm", "öh", "öhm", "ehm", "eh",
-            "hm", "hmm", "mhh", "mhm", "mmh",
-            # Meta-fillers REMOVED — words like "halt", "also", "quasi",
-            # "genau", "eben", "irgendwie" are legitimate sentence
-            # content in ~50% of contexts (e.g. "halt deine Fresse",
-            # "also nochmal", "eben genau das"). Rule-based removal
-            # created too many false positives. LLM cleanup handles
-            # them context-aware.
+            "ähm", "äh", "ähhh", "ähhm", "ahm", "öh", "öhm", "ehm", "eh",
+            "hm", "hmm", "hmmm", "mhh", "mhm", "mmh", "mm", "mmm",
+            # Multi-word filler combos — almost always fillers as a
+            # unit (single-word "also/halt/quasi" are ambiguous and
+            # stay out, but combos with a real vocalisation are safe).
+            "ähm ja", "ähm also", "und ähm", "so ähm", "also ähm",
+            "ja ähm", "ähm und", "ähm dann", "ähm quasi", "ähm halt",
         },
     }
 
@@ -55,9 +60,10 @@ class FillerDetector:
     # These are pure vocalisations that have no semantic meaning — if
     # transcribed at all, they're almost always real fillers.
     ALWAYS_FILLER: dict[str, set[str]] = {
-        "en": {"um", "uh", "uhm", "uhh", "hmm", "hm", "mm", "mhm", "er"},
-        "de": {"ähm", "äh", "ähhh", "ähhm", "öh", "öhm", "ehm", "eh",
-               "hm", "hmm", "mhh", "mhm", "mmh"},
+        "en": {"um", "uh", "uhm", "uhh", "hmm", "hm", "mm", "mmm",
+               "mhm", "mhmm", "er", "erm"},
+        "de": {"ähm", "äh", "ähhh", "ähhm", "ahm", "öh", "öhm", "ehm", "eh",
+               "hm", "hmm", "hmmm", "mhh", "mhm", "mmh", "mm", "mmm"},
     }
 
     SENSITIVITY_THRESHOLDS: dict[str, float] = {
