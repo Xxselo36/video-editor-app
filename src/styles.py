@@ -62,7 +62,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": True,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": True,
 
         # Emojis
@@ -131,7 +131,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": True,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": True,
 
         # Emojis
@@ -203,7 +203,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": True,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": True,
 
         # Emojis
@@ -274,7 +274,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": True,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": True,
 
         # Emojis
@@ -346,7 +346,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": True,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": True,
 
         # Emojis
@@ -419,7 +419,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": False,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": False,
 
         # Emojis
@@ -499,7 +499,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": True,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": True,
 
         # Emojis
@@ -571,7 +571,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": True,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": True,
 
         # Emojis
@@ -654,7 +654,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": True,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": True,
 
         # Emojis
@@ -728,7 +728,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": True,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": True,
 
         # Emojis
@@ -799,7 +799,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": True,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": True,
 
         # Emojis
@@ -870,7 +870,7 @@ STYLES = {
 
         # Filler & Smart Cut
         "remove_fillers": False,
-        "filler_sensitivity": "high",
+        "filler_sensitivity": "medium",
         "smart_cut": False,
 
         # Emojis

@@ -218,6 +218,28 @@ def analyze_video(
                   f"(removed {total_before - total_after:.1f}s of filler)",
                   flush=True)
 
+    # Stutter cleanup — repeated N-gram sequences ("es ist ein, es ist
+    # ein sehr schönes Thema") that filler removal doesn't catch
+    # because the repeated words aren't classical fillers. Runs on the
+    # Whisper transcription (unchanged by upstream cuts), returns cut
+    # ranges that we apply to the current speech segments.
+    if remove_fillers and analyzer._transcription:
+        from src.stutter_detection import find_stutter_cuts
+        stutter_ranges = find_stutter_cuts(analyzer._transcription)
+        if stutter_ranges:
+            from src.filler_detection import FillerDetector
+            detector = FillerDetector()
+            segments_before = len(segments)
+            total_before = sum(e - s for s, e in segments)
+            segments = detector.filter_segments(segments, stutter_ranges)
+            total_after = sum(e - s for s, e in segments)
+            print(f"[stutter] {len(stutter_ranges)} n-gram repeat(s) "
+                  f"cut: {stutter_ranges}", flush=True)
+            print(f"[stutter] segments {segments_before}→{len(segments)}, "
+                  f"time {total_before:.1f}s→{total_after:.1f}s "
+                  f"(removed {total_before - total_after:.1f}s)",
+                  flush=True)
+
     # Get video duration
     from moviepy.editor import VideoFileClip
     clip = VideoFileClip(video_path)
