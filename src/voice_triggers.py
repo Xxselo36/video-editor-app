@@ -259,44 +259,75 @@ def detect_voice_triggers(
     return pairs
 
 
+# Stopwords + fillers dropped from content-word extraction. Keeps only
+# semantically meaningful tokens so pre/post overlap catches topic
+# words like 'Testvideo' but not function words like 'das' or 'und'.
+_PRE_RESTART_STOPWORDS = frozenset([
+    # DE function words
+    "der", "die", "das", "dass", "den", "dem", "des",
+    "ein", "eine", "einen", "einem", "einer", "eines",
+    "und", "oder", "aber", "denn", "weil", "ob",
+    "ist", "sind", "war", "waren", "bin", "bist",
+    "hat", "haben", "hatte", "hatten",
+    "wird", "werden", "würde", "würden",
+    "kann", "können", "muss", "müssen", "soll", "sollen",
+    "ich", "du", "er", "sie", "es", "wir", "ihr",
+    "mich", "dich", "sich", "uns", "euch", "mir", "dir",
+    "in", "an", "auf", "für", "mit", "von", "bei", "zu",
+    "als", "wie", "so", "auch", "noch", "nur", "mal",
+    "ja", "nein", "doch", "nicht",
+    # EN
+    "a", "an", "the", "and", "or", "but", "is", "are", "was",
+    "i", "you", "he", "she", "it", "we", "they",
+    "in", "on", "at", "for", "with", "to", "of",
+    # Fillers
+    "äh", "ähm", "öh", "hm", "hmm", "mhm", "eh", "um", "uh",
+])
+
+
+def _content_norm(word: str) -> str | None:
+    """Return normalized content form, or None if stopword/short."""
+    n = _normalize(word).strip()
+    if len(n) <= 1 or n in _PRE_RESTART_STOPWORDS:
+        return None
+    return n
+
+
 def extend_pairs_for_pre_restart(
     pairs: list[VoiceTriggerPair],
     whisper_words: list[dict],
-    max_ngram_size: int = 4,
-    min_ngram_size: int = 2,
-    lookback_seconds: float = 4.0,
-    lookforward_seconds: float = 4.0,
+    lookback_seconds: float = 2.5,
+    lookforward_seconds: float = 2.5,
 ) -> list[VoiceTriggerPair]:
-    """Extend each trigger cut backward if the same phrase repeats
+    """Extend each trigger cut backward when a content word repeats
     across the cut.
 
-    Common pattern: user says a phrase, realizes the take is bad,
-    calls "Cleo cut", then after "Cleo go" says the same phrase
-    again and continues cleanly. Example:
+    Common pattern: user says a phrase, realizes it's bad, calls
+    "Cleo cut", then after "Cleo go" says a similar phrase and
+    continues cleanly. Example:
 
-        "...das Testvideo. Cleo cut. Ich weiß nicht. Cleo go. Das
-         Testvideo wird ganz gut."
+        "...gutes Testvideo und das. Cleo cut. Ich weiß nicht. Cleo
+         go. Testvideo wird ganz gut."
 
-    The base voice-trigger cut removes "Cleo cut ... Cleo go". This
-    post-pass ALSO removes the pre-cut "das Testvideo" because the
-    post-cut side starts with the same phrase — a 100% signal that
-    the pre-cut words were the abandoned attempt's start.
+    "testvideo" appears BOTH just before the cut AND just after the
+    continue — 100% signal that the pre-cut mention was the abandoned
+    restart. Extend cut_start backward to swallow the first mention.
 
-    Greedy on N — tries longer matches first so a 4-word overlap
-    wins over a 2-word one.
+    Content-word overlap only (not exact N-gram): stopwords like
+    "das", "und" ignored so the match works even when the user
+    rephrases slightly. Lookback capped at 2.5s so we don't cut
+    unrelated earlier mentions of topic words.
     """
     if not pairs or not whisper_words:
         return list(pairs)
 
     updated: list[VoiceTriggerPair] = []
     for p in pairs:
-        # Whisper words just BEFORE cut_start (last few, within lookback)
         pre = [
             w for w in whisper_words
             if w.get("end", 0) <= p.cut_start
             and w.get("end", 0) >= p.cut_start - lookback_seconds
         ]
-        # Whisper words just AFTER continue_end (first few, within lookforward)
         post = [
             w for w in whisper_words
             if w.get("start", 0) >= p.continue_end
@@ -306,27 +337,34 @@ def extend_pairs_for_pre_restart(
             updated.append(p)
             continue
 
-        pre_last4 = [_normalize(w.get("word", "") or "").strip()
-                     for w in pre[-4:]]
-        post_first4 = [_normalize(w.get("word", "") or "").strip()
-                       for w in post[:4]]
+        post_content: set[str] = set()
+        for w in post:
+            n = _content_norm(w.get("word", "") or "")
+            if n:
+                post_content.add(n)
+
+        pre_last = [_normalize(w.get("word", "") or "").strip()
+                    for w in pre[-6:]]
+        post_first = [_normalize(w.get("word", "") or "").strip()
+                      for w in post[:6]]
         print(f"[voice-triggers] pre-restart check @cut_start="
               f"{p.cut_start:.2f}s → continue_end={p.continue_end:.2f}s | "
-              f"pre_tail={pre_last4} post_head={post_first4}",
+              f"pre={pre_last} post={post_first} "
+              f"post_content={sorted(post_content)}",
               flush=True)
 
+        if not post_content:
+            updated.append(p)
+            continue
+
+        # Find EARLIEST pre word (by start time) whose content form
+        # appears in post_content. That's the beginning of the
+        # abandoned restart intro.
         new_cut_start = p.cut_start
-        for n in range(min(max_ngram_size, len(pre), len(post)),
-                       min_ngram_size - 1, -1):
-            pre_tail = pre[-n:]
-            post_head = post[:n]
-            pre_tokens = [_normalize(w.get("word", "") or "").strip()
-                          for w in pre_tail]
-            post_tokens = [_normalize(w.get("word", "") or "").strip()
-                           for w in post_head]
-            if pre_tokens == post_tokens and all(pre_tokens):
-                # Extend cut_start backward to swallow the pre-tail.
-                new_cut_start = float(pre_tail[0].get("start", p.cut_start))
+        for w in pre:  # pre is chronological
+            n = _content_norm(w.get("word", "") or "")
+            if n and n in post_content:
+                new_cut_start = float(w.get("start", p.cut_start))
                 break
 
         if new_cut_start < p.cut_start:
