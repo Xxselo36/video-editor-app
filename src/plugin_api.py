@@ -386,30 +386,41 @@ def analyze_video(
         EDGE_GAP_THRESHOLD = 0.5
         EDGE_KEEP_BUFFER = 0.15
         _tx_words: list[tuple[float, float]] = []
+        _tx_words_full: list[dict] = []
         for _seg in analyzer._transcription.get("segments") or []:
             for _w in _seg.get("words") or []:
                 if _w.get("start") is None or _w.get("end") is None:
                     continue
                 _tx_words.append((float(_w["start"]), float(_w["end"])))
+                _tx_words_full.append({
+                    "start": float(_w["start"]),
+                    "end": float(_w["end"]),
+                    "prob": float(_w.get("probability") or 1.0),
+                    "text": (_w.get("word", "") or "").strip(),
+                })
         trimmed: list[tuple[float, float]] = []
         edges_trimmed = 0
-        for (s, e) in segments:
-            words_in = [(ws, we) for (ws, we) in _tx_words
-                        if ws >= s - 0.1 and we <= e + 0.1]
+        for idx, (s, e) in enumerate(segments):
+            words_in = [w for w in _tx_words_full
+                        if w["start"] >= s - 0.1 and w["end"] <= e + 0.1]
             if not words_in:
-                # No transcribed words at all — likely music/effects.
-                # Keep as-is; user might want the audio.
                 trimmed.append((s, e))
                 continue
-            first_ws = min(ws for (ws, _) in words_in)
-            last_we = max(we for (_, we) in words_in)
+            first_w = min(words_in, key=lambda w: w["start"])
+            last_w = max(words_in, key=lambda w: w["end"])
+            leading_gap = first_w["start"] - s
+            trailing_gap = e - last_w["end"]
+            print(f"[edge-trim] seg{idx}: {s:.2f}→{e:.2f}s | "
+                  f"first_word={first_w['text']!r}@{first_w['start']:.2f}s "
+                  f"conf={first_w['prob']:.2f} lead_gap={leading_gap:.2f}s | "
+                  f"trail_gap={trailing_gap:.2f}s", flush=True)
             new_s = s
             new_e = e
-            if first_ws - s > EDGE_GAP_THRESHOLD:
-                new_s = max(s, first_ws - EDGE_KEEP_BUFFER)
+            if leading_gap > EDGE_GAP_THRESHOLD:
+                new_s = max(s, first_w["start"] - EDGE_KEEP_BUFFER)
                 edges_trimmed += 1
-            if e - last_we > EDGE_GAP_THRESHOLD:
-                new_e = min(e, last_we + EDGE_KEEP_BUFFER)
+            if trailing_gap > EDGE_GAP_THRESHOLD:
+                new_e = min(e, last_w["end"] + EDGE_KEEP_BUFFER)
                 edges_trimmed += 1
             if new_e > new_s:
                 trimmed.append((new_s, new_e))
