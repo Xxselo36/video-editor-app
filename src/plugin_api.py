@@ -300,7 +300,6 @@ def analyze_video(
             from src.voice_triggers import (
                 collect_whisper_words,
                 detect_voice_triggers,
-                extend_pairs_for_pre_restart,
                 apply_voice_triggers_to_segments,
                 apply_voice_triggers_to_subtitles,
             )
@@ -322,19 +321,6 @@ def analyze_video(
                 clip_duration=duration,
                 silence_ranges=silence_ranges,
             )
-            # If user said the same phrase before "Cleo cut" and after
-            # "Cleo go", the pre-cut occurrence is guaranteed to be a
-            # restart — extend the cut backward to swallow it too.
-            extended = extend_pairs_for_pre_restart(
-                detected_trigger_pairs, ww,
-            )
-            for old, new in zip(detected_trigger_pairs, extended):
-                if new.cut_start < old.cut_start:
-                    print(f"[voice-triggers] extended cut backward "
-                          f"{old.cut_start:.2f}s → {new.cut_start:.2f}s "
-                          f"(pre-restart phrase matches post-continue)",
-                          flush=True)
-            detected_trigger_pairs = extended
             # Dump whisper words so we can see exactly what was heard
             print(f"[voice-triggers] whisper heard "
                   f"({len(ww)} words):", flush=True)
@@ -373,84 +359,6 @@ def analyze_video(
                 )
         except Exception as e:
             print(f"[voice-triggers] error: {e}", flush=True)
-
-    # Trim unrecognized-audio edges. Silence-detection sometimes
-    # flags real audible energy at a segment's start/end that Whisper
-    # never produced a word for (garbled mumble / throat clear / half-
-    # word at video start). Nothing else catches it: filler-detector
-    # needs a word, mumble-detector needs a word-with-low-confidence.
-    # If a segment has a >EDGE_GAP_THRESHOLD leading or trailing
-    # window with no Whisper words in it, trim the segment to start
-    # (or end) right at the first (or last) real word plus tiny buffer.
-    if segments and analyzer._transcription:
-        EDGE_GAP_THRESHOLD = 0.5
-        EDGE_KEEP_BUFFER = 0.15
-        # Video-intro edge case: the very first segment often has a
-        # short unclear syllable / throat clear before the first real
-        # word. Cut aggressively here (any gap >0.2s), because a video
-        # should start with real content, not with mumble.
-        INTRO_GAP_THRESHOLD = 0.2
-        INTRO_KEEP_BUFFER = 0.05
-        _tx_words: list[tuple[float, float]] = []
-        _tx_words_full: list[dict] = []
-        for _seg in analyzer._transcription.get("segments") or []:
-            for _w in _seg.get("words") or []:
-                if _w.get("start") is None or _w.get("end") is None:
-                    continue
-                _tx_words.append((float(_w["start"]), float(_w["end"])))
-                _tx_words_full.append({
-                    "start": float(_w["start"]),
-                    "end": float(_w["end"]),
-                    "prob": float(_w.get("probability") or 1.0),
-                    "text": (_w.get("word", "") or "").strip(),
-                })
-        trimmed: list[tuple[float, float]] = []
-        edges_trimmed = 0
-        for idx, (s, e) in enumerate(segments):
-            words_in = [w for w in _tx_words_full
-                        if w["start"] >= s - 0.1 and w["end"] <= e + 0.1]
-            if not words_in:
-                trimmed.append((s, e))
-                continue
-            first_w = min(words_in, key=lambda w: w["start"])
-            last_w = max(words_in, key=lambda w: w["end"])
-            leading_gap = first_w["start"] - s
-            trailing_gap = e - last_w["end"]
-            print(f"[edge-trim] seg{idx}: {s:.2f}→{e:.2f}s | "
-                  f"first_word={first_w['text']!r}@{first_w['start']:.2f}s "
-                  f"conf={first_w['prob']:.2f} lead_gap={leading_gap:.2f}s | "
-                  f"trail_gap={trailing_gap:.2f}s", flush=True)
-            new_s = s
-            new_e = e
-            is_first_segment = (idx == 0)
-            lead_threshold = INTRO_GAP_THRESHOLD if is_first_segment else EDGE_GAP_THRESHOLD
-            lead_buffer = INTRO_KEEP_BUFFER if is_first_segment else EDGE_KEEP_BUFFER
-            if leading_gap > lead_threshold:
-                new_s = max(s, first_w["start"] - lead_buffer)
-                edges_trimmed += 1
-            # Video-onset cleanup: seg0 starts at exactly 0.00 means
-            # the audio began without any natural silence padding at
-            # the very start. Whisper often snaps word.start to 0.00
-            # even when there's a brief unclear onset (lip noise,
-            # breath, half-word) before the actual word. We can't see
-            # that in Whisper's word list, so we cut ~150ms hard.
-            ONSET_TRIM = 0.25
-            if is_first_segment and abs(s) < 0.001 and (new_s - s) < ONSET_TRIM:
-                new_s = min(new_s + (ONSET_TRIM - (new_s - s)), new_e - 0.1)
-                if edges_trimmed == 0 or (new_s > s):
-                    edges_trimmed += 1
-            if trailing_gap > EDGE_GAP_THRESHOLD:
-                new_e = min(e, last_w["end"] + EDGE_KEEP_BUFFER)
-                edges_trimmed += 1
-            if new_e > new_s:
-                trimmed.append((new_s, new_e))
-        if edges_trimmed:
-            before_t = sum(e - s for s, e in segments)
-            after_t = sum(e - s for s, e in trimmed)
-            print(f"[edge-trim] trimmed {edges_trimmed} unrecognized-audio "
-                  f"edge(s) (removed {before_t - after_t:.2f}s)",
-                  flush=True)
-            segments = trimmed
 
     # Final consolidation — after ALL cut passes (silence, filler,
     # stutter, smart_cut, voice_triggers), any segment shorter than
