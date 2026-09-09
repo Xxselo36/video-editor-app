@@ -22,18 +22,27 @@ from __future__ import annotations
 import re
 
 
-DEFAULT_START_KEYWORDS = [
-    "cleo start", "clio start", "cleyo start", "klio start", "kleo start",
-]
-DEFAULT_RESTART_KEYWORDS = [
-    "cleo restart", "clio restart", "cleyo restart", "klio restart", "kleo restart",
-]
-DEFAULT_KEEP_KEYWORDS = [
-    "cleo keep", "clio keep", "cleyo keep", "klio keep", "kleo keep",
-]
-DEFAULT_FINISH_KEYWORDS = [
-    "cleo finish", "clio finish", "cleyo finish", "klio finish", "kleo finish",
-]
+# Wake-word variants — Whisper regularly mishears "Cleo" as "Clio"
+# (Renault-car), "Cleyo", "Klio", "Kleo". Plus common mishearings of
+# the English command word in German audio (e.g. "restart" → "is what").
+_CLEO_VARIANTS = ["cleo", "clio", "cleyo", "klio", "kleo"]
+
+
+def _combos(command_variants: list[str]) -> list[str]:
+    """Build 'cleo <cmd>' for every Cleo-variant × command-variant."""
+    return [f"{c} {cmd}" for c in _CLEO_VARIANTS for cmd in command_variants]
+
+
+DEFAULT_START_KEYWORDS = _combos(["start", "starts", "starte"])
+DEFAULT_RESTART_KEYWORDS = _combos([
+    "restart", "restarts", "restarte",
+    "is what",  # Whisper mishears 'restart' as 'is what' in mixed audio
+    "rest art", "rest hart", "restard",
+])
+DEFAULT_KEEP_KEYWORDS = _combos(["keep", "keeps", "keep it", "kip", "kiep"])
+DEFAULT_FINISH_KEYWORDS = _combos([
+    "finish", "finished", "finnisch", "finito",
+])
 
 
 def _normalize(text: str) -> str:
