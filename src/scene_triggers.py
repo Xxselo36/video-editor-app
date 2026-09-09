@@ -36,6 +36,10 @@ def _combos(command_variants: list[str]) -> list[str]:
 DEFAULT_START_KEYWORDS = _combos([
     "start", "starts", "starte", "started", "starting",
     "star", "startet",
+    # Whisper hört "start" (englisch) als deutsches "ist ab" / "istab"
+    # / "isab" wenn die Aufnahme sonst deutsch ist. Real gesehen.
+    "ist ab", "istab", "is ab", "isab",
+    "hat ab", "hatab",
 ])
 
 # Restart — Whisper mishearings for mixed-language "restart":
