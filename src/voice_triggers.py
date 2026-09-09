@@ -192,11 +192,28 @@ def detect_voice_triggers(
                 cut_start = cleo_cap
             cut_start = max(0.0, cut_start)
 
-        # Search for continue-keyword after the cut-phrase
+        # Search for continue-keyword after the cut-phrase. If a NEW
+        # cut-keyword appears first, the user restarted again without
+        # saying 'go' — abandon this pair and re-anchor to the newer
+        # cut (which is the actual restart point).
         j = cut_next_idx
         matched_continue = None
         cont_next_idx = None
+        restart_from_new_cut = False
         while j < len(whisper_words):
+            # Check for a new cut before checking for continue
+            for kw in cut_keywords:
+                m = _match_phrase_at(j, whisper_words, kw)
+                if m is not None:
+                    print(f"[voice-triggers] second '{matched_cut}' at "
+                          f"{cut_phrase_start_t:.2f}s superseded by "
+                          f"'{kw}' at {float(whisper_words[j].get('start', 0)):.2f}s "
+                          f"(nested restart)", flush=True)
+                    i = j
+                    restart_from_new_cut = True
+                    break
+            if restart_from_new_cut:
+                break
             for kw in continue_keywords:
                 m = _match_phrase_at(j, whisper_words, kw)
                 if m is not None:
@@ -206,6 +223,9 @@ def detect_voice_triggers(
             if matched_continue is not None:
                 break
             j += 1
+
+        if restart_from_new_cut:
+            continue
 
         if matched_continue is None:
             # No continue-marker found — refuse to cut. Falling back to
