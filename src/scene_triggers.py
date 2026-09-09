@@ -33,15 +33,33 @@ def _combos(command_variants: list[str]) -> list[str]:
     return [f"{c} {cmd}" for c in _CLEO_VARIANTS for cmd in command_variants]
 
 
-DEFAULT_START_KEYWORDS = _combos(["start", "starts", "starte"])
-DEFAULT_RESTART_KEYWORDS = _combos([
-    "restart", "restarts", "restarte",
-    "is what",  # Whisper mishears 'restart' as 'is what' in mixed audio
-    "rest art", "rest hart", "restard",
+DEFAULT_START_KEYWORDS = _combos([
+    "start", "starts", "starte", "started", "starting",
+    "star", "startet",
 ])
-DEFAULT_KEEP_KEYWORDS = _combos(["keep", "keeps", "keep it", "kip", "kiep"])
+
+# Restart — Whisper mishearings for mixed-language "restart":
+#   'is what', 'is that' — observed in real user recordings
+#   'rest art', 'rest hart', 'restard', 'restarts' — phonetic collapse
+DEFAULT_RESTART_KEYWORDS = _combos([
+    "restart", "restarts", "restarte", "restartet", "restarted",
+    "is what", "is that", "is what's", "is that's",
+    "rest art", "rest hart", "rest hard", "restard",
+    "restat", "restate",
+])
+
+# Keep — soft plosive '/k/' often mistranscribed
+DEFAULT_KEEP_KEYWORDS = _combos([
+    "keep", "keeps", "keep it", "keep it up",
+    "kip", "kiep", "kef", "kefir",
+    "kib", "keeb", "geeb",
+])
+
+# Finish — English/German phonetic collapse
 DEFAULT_FINISH_KEYWORDS = _combos([
-    "finish", "finished", "finnisch", "finito",
+    "finish", "finished", "finishes", "finishing",
+    "finnisch", "finito", "finnish", "fenish",
+    "fin", "finish it",
 ])
 
 

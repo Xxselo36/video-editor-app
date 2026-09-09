@@ -183,8 +183,14 @@ class AudioAnalyzer:
 
         audio_path = self.extract_audio()
 
+        # Wake-word priming — repeat all scene/take commands so
+        # Whisper's language model biases toward transcribing them
+        # correctly instead of hallucinating close-sounding phrases
+        # ('Cleo restart' → 'Cleo is what' happens otherwise).
         wake_prompt = (
             "Cleo cut. Cleo go. Cleo cut. Cleo go. "
+            "Cleo start. Cleo restart. Cleo keep. Cleo finish. "
+            "Cleo start. Cleo restart. Cleo keep. Cleo finish. "
             "ähm, äh, hmm, um, uh, like, you know, also, halt"
         )
 
