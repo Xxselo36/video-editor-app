@@ -288,6 +288,39 @@ def analyze_video(
         cutter = SmartCutter(analyzer._transcription, duration)
         segments = cutter.optimize_cuts(segments)
 
+    # Scene triggers — Cleo start / restart / keep / finish workflow
+    # for record-once-and-refine. Opt-in: only activates if the user
+    # actually said "Cleo start". Runs before voice_triggers so scene
+    # boundaries are cut before per-take Cleo cut/go handling.
+    if voice_triggers and analyzer._transcription:
+        try:
+            from src.scene_triggers import find_scene_cut_ranges
+            from src.voice_triggers import collect_whisper_words as _scw
+            ww_scene = _scw(analyzer._transcription)
+            scene_cuts, scene_events = find_scene_cut_ranges(
+                ww_scene, clip_duration=duration,
+            )
+            if scene_events:
+                print(f"[scene-triggers] events: "
+                      f"{[(t, round(s,2), round(e,2)) for t,s,e in scene_events]}",
+                      flush=True)
+            if scene_cuts:
+                from src.filler_detection import FillerDetector
+                _det = FillerDetector()
+                segments_before = len(segments)
+                total_before = sum(e - s for s, e in segments)
+                segments = _det.filter_segments(segments, scene_cuts)
+                total_after = sum(e - s for s, e in segments)
+                print(f"[scene-triggers] {len(scene_cuts)} cut range(s) "
+                      f"applied: {scene_cuts}", flush=True)
+                print(f"[scene-triggers] segments {segments_before}→"
+                      f"{len(segments)}, time {total_before:.1f}s→"
+                      f"{total_after:.1f}s "
+                      f"(removed {total_before - total_after:.1f}s)",
+                      flush=True)
+        except Exception as e:
+            print(f"[scene-triggers] error: {e}", flush=True)
+
     # Voice triggers — user said "cut" / "weiter" during the take,
     # remove those ranges from the speech segments. Runs LAST so the
     # trigger cuts are authoritative (nothing snaps them back).
