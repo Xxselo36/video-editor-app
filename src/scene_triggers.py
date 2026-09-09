@@ -33,37 +33,55 @@ def _combos(command_variants: list[str]) -> list[str]:
     return [f"{c} {cmd}" for c in _CLEO_VARIANTS for cmd in command_variants]
 
 
+# Bilingual command set — English and German phrases both accepted so
+# the user can say whatever comes naturally. Every phrase paired with
+# every Cleo-mishearing (Clio, Cleyo, Klio, Kleo) plus phonetic collapse
+# variants Whisper produces in mixed-language audio.
+
 DEFAULT_START_KEYWORDS = _combos([
+    # EN
     "start", "starts", "starte", "started", "starting",
     "star", "startet",
-    # Whisper hört "start" (englisch) als deutsches "ist ab" / "istab"
-    # / "isab" wenn die Aufnahme sonst deutsch ist. Real gesehen.
+    # DE-mishearings of English 'start' in DE-audio
     "ist ab", "istab", "is ab", "isab",
     "hat ab", "hatab",
+    # DE proper — "anfang" is unambiguous but 2 syllables; skip unless
+    # user asks. 'Cleo start' works in both languages anyway.
 ])
 
-# Restart — Whisper mishearings for mixed-language "restart":
-#   'is what', 'is that' — observed in real user recordings
-#   'rest art', 'rest hart', 'restard', 'restarts' — phonetic collapse
 DEFAULT_RESTART_KEYWORDS = _combos([
+    # EN
     "restart", "restarts", "restarte", "restartet", "restarted",
-    "is what", "is that", "is what's", "is that's",
+    # DE-mishearings of 'restart'
+    "is what", "is that", "is left", "is what's", "is that's",
     "rest art", "rest hart", "rest hard", "restard",
     "restat", "restate",
+    # DE proper
+    "neu", "nue", "no", "noi",
+    "nochmal", "noch mal", "nochmals",
+    "zurück", "zurueck", "zuruck",
 ])
 
-# Keep — soft plosive '/k/' often mistranscribed
 DEFAULT_KEEP_KEYWORDS = _combos([
+    # EN
     "keep", "keeps", "keep it", "keep it up",
     "kip", "kiep", "kef", "kefir",
     "kib", "keeb", "geeb",
+    # DE proper
+    "behalten", "behalte", "behält", "behaelt",
+    "speichern", "speichere",
+    "check",
 ])
 
-# Finish — English/German phonetic collapse
 DEFAULT_FINISH_KEYWORDS = _combos([
+    # EN
     "finish", "finished", "finishes", "finishing",
     "finnisch", "finito", "finnish", "fenish",
     "fin", "finish it",
+    # DE proper
+    "ende", "enden", "endet",
+    "fertig", "fertisch",
+    "schluss", "schlus",
 ])
 
 

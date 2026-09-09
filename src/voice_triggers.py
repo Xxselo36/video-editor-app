@@ -29,15 +29,32 @@ import re
 from dataclasses import dataclass
 
 
-# Cleo-Wake-Word plus die häufigsten Whisper-Mishears als Phrasen.
-# "Clio" (Renault-Auto), "Cleyo" und "Klio" tauchen in normaler Sprache
-# nicht in Kombi mit "cut"/"go" auf — sicher als Trigger.
-DEFAULT_CUT_KEYWORDS = [
-    "cleo cut", "clio cut", "cleyo cut", "klio cut", "kleo cut",
-]
-DEFAULT_CONTINUE_KEYWORDS = [
-    "cleo go", "clio go", "cleyo go", "klio go", "kleo go",
-]
+# Bilingual wake commands — EN and DE both accepted. Every Cleo-
+# mishearing (Clio, Cleyo, Klio, Kleo, Cleo) × every command variant.
+_CLEO_VT_VARIANTS = ["cleo", "clio", "cleyo", "klio", "kleo"]
+
+
+def _vt_combos(command_variants: list[str]) -> list[str]:
+    return [f"{c} {cmd}" for c in _CLEO_VT_VARIANTS for cmd in command_variants]
+
+
+DEFAULT_CUT_KEYWORDS = _vt_combos([
+    # EN
+    "cut", "cuts", "cutted",
+    # DE
+    "schnitt", "schneiden", "schneide", "schmitt",
+    # Common mishears in mixed audio
+    "kutt", "gut",  # 'cut' → 'gut' Whisper mishear (rare)
+])
+
+DEFAULT_CONTINUE_KEYWORDS = _vt_combos([
+    # EN
+    "go", "goes", "goh",
+    # DE
+    "weiter", "weiterreden", "weiterr",
+    # Mishears
+    "los", "gone",
+])
 
 
 @dataclass
