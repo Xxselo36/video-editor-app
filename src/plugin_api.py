@@ -434,7 +434,7 @@ def analyze_video(
             # even when there's a brief unclear onset (lip noise,
             # breath, half-word) before the actual word. We can't see
             # that in Whisper's word list, so we cut ~150ms hard.
-            ONSET_TRIM = 0.15
+            ONSET_TRIM = 0.25
             if is_first_segment and abs(s) < 0.001 and (new_s - s) < ONSET_TRIM:
                 new_s = min(new_s + (ONSET_TRIM - (new_s - s)), new_e - 0.1)
                 if edges_trimmed == 0 or (new_s > s):
