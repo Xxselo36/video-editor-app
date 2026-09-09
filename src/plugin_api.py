@@ -374,6 +374,53 @@ def analyze_video(
         except Exception as e:
             print(f"[voice-triggers] error: {e}", flush=True)
 
+    # Trim unrecognized-audio edges. Silence-detection sometimes
+    # flags real audible energy at a segment's start/end that Whisper
+    # never produced a word for (garbled mumble / throat clear / half-
+    # word at video start). Nothing else catches it: filler-detector
+    # needs a word, mumble-detector needs a word-with-low-confidence.
+    # If a segment has a >EDGE_GAP_THRESHOLD leading or trailing
+    # window with no Whisper words in it, trim the segment to start
+    # (or end) right at the first (or last) real word plus tiny buffer.
+    if segments and analyzer._transcription:
+        EDGE_GAP_THRESHOLD = 0.5
+        EDGE_KEEP_BUFFER = 0.15
+        _tx_words: list[tuple[float, float]] = []
+        for _seg in analyzer._transcription.get("segments") or []:
+            for _w in _seg.get("words") or []:
+                if _w.get("start") is None or _w.get("end") is None:
+                    continue
+                _tx_words.append((float(_w["start"]), float(_w["end"])))
+        trimmed: list[tuple[float, float]] = []
+        edges_trimmed = 0
+        for (s, e) in segments:
+            words_in = [(ws, we) for (ws, we) in _tx_words
+                        if ws >= s - 0.1 and we <= e + 0.1]
+            if not words_in:
+                # No transcribed words at all — likely music/effects.
+                # Keep as-is; user might want the audio.
+                trimmed.append((s, e))
+                continue
+            first_ws = min(ws for (ws, _) in words_in)
+            last_we = max(we for (_, we) in words_in)
+            new_s = s
+            new_e = e
+            if first_ws - s > EDGE_GAP_THRESHOLD:
+                new_s = max(s, first_ws - EDGE_KEEP_BUFFER)
+                edges_trimmed += 1
+            if e - last_we > EDGE_GAP_THRESHOLD:
+                new_e = min(e, last_we + EDGE_KEEP_BUFFER)
+                edges_trimmed += 1
+            if new_e > new_s:
+                trimmed.append((new_s, new_e))
+        if edges_trimmed:
+            before_t = sum(e - s for s, e in segments)
+            after_t = sum(e - s for s, e in trimmed)
+            print(f"[edge-trim] trimmed {edges_trimmed} unrecognized-audio "
+                  f"edge(s) (removed {before_t - after_t:.2f}s)",
+                  flush=True)
+            segments = trimmed
+
     # Final consolidation — after ALL cut passes (silence, filler,
     # stutter, smart_cut, voice_triggers), any segment shorter than
     # MIN_FINAL_SEGMENT is a fragment: an orphan word/syllable left
