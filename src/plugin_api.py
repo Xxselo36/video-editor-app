@@ -385,6 +385,12 @@ def analyze_video(
     if segments and analyzer._transcription:
         EDGE_GAP_THRESHOLD = 0.5
         EDGE_KEEP_BUFFER = 0.15
+        # Video-intro edge case: the very first segment often has a
+        # short unclear syllable / throat clear before the first real
+        # word. Cut aggressively here (any gap >0.2s), because a video
+        # should start with real content, not with mumble.
+        INTRO_GAP_THRESHOLD = 0.2
+        INTRO_KEEP_BUFFER = 0.05
         _tx_words: list[tuple[float, float]] = []
         _tx_words_full: list[dict] = []
         for _seg in analyzer._transcription.get("segments") or []:
@@ -416,8 +422,11 @@ def analyze_video(
                   f"trail_gap={trailing_gap:.2f}s", flush=True)
             new_s = s
             new_e = e
-            if leading_gap > EDGE_GAP_THRESHOLD:
-                new_s = max(s, first_w["start"] - EDGE_KEEP_BUFFER)
+            is_first_segment = (idx == 0)
+            lead_threshold = INTRO_GAP_THRESHOLD if is_first_segment else EDGE_GAP_THRESHOLD
+            lead_buffer = INTRO_KEEP_BUFFER if is_first_segment else EDGE_KEEP_BUFFER
+            if leading_gap > lead_threshold:
+                new_s = max(s, first_w["start"] - lead_buffer)
                 edges_trimmed += 1
             if trailing_gap > EDGE_GAP_THRESHOLD:
                 new_e = min(e, last_w["end"] + EDGE_KEEP_BUFFER)
