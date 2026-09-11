@@ -239,10 +239,21 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
 
     Uses libx264 because bundled imageio_ffmpeg's videotoolbox is broken.
     """
-    # Audio: loudnorm to -14 LUFS. iPhone videos are recorded quiet;
-    # without this the preview + final output are barely audible.
-    # afftdn stays OUT — it was making voice hollow.
-    audio_chain = "loudnorm=I=-14:TP=-1.5:LRA=11"
+    # Audio chain (order matters):
+    #   1. highpass f=80   — kills sub-80Hz rumble (AC hum, wind, mic
+    #      handling noise). Speech starts at 100Hz so this doesn't touch
+    #      the voice.
+    #   2. afftdn nr=10 nf=-25 — light spectral noise reduction. Default
+    #      settings (nr=12 nf=-25) made voice hollow; nr=10 is gentler
+    #      and still knocks down hiss / room tone audibly.
+    #   3. loudnorm to -14 LUFS — modern streaming standard. Runs LAST
+    #      so noise-reduction and highpass happen on the raw signal,
+    #      not on already-boosted quiet passages.
+    audio_chain = (
+        "highpass=f=80,"
+        "afftdn=nr=10:nf=-25,"
+        "loudnorm=I=-14:TP=-1.5:LRA=11"
+    )
     # Cap longest side at 1920 (= 1080p output). iPhone 4K (2160×3840
     # portrait) on a small Railway container kills the libx264 encode
     # within minutes — 5-10× more pixels than 1080p with no visible
@@ -265,7 +276,11 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
         get_ffmpeg_path(), "-y",
         "-i", input_path,
         "-vf", vf,
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22",
+        # veryfast (was ultrafast) — the normalized file gets re-encoded
+        # again during burn, so double-ultrafast was compounding quality
+        # loss. veryfast still fits Railway's CPU budget for 60-90s
+        # videos and gives visibly cleaner output.
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-pix_fmt", "yuv420p",
         # Tag output as BT.709 SDR so downstream players don't re-interpret
         # our tonemapped pixels as still-HDR.
