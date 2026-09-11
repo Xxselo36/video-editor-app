@@ -376,17 +376,22 @@ def _generate_thumbnail(input_path: str, output_path: str, at_seconds: float = 1
         print(f"[thumbnail] extract failed: {e}", flush=True)
 
 
-def _ffmpeg_concat(clip_paths: list[str], output_path: str) -> None:
-    """Concatenate clips through the concat demuxer, re-encoding output.
+def _ffmpeg_concat(
+    clip_paths: list[str],
+    output_path: str,
+    source_audio_path: str | None = None,
+    audio_segments: list[tuple[float, float]] | None = None,
+) -> None:
+    """Concatenate clips through the concat demuxer, re-encoding video
+    AND rebuilding audio directly from the source.
 
-    The old `-c copy` version was fast but produced three visible
-    artifacts at every cut boundary: audible clicks (raw AAC frame
-    joins), occasional black frames (segment I-frame gaps), and AV
-    drift (per-segment timebase rounding accumulates).
-
-    Re-encoding on the output side fixes all three by re-writing every
-    frame with a unified timebase and consistent codec params. Adds
-    ~10-20s per render but the artifacts are gone.
+    Audio strategy:
+      - If source_audio_path + audio_segments given, we DISCARD the
+        per-segment burned audio (MoviePy's numpy pipeline was subtly
+        altering it) and rebuild the audio timeline by atrim+concat
+        directly from the source. One AAC re-encode, no numpy round-
+        trip → audio stays character-identical to the recording.
+      - Otherwise falls back to stream-copying the burned audio.
     """
     if not clip_paths:
         raise ValueError("no clips to concat")
@@ -398,23 +403,50 @@ def _ffmpeg_concat(clip_paths: list[str], output_path: str) -> None:
         for p in clip_paths:
             f.write(f"file '{p}'\n")
 
+    use_source_audio = bool(source_audio_path and audio_segments)
+
     cmd = [
         get_ffmpeg_path(), "-y",
         "-f", "concat", "-safe", "0",
         "-i", list_path,
+    ]
+
+    if use_source_audio:
+        # Second input: source audio, plus a filter_complex that
+        # trims per segment and concatenates. Output labelled [aout].
+        cmd += ["-i", source_audio_path]
+        atrim_parts = []
+        for i, (s, e) in enumerate(audio_segments):
+            atrim_parts.append(
+                f"[1:a]atrim=start={s:.3f}:end={e:.3f},"
+                f"asetpts=PTS-STARTPTS[a{i}]"
+            )
+        concat_inputs = "".join(f"[a{i}]" for i in range(len(audio_segments)))
+        atrim_parts.append(
+            f"{concat_inputs}concat=n={len(audio_segments)}:v=0:a=1[aout]"
+        )
+        cmd += [
+            "-filter_complex", ";".join(atrim_parts),
+            "-map", "0:v", "-map", "[aout]",
+        ]
+    # else: default mapping picks up video + audio from clip_paths
+
+    cmd += [
         # Match the burn step (medium/crf 16 + tune film). Same-preset
-        # concat preserves the quality the burn step invested — mixing
-        # presets throws away bits either the burn or the concat spent.
+        # concat preserves the quality the burn step invested.
         "-c:v", "libx264", "-preset", "medium", "-crf", "16",
         "-tune", "film",
         "-profile:v", "high", "-level:v", "4.1",
         "-pix_fmt", "yuv420p",
-        # Stream-copy audio (no second AAC re-encode). Second AAC pass
-        # was producing HF hissing artifacts in the final render. All
-        # segments share the same AAC params from the per-segment burn,
-        # so copy joins them without click issues that raw-copy would
-        # have on inconsistent inputs.
-        "-c:a", "copy",
+    ]
+    if use_source_audio:
+        # Fresh AAC encode from source — single lossy pass, no
+        # MoviePy numpy round-trip preceding it.
+        cmd += ["-c:a", "aac", "-b:a", "320k"]
+    else:
+        cmd += ["-c:a", "copy"]
+
+    cmd += [
         "-movflags", "+faststart",
         output_path,
     ]
@@ -819,7 +851,15 @@ def render_only(
         clip_paths = [p for (p, _dur) in clip_outputs]
 
         _stage("Stitching clips…", 80)
-        _ffmpeg_concat(clip_paths, primary_path)
+        # Pass source audio + original segment times so concat rebuilds
+        # the audio track directly from normalized.mp4 (bit-perfect
+        # source copy) instead of stream-copying MoviePy's numpy-
+        # processed audio out of each burned segment.
+        _ffmpeg_concat(
+            clip_paths, primary_path,
+            source_audio_path=normalized_path,
+            audio_segments=segments,
+        )
 
         _generate_thumbnail(primary_path, thumbnail_path)
 
