@@ -31,7 +31,11 @@ from dataclasses import dataclass
 
 # Bilingual wake commands — EN and DE both accepted. Every Cleo-
 # mishearing (Clio, Cleyo, Klio, Kleo, Cleo) × every command variant.
-_CLEO_VT_VARIANTS = ["cleo", "clio", "cleyo", "klio", "kleo"]
+_CLEO_VT_VARIANTS = [
+    "cleo", "clio", "cleyo", "klio", "kleo",
+    "clear", "cleer", "clara", "claro", "clean",
+    "kilo", "keo", "kejo", "clea",
+]
 
 
 def _vt_combos(command_variants: list[str]) -> list[str]:

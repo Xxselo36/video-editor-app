@@ -25,7 +25,12 @@ import re
 # Wake-word variants — Whisper regularly mishears "Cleo" as "Clio"
 # (Renault-car), "Cleyo", "Klio", "Kleo". Plus common mishearings of
 # the English command word in German audio (e.g. "restart" → "is what").
-_CLEO_VARIANTS = ["cleo", "clio", "cleyo", "klio", "kleo"]
+_CLEO_VARIANTS = [
+    "cleo", "clio", "cleyo", "klio", "kleo",
+    # Whisper mishearings observed in real recordings:
+    "clear", "cleer", "clara", "claro", "clean",
+    "kilo", "keo", "kejo", "clea",
+]
 
 
 def _combos(command_variants: list[str]) -> list[str]:
