@@ -218,6 +218,37 @@ def analyze_video(
                   f"(removed {total_before - total_after:.1f}s of filler)",
                   flush=True)
 
+    # Hesitation-marker cleanup — Whisper's convention for audible
+    # but unrecognized speech (typically 'äääh', throat clears, or
+    # mumbled syllables) is to output a punctuation-only "word" like
+    # '...' or '…'. Silence detection sees energy → keeps them in a
+    # speech segment. Filler detector strips them to empty → skips.
+    # Cut them here.
+    if remove_fillers and analyzer._transcription:
+        import re as _re
+        _punct_only = _re.compile(r"^[^\w]+$")
+        _hes_cuts: list[tuple[float, float]] = []
+        for _seg in (analyzer._transcription.get("segments") or []):
+            for _w in (_seg.get("words") or []):
+                _t = (_w.get("word", "") or "").strip()
+                if _t and _punct_only.match(_t):
+                    _s = float(_w.get("start") or 0)
+                    _e = float(_w.get("end") or 0)
+                    if _e - _s > 0.15:  # ignore instant punctuation blips
+                        _hes_cuts.append((_s, _e))
+        if _hes_cuts:
+            from src.filler_detection import FillerDetector
+            _det = FillerDetector()
+            _sb = len(segments)
+            _tb = sum(e - s for s, e in segments)
+            segments = _det.filter_segments(segments, _hes_cuts)
+            _ta = sum(e - s for s, e in segments)
+            print(f"[hesitation] {len(_hes_cuts)} punctuation-only "
+                  f"marker(s) cut: {_hes_cuts}", flush=True)
+            print(f"[hesitation] segments {_sb}→{len(segments)}, "
+                  f"time {_tb:.1f}s→{_ta:.1f}s (removed {_tb - _ta:.1f}s)",
+                  flush=True)
+
     # Stutter cleanup — repeated N-gram sequences ("es ist ein, es ist
     # ein sehr schönes Thema") that filler removal doesn't catch
     # because the repeated words aren't classical fillers. Runs on the
