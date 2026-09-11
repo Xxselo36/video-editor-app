@@ -239,22 +239,13 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
 
     Uses libx264 because bundled imageio_ffmpeg's videotoolbox is broken.
     """
-    # Audio chain (order matters):
-    #   1. highpass f=100 — kills sub-100Hz rumble (AC hum, wind, mic
-    #      handling, HVAC). Speech fundamentals start at ~120Hz so
-    #      this doesn't touch the voice character.
-    #   2. loudnorm to -14 LUFS with LRA=14 (was 11) — modern streaming
-    #      target, but a wider LRA leaves more dynamic range intact so
-    #      quiet background bits don't get boosted to match the voice.
-    #      Less pumping, no squeak between sentences.
-    #
-    # afftdn stays OUT — even at nr=10 it makes voice hollow. Highpass
-    # covers the big-win noise band; the remaining hiss is minor and
-    # loudnorm's higher LRA now stops amplifying it.
-    audio_chain = (
-        "highpass=f=100,"
-        "loudnorm=I=-14:TP=-1.5:LRA=14"
-    )
+    # AUDIO: passthrough — no processing at normalize step.
+    # Any filter we added introduced audible artifacts (afftdn hollow,
+    # loudnorm pumping between sentences, even highpass noticeable in
+    # low-passages). Trade-off: video will be quieter than TikTok norm
+    # (-14 LUFS target) but sound natural. TikTok/YT re-normalize on
+    # upload anyway so end viewers hear roughly correct loudness.
+    audio_chain = "anull"  # ffmpeg no-op filter; keeps the -af slot valid
     # Cap longest side at 1920 (= 1080p output). iPhone 4K (2160×3840
     # portrait) on a small Railway container kills the libx264 encode
     # within minutes — 5-10× more pixels than 1080p with no visible
