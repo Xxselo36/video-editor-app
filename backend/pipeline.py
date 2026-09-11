@@ -405,48 +405,62 @@ def _ffmpeg_concat(
 
     use_source_audio = bool(source_audio_path and audio_segments)
 
+    # Bit-perfect audio path: extract each segment from source AAC with
+    # -c:a copy (no decode, no re-encode), concat via demuxer with copy.
+    # Result byte-matches the source samples in the kept ranges — no
+    # numpy round-trip, no AAC re-encode. Downside: -ss on AAC copy
+    # snaps cuts to the nearest AAC frame (~21ms at 48kHz), which is
+    # below the audibility threshold.
+    audio_only_path: str | None = None
+    if use_source_audio:
+        audio_segs_dir = tempfile.mkdtemp(prefix="cleo_audio_")
+        aac_seg_paths: list[str] = []
+        for i, (s, e) in enumerate(audio_segments):
+            aac_path = str(Path(audio_segs_dir) / f"a_{i:04d}.aac")
+            extract_cmd = [
+                get_ffmpeg_path(), "-y",
+                "-ss", f"{s:.3f}", "-to", f"{e:.3f}",
+                "-i", source_audio_path,
+                "-vn", "-c:a", "copy",
+                "-avoid_negative_ts", "make_zero",
+                aac_path,
+            ]
+            r = subprocess.run(extract_cmd, capture_output=True, text=True)
+            if r.returncode == 0 and Path(aac_path).exists():
+                aac_seg_paths.append(aac_path)
+        if aac_seg_paths:
+            audio_list_path = str(Path(audio_segs_dir) / "list.txt")
+            with open(audio_list_path, "w") as f:
+                for p in aac_seg_paths:
+                    f.write(f"file '{p}'\n")
+            audio_only_path = str(Path(audio_segs_dir) / "concat.aac")
+            concat_a_cmd = [
+                get_ffmpeg_path(), "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", audio_list_path,
+                "-c:a", "copy",
+                audio_only_path,
+            ]
+            r = subprocess.run(concat_a_cmd, capture_output=True, text=True)
+            if r.returncode != 0:
+                audio_only_path = None
+
     cmd = [
         get_ffmpeg_path(), "-y",
         "-f", "concat", "-safe", "0",
         "-i", list_path,
     ]
-
-    if use_source_audio:
-        # Second input: source audio, plus a filter_complex that
-        # trims per segment and concatenates. Output labelled [aout].
-        cmd += ["-i", source_audio_path]
-        atrim_parts = []
-        for i, (s, e) in enumerate(audio_segments):
-            atrim_parts.append(
-                f"[1:a]atrim=start={s:.3f}:end={e:.3f},"
-                f"asetpts=PTS-STARTPTS[a{i}]"
-            )
-        concat_inputs = "".join(f"[a{i}]" for i in range(len(audio_segments)))
-        atrim_parts.append(
-            f"{concat_inputs}concat=n={len(audio_segments)}:v=0:a=1[aout]"
-        )
-        cmd += [
-            "-filter_complex", ";".join(atrim_parts),
-            "-map", "0:v", "-map", "[aout]",
-        ]
-    # else: default mapping picks up video + audio from clip_paths
+    if audio_only_path:
+        cmd += ["-i", audio_only_path, "-map", "0:v", "-map", "1:a"]
 
     cmd += [
-        # Match the burn step (medium/crf 16 + tune film). Same-preset
-        # concat preserves the quality the burn step invested.
+        # Match the burn step (medium/crf 16 + tune film).
         "-c:v", "libx264", "-preset", "medium", "-crf", "16",
         "-tune", "film",
         "-profile:v", "high", "-level:v", "4.1",
         "-pix_fmt", "yuv420p",
-    ]
-    if use_source_audio:
-        # Fresh AAC encode from source — single lossy pass, no
-        # MoviePy numpy round-trip preceding it.
-        cmd += ["-c:a", "aac", "-b:a", "320k"]
-    else:
-        cmd += ["-c:a", "copy"]
-
-    cmd += [
+        # Audio: bit-perfect copy of source AAC either way.
+        "-c:a", "copy",
         "-movflags", "+faststart",
         output_path,
     ]
