@@ -1,8 +1,9 @@
-"""Groq Whisper — cloud-hosted transcription, ~10× faster than local.
+"""Groq Whisper — cloud-hosted transcription.
 
-Uses `whisper-large-v3-turbo` by default (fast, same-or-better accuracy
-as local 'medium'). Returns None on missing key / API failure so the
-caller can fall back to local faster-whisper without breaking the flow.
+Uses `whisper-large-v3` (full) — fewer hallucinations, better command-
+word recognition in mixed DE/EN audio than turbo. Returns None on
+missing key / API failure so the caller can fall back to local
+faster-whisper without breaking the flow.
 
 Requires GROQ_API_KEY env var. Get one free-tier at console.groq.com.
 """
@@ -13,11 +14,15 @@ from typing import Any
 
 
 # Model choice:
-#   whisper-large-v3-turbo — fast (~10x realtime), same quality as
-#                            'medium' locally, cheapest at $0.04/hour
-#   whisper-large-v3       — slower but most accurate, $0.111/hour
-# Default to turbo: matches our local 'medium' quality but far faster.
-_MODEL = "whisper-large-v3-turbo"
+#   whisper-large-v3       — slower (~4× realtime) but noticeably fewer
+#                            hallucinations + fewer command-word mishears.
+#                            $0.111/hour on Groq.
+#   whisper-large-v3-turbo — faster (~10× realtime) but hallucinates
+#                            more on ambiguous audio, produces phrase-
+#                            repeat hedges under uncertainty ($0.04/hour).
+# Upgraded to non-turbo after user reported repeated command mishearings
+# and phrase-loop hallucinations that turbo produced.
+_MODEL = "whisper-large-v3"
 
 
 def transcribe_via_groq(
