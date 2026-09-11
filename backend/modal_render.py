@@ -131,14 +131,9 @@ def render_burn_concat(
     # Write outputs directly into the volume — backend downloads them
     # via the Volume SDK afterwards, no bytes-through-Python return.
     primary_out = job_dir / "output.mp4"
-    # Pass source (normalized) + segment times so concat rebuilds
-    # audio bit-perfect from source via -c:a copy, bypassing MoviePy's
-    # numpy audio pipeline.
-    _ffmpeg_concat(
-        clip_paths, str(primary_out),
-        source_audio_path=str(input_path),
-        audio_segments=seg_tuples,
-    )
+    # Old-signature concat call — bit-perfect audio rebuild happens on
+    # Railway's local fallback path only until Modal issue is diagnosed.
+    _ffmpeg_concat(clip_paths, str(primary_out))
 
     thumbnail_out = job_dir / "thumbnail.jpg"
     _generate_thumbnail(str(primary_out), str(thumbnail_out))
