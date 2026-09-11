@@ -402,11 +402,12 @@ def _ffmpeg_concat(clip_paths: list[str], output_path: str) -> None:
         get_ffmpeg_path(), "-y",
         "-f", "concat", "-safe", "0",
         "-i", list_path,
-        # Match burn preset+CRF (fast/18) — the burn output is already
-        # this quality, so re-encoding at veryfast/20 was throwing away
-        # bitrate the burn step spent. Same-preset concat costs the
-        # same time and preserves quality end-to-end.
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        # Match the burn step (medium/crf 16 + tune film). Same-preset
+        # concat preserves the quality the burn step invested — mixing
+        # presets throws away bits either the burn or the concat spent.
+        "-c:v", "libx264", "-preset", "medium", "-crf", "16",
+        "-tune", "film",
+        "-profile:v", "high", "-level:v", "4.1",
         "-pix_fmt", "yuv420p",
         # Stream-copy audio (no second AAC re-encode). Second AAC pass
         # was producing HF hissing artifacts in the final render. All
