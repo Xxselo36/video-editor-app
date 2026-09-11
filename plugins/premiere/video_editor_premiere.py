@@ -1696,7 +1696,7 @@ def _render_segment_with_standalone_captions(
             clip.write_videofile(
                 output_path,
                 codec="libx264", audio_codec="aac",
-                audio_bitrate="192k", audio_fps=_audio_fps,
+                audio_bitrate="320k", audio_fps=_audio_fps,
                 preset="fast",
                 temp_audiofile=_tmp_audio, remove_temp=True,
                 ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "18", "-bf", "0", "-avoid_negative_ts", "make_zero"],
@@ -1725,7 +1725,7 @@ def _render_segment_with_standalone_captions(
             clip.write_videofile(
                 output_path,
                 codec="libx264", audio_codec="aac",
-                audio_bitrate="192k", audio_fps=_audio_fps,
+                audio_bitrate="320k", audio_fps=_audio_fps,
                 preset="fast",
                 temp_audiofile=_tmp_audio, remove_temp=True,
                 ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "18", "-bf", "0", "-avoid_negative_ts", "make_zero"],
@@ -1967,7 +1967,7 @@ def _render_segment_with_standalone_captions(
         final.write_videofile(
             output_path,
             codec="libx264", audio_codec="aac",
-            audio_bitrate="192k", audio_fps=_audio_fps,
+            audio_bitrate="320k", audio_fps=_audio_fps,
             preset="fast",
             temp_audiofile=_tmp_audio, remove_temp=True,
             ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "18", "-bf", "0", "-avoid_negative_ts", "make_zero"],
