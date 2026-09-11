@@ -240,19 +240,20 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
     Uses libx264 because bundled imageio_ffmpeg's videotoolbox is broken.
     """
     # Audio chain (order matters):
-    #   1. highpass f=80   — kills sub-80Hz rumble (AC hum, wind, mic
-    #      handling noise). Speech starts at 100Hz so this doesn't touch
-    #      the voice.
-    #   2. afftdn nr=10 nf=-25 — light spectral noise reduction. Default
-    #      settings (nr=12 nf=-25) made voice hollow; nr=10 is gentler
-    #      and still knocks down hiss / room tone audibly.
-    #   3. loudnorm to -14 LUFS — modern streaming standard. Runs LAST
-    #      so noise-reduction and highpass happen on the raw signal,
-    #      not on already-boosted quiet passages.
+    #   1. highpass f=100 — kills sub-100Hz rumble (AC hum, wind, mic
+    #      handling, HVAC). Speech fundamentals start at ~120Hz so
+    #      this doesn't touch the voice character.
+    #   2. loudnorm to -14 LUFS with LRA=14 (was 11) — modern streaming
+    #      target, but a wider LRA leaves more dynamic range intact so
+    #      quiet background bits don't get boosted to match the voice.
+    #      Less pumping, no squeak between sentences.
+    #
+    # afftdn stays OUT — even at nr=10 it makes voice hollow. Highpass
+    # covers the big-win noise band; the remaining hiss is minor and
+    # loudnorm's higher LRA now stops amplifying it.
     audio_chain = (
-        "highpass=f=80,"
-        "afftdn=nr=10:nf=-25,"
-        "loudnorm=I=-14:TP=-1.5:LRA=11"
+        "highpass=f=100,"
+        "loudnorm=I=-14:TP=-1.5:LRA=14"
     )
     # Cap longest side at 1920 (= 1080p output). iPhone 4K (2160×3840
     # portrait) on a small Railway container kills the libx264 encode
@@ -276,11 +277,12 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
         get_ffmpeg_path(), "-y",
         "-i", input_path,
         "-vf", vf,
-        # veryfast (was ultrafast) — the normalized file gets re-encoded
-        # again during burn, so double-ultrafast was compounding quality
-        # loss. veryfast still fits Railway's CPU budget for 60-90s
-        # videos and gives visibly cleaner output.
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        # 'fast' preset + crf 18 — the normalized file is re-encoded
+        # during burn, so investing extra encode time here pays off in
+        # the final quality. Fast (~40% slower than veryfast) still
+        # fits Railway's CPU budget for typical 60-90s videos, and
+        # crf 18 is visually near-lossless as a source for the burn.
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-pix_fmt", "yuv420p",
         # Tag output as BT.709 SDR so downstream players don't re-interpret
         # our tonemapped pixels as still-HDR.
@@ -409,7 +411,11 @@ def _ffmpeg_concat(clip_paths: list[str], output_path: str) -> None:
         get_ffmpeg_path(), "-y",
         "-f", "concat", "-safe", "0",
         "-i", list_path,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        # Match burn preset+CRF (fast/18) — the burn output is already
+        # this quality, so re-encoding at veryfast/20 was throwing away
+        # bitrate the burn step spent. Same-preset concat costs the
+        # same time and preserves quality end-to-end.
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-pix_fmt", "yuv420p",
         # Stream-copy audio (no second AAC re-encode). Second AAC pass
         # was producing HF hissing artifacts in the final render. All
