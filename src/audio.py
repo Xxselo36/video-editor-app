@@ -206,8 +206,13 @@ class AudioAnalyzer:
             "Ich sage Cleo stop wenn ich einen Satz abbreche. "
             "Ich sage Cleo cut wenn ich den Take neu mache. "
             "Ich sage Cleo behalten wenn der Take gut war. "
-            "Ich sage Cleo ende zum Schluss. "
-            "ähm, äh, hmm, um, uh, like, you know, also, halt"
+            "Ich sage Cleo ende zum Schluss."
+            # NOTE: filler examples ('ähm', 'um', 'uh') deliberately
+            # NOT included here. When Whisper decoding gets uncertain
+            # (mumble, silence with mic noise), tokens in the prompt
+            # bias the language model — a prompt with 'um' encourages
+            # the decoder to fall into an 'um um um um...' loop instead
+            # of producing silence or no-speech.
         )
 
         # Try Groq first: cloud Whisper, ~10x faster than local CPU.

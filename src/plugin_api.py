@@ -126,6 +126,35 @@ def analyze_video(
 
     subtitles = analyzer.transcribe()
 
+    # Hallucination cleanup: Whisper's decoder sometimes loops on a
+    # single token (dozens of 'um um um' in a row) when audio is
+    # ambiguous. Detect the run in the word list, cut the audio range,
+    # and drop the fake tokens from the transcript BEFORE anything
+    # else looks at it (voice-command LLM, filler, stutter, mumble).
+    _hallucination_cuts_to_apply: list[tuple[float, float]] = []
+    if analyzer._transcription:
+        try:
+            from src.hallucination_detection import find_hallucination_cuts
+            hallucinations = find_hallucination_cuts(analyzer._transcription)
+            if hallucinations:
+                for (s, e, tok, n) in hallucinations:
+                    print(f"[hallucination] cut {s:.2f}-{e:.2f}s "
+                          f"({n}× {tok!r}) — Whisper loop", flush=True)
+                    _hallucination_cuts_to_apply.append((s, e))
+                # Strip the looped tokens from the transcription so
+                # downstream text-based detectors don't see them.
+                for seg in analyzer._transcription.get("segments") or []:
+                    words = seg.get("words") or []
+                    seg["words"] = [
+                        w for w in words
+                        if not any(
+                            s <= float(w.get("start") or 0) < e
+                            for (s, e) in _hallucination_cuts_to_apply
+                        )
+                    ]
+        except Exception as _e:
+            print(f"[hallucination] skipped: {_e}", flush=True)
+
     # Voice-command correction: LLM scans the raw transcript for spots
     # where Whisper mangled a Cleo command in mixed-language audio and
     # rewrites those tokens in-place. Runs BEFORE any detector so scene/
@@ -200,6 +229,21 @@ def analyze_video(
     segments = merged
     print(f"[silence] after padding+merge: {len(segments)} segments, "
           f"total kept={sum(e - s for s, e in segments):.1f}s", flush=True)
+
+    # Apply hallucination-loop cuts (detected earlier from the raw
+    # transcription) to the speech segments. Silence detection can't
+    # find these — the audio has real energy, just no meaningful speech.
+    if _hallucination_cuts_to_apply:
+        from src.filler_detection import FillerDetector
+        _det = FillerDetector()
+        _sb = len(segments)
+        _tb = sum(e - s for s, e in segments)
+        segments = _det.filter_segments(segments, _hallucination_cuts_to_apply)
+        _ta = sum(e - s for s, e in segments)
+        print(f"[hallucination] segments {_sb}→{len(segments)}, "
+              f"time {_tb:.1f}s→{_ta:.1f}s "
+              f"(removed {_tb - _ta:.1f}s of Whisper loop)",
+              flush=True)
 
     # Filler word detection and removal
     filler_data = None
