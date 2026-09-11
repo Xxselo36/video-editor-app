@@ -28,7 +28,9 @@ except ImportError:
 
 _MODEL = "claude-haiku-4-5"
 _MODEL_CLEANUP = "claude-haiku-4-5"       # fast + cheap, good enough for typo/filler fix
+_MODEL_COMMAND_FIX = "claude-haiku-4-5"   # short call, contextual reasoning fine on Haiku
 _MAX_TOKENS_CLEANUP = 4000
+_MAX_TOKENS_COMMAND_FIX = 800
 _MAX_TOKENS_SOCIAL = 800
 
 
@@ -64,6 +66,179 @@ def _extract_json(text: str) -> Any | None:
         return json.loads(text[start:end + 1])
     except json.JSONDecodeError:
         return None
+
+
+def correct_voice_commands(
+    transcription: dict[str, Any],
+    language: str | None = None,
+    brand: str = "Cleo",
+) -> dict[str, Any]:
+    """Post-process Whisper transcription to fix misheard voice commands.
+
+    Whisper often mangles 'Cleo <cmd>' in mixed-language audio:
+    'Cleo restart' → 'Cleo is what', 'Cleo finish' → 'Clear finish',
+    'Cleo start' → 'Cleo ist ab'. Hand-coding every variant is
+    whack-a-mole; the LLM sees full context and can identify likely
+    commands even in novel mishearings.
+
+    Runs on the raw whisper transcription (segments with per-word
+    timestamps). For each identified correction, mutates the affected
+    word tokens IN PLACE so downstream voice-trigger / scene-trigger
+    detection sees clean command phrases.
+
+    Args:
+        transcription: Whisper output {segments: [{words: [...]}]}.
+        language: ISO code hint for the LLM.
+        brand: canonical wake word.
+
+    Returns:
+        The transcription (same object, mutated) plus a debug list of
+        corrections applied under key '_command_corrections'.
+
+    Soft-fails on no key / model error — returns transcription unchanged.
+    """
+    if not transcription:
+        return transcription
+    client = _client()
+    if client is None:
+        return transcription
+
+    # Flatten all words with global index
+    all_words: list[dict[str, Any]] = []
+    for seg in transcription.get("segments") or []:
+        for w in seg.get("words") or []:
+            all_words.append(w)
+    if not all_words:
+        return transcription
+
+    # Build a compact indexed transcript for the LLM
+    indexed = [
+        {"i": i, "w": (w.get("word", "") or "").strip()}
+        for i, w in enumerate(all_words)
+    ]
+    lang_hint = f"Spoken language: {language}." if language else ""
+
+    system = f"""You correct misheard voice commands in a video transcript.
+
+The user records short videos with these voice commands to control
+editing at recording time:
+  '{brand} start'   — begin a take
+  '{brand} cut'     — discard the current take, restart
+  '{brand} keep'    — commit the current take, next scene
+  '{brand} finish'  — end the video
+  '{brand} stop'    — mark a bad sentence (paired with 'go')
+  '{brand} go'      — resume after 'stop'
+
+Whisper often mishears these in mixed English/German audio. Known patterns:
+  - '{brand}' → 'clear', 'clara', 'kleo', 'klio', 'cleer', 'clean', 'kilo'
+  - 'start'   → 'ist ab', 'istab', 'is auf', 'ist tough', 'is doof'
+  - 'cut'     → 'kutt', 'kot', 'gut', 'kurt', 'schnitt'
+  - 'keep'    → 'kip', 'kiep', 'geeb', 'behalten' (DE-legit)
+  - 'finish'  → 'finnisch', 'fenish', 'finito', 'finished'
+  - 'stop'    → 'stopp', 'top', 'halt'
+  - 'go'      → 'goes', 'los', 'weiter', 'gone'
+
+You get the transcript as an array of tokens with indices. Find spots
+where the user LIKELY said a voice command but Whisper misheard. A
+strong signal is 2-3 consecutive tokens where:
+  1. The first token phonetically resembles '{brand}' (starts with 'k'
+     or 'cl' sound, ends in vowel), AND
+  2. The following 1-2 tokens phonetically resemble a command word
+
+Also consider position: video intros often START with a command
+('Cleo start'), video ends often FINISH with one ('Cleo finish').
+
+BE CONSERVATIVE. Only correct when you are >90% confident it was a
+mangled command. When in doubt, leave the transcript alone — a wrong
+correction cuts real content out of the video.
+
+{lang_hint}
+
+Respond with ONLY a JSON object:
+{{
+  "corrections": [
+    {{"start_index": 42, "end_index": 43, "original": "clear finish",
+      "corrected_to": "cleo finish"}},
+    ...
+  ]
+}}
+
+Empty corrections list is a valid answer.
+"""
+
+    user_msg = json.dumps({"tokens": indexed}, ensure_ascii=False)
+
+    try:
+        resp = client.messages.create(
+            model=_MODEL_COMMAND_FIX,
+            max_tokens=_MAX_TOKENS_COMMAND_FIX,
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        text = "".join(
+            getattr(b, "text", "") for b in (resp.content or [])
+            if getattr(b, "type", None) == "text"
+        )
+    except Exception as e:
+        print(f"[llm] command-fix call failed: {e}", flush=True)
+        return transcription
+
+    parsed = _extract_json(text)
+    if not isinstance(parsed, dict):
+        return transcription
+
+    corrections = parsed.get("corrections") or []
+    if not corrections:
+        return transcription
+
+    # Apply corrections IN PLACE: replace the text of the token range
+    # with the corrected phrase's tokens. Keep original timestamps —
+    # the LLM only fixes the word text.
+    applied: list[dict[str, Any]] = []
+    for c in corrections:
+        try:
+            s_i = int(c.get("start_index"))
+            e_i = int(c.get("end_index"))
+            corrected = str(c.get("corrected_to", "")).strip()
+        except (TypeError, ValueError):
+            continue
+        if not corrected or s_i < 0 or e_i >= len(all_words) or e_i < s_i:
+            continue
+
+        corr_tokens = corrected.split()
+        span = e_i - s_i + 1
+        # If the corrected phrase has the same token count as the
+        # span, do a 1:1 replace. Otherwise map best-effort: distribute
+        # tokens across the span, padding/joining as needed.
+        if len(corr_tokens) == span:
+            for offset, tok in enumerate(corr_tokens):
+                all_words[s_i + offset]["word"] = tok
+        elif len(corr_tokens) < span:
+            # Fewer corrected tokens than span → put them in the first
+            # slots, mark the rest as empty (they'll be stripped later)
+            for offset, tok in enumerate(corr_tokens):
+                all_words[s_i + offset]["word"] = tok
+            for offset in range(len(corr_tokens), span):
+                all_words[s_i + offset]["word"] = ""
+        else:
+            # More corrected tokens than span → cram the extras into
+            # the last slot as a single joined word.
+            for offset in range(span - 1):
+                all_words[s_i + offset]["word"] = corr_tokens[offset]
+            all_words[s_i + span - 1]["word"] = " ".join(corr_tokens[span - 1:])
+
+        applied.append({
+            "range": [s_i, e_i],
+            "from": c.get("original", ""),
+            "to": corrected,
+        })
+
+    if applied:
+        print(f"[cmd-fix] applied {len(applied)} correction(s): {applied}",
+              flush=True)
+
+    transcription["_command_corrections"] = applied
+    return transcription
 
 
 def cleanup_transcript(

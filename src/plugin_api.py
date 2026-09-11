@@ -126,6 +126,21 @@ def analyze_video(
 
     subtitles = analyzer.transcribe()
 
+    # Voice-command correction: LLM scans the raw transcript for spots
+    # where Whisper mangled a Cleo command in mixed-language audio and
+    # rewrites those tokens in-place. Runs BEFORE any detector so scene/
+    # voice triggers see clean command phrases. Soft-fails: on no key or
+    # error the transcript is unchanged, downstream still works.
+    if analyzer._transcription:
+        try:
+            from backend.llm import correct_voice_commands
+            _detected_lang_early = analyzer._transcription.get("language")
+            correct_voice_commands(
+                analyzer._transcription, language=_detected_lang_early,
+            )
+        except Exception as _e:
+            print(f"[cmd-fix] skipped: {_e}", flush=True)
+
     # Step 2: Detect silence / speech segments
     current_step += 1
     if progress_callback:
