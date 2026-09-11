@@ -124,7 +124,7 @@ def _extract_hook_clip(
         "-t", f"{duration:.3f}",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "192k",
+        "-c:a", "aac", "-b:a", "320k",
         "-movflags", "+faststart",
         "-avoid_negative_ts", "make_zero",
         output_path,
@@ -239,13 +239,12 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
 
     Uses libx264 because bundled imageio_ffmpeg's videotoolbox is broken.
     """
-    # AUDIO: passthrough — no processing at normalize step.
-    # Any filter we added introduced audible artifacts (afftdn hollow,
-    # loudnorm pumping between sentences, even highpass noticeable in
-    # low-passages). Trade-off: video will be quieter than TikTok norm
-    # (-14 LUFS target) but sound natural. TikTok/YT re-normalize on
-    # upload anyway so end viewers hear roughly correct loudness.
-    audio_chain = "anull"  # ffmpeg no-op filter; keeps the -af slot valid
+    # AUDIO: bit-perfect passthrough via -c:a copy (see cmd list below).
+    # Prior 'anull filter + AAC 192k re-encode' still lost quality on
+    # quiet iPhone audio — audible as hollow/squeaky artifacts when
+    # user played back with volume boosted. Skipping the normalize
+    # re-encode entirely means the burn step is the ONLY lossy AAC
+    # pass, and at 320k that's transparent for speech.
     # Cap longest side at 1920 (= 1080p output). iPhone 4K (2160×3840
     # portrait) on a small Railway container kills the libx264 encode
     # within minutes — 5-10× more pixels than 1080p with no visible
@@ -280,8 +279,9 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
         "-color_primaries", "bt709",
         "-color_trc", "bt709",
         "-colorspace", "bt709",
-        "-af", audio_chain,
-        "-c:a", "aac", "-b:a", "192k",
+        # Bit-perfect audio passthrough — copies the source AAC stream
+        # unchanged. No re-encode, no filter, no quality loss.
+        "-c:a", "copy",
         "-movflags", "+faststart",
         output_path,
     ]
