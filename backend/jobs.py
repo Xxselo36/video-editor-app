@@ -171,6 +171,42 @@ class JobStore:
             )
             self._conn.commit()
 
+    def list_all(self) -> list[Job]:
+        """Return every job in the store (unfiltered)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT data FROM jobs"
+            ).fetchall()
+        jobs: list[Job] = []
+        for r in rows:
+            try:
+                jobs.append(self._deserialize(r["data"]))
+            except Exception:
+                continue
+        return jobs
+
+    def mark_stuck_as_error(
+        self,
+        message: str = "Verarbeitung wurde unterbrochen. "
+                       "Bitte lade das Video noch einmal hoch.",
+    ) -> int:
+        """Mark jobs that were mid-processing during shutdown as failed.
+
+        Called on container startup. Any job whose in-memory worker
+        thread died with the previous process (status='processing' or
+        'pending') is unrecoverable — surface the error so the user
+        can retry instead of watching an infinite spinner.
+
+        Returns the number of jobs that got marked.
+        """
+        marked = 0
+        for job in self.list_all():
+            if job.status in ("processing", "pending"):
+                self.update(job.id, status="error", message=message,
+                            error="container_restart", progress=0.0)
+                marked += 1
+        return marked
+
 
 # Singleton — one store per process
 store = JobStore()

@@ -33,14 +33,17 @@ try:
 except ImportError:
     pass
 
+import io
 import json
+import os
 import shutil
 import tempfile
 import threading
 import traceback
 from pathlib import Path
 
-import io
+from contextlib import asynccontextmanager
+import time
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,10 +52,62 @@ from fastapi.responses import FileResponse, Response
 from backend.jobs import store
 from backend.pipeline import analyze_only, render_only
 
+# Track active worker threads so shutdown can wait for them before
+# letting the container die. Deploys used to kill mid-flight jobs;
+# now they wait up to _SHUTDOWN_GRACE_SEC for work in progress.
+_active_jobs: set[str] = set()
+_active_lock = threading.Lock()
+_shutdown_grace_sec = float(os.environ.get("CLEO_SHUTDOWN_GRACE_SEC", "180"))
+
+
+def _register_active(job_id: str) -> None:
+    with _active_lock:
+        _active_jobs.add(job_id)
+
+
+def _release_active(job_id: str) -> None:
+    with _active_lock:
+        _active_jobs.discard(job_id)
+
+
+@asynccontextmanager
+async def lifespan(app_: FastAPI):
+    # STARTUP: any job stuck in 'processing'/'pending' from the previous
+    # container generation is unrecoverable — its worker thread died
+    # with the process. Surface it as a real error so the frontend can
+    # show a retry button instead of polling forever.
+    stuck = store.mark_stuck_as_error()
+    if stuck:
+        print(f"[startup] marked {stuck} stuck job(s) as error "
+              f"(container restart)", flush=True)
+    yield
+    # SHUTDOWN: wait for in-flight worker threads to finish before
+    # letting Uvicorn exit. Railway sends SIGTERM then waits
+    # `RAILWAY_STOP_TIMEOUT_SEC` before SIGKILL — align our grace with
+    # that (default 180s here; Railway Hobbyist caps at 300s).
+    deadline = time.monotonic() + _shutdown_grace_sec
+    while True:
+        with _active_lock:
+            remaining = len(_active_jobs)
+        if remaining == 0:
+            print("[shutdown] all jobs completed, exiting cleanly",
+                  flush=True)
+            break
+        if time.monotonic() > deadline:
+            print(f"[shutdown] grace period expired, "
+                  f"{remaining} job(s) will be killed", flush=True)
+            break
+        print(f"[shutdown] waiting for {remaining} job(s) to finish "
+              f"(grace {int(deadline - time.monotonic())}s left)",
+              flush=True)
+        time.sleep(2.0)
+
+
 app = FastAPI(
     title="Cleo Web Backend",
     version="0.1.0",
     description="Voice-first AI video editor — backend for web app.",
+    lifespan=lifespan,
 )
 
 # Where uploads + outputs live during processing. Phase 2: local disk.
@@ -143,51 +198,55 @@ def caption_preview(preset: str, w: int = 280, h: int = 100):
 
 def _run_analyze(job_id: str) -> None:
     """Worker: normalize + analyze. Job pauses on success awaiting render."""
-    job = store.get(job_id)
-    if job is None or job.input_path is None:
-        return
-
-    job_dir = _WORK_ROOT / job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
-
-    def _progress(msg: str, pct: float) -> None:
-        cur = store.get(job_id)
-        store.update(
-            job_id,
-            status="processing",
-            message=msg,
-            progress=pct if pct >= 0 else (cur.progress if cur else 0),
-        )
-
-    store.update(job_id, status="processing", message="Starting…", progress=1.0)
+    _register_active(job_id)
     try:
-        res = analyze_only(
-            input_path=job.input_path,
-            output_dir=str(job_dir),
-            settings=job.settings,
-            progress_cb=_progress,
-        )
-        # Pause here: status "awaiting_review" tells the UI to show the
-        # subtitle editor. Render starts when client POSTs /jobs/{id}/render.
-        store.update(
-            job_id,
-            status="awaiting_review",
-            message="Review subtitles",
-            progress=100.0,
-            normalized_path=res["normalized_path"],
-            preview_path=res["preview_path"],
-            segments=res["segments"],
-            subtitles=res["subtitles"],
-            duration=res.get("duration", 0.0),
-            cut_ranges=res.get("cut_ranges", []),
-            language=res["language"],
-            audio_warnings=res.get("audio_warnings", []),
-            audio_levels=res.get("audio_levels", {}),
-        )
-    except Exception as e:
-        tb = traceback.format_exc()
-        print(f"[job {job_id}] ANALYZE FAILED: {e}\n{tb}", flush=True)
-        store.update(job_id, status="error", message=str(e), error=str(e))
+        job = store.get(job_id)
+        if job is None or job.input_path is None:
+            return
+
+        job_dir = _WORK_ROOT / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        def _progress(msg: str, pct: float) -> None:
+            cur = store.get(job_id)
+            store.update(
+                job_id,
+                status="processing",
+                message=msg,
+                progress=pct if pct >= 0 else (cur.progress if cur else 0),
+            )
+
+        store.update(job_id, status="processing", message="Starting…", progress=1.0)
+        try:
+            res = analyze_only(
+                input_path=job.input_path,
+                output_dir=str(job_dir),
+                settings=job.settings,
+                progress_cb=_progress,
+            )
+            # Pause here: status "awaiting_review" tells the UI to show the
+            # subtitle editor. Render starts when client POSTs /jobs/{id}/render.
+            store.update(
+                job_id,
+                status="awaiting_review",
+                message="Review subtitles",
+                progress=100.0,
+                normalized_path=res["normalized_path"],
+                preview_path=res["preview_path"],
+                segments=res["segments"],
+                subtitles=res["subtitles"],
+                duration=res.get("duration", 0.0),
+                cut_ranges=res.get("cut_ranges", []),
+                language=res["language"],
+                audio_warnings=res.get("audio_warnings", []),
+                audio_levels=res.get("audio_levels", {}),
+            )
+        except Exception as e:
+            tb = traceback.format_exc()
+            print(f"[job {job_id}] ANALYZE FAILED: {e}\n{tb}", flush=True)
+            store.update(job_id, status="error", message=str(e), error=str(e))
+    finally:
+        _release_active(job_id)
 
 
 def _run_render(
@@ -196,8 +255,10 @@ def _run_render(
     disabled_cuts: list[int] | None = None,
 ) -> None:
     """Worker: render + concat into final MP4."""
+    _register_active(job_id)
     job = store.get(job_id)
     if job is None or job.normalized_path is None:
+        _release_active(job_id)
         return
     job_dir = _WORK_ROOT / job_id
 
@@ -255,6 +316,8 @@ def _run_render(
         tb = traceback.format_exc()
         print(f"[job {job_id}] RENDER FAILED: {e}\n{tb}", flush=True)
         store.update(job_id, status="error", message=str(e), error=str(e))
+    finally:
+        _release_active(job_id)
 
 
 @app.post("/jobs")
