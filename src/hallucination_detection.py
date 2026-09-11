@@ -52,9 +52,12 @@ def find_hallucination_cuts(
             })
 
     cuts: list[tuple[float, float, str, int]] = []
+    consumed: set[int] = set()
+
+    # Pass 1: single-word loops ('um um um um um…')
     i = 0
     while i < len(words):
-        if not words[i]["norm"]:
+        if i in consumed or not words[i]["norm"]:
             i += 1
             continue
         j = i
@@ -71,6 +74,52 @@ def find_hallucination_cuts(
                     words[i]["text"],
                     run_length,
                 ))
+                for k in range(i, j + 1):
+                    consumed.add(k)
         i = j + 1
 
+    # Pass 2: multi-word phrase loops ('Cleo keep. Cleo keep. Cleo
+    # keep.'). Whisper hedges with 2-3× phrase repeats when uncertain,
+    # a subtler hallucination pattern than the single-word case.
+    # Threshold looser here: 3+ repeats of a 2-3 word phrase within
+    # max_span_seconds is a clear loop.
+    PHRASE_LEN_RANGE = (2, 3)
+    PHRASE_MIN_REPEATS = 3
+    for phrase_len in PHRASE_LEN_RANGE:
+        i = 0
+        while i + phrase_len * PHRASE_MIN_REPEATS <= len(words):
+            if any(k in consumed for k in range(i, i + phrase_len)):
+                i += 1
+                continue
+            # Try to grow a run of identical phrase_len-word phrases
+            phrase = tuple(words[i + k]["norm"] for k in range(phrase_len))
+            if not all(phrase):
+                i += 1
+                continue
+            reps = 1
+            j = i + phrase_len
+            while j + phrase_len <= len(words):
+                next_phrase = tuple(words[j + k]["norm"]
+                                    for k in range(phrase_len))
+                if next_phrase != phrase:
+                    break
+                reps += 1
+                j += phrase_len
+            if reps >= PHRASE_MIN_REPEATS:
+                span = words[j - 1]["end"] - words[i]["start"]
+                if span <= max_span_seconds * reps / 2:
+                    cuts.append((
+                        round(words[i]["start"], 3),
+                        round(words[j - 1]["end"], 3),
+                        " ".join(words[i + k]["text"] for k in range(phrase_len)),
+                        reps,
+                    ))
+                    for k in range(i, j):
+                        consumed.add(k)
+                    i = j
+                    continue
+            i += 1
+
+    # Sort cuts by start time
+    cuts.sort(key=lambda c: c[0])
     return cuts

@@ -187,6 +187,23 @@ def find_scene_cut_ranges(
         if not matched:
             i += 1
 
+    # Dedupe consecutive same-type events within 1s — Whisper
+    # sometimes hallucinates a command 2-3 times as a hedge when
+    # decoding gets uncertain ('Cleo keep. Cleo keep. Cleo keep.' when
+    # the user said it once). The extra copies over-cut real content
+    # because their word.end timestamps drift far into the following
+    # audio. Keep only the first occurrence of each cluster.
+    HALLUCINATION_GAP = 1.0
+    deduped: list[tuple[str, float, float, int]] = []
+    for evt in events:
+        if deduped and evt[0] == deduped[-1][0]:
+            gap = evt[1] - deduped[-1][2]
+            if gap < HALLUCINATION_GAP:
+                # Drop as hallucinated repeat of the previous event
+                continue
+        deduped.append(evt)
+    events = deduped
+
     # No start command → feature not used; do nothing.
     first_start = next((e for e in events if e[0] == "start"), None)
     if first_start is None:
