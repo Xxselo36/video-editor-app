@@ -39,12 +39,14 @@ def _vt_combos(command_variants: list[str]) -> list[str]:
 
 
 DEFAULT_CUT_KEYWORDS = _vt_combos([
-    # EN
-    "cut", "cuts", "cutted",
+    # EN — 'Cleo stop' is the new voice-trigger primary. 'cut' moved
+    # to scene-triggers as the RESTART command.
+    "stop", "stops", "stopped", "stopping",
     # DE
-    "schnitt", "schneiden", "schneide", "schmitt",
-    # Common mishears in mixed audio
-    "kutt", "gut",  # 'cut' → 'gut' Whisper mishear (rare)
+    "stopp", "stoppe", "gestoppt",
+    "halt", "halte",
+    # Common mishears
+    "top", "stap", "stoop",
 ])
 
 DEFAULT_CONTINUE_KEYWORDS = _vt_combos([

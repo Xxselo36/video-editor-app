@@ -189,21 +189,24 @@ class AudioAnalyzer:
         # sounding German phrases ('Cleo start' → 'Cleo ist ab',
         # 'Cleo restart' → 'Cleo is what').
         wake_prompt = (
-            # EN commands 3x
-            "Cleo cut. Cleo go. Cleo cut. Cleo go. Cleo cut. Cleo go. "
-            "Cleo start. Cleo restart. Cleo keep. Cleo finish. "
-            "Cleo start. Cleo restart. Cleo keep. Cleo finish. "
-            "Cleo start. Cleo restart. Cleo keep. Cleo finish. "
-            # DE commands 3x
-            "Cleo schnitt. Cleo weiter. Cleo schnitt. Cleo weiter. "
+            # PRIMARY EN commands 3x — new: 'stop' for voice-trigger,
+            # 'cut' for scene-restart. Both priorities repeated heavily.
+            "Cleo stop. Cleo go. Cleo stop. Cleo go. Cleo stop. Cleo go. "
+            "Cleo start. Cleo cut. Cleo keep. Cleo finish. "
+            "Cleo start. Cleo cut. Cleo keep. Cleo finish. "
+            "Cleo start. Cleo cut. Cleo keep. Cleo finish. "
+            # DE variants 3x
+            "Cleo halt. Cleo weiter. Cleo halt. Cleo weiter. "
             "Cleo neu. Cleo behalten. Cleo ende. "
             "Cleo neu. Cleo behalten. Cleo ende. "
             "Cleo neu. Cleo behalten. Cleo ende. "
             # Context sentences EN + DE
-            "I say Cleo start to begin. I say Cleo restart to redo. "
+            "I say Cleo stop to pause a bad sentence. I say Cleo cut to redo. "
             "I say Cleo keep to save. I say Cleo finish to end. "
-            "Ich sage Cleo start um anzufangen. Ich sage Cleo neu um nochmal. "
-            "Ich sage Cleo behalten um zu speichern. Ich sage Cleo ende zum Schluss. "
+            "Ich sage Cleo stop wenn ich einen Satz abbreche. "
+            "Ich sage Cleo cut wenn ich den Take neu mache. "
+            "Ich sage Cleo behalten wenn der Take gut war. "
+            "Ich sage Cleo ende zum Schluss. "
             "ähm, äh, hmm, um, uh, like, you know, also, halt"
         )
 

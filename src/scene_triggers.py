@@ -45,19 +45,25 @@ DEFAULT_START_KEYWORDS = _combos([
     # DE-mishearings of English 'start' in DE-audio
     "ist ab", "istab", "is ab", "isab",
     "hat ab", "hatab",
-    # DE proper — "anfang" is unambiguous but 2 syllables; skip unless
-    # user asks. 'Cleo start' works in both languages anyway.
+    "is tough", "istough", "is tuff", "is auf",
+    "ist auf", "is doof",
 ])
 
 DEFAULT_RESTART_KEYWORDS = _combos([
-    # EN
+    # Primary — 'Cleo cut' is now the RESTART command (was voice-trigger).
+    "cut", "cuts", "cutted", "cutting",
+    # DE variants for 'cut'
+    "schnitt", "schneiden", "schneide",
+    # Whisper mishears of 'cut' in mixed audio
+    "kutt", "kurt", "gut", "kot",
+    # Legacy: 'restart' + its mishears kept as fallback so users who
+    # already learned the old primary don't get broken.
     "restart", "restarts", "restarte", "restartet", "restarted",
-    # DE-mishearings of 'restart'
     "is what", "is that", "is left", "is what's", "is that's",
     "rest art", "rest hart", "rest hard", "restard",
     "restat", "restate",
-    # DE proper
-    "neu", "nue", "no", "noi",
+    # DE proper — semantic siblings
+    "neu", "nue", "noi",
     "nochmal", "noch mal", "nochmals",
     "zurück", "zurueck", "zuruck",
 ])
