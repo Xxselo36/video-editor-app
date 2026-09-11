@@ -15,6 +15,26 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+def _drawn_out(bases: list[str], extend_char: str, max_repeat: int = 8) -> set[str]:
+    """Generate drawn-out spelling variants a word can take when
+    Whisper transcribes a long vocalisation.
+
+    E.g. _drawn_out(['äh'], 'ä') → {'äh', 'ääh', 'äääh', 'ääääh', ...}
+         _drawn_out(['äh'], 'h') → {'äh', 'ähh', 'ähhh', 'ähhhh', ...}
+
+    Used to cover 'äääh' / 'ähhh' / 'hmmmm' etc. that a strict word-
+    list otherwise misses.
+    """
+    out: set[str] = set()
+    for base in bases:
+        idx = base.find(extend_char)
+        if idx == -1:
+            continue
+        for n in range(1, max_repeat + 1):
+            out.add(base[:idx] + extend_char * n + base[idx + 1:])
+    return out
+
+
 @dataclass
 class FillerWord:
     """A detected filler word with timing and confidence information."""
@@ -45,9 +65,22 @@ class FillerDetector:
             "well um", "um well",
         },
         "de": {
-            # Whisper transcribes "äh"-sounds in many spellings — cover them.
-            "ähm", "äh", "ähhh", "ähhm", "ahm", "öh", "öhm", "ehm", "eh",
-            "hm", "hmm", "hmmm", "mhh", "mhm", "mmh", "mm", "mmm",
+            # Base spellings + all drawn-out variants (ää+h, äh+, ah+, etc.)
+            # so 'ääääh' / 'ähhhh' / 'hmmmm' get caught by the same lookup.
+            *_drawn_out(["äh"], "ä"),      # äh, ääh, äääh, ...
+            *_drawn_out(["äh"], "h"),      # äh, ähh, ähhh, ...
+            *_drawn_out(["ähm"], "ä"),     # ähm, äähm, ääähm, ...
+            *_drawn_out(["ähm"], "h"),     # ähm, ähhm, ähhhm, ...
+            *_drawn_out(["ah"], "a"),      # ah, aah, aaah, ...
+            *_drawn_out(["ahm"], "a"),     # ahm, aahm, aaahm, ...
+            *_drawn_out(["öh"], "ö"),      # öh, ööh, öööh, ...
+            *_drawn_out(["öhm"], "ö"),     # öhm, ööhm, öööhm, ...
+            *_drawn_out(["eh"], "e"),      # eh, eeh, eeeh, ...
+            *_drawn_out(["ehm"], "e"),     # ehm, eehm, eeehm, ...
+            *_drawn_out(["hm"], "h"),      # hm, hhm, hhhm, ...
+            *_drawn_out(["hm"], "m"),      # hm, hmm, hmmm, hmmmm, ...
+            *_drawn_out(["mmh"], "m"),     # mmh, mmmh, mmmmh, ...
+            "mhh", "mhm",
             # Multi-word filler combos — almost always fillers as a
             # unit (single-word "also/halt/quasi" are ambiguous and
             # stay out, but combos with a real vocalisation are safe).
@@ -62,8 +95,18 @@ class FillerDetector:
     ALWAYS_FILLER: dict[str, set[str]] = {
         "en": {"um", "uh", "uhm", "uhh", "hmm", "hm", "mm", "mmm",
                "mhm", "mhmm", "er", "erm"},
-        "de": {"ähm", "äh", "ähhh", "ähhm", "ahm", "öh", "öhm", "ehm", "eh",
-               "hm", "hmm", "hmmm", "mhh", "mhm", "mmh", "mm", "mmm"},
+        "de": {
+            # Same programmatic expansion as FILLER_WORDS so drawn-out
+            # forms bypass the confidence threshold too.
+            *_drawn_out(["äh"], "ä"), *_drawn_out(["äh"], "h"),
+            *_drawn_out(["ähm"], "ä"), *_drawn_out(["ähm"], "h"),
+            *_drawn_out(["ah"], "a"), *_drawn_out(["ahm"], "a"),
+            *_drawn_out(["öh"], "ö"), *_drawn_out(["öhm"], "ö"),
+            *_drawn_out(["eh"], "e"), *_drawn_out(["ehm"], "e"),
+            *_drawn_out(["hm"], "h"), *_drawn_out(["hm"], "m"),
+            *_drawn_out(["mmh"], "m"),
+            "mhh", "mhm",
+        },
     }
 
     SENSITIVITY_THRESHOLDS: dict[str, float] = {
