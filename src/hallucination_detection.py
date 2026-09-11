@@ -108,13 +108,21 @@ def find_hallucination_cuts(
             if reps >= PHRASE_MIN_REPEATS:
                 span = words[j - 1]["end"] - words[i]["start"]
                 if span <= max_span_seconds * reps / 2:
+                    # KEEP the first legitimate occurrence, cut only
+                    # the duplicated copies 2..N. Otherwise the user's
+                    # actual command gets removed alongside the hedge.
+                    first_end_idx = i + phrase_len - 1
+                    dup_start_idx = i + phrase_len
                     cuts.append((
-                        round(words[i]["start"], 3),
+                        round(words[first_end_idx]["end"], 3),
                         round(words[j - 1]["end"], 3),
                         " ".join(words[i + k]["text"] for k in range(phrase_len)),
                         reps,
                     ))
-                    for k in range(i, j):
+                    # Consume only the duplicate tokens; the first
+                    # phrase stays in the word list for scene/voice
+                    # trigger detection to pick up.
+                    for k in range(dup_start_idx, j):
                         consumed.add(k)
                     i = j
                     continue
