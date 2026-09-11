@@ -188,31 +188,17 @@ class AudioAnalyzer:
         # command words correctly instead of re-mapping them to close-
         # sounding German phrases ('Cleo start' → 'Cleo ist ab',
         # 'Cleo restart' → 'Cleo is what').
+        # Wake-prompt kept short — Whisper only allows ~224 tokens of
+        # priming, and long prompts BIAS the decoder so heavily that
+        # actual content gets dropped (seen: 25s of speech → only 19
+        # transcribed words when the prompt was 40+ repetitions).
+        # One instance of each command word is enough for the LM to
+        # know the vocabulary; the LLM correct_voice_commands step
+        # catches any residual mishears downstream.
         wake_prompt = (
-            # PRIMARY EN commands 3x — new: 'stop' for voice-trigger,
-            # 'cut' for scene-restart. Both priorities repeated heavily.
-            "Cleo stop. Cleo go. Cleo stop. Cleo go. Cleo stop. Cleo go. "
             "Cleo start. Cleo cut. Cleo keep. Cleo finish. "
-            "Cleo start. Cleo cut. Cleo keep. Cleo finish. "
-            "Cleo start. Cleo cut. Cleo keep. Cleo finish. "
-            # DE variants 3x
-            "Cleo halt. Cleo weiter. Cleo halt. Cleo weiter. "
-            "Cleo neu. Cleo behalten. Cleo ende. "
-            "Cleo neu. Cleo behalten. Cleo ende. "
-            "Cleo neu. Cleo behalten. Cleo ende. "
-            # Context sentences EN + DE
-            "I say Cleo stop to pause a bad sentence. I say Cleo cut to redo. "
-            "I say Cleo keep to save. I say Cleo finish to end. "
-            "Ich sage Cleo stop wenn ich einen Satz abbreche. "
-            "Ich sage Cleo cut wenn ich den Take neu mache. "
-            "Ich sage Cleo behalten wenn der Take gut war. "
-            "Ich sage Cleo ende zum Schluss."
-            # NOTE: filler examples ('ähm', 'um', 'uh') deliberately
-            # NOT included here. When Whisper decoding gets uncertain
-            # (mumble, silence with mic noise), tokens in the prompt
-            # bias the language model — a prompt with 'um' encourages
-            # the decoder to fall into an 'um um um um...' loop instead
-            # of producing silence or no-speech.
+            "Cleo stop. Cleo go. "
+            "Cleo neu. Cleo behalten. Cleo ende."
         )
 
         # Try Groq first: cloud Whisper, ~10x faster than local CPU.
