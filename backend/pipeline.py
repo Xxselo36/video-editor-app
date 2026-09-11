@@ -414,26 +414,36 @@ def _ffmpeg_concat(
     audio_only_path: str | None = None
     if use_source_audio:
         audio_segs_dir = tempfile.mkdtemp(prefix="cleo_audio_")
-        aac_seg_paths: list[str] = []
+        # Extract to .m4a (MP4 container) instead of raw .aac (ADTS).
+        # iPhone AAC lives natively in MP4 — matching the container
+        # keeps the AAC bitstream bit-identical without ADTS wrapping
+        # that concat demuxer sometimes rejects.
+        m4a_seg_paths: list[str] = []
         for i, (s, e) in enumerate(audio_segments):
-            aac_path = str(Path(audio_segs_dir) / f"a_{i:04d}.aac")
+            m4a_path = str(Path(audio_segs_dir) / f"a_{i:04d}.m4a")
             extract_cmd = [
                 get_ffmpeg_path(), "-y",
                 "-ss", f"{s:.3f}", "-to", f"{e:.3f}",
                 "-i", source_audio_path,
                 "-vn", "-c:a", "copy",
                 "-avoid_negative_ts", "make_zero",
-                aac_path,
+                m4a_path,
             ]
             r = subprocess.run(extract_cmd, capture_output=True, text=True)
-            if r.returncode == 0 and Path(aac_path).exists():
-                aac_seg_paths.append(aac_path)
-        if aac_seg_paths:
+            if r.returncode == 0 and Path(m4a_path).exists():
+                m4a_seg_paths.append(m4a_path)
+            else:
+                # Surface the failure loudly so we don't silently fall
+                # back to MoviePy's degraded audio.
+                print(f"[audio-extract] seg {i} failed: "
+                      f"{r.stderr[-400:] if r.stderr else '(no stderr)'}",
+                      flush=True)
+        if m4a_seg_paths and len(m4a_seg_paths) == len(audio_segments):
             audio_list_path = str(Path(audio_segs_dir) / "list.txt")
             with open(audio_list_path, "w") as f:
-                for p in aac_seg_paths:
+                for p in m4a_seg_paths:
                     f.write(f"file '{p}'\n")
-            audio_only_path = str(Path(audio_segs_dir) / "concat.aac")
+            audio_only_path = str(Path(audio_segs_dir) / "concat.m4a")
             concat_a_cmd = [
                 get_ffmpeg_path(), "-y",
                 "-f", "concat", "-safe", "0",
@@ -443,7 +453,18 @@ def _ffmpeg_concat(
             ]
             r = subprocess.run(concat_a_cmd, capture_output=True, text=True)
             if r.returncode != 0:
+                print(f"[audio-concat] failed: "
+                      f"{r.stderr[-400:] if r.stderr else '(no stderr)'}",
+                      flush=True)
                 audio_only_path = None
+            else:
+                print(f"[audio] bit-perfect track built from source "
+                      f"({len(audio_segments)} segments)", flush=True)
+        else:
+            print(f"[audio] source-audio path aborted — "
+                  f"{len(m4a_seg_paths)}/{len(audio_segments)} segments "
+                  "extracted; falling back to MoviePy audio",
+                  flush=True)
 
     cmd = [
         get_ffmpeg_path(), "-y",
