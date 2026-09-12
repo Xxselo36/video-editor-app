@@ -485,11 +485,9 @@ def _ffmpeg_concat(
         # medium/crf 16 for the final output — runs once per render.
         "-c:v", "libx264", "-preset", "medium", "-crf", "16",
         "-pix_fmt", "yuv420p",
-        # Force constant frame rate at 30fps so any tiny drift from
-        # AAC-frame-boundary snaps on the audio slice extracts doesn't
-        # accumulate.
-        "-vsync", "cfr",
-        "-r", "30",
+        # -vsync 1 (default) with +genpts on input preserves source fps.
+        # Previous -r 30 forced re-timing which caused drift on 60fps
+        # or 29.97 source. Removed.
         # Audio: bit-perfect copy of source AAC.
         "-c:a", "copy",
         "-movflags", "+faststart",

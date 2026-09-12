@@ -2153,6 +2153,11 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
 
         ok_replace = False
         if er.returncode == 0 and os.path.isfile(audio_slice_path):
+            # -shortest truncates whichever stream is longer to match
+            # the shorter. Combined with -c:v copy, video ends at its
+            # nearest frame BEFORE audio ends → both streams end at
+            # essentially the same time (< 1 video frame apart).
+            # Container duration = shorter stream's duration.
             mux_cmd = [
                 _ffmpeg, "-y",
                 "-i", out_path,
@@ -2161,6 +2166,8 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                 "-map", "1:a:0",
                 "-c:v", "copy",
                 "-c:a", "copy",
+                "-shortest",
+                "-fflags", "+genpts",
                 "-movflags", "+faststart",
                 muxed_path,
             ]
