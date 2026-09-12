@@ -1697,9 +1697,9 @@ def _render_segment_with_standalone_captions(
                 output_path,
                 codec="libx264", audio_codec="aac",
                 audio_bitrate="320k", audio_fps=_audio_fps,
-                preset="fast",
+                preset="medium",
                 temp_audiofile=_tmp_audio, remove_temp=True,
-                ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "18", "-bf", "0", "-avoid_negative_ts", "make_zero"],
+                ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "17", "-bf", "0", "-avoid_negative_ts", "make_zero"],
                 threads=4, logger=None,
             )
             if _close_base_clip:
@@ -1726,9 +1726,9 @@ def _render_segment_with_standalone_captions(
                 output_path,
                 codec="libx264", audio_codec="aac",
                 audio_bitrate="320k", audio_fps=_audio_fps,
-                preset="fast",
+                preset="medium",
                 temp_audiofile=_tmp_audio, remove_temp=True,
-                ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "18", "-bf", "0", "-avoid_negative_ts", "make_zero"],
+                ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "17", "-bf", "0", "-avoid_negative_ts", "make_zero"],
                 threads=4, logger=None,
             )
             if _close_base_clip:
@@ -1968,9 +1968,9 @@ def _render_segment_with_standalone_captions(
             output_path,
             codec="libx264", audio_codec="aac",
             audio_bitrate="320k", audio_fps=_audio_fps,
-            preset="fast",
+            preset="medium",
             temp_audiofile=_tmp_audio, remove_temp=True,
-            ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "18", "-bf", "0", "-avoid_negative_ts", "make_zero"],
+            ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "17", "-bf", "0", "-avoid_negative_ts", "make_zero"],
             threads=4, logger=None,
         )
         try:

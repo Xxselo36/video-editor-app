@@ -471,6 +471,10 @@ def _ffmpeg_concat(
 
     cmd = [
         get_ffmpeg_path(), "-y",
+        # +genpts on the INPUT parser fills in missing PTS from DTS so
+        # concat-demuxer segments join cleanly without inheriting the
+        # tiny AAC-frame-boundary offsets that stacked as A/V drift.
+        "-fflags", "+genpts",
         "-f", "concat", "-safe", "0",
         "-i", list_path,
     ]
@@ -478,11 +482,15 @@ def _ffmpeg_concat(
         cmd += ["-i", audio_only_path, "-map", "0:v", "-map", "1:a"]
 
     cmd += [
-        # v3-compatible params (fast/crf 18) — matches burn step so
-        # concat doesn't re-introduce GOP mismatch that caused A/V drift.
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        # medium/crf 16 for the final output — runs once per render.
+        "-c:v", "libx264", "-preset", "medium", "-crf", "16",
         "-pix_fmt", "yuv420p",
-        # Audio: bit-perfect copy of source AAC either way.
+        # Force constant frame rate at 30fps so any tiny drift from
+        # AAC-frame-boundary snaps on the audio slice extracts doesn't
+        # accumulate.
+        "-vsync", "cfr",
+        "-r", "30",
+        # Audio: bit-perfect copy of source AAC.
         "-c:a", "copy",
         "-movflags", "+faststart",
         output_path,
