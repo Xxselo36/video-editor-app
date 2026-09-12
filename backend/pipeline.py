@@ -223,7 +223,11 @@ def _precheck_audio(input_path: str) -> dict:
     return {"mean_db": mean_db, "max_db": max_db, "warnings": warnings}
 
 
-def _normalize_orientation(input_path: str, output_path: str) -> None:
+def _normalize_orientation(
+    input_path: str,
+    output_path: str,
+    max_side: int = 1920,
+) -> None:
     """Re-encode upload with rotation baked in, audio cleaned + LUFS-normalized.
 
     Three passes folded into one ffmpeg call:
@@ -245,13 +249,12 @@ def _normalize_orientation(input_path: str, output_path: str) -> None:
     # user played back with volume boosted. Skipping the normalize
     # re-encode entirely means the burn step is the ONLY lossy AAC
     # pass, and at 320k that's transparent for speech.
-    # Cap longest side at 1920 (= 1080p output). iPhone 4K (2160×3840
-    # portrait) on a small Railway container kills the libx264 encode
-    # within minutes — 5-10× more pixels than 1080p with no visible
-    # quality gain after the burn step re-encodes anyway. Aspect ratio
-    # preserved. Even/odd-safe via -2.
+    # Cap longest side at `max_side`. Default 1920 (1080p) for the
+    # Railway fast path; caller passes 3840 for 4K when user opts in.
+    # Aspect ratio preserved. Even/odd-safe via -2.
     scale_filter = (
-        "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(ih,iw),min(1920,ih),-2)'"
+        f"scale='if(gt(iw,ih),min({max_side},iw),-2)':"
+        f"'if(gt(ih,iw),min({max_side},ih),-2)'"
     )
 
     # HDR → SDR tonemap. iPhone videos (Dolby Vision / HLG) will clip to
@@ -540,7 +543,15 @@ def analyze_only(
 
     _stage("Preparing video…", 3)
     normalized_path = str(Path(output_dir) / "normalized.mp4")
-    _normalize_orientation(input_path, normalized_path)
+    # Resolution: 'resolution' setting is a string like '1080', '1440',
+    # '2160'. Map to max longest side. Default 1080p to preserve the
+    # Railway budget for casual users; 4K opt-in for creators.
+    _res_str = str(settings.get("resolution", "1080"))
+    _res_map = {"1080": 1920, "1440": 2560, "2160": 3840, "4k": 3840}
+    _max_side = _res_map.get(_res_str.lower(), 1920)
+    print(f"[render] resolution setting='{_res_str}' → "
+          f"longest-side max={_max_side}", flush=True)
+    _normalize_orientation(input_path, normalized_path, max_side=_max_side)
 
     # Optional SmartCam reframe — runs ONCE for the primary aspect the
     # user selected. Other multi-format outputs derive from the rendered

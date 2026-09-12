@@ -2122,6 +2122,71 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
             print(f"[multi-clip] seg {i} render failed", flush=True)
             return None
 
+        # POST-MUX: replace MoviePy's numpy'd audio with source AAC.
+        # Reproduced locally why previous attempts failed: -ss BEFORE -i
+        # with -c:a copy on AAC snapped to keyframes AND -to X was
+        # interpreted as end-of-file, producing 2.5s audio for a 2.0s
+        # video request. Container duration reflected the audio length
+        # → concat step produced a broken file with mis-aligned streams.
+        #
+        # Correct incantation: -ss AFTER -i (precise decode-seek) +
+        # -t DURATION (not -to end-time). Streams now match to <5ms.
+        try:
+            from src.ffmpeg_utils import get_ffmpeg_path
+            _ffmpeg = get_ffmpeg_path()
+        except Exception:
+            _ffmpeg = "ffmpeg"
+        seg_len = s_end - s_start
+        audio_slice_path = out_path + ".audio.m4a"
+        muxed_path = out_path + ".muxed.mp4"
+
+        extract_cmd = [
+            _ffmpeg, "-y",
+            "-i", input_video,
+            "-ss", f"{s_start:.6f}",
+            "-t", f"{seg_len:.6f}",
+            "-vn", "-c:a", "copy",
+            audio_slice_path,
+        ]
+        er = subprocess.run(extract_cmd, capture_output=True, text=True,
+                            timeout=60)
+
+        ok_replace = False
+        if er.returncode == 0 and os.path.isfile(audio_slice_path):
+            mux_cmd = [
+                _ffmpeg, "-y",
+                "-i", out_path,
+                "-i", audio_slice_path,
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-c:v", "copy",
+                "-c:a", "copy",
+                "-movflags", "+faststart",
+                muxed_path,
+            ]
+            mr = subprocess.run(mux_cmd, capture_output=True, text=True,
+                                timeout=60)
+            if mr.returncode == 0 and os.path.isfile(muxed_path):
+                os.replace(muxed_path, out_path)
+                ok_replace = True
+                print(f"[multi-clip] seg {i} audio replaced from source "
+                      f"(bit-perfect, dur={seg_len:.3f}s)", flush=True)
+            else:
+                tail = (mr.stderr or "")[-300:]
+                print(f"[multi-clip] seg {i} mux failed: {tail}",
+                      flush=True)
+        else:
+            tail = (er.stderr or "")[-300:]
+            print(f"[multi-clip] seg {i} audio-extract failed: {tail}",
+                  flush=True)
+
+        for _p in (audio_slice_path, muxed_path):
+            try:
+                if os.path.exists(_p):
+                    os.remove(_p)
+            except Exception:
+                pass
+
         actual_dur = _probe_video(out_path).get("duration", seg_dur)
         # Report progress from the worker so the UI bar moves as each
         # segment finishes (not in submission order).
