@@ -2121,6 +2121,50 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
         if not ok or not os.path.isfile(out_path):
             print(f"[multi-clip] seg {i} render failed", flush=True)
             return None
+
+        # POST-MUX: replace MoviePy's numpy-processed audio with the
+        # source audio slice (bit-perfect AAC copy from input_video).
+        # MoviePy decodes → numpy → re-encodes audio which subtly alters
+        # dynamics; muxing source audio directly bypasses that.
+        # Uses -copyts + -shortest to keep video/audio duration exactly
+        # aligned so A/V stays in sync when the segments are concat'd.
+        try:
+            from src.ffmpeg_utils import get_ffmpeg_path
+            _ffmpeg = get_ffmpeg_path()
+        except Exception:
+            _ffmpeg = "ffmpeg"
+        muxed_path = out_path + ".muxed.mp4"
+        mux_cmd = [
+            _ffmpeg, "-y",
+            "-i", out_path,               # MoviePy's video (with captions)
+            "-ss", f"{s_start:.6f}",
+            "-to", f"{s_end:.6f}",
+            "-i", input_video,             # source (has bit-perfect audio)
+            "-map", "0:v:0",              # video from MoviePy segment
+            "-map", "1:a:0",              # audio from source slice
+            "-c:v", "copy",               # zero re-encode of video
+            "-c:a", "copy",               # zero re-encode of audio
+            "-shortest",                  # truncate to shorter stream
+            "-avoid_negative_ts", "make_zero",
+            "-movflags", "+faststart",
+            muxed_path,
+        ]
+        mux_res = subprocess.run(mux_cmd, capture_output=True, text=True,
+                                 timeout=60)
+        if mux_res.returncode == 0 and os.path.isfile(muxed_path):
+            os.replace(muxed_path, out_path)
+            print(f"[multi-clip] seg {i} audio replaced from source "
+                  f"(bit-perfect)", flush=True)
+        else:
+            tail = (mux_res.stderr or "")[-400:]
+            print(f"[multi-clip] seg {i} audio-replace failed, keeping "
+                  f"MoviePy audio: {tail}", flush=True)
+            try:
+                if os.path.exists(muxed_path):
+                    os.remove(muxed_path)
+            except Exception:
+                pass
+
         actual_dur = _probe_video(out_path).get("duration", seg_dur)
         # Report progress from the worker so the UI bar moves as each
         # segment finishes (not in submission order).
