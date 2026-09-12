@@ -1695,8 +1695,8 @@ def _render_segment_with_standalone_captions(
             # consistent codec) and we're done.
             clip.write_videofile(
                 output_path,
-                codec="libx264", audio=False,
-                # audio=False (muxed from source after)
+                codec="libx264", audio_codec="aac",
+                audio_bitrate="320k", audio_fps=_audio_fps,
                 preset="fast",
                 temp_audiofile=_tmp_audio, remove_temp=True,
                 ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "18", "-bf", "0", "-avoid_negative_ts", "make_zero"],
@@ -1724,8 +1724,8 @@ def _render_segment_with_standalone_captions(
                 return []
             clip.write_videofile(
                 output_path,
-                codec="libx264", audio=False,
-                # audio=False (muxed from source after)
+                codec="libx264", audio_codec="aac",
+                audio_bitrate="320k", audio_fps=_audio_fps,
                 preset="fast",
                 temp_audiofile=_tmp_audio, remove_temp=True,
                 ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "18", "-bf", "0", "-avoid_negative_ts", "make_zero"],
@@ -1966,8 +1966,8 @@ def _render_segment_with_standalone_captions(
 
         final.write_videofile(
             output_path,
-            codec="libx264", audio=False,
-            # audio=False (muxed from source after)
+            codec="libx264", audio_codec="aac",
+            audio_bitrate="320k", audio_fps=_audio_fps,
             preset="fast",
             temp_audiofile=_tmp_audio, remove_temp=True,
             ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "18", "-bf", "0", "-avoid_negative_ts", "make_zero"],
@@ -2121,74 +2121,6 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
         if not ok or not os.path.isfile(out_path):
             print(f"[multi-clip] seg {i} render failed", flush=True)
             return None
-
-        # POST-MUX in two steps for reliability:
-        #   1) Extract source-audio slice into a standalone .m4a.
-        #   2) Mux MoviePy video + that .m4a into a fresh MP4.
-        # Both steps use -c copy so audio stays bit-perfect. Split
-        # avoids -ss/-to interacting with -c:v copy + +faststart, which
-        # was producing broken outputs when done in a single ffmpeg call.
-        try:
-            from src.ffmpeg_utils import get_ffmpeg_path
-            _ffmpeg = get_ffmpeg_path()
-        except Exception:
-            _ffmpeg = "ffmpeg"
-        audio_slice_path = out_path + ".audio.m4a"
-        muxed_path = out_path + ".muxed.mp4"
-
-        # Step 1: extract source audio slice
-        extract_cmd = [
-            _ffmpeg, "-y",
-            "-ss", f"{s_start:.6f}",
-            "-to", f"{s_end:.6f}",
-            "-i", input_video,
-            "-vn", "-c:a", "copy",
-            "-avoid_negative_ts", "make_zero",
-            audio_slice_path,
-        ]
-        er = subprocess.run(extract_cmd, capture_output=True, text=True,
-                            timeout=60)
-
-        ok_replace = False
-        if er.returncode == 0 and os.path.isfile(audio_slice_path):
-            # Step 2: mux MoviePy video (input 0) + audio slice (input 1)
-            mux_cmd = [
-                _ffmpeg, "-y",
-                "-i", out_path,
-                "-i", audio_slice_path,
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-c:v", "copy",
-                "-c:a", "copy",
-                "-movflags", "+faststart",
-                muxed_path,
-            ]
-            mr = subprocess.run(mux_cmd, capture_output=True, text=True,
-                                timeout=60)
-            if mr.returncode == 0 and os.path.isfile(muxed_path):
-                os.replace(muxed_path, out_path)
-                ok_replace = True
-                print(f"[multi-clip] seg {i} audio replaced from source "
-                      f"(bit-perfect)", flush=True)
-            else:
-                tail = (mr.stderr or "")[-300:]
-                print(f"[multi-clip] seg {i} mux failed: {tail}",
-                      flush=True)
-        else:
-            tail = (er.stderr or "")[-300:]
-            print(f"[multi-clip] seg {i} audio-extract failed: {tail}",
-                  flush=True)
-
-        if not ok_replace:
-            print(f"[multi-clip] seg {i} keeping MoviePy audio "
-                  f"(fallback)", flush=True)
-        # Clean up temp files
-        for _p in (audio_slice_path, muxed_path):
-            try:
-                if os.path.exists(_p):
-                    os.remove(_p)
-            except Exception:
-                pass
 
         actual_dur = _probe_video(out_path).get("duration", seg_dur)
         # Report progress from the worker so the UI bar moves as each
