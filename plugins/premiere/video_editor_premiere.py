@@ -2098,9 +2098,17 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
         if seg_dur <= 0:
             return None
         clip_subs = _subs_for(s_start, s_end, seg_dur)
+        # Render video 50ms LONGER than the requested segment so the
+        # post-mux -shortest step truncates video (not audio) to match
+        # the AAC-snapped audio duration exactly. Without this padding
+        # each segment lost up to 33ms video and total render length
+        # drifted shorter than intended — noticeable on 10min+ output.
+        # Clamped to source duration for the last segment.
         try:
             full_clip = VideoFileClip(input_video)
-            sub_clip = full_clip.subclip(s_start, s_end)
+            _src_dur = float(getattr(full_clip, "duration", 0.0) or 0.0)
+            _s_end_padded = min(s_end + 0.05, _src_dur) if _src_dur else s_end
+            sub_clip = full_clip.subclip(s_start, _s_end_padded)
         except Exception as e:
             print(f"[multi-clip] seg {i} open/subclip failed: {e}",
                   flush=True)
