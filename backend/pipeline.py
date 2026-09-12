@@ -475,10 +475,9 @@ def _ffmpeg_concat(
         cmd += ["-i", audio_only_path, "-map", "0:v", "-map", "1:a"]
 
     cmd += [
-        # Match the burn step (medium/crf 16 + tune film).
-        "-c:v", "libx264", "-preset", "medium", "-crf", "16",
-        "-tune", "film",
-        "-profile:v", "high", "-level:v", "4.1",
+        # v3-compatible params (fast/crf 18) — matches burn step so
+        # concat doesn't re-introduce GOP mismatch that caused A/V drift.
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-pix_fmt", "yuv420p",
         # Audio: bit-perfect copy of source AAC either way.
         "-c:a", "copy",

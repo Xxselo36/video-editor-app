@@ -2231,13 +2231,10 @@ def _cut_concat_burn(input_video, segments, srt_path, output_path,
         "-filter_complex", filter_complex,
         "-map", "[outv]",
         "-map", "[cata]",
-        # Burn step is the main visible output. medium/crf 16 + tune film
-        # is ~2× slower than fast/crf 18 but visibly sharper — sharper
-        # edges on captions, less blocking in flat regions, better
-        # preserved detail in the speaker's face.
-        "-c:v", "libx264", "-preset", "medium", "-crf", "16",
-        "-tune", "film",
-        "-profile:v", "high", "-level:v", "4.1",
+        # v3-compatible burn params (fast/crf 18) — the medium/tune film/
+        # profile high combo altered GOP + B-frame handling and produced
+        # audible A/V drift. Sync stability > slight quality gain.
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "320k",
         "-movflags", "+faststart",
@@ -2306,9 +2303,7 @@ def _burn_subtitles_into_video(input_video, srt_path, output_path,
         ffmpeg, "-y",
         "-i", input_video,
         "-vf", f"subtitles='{escaped_srt}':force_style='{style}'",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "16",
-        "-tune", "film",
-        "-profile:v", "high", "-level:v", "4.1",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-pix_fmt", "yuv420p",
         "-c:a", "copy",
         "-movflags", "+faststart",
