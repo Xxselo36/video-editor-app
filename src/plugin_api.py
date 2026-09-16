@@ -308,6 +308,33 @@ def analyze_video(
                   f"time {_tb:.1f}s→{_ta:.1f}s (removed {_tb - _ta:.1f}s)",
                   flush=True)
 
+    # Word-gap cleanup: catch drawn-out fillers Whisper cleaned out of
+    # its transcription entirely (a common Whisper 'polish' behavior
+    # for 'ääääh' / 'öhm' / long throat clears). Looks for gaps > 400ms
+    # between consecutive Whisper words within a speech-detected region.
+    if remove_fillers and analyzer._transcription:
+        from src.word_gap_detection import find_word_gap_cuts
+        _speech_only = [(s.start, s.end) for s in speech_segments
+                        if s.has_speech]
+        _gap_cuts_raw = find_word_gap_cuts(
+            analyzer._transcription, speech_ranges=_speech_only,
+        )
+        if _gap_cuts_raw:
+            from src.filler_detection import FillerDetector
+            _det = FillerDetector()
+            _gap_ranges = [(s, e) for (s, e, _g) in _gap_cuts_raw]
+            _sb = len(segments)
+            _tb = sum(e - s for s, e in segments)
+            segments = _det.filter_segments(segments, _gap_ranges)
+            _ta = sum(e - s for s, e in segments)
+            for (s, e, g) in _gap_cuts_raw:
+                print(f"[word-gap] cut {s:.2f}-{e:.2f}s "
+                      f"(gap={g:.2f}s — likely untranscribed filler)",
+                      flush=True)
+            print(f"[word-gap] segments {_sb}→{len(segments)}, "
+                  f"time {_tb:.1f}s→{_ta:.1f}s (removed {_tb - _ta:.1f}s)",
+                  flush=True)
+
     # Stutter cleanup — repeated N-gram sequences ("es ist ein, es ist
     # ein sehr schönes Thema") that filler removal doesn't catch
     # because the repeated words aren't classical fillers. Runs on the
