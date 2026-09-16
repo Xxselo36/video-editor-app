@@ -335,6 +335,37 @@ def analyze_video(
                   f"time {_tb:.1f}s→{_ta:.1f}s (removed {_tb - _ta:.1f}s)",
                   flush=True)
 
+    # Audio-based filler detection: Whisper sometimes drops a filler
+    # AND collapses the timing so no gap is visible in the transcript.
+    # For those cases, scan the audio directly for low-energy monotone
+    # segments (RMS + spectral flatness) — classic 'ähm/uh' acoustic
+    # signature. Runs inside kept speech segments only.
+    if remove_fillers:
+        try:
+            from src.filler_detection import detect_fillers_audio
+            _sr, _adata = analyzer.get_audio_data()
+            _current_speech = [(s, e) for (s, e) in segments]
+            _audio_fillers = detect_fillers_audio(
+                _sr, _adata, _current_speech,
+                min_duration=0.25, max_duration=1.5,
+            )
+            if _audio_fillers:
+                from src.filler_detection import FillerDetector
+                _det = FillerDetector()
+                _sb = len(segments)
+                _tb = sum(e - s for s, e in segments)
+                segments = _det.filter_segments(segments, _audio_fillers)
+                _ta = sum(e - s for s, e in segments)
+                for (s, e) in _audio_fillers:
+                    print(f"[audio-filler] cut {s:.2f}-{e:.2f}s "
+                          f"(low-energy monotone — likely äh)",
+                          flush=True)
+                print(f"[audio-filler] segments {_sb}→{len(segments)}, "
+                      f"time {_tb:.1f}s→{_ta:.1f}s "
+                      f"(removed {_tb - _ta:.1f}s)", flush=True)
+        except Exception as _e:
+            print(f"[audio-filler] skipped: {_e}", flush=True)
+
     # Stutter cleanup — repeated N-gram sequences ("es ist ein, es ist
     # ein sehr schönes Thema") that filler removal doesn't catch
     # because the repeated words aren't classical fillers. Runs on the
