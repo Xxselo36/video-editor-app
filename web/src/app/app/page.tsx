@@ -443,23 +443,80 @@ export default function Home() {
       output_formats: applyPreset ? p!.settings.outputFormats : outputFormats,
     };
 
-    const form = new FormData();
-    form.append("file", targetFile);
-    form.append("settings", JSON.stringify(settings));
-
     try {
-      const res = await new Promise<XMLHttpRequest>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", `${backendUrl()}/jobs`);
-        xhr.upload.onprogress = (ev) => {
-          if (ev.lengthComputable) {
-            setUploadPct(Math.round((ev.loaded / ev.total) * 100));
-          }
-        };
-        xhr.onload = () => resolve(xhr);
-        xhr.onerror = () => reject(new Error("Network error"));
-        xhr.send(form);
-      });
+      // Two upload paths depending on file size:
+      //   - <=90MB: legacy multipart POST /jobs (through Railway).
+      //   - >90MB:  presigned R2 PUT direct from browser → then POST
+      //             /jobs with the storage_key so backend fetches from R2.
+      //             Railway's edge caps HTTP bodies around 100MB.
+      const R2_THRESHOLD = 90 * 1024 * 1024; // 90MB
+      let res: XMLHttpRequest;
+
+      if (targetFile.size > R2_THRESHOLD) {
+        // Step 1: get presigned URL
+        const presignRes = await fetch(`${backendUrl()}/uploads/presign`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: targetFile.name,
+            content_type: targetFile.type || "video/mp4",
+          }),
+        });
+        if (!presignRes.ok) {
+          const txt = await presignRes.text();
+          throw new Error(`presign failed: ${txt}`);
+        }
+        const presign = await presignRes.json();
+
+        // Step 2: PUT the file body directly to R2
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("PUT", presign.upload_url);
+          const ct = presign.headers?.["Content-Type"];
+          if (ct) xhr.setRequestHeader("Content-Type", ct);
+          xhr.upload.onprogress = (ev) => {
+            if (ev.lengthComputable) {
+              setUploadPct(Math.round((ev.loaded / ev.total) * 100));
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error(`R2 upload failed: ${xhr.status}`));
+          };
+          xhr.onerror = () => reject(new Error("R2 network error"));
+          xhr.send(targetFile);
+        });
+
+        // Step 3: create job with storage_key (server fetches from R2)
+        const form = new FormData();
+        form.append("storage_key", presign.storage_key);
+        form.append("filename", targetFile.name);
+        form.append("settings", JSON.stringify(settings));
+        res = await new Promise<XMLHttpRequest>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", `${backendUrl()}/jobs`);
+          xhr.onload = () => resolve(xhr);
+          xhr.onerror = () => reject(new Error("Network error"));
+          xhr.send(form);
+        });
+      } else {
+        // Legacy path — direct multipart upload to Railway.
+        const form = new FormData();
+        form.append("file", targetFile);
+        form.append("settings", JSON.stringify(settings));
+        res = await new Promise<XMLHttpRequest>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", `${backendUrl()}/jobs`);
+          xhr.upload.onprogress = (ev) => {
+            if (ev.lengthComputable) {
+              setUploadPct(Math.round((ev.loaded / ev.total) * 100));
+            }
+          };
+          xhr.onload = () => resolve(xhr);
+          xhr.onerror = () => reject(new Error("Network error"));
+          xhr.send(form);
+        });
+      }
 
       if (res.status >= 400) {
         throw new Error(`Upload failed: ${res.responseText}`);

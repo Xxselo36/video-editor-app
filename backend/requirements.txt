@@ -40,3 +40,8 @@ torchvision
 
 # Process utils.
 psutil>=5.9.0
+
+# ── Direct-to-storage upload (Cloudflare R2, S3-compatible) ──
+# Used for presigned URLs so client uploads bypass Railway's edge
+# router for large files (multi-GB iPhone ProRes).
+boto3>=1.35.0

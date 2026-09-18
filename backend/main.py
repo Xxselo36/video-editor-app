@@ -320,26 +320,100 @@ def _run_render(
         _release_active(job_id)
 
 
+@app.post("/uploads/presign")
+async def presign_upload_endpoint(payload: dict):
+    """Return a presigned URL for direct-to-R2 upload.
+
+    Client PUTs the video body straight to R2 (bypasses Railway edge
+    for multi-GB files), then calls POST /jobs with the returned
+    storage_key. Falls back with 503 if R2 isn't configured.
+    """
+    from backend.storage import r2_available, presign_upload
+    if not r2_available():
+        raise HTTPException(
+            503,
+            "Direct upload not available on this deployment. "
+            "Contact support if you need multi-GB uploads."
+        )
+    filename = str(payload.get("filename") or "upload.mp4").strip()
+    content_type = str(
+        payload.get("content_type") or "video/mp4"
+    ).strip() or "video/mp4"
+    try:
+        info = presign_upload(filename=filename, content_type=content_type)
+    except Exception as e:
+        raise HTTPException(500, f"presign failed: {e}") from e
+    return info
+
+
 @app.post("/jobs")
 async def create_job(
-    file: UploadFile = File(...),
+    file: UploadFile = File(None),
     settings: str = Form("{}"),
+    storage_key: str = Form(None),
+    filename: str = Form(None),
 ):
-    """Upload + start analyze. Job pauses for subtitle review."""
+    """Upload + start analyze. Two paths:
+
+    1) Small files (< ~100MB): multipart 'file' upload directly through
+       Railway. Legacy path — works for everything that fits under the
+       edge-router body limit.
+
+    2) Large files: client first hits POST /uploads/presign, uploads
+       the body directly to R2 with the returned URL, then calls this
+       endpoint with `storage_key` set to the R2 object key. Backend
+       downloads from R2 into local /tmp before starting analyze.
+    """
     try:
         parsed = json.loads(settings)
     except json.JSONDecodeError:
         raise HTTPException(400, "settings must be valid JSON")
 
-    suffix = Path(file.filename or "upload.mp4").suffix or ".mp4"
     job_input_dir = _WORK_ROOT / "uploads"
     job_input_dir.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.NamedTemporaryFile(
-        delete=False, suffix=suffix, dir=str(job_input_dir)
-    ) as f:
-        shutil.copyfileobj(file.file, f)
-        input_path = f.name
+    input_path: str
+    if storage_key:
+        # Path B: pull from R2
+        from backend.storage import download_from_r2
+        # Preserve extension from original filename if given, else from
+        # the storage_key (which we generated).
+        suffix = (
+            Path(filename or "").suffix.lower()
+            or Path(storage_key).suffix.lower()
+            or ".mp4"
+        )
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=suffix, dir=str(job_input_dir)
+        ) as f:
+            input_path = f.name
+        try:
+            download_from_r2(storage_key, input_path)
+        except Exception as e:
+            try:
+                os.remove(input_path)
+            except Exception:
+                pass
+            raise HTTPException(
+                502, f"failed to fetch upload from storage: {e}"
+            ) from e
+    elif file is not None:
+        # Path A: legacy multipart upload
+        suffix = Path(file.filename or "upload.mp4").suffix or ".mp4"
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=suffix, dir=str(job_input_dir)
+        ) as f:
+            shutil.copyfileobj(file.file, f)
+            input_path = f.name
+    else:
+        raise HTTPException(
+            400, "Either 'file' (multipart) or 'storage_key' (R2) required."
+        )
+
+    # Stash storage_key on the job settings so we can clean up R2
+    # after render completes.
+    if storage_key:
+        parsed["_r2_storage_key"] = storage_key
 
     job = store.create(input_path=input_path, settings=parsed)
     threading.Thread(target=_run_analyze, args=(job.id,), daemon=True).start()
