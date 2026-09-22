@@ -2673,15 +2673,15 @@ function SceneCommandsPanel({
 
   const addAt = async (t: number, type: SceneEvent["type"]) => {
     const kept = events.filter((_, i) => enabled[i]);
-    const next: SceneEvent[] = [
-      ...kept,
-      {
-        type,
-        start: t,
-        end: Math.min(t + 0.5, duration || t + 0.5),
-        source: "user",
-      },
-    ].sort((a, b) => a.start - b.start);
+    const added: SceneEvent = {
+      type,
+      start: t,
+      end: Math.min(t + 0.5, duration || t + 0.5),
+      source: "user",
+    };
+    const next: SceneEvent[] = [...kept, added].sort(
+      (a, b) => a.start - b.start,
+    );
     setPending(true);
     setAddOpen(false);
     try {
