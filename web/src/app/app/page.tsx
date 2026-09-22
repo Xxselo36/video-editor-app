@@ -2252,7 +2252,10 @@ function ErrorScreen({
 
 // Voice commands cheat sheet. Shown automatically on the user's first
 // visit (localStorage flag) and re-openable via the pill on the picker.
+// Two steps: (1) command reference cards, (2) live mic test with
+// camera preview so the user hears/sees themselves being recognised.
 function VoiceCommandsModal({ onClose }: { onClose: () => void }) {
+  const [step, setStep] = useState<"cheatsheet" | "test">("cheatsheet");
   const commands: Array<{
     phrase: string;
     subtitle: string;
@@ -2300,113 +2303,449 @@ function VoiceCommandsModal({ onClose }: { onClose: () => void }) {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div
-          className="flex items-start justify-between p-6 pb-4"
-          style={{ borderBottom: "1px solid var(--border)" }}
-        >
-          <div>
+        {step === "cheatsheet" ? (
+          <>
+            {/* Header */}
             <div
-              className="mb-1 inline-flex items-center gap-2 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-              style={{
-                background: "var(--brand-tint)",
-                color: "var(--brand-strong)",
-              }}
+              className="flex items-start justify-between p-6 pb-4"
+              style={{ borderBottom: "1px solid var(--border)" }}
             >
-              <IconMic size={12} strokeWidth={2.5} />
-              Voice commands
+              <div>
+                <div
+                  className="mb-1 inline-flex items-center gap-2 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                  style={{
+                    background: "var(--brand-tint)",
+                    color: "var(--brand-strong)",
+                  }}
+                >
+                  <IconMic size={12} strokeWidth={2.5} />
+                  Voice commands
+                </div>
+                <div
+                  className="text-lg font-bold"
+                  style={{ color: "var(--text-strong)" }}
+                >
+                  Edit while you record
+                </div>
+                <div
+                  className="mt-1 text-xs leading-relaxed"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Say these while recording. Cleo cuts the bad parts, keeps
+                  the good ones — you never open an editor.
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                className="ml-4 shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--surface-2)]"
+                style={{ color: "var(--text-muted)" }}
+              >
+                ✕
+              </button>
             </div>
-            <div
-              className="text-lg font-bold"
-              style={{ color: "var(--text-strong)" }}
-            >
-              Edit while you record
-            </div>
-            <div
-              className="mt-1 text-xs leading-relaxed"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Say these while recording. Cleo cuts the bad parts, keeps
-              the good ones — you never open an editor.
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="ml-4 shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--surface-2)]"
-            style={{ color: "var(--text-muted)" }}
-          >
-            ✕
-          </button>
-        </div>
 
-        {/* Command cards */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="flex flex-col gap-2">
-            {commands.map((c) => (
+            {/* Command cards */}
+            <div className="flex-1 overflow-y-auto p-4">
+              <div className="flex flex-col gap-2">
+                {commands.map((c) => (
+                  <div
+                    key={c.phrase}
+                    className="flex items-start gap-3 rounded-xl p-3"
+                    style={{
+                      background: "var(--surface-1)",
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    <div
+                      className="mt-0.5 h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: c.color, boxShadow: `0 0 8px ${c.color}` }}
+                    />
+                    <div className="flex-1">
+                      <div
+                        className="mb-0.5 font-mono text-sm font-semibold"
+                        style={{ color: "var(--text-strong)" }}
+                      >
+                        &ldquo;{c.phrase}&rdquo;
+                      </div>
+                      <div
+                        className="text-xs leading-relaxed"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        {c.subtitle}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
               <div
-                key={c.phrase}
-                className="flex items-start gap-3 rounded-xl p-3"
+                className="mt-4 rounded-xl p-3 text-[11px] leading-relaxed"
                 style={{
                   background: "var(--surface-1)",
-                  border: "1px solid var(--border)",
+                  border: "1px dashed var(--border-hover)",
+                  color: "var(--text-body)",
+                }}
+              >
+                <strong style={{ color: "var(--text-strong)" }}>Example:</strong>{" "}
+                Say &ldquo;Cleo start&rdquo; → talk → mess up → say &ldquo;Cleo
+                cut&rdquo; → retry the sentence → say &ldquo;Cleo keep&rdquo;
+                when it&apos;s good → say &ldquo;Cleo finish&rdquo; when
+                done. Everything else gets cleaned automatically.
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div
+              className="flex gap-2 p-4"
+              style={{ borderTop: "1px solid var(--border)" }}
+            >
+              <button
+                onClick={onClose}
+                className="rounded-xl px-4 py-3 text-sm font-semibold transition-colors"
+                style={{
+                  background: "transparent",
+                  color: "var(--text-body)",
+                  border: "1px solid var(--border-hover)",
+                }}
+              >
+                Skip
+              </button>
+              <button
+                onClick={() => setStep("test")}
+                className="flex-1 rounded-xl py-3 text-sm font-semibold transition-transform hover:scale-[0.99]"
+                style={{
+                  background: "var(--brand)",
+                  color: "white",
+                }}
+              >
+                Try it live →
+              </button>
+            </div>
+          </>
+        ) : (
+          <VoiceCommandsTestStep onDone={onClose} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Live mic + camera test. User grants permissions, sees themselves,
+// says commands, gets real-time feedback. Uses the browser's Web
+// Speech API (webkitSpeechRecognition) — no backend, no cost,
+// works in Safari + Chrome on macOS/iOS/Android.
+function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const [permStatus, setPermStatus] = useState<
+    "idle" | "requesting" | "granted" | "denied" | "unsupported"
+  >("idle");
+  const [transcript, setTranscript] = useState("");
+  const [detected, setDetected] = useState<Record<string, number>>({});
+  const [lastHitAt, setLastHitAt] = useState(0);
+
+  const targets = [
+    { id: "start", phrase: "Cleo start", color: "#5A9FFF" },
+    { id: "cut", phrase: "Cleo cut", color: "#F26E6E" },
+    { id: "keep", phrase: "Cleo keep", color: "#4ECC77" },
+    { id: "finish", phrase: "Cleo finish", color: "#B979FF" },
+    { id: "stop", phrase: "Cleo stop", color: "#F5B54D" },
+    { id: "go", phrase: "Cleo go", color: "#F5B54D" },
+  ];
+
+  // Match keywords + common mishears
+  const matchers: Record<string, RegExp> = {
+    start: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(start|starts|starte|ist ab|is ab|is tough)\b/i,
+    cut: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(cut|cuts|kot|kutt|schnitt)\b/i,
+    keep: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(keep|kip|kiep|behalten)\b/i,
+    finish: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(finish|finnisch|fenish|ende|fertig)\b/i,
+    stop: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(stop|stopp|halt)\b/i,
+    go: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(go|los|weiter)\b/i,
+  };
+
+  const startTest = async () => {
+    setPermStatus("requesting");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: 640, height: 480 },
+        audio: true,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+
+      // Web Speech API
+      const SR =
+        (typeof window !== "undefined" &&
+          ((window as any).SpeechRecognition ||
+            (window as any).webkitSpeechRecognition)) ||
+        null;
+      if (!SR) {
+        setPermStatus("unsupported");
+        return;
+      }
+      const recognition = new SR();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "de-DE";
+      recognition.onresult = (event: any) => {
+        let text = "";
+        for (let i = 0; i < event.results.length; i++) {
+          text += event.results[i][0].transcript + " ";
+        }
+        setTranscript(text.trim());
+        const newDetected: Record<string, number> = {};
+        for (const [id, re] of Object.entries(matchers)) {
+          const matches = text.match(new RegExp(re, "gi"));
+          if (matches) newDetected[id] = matches.length;
+        }
+        if (Object.keys(newDetected).length > 0) {
+          setLastHitAt(Date.now());
+        }
+        setDetected(newDetected);
+      };
+      recognition.onerror = (event: any) => {
+        if (event.error === "not-allowed") setPermStatus("denied");
+      };
+      recognition.onend = () => {
+        // Auto-restart while modal is open
+        try {
+          recognition.start();
+        } catch {
+          // ignore
+        }
+      };
+      recognition.start();
+      recognitionRef.current = recognition;
+      setPermStatus("granted");
+    } catch {
+      setPermStatus("denied");
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      try {
+        recognitionRef.current?.stop();
+      } catch {
+        // ignore
+      }
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  const pulseActive = Date.now() - lastHitAt < 800;
+
+  return (
+    <>
+      {/* Header */}
+      <div
+        className="flex items-start justify-between p-6 pb-4"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
+        <div>
+          <div
+            className="mb-1 inline-flex items-center gap-2 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+            style={{
+              background: "var(--brand-tint)",
+              color: "var(--brand-strong)",
+            }}
+          >
+            <IconMic size={12} strokeWidth={2.5} />
+            Live test
+          </div>
+          <div
+            className="text-lg font-bold"
+            style={{ color: "var(--text-strong)" }}
+          >
+            Say the commands
+          </div>
+          <div
+            className="mt-1 text-xs leading-relaxed"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Cards light up when Cleo hears them. Nothing is uploaded — this
+            runs in your browser.
+          </div>
+        </div>
+        <button
+          onClick={onDone}
+          aria-label="Close"
+          className="ml-4 shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--surface-2)]"
+          style={{ color: "var(--text-muted)" }}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {/* Camera preview */}
+        <div
+          className="relative mb-4 overflow-hidden rounded-xl"
+          style={{
+            background: "var(--surface-1)",
+            aspectRatio: "4 / 3",
+            border: "1px solid var(--border)",
+          }}
+        >
+          <video
+            ref={videoRef}
+            className="h-full w-full object-cover"
+            style={{ transform: "scaleX(-1)" }}
+            muted
+            playsInline
+          />
+          {permStatus === "granted" && (
+            <div
+              className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              style={{
+                background: "rgba(0,0,0,0.6)",
+                color: pulseActive ? "#4ECC77" : "#fff",
+              }}
+            >
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{
+                  background: pulseActive ? "#4ECC77" : "#F26E6E",
+                  boxShadow: pulseActive ? "0 0 6px #4ECC77" : "none",
+                }}
+              />
+              {pulseActive ? "Heard you!" : "Listening…"}
+            </div>
+          )}
+          {permStatus !== "granted" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
+              {permStatus === "idle" && (
+                <>
+                  <div
+                    className="text-center text-sm"
+                    style={{ color: "var(--text-body)" }}
+                  >
+                    Grant camera + mic access to test your voice
+                  </div>
+                  <button
+                    onClick={startTest}
+                    className="rounded-xl px-5 py-2 text-sm font-semibold"
+                    style={{ background: "var(--brand)", color: "white" }}
+                  >
+                    Start test
+                  </button>
+                </>
+              )}
+              {permStatus === "requesting" && (
+                <div className="text-sm" style={{ color: "var(--text-muted)" }}>
+                  Waiting for permission…
+                </div>
+              )}
+              {permStatus === "denied" && (
+                <div className="text-center text-sm" style={{ color: "var(--warn)" }}>
+                  Permission denied. Enable camera + mic access in browser
+                  settings and reload.
+                </div>
+              )}
+              {permStatus === "unsupported" && (
+                <div className="text-center text-sm" style={{ color: "var(--warn)" }}>
+                  Voice detection isn&apos;t supported in this browser. Try
+                  Safari or Chrome.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Command status grid */}
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {targets.map((t) => {
+            const count = detected[t.id] || 0;
+            const hit = count > 0;
+            return (
+              <div
+                key={t.id}
+                className="flex items-center gap-2 rounded-xl p-2.5 transition-all"
+                style={{
+                  background: hit ? "var(--surface-1)" : "var(--surface-1)",
+                  border: `1px solid ${hit ? t.color : "var(--border)"}`,
+                  boxShadow: hit ? `0 0 12px ${t.color}55` : "none",
                 }}
               >
                 <div
-                  className="mt-0.5 h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: c.color, boxShadow: `0 0 8px ${c.color}` }}
-                />
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                  style={{
+                    background: hit ? t.color : "var(--surface-2)",
+                    color: hit ? "white" : "var(--text-muted)",
+                  }}
+                >
+                  {hit ? "✓" : "○"}
+                </div>
                 <div className="flex-1">
                   <div
-                    className="mb-0.5 font-mono text-sm font-semibold"
+                    className="font-mono text-xs font-semibold"
                     style={{ color: "var(--text-strong)" }}
                   >
-                    &ldquo;{c.phrase}&rdquo;
+                    {t.phrase}
                   </div>
-                  <div
-                    className="text-xs leading-relaxed"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    {c.subtitle}
-                  </div>
+                  {count > 1 && (
+                    <div
+                      className="text-[10px]"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      {count}× heard
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
+        </div>
 
+        {/* Live transcript preview */}
+        {permStatus === "granted" && (
           <div
-            className="mt-4 rounded-xl p-3 text-[11px] leading-relaxed"
+            className="rounded-xl p-3 text-[11px] leading-relaxed"
             style={{
               background: "var(--surface-1)",
               border: "1px dashed var(--border-hover)",
-              color: "var(--text-body)",
+              color: "var(--text-muted)",
+              minHeight: "42px",
+              maxHeight: "80px",
+              overflow: "auto",
             }}
           >
-            <strong style={{ color: "var(--text-strong)" }}>Example:</strong>{" "}
-            Say &ldquo;Cleo start&rdquo; → talk → mess up → say &ldquo;Cleo
-            cut&rdquo; → retry the sentence → say &ldquo;Cleo keep&rdquo;
-            when it&apos;s good → say &ldquo;Cleo finish&rdquo; when
-            done. Everything else gets cleaned automatically.
+            <div
+              className="mb-1 text-[9px] uppercase tracking-wider"
+              style={{ color: "var(--text-faint)" }}
+            >
+              What Cleo heard
+            </div>
+            {transcript || (
+              <span style={{ color: "var(--text-faint)" }}>
+                Nothing yet — try saying &ldquo;Cleo start&rdquo;
+              </span>
+            )}
           </div>
-        </div>
-
-        {/* Footer */}
-        <div
-          className="p-4"
-          style={{ borderTop: "1px solid var(--border)" }}
-        >
-          <button
-            onClick={onClose}
-            className="w-full rounded-xl py-3 text-sm font-semibold transition-transform hover:scale-[0.99]"
-            style={{
-              background: "var(--brand)",
-              color: "white",
-            }}
-          >
-            Got it — let&apos;s record
-          </button>
-        </div>
+        )}
       </div>
-    </div>
+
+      {/* Footer */}
+      <div
+        className="p-4"
+        style={{ borderTop: "1px solid var(--border)" }}
+      >
+        <button
+          onClick={onDone}
+          className="w-full rounded-xl py-3 text-sm font-semibold transition-transform hover:scale-[0.99]"
+          style={{
+            background: "var(--brand)",
+            color: "white",
+          }}
+        >
+          Done — let&apos;s record
+        </button>
+      </div>
+    </>
   );
 }
