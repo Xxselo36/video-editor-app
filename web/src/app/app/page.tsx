@@ -452,6 +452,21 @@ export default function Home() {
       output_formats: applyPreset ? p!.settings.outputFormats : outputFormats,
     };
 
+    // Acquire a Wake Lock so the OS doesn't put the tab to sleep
+    // mid-upload. iOS 16.4+ / Android Chrome 84+ / desktop most.
+    // Silent no-op if unsupported (older iOS, private mode).
+    let _wakeLock: { release: () => Promise<void> } | null = null;
+    try {
+      const nav = navigator as unknown as {
+        wakeLock?: { request: (t: string) => Promise<{ release: () => Promise<void> }> };
+      };
+      if (nav.wakeLock?.request) {
+        _wakeLock = await nav.wakeLock.request("screen");
+      }
+    } catch {
+      // ignore — unsupported, permission denied, or lost focus
+    }
+
     try {
       // Two upload paths depending on file size:
       //   - <=90MB: legacy multipart POST /jobs (through Railway).
@@ -556,6 +571,13 @@ export default function Home() {
       setErrorMsg(err instanceof Error ? err.message : String(err));
       setPhase("error");
       clearActiveJob();
+    } finally {
+      // Release wake lock when upload path exits (success OR error).
+      try {
+        await _wakeLock?.release();
+      } catch {
+        // ignore
+      }
     }
   };
 
@@ -1622,6 +1644,27 @@ function ProgressScreen({
             style={{ color: "var(--text-body)" }}
           >
             {label}
+          </div>
+        )}
+        {/* iOS Safari kills background tabs after ~30s, aborting the
+            upload. Explicit warning so users don't switch apps mid-
+            upload and lose their progress. Only shown for the upload
+            phase — rendering runs on the server and doesn't care. */}
+        {phase === "uploading" && (
+          <div
+            className="mt-5 flex items-start gap-2 rounded-xl px-3 py-2 text-left"
+            style={{
+              background: "var(--warn)/10",
+              border: "1px solid var(--warn)/30",
+              color: "var(--warn)",
+              maxWidth: "320px",
+            }}
+          >
+            <div className="mt-0.5 shrink-0 text-base">⚠️</div>
+            <div className="text-[11px] leading-relaxed">
+              Keep this tab open until the upload finishes. Switching apps
+              or locking your phone will cancel the upload.
+            </div>
           </div>
         )}
       </div>
