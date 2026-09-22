@@ -218,7 +218,7 @@ export async function uploadResumable(opts: {
       parts: Array<{ part_number: number; upload_url: string }>;
     };
 
-    // Upload with a semaphore-style limit
+    // Upload with a semaphore-style limit + per-part timeout + retry
     let cursor = 0;
     const workers: Promise<void>[] = [];
     const runNext = async (): Promise<void> => {
@@ -229,25 +229,57 @@ export async function uploadResumable(opts: {
         const start = (part.part_number - 1) * state!.chunk_size;
         const end = Math.min(start + state!.chunk_size, state!.file_size);
         const blob = file.slice(start, end);
-        const putRes = await fetch(part.upload_url, {
-          method: "PUT",
-          body: blob,
-          signal,
-        });
-        if (!putRes.ok) {
-          throw new Error(
-            `part ${part.part_number} PUT failed: ${putRes.status}`,
-          );
+
+        const PART_TIMEOUT_MS = 90_000;   // 90s per 25MB chunk = ~2Mbps
+        const MAX_ATTEMPTS = 4;
+        let lastErr: unknown = null;
+        let etag: string | null = null;
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+          const ctrl = new AbortController();
+          const linkAbort = () => ctrl.abort();
+          signal?.addEventListener("abort", linkAbort);
+          const timer = setTimeout(() => ctrl.abort(), PART_TIMEOUT_MS);
+          try {
+            const putRes = await fetch(part.upload_url, {
+              method: "PUT",
+              body: blob,
+              signal: ctrl.signal,
+            });
+            if (!putRes.ok) {
+              throw new Error(`part ${part.part_number} PUT ${putRes.status}`);
+            }
+            const raw = putRes.headers.get("ETag") ||
+              putRes.headers.get("etag");
+            if (!raw) {
+              throw new Error(
+                `part ${part.part_number}: no ETag header ` +
+                  "(check R2 CORS ExposeHeaders)",
+              );
+            }
+            etag = raw.replace(/^"|"$/g, "");
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            if (signal?.aborted) throw err;
+            // Backoff: 1s, 2s, 4s
+            if (attempt < MAX_ATTEMPTS) {
+              await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
+            }
+          } finally {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", linkAbort);
+          }
         }
-        const etag = putRes.headers.get("ETag") || putRes.headers.get("etag");
         if (!etag) {
           throw new Error(
-            `part ${part.part_number}: missing ETag response header (check R2 CORS ExposeHeaders)`,
+            `part ${part.part_number} failed after retries: ${lastErr}`,
           );
         }
         state!.completed_parts.push({
           part_number: part.part_number,
-          etag: etag.replace(/^"|"$/g, ""),
+          etag,
         });
         saveState(file, state!);
         reportProgress();
