@@ -72,6 +72,62 @@ function clearState(file: File): void {
   }
 }
 
+/**
+ * Fallback: single-shot PUT via /uploads/presign. Used when the
+ * backend doesn't have the multipart endpoints yet (during deploy
+ * transitions) or returns 503 (R2 not configured for multipart).
+ * Same public shape as uploadResumable so callers don't branch.
+ */
+async function uploadSingle(opts: {
+  file: File;
+  backendUrl: string;
+  onProgress?: (pct: number) => void;
+  signal?: AbortSignal;
+}): Promise<{ storage_key: string }> {
+  const { file, backendUrl, onProgress, signal } = opts;
+  const presignRes = await fetch(`${backendUrl}/uploads/presign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename: file.name,
+      content_type: file.type || "video/mp4",
+    }),
+    signal,
+  });
+  if (!presignRes.ok) {
+    throw new Error(`presign failed: ${await presignRes.text()}`);
+  }
+  const presign = (await presignRes.json()) as {
+    upload_url: string;
+    storage_key: string;
+    headers?: Record<string, string>;
+  };
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", presign.upload_url);
+    const ct = presign.headers?.["Content-Type"];
+    if (ct) xhr.setRequestHeader("Content-Type", ct);
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable && onProgress) {
+        onProgress(Math.round((ev.loaded / ev.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`R2 upload failed: ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("R2 network error"));
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        xhr.abort();
+        reject(new DOMException("aborted", "AbortError"));
+      });
+    }
+    xhr.send(file);
+  });
+  return { storage_key: presign.storage_key };
+}
+
 export async function uploadResumable(opts: {
   file: File;
   backendUrl: string;
@@ -92,6 +148,14 @@ export async function uploadResumable(opts: {
       }),
       signal,
     });
+    // Backend deploy transition: multipart endpoints not there yet.
+    // Fall back to the single-PUT presign path so the user still
+    // uploads successfully; they just lose the resume feature until
+    // the deploy completes.
+    if (initRes.status === 404 || initRes.status === 503) {
+      console.warn("[upload] multipart unavailable, using single-PUT fallback");
+      return uploadSingle(opts);
+    }
     if (!initRes.ok) throw new Error(`init failed: ${await initRes.text()}`);
     const init = (await initRes.json()) as {
       upload_id: string;
