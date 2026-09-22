@@ -36,9 +36,11 @@ interface PersistedState {
 }
 
 function storageKey(file: File): string {
-  // Stable per-file key so navigating away and coming back finds the
-  // same in-flight upload.
-  return `cleocuts.chunkedUpload.v1.${file.name}.${file.size}.${file.lastModified}`;
+  // Key on (name + size) only — NOT lastModified. iOS Safari
+  // regenerates the timestamp each time the user picks a video from
+  // Photos, breaking resume. Name+size collision is negligible for
+  // multi-GB user recordings.
+  return `cleocuts.chunkedUpload.v1.${file.name}.${file.size}`;
 }
 
 function loadState(file: File): PersistedState | null {
@@ -48,7 +50,9 @@ function loadState(file: File): PersistedState | null {
     const parsed = JSON.parse(raw) as PersistedState;
     if (parsed.version !== 1) return null;
     if (parsed.file_size !== file.size) return null;
-    if (parsed.last_modified !== file.lastModified) return null;
+    console.log(
+      `[upload] resuming from ${parsed.completed_parts.length} parts`,
+    );
     return parsed;
   } catch {
     return null;
