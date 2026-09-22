@@ -16,20 +16,13 @@
 // per-part overhead against granular retry / resume granularity.
 const CHUNK_SIZE = 25 * 1024 * 1024;
 
-// Bounded parallelism. Mobile networks: 2 concurrent PUTs give better
-// throughput than 4 because we avoid TCP slow-start contention. On
-// desktop networks 2 is still fine (the pipe is fatter per connection).
-const MAX_PARALLEL = 2;
+// Bounded parallelism — don't saturate a mobile connection with 8
+// parallel puts, but also don't crawl through 320 parts serially.
+const MAX_PARALLEL = 4;
 
 // URL sign batch — one call to the backend returns this many signed
 // URLs, cutting round-trip overhead on very large uploads.
 const SIGN_BATCH = 32;
-
-// Throttle localStorage writes. On iOS Safari, setItem() blocks the
-// main thread for tens of ms per call. Persisting after every chunk
-// completion (every ~5-10s) is fine; persisting synchronously in the
-// hot path was killing throughput.
-const STATE_SAVE_MIN_INTERVAL_MS = 2_000;
 
 interface PersistedState {
   version: 1;
@@ -43,11 +36,9 @@ interface PersistedState {
 }
 
 function storageKey(file: File): string {
-  // Key on (name + size) only — NOT lastModified. iOS Safari
-  // regenerates the timestamp each time the user picks a video from
-  // Photos, breaking resume. Name+size collision is negligible for
-  // multi-GB user recordings.
-  return `cleocuts.chunkedUpload.v1.${file.name}.${file.size}`;
+  // Stable per-file key so navigating away and coming back finds the
+  // same in-flight upload.
+  return `cleocuts.chunkedUpload.v1.${file.name}.${file.size}.${file.lastModified}`;
 }
 
 function loadState(file: File): PersistedState | null {
@@ -57,26 +48,16 @@ function loadState(file: File): PersistedState | null {
     const parsed = JSON.parse(raw) as PersistedState;
     if (parsed.version !== 1) return null;
     if (parsed.file_size !== file.size) return null;
-    console.log(
-      `[upload] resuming from ${parsed.completed_parts.length} parts`,
-    );
+    if (parsed.last_modified !== file.lastModified) return null;
     return parsed;
   } catch {
     return null;
   }
 }
 
-let _lastSaveAt = 0;
-function saveState(
-  file: File,
-  state: PersistedState,
-  force = false,
-): void {
-  const now = Date.now();
-  if (!force && now - _lastSaveAt < STATE_SAVE_MIN_INTERVAL_MS) return;
+function saveState(file: File, state: PersistedState): void {
   try {
     localStorage.setItem(storageKey(file), JSON.stringify(state));
-    _lastSaveAt = now;
   } catch {
     // Quota exceeded — nothing we can do, the upload will still
     // complete for THIS session but resume won't work.
@@ -190,10 +171,7 @@ export async function uploadResumable(opts: {
       last_modified: file.lastModified,
       completed_parts: [],
     };
-    // Force initial save so if the user closes the tab BEFORE any
-    // parts complete, the upload_id + storage_key are still saved
-    // and a resume finds them.
-    saveState(file, state, true);
+    saveState(file, state);
   }
 
   const totalParts = Math.ceil(state.file_size / state.chunk_size);
@@ -205,24 +183,13 @@ export async function uploadResumable(opts: {
     if (!doneNumbers.has(n)) missing.push(n);
   }
 
-  // Byte-based progress — in-flight chunks report incremental bytes,
-  // completed chunks stay counted. Otherwise a 25MB chunk that takes
-  // 30s shows NO progress until it finishes, making the UI look
-  // stuck on slow connections. inFlightBytes maps partNumber →
-  // bytes uploaded so far for that part.
-  const inFlightBytes = new Map<number, number>();
-  let completedBytes = state.completed_parts.reduce((acc, p) => {
-    const start = (p.part_number - 1) * state!.chunk_size;
-    const end = Math.min(start + state!.chunk_size, state!.file_size);
-    return acc + (end - start);
-  }, 0);
-
   const reportProgress = () => {
     if (!onProgress) return;
-    let flying = 0;
-    for (const b of inFlightBytes.values()) flying += b;
-    const bytes = Math.min(state!.file_size, completedBytes + flying);
-    onProgress(Math.round((bytes / Math.max(1, state!.file_size)) * 100));
+    onProgress(
+      Math.round(
+        (state!.completed_parts.length / Math.max(1, totalParts)) * 100,
+      ),
+    );
   };
   reportProgress();
 
@@ -247,10 +214,10 @@ export async function uploadResumable(opts: {
       parts: Array<{ part_number: number; upload_url: string }>;
     };
 
-    // Upload with a semaphore-style limit + per-part timeout + retry
+    // Upload with a semaphore-style limit
     let cursor = 0;
     const workers: Promise<void>[] = [];
-    const runNext = async (workerId: number): Promise<void> => {
+    const runNext = async (): Promise<void> => {
       while (cursor < signed.parts.length) {
         if (signal?.aborted) throw new DOMException("aborted", "AbortError");
         const idx = cursor++;
@@ -258,106 +225,31 @@ export async function uploadResumable(opts: {
         const start = (part.part_number - 1) * state!.chunk_size;
         const end = Math.min(start + state!.chunk_size, state!.file_size);
         const blob = file.slice(start, end);
-
-        const PART_TIMEOUT_MS = 300_000;
-        const MAX_ATTEMPTS = 4;
-        let lastErr: unknown = null;
-        let etag: string | null = null;
-        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-          if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-          console.log(
-            `[upload w${workerId}] part ${part.part_number}/${totalParts} attempt ${attempt} starting (${(blob.size / 1024 / 1024).toFixed(1)}MB)`,
+        const putRes = await fetch(part.upload_url, {
+          method: "PUT",
+          body: blob,
+          signal,
+        });
+        if (!putRes.ok) {
+          throw new Error(
+            `part ${part.part_number} PUT failed: ${putRes.status}`,
           );
-          const attemptStart = Date.now();
-          try {
-            etag = await new Promise<string>((resolve, reject) => {
-              const xhr = new XMLHttpRequest();
-              xhr.open("PUT", part.upload_url);
-              // NO custom headers → simple request → no CORS preflight
-              const timer = setTimeout(() => {
-                xhr.abort();
-                reject(new Error(`part ${part.part_number} timeout`));
-              }, PART_TIMEOUT_MS);
-              const linkAbort = () => {
-                xhr.abort();
-                reject(new DOMException("aborted", "AbortError"));
-              };
-              signal?.addEventListener("abort", linkAbort);
-              xhr.upload.onprogress = (ev) => {
-                if (ev.lengthComputable) {
-                  inFlightBytes.set(part.part_number, ev.loaded);
-                  reportProgress();
-                }
-              };
-              xhr.onload = () => {
-                clearTimeout(timer);
-                signal?.removeEventListener("abort", linkAbort);
-                if (xhr.status >= 200 && xhr.status < 300) {
-                  const raw =
-                    xhr.getResponseHeader("ETag") ||
-                    xhr.getResponseHeader("etag");
-                  if (!raw) {
-                    reject(
-                      new Error(
-                        `part ${part.part_number}: no ETag header ` +
-                          "(check R2 CORS ExposeHeaders)",
-                      ),
-                    );
-                  } else {
-                    resolve(raw.replace(/^"|"$/g, ""));
-                  }
-                } else {
-                  reject(
-                    new Error(
-                      `part ${part.part_number} PUT ${xhr.status}: ${xhr.responseText.slice(0, 200)}`,
-                    ),
-                  );
-                }
-              };
-              xhr.onerror = () => {
-                clearTimeout(timer);
-                signal?.removeEventListener("abort", linkAbort);
-                reject(new Error(`part ${part.part_number} network error`));
-              };
-              xhr.send(blob);
-            });
-            const elapsed = ((Date.now() - attemptStart) / 1000).toFixed(1);
-            console.log(
-              `[upload w${workerId}] part ${part.part_number} done in ${elapsed}s`,
-            );
-            lastErr = null;
-            break;
-          } catch (err) {
-            lastErr = err;
-            const elapsed = ((Date.now() - attemptStart) / 1000).toFixed(1);
-            console.warn(
-              `[upload w${workerId}] part ${part.part_number} attempt ${attempt} failed after ${elapsed}s: ${err}`,
-            );
-            inFlightBytes.delete(part.part_number);
-            if (signal?.aborted) throw err;
-            if (attempt < MAX_ATTEMPTS) {
-              await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
-            }
-          }
         }
+        const etag = putRes.headers.get("ETag") || putRes.headers.get("etag");
         if (!etag) {
           throw new Error(
-            `part ${part.part_number} failed after retries: ${lastErr}`,
+            `part ${part.part_number}: missing ETag response header (check R2 CORS ExposeHeaders)`,
           );
         }
         state!.completed_parts.push({
           part_number: part.part_number,
-          etag,
+          etag: etag.replace(/^"|"$/g, ""),
         });
-        // Move this chunk's bytes from in-flight to completed so
-        // progress reflects total-uploaded correctly.
-        completedBytes += end - start;
-        inFlightBytes.delete(part.part_number);
         saveState(file, state!);
         reportProgress();
       }
     };
-    for (let w = 0; w < MAX_PARALLEL; w++) workers.push(runNext(w));
+    for (let w = 0; w < MAX_PARALLEL; w++) workers.push(runNext());
     await Promise.all(workers);
   }
 
