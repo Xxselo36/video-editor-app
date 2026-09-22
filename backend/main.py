@@ -321,6 +321,88 @@ def _run_render(
         _release_active(job_id)
 
 
+@app.post("/uploads/multipart/init")
+async def multipart_init_endpoint(payload: dict):
+    """Start a resumable multipart upload. Returns upload_id +
+    storage_key. Client then batches part-URL signs via
+    /uploads/multipart/sign and PUT-s bytes directly to R2.
+    """
+    from backend.storage import r2_available, multipart_init
+    if not r2_available():
+        raise HTTPException(503, "Direct upload not available.")
+    filename = str(payload.get("filename") or "upload.mp4").strip()
+    content_type = str(
+        payload.get("content_type") or "video/mp4"
+    ).strip() or "video/mp4"
+    try:
+        return multipart_init(filename=filename, content_type=content_type)
+    except Exception as e:
+        raise HTTPException(500, f"multipart init failed: {e}") from e
+
+
+@app.post("/uploads/multipart/sign")
+async def multipart_sign_endpoint(payload: dict):
+    """Batch-sign a set of part URLs. Payload:
+        {"upload_id": ..., "storage_key": ..., "part_numbers": [1,2,3,...]}
+    """
+    from backend.storage import r2_available, multipart_sign_parts
+    if not r2_available():
+        raise HTTPException(503, "Direct upload not available.")
+    upload_id = str(payload.get("upload_id") or "").strip()
+    storage_key = str(payload.get("storage_key") or "").strip()
+    parts = payload.get("part_numbers") or []
+    if not upload_id or not storage_key or not parts:
+        raise HTTPException(400, "upload_id + storage_key + part_numbers required")
+    try:
+        urls = multipart_sign_parts(
+            storage_key=storage_key,
+            upload_id=upload_id,
+            part_numbers=[int(p) for p in parts],
+        )
+        return {"parts": urls}
+    except Exception as e:
+        raise HTTPException(500, f"multipart sign failed: {e}") from e
+
+
+@app.post("/uploads/multipart/complete")
+async def multipart_complete_endpoint(payload: dict):
+    """Finalise the multipart upload. Payload:
+        {"upload_id": ..., "storage_key": ...,
+         "parts": [{"part_number": int, "etag": str}, ...]}
+    """
+    from backend.storage import r2_available, multipart_complete
+    if not r2_available():
+        raise HTTPException(503, "Direct upload not available.")
+    upload_id = str(payload.get("upload_id") or "").strip()
+    storage_key = str(payload.get("storage_key") or "").strip()
+    parts = payload.get("parts") or []
+    if not upload_id or not storage_key or not parts:
+        raise HTTPException(400, "upload_id + storage_key + parts required")
+    try:
+        multipart_complete(
+            storage_key=storage_key,
+            upload_id=upload_id,
+            parts=parts,
+        )
+        return {"storage_key": storage_key, "ok": True}
+    except Exception as e:
+        raise HTTPException(500, f"multipart complete failed: {e}") from e
+
+
+@app.post("/uploads/multipart/abort")
+async def multipart_abort_endpoint(payload: dict):
+    """Cancel a multipart upload — e.g. user hit cancel or a hard
+    error occurred client-side."""
+    from backend.storage import r2_available, multipart_abort
+    if not r2_available():
+        return {"ok": True}
+    upload_id = str(payload.get("upload_id") or "").strip()
+    storage_key = str(payload.get("storage_key") or "").strip()
+    if upload_id and storage_key:
+        multipart_abort(storage_key=storage_key, upload_id=upload_id)
+    return {"ok": True}
+
+
 @app.post("/uploads/presign")
 async def presign_upload_endpoint(payload: dict):
     """Return a presigned URL for direct-to-R2 upload.

@@ -120,6 +120,106 @@ def presign_upload(
     }
 
 
+def multipart_init(
+    filename: str,
+    content_type: str = "video/mp4",
+) -> dict[str, Any]:
+    """Start a new S3 Multipart Upload on R2.
+
+    Returns:
+        {"upload_id": "...", "storage_key": "uploads/<uuid>.mp4"}
+    """
+    cfg = _r2_config()
+    if cfg is None:
+        raise RuntimeError("R2 not configured")
+    ext = Path(filename).suffix.lower() or ".mp4"
+    storage_key = f"uploads/{uuid.uuid4().hex}{ext}"
+    client = _r2_client()
+    resp = client.create_multipart_upload(
+        Bucket=cfg["R2_BUCKET"],
+        Key=storage_key,
+        ContentType=content_type,
+    )
+    return {
+        "upload_id": resp["UploadId"],
+        "storage_key": storage_key,
+    }
+
+
+def multipart_sign_parts(
+    storage_key: str,
+    upload_id: str,
+    part_numbers: list[int],
+    expires_in: int = 21600,  # 6 hours — enough for slow mobile
+) -> list[dict[str, Any]]:
+    """Presign a batch of part upload URLs. Batching lets the client
+    fetch all URLs up front and stream through them, avoiding a round
+    trip per chunk.
+    """
+    cfg = _r2_config()
+    if cfg is None:
+        raise RuntimeError("R2 not configured")
+    client = _r2_client()
+    out: list[dict[str, Any]] = []
+    for n in part_numbers:
+        url = client.generate_presigned_url(
+            "upload_part",
+            Params={
+                "Bucket": cfg["R2_BUCKET"],
+                "Key": storage_key,
+                "UploadId": upload_id,
+                "PartNumber": int(n),
+            },
+            ExpiresIn=expires_in,
+        )
+        out.append({"part_number": int(n), "upload_url": url})
+    return out
+
+
+def multipart_complete(
+    storage_key: str,
+    upload_id: str,
+    parts: list[dict[str, Any]],
+) -> None:
+    """Finalise the multipart upload. `parts` must be an ordered list
+    of {"part_number": int, "etag": str} — R2 stitches them into the
+    final object.
+    """
+    cfg = _r2_config()
+    if cfg is None:
+        raise RuntimeError("R2 not configured")
+    client = _r2_client()
+    ordered = sorted(parts, key=lambda p: int(p["part_number"]))
+    client.complete_multipart_upload(
+        Bucket=cfg["R2_BUCKET"],
+        Key=storage_key,
+        UploadId=upload_id,
+        MultipartUpload={
+            "Parts": [
+                {"PartNumber": int(p["part_number"]),
+                 "ETag": str(p["etag"])}
+                for p in ordered
+            ],
+        },
+    )
+
+
+def multipart_abort(storage_key: str, upload_id: str) -> None:
+    """Cancel a multipart upload (called on user cancel or error)."""
+    cfg = _r2_config()
+    if cfg is None:
+        return
+    try:
+        client = _r2_client()
+        client.abort_multipart_upload(
+            Bucket=cfg["R2_BUCKET"],
+            Key=storage_key,
+            UploadId=upload_id,
+        )
+    except Exception as e:
+        print(f"[storage] multipart abort failed: {e}", flush=True)
+
+
 def download_from_r2(storage_key: str, dest_path: str) -> None:
     """Fetch an R2 object into a local file (used by the worker
     thread before analyze).

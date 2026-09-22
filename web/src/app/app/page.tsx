@@ -28,6 +28,7 @@ import {
 import { VideoModal } from "@/components/VideoModal";
 import { downscaleVideo, shouldDownscale } from "@/lib/videoDownscale";
 import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
+import { uploadResumable } from "@/lib/chunkedUpload";
 
 // Backend host: explicit env wins, else use the page's hostname on
 // port 8000. This way iPhone (192.168.178.155:3000) hits
@@ -477,43 +478,19 @@ export default function Home() {
       let res: XMLHttpRequest;
 
       if (targetFile.size > R2_THRESHOLD) {
-        // Step 1: get presigned URL
-        const presignRes = await fetch(`${backendUrl()}/uploads/presign`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            filename: targetFile.name,
-            content_type: targetFile.type || "video/mp4",
-          }),
-        });
-        if (!presignRes.ok) {
-          const txt = await presignRes.text();
-          throw new Error(`presign failed: ${txt}`);
-        }
-        const presign = await presignRes.json();
-
-        // Step 2: PUT the file body directly to R2
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open("PUT", presign.upload_url);
-          const ct = presign.headers?.["Content-Type"];
-          if (ct) xhr.setRequestHeader("Content-Type", ct);
-          xhr.upload.onprogress = (ev) => {
-            if (ev.lengthComputable) {
-              setUploadPct(Math.round((ev.loaded / ev.total) * 100));
-            }
-          };
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) resolve();
-            else reject(new Error(`R2 upload failed: ${xhr.status}`));
-          };
-          xhr.onerror = () => reject(new Error("R2 network error"));
-          xhr.send(targetFile);
+        // Chunked resumable upload via S3 multipart on R2. Splits the
+        // file into 25MB parts, uploads in parallel with bounded
+        // concurrency, and persists progress to localStorage so an
+        // interrupted upload can resume from where it left off.
+        const { storage_key } = await uploadResumable({
+          file: targetFile,
+          backendUrl: backendUrl(),
+          onProgress: (pct) => setUploadPct(pct),
         });
 
-        // Step 3: create job with storage_key (server fetches from R2)
+        // Create the job with the completed storage_key.
         const form = new FormData();
-        form.append("storage_key", presign.storage_key);
+        form.append("storage_key", storage_key);
         form.append("filename", targetFile.name);
         form.append("settings", JSON.stringify(settings));
         res = await new Promise<XMLHttpRequest>((resolve, reject) => {
