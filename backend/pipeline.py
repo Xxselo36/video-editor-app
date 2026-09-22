@@ -356,11 +356,53 @@ def _ffmpeg_cuts_preview(
 def _generate_thumbnail(input_path: str, output_path: str, at_seconds: float = 1.0) -> None:
     """Extract a JPG poster frame from the rendered video.
 
-    ~320px wide, aspect-preserving. Used by the Library UI so we can
-    show a visual for each project without loading the whole video.
-    Silent on any failure — a missing thumbnail just means the card
-    falls back to the plain text layout, nothing breaks.
+    Instead of dumb "grab frame at 1s" (often black/blur/loading screen),
+    scan candidate frames and pick the one with the highest visual
+    interest score: brightness (not black) × edge density (not blur).
+    Falls back to the simple 1s grab on any error.
     """
+    # Probe duration; if too short (<3s) just grab frame 0.
+    try:
+        probe = subprocess.run(
+            [get_ffprobe_path(), "-v", "error", "-show_entries",
+             "format=duration", "-of",
+             "default=noprint_wrappers=1:nokey=1", input_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        duration = float((probe.stdout or "0").strip() or 0)
+    except Exception:
+        duration = 0.0
+
+    if duration < 3.0:
+        _generate_thumbnail_simple(input_path, output_path, at_seconds=0.5)
+        return
+
+    best_path = _pick_best_frame(input_path, duration)
+    if best_path is None:
+        _generate_thumbnail_simple(input_path, output_path, at_seconds=at_seconds)
+        return
+
+    # Rescale + JPG-encode the chosen frame at the same size as before
+    cmd = [
+        get_ffmpeg_path(), "-y",
+        "-i", best_path,
+        "-vf", "scale=320:-2",
+        "-q:v", "3",
+        output_path,
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    finally:
+        try:
+            Path(best_path).unlink()
+        except Exception:
+            pass
+
+
+def _generate_thumbnail_simple(
+    input_path: str, output_path: str, at_seconds: float = 1.0,
+) -> None:
+    """Fallback: grab a single frame at the given timestamp."""
     cmd = [
         get_ffmpeg_path(), "-y",
         "-ss", str(at_seconds),
@@ -373,10 +415,97 @@ def _generate_thumbnail(input_path: str, output_path: str, at_seconds: float = 1
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         if result.returncode != 0 and at_seconds > 0:
-            # Fallback: very short clips can't seek to 1s — try frame 0
-            _generate_thumbnail(input_path, output_path, at_seconds=0.0)
+            _generate_thumbnail_simple(input_path, output_path, at_seconds=0.0)
     except Exception as e:
         print(f"[thumbnail] extract failed: {e}", flush=True)
+
+
+def _pick_best_frame(
+    input_path: str, duration: float, num_candidates: int = 8,
+) -> str | None:
+    """Sample `num_candidates` frames spread across the video's middle
+    60%, score each on brightness × sharpness, return the path to the
+    best. Skips the first 15% (often loading / talking-head intro) and
+    the last 25% (outro / hand-in-frame reaching for phone).
+    """
+    start = duration * 0.15
+    end = duration * 0.75
+    if end <= start:
+        return None
+    spacing = (end - start) / max(1, num_candidates - 1)
+
+    tmp_dir = tempfile.mkdtemp(prefix="cleo_thumb_")
+    best_score = -1.0
+    best_path: str | None = None
+
+    try:
+        for i in range(num_candidates):
+            t = start + i * spacing
+            candidate = str(Path(tmp_dir) / f"cand_{i:02d}.png")
+            # Scale down for cheap analysis + always yuv420p so tone-
+            # mapped HDR sources don't blow up the encode.
+            extract_cmd = [
+                get_ffmpeg_path(), "-y",
+                "-ss", f"{t:.3f}",
+                "-i", input_path,
+                "-frames:v", "1",
+                "-vf", "scale=320:-2",
+                "-pix_fmt", "yuv420p",
+                candidate,
+            ]
+            r = subprocess.run(
+                extract_cmd, capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode != 0 or not Path(candidate).exists():
+                continue
+            score = _score_frame(candidate)
+            if score > best_score:
+                best_score = score
+                # If we already had a best_path, drop the old file
+                if best_path and best_path != candidate:
+                    try:
+                        Path(best_path).unlink()
+                    except Exception:
+                        pass
+                best_path = candidate
+            else:
+                try:
+                    Path(candidate).unlink()
+                except Exception:
+                    pass
+        return best_path
+    except Exception as e:
+        print(f"[thumbnail] frame-pick failed: {e}", flush=True)
+        return best_path
+
+
+def _score_frame(image_path: str) -> float:
+    """Score = brightness × sharpness. Both normalised to 0-1.
+
+    - Brightness: mean pixel value / 255. Kills black or almost-black
+      frames. Also lightly penalises blown-out white frames via a
+      distance-from-middle curve.
+    - Sharpness: variance of the Laplacian, a classic quick blur
+      detector. High variance = strong edges = not blurry.
+    """
+    try:
+        import numpy as np
+        import cv2  # opencv-python-headless in requirements
+    except Exception:
+        return 0.0
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if img is None or img.size == 0:
+        return 0.0
+    mean = float(np.mean(img)) / 255.0
+    # Kill pure black or pure white. Prefer mid-tone.
+    brightness_ok = 1.0 - abs(mean - 0.5) * 1.6
+    brightness_ok = max(0.0, brightness_ok)
+    # Sharpness: variance of Laplacian. Real speaker frames land
+    # around 200-2000. Cap at 500 to normalise.
+    lap = cv2.Laplacian(img, cv2.CV_64F)
+    sharp_raw = float(lap.var())
+    sharp = min(1.0, sharp_raw / 500.0)
+    return brightness_ok * sharp
 
 
 def _ffmpeg_concat(
