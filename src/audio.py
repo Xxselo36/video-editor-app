@@ -205,9 +205,9 @@ class AudioAnalyzer:
         # Silently falls back to local if GROQ_API_KEY is missing or
         # any error occurs — same interface either way.
         try:
-            from backend.whisper_groq import transcribe_via_groq
+            from backend.whisper_groq import transcribe_via_groq_multilang
             self._report("Transkribiere Audio mit Whisper (Groq)...")
-            groq_result = transcribe_via_groq(
+            groq_result = transcribe_via_groq_multilang(
                 audio_path,
                 initial_prompt=wake_prompt,
             )

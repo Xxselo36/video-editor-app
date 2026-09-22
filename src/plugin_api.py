@@ -335,6 +335,59 @@ def analyze_video(
                   f"time {_tb:.1f}s→{_ta:.1f}s (removed {_tb - _ta:.1f}s)",
                   flush=True)
 
+    # Audio-based filler detection with STRICT guards — catches drawn-
+    # out 'ähhh' that Whisper cleans out completely (no gap in transcript,
+    # no punctuation-only word, no low-confidence word). Previous version
+    # was disabled for false-positive risk on drawn-out real content.
+    # STRICT guards used here:
+    #   1. NO Whisper word overlaps the range (real content stays intact)
+    #   2. min duration 300ms, MAX duration 800ms (skip long content
+    #      passages and instant blips)
+    #   3. Energy 20-45% of median (real 'ähm' is quieter than speech)
+    #   4. Spectral flatness threshold internal to detect_fillers_audio
+    if remove_fillers:
+        try:
+            from src.filler_detection import detect_fillers_audio
+            _sr, _adata = analyzer.get_audio_data()
+            _current_speech = [(s, e) for (s, e) in segments]
+            _audio_fillers = detect_fillers_audio(
+                _sr, _adata, _current_speech,
+                min_duration=0.30, max_duration=0.80,
+            )
+            _tx_words: list[tuple[float, float]] = []
+            for _seg in (analyzer._transcription or {}).get("segments", []):
+                for _w in _seg.get("words") or []:
+                    if _w.get("start") is None or _w.get("end") is None:
+                        continue
+                    _tx_words.append((float(_w["start"]), float(_w["end"])))
+
+            def _overlaps_word(s: float, e: float) -> bool:
+                # STRICT: any overlap disqualifies. Not even partial.
+                return any(ws < e and we > s for (ws, we) in _tx_words)
+
+            _safe = [(s, e) for (s, e) in _audio_fillers
+                     if not _overlaps_word(s, e)]
+            _dropped = len(_audio_fillers) - len(_safe)
+            if _dropped:
+                print(f"[audio-filler] skipped {_dropped} candidate(s) "
+                      f"— overlap with Whisper words", flush=True)
+            if _safe:
+                from src.filler_detection import FillerDetector
+                _det = FillerDetector()
+                _sb = len(segments)
+                _tb = sum(e - s for s, e in segments)
+                segments = _det.filter_segments(segments, _safe)
+                _ta = sum(e - s for s, e in segments)
+                for (s, e) in _safe:
+                    print(f"[audio-filler] cut {s:.2f}-{e:.2f}s "
+                          f"(no Whisper word, low-energy monotone)",
+                          flush=True)
+                print(f"[audio-filler] segments {_sb}→{len(segments)}, "
+                      f"time {_tb:.1f}s→{_ta:.1f}s (removed {_tb - _ta:.1f}s)",
+                      flush=True)
+        except Exception as _e:
+            print(f"[audio-filler] skipped: {_e}", flush=True)
+
     # Stutter cleanup — repeated N-gram sequences ("es ist ein, es ist
     # ein sehr schönes Thema") that filler removal doesn't catch
     # because the repeated words aren't classical fillers. Runs on the
