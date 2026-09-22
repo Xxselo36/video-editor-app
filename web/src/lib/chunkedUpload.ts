@@ -205,13 +205,24 @@ export async function uploadResumable(opts: {
     if (!doneNumbers.has(n)) missing.push(n);
   }
 
+  // Byte-based progress — in-flight chunks report incremental bytes,
+  // completed chunks stay counted. Otherwise a 25MB chunk that takes
+  // 30s shows NO progress until it finishes, making the UI look
+  // stuck on slow connections. inFlightBytes maps partNumber →
+  // bytes uploaded so far for that part.
+  const inFlightBytes = new Map<number, number>();
+  let completedBytes = state.completed_parts.reduce((acc, p) => {
+    const start = (p.part_number - 1) * state!.chunk_size;
+    const end = Math.min(start + state!.chunk_size, state!.file_size);
+    return acc + (end - start);
+  }, 0);
+
   const reportProgress = () => {
     if (!onProgress) return;
-    onProgress(
-      Math.round(
-        (state!.completed_parts.length / Math.max(1, totalParts)) * 100,
-      ),
-    );
+    let flying = 0;
+    for (const b of inFlightBytes.values()) flying += b;
+    const bytes = Math.min(state!.file_size, completedBytes + flying);
+    onProgress(Math.round((bytes / Math.max(1, state!.file_size)) * 100));
   };
   reportProgress();
 
@@ -257,40 +268,67 @@ export async function uploadResumable(opts: {
         let etag: string | null = null;
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
           if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-          const ctrl = new AbortController();
-          const linkAbort = () => ctrl.abort();
-          signal?.addEventListener("abort", linkAbort);
-          const timer = setTimeout(() => ctrl.abort(), PART_TIMEOUT_MS);
           try {
-            const putRes = await fetch(part.upload_url, {
-              method: "PUT",
-              body: blob,
-              signal: ctrl.signal,
+            etag = await new Promise<string>((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              xhr.open("PUT", part.upload_url);
+              const timer = setTimeout(() => {
+                xhr.abort();
+                reject(new Error(`part ${part.part_number} timeout`));
+              }, PART_TIMEOUT_MS);
+              const linkAbort = () => {
+                xhr.abort();
+                reject(new DOMException("aborted", "AbortError"));
+              };
+              signal?.addEventListener("abort", linkAbort);
+              xhr.upload.onprogress = (ev) => {
+                if (ev.lengthComputable) {
+                  inFlightBytes.set(part.part_number, ev.loaded);
+                  reportProgress();
+                }
+              };
+              xhr.onload = () => {
+                clearTimeout(timer);
+                signal?.removeEventListener("abort", linkAbort);
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  const raw =
+                    xhr.getResponseHeader("ETag") ||
+                    xhr.getResponseHeader("etag");
+                  if (!raw) {
+                    reject(
+                      new Error(
+                        `part ${part.part_number}: no ETag header ` +
+                          "(check R2 CORS ExposeHeaders)",
+                      ),
+                    );
+                  } else {
+                    resolve(raw.replace(/^"|"$/g, ""));
+                  }
+                } else {
+                  reject(
+                    new Error(
+                      `part ${part.part_number} PUT ${xhr.status}`,
+                    ),
+                  );
+                }
+              };
+              xhr.onerror = () => {
+                clearTimeout(timer);
+                signal?.removeEventListener("abort", linkAbort);
+                reject(new Error(`part ${part.part_number} network error`));
+              };
+              xhr.send(blob);
             });
-            if (!putRes.ok) {
-              throw new Error(`part ${part.part_number} PUT ${putRes.status}`);
-            }
-            const raw = putRes.headers.get("ETag") ||
-              putRes.headers.get("etag");
-            if (!raw) {
-              throw new Error(
-                `part ${part.part_number}: no ETag header ` +
-                  "(check R2 CORS ExposeHeaders)",
-              );
-            }
-            etag = raw.replace(/^"|"$/g, "");
             lastErr = null;
             break;
           } catch (err) {
             lastErr = err;
+            inFlightBytes.delete(part.part_number);
             if (signal?.aborted) throw err;
             // Backoff: 1s, 2s, 4s
             if (attempt < MAX_ATTEMPTS) {
               await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
             }
-          } finally {
-            clearTimeout(timer);
-            signal?.removeEventListener("abort", linkAbort);
           }
         }
         if (!etag) {
@@ -302,6 +340,10 @@ export async function uploadResumable(opts: {
           part_number: part.part_number,
           etag,
         });
+        // Move this chunk's bytes from in-flight to completed so
+        // progress reflects total-uploaded correctly.
+        completedBytes += end - start;
+        inFlightBytes.delete(part.part_number);
         saveState(file, state!);
         reportProgress();
       }
