@@ -28,7 +28,10 @@ except ImportError:
 
 _MODEL = "claude-haiku-4-5"
 _MODEL_CLEANUP = "claude-haiku-4-5"       # fast + cheap, good enough for typo/filler fix
-_MODEL_COMMAND_FIX = "claude-haiku-4-5"   # short call, contextual reasoning fine on Haiku
+_MODEL_COMMAND_FIX = "claude-sonnet-4-6"  # Sonnet handles phonetic mishears
+                                          # (e.g. 'Klick hat' → 'Cleo keep')
+                                          # far better than Haiku. +$0.01/video
+                                          # for launch-critical reliability.
 _MAX_TOKENS_CLEANUP = 4000
 _MAX_TOKENS_COMMAND_FIX = 800
 _MAX_TOKENS_SOCIAL = 800

@@ -187,6 +187,25 @@ def find_scene_cut_ranges(
         if not matched:
             i += 1
 
+    # Phonetic-fuzzy pass — catches Whisper mishears the exact-match
+    # scan missed (e.g. 'CleoKey' single-token 'keep', 'Klio Kip').
+    # Only adds events, never overrides — dedupe_window prevents
+    # collisions with the primary detection.
+    try:
+        from src.phonetic_wake_detection import find_phonetic_candidates
+        primary_events = [(t, s, e) for (t, s, e, _) in events]
+        candidates = find_phonetic_candidates(
+            whisper_words, already_detected=primary_events,
+        )
+        for (cmd_type, ph_s, ph_e, raw) in candidates:
+            print(f"[phonetic] added {cmd_type} @ {ph_s:.2f}s — raw="
+                  f"{raw!r}", flush=True)
+            events.append((cmd_type, ph_s, ph_e, 0))
+        # Re-sort chronologically since phonetic events are appended.
+        events.sort(key=lambda e: e[1])
+    except Exception as _phe:
+        print(f"[phonetic] skipped: {_phe}", flush=True)
+
     # Dedupe consecutive same-type events within 1s — Whisper
     # sometimes hallucinates a command 2-3 times as a hedge when
     # decoding gets uncertain ('Cleo keep. Cleo keep. Cleo keep.' when
