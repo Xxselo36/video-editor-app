@@ -916,10 +916,28 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
   const featured: PresetId[] = ["tiktok", "podcast", "vlog", "captions"];
   const [recent, setRecent] = useState<LibraryEntry[] | null>(null);
   const [playingJobId, setPlayingJobId] = useState<string | null>(null);
+  const [showVoiceOnboarding, setShowVoiceOnboarding] = useState(false);
 
   useEffect(() => {
     setRecent(getLibrary().slice(0, 3));
+    // Show voice commands onboarding on first visit. Users won't
+    // discover the USP unless we explicitly explain it.
+    try {
+      const seen = localStorage.getItem("cleocuts.voiceOnboardingSeen.v1");
+      if (!seen) setShowVoiceOnboarding(true);
+    } catch {
+      // localStorage may be blocked; that's fine, don't nag.
+    }
   }, []);
+
+  const dismissVoiceOnboarding = () => {
+    setShowVoiceOnboarding(false);
+    try {
+      localStorage.setItem("cleocuts.voiceOnboardingSeen.v1", "1");
+    } catch {
+      // ignore
+    }
+  };
 
   return (
     <div className="relative z-10 flex flex-col">
@@ -953,6 +971,22 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
           Pick a workflow — CleoCuts pre-configures captions, format, and
           cleanup for the platform.
         </p>
+
+        {/* Voice-commands teaser — link to the onboarding modal so
+            users can always re-open the cheat sheet. */}
+        <button
+          onClick={() => setShowVoiceOnboarding(true)}
+          className="mt-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
+          style={{
+            background: "var(--brand-tint)",
+            color: "var(--brand-strong)",
+            border: "1px solid var(--brand)/30",
+          }}
+        >
+          <IconMic size={14} strokeWidth={2.5} />
+          Say &ldquo;Cleo&rdquo; while recording — save hours of editing
+          <span className="opacity-70">→</span>
+        </button>
       </div>
 
       {/* Preset grid — big cards with per-preset accent glow + config chips */}
@@ -1116,6 +1150,10 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
           jobId={playingJobId}
           onClose={() => setPlayingJobId(null)}
         />
+      )}
+
+      {showVoiceOnboarding && (
+        <VoiceCommandsModal onClose={dismissVoiceOnboarding} />
       )}
     </div>
   );
@@ -2208,6 +2246,167 @@ function ErrorScreen({
       >
         Try again
       </button>
+    </div>
+  );
+}
+
+// Voice commands cheat sheet. Shown automatically on the user's first
+// visit (localStorage flag) and re-openable via the pill on the picker.
+function VoiceCommandsModal({ onClose }: { onClose: () => void }) {
+  const commands: Array<{
+    phrase: string;
+    subtitle: string;
+    color: string;
+  }> = [
+    {
+      phrase: "Cleo start",
+      subtitle: "Anchor a take. Everything before this gets dropped.",
+      color: "#5A9FFF",
+    },
+    {
+      phrase: "Cleo cut",
+      subtitle: "Discard the current take, redo from here.",
+      color: "#F26E6E",
+    },
+    {
+      phrase: "Cleo keep",
+      subtitle: "Confirm this take, move on to the next scene.",
+      color: "#4ECC77",
+    },
+    {
+      phrase: "Cleo finish",
+      subtitle: "End of video. Everything after this is cut.",
+      color: "#B979FF",
+    },
+    {
+      phrase: "Cleo stop → Cleo go",
+      subtitle: "Skip one bad sentence inline. Say both.",
+      color: "#F5B54D",
+    },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
+      onClick={onClose}
+    >
+      <div
+        className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl"
+        style={{
+          background: "var(--surface-0)",
+          border: "1px solid var(--border)",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div
+          className="flex items-start justify-between p-6 pb-4"
+          style={{ borderBottom: "1px solid var(--border)" }}
+        >
+          <div>
+            <div
+              className="mb-1 inline-flex items-center gap-2 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+              style={{
+                background: "var(--brand-tint)",
+                color: "var(--brand-strong)",
+              }}
+            >
+              <IconMic size={12} strokeWidth={2.5} />
+              Voice commands
+            </div>
+            <div
+              className="text-lg font-bold"
+              style={{ color: "var(--text-strong)" }}
+            >
+              Edit while you record
+            </div>
+            <div
+              className="mt-1 text-xs leading-relaxed"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Say these while recording. Cleo cuts the bad parts, keeps
+              the good ones — you never open an editor.
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="ml-4 shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--surface-2)]"
+            style={{ color: "var(--text-muted)" }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Command cards */}
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex flex-col gap-2">
+            {commands.map((c) => (
+              <div
+                key={c.phrase}
+                className="flex items-start gap-3 rounded-xl p-3"
+                style={{
+                  background: "var(--surface-1)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                <div
+                  className="mt-0.5 h-2 w-2 shrink-0 rounded-full"
+                  style={{ background: c.color, boxShadow: `0 0 8px ${c.color}` }}
+                />
+                <div className="flex-1">
+                  <div
+                    className="mb-0.5 font-mono text-sm font-semibold"
+                    style={{ color: "var(--text-strong)" }}
+                  >
+                    &ldquo;{c.phrase}&rdquo;
+                  </div>
+                  <div
+                    className="text-xs leading-relaxed"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {c.subtitle}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div
+            className="mt-4 rounded-xl p-3 text-[11px] leading-relaxed"
+            style={{
+              background: "var(--surface-1)",
+              border: "1px dashed var(--border-hover)",
+              color: "var(--text-body)",
+            }}
+          >
+            <strong style={{ color: "var(--text-strong)" }}>Example:</strong>{" "}
+            Say &ldquo;Cleo start&rdquo; → talk → mess up → say &ldquo;Cleo
+            cut&rdquo; → retry the sentence → say &ldquo;Cleo keep&rdquo;
+            when it&apos;s good → say &ldquo;Cleo finish&rdquo; when
+            done. Everything else gets cleaned automatically.
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div
+          className="p-4"
+          style={{ borderTop: "1px solid var(--border)" }}
+        >
+          <button
+            onClick={onClose}
+            className="w-full rounded-xl py-3 text-sm font-semibold transition-transform hover:scale-[0.99]"
+            style={{
+              background: "var(--brand)",
+              color: "white",
+            }}
+          >
+            Got it — let&apos;s record
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
