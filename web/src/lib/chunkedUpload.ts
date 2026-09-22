@@ -250,7 +250,7 @@ export async function uploadResumable(opts: {
     // Upload with a semaphore-style limit + per-part timeout + retry
     let cursor = 0;
     const workers: Promise<void>[] = [];
-    const runNext = async (): Promise<void> => {
+    const runNext = async (workerId: number): Promise<void> => {
       while (cursor < signed.parts.length) {
         if (signal?.aborted) throw new DOMException("aborted", "AbortError");
         const idx = cursor++;
@@ -259,19 +259,21 @@ export async function uploadResumable(opts: {
         const end = Math.min(start + state!.chunk_size, state!.file_size);
         const blob = file.slice(start, end);
 
-        // Timeout must cover the slowest realistic mobile connection.
-        // 25MB over 700kbps = ~5min; 90s was too tight and made valid
-        // slow chunks retry endlessly. 300s covers ~700kbps floor.
         const PART_TIMEOUT_MS = 300_000;
         const MAX_ATTEMPTS = 4;
         let lastErr: unknown = null;
         let etag: string | null = null;
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
           if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+          console.log(
+            `[upload w${workerId}] part ${part.part_number}/${totalParts} attempt ${attempt} starting (${(blob.size / 1024 / 1024).toFixed(1)}MB)`,
+          );
+          const attemptStart = Date.now();
           try {
             etag = await new Promise<string>((resolve, reject) => {
               const xhr = new XMLHttpRequest();
               xhr.open("PUT", part.upload_url);
+              // NO custom headers → simple request → no CORS preflight
               const timer = setTimeout(() => {
                 xhr.abort();
                 reject(new Error(`part ${part.part_number} timeout`));
@@ -307,7 +309,7 @@ export async function uploadResumable(opts: {
                 } else {
                   reject(
                     new Error(
-                      `part ${part.part_number} PUT ${xhr.status}`,
+                      `part ${part.part_number} PUT ${xhr.status}: ${xhr.responseText.slice(0, 200)}`,
                     ),
                   );
                 }
@@ -319,13 +321,20 @@ export async function uploadResumable(opts: {
               };
               xhr.send(blob);
             });
+            const elapsed = ((Date.now() - attemptStart) / 1000).toFixed(1);
+            console.log(
+              `[upload w${workerId}] part ${part.part_number} done in ${elapsed}s`,
+            );
             lastErr = null;
             break;
           } catch (err) {
             lastErr = err;
+            const elapsed = ((Date.now() - attemptStart) / 1000).toFixed(1);
+            console.warn(
+              `[upload w${workerId}] part ${part.part_number} attempt ${attempt} failed after ${elapsed}s: ${err}`,
+            );
             inFlightBytes.delete(part.part_number);
             if (signal?.aborted) throw err;
-            // Backoff: 1s, 2s, 4s
             if (attempt < MAX_ATTEMPTS) {
               await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
             }
@@ -348,7 +357,7 @@ export async function uploadResumable(opts: {
         reportProgress();
       }
     };
-    for (let w = 0; w < MAX_PARALLEL; w++) workers.push(runNext());
+    for (let w = 0; w < MAX_PARALLEL; w++) workers.push(runNext(w));
     await Promise.all(workers);
   }
 
