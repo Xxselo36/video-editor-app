@@ -2274,12 +2274,12 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   const [lastHitAt, setLastHitAt] = useState(0);
 
   const targets = [
-    { id: "start", phrase: "Cleo start", color: "#5A9FFF" },
-    { id: "cut", phrase: "Cleo cut", color: "#F26E6E" },
-    { id: "keep", phrase: "Cleo keep", color: "#4ECC77" },
-    { id: "finish", phrase: "Cleo finish", color: "#B979FF" },
-    { id: "stop", phrase: "Cleo stop", color: "#F5B54D" },
-    { id: "go", phrase: "Cleo go", color: "#F5B54D" },
+    { id: "start", phrase: "Cleo start", desc: "Begin your take", color: "#5A9FFF" },
+    { id: "cut", phrase: "Cleo cut", desc: "Redo, discard current take", color: "#F26E6E" },
+    { id: "keep", phrase: "Cleo keep", desc: "Confirm take, next scene", color: "#4ECC77" },
+    { id: "finish", phrase: "Cleo finish", desc: "End video, cut everything after", color: "#B979FF" },
+    { id: "stop", phrase: "Cleo stop", desc: "Skip one bad sentence (pair with 'go')", color: "#F5B54D" },
+    { id: "go", phrase: "Cleo go", desc: "Resume after 'stop'", color: "#F5B54D" },
   ];
 
   // Match keywords + common mishears. \s* (not \s+) so 'cleokeep',
@@ -2499,15 +2499,17 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
             )}
           </div>
 
-          {/* Command list — always visible, doubles as cheat sheet */}
-          <div className="grid grid-cols-2 gap-1.5 p-3">
+          {/* Command list — always visible, doubles as cheat sheet.
+              Single-column with phrase + one-line explanation so the
+              user sees what each command DOES, not just its name. */}
+          <div className="flex flex-col gap-1.5 p-3">
             {targets.map((t) => {
               const count = detected[t.id] || 0;
               const hit = count > 0;
               return (
                 <div
                   key={t.id}
-                  className="flex items-center gap-2 rounded-lg p-2 transition-all"
+                  className="flex items-center gap-2.5 rounded-lg p-2 transition-all"
                   style={{
                     background: "var(--surface-1)",
                     border: `1px solid ${hit ? t.color : "var(--border)"}`,
@@ -2523,11 +2525,19 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
                   >
                     {hit ? "✓" : "○"}
                   </div>
-                  <div
-                    className="font-mono text-[11px] font-semibold"
-                    style={{ color: "var(--text-strong)" }}
-                  >
-                    {t.phrase}
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className="font-mono text-[12px] font-semibold leading-tight"
+                      style={{ color: "var(--text-strong)" }}
+                    >
+                      {t.phrase}
+                    </div>
+                    <div
+                      className="text-[10px] leading-tight"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      {t.desc}
+                    </div>
                   </div>
                 </div>
               );
