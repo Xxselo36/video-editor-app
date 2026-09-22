@@ -2250,185 +2250,12 @@ function ErrorScreen({
   );
 }
 
-// Voice commands cheat sheet. Shown automatically on the user's first
-// visit (localStorage flag) and re-openable via the pill on the picker.
-// Two steps: (1) command reference cards, (2) live mic test with
-// camera preview so the user hears/sees themselves being recognised.
+// Single-screen onboarding: live mic test + command list on one modal.
+// Cheat sheet and test collapsed into one screen so the user doesn't
+// need to click through. On first open, we don't force mic permission —
+// user clicks 'Start test' when ready. All processing local, no backend.
 function VoiceCommandsModal({ onClose }: { onClose: () => void }) {
-  const [step, setStep] = useState<"cheatsheet" | "test">("cheatsheet");
-  const commands: Array<{
-    phrase: string;
-    subtitle: string;
-    color: string;
-  }> = [
-    {
-      phrase: "Cleo start",
-      subtitle: "Anchor a take. Everything before this gets dropped.",
-      color: "#5A9FFF",
-    },
-    {
-      phrase: "Cleo cut",
-      subtitle: "Discard the current take, redo from here.",
-      color: "#F26E6E",
-    },
-    {
-      phrase: "Cleo keep",
-      subtitle: "Confirm this take, move on to the next scene.",
-      color: "#4ECC77",
-    },
-    {
-      phrase: "Cleo finish",
-      subtitle: "End of video. Everything after this is cut.",
-      color: "#B979FF",
-    },
-    {
-      phrase: "Cleo stop → Cleo go",
-      subtitle: "Skip one bad sentence inline. Say both.",
-      color: "#F5B54D",
-    },
-  ];
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
-      onClick={onClose}
-    >
-      <div
-        className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl"
-        style={{
-          background: "var(--surface-0)",
-          border: "1px solid var(--border)",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {step === "cheatsheet" ? (
-          <>
-            {/* Header */}
-            <div
-              className="flex items-start justify-between p-6 pb-4"
-              style={{ borderBottom: "1px solid var(--border)" }}
-            >
-              <div>
-                <div
-                  className="mb-1 inline-flex items-center gap-2 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-                  style={{
-                    background: "var(--brand-tint)",
-                    color: "var(--brand-strong)",
-                  }}
-                >
-                  <IconMic size={12} strokeWidth={2.5} />
-                  Voice commands
-                </div>
-                <div
-                  className="text-lg font-bold"
-                  style={{ color: "var(--text-strong)" }}
-                >
-                  Edit while you record
-                </div>
-                <div
-                  className="mt-1 text-xs leading-relaxed"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  Say these while recording. Cleo cuts the bad parts, keeps
-                  the good ones — you never open an editor.
-                </div>
-              </div>
-              <button
-                onClick={onClose}
-                aria-label="Close"
-                className="ml-4 shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--surface-2)]"
-                style={{ color: "var(--text-muted)" }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Command cards */}
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="flex flex-col gap-2">
-                {commands.map((c) => (
-                  <div
-                    key={c.phrase}
-                    className="flex items-start gap-3 rounded-xl p-3"
-                    style={{
-                      background: "var(--surface-1)",
-                      border: "1px solid var(--border)",
-                    }}
-                  >
-                    <div
-                      className="mt-0.5 h-2 w-2 shrink-0 rounded-full"
-                      style={{ background: c.color, boxShadow: `0 0 8px ${c.color}` }}
-                    />
-                    <div className="flex-1">
-                      <div
-                        className="mb-0.5 font-mono text-sm font-semibold"
-                        style={{ color: "var(--text-strong)" }}
-                      >
-                        &ldquo;{c.phrase}&rdquo;
-                      </div>
-                      <div
-                        className="text-xs leading-relaxed"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        {c.subtitle}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div
-                className="mt-4 rounded-xl p-3 text-[11px] leading-relaxed"
-                style={{
-                  background: "var(--surface-1)",
-                  border: "1px dashed var(--border-hover)",
-                  color: "var(--text-body)",
-                }}
-              >
-                <strong style={{ color: "var(--text-strong)" }}>Example:</strong>{" "}
-                Say &ldquo;Cleo start&rdquo; → talk → mess up → say &ldquo;Cleo
-                cut&rdquo; → retry the sentence → say &ldquo;Cleo keep&rdquo;
-                when it&apos;s good → say &ldquo;Cleo finish&rdquo; when
-                done. Everything else gets cleaned automatically.
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div
-              className="flex gap-2 p-4"
-              style={{ borderTop: "1px solid var(--border)" }}
-            >
-              <button
-                onClick={onClose}
-                className="rounded-xl px-4 py-3 text-sm font-semibold transition-colors"
-                style={{
-                  background: "transparent",
-                  color: "var(--text-body)",
-                  border: "1px solid var(--border-hover)",
-                }}
-              >
-                Skip
-              </button>
-              <button
-                onClick={() => setStep("test")}
-                className="flex-1 rounded-xl py-3 text-sm font-semibold transition-transform hover:scale-[0.99]"
-                style={{
-                  background: "var(--brand)",
-                  color: "white",
-                }}
-              >
-                Try it live →
-              </button>
-            </div>
-          </>
-        ) : (
-          <VoiceCommandsTestStep onDone={onClose} />
-        )}
-      </div>
-    </div>
-  );
+  return <VoiceCommandsTestStep onDone={onClose} />;
 }
 
 // Live mic + camera test. User grants permissions, sees themselves,
@@ -2455,14 +2282,16 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
     { id: "go", phrase: "Cleo go", color: "#F5B54D" },
   ];
 
-  // Match keywords + common mishears
+  // Match keywords + common mishears. \s* (not \s+) so 'cleokeep',
+  // 'cleogo' etc. (Web Speech often concatenates fast speech) match
+  // the same as 'cleo keep'.
   const matchers: Record<string, RegExp> = {
-    start: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(start|starts|starte|ist ab|is ab|is tough)\b/i,
-    cut: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(cut|cuts|kot|kutt|schnitt)\b/i,
-    keep: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(keep|kip|kiep|behalten)\b/i,
-    finish: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(finish|finnisch|fenish|ende|fertig)\b/i,
-    stop: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(stop|stopp|halt)\b/i,
-    go: /\b(cleo|clio|klio|kleo|cleyo|clear)\s+(go|los|weiter)\b/i,
+    start: /\b(cleo|clio|klio|kleo|cleyo|clear)\s*(start|starts|starte|istab|isab)\b/i,
+    cut: /\b(cleo|clio|klio|kleo|cleyo|clear)\s*(cut|cuts|kot|kutt|schnitt)\b/i,
+    keep: /\b(cleo|clio|klio|kleo|cleyo|clear)\s*(keep|kip|kiep|behalten)\b/i,
+    finish: /\b(cleo|clio|klio|kleo|cleyo|clear)\s*(finish|finnisch|fenish|ende|fertig)\b/i,
+    stop: /\b(cleo|clio|klio|kleo|cleyo|clear)\s*(stop|stopp|halt)\b/i,
+    go: /\b(cleo|clio|klio|kleo|cleyo|clear)\s*(go|los|weiter)\b/i,
   };
 
   const startTest = async () => {
@@ -2541,211 +2370,187 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   const pulseActive = Date.now() - lastHitAt < 800;
 
   return (
-    <>
-      {/* Header */}
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
+      onClick={onDone}
+    >
       <div
-        className="flex items-start justify-between p-6 pb-4"
-        style={{ borderBottom: "1px solid var(--border)" }}
+        className="relative flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl"
+        style={{
+          background: "var(--surface-0)",
+          border: "1px solid var(--border)",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+        }}
+        onClick={(e) => e.stopPropagation()}
       >
-        <div>
-          <div
-            className="mb-1 inline-flex items-center gap-2 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-            style={{
-              background: "var(--brand-tint)",
-              color: "var(--brand-strong)",
-            }}
-          >
-            <IconMic size={12} strokeWidth={2.5} />
-            Live test
+        {/* Compact header — one line title, one line explanation */}
+        <div
+          className="flex items-center justify-between p-4"
+          style={{ borderBottom: "1px solid var(--border)" }}
+        >
+          <div className="flex-1">
+            <div
+              className="text-base font-bold"
+              style={{ color: "var(--text-strong)" }}
+            >
+              Test your voice
+            </div>
+            <div
+              className="text-[11px]"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Say the commands — see if Cleo hears you.
+            </div>
           </div>
-          <div
-            className="text-lg font-bold"
-            style={{ color: "var(--text-strong)" }}
-          >
-            Say the commands
-          </div>
-          <div
-            className="mt-1 text-xs leading-relaxed"
+          <button
+            onClick={onDone}
+            aria-label="Close"
+            className="ml-3 shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--surface-2)]"
             style={{ color: "var(--text-muted)" }}
           >
-            Cards light up when Cleo hears them. Nothing is uploaded — this
-            runs in your browser.
-          </div>
-        </div>
-        <button
-          onClick={onDone}
-          aria-label="Close"
-          className="ml-4 shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--surface-2)]"
-          style={{ color: "var(--text-muted)" }}
-        >
-          ✕
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4">
-        {/* Camera preview */}
-        <div
-          className="relative mb-4 overflow-hidden rounded-xl"
-          style={{
-            background: "var(--surface-1)",
-            aspectRatio: "4 / 3",
-            border: "1px solid var(--border)",
-          }}
-        >
-          <video
-            ref={videoRef}
-            className="h-full w-full object-cover"
-            style={{ transform: "scaleX(-1)" }}
-            muted
-            playsInline
-          />
-          {permStatus === "granted" && (
-            <div
-              className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-              style={{
-                background: "rgba(0,0,0,0.6)",
-                color: pulseActive ? "#4ECC77" : "#fff",
-              }}
-            >
-              <span
-                className="inline-block h-1.5 w-1.5 rounded-full"
-                style={{
-                  background: pulseActive ? "#4ECC77" : "#F26E6E",
-                  boxShadow: pulseActive ? "0 0 6px #4ECC77" : "none",
-                }}
-              />
-              {pulseActive ? "Heard you!" : "Listening…"}
-            </div>
-          )}
-          {permStatus !== "granted" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
-              {permStatus === "idle" && (
-                <>
-                  <div
-                    className="text-center text-sm"
-                    style={{ color: "var(--text-body)" }}
-                  >
-                    Grant camera + mic access to test your voice
-                  </div>
-                  <button
-                    onClick={startTest}
-                    className="rounded-xl px-5 py-2 text-sm font-semibold"
-                    style={{ background: "var(--brand)", color: "white" }}
-                  >
-                    Start test
-                  </button>
-                </>
-              )}
-              {permStatus === "requesting" && (
-                <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                  Waiting for permission…
-                </div>
-              )}
-              {permStatus === "denied" && (
-                <div className="text-center text-sm" style={{ color: "var(--warn)" }}>
-                  Permission denied. Enable camera + mic access in browser
-                  settings and reload.
-                </div>
-              )}
-              {permStatus === "unsupported" && (
-                <div className="text-center text-sm" style={{ color: "var(--warn)" }}>
-                  Voice detection isn&apos;t supported in this browser. Try
-                  Safari or Chrome.
-                </div>
-              )}
-            </div>
-          )}
+            ✕
+          </button>
         </div>
 
-        {/* Command status grid */}
-        <div className="mb-3 grid grid-cols-2 gap-2">
-          {targets.map((t) => {
-            const count = detected[t.id] || 0;
-            const hit = count > 0;
-            return (
-              <div
-                key={t.id}
-                className="flex items-center gap-2 rounded-xl p-2.5 transition-all"
-                style={{
-                  background: hit ? "var(--surface-1)" : "var(--surface-1)",
-                  border: `1px solid ${hit ? t.color : "var(--border)"}`,
-                  boxShadow: hit ? `0 0 12px ${t.color}55` : "none",
-                }}
-              >
+        <div className="flex-1 overflow-y-auto">
+          {/* Camera preview OR permission prompt */}
+          <div
+            className="relative overflow-hidden"
+            style={{
+              background: "var(--surface-1)",
+              aspectRatio: "16 / 10",
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <video
+              ref={videoRef}
+              className="h-full w-full object-cover"
+              style={{ transform: "scaleX(-1)" }}
+              muted
+              playsInline
+            />
+            {permStatus === "granted" && (
+              <>
                 <div
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                  className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
                   style={{
-                    background: hit ? t.color : "var(--surface-2)",
-                    color: hit ? "white" : "var(--text-muted)",
+                    background: "rgba(0,0,0,0.7)",
+                    color: pulseActive ? "#4ECC77" : "#fff",
+                    backdropFilter: "blur(4px)",
                   }}
                 >
-                  {hit ? "✓" : "○"}
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{
+                      background: pulseActive ? "#4ECC77" : "#F26E6E",
+                      boxShadow: pulseActive ? "0 0 8px #4ECC77" : "none",
+                    }}
+                  />
+                  {pulseActive ? "Heard you!" : "Listening…"}
                 </div>
-                <div className="flex-1">
+                {/* Live transcript strip */}
+                {transcript && (
                   <div
-                    className="font-mono text-xs font-semibold"
+                    className="absolute bottom-0 left-0 right-0 p-2 text-[10px]"
+                    style={{
+                      background: "rgba(0,0,0,0.65)",
+                      color: "#fff",
+                      backdropFilter: "blur(4px)",
+                    }}
+                  >
+                    <span style={{ color: "#aaa" }}>heard: </span>
+                    {transcript.slice(-100)}
+                  </div>
+                )}
+              </>
+            )}
+            {permStatus !== "granted" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
+                {(permStatus === "idle" || permStatus === "requesting") && (
+                  <>
+                    <div
+                      className="text-center text-xs"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      Uses your camera + mic. Everything stays in your browser.
+                    </div>
+                    <button
+                      onClick={startTest}
+                      disabled={permStatus === "requesting"}
+                      className="rounded-xl px-6 py-2.5 text-sm font-semibold disabled:opacity-60"
+                      style={{ background: "var(--brand)", color: "white" }}
+                    >
+                      {permStatus === "requesting" ? "Requesting…" : "Start"}
+                    </button>
+                  </>
+                )}
+                {permStatus === "denied" && (
+                  <div className="text-center text-xs" style={{ color: "var(--warn)" }}>
+                    Permission denied. Enable in browser settings + reload.
+                  </div>
+                )}
+                {permStatus === "unsupported" && (
+                  <div className="text-center text-xs" style={{ color: "var(--warn)" }}>
+                    Not supported in this browser. Try Safari or Chrome.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Command list — always visible, doubles as cheat sheet */}
+          <div className="grid grid-cols-2 gap-1.5 p-3">
+            {targets.map((t) => {
+              const count = detected[t.id] || 0;
+              const hit = count > 0;
+              return (
+                <div
+                  key={t.id}
+                  className="flex items-center gap-2 rounded-lg p-2 transition-all"
+                  style={{
+                    background: "var(--surface-1)",
+                    border: `1px solid ${hit ? t.color : "var(--border)"}`,
+                    boxShadow: hit ? `0 0 12px ${t.color}55` : "none",
+                  }}
+                >
+                  <div
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold transition-all"
+                    style={{
+                      background: hit ? t.color : "var(--surface-2)",
+                      color: hit ? "white" : "var(--text-muted)",
+                    }}
+                  >
+                    {hit ? "✓" : "○"}
+                  </div>
+                  <div
+                    className="font-mono text-[11px] font-semibold"
                     style={{ color: "var(--text-strong)" }}
                   >
                     {t.phrase}
                   </div>
-                  {count > 1 && (
-                    <div
-                      className="text-[10px]"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      {count}× heard
-                    </div>
-                  )}
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
 
-        {/* Live transcript preview */}
-        {permStatus === "granted" && (
-          <div
-            className="rounded-xl p-3 text-[11px] leading-relaxed"
+        <div
+          className="p-3"
+          style={{ borderTop: "1px solid var(--border)" }}
+        >
+          <button
+            onClick={onDone}
+            className="w-full rounded-xl py-2.5 text-sm font-semibold transition-transform hover:scale-[0.99]"
             style={{
-              background: "var(--surface-1)",
-              border: "1px dashed var(--border-hover)",
-              color: "var(--text-muted)",
-              minHeight: "42px",
-              maxHeight: "80px",
-              overflow: "auto",
+              background: "var(--brand)",
+              color: "white",
             }}
           >
-            <div
-              className="mb-1 text-[9px] uppercase tracking-wider"
-              style={{ color: "var(--text-faint)" }}
-            >
-              What Cleo heard
-            </div>
-            {transcript || (
-              <span style={{ color: "var(--text-faint)" }}>
-                Nothing yet — try saying &ldquo;Cleo start&rdquo;
-              </span>
-            )}
-          </div>
-        )}
+            Done
+          </button>
+        </div>
       </div>
-
-      {/* Footer */}
-      <div
-        className="p-4"
-        style={{ borderTop: "1px solid var(--border)" }}
-      >
-        <button
-          onClick={onDone}
-          className="w-full rounded-xl py-3 text-sm font-semibold transition-transform hover:scale-[0.99]"
-          style={{
-            background: "var(--brand)",
-            color: "white",
-          }}
-        >
-          Done — let&apos;s record
-        </button>
-      </div>
-    </>
+    </div>
   );
 }
