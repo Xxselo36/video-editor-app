@@ -230,7 +230,10 @@ export async function uploadResumable(opts: {
         const end = Math.min(start + state!.chunk_size, state!.file_size);
         const blob = file.slice(start, end);
 
-        const PART_TIMEOUT_MS = 90_000;   // 90s per 25MB chunk = ~2Mbps
+        // Timeout must cover the slowest realistic mobile connection.
+        // 25MB over 700kbps = ~5min; 90s was too tight and made valid
+        // slow chunks retry endlessly. 300s covers ~700kbps floor.
+        const PART_TIMEOUT_MS = 300_000;
         const MAX_ATTEMPTS = 4;
         let lastErr: unknown = null;
         let etag: string | null = null;
