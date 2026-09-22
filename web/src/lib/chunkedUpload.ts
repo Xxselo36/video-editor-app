@@ -16,13 +16,20 @@
 // per-part overhead against granular retry / resume granularity.
 const CHUNK_SIZE = 25 * 1024 * 1024;
 
-// Bounded parallelism — don't saturate a mobile connection with 8
-// parallel puts, but also don't crawl through 320 parts serially.
-const MAX_PARALLEL = 4;
+// Bounded parallelism. Mobile networks: 2 concurrent PUTs give better
+// throughput than 4 because we avoid TCP slow-start contention. On
+// desktop networks 2 is still fine (the pipe is fatter per connection).
+const MAX_PARALLEL = 2;
 
 // URL sign batch — one call to the backend returns this many signed
 // URLs, cutting round-trip overhead on very large uploads.
 const SIGN_BATCH = 32;
+
+// Throttle localStorage writes. On iOS Safari, setItem() blocks the
+// main thread for tens of ms per call. Persisting after every chunk
+// completion (every ~5-10s) is fine; persisting synchronously in the
+// hot path was killing throughput.
+const STATE_SAVE_MIN_INTERVAL_MS = 2_000;
 
 interface PersistedState {
   version: 1;
@@ -59,9 +66,17 @@ function loadState(file: File): PersistedState | null {
   }
 }
 
-function saveState(file: File, state: PersistedState): void {
+let _lastSaveAt = 0;
+function saveState(
+  file: File,
+  state: PersistedState,
+  force = false,
+): void {
+  const now = Date.now();
+  if (!force && now - _lastSaveAt < STATE_SAVE_MIN_INTERVAL_MS) return;
   try {
     localStorage.setItem(storageKey(file), JSON.stringify(state));
+    _lastSaveAt = now;
   } catch {
     // Quota exceeded — nothing we can do, the upload will still
     // complete for THIS session but resume won't work.
@@ -175,7 +190,10 @@ export async function uploadResumable(opts: {
       last_modified: file.lastModified,
       completed_parts: [],
     };
-    saveState(file, state);
+    // Force initial save so if the user closes the tab BEFORE any
+    // parts complete, the upload_id + storage_key are still saved
+    // and a resume finds them.
+    saveState(file, state, true);
   }
 
   const totalParts = Math.ceil(state.file_size / state.chunk_size);
