@@ -45,6 +45,7 @@ class Job:
     language: str | None = None
     audio_warnings: list[str] = field(default_factory=list)
     audio_levels: dict[str, Any] = field(default_factory=dict)
+    scene_events: list[dict[str, Any]] = field(default_factory=list)
     social_caption: str = ""
     social_hashtags: list[str] = field(default_factory=list)
     hook_clips: list[dict[str, Any]] = field(default_factory=list)
@@ -68,6 +69,7 @@ class Job:
             "audio_levels": self.audio_levels,
             "duration": self.duration,
             "cut_ranges": self.cut_ranges,
+            "scene_events": self.scene_events,
         }
 
 
@@ -80,7 +82,7 @@ def _db_path() -> str:
 _JSON_FIELDS = {
     "settings", "subtitles", "segments", "cut_ranges",
     "audio_warnings", "audio_levels", "outputs",
-    "social_hashtags", "hook_clips",
+    "social_hashtags", "hook_clips", "scene_events",
 }
 
 

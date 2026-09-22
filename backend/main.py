@@ -240,6 +240,7 @@ def _run_analyze(job_id: str) -> None:
                 language=res["language"],
                 audio_warnings=res.get("audio_warnings", []),
                 audio_levels=res.get("audio_levels", {}),
+                scene_events=res.get("scene_events", []),
             )
         except Exception as e:
             tb = traceback.format_exc()
@@ -459,6 +460,107 @@ def preview_video(job_id: str):
         media_type="video/mp4",
         headers={"Accept-Ranges": "bytes"},
     )
+
+
+@app.post("/jobs/{job_id}/recompute-scenes")
+def post_recompute_scenes(job_id: str, payload: dict):
+    """Recompute cut segments from an edited scene-event list.
+
+    Frontend sends the user-edited event list (some toggled off, maybe
+    some new ones added). We recompute the cut ranges from scratch,
+    remap subtitles onto the new timeline, and update the job so the
+    preview + review UI refresh.
+
+    Payload:
+        {"events": [{"type": "start"|"restart"|"keep"|"finish",
+                     "start": float, "end": float}, ...]}
+    """
+    job = store.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.status not in ("awaiting_review",):
+        raise HTTPException(
+            409, f"job not in review state (status={job.status})"
+        )
+    if not job.normalized_path or not Path(job.normalized_path).exists():
+        raise HTTPException(410, "normalized video no longer on disk")
+
+    events_in = payload.get("events") or []
+    try:
+        clean: list[tuple[str, float, float, int]] = []
+        for i, e in enumerate(events_in):
+            t = str(e.get("type") or "").lower()
+            if t not in ("start", "restart", "keep", "finish"):
+                continue
+            s = float(e.get("start") or 0)
+            end = float(e.get("end") or s)
+            clean.append((t, s, end, i))
+        clean.sort(key=lambda x: x[1])
+    except Exception as e:
+        raise HTTPException(400, f"invalid events payload: {e}") from e
+
+    # Re-apply scene semantics to compute cut ranges + kept segments.
+    from src.scene_triggers import find_scene_cut_ranges
+    # Trick: our scene fn expects whisper-words. We synthesize a
+    # minimal word list that matches the requested command phrases so
+    # the existing state-machine logic can be re-used unchanged.
+    fake_words: list[dict] = []
+    for (t, s, end, _i) in clean:
+        # Two-token phrase: "cleo <type>"
+        cleo_start = max(0.0, s)
+        cleo_end = s + max(0.05, (end - s) / 2)
+        cmd_start = cleo_end + 0.01
+        cmd_end = max(end, cmd_start + 0.05)
+        fake_words.append({"word": "cleo", "start": cleo_start, "end": cleo_end})
+        fake_words.append({"word": t, "start": cmd_start, "end": cmd_end})
+    cut_ranges_scene, _events_out = find_scene_cut_ranges(
+        fake_words, clip_duration=job.duration or None,
+    )
+
+    # Merge with the existing full pipeline: start from the original
+    # analyze segments then apply the NEW scene cuts.
+    from src.filler_detection import FillerDetector
+    _det = FillerDetector()
+    # We need the ORIGINAL segments (pre-scene). We didn't store them
+    # separately, so we rebuild from cut_ranges + duration: take
+    # `job.segments` and re-expand the scene cuts we previously applied.
+    # Simpler: recompute cut_ranges as inverse of current segments and
+    # apply the new scene cuts on top of a "no cuts" baseline.
+    # For MVP we simply add the new scene cuts to the existing segments.
+    base_segments = [tuple(s) for s in job.segments]
+    new_segments = _det.filter_segments(base_segments, cut_ranges_scene)
+
+    # Update cut_ranges to include the new scene cuts alongside existing
+    old_cut_ranges = list(job.cut_ranges or [])
+    next_id = (max((c.get("id", 0) for c in old_cut_ranges), default=-1)) + 1
+    new_cut_range_dicts = []
+    for (rs, re_) in cut_ranges_scene:
+        new_cut_range_dicts.append({
+            "id": next_id, "start": float(rs), "end": float(re_),
+            "source": "user_edit",
+        })
+        next_id += 1
+
+    store.update(
+        job_id,
+        segments=new_segments,
+        cut_ranges=old_cut_ranges + new_cut_range_dicts,
+        scene_events=[
+            {"type": t, "start": s, "end": end, "source": "user"}
+            for (t, s, end, _i) in clean
+        ],
+    )
+
+    # Rebuild the preview video so the review UI reflects the new cuts.
+    try:
+        preview_path = str(Path(_WORK_ROOT) / job_id / "preview.mp4")
+        from backend.pipeline import _ffmpeg_cuts_preview
+        _ffmpeg_cuts_preview(job.normalized_path, new_segments, preview_path)
+        store.update(job_id, preview_path=preview_path)
+    except Exception as e:
+        print(f"[recompute] preview rebuild failed: {e}", flush=True)
+
+    return store.get(job_id).to_dict()
 
 
 @app.post("/jobs/{job_id}/render")

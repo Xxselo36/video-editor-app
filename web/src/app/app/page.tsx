@@ -193,6 +193,15 @@ type JobStatus = {
   audio_levels?: { mean_db?: number | null; max_db?: number | null };
   duration?: number;
   cut_ranges?: CutRange[];
+  scene_events?: SceneEvent[];
+};
+
+type SceneEvent = {
+  type: "start" | "restart" | "keep" | "finish";
+  start: number;
+  end: number;
+  raw_text?: string;
+  source?: "exact" | "phonetic" | "llm" | "user";
 };
 
 type Subtitle = {
@@ -784,6 +793,25 @@ export default function Home() {
             duration={job.duration ?? 0}
             disabledCuts={disabledCuts}
             setDisabledCuts={setDisabledCuts}
+            sceneEvents={job.scene_events ?? []}
+            onSceneEventsChange={async (evts) => {
+              try {
+                const r = await fetch(
+                  `${backendUrl()}/jobs/${job.id}/recompute-scenes`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ events: evts }),
+                  },
+                );
+                if (r.ok) {
+                  const updated = await r.json();
+                  setJob(updated);
+                }
+              } catch {
+                // ignore
+              }
+            }}
             onChange={setPhrases}
             onApply={onApplyRender}
             onBack={reset}
@@ -1839,6 +1867,8 @@ function ReviewScreen({
   duration,
   disabledCuts,
   setDisabledCuts,
+  sceneEvents,
+  onSceneEventsChange,
   onChange,
   onApply,
   onBack,
@@ -1851,6 +1881,8 @@ function ReviewScreen({
   duration: number;
   disabledCuts: number[];
   setDisabledCuts: (ids: number[]) => void;
+  sceneEvents: SceneEvent[];
+  onSceneEventsChange: (evts: SceneEvent[]) => void | Promise<void>;
   onChange: (p: Phrase[]) => void;
   onApply: () => void;
   onBack: () => void;
@@ -2025,6 +2057,20 @@ function ReviewScreen({
                 : [...disabledCuts, id],
             )
           }
+        />
+      )}
+
+      {/* Voice commands panel — appears only if scene events were
+          detected. Users can toggle each event off (false positive)
+          or add missing commands. */}
+      {sceneEvents.length > 0 && (
+        <SceneCommandsPanel
+          events={sceneEvents}
+          duration={duration}
+          onChange={onSceneEventsChange}
+          onSeek={(t) => {
+            if (videoRef.current) videoRef.current.currentTime = t;
+          }}
         />
       )}
 
@@ -2560,6 +2606,223 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
             Done
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Scene commands panel — shown in the review screen. Lists every
+// detected Cleo-command (start/cut/keep/finish) with its timestamp
+// and the raw Whisper text that triggered it. User can:
+//   - toggle each event off (false positive)
+//   - add a missing command at any timestamp via 'Add command'
+//   - click timestamps to seek the video preview
+// Changes are debounced then POSTed to /jobs/:id/recompute-scenes.
+function SceneCommandsPanel({
+  events,
+  duration,
+  onChange,
+  onSeek,
+}: {
+  events: SceneEvent[];
+  duration: number;
+  onChange: (evts: SceneEvent[]) => void | Promise<void>;
+  onSeek: (t: number) => void;
+}) {
+  const [enabled, setEnabled] = useState<boolean[]>(() =>
+    events.map(() => true),
+  );
+  const [addOpen, setAddOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  // Reset local state when incoming events change (e.g. after
+  // recompute) so toggles stay in sync.
+  useEffect(() => {
+    setEnabled(events.map(() => true));
+  }, [events]);
+
+  const COLORS: Record<SceneEvent["type"], string> = {
+    start: "#5A9FFF",
+    keep: "#4ECC77",
+    restart: "#F26E6E",
+    finish: "#B979FF",
+  };
+  const LABELS: Record<SceneEvent["type"], string> = {
+    start: "Start",
+    keep: "Keep",
+    restart: "Cut / Restart",
+    finish: "Finish",
+  };
+
+  const commit = async (nextEnabled: boolean[]) => {
+    setPending(true);
+    try {
+      const filtered = events.filter((_, i) => nextEnabled[i]);
+      await onChange(filtered);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const toggle = (i: number) => {
+    const next = [...enabled];
+    next[i] = !next[i];
+    setEnabled(next);
+    void commit(next);
+  };
+
+  const addAt = async (t: number, type: SceneEvent["type"]) => {
+    const kept = events.filter((_, i) => enabled[i]);
+    const next: SceneEvent[] = [
+      ...kept,
+      {
+        type,
+        start: t,
+        end: Math.min(t + 0.5, duration || t + 0.5),
+        source: "user",
+      },
+    ].sort((a, b) => a.start - b.start);
+    setPending(true);
+    setAddOpen(false);
+    try {
+      await onChange(next);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const fmtT = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div
+      className="mb-3 overflow-hidden rounded-2xl"
+      style={{
+        background: "var(--surface-1)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <div
+        className="flex items-center justify-between border-b px-4 py-3"
+        style={{ borderColor: "var(--border)" }}
+      >
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+            Voice commands · {events.filter((_, i) => enabled[i]).length} active
+          </div>
+          <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
+            Uncheck false detections, add missing ones. Cuts update
+            automatically.
+          </div>
+        </div>
+        <button
+          onClick={() => setAddOpen(!addOpen)}
+          disabled={pending}
+          className="rounded-lg px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50"
+          style={{
+            background: "var(--brand-tint)",
+            color: "var(--brand-strong)",
+            border: "1px solid var(--brand)/30",
+          }}
+        >
+          + Add
+        </button>
+      </div>
+
+      {addOpen && (
+        <div
+          className="border-b p-3"
+          style={{
+            borderColor: "var(--border)",
+            background: "var(--surface-0)",
+          }}
+        >
+          <div className="mb-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+            Add command at current video time
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {(["start", "keep", "restart", "finish"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => {
+                  const videoEl = document.querySelector(
+                    "video",
+                  ) as HTMLVideoElement | null;
+                  const now = videoEl?.currentTime ?? 0;
+                  void addAt(now, t);
+                }}
+                className="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+                style={{
+                  background: "var(--surface-1)",
+                  color: COLORS[t],
+                  border: `1px solid ${COLORS[t]}66`,
+                }}
+              >
+                {LABELS[t]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="max-h-[220px] overflow-y-auto p-2">
+        {events.length === 0 && (
+          <div className="p-3 text-center text-xs text-[var(--text-muted)]">
+            No voice commands detected.
+          </div>
+        )}
+        {events.map((ev, i) => {
+          const on = enabled[i];
+          return (
+            <div
+              key={`${ev.type}-${ev.start}-${i}`}
+              className="mb-1 flex items-center gap-2 rounded-lg p-2 transition-colors"
+              style={{
+                background: on ? "var(--surface-0)" : "transparent",
+                border: `1px solid ${on ? COLORS[ev.type] + "40" : "var(--border)"}`,
+                opacity: on ? 1 : 0.5,
+              }}
+            >
+              <button
+                onClick={() => toggle(i)}
+                disabled={pending}
+                aria-label={on ? "Disable" : "Enable"}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold transition-colors disabled:opacity-50"
+                style={{
+                  background: on ? COLORS[ev.type] : "var(--surface-2)",
+                  color: on ? "white" : "var(--text-muted)",
+                  border: `1px solid ${on ? COLORS[ev.type] : "var(--border)"}`,
+                }}
+              >
+                {on ? "✓" : "○"}
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="text-xs font-semibold"
+                    style={{ color: on ? "var(--text-strong)" : "var(--text-muted)" }}
+                  >
+                    {LABELS[ev.type]}
+                  </span>
+                  <button
+                    onClick={() => onSeek(ev.start)}
+                    className="text-[10px] tabular-nums text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+                  >
+                    ▸ {fmtT(ev.start)}
+                  </button>
+                </div>
+                {ev.raw_text && (
+                  <div className="mt-0.5 truncate text-[10px] text-[var(--text-faint)]">
+                    heard: &ldquo;{ev.raw_text}&rdquo;
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

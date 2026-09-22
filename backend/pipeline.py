@@ -647,6 +647,7 @@ def analyze_only(
         "duration": duration,
         "cut_ranges": cut_ranges,
         "language": result.language,
+        "scene_events": getattr(result, "scene_events", None) or [],
         "audio_warnings": audio_precheck.get("warnings", []),
         "audio_levels": {
             "mean_db": audio_precheck.get("mean_db"),

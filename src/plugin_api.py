@@ -23,6 +23,8 @@ class AnalysisResult:
     style: str
     fillers: list = None  # [{"start", "end", "word"}, ...] detected filler words
     language: str = None  # Whisper-detected ISO-Code (e.g. "de", "en")
+    scene_events: list = None  # [{"type", "start", "end", "source"}, ...]
+    all_words: list = None  # Whisper words for user "add missing command"
 
     def to_dict(self):
         d = {
@@ -37,6 +39,8 @@ class AnalysisResult:
             d["fillers"] = self.fillers
         if self.language is not None:
             d["language"] = self.language
+        if self.scene_events is not None:
+            d["scene_events"] = self.scene_events
         return d
 
     def to_json(self, indent=2):
@@ -462,6 +466,7 @@ def analyze_video(
     # for record-once-and-refine. Opt-in: only activates if the user
     # actually said "Cleo start". Runs before voice_triggers so scene
     # boundaries are cut before per-take Cleo cut/go handling.
+    scene_events_out: list[dict] = []
     if voice_triggers and analyzer._transcription:
         try:
             from src.scene_triggers import find_scene_cut_ranges
@@ -470,6 +475,22 @@ def analyze_video(
             scene_cuts, scene_events = find_scene_cut_ranges(
                 ww_scene, clip_duration=duration,
             )
+            # Extract raw text around each event for the review UI so
+            # the user can see WHAT Whisper heard when the event was
+            # detected. Look up ±0.5s window of words.
+            for (t, s, e) in scene_events:
+                raw_words = [
+                    (w.get("word", "") or "").strip()
+                    for w in ww_scene
+                    if float(w.get("start", 0)) >= s - 0.5
+                    and float(w.get("end", 0)) <= e + 0.5
+                ]
+                scene_events_out.append({
+                    "type": t,
+                    "start": round(s, 3),
+                    "end": round(e, 3),
+                    "raw_text": " ".join(raw_words)[:80],
+                })
             if scene_events:
                 print(f"[scene-triggers] events: "
                       f"{[(t, round(s,2), round(e,2)) for t,s,e in scene_events]}",
@@ -629,6 +650,7 @@ def analyze_video(
         style=style,
         fillers=filler_data,
         language=_detected_lang,
+        scene_events=scene_events_out,
     )
 
 
