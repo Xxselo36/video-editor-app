@@ -29,6 +29,13 @@ import { VideoModal } from "@/components/VideoModal";
 import { downscaleVideo, shouldDownscale } from "@/lib/videoDownscale";
 import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
 import { uploadResumable } from "@/lib/chunkedUpload";
+import {
+  addActiveJob,
+  getActiveJobs,
+  removeActiveJob,
+  updateActiveJob as updateActiveJobV2,
+  type ActiveJobV2,
+} from "@/lib/activeJobs";
 
 // Backend host: explicit env wins, else use the page's hostname on
 // port 8000. This way iPhone (192.168.178.155:3000) hits
@@ -523,17 +530,18 @@ export default function Home() {
         throw new Error(`Upload failed: ${res.responseText}`);
       }
       const initial: JobStatus = JSON.parse(res.responseText);
-      setJob(initial);
-      setPhase("analyzing");
 
       // Ask for notification permission on job start — user won't be
       // interrupted mid-task, and gets pinged when the render is done
       // even if the tab is in the background.
       requestNotificationPermission();
 
-      // Persist so the user can navigate away and come back without
-      // losing the job. Backend keeps processing regardless.
       const presetInfo = selectedPreset ? PRESETS[selectedPreset] : null;
+
+      // Multi-job dashboard: save to activeJobs list, then send the
+      // user back to the picker so they can start another upload
+      // right away. Single-job activeJob kept for backward compat
+      // in case any legacy code still checks it.
       saveActiveJob({
         jobId: initial.id,
         phase: "analyzing",
@@ -544,6 +552,25 @@ export default function Home() {
         presetIcon: presetInfo?.icon ?? null,
         captionPreset: settings.caption_preset,
       });
+      addActiveJob({
+        jobId: initial.id,
+        phase: "analyzing",
+        timestamp: Date.now(),
+        filename: targetFile.name,
+        fileSize: targetFile.size,
+        presetId: selectedPreset,
+        presetLabel: presetInfo?.label ?? null,
+        presetIcon: presetInfo?.icon ?? null,
+        captionPreset: settings.caption_preset,
+      });
+
+      // Reset local state and drop user back on the dashboard — the
+      // job now lives as a card, backend keeps processing regardless.
+      setFile(null);
+      setSelectedPreset(null);
+      setJob(null);
+      setUploadPct(0);
+      setPhase("picker");
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
       setPhase("error");
@@ -740,7 +767,35 @@ export default function Home() {
           phase === "picker" ? "max-w-2xl" : "max-w-md"
         }`}
       >
-        {phase === "picker" && <PickerScreen onPick={pickPreset} />}
+        {phase === "picker" && (
+          <PickerScreen
+            onPick={pickPreset}
+            onResumeJob={async (jobId) => {
+              try {
+                const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
+                if (!r.ok) return;
+                const s: JobStatus = await r.json();
+                setJob(s);
+                if (s.status === "awaiting_review") {
+                  const subsRes = await fetch(
+                    `${backendUrl()}/jobs/${jobId}/subtitles`,
+                  );
+                  if (subsRes.ok) {
+                    const sd = await subsRes.json();
+                    setPhrases(buildPhrases(sd.subtitles ?? []));
+                  }
+                  setPhase("reviewing");
+                } else if (s.status === "done") {
+                  setPhase("done");
+                } else {
+                  setPhase("analyzing");
+                }
+              } catch {
+                /* ignore */
+              }
+            }}
+          />
+        )}
 
         {phase === "idle" && <IdleScreen onPick={onPickFile} onDrop={onDrop} />}
 
@@ -939,16 +994,25 @@ function getPresetChips(p: (typeof PRESETS)[PresetId]): string[] {
   return chips;
 }
 
-function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
+function PickerScreen({
+  onPick,
+  onResumeJob,
+}: {
+  onPick: (id: PresetId) => void;
+  onResumeJob?: (jobId: string) => void;
+}) {
   const featured: PresetId[] = ["tiktok", "podcast", "vlog", "captions"];
   const [recent, setRecent] = useState<LibraryEntry[] | null>(null);
   const [playingJobId, setPlayingJobId] = useState<string | null>(null);
   const [showVoiceOnboarding, setShowVoiceOnboarding] = useState(false);
+  const [activeJobs, setActiveJobs] = useState<ActiveJobV2[]>([]);
+  const [jobStatuses, setJobStatuses] = useState<
+    Record<string, { progress: number; message: string; status: string }>
+  >({});
 
   useEffect(() => {
     setRecent(getLibrary().slice(0, 3));
-    // Show voice commands onboarding on first visit. Users won't
-    // discover the USP unless we explicitly explain it.
+    setActiveJobs(getActiveJobs());
     try {
       const seen = localStorage.getItem("cleocuts.voiceOnboardingSeen.v1");
       if (!seen) setShowVoiceOnboarding(true);
@@ -956,6 +1020,57 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
       // localStorage may be blocked; that's fine, don't nag.
     }
   }, []);
+
+  // Poll all active jobs every 2s so the cards show live status
+  useEffect(() => {
+    const active = activeJobs.filter((j) => j.phase !== "uploading");
+    if (active.length === 0) return;
+    let cancelled = false;
+    const tick = async () => {
+      const updates: typeof jobStatuses = {};
+      for (const j of active) {
+        try {
+          const r = await fetch(`${backendUrl()}/jobs/${j.jobId}`);
+          if (!r.ok) continue;
+          const s = await r.json();
+          updates[j.jobId] = {
+            progress: s.progress ?? 0,
+            message: s.message ?? "",
+            status: s.status,
+          };
+          // Promote to matching phase if backend advanced
+          if (
+            s.status === "awaiting_review" &&
+            j.phase !== "reviewing"
+          ) {
+            updateActiveJobV2(j.jobId, { phase: "reviewing" });
+          } else if (
+            s.status === "processing" &&
+            j.phase === "analyzing" &&
+            s.message?.toLowerCase().includes("render")
+          ) {
+            updateActiveJobV2(j.jobId, { phase: "rendering" });
+          } else if (s.status === "done") {
+            removeActiveJob(j.jobId);
+          } else if (s.status === "error") {
+            updateActiveJobV2(j.jobId, { phase: j.phase });
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!cancelled) {
+        setJobStatuses((prev) => ({ ...prev, ...updates }));
+        setActiveJobs(getActiveJobs());
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [activeJobs]);
 
   const dismissVoiceOnboarding = () => {
     setShowVoiceOnboarding(false);
@@ -968,6 +1083,32 @@ function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
 
   return (
     <div className="relative z-10 flex flex-col">
+      {/* Active jobs — cards shown at the very top so newly-uploaded
+          videos are always visible and users can dive back in without
+          losing sight of the multi-job queue. */}
+      {activeJobs.length > 0 && (
+        <div className="mb-8">
+          <div className="mb-3 flex items-center justify-between">
+            <div
+              className="text-[11px] font-semibold uppercase tracking-[0.15em]"
+              style={{ color: "var(--text-muted)" }}
+            >
+              In progress · {activeJobs.length}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {activeJobs.map((j) => (
+              <ActiveJobCard
+                key={j.jobId}
+                job={j}
+                status={jobStatuses[j.jobId]}
+                onOpen={() => onResumeJob?.(j.jobId)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Hero */}
       <div className="mb-10">
         <div
@@ -2845,5 +2986,109 @@ function SceneCommandsPanel({
         })}
       </div>
     </div>
+  );
+}
+
+// Compact card for an in-progress job in the dashboard grid.
+// Renders phase-appropriate visuals: uploading (client-side pct),
+// analyzing/rendering (backend progress bar), reviewing (Open →).
+function ActiveJobCard({
+  job,
+  status,
+  onOpen,
+}: {
+  job: ActiveJobV2;
+  status?: { progress: number; message: string; status: string };
+  onOpen: () => void;
+}) {
+  const phaseLabel: Record<ActiveJobV2["phase"], string> = {
+    uploading: "Uploading",
+    analyzing: "Analyzing",
+    reviewing: "Ready to edit",
+    rendering: "Rendering",
+  };
+  const phaseColor: Record<ActiveJobV2["phase"], string> = {
+    uploading: "#5A9FFF",
+    analyzing: "#F5B54D",
+    reviewing: "#4ECC77",
+    rendering: "#B979FF",
+  };
+  const pct =
+    job.phase === "uploading" ? job.uploadPct ?? 0 : status?.progress ?? 0;
+  const canOpen = job.phase === "reviewing";
+  const message = status?.message ?? "";
+
+  return (
+    <button
+      onClick={canOpen ? onOpen : undefined}
+      disabled={!canOpen}
+      className={`group flex flex-col rounded-xl p-3 text-left transition-all ${
+        canOpen ? "cursor-pointer hover:-translate-y-0.5" : "cursor-default"
+      }`}
+      style={{
+        background: "var(--surface-1)",
+        border: `1px solid ${
+          canOpen ? phaseColor[job.phase] + "60" : "var(--border)"
+        }`,
+      }}
+    >
+      <div className="mb-2 flex items-start gap-2">
+        <div
+          className="mt-1 h-2 w-2 shrink-0 rounded-full"
+          style={{
+            background: phaseColor[job.phase],
+            boxShadow: canOpen ? `0 0 8px ${phaseColor[job.phase]}` : "none",
+          }}
+        />
+        <div className="min-w-0 flex-1">
+          <div
+            className="truncate text-xs font-semibold"
+            style={{ color: "var(--text-strong)" }}
+          >
+            {job.filename}
+          </div>
+          <div
+            className="mt-0.5 truncate text-[10px]"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {phaseLabel[job.phase]}
+            {message ? ` · ${message}` : ""}
+          </div>
+        </div>
+      </div>
+
+      {/* Progress bar for uploading / analyzing / rendering phases */}
+      {job.phase !== "reviewing" && (
+        <div
+          className="mb-1 h-1 overflow-hidden rounded-full"
+          style={{ background: "var(--surface-2)" }}
+        >
+          <div
+            className="h-full transition-all duration-300"
+            style={{
+              width: `${Math.max(2, Math.min(100, pct))}%`,
+              background: phaseColor[job.phase],
+            }}
+          />
+        </div>
+      )}
+
+      <div className="mt-1 flex items-center justify-between">
+        <span
+          className="text-[10px] tabular-nums"
+          style={{ color: "var(--text-faint)" }}
+        >
+          {job.phase !== "reviewing" ? `${Math.round(pct)}%` : "Tap to edit →"}
+        </span>
+        {job.captionPreset && (
+          <span
+            className="text-[10px] uppercase tracking-wider"
+            style={{ color: "var(--text-faint)" }}
+          >
+            {job.captionPreset}
+          </span>
+        )}
+      </div>
+    </button>
   );
 }
