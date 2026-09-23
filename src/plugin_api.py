@@ -460,7 +460,15 @@ def analyze_video(
 
         from src.smart_cut import SmartCutter
         cutter = SmartCutter(analyzer._transcription, duration)
-        segments = cutter.optimize_cuts(segments)
+        # Pass audio silence ranges so word-expansion can distinguish
+        # real audio content from Whisper's word.end drift into silence.
+        _silence_ranges_for_snap = [
+            (round(s.start, 3), round(s.end, 3))
+            for s in speech_segments if not s.has_speech
+        ]
+        segments = cutter.optimize_cuts(
+            segments, silence_ranges=_silence_ranges_for_snap,
+        )
 
     # Scene triggers — Cleo start / restart / keep / finish workflow
     # for record-once-and-refine. Opt-in: only activates if the user

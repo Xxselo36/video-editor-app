@@ -194,14 +194,21 @@ class SmartCutter:
         self,
         segments: list[tuple[float, float]],
         max_adjust: float = 0.5,
+        silence_ranges: list[tuple[float, float]] | None = None,
     ) -> list[tuple[float, float]]:
         """Snap segment boundaries to the nearest natural break point.
 
         Priority: sentence boundary > clause boundary > word boundary > original.
         Adjustments are limited to *max_adjust* seconds in either direction.
-        Bumped from 0.5s to 1.0s — the tighter window sometimes left
-        silence-based cuts mid-word when the nearest word boundary was
-        further away, producing garbled fragments in the output.
+
+        `silence_ranges` (optional): list of (start, end) audio-silence
+        intervals from RMS silence detection. When present, the word-
+        expansion pass computes each Whisper word's EFFECTIVE audio
+        bounds by trimming its start/end inward where audio silence
+        intersects the word. This handles Whisper's known bug where
+        word.end drifts 100-500ms into trailing silence — we no longer
+        expand into that silence, so aggressive-mode silence removal
+        stays aggressive.
         """
         if not segments:
             return []
@@ -209,6 +216,22 @@ class SmartCutter:
         sentence_bounds = self.find_sentence_boundaries()
         clause_bounds = self.find_clause_boundaries()
         words = self.get_word_segments()
+
+        # Compute effective word bounds. If silence detector says the
+        # audio inside a Whisper word is actually silent, trim the
+        # word's effective end/start there.
+        silence_ranges = silence_ranges or []
+        eff_bounds: list[tuple[float, float]] = []
+        for w in words:
+            eff_s, eff_e = w.start, w.end
+            for (sil_s, sil_e) in silence_ranges:
+                if w.start < sil_s < w.end:
+                    eff_e = min(eff_e, sil_s)
+                if w.start < sil_e < w.end:
+                    eff_s = max(eff_s, sil_e)
+            if eff_e - eff_s < 0.03:
+                eff_s, eff_e = w.start, w.end
+            eff_bounds.append((eff_s, eff_e))
         word_ends = sorted({w.end for w in words})
         word_starts = sorted({w.start for w in words})
 
@@ -282,23 +305,37 @@ class SmartCutter:
                 _clamp(new_end, 0.0, self.duration),
             ))
 
-        # Word-aware safety: jedes Whisper-Wort, das zu mindestens 50 %
-        # in einem Segment liegt, muss komplett enthalten sein. Sonst
-        # werden kurze End-Wörter wie "leid", "auch", "und" reproducibly
-        # abgeschnitten, weil die silence-detection den Auslaut als
-        # Stille interpretiert.
+        # Word-aware safety with silence cross-validation.
+        # Two signals decide "is this word inside the segment":
+        #   1. EFFECTIVE overlap (Whisper word trimmed by real silence)
+        #   2. RAW overlap (fallback when no silence data)
+        # Word is fully included if EITHER:
+        #   - effective overlap ≥ 25% of effective duration
+        #   - raw overlap ≥ 50% (only when silence data unavailable)
+        # Expansion always targets EFFECTIVE bounds, never raw word.end,
+        # so Whisper's drift into trailing silence stays cut.
         if words:
             expanded: list[tuple[float, float]] = []
             for s, e in optimized:
                 ns, ne = s, e
-                for w in words:
-                    overlap_start = max(ns, w.start)
-                    overlap_end = min(ne, w.end)
-                    w_dur = max(0.001, w.end - w.start)
-                    if (overlap_end - overlap_start) / w_dur >= 0.5:
-                        # Wort gehört zu diesem Segment — Boundary expandieren
-                        ns = min(ns, w.start)
-                        ne = max(ne, w.end)
+                for w, (eff_s, eff_e) in zip(words, eff_bounds):
+                    # Effective overlap check — silence-aware
+                    eff_overlap = max(0.0, min(ne, eff_e) - max(ns, eff_s))
+                    eff_dur = max(0.001, eff_e - eff_s)
+                    eff_frac = eff_overlap / eff_dur
+                    # Raw overlap check — fallback when no silence data
+                    raw_overlap = max(0.0, min(ne, w.end) - max(ns, w.start))
+                    raw_dur = max(0.001, w.end - w.start)
+                    raw_frac = raw_overlap / raw_dur
+
+                    include = eff_frac >= 0.25 or (
+                        not silence_ranges and raw_frac >= 0.5
+                    )
+                    if include:
+                        # Expand to EFFECTIVE bounds — Whisper's drifted
+                        # word.end is not trusted, silence detector is.
+                        ns = min(ns, eff_s)
+                        ne = max(ne, eff_e)
                 expanded.append((
                     _clamp(ns, 0.0, self.duration),
                     _clamp(ne, 0.0, self.duration),
