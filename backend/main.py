@@ -544,6 +544,27 @@ def preview_video(job_id: str):
     )
 
 
+@app.get("/jobs/{job_id}/source-video")
+def source_video(job_id: str):
+    """Stream the RAW normalized source (no cuts applied).
+
+    Used by the timeline editor which composes edits client-side so the
+    video never has to reload during trim / split / delete. Segments are
+    only committed to the backend right before render.
+    """
+    job = store.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    path = job.normalized_path
+    if not path or not Path(path).exists():
+        raise HTTPException(409, "source video not ready")
+    return FileResponse(
+        path=path,
+        media_type="video/mp4",
+        headers={"Accept-Ranges": "bytes"},
+    )
+
+
 @app.post("/jobs/{job_id}/edit-segments")
 def post_edit_segments(job_id: str, payload: dict):
     """Accept a user-edited segment list and rebuild the preview video.

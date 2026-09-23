@@ -2198,10 +2198,9 @@ function ReviewScreen({
     return () => cancelAnimationFrame(rafId);
   }, []);
 
-  // Convert the preview video's currentTime (which runs on the CUT
-  // timeline — kept segments concatenated) into a position on the
-  // ORIGINAL timeline so the cuts strip playhead lines up with the
-  // right removed section.
+  // Video now plays the RAW source, so currentTime already IS the
+  // original-timeline position. Kept fields for backwards compat —
+  // keptSegments still seeds the initial edit strip.
   const keptSegments = useMemo<[number, number][]>(() => {
     if (!duration) return [];
     const sorted = [...cutRanges].sort((a, b) => a.start - b.start);
@@ -2215,16 +2214,7 @@ function ReviewScreen({
     return kept;
   }, [cutRanges, duration]);
 
-  const originalTime = useMemo(() => {
-    if (!keptSegments.length) return currentTime;
-    let acc = 0;
-    for (const [s, e] of keptSegments) {
-      const segDur = e - s;
-      if (acc + segDur >= currentTime) return s + (currentTime - acc);
-      acc += segDur;
-    }
-    return duration;
-  }, [currentTime, keptSegments, duration]);
+  const originalTime = currentTime;
 
   // Editable segments — starts from keptSegments and can be trimmed,
   // split, deleted, or reordered by the user in the timeline editor.
@@ -2235,6 +2225,10 @@ function ReviewScreen({
     start: number;
     end: number;
     disabled?: boolean;
+    speed?: number;
+    fadeIn?: number;
+    fadeOut?: number;
+    volume?: number;
   };
   const [editSegs, setEditSegs] = useState<EditableSeg[]>([]);
   const [editSaving, setEditSaving] = useState(false);
@@ -2255,93 +2249,75 @@ function ReviewScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptSegments.length]);
 
-  // Commit queue. Rapid edits (delete, split, undo, drag-release) used
-  // to fire concurrent POSTs → concurrent ffmpeg previews writing to
-  // the same preview.mp4 → video element decodes half-written bytes and
-  // crashes. Now: only ONE request in flight; newer intents overwrite
-  // the pending state so we always land on the latest edit without
-  // trampling files mid-render.
-  const pendingCommitRef = useRef<EditableSeg[] | null>(null);
-  const commitBusyRef = useRef(false);
-
-  const swapVideoSource = (): Promise<void> => {
-    return new Promise((resolve) => {
-      const v = videoRef.current;
-      if (!v) return resolve();
-      const wasPaused = v.paused;
-      const wasTime = v.currentTime;
-      const base = `${backendUrl()}/jobs/${jobId}/preview-video`;
-      // Pause before src swap so Safari doesn't try to decode bytes
-      // from the freshly-rebuilt file mid-playback.
-      try {
+  // Virtual playback controller. The <video> plays the raw source, so
+  // its currentTime can wander into deleted/trimmed regions. This
+  // controller watches currentTime and hops to the next enabled
+  // segment's start whenever we're in a hole. Runs cheaply — only
+  // acts when we detect drift.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || editSegs.length === 0) return;
+    const active = editSegs
+      .filter((s) => !s.disabled && s.end - s.start > 0.05)
+      .sort((a, b) => a.start - b.start);
+    if (active.length === 0) return;
+    const onTick = () => {
+      const t = v.currentTime;
+      // If we're inside an active segment, all good.
+      const inside = active.find((s) => t >= s.start - 0.02 && t < s.end);
+      if (inside) return;
+      // Otherwise skip to the next segment's start (or wrap to first
+      // if we've fallen off the end while paused).
+      const next = active.find((s) => s.start > t);
+      if (next) {
+        v.currentTime = next.start;
+      } else if (!v.paused) {
         v.pause();
-      } catch {
-        /* ignore */
+        v.currentTime = active[0].start;
       }
-      const done = () => {
-        v.removeEventListener("loadedmetadata", done);
-        v.removeEventListener("error", done);
-        try {
-          const dur = isFinite(v.duration) ? v.duration : 0;
-          v.currentTime = Math.min(wasTime, Math.max(0, dur - 0.1));
-        } catch {
-          /* ignore */
-        }
-        if (!wasPaused) v.play().catch(() => {});
-        resolve();
-      };
-      v.addEventListener("loadedmetadata", done, { once: true });
-      v.addEventListener("error", done, { once: true });
-      // Setting src triggers a fresh load; append cache-buster so the
-      // browser never serves a stale copy of preview-video.
-      v.src = `${base}?v=${Date.now()}`;
-    });
-  };
+    };
+    v.addEventListener("timeupdate", onTick);
+    v.addEventListener("seeked", onTick);
+    v.addEventListener("play", onTick);
+    return () => {
+      v.removeEventListener("timeupdate", onTick);
+      v.removeEventListener("seeked", onTick);
+      v.removeEventListener("play", onTick);
+    };
+  }, [editSegs]);
 
-  const flushCommitQueue = async () => {
-    if (commitBusyRef.current) return;
-    commitBusyRef.current = true;
-    setEditSaving(true);
-    try {
-      while (pendingCommitRef.current) {
-        const toSend = pendingCommitRef.current;
-        pendingCommitRef.current = null;
-        const active = toSend
-          .filter((s) => !s.disabled && s.end - s.start > 0.05)
-          .map((s) => ({ start: s.start, end: s.end }));
-        if (active.length === 0) continue; // safety: never send an empty timeline
-        try {
-          const r = await fetch(
-            `${backendUrl()}/jobs/${jobId}/edit-segments`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ segments: active }),
-            },
-          );
-          if (r.ok) await swapVideoSource();
-        } catch {
-          /* ignore transient network errors — user can retry */
-        }
+  // Initial seek to the first segment when the video is ready. Without
+  // this the raw source starts at t=0 which may be deleted content.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || editSegs.length === 0) return;
+    const first = editSegs.find((s) => !s.disabled);
+    if (!first) return;
+    const onReady = () => {
+      if (v.currentTime < first.start - 0.02) {
+        v.currentTime = first.start;
       }
-    } finally {
-      commitBusyRef.current = false;
-      setEditSaving(false);
-    }
-  };
+    };
+    if (v.readyState >= 1) onReady();
+    else v.addEventListener("loadedmetadata", onReady, { once: true });
+    // Only run on initial mount / when segments first arrive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editSegs.length > 0]);
 
+  // Edits are pure local state updates — no server round-trip, no
+  // video reload. The video element plays the RAW source; a virtual
+  // playback controller (below) skips over deleted segments and
+  // enforces trim boundaries. Segments only get sent to the backend
+  // once, right before the final render.
   const commitEditSegs = (next: EditableSeg[]) => {
     setEditSegs(next);
-    pendingCommitRef.current = next;
-    void flushCommitQueue();
   };
 
-  // The preview video is the SOURCE already cut to the kept segments,
-  // so phrase.start / phrase.end (cut-timeline) match video.currentTime
-  // directly. The original_* fields are kept only for the render step.
+  // Video runs on the RAW source, so we match phrases via their
+  // original_start / original_end fields.
   useEffect(() => {
     const idx = phrases.findIndex(
-      (p) => currentTime >= p.start && currentTime <= p.end,
+      (p) => currentTime >= p.original_start && currentTime <= p.original_end,
     );
     setActiveIdx(idx === -1 ? null : idx);
   }, [currentTime, phrases]);
@@ -2378,7 +2354,7 @@ function ReviewScreen({
 
   const seekToPhrase = (p: Phrase) => {
     if (!videoRef.current) return;
-    videoRef.current.currentTime = p.start;
+    videoRef.current.currentTime = p.original_start;
     videoRef.current.play().catch(() => {});
   };
 
@@ -2410,13 +2386,15 @@ function ReviewScreen({
         </div>
       )}
 
-      {/* Cut video preview — captions will be burned in by the final
-          render, not approximated here. The style sample below shows
-          the user what to expect visually. */}
+      {/* Raw source preview. The virtual player above skips deleted
+          segments and enforces trim boundaries client-side so the user
+          never has to wait for a server rebuild between edits. Captions
+          + effects are rendered by the final Render pass, not
+          approximated here. */}
       <div className="overflow-hidden rounded-xl bg-[var(--surface-1)]">
         <video
           ref={videoRef}
-          src={`${backendUrl()}/jobs/${jobId}/preview-video`}
+          src={`${backendUrl()}/jobs/${jobId}/source-video`}
           controls
           playsInline
           onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
@@ -2489,16 +2467,7 @@ function ReviewScreen({
           onToggleOpen={() => {}}
           onCommit={(next) => void commitEditSegs(next)}
           onSeekOriginal={(t) => {
-            let acc = 0;
-            for (const s of editSegs.filter((x) => !x.disabled)) {
-              if (t >= s.start && t <= s.end) {
-                if (videoRef.current) {
-                  videoRef.current.currentTime = acc + (t - s.start);
-                }
-                return;
-              }
-              acc += s.end - s.start;
-            }
+            if (videoRef.current) videoRef.current.currentTime = t;
           }}
           getVideoTime={() => originalTime}
           onPlayPauseKey={() => {
@@ -2652,10 +2621,42 @@ function ReviewScreen({
       )}
 
       <button
-        onClick={onApply}
-        className="mt-1 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99]"
+        onClick={async () => {
+          // Push the user's edited segments to the backend before we
+          // hit /render. During editing we kept everything local for
+          // instant feedback; render needs the segment list on the
+          // server. Fire-and-forget the effects too if the user
+          // touched them.
+          setEditSaving(true);
+          try {
+            const active = editSegs
+              .filter((s) => !s.disabled && s.end - s.start > 0.05)
+              .map((s) => ({
+                start: s.start,
+                end: s.end,
+                speed: s.speed,
+                fadeIn: s.fadeIn,
+                fadeOut: s.fadeOut,
+                volume: s.volume,
+              }));
+            if (active.length > 0) {
+              await fetch(`${backendUrl()}/jobs/${jobId}/edit-segments`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ segments: active }),
+              });
+            }
+          } catch {
+            /* non-fatal — backend falls back to the pre-edit cuts */
+          } finally {
+            setEditSaving(false);
+          }
+          onApply();
+        }}
+        disabled={editSaving}
+        className="mt-1 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99] disabled:opacity-60"
       >
-        Apply &amp; render
+        {editSaving ? "Preparing…" : "Apply & render"}
       </button>
     </div>
   );
