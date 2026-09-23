@@ -933,10 +933,18 @@ function PickerScreen({
   const [jobStatuses, setJobStatuses] = useState<
     Record<string, { progress: number; message: string; status: string }>
   >({});
+  // Dashboard (jobs + recent) is the home for returning users. The
+  // workflow picker is its own screen — reached via "+ New video" and
+  // returned from via ← Back. First-time users skip the empty
+  // dashboard and land straight on the picker.
+  const [view, setView] = useState<"dashboard" | "picker">("picker");
 
   useEffect(() => {
-    setRecent(getLibrary().slice(0, 3));
-    setActiveJobs(getActiveJobs());
+    const rec = getLibrary().slice(0, 3);
+    const jobs = getActiveJobs();
+    setRecent(rec);
+    setActiveJobs(jobs);
+    if (jobs.length > 0 || rec.length > 0) setView("dashboard");
     try {
       const seen = localStorage.getItem("cleocuts.voiceOnboardingSeen.v1");
       if (!seen) setShowVoiceOnboarding(true);
@@ -1005,36 +1013,180 @@ function PickerScreen({
     }
   };
 
-  return (
-    <div className="relative z-10 flex flex-col">
-      {/* Active jobs — cards shown at the very top so newly-uploaded
-          videos are always visible and users can dive back in without
-          losing sight of the multi-job queue. */}
-      {activeJobs.length > 0 && (
-        <div className="mb-8">
-          <div className="mb-3 flex items-center justify-between">
+  if (view === "dashboard") {
+    return (
+      <div className="relative z-10 flex flex-col">
+        {/* Dashboard header — logo/tagline on the left, primary CTA on
+            the right. This screen is deliberately jobs-only; the
+            workflow picker lives on its own screen. */}
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
             <div
               className="text-[11px] font-semibold uppercase tracking-[0.15em]"
               style={{ color: "var(--text-muted)" }}
             >
-              In progress · {activeJobs.length}
+              Your workspace
+            </div>
+            <h1
+              className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl"
+              style={{ color: "var(--text-strong)" }}
+            >
+              {activeJobs.length > 0
+                ? `${activeJobs.length} video${activeJobs.length === 1 ? "" : "s"} in progress`
+                : "Ready when you are"}
+            </h1>
+          </div>
+          <button
+            onClick={() => setView("picker")}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold transition-transform hover:-translate-y-0.5"
+            style={{
+              background: "var(--brand)",
+              color: "#0f0f0f",
+            }}
+          >
+            <span className="text-base leading-none">+</span>
+            New video
+          </button>
+        </div>
+
+        {/* Active jobs */}
+        {activeJobs.length > 0 && (
+          <div className="mb-10">
+            <div
+              className="mb-3 text-[11px] font-semibold uppercase tracking-[0.15em]"
+              style={{ color: "var(--text-muted)" }}
+            >
+              In progress
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {activeJobs.map((j) => (
+                <ActiveJobCard
+                  key={j.jobId}
+                  job={j}
+                  status={jobStatuses[j.jobId]}
+                  onOpen={() => onResumeJob?.(j.jobId)}
+                  onRetry={() => {
+                    removeActiveJob(j.jobId);
+                    setActiveJobs(getActiveJobs());
+                  }}
+                />
+              ))}
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {activeJobs.map((j) => (
-              <ActiveJobCard
-                key={j.jobId}
-                job={j}
-                status={jobStatuses[j.jobId]}
-                onOpen={() => onResumeJob?.(j.jobId)}
-                onRetry={() => {
-                  removeActiveJob(j.jobId);
-                  setActiveJobs(getActiveJobs());
-                }}
-              />
-            ))}
+        )}
+
+        {/* Recent projects */}
+        {recent && recent.length > 0 && (
+          <div className="mb-10">
+            <div className="mb-3 flex items-center justify-between">
+              <div
+                className="text-[11px] font-semibold uppercase tracking-[0.15em]"
+                style={{ color: "var(--text-muted)" }}
+              >
+                Recent projects
+              </div>
+              <Link
+                href="/app/library"
+                className="text-xs transition-opacity hover:opacity-70"
+                style={{ color: "var(--brand-strong)" }}
+              >
+                View all →
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {recent.map((entry) => (
+                <RecentProjectCard
+                  key={entry.jobId}
+                  entry={entry}
+                  onPlay={setPlayingJobId}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Empty state — no jobs and no library entries yet */}
+        {activeJobs.length === 0 && (!recent || recent.length === 0) && (
+          <button
+            onClick={() => setView("picker")}
+            className="flex items-center gap-4 rounded-2xl p-6 text-left transition-colors"
+            style={{
+              background: "var(--surface-1)",
+              border: "1px dashed var(--border-hover)",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "var(--brand)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "var(--border-hover)";
+            }}
+          >
+            <div
+              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
+              style={{ background: "var(--brand-tint)", color: "var(--brand)" }}
+            >
+              <IconArrowRight size={22} strokeWidth={2.5} />
+            </div>
+            <div>
+              <div
+                className="text-base font-bold"
+                style={{ color: "var(--text-strong)" }}
+              >
+                Start your first video
+              </div>
+              <div
+                className="text-xs"
+                style={{ color: "var(--text-muted)" }}
+              >
+                Pick a workflow — CleoCuts handles captions, format, cleanup
+              </div>
+            </div>
+          </button>
+        )}
+
+        {/* Voice teaser pinned at the bottom of the dashboard so it
+            stays a reminder without competing with the CTA. */}
+        <button
+          onClick={() => setShowVoiceOnboarding(true)}
+          className="mt-2 inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
+          style={{
+            background: "var(--brand-tint)",
+            color: "var(--brand-strong)",
+            border: "1px solid var(--brand)/30",
+          }}
+        >
+          <IconMic size={14} strokeWidth={2.5} />
+          Say &ldquo;Cleo&rdquo; while recording — save hours of editing
+          <span className="opacity-70">→</span>
+        </button>
+
+        {playingJobId && (
+          <VideoModal
+            jobId={playingJobId}
+            onClose={() => setPlayingJobId(null)}
+          />
+        )}
+        {showVoiceOnboarding && (
+          <VoiceCommandsModal onClose={dismissVoiceOnboarding} />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative z-10 flex flex-col">
+      {/* Back to dashboard — only rendered when there's a dashboard to
+          go back to (existing jobs or library entries). Fresh users
+          land here directly and don't see the back button. */}
+      {(activeJobs.length > 0 || (recent && recent.length > 0)) && (
+        <button
+          onClick={() => setView("dashboard")}
+          className="mb-6 inline-flex w-fit items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
+          style={{ color: "var(--text-muted)" }}
+        >
+          <span className="text-base leading-none">←</span>
+          Back to dashboard
+        </button>
       )}
 
       {/* Hero */}
@@ -1210,36 +1362,6 @@ function PickerScreen({
           <IconArrowRight size={14} strokeWidth={2} />
         </span>
       </button>
-
-      {/* Recent projects — only shown if the user has library entries */}
-      {recent && recent.length > 0 && (
-        <div className="mt-10">
-          <div className="mb-3 flex items-center justify-between">
-            <div
-              className="text-[11px] font-semibold uppercase tracking-[0.15em]"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Recent projects
-            </div>
-            <Link
-              href="/app/library"
-              className="text-xs transition-opacity hover:opacity-70"
-              style={{ color: "var(--brand-strong)" }}
-            >
-              View all →
-            </Link>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {recent.map((entry) => (
-              <RecentProjectCard
-                key={entry.jobId}
-                entry={entry}
-                onPlay={setPlayingJobId}
-              />
-            ))}
-          </div>
-        </div>
-      )}
 
       {playingJobId && (
         <VideoModal
