@@ -1021,6 +1021,38 @@ function PickerScreen({
           ) {
             updateActiveJobV2(j.jobId, { phase: "rendering" });
           } else if (s.status === "done") {
+            // Persist the finished render to the library so the user
+            // can find it later. Backend keeps the files on Railway's
+            // volume for the retention window.
+            try {
+              const withOutputs = s as typeof s & {
+                outputs?: Record<string, string>;
+                social_caption?: string;
+                social_hashtags?: string[];
+                hook_clips?: LibraryHookClip[];
+              };
+              const outputKeys = withOutputs.outputs
+                ? Object.keys(withOutputs.outputs)
+                : ["primary"];
+              saveEntry({
+                jobId: j.jobId,
+                timestamp: Date.now(),
+                presetId: j.presetId,
+                presetIcon: j.presetIcon,
+                presetLabel: j.presetLabel,
+                filename: j.filename,
+                outputs: outputKeys,
+                hookClips: withOutputs.hook_clips ?? [],
+                socialCaption: withOutputs.social_caption ?? "",
+                socialHashtags: withOutputs.social_hashtags ?? [],
+              });
+              notifyIfHidden(
+                "CleoCuts — your video is ready",
+                j.filename,
+              );
+            } catch {
+              /* library save is non-fatal */
+            }
             removeActiveJob(j.jobId);
           } else if (s.status === "error") {
             updateActiveJobV2(j.jobId, { phase: j.phase });

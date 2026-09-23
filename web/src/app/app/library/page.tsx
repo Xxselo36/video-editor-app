@@ -10,7 +10,6 @@ import {
   getLibrary,
   type LibraryEntry,
 } from "@/lib/library";
-import { getActiveJob, type ActiveJob } from "@/lib/activeJob";
 import { VideoModal } from "@/components/VideoModal";
 
 function backendUrl(): string {
@@ -29,12 +28,10 @@ function formatLabel(f: string): string {
 
 export default function Library() {
   const [entries, setEntries] = useState<LibraryEntry[] | null>(null);
-  const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const [playingJobId, setPlayingJobId] = useState<string | null>(null);
 
   useEffect(() => {
     setEntries(getLibrary());
-    setActiveJob(getActiveJob());
   }, []);
 
   const remove = (jobId: string) => {
@@ -84,64 +81,6 @@ export default function Library() {
       </header>
 
       <div className="phase-fade mx-auto w-full max-w-3xl flex-1 px-5 py-10">
-        {activeJob && (
-          <Link
-            href="/app"
-            className="mb-6 flex items-center gap-3 rounded-2xl p-4 transition-all hover:-translate-y-0.5"
-            style={{
-              background: "var(--brand-tint)",
-              border: "1px solid var(--brand-hover)",
-              boxShadow: "0 0 24px rgba(139, 92, 246, 0.15)",
-            }}
-          >
-            <div
-              className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
-              style={{ background: "var(--surface-1)" }}
-            >
-              <span
-                className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-40"
-                style={{ background: "var(--brand)" }}
-              />
-              <span
-                className="relative inline-block h-2.5 w-2.5 rounded-full"
-                style={{ background: "var(--brand)" }}
-              />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div
-                className="text-xs font-semibold uppercase tracking-[0.15em]"
-                style={{ color: "var(--brand-strong)" }}
-              >
-                {activeJob.phase === "reviewing"
-                  ? "Waiting for your review"
-                  : activeJob.phase === "rendering"
-                  ? "Rendering your video"
-                  : "Processing…"}
-              </div>
-              <div
-                className="truncate text-sm font-semibold"
-                style={{ color: "var(--text-strong)" }}
-              >
-                {activeJob.filename}
-              </div>
-              {activeJob.presetLabel && (
-                <div
-                  className="text-[11px]"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {activeJob.presetLabel} · started{" "}
-                  {formatRelativeTime(activeJob.timestamp)}
-                </div>
-              )}
-            </div>
-            <IconArrowRight
-              size={16}
-              strokeWidth={2}
-              className="shrink-0"
-            />
-          </Link>
-        )}
-
         {entries === null ? (
           <div className="flex flex-col gap-3">
             <div className="mb-2 skeleton h-3 w-24" />
