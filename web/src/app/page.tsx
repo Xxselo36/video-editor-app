@@ -62,8 +62,7 @@ export default function Landing() {
             className="mb-6 text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl"
             style={{ color: "var(--text-strong)" }}
           >
-            World&apos;s first
-            <br />
+            Edit while you{" "}
             <span
               style={{
                 background: "linear-gradient(120deg, var(--brand) 0%, var(--accent) 100%)",
@@ -72,18 +71,19 @@ export default function Landing() {
                 WebkitTextFillColor: "transparent",
               }}
             >
-              voice-controlled
-            </span>{" "}
-            editor.
+              record.
+            </span>
           </h1>
 
           <p
             className="mb-8 max-w-md text-lg"
             style={{ color: "var(--text-body)" }}
           >
-            Just say{" "}
+            Say{" "}
             <span style={{ color: "var(--brand)", fontWeight: 600 }}>&ldquo;Cleo cut&rdquo;</span>{" "}
-            when you mess up. AI does the rest — captions, cuts, ready-to-post clips.
+            when you mess up.{" "}
+            <span style={{ color: "var(--brand)", fontWeight: 600 }}>&ldquo;Cleo finish&rdquo;</span>{" "}
+            when you&apos;re done. Post-fertig in Minuten — Captions, Cuts, Multi-Format inklusive.
           </p>
 
           <Link

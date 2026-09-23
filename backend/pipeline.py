@@ -785,6 +785,114 @@ def analyze_only(
     }
 
 
+def _apply_segment_effects(
+    input_path: str,
+    output_path: str,
+    segments: list[tuple[float, float] | list[float]],
+    effects: list[dict],
+) -> None:
+    """Apply per-segment speed / fade / volume via ffmpeg filter_complex.
+
+    The concat output is a linear video where segment N runs from
+    `sum(prev durations)` to `sum(prev durations) + segment_N_duration`.
+    We split the video into those slices, apply per-slice filters, and
+    concat back. Effects supported:
+      - speed: setpts (video) + atempo (audio). Chained for >2x / <0.5x.
+      - fadeIn / fadeOut: video fade + afade at slice boundary.
+      - volume: audio scale.
+    """
+    if not segments or not effects:
+        raise ValueError("nothing to apply")
+    # Compute per-slice bounds in OUTPUT time.
+    durations = [max(0.0, float(s[1]) - float(s[0])) for s in segments]
+    total = sum(durations)
+    if total <= 0:
+        raise ValueError("segments have zero total duration")
+
+    filter_parts: list[str] = []
+    concat_v: list[str] = []
+    concat_a: list[str] = []
+    cursor = 0.0
+    for i, (dur, eff) in enumerate(zip(durations, effects)):
+        s_start = cursor
+        s_end = cursor + dur
+        cursor = s_end
+        speed = float(eff.get("speed", 1.0)) or 1.0
+        fade_in = float(eff.get("fadeIn", 0.0)) or 0.0
+        fade_out = float(eff.get("fadeOut", 0.0)) or 0.0
+        volume = float(eff.get("volume", 1.0)) or 1.0
+
+        v_chain = [
+            f"[0:v]trim=start={s_start:.3f}:end={s_end:.3f}",
+            "setpts=PTS-STARTPTS",
+        ]
+        a_chain = [
+            f"[0:a]atrim=start={s_start:.3f}:end={s_end:.3f}",
+            "asetpts=PTS-STARTPTS",
+        ]
+        # Speed via setpts + atempo (atempo capped 0.5-2.0 per stage)
+        if abs(speed - 1.0) > 0.001:
+            v_chain.append(f"setpts=PTS/{speed:.4f}")
+            remaining = speed
+            while remaining > 2.0:
+                a_chain.append("atempo=2.0")
+                remaining /= 2.0
+            while remaining < 0.5:
+                a_chain.append("atempo=0.5")
+                remaining /= 0.5
+            if abs(remaining - 1.0) > 0.001:
+                a_chain.append(f"atempo={remaining:.4f}")
+        # Effective slice duration after speed change
+        eff_dur = dur / speed if speed > 0 else dur
+        if fade_in > 0:
+            fi = min(fade_in, eff_dur / 2)
+            v_chain.append(f"fade=t=in:st=0:d={fi:.3f}")
+            a_chain.append(f"afade=t=in:st=0:d={fi:.3f}")
+        if fade_out > 0:
+            fo = min(fade_out, eff_dur / 2)
+            v_chain.append(
+                f"fade=t=out:st={max(0.0, eff_dur - fo):.3f}:d={fo:.3f}",
+            )
+            a_chain.append(
+                f"afade=t=out:st={max(0.0, eff_dur - fo):.3f}:d={fo:.3f}",
+            )
+        if abs(volume - 1.0) > 0.001:
+            a_chain.append(f"volume={volume:.4f}")
+        v_chain.append(f"[v{i}]")
+        a_chain.append(f"[a{i}]")
+        filter_parts.append(",".join(v_chain))
+        filter_parts.append(",".join(a_chain))
+        concat_v.append(f"[v{i}]")
+        concat_a.append(f"[a{i}]")
+
+    n = len(durations)
+    # concat wants alternating streams: v0,a0,v1,a1,...
+    interleaved = "".join(
+        f"[v{i}][a{i}]" for i in range(n)
+    )
+    filter_parts.append(
+        f"{interleaved}concat=n={n}:v=1:a=1[outv][outa]"
+    )
+    filter_complex = ";".join(filter_parts)
+
+    cmd = [
+        get_ffmpeg_path(), "-y",
+        "-i", input_path,
+        "-filter_complex", filter_complex,
+        "-map", "[outv]", "-map", "[outa]",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "320k",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg segment-effects failed: {result.stderr[-800:]}"
+        )
+
+
 def _try_modal_render(
     normalized_path: str,
     segments: list[tuple[float, float]],
@@ -1043,6 +1151,37 @@ def render_only(
         )
 
         _generate_thumbnail(primary_path, thumbnail_path)
+
+    # Per-segment effects (speed / fade / volume) from timeline editor.
+    # Applied after concat so we can build a filter_complex that maps
+    # each segment slice to its own filter chain. If any effect is a
+    # no-op across the board, skip the pass entirely to save encode time.
+    effects = settings.get("segment_effects") or []
+    if effects and any(
+        (e.get("speed", 1.0) != 1.0)
+        or (e.get("fadeIn", 0.0) > 0)
+        or (e.get("fadeOut", 0.0) > 0)
+        or (e.get("volume", 1.0) != 1.0)
+        for e in effects
+    ):
+        try:
+            fx_path = str(Path(output_dir) / "cleo_output_fx.mp4")
+            _stage("Applying effects…", 92)
+            _apply_segment_effects(
+                primary_path, fx_path, segments, effects,
+            )
+            if Path(fx_path).exists():
+                # Swap in the effects output as the new primary.
+                try:
+                    Path(primary_path).unlink()
+                except Exception:
+                    pass
+                Path(fx_path).rename(primary_path)
+                # Regenerate thumbnail from post-fx primary.
+                _generate_thumbnail(primary_path, thumbnail_path)
+        except Exception as e:
+            print(f"[effects] failed, using un-effected output: {e}",
+                  flush=True)
 
     # Assemble outputs dict. Modal path already wrote extra-format files
     # to output_dir; local path still needs to encode them below.

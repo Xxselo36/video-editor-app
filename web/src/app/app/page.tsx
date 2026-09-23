@@ -1103,6 +1103,10 @@ function PickerScreen({
                 job={j}
                 status={jobStatuses[j.jobId]}
                 onOpen={() => onResumeJob?.(j.jobId)}
+                onRetry={() => {
+                  removeActiveJob(j.jobId);
+                  setActiveJobs(getActiveJobs());
+                }}
               />
             ))}
           </div>
@@ -2286,6 +2290,12 @@ function ReviewScreen({
             }
           }}
           getVideoTime={() => originalTime}
+          onPlayPauseKey={() => {
+            const v = videoRef.current;
+            if (!v) return;
+            if (v.paused) v.play().catch(() => {});
+            else v.pause();
+          }}
         />
       )}
 
@@ -3080,11 +3090,14 @@ function ActiveJobCard({
   job,
   status,
   onOpen,
+  onRetry,
 }: {
   job: ActiveJobV2;
   status?: { progress: number; message: string; status: string };
   onOpen: () => void;
+  onRetry?: () => void;
 }) {
+  const isError = status?.status === "error";
   const phaseLabel: Record<ActiveJobV2["phase"], string> = {
     uploading: "Uploading",
     analyzing: "Analyzing",
@@ -3099,7 +3112,7 @@ function ActiveJobCard({
   };
   const pct =
     job.phase === "uploading" ? job.uploadPct ?? 0 : status?.progress ?? 0;
-  const canOpen = job.phase === "reviewing";
+  const canOpen = job.phase === "reviewing" && !isError;
   const message = status?.message ?? "";
 
   return (
@@ -3160,11 +3173,30 @@ function ActiveJobCard({
       <div className="mt-1 flex items-center justify-between">
         <span
           className="text-[10px] tabular-nums"
-          style={{ color: "var(--text-faint)" }}
+          style={{ color: isError ? "#F26E6E" : "var(--text-faint)" }}
         >
-          {job.phase !== "reviewing" ? `${Math.round(pct)}%` : "Tap to edit →"}
+          {isError
+            ? "⚠ Failed"
+            : job.phase !== "reviewing"
+              ? `${Math.round(pct)}%`
+              : "Tap to edit →"}
         </span>
-        {job.captionPreset && (
+        {isError && onRetry && (
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetry();
+            }}
+            className="cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-semibold"
+            style={{
+              background: "var(--brand-tint)",
+              color: "var(--brand-strong)",
+            }}
+          >
+            Retry
+          </span>
+        )}
+        {!isError && job.captionPreset && (
           <span
             className="text-[10px] uppercase tracking-wider"
             style={{ color: "var(--text-faint)" }}
@@ -3189,6 +3221,10 @@ type EditorSeg = {
   start: number;
   end: number;
   disabled?: boolean;
+  speed?: number;      // 0.25 – 4.0, default 1
+  fadeIn?: number;     // seconds
+  fadeOut?: number;    // seconds
+  volume?: number;     // 0 – 2.5, default 1
 };
 
 function TimelineEditor({
@@ -3201,6 +3237,7 @@ function TimelineEditor({
   onCommit,
   onSeekOriginal,
   getVideoTime,
+  onPlayPauseKey,
 }: {
   segments: EditorSeg[];
   duration: number;
@@ -3211,13 +3248,16 @@ function TimelineEditor({
   onCommit: (next: EditorSeg[]) => void;
   onSeekOriginal: (t: number) => void;
   getVideoTime: () => number;
+  onPlayPauseKey?: () => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragMode, setDragMode] = useState<"start" | "end" | "move" | null>(
-    null,
-  );
+  const [dragMode, setDragMode] = useState<"start" | "end" | null>(null);
+  const [zoom, setZoom] = useState(1); // 1 – 4×
+  const [history, setHistory] = useState<EditorSeg[][]>([]);
+  const [future, setFuture] = useState<EditorSeg[][]>([]);
   const stripRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const totalDur = segments.reduce((acc, s) => acc + (s.end - s.start), 0) || 1;
   const activeCount = segments.filter((s) => !s.disabled).length;
@@ -3228,8 +3268,28 @@ function TimelineEditor({
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Trim drag: as the user moves the mouse, update the segment bounds
-  // live. Commit only on mouseup to avoid spamming the backend.
+  // Wrap onCommit to push history state
+  const commit = (next: EditorSeg[]) => {
+    setHistory((h) => [...h, segments].slice(-30));
+    setFuture([]);
+    onCommit(next);
+  };
+  const undo = () => {
+    if (history.length === 0) return;
+    const prev = history[history.length - 1];
+    setHistory(history.slice(0, -1));
+    setFuture((f) => [segments, ...f].slice(0, 30));
+    onCommit(prev);
+  };
+  const redo = () => {
+    if (future.length === 0) return;
+    const next = future[0];
+    setFuture(future.slice(1));
+    setHistory((h) => [...h, segments].slice(-30));
+    onCommit(next);
+  };
+
+  // Trim drag
   useEffect(() => {
     if (!draggingId || !dragMode || !stripRef.current) return;
     const strip = stripRef.current;
@@ -3240,23 +3300,20 @@ function TimelineEditor({
       const clientX =
         (e as TouchEvent).touches?.[0]?.clientX ?? (e as MouseEvent).clientX;
       const relX = clientX - stripRect.left;
-      const seconds = relX / pxPerSec;
+      const seconds = Math.max(0, relX / pxPerSec);
 
-      // Convert screen-x offset into an ABSOLUTE original-timeline
-      // second by summing prior segment durations until we hit our seg
       let acc = 0;
       const next = segments.map((s) => {
         if (s.disabled) return s;
         const sDur = s.end - s.start;
         if (s.id === draggingId) {
           if (dragMode === "start") {
-            const targetOriginal =
-              s.end - (sDur - Math.max(0, seconds - acc));
-            const clamped = Math.min(s.end - 0.1, Math.max(0, targetOriginal));
+            const target = s.end - (sDur - Math.max(0, seconds - acc));
+            const clamped = Math.min(s.end - 0.1, Math.max(0, target));
             return { ...s, start: clamped };
           } else if (dragMode === "end") {
-            const targetOriginal = s.start + Math.max(0.1, seconds - acc);
-            const clamped = Math.min(duration, Math.max(s.start + 0.1, targetOriginal));
+            const target = s.start + Math.max(0.1, seconds - acc);
+            const clamped = Math.min(duration, Math.max(s.start + 0.1, target));
             return { ...s, end: clamped };
           }
         }
@@ -3285,10 +3342,10 @@ function TimelineEditor({
   }, [draggingId, dragMode, totalDur]);
 
   const del = (id: string) => {
-    onCommit(segments.map((s) => (s.id === id ? { ...s, disabled: true } : s)));
+    commit(segments.map((s) => (s.id === id ? { ...s, disabled: true } : s)));
   };
   const restore = (id: string) => {
-    onCommit(segments.map((s) => (s.id === id ? { ...s, disabled: false } : s)));
+    commit(segments.map((s) => (s.id === id ? { ...s, disabled: false } : s)));
   };
   const splitAtPlayhead = () => {
     const t = getVideoTime();
@@ -3303,23 +3360,62 @@ function TimelineEditor({
       start: t,
       id: `${cur.id}-b-${Date.now()}`,
     };
-    const next = [...segments.slice(0, idx), first, second, ...segments.slice(idx + 1)];
-    onCommit(next);
+    commit([...segments.slice(0, idx), first, second, ...segments.slice(idx + 1)]);
   };
   const moveLeft = (id: string) => {
     const idx = segments.findIndex((s) => s.id === id);
     if (idx <= 0) return;
     const next = [...segments];
     [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-    onCommit(next);
+    commit(next);
   };
   const moveRight = (id: string) => {
     const idx = segments.findIndex((s) => s.id === id);
     if (idx === -1 || idx >= segments.length - 1) return;
     const next = [...segments];
     [next[idx + 1], next[idx]] = [next[idx], next[idx + 1]];
-    onCommit(next);
+    commit(next);
   };
+  const patchSeg = (id: string, patch: Partial<EditorSeg>) => {
+    commit(segments.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  };
+
+  // Keyboard shortcuts: Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z (redo),
+  // Delete (remove selected), Space (play/pause via callback).
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const inField =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable;
+      if (inField) return;
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (
+        meta &&
+        (e.key.toLowerCase() === "y" ||
+          (e.key.toLowerCase() === "z" && e.shiftKey))
+      ) {
+        e.preventDefault();
+        redo();
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selected) {
+        e.preventDefault();
+        del(selected);
+      } else if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        onPlayPauseKey?.();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, selected, history, future, segments]);
+
+  const selectedSeg = selected ? segments.find((x) => x.id === selected) : null;
 
   return (
     <div
@@ -3347,13 +3443,10 @@ function TimelineEditor({
             )}
           </div>
           <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
-            Trim edges, split at playhead, delete or reorder clips.
+            Trim / Split / Delete / Reorder · Speed · Fade · Volume · Undo (⌘Z)
           </div>
         </div>
-        <span
-          className="text-xs"
-          style={{ color: "var(--text-muted)" }}
-        >
+        <span className="text-xs" style={{ color: "var(--text-muted)" }}>
           {open ? "Hide ▲" : "Show ▼"}
         </span>
       </button>
@@ -3363,6 +3456,32 @@ function TimelineEditor({
           {/* Toolbar */}
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <button
+              onClick={undo}
+              disabled={history.length === 0}
+              className="rounded-lg px-2 py-1 text-xs disabled:opacity-40"
+              style={{
+                background: "var(--surface-2)",
+                color: "var(--text-body)",
+                border: "1px solid var(--border)",
+              }}
+              title="Undo (⌘Z)"
+            >
+              ↶
+            </button>
+            <button
+              onClick={redo}
+              disabled={future.length === 0}
+              className="rounded-lg px-2 py-1 text-xs disabled:opacity-40"
+              style={{
+                background: "var(--surface-2)",
+                color: "var(--text-body)",
+                border: "1px solid var(--border)",
+              }}
+              title="Redo (⌘⇧Z)"
+            >
+              ↷
+            </button>
+            <button
               onClick={splitAtPlayhead}
               className="rounded-lg px-2.5 py-1 text-xs font-semibold"
               style={{
@@ -3371,195 +3490,374 @@ function TimelineEditor({
                 border: "1px solid var(--border)",
               }}
             >
-              ⧉ Split at playhead
+              ⧉ Split
             </button>
-            {selected && (
-              <>
-                <button
-                  onClick={() => moveLeft(selected)}
-                  className="rounded-lg px-2.5 py-1 text-xs"
-                  style={{
-                    background: "var(--surface-2)",
-                    color: "var(--text-body)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  ← Move
-                </button>
-                <button
-                  onClick={() => moveRight(selected)}
-                  className="rounded-lg px-2.5 py-1 text-xs"
-                  style={{
-                    background: "var(--surface-2)",
-                    color: "var(--text-body)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  Move →
-                </button>
-                <button
-                  onClick={() => del(selected)}
-                  className="rounded-lg px-2.5 py-1 text-xs"
-                  style={{
-                    background: "var(--surface-2)",
-                    color: "#F26E6E",
-                    border: "1px solid #F26E6E44",
-                  }}
-                >
-                  ✕ Delete
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Segment strip */}
-          <div
-            ref={stripRef}
-            className="relative flex h-14 items-stretch gap-0.5 overflow-hidden rounded-lg select-none"
-            style={{ background: "var(--surface-0)" }}
-          >
-            {segments.map((s) => {
-              const width = ((s.end - s.start) / totalDur) * 100;
-              const isSel = selected === s.id;
-              return (
-                <div
-                  key={s.id}
-                  onClick={() => {
-                    setSelected(s.id);
-                    onSeekOriginal(s.start);
-                  }}
-                  className="group relative flex cursor-pointer items-center justify-center"
-                  style={{
-                    width: `${width}%`,
-                    minWidth: "12px",
-                    background: s.disabled
-                      ? "var(--surface-2)"
-                      : isSel
-                        ? "var(--brand-tint)"
-                        : "var(--surface-1)",
-                    border: isSel
-                      ? "1px solid var(--brand)"
-                      : "1px solid var(--border)",
-                    opacity: s.disabled ? 0.35 : 1,
-                  }}
-                >
-                  {!s.disabled && (
-                    <>
-                      <div
-                        onMouseDown={(e) => {
-                          e.stopPropagation();
-                          setDraggingId(s.id);
-                          setDragMode("start");
-                        }}
-                        onTouchStart={(e) => {
-                          e.stopPropagation();
-                          setDraggingId(s.id);
-                          setDragMode("start");
-                        }}
-                        className="absolute left-0 top-0 bottom-0 z-10 w-1.5 cursor-ew-resize"
-                        style={{
-                          background: isSel
-                            ? "var(--brand-strong)"
-                            : "var(--border-hover)",
-                        }}
-                      />
-                      <div
-                        onMouseDown={(e) => {
-                          e.stopPropagation();
-                          setDraggingId(s.id);
-                          setDragMode("end");
-                        }}
-                        onTouchStart={(e) => {
-                          e.stopPropagation();
-                          setDraggingId(s.id);
-                          setDragMode("end");
-                        }}
-                        className="absolute right-0 top-0 bottom-0 z-10 w-1.5 cursor-ew-resize"
-                        style={{
-                          background: isSel
-                            ? "var(--brand-strong)"
-                            : "var(--border-hover)",
-                        }}
-                      />
-                    </>
-                  )}
-                  <span
-                    className="pointer-events-none text-[10px] tabular-nums"
-                    style={{
-                      color: s.disabled
-                        ? "var(--text-faint)"
-                        : "var(--text-strong)",
-                    }}
-                  >
-                    {fmt(s.end - s.start)}
-                  </span>
-                  {s.disabled && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        restore(s.id);
-                      }}
-                      className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      Restore
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Playhead indicator */}
-            {(() => {
-              let acc = 0;
-              for (const s of segments) {
-                if (s.disabled) continue;
-                if (playhead >= s.start && playhead <= s.end) {
-                  const pct =
-                    ((acc + (playhead - s.start)) / totalDur) * 100;
-                  return (
-                    <div
-                      key="playhead"
-                      className="pointer-events-none absolute top-0 bottom-0 z-20 w-0.5"
-                      style={{
-                        left: `${pct}%`,
-                        background: "var(--brand)",
-                        boxShadow: "0 0 8px var(--brand-glow)",
-                      }}
-                    />
-                  );
-                }
-                acc += s.end - s.start;
-              }
-              return null;
-            })()}
-          </div>
-
-          {/* Selected segment detail */}
-          {selected && (() => {
-            const s = segments.find((x) => x.id === selected);
-            if (!s) return null;
-            return (
-              <div
-                className="mt-2 flex items-center gap-3 rounded-lg p-2 text-[11px]"
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                onClick={() => setZoom((z) => Math.max(1, z / 1.5))}
+                className="rounded-lg px-2 py-1 text-xs"
                 style={{
-                  background: "var(--surface-0)",
+                  background: "var(--surface-2)",
+                  color: "var(--text-body)",
                   border: "1px solid var(--border)",
                 }}
               >
+                −
+              </button>
+              <span
+                className="text-[10px] tabular-nums"
+                style={{ color: "var(--text-muted)", minWidth: "34px", textAlign: "center" }}
+              >
+                {zoom.toFixed(1)}×
+              </span>
+              <button
+                onClick={() => setZoom((z) => Math.min(6, z * 1.5))}
+                className="rounded-lg px-2 py-1 text-xs"
+                style={{
+                  background: "var(--surface-2)",
+                  color: "var(--text-body)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          {selected && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={() => moveLeft(selected)}
+                className="rounded-lg px-2.5 py-1 text-xs"
+                style={{
+                  background: "var(--surface-2)",
+                  color: "var(--text-body)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                ← Move
+              </button>
+              <button
+                onClick={() => moveRight(selected)}
+                className="rounded-lg px-2.5 py-1 text-xs"
+                style={{
+                  background: "var(--surface-2)",
+                  color: "var(--text-body)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                Move →
+              </button>
+              <button
+                onClick={() => del(selected)}
+                className="rounded-lg px-2.5 py-1 text-xs"
+                style={{
+                  background: "var(--surface-2)",
+                  color: "#F26E6E",
+                  border: "1px solid #F26E6E44",
+                }}
+              >
+                ✕ Delete
+              </button>
+            </div>
+          )}
+
+          {/* Segment strip — width scales with zoom, in a scroll container */}
+          <div
+            ref={scrollRef}
+            className="overflow-x-auto rounded-lg"
+            style={{ background: "var(--surface-0)" }}
+          >
+            <div
+              ref={stripRef}
+              className="relative flex h-16 items-stretch gap-0.5 select-none"
+              style={{ width: `${100 * zoom}%`, minWidth: "100%" }}
+            >
+              {segments.map((s) => {
+                const width = ((s.end - s.start) / totalDur) * 100;
+                const isSel = selected === s.id;
+                const hasFx =
+                  (s.speed && s.speed !== 1) ||
+                  (s.volume && s.volume !== 1) ||
+                  (s.fadeIn && s.fadeIn > 0) ||
+                  (s.fadeOut && s.fadeOut > 0);
+                return (
+                  <div
+                    key={s.id}
+                    onClick={() => {
+                      setSelected(s.id);
+                      onSeekOriginal(s.start);
+                    }}
+                    className="group relative flex cursor-pointer flex-col items-stretch justify-between"
+                    style={{
+                      width: `${width}%`,
+                      minWidth: "14px",
+                      background: s.disabled
+                        ? "var(--surface-2)"
+                        : isSel
+                          ? "var(--brand-tint)"
+                          : "var(--surface-1)",
+                      border: isSel
+                        ? "1px solid var(--brand)"
+                        : "1px solid var(--border)",
+                      opacity: s.disabled ? 0.35 : 1,
+                    }}
+                  >
+                    {!s.disabled && (
+                      <>
+                        <div
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            setDraggingId(s.id);
+                            setDragMode("start");
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                            setDraggingId(s.id);
+                            setDragMode("start");
+                          }}
+                          className="absolute left-0 top-0 bottom-0 z-10 w-1.5 cursor-ew-resize"
+                          style={{
+                            background: isSel
+                              ? "var(--brand-strong)"
+                              : "var(--border-hover)",
+                          }}
+                        />
+                        <div
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            setDraggingId(s.id);
+                            setDragMode("end");
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                            setDraggingId(s.id);
+                            setDragMode("end");
+                          }}
+                          className="absolute right-0 top-0 bottom-0 z-10 w-1.5 cursor-ew-resize"
+                          style={{
+                            background: isSel
+                              ? "var(--brand-strong)"
+                              : "var(--border-hover)",
+                          }}
+                        />
+                      </>
+                    )}
+                    <div className="pointer-events-none flex flex-1 flex-col items-center justify-center gap-0.5 px-1">
+                      <span
+                        className="text-[10px] tabular-nums"
+                        style={{
+                          color: s.disabled
+                            ? "var(--text-faint)"
+                            : "var(--text-strong)",
+                        }}
+                      >
+                        {fmt(s.end - s.start)}
+                      </span>
+                      {hasFx && !s.disabled && (
+                        <div className="flex gap-0.5">
+                          {s.speed && s.speed !== 1 && (
+                            <span
+                              className="rounded px-0.5 text-[8px]"
+                              style={{
+                                background: "var(--brand)",
+                                color: "white",
+                              }}
+                            >
+                              {s.speed}×
+                            </span>
+                          )}
+                          {(s.fadeIn || s.fadeOut) && (
+                            <span
+                              className="rounded px-0.5 text-[8px]"
+                              style={{ background: "#B979FF", color: "white" }}
+                            >
+                              ⋅⋅⋅
+                            </span>
+                          )}
+                          {s.volume && s.volume !== 1 && (
+                            <span
+                              className="rounded px-0.5 text-[8px]"
+                              style={{
+                                background: s.volume === 0 ? "#F26E6E" : "#F5B54D",
+                                color: "white",
+                              }}
+                            >
+                              {s.volume === 0
+                                ? "M"
+                                : `${Math.round(s.volume * 100)}%`}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {s.disabled && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          restore(s.id);
+                        }}
+                        className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        Restore
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Playhead */}
+              {(() => {
+                let acc = 0;
+                for (const s of segments) {
+                  if (s.disabled) continue;
+                  if (playhead >= s.start && playhead <= s.end) {
+                    const pct = ((acc + (playhead - s.start)) / totalDur) * 100;
+                    return (
+                      <div
+                        key="playhead"
+                        className="pointer-events-none absolute top-0 bottom-0 z-20 w-0.5"
+                        style={{
+                          left: `${pct}%`,
+                          background: "var(--brand)",
+                          boxShadow: "0 0 8px var(--brand-glow)",
+                        }}
+                      />
+                    );
+                  }
+                  acc += s.end - s.start;
+                }
+                return null;
+              })()}
+            </div>
+          </div>
+
+          {/* Effects panel — only when a segment is selected */}
+          {selectedSeg && !selectedSeg.disabled && (
+            <div
+              className="mt-3 grid grid-cols-1 gap-2 rounded-lg p-3 text-[11px] sm:grid-cols-2"
+              style={{
+                background: "var(--surface-0)",
+                border: "1px solid var(--border)",
+              }}
+            >
+              <div className="col-span-1 sm:col-span-2 flex items-center gap-3">
                 <span style={{ color: "var(--text-muted)" }}>Selected:</span>
                 <span
                   className="tabular-nums"
                   style={{ color: "var(--text-strong)" }}
                 >
-                  {fmt(s.start)} → {fmt(s.end)}
+                  {fmt(selectedSeg.start)} → {fmt(selectedSeg.end)}
                 </span>
                 <span style={{ color: "var(--text-faint)" }}>
-                  ({(s.end - s.start).toFixed(2)}s)
+                  ({(selectedSeg.end - selectedSeg.start).toFixed(2)}s)
                 </span>
               </div>
-            );
-          })()}
+
+              <div className="flex items-center gap-2">
+                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Speed</span>
+                <select
+                  value={selectedSeg.speed ?? 1}
+                  onChange={(e) => patchSeg(selectedSeg.id, { speed: Number(e.target.value) })}
+                  className="flex-1 rounded-md px-2 py-1 text-xs"
+                  style={{
+                    background: "var(--surface-1)",
+                    color: "var(--text-strong)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <option value={0.25}>0.25×</option>
+                  <option value={0.5}>0.5×</option>
+                  <option value={0.75}>0.75×</option>
+                  <option value={1}>1× (normal)</option>
+                  <option value={1.25}>1.25×</option>
+                  <option value={1.5}>1.5×</option>
+                  <option value={2}>2×</option>
+                  <option value={3}>3×</option>
+                  <option value={4}>4×</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Volume</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={2.5}
+                  step={0.05}
+                  value={selectedSeg.volume ?? 1}
+                  onChange={(e) => patchSeg(selectedSeg.id, { volume: Number(e.target.value) })}
+                  className="flex-1"
+                />
+                <span
+                  className="w-10 text-right tabular-nums"
+                  style={{ color: "var(--text-strong)" }}
+                >
+                  {Math.round(((selectedSeg.volume ?? 1) * 100))}%
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Fade in</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={selectedSeg.fadeIn ?? 0}
+                  onChange={(e) => patchSeg(selectedSeg.id, { fadeIn: Number(e.target.value) })}
+                  className="flex-1"
+                />
+                <span
+                  className="w-10 text-right tabular-nums"
+                  style={{ color: "var(--text-strong)" }}
+                >
+                  {(selectedSeg.fadeIn ?? 0).toFixed(1)}s
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Fade out</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={selectedSeg.fadeOut ?? 0}
+                  onChange={(e) => patchSeg(selectedSeg.id, { fadeOut: Number(e.target.value) })}
+                  className="flex-1"
+                />
+                <span
+                  className="w-10 text-right tabular-nums"
+                  style={{ color: "var(--text-strong)" }}
+                >
+                  {(selectedSeg.fadeOut ?? 0).toFixed(1)}s
+                </span>
+              </div>
+
+              <div className="col-span-1 sm:col-span-2 flex justify-end">
+                <button
+                  onClick={() =>
+                    patchSeg(selectedSeg.id, {
+                      speed: 1,
+                      volume: 1,
+                      fadeIn: 0,
+                      fadeOut: 0,
+                    })
+                  }
+                  className="rounded-md px-2 py-1 text-[10px]"
+                  style={{
+                    background: "transparent",
+                    color: "var(--text-muted)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  Reset effects
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

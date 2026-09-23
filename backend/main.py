@@ -572,6 +572,7 @@ def post_edit_segments(job_id: str, payload: dict):
 
     dur = float(job.duration or 0.0)
     cleaned: list[tuple[float, float]] = []
+    effects: list[dict] = []
     for s in raw:
         try:
             ss = max(0.0, float(s.get("start") or 0))
@@ -583,14 +584,23 @@ def post_edit_segments(job_id: str, payload: dict):
         if ee - ss < 0.05:
             continue
         cleaned.append((round(ss, 3), round(ee, 3)))
+        # Per-segment effects. Clamped to safe ranges — render step
+        # applies these via ffmpeg atempo / fade / volume filters.
+        eff = {
+            "speed": max(0.25, min(4.0, float(s.get("speed") or 1.0))),
+            "fadeIn": max(0.0, min(2.0, float(s.get("fadeIn") or 0.0))),
+            "fadeOut": max(0.0, min(2.0, float(s.get("fadeOut") or 0.0))),
+            "volume": max(0.0, min(2.5, float(s.get("volume") or 1.0))),
+        }
+        effects.append(eff)
     if not cleaned:
         raise HTTPException(400, "no valid segments after cleaning")
 
-    # Preserve the ORDER the user chose (drag-to-reorder is supported)
-    # but merge tiny overlaps within adjacent same-ordered pairs.
+    # Preserve the ORDER the user chose (drag-to-reorder is supported).
     new_segments = [list(seg) for seg in cleaned]
-
-    store.update(job_id, segments=new_segments)
+    new_settings = dict(job.settings or {})
+    new_settings["segment_effects"] = effects
+    store.update(job_id, segments=new_segments, settings=new_settings)
 
     # Rebuild preview so the player reflects the edited timeline.
     try:
