@@ -544,6 +544,66 @@ def preview_video(job_id: str):
     )
 
 
+@app.post("/jobs/{job_id}/edit-segments")
+def post_edit_segments(job_id: str, payload: dict):
+    """Accept a user-edited segment list and rebuild the preview video.
+
+    Frontend sends the raw segment list after the user has trimmed,
+    split, deleted, or reordered blocks in the timeline editor. We
+    validate + sort + clamp against the normalized video duration,
+    then re-render the preview MP4 so the player reflects the edit.
+
+    Payload:
+        {"segments": [{"start": float, "end": float}, ...]}
+    """
+    job = store.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.status != "awaiting_review":
+        raise HTTPException(
+            409, f"job not in review state (status={job.status})"
+        )
+    if not job.normalized_path or not Path(job.normalized_path).exists():
+        raise HTTPException(410, "normalized video no longer on disk")
+
+    raw = payload.get("segments") or []
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(400, "segments must be a non-empty list")
+
+    dur = float(job.duration or 0.0)
+    cleaned: list[tuple[float, float]] = []
+    for s in raw:
+        try:
+            ss = max(0.0, float(s.get("start") or 0))
+            ee = float(s.get("end") or 0)
+        except Exception:
+            continue
+        if dur > 0:
+            ee = min(ee, dur)
+        if ee - ss < 0.05:
+            continue
+        cleaned.append((round(ss, 3), round(ee, 3)))
+    if not cleaned:
+        raise HTTPException(400, "no valid segments after cleaning")
+
+    # Preserve the ORDER the user chose (drag-to-reorder is supported)
+    # but merge tiny overlaps within adjacent same-ordered pairs.
+    new_segments = [list(seg) for seg in cleaned]
+
+    store.update(job_id, segments=new_segments)
+
+    # Rebuild preview so the player reflects the edited timeline.
+    try:
+        preview_path = str(Path(_WORK_ROOT) / job_id / "preview.mp4")
+        from backend.pipeline import _ffmpeg_cuts_preview
+        _ffmpeg_cuts_preview(job.normalized_path, cleaned, preview_path)
+        store.update(job_id, preview_path=preview_path)
+    except Exception as e:
+        print(f"[edit-segments] preview rebuild failed: {e}", flush=True)
+
+    return store.get(job_id).to_dict()
+
+
 @app.post("/jobs/{job_id}/recompute-scenes")
 def post_recompute_scenes(job_id: str, payload: dict):
     """Recompute cut segments from an edited scene-event list.

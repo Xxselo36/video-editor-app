@@ -2100,6 +2100,63 @@ function ReviewScreen({
     return duration;
   }, [currentTime, keptSegments, duration]);
 
+  // Editable segments — starts from keptSegments and can be trimmed,
+  // split, deleted, or reordered by the user in the timeline editor.
+  // Changes debounce-POST to /jobs/:id/edit-segments so the preview
+  // video rebuilds and the player reflects the new timeline.
+  type EditableSeg = {
+    id: string;
+    start: number;
+    end: number;
+    disabled?: boolean;
+  };
+  const [editSegs, setEditSegs] = useState<EditableSeg[]>([]);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  useEffect(() => {
+    // Seed from keptSegments the first time they arrive
+    if (editSegs.length === 0 && keptSegments.length > 0) {
+      setEditSegs(
+        keptSegments.map(([s, e], i) => ({
+          id: `seg-${i}-${s.toFixed(3)}`,
+          start: s,
+          end: e,
+        })),
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keptSegments.length]);
+
+  const commitEditSegs = async (next: EditableSeg[]) => {
+    setEditSegs(next);
+    const active = next
+      .filter((s) => !s.disabled && s.end - s.start > 0.05)
+      .map((s) => ({ start: s.start, end: s.end }));
+    if (active.length === 0) return;
+    setEditSaving(true);
+    try {
+      const r = await fetch(`${backendUrl()}/jobs/${jobId}/edit-segments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segments: active }),
+      });
+      if (r.ok) {
+        // Force video reload with fresh URL to bypass browser cache
+        const v = videoRef.current;
+        if (v) {
+          const src = v.currentSrc;
+          const bust = src.includes("?") ? "&" : "?";
+          v.src = src.split("?")[0] + `${bust}v=${Date.now()}`;
+          v.load();
+        }
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   // The preview video is the SOURCE already cut to the kept segments,
   // so phrase.start / phrase.end (cut-timeline) match video.currentTime
   // directly. The original_* fields are kept only for the render step.
@@ -2203,6 +2260,33 @@ function ReviewScreen({
             <div className="text-sm font-medium capitalize">{captionPreset}</div>
           </div>
         </div>
+      )}
+
+      {/* Timeline editor — segment-level trim / split / delete / reorder */}
+      {editSegs.length > 0 && duration > 0 && (
+        <TimelineEditor
+          segments={editSegs}
+          duration={duration}
+          playhead={originalTime}
+          open={editorOpen}
+          saving={editSaving}
+          onToggleOpen={() => setEditorOpen(!editorOpen)}
+          onCommit={(next) => void commitEditSegs(next)}
+          onSeekOriginal={(t) => {
+            // Map original timestamp back to preview time
+            let acc = 0;
+            for (const s of editSegs.filter((x) => !x.disabled)) {
+              if (t >= s.start && t <= s.end) {
+                if (videoRef.current) {
+                  videoRef.current.currentTime = acc + (t - s.start);
+                }
+                return;
+              }
+              acc += s.end - s.start;
+            }
+          }}
+          getVideoTime={() => originalTime}
+        />
       )}
 
       {cutRanges.length > 0 && duration > 0 && (
@@ -3090,5 +3174,394 @@ function ActiveJobCard({
         )}
       </div>
     </button>
+  );
+}
+
+// Timeline editor with per-segment trim, split, delete, reorder.
+// Segments are rendered as blocks in a horizontal strip proportional
+// to their duration. Handles on the left/right edges let the user drag
+// to trim; a Delete button removes a segment (soft-disable so it can
+// be restored); Split at playhead splits the current block into two;
+// drag-and-drop reorders. All edits POST to the backend which rebuilds
+// the preview MP4.
+type EditorSeg = {
+  id: string;
+  start: number;
+  end: number;
+  disabled?: boolean;
+};
+
+function TimelineEditor({
+  segments,
+  duration,
+  playhead,
+  open,
+  saving,
+  onToggleOpen,
+  onCommit,
+  onSeekOriginal,
+  getVideoTime,
+}: {
+  segments: EditorSeg[];
+  duration: number;
+  playhead: number;
+  open: boolean;
+  saving: boolean;
+  onToggleOpen: () => void;
+  onCommit: (next: EditorSeg[]) => void;
+  onSeekOriginal: (t: number) => void;
+  getVideoTime: () => number;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragMode, setDragMode] = useState<"start" | "end" | "move" | null>(
+    null,
+  );
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  const totalDur = segments.reduce((acc, s) => acc + (s.end - s.start), 0) || 1;
+  const activeCount = segments.filter((s) => !s.disabled).length;
+
+  const fmt = (t: number) => {
+    const m = Math.floor(t / 60);
+    const s = Math.floor(t % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  // Trim drag: as the user moves the mouse, update the segment bounds
+  // live. Commit only on mouseup to avoid spamming the backend.
+  useEffect(() => {
+    if (!draggingId || !dragMode || !stripRef.current) return;
+    const strip = stripRef.current;
+    const stripRect = strip.getBoundingClientRect();
+    const pxPerSec = stripRect.width / totalDur;
+
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+      const clientX =
+        (e as TouchEvent).touches?.[0]?.clientX ?? (e as MouseEvent).clientX;
+      const relX = clientX - stripRect.left;
+      const seconds = relX / pxPerSec;
+
+      // Convert screen-x offset into an ABSOLUTE original-timeline
+      // second by summing prior segment durations until we hit our seg
+      let acc = 0;
+      const next = segments.map((s) => {
+        if (s.disabled) return s;
+        const sDur = s.end - s.start;
+        if (s.id === draggingId) {
+          if (dragMode === "start") {
+            const targetOriginal =
+              s.end - (sDur - Math.max(0, seconds - acc));
+            const clamped = Math.min(s.end - 0.1, Math.max(0, targetOriginal));
+            return { ...s, start: clamped };
+          } else if (dragMode === "end") {
+            const targetOriginal = s.start + Math.max(0.1, seconds - acc);
+            const clamped = Math.min(duration, Math.max(s.start + 0.1, targetOriginal));
+            return { ...s, end: clamped };
+          }
+        }
+        acc += sDur;
+        return s;
+      });
+      onCommit(next);
+    };
+
+    const handleUp = () => {
+      setDraggingId(null);
+      setDragMode(null);
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    window.addEventListener("touchmove", handleMove, { passive: false });
+    window.addEventListener("touchend", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("touchmove", handleMove);
+      window.removeEventListener("touchend", handleUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draggingId, dragMode, totalDur]);
+
+  const del = (id: string) => {
+    onCommit(segments.map((s) => (s.id === id ? { ...s, disabled: true } : s)));
+  };
+  const restore = (id: string) => {
+    onCommit(segments.map((s) => (s.id === id ? { ...s, disabled: false } : s)));
+  };
+  const splitAtPlayhead = () => {
+    const t = getVideoTime();
+    const idx = segments.findIndex(
+      (s) => !s.disabled && t > s.start + 0.1 && t < s.end - 0.1,
+    );
+    if (idx === -1) return;
+    const cur = segments[idx];
+    const first: EditorSeg = { ...cur, end: t, id: `${cur.id}-a` };
+    const second: EditorSeg = {
+      ...cur,
+      start: t,
+      id: `${cur.id}-b-${Date.now()}`,
+    };
+    const next = [...segments.slice(0, idx), first, second, ...segments.slice(idx + 1)];
+    onCommit(next);
+  };
+  const moveLeft = (id: string) => {
+    const idx = segments.findIndex((s) => s.id === id);
+    if (idx <= 0) return;
+    const next = [...segments];
+    [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+    onCommit(next);
+  };
+  const moveRight = (id: string) => {
+    const idx = segments.findIndex((s) => s.id === id);
+    if (idx === -1 || idx >= segments.length - 1) return;
+    const next = [...segments];
+    [next[idx + 1], next[idx]] = [next[idx], next[idx + 1]];
+    onCommit(next);
+  };
+
+  return (
+    <div
+      className="mb-3 overflow-hidden rounded-2xl"
+      style={{
+        background: "var(--surface-1)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <button
+        onClick={onToggleOpen}
+        className="flex w-full items-center justify-between px-4 py-3 text-left"
+        style={{ borderBottom: open ? "1px solid var(--border)" : "none" }}
+      >
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+            Timeline editor · {activeCount} clip{activeCount === 1 ? "" : "s"}
+            {saving && (
+              <span
+                className="ml-2 text-[10px] normal-case"
+                style={{ color: "var(--brand-strong)" }}
+              >
+                saving…
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
+            Trim edges, split at playhead, delete or reorder clips.
+          </div>
+        </div>
+        <span
+          className="text-xs"
+          style={{ color: "var(--text-muted)" }}
+        >
+          {open ? "Hide ▲" : "Show ▼"}
+        </span>
+      </button>
+
+      {open && (
+        <div className="p-3">
+          {/* Toolbar */}
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={splitAtPlayhead}
+              className="rounded-lg px-2.5 py-1 text-xs font-semibold"
+              style={{
+                background: "var(--surface-2)",
+                color: "var(--text-strong)",
+                border: "1px solid var(--border)",
+              }}
+            >
+              ⧉ Split at playhead
+            </button>
+            {selected && (
+              <>
+                <button
+                  onClick={() => moveLeft(selected)}
+                  className="rounded-lg px-2.5 py-1 text-xs"
+                  style={{
+                    background: "var(--surface-2)",
+                    color: "var(--text-body)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  ← Move
+                </button>
+                <button
+                  onClick={() => moveRight(selected)}
+                  className="rounded-lg px-2.5 py-1 text-xs"
+                  style={{
+                    background: "var(--surface-2)",
+                    color: "var(--text-body)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  Move →
+                </button>
+                <button
+                  onClick={() => del(selected)}
+                  className="rounded-lg px-2.5 py-1 text-xs"
+                  style={{
+                    background: "var(--surface-2)",
+                    color: "#F26E6E",
+                    border: "1px solid #F26E6E44",
+                  }}
+                >
+                  ✕ Delete
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Segment strip */}
+          <div
+            ref={stripRef}
+            className="relative flex h-14 items-stretch gap-0.5 overflow-hidden rounded-lg select-none"
+            style={{ background: "var(--surface-0)" }}
+          >
+            {segments.map((s) => {
+              const width = ((s.end - s.start) / totalDur) * 100;
+              const isSel = selected === s.id;
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => {
+                    setSelected(s.id);
+                    onSeekOriginal(s.start);
+                  }}
+                  className="group relative flex cursor-pointer items-center justify-center"
+                  style={{
+                    width: `${width}%`,
+                    minWidth: "12px",
+                    background: s.disabled
+                      ? "var(--surface-2)"
+                      : isSel
+                        ? "var(--brand-tint)"
+                        : "var(--surface-1)",
+                    border: isSel
+                      ? "1px solid var(--brand)"
+                      : "1px solid var(--border)",
+                    opacity: s.disabled ? 0.35 : 1,
+                  }}
+                >
+                  {!s.disabled && (
+                    <>
+                      <div
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          setDraggingId(s.id);
+                          setDragMode("start");
+                        }}
+                        onTouchStart={(e) => {
+                          e.stopPropagation();
+                          setDraggingId(s.id);
+                          setDragMode("start");
+                        }}
+                        className="absolute left-0 top-0 bottom-0 z-10 w-1.5 cursor-ew-resize"
+                        style={{
+                          background: isSel
+                            ? "var(--brand-strong)"
+                            : "var(--border-hover)",
+                        }}
+                      />
+                      <div
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          setDraggingId(s.id);
+                          setDragMode("end");
+                        }}
+                        onTouchStart={(e) => {
+                          e.stopPropagation();
+                          setDraggingId(s.id);
+                          setDragMode("end");
+                        }}
+                        className="absolute right-0 top-0 bottom-0 z-10 w-1.5 cursor-ew-resize"
+                        style={{
+                          background: isSel
+                            ? "var(--brand-strong)"
+                            : "var(--border-hover)",
+                        }}
+                      />
+                    </>
+                  )}
+                  <span
+                    className="pointer-events-none text-[10px] tabular-nums"
+                    style={{
+                      color: s.disabled
+                        ? "var(--text-faint)"
+                        : "var(--text-strong)",
+                    }}
+                  >
+                    {fmt(s.end - s.start)}
+                  </span>
+                  {s.disabled && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        restore(s.id);
+                      }}
+                      className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      Restore
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Playhead indicator */}
+            {(() => {
+              let acc = 0;
+              for (const s of segments) {
+                if (s.disabled) continue;
+                if (playhead >= s.start && playhead <= s.end) {
+                  const pct =
+                    ((acc + (playhead - s.start)) / totalDur) * 100;
+                  return (
+                    <div
+                      key="playhead"
+                      className="pointer-events-none absolute top-0 bottom-0 z-20 w-0.5"
+                      style={{
+                        left: `${pct}%`,
+                        background: "var(--brand)",
+                        boxShadow: "0 0 8px var(--brand-glow)",
+                      }}
+                    />
+                  );
+                }
+                acc += s.end - s.start;
+              }
+              return null;
+            })()}
+          </div>
+
+          {/* Selected segment detail */}
+          {selected && (() => {
+            const s = segments.find((x) => x.id === selected);
+            if (!s) return null;
+            return (
+              <div
+                className="mt-2 flex items-center gap-3 rounded-lg p-2 text-[11px]"
+                style={{
+                  background: "var(--surface-0)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                <span style={{ color: "var(--text-muted)" }}>Selected:</span>
+                <span
+                  className="tabular-nums"
+                  style={{ color: "var(--text-strong)" }}
+                >
+                  {fmt(s.start)} → {fmt(s.end)}
+                </span>
+                <span style={{ color: "var(--text-faint)" }}>
+                  ({(s.end - s.start).toFixed(2)}s)
+                </span>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+    </div>
   );
 }
