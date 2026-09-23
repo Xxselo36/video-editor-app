@@ -3230,9 +3230,16 @@ function TimelineEditor({
   const [future, setFuture] = useState<EditorSeg[][]>([]);
   const stripRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dragPreviewRef = useRef<EditorSeg[] | null>(null);
+  const [, forceRender] = useState({});
 
-  const totalDur = segments.reduce((acc, s) => acc + (s.end - s.start), 0) || 1;
-  const activeCount = segments.filter((s) => !s.disabled).length;
+  // While the user is dragging a trim handle, use the live preview
+  // for measurements so the visible strip stays in sync with the
+  // dragging cursor. Otherwise fall back to committed props.
+  const displaySegs = dragPreviewRef.current ?? segments;
+  const totalDur =
+    displaySegs.reduce((acc, s) => acc + (s.end - s.start), 0) || 1;
+  const activeCount = displaySegs.filter((s) => !s.disabled).length;
 
   const fmt = (t: number) => {
     const m = Math.floor(t / 60);
@@ -3261,12 +3268,19 @@ function TimelineEditor({
     onCommit(next);
   };
 
-  // Trim drag
+  // Trim drag — during the gesture we mutate a LOCAL preview so the
+  // strip resizes visually without spamming the backend. Only on
+  // release do we call onCommit ONCE with the final state. Without
+  // this, every mousemove pixel used to fire an /edit-segments POST
+  // which triggered concurrent preview MP4 rebuilds and crashed the
+  // video element mid-playback.
   useEffect(() => {
     if (!draggingId || !dragMode || !stripRef.current) return;
     const strip = stripRef.current;
     const stripRect = strip.getBoundingClientRect();
     const pxPerSec = stripRect.width / totalDur;
+    // Start local preview from the current committed state
+    dragPreviewRef.current = segments.map((s) => ({ ...s }));
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
       const clientX =
@@ -3275,7 +3289,8 @@ function TimelineEditor({
       const seconds = Math.max(0, relX / pxPerSec);
 
       let acc = 0;
-      const next = segments.map((s) => {
+      const base = dragPreviewRef.current ?? segments;
+      const next = base.map((s) => {
         if (s.disabled) return s;
         const sDur = s.end - s.start;
         if (s.id === draggingId) {
@@ -3292,12 +3307,18 @@ function TimelineEditor({
         acc += sDur;
         return s;
       });
-      onCommit(next);
+      dragPreviewRef.current = next;
+      forceRender({});
     };
 
     const handleUp = () => {
+      const final = dragPreviewRef.current;
       setDraggingId(null);
       setDragMode(null);
+      if (final) {
+        onCommit(final);
+      }
+      dragPreviewRef.current = null;
     };
 
     window.addEventListener("mousemove", handleMove);
@@ -3545,7 +3566,7 @@ function TimelineEditor({
               className="relative flex h-16 items-stretch gap-0.5 select-none"
               style={{ width: `${100 * zoom}%`, minWidth: "100%" }}
             >
-              {segments.map((s) => {
+              {(dragPreviewRef.current ?? segments).map((s) => {
                 const width = ((s.end - s.start) / totalDur) * 100;
                 const isSel = selected === s.id;
                 const hasFx =
