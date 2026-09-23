@@ -1026,14 +1026,20 @@ function PickerScreen({
             // volume for the retention window.
             try {
               const withOutputs = s as typeof s & {
-                outputs?: Record<string, string>;
+                outputs?: string[] | Record<string, string>;
                 social_caption?: string;
                 social_hashtags?: string[];
                 hook_clips?: LibraryHookClip[];
               };
-              const outputKeys = withOutputs.outputs
-                ? Object.keys(withOutputs.outputs)
-                : ["primary"];
+              // Backend returns outputs as a list of format keys
+              // (["primary", "9:16"]). Older versions returned an
+              // object — handle both shapes so we never save numeric
+              // indices as format identifiers.
+              const outputKeys = Array.isArray(withOutputs.outputs)
+                ? withOutputs.outputs
+                : withOutputs.outputs && typeof withOutputs.outputs === "object"
+                  ? Object.keys(withOutputs.outputs)
+                  : ["primary"];
               saveEntry({
                 jobId: j.jobId,
                 timestamp: Date.now(),
@@ -3298,9 +3304,11 @@ function SceneCommandsPanel({
   );
 }
 
-// Compact card for an in-progress job in the dashboard grid.
-// Renders phase-appropriate visuals: uploading (client-side pct),
-// analyzing/rendering (backend progress bar), reviewing (Open →).
+// Compact card for an in-progress job. The copy is deliberately warm
+// and non-technical — we translate the backend's phase into a plain
+// "we're doing X" sentence instead of dumping ffmpeg / whisper jargon
+// on the user. Progress bar shows movement; the % lives in the corner
+// as a small tabular number.
 function ActiveJobCard({
   job,
   status,
@@ -3313,13 +3321,29 @@ function ActiveJobCard({
   onRetry?: () => void;
 }) {
   const isError = status?.status === "error" || Boolean(job.error);
-  const phaseLabel: Record<ActiveJobV2["phase"], string> = {
-    uploading: "Uploading",
-    analyzing: "Analyzing",
-    reviewing: "Ready to edit",
-    rendering: "Rendering",
+  const phaseCopy: Record<ActiveJobV2["phase"], { title: string; sub: string; icon: string }> = {
+    uploading: {
+      title: "Uploading",
+      sub: "Sending your video over — hang tight.",
+      icon: "↑",
+    },
+    analyzing: {
+      title: "Analyzing",
+      sub: "Reading your speech and finding the best moments.",
+      icon: "✦",
+    },
+    reviewing: {
+      title: "Ready to edit",
+      sub: "Tap to open the editor and fine-tune the cut.",
+      icon: "▸",
+    },
+    rendering: {
+      title: "Rendering",
+      sub: "Putting your final video together.",
+      icon: "✦",
+    },
   };
-  const phaseColor: Record<ActiveJobV2["phase"], string> = {
+  const phaseAccent: Record<ActiveJobV2["phase"], string> = {
     uploading: "#5A9FFF",
     analyzing: "#F5B54D",
     reviewing: "#4ECC77",
@@ -3328,98 +3352,129 @@ function ActiveJobCard({
   const pct =
     job.phase === "uploading" ? job.uploadPct ?? 0 : status?.progress ?? 0;
   const canOpen = job.phase === "reviewing" && !isError;
-  const message = job.error ?? status?.message ?? "";
+  const copy = phaseCopy[job.phase];
+  const accent = phaseAccent[job.phase];
 
   return (
     <button
       onClick={canOpen ? onOpen : undefined}
       disabled={!canOpen}
-      className={`group flex flex-col rounded-xl p-3 text-left transition-all ${
+      className={`group relative flex flex-col overflow-hidden rounded-2xl p-4 text-left transition-all ${
         canOpen ? "cursor-pointer hover:-translate-y-0.5" : "cursor-default"
       }`}
       style={{
         background: "var(--surface-1)",
         border: `1px solid ${
-          canOpen ? phaseColor[job.phase] + "60" : "var(--border)"
+          isError
+            ? "#F26E6E55"
+            : canOpen
+              ? accent + "80"
+              : "var(--border)"
         }`,
+        boxShadow: canOpen ? `0 4px 24px ${accent}20` : "none",
       }}
     >
-      <div className="mb-2 flex items-start gap-2">
-        <div
-          className="mt-1 h-2 w-2 shrink-0 rounded-full"
-          style={{
-            background: phaseColor[job.phase],
-            boxShadow: canOpen ? `0 0 8px ${phaseColor[job.phase]}` : "none",
-          }}
-        />
+      {/* Ambient accent glow — same treatment as preset cards */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full opacity-30 blur-2xl"
+        style={{ background: isError ? "#F26E6E" : accent }}
+      />
+
+      {/* Header row: filename + preset chip */}
+      <div className="relative z-10 mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div
-            className="truncate text-xs font-semibold"
+            className="truncate text-sm font-bold"
             style={{ color: "var(--text-strong)" }}
           >
             {job.filename}
           </div>
-          <div
-            className="mt-0.5 truncate text-[10px]"
-            style={{ color: "var(--text-muted)" }}
-          >
-            {phaseLabel[job.phase]}
-            {message ? ` · ${message}` : ""}
-          </div>
+          {job.presetLabel && (
+            <div
+              className="mt-0.5 text-[10px] uppercase tracking-wider"
+              style={{ color: "var(--text-faint)" }}
+            >
+              {job.presetLabel}
+            </div>
+          )}
         </div>
+        {canOpen ? (
+          <div
+            className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-transform group-hover:translate-x-0.5"
+            style={{ background: accent, color: "#0f0f0f" }}
+          >
+            Open →
+          </div>
+        ) : (
+          <div
+            className="shrink-0 text-lg leading-none opacity-70"
+            style={{ color: isError ? "#F26E6E" : accent }}
+          >
+            {isError ? "!" : copy.icon}
+          </div>
+        )}
       </div>
 
-      {/* Progress bar for uploading / analyzing / rendering phases */}
-      {job.phase !== "reviewing" && (
+      {/* Status line */}
+      {isError ? (
         <div
-          className="mb-1 h-1 overflow-hidden rounded-full"
-          style={{ background: "var(--surface-2)" }}
+          className="relative z-10 mb-3 text-xs"
+          style={{ color: "#F26E6E" }}
         >
-          <div
-            className="h-full transition-all duration-300"
-            style={{
-              width: `${Math.max(2, Math.min(100, pct))}%`,
-              background: phaseColor[job.phase],
-            }}
-          />
+          Something went wrong. {job.error ?? status?.message ?? "Try again."}
+        </div>
+      ) : (
+        <div
+          className="relative z-10 mb-3 text-xs leading-relaxed"
+          style={{ color: "var(--text-body)" }}
+        >
+          {copy.sub}
         </div>
       )}
 
-      <div className="mt-1 flex items-center justify-between">
+      {/* Progress bar for non-review phases */}
+      {job.phase !== "reviewing" && !isError && (
+        <div className="relative z-10">
+          <div
+            className="h-1.5 overflow-hidden rounded-full"
+            style={{ background: "var(--surface-2)" }}
+          >
+            <div
+              className="h-full transition-all duration-500"
+              style={{
+                width: `${Math.max(3, Math.min(100, pct))}%`,
+                background: accent,
+                boxShadow: `0 0 12px ${accent}80`,
+              }}
+            />
+          </div>
+          <div
+            className="mt-1.5 flex items-center justify-between text-[10px]"
+            style={{ color: "var(--text-muted)" }}
+          >
+            <span>{copy.title}</span>
+            <span className="tabular-nums">{Math.round(pct)}%</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error retry */}
+      {isError && onRetry && (
         <span
-          className="text-[10px] tabular-nums"
-          style={{ color: isError ? "#F26E6E" : "var(--text-faint)" }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry();
+          }}
+          className="relative z-10 mt-1 inline-flex w-fit cursor-pointer items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+          style={{
+            background: "var(--brand-tint)",
+            color: "var(--brand-strong)",
+          }}
         >
-          {isError
-            ? "⚠ Failed"
-            : job.phase !== "reviewing"
-              ? `${Math.round(pct)}%`
-              : "Tap to edit →"}
+          ↻ Try again
         </span>
-        {isError && onRetry && (
-          <span
-            onClick={(e) => {
-              e.stopPropagation();
-              onRetry();
-            }}
-            className="cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-semibold"
-            style={{
-              background: "var(--brand-tint)",
-              color: "var(--brand-strong)",
-            }}
-          >
-            Retry
-          </span>
-        )}
-        {!isError && job.captionPreset && (
-          <span
-            className="text-[10px] uppercase tracking-wider"
-            style={{ color: "var(--text-faint)" }}
-          >
-            {job.captionPreset}
-          </span>
-        )}
-      </div>
+      )}
     </button>
   );
 }

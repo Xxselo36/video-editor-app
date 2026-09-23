@@ -209,7 +209,13 @@ function LibraryCard({
       .catch(() => {});
   };
 
-  const mainOutputs = entry.outputs.filter((f) => !f.startsWith("hook_"));
+  // Older entries were saved with numeric indices ("0", "1") because
+  // an earlier bug ran Object.keys() on an array. Detect that and fall
+  // back to just "primary" so the download links point at real files.
+  const looksLikeLegacyIndices =
+    entry.outputs.length > 0 && entry.outputs.every((f) => /^\d+$/.test(f));
+  const outputsSafe = looksLikeLegacyIndices ? ["primary"] : entry.outputs;
+  const mainOutputs = outputsSafe.filter((f) => !f.startsWith("hook_"));
 
   return (
     <div
