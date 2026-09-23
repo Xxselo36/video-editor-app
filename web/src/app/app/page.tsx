@@ -2179,34 +2179,85 @@ function ReviewScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptSegments.length]);
 
-  const commitEditSegs = async (next: EditableSeg[]) => {
-    setEditSegs(next);
-    const active = next
-      .filter((s) => !s.disabled && s.end - s.start > 0.05)
-      .map((s) => ({ start: s.start, end: s.end }));
-    if (active.length === 0) return;
+  // Commit queue. Rapid edits (delete, split, undo, drag-release) used
+  // to fire concurrent POSTs → concurrent ffmpeg previews writing to
+  // the same preview.mp4 → video element decodes half-written bytes and
+  // crashes. Now: only ONE request in flight; newer intents overwrite
+  // the pending state so we always land on the latest edit without
+  // trampling files mid-render.
+  const pendingCommitRef = useRef<EditableSeg[] | null>(null);
+  const commitBusyRef = useRef(false);
+
+  const swapVideoSource = (): Promise<void> => {
+    return new Promise((resolve) => {
+      const v = videoRef.current;
+      if (!v) return resolve();
+      const wasPaused = v.paused;
+      const wasTime = v.currentTime;
+      const base = `${backendUrl()}/jobs/${jobId}/preview-video`;
+      // Pause before src swap so Safari doesn't try to decode bytes
+      // from the freshly-rebuilt file mid-playback.
+      try {
+        v.pause();
+      } catch {
+        /* ignore */
+      }
+      const done = () => {
+        v.removeEventListener("loadedmetadata", done);
+        v.removeEventListener("error", done);
+        try {
+          const dur = isFinite(v.duration) ? v.duration : 0;
+          v.currentTime = Math.min(wasTime, Math.max(0, dur - 0.1));
+        } catch {
+          /* ignore */
+        }
+        if (!wasPaused) v.play().catch(() => {});
+        resolve();
+      };
+      v.addEventListener("loadedmetadata", done, { once: true });
+      v.addEventListener("error", done, { once: true });
+      // Setting src triggers a fresh load; append cache-buster so the
+      // browser never serves a stale copy of preview-video.
+      v.src = `${base}?v=${Date.now()}`;
+    });
+  };
+
+  const flushCommitQueue = async () => {
+    if (commitBusyRef.current) return;
+    commitBusyRef.current = true;
     setEditSaving(true);
     try {
-      const r = await fetch(`${backendUrl()}/jobs/${jobId}/edit-segments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ segments: active }),
-      });
-      if (r.ok) {
-        // Force video reload with fresh URL to bypass browser cache
-        const v = videoRef.current;
-        if (v) {
-          const src = v.currentSrc;
-          const bust = src.includes("?") ? "&" : "?";
-          v.src = src.split("?")[0] + `${bust}v=${Date.now()}`;
-          v.load();
+      while (pendingCommitRef.current) {
+        const toSend = pendingCommitRef.current;
+        pendingCommitRef.current = null;
+        const active = toSend
+          .filter((s) => !s.disabled && s.end - s.start > 0.05)
+          .map((s) => ({ start: s.start, end: s.end }));
+        if (active.length === 0) continue; // safety: never send an empty timeline
+        try {
+          const r = await fetch(
+            `${backendUrl()}/jobs/${jobId}/edit-segments`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ segments: active }),
+            },
+          );
+          if (r.ok) await swapVideoSource();
+        } catch {
+          /* ignore transient network errors — user can retry */
         }
       }
-    } catch {
-      /* ignore */
     } finally {
+      commitBusyRef.current = false;
       setEditSaving(false);
     }
+  };
+
+  const commitEditSegs = (next: EditableSeg[]) => {
+    setEditSegs(next);
+    pendingCommitRef.current = next;
+    void flushCommitQueue();
   };
 
   // The preview video is the SOURCE already cut to the kept segments,
@@ -3457,7 +3508,15 @@ function TimelineEditor({
   }, [draggingId, dragMode, totalDur]);
 
   const del = (id: string) => {
+    // Refuse to disable the last active clip — the backend would have
+    // nothing to render and the video element would go blank.
+    const activeIds = segments.filter((s) => !s.disabled).map((s) => s.id);
+    if (activeIds.length <= 1 && activeIds.includes(id)) {
+      setSelected(id);
+      return;
+    }
     commit(segments.map((s) => (s.id === id ? { ...s, disabled: true } : s)));
+    setSelected(null);
   };
   const restore = (id: string) => {
     commit(segments.map((s) => (s.id === id ? { ...s, disabled: false } : s)));
