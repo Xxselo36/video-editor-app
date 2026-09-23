@@ -22,8 +22,8 @@ from __future__ import annotations
 def find_word_gap_cuts(
     transcription: dict,
     speech_ranges: list[tuple[float, float]] | None = None,
-    min_gap_seconds: float = 0.4,
-    keep_edge_pad: float = 0.05,
+    min_gap_seconds: float = 0.25,
+    keep_edge_pad: float = 0.03,
 ) -> list[tuple[float, float, float]]:
     """Find gaps between consecutive Whisper words that likely contain
     untranscribed audible content.

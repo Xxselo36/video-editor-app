@@ -339,16 +339,18 @@ def analyze_video(
                   f"time {_tb:.1f}s→{_ta:.1f}s (removed {_tb - _ta:.1f}s)",
                   flush=True)
 
-    # Audio-based filler detection with STRICT guards — catches drawn-
-    # out 'ähhh' that Whisper cleans out completely (no gap in transcript,
-    # no punctuation-only word, no low-confidence word). Previous version
-    # was disabled for false-positive risk on drawn-out real content.
-    # STRICT guards used here:
-    #   1. NO Whisper word overlaps the range (real content stays intact)
-    #   2. min duration 300ms, MAX duration 800ms (skip long content
-    #      passages and instant blips)
-    #   3. Energy 20-45% of median (real 'ähm' is quieter than speech)
-    #   4. Spectral flatness threshold internal to detect_fillers_audio
+    # Audio-based filler detection — catches drawn-out 'ähhh' that
+    # Whisper cleans out entirely (no transcript token, no gap in
+    # timeline because Whisper stretches the surrounding words to
+    # cover the audio the filler occupied).
+    # Guards:
+    #   1. min duration 200ms, max 900ms
+    #   2. Whisper-word overlap: uses EFFECTIVE (silence-aware) bounds
+    #      so we don't reject candidates that fall inside a drifted
+    #      Whisper word range but are actually in real silence-audio.
+    #      Overlap must be >30% of candidate duration to disqualify.
+    #   3. Energy + spectral flatness thresholds internal to
+    #      detect_fillers_audio pick low-energy monotone regions.
     if remove_fillers:
         try:
             from src.filler_detection import detect_fillers_audio
@@ -356,25 +358,43 @@ def analyze_video(
             _current_speech = [(s, e) for (s, e) in segments]
             _audio_fillers = detect_fillers_audio(
                 _sr, _adata, _current_speech,
-                min_duration=0.30, max_duration=0.80,
+                min_duration=0.20, max_duration=0.90,
             )
+            # Build EFFECTIVE whisper-word bounds (silence-trimmed)
+            _silence_regions = [(s.start, s.end)
+                                for s in speech_segments
+                                if not s.has_speech]
             _tx_words: list[tuple[float, float]] = []
             for _seg in (analyzer._transcription or {}).get("segments", []):
                 for _w in _seg.get("words") or []:
                     if _w.get("start") is None or _w.get("end") is None:
                         continue
-                    _tx_words.append((float(_w["start"]), float(_w["end"])))
+                    ws, we = float(_w["start"]), float(_w["end"])
+                    # Trim by silence
+                    for (sil_s, sil_e) in _silence_regions:
+                        if ws < sil_s < we:
+                            we = min(we, sil_s)
+                        if ws < sil_e < we:
+                            ws = max(ws, sil_e)
+                    if we - ws > 0.03:
+                        _tx_words.append((ws, we))
 
-            def _overlaps_word(s: float, e: float) -> bool:
-                # STRICT: any overlap disqualifies. Not even partial.
-                return any(ws < e and we > s for (ws, we) in _tx_words)
+            def _covered_by_word(s: float, e: float) -> bool:
+                # Candidate is disqualified only if MORE than 30% is
+                # covered by an effective Whisper word range.
+                dur = max(0.001, e - s)
+                for ws, we in _tx_words:
+                    ov = max(0.0, min(e, we) - max(s, ws))
+                    if ov / dur > 0.30:
+                        return True
+                return False
 
             _safe = [(s, e) for (s, e) in _audio_fillers
-                     if not _overlaps_word(s, e)]
+                     if not _covered_by_word(s, e)]
             _dropped = len(_audio_fillers) - len(_safe)
             if _dropped:
                 print(f"[audio-filler] skipped {_dropped} candidate(s) "
-                      f"— overlap with Whisper words", flush=True)
+                      f"— covered by Whisper words", flush=True)
             if _safe:
                 from src.filler_detection import FillerDetector
                 _det = FillerDetector()
