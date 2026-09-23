@@ -9,6 +9,22 @@
  */
 
 const KEY = "cleocuts.activeJobs.v1";
+const CHANGE_EVENT = "cleocuts.activeJobs.change";
+
+function emitChange(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function subscribeActiveJobs(cb: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener(CHANGE_EVENT, cb);
+  return () => window.removeEventListener(CHANGE_EVENT, cb);
+}
 
 export type ActiveJobPhase =
   | "uploading"
@@ -28,6 +44,9 @@ export type ActiveJobV2 = {
   captionPreset: string;
   // Client-side upload progress 0-100. Only used during 'uploading' phase.
   uploadPct?: number;
+  // Populated when the upload or a later phase fails. Card renders a
+  // retry button instead of the normal progress bar when set.
+  error?: string;
 };
 
 export function getActiveJobs(): ActiveJobV2[] {
@@ -50,6 +69,7 @@ export function saveActiveJobs(jobs: ActiveJobV2[]): void {
   } catch {
     /* quota errors — non-fatal */
   }
+  emitChange();
 }
 
 export function addActiveJob(entry: ActiveJobV2): void {

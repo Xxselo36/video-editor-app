@@ -33,6 +33,7 @@ import {
   addActiveJob,
   getActiveJobs,
   removeActiveJob,
+  subscribeActiveJobs,
   updateActiveJob as updateActiveJobV2,
   type ActiveJobV2,
 } from "@/lib/activeJobs";
@@ -370,7 +371,11 @@ export default function Home() {
     let targetFile = fileOverride ?? file;
     if (!targetFile) return;
     if (!fileOverride) setFile(targetFile);
-    setPhase("uploading");
+    // Skip the fullscreen "Uploading…" screen entirely. Upload runs in
+    // the background; the dashboard card shows progress. This lets the
+    // user browse, start another upload, or check other jobs while
+    // this one uploads.
+    setPhase("picker");
     setErrorMsg(null);
     setDownscalePct(null);
 
@@ -400,6 +405,39 @@ export default function Home() {
         : smartcamFormat,
       resolution: "1080",
       output_formats: applyPreset ? p!.settings.outputFormats : outputFormats,
+    };
+
+    // Add a placeholder dashboard card while the upload is in flight.
+    // The real backend job ID isn't known until POST /jobs returns, so
+    // we use a temporary local ID and swap it in once the response
+    // arrives. Poll loop skips uploading-phase cards so no ghost
+    // requests are fired against a non-existent job.
+    const tempId = `upl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const presetInfo = selectedPreset ? PRESETS[selectedPreset] : null;
+    addActiveJob({
+      jobId: tempId,
+      phase: "uploading",
+      timestamp: Date.now(),
+      filename: targetFile.name,
+      fileSize: targetFile.size,
+      presetId: selectedPreset,
+      presetLabel: presetInfo?.label ?? null,
+      presetIcon: presetInfo?.icon ?? null,
+      captionPreset: settings.caption_preset,
+      uploadPct: 0,
+    });
+
+    // Throttle uploadPct updates to ~5/sec. On big files (multi-GB) we
+    // get thousands of progress ticks; every one used to write to
+    // localStorage + fire a re-render across the dashboard.
+    let lastUiUpdate = 0;
+    const setPct = (pct: number) => {
+      setUploadPct(pct);
+      const now = Date.now();
+      if (now - lastUiUpdate > 200 || pct >= 100) {
+        lastUiUpdate = now;
+        updateActiveJobV2(tempId, { uploadPct: pct });
+      }
     };
 
     // Acquire a Wake Lock so the OS doesn't put the tab to sleep
@@ -434,7 +472,7 @@ export default function Home() {
         const { storage_key } = await uploadResumable({
           file: targetFile,
           backendUrl: backendUrl(),
-          onProgress: (pct) => setUploadPct(pct),
+          onProgress: (pct) => setPct(pct),
         });
 
         // Create the job with the completed storage_key.
@@ -459,7 +497,7 @@ export default function Home() {
           xhr.open("POST", `${backendUrl()}/jobs`);
           xhr.upload.onprogress = (ev) => {
             if (ev.lengthComputable) {
-              setUploadPct(Math.round((ev.loaded / ev.total) * 100));
+              setPct(Math.round((ev.loaded / ev.total) * 100));
             }
           };
           xhr.onload = () => resolve(xhr);
@@ -478,12 +516,10 @@ export default function Home() {
       // even if the tab is in the background.
       requestNotificationPermission();
 
-      const presetInfo = selectedPreset ? PRESETS[selectedPreset] : null;
-
-      // Multi-job dashboard: save to activeJobs list, then send the
-      // user back to the picker so they can start another upload
-      // right away. Single-job activeJob kept for backward compat
-      // in case any legacy code still checks it.
+      // Swap the temporary uploading card for the real backend job.
+      // Single-job activeJob kept for backward compat in case any
+      // legacy code still checks it.
+      removeActiveJob(tempId);
       saveActiveJob({
         jobId: initial.id,
         phase: "analyzing",
@@ -506,17 +542,19 @@ export default function Home() {
         captionPreset: settings.caption_preset,
       });
 
-      // Reset local state and drop user back on the dashboard — the
-      // job now lives as a card, backend keeps processing regardless.
+      // Reset local state — the job now lives as a card on the
+      // dashboard, backend keeps processing regardless of where the
+      // user goes next.
       setFile(null);
       setSelectedPreset(null);
       setJob(null);
       setUploadPct(0);
-      setPhase("picker");
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
-      setPhase("error");
-      clearActiveJob();
+      // Upload failed — mark the temp card with an error message so
+      // the user can hit Retry from the dashboard. No fullscreen error
+      // takeover, no scary redirect.
+      const msg = err instanceof Error ? err.message : String(err);
+      updateActiveJobV2(tempId, { error: msg });
     } finally {
       // Release wake lock when upload path exits (success OR error).
       try {
@@ -767,18 +805,6 @@ export default function Home() {
           />
         )}
 
-        {phase === "uploading" && (
-          downscalePct !== null ? (
-            <ProgressScreen
-              label={downscaleLabel ?? `Optimizing video (${downscalePct}%)…`}
-              pct={downscalePct}
-              phase="uploading"
-            />
-          ) : (
-            <ProgressScreen label="Uploading…" pct={uploadPct} phase="uploading" />
-          )
-        )}
-
         {phase === "reviewing" && job && (
           <ReviewScreen
             jobId={job.id}
@@ -951,6 +977,18 @@ function PickerScreen({
     } catch {
       // localStorage may be blocked; that's fine, don't nag.
     }
+  }, []);
+
+  // React to add/update/remove from anywhere in the app (uploads
+  // starting, progress ticks, jobs finishing). Bumps to dashboard
+  // when a job first appears so the user sees their upload land.
+  useEffect(() => {
+    const refresh = () => {
+      const jobs = getActiveJobs();
+      setActiveJobs(jobs);
+      if (jobs.length > 0) setView("dashboard");
+    };
+    return subscribeActiveJobs(refresh);
   }, []);
 
   // Poll all active jobs every 2s so the cards show live status
@@ -3242,7 +3280,7 @@ function ActiveJobCard({
   onOpen: () => void;
   onRetry?: () => void;
 }) {
-  const isError = status?.status === "error";
+  const isError = status?.status === "error" || Boolean(job.error);
   const phaseLabel: Record<ActiveJobV2["phase"], string> = {
     uploading: "Uploading",
     analyzing: "Analyzing",
@@ -3258,7 +3296,7 @@ function ActiveJobCard({
   const pct =
     job.phase === "uploading" ? job.uploadPct ?? 0 : status?.progress ?? 0;
   const canOpen = job.phase === "reviewing" && !isError;
-  const message = status?.message ?? "";
+  const message = job.error ?? status?.message ?? "";
 
   return (
     <button
