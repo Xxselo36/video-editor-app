@@ -325,66 +325,8 @@ export default function Home() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Resume an in-flight job on mount. If we find a saved activeJob,
-  // ask the backend where it is and drop back into the right phase.
-  // Runs once — deliberately empty deps.
-  useEffect(() => {
-    const active = getActiveJob();
-    if (!active) return;
-
-    (async () => {
-      try {
-        const r = await fetch(`${backendUrl()}/jobs/${active.jobId}`);
-        if (!r.ok) {
-          // Backend forgot the job (expired, restart, unknown ID). Give
-          // the user a clean slate rather than an infinite spinner.
-          clearActiveJob();
-          return;
-        }
-        const s: JobStatus = await r.json();
-        // Rehydrate preset context so headers + Library-save work
-        if (active.presetId && (active.presetId in PRESETS)) {
-          setSelectedPreset(active.presetId as PresetId);
-        }
-        setCaptionPreset(active.captionPreset);
-        setJob(s);
-
-        // Fake a File so downstream screens that read file.name still
-        // work. We can't recover the original bytes, but we know the
-        // filename — that's what the Library entry uses.
-        setFile(new File([], active.filename));
-
-        if (s.status === "done") {
-          setPhase("done");
-          clearActiveJob();
-        } else if (s.status === "error") {
-          setErrorMsg(s.error ?? s.message);
-          setPhase("error");
-          clearActiveJob();
-        } else if (s.status === "awaiting_review") {
-          const subRes = await fetch(
-            `${backendUrl()}/jobs/${active.jobId}/subtitles`,
-          );
-          if (subRes.ok) {
-            const data = await subRes.json();
-            const subs: Subtitle[] = data.subtitles ?? [];
-            setPhrases(buildPhrases(subs));
-            setPhase("reviewing");
-            updateActiveJob({ phase: "reviewing" });
-          } else {
-            setPhase("analyzing");
-          }
-        } else {
-          // pending / processing → back into polling
-          setPhase(active.phase === "rendering" ? "rendering" : "analyzing");
-        }
-      } catch {
-        // Network / parse failure on resume — swallow, user gets picker
-        clearActiveJob();
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Mount: always land on picker. Active jobs render as cards there —
+  // no need to jump users into a fullscreen wait or rehydrate state.
 
   const pickPreset = (id: PresetId) => {
     const p = PRESETS[id];
@@ -679,16 +621,20 @@ export default function Home() {
         }),
       });
       if (!r.ok) throw new Error(await r.text());
-      // Reset job.progress to 0 BEFORE flipping phase — otherwise the
-      // progress bar briefly shows 100 (leftover from analyze phase)
-      // before the first render-progress poll drops it to ~5.
-      setJob((prev) => prev ? { ...prev, progress: 0, message: "Starting render…" } : prev);
-      setPhase("rendering");
+      // Send user back to the dashboard — the card takes over from
+      // here. No fullscreen "rendering" screen anymore.
       updateActiveJob({ phase: "rendering" });
+      updateActiveJobV2(job.id, { phase: "rendering" });
+      setFile(null);
+      setJob(null);
+      setPhrases([]);
+      setDisabledCuts([]);
+      setUploadPct(0);
+      setSelectedPreset(null);
+      setPhase("picker");
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
       setPhase("error");
-      clearActiveJob();
     }
   };
 
@@ -833,10 +779,6 @@ export default function Home() {
           )
         )}
 
-        {phase === "analyzing" && job && (
-          <ProgressScreen label={job.message} pct={job.progress} phase="analyzing" />
-        )}
-
         {phase === "reviewing" && job && (
           <ReviewScreen
             jobId={job.id}
@@ -872,26 +814,8 @@ export default function Home() {
           />
         )}
 
-        {phase === "rendering" && job && (
-          <ProgressScreen label={job.message} pct={job.progress} phase="rendering" />
-        )}
-
-        {phase === "done" && job && (
-          <DoneScreen
-            jobId={job.id}
-            outputs={(job as JobStatus & { outputs?: string[] }).outputs ?? ["primary"]}
-            socialCaption={
-              (job as JobStatus & { social_caption?: string }).social_caption ?? ""
-            }
-            socialHashtags={
-              (job as JobStatus & { social_hashtags?: string[] }).social_hashtags ?? []
-            }
-            hookClips={
-              (job as JobStatus & { hook_clips?: HookClip[] }).hook_clips ?? []
-            }
-            onReset={reset}
-          />
-        )}
+        {/* rendering / done fullscreens killed — cards on picker are
+            the single source of truth for post-upload status. */}
 
         {phase === "error" && (
           <ErrorScreen
@@ -2115,8 +2039,10 @@ function ReviewScreen({
     disabled?: boolean;
   };
   const [editSegs, setEditSegs] = useState<EditableSeg[]>([]);
-  const [editorOpen, setEditorOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<
+    "timeline" | "transcript" | "style"
+  >("timeline");
   useEffect(() => {
     // Seed from keptSegments the first time they arrive
     if (editSegs.length === 0 && keptSegments.length > 0) {
@@ -2265,19 +2191,55 @@ function ReviewScreen({
           </div>
         </div>
       )}
+      {/* Tab bar — clean 3-way switch for the editor */}
+      <div
+        className="flex overflow-hidden rounded-xl"
+        style={{
+          background: "var(--surface-1)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        {(
+          [
+            { id: "timeline" as const, label: "Timeline", icon: "⏱" },
+            { id: "transcript" as const, label: "Transcript", icon: "T" },
+            { id: "style" as const, label: "Captions", icon: "✎" },
+          ]
+        ).map((t) => {
+          const isActive = activeTab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              className="flex-1 px-3 py-2.5 text-sm font-medium transition-colors"
+              style={{
+                background: isActive
+                  ? "var(--brand-tint)"
+                  : "transparent",
+                color: isActive
+                  ? "var(--brand-strong)"
+                  : "var(--text-muted)",
+                borderRight: t.id !== "style" ? "1px solid var(--border)" : "none",
+              }}
+            >
+              <span className="mr-1.5">{t.icon}</span>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
 
-      {/* Timeline editor — segment-level trim / split / delete / reorder */}
-      {editSegs.length > 0 && duration > 0 && (
+      {/* Timeline tab — everything for cut/trim/effects lives here */}
+      {activeTab === "timeline" && editSegs.length > 0 && duration > 0 && (
         <TimelineEditor
           segments={editSegs}
           duration={duration}
           playhead={originalTime}
-          open={editorOpen}
+          open={true}
           saving={editSaving}
-          onToggleOpen={() => setEditorOpen(!editorOpen)}
+          onToggleOpen={() => {}}
           onCommit={(next) => void commitEditSegs(next)}
           onSeekOriginal={(t) => {
-            // Map original timestamp back to preview time
             let acc = 0;
             for (const s of editSegs.filter((x) => !x.disabled)) {
               if (t >= s.start && t <= s.end) {
@@ -2299,136 +2261,146 @@ function ReviewScreen({
         />
       )}
 
-      {cutRanges.length > 0 && duration > 0 && (
-        <Timeline
-          duration={duration}
-          cuts={cutRanges}
-          disabled={disabledCuts}
-          playhead={originalTime}
-          onToggle={(id) =>
-            setDisabledCuts(
-              disabledCuts.includes(id)
-                ? disabledCuts.filter((x) => x !== id)
-                : [...disabledCuts, id],
-            )
-          }
-        />
-      )}
-
-      {/* Voice commands panel — appears only if scene events were
-          detected. Users can toggle each event off (false positive)
-          or add missing commands. */}
-      {sceneEvents.length > 0 && (
-        <SceneCommandsPanel
-          events={sceneEvents}
-          duration={duration}
-          onChange={onSceneEventsChange}
-          onSeek={(t) => {
-            if (videoRef.current) videoRef.current.currentTime = t;
-          }}
-        />
-      )}
-
-      {/* Transcript panel — its own bordered container so the scrolling
-          feels contained (was previously loose blocks bleeding into
-          the surrounding layout). Header is sticky inside the panel. */}
-      <div
-        className="overflow-hidden rounded-2xl"
-        style={{
-          background: "var(--surface-1)",
-          border: "1px solid var(--border)",
-        }}
-      >
+      {/* Transcript tab — phrase-level text editing */}
+      {activeTab === "transcript" && (
         <div
-          className="border-b px-4 pt-3 pb-2"
+          className="overflow-hidden rounded-2xl"
           style={{
-            borderColor: "var(--border)",
             background: "var(--surface-1)",
+            border: "1px solid var(--border)",
           }}
         >
-          <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
-            Review captions
-          </div>
-          <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
-            Play the video, fix typos as they go by. Tap ✕ to drop a line,
-            tap a card to jump to that moment.
-          </div>
-        </div>
-        <div
-          ref={transcriptScrollRef}
-          className="flex max-h-[45vh] flex-col gap-2 overflow-y-auto p-3"
-        >
-        {phrases.length === 0 && (
-          <div className="rounded-xl border border-[var(--border)] p-6 text-center text-xs text-[var(--text-muted)]">
-            No captions. Output will be video only.
-          </div>
-        )}
-        {phrases.map((p, i) => {
-          const isActive = i === activeIdx;
-          const lowConfidence = p.confidence < 0.6;
-          let extraClass = "border border-[var(--border)]";
-          if (isActive) {
-            extraClass =
-              "border border-[var(--brand)] bg-[var(--brand-tint)] " +
-              "ring-2 ring-[var(--brand-hover)]/50 shadow-[0_0_20px_var(--brand-glow)]";
-          } else if (lowConfidence) {
-            extraClass = "border border-[var(--warn)]/60 bg-[var(--warn)]/[0.04]";
-          }
-          return (
-            <div
-              key={i}
-              ref={(el) => {
-                phraseRefs.current[i] = el;
-              }}
-              onClick={() => seekToPhrase(p)}
-              className={`relative cursor-pointer rounded-xl p-3 transition-all ${extraClass}`}
-            >
-              {isActive && (
-                <span
-                  aria-hidden
-                  className="absolute -left-1 top-1/2 -translate-y-1/2 h-8 w-1 rounded-full"
-                  style={{
-                    background: "var(--brand-hover)",
-                    boxShadow: "0 0 8px var(--brand-glow)",
-                  }}
-                />
-              )}
-              <div className="mb-1.5 flex items-center justify-between">
-                <button
-                  onClick={() => seekToPhrase(p)}
-                  className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-strong)]"
-                >
-                  ▸ {fmtTime(p.original_start)}
-                </button>
-                <div className="flex items-center gap-2">
-                  {lowConfidence && (
-                    <span className="text-[9px] uppercase tracking-wider text-[var(--warn)]">
-                      verify
-                    </span>
-                  )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      remove(i);
-                    }}
-                    className="text-[var(--text-faint)] hover:text-[var(--danger)]"
-                    aria-label="delete sentence"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-              <textarea
-                value={p.text}
-                onChange={(e) => updateText(i, e.target.value)}
-                rows={Math.min(4, Math.max(1, Math.ceil(p.text.length / 38)))}
-                className="w-full resize-none bg-transparent text-base leading-snug text-[var(--text-strong)] focus:outline-none"
-              />
+          <div
+            className="border-b px-4 pt-3 pb-2"
+            style={{
+              borderColor: "var(--border)",
+              background: "var(--surface-1)",
+            }}
+          >
+            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+              Transcript · {phrases.length} line{phrases.length === 1 ? "" : "s"}
             </div>
-          );
-        })}
+            <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
+              Fix typos, drop a line with ✕, tap a card to jump to that moment.
+            </div>
+          </div>
+          <div
+            ref={transcriptScrollRef}
+            className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto p-3"
+          >
+            {phrases.length === 0 && (
+              <div className="rounded-xl border border-[var(--border)] p-6 text-center text-xs text-[var(--text-muted)]">
+                No captions. Output will be video only.
+              </div>
+            )}
+            {phrases.map((p, i) => {
+              const isActive = i === activeIdx;
+              const lowConfidence = p.confidence < 0.6;
+              let extraClass = "border border-[var(--border)]";
+              if (isActive) {
+                extraClass =
+                  "border border-[var(--brand)] bg-[var(--brand-tint)] " +
+                  "ring-2 ring-[var(--brand-hover)]/50 shadow-[0_0_20px_var(--brand-glow)]";
+              } else if (lowConfidence) {
+                extraClass = "border border-[var(--warn)]/60 bg-[var(--warn)]/[0.04]";
+              }
+              return (
+                <div
+                  key={i}
+                  ref={(el) => {
+                    phraseRefs.current[i] = el;
+                  }}
+                  onClick={() => seekToPhrase(p)}
+                  className={`relative cursor-pointer rounded-xl p-3 transition-all ${extraClass}`}
+                >
+                  {isActive && (
+                    <span
+                      aria-hidden
+                      className="absolute -left-1 top-1/2 -translate-y-1/2 h-8 w-1 rounded-full"
+                      style={{
+                        background: "var(--brand-hover)",
+                        boxShadow: "0 0 8px var(--brand-glow)",
+                      }}
+                    />
+                  )}
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        seekToPhrase(p);
+                      }}
+                      className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+                    >
+                      ▸ {fmtTime(p.original_start)}
+                    </button>
+                    <div className="flex items-center gap-2">
+                      {lowConfidence && (
+                        <span className="text-[9px] uppercase tracking-wider text-[var(--warn)]">
+                          verify
+                        </span>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          remove(i);
+                        }}
+                        className="text-[var(--text-faint)] hover:text-[var(--danger)]"
+                        aria-label="delete sentence"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    value={p.text}
+                    onChange={(e) => updateText(i, e.target.value)}
+                    rows={Math.min(4, Math.max(1, Math.ceil(p.text.length / 38)))}
+                    className="w-full resize-none bg-transparent text-base leading-snug text-[var(--text-strong)] focus:outline-none"
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Captions tab — style picker */}
+      {activeTab === "style" && (
+        <div
+          className="overflow-hidden rounded-2xl p-4"
+          style={{
+            background: "var(--surface-1)",
+            border: "1px solid var(--border)",
+          }}
+        >
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+            Caption style · {captionPreset}
+          </div>
+          {captionPreset !== "none" ? (
+            <div
+              className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3"
+              style={{ background: "var(--surface-0)" }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`${backendUrl()}/caption-previews/${captionPreset}.png?w=240&h=90`}
+                alt={`${captionPreset} caption preview`}
+                className="h-14 w-40 rounded-md object-cover"
+              />
+              <div className="flex-1">
+                <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+                  Applied to output
+                </div>
+                <div className="text-sm font-medium capitalize">{captionPreset}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-[var(--text-muted)]">
+              Captions disabled for this render.
+            </div>
+          )}
+        </div>
+      )}
 
       <button
         onClick={onApply}
