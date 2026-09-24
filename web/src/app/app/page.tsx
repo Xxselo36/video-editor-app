@@ -2263,10 +2263,26 @@ function ReviewScreen({
   useEffect(() => {
     const v = videoRef.current;
     if (!v || editSegs.length === 0) return;
-    const active = editSegs
+    const raw = editSegs
       .filter((s) => !s.disabled && s.end - s.start > 0.05)
       .sort((a, b) => a.start - b.start);
-    if (active.length === 0) return;
+    if (raw.length === 0) return;
+
+    // Playback-only: coalesce adjacent segments whose gap is under
+    // ~0.4s. Every seek costs 30-100ms on decode + buffer, and a
+    // typical video has dozens of tiny filler cuts. Chaining them
+    // felt like the player was stuttering / hanging. Playing straight
+    // through fillers < 0.4s is imperceptible — the visible timeline
+    // still shows the cuts, they just don't cause a visible hop.
+    const active: EditableSeg[] = [];
+    for (const s of raw) {
+      const last = active[active.length - 1];
+      if (last && s.start - last.end < 0.4) {
+        active[active.length - 1] = { ...last, end: s.end };
+      } else {
+        active.push({ ...s });
+      }
+    }
 
     let boundaryTimer: ReturnType<typeof setTimeout> | null = null;
     let rvfcId = 0;
@@ -2464,6 +2480,7 @@ function ReviewScreen({
           src={`${backendUrl()}/jobs/${jobId}/source-video`}
           controls
           playsInline
+          preload="auto"
           onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
           className="block max-h-[55vh] w-full bg-[var(--surface-0)]"
         />
