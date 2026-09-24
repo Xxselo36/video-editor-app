@@ -2198,9 +2198,10 @@ function ReviewScreen({
     return () => cancelAnimationFrame(rafId);
   }, []);
 
-  // Video now plays the RAW source, so currentTime already IS the
-  // original-timeline position. Kept fields for backwards compat —
-  // keptSegments still seeds the initial edit strip.
+  // Video plays the cut-preview (concatenated kept segments), so
+  // currentTime lives on the CUT timeline. We map it back to the
+  // original timeline for the strip playhead so the cursor lines up
+  // with the right original-time position.
   const keptSegments = useMemo<[number, number][]>(() => {
     if (!duration) return [];
     const sorted = [...cutRanges].sort((a, b) => a.start - b.start);
@@ -2214,7 +2215,16 @@ function ReviewScreen({
     return kept;
   }, [cutRanges, duration]);
 
-  const originalTime = currentTime;
+  const originalTime = useMemo(() => {
+    if (!keptSegments.length) return currentTime;
+    let acc = 0;
+    for (const [s, e] of keptSegments) {
+      const segDur = e - s;
+      if (acc + segDur >= currentTime) return s + (currentTime - acc);
+      acc += segDur;
+    }
+    return duration;
+  }, [currentTime, keptSegments, duration]);
 
   // Editable segments — starts from keptSegments and can be trimmed,
   // split, deleted, or reordered by the user in the timeline editor.
@@ -2249,158 +2259,100 @@ function ReviewScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptSegments.length]);
 
-  // Virtual playback controller. The <video> plays the raw source, so
-  // its currentTime can wander into deleted/trimmed regions.
+
+  // Edits update local state instantly (strip re-renders in the same
+  // frame). A debounced POST rebuilds the server preview 800ms after
+  // the last edit — long enough that rapid trims coalesce into one
+  // rebuild, short enough that the user doesn't wait when they stop.
   //
-  // Approach: schedule a precise setTimeout to hit the end of the
-  // current segment on every play/seek. When it fires we snap to the
-  // next segment's start. This is millisecond-accurate, unlike a
-  // timeupdate-driven check (throttled to ~4Hz) which used to leave
-  // the cursor visibly frozen 100-250ms past the boundary.
-  //
-  // requestVideoFrameCallback runs as a safety net for drift caused
-  // by playbackRate changes, buffering hiccups, or user seeks.
-  useEffect(() => {
+  // The src swap that follows is gated: if the video is currently
+  // playing we defer until the next pause. That's what killed the
+  // 'flow' before — the browser reloaded mid-playback and jumped
+  // back to the start of the clip.
+  const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRebuildRef = useRef<EditableSeg[] | null>(null);
+  const swapWhenPausedRef = useRef(false);
+
+  const swapPreviewSrc = () => {
     const v = videoRef.current;
-    if (!v || editSegs.length === 0) return;
-    const raw = editSegs
+    if (!v) return;
+    const base = `${backendUrl()}/jobs/${jobId}/preview-video`;
+    const wasTime = v.currentTime;
+    v.src = `${base}?v=${Date.now()}`;
+    const restore = () => {
+      v.removeEventListener("loadedmetadata", restore);
+      try {
+        const dur = isFinite(v.duration) ? v.duration : 0;
+        v.currentTime = Math.min(wasTime, Math.max(0, dur - 0.1));
+      } catch {
+        /* ignore */
+      }
+    };
+    v.addEventListener("loadedmetadata", restore, { once: true });
+  };
+
+  const doRebuild = async () => {
+    const next = pendingRebuildRef.current;
+    if (!next) return;
+    pendingRebuildRef.current = null;
+    const active = next
       .filter((s) => !s.disabled && s.end - s.start > 0.05)
-      .sort((a, b) => a.start - b.start);
-    if (raw.length === 0) return;
-
-    // Playback-only: coalesce adjacent segments whose gap is under
-    // ~0.4s. Every seek costs 30-100ms on decode + buffer, and a
-    // typical video has dozens of tiny filler cuts. Chaining them
-    // felt like the player was stuttering / hanging. Playing straight
-    // through fillers < 0.4s is imperceptible — the visible timeline
-    // still shows the cuts, they just don't cause a visible hop.
-    const active: EditableSeg[] = [];
-    for (const s of raw) {
-      const last = active[active.length - 1];
-      if (last && s.start - last.end < 0.4) {
-        active[active.length - 1] = { ...last, end: s.end };
-      } else {
-        active.push({ ...s });
-      }
-    }
-
-    let boundaryTimer: ReturnType<typeof setTimeout> | null = null;
-    let rvfcId = 0;
-
-    const currentSeg = () => {
-      const t = v.currentTime;
-      return active.find((s) => t >= s.start - 0.02 && t < s.end);
-    };
-    const nextSeg = () => {
-      const t = v.currentTime;
-      return active.find((s) => s.start > t);
-    };
-
-    const scheduleBoundary = () => {
-      if (boundaryTimer) {
-        clearTimeout(boundaryTimer);
-        boundaryTimer = null;
-      }
-      if (v.paused) return;
-      const seg = currentSeg();
-      if (!seg) return;
-      const rate = v.playbackRate || 1;
-      const msUntilEnd = Math.max(0, ((seg.end - v.currentTime) / rate) * 1000);
-      boundaryTimer = setTimeout(() => {
-        const nxt = nextSeg();
-        if (nxt) {
-          v.currentTime = nxt.start;
+      .map((s) => ({ start: s.start, end: s.end }));
+    if (active.length === 0) return;
+    setEditSaving(true);
+    try {
+      const r = await fetch(`${backendUrl()}/jobs/${jobId}/edit-segments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segments: active }),
+      });
+      if (r.ok) {
+        const v = videoRef.current;
+        if (v && v.paused) {
+          swapPreviewSrc();
         } else {
-          v.pause();
+          // Defer the src swap until the user pauses — we DO NOT
+          // interrupt playback in flight. The pause listener below
+          // performs the swap when they stop.
+          swapWhenPausedRef.current = true;
         }
-      }, msUntilEnd);
-    };
-
-    // Safety net: if we somehow overshoot (buffering hiccup, tab
-    // throttle, playbackRate change) rvfc catches it within a frame.
-    const rvfcTick = (_now: DOMHighResTimeStamp) => {
-      const t = v.currentTime;
-      const seg = currentSeg();
-      if (!seg && !v.paused) {
-        const nxt = nextSeg();
-        if (nxt) v.currentTime = nxt.start;
-        else v.pause();
-      } else if (seg && t >= seg.end - 0.005) {
-        const nxt = nextSeg();
-        if (nxt) v.currentTime = nxt.start;
       }
-      rvfcId = (v as HTMLVideoElement & {
-        requestVideoFrameCallback?: (cb: (now: number) => void) => number;
-      }).requestVideoFrameCallback?.(rvfcTick) ?? 0;
-    };
+    } catch {
+      /* transient — the next edit will retry */
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
-    const onPlay = () => {
-      scheduleBoundary();
-      rvfcId = (v as HTMLVideoElement & {
-        requestVideoFrameCallback?: (cb: (now: number) => void) => number;
-      }).requestVideoFrameCallback?.(rvfcTick) ?? 0;
-    };
-    const onPause = () => {
-      if (boundaryTimer) {
-        clearTimeout(boundaryTimer);
-        boundaryTimer = null;
-      }
-    };
-    const onSeeked = () => scheduleBoundary();
-    const onRateChange = () => scheduleBoundary();
-
-    v.addEventListener("play", onPlay);
-    v.addEventListener("pause", onPause);
-    v.addEventListener("seeked", onSeeked);
-    v.addEventListener("ratechange", onRateChange);
-    if (!v.paused) onPlay();
-    return () => {
-      v.removeEventListener("play", onPlay);
-      v.removeEventListener("pause", onPause);
-      v.removeEventListener("seeked", onSeeked);
-      v.removeEventListener("ratechange", onRateChange);
-      if (boundaryTimer) clearTimeout(boundaryTimer);
-      const vany = v as HTMLVideoElement & {
-        cancelVideoFrameCallback?: (id: number) => void;
-      };
-      if (rvfcId && vany.cancelVideoFrameCallback) {
-        vany.cancelVideoFrameCallback(rvfcId);
-      }
-    };
-  }, [editSegs]);
-
-  // Initial seek to the first segment when the video is ready. Without
-  // this the raw source starts at t=0 which may be deleted content.
   useEffect(() => {
     const v = videoRef.current;
-    if (!v || editSegs.length === 0) return;
-    const first = editSegs.find((s) => !s.disabled);
-    if (!first) return;
-    const onReady = () => {
-      if (v.currentTime < first.start - 0.02) {
-        v.currentTime = first.start;
+    if (!v) return;
+    const onPause = () => {
+      if (swapWhenPausedRef.current) {
+        swapWhenPausedRef.current = false;
+        swapPreviewSrc();
       }
     };
-    if (v.readyState >= 1) onReady();
-    else v.addEventListener("loadedmetadata", onReady, { once: true });
-    // Only run on initial mount / when segments first arrive.
+    v.addEventListener("pause", onPause);
+    return () => v.removeEventListener("pause", onPause);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editSegs.length > 0]);
+  }, []);
 
-  // Edits are pure local state updates — no server round-trip, no
-  // video reload. The video element plays the RAW source; a virtual
-  // playback controller (below) skips over deleted segments and
-  // enforces trim boundaries. Segments only get sent to the backend
-  // once, right before the final render.
   const commitEditSegs = (next: EditableSeg[]) => {
     setEditSegs(next);
+    pendingRebuildRef.current = next;
+    if (rebuildTimerRef.current) clearTimeout(rebuildTimerRef.current);
+    rebuildTimerRef.current = setTimeout(() => {
+      rebuildTimerRef.current = null;
+      void doRebuild();
+    }, 800);
   };
 
   // Video runs on the RAW source, so we match phrases via their
   // original_start / original_end fields.
   useEffect(() => {
     const idx = phrases.findIndex(
-      (p) => currentTime >= p.original_start && currentTime <= p.original_end,
+      (p) => currentTime >= p.start && currentTime <= p.end,
     );
     setActiveIdx(idx === -1 ? null : idx);
   }, [currentTime, phrases]);
@@ -2437,7 +2389,7 @@ function ReviewScreen({
 
   const seekToPhrase = (p: Phrase) => {
     if (!videoRef.current) return;
-    videoRef.current.currentTime = p.original_start;
+    videoRef.current.currentTime = p.start;
     videoRef.current.play().catch(() => {});
   };
 
@@ -2469,21 +2421,36 @@ function ReviewScreen({
         </div>
       )}
 
-      {/* Raw source preview. The virtual player above skips deleted
-          segments and enforces trim boundaries client-side so the user
-          never has to wait for a server rebuild between edits. Captions
-          + effects are rendered by the final Render pass, not
-          approximated here. */}
-      <div className="overflow-hidden rounded-xl bg-[var(--surface-1)]">
+      {/* Server-rendered cut preview — continuous MP4 with all
+          enabled segments concatenated, so playback is always smooth
+          (no client-side seek hops). Rebuild happens in the background
+          via a debounced POST; we swap src only while paused so the
+          user never sees a reload mid-playback. */}
+      <div className="relative overflow-hidden rounded-xl bg-[var(--surface-1)]">
         <video
           ref={videoRef}
-          src={`${backendUrl()}/jobs/${jobId}/source-video`}
+          src={`${backendUrl()}/jobs/${jobId}/preview-video`}
           controls
           playsInline
           preload="auto"
           onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
           className="block max-h-[55vh] w-full bg-[var(--surface-0)]"
         />
+        {editSaving && (
+          <div
+            className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold backdrop-blur-md"
+            style={{
+              background: "rgba(0,0,0,0.55)",
+              color: "var(--brand-strong)",
+            }}
+          >
+            <span
+              className="inline-block h-1.5 w-1.5 animate-pulse rounded-full"
+              style={{ background: "var(--brand)" }}
+            />
+            Updating preview…
+          </div>
+        )}
       </div>
 
       {captionPreset !== "none" && (
@@ -2551,7 +2518,18 @@ function ReviewScreen({
           onToggleOpen={() => {}}
           onCommit={(next) => void commitEditSegs(next)}
           onSeekOriginal={(t) => {
-            if (videoRef.current) videoRef.current.currentTime = t;
+            // t comes in on the ORIGINAL timeline; map into the
+            // cut-timeline the preview video plays on.
+            let acc = 0;
+            for (const s of editSegs.filter((x) => !x.disabled)) {
+              if (t >= s.start && t <= s.end) {
+                if (videoRef.current) {
+                  videoRef.current.currentTime = acc + (t - s.start);
+                }
+                return;
+              }
+              acc += s.end - s.start;
+            }
           }}
           getVideoTime={() => originalTime}
           onPlayPauseKey={() => {
