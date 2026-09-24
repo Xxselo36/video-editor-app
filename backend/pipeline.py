@@ -276,6 +276,11 @@ def _normalize_orientation(
         # fits Railway's CPU budget for typical 60-90s videos, and
         # crf 18 is visually near-lossless as a source for the burn.
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        # Force a keyframe every ~1s. The web editor plays this file
+        # directly and seeks over cut regions; sparse keyframes
+        # (libx264's default ~10s) made the browser buffer for
+        # hundreds of ms at every hop → visibly frozen playback.
+        "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
         "-pix_fmt", "yuv420p",
         # Tag output as BT.709 SDR so downstream players don't re-interpret
         # our tonemapped pixels as still-HDR.

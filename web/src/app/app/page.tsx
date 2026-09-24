@@ -2250,10 +2250,16 @@ function ReviewScreen({
   }, [keptSegments.length]);
 
   // Virtual playback controller. The <video> plays the raw source, so
-  // its currentTime can wander into deleted/trimmed regions. This
-  // controller watches currentTime and hops to the next enabled
-  // segment's start whenever we're in a hole. Runs cheaply — only
-  // acts when we detect drift.
+  // its currentTime can wander into deleted/trimmed regions.
+  //
+  // Approach: schedule a precise setTimeout to hit the end of the
+  // current segment on every play/seek. When it fires we snap to the
+  // next segment's start. This is millisecond-accurate, unlike a
+  // timeupdate-driven check (throttled to ~4Hz) which used to leave
+  // the cursor visibly frozen 100-250ms past the boundary.
+  //
+  // requestVideoFrameCallback runs as a safety net for drift caused
+  // by playbackRate changes, buffering hiccups, or user seeks.
   useEffect(() => {
     const v = videoRef.current;
     if (!v || editSegs.length === 0) return;
@@ -2261,28 +2267,89 @@ function ReviewScreen({
       .filter((s) => !s.disabled && s.end - s.start > 0.05)
       .sort((a, b) => a.start - b.start);
     if (active.length === 0) return;
-    const onTick = () => {
+
+    let boundaryTimer: ReturnType<typeof setTimeout> | null = null;
+    let rvfcId = 0;
+
+    const currentSeg = () => {
       const t = v.currentTime;
-      // If we're inside an active segment, all good.
-      const inside = active.find((s) => t >= s.start - 0.02 && t < s.end);
-      if (inside) return;
-      // Otherwise skip to the next segment's start (or wrap to first
-      // if we've fallen off the end while paused).
-      const next = active.find((s) => s.start > t);
-      if (next) {
-        v.currentTime = next.start;
-      } else if (!v.paused) {
-        v.pause();
-        v.currentTime = active[0].start;
+      return active.find((s) => t >= s.start - 0.02 && t < s.end);
+    };
+    const nextSeg = () => {
+      const t = v.currentTime;
+      return active.find((s) => s.start > t);
+    };
+
+    const scheduleBoundary = () => {
+      if (boundaryTimer) {
+        clearTimeout(boundaryTimer);
+        boundaryTimer = null;
+      }
+      if (v.paused) return;
+      const seg = currentSeg();
+      if (!seg) return;
+      const rate = v.playbackRate || 1;
+      const msUntilEnd = Math.max(0, ((seg.end - v.currentTime) / rate) * 1000);
+      boundaryTimer = setTimeout(() => {
+        const nxt = nextSeg();
+        if (nxt) {
+          v.currentTime = nxt.start;
+        } else {
+          v.pause();
+        }
+      }, msUntilEnd);
+    };
+
+    // Safety net: if we somehow overshoot (buffering hiccup, tab
+    // throttle, playbackRate change) rvfc catches it within a frame.
+    const rvfcTick = (_now: DOMHighResTimeStamp) => {
+      const t = v.currentTime;
+      const seg = currentSeg();
+      if (!seg && !v.paused) {
+        const nxt = nextSeg();
+        if (nxt) v.currentTime = nxt.start;
+        else v.pause();
+      } else if (seg && t >= seg.end - 0.005) {
+        const nxt = nextSeg();
+        if (nxt) v.currentTime = nxt.start;
+      }
+      rvfcId = (v as HTMLVideoElement & {
+        requestVideoFrameCallback?: (cb: (now: number) => void) => number;
+      }).requestVideoFrameCallback?.(rvfcTick) ?? 0;
+    };
+
+    const onPlay = () => {
+      scheduleBoundary();
+      rvfcId = (v as HTMLVideoElement & {
+        requestVideoFrameCallback?: (cb: (now: number) => void) => number;
+      }).requestVideoFrameCallback?.(rvfcTick) ?? 0;
+    };
+    const onPause = () => {
+      if (boundaryTimer) {
+        clearTimeout(boundaryTimer);
+        boundaryTimer = null;
       }
     };
-    v.addEventListener("timeupdate", onTick);
-    v.addEventListener("seeked", onTick);
-    v.addEventListener("play", onTick);
+    const onSeeked = () => scheduleBoundary();
+    const onRateChange = () => scheduleBoundary();
+
+    v.addEventListener("play", onPlay);
+    v.addEventListener("pause", onPause);
+    v.addEventListener("seeked", onSeeked);
+    v.addEventListener("ratechange", onRateChange);
+    if (!v.paused) onPlay();
     return () => {
-      v.removeEventListener("timeupdate", onTick);
-      v.removeEventListener("seeked", onTick);
-      v.removeEventListener("play", onTick);
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("pause", onPause);
+      v.removeEventListener("seeked", onSeeked);
+      v.removeEventListener("ratechange", onRateChange);
+      if (boundaryTimer) clearTimeout(boundaryTimer);
+      const vany = v as HTMLVideoElement & {
+        cancelVideoFrameCallback?: (id: number) => void;
+      };
+      if (rvfcId && vany.cancelVideoFrameCallback) {
+        vany.cancelVideoFrameCallback(rvfcId);
+      }
     };
   }, [editSegs]);
 
