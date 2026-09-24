@@ -346,6 +346,13 @@ def _ffmpeg_cuts_preview(
         "-filter_complex", ";".join(filters),
         "-map", "[outv]", "-map", "[outa]",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+        # Force a keyframe every ~1s. Without this, libx264 ultrafast
+        # produces GOPs of ~10s, which makes seeking + decoding at
+        # segment concat points visibly stutter — the user sees the
+        # transitions as 'hangs' when the preview swaps in after a
+        # rebuild. Dense keyframes also let currentTime restore snap
+        # instantly on src swap.
+        "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
         "-pix_fmt", "yuv420p",
         "-profile:v", "main",
         "-c:a", "aac", "-b:a", "128k",
