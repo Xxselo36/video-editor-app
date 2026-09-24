@@ -2215,16 +2215,29 @@ function ReviewScreen({
     return kept;
   }, [cutRanges, duration]);
 
+  // Segments the CURRENT preview MP4 was rendered from. Kept in sync
+  // with what's actually playing, NOT with the user's in-progress
+  // edits — otherwise the playhead jumps around wildly while the
+  // rebuild is still pending.
+  const [videoSegments, setVideoSegments] = useState<[number, number][]>([]);
+  useEffect(() => {
+    if (videoSegments.length === 0 && keptSegments.length > 0) {
+      setVideoSegments(keptSegments);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keptSegments.length]);
+
   const originalTime = useMemo(() => {
-    if (!keptSegments.length) return currentTime;
+    const src = videoSegments.length ? videoSegments : keptSegments;
+    if (!src.length) return currentTime;
     let acc = 0;
-    for (const [s, e] of keptSegments) {
+    for (const [s, e] of src) {
       const segDur = e - s;
       if (acc + segDur >= currentTime) return s + (currentTime - acc);
       acc += segDur;
     }
     return duration;
-  }, [currentTime, keptSegments, duration]);
+  }, [currentTime, videoSegments, keptSegments, duration]);
 
   // Editable segments — starts from keptSegments and can be trimmed,
   // split, deleted, or reordered by the user in the timeline editor.
@@ -2272,6 +2285,7 @@ function ReviewScreen({
   const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRebuildRef = useRef<EditableSeg[] | null>(null);
   const swapWhenPausedRef = useRef(false);
+  const pendingSwapSegsRef = useRef<[number, number][] | null>(null);
 
   const swapPreviewSrc = () => {
     const v = videoRef.current;
@@ -2308,12 +2322,18 @@ function ReviewScreen({
       });
       if (r.ok) {
         const v = videoRef.current;
+        const nextVideoSegs: [number, number][] = active.map((s) => [
+          s.start,
+          s.end,
+        ]);
         if (v && v.paused) {
+          setVideoSegments(nextVideoSegs);
           swapPreviewSrc();
         } else {
           // Defer the src swap until the user pauses — we DO NOT
           // interrupt playback in flight. The pause listener below
           // performs the swap when they stop.
+          pendingSwapSegsRef.current = nextVideoSegs;
           swapWhenPausedRef.current = true;
         }
       }
@@ -2330,6 +2350,10 @@ function ReviewScreen({
     const onPause = () => {
       if (swapWhenPausedRef.current) {
         swapWhenPausedRef.current = false;
+        if (pendingSwapSegsRef.current) {
+          setVideoSegments(pendingSwapSegsRef.current);
+          pendingSwapSegsRef.current = null;
+        }
         swapPreviewSrc();
       }
     };
@@ -3696,18 +3720,15 @@ function TimelineEditor({
   }, [draggingId, dragMode, totalDur]);
 
   const del = (id: string) => {
-    // Refuse to disable the last active clip — the backend would have
-    // nothing to render and the video element would go blank.
-    const activeIds = segments.filter((s) => !s.disabled).map((s) => s.id);
-    if (activeIds.length <= 1 && activeIds.includes(id)) {
+    // Refuse to remove the last clip — the backend would have nothing
+    // to render. Undo (⌘Z / ↶) brings anything back.
+    const active = segments.filter((s) => !s.disabled);
+    if (active.length <= 1 && active.some((s) => s.id === id)) {
       setSelected(id);
       return;
     }
-    commit(segments.map((s) => (s.id === id ? { ...s, disabled: true } : s)));
+    commit(segments.filter((s) => s.id !== id));
     setSelected(null);
-  };
-  const restore = (id: string) => {
-    commit(segments.map((s) => (s.id === id ? { ...s, disabled: false } : s)));
   };
   const splitAtPlayhead = () => {
     const t = getVideoTime();
@@ -4053,18 +4074,6 @@ function TimelineEditor({
                         </div>
                       )}
                     </div>
-                    {s.disabled && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          restore(s.id);
-                        }}
-                        className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        Restore
-                      </button>
-                    )}
                   </div>
                 );
               })}
