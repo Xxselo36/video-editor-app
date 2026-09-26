@@ -2460,6 +2460,7 @@ function ReviewScreen({
           onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
           className="block max-h-[55vh] w-full bg-[var(--surface-0)]"
         />
+        <PlaybackDebug videoRef={videoRef} />
         {editSaving && (
           <div
             className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold backdrop-blur-md"
@@ -2745,6 +2746,83 @@ function ReviewScreen({
         {editSaving ? "Preparing…" : "Apply & render"}
       </button>
     </div>
+  );
+}
+
+// Temporary playback diagnostics, shown only with ?debug=1 in the URL.
+// Distinguishes network stalls (waiting events), decoder drops and
+// main-thread jank so we know which layer causes the hitches.
+function PlaybackDebug({
+  videoRef,
+}: {
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+}) {
+  const [enabled, setEnabled] = useState(false);
+  const [text, setText] = useState("");
+  useEffect(() => {
+    setEnabled(new URLSearchParams(window.location.search).has("debug"));
+  }, []);
+  useEffect(() => {
+    if (!enabled) return;
+    const v = videoRef.current;
+    if (!v) return;
+    let waits = 0;
+    let janks = 0;
+    let worstJank = 0;
+    const log: string[] = [];
+    const push = (s: string) => {
+      log.unshift(`${v.currentTime.toFixed(2)}s ${s}`);
+      log.length = Math.min(log.length, 5);
+    };
+    const onWaiting = () => {
+      waits++;
+      push("WAITING (buffer)");
+    };
+    const onStalled = () => push("STALLED (network)");
+    v.addEventListener("waiting", onWaiting);
+    v.addEventListener("stalled", onStalled);
+    let last = performance.now();
+    let raf = 0;
+    const frame = (now: number) => {
+      const dt = now - last;
+      last = now;
+      if (!v.paused && dt > 120) {
+        janks++;
+        worstJank = Math.max(worstJank, dt);
+        push(`JANK ${Math.round(dt)}ms (UI)`);
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    const iv = setInterval(() => {
+      let ahead = 0;
+      for (let i = 0; i < v.buffered.length; i++) {
+        if (v.buffered.start(i) <= v.currentTime && v.currentTime <= v.buffered.end(i)) {
+          ahead = v.buffered.end(i) - v.currentTime;
+        }
+      }
+      const q = v.getVideoPlaybackQuality?.();
+      setText(
+        [
+          `${v.paused ? "paused" : "playing"} · ready=${v.readyState} · buffer +${ahead.toFixed(1)}s`,
+          `waits=${waits} · janks=${janks} (max ${Math.round(worstJank)}ms)`,
+          `dropped=${q?.droppedVideoFrames ?? "?"}/${q?.totalVideoFrames ?? "?"}`,
+          ...log,
+        ].join("\n"),
+      );
+    }, 300);
+    return () => {
+      v.removeEventListener("waiting", onWaiting);
+      v.removeEventListener("stalled", onStalled);
+      cancelAnimationFrame(raf);
+      clearInterval(iv);
+    };
+  }, [enabled, videoRef]);
+  if (!enabled) return null;
+  return (
+    <pre className="pointer-events-none absolute left-2 top-2 z-30 whitespace-pre rounded-md bg-black/75 p-2 font-mono text-[10px] leading-tight text-green-300">
+      {text}
+    </pre>
   );
 }
 
