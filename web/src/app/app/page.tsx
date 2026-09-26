@@ -3800,12 +3800,71 @@ function TimelineEditor({
 
   const selectedSeg = selected ? segments.find((x) => x.id === selected) : null;
 
+  // Playhead position on the CUT timeline (what the strip lays out).
+  const playheadCut = (() => {
+    let acc = 0;
+    for (const s of segments) {
+      if (s.disabled) continue;
+      if (playhead >= s.start && playhead <= s.end) return acc + (playhead - s.start);
+      acc += s.end - s.start;
+    }
+    return null;
+  })();
+  const playheadPct =
+    playheadCut !== null ? Math.min(100, (playheadCut / totalDur) * 100) : null;
+
+  // Ruler ticks — pick the smallest step that keeps labels ~8 per
+  // screen width at the current zoom.
+  const tickStep = (() => {
+    const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+    const target = totalDur / (8 * zoom);
+    return steps.find((st) => st >= target) ?? steps[steps.length - 1];
+  })();
+  const ticks: number[] = [];
+  for (let t = 0; t <= totalDur + 1e-6; t += tickStep) ticks.push(t);
+
+  // Click on the ruler → seek. Converts cut-timeline x into the
+  // original time of whichever clip sits there.
+  const seekFromRuler = (clientX: number) => {
+    const el = stripRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const cut = Math.max(0, Math.min(totalDur, ((clientX - rect.left) / rect.width) * totalDur));
+    let acc = 0;
+    for (const s of segments) {
+      if (s.disabled) continue;
+      const d = s.end - s.start;
+      if (cut <= acc + d) {
+        onSeekOriginal(Math.min(s.end, s.start + (cut - acc)));
+        return;
+      }
+      acc += d;
+    }
+  };
+
+  // When zoomed in, keep the playhead in view while it moves.
+  useEffect(() => {
+    const sc = scrollRef.current;
+    if (!sc || playheadPct === null || zoom <= 1 || draggingId) return;
+    const x = (playheadPct / 100) * sc.scrollWidth;
+    if (x < sc.scrollLeft + 24 || x > sc.scrollLeft + sc.clientWidth - 24) {
+      sc.scrollTo({ left: Math.max(0, x - sc.clientWidth / 3), behavior: "smooth" });
+    }
+  }, [playheadPct, zoom, draggingId]);
+
+  const toolBtn = {
+    background: "var(--surface-2)",
+    color: "var(--text-body)",
+    border: "1px solid var(--border)",
+  } as const;
+
   return (
     <div
       className="mb-3 overflow-hidden rounded-2xl"
       style={{
         background: "var(--surface-1)",
         border: "1px solid var(--border)",
+        boxShadow: "var(--shadow-md)",
       }}
     >
       <button
@@ -3814,19 +3873,29 @@ function TimelineEditor({
         style={{ borderBottom: open ? "1px solid var(--border)" : "none" }}
       >
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
-            Timeline editor · {activeCount} clip{activeCount === 1 ? "" : "s"}
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+            Timeline
+            <span
+              className="rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal tabular-nums"
+              style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
+            >
+              {activeCount} clip{activeCount === 1 ? "" : "s"} · {fmt(totalDur)}
+            </span>
             {saving && (
               <span
-                className="ml-2 text-[10px] normal-case"
-                style={{ color: "var(--brand-strong)" }}
+                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal"
+                style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
               >
-                saving…
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: "var(--brand)", animation: "soft-pulse 1.2s ease-in-out infinite" }}
+                />
+                saving
               </span>
             )}
           </div>
-          <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
-            Trim / Split / Delete / Reorder · Speed · Fade · Volume · Undo (⌘Z)
+          <div className="mt-1 text-[11px] text-[var(--text-faint)]">
+            Drag edges to trim · click a clip to select · Space play · ⌫ delete · ⌘Z undo
           </div>
         </div>
         <span className="text-xs" style={{ color: "var(--text-muted)" }}>
@@ -3837,270 +3906,332 @@ function TimelineEditor({
       {open && (
         <div className="p-3">
           {/* Toolbar */}
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">
-            <button
-              onClick={undo}
-              disabled={history.length === 0}
-              className="rounded-lg px-2 py-1 text-xs disabled:opacity-40"
-              style={{
-                background: "var(--surface-2)",
-                color: "var(--text-body)",
-                border: "1px solid var(--border)",
-              }}
-              title="Undo (⌘Z)"
-            >
-              ↶
-            </button>
-            <button
-              onClick={redo}
-              disabled={future.length === 0}
-              className="rounded-lg px-2 py-1 text-xs disabled:opacity-40"
-              style={{
-                background: "var(--surface-2)",
-                color: "var(--text-body)",
-                border: "1px solid var(--border)",
-              }}
-              title="Redo (⌘⇧Z)"
-            >
-              ↷
-            </button>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="flex overflow-hidden rounded-lg" style={{ border: "1px solid var(--border)" }}>
+              <button
+                onClick={undo}
+                disabled={history.length === 0}
+                className="px-2.5 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 disabled:hover:bg-transparent"
+                style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
+                title="Undo (⌘Z)"
+              >
+                ↶
+              </button>
+              <button
+                onClick={redo}
+                disabled={future.length === 0}
+                className="px-2.5 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 disabled:hover:bg-transparent"
+                style={{
+                  background: "var(--surface-2)",
+                  color: "var(--text-body)",
+                  borderLeft: "1px solid var(--border)",
+                }}
+                title="Redo (⌘⇧Z)"
+              >
+                ↷
+              </button>
+            </div>
             <button
               onClick={splitAtPlayhead}
-              className="rounded-lg px-2.5 py-1 text-xs font-semibold"
-              style={{
-                background: "var(--surface-2)",
-                color: "var(--text-strong)",
-                border: "1px solid var(--border)",
-              }}
+              className="rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors hover:border-[var(--brand)]"
+              style={{ ...toolBtn, color: "var(--text-strong)" }}
+              title="Split the clip under the playhead"
             >
               ⧉ Split
             </button>
-            <div className="ml-auto flex items-center gap-1">
-              <button
-                onClick={() => setZoom((z) => Math.max(1, z / 1.5))}
-                className="rounded-lg px-2 py-1 text-xs"
-                style={{
-                  background: "var(--surface-2)",
-                  color: "var(--text-body)",
-                  border: "1px solid var(--border)",
-                }}
-              >
-                −
-              </button>
+
+            {selected && (
+              <>
+                <span className="mx-0.5 h-4 w-px" style={{ background: "var(--border-hover)" }} />
+                <button
+                  onClick={() => moveLeft(selected)}
+                  className="rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)]"
+                  style={toolBtn}
+                  title="Move clip left"
+                >
+                  ←
+                </button>
+                <button
+                  onClick={() => moveRight(selected)}
+                  className="rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)]"
+                  style={toolBtn}
+                  title="Move clip right"
+                >
+                  →
+                </button>
+                <button
+                  onClick={() => del(selected)}
+                  className="rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-[rgba(239,107,87,0.12)]"
+                  style={{
+                    background: "var(--surface-2)",
+                    color: "var(--danger)",
+                    border: "1px solid rgba(239,107,87,0.3)",
+                  }}
+                  title="Delete clip (⌫)"
+                >
+                  ✕ Delete
+                </button>
+              </>
+            )}
+
+            <div className="ml-auto flex items-center gap-2">
               <span
-                className="text-[10px] tabular-nums"
-                style={{ color: "var(--text-muted)", minWidth: "34px", textAlign: "center" }}
+                className="rounded-md px-2 py-1 font-mono text-[11px] tabular-nums"
+                style={{ background: "var(--surface-0)", color: "var(--text-strong)" }}
               >
-                {zoom.toFixed(1)}×
+                {fmt(playheadCut ?? 0)}
+                <span style={{ color: "var(--text-faint)" }}> / {fmt(totalDur)}</span>
               </span>
-              <button
-                onClick={() => setZoom((z) => Math.min(6, z * 1.5))}
-                className="rounded-lg px-2 py-1 text-xs"
-                style={{
-                  background: "var(--surface-2)",
-                  color: "var(--text-body)",
-                  border: "1px solid var(--border)",
-                }}
-              >
-                +
-              </button>
+              <div className="flex items-center overflow-hidden rounded-lg" style={{ border: "1px solid var(--border)" }}>
+                <button
+                  onClick={() => setZoom((z) => Math.max(1, z / 1.5))}
+                  disabled={zoom <= 1}
+                  className="px-2 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40"
+                  style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
+                  title="Zoom out"
+                >
+                  −
+                </button>
+                <span
+                  className="px-1 text-[10px] tabular-nums"
+                  style={{ color: "var(--text-muted)", minWidth: "34px", textAlign: "center" }}
+                >
+                  {zoom.toFixed(1)}×
+                </span>
+                <button
+                  onClick={() => setZoom((z) => Math.min(6, z * 1.5))}
+                  disabled={zoom >= 6}
+                  className="px-2 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40"
+                  style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
+                  title="Zoom in"
+                >
+                  +
+                </button>
+              </div>
             </div>
           </div>
 
-          {selected && (
-            <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              <button
-                onClick={() => moveLeft(selected)}
-                className="rounded-lg px-2.5 py-1 text-xs"
-                style={{
-                  background: "var(--surface-2)",
-                  color: "var(--text-body)",
-                  border: "1px solid var(--border)",
-                }}
-              >
-                ← Move
-              </button>
-              <button
-                onClick={() => moveRight(selected)}
-                className="rounded-lg px-2.5 py-1 text-xs"
-                style={{
-                  background: "var(--surface-2)",
-                  color: "var(--text-body)",
-                  border: "1px solid var(--border)",
-                }}
-              >
-                Move →
-              </button>
-              <button
-                onClick={() => del(selected)}
-                className="rounded-lg px-2.5 py-1 text-xs"
-                style={{
-                  background: "var(--surface-2)",
-                  color: "#F26E6E",
-                  border: "1px solid #F26E6E44",
-                }}
-              >
-                ✕ Delete
-              </button>
-            </div>
-          )}
-
-          {/* Segment strip — width scales with zoom, in a scroll container */}
+          {/* Ruler + clip strip — width scales with zoom, in a scroll container */}
           <div
             ref={scrollRef}
-            className="overflow-x-auto rounded-lg"
-            style={{ background: "var(--surface-0)" }}
+            className="overflow-x-auto rounded-xl"
+            style={{
+              background: "var(--surface-0)",
+              border: "1px solid var(--border)",
+            }}
           >
             <div
-              ref={stripRef}
-              className="relative flex h-16 items-stretch gap-0.5 select-none"
+              className="relative select-none"
               style={{ width: `${100 * zoom}%`, minWidth: "100%" }}
             >
-              {(dragPreviewRef.current ?? segments).map((s) => {
-                const width = ((s.end - s.start) / totalDur) * 100;
-                const isSel = selected === s.id;
-                const hasFx =
-                  (s.speed && s.speed !== 1) ||
-                  (s.volume && s.volume !== 1) ||
-                  (s.fadeIn && s.fadeIn > 0) ||
-                  (s.fadeOut && s.fadeOut > 0);
-                return (
-                  <div
-                    key={s.id}
-                    onClick={() => {
-                      setSelected(s.id);
-                      onSeekOriginal(s.start);
-                    }}
-                    className="group relative flex cursor-pointer flex-col items-stretch justify-between"
-                    style={{
-                      width: `${width}%`,
-                      minWidth: "14px",
-                      background: s.disabled
-                        ? "var(--surface-2)"
-                        : isSel
-                          ? "var(--brand-tint)"
-                          : "var(--surface-1)",
-                      border: isSel
-                        ? "1px solid var(--brand)"
-                        : "1px solid var(--border)",
-                      opacity: s.disabled ? 0.35 : 1,
-                    }}
-                  >
-                    {!s.disabled && (
-                      <>
-                        <div
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            setDraggingId(s.id);
-                            setDragMode("start");
-                          }}
-                          onTouchStart={(e) => {
-                            e.stopPropagation();
-                            setDraggingId(s.id);
-                            setDragMode("start");
-                          }}
-                          className="absolute left-0 top-0 bottom-0 z-10 w-1.5 cursor-ew-resize"
-                          style={{
-                            background: isSel
-                              ? "var(--brand-strong)"
-                              : "var(--border-hover)",
-                          }}
-                        />
-                        <div
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            setDraggingId(s.id);
-                            setDragMode("end");
-                          }}
-                          onTouchStart={(e) => {
-                            e.stopPropagation();
-                            setDraggingId(s.id);
-                            setDragMode("end");
-                          }}
-                          className="absolute right-0 top-0 bottom-0 z-10 w-1.5 cursor-ew-resize"
-                          style={{
-                            background: isSel
-                              ? "var(--brand-strong)"
-                              : "var(--border-hover)",
-                          }}
-                        />
-                      </>
-                    )}
-                    <div className="pointer-events-none flex flex-1 flex-col items-center justify-center gap-0.5 px-1">
-                      <span
-                        className="text-[10px] tabular-nums"
-                        style={{
-                          color: s.disabled
-                            ? "var(--text-faint)"
-                            : "var(--text-strong)",
-                        }}
-                      >
-                        {fmt(s.end - s.start)}
-                      </span>
-                      {hasFx && !s.disabled && (
-                        <div className="flex gap-0.5">
-                          {s.speed && s.speed !== 1 && (
-                            <span
-                              className="rounded px-0.5 text-[8px]"
-                              style={{
-                                background: "var(--brand)",
-                                color: "white",
-                              }}
-                            >
-                              {s.speed}×
-                            </span>
-                          )}
-                          {(s.fadeIn || s.fadeOut) && (
-                            <span
-                              className="rounded px-0.5 text-[8px]"
-                              style={{ background: "#B979FF", color: "white" }}
-                            >
-                              ⋅⋅⋅
-                            </span>
-                          )}
-                          {s.volume && s.volume !== 1 && (
-                            <span
-                              className="rounded px-0.5 text-[8px]"
-                              style={{
-                                background: s.volume === 0 ? "#F26E6E" : "#F5B54D",
-                                color: "white",
-                              }}
-                            >
-                              {s.volume === 0
-                                ? "M"
-                                : `${Math.round(s.volume * 100)}%`}
-                            </span>
-                          )}
-                        </div>
+              {/* Time ruler */}
+              <div
+                className="relative h-6 cursor-pointer"
+                style={{ borderBottom: "1px solid var(--border)" }}
+                onMouseDown={(e) => seekFromRuler(e.clientX)}
+              >
+                {ticks.map((t) => {
+                  const pct = (t / totalDur) * 100;
+                  return (
+                    <div
+                      key={t}
+                      className="pointer-events-none absolute bottom-0 top-0"
+                      style={{ left: `${pct}%` }}
+                    >
+                      <div
+                        className="absolute bottom-0 w-px"
+                        style={{ height: "7px", background: "var(--border-strong)" }}
+                      />
+                      {pct < 97 && (
+                        <span
+                          className="absolute top-1 pl-1 text-[9px] tabular-nums"
+                          style={{ color: "var(--text-muted)" }}
+                        >
+                          {fmt(t)}
+                        </span>
                       )}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+                {/* Half-step minor ticks */}
+                {ticks.map((t) =>
+                  t + tickStep / 2 < totalDur ? (
+                    <div
+                      key={`m${t}`}
+                      className="pointer-events-none absolute bottom-0 w-px"
+                      style={{
+                        left: `${((t + tickStep / 2) / totalDur) * 100}%`,
+                        height: "4px",
+                        background: "var(--border-hover)",
+                      }}
+                    />
+                  ) : null,
+                )}
+              </div>
 
-              {/* Playhead */}
-              {(() => {
-                let acc = 0;
-                for (const s of segments) {
-                  if (s.disabled) continue;
-                  if (playhead >= s.start && playhead <= s.end) {
-                    const pct = ((acc + (playhead - s.start)) / totalDur) * 100;
-                    return (
+              {/* Clips */}
+              <div
+                ref={stripRef}
+                className="relative flex h-20 items-stretch py-2"
+              >
+                {(dragPreviewRef.current ?? segments).map((s, i) => {
+                  const dur = s.end - s.start;
+                  const width = (dur / totalDur) * 100;
+                  const isSel = selected === s.id;
+                  const isDragging = draggingId === s.id;
+                  const fadeInPct = s.fadeIn ? Math.min(50, (s.fadeIn / Math.max(dur, 0.01)) * 100) : 0;
+                  const fadeOutPct = s.fadeOut ? Math.min(50, (s.fadeOut / Math.max(dur, 0.01)) * 100) : 0;
+                  return (
+                    <div
+                      key={s.id}
+                      className="relative px-[1.5px]"
+                      style={{ width: `${width}%`, minWidth: "14px" }}
+                    >
                       <div
-                        key="playhead"
-                        className="pointer-events-none absolute top-0 bottom-0 z-20 w-0.5"
-                        style={{
-                          left: `${pct}%`,
-                          background: "var(--brand)",
-                          boxShadow: "0 0 8px var(--brand-glow)",
+                        onClick={() => {
+                          setSelected(s.id);
+                          onSeekOriginal(s.start);
                         }}
-                      />
-                    );
-                  }
-                  acc += s.end - s.start;
-                }
-                return null;
-              })()}
+                        className="group relative flex h-full cursor-pointer flex-col justify-between overflow-hidden rounded-md transition-[box-shadow,border-color] duration-150"
+                        style={{
+                          background: s.disabled
+                            ? "var(--surface-2)"
+                            : isSel
+                              ? "linear-gradient(180deg, rgba(139,92,246,0.45) 0%, rgba(139,92,246,0.22) 100%)"
+                              : i % 2 === 0
+                                ? "linear-gradient(180deg, rgba(139,92,246,0.24) 0%, rgba(139,92,246,0.10) 100%)"
+                                : "linear-gradient(180deg, rgba(167,139,250,0.20) 0%, rgba(167,139,250,0.08) 100%)",
+                          border: isSel
+                            ? "1px solid var(--brand-hover)"
+                            : "1px solid rgba(139,92,246,0.28)",
+                          boxShadow: isSel || isDragging ? "var(--shadow-glow)" : "none",
+                          opacity: s.disabled ? 0.35 : 1,
+                        }}
+                      >
+                        {/* Fade ramps */}
+                        {fadeInPct > 0 && (
+                          <div
+                            className="pointer-events-none absolute inset-y-0 left-0"
+                            style={{
+                              width: `${fadeInPct}%`,
+                              background: "linear-gradient(90deg, rgba(11,10,16,0.85), rgba(11,10,16,0.15))",
+                            }}
+                          />
+                        )}
+                        {fadeOutPct > 0 && (
+                          <div
+                            className="pointer-events-none absolute inset-y-0 right-0"
+                            style={{
+                              width: `${fadeOutPct}%`,
+                              background: "linear-gradient(270deg, rgba(11,10,16,0.85), rgba(11,10,16,0.15))",
+                            }}
+                          />
+                        )}
+
+                        {!s.disabled && (
+                          <>
+                            {(["start", "end"] as const).map((mode) => (
+                              <div
+                                key={mode}
+                                onMouseDown={(e) => {
+                                  e.stopPropagation();
+                                  setDraggingId(s.id);
+                                  setDragMode(mode);
+                                }}
+                                onTouchStart={(e) => {
+                                  e.stopPropagation();
+                                  setDraggingId(s.id);
+                                  setDragMode(mode);
+                                }}
+                                className={`absolute top-0 bottom-0 z-10 flex w-2 cursor-ew-resize items-center justify-center transition-opacity ${
+                                  mode === "start" ? "left-0" : "right-0"
+                                } ${isSel || isDragging ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+                                style={{
+                                  background: isSel ? "var(--brand)" : "var(--border-strong)",
+                                }}
+                              >
+                                <span
+                                  className="h-4 w-px rounded-full"
+                                  style={{ background: "rgba(255,255,255,0.7)" }}
+                                />
+                              </div>
+                            ))}
+                          </>
+                        )}
+
+                        <div className="pointer-events-none relative flex items-center justify-between gap-1 px-2.5 pt-1">
+                          <span
+                            className="text-[9px] font-semibold tabular-nums"
+                            style={{ color: isSel ? "var(--brand-strong)" : "var(--text-muted)" }}
+                          >
+                            {i + 1}
+                          </span>
+                          {!s.disabled && (
+                            <div className="flex gap-0.5">
+                              {s.speed && s.speed !== 1 && (
+                                <span
+                                  className="rounded px-1 text-[8px] font-semibold"
+                                  style={{ background: "var(--brand)", color: "white" }}
+                                >
+                                  {s.speed}×
+                                </span>
+                              )}
+                              {s.volume !== undefined && s.volume !== 1 && (
+                                <span
+                                  className="rounded px-1 text-[8px] font-semibold"
+                                  style={{
+                                    background: s.volume === 0 ? "var(--danger)" : "var(--warn)",
+                                    color: "white",
+                                  }}
+                                >
+                                  {s.volume === 0 ? "M" : `${Math.round(s.volume * 100)}%`}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="pointer-events-none relative px-2.5 pb-1">
+                          <span
+                            className="text-[10px] tabular-nums"
+                            style={{
+                              color: s.disabled ? "var(--text-faint)" : "var(--text-strong)",
+                            }}
+                          >
+                            {fmt(dur)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Playhead — spans ruler + strip */}
+              {playheadPct !== null && (
+                <div
+                  className="pointer-events-none absolute top-0 bottom-0 z-20"
+                  style={{ left: `${playheadPct}%`, transform: "translateX(-50%)" }}
+                >
+                  <div
+                    className="absolute left-1/2 top-0 -translate-x-1/2"
+                    style={{
+                      width: 0,
+                      height: 0,
+                      borderLeft: "5px solid transparent",
+                      borderRight: "5px solid transparent",
+                      borderTop: "7px solid var(--accent)",
+                    }}
+                  />
+                  <div
+                    className="mx-auto h-full w-0.5"
+                    style={{
+                      background: "var(--accent)",
+                      boxShadow: "0 0 8px rgba(236,72,153,0.55)",
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
@@ -4160,6 +4291,7 @@ function TimelineEditor({
                   value={selectedSeg.volume ?? 1}
                   onChange={(e) => patchSeg(selectedSeg.id, { volume: Number(e.target.value) })}
                   className="flex-1"
+                  style={{ accentColor: "var(--brand)" }}
                 />
                 <span
                   className="w-10 text-right tabular-nums"
@@ -4179,6 +4311,7 @@ function TimelineEditor({
                   value={selectedSeg.fadeIn ?? 0}
                   onChange={(e) => patchSeg(selectedSeg.id, { fadeIn: Number(e.target.value) })}
                   className="flex-1"
+                  style={{ accentColor: "var(--brand)" }}
                 />
                 <span
                   className="w-10 text-right tabular-nums"
@@ -4198,6 +4331,7 @@ function TimelineEditor({
                   value={selectedSeg.fadeOut ?? 0}
                   onChange={(e) => patchSeg(selectedSeg.id, { fadeOut: Number(e.target.value) })}
                   className="flex-1"
+                  style={{ accentColor: "var(--brand)" }}
                 />
                 <span
                   className="w-10 text-right tabular-nums"
