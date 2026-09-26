@@ -3616,14 +3616,20 @@ function TimelineEditor({
   const stripRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragPreviewRef = useRef<EditorSeg[] | null>(null);
+  const scrubbingRef = useRef(false);
   const [, forceRender] = useState({});
 
   // While the user is dragging a trim handle, use the live preview
   // for measurements so the visible strip stays in sync with the
   // dragging cursor. Otherwise fall back to committed props.
   const displaySegs = dragPreviewRef.current ?? segments;
+  // During a trim drag the strip keeps the scale it had when the drag
+  // started — otherwise shrinking a clip rescales every block under the
+  // cursor and the trim runs away.
+  const dragTotalRef = useRef<number | null>(null);
   const totalDur =
-    displaySegs.reduce((acc, s) => acc + (s.end - s.start), 0) || 1;
+    dragTotalRef.current ??
+    (displaySegs.reduce((acc, s) => acc + (s.end - s.start), 0) || 1);
   const activeCount = displaySegs.filter((s) => !s.disabled).length;
 
   const fmt = (t: number) => {
@@ -3664,23 +3670,27 @@ function TimelineEditor({
     const strip = stripRef.current;
     const stripRect = strip.getBoundingClientRect();
     const pxPerSec = stripRect.width / totalDur;
-    // Start local preview from the current committed state
-    dragPreviewRef.current = segments.map((s) => ({ ...s }));
+    dragTotalRef.current = totalDur;
+    // Every move is computed from this snapshot (not the previous
+    // move's result) so offsets don't accumulate.
+    const startSegs = segments.map((s) => ({ ...s }));
+    dragPreviewRef.current = startSegs;
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
+      // Touch: keep the page / strip from scrolling under the finger.
+      if (e.cancelable && "touches" in e) e.preventDefault();
       const clientX =
         (e as TouchEvent).touches?.[0]?.clientX ?? (e as MouseEvent).clientX;
       const relX = clientX - stripRect.left;
       const seconds = Math.max(0, relX / pxPerSec);
 
       let acc = 0;
-      const base = dragPreviewRef.current ?? segments;
-      const next = base.map((s) => {
+      const next = startSegs.map((s) => {
         if (s.disabled) return s;
         const sDur = s.end - s.start;
         if (s.id === draggingId) {
           if (dragMode === "start") {
-            const target = s.end - (sDur - Math.max(0, seconds - acc));
+            const target = s.start + (seconds - acc);
             const clamped = Math.min(s.end - 0.1, Math.max(0, target));
             return { ...s, start: clamped };
           } else if (dragMode === "end") {
@@ -3698,6 +3708,7 @@ function TimelineEditor({
 
     const handleUp = () => {
       const final = dragPreviewRef.current;
+      dragTotalRef.current = null;
       setDraggingId(null);
       setDragMode(null);
       if (final) {
@@ -3717,7 +3728,7 @@ function TimelineEditor({
       window.removeEventListener("touchend", handleUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draggingId, dragMode, totalDur]);
+  }, [draggingId, dragMode]);
 
   const del = (id: string) => {
     // Refuse to remove the last clip — the backend would have nothing
@@ -3813,11 +3824,22 @@ function TimelineEditor({
   const playheadPct =
     playheadCut !== null ? Math.min(100, (playheadCut / totalDur) * 100) : null;
 
-  // Ruler ticks — pick the smallest step that keeps labels ~8 per
-  // screen width at the current zoom.
+  // Visible strip width, so ruler density adapts to phone vs desktop.
+  const [viewW, setViewW] = useState(640);
+  useEffect(() => {
+    const sc = scrollRef.current;
+    if (!sc) return;
+    const ro = new ResizeObserver(() => setViewW(sc.clientWidth || 640));
+    ro.observe(sc);
+    return () => ro.disconnect();
+  }, [open]);
+
+  // Ruler ticks — pick the smallest step that keeps labels ~70px
+  // apart at the current width and zoom.
   const tickStep = (() => {
     const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
-    const target = totalDur / (8 * zoom);
+    const labels = Math.max(3, (viewW * zoom) / 70);
+    const target = totalDur / labels;
     return steps.find((st) => st >= target) ?? steps[steps.length - 1];
   })();
   const ticks: number[] = [];
@@ -3894,11 +3916,14 @@ function TimelineEditor({
               </span>
             )}
           </div>
-          <div className="mt-1 text-[11px] text-[var(--text-faint)]">
+          <div className="mt-1 hidden text-[11px] text-[var(--text-faint)] sm:block">
             Drag edges to trim · click a clip to select · Space play · ⌫ delete · ⌘Z undo
           </div>
+          <div className="mt-1 text-[11px] text-[var(--text-faint)] sm:hidden">
+            Tap a clip to edit · drag its edges to trim · drag the ruler to scrub
+          </div>
         </div>
-        <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+        <span className="shrink-0 whitespace-nowrap pl-3 text-xs" style={{ color: "var(--text-muted)" }}>
           {open ? "Hide ▲" : "Show ▼"}
         </span>
       </button>
@@ -3906,73 +3931,41 @@ function TimelineEditor({
       {open && (
         <div className="p-3">
           {/* Toolbar */}
-          <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="mb-3 flex items-center gap-2">
             <div className="flex overflow-hidden rounded-lg" style={{ border: "1px solid var(--border)" }}>
               <button
                 onClick={undo}
                 disabled={history.length === 0}
-                className="px-2.5 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 disabled:hover:bg-transparent"
+                className="px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 disabled:hover:bg-transparent sm:px-2.5 sm:py-1"
                 style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
                 title="Undo (⌘Z)"
+                aria-label="Undo"
               >
                 ↶
               </button>
               <button
                 onClick={redo}
                 disabled={future.length === 0}
-                className="px-2.5 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 disabled:hover:bg-transparent"
+                className="px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 disabled:hover:bg-transparent sm:px-2.5 sm:py-1"
                 style={{
                   background: "var(--surface-2)",
                   color: "var(--text-body)",
                   borderLeft: "1px solid var(--border)",
                 }}
                 title="Redo (⌘⇧Z)"
+                aria-label="Redo"
               >
                 ↷
               </button>
             </div>
             <button
               onClick={splitAtPlayhead}
-              className="rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors hover:border-[var(--brand)]"
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors hover:border-[var(--brand)] sm:px-2.5 sm:py-1"
               style={{ ...toolBtn, color: "var(--text-strong)" }}
               title="Split the clip under the playhead"
             >
               ⧉ Split
             </button>
-
-            {selected && (
-              <>
-                <span className="mx-0.5 h-4 w-px" style={{ background: "var(--border-hover)" }} />
-                <button
-                  onClick={() => moveLeft(selected)}
-                  className="rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)]"
-                  style={toolBtn}
-                  title="Move clip left"
-                >
-                  ←
-                </button>
-                <button
-                  onClick={() => moveRight(selected)}
-                  className="rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)]"
-                  style={toolBtn}
-                  title="Move clip right"
-                >
-                  →
-                </button>
-                <button
-                  onClick={() => del(selected)}
-                  className="rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-[rgba(239,107,87,0.12)]"
-                  style={{
-                    background: "var(--surface-2)",
-                    color: "var(--danger)",
-                    border: "1px solid rgba(239,107,87,0.3)",
-                  }}
-                  title="Delete clip (⌫)"
-                >
-                  ✕ Delete
-                </button>
-              </>
-            )}
 
             <div className="ml-auto flex items-center gap-2">
               <span
@@ -3980,20 +3973,23 @@ function TimelineEditor({
                 style={{ background: "var(--surface-0)", color: "var(--text-strong)" }}
               >
                 {fmt(playheadCut ?? 0)}
-                <span style={{ color: "var(--text-faint)" }}> / {fmt(totalDur)}</span>
+                <span className="hidden sm:inline" style={{ color: "var(--text-faint)" }}>
+                  {" "}/ {fmt(totalDur)}
+                </span>
               </span>
               <div className="flex items-center overflow-hidden rounded-lg" style={{ border: "1px solid var(--border)" }}>
                 <button
                   onClick={() => setZoom((z) => Math.max(1, z / 1.5))}
                   disabled={zoom <= 1}
-                  className="px-2 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40"
+                  className="px-2.5 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 sm:px-2 sm:py-1"
                   style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
                   title="Zoom out"
+                  aria-label="Zoom out"
                 >
                   −
                 </button>
                 <span
-                  className="px-1 text-[10px] tabular-nums"
+                  className="hidden px-1 text-[10px] tabular-nums sm:inline"
                   style={{ color: "var(--text-muted)", minWidth: "34px", textAlign: "center" }}
                 >
                   {zoom.toFixed(1)}×
@@ -4001,9 +3997,14 @@ function TimelineEditor({
                 <button
                   onClick={() => setZoom((z) => Math.min(6, z * 1.5))}
                   disabled={zoom >= 6}
-                  className="px-2 py-1 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40"
-                  style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
+                  className="px-2.5 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 sm:px-2 sm:py-1"
+                  style={{
+                    background: "var(--surface-2)",
+                    color: "var(--text-body)",
+                    borderLeft: "1px solid var(--border)",
+                  }}
                   title="Zoom in"
+                  aria-label="Zoom in"
                 >
                   +
                 </button>
@@ -4026,9 +4027,22 @@ function TimelineEditor({
             >
               {/* Time ruler */}
               <div
-                className="relative h-6 cursor-pointer"
-                style={{ borderBottom: "1px solid var(--border)" }}
-                onMouseDown={(e) => seekFromRuler(e.clientX)}
+                className="relative h-7 cursor-pointer sm:h-6"
+                style={{ borderBottom: "1px solid var(--border)", touchAction: "none" }}
+                onPointerDown={(e) => {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  scrubbingRef.current = true;
+                  seekFromRuler(e.clientX);
+                }}
+                onPointerMove={(e) => {
+                  if (scrubbingRef.current) seekFromRuler(e.clientX);
+                }}
+                onPointerUp={() => {
+                  scrubbingRef.current = false;
+                }}
+                onPointerCancel={() => {
+                  scrubbingRef.current = false;
+                }}
               >
                 {ticks.map((t) => {
                   const pct = (t / totalDur) * 100;
@@ -4084,7 +4098,7 @@ function TimelineEditor({
                   return (
                     <div
                       key={s.id}
-                      className="relative px-[1.5px]"
+                      className="relative shrink-0 px-[1.5px]"
                       style={{ width: `${width}%`, minWidth: "14px" }}
                     >
                       <div
@@ -4092,7 +4106,7 @@ function TimelineEditor({
                           setSelected(s.id);
                           onSeekOriginal(s.start);
                         }}
-                        className="group relative flex h-full cursor-pointer flex-col justify-between overflow-hidden rounded-md transition-[box-shadow,border-color] duration-150"
+                        className="@container group relative flex h-full cursor-pointer flex-col justify-between overflow-hidden rounded-md transition-[box-shadow,border-color] duration-150"
                         style={{
                           background: s.disabled
                             ? "var(--surface-2)"
@@ -4131,6 +4145,10 @@ function TimelineEditor({
                         {!s.disabled && (
                           <>
                             {(["start", "end"] as const).map((mode) => (
+                              // Hit area is wider than the visible bar on
+                              // touch screens. Without hover, handles only
+                              // react on the selected clip so a tap near an
+                              // edge selects instead of trimming.
                               <div
                                 key={mode}
                                 onMouseDown={(e) => {
@@ -4143,23 +4161,34 @@ function TimelineEditor({
                                   setDraggingId(s.id);
                                   setDragMode(mode);
                                 }}
-                                className={`absolute top-0 bottom-0 z-10 flex w-2 cursor-ew-resize items-center justify-center transition-opacity ${
+                                className={`absolute top-0 bottom-0 z-10 w-5 cursor-ew-resize transition-opacity [@media(hover:hover)]:w-2 ${
                                   mode === "start" ? "left-0" : "right-0"
-                                } ${isSel || isDragging ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-                                style={{
-                                  background: isSel ? "var(--brand)" : "var(--border-strong)",
-                                }}
+                                } ${
+                                  isSel || isDragging
+                                    ? "opacity-100"
+                                    : "pointer-events-none opacity-0 [@media(hover:hover)]:pointer-events-auto [@media(hover:hover)]:group-hover:opacity-100"
+                                }`}
+                                style={{ touchAction: "none" }}
                               >
-                                <span
-                                  className="h-4 w-px rounded-full"
-                                  style={{ background: "rgba(255,255,255,0.7)" }}
-                                />
+                                <div
+                                  className={`absolute top-0 bottom-0 flex w-2.5 items-center justify-center [@media(hover:hover)]:w-2 ${
+                                    mode === "start" ? "left-0" : "right-0"
+                                  }`}
+                                  style={{
+                                    background: isSel ? "var(--brand)" : "var(--border-strong)",
+                                  }}
+                                >
+                                  <span
+                                    className="h-4 w-px rounded-full"
+                                    style={{ background: "rgba(255,255,255,0.7)" }}
+                                  />
+                                </div>
                               </div>
                             ))}
                           </>
                         )}
 
-                        <div className="pointer-events-none relative flex items-center justify-between gap-1 px-2.5 pt-1">
+                        <div className="pointer-events-none relative hidden items-center justify-between gap-1 px-2.5 pt-1 @min-[30px]:flex">
                           <span
                             className="text-[9px] font-semibold tabular-nums"
                             style={{ color: isSel ? "var(--brand-strong)" : "var(--text-muted)" }}
@@ -4167,7 +4196,7 @@ function TimelineEditor({
                             {i + 1}
                           </span>
                           {!s.disabled && (
-                            <div className="flex gap-0.5">
+                            <div className="hidden gap-0.5 @min-[64px]:flex">
                               {s.speed && s.speed !== 1 && (
                                 <span
                                   className="rounded px-1 text-[8px] font-semibold"
@@ -4191,7 +4220,7 @@ function TimelineEditor({
                           )}
                         </div>
 
-                        <div className="pointer-events-none relative px-2.5 pb-1">
+                        <div className="pointer-events-none relative hidden px-2.5 pb-1 @min-[40px]:block">
                           <span
                             className="text-[10px] tabular-nums"
                             style={{
@@ -4244,17 +4273,51 @@ function TimelineEditor({
                 border: "1px solid var(--border)",
               }}
             >
-              <div className="col-span-1 sm:col-span-2 flex items-center gap-3">
-                <span style={{ color: "var(--text-muted)" }}>Selected:</span>
+              <div className="col-span-1 flex flex-wrap items-center gap-x-3 gap-y-2 sm:col-span-2">
                 <span
-                  className="tabular-nums"
-                  style={{ color: "var(--text-strong)" }}
+                  className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                  style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
                 >
+                  Clip {segments.findIndex((x) => x.id === selectedSeg.id) + 1}
+                </span>
+                <span className="tabular-nums" style={{ color: "var(--text-strong)" }}>
                   {fmt(selectedSeg.start)} → {fmt(selectedSeg.end)}
+                  <span className="ml-1.5" style={{ color: "var(--text-faint)" }}>
+                    ({(selectedSeg.end - selectedSeg.start).toFixed(1)}s)
+                  </span>
                 </span>
-                <span style={{ color: "var(--text-faint)" }}>
-                  ({(selectedSeg.end - selectedSeg.start).toFixed(2)}s)
-                </span>
+                <div className="ml-auto flex items-center gap-1.5">
+                  <button
+                    onClick={() => moveLeft(selectedSeg.id)}
+                    className="rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] sm:px-2.5 sm:py-1"
+                    style={toolBtn}
+                    title="Move clip left"
+                    aria-label="Move clip left"
+                  >
+                    ←
+                  </button>
+                  <button
+                    onClick={() => moveRight(selectedSeg.id)}
+                    className="rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] sm:px-2.5 sm:py-1"
+                    style={toolBtn}
+                    title="Move clip right"
+                    aria-label="Move clip right"
+                  >
+                    →
+                  </button>
+                  <button
+                    onClick={() => del(selectedSeg.id)}
+                    className="rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-[rgba(239,107,87,0.12)] sm:px-2.5 sm:py-1"
+                    style={{
+                      background: "var(--surface-2)",
+                      color: "var(--danger)",
+                      border: "1px solid rgba(239,107,87,0.3)",
+                    }}
+                    title="Delete clip (⌫)"
+                  >
+                    ✕ Delete
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
