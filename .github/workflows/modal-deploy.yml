@@ -1,0 +1,54 @@
+name: Deploy Modal render
+
+# Modal bundles src/, plugins/ and backend/ into the render image at
+# deploy time, so every change there needs a redeploy. This does it on
+# each push to main (and on demand). Needs the repo secrets
+# MODAL_TOKEN_ID and MODAL_TOKEN_SECRET (same values as on Railway).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'src/**'
+      - 'plugins/**'
+      - '.github/workflows/modal-deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: modal-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - name: Check Modal credentials
+        id: creds
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "::warning::MODAL_TOKEN_ID / MODAL_TOKEN_SECRET repo secrets are not set — skipping Modal deploy."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.creds.outputs.ok == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.creds.outputs.ok == 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Deploy
+        if: steps.creds.outputs.ok == 'true'
+        run: |
+          pip install "modal>=1.0"
+          modal deploy backend/modal_render.py
