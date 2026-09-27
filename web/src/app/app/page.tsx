@@ -28,13 +28,19 @@ import {
 import { VideoModal } from "@/components/VideoModal";
 import { downscaleVideo, shouldDownscale } from "@/lib/videoDownscale";
 import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
-import { uploadResumable } from "@/lib/chunkedUpload";
+import {
+  uploadResumable,
+  UPLOAD_STALL_MS,
+  UPLOAD_STALLED_MSG,
+} from "@/lib/chunkedUpload";
 import {
   addActiveJob,
   getActiveJobs,
   removeActiveJob,
   subscribeActiveJobs,
   updateActiveJob as updateActiveJobV2,
+  liveUploads,
+  markStaleUploads,
   type ActiveJobV2,
 } from "@/lib/activeJobs";
 
@@ -425,7 +431,9 @@ export default function Home() {
       presetIcon: presetInfo?.icon ?? null,
       captionPreset: settings.caption_preset,
       uploadPct: 0,
+      lastProgressAt: Date.now(),
     });
+    liveUploads.add(tempId);
 
     // Throttle uploadPct updates to ~5/sec. On big files (multi-GB) we
     // get thousands of progress ticks; every one used to write to
@@ -436,7 +444,7 @@ export default function Home() {
       const now = Date.now();
       if (now - lastUiUpdate > 200 || pct >= 100) {
         lastUiUpdate = now;
-        updateActiveJobV2(tempId, { uploadPct: pct });
+        updateActiveJobV2(tempId, { uploadPct: pct, lastProgressAt: now });
       }
     };
 
@@ -483,8 +491,10 @@ export default function Home() {
         res = await new Promise<XMLHttpRequest>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("POST", `${backendUrl()}/jobs`);
+          xhr.timeout = 120_000;
           xhr.onload = () => resolve(xhr);
           xhr.onerror = () => reject(new Error("Network error"));
+          xhr.ontimeout = () => reject(new Error("Server did not respond. Please try again."));
           xhr.send(form);
         });
       } else {
@@ -495,13 +505,37 @@ export default function Home() {
         res = await new Promise<XMLHttpRequest>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("POST", `${backendUrl()}/jobs`);
+          // Abort when no upload progress arrives for a while, so a
+          // dropped connection shows an error instead of hanging.
+          let stallTimer: ReturnType<typeof setTimeout> | undefined;
+          const armStall = () => {
+            clearTimeout(stallTimer);
+            stallTimer = setTimeout(() => {
+              // Reject first: abort() fires onabort synchronously.
+              reject(new Error(UPLOAD_STALLED_MSG));
+              xhr.abort();
+            }, UPLOAD_STALL_MS);
+          };
           xhr.upload.onprogress = (ev) => {
+            armStall();
             if (ev.lengthComputable) {
               setPct(Math.round((ev.loaded / ev.total) * 100));
             }
           };
-          xhr.onload = () => resolve(xhr);
-          xhr.onerror = () => reject(new Error("Network error"));
+          xhr.upload.onload = () => clearTimeout(stallTimer);
+          xhr.onload = () => {
+            clearTimeout(stallTimer);
+            resolve(xhr);
+          };
+          xhr.onerror = () => {
+            clearTimeout(stallTimer);
+            reject(new Error("Network error"));
+          };
+          xhr.onabort = () => {
+            clearTimeout(stallTimer);
+            reject(new Error("Upload aborted"));
+          };
+          armStall();
           xhr.send(form);
         });
       }
@@ -556,6 +590,7 @@ export default function Home() {
       const msg = err instanceof Error ? err.message : String(err);
       updateActiveJobV2(tempId, { error: msg });
     } finally {
+      liveUploads.delete(tempId);
       // Release wake lock when upload path exits (success OR error).
       try {
         await _wakeLock?.release();
@@ -989,6 +1024,14 @@ function PickerScreen({
       if (jobs.length > 0) setView("dashboard");
     };
     return subscribeActiveJobs(refresh);
+  }, []);
+
+  // Upload cards left over from a reload / closed tab never finish —
+  // flip them to error cards so the user can clear them and retry.
+  useEffect(() => {
+    markStaleUploads();
+    const id = setInterval(() => markStaleUploads(), 10_000);
+    return () => clearInterval(id);
   }, []);
 
   // Poll all active jobs every 2s so the cards show live status
@@ -3445,7 +3488,9 @@ function ActiveJobCard({
   return (
     <button
       onClick={canOpen ? onOpen : undefined}
-      disabled={!canOpen}
+      // Error cards stay enabled: a disabled <button> swallows clicks on
+      // its children, which made the "Try again" chip below dead.
+      disabled={!canOpen && !isError}
       className={`group relative flex flex-col overflow-hidden rounded-2xl p-4 text-left transition-all ${
         canOpen ? "cursor-pointer hover:-translate-y-0.5" : "cursor-default"
       }`}
