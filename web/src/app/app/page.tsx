@@ -43,36 +43,62 @@ import {
   markStaleUploads,
   type ActiveJobV2,
 } from "@/lib/activeJobs";
+import { LanguageSwitcher, translate, useT, type TFn } from "@/i18n";
+import type { MessageKey } from "@/i18n/messages/en";
 
 // Backend host: explicit env wins, else use the page's hostname on
 // port 8000. This way iPhone (192.168.178.155:3000) hits
 // 192.168.178.155:8000 — not its own localhost.
 // Called lazily so it runs in the browser, not during SSR.
-const FRIENDLY_EXPIRED =
-  "This project no longer exists on the server (expired or server update). Please upload the video again.";
+// English translator for text that gets PERSISTED (localStorage job
+// cards / library entries). Stored text stays English and is mapped
+// back to the viewer's language at render time (see localizeKnown).
+const tEn: TFn = (key, vars) => translate("en", key, vars);
+
+const FRIENDLY_EXPIRED_KEY = "app.errors.expired" as const;
+
+// Messages we may have stored in English; shown translated on render.
+const STORED_MESSAGE_KEYS: MessageKey[] = [
+  "app.errors.expired",
+  "app.errors.generic",
+  "app.errors.connection",
+  "app.errors.interrupted",
+  "app.errors.tooLarge",
+  "app.errors.noAudio",
+  "app.errors.renderFailed",
+  "app.errors.serverNoResponse",
+  "app.card.renderFailedNote",
+];
+function localizeKnown(text: string, t: TFn): string {
+  const k = STORED_MESSAGE_KEYS.find((key) => translate("en", key) === text);
+  return k ? t(k) : text;
+}
 
 // Turn raw server/network errors into something a creator can act on.
 // The technical text still goes to the console for debugging.
-function friendlyError(raw: unknown): string {
-  const t = String(raw ?? "").trim();
-  if (t) console.warn("[cleocuts] error detail:", t.slice(0, 500));
-  const l = t.toLowerCase();
-  if (!t) return "Something went wrong. Please try again.";
+function friendlyError(raw: unknown, t: TFn): string {
+  const txt = String(raw ?? "").trim();
+  if (txt) console.warn("[cleocuts] error detail:", txt.slice(0, 500));
+  const l = txt.toLowerCase();
+  if (!txt) return t("app.errors.generic");
+  // One of our own (stored in English) → current language.
+  const known = localizeKnown(txt, t);
+  if (known !== txt) return known;
   // Already a user-facing message (ours or the backend's).
-  if (t.endsWith(".") && /\b(Please|please)\b/.test(t)) return t;
+  if (txt.endsWith(".") && /\b(Please|please)\b/.test(txt)) return txt;
   if (l.includes("stalled") || l.includes("network") || l.includes("failed to fetch"))
-    return "The connection dropped. Check your internet and try again.";
+    return t("app.errors.connection");
   if (l.includes("interrupted"))
-    return "The upload was interrupted (page reloaded or app switched). Please upload the video again.";
+    return t("app.errors.interrupted");
   if (l.includes("not found") || l.includes("404") || l.includes("no longer"))
-    return FRIENDLY_EXPIRED;
+    return t(FRIENDLY_EXPIRED_KEY);
   if (l.includes("413") || l.includes("too large"))
-    return "The file is too large. Please trim the video or export it smaller.";
+    return t("app.errors.tooLarge");
   if (l.includes("no audio") || l.includes("audio"))
-    return "No usable audio was found in the video.";
+    return t("app.errors.noAudio");
   if (l.includes("render"))
-    return "Rendering failed. Your edits are saved — open the project and render again.";
-  return "Something went wrong. Please try again.";
+    return t("app.errors.renderFailed");
+  return t("app.errors.generic");
 }
 
 function backendUrl(): string {
@@ -83,22 +109,28 @@ function backendUrl(): string {
   return `${window.location.protocol}//${window.location.hostname}:8000`;
 }
 
-const CAPTION_PRESETS = [
-  { id: "clean", label: "Clean" },
-  { id: "classic", label: "Classic" },
-  { id: "clipper", label: "Clipper" },
-  { id: "highlight", label: "Highlight" },
-  { id: "flash", label: "Flash" },
-  { id: "punch", label: "Punch" },
-  { id: "elegant", label: "Elegant" },
-  { id: "subtle", label: "Subtle" },
-  { id: "none", label: "No captions" },
+const CAPTION_PRESETS: { id: string; labelKey: MessageKey }[] = [
+  { id: "clean", labelKey: "app.captions.clean" },
+  { id: "classic", labelKey: "app.captions.classic" },
+  { id: "clipper", labelKey: "app.captions.clipper" },
+  { id: "highlight", labelKey: "app.captions.highlight" },
+  { id: "flash", labelKey: "app.captions.flash" },
+  { id: "punch", labelKey: "app.captions.punch" },
+  { id: "elegant", labelKey: "app.captions.elegant" },
+  { id: "subtle", labelKey: "app.captions.subtle" },
+  { id: "none", labelKey: "app.captions.none" },
 ];
 
-const CUT_STYLES = [
-  { id: "tight", label: "Tight", desc: "Aggressive" },
-  { id: "balanced", label: "Balanced", desc: "Default" },
-  { id: "smooth", label: "Smooth", desc: "Keep pauses" },
+// Display name of a caption preset id (falls back to the raw id).
+function captionLabel(id: string, t: TFn): string {
+  const c = CAPTION_PRESETS.find((x) => x.id === id);
+  return c ? t(c.labelKey) : id;
+}
+
+const CUT_STYLES: { id: string; labelKey: MessageKey; descKey: MessageKey }[] = [
+  { id: "tight", labelKey: "app.cutStyle.tight.label", descKey: "app.cutStyle.tight.desc" },
+  { id: "balanced", labelKey: "app.cutStyle.balanced.label", descKey: "app.cutStyle.balanced.desc" },
+  { id: "smooth", labelKey: "app.cutStyle.smooth.label", descKey: "app.cutStyle.smooth.desc" },
 ];
 
 type Phase =
@@ -120,10 +152,10 @@ type PresetId = "tiktok" | "podcast" | "captions" | "vlog" | "custom";
 const PRESETS: Record<
   PresetId,
   {
-    label: string;
+    labelKey: MessageKey;
     icon: string;
-    tagline: string;
-    desc: string;
+    taglineKey: MessageKey;
+    descKey: MessageKey;
     settings: {
       captionPreset: string;
       cutStyle: string;
@@ -137,10 +169,10 @@ const PRESETS: Record<
   }
 > = {
   tiktok: {
-    label: "TikTok / Reels",
+    labelKey: "app.preset.tiktok.label",
     icon: "📱",
-    tagline: "Vertical short-form",
-    desc: "Voice-triggers, Clipper captions, auto-vertical crop",
+    taglineKey: "app.preset.tiktok.tagline",
+    descKey: "app.preset.tiktok.desc",
     settings: {
       captionPreset: "clipper",
       cutStyle: "tight",
@@ -153,10 +185,10 @@ const PRESETS: Record<
     skipConfigure: true,
   },
   podcast: {
-    label: "Podcast Long-Form",
+    labelKey: "app.preset.podcast.label",
     icon: "🎙",
-    tagline: "Full episode + clips",
-    desc: "AI cleanup, hook detection, multi-format export",
+    taglineKey: "app.preset.podcast.tagline",
+    descKey: "app.preset.podcast.desc",
     settings: {
       captionPreset: "clean",
       cutStyle: "smooth",
@@ -169,10 +201,10 @@ const PRESETS: Record<
     skipConfigure: true,
   },
   vlog: {
-    label: "Vlog Cleanup",
+    labelKey: "app.preset.vlog.label",
     icon: "✂️",
-    tagline: "Solo talking-head",
-    desc: "Remove fillers, subtle captions, keep aspect",
+    taglineKey: "app.preset.vlog.tagline",
+    descKey: "app.preset.vlog.desc",
     settings: {
       captionPreset: "subtle",
       cutStyle: "balanced",
@@ -185,10 +217,10 @@ const PRESETS: Record<
     skipConfigure: true,
   },
   captions: {
-    label: "Just Captions",
+    labelKey: "app.preset.captions.label",
     icon: "💬",
-    tagline: "Add captions only",
-    desc: "Burn captions on your video — no cuts, no cleanup",
+    taglineKey: "app.preset.captions.tagline",
+    descKey: "app.preset.captions.desc",
     settings: {
       captionPreset: "clean",
       cutStyle: "smooth",
@@ -201,10 +233,10 @@ const PRESETS: Record<
     skipConfigure: true,
   },
   custom: {
-    label: "Custom",
+    labelKey: "app.preset.custom.label",
     icon: "🎛",
-    tagline: "Configure everything",
-    desc: "Full settings — pick every knob yourself",
+    taglineKey: "app.preset.custom.tagline",
+    descKey: "app.preset.custom.desc",
     settings: {
       captionPreset: "clean",
       cutStyle: "balanced",
@@ -217,6 +249,17 @@ const PRESETS: Record<
     skipConfigure: false,
   },
 };
+
+// Label shown for a stored job/library entry: translated when the
+// preset id is known, else whatever label was stored.
+function presetLabelFor(
+  presetId: string | null | undefined,
+  stored: string | null | undefined,
+  t: TFn,
+): string | null {
+  if (presetId && presetId in PRESETS) return t(PRESETS[presetId as PresetId].labelKey);
+  return stored ?? null;
+}
 
 type JobStatus = {
   id: string;
@@ -366,6 +409,7 @@ function buildPhrases(subs: Subtitle[]): Phrase[] {
 }
 
 export default function Home() {
+  const t = useT();
   const [phase, setPhase] = useState<Phase>("picker");
   const [selectedPreset, setSelectedPreset] = useState<PresetId | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -504,7 +548,7 @@ export default function Home() {
       filename: targetFile.name,
       fileSize: targetFile.size,
       presetId: selectedPreset,
-      presetLabel: presetInfo?.label ?? null,
+      presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
       presetIcon: presetInfo?.icon ?? null,
       captionPreset: settings.caption_preset,
       uploadPct: 0,
@@ -571,7 +615,7 @@ export default function Home() {
           xhr.timeout = 120_000;
           xhr.onload = () => resolve(xhr);
           xhr.onerror = () => reject(new Error("Network error"));
-          xhr.ontimeout = () => reject(new Error("Server did not respond. Please try again."));
+          xhr.ontimeout = () => reject(new Error(tEn("app.errors.serverNoResponse")));
           xhr.send(form);
         });
       } else {
@@ -637,7 +681,7 @@ export default function Home() {
         timestamp: Date.now(),
         filename: targetFile.name,
         presetId: selectedPreset,
-        presetLabel: presetInfo?.label ?? null,
+        presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
         presetIcon: presetInfo?.icon ?? null,
         captionPreset: settings.caption_preset,
       });
@@ -648,7 +692,7 @@ export default function Home() {
         filename: targetFile.name,
         fileSize: targetFile.size,
         presetId: selectedPreset,
-        presetLabel: presetInfo?.label ?? null,
+        presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
         presetIcon: presetInfo?.icon ?? null,
         captionPreset: settings.caption_preset,
       });
@@ -690,8 +734,8 @@ export default function Home() {
         if (s.status === "done") {
           setPhase("done");
           notifyIfHidden(
-            "CleoCuts — your video is ready",
-            file?.name ?? "Click to view",
+            t("app.notify.readyTitle"),
+            file?.name ?? t("app.notify.clickToView"),
           );
           // Job finished — remove from active tracking, promote to Library
           clearActiveJob();
@@ -710,8 +754,8 @@ export default function Home() {
               timestamp: Date.now(),
               presetId: selectedPreset,
               presetIcon: p?.icon ?? null,
-              presetLabel: p?.label ?? null,
-              filename: file?.name ?? "Untitled",
+              presetLabel: p ? tEn(p.labelKey) : null,
+              filename: file?.name ?? t("app.library.untitled"),
               outputs: withOutputs.outputs ?? ["primary"],
               hookClips: withOutputs.hook_clips ?? [],
               socialCaption: withOutputs.social_caption ?? "",
@@ -735,8 +779,8 @@ export default function Home() {
             setPhase("reviewing");
             updateActiveJob({ phase: "reviewing" });
             notifyIfHidden(
-              "CleoCuts — ready for your review",
-              "Cuts + transcript are done. Tap to review.",
+              t("app.notify.reviewTitle"),
+              t("app.notify.reviewBody"),
             );
           }
         }
@@ -886,11 +930,11 @@ export default function Home() {
       await waitForSaves(jobId, 8_000);
       const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
       if (r.status === 404) {
-        updateActiveJobV2(jobId, { error: FRIENDLY_EXPIRED });
+        updateActiveJobV2(jobId, { error: tEn(FRIENDLY_EXPIRED_KEY) });
         return;
       }
       if (!r.ok) {
-        showNotice("Couldn't load the project right now. Please try again in a moment.");
+        showNotice(t("app.notice.loadFailed"));
         return;
       }
       const s: JobStatus = await r.json();
@@ -899,10 +943,10 @@ export default function Home() {
         // the state — don't switch to an empty screen.
         showNotice(
           s.status === "done"
-            ? "This video is done — find it under Recent and in your Library."
+            ? t("app.notice.done")
             : s.status === "error"
-              ? friendlyError(s.error ?? s.message)
-              : "This video is still processing. The card shows its progress.",
+              ? friendlyError(s.error ?? s.message, t)
+              : t("app.notice.processing"),
         );
         return;
       }
@@ -921,7 +965,7 @@ export default function Home() {
         setPhase("reviewing");
       }
     } catch {
-      showNotice("Can't reach the server. Check your internet and try again.");
+      showNotice(t("app.notice.offline"));
     } finally {
       setResuming(false);
     }
@@ -949,14 +993,14 @@ export default function Home() {
       style={{ color: "var(--text-strong)" }}
     >
       <header
-        className="flex items-center justify-between px-6 py-4"
+        className="flex flex-wrap items-center justify-between gap-y-2 px-6 py-4"
         style={{ borderBottom: "1px solid var(--border)" }}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/"
             className="flex items-center gap-2 transition-opacity hover:opacity-80"
-            aria-label="CleoCuts home"
+            aria-label={t("app.header.homeAria")}
           >
             <LogoMark size={24} />
             <span className="text-xl font-bold tracking-tight">CleoCuts</span>
@@ -972,28 +1016,29 @@ export default function Home() {
                   background: "var(--brand-tint)",
                 }}
               >
-                <span>{currentPreset.label}</span>
+                <span>{t(currentPreset.labelKey)}</span>
                 <span style={{ color: "var(--brand-strong)", opacity: 0.6 }}>✕</span>
               </button>
             </>
           )}
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
           <Link
             href="/app/library"
             className="text-xs transition-colors hover:opacity-70"
             style={{ color: "var(--text-body)" }}
           >
-            Library
+            {t("app.header.library")}
           </Link>
+          <LanguageSwitcher />
           <span
-            className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest"
+            className="hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest sm:inline-block"
             style={{
               background: "var(--brand-tint)",
               color: "var(--brand-strong)",
             }}
           >
-            Beta
+            {t("app.header.beta")}
           </span>
         </div>
       </header>
@@ -1014,7 +1059,7 @@ export default function Home() {
               boxShadow: "var(--shadow-md)",
             }}
           >
-            Opening…
+            {t("app.header.opening")}
           </div>
         )}
         {notice && (
@@ -1112,7 +1157,7 @@ export default function Home() {
 
         {phase === "error" && (
           <ErrorScreen
-            message={errorMsg ?? "Something went wrong"}
+            message={errorMsg ?? t("app.errors.title")}
             onReset={reset}
           />
         )}
@@ -1141,31 +1186,31 @@ const PRESET_ICONS: Record<PresetId, (p: { size?: number; className?: string; st
 
 // What each preset actually does — used as feature bullets in the card
 // so the user sees the value up front, not just a vague label.
-const PRESET_BULLETS: Record<PresetId, string[]> = {
+const PRESET_BULLETS: Record<PresetId, MessageKey[]> = {
   tiktok: [
-    "Voice-triggers on: say &ldquo;Cleo cut&rdquo; to redo",
-    "Bold Clipper-style captions",
-    "Auto vertical 9:16 with face tracking",
+    "app.preset.tiktok.bullet1",
+    "app.preset.tiktok.bullet2",
+    "app.preset.tiktok.bullet3",
   ],
   podcast: [
-    "AI cleanup on your transcript",
-    "3 hook clips picked automatically",
-    "Full episode + 9:16 clips exported",
+    "app.preset.podcast.bullet1",
+    "app.preset.podcast.bullet2",
+    "app.preset.podcast.bullet3",
   ],
   vlog: [
-    "Removes &ldquo;ähm&rdquo;, &ldquo;uh&rdquo;, long pauses",
-    "Subtle captions that don&apos;t distract",
-    "Keeps your original aspect",
+    "app.preset.vlog.bullet1",
+    "app.preset.vlog.bullet2",
+    "app.preset.vlog.bullet3",
   ],
   captions: [
-    "Burns captions in your picked style",
-    "No cuts, no cleanup",
-    "Fastest — just captions",
+    "app.preset.captions.bullet1",
+    "app.preset.captions.bullet2",
+    "app.preset.captions.bullet3",
   ],
   custom: [
-    "Every setting exposed",
-    "Pick captions, cuts, format yourself",
-    "For when you know what you want",
+    "app.preset.custom.bullet1",
+    "app.preset.custom.bullet2",
+    "app.preset.custom.bullet3",
   ],
 };
 
@@ -1180,7 +1225,7 @@ const PRESET_ACCENTS: Record<PresetId, string> = {
   custom: "rgba(139, 92, 246, 0.35)",
 };
 
-function getPresetChips(p: (typeof PRESETS)[PresetId]): string[] {
+function getPresetChips(p: (typeof PRESETS)[PresetId], t: TFn): string[] {
   const chips: string[] = [];
 
   // Aspect ratios — primary is smartcam format if enabled, else outputs
@@ -1194,18 +1239,18 @@ function getPresetChips(p: (typeof PRESETS)[PresetId]): string[] {
   }
 
   // Caption style
-  const captionLabel = CAPTION_PRESETS.find(
+  const capKey = CAPTION_PRESETS.find(
     (c) => c.id === p.settings.captionPreset,
-  )?.label;
-  if (captionLabel && p.settings.captionPreset !== "none") {
-    chips.push(`${captionLabel} captions`);
+  )?.labelKey;
+  if (capKey && p.settings.captionPreset !== "none") {
+    chips.push(t("app.picker.chipCaptions", { style: t(capKey) }));
   } else if (p.settings.captionPreset === "none") {
-    chips.push("No captions");
+    chips.push(t("app.captions.none"));
   }
 
   // Voice triggers indicator
   if (p.settings.voiceTriggers) {
-    chips.push('"Cleo cut" on');
+    chips.push(t("app.picker.chipVoice"));
   }
 
   return chips;
@@ -1218,6 +1263,7 @@ function PickerScreen({
   onPick: (id: PresetId) => void;
   onResumeJob?: (jobId: string) => void;
 }) {
+  const t = useT();
   const featured: PresetId[] = ["tiktok", "podcast", "vlog", "captions"];
   const [recent, setRecent] = useState<LibraryEntry[] | null>(null);
   const [playingJobId, setPlayingJobId] = useState<string | null>(null);
@@ -1282,7 +1328,7 @@ function PickerScreen({
           const r = await fetch(`${backendUrl()}/jobs/${j.jobId}`);
           if (r.status === 404) {
             // Server no longer knows the job (redeploy / expired).
-            updateActiveJobV2(j.jobId, { error: FRIENDLY_EXPIRED });
+            updateActiveJobV2(j.jobId, { error: tEn(FRIENDLY_EXPIRED_KEY) });
             continue;
           }
           if (!r.ok) continue;
@@ -1296,7 +1342,7 @@ function PickerScreen({
             updateActiveJobV2(j.jobId, {
               phase: "reviewing",
               note: s.error
-                ? "Render failed — your edits are saved. Open it and render again."
+                ? tEn("app.card.renderFailedNote")
                 : undefined,
             });
           } else if (
@@ -1330,7 +1376,7 @@ function PickerScreen({
                 socialCaption: withOutputs.social_caption ?? "",
                 socialHashtags: withOutputs.social_hashtags ?? [],
               });
-              notifyIfHidden("CleoCuts — your video is ready", j.filename);
+              notifyIfHidden(t("app.notify.readyTitle"), j.filename);
             } catch {
               /* library save is non-fatal */
             }
@@ -1339,7 +1385,7 @@ function PickerScreen({
             setRecent(getLibrary().slice(0, 3));
           } else if (s.status === "error") {
             updateActiveJobV2(j.jobId, {
-              error: friendlyError(s.error ?? s.message),
+              error: friendlyError(s.error ?? s.message, tEn),
             });
           }
         } catch {
@@ -1378,15 +1424,20 @@ function PickerScreen({
               className="text-[11px] font-semibold uppercase tracking-[0.15em]"
               style={{ color: "var(--text-muted)" }}
             >
-              Your workspace
+              {t("app.dashboard.workspace")}
             </div>
             <h1
               className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl"
               style={{ color: "var(--text-strong)" }}
             >
               {activeJobs.length > 0
-                ? `${activeJobs.length} video${activeJobs.length === 1 ? "" : "s"} in progress`
-                : "Ready when you are"}
+                ? t(
+                    activeJobs.length === 1
+                      ? "app.dashboard.inProgressCountOne"
+                      : "app.dashboard.inProgressCountOther",
+                    { count: activeJobs.length },
+                  )
+                : t("app.dashboard.readyWhenYouAre")}
             </h1>
           </div>
           <button
@@ -1398,7 +1449,7 @@ function PickerScreen({
             }}
           >
             <span className="text-base leading-none">+</span>
-            New video
+            {t("app.dashboard.newVideo")}
           </button>
         </div>
 
@@ -1409,7 +1460,7 @@ function PickerScreen({
               className="mb-3 text-[11px] font-semibold uppercase tracking-[0.15em]"
               style={{ color: "var(--text-muted)" }}
             >
-              In progress
+              {t("app.dashboard.inProgress")}
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {activeJobs.map((j) => (
@@ -1436,14 +1487,14 @@ function PickerScreen({
                 className="text-[11px] font-semibold uppercase tracking-[0.15em]"
                 style={{ color: "var(--text-muted)" }}
               >
-                Recent projects
+                {t("app.dashboard.recentProjects")}
               </div>
               <Link
                 href="/app/library"
                 className="text-xs transition-opacity hover:opacity-70"
                 style={{ color: "var(--brand-strong)" }}
               >
-                View all →
+                {t("app.dashboard.viewAll")}
               </Link>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -1485,13 +1536,13 @@ function PickerScreen({
                 className="text-base font-bold"
                 style={{ color: "var(--text-strong)" }}
               >
-                Start your first video
+                {t("app.dashboard.startFirst")}
               </div>
               <div
                 className="text-xs"
                 style={{ color: "var(--text-muted)" }}
               >
-                Pick a workflow — CleoCuts handles captions, format, cleanup
+                {t("app.dashboard.startFirstSub")}
               </div>
             </div>
           </button>
@@ -1509,7 +1560,7 @@ function PickerScreen({
           }}
         >
           <IconMic size={14} strokeWidth={2.5} />
-          Say &ldquo;Cleo&rdquo; while recording — save hours of editing
+          {t("app.dashboard.voiceTeaser")}
           <span className="opacity-70">→</span>
         </button>
 
@@ -1538,7 +1589,7 @@ function PickerScreen({
           style={{ color: "var(--text-muted)" }}
         >
           <span className="text-base leading-none">←</span>
-          Back to dashboard
+          {t("app.picker.backToDashboard")}
         </button>
       )}
 
@@ -1556,21 +1607,20 @@ function PickerScreen({
             className="pulse-dot inline-block h-1.5 w-1.5 rounded-full"
             style={{ background: "var(--brand)" }}
           />
-          Free during beta
+          {t("app.picker.freeDuringBeta")}
         </div>
 
         <h1
           className="mb-3 text-4xl font-bold tracking-tight sm:text-5xl"
           style={{ color: "var(--text-strong)" }}
         >
-          What are you shipping?
+          {t("app.picker.title")}
         </h1>
         <p
           className="max-w-md text-base leading-relaxed"
           style={{ color: "var(--text-body)" }}
         >
-          Pick a workflow — CleoCuts pre-configures captions, format, and
-          cleanup for the platform.
+          {t("app.picker.subtitle")}
         </p>
 
         {/* Voice-commands teaser — link to the onboarding modal so
@@ -1585,7 +1635,7 @@ function PickerScreen({
           }}
         >
           <IconMic size={14} strokeWidth={2.5} />
-          Say &ldquo;Cleo&rdquo; while recording — save hours of editing
+          {t("app.dashboard.voiceTeaser")}
           <span className="opacity-70">→</span>
         </button>
       </div>
@@ -1596,7 +1646,7 @@ function PickerScreen({
           const p = PRESETS[id];
           const Icon = PRESET_ICONS[id];
           const accent = PRESET_ACCENTS[id];
-          const chips = getPresetChips(p);
+          const chips = getPresetChips(p, t);
           return (
             <button
               key={id}
@@ -1646,13 +1696,13 @@ function PickerScreen({
                   className="mb-1 text-base font-bold"
                   style={{ color: "var(--text-strong)" }}
                 >
-                  {p.label}
+                  {t(p.labelKey)}
                 </div>
                 <div
                   className="text-xs leading-relaxed"
                   style={{ color: "var(--text-muted)" }}
                 >
-                  {p.tagline}
+                  {t(p.taglineKey)}
                 </div>
               </div>
 
@@ -1705,10 +1755,10 @@ function PickerScreen({
             className="text-sm font-semibold"
             style={{ color: "var(--text-strong)" }}
           >
-            Custom setup
+            {t("app.picker.customTitle")}
           </div>
           <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-            Pick every knob yourself — captions, cuts, formats
+            {t("app.picker.customSub")}
           </div>
         </div>
         <span style={{ color: "var(--text-muted)" }}>
@@ -1739,6 +1789,7 @@ function RecentProjectCard({
   entry: LibraryEntry;
   onPlay: (jobId: string) => void;
 }) {
+  const t = useT();
   const [thumbFailed, setThumbFailed] = useState(false);
   return (
     <button
@@ -1771,7 +1822,7 @@ function RecentProjectCard({
             className="flex h-full w-full items-center justify-center text-[9px] font-semibold uppercase tracking-widest"
             style={{ color: "var(--text-faint)" }}
           >
-            no preview
+            {t("app.card.noPreview")}
           </div>
         )}
         {/* Preset chip pinned bottom-left over the thumbnail */}
@@ -1784,7 +1835,7 @@ function RecentProjectCard({
               backdropFilter: "blur(4px)",
             }}
           >
-            {entry.presetLabel ?? "Custom"}
+            {presetLabelFor(entry.presetId, entry.presetLabel, t) ?? t("app.preset.custom.label")}
           </span>
         </div>
         {/* Play triangle on hover */}
@@ -1832,6 +1883,7 @@ function IdleScreen({
   onDrop: (e: React.DragEvent) => void;
   onBack: () => void;
 }) {
+  const t = useT();
   return (
     <div className="relative z-10 flex flex-col">
       <button
@@ -1839,17 +1891,16 @@ function IdleScreen({
         className="mb-4 -ml-2 w-fit rounded-lg px-2 py-2 text-sm"
         style={{ color: "var(--text-muted)" }}
       >
-        ← Back
+        {t("app.upload.back")}
       </button>
       <h1
         className="mb-2 text-4xl font-bold tracking-tight sm:text-5xl"
         style={{ color: "var(--text-strong)" }}
       >
-        Choose a video
+        {t("app.upload.title")}
       </h1>
       <p className="mb-8 text-sm" style={{ color: "var(--text-muted)" }}>
-        MP4 or MOV from your phone or computer. Keep this page open until
-        the upload has finished.
+        {t("app.upload.hint")}
       </p>
 
       <button
@@ -1881,20 +1932,21 @@ function IdleScreen({
           className="text-base font-bold"
           style={{ color: "var(--text-strong)" }}
         >
-          Tap to choose
+          {t("app.upload.tapToChoose")}
         </div>
         <div className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
-          or drag one in
+          {t("app.upload.orDrag")}
         </div>
       </button>
     </div>
   );
 }
 
-const EXPORT_FORMAT_OPTIONS = [
-  { id: "9:16", label: "9:16", desc: "TikTok / Reels / Shorts" },
-  { id: "1:1", label: "1:1", desc: "Instagram feed" },
-  { id: "16:9", label: "16:9", desc: "YouTube / desktop" },
+// Labels are aspect ratios (not translated); descriptions are keys.
+const EXPORT_FORMAT_OPTIONS: { id: string; label: string; descKey: MessageKey }[] = [
+  { id: "9:16", label: "9:16", descKey: "app.format.9x16.desc" },
+  { id: "1:1", label: "1:1", descKey: "app.format.1x1.desc" },
+  { id: "16:9", label: "16:9", descKey: "app.format.16x9.desc" },
 ];
 
 function ConfigureScreen(props: {
@@ -1916,6 +1968,7 @@ function ConfigureScreen(props: {
   onProcess: () => void;
   onBack: () => void;
 }) {
+  const t = useT();
   const sizeMB = (props.file.size / 1024 / 1024).toFixed(1);
 
   return (
@@ -1925,14 +1978,14 @@ function ConfigureScreen(props: {
           onClick={props.onBack}
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
         >
-          ← back
+          {t("app.configure.back")}
         </button>
         <div className="truncate text-xs text-[var(--text-body)]">
-          {props.file.name} · {sizeMB} MB
+          {t("app.configure.fileInfo", { name: props.file.name, size: sizeMB })}
         </div>
       </div>
 
-      <Section title="Caption style">
+      <Section title={t("app.configure.captionStyle")}>
         <div className="grid grid-cols-2 gap-2">
           {CAPTION_PRESETS.map((p) => {
             const selected = props.captionPreset === p.id;
@@ -1949,18 +2002,18 @@ function ConfigureScreen(props: {
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={`${backendUrl()}/caption-previews/${p.id}.png?w=320&h=110`}
-                  alt={`${p.label} caption preview`}
+                  alt={t("app.configure.captionPreviewAlt", { style: t(p.labelKey) })}
                   className="block h-[64px] w-full bg-[var(--surface-1)] object-cover"
                   loading="lazy"
                 />
-                <div className="px-3 py-2 text-xs font-medium">{p.label}</div>
+                <div className="px-3 py-2 text-xs font-medium">{t(p.labelKey)}</div>
               </button>
             );
           })}
         </div>
       </Section>
 
-      <Section title="Cut style">
+      <Section title={t("app.configure.cutStyle")}>
         <div className="grid grid-cols-3 gap-2">
           {CUT_STYLES.map((s) => (
             <button
@@ -1972,32 +2025,32 @@ function ConfigureScreen(props: {
                   : "border-[var(--border)] hover:border-[var(--border-strong)]"
               }`}
             >
-              <div className="text-xs font-medium">{s.label}</div>
-              <div className="text-[10px] text-[var(--text-muted)]">{s.desc}</div>
+              <div className="text-xs font-medium">{t(s.labelKey)}</div>
+              <div className="text-[10px] text-[var(--text-muted)]">{t(s.descKey)}</div>
             </button>
           ))}
         </div>
       </Section>
 
-      <Section title="Cleanup">
+      <Section title={t("app.configure.cleanup")}>
         <ToggleRow
-          label='Listen for "Cleo cut" / "Cleo go"'
-          desc="Auto-removes failed takes"
+          label={t("app.configure.voiceTriggers")}
+          desc={t("app.configure.voiceTriggersDesc")}
           checked={props.voiceTriggers}
           onChange={props.setVoiceTriggers}
         />
         <ToggleRow
-          label="Remove filler words"
-          desc='Cuts out "ähm", "uh", "like"…'
+          label={t("app.configure.removeFillers")}
+          desc={t("app.configure.removeFillersDesc")}
           checked={props.removeFillers}
           onChange={props.setRemoveFillers}
         />
       </Section>
 
-      <Section title="Smart reframe">
+      <Section title={t("app.configure.smartReframe")}>
         <ToggleRow
-          label="SmartCam face-tracking"
-          desc="Auto-reframe for vertical/horizontal output"
+          label={t("app.configure.smartcam")}
+          desc={t("app.configure.smartcamDesc")}
           checked={props.smartcamEnabled}
           onChange={props.setSmartcamEnabled}
         />
@@ -2013,9 +2066,11 @@ function ConfigureScreen(props: {
                     : "border-[var(--border)] hover:border-[var(--border-strong)]"
                 }`}
               >
-                <div className="font-medium capitalize">{f}</div>
+                <div className="font-medium capitalize">
+                  {f === "portrait" ? t("app.configure.portrait") : t("app.configure.landscape")}
+                </div>
                 <div className="text-[10px] text-[var(--text-muted)]">
-                  {f === "portrait" ? "Vertical 9:16" : "Horizontal 16:9"}
+                  {f === "portrait" ? t("app.configure.portraitDesc") : t("app.configure.landscapeDesc")}
                 </div>
               </button>
             ))}
@@ -2023,10 +2078,9 @@ function ConfigureScreen(props: {
         )}
       </Section>
 
-      <Section title="Extra output formats">
+      <Section title={t("app.configure.extraFormats")}>
         <div className="text-[10px] text-[var(--text-muted)] -mt-1">
-          Primary export is your SmartCam format (or original aspect). Pick
-          extra letterbox-padded versions for other platforms.
+          {t("app.configure.extraFormatsHint")}
         </div>
         <div className="grid grid-cols-3 gap-2">
           {EXPORT_FORMAT_OPTIONS.map((f) => {
@@ -2048,7 +2102,7 @@ function ConfigureScreen(props: {
                 }`}
               >
                 <div className="text-xs font-medium">{f.label}</div>
-                <div className="text-[10px] text-[var(--text-muted)]">{f.desc}</div>
+                <div className="text-[10px] text-[var(--text-muted)]">{t(f.descKey)}</div>
               </button>
             );
           })}
@@ -2060,7 +2114,7 @@ function ConfigureScreen(props: {
         // Sticky on phones: the options list is ~2 screens tall.
         className="sticky bottom-3 z-20 mt-2 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold shadow-lg hover:bg-[var(--brand-hover)] active:scale-[0.99]"
       >
-        Process video
+        {t("app.configure.process")}
       </button>
     </div>
   );
@@ -2123,17 +2177,18 @@ function ToggleRow({
  *   analyze pipeline: 1→10 prep, 10→80 whisper, 80→95 cuts+LLM, 95→100 preview
  *   render pipeline:  0→80 segment burn, 80→95 stitch+formats, 95→100 hooks+done
  */
-const ANALYZE_STAGES = [
-  { key: "prep", label: "Preparing your video", from: 0, to: 10 },
-  { key: "listen", label: "Listening to your voice", from: 10, to: 80 },
-  { key: "polish", label: "Finding the good takes", from: 80, to: 95 },
-  { key: "preview", label: "Almost ready", from: 95, to: 100 },
+type Stage = { key: string; labelKey: MessageKey; from: number; to: number };
+const ANALYZE_STAGES: Stage[] = [
+  { key: "prep", labelKey: "app.progress.stage.prep", from: 0, to: 10 },
+  { key: "listen", labelKey: "app.progress.stage.listen", from: 10, to: 80 },
+  { key: "polish", labelKey: "app.progress.stage.polish", from: 80, to: 95 },
+  { key: "preview", labelKey: "app.progress.stage.preview", from: 95, to: 100 },
 ];
 
-const RENDER_STAGES = [
-  { key: "burn", label: "Applying your edits", from: 0, to: 70 },
-  { key: "stitch", label: "Stitching it together", from: 70, to: 90 },
-  { key: "finish", label: "Final touches", from: 90, to: 100 },
+const RENDER_STAGES: Stage[] = [
+  { key: "burn", labelKey: "app.progress.stage.burn", from: 0, to: 70 },
+  { key: "stitch", labelKey: "app.progress.stage.stitch", from: 70, to: 90 },
+  { key: "finish", labelKey: "app.progress.stage.finish", from: 90, to: 100 },
 ];
 
 function ProgressScreen({
@@ -2145,6 +2200,7 @@ function ProgressScreen({
   pct: number;
   phase?: "analyzing" | "rendering" | "uploading";
 }) {
+  const t = useT();
   const stages =
     phase === "rendering" ? RENDER_STAGES
     : phase === "analyzing" ? ANALYZE_STAGES
@@ -2167,7 +2223,11 @@ function ProgressScreen({
           className="mt-1 text-xs uppercase tracking-[0.2em]"
           style={{ color: "var(--text-muted)" }}
         >
-          {phase === "uploading" ? "Uploading" : phase === "rendering" ? "Rendering" : "Processing"}
+          {phase === "uploading"
+            ? t("app.progress.uploading")
+            : phase === "rendering"
+              ? t("app.progress.rendering")
+              : t("app.progress.processing")}
         </div>
         {/* Live message — tells the user WHAT is happening right now
             (e.g. 'Optimizing video (56%)…', 'Clip 3/12…'). Was passed
@@ -2197,8 +2257,7 @@ function ProgressScreen({
           >
             <div className="mt-0.5 shrink-0 text-base">⚠️</div>
             <div className="text-[11px] leading-relaxed">
-              Keep this tab open until the upload finishes. Switching apps
-              or locking your phone will cancel the upload.
+              {t("app.upload.keepTabOpen")}
             </div>
           </div>
         )}
@@ -2268,7 +2327,7 @@ function ProgressScreen({
                     fontWeight: active ? 600 : 400,
                   }}
                 >
-                  {s.label}
+                  {t(s.labelKey)}
                 </span>
               </div>
             );
@@ -2294,13 +2353,12 @@ function DoneScreen({
   hookClips: HookClip[];
   onReset: () => void;
 }) {
+  const t = useT();
   const formatLabel = (f: string) =>
-    f === "primary" ? "Download primary" : `Download ${f}`;
+    f === "primary" ? t("app.done.downloadPrimary") : t("app.done.downloadFormat", { format: f });
   const formatSub = (f: string) => {
-    if (f === "9:16") return "TikTok / Reels / Shorts";
-    if (f === "1:1") return "Instagram feed";
-    if (f === "16:9") return "YouTube / desktop";
-    return "Main edit";
+    const opt = EXPORT_FORMAT_OPTIONS.find((o) => o.id === f);
+    return opt ? t(opt.descKey) : t("app.done.mainEdit");
   };
 
   const hashtagLine = socialHashtags
@@ -2340,20 +2398,20 @@ function DoneScreen({
       </div>
 
       <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--brand-strong)" }}>
-        <span className="text-base">✨</span> Ready to post
+        <span className="text-base">✨</span> {t("app.done.readyToPost")}
       </div>
 
       {(socialCaption || hashtagLine) && (
         <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4 text-left">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
-              Caption suggestion
+              {t("app.done.captionSuggestion")}
             </span>
             <button
               onClick={() => copyText(`${socialCaption}\n\n${hashtagLine}`.trim())}
               className="text-[10px] uppercase tracking-wider text-[var(--brand)] hover:text-[var(--brand-hover)]"
             >
-              copy
+              {t("app.done.copy")}
             </button>
           </div>
           {socialCaption && (
@@ -2392,9 +2450,9 @@ function DoneScreen({
       {hookClips.length > 0 && (
         <div className="w-full max-w-md">
           <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
-            <span>Bonus clips</span>
+            <span>{t("app.done.bonusClips")}</span>
             <span className="rounded bg-[var(--brand)]/15 px-1.5 py-0.5 text-[var(--brand-hover)]">
-              AI-picked
+              {t("app.done.aiPicked")}
             </span>
           </div>
           <div className="flex flex-col gap-2">
@@ -2430,7 +2488,7 @@ function DoneScreen({
         onClick={onReset}
         className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
       >
-        Process another
+        {t("app.done.processAnother")}
       </button>
     </div>
   );
@@ -2471,6 +2529,7 @@ function ReviewScreen({
   onApply: () => void;
   onBack: () => void;
 }) {
+  const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -2903,17 +2962,20 @@ function ReviewScreen({
           onClick={onBack}
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
         >
-          ← Dashboard
+          {t("app.review.backToDashboard")}
         </button>
         <div className="text-xs text-[var(--text-body)]">
-          {phrases.length} sentence{phrases.length === 1 ? "" : "s"}
+          {t(
+            phrases.length === 1 ? "app.review.sentencesOne" : "app.review.sentencesOther",
+            { count: phrases.length },
+          )}
         </div>
       </div>
 
       {audioWarnings.length > 0 && (
         <div className="rounded-xl border border-[var(--warn)]/30 bg-[var(--warn)]/10 p-3 text-xs text-[var(--warn)]">
           <div className="mb-1 font-semibold uppercase tracking-wider">
-            Audio heads-up
+            {t("app.review.audioHeadsUp")}
           </div>
           <ul className="list-disc pl-4 space-y-0.5">
             {audioWarnings.map((w, i) => (
@@ -2974,7 +3036,7 @@ function ReviewScreen({
               className="inline-block h-1.5 w-1.5 animate-pulse rounded-full"
               style={{ background: "var(--brand)" }}
             />
-            Updating preview…
+            {t("app.review.updatingPreview")}
           </div>
         )}
       </div>
@@ -2984,14 +3046,14 @@ function ReviewScreen({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${backendUrl()}/caption-previews/${captionPreset}.png?w=200&h=72`}
-            alt={`${captionPreset} caption sample`}
+            alt={t("app.review.captionSampleAlt", { style: captionPreset })}
             className="h-10 w-28 rounded-md object-cover"
           />
           <div className="flex-1">
             <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-              Captions will look like
+              {t("app.review.captionsLookLike")}
             </div>
-            <div className="text-sm font-medium capitalize">{captionPreset}</div>
+            <div className="text-sm font-medium capitalize">{captionLabel(captionPreset, t)}</div>
           </div>
         </div>
       )}
@@ -3005,16 +3067,16 @@ function ReviewScreen({
       >
         {(
           [
-            { id: "timeline" as const, label: "Timeline", icon: "⏱" },
-            { id: "transcript" as const, label: "Transcript", icon: "T" },
-            { id: "style" as const, label: "Captions", icon: "✎" },
+            { id: "timeline" as const, labelKey: "app.review.tabTimeline" as const, icon: "⏱" },
+            { id: "transcript" as const, labelKey: "app.review.tabTranscript" as const, icon: "T" },
+            { id: "style" as const, labelKey: "app.review.tabCaptions" as const, icon: "✎" },
           ]
-        ).map((t) => {
-          const isActive = activeTab === t.id;
+        ).map((tab) => {
+          const isActive = activeTab === tab.id;
           return (
             <button
-              key={t.id}
-              onClick={() => setActiveTab(t.id)}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
               className="flex-1 px-3 py-2.5 text-sm font-medium transition-colors"
               style={{
                 background: isActive
@@ -3023,11 +3085,11 @@ function ReviewScreen({
                 color: isActive
                   ? "var(--brand-strong)"
                   : "var(--text-muted)",
-                borderRight: t.id !== "style" ? "1px solid var(--border)" : "none",
+                borderRight: tab.id !== "style" ? "1px solid var(--border)" : "none",
               }}
             >
-              <span className="mr-1.5">{t.icon}</span>
-              {t.label}
+              <span className="mr-1.5">{tab.icon}</span>
+              {t(tab.labelKey)}
             </button>
           );
         })}
@@ -3047,11 +3109,11 @@ function ReviewScreen({
           saveError={saveError}
           onToggleOpen={() => {}}
           onCommit={(next) => void commitEditSegs(next)}
-          onSeekOriginal={(t) => {
-            // t comes in on the ORIGINAL timeline; map it through the
+          onSeekOriginal={(time) => {
+            // time comes in on the ORIGINAL timeline; map it through the
             // segments of the preview that is actually playing (an edit
             // may not be rebuilt into it yet).
-            const pt = previewTimeFor(t);
+            const pt = previewTimeFor(time);
             if (pt !== null && videoRef.current) {
               videoRef.current.currentTime = pt;
             }
@@ -3074,13 +3136,13 @@ function ReviewScreen({
           className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm"
           style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
         >
-          <span style={{ color: "var(--text-body)" }}>Line deleted</span>
+          <span style={{ color: "var(--text-body)" }}>{t("app.transcript.lineDeleted")}</span>
           <button
             onClick={undoRemove}
             className="rounded-lg px-3 py-1.5 text-sm font-semibold"
             style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
           >
-            ↶ Undo
+            {t("app.transcript.undo")}
           </button>
         </div>
       )}
@@ -3100,10 +3162,13 @@ function ReviewScreen({
             }}
           >
             <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
-              Transcript · {phrases.length} line{phrases.length === 1 ? "" : "s"}
+              {t(
+                phrases.length === 1 ? "app.transcript.headingOne" : "app.transcript.headingOther",
+                { count: phrases.length },
+              )}
             </div>
             <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
-              Fix typos, drop a line with ✕, tap a card to jump to that moment.
+              {t("app.transcript.hint")}
             </div>
           </div>
           <div
@@ -3112,7 +3177,7 @@ function ReviewScreen({
           >
             {phrases.length === 0 && (
               <div className="rounded-xl border border-[var(--border)] p-6 text-center text-xs text-[var(--text-muted)]">
-                No captions. Output will be video only.
+                {t("app.transcript.empty")}
               </div>
             )}
             {phrases.map((p, i) => {
@@ -3158,7 +3223,7 @@ function ReviewScreen({
                     <div className="flex items-center gap-2">
                       {lowConfidence && (
                         <span className="text-[9px] uppercase tracking-wider text-[var(--warn)]">
-                          verify
+                          {t("app.transcript.verify")}
                         </span>
                       )}
                       <button
@@ -3167,8 +3232,8 @@ function ReviewScreen({
                           remove(i);
                         }}
                         className="-m-2 flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-faint)] hover:text-[var(--danger)]"
-                        aria-label="Delete sentence"
-                        title="Delete sentence"
+                        aria-label={t("app.transcript.deleteSentence")}
+                        title={t("app.transcript.deleteSentence")}
                       >
                         ✕
                       </button>
@@ -3197,7 +3262,7 @@ function ReviewScreen({
           }}
         >
           <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
-            Caption style · {captionPreset}
+            {t("app.captions.styleHeading", { style: captionPreset })}
           </div>
           {captionPreset !== "none" ? (
             <div
@@ -3207,19 +3272,19 @@ function ReviewScreen({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={`${backendUrl()}/caption-previews/${captionPreset}.png?w=240&h=90`}
-                alt={`${captionPreset} caption preview`}
+                alt={t("app.configure.captionPreviewAlt", { style: captionPreset })}
                 className="h-14 w-40 rounded-md object-cover"
               />
               <div className="flex-1">
                 <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-                  Applied to output
+                  {t("app.captions.appliedToOutput")}
                 </div>
-                <div className="text-sm font-medium capitalize">{captionPreset}</div>
+                <div className="text-sm font-medium capitalize">{captionLabel(captionPreset, t)}</div>
               </div>
             </div>
           ) : (
             <div className="text-xs text-[var(--text-muted)]">
-              Captions disabled for this render.
+              {t("app.captions.disabled")}
             </div>
           )}
         </div>
@@ -3251,7 +3316,7 @@ function ReviewScreen({
             }
           } catch {
             // Never render an older cut than the one on screen.
-            setApplyError("Couldn't save your edits — check your connection and try again.");
+            setApplyError(t("app.errors.saveEditsFailed"));
             pendingRebuildRef.current = editSegs;
             setApplying(false);
             return;
@@ -3263,7 +3328,7 @@ function ReviewScreen({
         disabled={applying}
         className="mt-1 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99] disabled:opacity-60"
       >
-        {applying ? "Preparing…" : "Apply & render"}
+        {applying ? t("app.review.preparing") : t("app.review.applyRender")}
       </button>
       {applyError && (
         <div className="text-center text-xs" style={{ color: "var(--danger)" }}>
@@ -3370,6 +3435,7 @@ function Timeline({
   onToggle: (id: number) => void;
   playhead?: number;
 }) {
+  const t = useT();
   const disabledSet = new Set(disabled);
   const totalCutSeconds = cuts
     .filter((c) => !disabledSet.has(c.id))
@@ -3381,10 +3447,10 @@ function Timeline({
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
-        <span>Cuts</span>
+        <span>{t("app.timeline.cuts")}</span>
         <span className="text-[var(--text-faint)]">
-          {totalCutSeconds.toFixed(1)}s removed
-          {disabled.length > 0 && ` · ${disabled.length} restored`}
+          {t("app.timeline.cutsRemoved", { sec: totalCutSeconds.toFixed(1) })}
+          {disabled.length > 0 && t("app.timeline.cutsRestored", { count: disabled.length })}
         </span>
       </div>
       <div className="relative h-3 overflow-visible rounded-full bg-[var(--success)]/30">
@@ -3399,9 +3465,10 @@ function Timeline({
             <button
               key={c.id}
               onClick={() => onToggle(c.id)}
-              title={`Cut ${fmtTime(c.start)}–${fmtTime(c.end)} (tap to ${
-                isOff ? "remove again" : "restore"
-              })`}
+              title={t(
+                isOff ? "app.timeline.cutTitleRemoveAgain" : "app.timeline.cutTitleRestore",
+                { from: fmtTime(c.start), to: fmtTime(c.end) },
+              )}
               className={`absolute top-1/2 -translate-y-1/2 h-5 cursor-pointer rounded-sm border border-black/40 transition-colors ${
                 isOff
                   ? "bg-[var(--success)]/70 hover:bg-[var(--success)]"
@@ -3434,7 +3501,7 @@ function Timeline({
         )}
       </div>
       <div className="mt-1 text-[10px] text-[var(--text-faint)]">
-        Red = removed · tap to restore. Green dashes = kept.
+        {t("app.timeline.cutsLegend")}
       </div>
     </div>
   );
@@ -3447,16 +3514,17 @@ function ErrorScreen({
   message: string;
   onReset: () => void;
 }) {
+  const t = useT();
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
       <div className="text-5xl">⚠️</div>
-      <div className="text-base font-semibold">Something went wrong</div>
+      <div className="text-base font-semibold">{t("app.errors.title")}</div>
       <div className="max-w-xs text-center text-xs text-[var(--text-muted)]">{message}</div>
       <button
         onClick={onReset}
         className="mt-2 rounded-xl border border-[var(--border-hover)] px-5 py-2 text-sm hover:border-[var(--brand)]"
       >
-        Try again
+        {t("app.errors.tryAgain")}
       </button>
     </div>
   );
@@ -3475,6 +3543,7 @@ function VoiceCommandsModal({ onClose }: { onClose: () => void }) {
 // Speech API (webkitSpeechRecognition) — no backend, no cost,
 // works in Safari + Chrome on macOS/iOS/Android.
 function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
+  const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -3485,13 +3554,14 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   const [detected, setDetected] = useState<Record<string, number>>({});
   const [lastHitAt, setLastHitAt] = useState(0);
 
-  const targets = [
-    { id: "start", phrase: "Cleo start", desc: "Begin your take", color: "#5A9FFF" },
-    { id: "cut", phrase: "Cleo cut", desc: "Redo, discard current take", color: "#F26E6E" },
-    { id: "keep", phrase: "Cleo keep", desc: "Confirm take, next scene", color: "#4ECC77" },
-    { id: "finish", phrase: "Cleo finish", desc: "End video, cut everything after", color: "#B979FF" },
-    { id: "stop", phrase: "Cleo stop", desc: "Skip one bad sentence (pair with 'go')", color: "#F5B54D" },
-    { id: "go", phrase: "Cleo go", desc: "Resume after 'stop'", color: "#F5B54D" },
+  // `phrase` is the spoken command itself — not translated.
+  const targets: { id: string; phrase: string; descKey: MessageKey; color: string }[] = [
+    { id: "start", phrase: "Cleo start", descKey: "app.voice.cmd.start", color: "#5A9FFF" },
+    { id: "cut", phrase: "Cleo cut", descKey: "app.voice.cmd.cut", color: "#F26E6E" },
+    { id: "keep", phrase: "Cleo keep", descKey: "app.voice.cmd.keep", color: "#4ECC77" },
+    { id: "finish", phrase: "Cleo finish", descKey: "app.voice.cmd.finish", color: "#B979FF" },
+    { id: "stop", phrase: "Cleo stop", descKey: "app.voice.cmd.stop", color: "#F5B54D" },
+    { id: "go", phrase: "Cleo go", descKey: "app.voice.cmd.go", color: "#F5B54D" },
   ];
 
   // Match keywords + common mishears. \s* (not \s+) so 'cleokeep',
@@ -3575,7 +3645,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
       } catch {
         // ignore
       }
-      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, []);
 
@@ -3606,18 +3676,18 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
               className="text-base font-bold"
               style={{ color: "var(--text-strong)" }}
             >
-              Test your voice
+              {t("app.voice.title")}
             </div>
             <div
               className="text-[11px]"
               style={{ color: "var(--text-muted)" }}
             >
-              Say the commands — see if Cleo hears you.
+              {t("app.voice.subtitle")}
             </div>
           </div>
           <button
             onClick={onDone}
-            aria-label="Close"
+            aria-label={t("app.voice.close")}
             className="ml-3 shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--surface-2)]"
             style={{ color: "var(--text-muted)" }}
           >
@@ -3659,7 +3729,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
                       boxShadow: pulseActive ? "0 0 8px #4ECC77" : "none",
                     }}
                   />
-                  {pulseActive ? "Heard you!" : "Listening…"}
+                  {pulseActive ? t("app.voice.heardYou") : t("app.voice.listening")}
                 </div>
                 {/* Live transcript strip */}
                 {transcript && (
@@ -3671,7 +3741,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
                       backdropFilter: "blur(4px)",
                     }}
                   >
-                    <span style={{ color: "#aaa" }}>heard: </span>
+                    <span style={{ color: "#aaa" }}>{t("app.voice.heardPrefix")}</span>
                     {transcript.slice(-100)}
                   </div>
                 )}
@@ -3685,7 +3755,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
                       className="text-center text-xs"
                       style={{ color: "var(--text-muted)" }}
                     >
-                      Uses your camera + mic. Everything stays in your browser.
+                      {t("app.voice.permissionHint")}
                     </div>
                     <button
                       onClick={startTest}
@@ -3693,18 +3763,18 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
                       className="rounded-xl px-6 py-2.5 text-sm font-semibold disabled:opacity-60"
                       style={{ background: "var(--brand)", color: "white" }}
                     >
-                      {permStatus === "requesting" ? "Requesting…" : "Start"}
+                      {permStatus === "requesting" ? t("app.voice.requesting") : t("app.voice.start")}
                     </button>
                   </>
                 )}
                 {permStatus === "denied" && (
                   <div className="text-center text-xs" style={{ color: "var(--warn)" }}>
-                    Permission denied. Enable in browser settings + reload.
+                    {t("app.voice.denied")}
                   </div>
                 )}
                 {permStatus === "unsupported" && (
                   <div className="text-center text-xs" style={{ color: "var(--warn)" }}>
-                    Not supported in this browser. Try Safari or Chrome.
+                    {t("app.voice.unsupported")}
                   </div>
                 )}
               </div>
@@ -3715,23 +3785,23 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
               Single-column with phrase + one-line explanation so the
               user sees what each command DOES, not just its name. */}
           <div className="flex flex-col gap-1.5 p-3">
-            {targets.map((t) => {
-              const count = detected[t.id] || 0;
+            {targets.map((cmd) => {
+              const count = detected[cmd.id] || 0;
               const hit = count > 0;
               return (
                 <div
-                  key={t.id}
+                  key={cmd.id}
                   className="flex items-center gap-2.5 rounded-lg p-2 transition-all"
                   style={{
                     background: "var(--surface-1)",
-                    border: `1px solid ${hit ? t.color : "var(--border)"}`,
-                    boxShadow: hit ? `0 0 12px ${t.color}55` : "none",
+                    border: `1px solid ${hit ? cmd.color : "var(--border)"}`,
+                    boxShadow: hit ? `0 0 12px ${cmd.color}55` : "none",
                   }}
                 >
                   <div
                     className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold transition-all"
                     style={{
-                      background: hit ? t.color : "var(--surface-2)",
+                      background: hit ? cmd.color : "var(--surface-2)",
                       color: hit ? "white" : "var(--text-muted)",
                     }}
                   >
@@ -3742,13 +3812,13 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
                       className="font-mono text-[12px] font-semibold leading-tight"
                       style={{ color: "var(--text-strong)" }}
                     >
-                      {t.phrase}
+                      {cmd.phrase}
                     </div>
                     <div
                       className="text-[10px] leading-tight"
                       style={{ color: "var(--text-muted)" }}
                     >
-                      {t.desc}
+                      {t(cmd.descKey)}
                     </div>
                   </div>
                 </div>
@@ -3769,7 +3839,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
               color: "white",
             }}
           >
-            Done
+            {t("app.voice.done")}
           </button>
         </div>
       </div>
@@ -3795,6 +3865,7 @@ function SceneCommandsPanel({
   onChange: (evts: SceneEvent[]) => void | Promise<void>;
   onSeek: (t: number) => void;
 }) {
+  const t = useT();
   const [enabled, setEnabled] = useState<boolean[]>(() =>
     events.map(() => true),
   );
@@ -3814,10 +3885,10 @@ function SceneCommandsPanel({
     finish: "#B979FF",
   };
   const LABELS: Record<SceneEvent["type"], string> = {
-    start: "Start",
-    keep: "Keep",
-    restart: "Cut / Restart",
-    finish: "Finish",
+    start: t("app.voice.scene.type.start"),
+    keep: t("app.voice.scene.type.keep"),
+    restart: t("app.voice.scene.type.restart"),
+    finish: t("app.voice.scene.type.finish"),
   };
 
   const commit = async (nextEnabled: boolean[]) => {
@@ -3837,12 +3908,12 @@ function SceneCommandsPanel({
     void commit(next);
   };
 
-  const addAt = async (t: number, type: SceneEvent["type"]) => {
+  const addAt = async (at: number, type: SceneEvent["type"]) => {
     const kept = events.filter((_, i) => enabled[i]);
     const added: SceneEvent = {
       type,
-      start: t,
-      end: Math.min(t + 0.5, duration || t + 0.5),
+      start: at,
+      end: Math.min(at + 0.5, duration || at + 0.5),
       source: "user",
     };
     const next: SceneEvent[] = [...kept, added].sort(
@@ -3877,11 +3948,12 @@ function SceneCommandsPanel({
       >
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
-            Voice commands · {events.filter((_, i) => enabled[i]).length} active
+            {t("app.voice.scene.heading", {
+              count: events.filter((_, i) => enabled[i]).length,
+            })}
           </div>
           <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
-            Uncheck false detections, add missing ones. Cuts update
-            automatically.
+            {t("app.voice.scene.hint")}
           </div>
         </div>
         <button
@@ -3894,7 +3966,7 @@ function SceneCommandsPanel({
             border: "1px solid var(--brand)/30",
           }}
         >
-          + Add
+          {t("app.voice.scene.add")}
         </button>
       </div>
 
@@ -3907,27 +3979,27 @@ function SceneCommandsPanel({
           }}
         >
           <div className="mb-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-            Add command at current video time
+            {t("app.voice.scene.addAt")}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {(["start", "keep", "restart", "finish"] as const).map((t) => (
+            {(["start", "keep", "restart", "finish"] as const).map((type) => (
               <button
-                key={t}
+                key={type}
                 onClick={() => {
                   const videoEl = document.querySelector(
                     "video",
                   ) as HTMLVideoElement | null;
                   const now = videoEl?.currentTime ?? 0;
-                  void addAt(now, t);
+                  void addAt(now, type);
                 }}
                 className="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
                 style={{
                   background: "var(--surface-1)",
-                  color: COLORS[t],
-                  border: `1px solid ${COLORS[t]}66`,
+                  color: COLORS[type],
+                  border: `1px solid ${COLORS[type]}66`,
                 }}
               >
-                {LABELS[t]}
+                {LABELS[type]}
               </button>
             ))}
           </div>
@@ -3937,7 +4009,7 @@ function SceneCommandsPanel({
       <div className="max-h-[220px] overflow-y-auto p-2">
         {events.length === 0 && (
           <div className="p-3 text-center text-xs text-[var(--text-muted)]">
-            No voice commands detected.
+            {t("app.voice.scene.none")}
           </div>
         )}
         {events.map((ev, i) => {
@@ -3955,7 +4027,7 @@ function SceneCommandsPanel({
               <button
                 onClick={() => toggle(i)}
                 disabled={pending}
-                aria-label={on ? "Disable" : "Enable"}
+                aria-label={on ? t("app.voice.scene.disable") : t("app.voice.scene.enable")}
                 className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold transition-colors disabled:opacity-50"
                 style={{
                   background: on ? COLORS[ev.type] : "var(--surface-2)",
@@ -3982,7 +4054,7 @@ function SceneCommandsPanel({
                 </div>
                 {ev.raw_text && (
                   <div className="mt-0.5 truncate text-[10px] text-[var(--text-faint)]">
-                    heard: &ldquo;{ev.raw_text}&rdquo;
+                    {t("app.voice.scene.heard", { text: ev.raw_text })}
                   </div>
                 )}
               </div>
@@ -4010,29 +4082,31 @@ function ActiveJobCard({
   onOpen: () => void;
   onRetry?: () => void;
 }) {
+  const t = useT();
   const isError = status?.status === "error" || Boolean(job.error);
   const phaseCopy: Record<ActiveJobV2["phase"], { title: string; sub: string; icon: string }> = {
     uploading: {
-      title: "Uploading",
-      sub: "Uploading — keep this page open and don't lock your phone.",
+      title: t("app.card.uploading.title"),
+      sub: t("app.card.uploading.sub"),
       icon: "↑",
     },
     analyzing: {
-      title: "Analyzing",
-      sub: "Transcribing and cutting pauses and filler words.",
+      title: t("app.card.analyzing.title"),
+      sub: t("app.card.analyzing.sub"),
       icon: "✦",
     },
     reviewing: {
-      title: "Ready to edit",
-      sub: "Tap to open the editor and fine-tune the cut.",
+      title: t("app.card.reviewing.title"),
+      sub: t("app.card.reviewing.sub"),
       icon: "▸",
     },
     rendering: {
-      title: "Rendering",
-      sub: "Putting your final video together.",
+      title: t("app.card.rendering.title"),
+      sub: t("app.card.rendering.sub"),
       icon: "✦",
     },
   };
+  const presetLabel = presetLabelFor(job.presetId, job.presetLabel, t);
   const phaseAccent: Record<ActiveJobV2["phase"], string> = {
     uploading: "#5A9FFF",
     analyzing: "#F5B54D",
@@ -4082,12 +4156,12 @@ function ActiveJobCard({
           >
             {job.filename}
           </div>
-          {job.presetLabel && (
+          {presetLabel && (
             <div
               className="mt-0.5 text-[10px] uppercase tracking-wider"
               style={{ color: "var(--text-faint)" }}
             >
-              {job.presetLabel}
+              {presetLabel}
             </div>
           )}
         </div>
@@ -4096,7 +4170,7 @@ function ActiveJobCard({
             className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-transform group-hover:translate-x-0.5"
             style={{ background: accent, color: "#0f0f0f" }}
           >
-            Open →
+            {t("app.card.open")}
           </div>
         ) : (
           <div
@@ -4114,14 +4188,14 @@ function ActiveJobCard({
           className="relative z-10 mb-3 text-xs"
           style={{ color: "#F26E6E" }}
         >
-          {friendlyError(job.error ?? status?.message)}
+          {friendlyError(job.error ?? status?.message, t)}
         </div>
       ) : (
         <div
           className="relative z-10 mb-3 text-xs leading-relaxed"
           style={{ color: job.note ? "var(--warn)" : "var(--text-body)" }}
         >
-          {job.note ?? copy.sub}
+          {job.note ? localizeKnown(job.note, t) : copy.sub}
         </div>
       )}
 
@@ -4164,7 +4238,7 @@ function ActiveJobCard({
             color: "var(--brand-strong)",
           }}
         >
-          ✕ Remove
+          {t("app.card.remove")}
         </span>
       )}
     </button>
@@ -4318,6 +4392,7 @@ function TimelineEditor({
   getVideoTime: () => number;
   onPlayPauseKey?: () => void;
 }) {
+  const t = useT();
   const [selected, setSelected] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragMode, setDragMode] = useState<"start" | "end" | null>(null);
@@ -4345,9 +4420,9 @@ function TimelineEditor({
     (displaySegs.reduce((acc, s) => acc + (s.end - s.start), 0) || 1);
   const activeCount = displaySegs.filter((s) => !s.disabled).length;
 
-  const fmt = (t: number) => {
-    const m = Math.floor(t / 60);
-    const s = Math.floor(t % 60);
+  const fmt = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
@@ -4482,16 +4557,16 @@ function TimelineEditor({
     setSelected(null);
   };
   const splitAtPlayhead = () => {
-    const t = getVideoTime();
+    const at = getVideoTime();
     const idx = segments.findIndex(
-      (s) => !s.disabled && t > s.start + 0.1 && t < s.end - 0.1,
+      (s) => !s.disabled && at > s.start + 0.1 && at < s.end - 0.1,
     );
     if (idx === -1) return;
     const cur = segments[idx];
-    const first: EditorSeg = { ...cur, end: t, id: `${cur.id}-a` };
+    const first: EditorSeg = { ...cur, end: at, id: `${cur.id}-a` };
     const second: EditorSeg = {
       ...cur,
-      start: t,
+      start: at,
       id: `${cur.id}-b-${Date.now()}`,
     };
     commit([...segments.slice(0, idx), first, second, ...segments.slice(idx + 1)]);
@@ -4729,12 +4804,15 @@ function TimelineEditor({
       >
         <div>
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
-            Timeline
+            {t("app.timeline.title")}
             <span
               className="rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal tabular-nums"
               style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
             >
-              {activeCount} clip{activeCount === 1 ? "" : "s"} · {fmt(totalDur)}
+              {t(activeCount === 1 ? "app.timeline.clipsOne" : "app.timeline.clipsOther", {
+                count: activeCount,
+                dur: fmt(totalDur),
+              })}
             </span>
             {saving && (
               <span
@@ -4745,7 +4823,7 @@ function TimelineEditor({
                   className="h-1.5 w-1.5 rounded-full"
                   style={{ background: "var(--brand)", animation: "soft-pulse 1.2s ease-in-out infinite" }}
                 />
-                saving
+                {t("app.timeline.saving")}
               </span>
             )}
             {saveError && !saving && (
@@ -4754,19 +4832,19 @@ function TimelineEditor({
                 style={{ background: "rgba(239,107,87,0.14)", color: "var(--danger)" }}
                 title={
                   saveError === "failed"
-                    ? "The server no longer accepts changes for this video (it may be rendering or expired)."
-                    : "Your last change hasn't reached the server yet. Retrying…"
+                    ? t("app.timeline.saveFailedTitle")
+                    : t("app.timeline.saveRetryingTitle")
                 }
               >
-                {saveError === "failed" ? "not saved" : "not saved · retrying"}
+                {saveError === "failed" ? t("app.timeline.notSaved") : t("app.timeline.notSavedRetrying")}
               </span>
             )}
           </div>
           <div className="mt-1 hidden text-[11px] text-[var(--text-faint)] sm:block">
-            Scroll to move · Ctrl/⌘ + scroll to zoom · drag edges to trim · Space play · ⌫ delete · ⌘Z undo
+            {t("app.timeline.hintDesktop")}
           </div>
           <div className="mt-1 text-[11px] text-[var(--text-faint)] sm:hidden">
-            Swipe to scroll · pinch to zoom · tap a clip to edit · drag the ruler to scrub
+            {t("app.timeline.hintMobile")}
           </div>
         </div>
 
@@ -4782,8 +4860,8 @@ function TimelineEditor({
                 disabled={history.length === 0}
                 className="px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 disabled:hover:bg-transparent sm:px-2.5 sm:py-1"
                 style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
-                title="Undo (⌘Z)"
-                aria-label="Undo"
+                title={t("app.timeline.undoTitle")}
+                aria-label={t("app.timeline.undoAria")}
               >
                 ↶
               </button>
@@ -4796,8 +4874,8 @@ function TimelineEditor({
                   color: "var(--text-body)",
                   borderLeft: "1px solid var(--border)",
                 }}
-                title="Redo (⌘⇧Z)"
-                aria-label="Redo"
+                title={t("app.timeline.redoTitle")}
+                aria-label={t("app.timeline.redoAria")}
               >
                 ↷
               </button>
@@ -4806,9 +4884,9 @@ function TimelineEditor({
               onClick={splitAtPlayhead}
               className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors hover:border-[var(--brand)] sm:px-2.5 sm:py-1"
               style={{ ...toolBtn, color: "var(--text-strong)" }}
-              title="Split the clip under the playhead"
+              title={t("app.timeline.splitTitle")}
             >
-              ⧉ Split
+              {t("app.timeline.split")}
             </button>
 
             <div className="ml-auto flex items-center gap-2">
@@ -4827,8 +4905,8 @@ function TimelineEditor({
                   disabled={!canZoomOut}
                   className="px-2.5 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 sm:px-2 sm:py-1"
                   style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
-                  title="Zoom out (show more of the video)"
-                  aria-label="Zoom out"
+                  title={t("app.timeline.zoomOutTitle")}
+                  aria-label={t("app.timeline.zoomOutAria")}
                 >
                   −
                 </button>
@@ -4841,9 +4919,9 @@ function TimelineEditor({
                     color: "var(--text-muted)",
                     borderLeft: "1px solid var(--border)",
                   }}
-                  title="Fit the whole video"
+                  title={t("app.timeline.fitTitle")}
                 >
-                  Fit
+                  {t("app.timeline.fit")}
                 </button>
                 <button
                   onClick={() => zoomTo(effPps * 1.5, viewW / 2)}
@@ -4854,8 +4932,8 @@ function TimelineEditor({
                     color: "var(--text-body)",
                     borderLeft: "1px solid var(--border)",
                   }}
-                  title="Zoom in (more detail, finer trimming)"
-                  aria-label="Zoom in"
+                  title={t("app.timeline.zoomInTitle")}
+                  aria-label={t("app.timeline.zoomInAria")}
                 >
                   +
                 </button>
@@ -5035,7 +5113,7 @@ function TimelineEditor({
                                     color: "white",
                                   }}
                                 >
-                                  {s.volume === 0 ? "M" : `${Math.round(s.volume * 100)}%`}
+                                  {s.volume === 0 ? t("app.timeline.muteBadge") : `${Math.round(s.volume * 100)}%`}
                                 </span>
                               )}
                             </div>
@@ -5100,7 +5178,9 @@ function TimelineEditor({
                   className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
                   style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
                 >
-                  Clip {segments.findIndex((x) => x.id === selectedSeg.id) + 1}
+                  {t("app.timeline.clipLabel", {
+                    n: segments.findIndex((x) => x.id === selectedSeg.id) + 1,
+                  })}
                 </span>
                 <span className="tabular-nums" style={{ color: "var(--text-strong)" }}>
                   {fmt(selectedSeg.start)} → {fmt(selectedSeg.end)}
@@ -5113,8 +5193,8 @@ function TimelineEditor({
                     onClick={() => moveLeft(selectedSeg.id)}
                     className="rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] sm:px-2.5 sm:py-1"
                     style={toolBtn}
-                    title="Move clip left"
-                    aria-label="Move clip left"
+                    title={t("app.timeline.moveLeft")}
+                    aria-label={t("app.timeline.moveLeft")}
                   >
                     ←
                   </button>
@@ -5122,8 +5202,8 @@ function TimelineEditor({
                     onClick={() => moveRight(selectedSeg.id)}
                     className="rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] sm:px-2.5 sm:py-1"
                     style={toolBtn}
-                    title="Move clip right"
-                    aria-label="Move clip right"
+                    title={t("app.timeline.moveRight")}
+                    aria-label={t("app.timeline.moveRight")}
                   >
                     →
                   </button>
@@ -5135,15 +5215,15 @@ function TimelineEditor({
                       color: "var(--danger)",
                       border: "1px solid rgba(239,107,87,0.3)",
                     }}
-                    title="Delete clip (⌫)"
+                    title={t("app.timeline.deleteTitle")}
                   >
-                    ✕ Delete
+                    {t("app.timeline.delete")}
                   </button>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Speed</span>
+                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{t("app.timeline.speed")}</span>
                 <select
                   value={selectedSeg.speed ?? 1}
                   onChange={(e) => patchSeg(selectedSeg.id, { speed: Number(e.target.value) })}
@@ -5157,7 +5237,7 @@ function TimelineEditor({
                   <option value={0.25}>0.25×</option>
                   <option value={0.5}>0.5×</option>
                   <option value={0.75}>0.75×</option>
-                  <option value={1}>1× (normal)</option>
+                  <option value={1}>{t("app.timeline.speedNormal")}</option>
                   <option value={1.25}>1.25×</option>
                   <option value={1.5}>1.5×</option>
                   <option value={2}>2×</option>
@@ -5167,7 +5247,7 @@ function TimelineEditor({
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Volume</span>
+                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{t("app.timeline.volume")}</span>
                 <input
                   type="range"
                   min={0}
@@ -5187,7 +5267,7 @@ function TimelineEditor({
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Fade in</span>
+                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{t("app.timeline.fadeIn")}</span>
                 <input
                   type="range"
                   min={0}
@@ -5207,7 +5287,7 @@ function TimelineEditor({
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Fade out</span>
+                <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{t("app.timeline.fadeOut")}</span>
                 <input
                   type="range"
                   min={0}
@@ -5243,7 +5323,7 @@ function TimelineEditor({
                     border: "1px solid var(--border)",
                   }}
                 >
-                  Reset effects
+                  {t("app.timeline.resetEffects")}
                 </button>
               </div>
             </div>
