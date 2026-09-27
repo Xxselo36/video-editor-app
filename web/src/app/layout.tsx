@@ -5,23 +5,22 @@ import "./globals.css";
 // Geist fonts were preloaded on every page without being used.
 
 export const metadata: Metadata = {
-  title: "CleoCuts – KI-Videoschnitt per Sprachbefehl",
+  title: "CleoCuts — World's first voice-controlled AI video editor",
   description:
-    "Sag „Cleo cut“, wenn du dich versprichst. CleoCuts schneidet Pausen, Füllwörter und verpatzte Takes automatisch heraus und fügt Untertitel hinzu – fertig für TikTok, Reels und YouTube.",
+    "The world's first voice-controlled AI video editor. Just say 'Cleo cut' when you mess up. AI cleans the rest — captions, cuts, ready-to-post clips.",
   metadataBase: new URL("https://cleocuts.com"),
   openGraph: {
-    title: "CleoCuts – KI-Videoschnitt per Sprachbefehl",
+    title: "CleoCuts — World's first voice-controlled AI video editor",
     description:
-      "Sag „Cleo cut“, wenn du dich versprichst. Die KI schneidet, untertitelt und liefert fertige Clips.",
+      "Just say 'Cleo cut' when you mess up. AI cleans it, adds captions, and gives you ready-to-post clips.",
     url: "https://cleocuts.com",
     siteName: "CleoCuts",
-    locale: "de_DE",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "CleoCuts – KI-Videoschnitt per Sprachbefehl",
-    description: "Sag „Cleo cut“, wenn du dich versprichst. Die KI macht den Rest.",
+    title: "CleoCuts — World's first voice-controlled AI video editor",
+    description: "Just say 'Cleo cut' when you mess up. AI does the rest.",
   },
 };
 
@@ -35,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="de" className="h-full antialiased">
+    <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

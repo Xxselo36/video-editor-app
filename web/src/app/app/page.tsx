@@ -49,7 +49,7 @@ import {
 // 192.168.178.155:8000 — not its own localhost.
 // Called lazily so it runs in the browser, not during SSR.
 const FRIENDLY_EXPIRED =
-  "Dieses Projekt gibt es auf dem Server nicht mehr (abgelaufen oder Server-Update). Bitte lade das Video neu hoch.";
+  "This project no longer exists on the server (expired or server update). Please upload the video again.";
 
 // Turn raw server/network errors into something a creator can act on.
 // The technical text still goes to the console for debugging.
@@ -57,22 +57,22 @@ function friendlyError(raw: unknown): string {
   const t = String(raw ?? "").trim();
   if (t) console.warn("[cleocuts] error detail:", t.slice(0, 500));
   const l = t.toLowerCase();
-  if (!t) return "Da ist etwas schiefgelaufen. Bitte versuch es noch einmal.";
-  // Already a user-facing German message (ours or the backend's).
-  if (/\b(Bitte|nicht|wurde|Dieses|Die|Der)\b/.test(t)) return t;
+  if (!t) return "Something went wrong. Please try again.";
+  // Already a user-facing message (ours or the backend's).
+  if (t.endsWith(".") && /\b(Please|please)\b/.test(t)) return t;
   if (l.includes("stalled") || l.includes("network") || l.includes("failed to fetch"))
-    return "Die Verbindung ist abgebrochen. Prüf dein Internet und versuch es noch einmal.";
+    return "The connection dropped. Check your internet and try again.";
   if (l.includes("interrupted"))
-    return "Der Upload wurde unterbrochen (Seite neu geladen oder App gewechselt). Bitte lade das Video erneut hoch.";
+    return "The upload was interrupted (page reloaded or app switched). Please upload the video again.";
   if (l.includes("not found") || l.includes("404") || l.includes("no longer"))
     return FRIENDLY_EXPIRED;
   if (l.includes("413") || l.includes("too large"))
-    return "Die Datei ist zu groß. Bitte kürze das Video oder exportiere es kleiner.";
+    return "The file is too large. Please trim the video or export it smaller.";
   if (l.includes("no audio") || l.includes("audio"))
-    return "Im Video wurde kein verwertbarer Ton gefunden.";
+    return "No usable audio was found in the video.";
   if (l.includes("render"))
-    return "Das Rendern ist fehlgeschlagen. Deine Bearbeitung ist gespeichert – öffne das Projekt und starte das Rendern erneut.";
-  return "Da ist etwas schiefgelaufen. Bitte versuch es noch einmal.";
+    return "Rendering failed. Your edits are saved — open the project and render again.";
+  return "Something went wrong. Please try again.";
 }
 
 function backendUrl(): string {
@@ -890,7 +890,7 @@ export default function Home() {
         return;
       }
       if (!r.ok) {
-        showNotice("Das Projekt konnte gerade nicht geladen werden. Bitte versuch es gleich noch einmal.");
+        showNotice("Couldn't load the project right now. Please try again in a moment.");
         return;
       }
       const s: JobStatus = await r.json();
@@ -899,10 +899,10 @@ export default function Home() {
         // the state — don't switch to an empty screen.
         showNotice(
           s.status === "done"
-            ? "Dieses Video ist fertig – du findest es unter „Zuletzt“ und in der Library."
+            ? "This video is done — find it under Recent and in your Library."
             : s.status === "error"
               ? friendlyError(s.error ?? s.message)
-              : "Dieses Video wird gerade verarbeitet. Die Karte zeigt den Fortschritt.",
+              : "This video is still processing. The card shows its progress.",
         );
         return;
       }
@@ -921,7 +921,7 @@ export default function Home() {
         setPhase("reviewing");
       }
     } catch {
-      showNotice("Keine Verbindung zum Server. Prüf dein Internet und versuch es noch einmal.");
+      showNotice("Can't reach the server. Check your internet and try again.");
     } finally {
       setResuming(false);
     }
@@ -1014,7 +1014,7 @@ export default function Home() {
               boxShadow: "var(--shadow-md)",
             }}
           >
-            Wird geöffnet…
+            Opening…
           </div>
         )}
         {notice && (
@@ -1296,7 +1296,7 @@ function PickerScreen({
             updateActiveJobV2(j.jobId, {
               phase: "reviewing",
               note: s.error
-                ? "Rendern fehlgeschlagen – deine Bearbeitung ist gespeichert. Öffnen und erneut rendern."
+                ? "Render failed — your edits are saved. Open it and render again."
                 : undefined,
             });
           } else if (
@@ -1330,7 +1330,7 @@ function PickerScreen({
                 socialCaption: withOutputs.social_caption ?? "",
                 socialHashtags: withOutputs.social_hashtags ?? [],
               });
-              notifyIfHidden("CleoCuts — dein Video ist fertig", j.filename);
+              notifyIfHidden("CleoCuts — your video is ready", j.filename);
             } catch {
               /* library save is non-fatal */
             }
@@ -1839,17 +1839,17 @@ function IdleScreen({
         className="mb-4 -ml-2 w-fit rounded-lg px-2 py-2 text-sm"
         style={{ color: "var(--text-muted)" }}
       >
-        ← Zurück
+        ← Back
       </button>
       <h1
         className="mb-2 text-4xl font-bold tracking-tight sm:text-5xl"
         style={{ color: "var(--text-strong)" }}
       >
-        Video auswählen
+        Choose a video
       </h1>
       <p className="mb-8 text-sm" style={{ color: "var(--text-muted)" }}>
-        MP4 oder MOV vom Handy oder Rechner. Lass die Seite geöffnet, bis der
-        Upload fertig ist.
+        MP4 or MOV from your phone or computer. Keep this page open until
+        the upload has finished.
       </p>
 
       <button
@@ -1881,10 +1881,10 @@ function IdleScreen({
           className="text-base font-bold"
           style={{ color: "var(--text-strong)" }}
         >
-          Tippen zum Auswählen
+          Tap to choose
         </div>
         <div className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
-          oder hierher ziehen
+          or drag one in
         </div>
       </button>
     </div>
@@ -2060,7 +2060,7 @@ function ConfigureScreen(props: {
         // Sticky on phones: the options list is ~2 screens tall.
         className="sticky bottom-3 z-20 mt-2 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold shadow-lg hover:bg-[var(--brand-hover)] active:scale-[0.99]"
       >
-        Video verarbeiten
+        Process video
       </button>
     </div>
   );
@@ -3074,13 +3074,13 @@ function ReviewScreen({
           className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm"
           style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
         >
-          <span style={{ color: "var(--text-body)" }}>Zeile gelöscht</span>
+          <span style={{ color: "var(--text-body)" }}>Line deleted</span>
           <button
             onClick={undoRemove}
             className="rounded-lg px-3 py-1.5 text-sm font-semibold"
             style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
           >
-            ↶ Rückgängig
+            ↶ Undo
           </button>
         </div>
       )}
@@ -3167,8 +3167,8 @@ function ReviewScreen({
                           remove(i);
                         }}
                         className="-m-2 flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-faint)] hover:text-[var(--danger)]"
-                        aria-label="Satz löschen"
-                        title="Satz löschen"
+                        aria-label="Delete sentence"
+                        title="Delete sentence"
                       >
                         ✕
                       </button>
@@ -3251,7 +3251,7 @@ function ReviewScreen({
             }
           } catch {
             // Never render an older cut than the one on screen.
-            setApplyError("Deine Änderungen konnten nicht gespeichert werden – prüf die Verbindung und versuch es noch einmal.");
+            setApplyError("Couldn't save your edits — check your connection and try again.");
             pendingRebuildRef.current = editSegs;
             setApplying(false);
             return;
@@ -3263,7 +3263,7 @@ function ReviewScreen({
         disabled={applying}
         className="mt-1 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99] disabled:opacity-60"
       >
-        {applying ? "Wird vorbereitet…" : "Video fertigstellen"}
+        {applying ? "Preparing…" : "Apply & render"}
       </button>
       {applyError && (
         <div className="text-center text-xs" style={{ color: "var(--danger)" }}>
@@ -4013,23 +4013,23 @@ function ActiveJobCard({
   const isError = status?.status === "error" || Boolean(job.error);
   const phaseCopy: Record<ActiveJobV2["phase"], { title: string; sub: string; icon: string }> = {
     uploading: {
-      title: "Upload",
-      sub: "Wird hochgeladen – bitte lass diese Seite geöffnet und sperr das Handy nicht.",
+      title: "Uploading",
+      sub: "Uploading — keep this page open and don't lock your phone.",
       icon: "↑",
     },
     analyzing: {
-      title: "Analyse",
-      sub: "Sprache wird erkannt, Pausen und Füllwörter werden geschnitten.",
+      title: "Analyzing",
+      sub: "Transcribing and cutting pauses and filler words.",
       icon: "✦",
     },
     reviewing: {
-      title: "Bereit",
-      sub: "Tippen, um den Schnitt im Editor anzupassen.",
+      title: "Ready to edit",
+      sub: "Tap to open the editor and fine-tune the cut.",
       icon: "▸",
     },
     rendering: {
-      title: "Rendern",
-      sub: "Dein fertiges Video wird erstellt.",
+      title: "Rendering",
+      sub: "Putting your final video together.",
       icon: "✦",
     },
   };
@@ -4096,7 +4096,7 @@ function ActiveJobCard({
             className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-transform group-hover:translate-x-0.5"
             style={{ background: accent, color: "#0f0f0f" }}
           >
-            Öffnen →
+            Open →
           </div>
         ) : (
           <div
@@ -4164,7 +4164,7 @@ function ActiveJobCard({
             color: "var(--brand-strong)",
           }}
         >
-          ✕ Entfernen
+          ✕ Remove
         </span>
       )}
     </button>
