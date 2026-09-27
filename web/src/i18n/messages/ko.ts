@@ -352,7 +352,8 @@ export const ko: Partial<Record<MessageKey, string>> = {
 
   "library.count.one": "프로젝트 {count}개",
   "library.count.other": "프로젝트 {count}개",
-  "library.confirmDelete": "이 프로젝트를 라이브러리에서 삭제할까요?",
+  "library.confirmDelete": "이 프로젝트를 영구 삭제할까요? 영상과 모든 편집 내용이 서버에서 삭제돼요.",
+  "library.deleteFailed": "지금은 삭제할 수 없어요. 영상이 아직 처리 중이면 잠시 후 다시 시도해 주세요.",
 
   "library.empty.title": "라이브러리가 비어 있어요",
   "library.empty.body":
@@ -363,6 +364,9 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "미리보기 없음",
   "library.card.customPreset": "커스텀",
   "library.card.deleteAria": "프로젝트 삭제",
+  "library.card.expiresDays": "{n}일 후 자동 삭제",
+  "library.card.expiresSoon": "24시간 이내에 삭제돼요",
+  "library.card.expired": "만료됨 — 파일이 삭제되었어요",
   "library.card.hooks.one": "하이라이트 {count}개",
   "library.card.hooks.other": "하이라이트 {count}개",
   "library.card.hookSeconds": "{seconds}초",

@@ -17,5 +17,8 @@ export const OPERATOR = {
   vatId: "[VAT ID (if any)]",
 };
 
-/** How long uploaded videos and results are kept on the server. */
-export const RETENTION_DAYS = "7";
+/**
+ * Days an idle project is kept on the server, per plan (counted from
+ * the last change). Must match PLAN_RETENTION_DAYS in backend/jobs.py.
+ */
+export const RETENTION_DAYS = { Starter: 14, Pro: 30, Studio: 90 } as const;

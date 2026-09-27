@@ -352,7 +352,8 @@ export const id: Partial<Record<MessageKey, string>> = {
 
   "library.count.one": "{count} proyek",
   "library.count.other": "{count} proyek",
-  "library.confirmDelete": "Hapus proyek ini dari perpustakaanmu?",
+  "library.confirmDelete": "Hapus proyek ini secara permanen? Video dan semua editan akan dihapus dari server kami.",
+  "library.deleteFailed": "Belum bisa dihapus — kalau video masih diproses, coba lagi sebentar lagi.",
 
   "library.empty.title": "Perpustakaanmu masih kosong",
   "library.empty.body":
@@ -363,6 +364,9 @@ export const id: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "tidak ada pratinjau",
   "library.card.customPreset": "Kustom",
   "library.card.deleteAria": "Hapus proyek",
+  "library.card.expiresDays": "Terhapus otomatis dalam {n} hari",
+  "library.card.expiresSoon": "Terhapus dalam 24 jam",
+  "library.card.expired": "Kedaluwarsa — file sudah dihapus",
   "library.card.hooks.one": "{count} hook",
   "library.card.hooks.other": "{count} hook",
   "library.card.hookSeconds": "{seconds}dtk",

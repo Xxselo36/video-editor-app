@@ -352,7 +352,8 @@ export const ja: Partial<Record<MessageKey, string>> = {
 
   "library.count.one": "{count} 件のプロジェクト",
   "library.count.other": "{count} 件のプロジェクト",
-  "library.confirmDelete": "このプロジェクトをライブラリから削除しますか?",
+  "library.confirmDelete": "このプロジェクトを完全に削除しますか?動画とすべての編集内容がサーバーから削除されます。",
+  "library.deleteFailed": "今は削除できませんでした。動画を処理中の場合は、少し待ってからもう一度お試しください。",
 
   "library.empty.title": "ライブラリは空です",
   "library.empty.body":
@@ -363,6 +364,9 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "プレビューなし",
   "library.card.customPreset": "カスタム",
   "library.card.deleteAria": "プロジェクトを削除",
+  "library.card.expiresDays": "{n}日後に自動削除",
+  "library.card.expiresSoon": "24時間以内に削除されます",
+  "library.card.expired": "期限切れ — ファイルは削除されました",
   "library.card.hooks.one": "{count} 件のフック",
   "library.card.hooks.other": "{count} 件のフック",
   "library.card.hookSeconds": "{seconds}秒",

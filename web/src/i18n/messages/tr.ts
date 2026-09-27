@@ -352,7 +352,8 @@ export const tr: Partial<Record<MessageKey, string>> = {
 
   "library.count.one": "{count} proje",
   "library.count.other": "{count} proje",
-  "library.confirmDelete": "Bu proje kütüphanenden silinsin mi?",
+  "library.confirmDelete": "Bu proje kalıcı olarak silinsin mi? Video ve tüm düzenlemeler sunucularımızdan kaldırılır.",
+  "library.deleteFailed": "Şu anda silinemedi — video hâlâ işleniyorsa birazdan tekrar dene.",
 
   "library.empty.title": "Kütüphanen boş",
   "library.empty.body":
@@ -363,6 +364,9 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "önizleme yok",
   "library.card.customPreset": "Özel",
   "library.card.deleteAria": "Projeyi sil",
+  "library.card.expiresDays": "{n} gün içinde otomatik silinecek",
+  "library.card.expiresSoon": "24 saat içinde silinecek",
+  "library.card.expired": "Süresi doldu — dosyalar silindi",
   "library.card.hooks.one": "{count} hook",
   "library.card.hooks.other": "{count} hook",
   "library.card.hookSeconds": "{seconds}sn",
