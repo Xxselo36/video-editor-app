@@ -1,3 +1,396 @@
 import type { MessageKey } from "./en";
 
-export const it: Partial<Record<MessageKey, string>> = {};
+export const it: Partial<Record<MessageKey, string>> = {
+  // ── Header ──────────────────────────────────────────────────────────
+  "app.header.homeAria": "Home di CleoCuts",
+  "app.header.library": "Libreria",
+  "app.header.beta": "Beta",
+  "app.header.opening": "Apertura…",
+
+  // ── Browser notifications ───────────────────────────────────────────
+  "app.notify.readyTitle": "CleoCuts — il tuo video è pronto",
+  "app.notify.clickToView": "Clicca per vederlo",
+  "app.notify.reviewTitle": "CleoCuts — pronto per la revisione",
+  "app.notify.reviewBody": "Tagli + trascrizione pronti. Tocca per rivedere.",
+
+  // ── Toasts / notices ────────────────────────────────────────────────
+  "app.notice.loadFailed": "Non riusciamo a caricare il progetto ora. Riprova in un momento.",
+  "app.notice.done": "Questo video è pronto — lo trovi in Recenti e nella tua Libreria.",
+  "app.notice.processing": "Questo video è ancora in elaborazione. La card mostra i progressi.",
+  "app.notice.offline": "Impossibile raggiungere il server. Controlla la connessione e riprova.",
+
+  // ── Errors ──────────────────────────────────────────────────────────
+  "app.errors.expired":
+    "Questo progetto non esiste più sul server (scaduto o aggiornamento server). Carica di nuovo il video.",
+  "app.errors.generic": "Qualcosa è andato storto. Riprova.",
+  "app.errors.connection": "La connessione si è interrotta. Controlla la rete e riprova.",
+  "app.errors.interrupted":
+    "L'upload è stato interrotto (pagina ricaricata o app cambiata). Carica di nuovo il video.",
+  "app.errors.tooLarge": "Il file è troppo grande. Taglia il video o esportalo più leggero.",
+  "app.errors.noAudio": "Non è stato trovato audio utilizzabile nel video.",
+  "app.errors.renderFailed":
+    "Il rendering è fallito. Le tue modifiche sono salvate — apri il progetto e renderizza di nuovo.",
+  "app.errors.serverNoResponse": "Il server non ha risposto. Riprova.",
+  "app.errors.saveEditsFailed": "Non siamo riusciti a salvare le modifiche — controlla la connessione e riprova.",
+  "app.errors.title": "Qualcosa è andato storto",
+  "app.errors.tryAgain": "Riprova",
+
+  // ── Library fallbacks ───────────────────────────────────────────────
+  "app.library.untitled": "Senza titolo",
+
+  // ── Workflow presets ────────────────────────────────────────────────
+  "app.preset.tiktok.label": "TikTok / Reels",
+  "app.preset.tiktok.tagline": "Verticale, short-form",
+  "app.preset.tiktok.desc": "Comandi vocali, sottotitoli Clipper, crop verticale automatico",
+  "app.preset.tiktok.bullet1": "Comandi vocali attivi: dì “Cleo cut” per rifare",
+  "app.preset.tiktok.bullet2": "Sottotitoli in grassetto stile Clipper",
+  "app.preset.tiktok.bullet3": "Verticale 9:16 automatico con face tracking",
+  "app.preset.podcast.label": "Podcast Long-Form",
+  "app.preset.podcast.tagline": "Episodio intero + clip",
+  "app.preset.podcast.desc": "Pulizia AI, rilevamento hook, esportazione multi-formato",
+  "app.preset.podcast.bullet1": "Pulizia AI sulla trascrizione",
+  "app.preset.podcast.bullet2": "3 clip hook scelte automaticamente",
+  "app.preset.podcast.bullet3": "Episodio intero + clip 9:16 esportati",
+  "app.preset.vlog.label": "Pulizia Vlog",
+  "app.preset.vlog.tagline": "Solo talking-head",
+  "app.preset.vlog.desc": "Rimuove le esitazioni, sottotitoli discreti, mantiene le proporzioni",
+  "app.preset.vlog.bullet1": "Rimuove “ehm”, “uh”, pause lunghe",
+  "app.preset.vlog.bullet2": "Sottotitoli discreti che non distraggono",
+  "app.preset.vlog.bullet3": "Mantiene le proporzioni originali",
+  "app.preset.captions.label": "Solo sottotitoli",
+  "app.preset.captions.tagline": "Aggiungi solo i sottotitoli",
+  "app.preset.captions.desc": "Incide i sottotitoli sul video — nessun taglio, nessuna pulizia",
+  "app.preset.captions.bullet1": "Incide i sottotitoli nello stile scelto",
+  "app.preset.captions.bullet2": "Nessun taglio, nessuna pulizia",
+  "app.preset.captions.bullet3": "Il più rapido — solo sottotitoli",
+  "app.preset.custom.label": "Personalizzato",
+  "app.preset.custom.tagline": "Configura tutto",
+  "app.preset.custom.desc": "Impostazioni complete — scegli tu ogni opzione",
+  "app.preset.custom.bullet1": "Ogni impostazione visibile",
+  "app.preset.custom.bullet2": "Scegli tu sottotitoli, tagli, formato",
+  "app.preset.custom.bullet3": "Per quando sai già cosa vuoi",
+
+  // ── Caption styles ──────────────────────────────────────────────────
+  "app.captions.clean": "Pulito",
+  "app.captions.classic": "Classico",
+  "app.captions.clipper": "Clipper",
+  "app.captions.highlight": "Highlight",
+  "app.captions.flash": "Flash",
+  "app.captions.punch": "Punch",
+  "app.captions.elegant": "Elegante",
+  "app.captions.subtle": "Discreto",
+  "app.captions.none": "Nessun sottotitolo",
+
+  // ── Cut styles ──────────────────────────────────────────────────────
+  "app.cutStyle.tight.label": "Serrato",
+  "app.cutStyle.tight.desc": "Aggressivo",
+  "app.cutStyle.balanced.label": "Bilanciato",
+  "app.cutStyle.balanced.desc": "Predefinito",
+  "app.cutStyle.smooth.label": "Fluido",
+  "app.cutStyle.smooth.desc": "Mantiene le pause",
+
+  // ── Export formats ──────────────────────────────────────────────────
+  "app.format.9x16.desc": "TikTok / Reels / Shorts",
+  "app.format.1x1.desc": "Feed Instagram",
+  "app.format.16x9.desc": "YouTube / desktop",
+
+  // ── Dashboard ───────────────────────────────────────────────────────
+  "app.dashboard.workspace": "Il tuo spazio di lavoro",
+  "app.dashboard.inProgressCountOne": "{count} video in corso",
+  "app.dashboard.inProgressCountOther": "{count} video in corso",
+  "app.dashboard.readyWhenYouAre": "Pronti quando vuoi",
+  "app.dashboard.newVideo": "Nuovo video",
+  "app.dashboard.inProgress": "In corso",
+  "app.dashboard.recentProjects": "Progetti recenti",
+  "app.dashboard.viewAll": "Vedi tutti →",
+  "app.dashboard.startFirst": "Inizia il tuo primo video",
+  "app.dashboard.startFirstSub": "Scegli un workflow — CleoCuts gestisce sottotitoli, formato e pulizia",
+  "app.dashboard.voiceTeaser": "Dì “Cleo” mentre registri — risparmia ore di editing",
+
+  // ── Workflow picker ─────────────────────────────────────────────────
+  "app.picker.backToDashboard": "Torna alla dashboard",
+  "app.picker.freeDuringBeta": "Gratis durante la beta",
+  "app.picker.title": "Cosa stai pubblicando?",
+  "app.picker.subtitle":
+    "Scegli un workflow — CleoCuts preconfigura sottotitoli, formato e pulizia per la piattaforma.",
+  "app.picker.chipCaptions": "Sottotitoli {style}",
+  "app.picker.chipVoice": "\"Cleo cut\" attivo",
+  "app.picker.customTitle": "Configurazione personalizzata",
+  "app.picker.customSub": "Scegli tu ogni opzione — sottotitoli, tagli, formati",
+
+  // ── Upload (choose a file) ──────────────────────────────────────────
+  "app.upload.back": "← Indietro",
+  "app.upload.title": "Scegli un video",
+  "app.upload.hint":
+    "MP4 o MOV dal telefono o dal computer. Tieni questa pagina aperta finché l'upload non è terminato.",
+  "app.upload.tapToChoose": "Tocca per scegliere",
+  "app.upload.orDrag": "oppure trascinane uno qui",
+  "app.upload.keepTabOpen":
+    "Tieni questa scheda aperta finché l'upload non termina. Cambiare app o bloccare il telefono annullerà l'upload.",
+
+  // ── Configure (custom settings) ─────────────────────────────────────
+  "app.configure.back": "← indietro",
+  "app.configure.fileInfo": "{name} · {size} MB",
+  "app.configure.captionStyle": "Stile sottotitoli",
+  "app.configure.captionPreviewAlt": "Anteprima sottotitoli {style}",
+  "app.configure.cutStyle": "Stile di taglio",
+  "app.configure.cleanup": "Pulizia",
+  "app.configure.voiceTriggers": "Ascolta \"Cleo cut\" / \"Cleo go\"",
+  "app.configure.voiceTriggersDesc": "Rimuove automaticamente le riprese fallite",
+  "app.configure.removeFillers": "Rimuovi le parole di riempimento",
+  "app.configure.removeFillersDesc": "Elimina \"ehm\", \"uh\", \"cioè\"…",
+  "app.configure.smartReframe": "Riquadratura intelligente",
+  "app.configure.smartcam": "Face-tracking SmartCam",
+  "app.configure.smartcamDesc": "Riquadratura automatica per output verticale/orizzontale",
+  "app.configure.portrait": "verticale",
+  "app.configure.landscape": "orizzontale",
+  "app.configure.portraitDesc": "Verticale 9:16",
+  "app.configure.landscapeDesc": "Orizzontale 16:9",
+  "app.configure.extraFormats": "Formati di output extra",
+  "app.configure.extraFormatsHint":
+    "L'export principale usa il tuo formato SmartCam (o le proporzioni originali). Scegli versioni extra con bordi neri per altre piattaforme.",
+  "app.configure.process": "Elabora il video",
+
+  // ── Progress screen ─────────────────────────────────────────────────
+  "app.progress.uploading": "Caricamento",
+  "app.progress.rendering": "Rendering",
+  "app.progress.processing": "Elaborazione",
+  "app.progress.stage.prep": "Preparazione del video",
+  "app.progress.stage.listen": "Ascolto della tua voce",
+  "app.progress.stage.polish": "Ricerca delle riprese migliori",
+  "app.progress.stage.preview": "Quasi pronto",
+  "app.progress.stage.burn": "Applicazione delle modifiche",
+  "app.progress.stage.stitch": "Montaggio in corso",
+  "app.progress.stage.finish": "Ultimi ritocchi",
+
+  // ── Done screen ─────────────────────────────────────────────────────
+  "app.done.readyToPost": "Pronto per la pubblicazione",
+  "app.done.captionSuggestion": "Suggerimento di caption",
+  "app.done.copy": "copia",
+  "app.done.downloadPrimary": "Scarica principale",
+  "app.done.downloadFormat": "Scarica {format}",
+  "app.done.mainEdit": "Montaggio principale",
+  "app.done.bonusClips": "Clip bonus",
+  "app.done.aiPicked": "Scelte dall'AI",
+  "app.done.processAnother": "Elabora un altro",
+
+  // ── Dashboard job cards ─────────────────────────────────────────────
+  "app.card.noPreview": "nessuna anteprima",
+  "app.card.uploading.title": "Caricamento",
+  "app.card.uploading.sub": "Caricamento in corso — tieni questa pagina aperta e non bloccare il telefono.",
+  "app.card.analyzing.title": "Analisi",
+  "app.card.analyzing.sub": "Trascrizione e rimozione di pause e parole di riempimento.",
+  "app.card.reviewing.title": "Pronto per l'editing",
+  "app.card.reviewing.sub": "Tocca per aprire l'editor e perfezionare il montaggio.",
+  "app.card.rendering.title": "Rendering",
+  "app.card.rendering.sub": "Montaggio del video finale in corso.",
+  "app.card.open": "Apri →",
+  "app.card.remove": "✕ Rimuovi",
+  "app.card.renderFailedNote": "Rendering fallito — le tue modifiche sono salvate. Apri e renderizza di nuovo.",
+
+  // ── Review (editor) ─────────────────────────────────────────────────
+  "app.review.backToDashboard": "← Dashboard",
+  "app.review.sentencesOne": "{count} frase",
+  "app.review.sentencesOther": "{count} frasi",
+  "app.review.audioHeadsUp": "Avviso audio",
+  "app.review.updatingPreview": "Aggiornamento anteprima…",
+  "app.review.captionSampleAlt": "Esempio sottotitoli {style}",
+  "app.review.captionsLookLike": "I sottotitoli avranno questo aspetto",
+  "app.review.tabTimeline": "Timeline",
+  "app.review.tabTranscript": "Trascrizione",
+  "app.review.tabCaptions": "Sottotitoli",
+  "app.review.preparing": "Preparazione…",
+  "app.review.applyRender": "Applica e renderizza",
+
+  // ── Transcript tab ──────────────────────────────────────────────────
+  "app.transcript.lineDeleted": "Riga eliminata",
+  "app.transcript.undo": "↶ Annulla",
+  "app.transcript.headingOne": "Trascrizione · {count} riga",
+  "app.transcript.headingOther": "Trascrizione · {count} righe",
+  "app.transcript.hint": "Correggi errori, elimina una riga con ✕, tocca una card per andare a quel momento.",
+  "app.transcript.empty": "Nessun sottotitolo. L'output sarà solo video.",
+  "app.transcript.verify": "verifica",
+  "app.transcript.deleteSentence": "Elimina frase",
+
+  // ── Captions tab ────────────────────────────────────────────────────
+  "app.captions.styleHeading": "Stile sottotitoli · {style}",
+  "app.captions.appliedToOutput": "Applicato all'output",
+  "app.captions.disabled": "Sottotitoli disattivati per questo rendering.",
+
+  // ── Timeline editor ─────────────────────────────────────────────────
+  "app.timeline.title": "Timeline",
+  "app.timeline.clipsOne": "{count} clip · {dur}",
+  "app.timeline.clipsOther": "{count} clip · {dur}",
+  "app.timeline.saving": "salvataggio",
+  "app.timeline.saveFailedTitle":
+    "Il server non accetta più modifiche per questo video (potrebbe essere in rendering o scaduto).",
+  "app.timeline.saveRetryingTitle": "L'ultima modifica non è ancora arrivata al server. Nuovo tentativo…",
+  "app.timeline.notSaved": "non salvato",
+  "app.timeline.notSavedRetrying": "non salvato · nuovo tentativo",
+  "app.timeline.hintDesktop":
+    "Scorri per muoverti · Ctrl/⌘ + scorri per zoomare · trascina i bordi per tagliare · Spazio play · ⌫ elimina · ⌘Z annulla",
+  "app.timeline.hintMobile":
+    "Scorri con il dito · pizzica per zoomare · tocca una clip per modificarla · trascina il righello per scorrere",
+  "app.timeline.undoTitle": "Annulla (⌘Z)",
+  "app.timeline.undoAria": "Annulla",
+  "app.timeline.redoTitle": "Ripeti (⌘⇧Z)",
+  "app.timeline.redoAria": "Ripeti",
+  "app.timeline.splitTitle": "Dividi la clip sotto il cursore",
+  "app.timeline.split": "⧉ Dividi",
+  "app.timeline.zoomOutTitle": "Rimpicciolisci (mostra più video)",
+  "app.timeline.zoomOutAria": "Rimpicciolisci",
+  "app.timeline.fitTitle": "Adatta l'intero video",
+  "app.timeline.fit": "Adatta",
+  "app.timeline.zoomInTitle": "Ingrandisci (più dettaglio, taglio più preciso)",
+  "app.timeline.zoomInAria": "Ingrandisci",
+  "app.timeline.clipLabel": "Clip {n}",
+  "app.timeline.moveLeft": "Sposta la clip a sinistra",
+  "app.timeline.moveRight": "Sposta la clip a destra",
+  "app.timeline.deleteTitle": "Elimina clip (⌫)",
+  "app.timeline.delete": "✕ Elimina",
+  "app.timeline.speed": "Velocità",
+  "app.timeline.speedNormal": "1× (normale)",
+  "app.timeline.volume": "Volume",
+  "app.timeline.muteBadge": "M",
+  "app.timeline.fadeIn": "Dissolvenza in entrata",
+  "app.timeline.fadeOut": "Dissolvenza in uscita",
+  "app.timeline.resetEffects": "Azzera effetti",
+  // Legacy cut strip
+  "app.timeline.cuts": "Tagli",
+  "app.timeline.cutsRemoved": "{sec}s rimossi",
+  "app.timeline.cutsRestored": " · {count} ripristinati",
+  "app.timeline.cutTitleRestore": "Tagliato {from}–{to} (tocca per ripristinare)",
+  "app.timeline.cutTitleRemoveAgain": "Tagliato {from}–{to} (tocca per rimuovere di nuovo)",
+  "app.timeline.cutsLegend": "Rosso = rimosso · tocca per ripristinare. Trattini verdi = mantenuto.",
+
+  // ── Voice commands (test modal + scene panel) ───────────────────────
+  "app.voice.title": "Testa la tua voce",
+  "app.voice.subtitle": "Pronuncia i comandi — verifica se Cleo ti sente.",
+  "app.voice.close": "Chiudi",
+  "app.voice.heardYou": "Ti ho sentito!",
+  "app.voice.listening": "In ascolto…",
+  "app.voice.heardPrefix": "sentito: ",
+  "app.voice.permissionHint": "Usa la fotocamera e il microfono. Tutto resta nel tuo browser.",
+  "app.voice.requesting": "Richiesta in corso…",
+  "app.voice.start": "Avvia",
+  "app.voice.denied": "Permesso negato. Attivalo nelle impostazioni del browser e ricarica.",
+  "app.voice.unsupported": "Non supportato in questo browser. Prova Safari o Chrome.",
+  "app.voice.done": "Fatto",
+  "app.voice.cmd.start": "Inizia la tua ripresa",
+  "app.voice.cmd.cut": "Rifai, scarta la ripresa attuale",
+  "app.voice.cmd.keep": "Confermare la ripresa, scena successiva",
+  "app.voice.cmd.finish": "Termina il video, taglia tutto ciò che segue",
+  "app.voice.cmd.stop": "Salta una frase sbagliata (usalo insieme a 'go')",
+  "app.voice.cmd.go": "Riprendi dopo 'stop'",
+  "app.voice.scene.heading": "Comandi vocali · {count} attivi",
+  "app.voice.scene.hint": "Deseleziona i falsi rilevamenti, aggiungi quelli mancanti. I tagli si aggiornano automaticamente.",
+  "app.voice.scene.add": "+ Aggiungi",
+  "app.voice.scene.addAt": "Aggiungi comando al momento attuale del video",
+  "app.voice.scene.none": "Nessun comando vocale rilevato.",
+  "app.voice.scene.disable": "Disattiva",
+  "app.voice.scene.enable": "Attiva",
+  "app.voice.scene.heard": "sentito: “{text}”",
+  "app.voice.scene.type.start": "Inizio",
+  "app.voice.scene.type.keep": "Mantieni",
+  "app.voice.scene.type.restart": "Taglia / Ricomincia",
+  "app.voice.scene.type.finish": "Fine",
+
+  // ── Landing: header ── */
+  "site.header.homeAria": "Home di CleoCuts",
+  "site.header.openEditor": "Apri l'editor",
+
+  // ── Landing: hero ── */
+  "site.hero.badge": "Beta aperta · gratis",
+  "site.hero.titleLead": "Monta mentre",
+  "site.hero.titleAccent": "registri.",
+  "site.hero.sub":
+    "Dì {cut} quando sbagli. Dì {finish} quando hai finito. Pronto per la pubblicazione in pochi minuti, con sottotitoli, tagli e più formati inclusi.",
+  "site.hero.cta": "Prova CleoCuts",
+
+  // ── Landing: caption showcase ── */
+  "site.showcase.listening": "CleoCuts in ascolto",
+  "site.showcase.captionStyle": "stile sottotitoli",
+  "site.showcase.clipper": "IL PARLATO È L'EDITOR",
+  "site.showcase.highlight": "PRONTO PER LA PUBBLICAZIONE",
+  "site.showcase.flash": "DÌ CUT",
+  "site.showcase.punch": "PERFETTO",
+  "site.showcase.elegant": "Ascolta e basta.",
+
+  // ── Landing: features ── */
+  "site.features.title": "Cosa fa CleoCuts.",
+  "site.features.voice.title": "Comandi vocali",
+  "site.features.voice.body": "Dì {cut} durante la ripresa. CleoCuts rimuove il tentativo fallito.",
+  "site.features.cleanup.title": "Pulizia AI",
+  "site.features.cleanup.body": "Corregge errori, nomi di marchi e omofoni.",
+  "site.features.captions.title": "{count} stili di sottotitoli",
+  "site.features.captions.body": "Da Clean a Clipper. Font veri.",
+  "site.features.captions.decoration": "FONT VERI",
+  "site.features.vertical.title": "Verticale automatico",
+  "site.features.vertical.body": "Orizzontale → 9:16 con face tracking.",
+  "site.features.multiformat.title": "Multi-formato",
+  "site.features.multiformat.body": "{formats} in un solo rendering.",
+  "site.features.hooks.title": "Selettore di clip hook",
+  "site.features.hooks.body":
+    "CleoCuts trova i {count} momenti migliori nel tuo video long-form e li trasforma in reel autonomi.",
+
+  // ── Landing: how it works ── */
+  "site.steps.title": "Tre passi.",
+  "site.steps.sub": "Registra. Parla con CleoCuts. Pubblica.",
+  "site.steps.record.title": "Registra",
+  "site.steps.record.body": "Dì {cut} quando sbagli. Niente riprese ripetute.",
+  "site.steps.record.hint": "Riprese di qualsiasi durata",
+  "site.steps.upload.title": "Carica",
+  "site.steps.upload.body": "Carica il tuo video. Scegli un workflow. L'AI fa il resto.",
+  "site.steps.upload.hint": "Pochi minuti, in base alla durata",
+  "site.steps.post.title": "Pubblica",
+  "site.steps.post.body": "Ottieni {formats} pronti per TikTok, Instagram e YouTube.",
+  "site.steps.post.hint": "Scarica quando è pronto",
+
+  // ── Landing: footer ── */
+  "site.footer.editor": "Editor",
+  "site.footer.library": "Libreria",
+  "site.footer.imprint": "Note legali",
+  "site.footer.privacy": "Privacy",
+
+  // ── Library: header ── */
+  "library.header.homeAria": "Editor di CleoCuts",
+  "library.header.title": "Libreria",
+  "library.header.newProject": "Nuovo progetto",
+
+  // ── Library: list ── */
+  "library.count.one": "{count} progetto",
+  "library.count.other": "{count} progetti",
+  "library.confirmDelete": "Eliminare questo progetto dalla tua libreria?",
+
+  // ── Library: empty state ── */
+  "library.empty.title": "La tua libreria è vuota",
+  "library.empty.body":
+    "Ogni video che completi appare qui. Puoi riscaricarlo, prendere i sottotitoli e condividere le clip hook in qualsiasi momento.",
+  "library.empty.cta": "Inizia il tuo primo progetto",
+
+  // ── Library: project card ── */
+  "library.card.playAria": "Riproduci anteprima di {name}",
+  "library.card.noPreview": "nessuna anteprima",
+  "library.card.customPreset": "Personalizzato",
+  "library.card.deleteAria": "Elimina progetto",
+  "library.card.hooks.one": "{count} hook",
+  "library.card.hooks.other": "{count} hook",
+  "library.card.hookSeconds": "{seconds}s",
+  "library.card.caption": "Caption",
+  "library.card.copy": "copia",
+  "library.card.copied": "copiato",
+
+  // ── Library: download labels ── */
+  "library.format.primary": "Montaggio principale",
+  "library.format.hook": "Clip hook {n}",
+
+  // ── Library: relative time ── */
+  "library.time.justNow": "proprio ora",
+  "library.time.minutesAgo": "{n}m fa",
+  "library.time.hoursAgo": "{n}h fa",
+  "library.time.daysAgo": "{n}g fa",
+
+  // ── Shared components ── */
+  "common.videoModal.closeAria": "Chiudi anteprima",
+  "common.videoModal.close": "Chiudi",
+};
