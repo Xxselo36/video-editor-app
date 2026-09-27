@@ -834,6 +834,99 @@ export default function Home() {
     }
   };
 
+  // Browser history: every screen gets its own entry so the phone's
+  // back gesture returns to the dashboard instead of leaving the app,
+  // and the editor has its own URL (/app?job=…) so a reload reopens it.
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const resetRef = useRef<() => void>(() => {});
+  // Job id from the URL at load time (reload / shared editor link).
+  const initialJobRef = useRef<string | null>(
+    typeof window !== "undefined"
+      ? new URL(window.location.href).searchParams.get("job")
+      : null,
+  );
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const wantJob = phase === "reviewing" && job ? job.id : null;
+    const onScreen = phase === "idle" || phase === "configuring" || phase === "reviewing";
+    const st = window.history.state as { cleo?: string } | null;
+    if (onScreen && st?.cleo !== phase) {
+      if (wantJob) url.searchParams.set("job", wantJob);
+      else url.searchParams.delete("job");
+      window.history.pushState({ cleo: phase }, "", url);
+    } else if (phase === "picker" && url.searchParams.has("job") && !initialJobRef.current) {
+      url.searchParams.delete("job");
+      window.history.replaceState({ cleo: "picker" }, "", url);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, job?.id]);
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const target = (e.state as { cleo?: string } | null)?.cleo ?? "picker";
+      const cur = phaseRef.current;
+      if (cur === "configuring" && target === "idle") setPhase("idle");
+      else if (cur !== "picker" && target !== cur) resetRef.current();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  // Reload / shared link on the editor URL → reopen that job.
+  useEffect(() => {
+    const id = initialJobRef.current;
+    if (id) void resumeJob(id).finally(() => { initialJobRef.current = null; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const resumeJob = async (jobId: string) => {
+    setResuming(true);
+    try {
+      // A save from the last visit may still be in flight —
+      // load the state the user actually left.
+      await waitForSaves(jobId, 8_000);
+      const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
+      if (r.status === 404) {
+        updateActiveJobV2(jobId, { error: FRIENDLY_EXPIRED });
+        return;
+      }
+      if (!r.ok) {
+        showNotice("Das Projekt konnte gerade nicht geladen werden. Bitte versuch es gleich noch einmal.");
+        return;
+      }
+      const s: JobStatus = await r.json();
+      if (s.status !== "awaiting_review") {
+        // Rendering / done / failed: the dashboard card shows
+        // the state — don't switch to an empty screen.
+        showNotice(
+          s.status === "done"
+            ? "Dieses Video ist fertig – du findest es unter „Zuletzt“ und in der Library."
+            : s.status === "error"
+              ? friendlyError(s.error ?? s.message)
+              : "Dieses Video wird gerade verarbeitet. Die Karte zeigt den Fortschritt.",
+        );
+        return;
+      }
+      setJob(s);
+      {
+        const subsRes = await fetch(
+          `${backendUrl()}/jobs/${jobId}/subtitles`,
+        );
+        if (subsRes.ok) {
+          const sd = await subsRes.json();
+          setPhrases(phrasesFromSubtitlesResponse(sd));
+        }
+        // Show the caption style this job renders with, not
+        // whatever was last picked in this tab.
+        if (s.caption_preset) setCaptionPreset(s.caption_preset);
+        setPhase("reviewing");
+      }
+    } catch {
+      showNotice("Keine Verbindung zum Server. Prüf dein Internet und versuch es noch einmal.");
+    } finally {
+      setResuming(false);
+    }
+  };
+
   const reset = () => {
     flushPhraseSave();
     setFile(null);
@@ -846,6 +939,7 @@ export default function Home() {
     setPhase("picker");
     clearActiveJob();
   };
+  resetRef.current = reset;
 
   const currentPreset = selectedPreset ? PRESETS[selectedPreset] : null;
 
@@ -907,7 +1001,7 @@ export default function Home() {
       <div
         key={phase}
         className={`phase-fade mx-auto w-full flex-1 px-5 py-8 ${
-          phase === "picker" ? "max-w-2xl" : "max-w-md"
+          phase === "picker" ? "max-w-2xl" : phase === "reviewing" ? "max-w-3xl" : "max-w-md"
         }`}
       >
         {resuming && (
@@ -941,54 +1035,7 @@ export default function Home() {
         {phase === "picker" && (
           <PickerScreen
             onPick={pickPreset}
-            onResumeJob={async (jobId) => {
-              setResuming(true);
-              try {
-                // A save from the last visit may still be in flight —
-                // load the state the user actually left.
-                await waitForSaves(jobId, 8_000);
-                const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
-                if (r.status === 404) {
-                  updateActiveJobV2(jobId, { error: FRIENDLY_EXPIRED });
-                  return;
-                }
-                if (!r.ok) {
-                  showNotice("Das Projekt konnte gerade nicht geladen werden. Bitte versuch es gleich noch einmal.");
-                  return;
-                }
-                const s: JobStatus = await r.json();
-                if (s.status !== "awaiting_review") {
-                  // Rendering / done / failed: the dashboard card shows
-                  // the state — don't switch to an empty screen.
-                  showNotice(
-                    s.status === "done"
-                      ? "Dieses Video ist fertig – du findest es unter „Zuletzt“ und in der Library."
-                      : s.status === "error"
-                        ? friendlyError(s.error ?? s.message)
-                        : "Dieses Video wird gerade verarbeitet. Die Karte zeigt den Fortschritt.",
-                  );
-                  return;
-                }
-                setJob(s);
-                {
-                  const subsRes = await fetch(
-                    `${backendUrl()}/jobs/${jobId}/subtitles`,
-                  );
-                  if (subsRes.ok) {
-                    const sd = await subsRes.json();
-                    setPhrases(phrasesFromSubtitlesResponse(sd));
-                  }
-                  // Show the caption style this job renders with, not
-                  // whatever was last picked in this tab.
-                  if (s.caption_preset) setCaptionPreset(s.caption_preset);
-                  setPhase("reviewing");
-                }
-              } catch {
-                showNotice("Keine Verbindung zum Server. Prüf dein Internet und versuch es noch einmal.");
-              } finally {
-                setResuming(false);
-              }
-            }}
+            onResumeJob={resumeJob}
           />
         )}
 
@@ -2010,9 +2057,10 @@ function ConfigureScreen(props: {
 
       <button
         onClick={() => props.onProcess()}
-        className="mt-2 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99]"
+        // Sticky on phones: the options list is ~2 screens tall.
+        className="sticky bottom-3 z-20 mt-2 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold shadow-lg hover:bg-[var(--brand-hover)] active:scale-[0.99]"
       >
-        Process video
+        Video verarbeiten
       </button>
     </div>
   );
@@ -2433,13 +2481,21 @@ function ReviewScreen({
   // onTimeUpdate only fires ~4x/sec (browser throttle) which lags the
   // active-phrase highlight visibly behind the spoken word. rAF hits
   // ~60fps so the highlight lands on the syllable.
+  // Throttled to ~12 updates/s: every update re-renders the whole
+  // editor (timeline, transcript), and 60/s pegged phone CPUs on long
+  // videos. 80 ms is still well under a spoken syllable.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     let rafId = 0;
+    let last = -1;
     const tick = () => {
       if (!video.paused && !video.ended) {
-        setCurrentTime(video.currentTime);
+        const t = video.currentTime;
+        if (Math.abs(t - last) >= 0.08) {
+          last = t;
+          setCurrentTime(t);
+        }
       }
       rafId = requestAnimationFrame(tick);
     };
@@ -2524,6 +2580,7 @@ function ReviewScreen({
   // that — a late retry would overwrite the edit flushed on leave.
   const closedRef = useRef(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "timeline" | "transcript" | "style"
@@ -2790,8 +2847,21 @@ function ReviewScreen({
     next[idx] = { ...next[idx], text };
     onChange(next);
   };
+  // Deleting a line is instant, with a few seconds to undo it.
+  const [lastRemoved, setLastRemoved] = useState<{ idx: number; phrase: Phrase } | null>(null);
+  const removedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const remove = (idx: number) => {
+    setLastRemoved({ idx, phrase: phrases[idx] });
+    if (removedTimer.current) clearTimeout(removedTimer.current);
+    removedTimer.current = setTimeout(() => setLastRemoved(null), 6000);
     onChange(phrases.filter((_, i) => i !== idx));
+  };
+  const undoRemove = () => {
+    if (!lastRemoved) return;
+    const next = phrases.slice();
+    next.splice(Math.min(lastRemoved.idx, next.length), 0, lastRemoved.phrase);
+    onChange(next);
+    setLastRemoved(null);
   };
 
   // Source time → time in the playing preview (null if cut out).
@@ -2833,7 +2903,7 @@ function ReviewScreen({
           onClick={onBack}
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
         >
-          ← cancel
+          ← Dashboard
         </button>
         <div className="text-xs text-[var(--text-body)]">
           {phrases.length} sentence{phrases.length === 1 ? "" : "s"}
@@ -2864,10 +2934,33 @@ function ReviewScreen({
           src={`${backendUrl()}/jobs/${jobId}/preview-video?v=${previewVersion}`}
           controls
           playsInline
-          preload="auto"
-          onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+          // metadata only: don't pull the whole preview over mobile data
+          // before the user presses play.
+          preload="metadata"
+          // Seeks while paused (rAF loop only runs while playing).
+          onSeeked={(e) => setCurrentTime(e.currentTarget.currentTime)}
           className="block max-h-[55vh] w-full bg-[var(--surface-0)]"
         />
+        {/* Live caption preview: the current transcript line, so the
+            user sees their text on the video before rendering. (The
+            exact caption style is applied in the final render.) */}
+        {captionPreset !== "none" && activeIdx !== null && phrases[activeIdx]?.text.trim() && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-3 bottom-12 flex justify-center"
+          >
+            <span
+              className="max-w-[90%] rounded-md px-2 py-1 text-center text-base font-extrabold leading-tight sm:text-lg"
+              style={{
+                color: "#fff",
+                background: "rgba(0,0,0,0.35)",
+                textShadow: "0 2px 6px rgba(0,0,0,0.9)",
+              }}
+            >
+              {phrases[activeIdx].text}
+            </span>
+          </div>
+        )}
         <PlaybackDebug videoRef={videoRef} />
         {editSaving && (
           <div
@@ -2941,12 +3034,15 @@ function ReviewScreen({
       </div>
 
       {/* Timeline tab — everything for cut/trim/effects lives here */}
-      {activeTab === "timeline" && editSegs.length > 0 && duration > 0 && (
+      {/* Stays mounted when another tab is open (just hidden), so undo
+          history, zoom and scroll position survive tab switches. */}
+      {editSegs.length > 0 && duration > 0 && (
+        <div style={{ display: activeTab === "timeline" ? undefined : "none" }}>
         <TimelineEditor
           segments={editSegs}
           duration={duration}
           playhead={originalTime}
-          open={true}
+          open={activeTab === "timeline"}
           saving={editSaving}
           saveError={saveError}
           onToggleOpen={() => {}}
@@ -2968,9 +3064,26 @@ function ReviewScreen({
             else v.pause();
           }}
         />
+        </div>
       )}
 
       {/* Transcript tab — phrase-level text editing */}
+      {activeTab === "transcript" && lastRemoved && (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm"
+          style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+        >
+          <span style={{ color: "var(--text-body)" }}>Zeile gelöscht</span>
+          <button
+            onClick={undoRemove}
+            className="rounded-lg px-3 py-1.5 text-sm font-semibold"
+            style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
+          >
+            ↶ Rückgängig
+          </button>
+        </div>
+      )}
       {activeTab === "transcript" && (
         <div
           className="overflow-hidden rounded-2xl"
@@ -3053,8 +3166,9 @@ function ReviewScreen({
                           e.stopPropagation();
                           remove(i);
                         }}
-                        className="text-[var(--text-faint)] hover:text-[var(--danger)]"
-                        aria-label="delete sentence"
+                        className="-m-2 flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-faint)] hover:text-[var(--danger)]"
+                        aria-label="Satz löschen"
+                        title="Satz löschen"
                       >
                         ✕
                       </button>
@@ -3122,9 +3236,9 @@ function ReviewScreen({
             rebuildTimerRef.current = null;
           }
           pendingRebuildRef.current = null;
+          setApplying(true);
           while (inflightRef.current) await inflightRef.current;
           setApplyError(null);
-          setEditSaving(true);
           try {
             const active = toPayload(editSegs);
             if (active.length > 0) {
@@ -3137,18 +3251,19 @@ function ReviewScreen({
             }
           } catch {
             // Never render an older cut than the one on screen.
-            setApplyError("Couldn't save your edits — check your connection and try again.");
+            setApplyError("Deine Änderungen konnten nicht gespeichert werden – prüf die Verbindung und versuch es noch einmal.");
             pendingRebuildRef.current = editSegs;
+            setApplying(false);
             return;
-          } finally {
-            setEditSaving(false);
           }
           onApply();
         }}
-        disabled={editSaving}
+        // Only the render itself blocks the button — autosaves no
+        // longer flip it to "Preparing…" every few seconds.
+        disabled={applying}
         className="mt-1 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99] disabled:opacity-60"
       >
-        {editSaving ? "Preparing…" : "Apply & render"}
+        {applying ? "Wird vorbereitet…" : "Video fertigstellen"}
       </button>
       {applyError && (
         <div className="text-center text-xs" style={{ color: "var(--danger)" }}>
@@ -4237,8 +4352,17 @@ function TimelineEditor({
   };
 
   // Wrap onCommit to push history state
-  const commit = (next: EditorSeg[]) => {
-    setHistory((h) => [...h, segments].slice(-30));
+  // `coalesce` groups rapid changes of the same control (a slider being
+  // dragged fires dozens of changes) into ONE undo step.
+  const lastCommitRef = useRef<{ key: string; t: number } | null>(null);
+  const commit = (next: EditorSeg[], coalesce?: string) => {
+    const now = Date.now();
+    const last = lastCommitRef.current;
+    const merge = coalesce && last && last.key === coalesce && now - last.t < 1000;
+    lastCommitRef.current = coalesce ? { key: coalesce, t: now } : null;
+    if (!merge) {
+      setHistory((h) => [...h, segments].slice(-50));
+    }
     setFuture([]);
     onCommit(next);
   };
@@ -4387,7 +4511,10 @@ function TimelineEditor({
     commit(next);
   };
   const patchSeg = (id: string, patch: Partial<EditorSeg>) => {
-    commit(segments.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    commit(
+      segments.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+      `${id}:${Object.keys(patch).sort().join(",")}`,
+    );
   };
 
   // Keyboard shortcuts: Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z (redo),
@@ -4642,9 +4769,7 @@ function TimelineEditor({
             Swipe to scroll · pinch to zoom · tap a clip to edit · drag the ruler to scrub
           </div>
         </div>
-        <span className="shrink-0 whitespace-nowrap pl-3 text-xs" style={{ color: "var(--text-muted)" }}>
-          {open ? "Hide ▲" : "Show ▼"}
-        </span>
+
       </button>
 
       {open && (
@@ -5022,7 +5147,7 @@ function TimelineEditor({
                 <select
                   value={selectedSeg.speed ?? 1}
                   onChange={(e) => patchSeg(selectedSeg.id, { speed: Number(e.target.value) })}
-                  className="flex-1 rounded-md px-2 py-1 text-xs"
+                  className="flex-1 rounded-md px-2 py-1 text-base sm:text-xs"
                   style={{
                     background: "var(--surface-1)",
                     color: "var(--text-strong)",
