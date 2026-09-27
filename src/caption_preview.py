@@ -25,7 +25,26 @@ _ASSETS_FONTS_DIR = os.path.normpath(
 )
 
 
+# Linux servers (the web backend's Docker image) have none of the macOS /
+# Windows fonts listed per style; without a fallback Pillow's tiny
+# built-in bitmap font was used and the style previews looked broken.
+# The Dockerfile installs fonts-dejavu-core + fonts-liberation2.
+_LINUX_BOLD = [
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+]
+_LINUX_ITALIC = [
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-BoldItalic.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf",
+]
+
+
 def _try_fonts(candidates, size) -> ImageFont.ImageFont:
+    names = " ".join(str(c[0] if isinstance(c, tuple) else c) for c in candidates)
+    italic = any(w in names for w in ("Italic", "Oblique", "Snell", "Chancery"))
+    candidates = list(candidates) + (_LINUX_ITALIC if italic else []) + _LINUX_BOLD
     for entry in candidates:
         path, index = (entry, 0) if isinstance(entry, str) else entry
         try:

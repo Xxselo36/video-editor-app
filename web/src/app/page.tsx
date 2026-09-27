@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { LogoWord } from "@/components/Logo";
+import { LanguageSwitcher, useT } from "@/i18n";
+import type { MessageKey } from "@/i18n/messages/en";
 import {
   IconArrowRight,
   IconCaptions,
@@ -13,7 +15,28 @@ import {
   IconVlog,
 } from "@/components/Icons";
 
+/* Voice commands and aspect ratios stay literal in every language —
+ * they are passed into translations as placeholders. */
+const CUT = "Cleo cut";
+const FINISH = "Cleo finish";
+const FORMATS = "9:16, 1:1, 16:9";
+
+/** Replace "{name}" placeholders in a translated string with React nodes. */
+function rich(text: string, nodes: Record<string, React.ReactNode>): React.ReactNode {
+  return text.split(/(\{\w+\})/).map((part, i) => {
+    const m = /^\{(\w+)\}$/.exec(part);
+    return <Fragment key={i}>{m && m[1] in nodes ? nodes[m[1]] : part}</Fragment>;
+  });
+}
+
 export default function Landing() {
+  const t = useT();
+  const brandQuote = (phrase: string) => (
+    <span style={{ color: "var(--brand)", fontWeight: 600 }}>&ldquo;{phrase}&rdquo;</span>
+  );
+  const strong = (text: React.ReactNode) => (
+    <span style={{ color: "var(--brand-strong)", fontWeight: 600 }}>{text}</span>
+  );
   return (
     <main
       className="relative flex min-h-screen flex-col"
@@ -21,23 +44,27 @@ export default function Landing() {
     >
       {/* ── Header ─── */}
       <header
-        className="relative z-10 flex items-center justify-between px-6 py-4"
+        className="relative z-10 flex items-center justify-between gap-3 px-4 py-4 sm:px-6"
         style={{ borderBottom: "1px solid var(--border)" }}
       >
-        <Link href="/" className="transition-opacity hover:opacity-80" aria-label="CleoCuts home">
+        <Link href="/" className="shrink-0 transition-opacity hover:opacity-80" aria-label={t("site.header.homeAria")}>
           <LogoWord />
         </Link>
-        <Link
-          href="/app"
-          className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-sm font-semibold transition-transform hover:scale-105"
-          style={{
-            background: "var(--brand)",
-            color: "white",
-            boxShadow: "var(--shadow-glow)",
-          }}
-        >
-          Open editor <IconArrowRight size={14} strokeWidth={2.5} />
-        </Link>
+        <div className="flex items-center gap-2">
+          <LanguageSwitcher />
+          {/* Hidden on phones: the hero CTA right below does the same job. */}
+          <Link
+            href="/app"
+            className="hidden items-center gap-1.5 rounded-full px-5 py-2 text-sm font-semibold transition-transform hover:scale-105 sm:inline-flex"
+            style={{
+              background: "var(--brand)",
+              color: "white",
+              boxShadow: "var(--shadow-glow)",
+            }}
+          >
+            {t("site.header.openEditor")} <IconArrowRight size={14} strokeWidth={2.5} />
+          </Link>
+        </div>
       </header>
 
       {/* ── Hero — tight ─── */}
@@ -55,14 +82,14 @@ export default function Landing() {
               className="pulse-dot inline-block h-1.5 w-1.5 rounded-full"
               style={{ background: "var(--brand)" }}
             />
-            Open beta · free
+            {t("site.hero.badge")}
           </div>
 
           <h1
             className="mb-6 text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl"
             style={{ color: "var(--text-strong)" }}
           >
-            Edit while you{" "}
+            {t("site.hero.titleLead")}{" "}
             <span
               style={{
                 background: "linear-gradient(120deg, var(--brand) 0%, var(--accent) 100%)",
@@ -71,7 +98,7 @@ export default function Landing() {
                 WebkitTextFillColor: "transparent",
               }}
             >
-              record.
+              {t("site.hero.titleAccent")}
             </span>
           </h1>
 
@@ -79,11 +106,7 @@ export default function Landing() {
             className="mb-8 max-w-md text-lg"
             style={{ color: "var(--text-body)" }}
           >
-            Say{" "}
-            <span style={{ color: "var(--brand)", fontWeight: 600 }}>&ldquo;Cleo cut&rdquo;</span>{" "}
-            when you mess up.{" "}
-            <span style={{ color: "var(--brand)", fontWeight: 600 }}>&ldquo;Cleo finish&rdquo;</span>{" "}
-            when you&apos;re done. Post-fertig in Minuten — Captions, Cuts, Multi-Format inklusive.
+            {rich(t("site.hero.sub"), { cut: brandQuote(CUT), finish: brandQuote(FINISH) })}
           </p>
 
           <Link
@@ -95,7 +118,7 @@ export default function Landing() {
               boxShadow: "var(--shadow-glow)",
             }}
           >
-            Try CleoCuts
+            {t("site.hero.cta")}
             <IconArrowRight size={18} strokeWidth={2.5} />
           </Link>
         </div>
@@ -115,23 +138,23 @@ export default function Landing() {
             className="mb-10 text-2xl font-bold tracking-tight sm:text-3xl"
             style={{ color: "var(--text-strong)" }}
           >
-            What CleoCuts does.
+            {t("site.features.title")}
           </h2>
 
           <div className="grid gap-3 sm:grid-cols-6">
             {/* Row 1: hero feature (wide) + accent card */}
             <BentoCard
               Icon={IconMic}
-              title="Voice triggers"
-              body='Say "Cleo cut" mid-take. CleoCuts removes the failed attempt.'
+              title={t("site.features.voice.title")}
+              body={t("site.features.voice.body", { cut: `“${CUT}”` })}
               span={4}
               decoration={<VoiceWaveDecoration />}
               accent="var(--brand)"
             />
             <BentoCard
               Icon={IconSparkle}
-              title="AI cleanup"
-              body="Fixes typos, brand names, homophones."
+              title={t("site.features.cleanup.title")}
+              body={t("site.features.cleanup.body")}
               span={2}
               accent="var(--accent)"
             />
@@ -139,22 +162,22 @@ export default function Landing() {
             {/* Row 2: three equal */}
             <BentoCard
               Icon={IconCaptions}
-              title="9 caption styles"
-              body="Clean to Clipper. Real fonts."
+              title={t("site.features.captions.title", { count: 9 })}
+              body={t("site.features.captions.body")}
               span={2}
               decoration={<CaptionMiniPreview />}
             />
             <BentoCard
               Icon={IconPhone}
-              title="Auto vertical"
-              body="Landscape → 9:16 with face tracking."
+              title={t("site.features.vertical.title")}
+              body={t("site.features.vertical.body")}
               span={2}
               decoration={<FaceFrameDecoration />}
             />
             <BentoCard
               Icon={IconVlog}
-              title="Multi-format"
-              body="9:16, 1:1, 16:9 in one render."
+              title={t("site.features.multiformat.title")}
+              body={t("site.features.multiformat.body", { formats: FORMATS })}
               span={2}
               decoration={<FormatStackDecoration />}
             />
@@ -162,8 +185,8 @@ export default function Landing() {
             {/* Row 3: wide feature */}
             <BentoCard
               Icon={IconArrowRight}
-              title="Hook clip picker"
-              body="CleoCuts finds the 3 best moments in your long-form and cuts them as standalone reels."
+              title={t("site.features.hooks.title")}
+              body={t("site.features.hooks.body", { count: 3 })}
               span={6}
               decoration={<HookClipStrip />}
               accent="var(--brand)"
@@ -182,13 +205,13 @@ export default function Landing() {
             className="mb-2 text-2xl font-bold tracking-tight sm:text-3xl"
             style={{ color: "var(--text-strong)" }}
           >
-            Three steps.
+            {t("site.steps.title")}
           </h2>
           <p
             className="mb-14 text-sm"
             style={{ color: "var(--text-muted)" }}
           >
-            Record. Talk to CleoCuts. Post.
+            {t("site.steps.sub")}
           </p>
 
           <div className="relative">
@@ -207,43 +230,25 @@ export default function Landing() {
             <div className="relative grid gap-12 md:grid-cols-3 md:gap-8">
               <Step
                 n="01"
-                title="Record"
-                body={
-                  <>
-                    Say{" "}
-                    <span style={{ color: "var(--brand-strong)", fontWeight: 600 }}>
-                      &ldquo;Cleo cut&rdquo;
-                    </span>{" "}
-                    when you mess up. No re-takes.
-                  </>
-                }
-                hint="Any length take"
+                title={t("site.steps.record.title")}
+                body={rich(t("site.steps.record.body"), {
+                  cut: strong(<>&ldquo;{CUT}&rdquo;</>),
+                })}
+                hint={t("site.steps.record.hint")}
                 Icon={IconMic}
               />
               <Step
                 n="02"
-                title="Upload"
-                body={
-                  <>
-                    Drop the video. Pick a workflow. AI does the rest.
-                  </>
-                }
-                hint="Under 60 seconds"
+                title={t("site.steps.upload.title")}
+                body={t("site.steps.upload.body")}
+                hint={t("site.steps.upload.hint")}
                 Icon={IconUploadInline}
               />
               <Step
                 n="03"
-                title="Post"
-                body={
-                  <>
-                    Get{" "}
-                    <span style={{ color: "var(--brand-strong)", fontWeight: 600 }}>
-                      9:16, 1:1, 16:9
-                    </span>{" "}
-                    ready for TikTok, IG, YouTube.
-                  </>
-                }
-                hint="Instant download"
+                title={t("site.steps.post.title")}
+                body={rich(t("site.steps.post.body"), { formats: strong(FORMATS) })}
+                hint={t("site.steps.post.hint")}
                 Icon={IconCheck}
               />
             </div>
@@ -261,11 +266,13 @@ export default function Landing() {
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-3 sm:flex-row sm:justify-between">
           <LogoWord size={22} />
           <div
-            className="flex items-center gap-5 text-xs"
+            className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs"
             style={{ color: "var(--text-muted)" }}
           >
-            <Link href="/app" className="hover:opacity-70">Editor</Link>
-            <Link href="/app/library" className="hover:opacity-70">Library</Link>
+            <Link href="/app" className="hover:opacity-70">{t("site.footer.editor")}</Link>
+            <Link href="/app/library" className="hover:opacity-70">{t("site.footer.library")}</Link>
+            <Link href="/imprint" className="hover:opacity-70">{t("site.footer.imprint")}</Link>
+            <Link href="/privacy" className="hover:opacity-70">{t("site.footer.privacy")}</Link>
           </div>
           <div className="text-[11px]" style={{ color: "var(--text-faint)" }}>
             © 2026 CleoCuts
@@ -282,15 +289,17 @@ export default function Landing() {
  * variety) rendered live. Reads as: "here's what CleoCuts makes."
  */
 type Style = {
+  /** Caption style name — a product name, not translated. */
   label: string;
-  text: string;
+  /** Message key of the sample caption. */
+  text: MessageKey;
   render: (t: string) => React.ReactNode;
 };
 
 const STYLES: Style[] = [
   {
     label: "Clipper",
-    text: "TALK IS THE EDITOR",
+    text: "site.showcase.clipper",
     render: (t) => {
       const words = t.split(" ");
       return (
@@ -314,7 +323,7 @@ const STYLES: Style[] = [
   },
   {
     label: "Highlight",
-    text: "READY TO POST",
+    text: "site.showcase.highlight",
     render: (t) => (
       <div
         className="rounded-md px-3 py-1.5 text-center text-[26px] font-bold uppercase sm:text-[32px]"
@@ -330,7 +339,7 @@ const STYLES: Style[] = [
   },
   {
     label: "Flash",
-    text: "SAY CUT",
+    text: "site.showcase.flash",
     render: (t) => (
       <div
         className="text-center text-[32px] font-black italic sm:text-[40px]"
@@ -347,7 +356,7 @@ const STYLES: Style[] = [
   },
   {
     label: "Punch",
-    text: "NAILED IT",
+    text: "site.showcase.punch",
     render: (t) => (
       <div
         className="text-center text-[36px] font-black uppercase sm:text-[44px]"
@@ -363,7 +372,7 @@ const STYLES: Style[] = [
   },
   {
     label: "Elegant",
-    text: "It just listens.",
+    text: "site.showcase.elegant",
     render: (t) => (
       <div
         className="text-center italic sm:text-[30px]"
@@ -381,6 +390,7 @@ const STYLES: Style[] = [
 ];
 
 function CaptionShowcase() {
+  const t = useT();
   const [idx, setIdx] = useState(0);
 
   useEffect(() => {
@@ -436,14 +446,14 @@ function CaptionShowcase() {
             className="text-[10px] font-semibold uppercase tracking-widest"
             style={{ color: "var(--brand-strong)" }}
           >
-            CleoCuts listening
+            {t("site.showcase.listening")}
           </span>
         </div>
 
         {/* Center: rotating caption */}
         <div className="relative z-10 flex flex-1 items-center justify-center px-8">
           <div key={idx} className="phase-fade max-w-full">
-            {style.render(style.text)}
+            {style.render(t(style.text))}
           </div>
         </div>
 
@@ -460,7 +470,7 @@ function CaptionShowcase() {
               {style.label}
             </div>
             <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-              caption style
+              {t("site.showcase.captionStyle")}
             </span>
           </div>
 
@@ -585,6 +595,7 @@ function VoiceWaveDecoration() {
 }
 
 function CaptionMiniPreview() {
+  const t = useT();
   return (
     <div className="absolute inset-0 flex items-end justify-center pb-4 opacity-70">
       <div
@@ -596,7 +607,7 @@ function CaptionMiniPreview() {
           border: "1px solid rgba(139,92,246,0.35)",
         }}
       >
-        REAL FONTS
+        {t("site.features.captions.decoration")}
       </div>
     </div>
   );
