@@ -1,36 +1,32 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// No web fonts: the UI uses the system font stack (globals.css), the
+// Geist fonts were preloaded on every page without being used.
 
 export const metadata: Metadata = {
-  title: "CleoCuts — World's first voice-controlled AI video editor",
+  title: "CleoCuts – KI-Videoschnitt per Sprachbefehl",
   description:
-    "The world's first voice-controlled AI video editor. Just say 'Cleo cut' when you mess up. AI cleans the rest — captions, cuts, ready-to-post clips.",
+    "Sag „Cleo cut“, wenn du dich versprichst. CleoCuts schneidet Pausen, Füllwörter und verpatzte Takes automatisch heraus und fügt Untertitel hinzu – fertig für TikTok, Reels und YouTube.",
   metadataBase: new URL("https://cleocuts.com"),
   openGraph: {
-    title: "CleoCuts — World's first voice-controlled AI video editor",
+    title: "CleoCuts – KI-Videoschnitt per Sprachbefehl",
     description:
-      "Just say 'Cleo cut' when you mess up. AI cleans it, adds captions, and gives you ready-to-post clips.",
+      "Sag „Cleo cut“, wenn du dich versprichst. Die KI schneidet, untertitelt und liefert fertige Clips.",
     url: "https://cleocuts.com",
     siteName: "CleoCuts",
+    locale: "de_DE",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "CleoCuts — World's first voice-controlled AI video editor",
-    description:
-      "Just say 'Cleo cut' when you mess up. AI does the rest.",
+    title: "CleoCuts – KI-Videoschnitt per Sprachbefehl",
+    description: "Sag „Cleo cut“, wenn du dich versprichst. Die KI macht den Rest.",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0b0a10",
 };
 
 export default function RootLayout({
@@ -39,10 +35,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="de" className="h-full antialiased">
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

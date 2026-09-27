@@ -119,7 +119,14 @@ class Job:
 
 
 def _db_path() -> str:
-    return os.environ.get("CLEO_JOB_DB", "/tmp/cleo_jobs.db")
+    env = os.environ.get("CLEO_JOB_DB")
+    if env:
+        return env
+    # Persistent volume (e.g. Railway mounted at /data) so jobs survive
+    # redeploys; /tmp is wiped on every restart.
+    if os.path.isdir("/data") and os.access("/data", os.W_OK):
+        return "/data/cleo_jobs.db"
+    return "/tmp/cleo_jobs.db"
 
 
 # Fields that hold structured (list/dict) data — JSON-encode on write,
@@ -248,9 +255,22 @@ class JobStore:
         """
         marked = 0
         for job in self.list_all():
+            src_ok = bool(job.normalized_path) and Path(job.normalized_path).exists()
             if job.status in ("processing", "pending"):
-                self.update(job.id, status="error", message=message,
-                            error="container_restart", progress=0.0)
+                if src_ok and job.segments:
+                    # Died while RENDERING: analysis + edits are intact,
+                    # send it back to review so the user can re-render.
+                    self.update(job.id, status="awaiting_review", progress=100.0,
+                                message="render_failed", error="container_restart")
+                else:
+                    self.update(job.id, status="error", message=message,
+                                error="container_restart", progress=0.0)
+                marked += 1
+            elif job.status == "awaiting_review" and not src_ok:
+                # Files are gone (old /tmp storage) — can't be edited.
+                self.update(job.id, status="error", error="files_expired",
+                            message="Die Dateien dieses Projekts sind abgelaufen. "
+                                    "Bitte lade das Video noch einmal hoch.")
                 marked += 1
         return marked
 
