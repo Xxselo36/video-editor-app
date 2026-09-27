@@ -246,6 +246,8 @@ def _transcribe_single(
 
     # Response is a pydantic model — convert to plain dict.
     data = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
+    from backend import costs
+    costs.record_groq(data.get("duration") or 0)
 
     top_words = data.get("words") or []
     segments = data.get("segments") or []

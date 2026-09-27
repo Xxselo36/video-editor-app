@@ -18,6 +18,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from backend import costs
+
 # Auto-load repo-root .env so direct imports of this module (not just
 # via FastAPI) pick up ANTHROPIC_API_KEY.
 try:
@@ -178,6 +180,7 @@ Empty corrections list is a valid answer.
             system=system,
             messages=[{"role": "user", "content": user_msg}],
         )
+        costs.record_claude(_MODEL_COMMAND_FIX, getattr(resp, "usage", None))
         text = "".join(
             getattr(b, "text", "") for b in (resp.content or [])
             if getattr(b, "type", None) == "text"
@@ -297,6 +300,7 @@ Respond with ONLY a JSON object in this exact shape:
             system=system,
             messages=[{"role": "user", "content": user_msg}],
         )
+        costs.record_claude(_MODEL_CLEANUP, getattr(resp, "usage", None))
         text = "".join(
             getattr(b, "text", "") for b in (resp.content or [])
             if getattr(b, "type", None) == "text"
@@ -403,6 +407,7 @@ within {int(min_seconds)}-{int(max_seconds)} seconds total per clip.
             system=system,
             messages=[{"role": "user", "content": user_msg}],
         )
+        costs.record_claude(_MODEL, getattr(resp, "usage", None))
         text = "".join(
             getattr(b, "text", "") for b in (resp.content or [])
             if getattr(b, "type", None) == "text"
@@ -468,6 +473,7 @@ Respond with ONLY a JSON object:
             system=system,
             messages=[{"role": "user", "content": full_transcript[:6000]}],
         )
+        costs.record_claude(_MODEL, getattr(resp, "usage", None))
         text = "".join(
             getattr(b, "text", "") for b in (resp.content or [])
             if getattr(b, "type", None) == "text"
