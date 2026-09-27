@@ -49,6 +49,42 @@ class Job:
     social_caption: str = ""
     social_hashtags: list[str] = field(default_factory=list)
     hook_clips: list[dict[str, Any]] = field(default_factory=list)
+    # Segment list the CURRENT preview.mp4 was built from, and a counter
+    # bumped on every successful rebuild. The editor maps the playhead
+    # through preview_segments and cache-busts the preview URL with
+    # preview_version, so after leaving and re-entering a job it shows
+    # the preview that is really on disk.
+    preview_segments: list[list[float]] = field(default_factory=list)
+    preview_version: int = 0
+    # Transcript phrases as last edited in review (text fixes, deleted
+    # lines). None until the user edits — an empty list means every line
+    # was deleted. GET /subtitles returns them so edits survive leaving
+    # the job.
+    edited_phrases: list[dict[str, Any]] | None = None
+    # Client revision of edited_phrases; older saves are ignored.
+    edited_phrases_rev: float = 0
+
+    def edit_segments(self) -> list[dict[str, Any]]:
+        """job.segments zipped with their per-segment effects.
+
+        This is the user's saved timeline (after /edit-segments), which
+        the editor must be seeded from — cut_ranges only describe the
+        automatic cuts from analysis.
+        """
+        effects = (self.settings or {}).get("segment_effects") or []
+        if len(effects) != len(self.segments):
+            effects = [{} for _ in self.segments]
+        out = []
+        for (s, e), eff in zip(self.segments, effects):
+            out.append({
+                "start": float(s),
+                "end": float(e),
+                "speed": eff.get("speed", 1.0),
+                "fadeIn": eff.get("fadeIn", 0.0),
+                "fadeOut": eff.get("fadeOut", 0.0),
+                "volume": eff.get("volume", 1.0),
+            })
+        return out
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -70,6 +106,15 @@ class Job:
             "duration": self.duration,
             "cut_ranges": self.cut_ranges,
             "scene_events": self.scene_events,
+            "edit_segments": self.edit_segments(),
+            # Jobs from before preview_segments existed: their preview
+            # was last rebuilt from job.segments, so that's the best guess.
+            "preview_segments": [
+                [float(s), float(e)]
+                for s, e in (self.preview_segments or self.segments)
+            ],
+            "preview_version": self.preview_version,
+            "caption_preset": (self.settings or {}).get("caption_preset"),
         }
 
 

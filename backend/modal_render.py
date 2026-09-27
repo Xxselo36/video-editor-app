@@ -122,6 +122,9 @@ def render_burn_concat(
         language=language,
         # More parallelism on Modal — we have dedicated CPU, not shared
         parallelism=8,
+        # render_only already merged tiny gaps (keeping per-segment
+        # effects aligned); don't merge again here.
+        merge_gap=0.0,
     )
 
     if not clip_outputs:

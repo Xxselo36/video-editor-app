@@ -28,6 +28,7 @@ import {
 import { VideoModal } from "@/components/VideoModal";
 import { downscaleVideo, shouldDownscale } from "@/lib/videoDownscale";
 import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
+import { trackSave, waitForSaves } from "@/lib/pendingSaves";
 import {
   uploadResumable,
   UPLOAD_STALL_MS,
@@ -209,7 +210,33 @@ type JobStatus = {
   duration?: number;
   cut_ranges?: CutRange[];
   scene_events?: SceneEvent[];
+  // The user's saved timeline (job.segments + effects). Seed the editor
+  // from this — cut_ranges only describe the automatic cuts.
+  edit_segments?: SavedSeg[];
+  // Segments the served preview.mp4 was built from + its version.
+  preview_segments?: [number, number][];
+  preview_version?: number;
+  caption_preset?: string | null;
 };
+
+type SavedSeg = {
+  start: number;
+  end: number;
+  speed?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  volume?: number;
+};
+
+// Transcript as returned by GET /subtitles: the user's saved edits when
+// present, otherwise sentences grouped from Whisper's fragments.
+function phrasesFromSubtitlesResponse(data: {
+  subtitles?: Subtitle[];
+  phrases?: Phrase[] | null;
+}): Phrase[] {
+  if (Array.isArray(data.phrases)) return data.phrases;
+  return buildPhrases(data.subtitles ?? []);
+}
 
 type SceneEvent = {
   type: "start" | "restart" | "keep" | "finish";
@@ -323,6 +350,8 @@ export default function Home() {
   const [uploadPct, setUploadPct] = useState(0);
   const [job, setJob] = useState<JobStatus | null>(null);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
+  // Opening a job from the dashboard (may wait for a last save).
+  const [resuming, setResuming] = useState(false);
   const [disabledCuts, setDisabledCuts] = useState<number[]>([]);
   const [smartcamEnabled, setSmartcamEnabled] = useState(false);
   const [smartcamFormat, setSmartcamFormat] = useState<"portrait" | "landscape">(
@@ -654,8 +683,7 @@ export default function Home() {
           );
           if (subRes.ok) {
             const data = await subRes.json();
-            const subs: Subtitle[] = data.subtitles ?? [];
-            setPhrases(buildPhrases(subs));
+            setPhrases(phrasesFromSubtitlesResponse(data));
             setPhase("reviewing");
             updateActiveJob({ phase: "reviewing" });
             notifyIfHidden(
@@ -671,8 +699,55 @@ export default function Home() {
     return () => clearInterval(id);
   }, [phase, job]);
 
+  // Transcript edits are saved (debounced) so they survive leaving the
+  // job; GET /subtitles hands them back as `phrases` on re-entry.
+  const phraseRevRef = useRef(0);
+  const phraseSaveRef = useRef<{
+    timer: ReturnType<typeof setTimeout> | null;
+    jobId: string;
+    phrases: Phrase[];
+  } | null>(null);
+  const sendPhrases = (jobId: string, list: Phrase[], unloading = false) => {
+    // Increasing revision: the server ignores a save older than the
+    // one it has, so out-of-order requests can't restore stale text.
+    phraseRevRef.current = Math.max(phraseRevRef.current + 1, Date.now());
+    const body = JSON.stringify({ phrases: list, rev: phraseRevRef.current });
+    const p = fetch(`${backendUrl()}/jobs/${jobId}/phrases`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      keepalive: unloading && body.length < 60_000,
+    }).catch(() => {});
+    trackSave(jobId, p);
+    return p;
+  };
+  const flushPhraseSave = (unloading = false) => {
+    const pend = phraseSaveRef.current;
+    if (!pend) return;
+    if (pend.timer) clearTimeout(pend.timer);
+    phraseSaveRef.current = null;
+    void sendPhrases(pend.jobId, pend.phrases, unloading);
+  };
+  const schedulePhraseSave = (jobId: string, list: Phrase[]) => {
+    const prev = phraseSaveRef.current;
+    if (prev?.timer) clearTimeout(prev.timer);
+    if (prev && prev.jobId !== jobId) void sendPhrases(prev.jobId, prev.phrases);
+    phraseSaveRef.current = {
+      jobId,
+      phrases: list,
+      timer: setTimeout(() => flushPhraseSave(), 800),
+    };
+  };
+  useEffect(() => {
+    const onHide = () => flushPhraseSave(true);
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const onApplyRender = async () => {
     if (!job) return;
+    flushPhraseSave();
     // Flatten phrases back to the subtitle shape the renderer expects.
     // One subtitle per phrase, spanning its original time range.
     const subtitles: Subtitle[] = phrases
@@ -712,6 +787,7 @@ export default function Home() {
   };
 
   const reset = () => {
+    flushPhraseSave();
     setFile(null);
     setJob(null);
     setPhrases([]);
@@ -786,11 +862,28 @@ export default function Home() {
           phase === "picker" ? "max-w-2xl" : "max-w-md"
         }`}
       >
+        {resuming && (
+          <div
+            className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-xs font-semibold"
+            style={{
+              background: "var(--surface-2)",
+              color: "var(--text-strong)",
+              border: "1px solid var(--border)",
+              boxShadow: "var(--shadow-md)",
+            }}
+          >
+            Opening…
+          </div>
+        )}
         {phase === "picker" && (
           <PickerScreen
             onPick={pickPreset}
             onResumeJob={async (jobId) => {
+              setResuming(true);
               try {
+                // A save from the last visit may still be in flight —
+                // load the state the user actually left.
+                await waitForSaves(jobId, 8_000);
                 const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
                 if (!r.ok) return;
                 const s: JobStatus = await r.json();
@@ -801,8 +894,11 @@ export default function Home() {
                   );
                   if (subsRes.ok) {
                     const sd = await subsRes.json();
-                    setPhrases(buildPhrases(sd.subtitles ?? []));
+                    setPhrases(phrasesFromSubtitlesResponse(sd));
                   }
+                  // Show the caption style this job renders with, not
+                  // whatever was last picked in this tab.
+                  if (s.caption_preset) setCaptionPreset(s.caption_preset);
                   setPhase("reviewing");
                 } else if (s.status === "done") {
                   setPhase("done");
@@ -811,6 +907,8 @@ export default function Home() {
                 }
               } catch {
                 /* ignore */
+              } finally {
+                setResuming(false);
               }
             }}
           />
@@ -842,7 +940,11 @@ export default function Home() {
 
         {phase === "reviewing" && job && (
           <ReviewScreen
+            key={job.id}
             jobId={job.id}
+            savedSegments={job.edit_segments ?? []}
+            previewSegments={job.preview_segments ?? []}
+            previewVersion={job.preview_version ?? 0}
             phrases={phrases}
             captionPreset={captionPreset}
             audioWarnings={job.audio_warnings ?? []}
@@ -869,7 +971,10 @@ export default function Home() {
                 // ignore
               }
             }}
-            onChange={setPhrases}
+            onChange={(next) => {
+              setPhrases(next);
+              schedulePhraseSave(job.id, next);
+            }}
             onApply={onApplyRender}
             onBack={reset}
           />
@@ -2190,6 +2295,9 @@ function DoneScreen({
 
 function ReviewScreen({
   jobId,
+  savedSegments,
+  previewSegments,
+  previewVersion,
   phrases,
   captionPreset,
   audioWarnings,
@@ -2204,6 +2312,9 @@ function ReviewScreen({
   onBack,
 }: {
   jobId: string;
+  savedSegments: SavedSeg[];
+  previewSegments: [number, number][];
+  previewVersion: number;
   phrases: Phrase[];
   captionPreset: string;
   audioWarnings: string[];
@@ -2262,7 +2373,9 @@ function ReviewScreen({
   // with what's actually playing, NOT with the user's in-progress
   // edits — otherwise the playhead jumps around wildly while the
   // rebuild is still pending.
-  const [videoSegments, setVideoSegments] = useState<[number, number][]>([]);
+  const [videoSegments, setVideoSegments] = useState<[number, number][]>(
+    () => previewSegments,
+  );
   useEffect(() => {
     if (videoSegments.length === 0 && keptSegments.length > 0) {
       setVideoSegments(keptSegments);
@@ -2296,7 +2409,26 @@ function ReviewScreen({
     fadeOut?: number;
     volume?: number;
   };
-  const [editSegs, setEditSegs] = useState<EditableSeg[]>([]);
+  // Seeded from the user's SAVED timeline (earlier visits included);
+  // only a job that was never edited falls back to the automatic cuts.
+  const [editSegs, setEditSegs] = useState<EditableSeg[]>(() =>
+    savedSegments.map((s, i) => ({
+      id: `seg-${i}-${s.start.toFixed(3)}`,
+      start: s.start,
+      end: s.end,
+      speed: s.speed,
+      fadeIn: s.fadeIn,
+      fadeOut: s.fadeOut,
+      volume: s.volume,
+    })),
+  );
+  // "retrying": transient failure, the edit is re-sent. "failed": the
+  // server refused it for good (job gone / no longer in review).
+  const [saveError, setSaveError] = useState<"retrying" | "failed" | null>(null);
+  // Set when the editor unmounts: nothing may re-queue or retry after
+  // that — a late retry would overwrite the edit flushed on leave.
+  const closedRef = useRef(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "timeline" | "transcript" | "style"
@@ -2327,15 +2459,29 @@ function ReviewScreen({
   // back to the start of the clip.
   const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRebuildRef = useRef<EditableSeg[] | null>(null);
+  const inflightRef = useRef<Promise<void> | null>(null);
   const swapWhenPausedRef = useRef(false);
-  const pendingSwapSegsRef = useRef<[number, number][] | null>(null);
+  const pendingSwapRef = useRef<{ segs: [number, number][]; version: number } | null>(null);
 
-  const swapPreviewSrc = () => {
+  const editUrl = `${backendUrl()}/jobs/${jobId}/edit-segments`;
+  const toPayload = (segs: EditableSeg[]) =>
+    segs
+      .filter((s) => !s.disabled && s.end - s.start > 0.05)
+      .map((s) => ({
+        start: s.start,
+        end: s.end,
+        speed: s.speed,
+        fadeIn: s.fadeIn,
+        fadeOut: s.fadeOut,
+        volume: s.volume,
+      }));
+
+  const swapPreviewSrc = (version: number) => {
     const v = videoRef.current;
     if (!v) return;
     const base = `${backendUrl()}/jobs/${jobId}/preview-video`;
     const wasTime = v.currentTime;
-    v.src = `${base}?v=${Date.now()}`;
+    v.src = `${base}?v=${version}`;
     const restore = () => {
       v.removeEventListener("loadedmetadata", restore);
       try {
@@ -2348,44 +2494,145 @@ function ReviewScreen({
     v.addEventListener("loadedmetadata", restore, { once: true });
   };
 
-  const doRebuild = async () => {
+  // Switch the player to a rebuilt preview together with the segment
+  // list it was built from (the server's, not ours), so the playhead
+  // mapping always matches the file that is playing.
+  const applyPreview = (segs: [number, number][], version: number) => {
+    const v = videoRef.current;
+    if (v && v.paused) {
+      setVideoSegments(segs);
+      swapPreviewSrc(version);
+    } else {
+      // Defer the src swap until the user pauses — we DO NOT
+      // interrupt playback in flight. The pause listener below
+      // performs the swap when they stop.
+      pendingSwapRef.current = { segs, version };
+      swapWhenPausedRef.current = true;
+    }
+  };
+
+  const scheduleRebuild = (delay: number) => {
+    if (closedRef.current) return;
+    if (rebuildTimerRef.current) clearTimeout(rebuildTimerRef.current);
+    rebuildTimerRef.current = setTimeout(() => {
+      rebuildTimerRef.current = null;
+      void doRebuild();
+    }, delay);
+  };
+
+  // One save at a time, always sending the latest edit (with effects —
+  // sending only start/end used to reset speed/volume/fades on every
+  // autosave). A failed save stays pending and is retried.
+  const doRebuild = async (): Promise<void> => {
+    while (inflightRef.current) await inflightRef.current;
     const next = pendingRebuildRef.current;
     if (!next) return;
     pendingRebuildRef.current = null;
-    const active = next
-      .filter((s) => !s.disabled && s.end - s.start > 0.05)
-      .map((s) => ({ start: s.start, end: s.end }));
+    const active = toPayload(next);
     if (active.length === 0) return;
-    setEditSaving(true);
-    try {
-      const r = await fetch(`${backendUrl()}/jobs/${jobId}/edit-segments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ segments: active }),
-      });
-      if (r.ok) {
-        const v = videoRef.current;
-        const nextVideoSegs: [number, number][] = active.map((s) => [
-          s.start,
-          s.end,
-        ]);
-        if (v && v.paused) {
-          setVideoSegments(nextVideoSegs);
-          swapPreviewSrc();
-        } else {
-          // Defer the src swap until the user pauses — we DO NOT
-          // interrupt playback in flight. The pause listener below
-          // performs the swap when they stop.
-          pendingSwapSegsRef.current = nextVideoSegs;
-          swapWhenPausedRef.current = true;
+    const run = (async () => {
+      setEditSaving(true);
+      try {
+        const r = await fetch(editUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ segments: active }),
+        });
+        if ([400, 404, 409, 410].includes(r.status)) {
+          // Permanent: retrying can't help.
+          setSaveError("failed");
+          return;
         }
+        if (!r.ok) throw new Error(`save failed (${r.status})`);
+        const data: JobStatus & { preview_ok?: boolean } = await r.json();
+        setSaveError(null);
+        if (data.preview_ok && data.preview_segments && !closedRef.current) {
+          applyPreview(data.preview_segments, data.preview_version ?? Date.now());
+        }
+      } catch {
+        if (closedRef.current) return;
+        // Keep the edit unless a newer one replaced it, and retry.
+        if (!pendingRebuildRef.current) pendingRebuildRef.current = next;
+        setSaveError("retrying");
+        scheduleRebuild(3000);
+      } finally {
+        setEditSaving(false);
       }
-    } catch {
-      /* transient — the next edit will retry */
+    })();
+    inflightRef.current = run;
+    trackSave(jobId, run);
+    try {
+      await run;
     } finally {
-      setEditSaving(false);
+      if (inflightRef.current === run) inflightRef.current = null;
     }
   };
+
+  // Leaving the editor (in-app navigation, tab close, reload) must not
+  // drop an edit that is still waiting for its debounce.
+  const flushOnLeave = (unloading: boolean) => {
+    if (rebuildTimerRef.current) {
+      clearTimeout(rebuildTimerRef.current);
+      rebuildTimerRef.current = null;
+    }
+    const next = pendingRebuildRef.current;
+    if (!next) return;
+    pendingRebuildRef.current = null;
+    const active = toPayload(next);
+    if (active.length === 0) return;
+    const body = JSON.stringify({ segments: active });
+    const p = fetch(editUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      // keepalive only while the page unloads (in-app navigation keeps
+      // the page alive), and only under the browser's 64 KB cap.
+      keepalive: unloading && body.length < 60_000,
+    }).catch(() => {});
+    trackSave(jobId, p);
+  };
+  useEffect(() => {
+    // Re-armed on (re)mount — React dev mode mounts effects twice.
+    closedRef.current = false;
+    const onHide = () => flushOnLeave(true);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      closedRef.current = true;
+      flushOnLeave(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reopened while the last save's preview was still rendering: the
+  // saved edit is newer than the preview we loaded. Poll until the
+  // server has the matching preview, then switch to it.
+  useEffect(() => {
+    const key = (xs: [number, number][]) =>
+      JSON.stringify(xs.map(([a, b]) => [+a.toFixed(3), +b.toFixed(3)]));
+    const want = key(savedSegments.map((x) => [x.start, x.end]));
+    if (!savedSegments.length || key(previewSegments) === want) return;
+    let tries = 0;
+    const id = setInterval(async () => {
+      if (closedRef.current || ++tries > 45) return clearInterval(id);
+      try {
+        const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
+        if (!r.ok) return;
+        const j: JobStatus = await r.json();
+        if ((j.preview_version ?? 0) > previewVersion && j.preview_segments) {
+          clearInterval(id);
+          // Only if the user hasn't produced a newer preview meanwhile.
+          if (!inflightRef.current && !pendingRebuildRef.current) {
+            applyPreview(j.preview_segments, j.preview_version ?? Date.now());
+          }
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, 2000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -2393,11 +2640,12 @@ function ReviewScreen({
     const onPause = () => {
       if (swapWhenPausedRef.current) {
         swapWhenPausedRef.current = false;
-        if (pendingSwapSegsRef.current) {
-          setVideoSegments(pendingSwapSegsRef.current);
-          pendingSwapSegsRef.current = null;
+        const sw = pendingSwapRef.current;
+        pendingSwapRef.current = null;
+        if (sw) {
+          setVideoSegments(sw.segs);
+          swapPreviewSrc(sw.version);
         }
-        swapPreviewSrc();
       }
     };
     v.addEventListener("pause", onPause);
@@ -2408,21 +2656,18 @@ function ReviewScreen({
   const commitEditSegs = (next: EditableSeg[]) => {
     setEditSegs(next);
     pendingRebuildRef.current = next;
-    if (rebuildTimerRef.current) clearTimeout(rebuildTimerRef.current);
-    rebuildTimerRef.current = setTimeout(() => {
-      rebuildTimerRef.current = null;
-      void doRebuild();
-    }, 800);
+    scheduleRebuild(800);
   };
 
-  // Video runs on the RAW source, so we match phrases via their
-  // original_start / original_end fields.
+  // The preview follows the user's edited timeline, so phrases are
+  // matched on SOURCE time (original_start / original_end) against the
+  // playhead mapped back through the segments of the playing preview.
   useEffect(() => {
     const idx = phrases.findIndex(
-      (p) => currentTime >= p.start && currentTime <= p.end,
+      (p) => originalTime >= p.original_start && originalTime <= p.original_end,
     );
     setActiveIdx(idx === -1 ? null : idx);
-  }, [currentTime, phrases]);
+  }, [originalTime, phrases]);
 
   // Keep the active phrase visible in the transcript container. Uses
   // getBoundingClientRect (not offsetTop) so it works regardless of
@@ -2454,9 +2699,34 @@ function ReviewScreen({
     onChange(phrases.filter((_, i) => i !== idx));
   };
 
+  // Source time → time in the playing preview (null if cut out).
+  const previewTimeFor = (t: number): number | null => {
+    const src = videoSegments.length ? videoSegments : keptSegments;
+    let acc = 0;
+    for (const [s, e] of src) {
+      if (t >= s && t <= e) return acc + (t - s);
+      acc += e - s;
+    }
+    return null;
+  };
   const seekToPhrase = (p: Phrase) => {
     if (!videoRef.current) return;
-    videoRef.current.currentTime = p.start;
+    // A phrase may start inside a removed stretch — jump to its first
+    // moment that is still in the cut.
+    let t = previewTimeFor(p.original_start);
+    if (t === null) {
+      const src = videoSegments.length ? videoSegments : keptSegments;
+      let acc = 0;
+      for (const [s, e] of src) {
+        if (s >= p.original_start && s <= p.original_end) {
+          t = acc;
+          break;
+        }
+        acc += e - s;
+      }
+    }
+    if (t === null) return;
+    videoRef.current.currentTime = t;
     videoRef.current.play().catch(() => {});
   };
 
@@ -2496,7 +2766,7 @@ function ReviewScreen({
       <div className="relative overflow-hidden rounded-xl bg-[var(--surface-1)]">
         <video
           ref={videoRef}
-          src={`${backendUrl()}/jobs/${jobId}/preview-video`}
+          src={`${backendUrl()}/jobs/${jobId}/preview-video?v=${previewVersion}`}
           controls
           playsInline
           preload="auto"
@@ -2583,20 +2853,16 @@ function ReviewScreen({
           playhead={originalTime}
           open={true}
           saving={editSaving}
+          saveError={saveError}
           onToggleOpen={() => {}}
           onCommit={(next) => void commitEditSegs(next)}
           onSeekOriginal={(t) => {
-            // t comes in on the ORIGINAL timeline; map into the
-            // cut-timeline the preview video plays on.
-            let acc = 0;
-            for (const s of editSegs.filter((x) => !x.disabled)) {
-              if (t >= s.start && t <= s.end) {
-                if (videoRef.current) {
-                  videoRef.current.currentTime = acc + (t - s.start);
-                }
-                return;
-              }
-              acc += s.end - s.start;
+            // t comes in on the ORIGINAL timeline; map it through the
+            // segments of the preview that is actually playing (an edit
+            // may not be rebuilt into it yet).
+            const pt = previewTimeFor(t);
+            if (pt !== null && videoRef.current) {
+              videoRef.current.currentTime = pt;
             }
           }}
           getVideoTime={() => originalTime}
@@ -2752,32 +3018,33 @@ function ReviewScreen({
 
       <button
         onClick={async () => {
-          // Push the user's edited segments to the backend before we
-          // hit /render. During editing we kept everything local for
-          // instant feedback; render needs the segment list on the
-          // server. Fire-and-forget the effects too if the user
-          // touched them.
+          // Push the user's edited segments (with effects) to the
+          // backend before we hit /render — the render reads them from
+          // the job. Cancel the pending autosave and wait for one in
+          // flight first, so neither can land after this save.
+          if (rebuildTimerRef.current) {
+            clearTimeout(rebuildTimerRef.current);
+            rebuildTimerRef.current = null;
+          }
+          pendingRebuildRef.current = null;
+          while (inflightRef.current) await inflightRef.current;
+          setApplyError(null);
           setEditSaving(true);
           try {
-            const active = editSegs
-              .filter((s) => !s.disabled && s.end - s.start > 0.05)
-              .map((s) => ({
-                start: s.start,
-                end: s.end,
-                speed: s.speed,
-                fadeIn: s.fadeIn,
-                fadeOut: s.fadeOut,
-                volume: s.volume,
-              }));
+            const active = toPayload(editSegs);
             if (active.length > 0) {
-              await fetch(`${backendUrl()}/jobs/${jobId}/edit-segments`, {
+              const r = await fetch(editUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ segments: active }),
               });
+              if (!r.ok) throw new Error(`save failed (${r.status})`);
             }
           } catch {
-            /* non-fatal — backend falls back to the pre-edit cuts */
+            // Never render an older cut than the one on screen.
+            setApplyError("Couldn't save your edits — check your connection and try again.");
+            pendingRebuildRef.current = editSegs;
+            return;
           } finally {
             setEditSaving(false);
           }
@@ -2788,6 +3055,11 @@ function ReviewScreen({
       >
         {editSaving ? "Preparing…" : "Apply & render"}
       </button>
+      {applyError && (
+        <div className="text-center text-xs" style={{ color: "var(--danger)" }}>
+          {applyError}
+        </div>
+      )}
     </div>
   );
 }
@@ -3708,6 +3980,9 @@ type EditorSeg = {
 };
 
 const TIMELINE_DEFAULT_PPS = 40; // px per second on open
+// Trimming snaps onto a neighbouring clip's footage when it would leave
+// less than this much of the removed gap between them.
+const TRIM_SNAP_S = 0.3;
 const TIMELINE_MAX_PPS = 400; // 0.1s = 40px
 
 // m:ss.t — for the playhead readout and sub-second ruler labels.
@@ -3814,6 +4089,7 @@ function TimelineEditor({
   playhead,
   open,
   saving,
+  saveError,
   onToggleOpen,
   onCommit,
   onSeekOriginal,
@@ -3825,6 +4101,7 @@ function TimelineEditor({
   playhead: number;
   open: boolean;
   saving: boolean;
+  saveError?: "retrying" | "failed" | null;
   onToggleOpen: () => void;
   onCommit: (next: EditorSeg[]) => void;
   onSeekOriginal: (t: number) => void;
@@ -3901,6 +4178,17 @@ function TimelineEditor({
     // move's result) so offsets don't accumulate.
     const startSegs = segments.map((s) => ({ ...s }));
     dragPreviewRef.current = startSegs;
+    // Growing a clip brings back removed source footage, but never
+    // footage another clip already uses — that would play it twice.
+    const bounds = (() => {
+      const self = startSegs.find((x) => x.id === draggingId);
+      const others = startSegs.filter((x) => x.id !== draggingId && !x.disabled);
+      if (!self) return { prev: 0, next: duration };
+      return {
+        prev: Math.max(0, ...others.filter((o) => o.end <= self.start + 1e-6).map((o) => o.end)),
+        next: Math.min(duration, ...others.filter((o) => o.start >= self.end - 1e-6).map((o) => o.start)),
+      };
+    })();
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
       // Touch: keep the page / strip from scrolling under the finger.
@@ -3908,7 +4196,9 @@ function TimelineEditor({
       const clientX =
         (e as TouchEvent).touches?.[0]?.clientX ?? (e as MouseEvent).clientX;
       const relX = clientX - stripRect.left;
-      const seconds = Math.max(0, relX / pxPerSec);
+      // May be negative: dragging the first clip's start handle past the
+      // strip's left edge brings back footage before it.
+      const seconds = relX / pxPerSec;
 
       let acc = 0;
       const next = startSegs.map((s) => {
@@ -3917,11 +4207,15 @@ function TimelineEditor({
         if (s.id === draggingId) {
           if (dragMode === "start") {
             const target = s.start + (seconds - acc);
-            const clamped = Math.min(s.end - 0.1, Math.max(0, target));
+            let clamped = Math.max(bounds.prev, Math.min(s.end - 0.1, target));
+            // Snap onto the neighbouring clip's footage instead of
+            // leaving a sliver of the removed gap.
+            if (clamped < s.start && clamped - bounds.prev < TRIM_SNAP_S) clamped = bounds.prev;
             return { ...s, start: clamped };
           } else if (dragMode === "end") {
             const target = s.start + Math.max(0.1, seconds - acc);
-            const clamped = Math.min(duration, Math.max(s.start + 0.1, target));
+            let clamped = Math.min(bounds.next, Math.max(s.start + 0.1, target));
+            if (clamped > s.end && bounds.next - clamped < TRIM_SNAP_S) clamped = bounds.next;
             return { ...s, end: clamped };
           }
         }
@@ -3938,7 +4232,8 @@ function TimelineEditor({
       setDraggingId(null);
       setDragMode(null);
       if (final) {
-        onCommit(final);
+        // Through commit() so ⌘Z can undo a trim.
+        commit(final);
       }
       dragPreviewRef.current = null;
     };
@@ -4229,6 +4524,19 @@ function TimelineEditor({
                   style={{ background: "var(--brand)", animation: "soft-pulse 1.2s ease-in-out infinite" }}
                 />
                 saving
+              </span>
+            )}
+            {saveError && !saving && (
+              <span
+                className="rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal"
+                style={{ background: "rgba(239,107,87,0.14)", color: "var(--danger)" }}
+                title={
+                  saveError === "failed"
+                    ? "The server no longer accepts changes for this video (it may be rendering or expired)."
+                    : "Your last change hasn't reached the server yet. Retrying…"
+                }
+              >
+                {saveError === "failed" ? "not saved" : "not saved · retrying"}
               </span>
             )}
           </div>

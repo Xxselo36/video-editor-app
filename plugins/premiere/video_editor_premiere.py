@@ -2013,13 +2013,20 @@ def _merge_tiny_segments(segments, min_gap=0.3):
     cheaper to encode them as ONE 2.2s segment (keeping the 0.2s
     original audio) than as two 1s segments. Reduces encode count
     ~30-50% on typical content without user-visible change.
+
+    Only merges a segment that starts AFTER the previous one ends (a
+    small forward gap). Overlapping or earlier-starting segments — e.g.
+    clips the user reordered in the web editor — are kept as-is;
+    merging those used to produce truncated or negative ranges that
+    silently dropped clips from the render.
     """
     if not segments:
         return []
     merged = [list(segments[0])]
     for s, e in segments[1:]:
-        if s - merged[-1][1] <= min_gap:
-            merged[-1][1] = e
+        gap = s - merged[-1][1]
+        if -1e-6 <= gap <= min_gap:
+            merged[-1][1] = max(merged[-1][1], e)
         else:
             merged.append([s, e])
     return [(s, e) for s, e in merged]
@@ -2028,7 +2035,8 @@ def _merge_tiny_segments(segments, min_gap=0.3):
 def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                      output_dir, cut_style="balanced", cancel_check=None,
                      sub_pos=None, sub_size=None, clip_name_prefix=None,
-                     language=None, progress_cb=None, parallelism=3):
+                     language=None, progress_cb=None, parallelism=3,
+                     merge_gap=0.3):
     """Per-Segment MoviePy render mit fresh VideoFileClip pro Segment.
 
     Returns list of (file_path, duration) tuples in timeline order.
@@ -2051,7 +2059,9 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
     import threading
 
     original_count = len(segments)
-    segments = _merge_tiny_segments(segments, min_gap=0.3)
+    # merge_gap=0: the caller already merged (web backend, which must
+    # keep clip boundaries in sync with audio + per-segment effects).
+    segments = _merge_tiny_segments(segments, min_gap=merge_gap)
     n_segments = len(segments)
     if n_segments < original_count:
         print(f"[multi-clip] merged {original_count} → {n_segments} "

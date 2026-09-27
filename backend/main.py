@@ -234,6 +234,8 @@ def _run_analyze(job_id: str) -> None:
                 normalized_path=res["normalized_path"],
                 preview_path=res["preview_path"],
                 segments=res["segments"],
+                preview_segments=[list(s) for s in res["segments"]],
+                preview_version=1,
                 subtitles=res["subtitles"],
                 duration=res.get("duration", 0.0),
                 cut_ranges=res.get("cut_ranges", []),
@@ -519,7 +521,12 @@ def get_subtitles(job_id: str):
         raise HTTPException(404, "job not found")
     if job.status != "awaiting_review":
         raise HTTPException(409, f"job not ready for review (status={job.status})")
-    return {"subtitles": job.subtitles, "language": job.language}
+    return {
+        "subtitles": job.subtitles,
+        "language": job.language,
+        # Transcript as edited in review, if the user changed anything.
+        "phrases": job.edited_phrases,
+    }
 
 
 @app.get("/jobs/{job_id}/preview-video")
@@ -540,7 +547,9 @@ def preview_video(job_id: str):
     return FileResponse(
         path=path,
         media_type="video/mp4",
-        headers={"Accept-Ranges": "bytes"},
+        # The file is rebuilt in place on every edit; make the browser
+        # revalidate instead of reusing a stale copy on re-entry.
+        headers={"Accept-Ranges": "bytes", "Cache-Control": "no-cache"},
     )
 
 
@@ -565,17 +574,82 @@ def source_video(job_id: str):
     )
 
 
+# Per-job ordering for timeline saves. Each /edit-segments request gets
+# a sequence number and stores its segments under _EDIT_GUARD, so the
+# newest request always wins even when FastAPI runs several in its
+# threadpool. Preview rebuilds are serialized per job and skipped when
+# a newer request has already arrived (it will rebuild instead).
+_EDIT_GUARD = threading.Lock()
+_EDIT_SEQ: dict[str, int] = {}
+_PREVIEW_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _preview_lock(job_id: str) -> threading.Lock:
+    with _EDIT_GUARD:
+        lock = _PREVIEW_LOCKS.get(job_id)
+        if lock is None:
+            lock = _PREVIEW_LOCKS[job_id] = threading.Lock()
+        return lock
+
+
+def _effect(value, default: float, lo: float, hi: float) -> float:
+    """Parse one effect value. Only a missing value means "default" —
+    `x or default` used to turn volume 0 (mute) into 1.0."""
+    if value is None or value == "":
+        return default
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if v != v:  # NaN
+        return default
+    return max(lo, min(hi, v))
+
+
+def _rebuild_preview(job_id: str, normalized_path: str, segments) -> None:
+    """Render the cut preview to a temp file and swap it in atomically,
+    then record which segments it shows. Raises on ffmpeg failure; the
+    old preview stays untouched in that case."""
+    from backend.pipeline import _ffmpeg_cuts_preview
+    job_dir = Path(_WORK_ROOT) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    final_path = job_dir / "preview.mp4"
+    tmp_path = job_dir / f"preview.{threading.get_ident()}.tmp.mp4"
+    try:
+        _ffmpeg_cuts_preview(normalized_path, segments, str(tmp_path))
+        os.replace(tmp_path, final_path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+    cur = store.get(job_id)
+    store.update(
+        job_id,
+        preview_path=str(final_path),
+        preview_segments=[[float(s), float(e)] for s, e in segments],
+        preview_version=(cur.preview_version if cur else 0) + 1,
+    )
+
+
 @app.post("/jobs/{job_id}/edit-segments")
 def post_edit_segments(job_id: str, payload: dict):
     """Accept a user-edited segment list and rebuild the preview video.
 
-    Frontend sends the raw segment list after the user has trimmed,
-    split, deleted, or reordered blocks in the timeline editor. We
-    validate + sort + clamp against the normalized video duration,
-    then re-render the preview MP4 so the player reflects the edit.
+    Frontend sends the segment list (with per-segment effects) after the
+    user has trimmed, split, deleted, reordered or changed effects in the
+    timeline editor. We clamp against the normalized video duration,
+    keep the user's ORDER, store segments + effects, then re-render the
+    preview MP4 so the player reflects the edit.
 
     Payload:
-        {"segments": [{"start": float, "end": float}, ...]}
+        {"segments": [{"start", "end", "speed"?, "fadeIn"?, "fadeOut"?,
+                       "volume"?}, ...]}
+
+    Response: the job dict plus
+        preview_ok  – the preview now shows exactly these segments
+        superseded  – a newer save arrived; its response is authoritative
     """
     job = store.get(job_id)
     if job is None:
@@ -595,10 +669,12 @@ def post_edit_segments(job_id: str, payload: dict):
     cleaned: list[tuple[float, float]] = []
     effects: list[dict] = []
     for s in raw:
+        if not isinstance(s, dict):
+            continue
         try:
             ss = max(0.0, float(s.get("start") or 0))
             ee = float(s.get("end") or 0)
-        except Exception:
+        except (TypeError, ValueError):
             continue
         if dur > 0:
             ee = min(ee, dur)
@@ -607,32 +683,98 @@ def post_edit_segments(job_id: str, payload: dict):
         cleaned.append((round(ss, 3), round(ee, 3)))
         # Per-segment effects. Clamped to safe ranges — render step
         # applies these via ffmpeg atempo / fade / volume filters.
-        eff = {
-            "speed": max(0.25, min(4.0, float(s.get("speed") or 1.0))),
-            "fadeIn": max(0.0, min(2.0, float(s.get("fadeIn") or 0.0))),
-            "fadeOut": max(0.0, min(2.0, float(s.get("fadeOut") or 0.0))),
-            "volume": max(0.0, min(2.5, float(s.get("volume") or 1.0))),
-        }
-        effects.append(eff)
+        effects.append({
+            "speed": _effect(s.get("speed"), 1.0, 0.25, 4.0),
+            "fadeIn": _effect(s.get("fadeIn"), 0.0, 0.0, 2.0),
+            "fadeOut": _effect(s.get("fadeOut"), 0.0, 0.0, 2.0),
+            "volume": _effect(s.get("volume"), 1.0, 0.0, 2.5),
+        })
     if not cleaned:
         raise HTTPException(400, "no valid segments after cleaning")
 
-    # Preserve the ORDER the user chose (drag-to-reorder is supported).
-    new_segments = [list(seg) for seg in cleaned]
-    new_settings = dict(job.settings or {})
-    new_settings["segment_effects"] = effects
-    store.update(job_id, segments=new_segments, settings=new_settings)
+    # Store under the guard so the request with the highest sequence
+    # number is also the one whose segments end up in the store.
+    with _EDIT_GUARD:
+        seq = _EDIT_SEQ.get(job_id, 0) + 1
+        _EDIT_SEQ[job_id] = seq
+        cur = store.get(job_id) or job
+        new_settings = dict(cur.settings or {})
+        new_settings["segment_effects"] = effects
+        extra = {}
+        if not cur.preview_segments:
+            # Job from before preview_segments existed: its preview.mp4
+            # was built from the segments we are about to replace.
+            extra["preview_segments"] = [[float(a), float(b)] for a, b in cur.segments]
+        store.update(
+            job_id,
+            segments=[list(seg) for seg in cleaned],
+            settings=new_settings,
+            **extra,
+        )
 
-    # Rebuild preview so the player reflects the edited timeline.
+    preview_ok = False
+    superseded = False
+    with _preview_lock(job_id):
+        with _EDIT_GUARD:
+            superseded = _EDIT_SEQ.get(job_id) != seq
+        if not superseded:
+            try:
+                _rebuild_preview(job_id, job.normalized_path, cleaned)
+                preview_ok = True
+            except Exception as e:
+                print(f"[edit-segments] preview rebuild failed: {e}", flush=True)
+
+    out = store.get(job_id).to_dict()
+    out["preview_ok"] = preview_ok
+    out["superseded"] = superseded
+    return out
+
+
+@app.post("/jobs/{job_id}/phrases")
+def post_phrases(job_id: str, payload: dict):
+    """Save the review transcript (edited text, deleted lines) so it
+    survives leaving and re-entering the job. GET /subtitles returns it
+    as `phrases`. The render still takes the subtitles the client sends."""
+    job = store.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.status != "awaiting_review":
+        raise HTTPException(
+            409, f"job not in review state (status={job.status})"
+        )
+    raw = payload.get("phrases")
+    if not isinstance(raw, list) or len(raw) > 20000:
+        raise HTTPException(400, "phrases must be a list")
+    cleaned: list[dict] = []
+    for p in raw:
+        if not isinstance(p, dict):
+            continue
+        try:
+            item = {
+                "start": float(p.get("start") or 0),
+                "end": float(p.get("end") or 0),
+                "original_start": float(p.get("original_start") or 0),
+                "original_end": float(p.get("original_end") or 0),
+                "confidence": float(
+                    1.0 if p.get("confidence") is None else p.get("confidence")
+                ),
+                "text": str(p.get("text") or "")[:2000],
+            }
+        except (TypeError, ValueError):
+            continue
+        cleaned.append(item)
+    # Saves can arrive out of order (slow network, flush on leave while
+    # a debounced save is still in flight): keep the newest revision.
     try:
-        preview_path = str(Path(_WORK_ROOT) / job_id / "preview.mp4")
-        from backend.pipeline import _ffmpeg_cuts_preview
-        _ffmpeg_cuts_preview(job.normalized_path, cleaned, preview_path)
-        store.update(job_id, preview_path=preview_path)
-    except Exception as e:
-        print(f"[edit-segments] preview rebuild failed: {e}", flush=True)
-
-    return store.get(job_id).to_dict()
+        rev = float(payload.get("rev") or 0)
+    except (TypeError, ValueError):
+        rev = 0.0
+    with _EDIT_GUARD:
+        cur = store.get(job_id)
+        if cur is not None and rev and rev < (cur.edited_phrases_rev or 0):
+            return {"ok": True, "count": len(cleaned), "stale": True}
+        store.update(job_id, edited_phrases=cleaned, edited_phrases_rev=rev)
+    return {"ok": True, "count": len(cleaned)}
 
 
 @app.post("/jobs/{job_id}/recompute-scenes")
@@ -724,12 +866,18 @@ def post_recompute_scenes(job_id: str, payload: dict):
         ],
     )
 
+    # Segment count may have changed, so per-segment effects no longer
+    # line up with it — reset them rather than apply them to wrong clips.
+    if len(new_segments) != len(base_segments):
+        cur = store.get(job_id)
+        settings = dict((cur.settings if cur else job.settings) or {})
+        settings.pop("segment_effects", None)
+        store.update(job_id, settings=settings)
+
     # Rebuild the preview video so the review UI reflects the new cuts.
     try:
-        preview_path = str(Path(_WORK_ROOT) / job_id / "preview.mp4")
-        from backend.pipeline import _ffmpeg_cuts_preview
-        _ffmpeg_cuts_preview(job.normalized_path, new_segments, preview_path)
-        store.update(job_id, preview_path=preview_path)
+        with _preview_lock(job_id):
+            _rebuild_preview(job_id, job.normalized_path, new_segments)
     except Exception as e:
         print(f"[recompute] preview rebuild failed: {e}", flush=True)
 
