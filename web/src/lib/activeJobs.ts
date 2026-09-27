@@ -44,6 +44,9 @@ export type ActiveJobV2 = {
   captionPreset: string;
   // Client-side upload progress 0-100. Only used during 'uploading' phase.
   uploadPct?: number;
+  // Last time the uploading tab reported progress (ms epoch). Lets
+  // other tabs / a reloaded page tell a live upload from a dead one.
+  lastProgressAt?: number;
   // Populated when the upload or a later phase fails. Card renders a
   // retry button instead of the normal progress bar when set.
   error?: string;
@@ -91,6 +94,32 @@ export function updateActiveJob(
 export function removeActiveJob(jobId: string): void {
   const jobs = getActiveJobs().filter((j) => j.jobId !== jobId);
   saveActiveJobs(jobs);
+}
+
+// Uploads running in THIS page. Module state, so it is empty again
+// after a reload — which is exactly when an 'uploading' card from
+// localStorage has lost its XHR and can never finish.
+export const liveUploads = new Set<string>();
+
+// Turn 'uploading' cards whose upload no longer exists into error
+// cards (with "Try again"), instead of leaving them frozen at their
+// last percentage forever. A card is dead when this page doesn't own
+// it and no other tab has reported progress for `idleMs`.
+export function markStaleUploads(idleMs = 20_000): void {
+  const now = Date.now();
+  const jobs = getActiveJobs();
+  let changed = false;
+  const next = jobs.map((j) => {
+    if (j.phase !== "uploading" || j.error || liveUploads.has(j.jobId)) return j;
+    if (now - (j.lastProgressAt ?? j.timestamp) < idleMs) return j;
+    changed = true;
+    return {
+      ...j,
+      error:
+        "Upload was interrupted (page reloaded or connection lost). Please upload the video again.",
+    };
+  });
+  if (changed) saveActiveJobs(next);
 }
 
 export function getActiveJob(jobId: string): ActiveJobV2 | null {
