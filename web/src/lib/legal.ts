@@ -18,4 +18,4 @@ export const OPERATOR = {
 };
 
 /** How long uploaded videos and results are kept on the server. */
-export const RETENTION_DAYS = "[N]";
+export const RETENTION_DAYS = "7";

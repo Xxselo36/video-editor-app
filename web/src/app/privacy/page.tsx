@@ -31,7 +31,7 @@ export default function PrivacyPage() {
       <p>To provide the service we use: hosting of the website (Vercel), the processing server (Railway), file storage (Cloudflare R2), cloud rendering (Modal), speech-to-text (Groq) and text cleanup (Anthropic). They process data only on our behalf. Some of them are located outside the EU; transfers rely on the EU standard contractual clauses or an adequacy decision.</p>
 
       <H>4. Storage period</H>
-      <p>Uploaded videos, previews and rendered results are deleted after {RETENTION_DAYS} days at the latest. Your list of projects is stored only in your browser (local storage) and can be removed by clearing site data.</p>
+      <p>Uploaded videos, previews, rendered results and transcripts are deleted automatically {RETENTION_DAYS} days after the last change to a project. Your list of projects is stored only in your browser (local storage) and can be removed by clearing site data.</p>
 
       <H>5. Cookies and tracking</H>
       <p>We use no advertising or tracking cookies. The browser&apos;s local storage keeps your projects list and language setting on your device.</p>
