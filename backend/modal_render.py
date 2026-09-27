@@ -32,7 +32,10 @@ VOLUME_MOUNT = "/vol"
 
 image = (
     modal.Image.debian_slim(python_version="3.13")
-    .apt_install("ffmpeg", "libgl1", "libglib2.0-0", "libsndfile1")
+    # Fonts: caption burn-in looks for DejaVu/Liberation on Linux; without
+    # them Pillow falls back to its tiny bitmap font (same as Dockerfile).
+    .apt_install("ffmpeg", "libgl1", "libglib2.0-0", "libsndfile1",
+                 "fonts-dejavu-core", "fonts-liberation2")
     .pip_install(
         "moviepy==1.0.3",
         "numpy>=1.21.0",
