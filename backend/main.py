@@ -112,7 +112,22 @@ app = FastAPI(
 
 # Where uploads + outputs live during processing. Phase 2: local disk.
 # Phase 3: swap for S3 / Cloudflare R2.
-_WORK_ROOT = Path(tempfile.gettempdir()) / "cleo_jobs"
+def _default_work_root() -> Path:
+    """Job files (upload, normalized source, preview, outputs).
+
+    CLEO_WORK_ROOT wins; otherwise a mounted persistent volume at /data
+    (Railway volume) is used so jobs survive redeploys; /tmp only as a
+    last resort (wiped on every restart)."""
+    env = os.environ.get("CLEO_WORK_ROOT")
+    if env:
+        return Path(env)
+    data = Path("/data")
+    if data.is_dir() and os.access(data, os.W_OK):
+        return data / "cleo_jobs"
+    return Path(tempfile.gettempdir()) / "cleo_jobs"
+
+
+_WORK_ROOT = _default_work_root()
 _WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
 # CORS configuration:
@@ -318,7 +333,11 @@ def _run_render(
     except Exception as e:
         tb = traceback.format_exc()
         print(f"[job {job_id}] RENDER FAILED: {e}\n{tb}", flush=True)
-        store.update(job_id, status="error", message=str(e), error=str(e))
+        # Back to review instead of a dead 'error': the user's edits and
+        # the source are still on disk, so they can open the editor and
+        # render again without re-uploading.
+        store.update(job_id, status="awaiting_review", progress=100.0,
+                     message="render_failed", error=str(e)[:500])
     finally:
         _release_active(job_id)
 
@@ -900,6 +919,11 @@ def post_render(job_id: str, payload: dict):
     if not isinstance(disabled_cuts, list):
         raise HTTPException(400, "payload.disabled_cuts must be a list")
 
+    # Flip to processing right away (and clear a previous render error)
+    # so a poll between this response and the worker start can't see
+    # the old 'awaiting_review + error' state.
+    store.update(job_id, status="processing", message="Rendering…",
+                 progress=1.0, error=None)
     threading.Thread(
         target=_run_render,
         args=(job_id, edited, disabled_cuts),

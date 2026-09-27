@@ -26,7 +26,6 @@ import {
   updateActiveJob,
 } from "@/lib/activeJob";
 import { VideoModal } from "@/components/VideoModal";
-import { downscaleVideo, shouldDownscale } from "@/lib/videoDownscale";
 import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
 import { trackSave, waitForSaves } from "@/lib/pendingSaves";
 import {
@@ -49,6 +48,33 @@ import {
 // port 8000. This way iPhone (192.168.178.155:3000) hits
 // 192.168.178.155:8000 — not its own localhost.
 // Called lazily so it runs in the browser, not during SSR.
+const FRIENDLY_EXPIRED =
+  "Dieses Projekt gibt es auf dem Server nicht mehr (abgelaufen oder Server-Update). Bitte lade das Video neu hoch.";
+
+// Turn raw server/network errors into something a creator can act on.
+// The technical text still goes to the console for debugging.
+function friendlyError(raw: unknown): string {
+  const t = String(raw ?? "").trim();
+  if (t) console.warn("[cleocuts] error detail:", t.slice(0, 500));
+  const l = t.toLowerCase();
+  if (!t) return "Da ist etwas schiefgelaufen. Bitte versuch es noch einmal.";
+  // Already a user-facing German message (ours or the backend's).
+  if (/\b(Bitte|nicht|wurde|Dieses|Die|Der)\b/.test(t)) return t;
+  if (l.includes("stalled") || l.includes("network") || l.includes("failed to fetch"))
+    return "Die Verbindung ist abgebrochen. Prüf dein Internet und versuch es noch einmal.";
+  if (l.includes("interrupted"))
+    return "Der Upload wurde unterbrochen (Seite neu geladen oder App gewechselt). Bitte lade das Video erneut hoch.";
+  if (l.includes("not found") || l.includes("404") || l.includes("no longer"))
+    return FRIENDLY_EXPIRED;
+  if (l.includes("413") || l.includes("too large"))
+    return "Die Datei ist zu groß. Bitte kürze das Video oder exportiere es kleiner.";
+  if (l.includes("no audio") || l.includes("audio"))
+    return "Im Video wurde kein verwertbarer Ton gefunden.";
+  if (l.includes("render"))
+    return "Das Rendern ist fehlgeschlagen. Deine Bearbeitung ist gespeichert – öffne das Projekt und starte das Rendern erneut.";
+  return "Da ist etwas schiefgelaufen. Bitte versuch es noch einmal.";
+}
+
 function backendUrl(): string {
   if (process.env.NEXT_PUBLIC_BACKEND_URL) {
     return process.env.NEXT_PUBLIC_BACKEND_URL;
@@ -352,6 +378,14 @@ export default function Home() {
   const [phrases, setPhrases] = useState<Phrase[]>([]);
   // Opening a job from the dashboard (may wait for a last save).
   const [resuming, setResuming] = useState(false);
+  // Short info toast (e.g. "this video is still rendering").
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 5000);
+  };
   const [disabledCuts, setDisabledCuts] = useState<number[]>([]);
   const [smartcamEnabled, setSmartcamEnabled] = useState(false);
   const [smartcamFormat, setSmartcamFormat] = useState<"portrait" | "landscape">(
@@ -375,7 +409,20 @@ export default function Home() {
     setSmartcamFormat(p.settings.smartcamFormat);
     setOutputFormats(p.settings.outputFormats);
     setPhase("idle");
+    // Open the file picker right after the idle screen mounted (the
+    // file <input> is re-created by the phase switch, so clicking the
+    // old one would lose the chosen file). Still within the tap's user
+    // activation, so the browser allows it. Saves a whole screen; the
+    // idle screen stays as fallback if the picker is cancelled.
+    setOpenPickerNext(true);
   };
+  const [openPickerNext, setOpenPickerNext] = useState(false);
+  useLayoutEffect(() => {
+    if (phase === "idle" && openPickerNext) {
+      setOpenPickerNext(false);
+      fileInputRef.current?.click();
+    }
+  }, [phase, openPickerNext]);
 
   const onPickFile = () => fileInputRef.current?.click();
 
@@ -403,7 +450,8 @@ export default function Home() {
   const [downscaleLabel, setDownscaleLabel] = useState<string | null>(null);
 
   const onProcess = async (fileOverride?: File) => {
-    let targetFile = fileOverride ?? file;
+    // Guard: a click event must never be treated as the file.
+    let targetFile = fileOverride instanceof File ? fileOverride : file;
     if (!targetFile) return;
     if (!fileOverride) setFile(targetFile);
     // Skip the fullscreen "Uploading…" screen entirely. Upload runs in
@@ -772,7 +820,7 @@ export default function Home() {
       // Send user back to the dashboard — the card takes over from
       // here. No fullscreen "rendering" screen anymore.
       updateActiveJob({ phase: "rendering" });
-      updateActiveJobV2(job.id, { phase: "rendering" });
+      updateActiveJobV2(job.id, { phase: "rendering", note: undefined });
       setFile(null);
       setJob(null);
       setPhrases([]);
@@ -872,7 +920,22 @@ export default function Home() {
               boxShadow: "var(--shadow-md)",
             }}
           >
-            Opening…
+            Wird geöffnet…
+          </div>
+        )}
+        {notice && (
+          <div
+            role="status"
+            onClick={() => setNotice(null)}
+            className="fixed left-1/2 top-4 z-50 w-[min(92vw,420px)] -translate-x-1/2 rounded-2xl px-4 py-3 text-sm"
+            style={{
+              background: "var(--surface-2)",
+              color: "var(--text-strong)",
+              border: "1px solid var(--border)",
+              boxShadow: "var(--shadow-md)",
+            }}
+          >
+            {notice}
           </div>
         )}
         {phase === "picker" && (
@@ -885,10 +948,29 @@ export default function Home() {
                 // load the state the user actually left.
                 await waitForSaves(jobId, 8_000);
                 const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
-                if (!r.ok) return;
+                if (r.status === 404) {
+                  updateActiveJobV2(jobId, { error: FRIENDLY_EXPIRED });
+                  return;
+                }
+                if (!r.ok) {
+                  showNotice("Das Projekt konnte gerade nicht geladen werden. Bitte versuch es gleich noch einmal.");
+                  return;
+                }
                 const s: JobStatus = await r.json();
+                if (s.status !== "awaiting_review") {
+                  // Rendering / done / failed: the dashboard card shows
+                  // the state — don't switch to an empty screen.
+                  showNotice(
+                    s.status === "done"
+                      ? "Dieses Video ist fertig – du findest es unter „Zuletzt“ und in der Library."
+                      : s.status === "error"
+                        ? friendlyError(s.error ?? s.message)
+                        : "Dieses Video wird gerade verarbeitet. Die Karte zeigt den Fortschritt.",
+                  );
+                  return;
+                }
                 setJob(s);
-                if (s.status === "awaiting_review") {
+                {
                   const subsRes = await fetch(
                     `${backendUrl()}/jobs/${jobId}/subtitles`,
                   );
@@ -900,13 +982,9 @@ export default function Home() {
                   // whatever was last picked in this tab.
                   if (s.caption_preset) setCaptionPreset(s.caption_preset);
                   setPhase("reviewing");
-                } else if (s.status === "done") {
-                  setPhase("done");
-                } else {
-                  setPhase("analyzing");
                 }
               } catch {
-                /* ignore */
+                showNotice("Keine Verbindung zum Server. Prüf dein Internet und versuch es noch einmal.");
               } finally {
                 setResuming(false);
               }
@@ -914,7 +992,9 @@ export default function Home() {
           />
         )}
 
-        {phase === "idle" && <IdleScreen onPick={onPickFile} onDrop={onDrop} />}
+        {phase === "idle" && (
+          <IdleScreen onPick={onPickFile} onDrop={onDrop} onBack={() => setPhase("picker")} />
+        )}
 
         {phase === "configuring" && file && (
           <ConfigureScreen
@@ -1111,12 +1191,9 @@ function PickerScreen({
     setRecent(rec);
     setActiveJobs(jobs);
     if (jobs.length > 0 || rec.length > 0) setView("dashboard");
-    try {
-      const seen = localStorage.getItem("cleocuts.voiceOnboardingSeen.v1");
-      if (!seen) setShowVoiceOnboarding(true);
-    } catch {
-      // localStorage may be blocked; that's fine, don't nag.
-    }
+    // The voice test (camera + mic) is NOT opened automatically any
+    // more — it scared off people who only want to upload a video.
+    // It's one tap away via the "Cleo" hint chip.
   }, []);
 
   // React to add/update/remove from anywhere in the app (uploads
@@ -1139,16 +1216,28 @@ function PickerScreen({
     return () => clearInterval(id);
   }, []);
 
-  // Poll all active jobs every 2s so the cards show live status
+  // Poll all active jobs every 2s so the cards show live status.
+  // Keyed on the set of job ids/phases (not the array identity): the
+  // tick itself refreshes activeJobs, which used to restart the effect
+  // immediately — the dashboard hammered the backend non-stop.
+  const pollKey = activeJobs
+    .filter((j) => j.phase !== "uploading" && !j.error)
+    .map((j) => `${j.jobId}:${j.phase}`)
+    .join("|");
   useEffect(() => {
-    const active = activeJobs.filter((j) => j.phase !== "uploading");
-    if (active.length === 0) return;
+    if (!pollKey) return;
     let cancelled = false;
     const tick = async () => {
+      const active = getActiveJobs().filter((j) => j.phase !== "uploading" && !j.error);
       const updates: typeof jobStatuses = {};
       for (const j of active) {
         try {
           const r = await fetch(`${backendUrl()}/jobs/${j.jobId}`);
+          if (r.status === 404) {
+            // Server no longer knows the job (redeploy / expired).
+            updateActiveJobV2(j.jobId, { error: FRIENDLY_EXPIRED });
+            continue;
+          }
           if (!r.ok) continue;
           const s = await r.json();
           updates[j.jobId] = {
@@ -1156,12 +1245,13 @@ function PickerScreen({
             message: s.message ?? "",
             status: s.status,
           };
-          // Promote to matching phase if backend advanced
-          if (
-            s.status === "awaiting_review" &&
-            j.phase !== "reviewing"
-          ) {
-            updateActiveJobV2(j.jobId, { phase: "reviewing" });
+          if (s.status === "awaiting_review" && (j.phase !== "reviewing" || (s.error && !j.note))) {
+            updateActiveJobV2(j.jobId, {
+              phase: "reviewing",
+              note: s.error
+                ? "Rendern fehlgeschlagen – deine Bearbeitung ist gespeichert. Öffnen und erneut rendern."
+                : undefined,
+            });
           } else if (
             s.status === "processing" &&
             j.phase === "analyzing" &&
@@ -1169,9 +1259,6 @@ function PickerScreen({
           ) {
             updateActiveJobV2(j.jobId, { phase: "rendering" });
           } else if (s.status === "done") {
-            // Persist the finished render to the library so the user
-            // can find it later. Backend keeps the files on Railway's
-            // volume for the retention window.
             try {
               const withOutputs = s as typeof s & {
                 outputs?: string[] | Record<string, string>;
@@ -1179,10 +1266,6 @@ function PickerScreen({
                 social_hashtags?: string[];
                 hook_clips?: LibraryHookClip[];
               };
-              // Backend returns outputs as a list of format keys
-              // (["primary", "9:16"]). Older versions returned an
-              // object — handle both shapes so we never save numeric
-              // indices as format identifiers.
               const outputKeys = Array.isArray(withOutputs.outputs)
                 ? withOutputs.outputs
                 : withOutputs.outputs && typeof withOutputs.outputs === "object"
@@ -1200,25 +1283,23 @@ function PickerScreen({
                 socialCaption: withOutputs.social_caption ?? "",
                 socialHashtags: withOutputs.social_hashtags ?? [],
               });
-              notifyIfHidden(
-                "CleoCuts — your video is ready",
-                j.filename,
-              );
+              notifyIfHidden("CleoCuts — dein Video ist fertig", j.filename);
             } catch {
               /* library save is non-fatal */
             }
             removeActiveJob(j.jobId);
+            // Show the finished video right away under "Zuletzt".
+            setRecent(getLibrary().slice(0, 3));
           } else if (s.status === "error") {
-            updateActiveJobV2(j.jobId, { phase: j.phase });
+            updateActiveJobV2(j.jobId, {
+              error: friendlyError(s.error ?? s.message),
+            });
           }
         } catch {
-          /* ignore */
+          /* offline / transient — next tick retries */
         }
       }
-      if (!cancelled) {
-        setJobStatuses((prev) => ({ ...prev, ...updates }));
-        setActiveJobs(getActiveJobs());
-      }
+      if (!cancelled) setJobStatuses((prev) => ({ ...prev, ...updates }));
     };
     void tick();
     const id = setInterval(tick, 2000);
@@ -1226,7 +1307,8 @@ function PickerScreen({
       cancelled = true;
       clearInterval(id);
     };
-  }, [activeJobs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollKey]);
 
   const dismissVoiceOnboarding = () => {
     setShowVoiceOnboarding(false);
@@ -1697,18 +1779,31 @@ function RecentProjectCard({
 function IdleScreen({
   onPick,
   onDrop,
+  onBack,
 }: {
   onPick: () => void;
   onDrop: (e: React.DragEvent) => void;
+  onBack: () => void;
 }) {
   return (
     <div className="relative z-10 flex flex-col">
+      <button
+        onClick={onBack}
+        className="mb-4 -ml-2 w-fit rounded-lg px-2 py-2 text-sm"
+        style={{ color: "var(--text-muted)" }}
+      >
+        ← Zurück
+      </button>
       <h1
-        className="mb-8 text-4xl font-bold tracking-tight sm:text-5xl"
+        className="mb-2 text-4xl font-bold tracking-tight sm:text-5xl"
         style={{ color: "var(--text-strong)" }}
       >
-        Drop the video.
+        Video auswählen
       </h1>
+      <p className="mb-8 text-sm" style={{ color: "var(--text-muted)" }}>
+        MP4 oder MOV vom Handy oder Rechner. Lass die Seite geöffnet, bis der
+        Upload fertig ist.
+      </p>
 
       <button
         onClick={onPick}
@@ -1739,10 +1834,10 @@ function IdleScreen({
           className="text-base font-bold"
           style={{ color: "var(--text-strong)" }}
         >
-          Tap to choose
+          Tippen zum Auswählen
         </div>
         <div className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
-          Or drag one in
+          oder hierher ziehen
         </div>
       </button>
     </div>
@@ -1914,7 +2009,7 @@ function ConfigureScreen(props: {
       </Section>
 
       <button
-        onClick={props.onProcess}
+        onClick={() => props.onProcess()}
         className="mt-2 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99]"
       >
         Process video
@@ -3803,23 +3898,23 @@ function ActiveJobCard({
   const isError = status?.status === "error" || Boolean(job.error);
   const phaseCopy: Record<ActiveJobV2["phase"], { title: string; sub: string; icon: string }> = {
     uploading: {
-      title: "Uploading",
-      sub: "Sending your video over — hang tight.",
+      title: "Upload",
+      sub: "Wird hochgeladen – bitte lass diese Seite geöffnet und sperr das Handy nicht.",
       icon: "↑",
     },
     analyzing: {
-      title: "Analyzing",
-      sub: "Reading your speech and finding the best moments.",
+      title: "Analyse",
+      sub: "Sprache wird erkannt, Pausen und Füllwörter werden geschnitten.",
       icon: "✦",
     },
     reviewing: {
-      title: "Ready to edit",
-      sub: "Tap to open the editor and fine-tune the cut.",
+      title: "Bereit",
+      sub: "Tippen, um den Schnitt im Editor anzupassen.",
       icon: "▸",
     },
     rendering: {
-      title: "Rendering",
-      sub: "Putting your final video together.",
+      title: "Rendern",
+      sub: "Dein fertiges Video wird erstellt.",
       icon: "✦",
     },
   };
@@ -3886,7 +3981,7 @@ function ActiveJobCard({
             className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-transform group-hover:translate-x-0.5"
             style={{ background: accent, color: "#0f0f0f" }}
           >
-            Open →
+            Öffnen →
           </div>
         ) : (
           <div
@@ -3904,14 +3999,14 @@ function ActiveJobCard({
           className="relative z-10 mb-3 text-xs"
           style={{ color: "#F26E6E" }}
         >
-          Something went wrong. {job.error ?? status?.message ?? "Try again."}
+          {friendlyError(job.error ?? status?.message)}
         </div>
       ) : (
         <div
           className="relative z-10 mb-3 text-xs leading-relaxed"
-          style={{ color: "var(--text-body)" }}
+          style={{ color: job.note ? "var(--warn)" : "var(--text-body)" }}
         >
-          {copy.sub}
+          {job.note ?? copy.sub}
         </div>
       )}
 
@@ -3954,7 +4049,7 @@ function ActiveJobCard({
             color: "var(--brand-strong)",
           }}
         >
-          ↻ Try again
+          ✕ Entfernen
         </span>
       )}
     </button>

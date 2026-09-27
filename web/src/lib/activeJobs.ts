@@ -50,6 +50,9 @@ export type ActiveJobV2 = {
   // Populated when the upload or a later phase fails. Card renders a
   // retry button instead of the normal progress bar when set.
   error?: string;
+  // Non-fatal hint on a card that still works (e.g. render failed →
+  // back in review, edits kept).
+  note?: string;
 };
 
 export function getActiveJobs(): ActiveJobV2[] {
