@@ -16,12 +16,14 @@ export default function ImprintPage() {
       </section>
       <section className="mb-6">
         <h2 className="mb-2 font-semibold" style={{ color: "var(--text-strong)" }}>Contact</h2>
-        <p>Email: {OPERATOR.email}<br />Phone: {OPERATOR.phone}</p>
+        <p>Email: {OPERATOR.email}{OPERATOR.phone && <><br />Phone: {OPERATOR.phone}</>}</p>
       </section>
-      <section className="mb-6">
-        <h2 className="mb-2 font-semibold" style={{ color: "var(--text-strong)" }}>VAT ID</h2>
-        <p>{OPERATOR.vatId}</p>
-      </section>
+      {OPERATOR.vatId && (
+        <section className="mb-6">
+          <h2 className="mb-2 font-semibold" style={{ color: "var(--text-strong)" }}>VAT ID</h2>
+          <p>{OPERATOR.vatId}</p>
+        </section>
+      )}
       <section className="mb-6">
         <h2 className="mb-2 font-semibold" style={{ color: "var(--text-strong)" }}>Responsible for content</h2>
         <p>{OPERATOR.name}, address as above.</p>
