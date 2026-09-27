@@ -352,7 +352,8 @@ export const hi: Partial<Record<MessageKey, string>> = {
 
   "library.count.one": "{count} प्रोजेक्ट",
   "library.count.other": "{count} प्रोजेक्ट्स",
-  "library.confirmDelete": "इस प्रोजेक्ट को अपनी लाइब्रेरी से डिलीट करें?",
+  "library.confirmDelete": "क्या इस प्रोजेक्ट को हमेशा के लिए डिलीट करें? वीडियो और सभी एडिट्स हमारे सर्वर से हटा दिए जाएंगे।",
+  "library.deleteFailed": "अभी डिलीट नहीं हो सका — अगर वीडियो अभी प्रोसेस हो रहा है, तो थोड़ी देर में फिर कोशिश करें।",
 
   "library.empty.title": "आपकी लाइब्रेरी खाली है",
   "library.empty.body":
@@ -363,6 +364,9 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "कोई प्रीव्यू नहीं",
   "library.card.customPreset": "कस्टम",
   "library.card.deleteAria": "प्रोजेक्ट डिलीट करें",
+  "library.card.expiresDays": "{n} दिनों में अपने-आप डिलीट होगा",
+  "library.card.expiresSoon": "24 घंटों के अंदर डिलीट होगा",
+  "library.card.expired": "समय समाप्त — फ़ाइलें डिलीट हो गईं",
   "library.card.hooks.one": "{count} हुक",
   "library.card.hooks.other": "{count} हुक्स",
   "library.card.hookSeconds": "{seconds}सेकंड",

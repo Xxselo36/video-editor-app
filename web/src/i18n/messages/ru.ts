@@ -352,7 +352,8 @@ export const ru: Partial<Record<MessageKey, string>> = {
 
   "library.count.one": "{count} проект",
   "library.count.other": "{count} проектов",
-  "library.confirmDelete": "Удалить этот проект из библиотеки?",
+  "library.confirmDelete": "Удалить проект навсегда? Видео и все правки будут удалены с наших серверов.",
+  "library.deleteFailed": "Сейчас не удалось удалить — если видео ещё обрабатывается, попробуй чуть позже.",
 
   "library.empty.title": "Твоя библиотека пуста",
   "library.empty.body":
@@ -363,6 +364,9 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "нет превью",
   "library.card.customPreset": "Свой вариант",
   "library.card.deleteAria": "Удалить проект",
+  "library.card.expiresDays": "Автоудаление через {n} дн.",
+  "library.card.expiresSoon": "Удалится в течение 24 часов",
+  "library.card.expired": "Срок истёк — файлы удалены",
   "library.card.hooks.one": "{count} хук",
   "library.card.hooks.other": "{count} хуков",
   "library.card.hookSeconds": "{seconds} сек",

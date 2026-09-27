@@ -359,7 +359,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
   // ── Library: list ── //
   "library.count.one": "{count} projet",
   "library.count.other": "{count} projets",
-  "library.confirmDelete": "Supprimer ce projet de ta bibliothèque ?",
+  "library.confirmDelete": "Supprimer ce projet définitivement ? La vidéo et toutes les modifications sont effacées de nos serveurs.",
+  "library.deleteFailed": "Suppression impossible pour le moment — si la vidéo est encore en traitement, réessaie dans un instant.",
 
   // ── Library: empty state ── //
   "library.empty.title": "Ta bibliothèque est vide",
@@ -372,6 +373,9 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "pas d'aperçu",
   "library.card.customPreset": "Personnalisé",
   "library.card.deleteAria": "Supprimer le projet",
+  "library.card.expiresDays": "Suppression automatique dans {n} jours",
+  "library.card.expiresSoon": "Suppression dans moins de 24 heures",
+  "library.card.expired": "Expiré — les fichiers ont été supprimés",
   "library.card.hooks.one": "{count} extrait accrocheur",
   "library.card.hooks.other": "{count} extraits accrocheurs",
   "library.card.hookSeconds": "{seconds}s",

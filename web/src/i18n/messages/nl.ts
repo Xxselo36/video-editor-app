@@ -352,7 +352,8 @@ export const nl: Partial<Record<MessageKey, string>> = {
 
   "library.count.one": "{count} project",
   "library.count.other": "{count} projecten",
-  "library.confirmDelete": "Dit project uit je bibliotheek verwijderen?",
+  "library.confirmDelete": "Dit project definitief verwijderen? De video en alle bewerkingen worden van onze servers verwijderd.",
+  "library.deleteFailed": "Verwijderen lukt nu niet — als de video nog wordt verwerkt, probeer het zo opnieuw.",
 
   "library.empty.title": "Je bibliotheek is leeg",
   "library.empty.body":
@@ -363,6 +364,9 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "geen voorbeeld",
   "library.card.customPreset": "Aangepast",
   "library.card.deleteAria": "Project verwijderen",
+  "library.card.expiresDays": "Wordt over {n} dagen automatisch verwijderd",
+  "library.card.expiresSoon": "Wordt binnen 24 uur verwijderd",
+  "library.card.expired": "Verlopen — bestanden zijn verwijderd",
   "library.card.hooks.one": "{count} hook",
   "library.card.hooks.other": "{count} hooks",
   "library.card.hookSeconds": "{seconds}s",

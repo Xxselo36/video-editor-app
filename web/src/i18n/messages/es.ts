@@ -360,7 +360,8 @@ export const es: Partial<Record<MessageKey, string>> = {
   /* ── Library: list ── */
   "library.count.one": "{count} proyecto",
   "library.count.other": "{count} proyectos",
-  "library.confirmDelete": "¿Eliminar este proyecto de tu biblioteca?",
+  "library.confirmDelete": "¿Eliminar este proyecto para siempre? El vídeo y todas las ediciones se borran de nuestros servidores.",
+  "library.deleteFailed": "No se pudo eliminar ahora: si el vídeo aún se está procesando, inténtalo de nuevo en un momento.",
 
   /* ── Library: empty state ── */
   "library.empty.title": "Tu biblioteca está vacía",
@@ -373,6 +374,9 @@ export const es: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "sin vista previa",
   "library.card.customPreset": "Personalizado",
   "library.card.deleteAria": "Eliminar proyecto",
+  "library.card.expiresDays": "Se elimina automáticamente en {n} días",
+  "library.card.expiresSoon": "Se elimina en menos de 24 horas",
+  "library.card.expired": "Caducado: los archivos se eliminaron",
   "library.card.hooks.one": "{count} gancho",
   "library.card.hooks.other": "{count} ganchos",
   "library.card.hookSeconds": "{seconds}s",

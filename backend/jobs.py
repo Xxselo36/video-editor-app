@@ -19,6 +19,25 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Literal
 
+# Subscription plans and how long an idle project is kept (days after
+# the last change). No free tier. Override per plan with e.g.
+# CLEO_RETENTION_DAYS_PRO=45; CLEO_RETENTION_DAYS=0 disables deletion.
+# Until accounts/billing exist every job gets CLEO_DEFAULT_PLAN.
+PLAN_RETENTION_DAYS: dict[str, float] = {
+    plan: float(os.environ.get(f"CLEO_RETENTION_DAYS_{plan.upper()}", days))
+    for plan, days in (("starter", 14), ("pro", 30), ("studio", 90))
+}
+DEFAULT_PLAN = os.environ.get("CLEO_DEFAULT_PLAN", "starter")
+
+
+def retention_days(plan: str | None) -> float:
+    """Retention for a plan; 0 means never delete."""
+    if os.environ.get("CLEO_RETENTION_DAYS", "").strip() == "0":
+        return 0.0
+    return PLAN_RETENTION_DAYS.get(plan or DEFAULT_PLAN,
+                                   PLAN_RETENTION_DAYS["starter"])
+
+
 JobStatus = Literal[
     "pending", "processing", "awaiting_review", "done", "error", "cancelled",
 ]
@@ -67,6 +86,15 @@ class Job:
     # Unix time of the last change (create/update). Drives automatic
     # deletion after CLEO_RETENTION_DAYS of inactivity. 0 = legacy job.
     updated_at: float = 0.0
+    # Subscription plan of the owner; decides the retention period.
+    plan: str = DEFAULT_PLAN
+
+    def expires_at(self) -> float | None:
+        """Unix time when the project gets deleted, None = never."""
+        days = retention_days(self.plan)
+        if days <= 0 or not self.updated_at:
+            return None
+        return self.updated_at + days * 86400
 
     def edit_segments(self) -> list[dict[str, Any]]:
         """job.segments zipped with their per-segment effects.
@@ -94,6 +122,8 @@ class Job:
         return {
             "id": self.id,
             "status": self.status,
+            "plan": self.plan,
+            "expires_at": self.expires_at(),
             "message": self.message,
             "progress": self.progress,
             "error": self.error,

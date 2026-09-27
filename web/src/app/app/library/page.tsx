@@ -48,8 +48,21 @@ export default function Library() {
     setEntries(getLibrary());
   }, []);
 
-  const remove = (jobId: string) => {
+  const remove = async (jobId: string) => {
     if (!confirm(t("library.confirmDelete"))) return;
+    // Delete on the server first (video, edits, renders). 404 = already
+    // gone, fine; anything else (e.g. 409 still processing) keeps the
+    // entry so the user can retry.
+    try {
+      const r = await fetch(`${backendUrl()}/jobs/${jobId}`, { method: "DELETE" });
+      if (!r.ok && r.status !== 404) {
+        alert(t("library.deleteFailed"));
+        return;
+      }
+    } catch {
+      alert(t("library.deleteFailed"));
+      return;
+    }
     deleteEntry(jobId);
     setEntries(getLibrary());
   };
@@ -216,6 +229,26 @@ function LibraryCard({
   const [thumbFailed, setThumbFailed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // Server-side lifetime: expires_at (unix s) or "gone" once deleted.
+  const [expiry, setExpiry] = useState<number | "gone" | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${backendUrl()}/jobs/${entry.jobId}`)
+      .then(async (r) => {
+        if (cancelled) return;
+        if (r.status === 404) setExpiry("gone");
+        else if (r.ok) {
+          const j = await r.json();
+          if (!cancelled && typeof j.expires_at === "number") setExpiry(j.expires_at);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [entry.jobId]);
+  const daysLeft =
+    typeof expiry === "number" ? Math.ceil((expiry * 1000 - Date.now()) / 86400000) : null;
   const hashtagLine = entry.socialHashtags
     .map((h) => `#${h.replace(/^#/, "")}`)
     .join(" ");
@@ -323,6 +356,23 @@ function LibraryCard({
           >
             {entry.filename}
           </div>
+          {(expiry === "gone" || daysLeft !== null) && (
+            <div
+              className="mt-1 text-[11px]"
+              style={{
+                color:
+                  expiry === "gone" || (daysLeft !== null && daysLeft <= 3)
+                    ? "var(--danger)"
+                    : "var(--text-muted)",
+              }}
+            >
+              {expiry === "gone"
+                ? t("library.card.expired")
+                : daysLeft !== null && daysLeft <= 1
+                  ? t("library.card.expiresSoon")
+                  : t("library.card.expiresDays", { n: daysLeft ?? 0 })}
+            </div>
+          )}
         </div>
         <button
           onClick={() => onDelete(entry.jobId)}
@@ -341,7 +391,7 @@ function LibraryCard({
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        {mainOutputs.map((f) => (
+        {expiry !== "gone" && mainOutputs.map((f) => (
           <a
             key={f}
             href={`${backendUrl()}/jobs/${entry.jobId}/download?format=${encodeURIComponent(f)}`}
@@ -364,7 +414,7 @@ function LibraryCard({
             ↓ {formatLabel(f, t)}
           </a>
         ))}
-        {entry.hookClips.length > 0 && (
+        {expiry !== "gone" && entry.hookClips.length > 0 && (
           <button
             onClick={() => setExpanded((v) => !v)}
             className="rounded-full px-3 py-1.5 text-xs transition-colors"
@@ -382,7 +432,7 @@ function LibraryCard({
         )}
       </div>
 
-      {expanded && entry.hookClips.length > 0 && (
+      {expanded && expiry !== "gone" && entry.hookClips.length > 0 && (
         <div
           className="mt-3 flex flex-col gap-2 pt-3"
           style={{ borderTop: "1px solid var(--border)" }}

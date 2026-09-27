@@ -131,23 +131,31 @@ def _default_work_root() -> Path:
 _WORK_ROOT = _default_work_root()
 _WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
-# Uploaded videos, previews, renders and transcripts are deleted after
-# this many days without activity (the privacy page states the same
-# number). 0 disables deletion.
-_RETENTION_DAYS = float(os.environ.get("CLEO_RETENTION_DAYS", "7"))
+def _delete_job(job) -> None:
+    """Remove a job's files (work dir, uploaded source, R2 object) and row."""
+    shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
+    inp = job.input_path
+    if inp and Path(inp).resolve().is_relative_to(_WORK_ROOT.resolve()):
+        try:
+            os.remove(inp)
+        except OSError:
+            pass
+    key = (job.settings or {}).get("_r2_storage_key")
+    if key:
+        from backend.storage import delete_from_r2
+        delete_from_r2(key)
+    store.delete(job.id)
 
 
 def purge_expired_jobs(now: float | None = None) -> int:
-    """Delete jobs (files + DB row) idle longer than _RETENTION_DAYS.
+    """Delete jobs idle longer than their plan's retention period
+    (backend.jobs.PLAN_RETENTION_DAYS; the privacy page states the same).
 
     Legacy jobs without updated_at get stamped now, so they get the
     full retention period instead of being wiped on the first sweep.
     Returns the number of deleted jobs.
     """
-    if _RETENTION_DAYS <= 0:
-        return 0
     now = time.time() if now is None else now
-    cutoff = now - _RETENTION_DAYS * 86400
     with _active_lock:
         active = set(_active_jobs)
     deleted = 0
@@ -157,20 +165,10 @@ def purge_expired_jobs(now: float | None = None) -> int:
         if not job.updated_at:
             store.update(job.id, updated_at=now)
             continue
-        if job.updated_at > cutoff:
+        expires = job.expires_at()
+        if expires is None or expires > now:
             continue
-        shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
-        inp = job.input_path
-        if inp and Path(inp).resolve().is_relative_to(_WORK_ROOT.resolve()):
-            try:
-                os.remove(inp)
-            except OSError:
-                pass
-        key = (job.settings or {}).get("_r2_storage_key")
-        if key:
-            from backend.storage import delete_from_r2
-            delete_from_r2(key)
-        store.delete(job.id)
+        _delete_job(job)
         deleted += 1
     return deleted
 
@@ -585,6 +583,20 @@ def get_job(job_id: str):
     if job is None:
         raise HTTPException(404, "job not found")
     return job.to_dict()
+
+
+@app.delete("/jobs/{job_id}")
+def delete_job(job_id: str):
+    """Delete a project and all its files right away (user request)."""
+    job = store.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    with _active_lock:
+        busy = job_id in _active_jobs
+    if busy or job.status in ("processing", "pending"):
+        raise HTTPException(409, "job is still processing")
+    _delete_job(job)
+    return {"deleted": job_id}
 
 
 @app.get("/jobs/{job_id}/subtitles")

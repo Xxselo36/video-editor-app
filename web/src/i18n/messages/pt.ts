@@ -66,7 +66,8 @@ export const pt: Partial<Record<MessageKey, string>> = {
   // ── library: list ──
   "library.count.one": "{count} projeto",
   "library.count.other": "{count} projetos",
-  "library.confirmDelete": "Excluir este projeto da sua biblioteca?",
+  "library.confirmDelete": "Excluir este projeto permanentemente? O vídeo e todas as edições são removidos dos nossos servidores.",
+  "library.deleteFailed": "Não foi possível excluir agora — se o vídeo ainda estiver sendo processado, tente de novo em instantes.",
 
   // ── library: empty state ──
   "library.empty.title": "Sua biblioteca está vazia",
@@ -79,6 +80,9 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "sem prévia",
   "library.card.customPreset": "Personalizado",
   "library.card.deleteAria": "Excluir projeto",
+  "library.card.expiresDays": "Excluído automaticamente em {n} dias",
+  "library.card.expiresSoon": "Excluído em menos de 24 horas",
+  "library.card.expired": "Expirado — os arquivos foram excluídos",
   "library.card.hooks.one": "{count} gancho",
   "library.card.hooks.other": "{count} ganchos",
   "library.card.hookSeconds": "{seconds}s",

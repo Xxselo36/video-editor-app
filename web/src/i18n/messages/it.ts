@@ -360,7 +360,8 @@ export const it: Partial<Record<MessageKey, string>> = {
   // ── Library: list ── */
   "library.count.one": "{count} progetto",
   "library.count.other": "{count} progetti",
-  "library.confirmDelete": "Eliminare questo progetto dalla tua libreria?",
+  "library.confirmDelete": "Eliminare definitivamente questo progetto? Il video e tutte le modifiche vengono rimossi dai nostri server.",
+  "library.deleteFailed": "Impossibile eliminare ora — se il video è ancora in elaborazione, riprova tra un attimo.",
 
   // ── Library: empty state ── */
   "library.empty.title": "La tua libreria è vuota",
@@ -373,6 +374,9 @@ export const it: Partial<Record<MessageKey, string>> = {
   "library.card.noPreview": "nessuna anteprima",
   "library.card.customPreset": "Personalizzato",
   "library.card.deleteAria": "Elimina progetto",
+  "library.card.expiresDays": "Eliminazione automatica tra {n} giorni",
+  "library.card.expiresSoon": "Eliminazione entro 24 ore",
+  "library.card.expired": "Scaduto — i file sono stati eliminati",
   "library.card.hooks.one": "{count} hook",
   "library.card.hooks.other": "{count} hook",
   "library.card.hookSeconds": "{seconds}s",
