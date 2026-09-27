@@ -8,13 +8,13 @@
  * legal advice.
  */
 export const OPERATOR = {
-  name: "[FULL NAME / COMPANY NAME]",
+  name: "Selim Alcibuga",
   street: "[STREET AND NUMBER]",
   city: "[POSTCODE CITY]",
   country: "[COUNTRY]",
-  email: "[CONTACT EMAIL]",
-  phone: "[PHONE (optional)]",
-  vatId: "[VAT ID (if any)]",
+  email: "selimalcibuga@gmail.com",
+  phone: "", // optional
+  vatId: "", // only if you have one
 };
 
 /**
