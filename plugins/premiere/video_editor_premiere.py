@@ -2035,7 +2035,8 @@ def _merge_tiny_segments(segments, min_gap=0.3):
 def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                      output_dir, cut_style="balanced", cancel_check=None,
                      sub_pos=None, sub_size=None, clip_name_prefix=None,
-                     language=None, progress_cb=None, parallelism=3):
+                     language=None, progress_cb=None, parallelism=3,
+                     merge_gap=0.3):
     """Per-Segment MoviePy render mit fresh VideoFileClip pro Segment.
 
     Returns list of (file_path, duration) tuples in timeline order.
@@ -2058,7 +2059,9 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
     import threading
 
     original_count = len(segments)
-    segments = _merge_tiny_segments(segments, min_gap=0.3)
+    # merge_gap=0: the caller already merged (web backend, which must
+    # keep clip boundaries in sync with audio + per-segment effects).
+    segments = _merge_tiny_segments(segments, min_gap=merge_gap)
     n_segments = len(segments)
     if n_segments < original_count:
         print(f"[multi-clip] merged {original_count} → {n_segments} "

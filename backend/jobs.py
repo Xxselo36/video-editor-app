@@ -61,6 +61,8 @@ class Job:
     # was deleted. GET /subtitles returns them so edits survive leaving
     # the job.
     edited_phrases: list[dict[str, Any]] | None = None
+    # Client revision of edited_phrases; older saves are ignored.
+    edited_phrases_rev: float = 0
 
     def edit_segments(self) -> list[dict[str, Any]]:
         """job.segments zipped with their per-segment effects.

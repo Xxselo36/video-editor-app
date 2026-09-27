@@ -350,6 +350,8 @@ export default function Home() {
   const [uploadPct, setUploadPct] = useState(0);
   const [job, setJob] = useState<JobStatus | null>(null);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
+  // Opening a job from the dashboard (may wait for a last save).
+  const [resuming, setResuming] = useState(false);
   const [disabledCuts, setDisabledCuts] = useState<number[]>([]);
   const [smartcamEnabled, setSmartcamEnabled] = useState(false);
   const [smartcamFormat, setSmartcamFormat] = useState<"portrait" | "landscape">(
@@ -699,27 +701,32 @@ export default function Home() {
 
   // Transcript edits are saved (debounced) so they survive leaving the
   // job; GET /subtitles hands them back as `phrases` on re-entry.
+  const phraseRevRef = useRef(0);
   const phraseSaveRef = useRef<{
     timer: ReturnType<typeof setTimeout> | null;
     jobId: string;
     phrases: Phrase[];
   } | null>(null);
-  const sendPhrases = (jobId: string, list: Phrase[], keepalive = false) => {
+  const sendPhrases = (jobId: string, list: Phrase[], unloading = false) => {
+    // Increasing revision: the server ignores a save older than the
+    // one it has, so out-of-order requests can't restore stale text.
+    phraseRevRef.current = Math.max(phraseRevRef.current + 1, Date.now());
+    const body = JSON.stringify({ phrases: list, rev: phraseRevRef.current });
     const p = fetch(`${backendUrl()}/jobs/${jobId}/phrases`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phrases: list }),
-      keepalive,
+      body,
+      keepalive: unloading && body.length < 60_000,
     }).catch(() => {});
     trackSave(jobId, p);
     return p;
   };
-  const flushPhraseSave = (keepalive = false) => {
+  const flushPhraseSave = (unloading = false) => {
     const pend = phraseSaveRef.current;
     if (!pend) return;
     if (pend.timer) clearTimeout(pend.timer);
     phraseSaveRef.current = null;
-    void sendPhrases(pend.jobId, pend.phrases, keepalive);
+    void sendPhrases(pend.jobId, pend.phrases, unloading);
   };
   const schedulePhraseSave = (jobId: string, list: Phrase[]) => {
     const prev = phraseSaveRef.current;
@@ -780,7 +787,7 @@ export default function Home() {
   };
 
   const reset = () => {
-    flushPhraseSave(true);
+    flushPhraseSave();
     setFile(null);
     setJob(null);
     setPhrases([]);
@@ -855,14 +862,28 @@ export default function Home() {
           phase === "picker" ? "max-w-2xl" : "max-w-md"
         }`}
       >
+        {resuming && (
+          <div
+            className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-xs font-semibold"
+            style={{
+              background: "var(--surface-2)",
+              color: "var(--text-strong)",
+              border: "1px solid var(--border)",
+              boxShadow: "var(--shadow-md)",
+            }}
+          >
+            Opening…
+          </div>
+        )}
         {phase === "picker" && (
           <PickerScreen
             onPick={pickPreset}
             onResumeJob={async (jobId) => {
+              setResuming(true);
               try {
                 // A save from the last visit may still be in flight —
                 // load the state the user actually left.
-                await waitForSaves(jobId);
+                await waitForSaves(jobId, 8_000);
                 const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
                 if (!r.ok) return;
                 const s: JobStatus = await r.json();
@@ -886,6 +907,8 @@ export default function Home() {
                 }
               } catch {
                 /* ignore */
+              } finally {
+                setResuming(false);
               }
             }}
           />
@@ -2399,7 +2422,12 @@ function ReviewScreen({
       volume: s.volume,
     })),
   );
-  const [saveError, setSaveError] = useState(false);
+  // "retrying": transient failure, the edit is re-sent. "failed": the
+  // server refused it for good (job gone / no longer in review).
+  const [saveError, setSaveError] = useState<"retrying" | "failed" | null>(null);
+  // Set when the editor unmounts: nothing may re-queue or retry after
+  // that — a late retry would overwrite the edit flushed on leave.
+  const closedRef = useRef(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<
@@ -2484,6 +2512,7 @@ function ReviewScreen({
   };
 
   const scheduleRebuild = (delay: number) => {
+    if (closedRef.current) return;
     if (rebuildTimerRef.current) clearTimeout(rebuildTimerRef.current);
     rebuildTimerRef.current = setTimeout(() => {
       rebuildTimerRef.current = null;
@@ -2509,16 +2538,22 @@ function ReviewScreen({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ segments: active }),
         });
+        if ([400, 404, 409, 410].includes(r.status)) {
+          // Permanent: retrying can't help.
+          setSaveError("failed");
+          return;
+        }
         if (!r.ok) throw new Error(`save failed (${r.status})`);
         const data: JobStatus & { preview_ok?: boolean } = await r.json();
-        setSaveError(false);
-        if (data.preview_ok && data.preview_segments) {
+        setSaveError(null);
+        if (data.preview_ok && data.preview_segments && !closedRef.current) {
           applyPreview(data.preview_segments, data.preview_version ?? Date.now());
         }
       } catch {
+        if (closedRef.current) return;
         // Keep the edit unless a newer one replaced it, and retry.
         if (!pendingRebuildRef.current) pendingRebuildRef.current = next;
-        setSaveError(true);
+        setSaveError("retrying");
         scheduleRebuild(3000);
       } finally {
         setEditSaving(false);
@@ -2535,7 +2570,7 @@ function ReviewScreen({
 
   // Leaving the editor (in-app navigation, tab close, reload) must not
   // drop an edit that is still waiting for its debounce.
-  const flushOnLeave = () => {
+  const flushOnLeave = (unloading: boolean) => {
     if (rebuildTimerRef.current) {
       clearTimeout(rebuildTimerRef.current);
       rebuildTimerRef.current = null;
@@ -2545,21 +2580,57 @@ function ReviewScreen({
     pendingRebuildRef.current = null;
     const active = toPayload(next);
     if (active.length === 0) return;
+    const body = JSON.stringify({ segments: active });
     const p = fetch(editUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ segments: active }),
-      keepalive: true,
+      body,
+      // keepalive only while the page unloads (in-app navigation keeps
+      // the page alive), and only under the browser's 64 KB cap.
+      keepalive: unloading && body.length < 60_000,
     }).catch(() => {});
     trackSave(jobId, p);
   };
   useEffect(() => {
-    const onHide = () => flushOnLeave();
+    // Re-armed on (re)mount — React dev mode mounts effects twice.
+    closedRef.current = false;
+    const onHide = () => flushOnLeave(true);
     window.addEventListener("pagehide", onHide);
     return () => {
       window.removeEventListener("pagehide", onHide);
-      flushOnLeave();
+      closedRef.current = true;
+      flushOnLeave(false);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reopened while the last save's preview was still rendering: the
+  // saved edit is newer than the preview we loaded. Poll until the
+  // server has the matching preview, then switch to it.
+  useEffect(() => {
+    const key = (xs: [number, number][]) =>
+      JSON.stringify(xs.map(([a, b]) => [+a.toFixed(3), +b.toFixed(3)]));
+    const want = key(savedSegments.map((x) => [x.start, x.end]));
+    if (!savedSegments.length || key(previewSegments) === want) return;
+    let tries = 0;
+    const id = setInterval(async () => {
+      if (closedRef.current || ++tries > 45) return clearInterval(id);
+      try {
+        const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
+        if (!r.ok) return;
+        const j: JobStatus = await r.json();
+        if ((j.preview_version ?? 0) > previewVersion && j.preview_segments) {
+          clearInterval(id);
+          // Only if the user hasn't produced a newer preview meanwhile.
+          if (!inflightRef.current && !pendingRebuildRef.current) {
+            applyPreview(j.preview_segments, j.preview_version ?? Date.now());
+          }
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, 2000);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -4030,7 +4101,7 @@ function TimelineEditor({
   playhead: number;
   open: boolean;
   saving: boolean;
-  saveError?: boolean;
+  saveError?: "retrying" | "failed" | null;
   onToggleOpen: () => void;
   onCommit: (next: EditorSeg[]) => void;
   onSeekOriginal: (t: number) => void;
@@ -4459,9 +4530,13 @@ function TimelineEditor({
               <span
                 className="rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal"
                 style={{ background: "rgba(239,107,87,0.14)", color: "var(--danger)" }}
-                title="Your last change hasn't reached the server yet. Retrying…"
+                title={
+                  saveError === "failed"
+                    ? "The server no longer accepts changes for this video (it may be rendering or expired)."
+                    : "Your last change hasn't reached the server yet. Retrying…"
+                }
               >
-                not saved · retrying
+                {saveError === "failed" ? "not saved" : "not saved · retrying"}
               </span>
             )}
           </div>

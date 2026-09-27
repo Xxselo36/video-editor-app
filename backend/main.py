@@ -763,7 +763,17 @@ def post_phrases(job_id: str, payload: dict):
         except (TypeError, ValueError):
             continue
         cleaned.append(item)
-    store.update(job_id, edited_phrases=cleaned)
+    # Saves can arrive out of order (slow network, flush on leave while
+    # a debounced save is still in flight): keep the newest revision.
+    try:
+        rev = float(payload.get("rev") or 0)
+    except (TypeError, ValueError):
+        rev = 0.0
+    with _EDIT_GUARD:
+        cur = store.get(job_id)
+        if cur is not None and rev and rev < (cur.edited_phrases_rev or 0):
+            return {"ok": True, "count": len(cleaned), "stale": True}
+        store.update(job_id, edited_phrases=cleaned, edited_phrases_rev=rev)
     return {"ok": True, "count": len(cleaned)}
 
 

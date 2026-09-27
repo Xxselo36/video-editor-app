@@ -898,10 +898,21 @@ def _apply_segment_effects(
     )
     filter_complex = ";".join(filter_parts)
 
+    # Linux caps a single argv string at 128 KiB; long timelines (many
+    # hundreds of clips) exceed that, which used to raise E2BIG and drop
+    # every effect. Hand long graphs to ffmpeg through a file instead.
+    graph_args = ["-filter_complex", filter_complex]
+    script_path = None
+    if len(filter_complex) > 100_000:
+        fd, script_path = tempfile.mkstemp(suffix=".ffgraph", text=True)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(filter_complex)
+        graph_args = ["-filter_complex_script", script_path]
+
     cmd = [
         get_ffmpeg_path(), "-y",
         "-i", input_path,
-        "-filter_complex", filter_complex,
+        *graph_args,
         "-map", "[outv]", "-map", "[outa]",
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-pix_fmt", "yuv420p",
@@ -909,7 +920,14 @@ def _apply_segment_effects(
         "-movflags", "+faststart",
         output_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    finally:
+        if script_path:
+            try:
+                os.unlink(script_path)
+            except OSError:
+                pass
     if result.returncode != 0:
         raise RuntimeError(
             f"ffmpeg segment-effects failed: {result.stderr[-800:]}"
@@ -1089,6 +1107,50 @@ def _segments_from_disabled_cuts(
     return [(max(0.0, s), min(duration, e)) for s, e in out if e - s > 0.05]
 
 
+_DEFAULT_FX = {"speed": 1.0, "fadeIn": 0.0, "fadeOut": 0.0, "volume": 1.0}
+
+
+def _merge_for_render(
+    segments: list,
+    effects: list[dict],
+    min_gap: float = 0.3,
+) -> tuple[list[tuple[float, float]], list[dict]]:
+    """Merge clips separated by a tiny FORWARD gap (<= min_gap) into one,
+    once, up front — so the burned video, the rebuilt audio and the
+    per-segment effects pass all see the same clip boundaries.
+
+    (Previously only the video burn merged, so audio / effect slices
+    were computed from the unmerged durations and drifted by the sum
+    of the merged gaps.) Two clips are only merged when neither has a
+    fade and their speed/volume match, so each merged clip still has a
+    single, correct effect. Effects are returned aligned 1:1 with the
+    merged segments; a mismatched effects list is ignored.
+    """
+    segs = [(float(s), float(e)) for s, e in segments]
+    if len(effects) != len(segs):
+        effects = []
+    fx = [dict(_DEFAULT_FX, **(effects[i] if effects else {})) for i in range(len(segs))]
+    if not segs:
+        return [], []
+    out_s = [list(segs[0])]
+    out_fx = [fx[0]]
+    for (s, e), f in zip(segs[1:], fx[1:]):
+        prev = out_fx[-1]
+        gap = s - out_s[-1][1]
+        mergeable = (
+            -1e-6 <= gap <= min_gap
+            and prev["fadeIn"] == 0 and prev["fadeOut"] == 0
+            and f["fadeIn"] == 0 and f["fadeOut"] == 0
+            and prev["speed"] == f["speed"] and prev["volume"] == f["volume"]
+        )
+        if mergeable:
+            out_s[-1][1] = max(out_s[-1][1], e)
+        else:
+            out_s.append([s, e])
+            out_fx.append(f)
+    return [(a, b) for a, b in out_s], out_fx
+
+
 def render_only(
     normalized_path: str,
     output_dir: str,
@@ -1116,6 +1178,10 @@ def render_only(
         segments = _segments_from_disabled_cuts(
             segments, cut_ranges, disabled_cuts, duration,
         )
+
+    segments, seg_effects = _merge_for_render(
+        segments, settings.get("segment_effects") or [],
+    )
 
     def _stage(msg: str, pct: float) -> None:
         if progress_cb:
@@ -1155,6 +1221,7 @@ def render_only(
             cancel_check=cancel_check,
             language=language,
             progress_cb=_stage,
+            merge_gap=0.0,  # already merged above, in sync with audio/effects
         )
 
         if not clip_outputs:
@@ -1179,7 +1246,8 @@ def render_only(
     # Applied after concat so we can build a filter_complex that maps
     # each segment slice to its own filter chain. If any effect is a
     # no-op across the board, skip the pass entirely to save encode time.
-    effects = settings.get("segment_effects") or []
+    effects = seg_effects
+    fx_applied = False
     if effects and any(
         (e.get("speed", 1.0) != 1.0)
         or (e.get("fadeIn", 0.0) > 0)
@@ -1200,6 +1268,7 @@ def render_only(
                 except Exception:
                     pass
                 Path(fx_path).rename(primary_path)
+                fx_applied = True
                 # Regenerate thumbnail from post-fx primary.
                 _generate_thumbnail(primary_path, thumbnail_path)
         except Exception as e:
@@ -1211,15 +1280,17 @@ def render_only(
     outputs: dict[str, str] = {"primary": primary_path}
     formats = settings.get("output_formats") or []
     valid_formats = [f for f in formats if f in EXPORT_FORMATS] if isinstance(formats, list) else []
-    if modal_ok:
+    if modal_ok and not fx_applied:
         # Just pick up whatever Modal already wrote — no re-encoding.
+        # (With effects applied, Modal's extra formats were cut from the
+        # pre-effects primary, so they are re-exported below instead.)
         for fmt in valid_formats:
             fmt_path = str(
                 Path(output_dir) / f"cleo_output_{fmt.replace(':', '-')}.mp4"
             )
             if Path(fmt_path).exists():
                 outputs[fmt] = fmt_path
-    elif valid_formats:
+    if valid_formats and (not modal_ok or fx_applied):
         # Run all extra-format exports in parallel — each is an independent
         # ffmpeg pass off the same primary file, so they don't contend
         # on shared state. Cuts multi-format export time roughly Nx.
