@@ -6,6 +6,7 @@ that can be consumed by DaVinci Resolve, Premiere Pro, Final Cut Pro, etc.
 """
 
 import json
+import os
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Optional
@@ -136,6 +137,12 @@ def analyze_video(
     # and drop the fake tokens from the transcript BEFORE anything
     # else looks at it (voice-command LLM, filler, stutter, mumble).
     _hallucination_cuts_to_apply: list[tuple[float, float]] = []
+    # Every range a detector deliberately cuts (loops, fillers, gaps,
+    # stutters, …). Smart cut runs later and snaps segment edges to
+    # word/sentence boundaries — which used to pull a cut 'äh' next to a
+    # comma or full stop straight back in. These ranges are re-applied
+    # after smart cut so it can adjust edges but never undo a cut.
+    _intentional_cuts: list[tuple[float, float]] = []
     if analyzer._transcription:
         try:
             from src.hallucination_detection import find_hallucination_cuts
@@ -158,6 +165,31 @@ def analyze_video(
                     ]
         except Exception as _e:
             print(f"[hallucination] skipped: {_e}", flush=True)
+        # Prompt leak: Whisper occasionally copies a prompt example
+        # sentence ('Ähm, also, äh, ich hab da, …') into near-silent
+        # audio. Cut and strip it the same way as a loop.
+        try:
+            from src.hallucination_detection import find_prompt_leak_cuts
+            from src.audio import (
+                DISFLUENT_DE, DISFLUENT_EN, _disfluent_prompt_enabled,
+            )
+            _leaks = find_prompt_leak_cuts(
+                analyzer._transcription, [DISFLUENT_DE, DISFLUENT_EN],
+            ) if _disfluent_prompt_enabled() else []
+            if _leaks:
+                for (s, e, t) in _leaks:
+                    print(f"[prompt-leak] cut {s:.2f}-{e:.2f}s: {t!r}", flush=True)
+                    _hallucination_cuts_to_apply.append((s, e))
+                for seg in analyzer._transcription.get("segments") or []:
+                    seg["words"] = [
+                        w for w in (seg.get("words") or [])
+                        if not any(
+                            s <= float(w.get("start") or 0) < e
+                            for (s, e, _t) in _leaks
+                        )
+                    ]
+        except Exception as _e:
+            print(f"[prompt-leak] skipped: {_e}", flush=True)
 
     # Voice-command correction: LLM scans the raw transcript for spots
     # where Whisper mangled a Cleo command in mixed-language audio and
@@ -243,6 +275,7 @@ def analyze_video(
         _sb = len(segments)
         _tb = sum(e - s for s, e in segments)
         segments = _det.filter_segments(segments, _hallucination_cuts_to_apply)
+        _intentional_cuts.extend(_hallucination_cuts_to_apply)
         _ta = sum(e - s for s, e in segments)
         print(f"[hallucination] segments {_sb}→{len(segments)}, "
               f"time {_tb:.1f}s→{_ta:.1f}s "
@@ -275,6 +308,7 @@ def analyze_video(
             segments_before = len(segments)
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, filler_segments)
+            _intentional_cuts.extend(filler_segments)
             total_after = sum(e - s for s, e in segments)
             print(f"[filler] segments {segments_before}→{len(segments)}, "
                   f"time {total_before:.1f}s→{total_after:.1f}s "
@@ -305,6 +339,7 @@ def analyze_video(
             _sb = len(segments)
             _tb = sum(e - s for s, e in segments)
             segments = _det.filter_segments(segments, _hes_cuts)
+            _intentional_cuts.extend(_hes_cuts)
             _ta = sum(e - s for s, e in segments)
             print(f"[hesitation] {len(_hes_cuts)} punctuation-only "
                   f"marker(s) cut: {_hes_cuts}", flush=True)
@@ -330,6 +365,7 @@ def analyze_video(
             _sb = len(segments)
             _tb = sum(e - s for s, e in segments)
             segments = _det.filter_segments(segments, _gap_ranges)
+            _intentional_cuts.extend(_gap_ranges)
             _ta = sum(e - s for s, e in segments)
             for (s, e, g) in _gap_cuts_raw:
                 print(f"[word-gap] cut {s:.2f}-{e:.2f}s "
@@ -401,6 +437,9 @@ def analyze_video(
                 _sb = len(segments)
                 _tb = sum(e - s for s, e in segments)
                 segments = _det.filter_segments(segments, _safe)
+                # Not added to _intentional_cuts: these are acoustic
+                # guesses that may clip a word edge, and smart cut's
+                # word-integrity expansion should be allowed to win.
                 _ta = sum(e - s for s, e in segments)
                 for (s, e) in _safe:
                     print(f"[audio-filler] cut {s:.2f}-{e:.2f}s "
@@ -411,6 +450,36 @@ def analyze_video(
                       flush=True)
         except Exception as _e:
             print(f"[audio-filler] skipped: {_e}", flush=True)
+
+    # Sustained-vowel detection — the 'äääh' Whisper neither transcribed
+    # nor left a gap for: it stretched a neighbouring word over it, so
+    # every text/gap detector above is blind to it and the audio-filler
+    # pass rejects it as 'covered by a Whisper word'. Looks inside
+    # over-long words for a held vowel with level pitch and a steady
+    # spectrum. CLEO_SUSTAINED_VOWEL_CUTS: 1 (default) cut, log = only
+    # log what would be cut, 0 = off.
+    _svd_mode = os.environ.get("CLEO_SUSTAINED_VOWEL_CUTS", "1").strip().lower()
+    if remove_fillers and analyzer._transcription and _svd_mode not in ("0", "off", "false", "no"):
+        try:
+            from src.sustained_vowel_detection import detect_sustained_vowels
+            _sr, _adata = analyzer.get_audio_data()
+            _svd_silence = [(s.start, s.end) for s in speech_segments if not s.has_speech]
+            _svd_cuts = detect_sustained_vowels(
+                _sr, _adata, analyzer._transcription, silence_ranges=_svd_silence,
+            )
+            for (s, e) in _svd_cuts:
+                print(f"[sustained-vowel] {'cut' if _svd_mode != 'log' else 'would cut'} "
+                      f"{s:.2f}-{e:.2f}s (held vowel inside a stretched word)",
+                      flush=True)
+            if _svd_cuts and _svd_mode != "log":
+                from src.filler_detection import FillerDetector
+                _tb = sum(e - s for s, e in segments)
+                segments = FillerDetector().filter_segments(segments, _svd_cuts)
+                _intentional_cuts.extend(_svd_cuts)
+                _ta = sum(e - s for s, e in segments)
+                print(f"[sustained-vowel] removed {_tb - _ta:.2f}s", flush=True)
+        except Exception as _e:
+            print(f"[sustained-vowel] skipped: {_e}", flush=True)
 
     # Stutter cleanup — repeated N-gram sequences ("es ist ein, es ist
     # ein sehr schönes Thema") that filler removal doesn't catch
@@ -426,6 +495,7 @@ def analyze_video(
             segments_before = len(segments)
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, stutter_ranges)
+            _intentional_cuts.extend(stutter_ranges)
             total_after = sum(e - s for s, e in segments)
             print(f"[stutter] {len(stutter_ranges)} n-gram repeat(s) "
                   f"cut: {stutter_ranges}", flush=True)
@@ -449,6 +519,7 @@ def analyze_video(
             segments_before = len(segments)
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, mumble_ranges)
+            _intentional_cuts.extend(mumble_ranges)
             total_after = sum(e - s for s, e in segments)
             for (s, e, c, t) in mumble_data:
                 print(f"[mumble] cut {s:.2f}-{e:.2f}s "
@@ -466,7 +537,7 @@ def analyze_video(
 
     # Smart cut optimization — snap silence-based cuts to natural break
     # points. MUST run BEFORE voice-triggers because it re-snaps every
-    # segment boundary to the nearest word/sentence within ±1s. Running
+    # segment boundary to the nearest word/sentence within ±0.5s. Running
     # it after voice-triggers would drag the trigger cuts back to a
     # nearby word boundary, effectively undoing the trigger removal
     # and leaving the failed take in the final video.
@@ -489,6 +560,15 @@ def analyze_video(
         segments = cutter.optimize_cuts(
             segments, silence_ranges=_silence_ranges_for_snap,
         )
+        if _intentional_cuts:
+            from src.filler_detection import FillerDetector
+            _tb = sum(e - s for s, e in segments)
+            segments = FillerDetector().filter_segments(segments, _intentional_cuts)
+            _ta = sum(e - s for s, e in segments)
+            if _tb - _ta > 0.005:
+                print(f"[smart-cut] re-applied {len(_intentional_cuts)} "
+                      f"detector cut(s) — {_tb - _ta:.2f}s smart cut had "
+                      f"snapped back in", flush=True)
 
     # Scene triggers — Cleo start / restart / keep / finish workflow
     # for record-once-and-refine. Opt-in: only activates if the user
@@ -617,11 +697,37 @@ def analyze_video(
     # MIN_FINAL_SEGMENT is a fragment: an orphan word/syllable left
     # between two aggressive cuts. Keeping them makes the flow feel
     # choppy (user report). Drop them.
+    # A fragment that holds a complete real word is kept, though: with
+    # fillers now transcribed and cut, 'und äh dann ähm haben' leaves
+    # 'dann' on its own, and dropping it changes what was said.
     MIN_FINAL_SEGMENT = 0.4
     if segments:
         before_n = len(segments)
         before_t = sum(e - s for s, e in segments)
-        segments = [(s, e) for (s, e) in segments if (e - s) >= MIN_FINAL_SEGMENT]
+        from src.filler_detection import _is_vocalisation as _isvoc
+        _real_words: list[tuple[float, float]] = []
+        for _seg in (analyzer._transcription or {}).get("segments", []):
+            for _w in _seg.get("words") or []:
+                _t = (_w.get("word") or "").strip().lower().strip(".,!?;:\"'()[]…–—-")
+                if not _t or _isvoc(_t):
+                    continue
+                try:
+                    _ws, _we = float(_w["start"]), float(_w["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if _we - _ws >= 0.08:
+                    _real_words.append((_ws, _we))
+
+        def _holds_word(s: float, e: float) -> bool:
+            for ws, we in _real_words:
+                if we <= s or ws >= e:
+                    continue
+                if min(e, we) - max(s, ws) >= 0.8 * (we - ws):
+                    return True
+            return False
+
+        segments = [(s, e) for (s, e) in segments
+                    if (e - s) >= MIN_FINAL_SEGMENT or _holds_word(s, e)]
         dropped = before_n - len(segments)
         if dropped:
             after_t = sum(e - s for s, e in segments)

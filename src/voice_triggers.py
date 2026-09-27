@@ -505,10 +505,18 @@ def collect_whisper_words(transcription: dict) -> list[dict]:
     into a single list of word-dicts for trigger scanning."""
     if not transcription:
         return []
+    # Filler sounds are skipped so 'Cleo, äh, cut' still reads as the
+    # command 'Cleo cut' (Whisper transcribes fillers since the prompt
+    # asks for them).
+    from src.filler_detection import _is_vocalisation
     words = []
     for seg in transcription.get("segments", []):
         seg_words = seg.get("words") or []
         for w in seg_words:
+            _t = (w.get("word", w.get("text", "")) or "").strip().lower().strip(
+                ".,!?;:\"'()[]…–—-")
+            if _t and _is_vocalisation(_t):
+                continue
             # word_timestamps gives "word" or "text"; normalize key
             entry = {
                 "word": w.get("word", w.get("text", "")),

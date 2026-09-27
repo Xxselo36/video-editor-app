@@ -11,8 +11,37 @@ Usage:
     clean_segments = detector.filter_segments(speech_segments, filler_segments)
 """
 
+import re
 from dataclasses import dataclass
 from typing import Optional
+
+
+# Pure vocalisations in any spelling Whisper produces — äh, äääh, ähmm,
+# äm, ä, öhm, öhh, ehm, ah, uh, uhm, hm, hmmm, mhm, mm, mmm. Treated as
+# fillers in every language (German speakers say 'uh' too, and Whisper's
+# English pass writes German 'äh' as 'uh'). Deliberately does NOT match
+# real words: um, er, am, eh, oh, ohm, an, mehr.
+_VOCAL_RE = re.compile(
+    r"^(?:ä+h*m*|ö+h+m*|ö+m+|e+h+m+|e{2,}h+|e+h{2,}|a+h+m*|u+h+m*|h+m+|m+h+m*|m{2,}h*"
+    # French 'euh'/'heu', Polish/Czech 'yyy'/'eee'
+    r"|e+u+h+|h+e+u+|y{3,}|e{3,})$"
+)
+# Reduplicated forms that mean 'no' — not fillers.
+_NEGATIONS = {"uh-uh", "mm-mm", "m-m", "hm-hm"}
+
+
+def _is_vocalisation(text: str) -> bool:
+    """True for a pure filler sound, incl. hyphenated 'äh-äh' / 'm-hm'."""
+    if text in _NEGATIONS:
+        return False
+    parts = [p for p in text.split("-") if p]
+    if not parts:
+        return False
+    # A lone 'm' only counts as part of 'm-hm' style tokens.
+    return all(
+        _VOCAL_RE.match(p) or (len(parts) > 1 and re.fullmatch(r"m+", p))
+        for p in parts
+    )
 
 
 def _drawn_out(bases: list[str], extend_char: str, max_repeat: int = 8) -> set[str]:
@@ -222,9 +251,17 @@ class FillerDetector:
             for i, w in enumerate(cleaned):
                 if i in consumed:
                     continue
-                if w["text"] not in filler_set:
+                vocal = _is_vocalisation(w["text"])
+                if w["text"] not in filler_set and not vocal:
                     continue
-                is_always_filler = w["text"] in always_filler_set
+                if w["text"] == "eh" and not self._eh_is_hesitation(words, i):
+                    # 'das ist eh klar' — a real word unless set off by
+                    # a comma or a pause.
+                    continue
+                if (w["text"] in ("mm", "mmm") and i > 0
+                        and cleaned[i - 1]["text"].replace(",", ".").replace(".", "", 1).isdigit()):
+                    continue  # '5 mm' — millimetres
+                is_always_filler = vocal or w["text"] in always_filler_set
                 if is_always_filler or w["probability"] >= self.confidence_threshold:
                     detected.append(FillerWord(
                         start=w["start"],
@@ -235,6 +272,24 @@ class FillerDetector:
 
         detected.sort(key=lambda f: f.start)
         return detected
+
+    @staticmethod
+    def _eh_is_hesitation(words: list[dict], i: int) -> bool:
+        """Plain 'eh' is a German word ('anyway'). Count it as a filler
+        only when punctuation or a >= 0.15 s pause sets it apart."""
+        raw = (words[i].get("word") or "").strip()
+        if raw[-1:] in ",.!?;:…" or raw[:1] in ",…":
+            return True
+        prev_raw = (words[i - 1].get("word") or "").strip() if i > 0 else ""
+        if prev_raw[-1:] in ",.!?;:…":
+            return True
+        s = float(words[i].get("start") or 0)
+        e = float(words[i].get("end") or 0)
+        if i > 0 and s - float(words[i - 1].get("end") or s) >= 0.15:
+            return True
+        if i + 1 < len(words) and float(words[i + 1].get("start") or e) - e >= 0.15:
+            return True
+        return i == 0 or i == len(words) - 1
 
     def get_filler_segments(
         self, transcription_result: dict
