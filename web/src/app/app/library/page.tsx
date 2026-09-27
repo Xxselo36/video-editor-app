@@ -6,11 +6,11 @@ import { LogoMark } from "@/components/Logo";
 import { IconArrowRight } from "@/components/Icons";
 import {
   deleteEntry,
-  formatRelativeTime,
   getLibrary,
   type LibraryEntry,
 } from "@/lib/library";
 import { VideoModal } from "@/components/VideoModal";
+import { LanguageSwitcher, useT, type TFn } from "@/i18n";
 
 function backendUrl(): string {
   if (process.env.NEXT_PUBLIC_BACKEND_URL) {
@@ -20,13 +20,27 @@ function backendUrl(): string {
   return `${window.location.protocol}//${window.location.hostname}:8000`;
 }
 
-function formatLabel(f: string): string {
-  if (f === "primary") return "Main edit";
-  if (f.startsWith("hook_")) return `Hook clip ${f.split("_")[1]}`;
+function formatLabel(f: string, t: TFn): string {
+  if (f === "primary") return t("library.format.primary");
+  if (f.startsWith("hook_")) return t("library.format.hook", { n: f.split("_")[1] });
   return f;
 }
 
+/** Localized twin of formatRelativeTime() from lib/library (same thresholds). */
+function relativeTime(ts: number, t: TFn): string {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return t("library.time.justNow");
+  const m = Math.floor(s / 60);
+  if (m < 60) return t("library.time.minutesAgo", { n: m });
+  const h = Math.floor(m / 60);
+  if (h < 24) return t("library.time.hoursAgo", { n: h });
+  const d = Math.floor(h / 24);
+  if (d < 7) return t("library.time.daysAgo", { n: d });
+  return new Date(ts).toLocaleDateString();
+}
+
 export default function Library() {
+  const t = useT();
   const [entries, setEntries] = useState<LibraryEntry[] | null>(null);
   const [playingJobId, setPlayingJobId] = useState<string | null>(null);
 
@@ -35,7 +49,7 @@ export default function Library() {
   }, []);
 
   const remove = (jobId: string) => {
-    if (!confirm("Delete this project from your library?")) return;
+    if (!confirm(t("library.confirmDelete"))) return;
     deleteEntry(jobId);
     setEntries(getLibrary());
   };
@@ -46,38 +60,43 @@ export default function Library() {
       style={{ color: "var(--text-strong)" }}
     >
       <header
-        className="flex items-center justify-between px-6 py-4"
+        className="flex items-center justify-between gap-2 px-4 py-4 sm:px-6"
         style={{ borderBottom: "1px solid var(--border)" }}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/app"
-            className="flex items-center gap-2 transition-opacity hover:opacity-80"
+            className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-80"
+            aria-label={t("library.header.homeAria")}
           >
             <LogoMark size={24} />
+            {/* Wordmark hidden on phones to make room for the language picker. */}
             <span
-              className="text-xl font-bold tracking-tight"
+              className="hidden text-xl font-bold tracking-tight sm:inline"
               style={{ color: "var(--text-strong)" }}
             >
               CleoCuts
             </span>
           </Link>
           <span style={{ color: "var(--text-faint)" }}>/</span>
-          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-            Library
+          <span className="truncate text-xs" style={{ color: "var(--text-muted)" }}>
+            {t("library.header.title")}
           </span>
         </div>
-        <Link
-          href="/app"
-          className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-medium transition-transform hover:scale-105"
-          style={{
-            background: "var(--brand)",
-            color: "white",
-            boxShadow: "var(--shadow-md)",
-          }}
-        >
-          New project <IconArrowRight size={14} />
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <LanguageSwitcher />
+          <Link
+            href="/app"
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-xs font-medium transition-transform hover:scale-105 sm:px-4"
+            style={{
+              background: "var(--brand)",
+              color: "white",
+              boxShadow: "var(--shadow-md)",
+            }}
+          >
+            {t("library.header.newProject")} <IconArrowRight size={14} />
+          </Link>
+        </div>
       </header>
 
       <div className="phase-fade mx-auto w-full max-w-3xl flex-1 px-5 py-10">
@@ -110,7 +129,9 @@ export default function Library() {
               className="mb-1 text-xs font-semibold uppercase tracking-[0.15em]"
               style={{ color: "var(--text-muted)" }}
             >
-              {entries.length} project{entries.length === 1 ? "" : "s"}
+              {t(entries.length === 1 ? "library.count.one" : "library.count.other", {
+                count: entries.length,
+              })}
             </div>
             {entries.map((e) => (
               <LibraryCard
@@ -136,6 +157,7 @@ export default function Library() {
 
 
 function EmptyState() {
+  const t = useT();
   return (
     <div className="mx-auto mt-20 max-w-md text-center">
       <div
@@ -158,14 +180,13 @@ function EmptyState() {
         className="mb-2 text-2xl font-bold"
         style={{ color: "var(--text-strong)" }}
       >
-        Your library is empty
+        {t("library.empty.title")}
       </div>
       <div
         className="mb-8 text-base leading-relaxed"
         style={{ color: "var(--text-body)" }}
       >
-        Every video you finish here shows up in this space. You can
-        re-download, grab your captions, and share hook clips whenever.
+        {t("library.empty.body")}
       </div>
       <Link
         href="/app"
@@ -176,7 +197,7 @@ function EmptyState() {
           boxShadow: "var(--shadow-lg)",
         }}
       >
-        Start your first project <IconArrowRight size={16} />
+        {t("library.empty.cta")} <IconArrowRight size={16} />
       </Link>
     </div>
   );
@@ -191,6 +212,7 @@ function LibraryCard({
   onDelete: (jobId: string) => void;
   onPlay: (jobId: string) => void;
 }) {
+  const t = useT();
   const [thumbFailed, setThumbFailed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -238,7 +260,7 @@ function LibraryCard({
             background: "var(--surface-2)",
             border: "1px solid var(--border)",
           }}
-          aria-label={`Play preview of ${entry.filename}`}
+          aria-label={t("library.card.playAria", { name: entry.filename })}
         >
           {!thumbFailed && (
             /* eslint-disable-next-line @next/next/no-img-element */
@@ -255,7 +277,7 @@ function LibraryCard({
               className="flex h-full w-full items-center justify-center text-[10px] font-semibold uppercase tracking-widest"
               style={{ color: "var(--text-faint)" }}
             >
-              no preview
+              {t("library.card.noPreview")}
             </div>
           )}
           {/* Play triangle overlay */}
@@ -286,13 +308,13 @@ function LibraryCard({
                 color: "var(--brand-strong)",
               }}
             >
-              {entry.presetLabel ?? "Custom"}
+              {entry.presetLabel ?? t("library.card.customPreset")}
             </span>
             <span
               className="text-[11px]"
               style={{ color: "var(--text-muted)" }}
             >
-              {formatRelativeTime(entry.timestamp)}
+              {relativeTime(entry.timestamp, t)}
             </span>
           </div>
           <div
@@ -306,7 +328,7 @@ function LibraryCard({
           onClick={() => onDelete(entry.jobId)}
           className="shrink-0 transition-colors"
           style={{ color: "var(--text-faint)" }}
-          aria-label="Delete project"
+          aria-label={t("library.card.deleteAria")}
           onMouseEnter={(e) =>
             (e.currentTarget.style.color = "var(--danger)")
           }
@@ -339,7 +361,7 @@ function LibraryCard({
                   }
             }
           >
-            ↓ {formatLabel(f)}
+            ↓ {formatLabel(f, t)}
           </a>
         ))}
         {entry.hookClips.length > 0 && (
@@ -352,7 +374,9 @@ function LibraryCard({
               border: "1px solid var(--border)",
             }}
           >
-            {entry.hookClips.length} hook{entry.hookClips.length === 1 ? "" : "s"}{" "}
+            {t(entry.hookClips.length === 1 ? "library.card.hooks.one" : "library.card.hooks.other", {
+              count: entry.hookClips.length,
+            })}{" "}
             {expanded ? "▲" : "▼"}
           </button>
         )}
@@ -385,7 +409,7 @@ function LibraryCard({
                   className="text-[11px]"
                   style={{ color: "var(--text-muted)" }}
                 >
-                  {(h.end - h.start).toFixed(0)}s
+                  {t("library.card.hookSeconds", { seconds: (h.end - h.start).toFixed(0) })}
                 </div>
               </div>
               {h.reason && (
@@ -411,14 +435,14 @@ function LibraryCard({
               className="text-[10px] font-semibold uppercase tracking-wider"
               style={{ color: "var(--text-muted)" }}
             >
-              Caption
+              {t("library.card.caption")}
             </span>
             <button
               onClick={copyCaption}
               className="text-[11px] font-semibold uppercase tracking-wider transition-colors"
               style={{ color: "var(--brand-strong)" }}
             >
-              {copied ? "copied" : "copy"}
+              {copied ? t("library.card.copied") : t("library.card.copy")}
             </button>
           </div>
           {entry.socialCaption && (

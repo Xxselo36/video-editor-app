@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useT } from "@/i18n";
 
 function backendUrl(): string {
   if (process.env.NEXT_PUBLIC_BACKEND_URL) {
@@ -23,6 +24,7 @@ export function VideoModal({
   jobId: string;
   onClose: () => void;
 }) {
+  const t = useT();
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -51,9 +53,9 @@ export function VideoModal({
         <button
           onClick={onClose}
           className="absolute -top-10 right-0 flex items-center gap-1.5 text-xs text-white/70 transition-opacity hover:opacity-100"
-          aria-label="Close preview"
+          aria-label={t("common.videoModal.closeAria")}
         >
-          Close ✕
+          {t("common.videoModal.close")} ✕
         </button>
         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
         <video
