@@ -13,6 +13,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
@@ -63,6 +64,9 @@ class Job:
     edited_phrases: list[dict[str, Any]] | None = None
     # Client revision of edited_phrases; older saves are ignored.
     edited_phrases_rev: float = 0
+    # Unix time of the last change (create/update). Drives automatic
+    # deletion after CLEO_RETENTION_DAYS of inactivity. 0 = legacy job.
+    updated_at: float = 0.0
 
     def edit_segments(self) -> list[dict[str, Any]]:
         """job.segments zipped with their per-segment effects.
@@ -183,7 +187,8 @@ class JobStore:
 
     def create(self, input_path: str, settings: dict[str, Any]) -> Job:
         job_id = uuid.uuid4().hex[:12]
-        job = Job(id=job_id, input_path=input_path, settings=settings)
+        job = Job(id=job_id, input_path=input_path, settings=settings,
+                  updated_at=time.time())
         with self._lock:
             self._conn.execute(
                 "INSERT INTO jobs (id, data) VALUES (?, ?)",
@@ -219,10 +224,17 @@ class JobStore:
                 return
             for k, v in fields_to_update.items():
                 setattr(job, k, v)
+            if "updated_at" not in fields_to_update:
+                job.updated_at = time.time()
             self._conn.execute(
                 "UPDATE jobs SET data = ? WHERE id = ?",
                 (self._serialize(job), job_id),
             )
+            self._conn.commit()
+
+    def delete(self, job_id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
             self._conn.commit()
 
     def list_all(self) -> list[Job]:

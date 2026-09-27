@@ -80,6 +80,7 @@ async def lifespan(app_: FastAPI):
     if stuck:
         print(f"[startup] marked {stuck} stuck job(s) as error "
               f"(container restart)", flush=True)
+    threading.Thread(target=_retention_loop, daemon=True).start()
     yield
     # SHUTDOWN: wait for in-flight worker threads to finish before
     # letting Uvicorn exit. Railway sends SIGTERM then waits
@@ -129,6 +130,60 @@ def _default_work_root() -> Path:
 
 _WORK_ROOT = _default_work_root()
 _WORK_ROOT.mkdir(parents=True, exist_ok=True)
+
+# Uploaded videos, previews, renders and transcripts are deleted after
+# this many days without activity (the privacy page states the same
+# number). 0 disables deletion.
+_RETENTION_DAYS = float(os.environ.get("CLEO_RETENTION_DAYS", "7"))
+
+
+def purge_expired_jobs(now: float | None = None) -> int:
+    """Delete jobs (files + DB row) idle longer than _RETENTION_DAYS.
+
+    Legacy jobs without updated_at get stamped now, so they get the
+    full retention period instead of being wiped on the first sweep.
+    Returns the number of deleted jobs.
+    """
+    if _RETENTION_DAYS <= 0:
+        return 0
+    now = time.time() if now is None else now
+    cutoff = now - _RETENTION_DAYS * 86400
+    with _active_lock:
+        active = set(_active_jobs)
+    deleted = 0
+    for job in store.list_all():
+        if job.id in active or job.status in ("processing", "pending"):
+            continue
+        if not job.updated_at:
+            store.update(job.id, updated_at=now)
+            continue
+        if job.updated_at > cutoff:
+            continue
+        shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
+        inp = job.input_path
+        if inp and Path(inp).resolve().is_relative_to(_WORK_ROOT.resolve()):
+            try:
+                os.remove(inp)
+            except OSError:
+                pass
+        key = (job.settings or {}).get("_r2_storage_key")
+        if key:
+            from backend.storage import delete_from_r2
+            delete_from_r2(key)
+        store.delete(job.id)
+        deleted += 1
+    return deleted
+
+
+def _retention_loop() -> None:
+    while True:
+        try:
+            n = purge_expired_jobs()
+            if n:
+                print(f"[retention] deleted {n} expired job(s)", flush=True)
+        except Exception as e:
+            print(f"[retention] sweep failed: {e}", flush=True)
+        time.sleep(3600)
 
 # CORS configuration:
 #   - Dev (default): allow LAN IPs on :3000 for phone/tablet testing.
