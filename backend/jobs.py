@@ -241,8 +241,8 @@ class JobStore:
 
     def mark_stuck_as_error(
         self,
-        message: str = "Verarbeitung wurde unterbrochen. "
-                       "Bitte lade das Video noch einmal hoch.",
+        message: str = "Processing was interrupted. "
+                       "Please upload the video again.",
     ) -> int:
         """Mark jobs that were mid-processing during shutdown as failed.
 
@@ -269,8 +269,8 @@ class JobStore:
             elif job.status == "awaiting_review" and not src_ok:
                 # Files are gone (old /tmp storage) — can't be edited.
                 self.update(job.id, status="error", error="files_expired",
-                            message="Die Dateien dieses Projekts sind abgelaufen. "
-                                    "Bitte lade das Video noch einmal hoch.")
+                            message="This project's files have expired. "
+                                    "Please upload the video again.")
                 marked += 1
         return marked
 
