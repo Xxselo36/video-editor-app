@@ -2013,13 +2013,20 @@ def _merge_tiny_segments(segments, min_gap=0.3):
     cheaper to encode them as ONE 2.2s segment (keeping the 0.2s
     original audio) than as two 1s segments. Reduces encode count
     ~30-50% on typical content without user-visible change.
+
+    Only merges a segment that starts AFTER the previous one ends (a
+    small forward gap). Overlapping or earlier-starting segments — e.g.
+    clips the user reordered in the web editor — are kept as-is;
+    merging those used to produce truncated or negative ranges that
+    silently dropped clips from the render.
     """
     if not segments:
         return []
     merged = [list(segments[0])]
     for s, e in segments[1:]:
-        if s - merged[-1][1] <= min_gap:
-            merged[-1][1] = e
+        gap = s - merged[-1][1]
+        if -1e-6 <= gap <= min_gap:
+            merged[-1][1] = max(merged[-1][1], e)
         else:
             merged.append([s, e])
     return [(s, e) for s, e in merged]

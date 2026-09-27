@@ -829,10 +829,20 @@ def _apply_segment_effects(
         s_start = cursor
         s_end = cursor + dur
         cursor = s_end
-        speed = float(eff.get("speed", 1.0)) or 1.0
-        fade_in = float(eff.get("fadeIn", 0.0)) or 0.0
-        fade_out = float(eff.get("fadeOut", 0.0)) or 0.0
-        volume = float(eff.get("volume", 1.0)) or 1.0
+        # Only a MISSING value means default: `x or 1.0` used to turn
+        # volume 0 (mute) back into full volume.
+        def _num(key: str, default: float) -> float:
+            v = eff.get(key)
+            try:
+                return default if v is None else float(v)
+            except (TypeError, ValueError):
+                return default
+        speed = _num("speed", 1.0)
+        if speed <= 0:
+            speed = 1.0
+        fade_in = max(0.0, _num("fadeIn", 0.0))
+        fade_out = max(0.0, _num("fadeOut", 0.0))
+        volume = max(0.0, _num("volume", 1.0))
 
         v_chain = [
             f"[0:v]trim=start={s_start:.3f}:end={s_end:.3f}",
@@ -870,10 +880,11 @@ def _apply_segment_effects(
             )
         if abs(volume - 1.0) > 0.001:
             a_chain.append(f"volume={volume:.4f}")
-        v_chain.append(f"[v{i}]")
-        a_chain.append(f"[a{i}]")
-        filter_parts.append(",".join(v_chain))
-        filter_parts.append(",".join(a_chain))
+        # Output label goes right after the last filter — a comma
+        # before it ("…,[v0]") is an empty filter and ffmpeg rejects
+        # the whole graph, which silently dropped every effect.
+        filter_parts.append(",".join(v_chain) + f"[v{i}]")
+        filter_parts.append(",".join(a_chain) + f"[a{i}]")
         concat_v.append(f"[v{i}]")
         concat_a.append(f"[a{i}]")
 
