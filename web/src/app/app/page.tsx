@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LogoMark } from "@/components/Logo";
 import {
   IconArrowRight,
@@ -3707,6 +3707,107 @@ type EditorSeg = {
   volume?: number;     // 0 – 2.5, default 1
 };
 
+const TIMELINE_DEFAULT_PPS = 40; // px per second on open
+const TIMELINE_MAX_PPS = 400; // 0.1s = 40px
+
+// m:ss.t — for the playhead readout and sub-second ruler labels.
+function fmtTimecode(t: number): string {
+  const tenths = Math.round(t * 10);
+  const m = Math.floor(tenths / 600);
+  const s = Math.floor((tenths % 600) / 10);
+  return `${m}:${s.toString().padStart(2, "0")}.${tenths % 10}`;
+}
+
+// Ruler marks for the visible part of the strip only (it can be many
+// thousands of px wide). Owns its scroll listener so scrolling
+// re-renders just the ruler, not the whole editor.
+//   - labelled major marks, spaced >= 56px
+//   - 0.5s marks (medium) and 0.1s marks (short) once there's room
+function RulerTicks({
+  scrollRef,
+  contentW,
+  totalDur,
+  viewW,
+}: {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  contentW: number;
+  totalDur: number;
+  viewW: number;
+}) {
+  const [scrollLeft, setScrollLeft] = useState(0);
+  useEffect(() => {
+    const sc = scrollRef.current;
+    if (!sc) return;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setScrollLeft(sc.scrollLeft));
+    };
+    onScroll();
+    sc.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      sc.removeEventListener("scroll", onScroll);
+    };
+  }, [scrollRef, contentW]);
+
+  const pps = contentW / totalDur;
+  const labelSteps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+  const labelStep = labelSteps.find((st) => st * pps >= 56) ?? 600;
+  // Finest step that still leaves >= 4px between marks.
+  const minorStep =
+    0.1 * pps >= 4 ? 0.1 : 0.5 * pps >= 4 && labelStep > 0.5 ? 0.5 : labelStep / 2;
+
+  // Work in tenths of a second to avoid float drift.
+  const minorT = Math.max(1, Math.round(minorStep * 10));
+  const labelT = Math.round(labelStep * 10);
+  const from = Math.max(0, scrollLeft - 100) / pps;
+  const to = Math.min(contentW, scrollLeft + viewW + 100) / pps;
+  const first = Math.ceil((from * 10) / minorT) * minorT;
+  const labelFmt = labelStep < 1 ? fmtTimecode : (t: number) => {
+    const m = Math.floor(t / 60);
+    const s = Math.round(t % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const marks = [];
+  for (let k = first; k <= to * 10 + 1e-6 && k <= totalDur * 10 + 1e-6; k += minorT) {
+    const t = k / 10;
+    const x = t * pps;
+    const isMajor = k % labelT === 0;
+    const isSecond = !isMajor && k % 10 === 0;
+    const isHalf = !isMajor && !isSecond && k % 5 === 0;
+    marks.push(
+      <div
+        key={k}
+        className="pointer-events-none absolute bottom-0"
+        style={{
+          left: `${x}px`,
+          width: "1px",
+          height: isMajor ? "10px" : isSecond ? "7px" : isHalf ? "5px" : "3px",
+          background: isMajor || isSecond
+            ? "var(--text-muted)"
+            : isHalf
+              ? "var(--border-strong)"
+              : "var(--border-hover)",
+        }}
+      />,
+    );
+    if (isMajor && x < contentW - 28) {
+      marks.push(
+        <span
+          key={`l${k}`}
+          className="pointer-events-none absolute top-1 pl-1 text-[9px] tabular-nums"
+          style={{ left: `${x}px`, color: "var(--text-muted)" }}
+        >
+          {labelFmt(t)}
+        </span>,
+      );
+    }
+  }
+  return <>{marks}</>;
+}
+
 function TimelineEditor({
   segments,
   duration,
@@ -3733,7 +3834,9 @@ function TimelineEditor({
   const [selected, setSelected] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragMode, setDragMode] = useState<"start" | "end" | null>(null);
-  const [zoom, setZoom] = useState(1); // 1 – 4×
+  // Zoom as pixels per second. Starts zoomed in so the strip scrolls
+  // and the 0.5s / 0.1s ruler marks are readable; "Fit" shows it all.
+  const [pps, setPps] = useState(TIMELINE_DEFAULT_PPS);
   const [history, setHistory] = useState<EditorSeg[][]>([]);
   const [future, setFuture] = useState<EditorSeg[][]>([]);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -3957,16 +4060,104 @@ function TimelineEditor({
     return () => ro.disconnect();
   }, [open]);
 
-  // Ruler ticks — pick the smallest step that keeps labels ~70px
-  // apart at the current width and zoom.
-  const tickStep = (() => {
-    const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
-    const labels = Math.max(3, (viewW * zoom) / 70);
-    const target = totalDur / labels;
-    return steps.find((st) => st >= target) ?? steps[steps.length - 1];
-  })();
-  const ticks: number[] = [];
-  for (let t = 0; t <= totalDur + 1e-6; t += tickStep) ticks.push(t);
+  // Effective zoom: never narrower than the view ("fit"), and capped
+  // so very long videos don't produce absurdly wide elements.
+  const fitPps = viewW / totalDur;
+  const maxPps = Math.max(fitPps, Math.min(TIMELINE_MAX_PPS, 200_000 / totalDur));
+  const effPps = Math.min(maxPps, Math.max(fitPps, pps));
+  const contentW = Math.max(viewW, Math.round(totalDur * effPps));
+  const canZoomOut = contentW > viewW + 1;
+  const canZoomIn = effPps < maxPps - 1e-6;
+
+  // Zoom while keeping the time under `anchorX` (px from the left edge
+  // of the visible strip) in place. The scroll correction is applied
+  // after the new width has been laid out.
+  const pendingAnchorRef = useRef<{ t: number; x: number } | null>(null);
+  const zoomStateRef = useRef({ effPps, contentW, totalDur, fitPps, maxPps });
+  zoomStateRef.current = { effPps, contentW, totalDur, fitPps, maxPps };
+  const zoomTo = (nextPps: number, anchorX: number) => {
+    const sc = scrollRef.current;
+    const z = zoomStateRef.current;
+    const clamped = Math.min(z.maxPps, Math.max(z.fitPps, nextPps));
+    if (sc) {
+      pendingAnchorRef.current = {
+        t: ((sc.scrollLeft + anchorX) / z.contentW) * z.totalDur,
+        x: anchorX,
+      };
+    }
+    setPps(clamped);
+  };
+  const zoomToRef = useRef(zoomTo);
+  zoomToRef.current = zoomTo;
+  useLayoutEffect(() => {
+    const sc = scrollRef.current;
+    const a = pendingAnchorRef.current;
+    if (!sc || !a) return;
+    pendingAnchorRef.current = null;
+    sc.scrollLeft = Math.max(0, (a.t / totalDur) * contentW - a.x);
+  }, [contentW, totalDur]);
+
+  // Mouse wheel scrolls the strip sideways (Ctrl/⌘ + wheel or a
+  // trackpad pinch zooms); two-finger pinch zooms on touch screens.
+  const lastUserScrollRef = useRef(0);
+  useEffect(() => {
+    const sc = scrollRef.current;
+    if (!sc) return;
+    const onWheel = (e: WheelEvent) => {
+      const rect = sc.getBoundingClientRect();
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        lastUserScrollRef.current = Date.now();
+        zoomToRef.current(
+          zoomStateRef.current.effPps * Math.exp(-e.deltaY * 0.01),
+          e.clientX - rect.left,
+        );
+        return;
+      }
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) {
+        lastUserScrollRef.current = Date.now();
+        return; // native horizontal scroll (trackpad, shift+wheel)
+      }
+      const max = sc.scrollWidth - sc.clientWidth;
+      // At either end, let the page scroll as usual.
+      if (max <= 0 || (e.deltaY < 0 && sc.scrollLeft <= 0) || (e.deltaY > 0 && sc.scrollLeft >= max - 1)) return;
+      e.preventDefault();
+      lastUserScrollRef.current = Date.now();
+      sc.scrollLeft += e.deltaY;
+    };
+    let pinch: { dist: number; pps: number } | null = null;
+    const dist = (t: TouchList) =>
+      Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onTouchStart = (e: TouchEvent) => {
+      lastUserScrollRef.current = Date.now();
+      if (e.touches.length === 2) {
+        pinch = { dist: dist(e.touches), pps: zoomStateRef.current.effPps };
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      lastUserScrollRef.current = Date.now();
+      if (!pinch || e.touches.length !== 2) return;
+      e.preventDefault();
+      const rect = sc.getBoundingClientRect();
+      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+      zoomToRef.current((pinch.pps * dist(e.touches)) / pinch.dist, midX);
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch = null;
+    };
+    sc.addEventListener("wheel", onWheel, { passive: false });
+    sc.addEventListener("touchstart", onTouchStart, { passive: true });
+    sc.addEventListener("touchmove", onTouchMove, { passive: false });
+    sc.addEventListener("touchend", onTouchEnd);
+    sc.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      sc.removeEventListener("wheel", onWheel);
+      sc.removeEventListener("touchstart", onTouchStart);
+      sc.removeEventListener("touchmove", onTouchMove);
+      sc.removeEventListener("touchend", onTouchEnd);
+      sc.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [open]);
 
   // Click on the ruler → seek. Converts cut-timeline x into the
   // original time of whichever clip sits there.
@@ -3987,15 +4178,17 @@ function TimelineEditor({
     }
   };
 
-  // When zoomed in, keep the playhead in view while it moves.
+  // Keep the playhead in view while it moves — unless the user just
+  // scrolled or zoomed by hand, so we don't yank the strip away.
   useEffect(() => {
     const sc = scrollRef.current;
-    if (!sc || playheadPct === null || zoom <= 1 || draggingId) return;
-    const x = (playheadPct / 100) * sc.scrollWidth;
+    if (!sc || playheadPct === null || !canZoomOut || draggingId) return;
+    if (Date.now() - lastUserScrollRef.current < 2500) return;
+    const x = (playheadPct / 100) * contentW;
     if (x < sc.scrollLeft + 24 || x > sc.scrollLeft + sc.clientWidth - 24) {
       sc.scrollTo({ left: Math.max(0, x - sc.clientWidth / 3), behavior: "smooth" });
     }
-  }, [playheadPct, zoom, draggingId]);
+  }, [playheadPct, contentW, canZoomOut, draggingId]);
 
   const toolBtn = {
     background: "var(--surface-2)",
@@ -4040,10 +4233,10 @@ function TimelineEditor({
             )}
           </div>
           <div className="mt-1 hidden text-[11px] text-[var(--text-faint)] sm:block">
-            Drag edges to trim · click a clip to select · Space play · ⌫ delete · ⌘Z undo
+            Scroll to move · Ctrl/⌘ + scroll to zoom · drag edges to trim · Space play · ⌫ delete · ⌘Z undo
           </div>
           <div className="mt-1 text-[11px] text-[var(--text-faint)] sm:hidden">
-            Tap a clip to edit · drag its edges to trim · drag the ruler to scrub
+            Swipe to scroll · pinch to zoom · tap a clip to edit · drag the ruler to scrub
           </div>
         </div>
         <span className="shrink-0 whitespace-nowrap pl-3 text-xs" style={{ color: "var(--text-muted)" }}>
@@ -4095,38 +4288,45 @@ function TimelineEditor({
                 className="rounded-md px-2 py-1 font-mono text-[11px] tabular-nums"
                 style={{ background: "var(--surface-0)", color: "var(--text-strong)" }}
               >
-                {fmt(playheadCut ?? 0)}
+                {fmtTimecode(playheadCut ?? 0)}
                 <span className="hidden sm:inline" style={{ color: "var(--text-faint)" }}>
                   {" "}/ {fmt(totalDur)}
                 </span>
               </span>
               <div className="flex items-center overflow-hidden rounded-lg" style={{ border: "1px solid var(--border)" }}>
                 <button
-                  onClick={() => setZoom((z) => Math.max(1, z / 1.5))}
-                  disabled={zoom <= 1}
+                  onClick={() => zoomTo(effPps / 1.5, viewW / 2)}
+                  disabled={!canZoomOut}
                   className="px-2.5 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 sm:px-2 sm:py-1"
                   style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
-                  title="Zoom out"
+                  title="Zoom out (show more of the video)"
                   aria-label="Zoom out"
                 >
                   −
                 </button>
-                <span
-                  className="hidden px-1 text-[10px] tabular-nums sm:inline"
-                  style={{ color: "var(--text-muted)", minWidth: "34px", textAlign: "center" }}
-                >
-                  {zoom.toFixed(1)}×
-                </span>
                 <button
-                  onClick={() => setZoom((z) => Math.min(6, z * 1.5))}
-                  disabled={zoom >= 6}
+                  onClick={() => zoomTo(fitPps, 0)}
+                  disabled={!canZoomOut}
+                  className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 sm:py-1"
+                  style={{
+                    background: "var(--surface-2)",
+                    color: "var(--text-muted)",
+                    borderLeft: "1px solid var(--border)",
+                  }}
+                  title="Fit the whole video"
+                >
+                  Fit
+                </button>
+                <button
+                  onClick={() => zoomTo(effPps * 1.5, viewW / 2)}
+                  disabled={!canZoomIn}
                   className="px-2.5 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 sm:px-2 sm:py-1"
                   style={{
                     background: "var(--surface-2)",
                     color: "var(--text-body)",
                     borderLeft: "1px solid var(--border)",
                   }}
-                  title="Zoom in"
+                  title="Zoom in (more detail, finer trimming)"
                   aria-label="Zoom in"
                 >
                   +
@@ -4142,11 +4342,16 @@ function TimelineEditor({
             style={{
               background: "var(--surface-0)",
               border: "1px solid var(--border)",
+              // Native swipe/scroll; pinch is handled above instead of
+              // zooming the whole page.
+              touchAction: "pan-x pan-y",
+              scrollbarWidth: "thin",
+              scrollbarColor: "var(--border-strong) transparent",
             }}
           >
             <div
               className="relative select-none"
-              style={{ width: `${100 * zoom}%`, minWidth: "100%" }}
+              style={{ width: `${contentW}px` }}
             >
               {/* Time ruler */}
               <div
@@ -4167,43 +4372,7 @@ function TimelineEditor({
                   scrubbingRef.current = false;
                 }}
               >
-                {ticks.map((t) => {
-                  const pct = (t / totalDur) * 100;
-                  return (
-                    <div
-                      key={t}
-                      className="pointer-events-none absolute bottom-0 top-0"
-                      style={{ left: `${pct}%` }}
-                    >
-                      <div
-                        className="absolute bottom-0 w-px"
-                        style={{ height: "7px", background: "var(--border-strong)" }}
-                      />
-                      {pct < 97 && (
-                        <span
-                          className="absolute top-1 pl-1 text-[9px] tabular-nums"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          {fmt(t)}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-                {/* Half-step minor ticks */}
-                {ticks.map((t) =>
-                  t + tickStep / 2 < totalDur ? (
-                    <div
-                      key={`m${t}`}
-                      className="pointer-events-none absolute bottom-0 w-px"
-                      style={{
-                        left: `${((t + tickStep / 2) / totalDur) * 100}%`,
-                        height: "4px",
-                        background: "var(--border-hover)",
-                      }}
-                    />
-                  ) : null,
-                )}
+                <RulerTicks scrollRef={scrollRef} contentW={contentW} totalDur={totalDur} viewW={viewW} />
               </div>
 
               {/* Clips */}
@@ -4229,7 +4398,7 @@ function TimelineEditor({
                           setSelected(s.id);
                           onSeekOriginal(s.start);
                         }}
-                        className="@container group relative flex h-full cursor-pointer flex-col justify-between overflow-hidden rounded-md transition-[box-shadow,border-color] duration-150"
+                        className="@container group relative flex h-full cursor-pointer flex-col justify-between overflow-clip rounded-md transition-[box-shadow,border-color] duration-150"
                         style={{
                           background: s.disabled
                             ? "var(--surface-2)"
@@ -4312,14 +4481,16 @@ function TimelineEditor({
                         )}
 
                         <div className="pointer-events-none relative hidden items-center justify-between gap-1 px-2.5 pt-1 @min-[30px]:flex">
+                          {/* Sticky so the labels stay visible when the
+                              clip's start is scrolled out of view. */}
                           <span
-                            className="text-[9px] font-semibold tabular-nums"
+                            className="sticky left-2.5 text-[9px] font-semibold tabular-nums"
                             style={{ color: isSel ? "var(--brand-strong)" : "var(--text-muted)" }}
                           >
                             {i + 1}
                           </span>
                           {!s.disabled && (
-                            <div className="hidden gap-0.5 @min-[64px]:flex">
+                            <div className="sticky right-2.5 hidden gap-0.5 @min-[64px]:flex">
                               {s.speed && s.speed !== 1 && (
                                 <span
                                   className="rounded px-1 text-[8px] font-semibold"
@@ -4345,7 +4516,7 @@ function TimelineEditor({
 
                         <div className="pointer-events-none relative hidden px-2.5 pb-1 @min-[40px]:block">
                           <span
-                            className="text-[10px] tabular-nums"
+                            className="sticky left-2.5 inline-block text-[10px] tabular-nums"
                             style={{
                               color: s.disabled ? "var(--text-faint)" : "var(--text-strong)",
                             }}
