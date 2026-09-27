@@ -57,6 +57,9 @@ Thresholds (tuned on synthetic speech and checked on real talking-head audio)
     EDGE_TOUCH_S       0.12   run must start/end this close to the word edge
     KEEP_MIN_S         0.12   word keeps max(0.12 s, 0.04 s x letters) ...
     KEEP_VOICED_MIN_S  0.05   ... of which >= 50 ms voiced speech
+    MAX_RUN_S          2.0    longer held tones are sung notes, not fillers
+    VOWEL_REMAINDER_S  0.06   left with the word when its vowel runs into
+                              the filler without a break
 
 Known limitations: a deliberately drawn-out word with a FLAT pitch and
 steady vowel ("jaaaa" sung on one note, a held "sooo") is acoustically
@@ -185,6 +188,14 @@ KEEP_VOICED_MIN_S = 0.05
 
 # Caps.
 MAX_CUTS_PER_MIN = 6.0
+# A held tone longer than this is a sung/held note, not a filled pause.
+MAX_RUN_S = 2.0
+# When the word's own vowel runs straight into the held vowel (no
+# consonant or unvoiced break), leave this much of the run with the word
+# so 'eine:::' becomes 'eine', not 'ein'.
+VOWEL_REMAINDER_S = 0.06
+# How far before/after the run we look for the word's voiced audio.
+CONTIG_LOOK_S = 0.025
 CUT_PAD_S = 0.02
 
 # Frames processed per vectorised FFT batch (bounds memory: ~2048 x 513
@@ -647,6 +658,9 @@ def detect_sustained_vowels(
             if dur < MIN_RUN_S:
                 run["verdict"] = "short"
                 continue
+            if dur > MAX_RUN_S:
+                run["verdict"] = "too long (held/sung note)"
+                continue
             at_head = rs <= eff_s + EDGE_TOUCH_S
             at_tail = re_ >= eff_e - EDGE_TOUCH_S
             if not (at_head or at_tail):
@@ -664,7 +678,24 @@ def detect_sustained_vowels(
             if drift > DRIFT_MAX_DB:
                 run["verdict"] = "spectrum drifts"
                 continue
-            cut = (max(win_s, rs - CUT_PAD_S), min(win_e, re_ + CUT_PAD_S))
+            cs, ce = rs - CUT_PAD_S, re_ + CUT_PAD_S
+            # Voiced word audio directly next to the run means the word's
+            # vowel flows into the filler — keep a natural vowel ending.
+            # Only frames lying entirely outside the run count (32 ms
+            # frames at a 10 ms hop overlap the run's own first frames).
+            # "Contiguous" = every frame ending in the last CONTIG_LOOK_S
+            # before the run (or starting in the first after it) is voiced
+            # word audio — a consonant closure ('gut|äh') breaks that.
+            fends = starts + FRAME_S
+            before = (fends <= rs - 0.002) & (fends > rs - CONTIG_LOOK_S)
+            after = (starts >= re_ + 0.002) & (starts < re_ + CONTIG_LOOK_S)
+            contig_before = bool(before.any()) and bool(np.all(word_voiced[before]))
+            contig_after = bool(after.any()) and bool(np.all(word_voiced[after]))
+            if at_tail and not at_head and contig_before:
+                cs = rs + VOWEL_REMAINDER_S
+            elif at_head and not at_tail and contig_after:
+                ce = re_ - VOWEL_REMAINDER_S
+            cut = (max(win_s, cs), min(win_e, ce))
             kept = _measure(c["parts"], cut)
             kept_voiced = HOP_S * int(np.count_nonzero(
                 word_voiced & ((centres < cut[0]) | (centres > cut[1]))))

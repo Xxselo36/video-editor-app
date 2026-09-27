@@ -147,8 +147,19 @@ class AudioAnalyzer:
         """
         if not self._transcription:
             return
+        # Filler sounds ('äh', 'ähm', 'hm', 'uh') are never captioned —
+        # the transcription prompt makes Whisper write them so they can
+        # be CUT, not shown. (Trigger/filler detection read the raw
+        # transcription, not these subtitles.)
+        from .filler_detection import _is_vocalisation
+
+        def _is_filler(w: dict) -> bool:
+            t = (w.get("word", "") or "").strip().lower().strip(
+                ".,!?;:\"'()[]…–—-")
+            return bool(t) and _is_vocalisation(t)
+
         for segment in self._transcription.get("segments", []):
-            words = segment.get("words", [])
+            words = [w for w in segment.get("words", []) if not _is_filler(w)]
             if words:
                 i = 0
                 while i < len(words):

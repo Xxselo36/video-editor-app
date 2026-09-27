@@ -136,15 +136,14 @@ def find_hallucination_cuts(
 def find_prompt_leak_cuts(
     transcription: dict,
     examples: list[str],
-    min_tokens: int = 6,
 ) -> list[tuple[float, float, str]]:
     """Find places where Whisper copied a prompt example sentence into the
     transcript (a known failure on near-silent or unclear audio).
 
-    A run of >= `min_tokens` consecutive words that equals a contiguous
-    stretch of an example sentence (normalized: lower-case, no
-    punctuation) is flagged. Real speech practically never reproduces
-    six words of 'Ähm, also, äh, ich hab da, hm, so eine Idee' verbatim.
+    Only a (nearly) complete copy counts: all tokens of the example, or
+    all but one, INCLUDING its final word ('Idee' / 'idea'). Partial
+    matches are ordinary hesitant speech — 'Ähm, also, äh, ich hab da
+    eine Frage' shares six tokens with the German example and must stay.
 
     Returns: list of (start, end, text) — audio ranges to cut.
     """
@@ -152,7 +151,7 @@ def find_prompt_leak_cuts(
         [t for t in (_norm(w) for w in ex.split()) if t]
         for ex in examples
     ]
-    ex_tokens = [t for t in ex_tokens if len(t) >= min_tokens]
+    ex_tokens = [t for t in ex_tokens if len(t) >= 4]
     if not ex_tokens:
         return []
     words = []
@@ -166,15 +165,18 @@ def find_prompt_leak_cuts(
     while i < len(words):
         best = 0
         for toks in ex_tokens:
-            for k in range(len(toks)):
+            # Match must start at token 0 or 1 of the example and run to
+            # its last token (so at most one leading token is missing).
+            for k in (0, 1):
                 n = 0
                 while (
                     i + n < len(words) and k + n < len(toks)
                     and words[i + n][0] == toks[k + n]
                 ):
                     n += 1
-                best = max(best, n)
-        if best >= min_tokens:
+                if k + n == len(toks):
+                    best = max(best, n)
+        if best:
             run = words[i:i + best]
             out.append((run[0][1], run[-1][2], " ".join(t for t, _, _ in run)))
             i += best

@@ -22,12 +22,18 @@ from typing import Optional
 # English pass writes German 'äh' as 'uh'). Deliberately does NOT match
 # real words: um, er, am, eh, oh, ohm, an, mehr.
 _VOCAL_RE = re.compile(
-    r"^(?:ä+h*m*|ö+h+m*|ö+m+|e+h+m+|e{2,}h+|e+h{2,}|a+h+m*|u+h+m*|h+m+|m+h+m*|m{2,}h*)$"
+    r"^(?:ä+h*m*|ö+h+m*|ö+m+|e+h+m+|e{2,}h+|e+h{2,}|a+h+m*|u+h+m*|h+m+|m+h+m*|m{2,}h*"
+    # French 'euh'/'heu', Polish/Czech 'yyy'/'eee'
+    r"|e+u+h+|h+e+u+|y{3,}|e{3,})$"
 )
+# Reduplicated forms that mean 'no' — not fillers.
+_NEGATIONS = {"uh-uh", "mm-mm", "m-m", "hm-hm"}
 
 
 def _is_vocalisation(text: str) -> bool:
     """True for a pure filler sound, incl. hyphenated 'äh-äh' / 'm-hm'."""
+    if text in _NEGATIONS:
+        return False
     parts = [p for p in text.split("-") if p]
     if not parts:
         return False
@@ -252,6 +258,9 @@ class FillerDetector:
                     # 'das ist eh klar' — a real word unless set off by
                     # a comma or a pause.
                     continue
+                if (w["text"] in ("mm", "mmm") and i > 0
+                        and cleaned[i - 1]["text"].replace(",", ".").replace(".", "", 1).isdigit()):
+                    continue  # '5 mm' — millimetres
                 is_always_filler = vocal or w["text"] in always_filler_set
                 if is_always_filler or w["probability"] >= self.confidence_threshold:
                     detected.append(FillerWord(

@@ -170,10 +170,12 @@ def analyze_video(
         # audio. Cut and strip it the same way as a loop.
         try:
             from src.hallucination_detection import find_prompt_leak_cuts
-            from src.audio import DISFLUENT_DE, DISFLUENT_EN
+            from src.audio import (
+                DISFLUENT_DE, DISFLUENT_EN, _disfluent_prompt_enabled,
+            )
             _leaks = find_prompt_leak_cuts(
                 analyzer._transcription, [DISFLUENT_DE, DISFLUENT_EN],
-            )
+            ) if _disfluent_prompt_enabled() else []
             if _leaks:
                 for (s, e, t) in _leaks:
                     print(f"[prompt-leak] cut {s:.2f}-{e:.2f}s: {t!r}", flush=True)
@@ -435,7 +437,9 @@ def analyze_video(
                 _sb = len(segments)
                 _tb = sum(e - s for s, e in segments)
                 segments = _det.filter_segments(segments, _safe)
-                _intentional_cuts.extend(_safe)
+                # Not added to _intentional_cuts: these are acoustic
+                # guesses that may clip a word edge, and smart cut's
+                # word-integrity expansion should be allowed to win.
                 _ta = sum(e - s for s, e in segments)
                 for (s, e) in _safe:
                     print(f"[audio-filler] cut {s:.2f}-{e:.2f}s "
@@ -693,11 +697,37 @@ def analyze_video(
     # MIN_FINAL_SEGMENT is a fragment: an orphan word/syllable left
     # between two aggressive cuts. Keeping them makes the flow feel
     # choppy (user report). Drop them.
+    # A fragment that holds a complete real word is kept, though: with
+    # fillers now transcribed and cut, 'und äh dann ähm haben' leaves
+    # 'dann' on its own, and dropping it changes what was said.
     MIN_FINAL_SEGMENT = 0.4
     if segments:
         before_n = len(segments)
         before_t = sum(e - s for s, e in segments)
-        segments = [(s, e) for (s, e) in segments if (e - s) >= MIN_FINAL_SEGMENT]
+        from src.filler_detection import _is_vocalisation as _isvoc
+        _real_words: list[tuple[float, float]] = []
+        for _seg in (analyzer._transcription or {}).get("segments", []):
+            for _w in _seg.get("words") or []:
+                _t = (_w.get("word") or "").strip().lower().strip(".,!?;:\"'()[]…–—-")
+                if not _t or _isvoc(_t):
+                    continue
+                try:
+                    _ws, _we = float(_w["start"]), float(_w["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if _we - _ws >= 0.08:
+                    _real_words.append((_ws, _we))
+
+        def _holds_word(s: float, e: float) -> bool:
+            for ws, we in _real_words:
+                if we <= s or ws >= e:
+                    continue
+                if min(e, we) - max(s, ws) >= 0.8 * (we - ws):
+                    return True
+            return False
+
+        segments = [(s, e) for (s, e) in segments
+                    if (e - s) >= MIN_FINAL_SEGMENT or _holds_word(s, e)]
         dropped = before_n - len(segments)
         if dropped:
             after_t = sum(e - s for s, e in segments)
