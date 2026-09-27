@@ -17,6 +17,14 @@ import { es } from "./messages/es";
 import { fr } from "./messages/fr";
 import { pt } from "./messages/pt";
 import { it } from "./messages/it";
+import { tr } from "./messages/tr";
+import { pl } from "./messages/pl";
+import { nl } from "./messages/nl";
+import { ru } from "./messages/ru";
+import { ja } from "./messages/ja";
+import { ko } from "./messages/ko";
+import { id } from "./messages/id";
+import { hi } from "./messages/hi";
 
 export const LANGS = {
   en: "English",
@@ -25,10 +33,18 @@ export const LANGS = {
   fr: "Français",
   pt: "Português",
   it: "Italiano",
+  tr: "Türkçe",
+  pl: "Polski",
+  nl: "Nederlands",
+  ru: "Русский",
+  ja: "日本語",
+  ko: "한국어",
+  id: "Bahasa Indonesia",
+  hi: "हिन्दी",
 } as const;
 export type Lang = keyof typeof LANGS;
 
-const DICTS: Record<Lang, Partial<Record<MessageKey, string>>> = { en, de, es, fr, pt, it };
+const DICTS: Record<Lang, Partial<Record<MessageKey, string>>> = { en, de, es, fr, pt, it, tr, pl, nl, ru, ja, ko, id, hi };
 const KEY = "cleocuts.lang";
 const EVENT = "cleocuts.lang.change";
 
