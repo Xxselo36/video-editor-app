@@ -6,6 +6,7 @@ that can be consumed by DaVinci Resolve, Premiere Pro, Final Cut Pro, etc.
 """
 
 import json
+import os
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Optional
@@ -445,6 +446,36 @@ def analyze_video(
                       flush=True)
         except Exception as _e:
             print(f"[audio-filler] skipped: {_e}", flush=True)
+
+    # Sustained-vowel detection — the 'äääh' Whisper neither transcribed
+    # nor left a gap for: it stretched a neighbouring word over it, so
+    # every text/gap detector above is blind to it and the audio-filler
+    # pass rejects it as 'covered by a Whisper word'. Looks inside
+    # over-long words for a held vowel with level pitch and a steady
+    # spectrum. CLEO_SUSTAINED_VOWEL_CUTS: 1 (default) cut, log = only
+    # log what would be cut, 0 = off.
+    _svd_mode = os.environ.get("CLEO_SUSTAINED_VOWEL_CUTS", "1").strip().lower()
+    if remove_fillers and analyzer._transcription and _svd_mode not in ("0", "off", "false", "no"):
+        try:
+            from src.sustained_vowel_detection import detect_sustained_vowels
+            _sr, _adata = analyzer.get_audio_data()
+            _svd_silence = [(s.start, s.end) for s in speech_segments if not s.has_speech]
+            _svd_cuts = detect_sustained_vowels(
+                _sr, _adata, analyzer._transcription, silence_ranges=_svd_silence,
+            )
+            for (s, e) in _svd_cuts:
+                print(f"[sustained-vowel] {'cut' if _svd_mode != 'log' else 'would cut'} "
+                      f"{s:.2f}-{e:.2f}s (held vowel inside a stretched word)",
+                      flush=True)
+            if _svd_cuts and _svd_mode != "log":
+                from src.filler_detection import FillerDetector
+                _tb = sum(e - s for s, e in segments)
+                segments = FillerDetector().filter_segments(segments, _svd_cuts)
+                _intentional_cuts.extend(_svd_cuts)
+                _ta = sum(e - s for s, e in segments)
+                print(f"[sustained-vowel] removed {_tb - _ta:.2f}s", flush=True)
+        except Exception as _e:
+            print(f"[sustained-vowel] skipped: {_e}", flush=True)
 
     # Stutter cleanup — repeated N-gram sequences ("es ist ein, es ist
     # ein sehr schönes Thema") that filler removal doesn't catch
