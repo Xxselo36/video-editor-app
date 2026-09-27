@@ -1179,8 +1179,12 @@ def render_only(
             segments, cut_ranges, disabled_cuts, duration,
         )
 
+    # min_gap=0: every gap between web-editor segments is a deliberate
+    # cut (silence, filler word, failed take, user trim). Bridging gaps
+    # up to 0.3 s — the Premiere plugin's encode-count optimisation —
+    # put short cut 'äh's back into the final video.
     segments, seg_effects = _merge_for_render(
-        segments, settings.get("segment_effects") or [],
+        segments, settings.get("segment_effects") or [], min_gap=0.0,
     )
 
     def _stage(msg: str, pct: float) -> None:

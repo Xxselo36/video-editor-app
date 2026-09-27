@@ -332,6 +332,7 @@ def transcribe_via_groq_multilang(
     audio_path: str,
     initial_prompt: str | None = None,
     bucket_seconds: float = 5.0,
+    initial_prompt_en: str | None = None,
 ) -> dict[str, Any] | None:
     """Two-pass Whisper for mixed-language audio.
 
@@ -366,8 +367,10 @@ def transcribe_via_groq_multilang(
               flush=True)
         return pass_auto
 
+    # The forced-English pass gets its own prompt (no German example
+    # text), so German disfluency priming can't leak into it.
     pass_en = transcribe_via_groq(audio_path,
-                                  initial_prompt=initial_prompt,
+                                  initial_prompt=initial_prompt_en or initial_prompt,
                                   language="en")
     if pass_en is None:
         print("[groq] English pass failed — using auto pass only",

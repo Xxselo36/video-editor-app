@@ -136,6 +136,12 @@ def analyze_video(
     # and drop the fake tokens from the transcript BEFORE anything
     # else looks at it (voice-command LLM, filler, stutter, mumble).
     _hallucination_cuts_to_apply: list[tuple[float, float]] = []
+    # Every range a detector deliberately cuts (loops, fillers, gaps,
+    # stutters, …). Smart cut runs later and snaps segment edges to
+    # word/sentence boundaries — which used to pull a cut 'äh' next to a
+    # comma or full stop straight back in. These ranges are re-applied
+    # after smart cut so it can adjust edges but never undo a cut.
+    _intentional_cuts: list[tuple[float, float]] = []
     if analyzer._transcription:
         try:
             from src.hallucination_detection import find_hallucination_cuts
@@ -158,6 +164,29 @@ def analyze_video(
                     ]
         except Exception as _e:
             print(f"[hallucination] skipped: {_e}", flush=True)
+        # Prompt leak: Whisper occasionally copies a prompt example
+        # sentence ('Ähm, also, äh, ich hab da, …') into near-silent
+        # audio. Cut and strip it the same way as a loop.
+        try:
+            from src.hallucination_detection import find_prompt_leak_cuts
+            from src.audio import DISFLUENT_DE, DISFLUENT_EN
+            _leaks = find_prompt_leak_cuts(
+                analyzer._transcription, [DISFLUENT_DE, DISFLUENT_EN],
+            )
+            if _leaks:
+                for (s, e, t) in _leaks:
+                    print(f"[prompt-leak] cut {s:.2f}-{e:.2f}s: {t!r}", flush=True)
+                    _hallucination_cuts_to_apply.append((s, e))
+                for seg in analyzer._transcription.get("segments") or []:
+                    seg["words"] = [
+                        w for w in (seg.get("words") or [])
+                        if not any(
+                            s <= float(w.get("start") or 0) < e
+                            for (s, e, _t) in _leaks
+                        )
+                    ]
+        except Exception as _e:
+            print(f"[prompt-leak] skipped: {_e}", flush=True)
 
     # Voice-command correction: LLM scans the raw transcript for spots
     # where Whisper mangled a Cleo command in mixed-language audio and
@@ -243,6 +272,7 @@ def analyze_video(
         _sb = len(segments)
         _tb = sum(e - s for s, e in segments)
         segments = _det.filter_segments(segments, _hallucination_cuts_to_apply)
+        _intentional_cuts.extend(_hallucination_cuts_to_apply)
         _ta = sum(e - s for s, e in segments)
         print(f"[hallucination] segments {_sb}→{len(segments)}, "
               f"time {_tb:.1f}s→{_ta:.1f}s "
@@ -275,6 +305,7 @@ def analyze_video(
             segments_before = len(segments)
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, filler_segments)
+            _intentional_cuts.extend(filler_segments)
             total_after = sum(e - s for s, e in segments)
             print(f"[filler] segments {segments_before}→{len(segments)}, "
                   f"time {total_before:.1f}s→{total_after:.1f}s "
@@ -305,6 +336,7 @@ def analyze_video(
             _sb = len(segments)
             _tb = sum(e - s for s, e in segments)
             segments = _det.filter_segments(segments, _hes_cuts)
+            _intentional_cuts.extend(_hes_cuts)
             _ta = sum(e - s for s, e in segments)
             print(f"[hesitation] {len(_hes_cuts)} punctuation-only "
                   f"marker(s) cut: {_hes_cuts}", flush=True)
@@ -330,6 +362,7 @@ def analyze_video(
             _sb = len(segments)
             _tb = sum(e - s for s, e in segments)
             segments = _det.filter_segments(segments, _gap_ranges)
+            _intentional_cuts.extend(_gap_ranges)
             _ta = sum(e - s for s, e in segments)
             for (s, e, g) in _gap_cuts_raw:
                 print(f"[word-gap] cut {s:.2f}-{e:.2f}s "
@@ -401,6 +434,7 @@ def analyze_video(
                 _sb = len(segments)
                 _tb = sum(e - s for s, e in segments)
                 segments = _det.filter_segments(segments, _safe)
+                _intentional_cuts.extend(_safe)
                 _ta = sum(e - s for s, e in segments)
                 for (s, e) in _safe:
                     print(f"[audio-filler] cut {s:.2f}-{e:.2f}s "
@@ -426,6 +460,7 @@ def analyze_video(
             segments_before = len(segments)
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, stutter_ranges)
+            _intentional_cuts.extend(stutter_ranges)
             total_after = sum(e - s for s, e in segments)
             print(f"[stutter] {len(stutter_ranges)} n-gram repeat(s) "
                   f"cut: {stutter_ranges}", flush=True)
@@ -449,6 +484,7 @@ def analyze_video(
             segments_before = len(segments)
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, mumble_ranges)
+            _intentional_cuts.extend(mumble_ranges)
             total_after = sum(e - s for s, e in segments)
             for (s, e, c, t) in mumble_data:
                 print(f"[mumble] cut {s:.2f}-{e:.2f}s "
@@ -466,7 +502,7 @@ def analyze_video(
 
     # Smart cut optimization — snap silence-based cuts to natural break
     # points. MUST run BEFORE voice-triggers because it re-snaps every
-    # segment boundary to the nearest word/sentence within ±1s. Running
+    # segment boundary to the nearest word/sentence within ±0.5s. Running
     # it after voice-triggers would drag the trigger cuts back to a
     # nearby word boundary, effectively undoing the trigger removal
     # and leaving the failed take in the final video.
@@ -489,6 +525,15 @@ def analyze_video(
         segments = cutter.optimize_cuts(
             segments, silence_ranges=_silence_ranges_for_snap,
         )
+        if _intentional_cuts:
+            from src.filler_detection import FillerDetector
+            _tb = sum(e - s for s, e in segments)
+            segments = FillerDetector().filter_segments(segments, _intentional_cuts)
+            _ta = sum(e - s for s, e in segments)
+            if _tb - _ta > 0.005:
+                print(f"[smart-cut] re-applied {len(_intentional_cuts)} "
+                      f"detector cut(s) — {_tb - _ta:.2f}s smart cut had "
+                      f"snapped back in", flush=True)
 
     # Scene triggers — Cleo start / restart / keep / finish workflow
     # for record-once-and-refine. Opt-in: only activates if the user

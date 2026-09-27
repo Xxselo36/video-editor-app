@@ -21,6 +21,20 @@ from scipy.io import wavfile
 from scipy import signal
 
 
+# Example sentences that make Whisper transcribe filled pauses instead of
+# silently dropping them (see AudioAnalyzer.transcribe). The English one
+# avoids 'um' on purpose — it is a real German word. Shared with
+# hallucination_detection.find_prompt_leak_cuts.
+DISFLUENT_EN = "Uh, so, uhm, I have, hmm, like an idea."
+DISFLUENT_DE = "Ähm, also, äh, ich hab da, hm, so eine Idee."
+
+
+def _disfluent_prompt_enabled() -> bool:
+    return os.environ.get("CLEO_DISFLUENT_PROMPT", "1").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
 @dataclass
 class Subtitle:
     """Ein Untertitel-Segment."""
@@ -200,6 +214,25 @@ class AudioAnalyzer:
             "Cleo stop. Cleo go. "
             "Cleo neu. Cleo behalten. Cleo ende."
         )
+        # Whisper writes 'clean verbatim' by default and drops 'äh'/'ähm'
+        # — often stretching a neighbouring word over it, which hides it
+        # from every text- and gap-based filler detector. Whisper only
+        # keeps disfluencies when its prompt contains disfluent text.
+        # One short sentence per language (fillers inside a sentence,
+        # not a list — a filler LIST was what triggered decoding loops
+        # before; find_hallucination_cuts / find_prompt_leak_cuts clean
+        # up if it happens anyway). CLEO_DISFLUENT_PROMPT=0 turns it off.
+        disfluent = _disfluent_prompt_enabled()
+        groq_prompt = wake_prompt
+        groq_prompt_en = wake_prompt
+        local_hotwords = None
+        if disfluent:
+            groq_prompt = f"{wake_prompt} {DISFLUENT_EN} {DISFLUENT_DE}"
+            groq_prompt_en = f"{wake_prompt} {DISFLUENT_EN}"
+            # Local faster-whisper drops initial_prompt after the first
+            # 30 s window (condition_on_previous_text=False); hotwords
+            # are re-inserted into every window.
+            local_hotwords = f"{DISFLUENT_EN} {DISFLUENT_DE}"
 
         # Try Groq first: cloud Whisper, ~10x faster than local CPU.
         # Silently falls back to local if GROQ_API_KEY is missing or
@@ -209,7 +242,8 @@ class AudioAnalyzer:
             self._report("Transkribiere Audio mit Whisper (Groq)...")
             groq_result = transcribe_via_groq_multilang(
                 audio_path,
-                initial_prompt=wake_prompt,
+                initial_prompt=groq_prompt,
+                initial_prompt_en=groq_prompt_en,
             )
             if groq_result is not None:
                 print(f"[whisper] Groq returned "
@@ -242,6 +276,7 @@ class AudioAnalyzer:
                 # truly-silent-full-segment gets skipped.
                 no_speech_threshold=0.98,
                 initial_prompt=wake_prompt,
+                hotwords=local_hotwords,
             )
 
             # Build openai-whisper-compatible dict so downstream code

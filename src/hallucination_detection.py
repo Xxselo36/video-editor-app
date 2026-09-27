@@ -3,9 +3,9 @@
 Whisper's decoder occasionally falls into a repetition loop, producing
 the same token 10-50+ times in a row within a few seconds. Triggered by:
 - Ambiguous audio (silence with mic noise, mumble, room tone)
-- Prompt bias (any filler token in the initial prompt encourages the
-  loop under uncertainty — that's why our wake-prompt no longer lists
-  'um' / 'äh')
+- Prompt bias (a LIST of filler tokens in the initial prompt encouraged
+  the loop under uncertainty — the prompt now carries fillers only
+  inside one short example sentence per language, see src/audio.py)
 - Long stretches without clear speech
 
 These runs aren't real speech; they're the language model dominating
@@ -131,3 +131,53 @@ def find_hallucination_cuts(
     # Sort cuts by start time
     cuts.sort(key=lambda c: c[0])
     return cuts
+
+
+def find_prompt_leak_cuts(
+    transcription: dict,
+    examples: list[str],
+    min_tokens: int = 6,
+) -> list[tuple[float, float, str]]:
+    """Find places where Whisper copied a prompt example sentence into the
+    transcript (a known failure on near-silent or unclear audio).
+
+    A run of >= `min_tokens` consecutive words that equals a contiguous
+    stretch of an example sentence (normalized: lower-case, no
+    punctuation) is flagged. Real speech practically never reproduces
+    six words of 'Ähm, also, äh, ich hab da, hm, so eine Idee' verbatim.
+
+    Returns: list of (start, end, text) — audio ranges to cut.
+    """
+    ex_tokens = [
+        [t for t in (_norm(w) for w in ex.split()) if t]
+        for ex in examples
+    ]
+    ex_tokens = [t for t in ex_tokens if len(t) >= min_tokens]
+    if not ex_tokens:
+        return []
+    words = []
+    for seg in transcription.get("segments") or []:
+        for w in seg.get("words") or []:
+            t = _norm(w.get("word", ""))
+            if t:
+                words.append((t, float(w.get("start") or 0), float(w.get("end") or 0)))
+    out: list[tuple[float, float, str]] = []
+    i = 0
+    while i < len(words):
+        best = 0
+        for toks in ex_tokens:
+            for k in range(len(toks)):
+                n = 0
+                while (
+                    i + n < len(words) and k + n < len(toks)
+                    and words[i + n][0] == toks[k + n]
+                ):
+                    n += 1
+                best = max(best, n)
+        if best >= min_tokens:
+            run = words[i:i + best]
+            out.append((run[0][1], run[-1][2], " ".join(t for t, _, _ in run)))
+            i += best
+        else:
+            i += 1
+    return out
