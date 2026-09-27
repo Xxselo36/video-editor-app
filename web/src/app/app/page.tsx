@@ -1290,13 +1290,19 @@ function PickerScreen({
   }, []);
 
   // React to add/update/remove from anywhere in the app (uploads
-  // starting, progress ticks, jobs finishing). Bumps to dashboard
-  // when a job first appears so the user sees their upload land.
+  // starting, progress ticks, jobs finishing). Bumps to dashboard only
+  // when a job is ADDED so the user sees their upload land — progress
+  // ticks used to bump too, which threw the user out of the workflow
+  // picker ("+ New video") while another job was running. Counting
+  // (not ids) because an upload card swaps its temp id for the real one.
+  const jobCountRef = useRef(0);
   useEffect(() => {
+    jobCountRef.current = getActiveJobs().length;
     const refresh = () => {
       const jobs = getActiveJobs();
       setActiveJobs(jobs);
-      if (jobs.length > 0) setView("dashboard");
+      if (jobs.length > jobCountRef.current) setView("dashboard");
+      jobCountRef.current = jobs.length;
     };
     return subscribeActiveJobs(refresh);
   }, []);
