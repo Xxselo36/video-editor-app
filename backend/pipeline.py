@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -977,6 +978,7 @@ def _try_modal_render(
         _stage(f"Rendering {len(segments)} clip(s) on Modal…", 10)
         # Modal 1.x renamed lookup → from_name
         fn = modal.Function.from_name("cleocuts-render", "render_burn_concat")
+        _modal_t0 = time.monotonic()
         result_map = fn.remote(
             job_id=job_id,
             input_filename=input_filename,
@@ -988,6 +990,8 @@ def _try_modal_render(
             output_formats=list(output_formats),
         )
 
+        from backend import costs
+        costs.record_modal(time.monotonic() - _modal_t0)
         _stage("Downloading from Modal…", 88)
         # result_map is {"primary": "output.mp4", "_thumbnail": "thumbnail.jpg", "9:16": "output_9-16.mp4", ...}
         primary_fname = result_map.get("primary")

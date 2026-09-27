@@ -88,6 +88,8 @@ class Job:
     updated_at: float = 0.0
     # Subscription plan of the owner; decides the retention period.
     plan: str = DEFAULT_PLAN
+    # Accumulated processing cost (raw units + usd_*), see backend/costs.py.
+    costs: dict[str, float] = field(default_factory=dict)
 
     def expires_at(self) -> float | None:
         """Unix time when the project gets deleted, None = never."""

@@ -33,6 +33,7 @@ try:
 except ImportError:
     pass
 
+import hmac
 import io
 import json
 import os
@@ -45,11 +46,12 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 import time
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
-from backend.jobs import store
+from backend import costs
+from backend.jobs import store, retention_days
 from backend.pipeline import analyze_only, render_only
 
 # Track active worker threads so shutdown can wait for them before
@@ -265,6 +267,11 @@ def caption_preview(preset: str, w: int = 280, h: int = 100):
 
 
 def _run_analyze(job_id: str) -> None:
+    with costs.tracking(job_id, "analyze"):
+        _run_analyze_inner(job_id)
+
+
+def _run_analyze_inner(job_id: str) -> None:
     """Worker: normalize + analyze. Job pauses on success awaiting render."""
     _register_active(job_id)
     try:
@@ -321,6 +328,15 @@ def _run_analyze(job_id: str) -> None:
 
 
 def _run_render(
+    job_id: str,
+    edited_subtitles: list,
+    disabled_cuts: list[int] | None = None,
+) -> None:
+    with costs.tracking(job_id, "render"):
+        _run_render_inner(job_id, edited_subtitles, disabled_cuts)
+
+
+def _run_render_inner(
     job_id: str,
     edited_subtitles: list,
     disabled_cuts: list[int] | None = None,
@@ -583,6 +599,59 @@ def get_job(job_id: str):
     if job is None:
         raise HTTPException(404, "job not found")
     return job.to_dict()
+
+
+@app.get("/admin/costs")
+def admin_costs(x_admin_token: str = Header(default="")):
+    """What processing costs us — per job and per video minute.
+
+    Protected by CLEO_ADMIN_TOKEN (send it as X-Admin-Token); disabled
+    (404) while that env var is unset. Storage is estimated for keeping
+    each job's files for its plan's full retention period.
+    """
+    token = os.environ.get("CLEO_ADMIN_TOKEN", "")
+    if not token:
+        raise HTTPException(404, "not found")
+    if not hmac.compare_digest(x_admin_token, token):
+        raise HTTPException(401, "bad admin token")
+    rows = []
+    for job in store.list_all():
+        c = dict(job.costs or {})
+        if not c:
+            continue
+        size = costs.dir_bytes(_WORK_ROOT / job.id)
+        c["usd_storage"] = costs.storage_usd(size, retention_days(job.plan))
+        total = c.get("usd_total", 0.0) + c["usd_storage"]
+        minutes = (job.duration or 0) / 60
+        rows.append({
+            "job_id": job.id,
+            "status": job.status,
+            "plan": job.plan,
+            "video_minutes": round(minutes, 2),
+            "storage_mb": round(size / 1e6, 1),
+            "usd": {k: round(v, 5) for k, v in c.items() if k.startswith("usd_")},
+            "usd_all_in": round(total, 5),
+            "usd_per_video_minute": round(total / minutes, 5) if minutes else None,
+            "usage": {k: round(v, 2) for k, v in c.items() if not k.startswith("usd_")},
+        })
+    minutes = sum(r["video_minutes"] for r in rows)
+    spent = sum(r["usd_all_in"] for r in rows)
+    parts: dict[str, float] = {}
+    for r in rows:
+        for k, v in r["usd"].items():
+            if k != "usd_total":
+                parts[k] = parts.get(k, 0.0) + v
+    return {
+        "note": "Estimates from backend/costs.py RATES — check provider prices.",
+        "jobs": len(rows),
+        "video_minutes": round(minutes, 2),
+        "usd_total": round(spent, 4),
+        "usd_per_video_minute": round(spent / minutes, 5) if minutes else None,
+        "usd_per_video_minute_by_part": {
+            k: round(v / minutes, 5) for k, v in parts.items()
+        } if minutes else {},
+        "rows": sorted(rows, key=lambda r: -r["usd_all_in"]),
+    }
 
 
 @app.delete("/jobs/{job_id}")
