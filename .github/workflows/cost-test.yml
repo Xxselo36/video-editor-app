@@ -1,0 +1,34 @@
+name: Cost test (live backend)
+
+# Runs synthetic talking-head videos through the live backend
+# (upload → analyze → render) so /admin/costs gets real numbers.
+# Costs a few cents per run (Groq, Claude, Modal). Per-job costs are
+# printed when the CLEO_ADMIN_TOKEN repo secret is set.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'Video lengths in minutes, comma-separated'
+        required: false
+        default: '2,10'
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ffmpeg + espeak-ng
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
+      - name: Run
+        env:
+          CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
+          MINUTES: ${{ inputs.minutes }}
+        run: python .github/scripts/cost_test.py "$MINUTES"
