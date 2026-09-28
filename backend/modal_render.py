@@ -63,11 +63,10 @@ image = (
 
 @app.function(
     image=image,
-    # Caption burn scales ~linearly with cores (3.8x on 4 cores in a
-    # benchmark) and Modal bills per core-second, so more cores ≈ same
-    # cost, less wall time. RAM grows with parallel MoviePy clips.
-    cpu=16.0,
-    memory=16384,
+    # 8 cores: a live test with 16 (10 min video) rendered slower and
+    # cost 2.5x as much on Modal, so more cores don't pay off here.
+    cpu=8.0,
+    memory=8192,
     timeout=1800,      # 30 min hard cap per render
     volumes={VOLUME_MOUNT: render_volume},
 )
@@ -127,7 +126,7 @@ def render_burn_concat(
         cut_style=cut_style,
         language=language,
         # One clip per core — dedicated CPU, not shared
-        parallelism=16,
+        parallelism=8,
         # render_only already merged tiny gaps (keeping per-segment
         # effects aligned); don't merge again here.
         merge_gap=0.0,

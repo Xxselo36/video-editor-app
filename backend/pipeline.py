@@ -1048,6 +1048,8 @@ def _try_modal_render(
         import traceback
         print(f"[modal] render failed, falling back to local: {e}\n"
               f"{traceback.format_exc()}", flush=True)
+        from backend import costs
+        costs.record_event("modal_failed")
         return False
 
 
