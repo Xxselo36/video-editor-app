@@ -63,8 +63,11 @@ image = (
 
 @app.function(
     image=image,
-    cpu=8.0,           # 8 vCPUs — enough parallelism for per-segment burn
-    memory=8192,       # 8 GB RAM — MoviePy + ffmpeg for 4K sources
+    # Caption burn scales ~linearly with cores (3.8x on 4 cores in a
+    # benchmark) and Modal bills per core-second, so more cores ≈ same
+    # cost, less wall time. RAM grows with parallel MoviePy clips.
+    cpu=16.0,
+    memory=16384,
     timeout=1800,      # 30 min hard cap per render
     volumes={VOLUME_MOUNT: render_volume},
 )
@@ -123,8 +126,8 @@ def render_burn_concat(
         output_dir=str(burn_dir),
         cut_style=cut_style,
         language=language,
-        # More parallelism on Modal — we have dedicated CPU, not shared
-        parallelism=8,
+        # One clip per core — dedicated CPU, not shared
+        parallelism=16,
         # render_only already merged tiny gaps (keeping per-segment
         # effects aligned); don't merge again here.
         merge_gap=0.0,
