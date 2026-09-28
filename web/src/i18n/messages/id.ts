@@ -34,6 +34,60 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "Editanmu tidak bisa disimpan — cek koneksimu dan coba lagi.",
   "app.errors.title": "Ada yang salah",
   "app.errors.tryAgain": "Coba lagi",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "Sesimu sudah berakhir. Silakan masuk lagi dan coba ulang.",
+  "app.errors.subscriptionRequired": "Untuk mengunggah, kamu perlu paket. Pilih salah satu di halaman harga.",
+  "app.errors.quotaExceeded":
+    "Sisa menitmu di periode ini tidak cukup untuk video ini. Upgrade paketmu atau tunggu sampai kuotanya direset.",
+  "app.errors.unreadableVideo":
+    "Kami tidak bisa membaca file video ini. Ekspor ulang sebagai MP4 atau MOV, lalu unggah lagi.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Masuk untuk membuka proyekmu.",
+  "app.auth.loadFailed":
+    "Halaman masuk tidak bisa dimuat. Cek koneksimu (atau izinkan situs ini di pemblokir kontenmu) dan coba lagi.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Pilih paket untuk mengunggah",
+  "app.paywall.subscriptionBody":
+    "Unggahan butuh paket aktif. Pilih salah satu — cuma butuh semenit, dan bisa dibatalkan kapan saja.",
+  "app.paywall.quotaTitle": "Sisa menit tidak cukup",
+  "app.paywall.quotaBody": "Sisa menitmu di periode ini tinggal {left} menit — video ini butuh {needed} menit.",
+  "app.paywall.quotaBodyUnknown": "Video ini lebih panjang dari sisa menitmu di periode ini.",
+  "app.paywall.seePlans": "Lihat paket",
+  "app.paywall.upgrade": "Upgrade paket",
+  "app.paywall.close": "Nanti saja",
+  "app.billing.minutesLeft": "Sisa {n} menit di periode ini",
+  "app.billing.choosePlan": "Pilih paket untuk mengunggah",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Akun",
+  "app.account.signedInAs": "Masuk sebagai {email}",
+  "app.account.plan": "Paket",
+  "app.account.noPlan": "Belum ada paket",
+  "app.account.freeBeta": "CleoCuts gratis selama beta terbuka — tidak perlu paket.",
+  "app.account.status.active": "Aktif · diperpanjang pada {date}",
+  "app.account.status.activeNoDate": "Aktif",
+  "app.account.status.trial": "Uji coba · pembayaran pertama pada {date}",
+  "app.account.status.cancelled": "Berakhir pada {date}",
+  "app.account.status.pastDue": "Pembayaran terlambat — perbarui metode pembayaranmu.",
+  "app.account.status.paused": "Dijeda",
+  "app.account.status.expired": "Kedaluwarsa",
+  "app.account.status.comp": "Gratis",
+  "app.account.usage": "Menit di periode ini",
+  "app.account.usageOf": "{used} dari {limit} menit terpakai",
+  "app.account.resetsOn": "Direset pada {date}",
+  "app.account.manage": "Kelola langganan",
+  "app.account.manageHint": "Faktur, metode pembayaran, dan pembatalan diurus di portal pelanggan Lemon Squeezy.",
+  "app.account.changePlan": "Ganti paket",
+  "app.account.choosePlan": "Pilih paket",
+  "app.account.portalFailed": "Portal tagihan tidak bisa dibuka. Coba lagi sebentar lagi.",
+  "app.account.loadFailed": "Akunmu tidak bisa dimuat sekarang. Coba lagi sebentar lagi.",
+  "app.account.testMode": "Mode tes",
+  "app.account.successPending": "Terima kasih! Pembayaranmu berhasil — paketmu sedang diaktifkan…",
+  "app.account.successDone": "Paket {plan} kamu sudah aktif. Selamat mengedit!",
+  "app.account.successSlow":
+    "Prosesnya lebih lama dari biasanya. Paketmu akan muncul di sini dalam beberapa menit — muat ulang halaman untuk mengecek.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "Tanpa judul",
@@ -300,6 +354,7 @@ export const id: Partial<Record<MessageKey, string>> = {
   "site.header.openEditor": "Buka editor",
 
   "site.hero.badge": "Beta terbuka · gratis",
+  "site.hero.badgePricing": "Lihat paket & harga",
   "site.hero.titleLead": "Edit sambil kamu",
   "site.hero.titleAccent": "merekam.",
   "site.hero.sub":
@@ -346,6 +401,36 @@ export const id: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "Perpustakaan",
   "site.footer.imprint": "Imprint",
   "site.footer.privacy": "Privasi",
+  "site.footer.terms": "Ketentuan",
+  "site.footer.pricing": "Harga",
+
+  /* ── Pricing page ── */
+  "site.pricing.title": "Harga yang simpel",
+  "site.pricing.subtitle": "Bayar bulanan sesuai menit video yang kamu unggah. Bisa berhenti kapan saja.",
+  "site.pricing.perMonth": "/ bulan",
+  "site.pricing.perYear": "/ tahun",
+  "site.pricing.priceAtCheckout": "Harga ditampilkan saat checkout",
+  "site.pricing.popular": "Paling populer",
+  "site.pricing.minutes": "{minutes} menit video per bulan",
+  "site.pricing.retention": "Proyek disimpan selama {days} hari",
+  "site.pricing.featureWorkflows": "Semua workflow dan gaya teks",
+  "site.pricing.featureVoice": "Perintah suara dan pembersihan AI",
+  "site.pricing.featureFormats": "Ekspor dalam {formats}",
+  "site.pricing.choose": "Pilih {plan}",
+  "site.pricing.current": "Paketmu saat ini",
+  "site.pricing.manage": "Kelola langganan",
+  "site.pricing.switch": "Ganti ke {plan}",
+  "site.pricing.unavailable": "Belum tersedia",
+  "site.pricing.redirecting": "Membuka checkout…",
+  "site.pricing.checkoutFailed": "Checkout tidak bisa dibuka. Coba lagi sebentar lagi.",
+  "site.pricing.loadFailed": "Paket tidak bisa dimuat. Coba lagi sebentar lagi.",
+  "site.pricing.minutesHint":
+    "Menit dihitung dari durasi video yang kamu unggah. Menit yang tidak terpakai tidak terbawa ke bulan berikutnya.",
+  "site.pricing.vatNote":
+    "Harga sudah termasuk PPN. Pembayaran diurus oleh Lemon Squeezy, Merchant of Record kami — mereka yang menagihmu dan mengirim fakturmu.",
+  "site.pricing.testMode": "Mode tes — tanpa pembayaran sungguhan",
+  "site.pricing.betaTitle": "Gratis selama beta terbuka",
+  "site.pricing.betaBody": "CleoCuts gratis selama masih beta. Paket berbayar dengan lebih banyak menit segera hadir.",
 
   "library.header.homeAria": "Editor CleoCuts",
   "library.header.title": "Perpustakaan",
@@ -385,4 +470,9 @@ export const id: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Tutup pratinjau",
   "common.videoModal.close": "Tutup",
+
+  /* ── Accounts (header, all pages) ── */
+  "common.auth.signIn": "Masuk",
+  "common.auth.account": "Akun",
+  "common.auth.pricing": "Harga",
 };

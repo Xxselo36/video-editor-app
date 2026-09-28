@@ -34,6 +34,60 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "Je bewerkingen konden niet worden opgeslagen — controleer je verbinding en probeer het opnieuw.",
   "app.errors.title": "Er ging iets mis",
   "app.errors.tryAgain": "Opnieuw proberen",
+  // Accounts + billing (alleen bereikbaar als die zijn ingeschakeld)
+  "app.errors.signInRequired": "Je sessie is verlopen. Log opnieuw in en probeer het nog eens.",
+  "app.errors.subscriptionRequired": "Voor uploaden heb je een abonnement nodig. Kies er een op de prijzenpagina.",
+  "app.errors.quotaExceeded":
+    "Je hebt deze periode niet genoeg minuten meer voor deze video. Upgrade je abonnement of wacht tot je minuten weer worden aangevuld.",
+  "app.errors.unreadableVideo":
+    "We konden dit videobestand niet lezen. Exporteer het opnieuw als MP4 of MOV en upload het nog een keer.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Log in om je projecten te openen.",
+  "app.auth.loadFailed":
+    "Inloggen kon niet worden geladen. Controleer je verbinding (of sta deze site toe in je contentblocker) en probeer het opnieuw.",
+
+  // ── Billing: upload geblokkeerd (402) + resterende minuten ──────────
+  "app.paywall.subscriptionTitle": "Kies een abonnement om te uploaden",
+  "app.paywall.subscriptionBody":
+    "Voor uploads heb je een actief abonnement nodig. Kies er een — dat duurt maar een minuutje, en je kunt altijd opzeggen.",
+  "app.paywall.quotaTitle": "Niet genoeg minuten over",
+  "app.paywall.quotaBody": "Je hebt deze periode nog {left} min over — deze video heeft {needed} min nodig.",
+  "app.paywall.quotaBodyUnknown": "Deze video is langer dan het aantal minuten dat je deze periode nog over hebt.",
+  "app.paywall.seePlans": "Abonnementen bekijken",
+  "app.paywall.upgrade": "Abonnement upgraden",
+  "app.paywall.close": "Niet nu",
+  "app.billing.minutesLeft": "Nog {n} min over deze periode",
+  "app.billing.choosePlan": "Kies een abonnement om te uploaden",
+
+  // ── Accountpagina (/app/account) ─────────────────────────────────────
+  "app.account.title": "Account",
+  "app.account.signedInAs": "Ingelogd als {email}",
+  "app.account.plan": "Abonnement",
+  "app.account.noPlan": "Nog geen abonnement",
+  "app.account.freeBeta": "CleoCuts is gratis tijdens de open beta — je hebt geen abonnement nodig.",
+  "app.account.status.active": "Actief · wordt verlengd op {date}",
+  "app.account.status.activeNoDate": "Actief",
+  "app.account.status.trial": "Proefperiode · eerste betaling op {date}",
+  "app.account.status.cancelled": "Stopt op {date}",
+  "app.account.status.pastDue": "Betaling achterstallig — werk je betaalmethode bij.",
+  "app.account.status.paused": "Gepauzeerd",
+  "app.account.status.expired": "Verlopen",
+  "app.account.status.comp": "Gratis aangeboden",
+  "app.account.usage": "Minuten deze periode",
+  "app.account.usageOf": "{used} van {limit} min gebruikt",
+  "app.account.resetsOn": "Wordt aangevuld op {date}",
+  "app.account.manage": "Abonnement beheren",
+  "app.account.manageHint": "Facturen, betaalmethode en opzeggen regel je in het klantenportaal van Lemon Squeezy.",
+  "app.account.changePlan": "Abonnement wijzigen",
+  "app.account.choosePlan": "Kies een abonnement",
+  "app.account.portalFailed": "Het betaalportaal kon niet worden geopend. Probeer het straks nog eens.",
+  "app.account.loadFailed": "Je account kon nu niet geladen worden. Probeer het straks nog eens.",
+  "app.account.testMode": "Testmodus",
+  "app.account.successPending": "Bedankt! Je betaling is gelukt — je abonnement wordt geactiveerd…",
+  "app.account.successDone": "Je {plan}-abonnement is actief. Veel montageplezier!",
+  "app.account.successSlow":
+    "Dit duurt langer dan normaal. Je abonnement verschijnt hier binnen een paar minuten — herlaad de pagina om het te controleren.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "Naamloos",
@@ -300,6 +354,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "site.header.openEditor": "Editor openen",
 
   "site.hero.badge": "Open beta · gratis",
+  "site.hero.badgePricing": "Bekijk abonnementen & prijzen",
   "site.hero.titleLead": "Monteer terwijl je",
   "site.hero.titleAccent": "opneemt.",
   "site.hero.sub":
@@ -346,6 +401,36 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "Bibliotheek",
   "site.footer.imprint": "Colofon",
   "site.footer.privacy": "Privacy",
+  "site.footer.terms": "Voorwaarden",
+  "site.footer.pricing": "Prijzen",
+
+  // ── Prijzenpagina ───────────────────────────────────────────────────
+  "site.pricing.title": "Eenvoudige prijzen",
+  "site.pricing.subtitle": "Betaal maandelijks voor de minuten video die je uploadt. Altijd opzegbaar.",
+  "site.pricing.perMonth": "/ maand",
+  "site.pricing.perYear": "/ jaar",
+  "site.pricing.priceAtCheckout": "Prijs zie je bij het afrekenen",
+  "site.pricing.popular": "Meest gekozen",
+  "site.pricing.minutes": "{minutes} min video per maand",
+  "site.pricing.retention": "Projecten worden {days} dagen bewaard",
+  "site.pricing.featureWorkflows": "Alle workflows en ondertitelstijlen",
+  "site.pricing.featureVoice": "Spraakcommando's en AI-opschoning",
+  "site.pricing.featureFormats": "Exporteren in {formats}",
+  "site.pricing.choose": "Kies {plan}",
+  "site.pricing.current": "Je huidige abonnement",
+  "site.pricing.manage": "Abonnement beheren",
+  "site.pricing.switch": "Overstappen naar {plan}",
+  "site.pricing.unavailable": "Nog niet beschikbaar",
+  "site.pricing.redirecting": "Afrekenen wordt geopend…",
+  "site.pricing.checkoutFailed": "Afrekenen kon niet worden geopend. Probeer het straks nog eens.",
+  "site.pricing.loadFailed": "De abonnementen konden niet worden geladen. Probeer het straks nog eens.",
+  "site.pricing.minutesHint":
+    "Minuten tellen de lengte van de video's die je uploadt. Ongebruikte minuten schuiven niet door naar de volgende maand.",
+  "site.pricing.vatNote":
+    "Prijzen zijn inclusief btw. Betalingen lopen via Lemon Squeezy, onze Merchant of Record — zij brengen de kosten in rekening en sturen je facturen.",
+  "site.pricing.testMode": "Testmodus — geen echte betalingen",
+  "site.pricing.betaTitle": "Gratis tijdens de open beta",
+  "site.pricing.betaBody": "CleoCuts is gratis zolang we in beta zijn. Betaalde abonnementen met meer minuten komen binnenkort.",
 
   "library.header.homeAria": "CleoCuts editor",
   "library.header.title": "Bibliotheek",
@@ -385,4 +470,8 @@ export const nl: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Voorbeeld sluiten",
   "common.videoModal.close": "Sluiten",
+
+  "common.auth.signIn": "Inloggen",
+  "common.auth.account": "Account",
+  "common.auth.pricing": "Prijzen",
 };

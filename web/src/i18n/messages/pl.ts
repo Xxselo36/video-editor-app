@@ -34,6 +34,60 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "Nie udało się zapisać zmian — sprawdź połączenie i spróbuj ponownie.",
   "app.errors.title": "Coś poszło nie tak",
   "app.errors.tryAgain": "Spróbuj ponownie",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "Twoja sesja wygasła. Zaloguj się ponownie i spróbuj jeszcze raz.",
+  "app.errors.subscriptionRequired": "Do przesyłania potrzebujesz planu. Wybierz go na stronie z cennikiem.",
+  "app.errors.quotaExceeded":
+    "Za mało minut w tym okresie na ten film. Ulepsz plan albo poczekaj na odnowienie limitu.",
+  "app.errors.unreadableVideo":
+    "Nie udało się odczytać tego pliku wideo. Wyeksportuj go ponownie jako MP4 lub MOV i wgraj jeszcze raz.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Zaloguj się, aby otworzyć swoje projekty.",
+  "app.auth.loadFailed":
+    "Nie udało się wczytać logowania. Sprawdź połączenie (albo odblokuj tę stronę w blokerze treści) i spróbuj ponownie.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Wybierz plan, aby przesyłać",
+  "app.paywall.subscriptionBody":
+    "Przesyłanie wymaga aktywnego planu. Wybierz jeden — zajmie to tylko minutę, a zrezygnować możesz w każdej chwili.",
+  "app.paywall.quotaTitle": "Za mało minut",
+  "app.paywall.quotaBody": "W tym okresie zostało ci {left} min — ten film potrzebuje {needed} min.",
+  "app.paywall.quotaBodyUnknown": "Ten film jest dłuższy niż liczba minut, które zostały ci w tym okresie.",
+  "app.paywall.seePlans": "Zobacz plany",
+  "app.paywall.upgrade": "Ulepsz plan",
+  "app.paywall.close": "Nie teraz",
+  "app.billing.minutesLeft": "Zostało {n} min w tym okresie",
+  "app.billing.choosePlan": "Wybierz plan, aby przesyłać",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Konto",
+  "app.account.signedInAs": "Zalogowano jako {email}",
+  "app.account.plan": "Plan",
+  "app.account.noPlan": "Brak planu",
+  "app.account.freeBeta": "W czasie otwartej bety korzystasz z CleoCuts bezpłatnie — plan nie jest potrzebny.",
+  "app.account.status.active": "Aktywny · odnawia się {date}",
+  "app.account.status.activeNoDate": "Aktywny",
+  "app.account.status.trial": "Okres próbny · pierwsza płatność {date}",
+  "app.account.status.cancelled": "Zostanie anulowany {date}",
+  "app.account.status.pastDue": "Zaległa płatność — zaktualizuj metodę płatności.",
+  "app.account.status.paused": "Wstrzymany",
+  "app.account.status.expired": "Wygasł",
+  "app.account.status.comp": "Bezpłatny",
+  "app.account.usage": "Minuty w tym okresie",
+  "app.account.usageOf": "Wykorzystano {used} z {limit} min",
+  "app.account.resetsOn": "Limit odnawia się {date}",
+  "app.account.manage": "Zarządzaj subskrypcją",
+  "app.account.manageHint": "Faktury, metodę płatności i anulowanie obsłużysz w portalu klienta Lemon Squeezy.",
+  "app.account.changePlan": "Zmień plan",
+  "app.account.choosePlan": "Wybierz plan",
+  "app.account.portalFailed": "Nie udało się otworzyć portalu płatności. Spróbuj ponownie za chwilę.",
+  "app.account.loadFailed": "Nie udało się teraz wczytać twojego konta. Spróbuj ponownie za chwilę.",
+  "app.account.testMode": "Tryb testowy",
+  "app.account.successPending": "Dzięki! Płatność przeszła — aktywujemy twój plan…",
+  "app.account.successDone": "Twój plan {plan} jest aktywny. Miłego montażu!",
+  "app.account.successSlow":
+    "Trwa to dłużej niż zwykle. Twój plan pojawi się tutaj w ciągu kilku minut — odśwież stronę, aby sprawdzić.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "Bez tytułu",
@@ -300,6 +354,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "site.header.openEditor": "Otwórz edytor",
 
   "site.hero.badge": "Otwarta beta · bezpłatnie",
+  "site.hero.badgePricing": "Zobacz plany i cennik",
   "site.hero.titleLead": "Montuj, kiedy",
   "site.hero.titleAccent": "nagrywasz.",
   "site.hero.sub":
@@ -346,6 +401,36 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "Biblioteka",
   "site.footer.imprint": "Nota prawna",
   "site.footer.privacy": "Prywatność",
+  "site.footer.terms": "Regulamin",
+  "site.footer.pricing": "Cennik",
+
+  "site.pricing.title": "Prosty cennik",
+  "site.pricing.subtitle": "Płać co miesiąc za minuty wgrywanych filmów. Możesz zrezygnować w każdej chwili.",
+  "site.pricing.perMonth": "/ mies.",
+  "site.pricing.perYear": "/ rok",
+  "site.pricing.priceAtCheckout": "Cena widoczna przy płatności",
+  "site.pricing.popular": "Najpopularniejszy",
+  "site.pricing.minutes": "{minutes} min wideo miesięcznie",
+  "site.pricing.retention": "Projekty przechowywane przez {days} dni",
+  "site.pricing.featureWorkflows": "Wszystkie workflowy i style napisów",
+  "site.pricing.featureVoice": "Komendy głosowe i czyszczenie przez AI",
+  "site.pricing.featureFormats": "Eksport w formatach {formats}",
+  "site.pricing.choose": "Wybierz {plan}",
+  "site.pricing.current": "Twój obecny plan",
+  "site.pricing.manage": "Zarządzaj subskrypcją",
+  "site.pricing.switch": "Przejdź na {plan}",
+  "site.pricing.unavailable": "Jeszcze niedostępny",
+  "site.pricing.redirecting": "Otwieranie płatności…",
+  "site.pricing.checkoutFailed": "Nie udało się otworzyć płatności. Spróbuj ponownie za chwilę.",
+  "site.pricing.loadFailed": "Nie udało się wczytać planów. Spróbuj ponownie za chwilę.",
+  "site.pricing.minutesHint":
+    "Minuty to łączna długość wgrywanych filmów. Niewykorzystane minuty nie przechodzą na kolejny miesiąc.",
+  "site.pricing.vatNote":
+    "Ceny zawierają VAT. Płatności obsługuje Lemon Squeezy, nasz Merchant of Record — pobiera opłaty i wysyła ci faktury.",
+  "site.pricing.testMode": "Tryb testowy — bez prawdziwych płatności",
+  "site.pricing.betaTitle": "Bezpłatnie w czasie otwartej bety",
+  "site.pricing.betaBody":
+    "W czasie bety korzystasz z CleoCuts bezpłatnie. Płatne plany z większą liczbą minut pojawią się wkrótce.",
 
   "library.header.homeAria": "Edytor CleoCuts",
   "library.header.title": "Biblioteka",
@@ -385,4 +470,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Zamknij podgląd",
   "common.videoModal.close": "Zamknij",
+
+  "common.auth.signIn": "Zaloguj się",
+  "common.auth.account": "Konto",
+  "common.auth.pricing": "Cennik",
 };

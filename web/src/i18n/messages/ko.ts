@@ -34,6 +34,60 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "편집 내용을 저장하지 못했어요 — 연결을 확인하고 다시 시도해 주세요.",
   "app.errors.title": "문제가 발생했어요",
   "app.errors.tryAgain": "다시 시도",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "세션이 만료됐어요. 다시 로그인한 후 시도해 주세요.",
+  "app.errors.subscriptionRequired": "업로드하려면 요금제가 필요해요. 요금제 페이지에서 선택해 주세요.",
+  "app.errors.quotaExceeded":
+    "이번 기간에 남은 이용 시간이 이 영상에는 부족해요. 요금제를 업그레이드하거나 초기화될 때까지 기다려 주세요.",
+  "app.errors.unreadableVideo":
+    "이 영상 파일을 읽을 수 없어요. MP4 또는 MOV로 다시 내보낸 후 업로드해 주세요.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "프로젝트를 열려면 로그인해 주세요.",
+  "app.auth.loadFailed":
+    "로그인 화면을 불러오지 못했어요. 연결을 확인하거나 콘텐츠 차단기에서 이 사이트를 허용한 후 다시 시도해 주세요.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "업로드하려면 요금제를 선택해 주세요",
+  "app.paywall.subscriptionBody":
+    "업로드하려면 이용 중인 요금제가 필요해요. 1분이면 선택할 수 있고, 언제든 해지할 수 있어요.",
+  "app.paywall.quotaTitle": "남은 이용 시간이 부족해요",
+  "app.paywall.quotaBody": "이번 기간에 {left}분 남았어요 — 이 영상에는 {needed}분이 필요해요.",
+  "app.paywall.quotaBodyUnknown": "이 영상은 이번 기간에 남은 이용 시간보다 길어요.",
+  "app.paywall.seePlans": "요금제 보기",
+  "app.paywall.upgrade": "요금제 업그레이드",
+  "app.paywall.close": "나중에",
+  "app.billing.minutesLeft": "이번 기간 {n}분 남음",
+  "app.billing.choosePlan": "업로드하려면 요금제를 선택하세요",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "계정",
+  "app.account.signedInAs": "{email} 계정으로 로그인됨",
+  "app.account.plan": "요금제",
+  "app.account.noPlan": "아직 요금제가 없어요",
+  "app.account.freeBeta": "오픈 베타 기간에는 CleoCuts를 무료로 쓸 수 있어요 — 요금제가 필요 없어요.",
+  "app.account.status.active": "이용 중 · {date}에 갱신",
+  "app.account.status.activeNoDate": "이용 중",
+  "app.account.status.trial": "무료 체험 · {date}에 첫 결제",
+  "app.account.status.cancelled": "{date}에 해지 예정",
+  "app.account.status.pastDue": "결제가 연체됐어요 — 결제 수단을 업데이트해 주세요.",
+  "app.account.status.paused": "일시 중지됨",
+  "app.account.status.expired": "만료됨",
+  "app.account.status.comp": "무료 제공",
+  "app.account.usage": "이번 기간 사용 시간",
+  "app.account.usageOf": "{limit}분 중 {used}분 사용",
+  "app.account.resetsOn": "{date}에 초기화돼요",
+  "app.account.manage": "구독 관리",
+  "app.account.manageHint": "청구서, 결제 수단, 해지는 Lemon Squeezy 고객 포털에서 관리해요.",
+  "app.account.changePlan": "요금제 변경",
+  "app.account.choosePlan": "요금제 선택",
+  "app.account.portalFailed": "결제 포털을 열 수 없어요. 잠시 후 다시 시도해 주세요.",
+  "app.account.loadFailed": "지금은 계정 정보를 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
+  "app.account.testMode": "테스트 모드",
+  "app.account.successPending": "감사해요! 결제가 완료됐어요 — 요금제를 활성화하는 중…",
+  "app.account.successDone": "{plan} 요금제가 활성화됐어요. 즐겁게 편집하세요!",
+  "app.account.successSlow":
+    "평소보다 오래 걸리고 있어요. 몇 분 안에 요금제가 여기에 표시될 거예요 — 페이지를 새로고침해서 확인해 보세요.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "제목 없음",
@@ -300,6 +354,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "site.header.openEditor": "편집기 열기",
 
   "site.hero.badge": "오픈 베타 · 무료",
+  "site.hero.badgePricing": "요금제 및 가격 보기",
   "site.hero.titleLead": "녹화하면서",
   "site.hero.titleAccent": "편집하세요.",
   "site.hero.sub":
@@ -346,6 +401,35 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "라이브러리",
   "site.footer.imprint": "사업자 정보",
   "site.footer.privacy": "개인정보 보호",
+  "site.footer.terms": "이용약관",
+  "site.footer.pricing": "요금제",
+
+  "site.pricing.title": "간단한 요금제",
+  "site.pricing.subtitle": "업로드하는 영상 길이(분)만큼 매월 결제하세요. 언제든 해지할 수 있어요.",
+  "site.pricing.perMonth": "/ 월",
+  "site.pricing.perYear": "/ 년",
+  "site.pricing.priceAtCheckout": "결제 시 가격이 표시돼요",
+  "site.pricing.popular": "가장 인기",
+  "site.pricing.minutes": "매월 영상 {minutes}분",
+  "site.pricing.retention": "프로젝트 {days}일 보관",
+  "site.pricing.featureWorkflows": "모든 워크플로우와 자막 스타일",
+  "site.pricing.featureVoice": "음성 명령과 AI 정리",
+  "site.pricing.featureFormats": "{formats} 형식으로 내보내기",
+  "site.pricing.choose": "{plan} 선택",
+  "site.pricing.current": "현재 요금제",
+  "site.pricing.manage": "구독 관리",
+  "site.pricing.switch": "{plan} 요금제로 변경",
+  "site.pricing.unavailable": "아직 이용할 수 없어요",
+  "site.pricing.redirecting": "결제 페이지를 여는 중…",
+  "site.pricing.checkoutFailed": "결제 페이지를 열 수 없어요. 잠시 후 다시 시도해 주세요.",
+  "site.pricing.loadFailed": "요금제를 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
+  "site.pricing.minutesHint":
+    "이용 시간은 업로드한 영상의 길이로 계산돼요. 사용하지 않은 시간은 다음 달로 이월되지 않아요.",
+  "site.pricing.vatNote":
+    "가격에는 부가세가 포함돼 있어요. 결제는 판매 대행사(Merchant of Record)인 Lemon Squeezy가 처리해요 — 요금 청구와 청구서 발송도 Lemon Squeezy가 맡아요.",
+  "site.pricing.testMode": "테스트 모드 — 실제 결제 없음",
+  "site.pricing.betaTitle": "오픈 베타 기간 무료",
+  "site.pricing.betaBody": "베타 기간에는 CleoCuts를 무료로 쓸 수 있어요. 더 많은 이용 시간을 제공하는 유료 요금제가 곧 나와요.",
 
   "library.header.homeAria": "CleoCuts 편집기",
   "library.header.title": "라이브러리",
@@ -385,4 +469,8 @@ export const ko: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "미리보기 닫기",
   "common.videoModal.close": "닫기",
+
+  "common.auth.signIn": "로그인",
+  "common.auth.account": "계정",
+  "common.auth.pricing": "요금제",
 };

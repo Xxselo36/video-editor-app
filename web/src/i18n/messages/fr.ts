@@ -34,6 +34,61 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "Impossible d'enregistrer tes modifications — vérifie ta connexion et réessaie.",
   "app.errors.title": "Une erreur est survenue",
   "app.errors.tryAgain": "Réessayer",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "Ta session a expiré. Reconnecte-toi et réessaie.",
+  "app.errors.subscriptionRequired": "L'envoi nécessite une offre. Choisis-en une sur la page des tarifs.",
+  "app.errors.quotaExceeded":
+    "Il ne te reste pas assez de minutes sur cette période pour cette vidéo. Passe à une offre supérieure ou attends la réinitialisation.",
+  "app.errors.unreadableVideo":
+    "Impossible de lire ce fichier vidéo. Exporte-le à nouveau en MP4 ou MOV, puis renvoie-le.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Connecte-toi pour ouvrir tes projets.",
+  "app.auth.loadFailed":
+    "Impossible de charger l'écran de connexion. Vérifie ta connexion internet (ou autorise ce site dans ton bloqueur de contenu) et réessaie.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Choisis une offre pour envoyer tes vidéos",
+  "app.paywall.subscriptionBody":
+    "Les envois nécessitent une offre active. Choisis-en une — ça ne prend qu'une minute, et tu peux résilier à tout moment.",
+  "app.paywall.quotaTitle": "Plus assez de minutes",
+  "app.paywall.quotaBody": "Il te reste {left} min sur cette période — cette vidéo nécessite {needed} min.",
+  "app.paywall.quotaBodyUnknown": "Cette vidéo dépasse les minutes qu'il te reste sur cette période.",
+  "app.paywall.seePlans": "Voir les offres",
+  "app.paywall.upgrade": "Passer à l'offre supérieure",
+  "app.paywall.close": "Pas maintenant",
+  "app.billing.minutesLeft": "{n} min restantes sur cette période",
+  "app.billing.choosePlan": "Choisis une offre pour envoyer tes vidéos",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Compte",
+  "app.account.signedInAs": "Connecté en tant que {email}",
+  "app.account.plan": "Offre",
+  "app.account.noPlan": "Aucune offre pour l'instant",
+  "app.account.freeBeta": "CleoCuts est gratuit pendant la bêta ouverte — aucune offre nécessaire.",
+  "app.account.status.active": "Active · renouvellement le {date}",
+  "app.account.status.activeNoDate": "Active",
+  "app.account.status.trial": "Essai · premier paiement le {date}",
+  "app.account.status.cancelled": "Prend fin le {date}",
+  "app.account.status.pastDue": "Paiement en retard — mets à jour ton moyen de paiement.",
+  "app.account.status.paused": "En pause",
+  "app.account.status.expired": "Expirée",
+  "app.account.status.comp": "Offerte",
+  "app.account.usage": "Minutes sur cette période",
+  "app.account.usageOf": "{used} min utilisées sur {limit}",
+  "app.account.resetsOn": "Réinitialisation le {date}",
+  "app.account.manage": "Gérer l'abonnement",
+  "app.account.manageHint":
+    "Les factures, le moyen de paiement et la résiliation se gèrent dans le portail client Lemon Squeezy.",
+  "app.account.changePlan": "Changer d'offre",
+  "app.account.choosePlan": "Choisir une offre",
+  "app.account.portalFailed": "Impossible d'ouvrir le portail de facturation. Réessaie dans un instant.",
+  "app.account.loadFailed": "Impossible de charger ton compte pour le moment. Réessaie dans un instant.",
+  "app.account.testMode": "Mode test",
+  "app.account.successPending": "Merci ! Ton paiement est passé — activation de ton offre…",
+  "app.account.successDone": "Ton offre {plan} est active. Bon montage !",
+  "app.account.successSlow":
+    "Ça prend plus de temps que d'habitude. Ton offre apparaîtra ici d'ici quelques minutes — recharge la page pour vérifier.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "Sans titre",
@@ -301,6 +356,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
 
   // ── Landing: hero ── //
   "site.hero.badge": "Bêta ouverte · gratuit",
+  "site.hero.badgePricing": "Voir les offres et les tarifs",
   "site.hero.titleLead": "Monte en",
   "site.hero.titleAccent": "filmant.",
   "site.hero.sub":
@@ -351,6 +407,36 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "Bibliothèque",
   "site.footer.imprint": "Mentions légales",
   "site.footer.privacy": "Confidentialité",
+  "site.footer.terms": "Conditions d'utilisation",
+  "site.footer.pricing": "Tarifs",
+
+  // ── Pricing page ── //
+  "site.pricing.title": "Des tarifs simples",
+  "site.pricing.subtitle": "Paie chaque mois pour les minutes de vidéo que tu envoies. Résiliable à tout moment.",
+  "site.pricing.perMonth": "/ mois",
+  "site.pricing.perYear": "/ an",
+  "site.pricing.priceAtCheckout": "Prix affiché au paiement",
+  "site.pricing.popular": "Le plus populaire",
+  "site.pricing.minutes": "{minutes} min de vidéo par mois",
+  "site.pricing.retention": "Projets conservés {days} jours",
+  "site.pricing.featureWorkflows": "Tous les workflows et styles de sous-titres",
+  "site.pricing.featureVoice": "Commandes vocales et nettoyage IA",
+  "site.pricing.featureFormats": "Exports en {formats}",
+  "site.pricing.choose": "Choisir {plan}",
+  "site.pricing.current": "Ton offre actuelle",
+  "site.pricing.manage": "Gérer l'abonnement",
+  "site.pricing.switch": "Passer à {plan}",
+  "site.pricing.unavailable": "Pas encore disponible",
+  "site.pricing.redirecting": "Ouverture du paiement…",
+  "site.pricing.checkoutFailed": "Impossible d'ouvrir la page de paiement. Réessaie dans un instant.",
+  "site.pricing.loadFailed": "Impossible de charger les offres. Réessaie dans un instant.",
+  "site.pricing.minutesHint":
+    "Les minutes correspondent à la durée des vidéos que tu envoies. Les minutes non utilisées ne sont pas reportées au mois suivant.",
+  "site.pricing.vatNote":
+    "Prix TTC. Les paiements sont gérés par Lemon Squeezy, notre revendeur officiel (Merchant of Record) — c'est lui qui encaisse tes paiements et t'envoie tes factures.",
+  "site.pricing.testMode": "Mode test — aucun paiement réel",
+  "site.pricing.betaTitle": "Gratuit pendant la bêta ouverte",
+  "site.pricing.betaBody": "CleoCuts est gratuit pendant la bêta. Des offres payantes avec plus de minutes arrivent bientôt.",
 
   // ── Library: header ── //
   "library.header.homeAria": "Éditeur CleoCuts",
@@ -397,4 +483,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   // ── Shared components ── //
   "common.videoModal.closeAria": "Fermer l'aperçu",
   "common.videoModal.close": "Fermer",
+  "common.auth.signIn": "Se connecter",
+  "common.auth.account": "Compte",
+  "common.auth.pricing": "Tarifs",
 };

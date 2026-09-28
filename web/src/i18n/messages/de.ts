@@ -34,6 +34,60 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "Deine Bearbeitungen konnten nicht gespeichert werden — prüfe deine Verbindung und versuch's erneut.",
   "app.errors.title": "Etwas ist schiefgelaufen",
   "app.errors.tryAgain": "Erneut versuchen",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "Deine Sitzung ist abgelaufen. Bitte melde dich erneut an und versuch's noch mal.",
+  "app.errors.subscriptionRequired": "Zum Hochladen brauchst du einen Tarif. Wähl einen auf der Preisseite aus.",
+  "app.errors.quotaExceeded":
+    "Für dieses Video reichen deine restlichen Minuten in diesem Zeitraum nicht. Upgrade deinen Tarif oder warte, bis sie zurückgesetzt werden.",
+  "app.errors.unreadableVideo":
+    "Diese Videodatei konnten wir nicht lesen. Exportiere sie bitte erneut als MP4 oder MOV und lade sie hoch.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Melde dich an, um deine Projekte zu öffnen.",
+  "app.auth.loadFailed":
+    "Die Anmeldung konnte nicht geladen werden. Prüfe deine Verbindung (oder erlaube diese Seite in deinem Content-Blocker) und versuch's erneut.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Wähle einen Tarif zum Hochladen",
+  "app.paywall.subscriptionBody":
+    "Für Uploads brauchst du einen aktiven Tarif. Such dir einen aus — das dauert nur eine Minute, und du kannst jederzeit kündigen.",
+  "app.paywall.quotaTitle": "Nicht mehr genug Minuten",
+  "app.paywall.quotaBody": "Du hast in diesem Zeitraum noch {left} Min. übrig — dieses Video braucht {needed} Min.",
+  "app.paywall.quotaBodyUnknown": "Dieses Video ist länger als die Minuten, die du in diesem Zeitraum noch übrig hast.",
+  "app.paywall.seePlans": "Tarife ansehen",
+  "app.paywall.upgrade": "Tarif upgraden",
+  "app.paywall.close": "Nicht jetzt",
+  "app.billing.minutesLeft": "Noch {n} Min. in diesem Zeitraum",
+  "app.billing.choosePlan": "Wähle einen Tarif zum Hochladen",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Konto",
+  "app.account.signedInAs": "Angemeldet als {email}",
+  "app.account.plan": "Tarif",
+  "app.account.noPlan": "Noch kein Tarif",
+  "app.account.freeBeta": "CleoCuts ist während der offenen Beta kostenlos — du brauchst keinen Tarif.",
+  "app.account.status.active": "Aktiv · verlängert sich am {date}",
+  "app.account.status.activeNoDate": "Aktiv",
+  "app.account.status.trial": "Testphase · erste Zahlung am {date}",
+  "app.account.status.cancelled": "Endet am {date}",
+  "app.account.status.pastDue": "Zahlung überfällig — bitte aktualisiere deine Zahlungsmethode.",
+  "app.account.status.paused": "Pausiert",
+  "app.account.status.expired": "Abgelaufen",
+  "app.account.status.comp": "Gratis",
+  "app.account.usage": "Minuten in diesem Zeitraum",
+  "app.account.usageOf": "{used} von {limit} Min. genutzt",
+  "app.account.resetsOn": "Wird am {date} zurückgesetzt",
+  "app.account.manage": "Abo verwalten",
+  "app.account.manageHint": "Rechnungen, Zahlungsmethode und Kündigung verwaltest du im Kundenportal von Lemon Squeezy.",
+  "app.account.changePlan": "Tarif wechseln",
+  "app.account.choosePlan": "Tarif wählen",
+  "app.account.portalFailed": "Das Abrechnungsportal konnte nicht geöffnet werden. Bitte versuch's gleich noch mal.",
+  "app.account.loadFailed": "Dein Konto konnte gerade nicht geladen werden. Bitte versuch's gleich noch mal.",
+  "app.account.testMode": "Testmodus",
+  "app.account.successPending": "Danke! Deine Zahlung ist durch — dein Tarif wird aktiviert…",
+  "app.account.successDone": "Dein {plan}-Tarif ist aktiv. Viel Spaß beim Schneiden!",
+  "app.account.successSlow":
+    "Das dauert länger als sonst. Dein Tarif erscheint hier in ein paar Minuten — lade die Seite neu, um nachzusehen.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "Ohne Titel",
@@ -300,6 +354,7 @@ export const de: Partial<Record<MessageKey, string>> = {
   "site.header.openEditor": "Editor öffnen",
 
   "site.hero.badge": "Offene Beta · kostenlos",
+  "site.hero.badgePricing": "Tarife & Preise ansehen",
   "site.hero.titleLead": "Schneiden während du",
   "site.hero.titleAccent": "aufnimmst.",
   "site.hero.sub":
@@ -346,6 +401,36 @@ export const de: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "Bibliothek",
   "site.footer.imprint": "Impressum",
   "site.footer.privacy": "Datenschutz",
+  "site.footer.terms": "AGB",
+  "site.footer.pricing": "Preise",
+
+  /* ── Pricing page ── */
+  "site.pricing.title": "Einfache Preise",
+  "site.pricing.subtitle": "Du zahlst monatlich für die Videominuten, die du hochlädst. Jederzeit kündbar.",
+  "site.pricing.perMonth": "/ Monat",
+  "site.pricing.perYear": "/ Jahr",
+  "site.pricing.priceAtCheckout": "Preis wird beim Checkout angezeigt",
+  "site.pricing.popular": "Am beliebtesten",
+  "site.pricing.minutes": "{minutes} Min. Video pro Monat",
+  "site.pricing.retention": "Projekte werden {days} Tage gespeichert",
+  "site.pricing.featureWorkflows": "Alle Workflows und Untertitel-Stile",
+  "site.pricing.featureVoice": "Sprachbefehle und KI-Bereinigung",
+  "site.pricing.featureFormats": "Exporte in {formats}",
+  "site.pricing.choose": "{plan} wählen",
+  "site.pricing.current": "Dein aktueller Tarif",
+  "site.pricing.manage": "Abo verwalten",
+  "site.pricing.switch": "Zu {plan} wechseln",
+  "site.pricing.unavailable": "Noch nicht verfügbar",
+  "site.pricing.redirecting": "Checkout wird geöffnet…",
+  "site.pricing.checkoutFailed": "Der Checkout konnte nicht geöffnet werden. Bitte versuch's gleich noch mal.",
+  "site.pricing.loadFailed": "Die Tarife konnten nicht geladen werden. Bitte versuch's gleich noch mal.",
+  "site.pricing.minutesHint":
+    "Gezählt wird die Länge der Videos, die du hochlädst. Nicht genutzte Minuten werden nicht in den nächsten Monat übernommen.",
+  "site.pricing.vatNote":
+    "Preise inkl. MwSt. Die Zahlung wickelt Lemon Squeezy als unser Merchant of Record ab — sie buchen den Betrag ab und schicken dir deine Rechnungen.",
+  "site.pricing.testMode": "Testmodus — keine echten Zahlungen",
+  "site.pricing.betaTitle": "Kostenlos während der offenen Beta",
+  "site.pricing.betaBody": "CleoCuts ist kostenlos, solange wir in der Beta sind. Bezahlte Tarife mit mehr Minuten kommen bald.",
 
   "library.header.homeAria": "CleoCuts Editor",
   "library.header.title": "Bibliothek",
@@ -385,4 +470,9 @@ export const de: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Vorschau schließen",
   "common.videoModal.close": "Schließen",
+
+  /* ── Accounts (header, all pages) ── */
+  "common.auth.signIn": "Anmelden",
+  "common.auth.account": "Konto",
+  "common.auth.pricing": "Preise",
 };

@@ -35,6 +35,61 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "No pudimos guardar tus ediciones — revisa tu conexión e inténtalo de nuevo.",
   "app.errors.title": "Algo salió mal",
   "app.errors.tryAgain": "Intentar de nuevo",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "Tu sesión ha terminado. Vuelve a iniciar sesión e inténtalo de nuevo.",
+  "app.errors.subscriptionRequired": "Para subir videos necesitas un plan. Elige uno en la página de precios.",
+  "app.errors.quotaExceeded":
+    "No te quedan suficientes minutos en este periodo para este video. Mejora tu plan o espera al reinicio.",
+  "app.errors.unreadableVideo":
+    "No pudimos leer este archivo de video. Vuelve a exportarlo como MP4 o MOV y súbelo.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Inicia sesión para abrir tus proyectos.",
+  "app.auth.loadFailed":
+    "No pudimos cargar el inicio de sesión. Revisa tu conexión (o permite este sitio en tu bloqueador de contenido) e inténtalo de nuevo.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Elige un plan para subir videos",
+  "app.paywall.subscriptionBody":
+    "Para subir videos necesitas un plan activo. Elige uno — solo te llevará un minuto y puedes cancelar cuando quieras.",
+  "app.paywall.quotaTitle": "No te quedan suficientes minutos",
+  "app.paywall.quotaBody": "Te quedan {left} min en este periodo — este video necesita {needed} min.",
+  "app.paywall.quotaBodyUnknown": "Este video dura más que los minutos que te quedan en este periodo.",
+  "app.paywall.seePlans": "Ver planes",
+  "app.paywall.upgrade": "Mejorar plan",
+  "app.paywall.close": "Ahora no",
+  "app.billing.minutesLeft": "Te quedan {n} min en este periodo",
+  "app.billing.choosePlan": "Elige un plan para subir videos",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Cuenta",
+  "app.account.signedInAs": "Sesión iniciada como {email}",
+  "app.account.plan": "Plan",
+  "app.account.noPlan": "Aún no tienes plan",
+  "app.account.freeBeta": "CleoCuts es gratis durante la beta abierta — no necesitas ningún plan.",
+  "app.account.status.active": "Activo · se renueva el {date}",
+  "app.account.status.activeNoDate": "Activo",
+  "app.account.status.trial": "Prueba · primer pago el {date}",
+  "app.account.status.cancelled": "Se cancela el {date}",
+  "app.account.status.pastDue": "Pago vencido — actualiza tu método de pago.",
+  "app.account.status.paused": "En pausa",
+  "app.account.status.expired": "Caducado",
+  "app.account.status.comp": "De cortesía",
+  "app.account.usage": "Minutos de este periodo",
+  "app.account.usageOf": "{used} de {limit} min usados",
+  "app.account.resetsOn": "Se reinicia el {date}",
+  "app.account.manage": "Gestionar suscripción",
+  "app.account.manageHint":
+    "Las facturas, el método de pago y la cancelación se gestionan en el portal de clientes de Lemon Squeezy.",
+  "app.account.changePlan": "Cambiar plan",
+  "app.account.choosePlan": "Elegir un plan",
+  "app.account.portalFailed": "No pudimos abrir el portal de facturación. Inténtalo de nuevo en un momento.",
+  "app.account.loadFailed": "No pudimos cargar tu cuenta en este momento. Inténtalo de nuevo en un momento.",
+  "app.account.testMode": "Modo de prueba",
+  "app.account.successPending": "¡Gracias! Tu pago se completó — activando tu plan…",
+  "app.account.successDone": "Tu plan {plan} está activo. ¡A editar!",
+  "app.account.successSlow":
+    "Esto está tardando más de lo normal. Tu plan aparecerá aquí en unos minutos — recarga la página para comprobarlo.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "Sin título",
@@ -302,6 +357,7 @@ export const es: Partial<Record<MessageKey, string>> = {
 
   /* ── Landing: hero ── */
   "site.hero.badge": "Beta abierta · gratis",
+  "site.hero.badgePricing": "Ver planes y precios",
   "site.hero.titleLead": "Edita mientras",
   "site.hero.titleAccent": "grabas.",
   "site.hero.sub":
@@ -352,6 +408,36 @@ export const es: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "Biblioteca",
   "site.footer.imprint": "Aviso legal",
   "site.footer.privacy": "Privacidad",
+  "site.footer.terms": "Términos",
+  "site.footer.pricing": "Precios",
+
+  /* ── Pricing page ── */
+  "site.pricing.title": "Precios sencillos",
+  "site.pricing.subtitle": "Paga cada mes por los minutos de video que subes. Cancela cuando quieras.",
+  "site.pricing.perMonth": "/ mes",
+  "site.pricing.perYear": "/ año",
+  "site.pricing.priceAtCheckout": "Precio indicado al pagar",
+  "site.pricing.popular": "El más popular",
+  "site.pricing.minutes": "{minutes} min de video al mes",
+  "site.pricing.retention": "Proyectos guardados durante {days} días",
+  "site.pricing.featureWorkflows": "Todos los flujos de trabajo y estilos de subtítulos",
+  "site.pricing.featureVoice": "Comandos de voz y limpieza con IA",
+  "site.pricing.featureFormats": "Exportaciones en {formats}",
+  "site.pricing.choose": "Elegir {plan}",
+  "site.pricing.current": "Tu plan actual",
+  "site.pricing.manage": "Gestionar suscripción",
+  "site.pricing.switch": "Cambiar a {plan}",
+  "site.pricing.unavailable": "Aún no disponible",
+  "site.pricing.redirecting": "Abriendo el pago…",
+  "site.pricing.checkoutFailed": "No pudimos abrir el pago. Inténtalo de nuevo en un momento.",
+  "site.pricing.loadFailed": "No pudimos cargar los planes. Inténtalo de nuevo en un momento.",
+  "site.pricing.minutesHint":
+    "Los minutos cuentan la duración de los videos que subes. Los minutos que no uses no se acumulan para el mes siguiente.",
+  "site.pricing.vatNote":
+    "Los precios incluyen IVA. Los pagos los gestiona Lemon Squeezy, nuestro comerciante registrado (Merchant of Record) — ellos te cobran y te envían las facturas.",
+  "site.pricing.testMode": "Modo de prueba — sin pagos reales",
+  "site.pricing.betaTitle": "Gratis durante la beta abierta",
+  "site.pricing.betaBody": "CleoCuts es gratis mientras estamos en beta. Pronto llegarán planes de pago con más minutos.",
 
   /* ── Library: header ── */
   "library.header.homeAria": "Editor de CleoCuts",
@@ -398,4 +484,9 @@ export const es: Partial<Record<MessageKey, string>> = {
   /* ── Shared components ── */
   "common.videoModal.closeAria": "Cerrar vista previa",
   "common.videoModal.close": "Cerrar",
+
+  /* ── Accounts (header, all pages) ── */
+  "common.auth.signIn": "Iniciar sesión",
+  "common.auth.account": "Cuenta",
+  "common.auth.pricing": "Precios",
 };

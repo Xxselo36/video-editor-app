@@ -35,6 +35,60 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "Non siamo riusciti a salvare le modifiche — controlla la connessione e riprova.",
   "app.errors.title": "Qualcosa è andato storto",
   "app.errors.tryAgain": "Riprova",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "La tua sessione è scaduta. Accedi di nuovo e riprova.",
+  "app.errors.subscriptionRequired": "Per caricare video serve un piano. Scegline uno nella pagina dei prezzi.",
+  "app.errors.quotaExceeded":
+    "Non ti restano abbastanza minuti in questo periodo per questo video. Passa a un piano superiore o aspetta il rinnovo dei minuti.",
+  "app.errors.unreadableVideo":
+    "Non riusciamo a leggere questo file video. Esportalo di nuovo come MP4 o MOV e ricaricalo.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Accedi per aprire i tuoi progetti.",
+  "app.auth.loadFailed":
+    "Impossibile caricare l'accesso. Controlla la connessione (o consenti questo sito nel tuo blocco contenuti) e riprova.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Scegli un piano per caricare",
+  "app.paywall.subscriptionBody":
+    "Per caricare video serve un piano attivo. Scegline uno — ci vuole un minuto e puoi disdire quando vuoi.",
+  "app.paywall.quotaTitle": "Minuti insufficienti",
+  "app.paywall.quotaBody": "Ti restano {left} min in questo periodo — questo video ne richiede {needed}.",
+  "app.paywall.quotaBodyUnknown": "Questo video supera i minuti che ti restano in questo periodo.",
+  "app.paywall.seePlans": "Vedi i piani",
+  "app.paywall.upgrade": "Passa a un piano superiore",
+  "app.paywall.close": "Non ora",
+  "app.billing.minutesLeft": "{n} min rimasti in questo periodo",
+  "app.billing.choosePlan": "Scegli un piano per caricare",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Account",
+  "app.account.signedInAs": "Accesso effettuato come {email}",
+  "app.account.plan": "Piano",
+  "app.account.noPlan": "Ancora nessun piano",
+  "app.account.freeBeta": "CleoCuts è gratis durante la beta aperta — nessun piano necessario.",
+  "app.account.status.active": "Attivo · si rinnova il {date}",
+  "app.account.status.activeNoDate": "Attivo",
+  "app.account.status.trial": "Prova · primo pagamento il {date}",
+  "app.account.status.cancelled": "Termina il {date}",
+  "app.account.status.pastDue": "Pagamento in ritardo — aggiorna il tuo metodo di pagamento.",
+  "app.account.status.paused": "In pausa",
+  "app.account.status.expired": "Scaduto",
+  "app.account.status.comp": "Omaggio",
+  "app.account.usage": "Minuti in questo periodo",
+  "app.account.usageOf": "{used} di {limit} min usati",
+  "app.account.resetsOn": "Si rinnova il {date}",
+  "app.account.manage": "Gestisci abbonamento",
+  "app.account.manageHint": "Fatture, metodo di pagamento e disdetta si gestiscono nel portale clienti di Lemon Squeezy.",
+  "app.account.changePlan": "Cambia piano",
+  "app.account.choosePlan": "Scegli un piano",
+  "app.account.portalFailed": "Impossibile aprire il portale di fatturazione. Riprova tra un momento.",
+  "app.account.loadFailed": "Non riusciamo a caricare il tuo account ora. Riprova tra un momento.",
+  "app.account.testMode": "Modalità test",
+  "app.account.successPending": "Grazie! Il pagamento è andato a buon fine — stiamo attivando il tuo piano…",
+  "app.account.successDone": "Il tuo piano {plan} è attivo. Buon montaggio!",
+  "app.account.successSlow":
+    "Ci sta mettendo più del solito. Il tuo piano comparirà qui entro pochi minuti — ricarica la pagina per controllare.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "Senza titolo",
@@ -302,6 +356,8 @@ export const it: Partial<Record<MessageKey, string>> = {
 
   // ── Landing: hero ── */
   "site.hero.badge": "Beta aperta · gratis",
+  // Replaces the badge once paid plans are live (NEXT_PUBLIC_BILLING_ENABLED).
+  "site.hero.badgePricing": "Scopri piani e prezzi",
   "site.hero.titleLead": "Monta mentre",
   "site.hero.titleAccent": "registri.",
   "site.hero.sub":
@@ -352,6 +408,36 @@ export const it: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "Libreria",
   "site.footer.imprint": "Note legali",
   "site.footer.privacy": "Privacy",
+  "site.footer.terms": "Termini",
+  "site.footer.pricing": "Prezzi",
+
+  // ── Pricing page ── */
+  "site.pricing.title": "Prezzi semplici",
+  "site.pricing.subtitle": "Paghi ogni mese per i minuti di video che carichi. Disdici quando vuoi.",
+  "site.pricing.perMonth": "/ mese",
+  "site.pricing.perYear": "/ anno",
+  "site.pricing.priceAtCheckout": "Prezzo mostrato al checkout",
+  "site.pricing.popular": "Il più scelto",
+  "site.pricing.minutes": "{minutes} min di video al mese",
+  "site.pricing.retention": "Progetti conservati per {days} giorni",
+  "site.pricing.featureWorkflows": "Tutti i workflow e gli stili di sottotitoli",
+  "site.pricing.featureVoice": "Comandi vocali e pulizia AI",
+  "site.pricing.featureFormats": "Esportazioni in {formats}",
+  "site.pricing.choose": "Scegli {plan}",
+  "site.pricing.current": "Il tuo piano attuale",
+  "site.pricing.manage": "Gestisci abbonamento",
+  "site.pricing.switch": "Passa a {plan}",
+  "site.pricing.unavailable": "Non ancora disponibile",
+  "site.pricing.redirecting": "Apertura del checkout…",
+  "site.pricing.checkoutFailed": "Impossibile aprire il checkout. Riprova tra un momento.",
+  "site.pricing.loadFailed": "Impossibile caricare i piani. Riprova tra un momento.",
+  "site.pricing.minutesHint":
+    "I minuti corrispondono alla durata dei video che carichi. I minuti non usati non passano al mese successivo.",
+  "site.pricing.vatNote":
+    "I prezzi includono l'IVA. I pagamenti sono gestiti da Lemon Squeezy, il nostro Merchant of Record — ti addebita l'importo e ti invia le fatture.",
+  "site.pricing.testMode": "Modalità test — nessun pagamento reale",
+  "site.pricing.betaTitle": "Gratis durante la beta aperta",
+  "site.pricing.betaBody": "CleoCuts è gratis finché siamo in beta. I piani a pagamento con più minuti arriveranno presto.",
 
   // ── Library: header ── */
   "library.header.homeAria": "Editor di CleoCuts",
@@ -398,4 +484,9 @@ export const it: Partial<Record<MessageKey, string>> = {
   // ── Shared components ── */
   "common.videoModal.closeAria": "Chiudi anteprima",
   "common.videoModal.close": "Chiudi",
+
+  // ── Accounts (header, all pages) ── */
+  "common.auth.signIn": "Accedi",
+  "common.auth.account": "Account",
+  "common.auth.pricing": "Prezzi",
 };
