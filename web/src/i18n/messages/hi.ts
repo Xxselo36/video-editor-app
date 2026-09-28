@@ -41,6 +41,13 @@ export const hi: Partial<Record<MessageKey, string>> = {
     "इस अवधि में इस वीडियो के लिए काफ़ी मिनट नहीं बचे हैं। कृपया अपना प्लान अपग्रेड करें या रीसेट होने तक इंतज़ार करें।",
   "app.errors.unreadableVideo":
     "हम यह वीडियो फ़ाइल पढ़ नहीं पाए। कृपया इसे MP4 या MOV में फिर से एक्सपोर्ट करके अपलोड करें।",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "यह फ़ाइल {max} GB से बड़ी है। कृपया वीडियो को ट्रिम करें या छोटे साइज़ में एक्सपोर्ट करें।",
+  "app.errors.videoTooLong":
+    "यह वीडियो {max} मिनट से लंबा है। कृपया इसे ट्रिम करें या कुछ हिस्सों में बांट दें।",
+  "app.errors.tooManyJobs":
+    "आपके पहले से ही अधिकतम संख्या में वीडियो प्रोसेस हो रहे हैं। कृपया किसी एक के तैयार होने तक इंतज़ार करें, फिर कोशिश करें।",
 
   // ── Accounts ────────────────────────────────────────────────────────
   "app.auth.signInToContinue": "अपने प्रोजेक्ट्स खोलने के लिए साइन इन करें।",
@@ -238,6 +245,11 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.card.reviewing.sub": "एडिटर खोलने और कट फ़ाइन-ट्यून करने के लिए टैप करें।",
   "app.card.rendering.title": "रेंडर हो रहा है",
   "app.card.rendering.sub": "आपका फ़ाइनल वीडियो तैयार किया जा रहा है।",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "कतार में (#{n})",
+  "app.card.queued.titleNoPos": "कतार में",
+  "app.card.queued.sub":
+    "अभी बहुत सारे वीडियो हैं — आपका वीडियो अपने-आप शुरू हो जाएगा। आप यह पेज छोड़ सकते हैं।",
   "app.card.open": "खोलें →",
   "app.card.remove": "✕ हटाएं",
   "app.card.renderFailedNote": "रेंडर नाकाम रहा — आपके एडिट्स सेव हैं। इसे खोलकर फिर से रेंडर करें।",

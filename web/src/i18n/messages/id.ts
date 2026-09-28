@@ -41,6 +41,13 @@ export const id: Partial<Record<MessageKey, string>> = {
     "Sisa menitmu di periode ini tidak cukup untuk video ini. Upgrade paketmu atau tunggu sampai kuotanya direset.",
   "app.errors.unreadableVideo":
     "Kami tidak bisa membaca file video ini. Ekspor ulang sebagai MP4 atau MOV, lalu unggah lagi.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "File ini lebih dari {max} GB. Potong videonya atau ekspor dengan ukuran lebih kecil.",
+  "app.errors.videoTooLong":
+    "Video ini lebih dari {max} menit. Potong videonya atau bagi menjadi beberapa bagian.",
+  "app.errors.tooManyJobs":
+    "Kamu sudah mencapai batas maksimum video yang sedang diproses. Tunggu sampai salah satunya selesai, lalu coba lagi.",
 
   // ── Accounts ────────────────────────────────────────────────────────
   "app.auth.signInToContinue": "Masuk untuk membuka proyekmu.",
@@ -238,6 +245,11 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.card.reviewing.sub": "Ketuk untuk membuka editor dan menyempurnakan potongannya.",
   "app.card.rendering.title": "Merender",
   "app.card.rendering.sub": "Menyatukan video akhirmu.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "Dalam antrean (#{n})",
+  "app.card.queued.titleNoPos": "Dalam antrean",
+  "app.card.queued.sub":
+    "Sedang banyak video — videomu akan mulai otomatis. Kamu bisa meninggalkan halaman ini.",
   "app.card.open": "Buka →",
   "app.card.remove": "✕ Hapus",
   "app.card.renderFailedNote": "Rendering gagal — editanmu sudah tersimpan. Buka dan render lagi.",

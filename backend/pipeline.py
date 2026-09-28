@@ -7,10 +7,12 @@ per-segment clips into a single MP4 for the web user to download.
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -308,8 +310,8 @@ _PROXY_SCALE = (
 
 def _proxy_video_args() -> list[str]:
     """Encoder settings of the proxy: veryfast crf 26 (a preview source,
-    not a mezzanine), same 1 s GOP as the normalized file so the per-run
-    seeks of _ffmpeg_cuts_preview stay cheap."""
+    not a mezzanine), same 1 s GOP as the normalized file so the per-
+    segment seeks of _ffmpeg_cuts_preview stay cheap."""
     return [
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
         *_threads(),
@@ -558,6 +560,23 @@ def _ascending_runs(
     return runs
 
 
+# Cap the preview at 720p on the longest side so iOS Safari can play it
+# inline — 4K MP4s often fail to start on the phone.
+_PREVIEW_SCALE = "scale='if(gt(iw,ih),720,-2)':'if(gt(ih,iw),720,-2)'"
+
+# Ascending timelines up to this many segments take the one-pass trim/
+# concat filter graph. Its cost grows much faster than the segment count
+# (every decoded frame visits every branch): on a 5 min 720p proxy 25
+# segments took 9 s, 100 25 s, 200 60 s and 1000 more than 10 min.
+_FILTER_MAX_SEGMENTS = 24
+
+# The concat demuxer ends a segment at the first packet of ANY stream
+# whose decoding timestamp reaches its outpoint; read this far past the
+# segment end so no frame of it is cut off (the exact end comes from its
+# `duration` + concatdec_select).
+_CONCAT_SLACK_S = 0.1
+
+
 def _preview_filter(
     segments: list[tuple[float, float]],
     offset: float = 0.0,
@@ -579,11 +598,7 @@ def _preview_filter(
     filters.append(
         f"{''.join(parts)}concat=n={len(segments)}:v=1:a=1[outvfull][outa]"
     )
-    # Cap the preview at 720p on the longest side so iOS Safari can
-    # play it inline — 4K MP4s often fail to start on the phone.
-    filters.append(
-        "[outvfull]scale='if(gt(iw,ih),720,-2)':'if(gt(ih,iw),720,-2)'[outv]"
-    )
+    filters.append(f"[outvfull]{_PREVIEW_SCALE}[outv]")
     return ";".join(filters)
 
 
@@ -610,6 +625,19 @@ def _run_preview_ffmpeg(cmd: list[str]) -> None:
         raise RuntimeError(f"ffmpeg preview-cut failed:\n{tail}")
 
 
+def _start_time(path: str) -> float:
+    """The container's start timestamp (0 for our own encodes)."""
+    try:
+        r = subprocess.run(
+            [get_ffprobe_path(), "-v", "error", "-show_entries",
+             "format=start_time", "-of", "default=nw=1:nk=1", path],
+            capture_output=True, text=True, timeout=15)
+        value = float((r.stdout or "").strip() or 0.0)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return 0.0
+    return value if math.isfinite(value) else 0.0
+
+
 def _ffmpeg_cuts_preview(
     input_path: str,
     segments: list[tuple[float, float]],
@@ -622,25 +650,26 @@ def _ffmpeg_cuts_preview(
     burned in — those will be overlaid live in the UI for the review
     step. Callers pass preview_source(normalized_path) as `input_path`.
 
-    Segments in ascending source order: one `filter_complex` pass.
+    A few segments in ascending source order: one `filter_complex` pass.
     Out of order (the editor's move-left/right) or overlapping, that
     pass would buffer every decoded frame between the moved clip's
     source position and its turn in the concat — ~100 MB per kept
     second at 1080p (measured 1.7 GB for 14 s, 4.6 GB for 60 s: two
-    clicks could OOM the box). So each ascending run is encoded on its
-    own instead (seeking to its start), and the runs are joined with
-    the concat demuxer: memory stays that of one in-order pass.
+    clicks could OOM the box) — and with many segments it gets very slow
+    (_FILTER_MAX_SEGMENTS). Those go through _concat_preview instead:
+    one pass, memory of a plain decode + encode, and a cost that grows
+    only by ~15 ms per segment, whatever the order.
     """
     if not segments:
         raise ValueError("no segments to preview")
 
     ff = get_ffmpeg_path()
-    runs = _ascending_runs(segments)
-    if len(runs) == 1:
+    if (len(segments) <= _FILTER_MAX_SEGMENTS
+            and len(_ascending_runs(segments)) == 1):
         _run_preview_ffmpeg([
             ff, "-y", *_threads(),
             "-i", input_path,
-            "-filter_complex", _preview_filter(runs[0]),
+            "-filter_complex", _preview_filter(segments),
             "-map", "[outv]", "-map", "[outa]",
             *_preview_video_args(),
             "-c:a", "aac", "-b:a", "128k",
@@ -648,45 +677,52 @@ def _ffmpeg_cuts_preview(
             output_path,
         ])
         return
+    _concat_preview(ff, input_path, segments, output_path)
 
-    work = tempfile.mkdtemp(prefix="cleo_preview_")
+
+def _concat_preview(
+    ff: str,
+    input_path: str,
+    segments: list[tuple[float, float]],
+    output_path: str,
+) -> None:
+    """One ffmpeg pass over `segments` in timeline order: the concat
+    demuxer reads each one from the source (seek to its inpoint, ≤ 1 GOP
+    decoded before it), concatdec_select drops the frames around each
+    cut, and the result is encoded once. Each segment starts exactly at
+    the sum of the lengths before it (its `duration`), so the editor's
+    preview_segments math holds; the audio is re-laid on the timestamps
+    (silence into gaps, overlaps trimmed) so A/V sync resets at every
+    join. The list file sits next to the output (the job folder, on
+    the work volume)."""
+    # inpoints are the container's own timestamps; the filter path's
+    # trim times are relative to its start.
+    offset = _start_time(input_path)
+    source = os.path.abspath(input_path).replace("'", "'\\''")
+    out_dir = os.path.dirname(os.path.abspath(output_path))
+    work = tempfile.mkdtemp(prefix="cleo_preview_", dir=out_dir)
     try:
-        parts: list[str] = []
-        for i, run in enumerate(runs):
-            start = run[0][0]
-            end = max(e for _s, e in run)
-            part = os.path.join(work, f"run_{i:04d}.mov")
-            _run_preview_ffmpeg([
-                ff, "-y", *_threads(),
-                # Accurate input seek: decoding starts at the keyframe
-                # before `start` (≤ 1 s GOP), timestamps restart at 0.
-                "-ss", f"{start:.3f}",
-                "-t", f"{end - start + 1.0:.3f}",
-                "-i", input_path,
-                "-filter_complex", _preview_filter(run, offset=start),
-                "-map", "[outv]", "-map", "[outa]",
-                *_preview_video_args(),
-                # PCM in the parts: no AAC priming/padding per part, so
-                # joining them doesn't add audio at every boundary.
-                "-c:a", "pcm_s16le",
-                part,
-            ])
-            parts.append(part)
-        list_path = os.path.join(work, "parts.txt")
+        list_path = os.path.join(work, "segments.txt")
         with open(list_path, "w") as f:
-            for part in parts:
-                f.write(f"file '{part}'\n")
+            for s, e in segments:
+                s, e = float(s), float(e)
+                f.write(f"file '{source}'\n"
+                        f"inpoint {offset + s:.6f}\n"
+                        f"outpoint {offset + e + _CONCAT_SLACK_S:.6f}\n"
+                        f"duration {e - s:.6f}\n")
         _run_preview_ffmpeg([
-            ff, "-y",
-            "-f", "concat", "-safe", "0", "-i", list_path,
+            ff, "-y", *_threads(),
+            # Keep the demuxer's timestamps: concatdec_select compares
+            # them with each segment's start (by default the CLI shifts
+            # them by the frames decoded before the first inpoint).
+            "-copyts",
+            "-f", "concat", "-safe", "0", "-segment_time_metadata", "1",
+            "-i", list_path,
             "-map", "0:v:0", "-map", "0:a:0",
-            # Same encoder settings in every part → stream copy.
-            "-c:v", "copy",
-            # A part lasts as long as its longer stream (video and audio
-            # differ by < 1 frame); re-lay the audio on the timestamps —
-            # silence into gaps, trim overlaps — so A/V sync resets at
-            # every join instead of drifting across many parts.
-            "-af", "aresample=async=1:min_hard_comp=0.01:first_pts=0",
+            "-vf", f"select=concatdec_select,{_PREVIEW_SCALE}",
+            "-af", ("aselect=concatdec_select,"
+                    "aresample=async=1:min_hard_comp=0.01:first_pts=0"),
+            *_preview_video_args(),
             "-c:a", "aac", "-b:a", "128k",
             "-movflags", "+faststart",
             output_path,
@@ -730,6 +766,7 @@ def _generate_thumbnail(input_path: str, output_path: str, at_seconds: float = 1
         "-i", best_path,
         "-vf", "scale=320:-2",
         "-q:v", "3",
+        *_threads(),
         output_path,
     ]
     try:
@@ -747,11 +784,13 @@ def _generate_thumbnail_simple(
     """Fallback: grab a single frame at the given timestamp."""
     cmd = [
         get_ffmpeg_path(), "-y",
+        *_threads(),
         "-ss", str(at_seconds),
         "-i", input_path,
         "-frames:v", "1",
         "-vf", "scale=320:-2",
         "-q:v", "3",
+        *_threads(),
         output_path,
     ]
     try:
@@ -788,11 +827,13 @@ def _pick_best_frame(
             # mapped HDR sources don't blow up the encode.
             extract_cmd = [
                 get_ffmpeg_path(), "-y",
+                *_threads(),
                 "-ss", f"{t:.3f}",
                 "-i", input_path,
                 "-frames:v", "1",
                 "-vf", "scale=320:-2",
                 "-pix_fmt", "yuv420p",
+                *_threads(),
                 candidate,
             ]
             r = subprocess.run(
@@ -900,6 +941,11 @@ def _ffmpeg_concat(
                 "-ss", f"{s:.3f}", "-to", f"{e:.3f}",
                 "-i", source_audio_path,
                 "-vn", "-c:a", "copy",
+                # The input seek lands on the VIDEO keyframe before `s`
+                # (up to 10 s early in a SmartCam mux); stream copy kept
+                # all audio from there, so kept ranges came out too long
+                # and the audio drifted off the picture. Drop it.
+                "-copypriorss", "0",
                 "-avoid_negative_ts", "make_zero",
                 m4a_path,
             ]
@@ -942,6 +988,7 @@ def _ffmpeg_concat(
 
     cmd = [
         get_ffmpeg_path(), "-y",
+        *_threads(),
         # +genpts on the INPUT parser fills in missing PTS from DTS so
         # concat-demuxer segments join cleanly without inheriting the
         # tiny AAC-frame-boundary offsets that stacked as A/V drift.
@@ -958,6 +1005,7 @@ def _ffmpeg_concat(
         "-c:v", "libx264",
         "-preset", os.environ.get("CLEO_FINAL_PRESET", "veryfast"),
         "-crf", os.environ.get("CLEO_FINAL_CRF", "20"),
+        *_threads(),
         "-pix_fmt", "yuv420p",
         # -vsync 1 (default) with +genpts on input preserves source fps.
         # Previous -r 30 forced re-timing which caused drift on 60fps
@@ -972,6 +1020,7 @@ def _ffmpeg_concat(
     finally:
         if use_source_audio:
             shutil.rmtree(audio_segs_dir, ignore_errors=True)
+        Path(list_path).unlink(missing_ok=True)
     if result.returncode != 0:
         raise RuntimeError(
             f"ffmpeg concat failed: {result.stderr[-800:]}"
@@ -984,12 +1033,20 @@ def analyze_only(
     settings: dict[str, Any],
     progress_cb: Callable[[str, float], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    on_normalized: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Normalize + run analysis. Returns dict with the pieces the render
     step + the subtitle-editor UI need.
 
+    `on_normalized` is called once, right after normalized.mp4 (and the
+    editor proxy) were written and before SmartCam / analysis: nothing
+    reads `input_path` after that point, so the web backend deletes the
+    upload there instead of keeping a second full-size copy for the
+    whole analysis. An exception from it is logged, not raised.
+
     Result keys:
       - normalized_path: where the rotation-fixed MP4 lives
+      - preview_path: the cut preview (built from preview_source())
       - segments: list of (start, end) speech segments after cuts
       - subtitles: list of {start, end, text, original_start, original_end}
       - language: ISO code from Whisper
@@ -1045,31 +1102,55 @@ def analyze_only(
     _max_side = _res_map.get(_res_str.lower(), 1920)
     print(f"[render] resolution setting='{_res_str}' → "
           f"longest-side max={_max_side}", flush=True)
-    _normalize_orientation(input_path, normalized_path, max_side=_max_side,
-                           max_seconds=max_seconds)
+    smartcam = bool(settings.get("smartcam_enabled"))
+    proxy_path = str(Path(output_dir) / PROXY_NAME)
+    # A stale proxy (a re-run in the same folder) must never outlive the
+    # file it was made from.
+    Path(proxy_path).unlink(missing_ok=True)
+    # SmartCam replaces normalized.mp4 with a reframed video, so its
+    # proxy is made from that output below; otherwise it comes out of
+    # the normalize pass itself.
+    has_proxy = _normalize_orientation(
+        input_path, normalized_path, max_side=_max_side,
+        max_seconds=max_seconds,
+        proxy_path=None if smartcam else proxy_path,
+    )
+    if not smartcam and not has_proxy:
+        _make_proxy(normalized_path, proxy_path)
+
+    if on_normalized is not None:
+        try:
+            on_normalized()
+        except Exception as e:
+            print(f"[normalize] on_normalized callback failed: {e}",
+                  flush=True)
 
     # Optional SmartCam reframe — runs ONCE for the primary aspect the
     # user selected. Other multi-format outputs derive from the rendered
     # primary via simple letterbox-pad in the render step.
-    if settings.get("smartcam_enabled"):
+    if smartcam:
         sc_format = settings.get("smartcam_format", "portrait")
         sc_resolution = settings.get("resolution", "1080")
         _stage(f"SmartCam tracking faces ({sc_format})…", 6)
+        # Written straight into this job's folder (job-scoped name; the
+        # plugin's shared-cache default collides between jobs).
+        sc_dest = str(Path(output_dir) / "normalized_smartcam.mp4")
         sc_out = _smartcam_reframe(
-            normalized_path, output_dir, sc_format, sc_resolution,
+            normalized_path, sc_dest, sc_format, sc_resolution,
             progress_cb=progress_cb,
         )
         if sc_out and Path(sc_out).exists():
-            # The SmartCam helper writes into a home-dir cache that is
-            # not on the persistent volume — move the result into the
-            # job folder and drop the now-unused plain normalized.mp4.
-            sc_dest = str(Path(output_dir) / "normalized_smartcam.mp4")
-            shutil.move(sc_out, sc_dest)
+            if os.path.abspath(sc_out) != os.path.abspath(sc_dest):
+                shutil.move(sc_out, sc_dest)
+            # Drop the now-unused plain normalized.mp4.
             Path(normalized_path).unlink(missing_ok=True)
             normalized_path = sc_dest
         else:
+            Path(sc_dest).unlink(missing_ok=True)  # partial output
             print("[smartcam] reframe returned no file — falling back to source",
                   flush=True)
+        _stage("Preparing preview…", 9)
+        _make_proxy(normalized_path, proxy_path)
 
     _stage("Analyzing audio…", 10)
     result = analyze_video(
@@ -1132,7 +1213,8 @@ def analyze_only(
 
     _stage("Building preview…", 95)
     preview_path = str(Path(output_dir) / "preview.mp4")
-    _ffmpeg_cuts_preview(normalized_path, segments, preview_path)
+    _ffmpeg_cuts_preview(preview_source(normalized_path), segments,
+                         preview_path)
 
     return {
         "normalized_path": normalized_path,
@@ -1265,10 +1347,12 @@ def _apply_segment_effects(
 
     cmd = [
         get_ffmpeg_path(), "-y",
+        *_threads(),
         "-i", input_path,
         *graph_args,
         "-map", "[outv]", "-map", "[outa]",
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        *_threads(),
         "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "320k",
         "-movflags", "+faststart",
@@ -1288,6 +1372,150 @@ def _apply_segment_effects(
         )
 
 
+class RenderUnavailableError(RuntimeError):
+    """The render worker (Modal) still failed after its retries and the
+    local fallback is off. The web backend turns any render exception
+    into `render_failed` (job back to review; renders aren't charged)."""
+
+
+def _env_flag(name: str) -> bool | None:
+    v = os.environ.get(name, "").strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
+def _modal_configured() -> bool:
+    return bool(os.environ.get("MODAL_TOKEN_ID"))
+
+
+def local_render_fallback_enabled() -> bool:
+    """May a render run in-process (MoviePy burn on the API box)?
+
+    CLEO_LOCAL_RENDER_FALLBACK=1/0; unset = only when Modal isn't
+    configured (local dev). With Modal on, a Modal outage must not move
+    ~12 CPU-s per output second and ~1.4 GB RSS per render onto the API
+    box, exactly when it is busiest.
+    """
+    flag = _env_flag("CLEO_LOCAL_RENDER_FALLBACK")
+    return (not _modal_configured()) if flag is None else flag
+
+
+def _modal_retry_delays() -> list[float]:
+    """Backoff before each Modal retry: CLEO_MODAL_RETRY_DELAYS, seconds,
+    comma-separated. Default "10,30" = up to 2 retries (3 attempts)."""
+    raw = os.environ.get("CLEO_MODAL_RETRY_DELAYS", "10,30")
+    try:
+        return [max(0.0, float(x)) for x in raw.split(",") if x.strip()]
+    except ValueError:
+        return [10.0, 30.0]
+
+
+def _modal_retryable(exc: BaseException) -> bool:
+    # A render that hit Modal's function timeout will hit it again.
+    return type(exc).__name__ != "FunctionTimeoutError"
+
+
+# ── Modal volume folders ─────────────────────────────────────────────
+# Each render copies the normalized source (and its outputs) into a
+# random /<folder> of the Modal volume. _try_modal_render removes it when
+# it ends, but a process killed mid-render (deploy after the shutdown
+# grace) never gets there, and a call that could not be cancelled may
+# still write into it later. So every folder is recorded in a ledger on
+# the work volume before anything is uploaded — one empty marker file
+# per folder, set by the web backend (MODAL_LEDGER_DIR) — and
+# sweep_modal_folders() removes what is left (at boot and hourly).
+MODAL_LEDGER_DIR: str | None = None
+_MODAL_VOLUME = "cleocuts-render-volume"
+# A marker stays until its folder can no longer be written to: longer
+# than any call of it can run (3 attempts × the 30 min function timeout
+# + backoff).
+_MODAL_ORPHAN_AGE_S = 2 * 3600
+_MODAL_ACTIVE: set[str] = set()   # folders of renders running here
+_MODAL_LOCK = threading.Lock()
+
+
+def _modal_ledger_path(folder: str) -> Path | None:
+    return Path(MODAL_LEDGER_DIR) / folder if MODAL_LEDGER_DIR else None
+
+
+def _modal_ledger_add(folder: str) -> None:
+    path = _modal_ledger_path(folder)
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    except OSError as e:  # bookkeeping never fails a render
+        print(f"[modal] could not record volume folder {folder}: {e}",
+              flush=True)
+
+
+def _modal_ledger_drop(folder: str) -> None:
+    path = _modal_ledger_path(folder)
+    if path is not None:
+        path.unlink(missing_ok=True)
+
+
+def _remove_modal_folder(vol, folder: str) -> bool:
+    """Delete /<folder> from the volume. True once it is gone."""
+    try:
+        vol.remove_file(f"/{folder}", recursive=True)
+    except Exception as e:
+        if type(e).__name__ == "NotFoundError":
+            return True
+        print(f"[modal] removing volume folder {folder} failed: {e}",
+              flush=True)
+        return False
+    return True
+
+
+def _cancel_modal_call(call) -> bool:
+    """Stop a failed attempt's call, so it can't keep writing into the
+    folder the next attempt renders into. True if Modal confirmed."""
+    try:
+        call.cancel()
+        return True
+    except Exception as e:
+        print(f"[modal] cancelling the failed call failed: {e}", flush=True)
+        return False
+
+
+def sweep_modal_folders(now: float | None = None) -> int:
+    """Remove the volume folders in the ledger that no render of this
+    process uses (left by a restart or an uncancelled call); a marker
+    is dropped once its folder is gone and older than
+    _MODAL_ORPHAN_AGE_S. Returns the number of markers dropped."""
+    ledger = Path(MODAL_LEDGER_DIR) if MODAL_LEDGER_DIR else None
+    if ledger is None or not ledger.is_dir() or not _modal_configured():
+        return 0
+    now = time.time() if now is None else now
+    with _MODAL_LOCK:
+        active = set(_MODAL_ACTIVE)
+    markers = [p for p in ledger.iterdir()
+               if p.is_file() and p.name not in active]
+    if not markers:
+        return 0
+    try:
+        import modal
+        vol = modal.Volume.from_name(_MODAL_VOLUME)
+    except Exception as e:
+        print(f"[modal] volume sweep skipped: {e}", flush=True)
+        return 0
+    dropped = 0
+    for marker in markers:
+        try:
+            age = now - marker.stat().st_mtime
+        except OSError:
+            continue
+        if _remove_modal_folder(vol, marker.name) and age > _MODAL_ORPHAN_AGE_S:
+            marker.unlink(missing_ok=True)
+            dropped += 1
+    return dropped
+
+
 def _try_modal_render(
     normalized_path: str,
     segments: list[tuple[float, float]],
@@ -1300,98 +1528,172 @@ def _try_modal_render(
     thumbnail_out_path: str,
     output_dir: str,
     _stage,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> bool:
     """Offload the burn+concat step to a Modal.com worker.
 
-    Returns True on success (files written to disk), False if Modal
-    isn't configured or the call failed — caller then falls back to
-    local rendering. Never raises.
+    Returns False if Modal isn't configured (MODAL_TOKEN_ID unset), True
+    once the outputs are on disk. A failed attempt (outage, quota,
+    crashed container) is retried after the CLEO_MODAL_RETRY_DELAYS
+    backoff; when all attempts failed it raises RenderUnavailableError
+    and the caller decides whether a local render may take over
+    (local_render_fallback_enabled). Never silently returns False after
+    a failure.
     """
-    if not os.environ.get("MODAL_TOKEN_ID"):
+    if not _modal_configured():
         return False
     try:
         import modal
-    except ImportError:
-        print("[modal] modal package not installed", flush=True)
-        return False
+    except ImportError as e:
+        raise RenderUnavailableError("modal package not installed") from e
 
+    import traceback
+    import uuid
+    from backend import costs
+
+    # The volume folder of this render (Modal's `job_id` parameter).
+    job_id = uuid.uuid4().hex[:12]
+    input_filename = os.path.basename(normalized_path)
+    delays = _modal_retry_delays()
+    attempts = len(delays) + 1
+    vol = None
+    uploaded = False
+    touched = False     # something may be in /<job_id> on the volume
+    abandoned = False   # a call that may still write there wasn't cancelled
+    last_exc: BaseException | None = None
+    attempt = 0
+    with _MODAL_LOCK:
+        _MODAL_ACTIVE.add(job_id)
+    _modal_ledger_add(job_id)
     try:
-        import uuid
-        job_id = uuid.uuid4().hex[:12]
-        input_filename = os.path.basename(normalized_path)
+        for attempt in range(1, attempts + 1):
+            try:
+                if vol is None:
+                    vol = modal.Volume.from_name(_MODAL_VOLUME)
+                if not uploaded:
+                    _stage("Uploading to Modal storage…", 5)
+                    # Stream file into Modal Volume — no Railway RAM spike
+                    # from reading the whole file. Volume SDK chunks it
+                    # internally. force: a retry may overwrite a partial
+                    # upload of the failed attempt.
+                    touched = True
+                    with vol.batch_upload(force=True) as batch:
+                        batch.put_file(normalized_path,
+                                       f"/{job_id}/{input_filename}")
+                    uploaded = True
 
-        _stage("Uploading to Modal storage…", 5)
-        # Stream file into Modal Volume — no Railway RAM spike from
-        # reading the whole file. Volume SDK chunks it internally.
-        vol = modal.Volume.from_name("cleocuts-render-volume")
-        remote_path = f"/{job_id}/{input_filename}"
-        with vol.batch_upload() as batch:
-            batch.put_file(normalized_path, remote_path)
+                _stage(f"Rendering {len(segments)} clip(s) on Modal…", 10)
+                # Modal 1.x renamed lookup → from_name
+                fn = modal.Function.from_name(
+                    "cleocuts-render", "render_burn_concat")
+                _modal_t0 = time.monotonic()
+                call = None
+                try:
+                    # spawn + get (not remote): a failed attempt's call can
+                    # be cancelled before the retry renders into the same
+                    # folder — it may only have failed on our side.
+                    call = fn.spawn(
+                        job_id=job_id,
+                        input_filename=input_filename,
+                        segments=[[float(s), float(e)] for s, e in segments],
+                        subtitles=subtitles,
+                        caption_preset=caption_preset,
+                        cut_style=cut_style,
+                        language=language,
+                        output_formats=list(output_formats),
+                    )
+                    result_map = call.get()
+                except BaseException:
+                    if call is None or not _cancel_modal_call(call):
+                        abandoned = True
+                    raise
+                finally:
+                    # Failed attempts are billed by Modal too.
+                    costs.record_modal(time.monotonic() - _modal_t0)
 
-        _stage(f"Rendering {len(segments)} clip(s) on Modal…", 10)
-        # Modal 1.x renamed lookup → from_name
-        fn = modal.Function.from_name("cleocuts-render", "render_burn_concat")
-        _modal_t0 = time.monotonic()
-        result_map = fn.remote(
-            job_id=job_id,
-            input_filename=input_filename,
-            segments=[[float(s), float(e)] for s, e in segments],
-            subtitles=subtitles,
-            caption_preset=caption_preset,
-            cut_style=cut_style,
-            language=language,
-            output_formats=list(output_formats),
-        )
-
-        from backend import costs
-        costs.record_modal(time.monotonic() - _modal_t0)
-        _stage("Downloading from Modal…", 88)
-        # result_map is {"primary": "output.mp4", "_thumbnail": "thumbnail.jpg", "9:16": "output_9-16.mp4", ...}
-        primary_fname = result_map.get("primary")
-        if not primary_fname:
-            print("[modal] returned no primary output", flush=True)
-            return False
-
-        # Stream each result file out of the volume
-        for fmt, fname in result_map.items():
-            remote_file = f"/{job_id}/{fname}"
-            if fmt == "primary":
-                local_out = primary_out_path
-            elif fmt == "_thumbnail":
-                local_out = thumbnail_out_path
-            else:
-                local_out = str(
-                    Path(output_dir) / f"cleo_output_{fmt.replace(':', '-')}.mp4"
+                _stage("Downloading from Modal…", 88)
+                _download_modal_outputs(
+                    vol, job_id, result_map, primary_out_path,
+                    thumbnail_out_path, output_dir,
                 )
-                if fname == primary_fname and Path(primary_out_path).exists():
-                    # Same file as the primary (export already had the
-                    # target size) — link it instead of downloading twice.
-                    Path(local_out).unlink(missing_ok=True)
-                    try:
-                        os.link(primary_out_path, local_out)
-                    except OSError:
-                        shutil.copyfile(primary_out_path, local_out)
-                    continue
-            with open(local_out, "wb") as out_f:
-                for chunk in vol.read_file(remote_file):
-                    out_f.write(chunk)
+                print(f"[modal] render complete for job {job_id} "
+                      f"(attempt {attempt}/{attempts})", flush=True)
+                return True
+            except Exception as e:
+                last_exc = e
+                costs.record_event("modal_failed")
+                print(f"[modal] render attempt {attempt}/{attempts} failed: "
+                      f"{e}\n{traceback.format_exc()}", flush=True)
+                if attempt >= attempts or not _modal_retryable(e):
+                    break
+                delay = delays[attempt - 1]
+                _stage(f"Render worker unavailable, retrying in "
+                       f"{delay:.0f} s…", 10)
+                waited = 0.0
+                while waited < delay:
+                    if cancel_check and cancel_check():
+                        raise InterruptedError("Cancelled")
+                    step = min(1.0, delay - waited)
+                    time.sleep(step)
+                    waited += step
+        raise RenderUnavailableError(
+            f"Modal render failed after {attempt} attempt(s): "
+            f"{type(last_exc).__name__}: {last_exc}"
+        ) from last_exc
+    finally:
+        # Drop this job's files from the volume so it doesn't accumulate
+        # — after failures too, not only on success. Non-fatal: what
+        # can't be removed now stays in the ledger for the sweep.
+        with _MODAL_LOCK:
+            _MODAL_ACTIVE.discard(job_id)
+        gone = not touched or (vol is not None
+                               and _remove_modal_folder(vol, job_id))
+        if gone and not abandoned:
+            _modal_ledger_drop(job_id)
 
-        # Cleanup: drop this job's files from the volume so it doesn't
-        # accumulate. Non-fatal on error.
+
+def _download_modal_outputs(
+    vol,
+    job_id: str,
+    result_map: dict[str, str],
+    primary_out_path: str,
+    thumbnail_out_path: str,
+    output_dir: str,
+) -> None:
+    """Stream each result file out of the Modal Volume. Each file goes to
+    a temp name first, so a download that dies half-way never replaces
+    the outputs of an earlier successful render."""
+    # result_map is {"primary": "output.mp4", "_thumbnail": "thumbnail.jpg", "9:16": "output_9-16.mp4", ...}
+    primary_fname = result_map.get("primary")
+    if not primary_fname:
+        raise RuntimeError("Modal returned no primary output")
+    for fmt in ["primary"] + [f for f in result_map if f != "primary"]:
+        fname = result_map[fmt]
+        if fmt == "primary":
+            local_out = primary_out_path
+        elif fmt == "_thumbnail":
+            local_out = thumbnail_out_path
+        else:
+            local_out = str(
+                Path(output_dir) / f"cleo_output_{fmt.replace(':', '-')}.mp4"
+            )
+            if fname == primary_fname and Path(primary_out_path).exists():
+                # Same file as the primary (export already had the
+                # target size) — link it instead of downloading twice.
+                Path(local_out).unlink(missing_ok=True)
+                try:
+                    os.link(primary_out_path, local_out)
+                except OSError:
+                    shutil.copyfile(primary_out_path, local_out)
+                continue
+        part = local_out + ".part"
         try:
-            vol.remove_file(f"/{job_id}", recursive=True)
-        except Exception:
-            pass
-
-        print(f"[modal] render complete for job {job_id}", flush=True)
-        return True
-    except Exception as e:
-        import traceback
-        print(f"[modal] render failed, falling back to local: {e}\n"
-              f"{traceback.format_exc()}", flush=True)
-        from backend import costs
-        costs.record_event("modal_failed")
-        return False
+            with open(part, "wb") as out_f:
+                for chunk in vol.read_file(f"/{job_id}/{fname}"):
+                    out_f.write(chunk)
+            os.replace(part, local_out)
+        finally:
+            Path(part).unlink(missing_ok=True)
 
 
 def _apply_extra_cuts(
@@ -1561,26 +1863,41 @@ def render_only(
 
     # Modal offload: if MODAL_TOKEN_ID is set, ship the render step to
     # Modal.com's pay-per-second workers. 3-5× faster than Railway CPU
-    # (more parallelism + better CPUs) at ~1/3 the cost. Falls back to
-    # local rendering if Modal isn't configured or the call fails.
+    # (more parallelism + better CPUs) at ~1/3 the cost. Failed attempts
+    # are retried (10 s / 30 s backoff); rendering locally instead is
+    # only allowed by CLEO_LOCAL_RENDER_FALLBACK (default: only without
+    # Modal) — otherwise the render fails and the job goes back to review.
     primary_path = str(Path(output_dir) / "cleo_output.mp4")
     thumbnail_path = str(Path(output_dir) / "cleo_thumbnail.jpg")
-    modal_ok = _try_modal_render(
-        normalized_path=normalized_path,
-        segments=segments,
-        subtitles=subtitles,
-        caption_preset=caption_preset,
-        cut_style=settings.get("style", "balanced"),
-        language=language,
-        output_formats=settings.get("output_formats") or [],
-        primary_out_path=primary_path,
-        thumbnail_out_path=thumbnail_path,
-        output_dir=output_dir,
-        _stage=_stage,
-    )
+    modal_ok = False
+    try:
+        modal_ok = _try_modal_render(
+            normalized_path=normalized_path,
+            segments=segments,
+            subtitles=subtitles,
+            caption_preset=caption_preset,
+            cut_style=settings.get("style", "balanced"),
+            language=language,
+            output_formats=settings.get("output_formats") or [],
+            primary_out_path=primary_path,
+            thumbnail_out_path=thumbnail_path,
+            output_dir=output_dir,
+            _stage=_stage,
+            cancel_check=cancel_check,
+        )
+    except RenderUnavailableError as e:
+        if not local_render_fallback_enabled():
+            raise
+        print(f"[modal] {e} — rendering locally "
+              "(CLEO_LOCAL_RENDER_FALLBACK=1)", flush=True)
 
     if not modal_ok:
-        # Local fallback path — same code as before
+        if not local_render_fallback_enabled():
+            raise RenderUnavailableError(
+                "no render worker: MODAL_TOKEN_ID is not set and "
+                "CLEO_LOCAL_RENDER_FALLBACK=0"
+            )
+        # Local path (dev without Modal, or explicitly allowed fallback)
         _stage(f"Rendering {len(segments)} clip(s)…", 0)
         burn_dir = tempfile.mkdtemp(prefix="cleo_burn_", dir=output_dir)
         clip_outputs = _multi_clip_burn(

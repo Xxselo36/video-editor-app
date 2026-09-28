@@ -41,6 +41,13 @@ export const nl: Partial<Record<MessageKey, string>> = {
     "Je hebt deze periode niet genoeg minuten meer voor deze video. Upgrade je abonnement of wacht tot je minuten weer worden aangevuld.",
   "app.errors.unreadableVideo":
     "We konden dit videobestand niet lezen. Exporteer het opnieuw als MP4 of MOV en upload het nog een keer.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "Dit bestand is groter dan {max} GB. Verklein de video of exporteer hem kleiner.",
+  "app.errors.videoTooLong":
+    "Deze video is langer dan {max} minuten. Kort hem in of splits hem op in delen.",
+  "app.errors.tooManyJobs":
+    "Je hebt al het maximale aantal video's in verwerking. Wacht tot er een klaar is en probeer het dan opnieuw.",
 
   // ── Accounts ────────────────────────────────────────────────────────
   "app.auth.signInToContinue": "Log in om je projecten te openen.",
@@ -238,6 +245,11 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.card.reviewing.sub": "Tik om de editor te openen en de montage te verfijnen.",
   "app.card.rendering.title": "Renderen",
   "app.card.rendering.sub": "Je definitieve video wordt samengesteld.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "In de wachtrij (#{n})",
+  "app.card.queued.titleNoPos": "In de wachtrij",
+  "app.card.queued.sub":
+    "Er zijn nu veel video's — die van jou start automatisch. Je kunt deze pagina verlaten.",
   "app.card.open": "Openen →",
   "app.card.remove": "✕ Verwijderen",
   "app.card.renderFailedNote": "Renderen mislukt — je bewerkingen zijn opgeslagen. Open het project en render opnieuw.",

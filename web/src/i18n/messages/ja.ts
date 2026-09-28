@@ -41,6 +41,10 @@ export const ja: Partial<Record<MessageKey, string>> = {
     "今期間の残り時間では、この動画を処理できません。プランをアップグレードするか、リセットまでお待ちください。",
   "app.errors.unreadableVideo":
     "この動画ファイルを読み込めませんでした。MP4またはMOV形式で書き出し直してから、アップロードしてください。",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge": "このファイルは{max} GBを超えています。動画を短くするか、サイズを小さくして書き出してください。",
+  "app.errors.videoTooLong": "この動画は{max}分を超えています。短くするか、いくつかに分割してください。",
+  "app.errors.tooManyJobs": "処理中の動画がすでに上限に達しています。いずれかの動画が完成するまで待ってから、もう一度お試しください。",
 
   // ── Accounts ────────────────────────────────────────────────────────
   "app.auth.signInToContinue": "プロジェクトを開くにはサインインしてください。",
@@ -238,6 +242,10 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.card.reviewing.sub": "タップしてエディタを開き、カットを調整しましょう。",
   "app.card.rendering.title": "レンダリング中",
   "app.card.rendering.sub": "最終的な動画をまとめています。",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "順番待ち(#{n})",
+  "app.card.queued.titleNoPos": "順番待ち",
+  "app.card.queued.sub": "現在たくさんの動画が処理待ちです — 順番が来たら自動的に始まります。このページを離れても大丈夫です。",
   "app.card.open": "開く →",
   "app.card.remove": "✕ 削除",
   "app.card.renderFailedNote": "レンダリングに失敗しました — 編集内容は保存されています。開いて再度レンダリングしてください。",

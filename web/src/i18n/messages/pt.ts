@@ -177,6 +177,12 @@ export const pt: Partial<Record<MessageKey, string>> = {
     "Não há minutos suficientes neste período para este vídeo. Faça upgrade do seu plano ou aguarde a renovação.",
   "app.errors.unreadableVideo":
     "Não conseguimos ler este arquivo de vídeo. Exporte-o novamente como MP4 ou MOV e envie de novo.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "Este arquivo tem mais de {max} GB. Corte o vídeo ou exporte em um tamanho menor.",
+  "app.errors.videoTooLong": "Este vídeo tem mais de {max} minutos. Corte-o ou divida-o em partes.",
+  "app.errors.tooManyJobs":
+    "Você já tem o número máximo de vídeos em processamento. Aguarde até um ficar pronto e tente novamente.",
   "app.errors.title": "Algo deu errado",
   "app.errors.tryAgain": "Tentar novamente",
 
@@ -376,6 +382,11 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.card.reviewing.sub": "Toque para abrir o editor e ajustar o corte.",
   "app.card.rendering.title": "Renderizando",
   "app.card.rendering.sub": "Montando seu vídeo final.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "Na fila (#{n})",
+  "app.card.queued.titleNoPos": "Na fila",
+  "app.card.queued.sub":
+    "Muitos vídeos no momento — o seu começa automaticamente. Você pode sair desta página.",
   "app.card.open": "Abrir →",
   "app.card.remove": "✕ Remover",
   "app.card.renderFailedNote": "A renderização falhou — suas edições foram salvas. Abra e renderize novamente.",

@@ -29,11 +29,15 @@ import { VideoModal } from "@/components/VideoModal";
 import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
 import { trackSave, waitForSaves } from "@/lib/pendingSaves";
 import {
+  MAX_MINUTES,
+  MAX_UPLOAD_GB,
   readVideoDuration,
+  uploadLimitHit,
   uploadResumable,
   UPLOAD_STALL_MS,
   UPLOAD_STALLED_MSG,
 } from "@/lib/chunkedUpload";
+import { fetchFullJob, JobStatusPoller, type StatusPollResult } from "@/lib/jobStatus";
 import {
   addActiveJob,
   getActiveJobs,
@@ -49,13 +53,13 @@ import type { MessageKey } from "@/i18n/messages/en";
 import { AUTH_ENABLED } from "@/lib/auth";
 import {
   ApiError,
+  apiErrorFromText,
   apiFetch,
   authHeaders,
   backendUrl,
   isMediaReady,
   mediaUrl,
   notifyAuthRequired,
-  parseDetail,
   publicUrl,
   useMediaReady,
   useMediaUrl,
@@ -98,11 +102,61 @@ const STORED_MESSAGE_KEYS: MessageKey[] = [
   "app.errors.subscriptionRequired",
   "app.errors.quotaExceeded",
   "app.errors.unreadableVideo",
+  "app.errors.fileTooLarge",
+  "app.errors.videoTooLong",
+  "app.errors.tooManyJobs",
   "app.card.renderFailedNote",
 ];
 function localizeKnown(text: string, t: TFn): string {
-  const k = STORED_MESSAGE_KEYS.find((key) => translate("en", key) === text);
-  return k ? t(k) : text;
+  for (const key of STORED_MESSAGE_KEYS) {
+    const vars = matchTemplate(translate("en", key), text);
+    if (vars) return t(key, vars);
+  }
+  return text;
+}
+
+// The placeholder values when `text` is the English template `tpl`
+// filled in ("…larger than {max} GB…" ↔ "…larger than 4 GB…"), else null.
+function matchTemplate(tpl: string, text: string): Record<string, string> | null {
+  if (!tpl.includes("{")) return tpl === text ? {} : null;
+  const names: string[] = [];
+  const src = tpl
+    .split(/\{(\w+)\}/)
+    .map((part, i) => {
+      if (i % 2) {
+        names.push(part);
+        return "(.+?)";
+      }
+      return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    })
+    .join("");
+  const m = new RegExp(`^${src}$`).exec(text);
+  return m ? Object.fromEntries(names.map((n, i) => [n, m[i + 1]])) : null;
+}
+
+// Upload refusals the backend answers with a code (+ the limit), as the
+// English text a card stores. Null for anything else.
+const REFUSAL_CODES = new Set([
+  "server_busy",
+  "server_storage_full",
+  "too_many_active_jobs",
+  "file_too_large",
+  "video_too_long",
+]);
+function refusalMessage(err: ApiError): string | null {
+  switch (err.code) {
+    case "server_busy":
+    case "server_storage_full":
+      return tEn("app.errors.serverBusy");
+    case "too_many_active_jobs":
+      return tEn("app.errors.tooManyJobs");
+    case "file_too_large":
+      return tEn("app.errors.fileTooLarge", { max: err.num("max_gb") ?? MAX_UPLOAD_GB });
+    case "video_too_long":
+      return tEn("app.errors.videoTooLong", { max: err.num("max_minutes") ?? MAX_MINUTES });
+    default:
+      return null;
+  }
 }
 
 // Turn raw server/network errors into something a creator can act on.
@@ -117,8 +171,20 @@ function friendlyError(raw: unknown, t: TFn): string {
   if (known !== txt) return known;
   // Already a user-facing message (ours or the backend's).
   if (txt.endsWith(".") && /\b(Please|please)\b/.test(txt)) return txt;
-  if (l.includes("server_storage_full") || l.includes("507"))
+  // transcription_unavailable: the speech service failed even after
+  // retries (the minutes were refunded) — a "try again later" case too.
+  if (l.includes("server_storage_full") || l.includes("507") || l.includes("server_busy")
+      || l.includes("transcription_unavailable"))
     return t("app.errors.serverBusy");
+  if (l.includes("too_many_active_jobs"))
+    return t("app.errors.tooManyJobs");
+  if (l.includes("file_too_large") || l.includes("video_too_long")) {
+    // Raw answer text, e.g. `{"detail":"file_too_large","max_gb":4}`.
+    const lim = (f: string) => Number(new RegExp(`"${f}"\\s*:\\s*([\\d.]+)`).exec(txt)?.[1]) || null;
+    return l.includes("file_too_large")
+      ? t("app.errors.fileTooLarge", { max: lim("max_gb") ?? MAX_UPLOAD_GB })
+      : t("app.errors.videoTooLong", { max: lim("max_minutes") ?? MAX_MINUTES });
+  }
   if (l.includes("unreadable_video"))
     return t("app.errors.unreadableVideo");
   // Accounts / billing (backend codes; only sent when switched on)
@@ -294,6 +360,20 @@ function presetLabelFor(
   if (presetId && presetId in PRESETS) return t(PRESETS[presetId as PresetId].labelKey);
   return stored ?? null;
 }
+
+// What a dashboard card shows of its job (from GET /jobs/status).
+type CardStatus = {
+  progress: number;
+  message: string;
+  status: string;
+  /** Place in line while waiting for a free server slot. */
+  queuePosition: number | null;
+};
+
+// Dashboard status poll: every 2 s, every 5 s after a minute unchanged.
+const POLL_FAST_MS = 2000;
+const POLL_SLOW_MS = 5000;
+const POLL_BACKOFF_AFTER_MS = 60_000;
 
 type JobStatus = {
   id: string;
@@ -632,6 +712,18 @@ export default function Home() {
       //     also when this deployment has no R2 (presign 503).
       const R2_THRESHOLD = 90 * 1024 * 1024; // 90MB
       let res: XMLHttpRequest | null = null;
+
+      // Over the size / length caps: say so now instead of after the
+      // upload (the server would answer 413). The length is read from
+      // the file's metadata; when the browser can't, the server probes.
+      const duration = await readVideoDuration(targetFile);
+      const limit = uploadLimitHit(targetFile.size, duration);
+      if (limit) {
+        throw new ApiError(413, limit.code, {
+          detail: limit.code,
+          [limit.code === "file_too_large" ? "max_gb" : "max_minutes"]: limit.max,
+        });
+      }
       // Stored with the job so the server-side project list has names.
       const appendJobFields = (form: FormData) => {
         form.append("filename", targetFile.name);
@@ -647,10 +739,12 @@ export default function Home() {
           ({ storage_key: storageKey } = await uploadResumable({
             file: targetFile,
             onProgress: (pct) => setPct(pct),
-            duration: AUTH_ENABLED ? await readVideoDuration(targetFile) : null,
+            duration,
           }));
         } catch (e) {
-          const noR2 = e instanceof ApiError && e.status === 503;
+          // 503 without R2 here → legacy upload; 503 server_busy is a
+          // full queue and means "later", not "another way".
+          const noR2 = e instanceof ApiError && e.status === 503 && e.code !== "server_busy";
           if (!(noR2 && targetFile.size <= R2_THRESHOLD)) throw e;
         }
       }
@@ -687,7 +781,10 @@ export default function Home() {
           let failure: unknown = null;
           try {
             res = await post;
-            if (res.status >= 500) failure = new Error(`Upload failed: ${res.responseText}`);
+            // 503 server_busy / 507 are refusals: no job to look for.
+            if (res.status >= 500 && !REFUSAL_CODES.has(apiErrorFromText(res.status, res.responseText).code ?? "")) {
+              failure = new Error(`Upload failed: ${res.responseText}`);
+            }
           } catch (e) {
             failure = e;
           }
@@ -741,10 +838,11 @@ export default function Home() {
       }
 
       if (createdJobId === null && res && res.status >= 400) {
-        // 401 / 402 (plan, minutes) get their own handling below.
-        if (res.status === 401 || res.status === 402) {
-          throw new ApiError(res.status, parseDetail(res.responseText));
-        }
+        // 401 / 402 (plan, minutes) and the refusals (413 too big / too
+        // long, 429 too many jobs, 503 busy, 507 full) get their own
+        // handling below.
+        const e = apiErrorFromText(res.status, res.responseText);
+        if (res.status === 401 || res.status === 402 || REFUSAL_CODES.has(e.code ?? "")) throw e;
         throw new Error(`Upload failed: ${res.responseText}`);
       }
       const initial: Pick<JobStatus, "id"> =
@@ -808,6 +906,9 @@ export default function Home() {
               ? "app.errors.quotaExceeded"
               : "app.errors.subscriptionRequired",
           );
+        } else {
+          // Too big / too long / too many jobs / servers busy.
+          msg = refusalMessage(err) ?? msg;
         }
       }
       updateActiveJobV2(tempId, { error: msg });
@@ -1432,9 +1533,7 @@ function PickerScreen({
   const [playingJobId, setPlayingJobId] = useState<string | null>(null);
   const [showVoiceOnboarding, setShowVoiceOnboarding] = useState(false);
   const [activeJobs, setActiveJobs] = useState<ActiveJobV2[]>([]);
-  const [jobStatuses, setJobStatuses] = useState<
-    Record<string, { progress: number; message: string; status: string }>
-  >({});
+  const [jobStatuses, setJobStatuses] = useState<Record<string, CardStatus>>({});
   // Dashboard (jobs + recent) is the home for returning users. The
   // workflow picker is its own screen — reached via "+ New video" and
   // returned from via ← Back. First-time users skip the empty
@@ -1523,99 +1622,180 @@ function PickerScreen({
     return () => clearInterval(id);
   }, []);
 
-  // Poll all active jobs every 2s so the cards show live status.
-  // Keyed on the set of job ids/phases (not the array identity): the
-  // tick itself refreshes activeJobs, which used to restart the effect
-  // immediately — the dashboard hammered the backend non-stop.
-  const pollKey = activeJobs
-    .filter((j) => j.phase !== "uploading" && !j.error)
-    .map((j) => `${j.jobId}:${j.phase}`)
-    .join("|");
+  // Live status for the cards: ONE GET /jobs/status for all of them per
+  // tick (lib/jobStatus — 304 while nothing changed), with chained
+  // timeouts so ticks never pile up behind a slow backend. Not polled:
+  // uploading cards (no job yet), error cards and cards in review —
+  // nothing changes there until the user acts. Review cards are checked
+  // once when the dashboard opens, so an expired project or a render
+  // started on another device still shows. Paused while the tab is
+  // hidden; every 2 s, every 5 s after a minute without any change.
+  const tRef = useRef(t);
+  tRef.current = t;
   useEffect(() => {
-    if (!pollKey) return;
+    const poller = new JobStatusPoller();
     let cancelled = false;
-    const tick = async () => {
-      const active = getActiveJobs().filter((j) => j.phase !== "uploading" && !j.error);
+    let running = false;
+    let again = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let lastChange = Date.now();
+    let checkReview = true;
+    const polled = (j: ActiveJobV2) =>
+      j.phase !== "uploading" && j.phase !== "reviewing" && !j.error;
+    const polledIds = () => getActiveJobs().filter(polled).map((j) => j.jobId);
+    let known = new Set(polledIds());
+
+    const apply = async (cards: ActiveJobV2[], res: StatusPollResult) => {
+      const missing = new Set(res.missing);
+      const rows = new Map(res.rows.map((r) => [r.id, r]));
       const updates: typeof jobStatuses = {};
-      for (const j of active) {
-        try {
-          const r = await apiFetch(`/jobs/${j.jobId}`);
-          if (r.status === 404) {
-            // Server no longer knows the job (redeploy / expired).
-            updateActiveJobV2(j.jobId, { error: tEn(FRIENDLY_EXPIRED_KEY) });
-            continue;
+      for (const j of cards) {
+        if (missing.has(j.jobId)) {
+          // Server no longer knows the job (redeploy / expired).
+          updateActiveJobV2(j.jobId, { error: tEn(FRIENDLY_EXPIRED_KEY) });
+          continue;
+        }
+        const s = rows.get(j.jobId);
+        if (!s) continue;
+        updates[j.jobId] = {
+          progress: s.progress,
+          message: s.message,
+          status: s.status,
+          queuePosition: s.queue_position,
+        };
+        if (s.status === "awaiting_review" && (j.phase !== "reviewing" || (s.error && !j.note))) {
+          updateActiveJobV2(j.jobId, {
+            phase: "reviewing",
+            note: s.error
+              ? tEn("app.card.renderFailedNote")
+              : undefined,
+          });
+        } else if (
+          s.status === "processing" &&
+          (j.phase === "reviewing" ||
+            (j.phase === "analyzing" && s.message.toLowerCase().includes("render")))
+        ) {
+          // Rendering (a review card: started on another device / tab).
+          updateActiveJobV2(j.jobId, { phase: "rendering" });
+        } else if (s.status === "done") {
+          // The status rows are minimal: the library entry needs the
+          // outputs, captions and hook clips of the full job.
+          const full = s.full ?? (await fetchFullJob(j.jobId));
+          if (cancelled) return;
+          if (!full) continue; // next tick retries
+          try {
+            const withOutputs = full as {
+              outputs?: string[] | Record<string, string>;
+              social_caption?: string;
+              social_hashtags?: string[];
+              hook_clips?: LibraryHookClip[];
+            };
+            const outputKeys = Array.isArray(withOutputs.outputs)
+              ? withOutputs.outputs
+              : withOutputs.outputs && typeof withOutputs.outputs === "object"
+                ? Object.keys(withOutputs.outputs)
+                : ["primary"];
+            saveEntry({
+              jobId: j.jobId,
+              timestamp: Date.now(),
+              presetId: j.presetId,
+              presetIcon: j.presetIcon,
+              presetLabel: j.presetLabel,
+              filename: j.filename,
+              outputs: outputKeys,
+              hookClips: withOutputs.hook_clips ?? [],
+              socialCaption: withOutputs.social_caption ?? "",
+              socialHashtags: withOutputs.social_hashtags ?? [],
+            });
+            notifyIfHidden(tRef.current("app.notify.readyTitle"), j.filename);
+          } catch {
+            /* library save is non-fatal */
           }
-          if (!r.ok) continue;
-          const s = await r.json();
-          updates[j.jobId] = {
-            progress: s.progress ?? 0,
-            message: s.message ?? "",
-            status: s.status,
-          };
-          if (s.status === "awaiting_review" && (j.phase !== "reviewing" || (s.error && !j.note))) {
-            updateActiveJobV2(j.jobId, {
-              phase: "reviewing",
-              note: s.error
-                ? tEn("app.card.renderFailedNote")
-                : undefined,
-            });
-          } else if (
-            s.status === "processing" &&
-            j.phase === "analyzing" &&
-            s.message?.toLowerCase().includes("render")
-          ) {
-            updateActiveJobV2(j.jobId, { phase: "rendering" });
-          } else if (s.status === "done") {
-            try {
-              const withOutputs = s as typeof s & {
-                outputs?: string[] | Record<string, string>;
-                social_caption?: string;
-                social_hashtags?: string[];
-                hook_clips?: LibraryHookClip[];
-              };
-              const outputKeys = Array.isArray(withOutputs.outputs)
-                ? withOutputs.outputs
-                : withOutputs.outputs && typeof withOutputs.outputs === "object"
-                  ? Object.keys(withOutputs.outputs)
-                  : ["primary"];
-              saveEntry({
-                jobId: j.jobId,
-                timestamp: Date.now(),
-                presetId: j.presetId,
-                presetIcon: j.presetIcon,
-                presetLabel: j.presetLabel,
-                filename: j.filename,
-                outputs: outputKeys,
-                hookClips: withOutputs.hook_clips ?? [],
-                socialCaption: withOutputs.social_caption ?? "",
-                socialHashtags: withOutputs.social_hashtags ?? [],
-              });
-              notifyIfHidden(t("app.notify.readyTitle"), j.filename);
-            } catch {
-              /* library save is non-fatal */
-            }
-            removeActiveJob(j.jobId);
-            // Show the finished video right away under "Zuletzt".
-            setRecent(getLibrary().slice(0, 3));
-          } else if (s.status === "error") {
-            updateActiveJobV2(j.jobId, {
-              error: friendlyError(s.error ?? s.message, tEn),
-            });
+          removeActiveJob(j.jobId);
+          // Show the finished video right away under "Zuletzt".
+          setRecent(getLibrary().slice(0, 3));
+        } else if (s.status === "error") {
+          updateActiveJobV2(j.jobId, {
+            error: friendlyError(s.error ?? s.message, tEn),
+          });
+        }
+      }
+      if (!cancelled && res.changed) setJobStatuses((prev) => ({ ...prev, ...updates }));
+    };
+
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = undefined;
+      if (cancelled || document.hidden || polledIds().length === 0) return;
+      const quiet = Date.now() - lastChange > POLL_BACKOFF_AFTER_MS;
+      timer = setTimeout(() => void tick(), quiet ? POLL_SLOW_MS : POLL_FAST_MS);
+    };
+
+    const tick = async (): Promise<void> => {
+      clearTimeout(timer);
+      timer = undefined;
+      if (cancelled || document.hidden) return;
+      if (running) {
+        again = true; // right after the request in flight
+        return;
+      }
+      const cards = getActiveJobs().filter(
+        (j) => polled(j) || (checkReview && j.phase === "reviewing" && !j.error),
+      );
+      checkReview = false;
+      if (cards.length > 0) {
+        running = true;
+        try {
+          const res = await poller.poll(cards.map((j) => j.jobId));
+          if (res && !cancelled) {
+            if (res.changed) lastChange = Date.now();
+            await apply(cards, res);
           }
         } catch {
           /* offline / transient — next tick retries */
+        } finally {
+          running = false;
         }
       }
-      if (!cancelled) setJobStatuses((prev) => ({ ...prev, ...updates }));
+      if (again) {
+        again = false;
+        return tick();
+      }
+      schedule();
     };
+
+    // A card joined the polled set (upload finished, render started):
+    // its status right away, and quick ticks again.
+    const unsubscribe = subscribeActiveJobs(() => {
+      const ids = polledIds();
+      const added = ids.some((id) => !known.has(id));
+      known = new Set(ids);
+      if (added) {
+        lastChange = Date.now();
+        void tick();
+      }
+    });
+    // Hidden tab: no requests. Back: fresh status now, quick ticks again.
+    const onVisibility = () => {
+      if (document.hidden) {
+        clearTimeout(timer);
+        timer = undefined;
+        return;
+      }
+      lastChange = Date.now();
+      void tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     void tick();
-    const id = setInterval(tick, 2000);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      clearTimeout(timer);
+      unsubscribe();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
+    // Runs for the dashboard's lifetime; reads the cards on every tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pollKey]);
+  }, []);
 
   const dismissVoiceOnboarding = () => {
     setShowVoiceOnboarding(false);
@@ -4345,12 +4525,18 @@ function ActiveJobCard({
   onRetry,
 }: {
   job: ActiveJobV2;
-  status?: { progress: number; message: string; status: string };
+  status?: CardStatus;
   onOpen: () => void;
   onRetry?: () => void;
 }) {
   const t = useT();
   const isError = status?.status === "error" || Boolean(job.error);
+  // Waiting for a free analysis / render slot (backend admission queue).
+  const queued =
+    !isError &&
+    (job.phase === "analyzing" || job.phase === "rendering") &&
+    status?.status === "processing" &&
+    status.message === "queued";
   const phaseCopy: Record<ActiveJobV2["phase"], { title: string; sub: string; icon: string }> = {
     uploading: {
       title: t("app.card.uploading.title"),
@@ -4462,7 +4648,7 @@ function ActiveJobCard({
           className="relative z-10 mb-3 text-xs leading-relaxed"
           style={{ color: job.note ? "var(--warn)" : "var(--text-body)" }}
         >
-          {job.note ? localizeKnown(job.note, t) : copy.sub}
+          {job.note ? localizeKnown(job.note, t) : queued ? t("app.card.queued.sub") : copy.sub}
         </div>
       )}
 
@@ -4486,8 +4672,14 @@ function ActiveJobCard({
             className="mt-1.5 flex items-center justify-between text-[10px]"
             style={{ color: "var(--text-muted)" }}
           >
-            <span>{copy.title}</span>
-            <span className="tabular-nums">{Math.round(pct)}%</span>
+            <span>
+              {queued
+                ? status?.queuePosition
+                  ? t("app.card.queued.title", { n: status.queuePosition })
+                  : t("app.card.queued.titleNoPos")
+                : copy.title}
+            </span>
+            {!queued && <span className="tabular-nums">{Math.round(pct)}%</span>}
           </div>
         </div>
       )}

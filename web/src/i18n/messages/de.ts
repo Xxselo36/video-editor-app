@@ -41,6 +41,13 @@ export const de: Partial<Record<MessageKey, string>> = {
     "Für dieses Video reichen deine restlichen Minuten in diesem Zeitraum nicht. Upgrade deinen Tarif oder warte, bis sie zurückgesetzt werden.",
   "app.errors.unreadableVideo":
     "Diese Videodatei konnten wir nicht lesen. Exportiere sie bitte erneut als MP4 oder MOV und lade sie hoch.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "Diese Datei ist größer als {max} GB. Kürze das Video oder exportiere es kleiner.",
+  "app.errors.videoTooLong":
+    "Dieses Video ist länger als {max} Minuten. Kürze es oder teile es in mehrere Teile auf.",
+  "app.errors.tooManyJobs":
+    "Du hast schon die maximale Anzahl an Videos in Bearbeitung. Warte, bis eins fertig ist, und versuch's dann erneut.",
 
   // ── Accounts ────────────────────────────────────────────────────────
   "app.auth.signInToContinue": "Melde dich an, um deine Projekte zu öffnen.",
@@ -238,6 +245,11 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.card.reviewing.sub": "Tippen, um den Editor zu öffnen und den Schnitt zu verfeinern.",
   "app.card.rendering.title": "Wird gerendert",
   "app.card.rendering.sub": "Dein fertiges Video wird zusammengesetzt.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "In der Warteschlange (#{n})",
+  "app.card.queued.titleNoPos": "In der Warteschlange",
+  "app.card.queued.sub":
+    "Gerade sind viele Videos dran — deins startet automatisch. Du kannst diese Seite verlassen.",
   "app.card.open": "Öffnen →",
   "app.card.remove": "✕ Entfernen",
   "app.card.renderFailedNote": "Rendern fehlgeschlagen — deine Bearbeitungen sind gespeichert. Öffne es und rendere erneut.",

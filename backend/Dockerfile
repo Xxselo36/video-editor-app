@@ -28,17 +28,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install CPU-only torch FIRST in its own layer — biggest dep, cache it
-# so changes to other deps don't force a 2 GB re-download.
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
-        torch \
-        torchvision
-
+# No torch / ultralytics layer any more: the web path never imports them
+# (see backend/requirements.txt), and they were ~2 GB of every image pull.
 COPY backend/requirements.txt /tmp/requirements.txt
-# Strip torch/torchvision lines from requirements.txt — already
-# installed above with the right wheel-index.
-RUN grep -v -E "^(torch|torchvision)" /tmp/requirements.txt > /tmp/req.txt \
-    && pip install --no-cache-dir -r /tmp/req.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Project code (src/, plugins/, backend/) — everything backend.main
 # transitively imports.

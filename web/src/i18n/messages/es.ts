@@ -42,6 +42,13 @@ export const es: Partial<Record<MessageKey, string>> = {
     "No te quedan suficientes minutos en este periodo para este video. Mejora tu plan o espera al reinicio.",
   "app.errors.unreadableVideo":
     "No pudimos leer este archivo de video. Vuelve a exportarlo como MP4 o MOV y súbelo.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "Este archivo pesa más de {max} GB. Recorta el video o expórtalo en un tamaño menor.",
+  "app.errors.videoTooLong":
+    "Este video dura más de {max} minutos. Recórtalo o divídelo en partes.",
+  "app.errors.tooManyJobs":
+    "Ya tienes el número máximo de videos en proceso. Espera a que uno esté listo y vuelve a intentarlo.",
 
   // ── Accounts ────────────────────────────────────────────────────────
   "app.auth.signInToContinue": "Inicia sesión para abrir tus proyectos.",
@@ -240,6 +247,11 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.card.reviewing.sub": "Toca para abrir el editor y ajustar el corte.",
   "app.card.rendering.title": "Renderizando",
   "app.card.rendering.sub": "Armando tu video final.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "En cola (#{n})",
+  "app.card.queued.titleNoPos": "En cola",
+  "app.card.queued.sub":
+    "Hay muchos videos ahora mismo — el tuyo empezará automáticamente. Puedes salir de esta página.",
   "app.card.open": "Abrir →",
   "app.card.remove": "✕ Eliminar",
   "app.card.renderFailedNote": "El renderizado falló — tus ediciones están guardadas. Ábrelo y vuelve a renderizar.",

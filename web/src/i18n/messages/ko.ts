@@ -41,6 +41,10 @@ export const ko: Partial<Record<MessageKey, string>> = {
     "이번 기간에 남은 이용 시간이 이 영상에는 부족해요. 요금제를 업그레이드하거나 초기화될 때까지 기다려 주세요.",
   "app.errors.unreadableVideo":
     "이 영상 파일을 읽을 수 없어요. MP4 또는 MOV로 다시 내보낸 후 업로드해 주세요.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge": "이 파일은 {max}GB를 넘어요. 영상을 잘라내거나 더 작게 내보내 주세요.",
+  "app.errors.videoTooLong": "이 영상은 {max}분을 넘어요. 영상을 잘라내거나 여러 개로 나눠 주세요.",
+  "app.errors.tooManyJobs": "이미 처리 중인 영상이 최대 개수에 도달했어요. 하나가 완료될 때까지 기다린 후 다시 시도해 주세요.",
 
   // ── Accounts ────────────────────────────────────────────────────────
   "app.auth.signInToContinue": "프로젝트를 열려면 로그인해 주세요.",
@@ -238,6 +242,10 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.card.reviewing.sub": "탭해서 편집기를 열고 컷을 다듬어 보세요.",
   "app.card.rendering.title": "렌더링 중",
   "app.card.rendering.sub": "최종 영상을 합치고 있어요.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "대기 중 (#{n})",
+  "app.card.queued.titleNoPos": "대기 중",
+  "app.card.queued.sub": "지금 영상이 많아요 — 순서가 되면 자동으로 시작돼요. 이 페이지를 나가도 괜찮아요.",
   "app.card.open": "열기 →",
   "app.card.remove": "✕ 삭제",
   "app.card.renderFailedNote": "렌더링에 실패했어요 — 편집 내용은 저장돼 있어요. 열어서 다시 렌더링해 주세요.",

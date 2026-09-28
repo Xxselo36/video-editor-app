@@ -42,6 +42,12 @@ export const tr: Partial<Record<MessageKey, string>> = {
     "Bu dönem bu video için yeterli dakikan kalmadı. Lütfen planını yükselt veya sıfırlanmayı bekle.",
   "app.errors.unreadableVideo":
     "Bu video dosyasını okuyamadık. Lütfen MP4 veya MOV olarak yeniden dışa aktarıp yükle.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "Bu dosya {max} GB sınırını aşıyor. Lütfen videoyu kısalt veya daha küçük dışa aktar.",
+  "app.errors.videoTooLong": "Bu video {max} dakikadan uzun. Lütfen kısalt veya parçalara böl.",
+  "app.errors.tooManyJobs":
+    "İşlenmekte olan video sayın zaten azami sınırda. Lütfen biri hazır olana kadar bekle, sonra tekrar dene.",
 
   // ── Accounts ────────────────────────────────────────────────────────
   "app.auth.signInToContinue": "Projelerini açmak için giriş yap.",
@@ -240,6 +246,11 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.card.reviewing.sub": "Editörü açıp kesimi ince ayarlamak için dokun.",
   "app.card.rendering.title": "Render ediliyor",
   "app.card.rendering.sub": "Son videon birleştiriliyor.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "Sırada bekliyor (#{n})",
+  "app.card.queued.titleNoPos": "Sırada bekliyor",
+  "app.card.queued.sub":
+    "Şu an çok fazla video var — seninki otomatik olarak başlayacak. Bu sayfadan ayrılabilirsin.",
   "app.card.open": "Aç →",
   "app.card.remove": "✕ Kaldır",
   "app.card.renderFailedNote": "Render başarısız oldu — düzenlemelerin kaydedildi. Aç ve yeniden render et.",

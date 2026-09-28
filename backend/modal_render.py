@@ -4,8 +4,9 @@ Deploy with:
     modal deploy backend/modal_render.py
 
 Then set MODAL_TOKEN_ID + MODAL_TOKEN_SECRET on Railway so the backend
-can invoke this function. pipeline.py falls back to local rendering if
-Modal isn't configured.
+can invoke this function. pipeline.py renders locally only when Modal
+isn't configured (or CLEO_LOCAL_RENDER_FALLBACK=1); a failed Modal call
+is retried and then fails the render.
 
 Cost model: pay-per-second CPU time only when a job is running.
 Idle = $0. A 10-min video render at ~2-3 min on 8-CPU worker ≈ $0.05.
@@ -43,12 +44,10 @@ image = (
         "opencv-python-headless>=4.8.0",
         "imageio_ffmpeg>=0.4.9",
         "scipy>=1.9.0",
-        # src/audio.py imports faster_whisper at top-level even though
-        # the render step never uses it — needed so pipeline.py imports
-        # don't ModuleNotFoundError on the Modal side.
-        "faster-whisper>=1.2.0",
+        # No faster-whisper / ultralytics (torch): the render path never
+        # uses them (src/audio.py imports faster_whisper lazily now;
+        # checked by running this function's calls with both blocked).
         "pydub>=0.25.1",
-        "ultralytics>=8.0.0",
         "anthropic==0.111.0",
         "openai>=1.50.0",
     )
@@ -88,12 +87,16 @@ def render_burn_concat(
     Backend downloads them afterwards via the Volume SDK.
     """
     import os
+    import shutil
     import sys
     import tempfile
     from pathlib import Path
 
     # Make bundled source importable
     sys.path.insert(0, "/app")
+    # pipeline.py caps ffmpeg at 4 threads for the shared API box; this
+    # container's 8 cores are all ours.
+    os.environ.setdefault("CLEO_FFMPEG_THREADS", "0")
 
     # Read input from Modal Volume — no bytes-through-Python transfer,
     # so Railway never has to hold the whole file in memory.
@@ -102,74 +105,78 @@ def render_burn_concat(
     if not input_path.exists():
         raise FileNotFoundError(f"input not found at {input_path}")
     work_dir = Path(tempfile.mkdtemp(prefix="cleo_modal_"))
+    # The burned clips are one user's video: never leave them on a
+    # warm container that serves the next render.
+    try:
+        from plugins.premiere.video_editor_premiere import _multi_clip_burn
+        from backend.pipeline import (
+            _ffmpeg_concat,
+            _export_format,
+            _generate_thumbnail,
+            _video_size,
+            EXPORT_FORMATS,
+        )
 
-    from plugins.premiere.video_editor_premiere import _multi_clip_burn
-    from backend.pipeline import (
-        _ffmpeg_concat,
-        _export_format,
-        _generate_thumbnail,
-        _video_size,
-        EXPORT_FORMATS,
-    )
+        burn_dir = work_dir / "burn"
+        burn_dir.mkdir()
 
-    burn_dir = work_dir / "burn"
-    burn_dir.mkdir()
+        # Convert segments back from JSON-friendly list-of-lists to tuples
+        seg_tuples = [(float(s), float(e)) for s, e in segments]
 
-    # Convert segments back from JSON-friendly list-of-lists to tuples
-    seg_tuples = [(float(s), float(e)) for s, e in segments]
+        clip_outputs = _multi_clip_burn(
+            input_video=str(input_path),
+            segments=seg_tuples,
+            subtitles=subtitles,
+            caption_preset=caption_preset,
+            output_dir=str(burn_dir),
+            cut_style=cut_style,
+            language=language,
+            # One clip per core — dedicated CPU, not shared
+            parallelism=8,
+            # render_only already merged tiny gaps (keeping per-segment
+            # effects aligned); don't merge again here.
+            merge_gap=0.0,
+        )
 
-    clip_outputs = _multi_clip_burn(
-        input_video=str(input_path),
-        segments=seg_tuples,
-        subtitles=subtitles,
-        caption_preset=caption_preset,
-        output_dir=str(burn_dir),
-        cut_style=cut_style,
-        language=language,
-        # One clip per core — dedicated CPU, not shared
-        parallelism=8,
-        # render_only already merged tiny gaps (keeping per-segment
-        # effects aligned); don't merge again here.
-        merge_gap=0.0,
-    )
+        if not clip_outputs:
+            raise RuntimeError("Modal render produced no output clips.")
 
-    if not clip_outputs:
-        raise RuntimeError("Modal render produced no output clips.")
+        clip_paths = [p for p, _dur in clip_outputs]
+        # Write outputs directly into the volume — backend downloads them
+        # via the Volume SDK afterwards, no bytes-through-Python return.
+        primary_out = job_dir / "output.mp4"
+        # Old-signature concat call — bit-perfect audio rebuild happens on
+        # Railway's local fallback path only until Modal issue is diagnosed.
+        _ffmpeg_concat(clip_paths, str(primary_out))
 
-    clip_paths = [p for p, _dur in clip_outputs]
-    # Write outputs directly into the volume — backend downloads them
-    # via the Volume SDK afterwards, no bytes-through-Python return.
-    primary_out = job_dir / "output.mp4"
-    # Old-signature concat call — bit-perfect audio rebuild happens on
-    # Railway's local fallback path only until Modal issue is diagnosed.
-    _ffmpeg_concat(clip_paths, str(primary_out))
+        thumbnail_out = job_dir / "thumbnail.jpg"
+        _generate_thumbnail(str(primary_out), str(thumbnail_out))
 
-    thumbnail_out = job_dir / "thumbnail.jpg"
-    _generate_thumbnail(str(primary_out), str(thumbnail_out))
+        result_map: dict[str, str] = {"primary": "output.mp4"}
+        if thumbnail_out.exists():
+            result_map["_thumbnail"] = "thumbnail.jpg"
 
-    result_map: dict[str, str] = {"primary": "output.mp4"}
-    if thumbnail_out.exists():
-        result_map["_thumbnail"] = "thumbnail.jpg"
+        # Extra formats — parallel encode from primary
+        from concurrent.futures import ThreadPoolExecutor
+        valid = [f for f in output_formats if f in EXPORT_FORMATS]
+        if valid:
+            primary_size = _video_size(str(primary_out))
 
-    # Extra formats — parallel encode from primary
-    from concurrent.futures import ThreadPoolExecutor
-    valid = [f for f in output_formats if f in EXPORT_FORMATS]
-    if valid:
-        primary_size = _video_size(str(primary_out))
+            def _do_export(fmt: str) -> tuple[str, str]:
+                tw, th = EXPORT_FORMATS[fmt]
+                if primary_size == (tw, th):
+                    # Primary already has this size: point at it, so the
+                    # backend downloads and stores it only once.
+                    return fmt, "output.mp4"
+                fname = f"output_{fmt.replace(':', '-')}.mp4"
+                _export_format(str(primary_out), str(job_dir / fname), tw, th)
+                return fmt, fname
 
-        def _do_export(fmt: str) -> tuple[str, str]:
-            tw, th = EXPORT_FORMATS[fmt]
-            if primary_size == (tw, th):
-                # Primary already has this size: point at it, so the
-                # backend downloads and stores it only once.
-                return fmt, "output.mp4"
-            fname = f"output_{fmt.replace(':', '-')}.mp4"
-            _export_format(str(primary_out), str(job_dir / fname), tw, th)
-            return fmt, fname
+            with ThreadPoolExecutor(max_workers=min(4, len(valid))) as ex:
+                for fmt, fname in ex.map(_do_export, valid):
+                    result_map[fmt] = fname
 
-        with ThreadPoolExecutor(max_workers=min(4, len(valid))) as ex:
-            for fmt, fname in ex.map(_do_export, valid):
-                result_map[fmt] = fname
-
-    render_volume.commit()  # persist writes so backend can read them
-    return result_map
+        render_volume.commit()  # persist writes so backend can read them
+        return result_map
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
