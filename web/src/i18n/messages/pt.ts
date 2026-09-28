@@ -7,6 +7,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
 
   // ── site: hero ──
   "site.hero.badge": "Beta aberto · gratuito",
+  "site.hero.badgePricing": "Ver planos e preços",
   "site.hero.titleLead": "Edite enquanto",
   "site.hero.titleAccent": "grava.",
   "site.hero.sub":
@@ -57,6 +58,37 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "Biblioteca",
   "site.footer.imprint": "Aviso legal",
   "site.footer.privacy": "Privacidade",
+  "site.footer.terms": "Termos",
+  "site.footer.pricing": "Preços",
+
+  // ── site: pricing page ──
+  "site.pricing.title": "Preços simples",
+  "site.pricing.subtitle": "Pague por mês pelos minutos de vídeo que você envia. Cancele quando quiser.",
+  "site.pricing.perMonth": "/ mês",
+  "site.pricing.perYear": "/ ano",
+  "site.pricing.priceAtCheckout": "Preço exibido no checkout",
+  "site.pricing.popular": "Mais popular",
+  "site.pricing.minutes": "{minutes} min de vídeo por mês",
+  "site.pricing.retention": "Projetos guardados por {days} dias",
+  "site.pricing.featureWorkflows": "Todos os fluxos de trabalho e estilos de legenda",
+  "site.pricing.featureVoice": "Comandos de voz e limpeza com IA",
+  "site.pricing.featureFormats": "Exportações em {formats}",
+  "site.pricing.choose": "Escolher {plan}",
+  "site.pricing.current": "Seu plano atual",
+  "site.pricing.manage": "Gerenciar assinatura",
+  "site.pricing.switch": "Mudar para {plan}",
+  "site.pricing.unavailable": "Ainda não disponível",
+  "site.pricing.redirecting": "Abrindo o checkout…",
+  "site.pricing.checkoutFailed": "Não foi possível abrir o checkout. Tente novamente em um instante.",
+  "site.pricing.loadFailed": "Não foi possível carregar os planos. Tente novamente em um instante.",
+  "site.pricing.minutesHint":
+    "Os minutos contam a duração dos vídeos que você envia. Minutos não usados não passam para o mês seguinte.",
+  "site.pricing.vatNote":
+    "Os preços já incluem impostos. Os pagamentos são processados pela Lemon Squeezy, nossa revendedora oficial (Merchant of Record) — ela faz a cobrança e envia suas faturas.",
+  "site.pricing.testMode": "Modo de teste — sem pagamentos reais",
+  "site.pricing.testersOnly": "Ainda não é possível comprar planos — o checkout está em modo de teste, só para testadores convidados.",
+  "site.pricing.betaTitle": "Gratuito durante o beta aberto",
+  "site.pricing.betaBody": "A CleoCuts é gratuita enquanto estamos em beta. Planos pagos com mais minutos chegam em breve.",
 
   // ── library: header ──
   "library.header.homeAria": "Editor da CleoCuts",
@@ -103,6 +135,9 @@ export const pt: Partial<Record<MessageKey, string>> = {
   // ── shared components ──
   "common.videoModal.closeAria": "Fechar prévia",
   "common.videoModal.close": "Fechar",
+  "common.auth.signIn": "Entrar",
+  "common.auth.account": "Conta",
+  "common.auth.pricing": "Preços",
 
   // ── app: header ──
   "app.header.homeAria": "Início da CleoCuts",
@@ -136,8 +171,61 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.errors.serverNoResponse": "O servidor não respondeu. Tente novamente.",
   "app.errors.serverBusy": "Nossos servidores estão ocupados agora. Tente novamente em alguns minutos.",
   "app.errors.saveEditsFailed": "Não foi possível salvar suas edições — verifique sua conexão e tente novamente.",
+  "app.errors.signInRequired": "Sua sessão expirou. Faça login de novo e tente novamente.",
+  "app.errors.subscriptionRequired": "Para enviar vídeos, você precisa de um plano. Escolha um na página de preços.",
+  "app.errors.quotaExceeded":
+    "Não há minutos suficientes neste período para este vídeo. Faça upgrade do seu plano ou aguarde a renovação.",
+  "app.errors.unreadableVideo":
+    "Não conseguimos ler este arquivo de vídeo. Exporte-o novamente como MP4 ou MOV e envie de novo.",
   "app.errors.title": "Algo deu errado",
   "app.errors.tryAgain": "Tentar novamente",
+
+  // ── app: accounts ──
+  "app.auth.signInToContinue": "Faça login para abrir seus projetos.",
+  "app.auth.loadFailed":
+    "Não foi possível carregar o login. Verifique sua conexão (ou libere este site no seu bloqueador de conteúdo) e tente novamente.",
+
+  // ── app: billing (upload blocked + minutes left) ──
+  "app.paywall.subscriptionTitle": "Escolha um plano para enviar",
+  "app.paywall.subscriptionBody":
+    "Para enviar vídeos, você precisa de um plano ativo. Escolha um — leva só um minuto, e você pode cancelar quando quiser.",
+  "app.paywall.quotaTitle": "Minutos insuficientes",
+  "app.paywall.quotaBody": "Você tem {left} min restantes neste período — este vídeo precisa de {needed} min.",
+  "app.paywall.quotaBodyUnknown": "Este vídeo é mais longo do que os minutos que você ainda tem neste período.",
+  "app.paywall.seePlans": "Ver planos",
+  "app.paywall.upgrade": "Fazer upgrade",
+  "app.paywall.close": "Agora não",
+  "app.billing.minutesLeft": "{n} min restantes neste período",
+  "app.billing.choosePlan": "Escolha um plano para enviar",
+
+  // ── app: account page ──
+  "app.account.title": "Conta",
+  "app.account.signedInAs": "Conectado como {email}",
+  "app.account.plan": "Plano",
+  "app.account.noPlan": "Nenhum plano ainda",
+  "app.account.freeBeta": "A CleoCuts é gratuita durante o beta aberto — não é preciso ter um plano.",
+  "app.account.status.active": "Ativo · renova em {date}",
+  "app.account.status.activeNoDate": "Ativo",
+  "app.account.status.trial": "Período de teste · primeiro pagamento em {date}",
+  "app.account.status.cancelled": "Será cancelado em {date}",
+  "app.account.status.pastDue": "Pagamento em atraso — atualize sua forma de pagamento.",
+  "app.account.status.paused": "Pausado",
+  "app.account.status.expired": "Expirado",
+  "app.account.status.comp": "Cortesia",
+  "app.account.usage": "Minutos neste período",
+  "app.account.usageOf": "{used} de {limit} min usados",
+  "app.account.resetsOn": "Renova em {date}",
+  "app.account.manage": "Gerenciar assinatura",
+  "app.account.manageHint": "Faturas, forma de pagamento e cancelamento ficam no portal do cliente da Lemon Squeezy.",
+  "app.account.changePlan": "Trocar de plano",
+  "app.account.choosePlan": "Escolher um plano",
+  "app.account.portalFailed": "Não foi possível abrir o portal de cobrança. Tente novamente em um instante.",
+  "app.account.loadFailed": "Não foi possível carregar sua conta agora. Tente novamente em um instante.",
+  "app.account.testMode": "Modo de teste",
+  "app.account.successPending": "Obrigado! Seu pagamento foi aprovado — ativando seu plano…",
+  "app.account.successDone": "Seu plano {plan} está ativo. Boas edições!",
+  "app.account.successSlow":
+    "Está demorando mais que o normal. Seu plano vai aparecer aqui em alguns minutos — recarregue a página para conferir.",
 
   // ── app: library fallbacks ──
   "app.library.untitled": "Sem título",

@@ -5,6 +5,9 @@ import { Fragment, useEffect, useState } from "react";
 import { LogoWord } from "@/components/Logo";
 import { LanguageSwitcher, useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
+import { AUTH_ENABLED } from "@/lib/auth";
+import { BILLING_COPY, useBillingEnabled } from "@/lib/account";
+import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import {
   IconArrowRight,
   IconCaptions,
@@ -31,6 +34,7 @@ function rich(text: string, nodes: Record<string, React.ReactNode>): React.React
 
 export default function Landing() {
   const t = useT();
+  const billingOn = useBillingEnabled();
   const brandQuote = (phrase: string) => (
     <span style={{ color: "var(--brand)", fontWeight: 600 }}>&ldquo;{phrase}&rdquo;</span>
   );
@@ -51,7 +55,10 @@ export default function Landing() {
           <LogoWord />
         </Link>
         <div className="flex items-center gap-2">
+          <PricingLink className="mr-2 hidden sm:inline" />
           <LanguageSwitcher />
+          {/* Accounts on: "Sign in" (stays visible on phones) or the avatar. */}
+          <AccountMenu returnHere={false} />
           {/* Hidden on phones: the hero CTA right below does the same job. */}
           <Link
             href="/app"
@@ -70,20 +77,40 @@ export default function Landing() {
       {/* ── Hero — tight ─── */}
       <section className="relative z-10 mx-auto grid w-full max-w-6xl flex-1 items-center gap-12 px-6 py-16 lg:grid-cols-[1.15fr_1fr] lg:py-24">
         <div className="phase-fade">
-          <div
-            className="mb-6 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-            style={{
-              background: "var(--surface-2)",
-              border: "1px solid var(--border-hover)",
-              color: "var(--text-body)",
-            }}
-          >
-            <span
-              className="pulse-dot inline-block h-1.5 w-1.5 rounded-full"
-              style={{ background: "var(--brand)" }}
-            />
-            {t("site.hero.badge")}
-          </div>
+          {BILLING_COPY ? (
+            // Paid plans live (NEXT_PUBLIC_BILLING_ENABLED): the beta badge
+            // becomes the way to the plans.
+            <Link
+              href="/pricing"
+              className="mb-6 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium transition-opacity hover:opacity-80"
+              style={{
+                background: "var(--surface-2)",
+                border: "1px solid var(--border-hover)",
+                color: "var(--text-body)",
+              }}
+            >
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ background: "var(--brand)" }}
+              />
+              {t("site.hero.badgePricing")} <IconArrowRight size={12} strokeWidth={2.5} />
+            </Link>
+          ) : (
+            <div
+              className="mb-6 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+              style={{
+                background: "var(--surface-2)",
+                border: "1px solid var(--border-hover)",
+                color: "var(--text-body)",
+              }}
+            >
+              <span
+                className="pulse-dot inline-block h-1.5 w-1.5 rounded-full"
+                style={{ background: "var(--brand)" }}
+              />
+              {t("site.hero.badge")}
+            </div>
+          )}
 
           <h1
             className="mb-6 text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl"
@@ -271,8 +298,14 @@ export default function Landing() {
           >
             <Link href="/app" className="hover:opacity-70">{t("site.footer.editor")}</Link>
             <Link href="/app/library" className="hover:opacity-70">{t("site.footer.library")}</Link>
+            {billingOn && (
+              <Link href="/pricing" className="hover:opacity-70">{t("site.footer.pricing")}</Link>
+            )}
             <Link href="/imprint" className="hover:opacity-70">{t("site.footer.imprint")}</Link>
             <Link href="/privacy" className="hover:opacity-70">{t("site.footer.privacy")}</Link>
+            {AUTH_ENABLED && (
+              <Link href="/terms" className="hover:opacity-70">{t("site.footer.terms")}</Link>
+            )}
           </div>
           <div className="text-[11px]" style={{ color: "var(--text-faint)" }}>
             © 2026 CleoCuts

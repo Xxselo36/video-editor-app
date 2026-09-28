@@ -70,6 +70,7 @@ def presign_upload(
     filename: str,
     expires_in: int = 3600,
     content_type: str = "video/mp4",
+    prefix: str = "uploads/",
 ) -> dict[str, Any]:
     """Generate a presigned PUT URL for direct browser upload to R2.
 
@@ -78,6 +79,8 @@ def presign_upload(
         expires_in: URL validity in seconds (default 1h — long enough
             for multi-GB uploads on slow connections).
         content_type: expected Content-Type header on the upload.
+        prefix: key prefix; `uploads/<user id>/` with accounts on, so
+            POST /jobs can check a key belongs to the caller.
 
     Returns:
         {
@@ -96,9 +99,9 @@ def presign_upload(
         raise RuntimeError("R2 not configured")
 
     ext = Path(filename).suffix.lower() or ".mp4"
-    # Namespace uploads under `uploads/<uuid><ext>` so we can bulk-list
-    # / bulk-clean without touching other keys later.
-    storage_key = f"uploads/{uuid.uuid4().hex}{ext}"
+    # Namespace uploads under `uploads/[<user>/]<uuid><ext>` so we can
+    # bulk-list / bulk-clean without touching other keys later.
+    storage_key = f"{prefix}{uuid.uuid4().hex}{ext}"
 
     client = _r2_client()
     url = client.generate_presigned_url(

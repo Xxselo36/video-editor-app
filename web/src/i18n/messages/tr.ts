@@ -34,6 +34,62 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "Düzenlemelerin kaydedilemedi — bağlantını kontrol edip tekrar dene.",
   "app.errors.title": "Bir şeyler ters gitti",
   "app.errors.tryAgain": "Tekrar dene",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "Oturumun sona erdi. Lütfen tekrar giriş yap ve yeniden dene.",
+  "app.errors.subscriptionRequired":
+    "Yükleme için bir plan gerekiyor. Lütfen fiyatlandırma sayfasından bir plan seç.",
+  "app.errors.quotaExceeded":
+    "Bu dönem bu video için yeterli dakikan kalmadı. Lütfen planını yükselt veya sıfırlanmayı bekle.",
+  "app.errors.unreadableVideo":
+    "Bu video dosyasını okuyamadık. Lütfen MP4 veya MOV olarak yeniden dışa aktarıp yükle.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Projelerini açmak için giriş yap.",
+  "app.auth.loadFailed":
+    "Giriş ekranı yüklenemedi. Bağlantını kontrol et (veya içerik engelleyicinde bu siteye izin ver) ve tekrar dene.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Yüklemek için bir plan seç",
+  "app.paywall.subscriptionBody":
+    "Yükleme için aktif bir plan gerekiyor. Birini seç — sadece bir dakika sürer ve istediğin zaman iptal edebilirsin.",
+  "app.paywall.quotaTitle": "Yeterli dakikan kalmadı",
+  "app.paywall.quotaBody": "Bu dönem {left} dk kaldı — bu video için {needed} dk gerekiyor.",
+  "app.paywall.quotaBodyUnknown": "Bu video, bu dönem kalan dakikalarından daha uzun.",
+  "app.paywall.seePlans": "Planları gör",
+  "app.paywall.upgrade": "Planı yükselt",
+  "app.paywall.close": "Şimdi değil",
+  "app.billing.minutesLeft": "Bu dönem {n} dk kaldı",
+  "app.billing.choosePlan": "Yüklemek için bir plan seç",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Hesap",
+  "app.account.signedInAs": "{email} olarak giriş yapıldı",
+  "app.account.plan": "Plan",
+  "app.account.noPlan": "Henüz plan yok",
+  "app.account.freeBeta": "CleoCuts açık beta boyunca ücretsiz — plan gerekmiyor.",
+  "app.account.status.active": "Aktif · {date} tarihinde yenilenir",
+  "app.account.status.activeNoDate": "Aktif",
+  "app.account.status.trial": "Deneme · ilk ödeme {date} tarihinde",
+  "app.account.status.cancelled": "{date} tarihinde iptal edilecek",
+  "app.account.status.pastDue": "Ödeme gecikti — lütfen ödeme yöntemini güncelle.",
+  "app.account.status.paused": "Duraklatıldı",
+  "app.account.status.expired": "Süresi doldu",
+  "app.account.status.comp": "Hediye",
+  "app.account.usage": "Bu dönemki dakikalar",
+  "app.account.usageOf": "{used} / {limit} dk kullanıldı",
+  "app.account.resetsOn": "{date} tarihinde sıfırlanır",
+  "app.account.manage": "Aboneliği yönet",
+  "app.account.manageHint":
+    "Faturalar, ödeme yöntemi ve iptal işlemleri Lemon Squeezy müşteri portalında yönetilir.",
+  "app.account.changePlan": "Planı değiştir",
+  "app.account.choosePlan": "Bir plan seç",
+  "app.account.portalFailed": "Ödeme portalı açılamadı. Lütfen birazdan tekrar dene.",
+  "app.account.loadFailed": "Hesabın şu an yüklenemedi. Lütfen birazdan tekrar dene.",
+  "app.account.testMode": "Test modu",
+  "app.account.successPending": "Teşekkürler! Ödemen alındı — planın etkinleştiriliyor…",
+  "app.account.successDone": "{plan} planın aktif. İyi düzenlemeler!",
+  "app.account.successSlow":
+    "Bu normalden uzun sürüyor. Planın birkaç dakika içinde burada görünecek — kontrol etmek için sayfayı yenile.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "Başlıksız",
@@ -300,6 +356,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "site.header.openEditor": "Editörü aç",
 
   "site.hero.badge": "Açık beta · ücretsiz",
+  "site.hero.badgePricing": "Planları ve fiyatları gör",
   "site.hero.titleLead": "Kayıt yaparken",
   "site.hero.titleAccent": "düzenle.",
   "site.hero.sub":
@@ -346,6 +403,38 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "Kütüphane",
   "site.footer.imprint": "Yasal bilgiler",
   "site.footer.privacy": "Gizlilik",
+  "site.footer.terms": "Koşullar",
+  "site.footer.pricing": "Fiyatlandırma",
+
+  /* ── Pricing page ── */
+  "site.pricing.title": "Basit fiyatlandırma",
+  "site.pricing.subtitle": "Yüklediğin video dakikaları için aylık öde. İstediğin zaman iptal et.",
+  "site.pricing.perMonth": "/ ay",
+  "site.pricing.perYear": "/ yıl",
+  "site.pricing.priceAtCheckout": "Fiyat ödeme sırasında gösterilir",
+  "site.pricing.popular": "En popüler",
+  "site.pricing.minutes": "Ayda {minutes} dk video",
+  "site.pricing.retention": "Projeler {days} gün saklanır",
+  "site.pricing.featureWorkflows": "Tüm iş akışları ve altyazı stilleri",
+  "site.pricing.featureVoice": "Sesli komutlar ve AI temizliği",
+  "site.pricing.featureFormats": "{formats} formatlarında dışa aktarma",
+  "site.pricing.choose": "{plan} seç",
+  "site.pricing.current": "Mevcut planın",
+  "site.pricing.manage": "Aboneliği yönet",
+  "site.pricing.switch": "{plan} planına geç",
+  "site.pricing.unavailable": "Henüz mevcut değil",
+  "site.pricing.redirecting": "Ödeme sayfası açılıyor…",
+  "site.pricing.checkoutFailed": "Ödeme sayfası açılamadı. Lütfen birazdan tekrar dene.",
+  "site.pricing.loadFailed": "Planlar yüklenemedi. Lütfen birazdan tekrar dene.",
+  "site.pricing.minutesHint":
+    "Dakikalar, yüklediğin videoların uzunluğuna göre sayılır. Kullanılmayan dakikalar sonraki aya devretmez.",
+  "site.pricing.vatNote":
+    "Fiyatlara KDV dahildir. Ödemeler, satıcı kaydımız (Merchant of Record) Lemon Squeezy üzerinden yapılır — ücreti onlar tahsil eder ve faturalarını onlar gönderir.",
+  "site.pricing.testMode": "Test modu — gerçek ödeme yok",
+  "site.pricing.testersOnly": "Planlar henüz satın alınamıyor — ödeme test modunda, yalnızca davetli test kullanıcıları için.",
+  "site.pricing.betaTitle": "Açık beta boyunca ücretsiz",
+  "site.pricing.betaBody":
+    "CleoCuts beta sürecinde ücretsiz. Daha fazla dakika sunan ücretli planlar yakında geliyor.",
 
   "library.header.homeAria": "CleoCuts editörü",
   "library.header.title": "Kütüphane",
@@ -385,4 +474,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Önizlemeyi kapat",
   "common.videoModal.close": "Kapat",
+  "common.auth.signIn": "Giriş yap",
+  "common.auth.account": "Hesap",
+  "common.auth.pricing": "Fiyatlandırma",
 };

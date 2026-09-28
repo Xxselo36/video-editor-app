@@ -1,0 +1,106 @@
+{
+  "data": {
+    "id": "1221875",
+    "type": "subscriptions",
+    "links": {
+      "self": "https://api.lemonsqueezy.com/v1/subscriptions/1221875"
+    },
+    "attributes": {
+      "urls": {
+        "customer_portal": "https://checkout.example.com/billing?expires=1748029853&test_mode=1&user=108191&signature=f55356e1104df1db78f793b0760df1b3a5f30a5ba15b6fc711283771a3e28f07",
+        "update_payment_method": "https://checkout.example.com/subscription/1221875/payment-details?expires=1748029853&signature=10e8df39bbbd7e9dd88a0cadde66f1c0bc79d6871b4e6521faae97731f5d19cc",
+        "customer_portal_update_subscription": "https://checkout.example.com/billing/1221875/update?expires=1748029853&user=108191&signature=be85cd46c5df3a3b19717244e304122d72e03273369463004084792d03cb98bf"
+      },
+      "pause": null,
+      "status": "on_trial",
+      "ends_at": null,
+      "order_id": 5572640,
+      "store_id": 179021,
+      "cancelled": false,
+      "renews_at": "2025-05-30T13:50:46.000000Z",
+      "test_mode": true,
+      "user_name": "Test",
+      "card_brand": "visa",
+      "created_at": "2025-05-23T13:50:48.000000Z",
+      "product_id": 510548,
+      "updated_at": "2025-05-23T13:50:53.000000Z",
+      "user_email": "test@example.com",
+      "variant_id": 795658,
+      "customer_id": 5761181,
+      "product_name": "SolidInvoice Hosted",
+      "variant_name": "Default",
+      "order_item_id": 5511684,
+      "trial_ends_at": "2025-05-30T13:50:46.000000Z",
+      "billing_anchor": 30,
+      "card_last_four": "4242",
+      "status_formatted": "On Trial",
+      "first_subscription_item": {
+        "id": 2241962,
+        "price_id": 1228365,
+        "quantity": 1,
+        "created_at": "2025-05-23T13:50:53.000000Z",
+        "updated_at": "2025-05-23T13:50:53.000000Z",
+        "is_usage_based": false,
+        "subscription_id": 1221875
+      }
+    },
+    "relationships": {
+      "order": {
+        "links": {
+          "self": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/relationships/order",
+          "related": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/order"
+        }
+      },
+      "store": {
+        "links": {
+          "self": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/relationships/store",
+          "related": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/store"
+        }
+      },
+      "product": {
+        "links": {
+          "self": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/relationships/product",
+          "related": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/product"
+        }
+      },
+      "variant": {
+        "links": {
+          "self": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/relationships/variant",
+          "related": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/variant"
+        }
+      },
+      "customer": {
+        "links": {
+          "self": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/relationships/customer",
+          "related": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/customer"
+        }
+      },
+      "order-item": {
+        "links": {
+          "self": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/relationships/order-item",
+          "related": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/order-item"
+        }
+      },
+      "subscription-items": {
+        "links": {
+          "self": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/relationships/subscription-items",
+          "related": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/subscription-items"
+        }
+      },
+      "subscription-invoices": {
+        "links": {
+          "self": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/relationships/subscription-invoices",
+          "related": "https://api.lemonsqueezy.com/v1/subscriptions/1221875/subscription-invoices"
+        }
+      }
+    }
+  },
+  "meta": {
+    "test_mode": true,
+    "event_name": "subscription_created",
+    "webhook_id": "9de3a0b4-82f2-4ede-98ae-63f136a983f2",
+    "custom_data": {
+      "subscription_id": "1CPQXtNzBozEqZmVW5MvRA"
+    }
+  }
+}

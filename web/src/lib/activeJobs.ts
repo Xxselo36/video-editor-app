@@ -8,7 +8,15 @@
  * new code should use this list-based API.
  */
 
-const KEY = "cleocuts.activeJobs.v1";
+import { storageScope } from "@/lib/auth";
+import { foldScopedKeys } from "@/lib/scopedStorage";
+
+export const ACTIVE_JOBS_KEY = "cleocuts.activeJobs.v1";
+// Per user when accounts are on (shared devices); unchanged when off.
+const key = () => {
+  foldScopedKeys(ACTIVE_JOBS_KEY);
+  return ACTIVE_JOBS_KEY + storageScope();
+};
 const CHANGE_EVENT = "cleocuts.activeJobs.change";
 
 function emitChange(): void {
@@ -58,7 +66,7 @@ export type ActiveJobV2 = {
 export function getActiveJobs(): ActiveJobV2[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(key());
     if (!raw) return [];
     const parsed = JSON.parse(raw) as ActiveJobV2[];
     if (!Array.isArray(parsed)) return [];
@@ -71,7 +79,7 @@ export function getActiveJobs(): ActiveJobV2[] {
 export function saveActiveJobs(jobs: ActiveJobV2[]): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(KEY, JSON.stringify(jobs));
+    localStorage.setItem(key(), JSON.stringify(jobs));
   } catch {
     /* quota errors — non-fatal */
   }

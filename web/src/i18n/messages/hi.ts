@@ -34,6 +34,60 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "आपके एडिट्स सेव नहीं हो पाए — अपना कनेक्शन चेक करके फिर कोशिश करें।",
   "app.errors.title": "कुछ गलत हो गया",
   "app.errors.tryAgain": "फिर कोशिश करें",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "आपका सेशन खत्म हो गया है। कृपया फिर से साइन इन करें और दोबारा कोशिश करें।",
+  "app.errors.subscriptionRequired": "अपलोड करने के लिए प्लान चाहिए। कृपया प्राइसिंग पेज पर कोई प्लान चुनें।",
+  "app.errors.quotaExceeded":
+    "इस अवधि में इस वीडियो के लिए काफ़ी मिनट नहीं बचे हैं। कृपया अपना प्लान अपग्रेड करें या रीसेट होने तक इंतज़ार करें।",
+  "app.errors.unreadableVideo":
+    "हम यह वीडियो फ़ाइल पढ़ नहीं पाए। कृपया इसे MP4 या MOV में फिर से एक्सपोर्ट करके अपलोड करें।",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "अपने प्रोजेक्ट्स खोलने के लिए साइन इन करें।",
+  "app.auth.loadFailed":
+    "साइन-इन लोड नहीं हो पाया। अपना कनेक्शन चेक करें (या अपने कंटेंट ब्लॉकर में इस साइट को अनुमति दें) और फिर कोशिश करें।",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "अपलोड करने के लिए प्लान चुनें",
+  "app.paywall.subscriptionBody":
+    "अपलोड के लिए एक्टिव प्लान चाहिए। कोई एक चुनें — इसमें बस एक मिनट लगता है, और आप कभी भी कैंसिल कर सकते हैं।",
+  "app.paywall.quotaTitle": "काफ़ी मिनट नहीं बचे",
+  "app.paywall.quotaBody": "इस अवधि में आपके पास {left} मिनट बचे हैं — इस वीडियो को {needed} मिनट चाहिए।",
+  "app.paywall.quotaBodyUnknown": "यह वीडियो इस अवधि में आपके बचे हुए मिनटों से लंबा है।",
+  "app.paywall.seePlans": "प्लान देखें",
+  "app.paywall.upgrade": "प्लान अपग्रेड करें",
+  "app.paywall.close": "अभी नहीं",
+  "app.billing.minutesLeft": "इस अवधि में {n} मिनट बचे",
+  "app.billing.choosePlan": "अपलोड करने के लिए प्लान चुनें",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "अकाउंट",
+  "app.account.signedInAs": "{email} से साइन इन किया है",
+  "app.account.plan": "प्लान",
+  "app.account.noPlan": "अभी कोई प्लान नहीं",
+  "app.account.freeBeta": "ओपन बीटा के दौरान CleoCuts फ़्री है — किसी प्लान की ज़रूरत नहीं।",
+  "app.account.status.active": "एक्टिव · {date} को रिन्यू होगा",
+  "app.account.status.activeNoDate": "एक्टिव",
+  "app.account.status.trial": "ट्रायल · पहला पेमेंट {date} को",
+  "app.account.status.cancelled": "{date} को खत्म होगा",
+  "app.account.status.pastDue": "पेमेंट बाकी है — कृपया अपना पेमेंट मेथड अपडेट करें।",
+  "app.account.status.paused": "पॉज़ किया गया",
+  "app.account.status.expired": "एक्सपायर हो गया",
+  "app.account.status.comp": "कॉम्प्लिमेंट्री",
+  "app.account.usage": "इस अवधि के मिनट",
+  "app.account.usageOf": "{limit} में से {used} मिनट इस्तेमाल हुए",
+  "app.account.resetsOn": "{date} को रीसेट होगा",
+  "app.account.manage": "सब्सक्रिप्शन मैनेज करें",
+  "app.account.manageHint": "इनवॉइस, पेमेंट मेथड और कैंसिलेशन Lemon Squeezy कस्टमर पोर्टल में मैनेज होते हैं।",
+  "app.account.changePlan": "प्लान बदलें",
+  "app.account.choosePlan": "प्लान चुनें",
+  "app.account.portalFailed": "बिलिंग पोर्टल नहीं खुल पाया। कृपया थोड़ी देर में फिर कोशिश करें।",
+  "app.account.loadFailed": "आपका अकाउंट अभी लोड नहीं हो पाया। कृपया थोड़ी देर में फिर कोशिश करें।",
+  "app.account.testMode": "टेस्ट मोड",
+  "app.account.successPending": "धन्यवाद! आपका पेमेंट हो गया — आपका प्लान एक्टिव किया जा रहा है…",
+  "app.account.successDone": "आपका {plan} प्लान एक्टिव है। एडिटिंग का मज़ा लें!",
+  "app.account.successSlow":
+    "इसमें सामान्य से ज़्यादा समय लग रहा है। आपका प्लान कुछ ही मिनटों में यहां दिखेगा — चेक करने के लिए पेज रीलोड करें।",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "बिना नाम",
@@ -300,6 +354,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "site.header.openEditor": "एडिटर खोलें",
 
   "site.hero.badge": "ओपन बीटा · फ़्री",
+  "site.hero.badgePricing": "प्लान और प्राइसिंग देखें",
   "site.hero.titleLead": "रिकॉर्ड करते हुए ही",
   "site.hero.titleAccent": "एडिट करें।",
   "site.hero.sub":
@@ -346,6 +401,36 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "लाइब्रेरी",
   "site.footer.imprint": "इम्प्रिंट",
   "site.footer.privacy": "प्राइवेसी",
+  "site.footer.terms": "शर्तें",
+  "site.footer.pricing": "प्राइसिंग",
+
+  "site.pricing.title": "आसान प्राइसिंग",
+  "site.pricing.subtitle": "आप जितने मिनट का वीडियो अपलोड करते हैं, उसके लिए हर महीने पेमेंट करें। कभी भी कैंसिल करें।",
+  "site.pricing.perMonth": "/ महीना",
+  "site.pricing.perYear": "/ साल",
+  "site.pricing.priceAtCheckout": "कीमत चेकआउट पर दिखेगी",
+  "site.pricing.popular": "सबसे लोकप्रिय",
+  "site.pricing.minutes": "हर महीने {minutes} मिनट का वीडियो",
+  "site.pricing.retention": "प्रोजेक्ट्स {days} दिनों तक सेव रहते हैं",
+  "site.pricing.featureWorkflows": "सभी वर्कफ़्लो और कैप्शन स्टाइल",
+  "site.pricing.featureVoice": "वॉइस कमांड्स और AI क्लीनअप",
+  "site.pricing.featureFormats": "{formats} में एक्सपोर्ट",
+  "site.pricing.choose": "{plan} चुनें",
+  "site.pricing.current": "आपका मौजूदा प्लान",
+  "site.pricing.manage": "सब्सक्रिप्शन मैनेज करें",
+  "site.pricing.switch": "{plan} पर स्विच करें",
+  "site.pricing.unavailable": "अभी उपलब्ध नहीं",
+  "site.pricing.redirecting": "चेकआउट खुल रहा है…",
+  "site.pricing.checkoutFailed": "चेकआउट नहीं खुल पाया। कृपया थोड़ी देर में फिर कोशिश करें।",
+  "site.pricing.loadFailed": "प्लान लोड नहीं हो पाए। कृपया थोड़ी देर में फिर कोशिश करें।",
+  "site.pricing.minutesHint":
+    "मिनट आपके अपलोड किए गए वीडियो की लंबाई के हिसाब से गिने जाते हैं। बचे हुए मिनट अगले महीने में नहीं जुड़ते।",
+  "site.pricing.vatNote":
+    "कीमतों में VAT शामिल है। पेमेंट Lemon Squeezy संभालता है, जो हमारा Merchant of Record है — वही आपसे पेमेंट लेता है और आपको इनवॉइस भेजता है।",
+  "site.pricing.testMode": "टेस्ट मोड — कोई असली पेमेंट नहीं",
+  "site.pricing.testersOnly": "प्लान अभी खरीदे नहीं जा सकते — चेकआउट टेस्ट मोड में है, सिर्फ़ आमंत्रित टेस्टर्स के लिए।",
+  "site.pricing.betaTitle": "ओपन बीटा के दौरान फ़्री",
+  "site.pricing.betaBody": "बीटा के दौरान CleoCuts फ़्री है। ज़्यादा मिनटों वाले पेड प्लान जल्द आ रहे हैं।",
 
   "library.header.homeAria": "CleoCuts एडिटर",
   "library.header.title": "लाइब्रेरी",
@@ -385,4 +470,8 @@ export const hi: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "प्रीव्यू बंद करें",
   "common.videoModal.close": "बंद करें",
+
+  "common.auth.signIn": "साइन इन करें",
+  "common.auth.account": "अकाउंट",
+  "common.auth.pricing": "प्राइसिंग",
 };

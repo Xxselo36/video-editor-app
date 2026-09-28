@@ -35,6 +35,60 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.errors.title": "問題が発生しました",
   "app.errors.tryAgain": "再試行",
 
+  "app.errors.signInRequired": "セッションが終了しました。もう一度サインインしてから、再度お試しください。",
+  "app.errors.subscriptionRequired": "アップロードにはプランが必要です。料金ページでプランをお選びください。",
+  "app.errors.quotaExceeded":
+    "今期間の残り時間では、この動画を処理できません。プランをアップグレードするか、リセットまでお待ちください。",
+  "app.errors.unreadableVideo":
+    "この動画ファイルを読み込めませんでした。MP4またはMOV形式で書き出し直してから、アップロードしてください。",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "プロジェクトを開くにはサインインしてください。",
+  "app.auth.loadFailed":
+    "サインイン画面を読み込めませんでした。接続を確認して(またはコンテンツブロッカーでこのサイトを許可して)、もう一度お試しください。",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "プランを選んでアップロード",
+  "app.paywall.subscriptionBody":
+    "アップロードには有効なプランが必要です。選ぶのは1分ほどで、いつでも解約できます。",
+  "app.paywall.quotaTitle": "残り時間が足りません",
+  "app.paywall.quotaBody": "今期間の残りは{left}分ですが、この動画には{needed}分必要です。",
+  "app.paywall.quotaBodyUnknown": "この動画は、今期間の残り時間より長いです。",
+  "app.paywall.seePlans": "プランを見る",
+  "app.paywall.upgrade": "プランをアップグレード",
+  "app.paywall.close": "あとで",
+  "app.billing.minutesLeft": "今期間の残り {n}分",
+  "app.billing.choosePlan": "プランを選んでアップロード",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "アカウント",
+  "app.account.signedInAs": "{email} でサインイン中",
+  "app.account.plan": "プラン",
+  "app.account.noPlan": "プラン未加入",
+  "app.account.freeBeta": "CleoCutsはオープンベータ期間中は無料です — プランは必要ありません。",
+  "app.account.status.active": "有効 · {date}に更新",
+  "app.account.status.activeNoDate": "有効",
+  "app.account.status.trial": "トライアル中 · {date}に初回のお支払い",
+  "app.account.status.cancelled": "{date}に解約予定",
+  "app.account.status.pastDue": "お支払いが未完了です — お支払い方法を更新してください。",
+  "app.account.status.paused": "一時停止中",
+  "app.account.status.expired": "期限切れ",
+  "app.account.status.comp": "無償提供",
+  "app.account.usage": "今期間の利用時間",
+  "app.account.usageOf": "{limit}分中 {used}分を使用",
+  "app.account.resetsOn": "{date}にリセット",
+  "app.account.manage": "サブスクリプションを管理",
+  "app.account.manageHint": "請求書、お支払い方法、解約はLemon Squeezyのカスタマーポータルで管理できます。",
+  "app.account.changePlan": "プランを変更",
+  "app.account.choosePlan": "プランを選ぶ",
+  "app.account.portalFailed": "請求ポータルを開けませんでした。少し時間をおいて、もう一度お試しください。",
+  "app.account.loadFailed": "アカウント情報を読み込めませんでした。少し時間をおいて、もう一度お試しください。",
+  "app.account.testMode": "テストモード",
+  "app.account.successPending": "ありがとうございます!お支払いが完了しました — プランを有効化しています…",
+  "app.account.successDone": "{plan}プランが有効になりました。編集を楽しんでください!",
+  "app.account.successSlow":
+    "通常より時間がかかっています。数分以内にここにプランが表示されます — ページを再読み込みして確認してください。",
+
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "無題",
 
@@ -300,6 +354,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "site.header.openEditor": "エディタを開く",
 
   "site.hero.badge": "オープンベータ · 無料",
+  "site.hero.badgePricing": "プランと料金を見る",
   "site.hero.titleLead": "録画しながら",
   "site.hero.titleAccent": "編集。",
   "site.hero.sub":
@@ -346,6 +401,36 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "ライブラリ",
   "site.footer.imprint": "運営者情報",
   "site.footer.privacy": "プライバシー",
+  "site.footer.terms": "利用規約",
+  "site.footer.pricing": "料金",
+
+  "site.pricing.title": "シンプルな料金プラン",
+  "site.pricing.subtitle": "アップロードする動画の分数に応じた月額制。いつでも解約できます。",
+  "site.pricing.perMonth": "/ 月",
+  "site.pricing.perYear": "/ 年",
+  "site.pricing.priceAtCheckout": "価格はお支払い画面で表示されます",
+  "site.pricing.popular": "いちばん人気",
+  "site.pricing.minutes": "毎月{minutes}分の動画",
+  "site.pricing.retention": "プロジェクトを{days}日間保存",
+  "site.pricing.featureWorkflows": "すべてのワークフローと字幕スタイル",
+  "site.pricing.featureVoice": "音声コマンドとAIクリーンアップ",
+  "site.pricing.featureFormats": "{formats} で書き出し",
+  "site.pricing.choose": "{plan}を選ぶ",
+  "site.pricing.current": "現在のプラン",
+  "site.pricing.manage": "サブスクリプションを管理",
+  "site.pricing.switch": "{plan}に切り替え",
+  "site.pricing.unavailable": "近日公開",
+  "site.pricing.redirecting": "お支払い画面を開いています…",
+  "site.pricing.checkoutFailed": "お支払い画面を開けませんでした。少し時間をおいて、もう一度お試しください。",
+  "site.pricing.loadFailed": "プランを読み込めませんでした。少し時間をおいて、もう一度お試しください。",
+  "site.pricing.minutesHint":
+    "分数はアップロードした動画の長さで計算されます。使わなかった分数は翌月に繰り越されません。",
+  "site.pricing.vatNote":
+    "価格はVAT(付加価値税)込みです。お支払いは販売事業者(Merchant of Record)であるLemon Squeezyが処理し、請求と請求書の発行を行います。",
+  "site.pricing.testMode": "テストモード — 実際の請求は発生しません",
+  "site.pricing.testersOnly": "プランはまだ購入できません。チェックアウトはテストモードで、招待されたテスターのみ利用できます。",
+  "site.pricing.betaTitle": "オープンベータ期間中は無料",
+  "site.pricing.betaBody": "ベータ期間中、CleoCutsは無料でご利用いただけます。より多くの分数を含む有料プランを近日公開予定です。",
 
   "library.header.homeAria": "CleoCuts エディタ",
   "library.header.title": "ライブラリ",
@@ -385,4 +470,8 @@ export const ja: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "プレビューを閉じる",
   "common.videoModal.close": "閉じる",
+
+  "common.auth.signIn": "サインイン",
+  "common.auth.account": "アカウント",
+  "common.auth.pricing": "料金",
 };

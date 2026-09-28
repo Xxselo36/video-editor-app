@@ -27,3 +27,6 @@ nuitka-crash-report.xml
 .env.local
 docs
 ANLEITUNG.md
+
+# Backend unit tests are not needed in the image
+backend/tests/

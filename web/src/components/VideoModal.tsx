@@ -2,20 +2,14 @@
 
 import { useEffect } from "react";
 import { useT } from "@/i18n";
-
-function backendUrl(): string {
-  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
-    return process.env.NEXT_PUBLIC_BACKEND_URL;
-  }
-  if (typeof window === "undefined") return "";
-  return `${window.location.protocol}//${window.location.hostname}:8000`;
-}
+import { useMediaUrl } from "@/lib/api";
 
 /* ── Inline video preview modal ──
  * Full-screen overlay used from Library + Picker's Recent-Projects.
  * Click backdrop or press Escape to close. Body-scroll lock while open.
  * Uses /jobs/:id/watch (no attachment header) so <video> can stream
- * with HTTP Range for smooth seeking.
+ * with HTTP Range for smooth seeking. The URL is fixed while the modal
+ * is open (and waits for the media token when accounts are on).
  */
 export function VideoModal({
   jobId,
@@ -25,6 +19,7 @@ export function VideoModal({
   onClose: () => void;
 }) {
   const t = useT();
+  const src = useMediaUrl(jobId, "watch");
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -57,19 +52,21 @@ export function VideoModal({
         >
           {t("common.videoModal.close")} ✕
         </button>
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <video
-          src={`${backendUrl()}/jobs/${jobId}/watch`}
-          controls
-          autoPlay
-          playsInline
-          className="max-h-[92vh] w-full rounded-2xl"
-          style={{
-            background: "#000",
-            boxShadow:
-              "0 0 0 1px rgba(139,92,246,0.35), 0 12px 60px rgba(139,92,246,0.35)",
-          }}
-        />
+        {src && (
+          /* eslint-disable-next-line jsx-a11y/media-has-caption */
+          <video
+            src={src}
+            controls
+            autoPlay
+            playsInline
+            className="max-h-[92vh] w-full rounded-2xl"
+            style={{
+              background: "#000",
+              boxShadow:
+                "0 0 0 1px rgba(139,92,246,0.35), 0 12px 60px rgba(139,92,246,0.35)",
+            }}
+          />
+        )}
       </div>
     </div>
   );

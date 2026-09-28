@@ -8,6 +8,12 @@ the desktop plugin and the web app.
 Loads repo-root .env on import so ANTHROPIC_API_KEY (and other secrets)
 are available to backend.llm without manual `export` per shell.
 
+Accounts (backend/auth.py, Clerk) and billing (backend/billing.py +
+backend/accounts.py, Lemon Squeezy) are off until their env vars are set;
+while off, every route works anonymously exactly as before. Those three
+modules are imported only here — the desktop app and the Modal image
+load backend.pipeline & co. without them (and without PyJWT).
+
 Run dev server:
     ./venv313/bin/uvicorn backend.main:app --reload --port 8000
 
@@ -36,8 +42,10 @@ except ImportError:
 import hmac
 import io
 import json
+import math
 import os
 import shutil
+import subprocess
 import tempfile
 import threading
 import traceback
@@ -46,14 +54,22 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 import time
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import (
+    Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile,
+)
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
-from backend import costs
-from backend.jobs import store, retention_days
+from backend import accounts, auth, billing, costs
+from backend.auth import (
+    User, current_user, get_owned_job, media_user, require_user,
+)
+from backend.jobs import DEFAULT_PLAN, new_job_id, retention_days, store
 from backend.pipeline import analyze_only, render_only
+
+# Media tokens (?t=) must not end up in the access log.
+auth.install_log_filter()
 
 # Track active worker threads so shutdown can wait for them before
 # letting the container die. Deploys used to kill mid-flight jobs;
@@ -83,7 +99,13 @@ async def lifespan(app_: FastAPI):
     if stuck:
         print(f"[startup] marked {stuck} stuck job(s) as error "
               f"(container restart)", flush=True)
+    _refund_interrupted()
     threading.Thread(target=_retention_loop, daemon=True).start()
+    auth.install_log_filter()
+    auth.log_status()
+    billing.log_status()
+    if billing.enabled():
+        threading.Thread(target=billing.reconcile_loop, daemon=True).start()
     yield
     # SHUTDOWN: wait for in-flight worker threads to finish before
     # letting Uvicorn exit. Railway sends SIGTERM then waits
@@ -191,6 +213,145 @@ def _retention_loop() -> None:
         except Exception as e:
             print(f"[retention] sweep failed: {e}", flush=True)
         time.sleep(3600)
+
+
+# ── Minutes quota (backend/accounts.py) ──────────────────────────────
+# Charged once, at POST /jobs, from the probed length of the upload;
+# trued up after analysis; refunded only when WE failed.
+
+
+def _bills(user: User | None) -> bool:
+    """Does this caller's upload count against a minutes quota? Not with
+    auth off, not for the service user, not while billing is off."""
+    return user is not None and not user.is_service and billing.enabled()
+
+
+def _to_float(value: str) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return v if v == v else 0.0  # NaN
+
+
+def _probe_duration(path: str) -> float | None:
+    """Length of an upload in seconds, or None if ffprobe can't tell.
+
+    Streamed WebM (MediaRecorder) has no duration in its header
+    (format=duration is N/A), so fall back to the last packet timestamp.
+    """
+    from src.ffmpeg_utils import get_ffprobe_path
+    ffprobe = get_ffprobe_path()
+
+    def _run(args: list[str], timeout: float) -> str:
+        try:
+            r = subprocess.run([ffprobe, "-v", "error", *args, path],
+                               capture_output=True, text=True,
+                               timeout=timeout)
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        return r.stdout if r.returncode == 0 else ""
+
+    dur = _to_float(_run(["-show_entries", "format=duration", "-of",
+                          "default=noprint_wrappers=1:nokey=1"], 30).strip())
+    if dur > 0:
+        return dur
+    out = _run(["-show_entries", "packet=pts_time", "-of", "csv=p=0"], 180)
+    dur = max((_to_float(line.strip().strip(","))
+               for line in out.splitlines()), default=0.0)
+    return dur if dur > 0 else None
+
+
+def _is_infra_failure(exc: BaseException, msg: str) -> bool:
+    """Analysis failures that are our fault (full disk, IO, ffmpeg,
+    restart) give the minutes back. Content problems ("No speech
+    detected") don't — they already cost Groq/Claude time, and a refund
+    would let the same file be retried for free forever."""
+    if msg in ("server_storage_full", "container_restart"):
+        return True
+    if isinstance(exc, (OSError, MemoryError)):
+        return True
+    return msg.lower().startswith("ffmpeg")
+
+
+def _true_up(job_id: str, duration: float) -> None:
+    if not auth.auth_enabled():
+        return
+    try:
+        extra = accounts.true_up(job_id, float(duration or 0))
+        if extra:
+            print(f"[job {job_id}] video longer than probed: charged "
+                  f"{extra:.0f}s more", flush=True)
+    except Exception as e:  # never fail a job over bookkeeping
+        print(f"[job {job_id}] usage true-up failed: {e}", flush=True)
+
+
+def _true_up_from_file(job_id: str, job_dir: Path) -> None:
+    """True-up for an analysis that failed after normalizing: its result
+    (with the duration) never came, so probe the normalized file."""
+    if not auth.auth_enabled():
+        return
+    for name in ("normalized.mp4", "normalized_smartcam.mp4"):
+        path = job_dir / name
+        if not path.exists():
+            continue
+        try:
+            seconds = _probe_duration(str(path))
+        except Exception as e:
+            print(f"[job {job_id}] duration probe failed: {e}", flush=True)
+            return
+        if seconds:
+            _true_up(job_id, seconds)
+        return
+
+
+def _refund(job_id: str, note: str) -> None:
+    if not auth.auth_enabled():
+        return
+    try:
+        if accounts.refund(job_id, note):
+            print(f"[job {job_id}] minutes refunded ({note[:60]})",
+                  flush=True)
+    except Exception as e:
+        print(f"[job {job_id}] refund failed: {e}", flush=True)
+
+
+def _refund_interrupted() -> None:
+    """Startup: analyses killed by the last restart get their minutes
+    back (mark_stuck_as_error tagged them container_restart). Idempotent."""
+    if not auth.auth_enabled():
+        return
+    for job in store.list_all():
+        if job.status == "error" and job.error == "container_restart":
+            _refund(job.id, "container_restart")
+
+
+def _discard_upload(input_path: str | None, storage_key: str | None) -> None:
+    """Throw away a refused upload (local copy + R2 object)."""
+    _remove_upload(input_path)
+    if storage_key:
+        from backend.storage import delete_from_r2
+        delete_from_r2(storage_key)
+
+
+def _clean_settings(parsed: dict, user: User | None) -> dict:
+    """Drop internal keys (leading "_") from client settings — a forged
+    _r2_storage_key would make us delete someone else's upload.
+    _cost_test (cost_test.py tagging) stays for the service user, and
+    while auth is off."""
+    keep_cost_test = user is None or user.is_service
+    return {k: v for k, v in parsed.items()
+            if not str(k).startswith("_")
+            or (k == "_cost_test" and keep_cost_test)}
+
+
+def _short(value: str | None, limit: int) -> str | None:
+    value = (value or "").strip()
+    return value[:limit] or None
+
+
+def _quota_error(code: str, **extra) -> HTTPException:
+    return HTTPException(402, {"code": code, **extra})
 
 # CORS configuration:
 #   - Dev (default): allow LAN IPs on :3000 for phone/tablet testing.
@@ -326,6 +487,7 @@ def _run_analyze_inner(job_id: str) -> None:
                 audio_levels=res.get("audio_levels", {}),
                 scene_events=res.get("scene_events", []),
             )
+            _true_up(job_id, res.get("duration", 0.0))
             # The original upload is only needed to build normalized.mp4;
             # editing and rendering work from that. Free the space now
             # instead of keeping a second full-size copy for weeks.
@@ -338,6 +500,10 @@ def _run_analyze_inner(job_id: str) -> None:
         except Exception as e:
             tb = traceback.format_exc()
             print(f"[job {job_id}] ANALYZE FAILED: {e}\n{tb}", flush=True)
+            # A content failure ("No speech detected") comes after the
+            # transcription was paid for: charge what was really
+            # processed (before the files go; refunds below still win).
+            _true_up_from_file(job_id, job_dir)
             # Nothing of a failed analysis can be reused (the user uploads
             # again), so free the upload + partial files right away — a
             # failed 10 min job used to leave ~1.5 GB on the volume.
@@ -352,6 +518,8 @@ def _run_analyze_inner(job_id: str) -> None:
                 msg = "server_storage_full"
             store.update(job_id, status="error", message=msg[:300],
                          error=msg[:2000], input_path=None)
+            if _is_infra_failure(e, msg):
+                _refund(job_id, msg)
     finally:
         _release_active(job_id)
 
@@ -440,97 +608,42 @@ def _run_render_inner(
         _release_active(job_id)
 
 
-@app.post("/uploads/multipart/init")
-async def multipart_init_endpoint(payload: dict):
-    """Start a resumable multipart upload. Returns upload_id +
-    storage_key. Client then batches part-URL signs via
-    /uploads/multipart/sign and PUT-s bytes directly to R2.
-    """
-    from backend.storage import r2_available, multipart_init
-    if not r2_available():
-        raise HTTPException(503, "Direct upload not available.")
-    filename = str(payload.get("filename") or "upload.mp4").strip()
-    content_type = str(
-        payload.get("content_type") or "video/mp4"
-    ).strip() or "video/mp4"
-    try:
-        return multipart_init(filename=filename, content_type=content_type)
-    except Exception as e:
-        raise HTTPException(500, f"multipart init failed: {e}") from e
-
-
-@app.post("/uploads/multipart/sign")
-async def multipart_sign_endpoint(payload: dict):
-    """Batch-sign a set of part URLs. Payload:
-        {"upload_id": ..., "storage_key": ..., "part_numbers": [1,2,3,...]}
-    """
-    from backend.storage import r2_available, multipart_sign_parts
-    if not r2_available():
-        raise HTTPException(503, "Direct upload not available.")
-    upload_id = str(payload.get("upload_id") or "").strip()
-    storage_key = str(payload.get("storage_key") or "").strip()
-    parts = payload.get("part_numbers") or []
-    if not upload_id or not storage_key or not parts:
-        raise HTTPException(400, "upload_id + storage_key + part_numbers required")
-    try:
-        urls = multipart_sign_parts(
-            storage_key=storage_key,
-            upload_id=upload_id,
-            part_numbers=[int(p) for p in parts],
-        )
-        return {"parts": urls}
-    except Exception as e:
-        raise HTTPException(500, f"multipart sign failed: {e}") from e
-
-
-@app.post("/uploads/multipart/complete")
-async def multipart_complete_endpoint(payload: dict):
-    """Finalise the multipart upload. Payload:
-        {"upload_id": ..., "storage_key": ...,
-         "parts": [{"part_number": int, "etag": str}, ...]}
-    """
-    from backend.storage import r2_available, multipart_complete
-    if not r2_available():
-        raise HTTPException(503, "Direct upload not available.")
-    upload_id = str(payload.get("upload_id") or "").strip()
-    storage_key = str(payload.get("storage_key") or "").strip()
-    parts = payload.get("parts") or []
-    if not upload_id or not storage_key or not parts:
-        raise HTTPException(400, "upload_id + storage_key + parts required")
-    try:
-        multipart_complete(
-            storage_key=storage_key,
-            upload_id=upload_id,
-            parts=parts,
-        )
-        return {"storage_key": storage_key, "ok": True}
-    except Exception as e:
-        raise HTTPException(500, f"multipart complete failed: {e}") from e
-
-
-@app.post("/uploads/multipart/abort")
-async def multipart_abort_endpoint(payload: dict):
-    """Cancel a multipart upload — e.g. user hit cancel or a hard
-    error occurred client-side."""
-    from backend.storage import r2_available, multipart_abort
-    if not r2_available():
-        return {"ok": True}
-    upload_id = str(payload.get("upload_id") or "").strip()
-    storage_key = str(payload.get("storage_key") or "").strip()
-    if upload_id and storage_key:
-        multipart_abort(storage_key=storage_key, upload_id=upload_id)
-    return {"ok": True}
+# /uploads/multipart/* (resumable R2 multipart upload) was never used by
+# the web app and had no ownership checks — removed, so those paths 404.
+# backend/storage.py still has the helpers.
 
 
 @app.post("/uploads/presign")
-async def presign_upload_endpoint(payload: dict):
+def presign_upload_endpoint(
+    payload: dict,
+    user: User | None = Depends(current_user),
+):
     """Return a presigned URL for direct-to-R2 upload.
 
     Client PUTs the video body straight to R2 (bypasses Railway edge
     for multi-GB files), then calls POST /jobs with the returned
     storage_key. Falls back with 503 if R2 isn't configured.
+
+    With accounts on, keys are namespaced `uploads/<user id>/…` (POST
+    /jobs only accepts the caller's own). With billing enforced this
+    refuses early when there is no plan / no minutes left — UX only, the
+    binding check is at POST /jobs. An optional `duration` (seconds, as
+    the browser reads it) is compared with the minutes left.
     """
     from backend.storage import r2_available, presign_upload
+    # Paywall first, also without R2: the frontend falls back to the
+    # legacy upload on 503, which would send the whole file before
+    # POST /jobs could say "no plan".
+    if _bills(user) and billing.enforce():
+        ent = accounts.entitlement(user.id, user.email)
+        if ent is None:
+            raise _quota_error("subscription_required")
+        remaining = accounts.minutes_summary(user.id, ent)["remaining_seconds"]
+        needed = math.ceil(_to_float(payload.get("duration") or 0))
+        if remaining <= 0 or needed > remaining:
+            raise _quota_error("quota_exceeded",
+                               remaining_seconds=round(remaining),
+                               needed_seconds=needed or None)
     if not r2_available():
         raise HTTPException(
             503,
@@ -542,7 +655,8 @@ async def presign_upload_endpoint(payload: dict):
         payload.get("content_type") or "video/mp4"
     ).strip() or "video/mp4"
     try:
-        info = presign_upload(filename=filename, content_type=content_type)
+        info = presign_upload(filename=filename, content_type=content_type,
+                              prefix=auth.upload_prefix(user))
     except Exception as e:
         raise HTTPException(500, f"presign failed: {e}") from e
     return info
@@ -554,6 +668,9 @@ async def create_job(
     settings: str = Form("{}"),
     storage_key: str = Form(None),
     filename: str = Form(None),
+    preset_id: str = Form(None),
+    preset_label: str = Form(None),
+    user: User | None = Depends(current_user),
 ):
     """Upload + start analyze. Two paths:
 
@@ -565,11 +682,20 @@ async def create_job(
        the body directly to R2 with the returned URL, then calls this
        endpoint with `storage_key` set to the R2 object key. Backend
        downloads from R2 into local /tmp before starting analyze.
+
+    `filename`, `preset_id`, `preset_label` are stored for the Library.
+    With billing on, the upload's length is probed and charged against
+    the caller's minutes here, once (402 subscription_required /
+    quota_exceeded when enforced; 400 unreadable_video if it has no
+    readable length).
     """
     try:
         parsed = json.loads(settings)
     except json.JSONDecodeError:
         raise HTTPException(400, "settings must be valid JSON")
+    if not isinstance(parsed, dict):
+        raise HTTPException(400, "settings must be a JSON object")
+    parsed = _clean_settings(parsed, user)
 
     job_input_dir = _WORK_ROOT / "uploads"
     job_input_dir.mkdir(parents=True, exist_ok=True)
@@ -581,6 +707,19 @@ async def create_job(
         print(f"[jobs] refusing upload: only {free / 1e9:.1f} GB free",
               flush=True)
         raise HTTPException(507, "server_storage_full")
+
+    if storage_key:
+        # Only keys we handed this caller out (presign) — any other key
+        # would be downloaded AND deleted after analysis.
+        if (not storage_key.startswith(auth.upload_prefix(user))
+                or ".." in storage_key):
+            raise HTTPException(403, "storage_key not yours")
+
+    bills = _bills(user)
+    enforce = bills and billing.enforce()
+    if enforce and accounts.entitlement(user.id, user.email) is None:
+        await run_in_threadpool(_discard_upload, None, storage_key)
+        raise _quota_error("subscription_required")
 
     input_path: str
     if storage_key:
@@ -628,17 +767,193 @@ async def create_job(
     if storage_key:
         parsed["_r2_storage_key"] = storage_key
 
-    job = store.create(input_path=input_path, settings=parsed)
+    job_id = new_job_id()
+    plan = DEFAULT_PLAN
+    if bills:
+        seconds = await run_in_threadpool(_probe_duration, input_path)
+        if seconds is None:
+            if enforce:
+                await run_in_threadpool(_discard_upload, input_path,
+                                        storage_key)
+                raise HTTPException(400, "unreadable_video")
+            seconds = 0.0  # not enforced: the true-up after analysis fixes it
+        # Synchronous on purpose: quota check + ledger insert must not be
+        # interleaved with another upload of the same user.
+        try:
+            ent = accounts.charge(job_id, user.id, seconds,
+                                  email=user.email, enforce=enforce)
+        except accounts.SubscriptionRequired:
+            await run_in_threadpool(_discard_upload, input_path, storage_key)
+            raise _quota_error("subscription_required")
+        except accounts.QuotaExceeded as e:
+            await run_in_threadpool(_discard_upload, input_path, storage_key)
+            raise _quota_error("quota_exceeded",
+                               remaining_seconds=round(e.remaining_seconds),
+                               needed_seconds=round(e.needed_seconds))
+        if ent is not None:
+            plan = ent.plan  # fixed per job: a downgrade never shortens retention
+        if enforce:
+            # The charge trusts the container's duration header, which
+            # the uploader controls: analyse no more than was charged
+            # (+ the true-up tolerance), or a file claiming 1 s would be
+            # transcribed in full, however long it really is.
+            parsed["_max_seconds"] = (math.ceil(max(seconds, 0.0))
+                                      + accounts.TRUE_UP_TOLERANCE_S)
+
+    try:
+        job = store.create(
+            input_path=input_path,
+            settings=parsed,
+            job_id=job_id,
+            owner_id=user.id if user else None,
+            plan=plan,
+            filename=_short(filename or (file.filename if file else None),
+                            255),
+            preset_id=_short(preset_id, 100),
+            preset_label=_short(preset_label, 200),
+        )
+    except Exception:
+        if bills:
+            _refund(job_id, "create_failed")
+        raise
     threading.Thread(target=_run_analyze, args=(job.id,), daemon=True).start()
     return {"job_id": job.id, **job.to_dict()}
 
 
+# Fields of GET /jobs rows (the Library's server-side list).
+_LIST_FIELDS = (
+    "id", "status", "message", "progress", "error", "filename", "preset_id",
+    "preset_label", "created_at", "updated_at", "expires_at", "has_output",
+    "outputs", "hook_clips", "social_caption", "social_hashtags", "duration",
+)
+
+
+@app.get("/jobs")
+def list_jobs(user: User = Depends(require_user)):
+    """The caller's projects, newest first (404 not_available while
+    accounts are off — the frontend keeps its localStorage list then).
+    Beta jobs show up once claimed, i.e. after any /jobs/{id} request."""
+    rows = store.list_all() if user.is_service else store.list_by_owner(user.id)
+    rows.sort(key=lambda j: j.created_at or j.updated_at, reverse=True)
+    out = []
+    for job in rows:
+        d = job.to_dict()
+        out.append({k: d.get(k) for k in _LIST_FIELDS})
+    return out
+
+
 @app.get("/jobs/{job_id}")
-def get_job(job_id: str):
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
-    return job.to_dict()
+def get_job(job_id: str, user: User | None = Depends(current_user)):
+    return get_owned_job(job_id, user).to_dict()
+
+
+@app.get("/me")
+def me(user: User | None = Depends(current_user)):
+    """Who is signed in, their plan and minutes, and the media token for
+    <video>/<img> URLs (`?t=`). {"auth_enabled": false} with auth off."""
+    if user is None:
+        return {"auth_enabled": False}
+    on, reason = billing.status()
+    out: dict = {
+        "user": {"id": user.id, "email": None},
+        "auth_enabled": True,
+        "billing": {"enabled": on, "enforce": billing.enforce(),
+                    "test_mode": accounts.test_mode()},
+        "plan": None,
+        "subscription": None,
+        "minutes": None,
+        "media_token": auth.media_token(user.id),
+    }
+    if reason:
+        out["billing"]["reason"] = reason
+    if user.is_service:
+        return out
+    email = billing.user_email(user)
+    out["user"]["email"] = email
+    if not on:
+        return out
+    billing.refresh_user(user.id)
+    ent = accounts.entitlement(user.id, email)
+    sub = (ent.subscription if ent and ent.subscription
+           else accounts.latest_subscription(user.id))
+    out["plan"] = ent.plan if ent else None
+    out["subscription"] = accounts.subscription_public(sub)
+    if ent is not None:
+        out["minutes"] = accounts.minutes_summary(user.id, ent)
+        out["comp"] = ent.source == "comp"
+    return out
+
+
+def _require_billing() -> None:
+    if not billing.enabled():
+        raise HTTPException(404, "billing_disabled")
+
+
+@app.get("/billing/config")
+def billing_config():
+    """Public: is billing on, and the plans (price, minutes, retention)."""
+    return billing.config()
+
+
+@app.post("/billing/checkout")
+def billing_checkout(payload: dict, user: User = Depends(require_user)):
+    """{plan} → {url} of a Lemon Squeezy checkout. 409 already_subscribed
+    (with a portal_url) when a subscription already grants access —
+    plan changes happen in the customer portal."""
+    _require_billing()
+    plan = str(payload.get("plan") or "").strip().lower()
+    if user.is_service or plan not in billing.variants():
+        raise HTTPException(400, "unknown_plan")
+    client_email = payload.get("email")
+    client_email = (client_email.strip()[:254]
+                    if isinstance(client_email, str) else None)
+    try:
+        url = billing.create_checkout(user, plan, client_email=client_email)
+    except billing.TestersOnly:
+        raise HTTPException(403, {"code": "test_mode_testers_only"})
+    except billing.AlreadySubscribed as e:
+        raise HTTPException(409, {"code": "already_subscribed",
+                                  "portal_url": e.portal_url})
+    except (billing.LemonSqueezyError, KeyError, TypeError) as e:
+        print(f"[billing] checkout failed: {e}", flush=True)
+        raise HTTPException(502, "checkout_failed")
+    return {"url": url}
+
+
+@app.get("/billing/portal")
+def billing_portal(user: User = Depends(require_user)):
+    """Fresh customer-portal URL (they are signed and expire)."""
+    _require_billing()
+    url = None if user.is_service else billing.portal_url(user.id)
+    if not url:
+        raise HTTPException(404, "no_subscription")
+    return {"url": url}
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    """Lemon Squeezy webhook. Signature over the raw body; 200 once
+    applied (or deliberately ignored), 400 bad signature, 500 when
+    processing failed so LS retries."""
+    _require_billing()
+    raw = await request.body()
+    if not billing.verify_signature(raw, request.headers.get("x-signature", "")):
+        raise HTTPException(400, "bad signature")
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        raise HTTPException(400, "invalid json")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "invalid payload")
+    event = (payload.get("meta") or {}).get("event_name")
+    try:
+        result = await run_in_threadpool(billing.process_event, payload)
+    except Exception as e:
+        print(f"[billing] webhook {event} FAILED: {e}\n"
+              f"{traceback.format_exc()}", flush=True)
+        raise HTTPException(500, "webhook processing failed")
+    print(f"[billing] webhook {event}: {result}", flush=True)
+    return {"ok": True, **result}
 
 
 @app.get("/admin/costs")
@@ -680,6 +995,7 @@ def admin_costs(x_admin_token: str = Header(default=""),
             continue
         rows.append({
             "job_id": job.id,
+            "owner_id": job.owner_id,
             "test": is_test,
             "status": job.status,
             "plan": job.plan,
@@ -713,11 +1029,9 @@ def admin_costs(x_admin_token: str = Header(default=""),
 
 
 @app.delete("/jobs/{job_id}")
-def delete_job(job_id: str):
+def delete_job(job_id: str, user: User | None = Depends(current_user)):
     """Delete a project and all its files right away (user request)."""
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
+    job = get_owned_job(job_id, user)
     with _active_lock:
         busy = job_id in _active_jobs
     if busy or job.status in ("processing", "pending"):
@@ -727,11 +1041,9 @@ def delete_job(job_id: str):
 
 
 @app.get("/jobs/{job_id}/subtitles")
-def get_subtitles(job_id: str):
+def get_subtitles(job_id: str, user: User | None = Depends(current_user)):
     """Subtitles produced by analyze, for the review editor."""
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
+    job = get_owned_job(job_id, user)
     if job.status != "awaiting_review":
         raise HTTPException(409, f"job not ready for review (status={job.status})")
     return {
@@ -743,15 +1055,13 @@ def get_subtitles(job_id: str):
 
 
 @app.get("/jobs/{job_id}/preview-video")
-def preview_video(job_id: str):
+def preview_video(job_id: str, user: User | None = Depends(media_user)):
     """Stream the rotation-normalized source for in-browser preview.
 
     Starlette's FileResponse handles HTTP Range requests so the <video>
     element can seek without downloading the full file.
     """
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
+    job = get_owned_job(job_id, user)
     # Prefer the cut preview (segments concatenated, no captions). Falls
     # back to the normalized file if the preview render isn't there yet.
     path = job.preview_path if job.preview_path else job.normalized_path
@@ -763,27 +1073,6 @@ def preview_video(job_id: str):
         # The file is rebuilt in place on every edit; make the browser
         # revalidate instead of reusing a stale copy on re-entry.
         headers={"Accept-Ranges": "bytes", "Cache-Control": "no-cache"},
-    )
-
-
-@app.get("/jobs/{job_id}/source-video")
-def source_video(job_id: str):
-    """Stream the RAW normalized source (no cuts applied).
-
-    Used by the timeline editor which composes edits client-side so the
-    video never has to reload during trim / split / delete. Segments are
-    only committed to the backend right before render.
-    """
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
-    path = job.normalized_path
-    if not path or not Path(path).exists():
-        raise HTTPException(409, "source video not ready")
-    return FileResponse(
-        path=path,
-        media_type="video/mp4",
-        headers={"Accept-Ranges": "bytes"},
     )
 
 
@@ -847,7 +1136,8 @@ def _rebuild_preview(job_id: str, normalized_path: str, segments) -> None:
 
 
 @app.post("/jobs/{job_id}/edit-segments")
-def post_edit_segments(job_id: str, payload: dict):
+def post_edit_segments(job_id: str, payload: dict,
+                       user: User | None = Depends(current_user)):
     """Accept a user-edited segment list and rebuild the preview video.
 
     Frontend sends the segment list (with per-segment effects) after the
@@ -864,9 +1154,7 @@ def post_edit_segments(job_id: str, payload: dict):
         preview_ok  – the preview now shows exactly these segments
         superseded  – a newer save arrived; its response is authoritative
     """
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
+    job = get_owned_job(job_id, user)
     if job.status != "awaiting_review":
         raise HTTPException(
             409, f"job not in review state (status={job.status})"
@@ -944,13 +1232,12 @@ def post_edit_segments(job_id: str, payload: dict):
 
 
 @app.post("/jobs/{job_id}/phrases")
-def post_phrases(job_id: str, payload: dict):
+def post_phrases(job_id: str, payload: dict,
+                 user: User | None = Depends(current_user)):
     """Save the review transcript (edited text, deleted lines) so it
     survives leaving and re-entering the job. GET /subtitles returns it
     as `phrases`. The render still takes the subtitles the client sends."""
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
+    job = get_owned_job(job_id, user)
     if job.status != "awaiting_review":
         raise HTTPException(
             409, f"job not in review state (status={job.status})"
@@ -991,7 +1278,8 @@ def post_phrases(job_id: str, payload: dict):
 
 
 @app.post("/jobs/{job_id}/recompute-scenes")
-def post_recompute_scenes(job_id: str, payload: dict):
+def post_recompute_scenes(job_id: str, payload: dict,
+                          user: User | None = Depends(current_user)):
     """Recompute cut segments from an edited scene-event list.
 
     Frontend sends the user-edited event list (some toggled off, maybe
@@ -1003,9 +1291,7 @@ def post_recompute_scenes(job_id: str, payload: dict):
         {"events": [{"type": "start"|"restart"|"keep"|"finish",
                      "start": float, "end": float}, ...]}
     """
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
+    job = get_owned_job(job_id, user)
     if job.status not in ("awaiting_review",):
         raise HTTPException(
             409, f"job not in review state (status={job.status})"
@@ -1098,11 +1384,11 @@ def post_recompute_scenes(job_id: str, payload: dict):
 
 
 @app.post("/jobs/{job_id}/render")
-def post_render(job_id: str, payload: dict):
-    """Kick off the render with (possibly edited) subtitles."""
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
+def post_render(job_id: str, payload: dict,
+                user: User | None = Depends(current_user)):
+    """Kick off the render with (possibly edited) subtitles. Never
+    blocked by billing: the minutes were charged at upload."""
+    job = get_owned_job(job_id, user)
     if job.status != "awaiting_review":
         raise HTTPException(409, f"job not in review state (status={job.status})")
 
@@ -1127,10 +1413,9 @@ def post_render(job_id: str, payload: dict):
 
 
 @app.get("/jobs/{job_id}/download")
-def download_job(job_id: str, format: str = "primary"):
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
+def download_job(job_id: str, format: str = "primary",
+                 user: User | None = Depends(media_user)):
+    job = get_owned_job(job_id, user)
     path = job.outputs.get(format) or (
         job.output_path if format == "primary" else None
     )
@@ -1145,13 +1430,12 @@ def download_job(job_id: str, format: str = "primary"):
 
 
 @app.get("/jobs/{job_id}/watch")
-def watch_job(job_id: str, format: str = "primary"):
+def watch_job(job_id: str, format: str = "primary",
+              user: User | None = Depends(media_user)):
     """Same file as /download but without the attachment header, so
     the Library modal can play it inline via <video src=...>. Supports
     HTTP Range so seeking works without downloading the whole file."""
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
+    job = get_owned_job(job_id, user)
     path = job.outputs.get(format) or (
         job.output_path if format == "primary" else None
     )
@@ -1165,13 +1449,11 @@ def watch_job(job_id: str, format: str = "primary"):
 
 
 @app.get("/jobs/{job_id}/thumbnail")
-def job_thumbnail(job_id: str):
+def job_thumbnail(job_id: str, user: User | None = Depends(media_user)):
     """Serve the poster-frame JPG generated at render time. The file
     lives next to the primary output at a fixed filename so we can
     derive the path without storing it on the Job."""
-    job = store.get(job_id)
-    if job is None:
-        raise HTTPException(404, "job not found")
+    job = get_owned_job(job_id, user)
     if not job.output_path:
         raise HTTPException(409, "thumbnail not ready")
     thumb = Path(job.output_path).parent / "cleo_thumbnail.jpg"
@@ -1180,5 +1462,7 @@ def job_thumbnail(job_id: str):
     return FileResponse(
         path=str(thumb),
         media_type="image/jpeg",
-        headers={"Cache-Control": "public, max-age=86400"},
+        # Behind a per-user token once accounts are on: no shared caches.
+        headers={"Cache-Control": ("private" if auth.auth_enabled()
+                                   else "public") + ", max-age=86400"},
     )

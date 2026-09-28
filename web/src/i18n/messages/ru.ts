@@ -34,6 +34,60 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.errors.saveEditsFailed": "Не удалось сохранить изменения — проверь подключение и попробуй снова.",
   "app.errors.title": "Что-то пошло не так",
   "app.errors.tryAgain": "Попробовать снова",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "Твоя сессия завершилась. Войди снова и повтори попытку.",
+  "app.errors.subscriptionRequired": "Для загрузки нужен тариф. Выбери его на странице с ценами.",
+  "app.errors.quotaExceeded":
+    "В этом периоде не хватает минут для этого видео. Повысь тариф или дождись сброса.",
+  "app.errors.unreadableVideo":
+    "Не удалось прочитать этот видеофайл. Экспортируй его заново в MP4 или MOV и загрузи снова.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Войди, чтобы открыть свои проекты.",
+  "app.auth.loadFailed":
+    "Не удалось загрузить вход. Проверь подключение (или разреши этот сайт в блокировщике контента) и попробуй снова.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Выбери тариф, чтобы загружать видео",
+  "app.paywall.subscriptionBody":
+    "Для загрузки нужен активный тариф. Выбери подходящий — это займёт минуту, а отменить можно в любой момент.",
+  "app.paywall.quotaTitle": "Не хватает минут",
+  "app.paywall.quotaBody": "В этом периоде у тебя осталось {left} мин, а этому видео нужно {needed} мин.",
+  "app.paywall.quotaBodyUnknown": "Это видео длиннее, чем минуты, оставшиеся у тебя в этом периоде.",
+  "app.paywall.seePlans": "Посмотреть тарифы",
+  "app.paywall.upgrade": "Повысить тариф",
+  "app.paywall.close": "Не сейчас",
+  "app.billing.minutesLeft": "Осталось {n} мин в этом периоде",
+  "app.billing.choosePlan": "Выбери тариф, чтобы загружать видео",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Аккаунт",
+  "app.account.signedInAs": "Вход выполнен: {email}",
+  "app.account.plan": "Тариф",
+  "app.account.noPlan": "Тарифа пока нет",
+  "app.account.freeBeta": "CleoCuts бесплатен во время открытой беты — тариф не нужен.",
+  "app.account.status.active": "Активен · продление {date}",
+  "app.account.status.activeNoDate": "Активен",
+  "app.account.status.trial": "Пробный период · первый платёж {date}",
+  "app.account.status.cancelled": "Будет отменён {date}",
+  "app.account.status.pastDue": "Платёж просрочен — обнови способ оплаты.",
+  "app.account.status.paused": "Приостановлен",
+  "app.account.status.expired": "Истёк",
+  "app.account.status.comp": "Бесплатный доступ",
+  "app.account.usage": "Минуты в этом периоде",
+  "app.account.usageOf": "Использовано {used} из {limit} мин",
+  "app.account.resetsOn": "Сброс {date}",
+  "app.account.manage": "Управление подпиской",
+  "app.account.manageHint": "Счета, способ оплаты и отмена подписки — в клиентском портале Lemon Squeezy.",
+  "app.account.changePlan": "Сменить тариф",
+  "app.account.choosePlan": "Выбрать тариф",
+  "app.account.portalFailed": "Не удалось открыть портал оплаты. Попробуй ещё раз через минуту.",
+  "app.account.loadFailed": "Не удалось загрузить аккаунт. Попробуй ещё раз через минуту.",
+  "app.account.testMode": "Тестовый режим",
+  "app.account.successPending": "Спасибо! Оплата прошла — активируем твой тариф…",
+  "app.account.successDone": "Тариф {plan} активен. Приятного монтажа!",
+  "app.account.successSlow":
+    "Это занимает больше времени, чем обычно. Тариф появится здесь в течение нескольких минут — обнови страницу, чтобы проверить.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "Без названия",
@@ -300,6 +354,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "site.header.openEditor": "Открыть редактор",
 
   "site.hero.badge": "Открытая бета · бесплатно",
+  "site.hero.badgePricing": "Тарифы и цены",
   "site.hero.titleLead": "Монтируй прямо во время",
   "site.hero.titleAccent": "записи.",
   "site.hero.sub":
@@ -346,6 +401,37 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "site.footer.library": "Библиотека",
   "site.footer.imprint": "Реквизиты",
   "site.footer.privacy": "Конфиденциальность",
+  "site.footer.terms": "Условия",
+  "site.footer.pricing": "Цены",
+
+  // ── Pricing page ────────────────────────────────────────────────────
+  "site.pricing.title": "Простые цены",
+  "site.pricing.subtitle": "Плати каждый месяц за минуты видео, которые загружаешь. Отменить можно в любой момент.",
+  "site.pricing.perMonth": "/ мес.",
+  "site.pricing.perYear": "/ год",
+  "site.pricing.priceAtCheckout": "Цена будет показана при оплате",
+  "site.pricing.popular": "Самый популярный",
+  "site.pricing.minutes": "{minutes} мин видео в месяц",
+  "site.pricing.retention": "Проекты хранятся {days} дн.",
+  "site.pricing.featureWorkflows": "Все workflow и стили субтитров",
+  "site.pricing.featureVoice": "Голосовые команды и ИИ-чистка",
+  "site.pricing.featureFormats": "Экспорт в {formats}",
+  "site.pricing.choose": "Выбрать {plan}",
+  "site.pricing.current": "Твой текущий тариф",
+  "site.pricing.manage": "Управление подпиской",
+  "site.pricing.switch": "Перейти на {plan}",
+  "site.pricing.unavailable": "Пока недоступно",
+  "site.pricing.redirecting": "Открываем оплату…",
+  "site.pricing.checkoutFailed": "Не удалось открыть оплату. Попробуй ещё раз через минуту.",
+  "site.pricing.loadFailed": "Не удалось загрузить тарифы. Попробуй ещё раз через минуту.",
+  "site.pricing.minutesHint":
+    "Минуты считаются по длительности загруженных видео. Неиспользованные минуты не переносятся на следующий месяц.",
+  "site.pricing.vatNote":
+    "Цены указаны с НДС. Платежи обрабатывает Lemon Squeezy — наш официальный продавец (Merchant of Record): он списывает оплату и присылает тебе счета.",
+  "site.pricing.testMode": "Тестовый режим — без реальных платежей",
+  "site.pricing.testersOnly": "Тарифы пока нельзя купить — оплата в тестовом режиме, только для приглашённых тестировщиков.",
+  "site.pricing.betaTitle": "Бесплатно во время открытой беты",
+  "site.pricing.betaBody": "CleoCuts бесплатен, пока мы в бете. Скоро появятся платные тарифы с большим количеством минут.",
 
   "library.header.homeAria": "Редактор CleoCuts",
   "library.header.title": "Библиотека",
@@ -385,4 +471,9 @@ export const ru: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Закрыть превью",
   "common.videoModal.close": "Закрыть",
+
+  // ── Accounts (header, all pages) ────────────────────────────────────
+  "common.auth.signIn": "Войти",
+  "common.auth.account": "Аккаунт",
+  "common.auth.pricing": "Цены",
 };
