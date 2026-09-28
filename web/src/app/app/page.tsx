@@ -29,6 +29,7 @@ import { VideoModal } from "@/components/VideoModal";
 import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
 import { trackSave, waitForSaves } from "@/lib/pendingSaves";
 import {
+  readVideoDuration,
   uploadResumable,
   UPLOAD_STALL_MS,
   UPLOAD_STALLED_MSG,
@@ -43,13 +44,35 @@ import {
   markStaleUploads,
   type ActiveJobV2,
 } from "@/lib/activeJobs";
-import { LanguageSwitcher, translate, useT, type TFn } from "@/i18n";
+import { LanguageSwitcher, translate, useLang, useT, type TFn } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
+import { AUTH_ENABLED } from "@/lib/auth";
+import {
+  ApiError,
+  apiFetch,
+  authHeaders,
+  backendUrl,
+  mediaUrl,
+  notifyAuthRequired,
+  parseDetail,
+  publicUrl,
+  useMediaUrl,
+  whenMediaReady,
+} from "@/lib/api";
+import {
+  fetchServerJobs,
+  fmtMinutes,
+  paywallFrom,
+  planName,
+  refreshMe,
+  serverJobToLibraryEntry,
+  useBillingConfig,
+  useMe,
+  type Paywall,
+} from "@/lib/account";
+import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
+import { PaywallDialog } from "@/components/billing/PaywallDialog";
 
-// Backend host: explicit env wins, else use the page's hostname on
-// port 8000. This way iPhone (192.168.178.155:3000) hits
-// 192.168.178.155:8000 — not its own localhost.
-// Called lazily so it runs in the browser, not during SSR.
 // English translator for text that gets PERSISTED (localStorage job
 // cards / library entries). Stored text stays English and is mapped
 // back to the viewer's language at render time (see localizeKnown).
@@ -68,6 +91,10 @@ const STORED_MESSAGE_KEYS: MessageKey[] = [
   "app.errors.renderFailed",
   "app.errors.serverNoResponse",
   "app.errors.serverBusy",
+  "app.errors.signInRequired",
+  "app.errors.subscriptionRequired",
+  "app.errors.quotaExceeded",
+  "app.errors.unreadableVideo",
   "app.card.renderFailedNote",
 ];
 function localizeKnown(text: string, t: TFn): string {
@@ -89,6 +116,15 @@ function friendlyError(raw: unknown, t: TFn): string {
   if (txt.endsWith(".") && /\b(Please|please)\b/.test(txt)) return txt;
   if (l.includes("server_storage_full") || l.includes("507"))
     return t("app.errors.serverBusy");
+  if (l.includes("unreadable_video"))
+    return t("app.errors.unreadableVideo");
+  // Accounts / billing (backend codes; only sent when switched on)
+  if (l.includes("auth_required"))
+    return t("app.errors.signInRequired");
+  if (l.includes("subscription_required"))
+    return t("app.errors.subscriptionRequired");
+  if (l.includes("quota_exceeded"))
+    return t("app.errors.quotaExceeded");
   if (l.includes("stalled") || l.includes("network") || l.includes("failed to fetch"))
     return t("app.errors.connection");
   if (l.includes("interrupted"))
@@ -102,14 +138,6 @@ function friendlyError(raw: unknown, t: TFn): string {
   if (l.includes("render"))
     return t("app.errors.renderFailed");
   return t("app.errors.generic");
-}
-
-function backendUrl(): string {
-  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
-    return process.env.NEXT_PUBLIC_BACKEND_URL;
-  }
-  if (typeof window === "undefined") return "http://localhost:8000";
-  return `${window.location.protocol}//${window.location.hostname}:8000`;
 }
 
 const CAPTION_PRESETS: { id: string; labelKey: MessageKey }[] = [
@@ -440,6 +468,8 @@ export default function Home() {
   );
   const [outputFormats, setOutputFormats] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Upload refused by billing (402): dialog with the way to a plan.
+  const [paywall, setPaywall] = useState<Paywall | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Mount: always land on picker. Active jobs render as cards there —
@@ -588,33 +618,51 @@ export default function Home() {
     }
 
     try {
-      // Two upload paths depending on file size:
-      //   - <=90MB: legacy multipart POST /jobs (through Railway).
-      //   - >90MB:  presigned R2 PUT direct from browser → then POST
-      //             /jobs with the storage_key so backend fetches from R2.
-      //             Railway's edge caps HTTP bodies around 100MB.
+      // Two upload paths:
+      //   - presigned R2 PUT direct from browser → then POST /jobs with
+      //     the storage_key so backend fetches from R2. For >90MB
+      //     (Railway's edge caps HTTP bodies around 100MB) and, with
+      //     accounts on, for every size: the ~60 s session token would
+      //     expire during a slow multipart upload (the backend checks it
+      //     after the body), and presign answers 402 before any bytes.
+      //   - otherwise legacy multipart POST /jobs (through Railway),
+      //     also when this deployment has no R2 (presign 503).
       const R2_THRESHOLD = 90 * 1024 * 1024; // 90MB
       let res: XMLHttpRequest;
-
-      if (targetFile.size > R2_THRESHOLD) {
-        // Chunked resumable upload via S3 multipart on R2. Splits the
-        // file into 25MB parts, uploads in parallel with bounded
-        // concurrency, and persists progress to localStorage so an
-        // interrupted upload can resume from where it left off.
-        const { storage_key } = await uploadResumable({
-          file: targetFile,
-          backendUrl: backendUrl(),
-          onProgress: (pct) => setPct(pct),
-        });
-
-        // Create the job with the completed storage_key.
-        const form = new FormData();
-        form.append("storage_key", storage_key);
+      // Stored with the job so the server-side project list has names.
+      const appendJobFields = (form: FormData) => {
         form.append("filename", targetFile.name);
         form.append("settings", JSON.stringify(settings));
+        if (selectedPreset) form.append("preset_id", selectedPreset);
+        if (presetInfo) form.append("preset_label", tEn(presetInfo.labelKey));
+      };
+
+      let storageKey: string | null = null;
+      if (targetFile.size > R2_THRESHOLD || AUTH_ENABLED) {
+        try {
+          // Single presigned PUT to R2 (see lib/chunkedUpload).
+          ({ storage_key: storageKey } = await uploadResumable({
+            file: targetFile,
+            onProgress: (pct) => setPct(pct),
+            duration: AUTH_ENABLED ? await readVideoDuration(targetFile) : null,
+          }));
+        } catch (e) {
+          const noR2 = e instanceof ApiError && e.status === 503;
+          if (!(noR2 && targetFile.size <= R2_THRESHOLD)) throw e;
+        }
+      }
+      // Fetched now, i.e. after the R2 PUT: the token is short-lived.
+      const auth = AUTH_ENABLED ? await authHeaders() : {};
+
+      if (storageKey) {
+        // Create the job with the completed storage_key.
+        const form = new FormData();
+        form.append("storage_key", storageKey);
+        appendJobFields(form);
         res = await new Promise<XMLHttpRequest>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("POST", `${backendUrl()}/jobs`);
+          for (const [k, v] of Object.entries(auth)) xhr.setRequestHeader(k, v);
           xhr.timeout = 120_000;
           xhr.onload = () => resolve(xhr);
           xhr.onerror = () => reject(new Error("Network error"));
@@ -625,10 +673,11 @@ export default function Home() {
         // Legacy path — direct multipart upload to Railway.
         const form = new FormData();
         form.append("file", targetFile);
-        form.append("settings", JSON.stringify(settings));
+        appendJobFields(form);
         res = await new Promise<XMLHttpRequest>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("POST", `${backendUrl()}/jobs`);
+          for (const [k, v] of Object.entries(auth)) xhr.setRequestHeader(k, v);
           // Abort when no upload progress arrives for a while, so a
           // dropped connection shows an error instead of hanging.
           let stallTimer: ReturnType<typeof setTimeout> | undefined;
@@ -665,9 +714,15 @@ export default function Home() {
       }
 
       if (res.status >= 400) {
+        // 401 / 402 (plan, minutes) get their own handling below.
+        if (res.status === 401 || res.status === 402) {
+          throw new ApiError(res.status, parseDetail(res.responseText));
+        }
         throw new Error(`Upload failed: ${res.responseText}`);
       }
       const initial: JobStatus = JSON.parse(res.responseText);
+      // Minutes were charged: the "min left" hints should follow.
+      if (AUTH_ENABLED) void refreshMe();
 
       // Ask for notification permission on job start — user won't be
       // interrupted mid-task, and gets pinged when the render is done
@@ -711,7 +766,22 @@ export default function Home() {
       // Upload failed — mark the temp card with an error message so
       // the user can hit Retry from the dashboard. No fullscreen error
       // takeover, no scary redirect.
-      const msg = err instanceof Error ? err.message : String(err);
+      let msg = err instanceof Error ? err.message : String(err);
+      if (err instanceof ApiError && err.status === 401) {
+        notifyAuthRequired();
+        msg = tEn("app.errors.signInRequired");
+      } else if (err instanceof ApiError) {
+        // No plan / not enough minutes: explain it with a way out.
+        const pw = paywallFrom(err.status, err.detail);
+        if (pw) {
+          setPaywall(pw);
+          msg = tEn(
+            pw.code === "quota_exceeded"
+              ? "app.errors.quotaExceeded"
+              : "app.errors.subscriptionRequired",
+          );
+        }
+      }
       updateActiveJobV2(tempId, { error: msg });
     } finally {
       liveUploads.delete(tempId);
@@ -730,7 +800,7 @@ export default function Home() {
     if ((phase !== "analyzing" && phase !== "rendering") || !job) return;
     const id = setInterval(async () => {
       try {
-        const r = await fetch(`${backendUrl()}/jobs/${job.id}`);
+        const r = await apiFetch(`/jobs/${job.id}`);
         if (!r.ok) return;
         const s: JobStatus = await r.json();
         setJob(s);
@@ -773,9 +843,7 @@ export default function Home() {
           setPhase("error");
           clearActiveJob();
         } else if (s.status === "awaiting_review" && phase === "analyzing") {
-          const subRes = await fetch(
-            `${backendUrl()}/jobs/${job.id}/subtitles`,
-          );
+          const subRes = await apiFetch(`/jobs/${job.id}/subtitles`);
           if (subRes.ok) {
             const data = await subRes.json();
             setPhrases(phrasesFromSubtitlesResponse(data));
@@ -807,11 +875,12 @@ export default function Home() {
     // one it has, so out-of-order requests can't restore stale text.
     phraseRevRef.current = Math.max(phraseRevRef.current + 1, Date.now());
     const body = JSON.stringify({ phrases: list, rev: phraseRevRef.current });
-    const p = fetch(`${backendUrl()}/jobs/${jobId}/phrases`, {
+    const p = apiFetch(`/jobs/${jobId}/phrases`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
       keepalive: unloading && body.length < 60_000,
+      unloading,
     }).catch(() => {});
     trackSave(jobId, p);
     return p;
@@ -855,7 +924,7 @@ export default function Home() {
         original_end: p.original_end,
       }));
     try {
-      const r = await fetch(`${backendUrl()}/jobs/${job.id}/render`, {
+      const r = await apiFetch(`/jobs/${job.id}/render`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -931,13 +1000,14 @@ export default function Home() {
       // A save from the last visit may still be in flight —
       // load the state the user actually left.
       await waitForSaves(jobId, 8_000);
-      const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
+      const r = await apiFetch(`/jobs/${jobId}`);
       if (r.status === 404) {
         updateActiveJobV2(jobId, { error: tEn(FRIENDLY_EXPIRED_KEY) });
         return;
       }
       if (!r.ok) {
-        showNotice(t("app.notice.loadFailed"));
+        // 401: sign-in opens (apiFetch); the job itself is fine.
+        showNotice(t(r.status === 401 ? "app.errors.signInRequired" : "app.notice.loadFailed"));
         return;
       }
       const s: JobStatus = await r.json();
@@ -953,11 +1023,12 @@ export default function Home() {
         );
         return;
       }
+      // The editor's <video> needs the media token (accounts on) —
+      // a tokenless first load would fail for good.
+      if (AUTH_ENABLED) await whenMediaReady();
       setJob(s);
       {
-        const subsRes = await fetch(
-          `${backendUrl()}/jobs/${jobId}/subtitles`,
-        );
+        const subsRes = await apiFetch(`/jobs/${jobId}/subtitles`);
         if (subsRes.ok) {
           const sd = await subsRes.json();
           setPhrases(phrasesFromSubtitlesResponse(sd));
@@ -989,6 +1060,10 @@ export default function Home() {
   resetRef.current = reset;
 
   const currentPreset = selectedPreset ? PRESETS[selectedPreset] : null;
+  // Accounts + billing (all null / off with auth off).
+  const { me } = useMe();
+  const billing = useBillingConfig();
+  const planBadge = billing?.enabled && me?.plan ? planName(me.plan, billing) : null;
 
   return (
     <main
@@ -1026,6 +1101,7 @@ export default function Home() {
           )}
         </div>
         <div className="flex items-center gap-3 sm:gap-4">
+          <PricingLink className="hidden sm:inline" />
           <Link
             href="/app/library"
             className="text-xs transition-colors hover:opacity-70"
@@ -1034,15 +1110,30 @@ export default function Home() {
             {t("app.header.library")}
           </Link>
           <LanguageSwitcher />
-          <span
-            className="hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest sm:inline-block"
-            style={{
-              background: "var(--brand-tint)",
-              color: "var(--brand-strong)",
-            }}
-          >
-            {t("app.header.beta")}
-          </span>
+          {planBadge ? (
+            // Paid plans live: the "Beta" badge becomes the plan badge.
+            <Link
+              href="/app/account"
+              className="hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest sm:inline-block"
+              style={{
+                background: "var(--brand-tint)",
+                color: "var(--brand-strong)",
+              }}
+            >
+              {planBadge}
+            </Link>
+          ) : (
+            <span
+              className="hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest sm:inline-block"
+              style={{
+                background: "var(--brand-tint)",
+                color: "var(--brand-strong)",
+              }}
+            >
+              {t("app.header.beta")}
+            </span>
+          )}
+          <AccountMenu />
         </div>
       </header>
 
@@ -1091,6 +1182,8 @@ export default function Home() {
           <IdleScreen onPick={onPickFile} onDrop={onDrop} onBack={() => setPhase("picker")} />
         )}
 
+        {paywall && <PaywallDialog paywall={paywall} onClose={() => setPaywall(null)} />}
+
         {phase === "configuring" && file && (
           <ConfigureScreen
             file={file}
@@ -1130,14 +1223,11 @@ export default function Home() {
             sceneEvents={job.scene_events ?? []}
             onSceneEventsChange={async (evts) => {
               try {
-                const r = await fetch(
-                  `${backendUrl()}/jobs/${job.id}/recompute-scenes`,
-                  {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ events: evts }),
-                  },
-                );
+                const r = await apiFetch(`/jobs/${job.id}/recompute-scenes`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ events: evts }),
+                });
                 if (r.ok) {
                   const updated = await r.json();
                   setJob(updated);
@@ -1259,6 +1349,24 @@ function getPresetChips(p: (typeof PRESETS)[PresetId], t: TFn): string[] {
   return chips;
 }
 
+/** Billing on: minutes left this period (→ account), or — when uploads
+ *  need a plan — the way to one (→ pricing). Null otherwise. */
+function useBillingHint(): { href: string; text: string } | null {
+  const t = useT();
+  const lang = useLang();
+  const { me } = useMe();
+  const billing = useBillingConfig();
+  if (!billing?.enabled || !me?.billing?.enabled) return null;
+  if (me.minutes) {
+    return {
+      href: "/app/account",
+      text: t("app.billing.minutesLeft", { n: fmtMinutes(Math.max(0, me.minutes.remaining), lang) }),
+    };
+  }
+  if (!me.plan && me.billing.enforce) return { href: "/pricing", text: t("app.billing.choosePlan") };
+  return null;
+}
+
 function PickerScreen({
   onPick,
   onResumeJob,
@@ -1267,6 +1375,7 @@ function PickerScreen({
   onResumeJob?: (jobId: string) => void;
 }) {
   const t = useT();
+  const billingHint = useBillingHint();
   const featured: PresetId[] = ["tiktok", "podcast", "vlog", "captions"];
   const [recent, setRecent] = useState<LibraryEntry[] | null>(null);
   const [playingJobId, setPlayingJobId] = useState<string | null>(null);
@@ -1290,6 +1399,51 @@ function PickerScreen({
     // The voice test (camera + mic) is NOT opened automatically any
     // more — it scared off people who only want to upload a video.
     // It's one tap away via the "Cleo" hint chip.
+  }, []);
+
+  // Accounts on: the server knows this user's projects from every
+  // device. Finished ones join "Recent", unfinished ones get a card
+  // (the poll below keeps it current).
+  useEffect(() => {
+    if (!AUTH_ENABLED) return;
+    let cancelled = false;
+    void fetchServerJobs().then((list) => {
+      if (cancelled || !list) return;
+      const known = new Set(getActiveJobs().map((j) => j.jobId));
+      // Oldest first: addActiveJob puts each new card on top.
+      for (const s of [...list].reverse()) {
+        if (known.has(s.id)) continue;
+        if (!["pending", "processing", "awaiting_review"].includes(s.status)) continue;
+        addActiveJob({
+          jobId: s.id,
+          phase:
+            s.status === "awaiting_review"
+              ? "reviewing"
+              : s.message?.toLowerCase().includes("render")
+                ? "rendering"
+                : "analyzing",
+          timestamp: (s.created_at ?? Date.now() / 1000) * 1000,
+          filename: s.filename || tEn("app.library.untitled"),
+          presetId: s.preset_id ?? null,
+          presetLabel: s.preset_label ?? null,
+          presetIcon: null,
+          captionPreset: "clean",
+        });
+      }
+      const done = list.filter((s) => s.has_output).map(serverJobToLibraryEntry);
+      if (done.length > 0) {
+        const ids = new Set(done.map((e) => e.jobId));
+        setRecent(
+          [...done, ...getLibrary().filter((e) => !ids.has(e.jobId))]
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 3),
+        );
+        setView("dashboard");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // React to add/update/remove from anywhere in the app (uploads
@@ -1334,7 +1488,7 @@ function PickerScreen({
       const updates: typeof jobStatuses = {};
       for (const j of active) {
         try {
-          const r = await fetch(`${backendUrl()}/jobs/${j.jobId}`);
+          const r = await apiFetch(`/jobs/${j.jobId}`);
           if (r.status === 404) {
             // Server no longer knows the job (redeploy / expired).
             updateActiveJobV2(j.jobId, { error: tEn(FRIENDLY_EXPIRED_KEY) });
@@ -1604,20 +1758,40 @@ function PickerScreen({
 
       {/* Hero */}
       <div className="mb-10">
-        <div
-          className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-          style={{
-            background: "var(--surface-2)",
-            border: "1px solid var(--border-hover)",
-            color: "var(--text-body)",
-          }}
-        >
-          <span
-            className="pulse-dot inline-block h-1.5 w-1.5 rounded-full"
-            style={{ background: "var(--brand)" }}
-          />
-          {t("app.picker.freeDuringBeta")}
-        </div>
+        {billingHint ? (
+          // Paid plans live: minutes left (or the way to a plan) instead
+          // of "Free during beta".
+          <Link
+            href={billingHint.href}
+            className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium transition-opacity hover:opacity-80"
+            style={{
+              background: "var(--surface-2)",
+              border: "1px solid var(--border-hover)",
+              color: "var(--text-body)",
+            }}
+          >
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full"
+              style={{ background: "var(--brand)" }}
+            />
+            {billingHint.text}
+          </Link>
+        ) : (
+          <div
+            className="mb-5 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+            style={{
+              background: "var(--surface-2)",
+              border: "1px solid var(--border-hover)",
+              color: "var(--text-body)",
+            }}
+          >
+            <span
+              className="pulse-dot inline-block h-1.5 w-1.5 rounded-full"
+              style={{ background: "var(--brand)" }}
+            />
+            {t("app.picker.freeDuringBeta")}
+          </div>
+        )}
 
         <h1
           className="mb-3 text-4xl font-bold tracking-tight sm:text-5xl"
@@ -1800,6 +1974,8 @@ function RecentProjectCard({
 }) {
   const t = useT();
   const [thumbFailed, setThumbFailed] = useState(false);
+  // null until the media token is known (accounts on).
+  const thumbSrc = useMediaUrl(entry.jobId, "thumbnail");
   return (
     <button
       onClick={() => onPlay(entry.jobId)}
@@ -1816,10 +1992,10 @@ function RecentProjectCard({
           background: "var(--surface-2)",
         }}
       >
-        {!thumbFailed && (
+        {!thumbFailed && thumbSrc && (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
-            src={`${backendUrl()}/jobs/${entry.jobId}/thumbnail`}
+            src={thumbSrc}
             alt=""
             className="h-full w-full object-cover"
             onError={() => setThumbFailed(true)}
@@ -1870,7 +2046,7 @@ function RecentProjectCard({
           className="mb-0.5 truncate text-xs font-semibold"
           style={{ color: "var(--text-strong)" }}
         >
-          {entry.filename}
+          {entry.filename || t("app.library.untitled")}
         </div>
         <div
           className="text-[10px]"
@@ -1893,6 +2069,7 @@ function IdleScreen({
   onBack: () => void;
 }) {
   const t = useT();
+  const billingHint = useBillingHint();
   return (
     <div className="relative z-10 flex flex-col">
       <button
@@ -1911,6 +2088,15 @@ function IdleScreen({
       <p className="mb-8 text-sm" style={{ color: "var(--text-muted)" }}>
         {t("app.upload.hint")}
       </p>
+      {billingHint && (
+        <Link
+          href={billingHint.href}
+          className="-mt-5 mb-6 w-fit text-xs font-medium transition-opacity hover:opacity-80"
+          style={{ color: "var(--brand-strong)" }}
+        >
+          {billingHint.text} →
+        </Link>
+      )}
 
       <button
         onClick={onPick}
@@ -2010,7 +2196,7 @@ function ConfigureScreen(props: {
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={`${backendUrl()}/caption-previews/${p.id}.png?w=320&h=110`}
+                  src={publicUrl(`/caption-previews/${p.id}.png?w=320&h=110`)}
                   alt={t("app.configure.captionPreviewAlt", { style: t(p.labelKey) })}
                   className="block h-[64px] w-full bg-[var(--surface-1)] object-cover"
                   loading="lazy"
@@ -2370,6 +2556,8 @@ function DoneScreen({
     return opt ? t(opt.descKey) : t("app.done.mainEdit");
   };
 
+  const watchSrc = useMediaUrl(jobId, "watch");
+  const posterSrc = useMediaUrl(jobId, "thumbnail");
   const hashtagLine = socialHashtags
     .map((h) => `#${h.replace(/^#/, "")}`)
     .join(" ");
@@ -2392,18 +2580,20 @@ function DoneScreen({
             "0 0 0 1px rgba(139,92,246,0.25), 0 12px 40px rgba(139,92,246,0.28)",
         }}
       >
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <video
-          src={`${backendUrl()}/jobs/${jobId}/watch`}
-          poster={`${backendUrl()}/jobs/${jobId}/thumbnail`}
-          controls
-          autoPlay
-          muted
-          loop
-          playsInline
-          className="block w-full"
-          style={{ maxHeight: "60vh" }}
-        />
+        {watchSrc && (
+          /* eslint-disable-next-line jsx-a11y/media-has-caption */
+          <video
+            src={watchSrc}
+            poster={posterSrc ?? undefined}
+            controls
+            autoPlay
+            muted
+            loop
+            playsInline
+            className="block w-full"
+            style={{ maxHeight: "60vh" }}
+          />
+        )}
       </div>
 
       <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--brand-strong)" }}>
@@ -2440,7 +2630,7 @@ function DoneScreen({
           .map((f) => (
             <a
               key={f}
-              href={`${backendUrl()}/jobs/${jobId}/download?format=${encodeURIComponent(f)}`}
+              href={mediaUrl(jobId, "download", { format: f })}
               download
               className={`rounded-xl px-5 py-3 text-center font-semibold ${
                 f === "primary"
@@ -2470,7 +2660,7 @@ function DoneScreen({
               return (
                 <a
                   key={h.key}
-                  href={`${backendUrl()}/jobs/${jobId}/download?format=${encodeURIComponent(h.key)}`}
+                  href={mediaUrl(jobId, "download", { format: h.key })}
                   download
                   className="block rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:border-[var(--brand)]"
                 >
@@ -2540,6 +2730,11 @@ function ReviewScreen({
 }) {
   const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Set once: a changing src would restart playback. Later previews are
+  // swapped in imperatively (swapPreviewSrc), only while paused.
+  const [initialPreviewSrc] = useState(() =>
+    mediaUrl(jobId, "preview-video", { v: previewVersion }),
+  );
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
@@ -2683,7 +2878,7 @@ function ReviewScreen({
   const swapWhenPausedRef = useRef(false);
   const pendingSwapRef = useRef<{ segs: [number, number][]; version: number } | null>(null);
 
-  const editUrl = `${backendUrl()}/jobs/${jobId}/edit-segments`;
+  const editPath = `/jobs/${jobId}/edit-segments`;
   const toPayload = (segs: EditableSeg[]) =>
     segs
       .filter((s) => !s.disabled && s.end - s.start > 0.05)
@@ -2699,9 +2894,8 @@ function ReviewScreen({
   const swapPreviewSrc = (version: number) => {
     const v = videoRef.current;
     if (!v) return;
-    const base = `${backendUrl()}/jobs/${jobId}/preview-video`;
     const wasTime = v.currentTime;
-    v.src = `${base}?v=${version}`;
+    v.src = mediaUrl(jobId, "preview-video", { v: version });
     const restore = () => {
       v.removeEventListener("loadedmetadata", restore);
       try {
@@ -2753,7 +2947,7 @@ function ReviewScreen({
     const run = (async () => {
       setEditSaving(true);
       try {
-        const r = await fetch(editUrl, {
+        const r = await apiFetch(editPath, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ segments: active }),
@@ -2801,13 +2995,14 @@ function ReviewScreen({
     const active = toPayload(next);
     if (active.length === 0) return;
     const body = JSON.stringify({ segments: active });
-    const p = fetch(editUrl, {
+    const p = apiFetch(editPath, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
       // keepalive only while the page unloads (in-app navigation keeps
       // the page alive), and only under the browser's 64 KB cap.
       keepalive: unloading && body.length < 60_000,
+      unloading,
     }).catch(() => {});
     trackSave(jobId, p);
   };
@@ -2836,7 +3031,7 @@ function ReviewScreen({
     const id = setInterval(async () => {
       if (closedRef.current || ++tries > 45) return clearInterval(id);
       try {
-        const r = await fetch(`${backendUrl()}/jobs/${jobId}`);
+        const r = await apiFetch(`/jobs/${jobId}`);
         if (!r.ok) return;
         const j: JobStatus = await r.json();
         if ((j.preview_version ?? 0) > previewVersion && j.preview_segments) {
@@ -3002,7 +3197,7 @@ function ReviewScreen({
       <div className="relative overflow-hidden rounded-xl bg-[var(--surface-1)]">
         <video
           ref={videoRef}
-          src={`${backendUrl()}/jobs/${jobId}/preview-video?v=${previewVersion}`}
+          src={initialPreviewSrc}
           controls
           playsInline
           // metadata only: don't pull the whole preview over mobile data
@@ -3054,7 +3249,7 @@ function ReviewScreen({
         <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] px-3 py-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={`${backendUrl()}/caption-previews/${captionPreset}.png?w=200&h=72`}
+            src={publicUrl(`/caption-previews/${captionPreset}.png?w=200&h=72`)}
             alt={t("app.review.captionSampleAlt", { style: captionPreset })}
             className="h-10 w-28 rounded-md object-cover"
           />
@@ -3280,7 +3475,7 @@ function ReviewScreen({
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={`${backendUrl()}/caption-previews/${captionPreset}.png?w=240&h=90`}
+                src={publicUrl(`/caption-previews/${captionPreset}.png?w=240&h=90`)}
                 alt={t("app.configure.captionPreviewAlt", { style: captionPreset })}
                 className="h-14 w-40 rounded-md object-cover"
               />
@@ -3316,7 +3511,7 @@ function ReviewScreen({
           try {
             const active = toPayload(editSegs);
             if (active.length > 0) {
-              const r = await fetch(editUrl, {
+              const r = await apiFetch(editPath, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ segments: active }),

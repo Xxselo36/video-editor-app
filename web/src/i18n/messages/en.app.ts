@@ -38,6 +38,60 @@ export const enApp = {
   "app.errors.saveEditsFailed": "Couldn't save your edits — check your connection and try again.",
   "app.errors.title": "Something went wrong",
   "app.errors.tryAgain": "Try again",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "Your session has ended. Please sign in again and retry.",
+  "app.errors.subscriptionRequired": "Uploading needs a plan. Please choose one on the pricing page.",
+  "app.errors.quotaExceeded":
+    "Not enough minutes left this period for this video. Please upgrade your plan or wait for the reset.",
+  "app.errors.unreadableVideo":
+    "We couldn't read this video file. Please export it again as MP4 or MOV and upload it.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Sign in to open your projects.",
+  "app.auth.loadFailed":
+    "Couldn't load sign-in. Check your connection (or allow this site in your content blocker) and try again.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Choose a plan to upload",
+  "app.paywall.subscriptionBody":
+    "Uploads need an active plan. Pick one — it only takes a minute, and you can cancel any time.",
+  "app.paywall.quotaTitle": "Not enough minutes left",
+  "app.paywall.quotaBody": "You have {left} min left this period — this video needs {needed} min.",
+  "app.paywall.quotaBodyUnknown": "This video is longer than the minutes you have left this period.",
+  "app.paywall.seePlans": "See plans",
+  "app.paywall.upgrade": "Upgrade plan",
+  "app.paywall.close": "Not now",
+  "app.billing.minutesLeft": "{n} min left this period",
+  "app.billing.choosePlan": "Choose a plan to upload",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Account",
+  "app.account.signedInAs": "Signed in as {email}",
+  "app.account.plan": "Plan",
+  "app.account.noPlan": "No plan yet",
+  "app.account.freeBeta": "CleoCuts is free during the open beta — no plan needed.",
+  "app.account.status.active": "Active · renews on {date}",
+  "app.account.status.activeNoDate": "Active",
+  "app.account.status.trial": "Trial · first payment on {date}",
+  "app.account.status.cancelled": "Cancels on {date}",
+  "app.account.status.pastDue": "Payment past due — please update your payment method.",
+  "app.account.status.paused": "Paused",
+  "app.account.status.expired": "Expired",
+  "app.account.status.comp": "Complimentary",
+  "app.account.usage": "Minutes this period",
+  "app.account.usageOf": "{used} of {limit} min used",
+  "app.account.resetsOn": "Resets on {date}",
+  "app.account.manage": "Manage subscription",
+  "app.account.manageHint": "Invoices, payment method and cancellation are handled in the Lemon Squeezy customer portal.",
+  "app.account.changePlan": "Change plan",
+  "app.account.choosePlan": "Choose a plan",
+  "app.account.portalFailed": "Couldn't open the billing portal. Please try again in a moment.",
+  "app.account.loadFailed": "Couldn't load your account right now. Please try again in a moment.",
+  "app.account.testMode": "Test mode",
+  "app.account.successPending": "Thanks! Your payment went through — activating your plan…",
+  "app.account.successDone": "Your {plan} plan is active. Happy editing!",
+  "app.account.successSlow":
+    "This is taking longer than usual. Your plan will show up here within a few minutes — reload the page to check.",
 
   // ── Library fallbacks ───────────────────────────────────────────────
   "app.library.untitled": "Untitled",

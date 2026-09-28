@@ -13,6 +13,8 @@ export const enSite = {
 
   /* ── Landing: hero ── */
   "site.hero.badge": "Open beta · free",
+  // Replaces the badge once paid plans are live (NEXT_PUBLIC_BILLING_ENABLED).
+  "site.hero.badgePricing": "See plans & pricing",
   "site.hero.titleLead": "Edit while you",
   "site.hero.titleAccent": "record.",
   "site.hero.sub":
@@ -63,6 +65,36 @@ export const enSite = {
   "site.footer.library": "Library",
   "site.footer.imprint": "Imprint",
   "site.footer.privacy": "Privacy",
+  "site.footer.terms": "Terms",
+  "site.footer.pricing": "Pricing",
+
+  /* ── Pricing page ── */
+  "site.pricing.title": "Simple pricing",
+  "site.pricing.subtitle": "Pay monthly for the minutes of video you upload. Cancel any time.",
+  "site.pricing.perMonth": "/ month",
+  "site.pricing.perYear": "/ year",
+  "site.pricing.priceAtCheckout": "Price shown at checkout",
+  "site.pricing.popular": "Most popular",
+  "site.pricing.minutes": "{minutes} min of video per month",
+  "site.pricing.retention": "Projects kept for {days} days",
+  "site.pricing.featureWorkflows": "All workflows and caption styles",
+  "site.pricing.featureVoice": "Voice commands and AI cleanup",
+  "site.pricing.featureFormats": "Exports in {formats}",
+  "site.pricing.choose": "Choose {plan}",
+  "site.pricing.current": "Your current plan",
+  "site.pricing.manage": "Manage subscription",
+  "site.pricing.switch": "Switch to {plan}",
+  "site.pricing.unavailable": "Not available yet",
+  "site.pricing.redirecting": "Opening checkout…",
+  "site.pricing.checkoutFailed": "Couldn't open the checkout. Please try again in a moment.",
+  "site.pricing.loadFailed": "Couldn't load the plans. Please try again in a moment.",
+  "site.pricing.minutesHint":
+    "Minutes count the length of the videos you upload. Unused minutes don't roll over to the next month.",
+  "site.pricing.vatNote":
+    "Prices include VAT. Payments are handled by Lemon Squeezy, our Merchant of Record — they charge you and send your invoices.",
+  "site.pricing.testMode": "Test mode — no real payments",
+  "site.pricing.betaTitle": "Free during the open beta",
+  "site.pricing.betaBody": "CleoCuts is free while we're in beta. Paid plans with more minutes are coming soon.",
 
   /* ── Library: header ── */
   "library.header.homeAria": "CleoCuts editor",
@@ -109,4 +141,9 @@ export const enSite = {
   /* ── Shared components ── */
   "common.videoModal.closeAria": "Close preview",
   "common.videoModal.close": "Close",
+
+  /* ── Accounts (header, all pages) ── */
+  "common.auth.signIn": "Sign in",
+  "common.auth.account": "Account",
+  "common.auth.pricing": "Pricing",
 };

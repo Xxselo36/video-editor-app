@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { AUTH_ENABLED } from "@/lib/auth";
+import { AuthProvider } from "@/components/auth/AuthProvider";
 
 // No web fonts: the UI uses the system font stack (globals.css), the
 // Geist fonts were preloaded on every page without being used.
@@ -35,7 +37,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {/* Accounts (Clerk) only when configured — otherwise no provider
+            and no Clerk code at all, exactly like the anonymous beta. */}
+        {AUTH_ENABLED ? <AuthProvider>{children}</AuthProvider> : children}
+      </body>
     </html>
   );
 }

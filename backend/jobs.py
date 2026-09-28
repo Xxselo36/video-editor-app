@@ -22,7 +22,8 @@ from typing import Any, Literal
 # Subscription plans and how long an idle project is kept (days after
 # the last change). No free tier. Override per plan with e.g.
 # CLEO_RETENTION_DAYS_PRO=45; CLEO_RETENTION_DAYS=0 disables deletion.
-# Until accounts/billing exist every job gets CLEO_DEFAULT_PLAN.
+# A job gets its owner's plan at upload (backend/main.py); without an
+# active subscription, or with billing off, it gets CLEO_DEFAULT_PLAN.
 PLAN_RETENTION_DAYS: dict[str, float] = {
     plan: float(os.environ.get(f"CLEO_RETENTION_DAYS_{plan.upper()}", days))
     for plan, days in (("starter", 14), ("pro", 30), ("studio", 90))
@@ -90,6 +91,17 @@ class Job:
     plan: str = DEFAULT_PLAN
     # Accumulated processing cost (raw units + usd_*), see backend/costs.py.
     costs: dict[str, float] = field(default_factory=dict)
+    # Account that uploaded the job (Clerk user id, see backend/auth.py).
+    # None = beta job from before accounts; the first signed-in user who
+    # opens it claims it.
+    owner_id: str | None = None
+    # What the Library shows for server-listed jobs (GET /jobs): original
+    # file name and the preset picked at upload.
+    filename: str | None = None
+    preset_id: str | None = None
+    preset_label: str | None = None
+    # Unix time of the upload. 0 = legacy job.
+    created_at: float = 0.0
 
     def expires_at(self) -> float | None:
         """Unix time when the project gets deleted, None = never."""
@@ -151,6 +163,11 @@ class Job:
             ],
             "preview_version": self.preview_version,
             "caption_preset": (self.settings or {}).get("caption_preset"),
+            "filename": self.filename,
+            "preset_id": self.preset_id,
+            "preset_label": self.preset_label,
+            "created_at": self.created_at or None,
+            "updated_at": self.updated_at or None,
         }
 
 
@@ -217,10 +234,20 @@ class JobStore:
         d = {k: v for k, v in d.items() if k in known}
         return Job(**d)
 
-    def create(self, input_path: str, settings: dict[str, Any]) -> Job:
-        job_id = uuid.uuid4().hex[:12]
+    def create(
+        self,
+        input_path: str,
+        settings: dict[str, Any],
+        job_id: str | None = None,
+        **extra: Any,
+    ) -> Job:
+        """Insert a new pending job. `job_id` lets the caller pick the id
+        up front (the usage ledger is keyed by it before the job exists);
+        `extra` sets further Job fields (owner_id, plan, filename, ...)."""
+        job_id = job_id or new_job_id()
+        now = time.time()
         job = Job(id=job_id, input_path=input_path, settings=settings,
-                  updated_at=time.time())
+                  updated_at=now, created_at=now, **extra)
         with self._lock:
             self._conn.execute(
                 "INSERT INTO jobs (id, data) VALUES (?, ?)",
@@ -264,6 +291,30 @@ class JobStore:
             )
             self._conn.commit()
 
+    def claim(self, job_id: str, owner_id: str) -> str | None:
+        """Give an unowned (beta) job to `owner_id`, atomically, without
+        touching updated_at. Returns the job's owner afterwards — the
+        caller's id, or whoever claimed it first — or None if the job
+        doesn't exist."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT data FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            try:
+                job = self._deserialize(row["data"])
+            except Exception:
+                return None
+            if job.owner_id is None:
+                job.owner_id = owner_id
+                self._conn.execute(
+                    "UPDATE jobs SET data = ? WHERE id = ?",
+                    (self._serialize(job), job_id),
+                )
+                self._conn.commit()
+            return job.owner_id
+
     def delete(self, job_id: str) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
@@ -282,6 +333,10 @@ class JobStore:
             except Exception:
                 continue
         return jobs
+
+    def list_by_owner(self, owner_id: str) -> list[Job]:
+        """Jobs of one account (GET /jobs)."""
+        return [j for j in self.list_all() if j.owner_id == owner_id]
 
     def mark_stuck_as_error(
         self,
@@ -317,6 +372,10 @@ class JobStore:
                                     "Please upload the video again.")
                 marked += 1
         return marked
+
+
+def new_job_id() -> str:
+    return uuid.uuid4().hex[:12]
 
 
 # Singleton — one store per process

@@ -8,8 +8,12 @@
  * gracefully.
  */
 
-const KEY = "cleo-library-v1";
+import { storageScope } from "@/lib/auth";
+
+export const LIBRARY_KEY = "cleo-library-v1";
 const MAX_ENTRIES = 30;
+// Per user when accounts are on (shared devices); unchanged when off.
+const key = () => LIBRARY_KEY + storageScope();
 
 export type LibraryHookClip = {
   key: string;
@@ -35,7 +39,7 @@ export type LibraryEntry = {
 function readAll(): LibraryEntry[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(key());
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -47,7 +51,7 @@ function readAll(): LibraryEntry[] {
 function writeAll(entries: LibraryEntry[]): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(entries.slice(0, MAX_ENTRIES)));
+    window.localStorage.setItem(key(), JSON.stringify(entries.slice(0, MAX_ENTRIES)));
   } catch {
     // Quota exceeded — silently drop, library is nice-to-have not critical.
   }

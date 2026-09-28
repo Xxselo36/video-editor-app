@@ -244,3 +244,132 @@ iPhone Safari → `https://cleo.video` → fertig:
 | **Total** | **~$10-15** |
 
 Für **Test-Phase mit <50 Usern** völlig safe.
+
+---
+
+## 7. Accounts (Clerk) + Abos (Lemon Squeezy) — Backend-Env-Vars
+
+Alles ist **aus**, solange die Variablen fehlen — dann läuft das Backend
+exakt wie bisher (anonym, Job-ID reicht). Vier Schalter, jeder setzt den
+vorherigen voraus:
+
+| Schalter | Backend (Railway) | Wirkung |
+|---|---|---|
+| **AUTH** | `CLERK_ISSUER` | Clerk-Login Pflicht, Jobs gehören einem Account |
+| **BILLING** | AUTH + `LEMONSQUEEZY_API_KEY`, `_STORE_ID`, `_WEBHOOK_SECRET`, mind. eine `LEMONSQUEEZY_VARIANT_<PLAN>` | Checkout, Portal, Minuten-Anzeige — niemand wird blockiert |
+| **ENFORCE** | `CLEO_BILLING_ENFORCE=1` | Upload nur mit aktivem Abo + genug Minuten (402) |
+| **Comp** | `CLEO_COMP_USERS` | diese Accounts bekommen Studio gratis |
+
+### 7.1 Reihenfolge beim Einschalten
+
+1. **Frontend** mit Clerk-Keys deployen (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+   **und** `CLERK_SECRET_KEY` auf Vercel — immer beide zusammen). Es schickt
+   Tokens, das Backend ignoriert sie noch.
+2. **Backend** `CLERK_ISSUER` setzen → Login ist Pflicht. Beta-Projekte
+   (ohne Besitzer) übernimmt der erste eingeloggte User, der sie öffnet.
+   `/app?job=…`-Links funktionieren danach nur noch für den Besitzer.
+3. Frontend mit Billing-UI (liest `GET /billing/config`).
+4. **Backend** Lemon-Squeezy-Variablen setzen → Billing an.
+5. Erst wenn Checkout + Webhook getestet sind: `CLEO_BILLING_ENFORCE=1`.
+
+Umgekehrte Reihenfolge = User bekommen 401/402 ohne UI dafür.
+
+### 7.2 Variablen
+
+**Clerk (Backend)**
+
+```
+CLERK_ISSUER             = https://clerk.cleocuts.com
+                           (Clerk Dashboard → API Keys → "Frontend API URL";
+                            Dev-Instanz: https://<slug>.clerk.accounts.dev)
+CLERK_AUTHORIZED_PARTIES = https://cleocuts.com,https://www.cleocuts.com
+                           (Origins der Web-App; Default zusätzlich
+                            http://localhost:3000. LAN-Handy-Test:
+                            http://192.168.x.y:3000 ergänzen)
+CLERK_JWT_KEY            = optional: PEM-Public-Key (Dashboard → API Keys →
+                           "JWT public key"), dann ohne JWKS-Abruf
+CLERK_SECRET_KEY         = sk_live_… — nur für die E-Mail-Adresse beim
+                           Checkout (Clerk Backend API)
+CLEO_MEDIA_SECRET        = empfohlen: langer Zufallswert (openssl rand -hex 32)
+                           für die ?t=-Tokens der Video-/Bild-URLs. Ohne:
+                           wird einmal erzeugt und in der DB gespeichert.
+CLEO_ADMIN_TOKEN         = wie bisher; mit AUTH an zusätzlich der
+                           Service-Zugang (Header X-Admin-Token: sieht alle
+                           Jobs, kein Minutenlimit, darf _cost_test setzen)
+```
+
+> **Cost-Test:** `.github/scripts/cost_test.py` schickt `X-Admin-Token`
+> bisher nur an `/admin/costs`. Mit AUTH an muss er ihn an **alle**
+> Requests hängen, sonst 401.
+
+Production-Clerk braucht DNS-Records in Cloudflare (**DNS only**, graue
+Wolke): `clerk` + `accounts` (CNAME) und die Mail-CNAMEs `clkmail`,
+`clk._domainkey`, `clk2._domainkey` — Werte zeigt Clerk an.
+
+**Lemon Squeezy (Backend)**
+
+```
+LEMONSQUEEZY_API_KEY         = API-Key (Test- und Live-Keys sind getrennt!)
+LEMONSQUEEZY_STORE_ID        = numerische Store-ID
+LEMONSQUEEZY_WEBHOOK_SECRET  = Signing Secret des Webhooks
+LEMONSQUEEZY_VARIANT_STARTER = Variant-ID (nicht die "pending"-Default-Variante)
+LEMONSQUEEZY_VARIANT_PRO     = …
+LEMONSQUEEZY_VARIANT_STUDIO  = …
+LEMONSQUEEZY_TEST_MODE       = 1 → nur Test-Abos zählen, Checkouts im Test-
+                               Modus (zum Durchspielen auf Production mit
+                               Testkarte). Sonst zählen nur Live-Abos.
+CLEO_APP_URL                 = https://cleocuts.com (Redirect nach dem Kauf:
+                               /app/account?billing=success)
+CLEO_BILLING_ENFORCE         = 1 → Uploads brauchen Abo + Minuten
+CLEO_COMP_USERS              = user_2abc…,freund@example.com (Clerk-IDs
+                               oder E-Mails → Studio gratis)
+CLEO_PLAN_MINUTES_STARTER    = optional, Default 90 (Pro 300, Studio 900)
+```
+
+In Lemon Squeezy:
+- Starter/Pro/Studio als **Varianten eines Produkts** (monatlich), damit
+  Kunden im Customer Portal den Plan wechseln können.
+- **Keine License Keys** für diese Varianten aktivieren: `src/license.py`
+  (SmartCut Desktop) akzeptiert jeden gültigen Key aus dem Store, ohne
+  Produkt zu prüfen — ein CleoCuts-Key würde SmartCut freischalten.
+- Webhook: URL `https://api.cleocuts.com/billing/webhook`, Events
+  `subscription_created`, `_updated`, `_cancelled`, `_resumed`,
+  `_expired`, `_paused`, `_unpaused`, `subscription_payment_success`,
+  `_payment_failed`, `_payment_recovered`. Test- und Live-Modus brauchen
+  je einen eigenen Webhook (+ Secret), Variant-IDs unterscheiden sich
+  zwischen den Modi.
+
+### 7.3 Betrieb
+
+- **Billing braucht das Volume.** Liegt die DB auf `/tmp` (kein `/data`,
+  kein `CLEO_JOB_DB`), bleibt Billing aus — Log beim Start:
+  `[billing] !!! BILLING DISABLED: the job DB is on /tmp …`,
+  `GET /billing/config` meldet `"reason": "db_not_persistent"`.
+- **Backup:** Abos lassen sich aus der LS-API neu aufbauen, das
+  Minuten-Ledger (`usage`-Tabelle in `/data/cleo_jobs.db`) nicht →
+  Railway-Volume-Backups einschalten.
+- **Verlorene Webhooks** (z.B. während eines Deploys): das Backend
+  gleicht stündlich alle Abos mit der LS-API ab und beim Aufruf von
+  `/me`, wenn ein Abo veraltet aussieht. Notfalls im LS-Dashboard
+  → Webhooks → "Resend".
+- **R2:** Lifecycle-Regel auf `uploads/` (z.B. 2 Tage) für hochgeladene,
+  aber nie gestartete Dateien. Keys sind jetzt `uploads/<user-id>/…`.
+- Minuten werden **einmal beim Upload** abgebucht (Länge per ffprobe,
+  sekundengenau), nach der Analyse nachberechnet, wenn das Video länger
+  war, und nur bei Serverfehlern (voller Speicher, Neustart, ffmpeg)
+  erstattet — nicht bei "No speech detected". Rendern kostet nichts
+  extra. Ein Downgrade ändert die Aufbewahrung bestehender Projekte nicht.
+
+### 7.4 Neue Endpoints (Kurzüberblick)
+
+| Endpoint | Zweck |
+|---|---|
+| `GET /me` | User, Plan, Abo, Minuten, `media_token` (AUTH aus: `{"auth_enabled": false}`) |
+| `GET /jobs` | Projekte des Users (AUTH aus: 404 `not_available`) |
+| `GET /billing/config` | öffentlich: Billing an?, Pläne + Preise |
+| `POST /billing/checkout` | `{plan}` → `{url}`; 409 `already_subscribed` → Portal |
+| `GET /billing/portal` | frische Customer-Portal-URL |
+| `POST /billing/webhook` | Lemon Squeezy (HMAC-signiert) |
+
+Entfernt: `/uploads/multipart/*` und `/jobs/{id}/source-video` (vom
+Frontend nie benutzt).

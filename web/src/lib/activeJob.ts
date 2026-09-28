@@ -12,7 +12,11 @@
  * the Library takes over for the historical record.
  */
 
-const KEY = "cleocuts.activeJob.v1";
+import { storageScope } from "@/lib/auth";
+
+export const ACTIVE_JOB_KEY = "cleocuts.activeJob.v1";
+// Per user when accounts are on (shared devices); unchanged when off.
+const key = () => ACTIVE_JOB_KEY + storageScope();
 
 // Phases that mean "backend is doing something" — worth resuming.
 // Upload isn't resumable (the XHR must run in the current tab).
@@ -32,7 +36,7 @@ export type ActiveJob = {
 export function getActiveJob(): ActiveJob | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(key());
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ActiveJob;
     if (!parsed?.jobId || !parsed?.phase) return null;
@@ -45,7 +49,7 @@ export function getActiveJob(): ActiveJob | null {
 export function saveActiveJob(entry: ActiveJob): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(KEY, JSON.stringify(entry));
+    localStorage.setItem(key(), JSON.stringify(entry));
   } catch {
     /* quota errors — non-fatal */
   }
@@ -60,7 +64,7 @@ export function updateActiveJob(patch: Partial<ActiveJob>): void {
 export function clearActiveJob(): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.removeItem(KEY);
+    localStorage.removeItem(key());
   } catch {
     /* non-fatal */
   }

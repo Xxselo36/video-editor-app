@@ -11,14 +11,10 @@ import {
 } from "@/lib/library";
 import { VideoModal } from "@/components/VideoModal";
 import { LanguageSwitcher, useT, type TFn } from "@/i18n";
-
-function backendUrl(): string {
-  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
-    return process.env.NEXT_PUBLIC_BACKEND_URL;
-  }
-  if (typeof window === "undefined") return "";
-  return `${window.location.protocol}//${window.location.hostname}:8000`;
-}
+import { AUTH_ENABLED } from "@/lib/auth";
+import { apiFetch, mediaUrl, useMediaReady, useMediaUrl } from "@/lib/api";
+import { fetchServerJobs, serverJobToLibraryEntry } from "@/lib/account";
+import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 
 function formatLabel(f: string, t: TFn): string {
   if (f === "primary") return t("library.format.primary");
@@ -43,9 +39,37 @@ export default function Library() {
   const t = useT();
   const [entries, setEntries] = useState<LibraryEntry[] | null>(null);
   const [playingJobId, setPlayingJobId] = useState<string | null>(null);
+  // expires_at from the server list (accounts on) — saves a GET per card.
+  const [serverExpiry, setServerExpiry] = useState<Record<string, number | null>>({});
 
   useEffect(() => {
-    setEntries(getLibrary());
+    if (!AUTH_ENABLED) {
+      setEntries(getLibrary());
+      return;
+    }
+    // Accounts on: the server list is the source of truth (all devices).
+    // Local entries it doesn't list stay visible — old beta projects
+    // (their card's GET assigns them to this account) or expired ones.
+    let cancelled = false;
+    void fetchServerJobs().then((list) => {
+      if (cancelled) return;
+      const local = getLibrary();
+      if (!list) {
+        setEntries(local);
+        return;
+      }
+      const done = list.filter((j) => j.has_output);
+      const ids = new Set(done.map((j) => j.id));
+      setServerExpiry(Object.fromEntries(done.map((j) => [j.id, j.expires_at ?? null])));
+      setEntries(
+        [...done.map(serverJobToLibraryEntry), ...local.filter((e) => !ids.has(e.jobId))].sort(
+          (a, b) => b.timestamp - a.timestamp,
+        ),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const remove = async (jobId: string) => {
@@ -54,7 +78,7 @@ export default function Library() {
     // gone, fine; anything else (e.g. 409 still processing) keeps the
     // entry so the user can retry.
     try {
-      const r = await fetch(`${backendUrl()}/jobs/${jobId}`, { method: "DELETE" });
+      const r = await apiFetch(`/jobs/${jobId}`, { method: "DELETE" });
       if (!r.ok && r.status !== 404) {
         alert(t("library.deleteFailed"));
         return;
@@ -64,7 +88,8 @@ export default function Library() {
       return;
     }
     deleteEntry(jobId);
-    setEntries(getLibrary());
+    if (AUTH_ENABLED) setEntries((prev) => (prev ?? []).filter((e) => e.jobId !== jobId));
+    else setEntries(getLibrary());
   };
 
   return (
@@ -97,7 +122,9 @@ export default function Library() {
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <PricingLink className="mr-1 hidden sm:inline" />
           <LanguageSwitcher />
+          <AccountMenu />
           <Link
             href="/app"
             className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-xs font-medium transition-transform hover:scale-105 sm:px-4"
@@ -150,6 +177,7 @@ export default function Library() {
               <LibraryCard
                 key={e.jobId}
                 entry={e}
+                expiresAt={serverExpiry[e.jobId]}
                 onDelete={remove}
                 onPlay={setPlayingJobId}
               />
@@ -218,10 +246,13 @@ function EmptyState() {
 
 function LibraryCard({
   entry,
+  expiresAt,
   onDelete,
   onPlay,
 }: {
   entry: LibraryEntry;
+  /** Known from the server list (accounts on); undefined → ask per card. */
+  expiresAt?: number | null;
   onDelete: (jobId: string) => void;
   onPlay: (jobId: string) => void;
 }) {
@@ -229,11 +260,15 @@ function LibraryCard({
   const [thumbFailed, setThumbFailed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // Media URLs carry the per-user token when accounts are on: wait for it.
+  const mediaReady = useMediaReady();
+  const thumbSrc = useMediaUrl(entry.jobId, "thumbnail");
   // Server-side lifetime: expires_at (unix s) or "gone" once deleted.
-  const [expiry, setExpiry] = useState<number | "gone" | null>(null);
+  const [expiry, setExpiry] = useState<number | "gone" | null>(expiresAt ?? null);
   useEffect(() => {
+    if (expiresAt !== undefined) return;
     let cancelled = false;
-    fetch(`${backendUrl()}/jobs/${entry.jobId}`)
+    apiFetch(`/jobs/${entry.jobId}`)
       .then(async (r) => {
         if (cancelled) return;
         if (r.status === 404) setExpiry("gone");
@@ -246,7 +281,7 @@ function LibraryCard({
     return () => {
       cancelled = true;
     };
-  }, [entry.jobId]);
+  }, [entry.jobId, expiresAt]);
   const daysLeft =
     typeof expiry === "number" ? Math.ceil((expiry * 1000 - Date.now()) / 86400000) : null;
   const hashtagLine = entry.socialHashtags
@@ -295,10 +330,10 @@ function LibraryCard({
           }}
           aria-label={t("library.card.playAria", { name: entry.filename })}
         >
-          {!thumbFailed && (
+          {!thumbFailed && thumbSrc && (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
-              src={`${backendUrl()}/jobs/${entry.jobId}/thumbnail`}
+              src={thumbSrc}
               alt=""
               className="h-full w-full object-cover"
               onError={() => setThumbFailed(true)}
@@ -354,7 +389,7 @@ function LibraryCard({
             className="truncate text-sm"
             style={{ color: "var(--text-body)" }}
           >
-            {entry.filename}
+            {entry.filename || t("app.library.untitled")}
           </div>
           {(expiry === "gone" || daysLeft !== null) && (
             <div
@@ -391,10 +426,10 @@ function LibraryCard({
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        {expiry !== "gone" && mainOutputs.map((f) => (
+        {expiry !== "gone" && mediaReady && mainOutputs.map((f) => (
           <a
             key={f}
-            href={`${backendUrl()}/jobs/${entry.jobId}/download?format=${encodeURIComponent(f)}`}
+            href={mediaUrl(entry.jobId, "download", { format: f })}
             download
             className="rounded-full px-3.5 py-1.5 text-xs font-semibold transition-transform hover:scale-105"
             style={
@@ -432,7 +467,7 @@ function LibraryCard({
         )}
       </div>
 
-      {expanded && expiry !== "gone" && entry.hookClips.length > 0 && (
+      {expanded && expiry !== "gone" && mediaReady && entry.hookClips.length > 0 && (
         <div
           className="mt-3 flex flex-col gap-2 pt-3"
           style={{ borderTop: "1px solid var(--border)" }}
@@ -440,7 +475,7 @@ function LibraryCard({
           {entry.hookClips.map((h) => (
             <a
               key={h.key}
-              href={`${backendUrl()}/jobs/${entry.jobId}/download?format=${encodeURIComponent(h.key)}`}
+              href={mediaUrl(entry.jobId, "download", { format: h.key })}
               download
               className="block rounded-xl p-3 transition-colors"
               style={{
