@@ -223,6 +223,22 @@ def multipart_abort(storage_key: str, upload_id: str) -> None:
         print(f"[storage] multipart abort failed: {e}", flush=True)
 
 
+def object_size(storage_key: str) -> int | None:
+    """Size in bytes of an R2 object (HEAD), or None if it can't be told
+    (not configured, missing object, network error). POST /jobs checks
+    the upload cap with it before downloading anything."""
+    cfg = _r2_config()
+    if cfg is None:
+        return None
+    try:
+        client = _r2_client()
+        head = client.head_object(Bucket=cfg["R2_BUCKET"], Key=storage_key)
+        return int(head["ContentLength"])
+    except Exception as e:
+        print(f"[storage] r2 head failed for {storage_key}: {e}", flush=True)
+        return None
+
+
 def download_from_r2(storage_key: str, dest_path: str) -> None:
     """Fetch an R2 object into a local file (used by the worker
     thread before analyze).

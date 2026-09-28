@@ -6,6 +6,7 @@ per-segment clips into a single MP4 for the web user to download.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -15,6 +16,27 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
+
+
+def _ffmpeg_threads() -> int:
+    """Thread cap for every ffmpeg encode/decode on the API box
+    (CLEO_FFMPEG_THREADS, default 4; 0 = ffmpeg's own default).
+
+    Without a cap x264 sizes its thread pool from the CPU count it sees
+    (1.5x cores): a 1080p normalize took 0.55 GB at 4 threads but 1.8 GB
+    at 64, and concurrent jobs just fight over the same cores. Read on
+    every call so the Modal worker can lift it (modal_render.py)."""
+    try:
+        return max(0, int(os.environ.get("CLEO_FFMPEG_THREADS", "4")))
+    except ValueError:
+        return 4
+
+
+def _threads() -> list[str]:
+    """`-threads N` for one input (decoder) or output (encoder), or
+    nothing when uncapped."""
+    n = _ffmpeg_threads()
+    return ["-threads", str(n)] if n else []
 
 # Per-clip caption burns are only an intermediate (they get re-encoded
 # by the final concat), so encode them fast. Benchmark (90 s 1080x1920,
@@ -87,7 +109,7 @@ _HDR_TONEMAP_CHAIN = (
 
 def _smartcam_reframe(
     input_path: str,
-    output_dir: str,
+    output_path: str,
     smartcam_format: str,
     resolution: str,
     progress_cb: Callable[[str, float], None] | None = None,
@@ -97,20 +119,28 @@ def _smartcam_reframe(
 
     Re-uses the premiere-plugin SmartCam preprocess (YuNet face tracking
     + rule-of-thirds composition + letterbox-crop pre-pass + VFR→CFR
-    conversion). Falls back to the original on failure.
+    conversion). Returns `output_path` on success, None on failure (the
+    caller keeps the original).
+
+    `output_path` is job-scoped: the plugin's own default name
+    (<input basename>_smartcam_<unix second>.mp4 in a shared cache dir)
+    is the same for every web job ("normalized") that starts SmartCam
+    in the same second, so two concurrent jobs could write — and hand
+    out — each other's video.
     """
     def _sc_cb(msg: str) -> None:
         if progress_cb:
             progress_cb(msg, -1)
 
-    out = _run_smartcam_preprocess(
+    return _run_smartcam_preprocess(
         video_path=input_path,
         smartcam_format=smartcam_format,
         resolution_label=resolution,
         progress_cb=_sc_cb,
         cancel_check=cancel_check,
+        output_path=output_path,
+        threads=_ffmpeg_threads() or None,
     )
-    return out  # the premiere fn already writes to ~/Movies/Videos/.smartcut_plugin_cache
 
 
 def _extract_hook_clip(
@@ -128,10 +158,12 @@ def _extract_hook_clip(
     duration = max(0.5, end - start)
     cmd = [
         get_ffmpeg_path(), "-y",
+        *_threads(),
         "-ss", f"{start:.3f}",
         "-i", input_path,
         "-t", f"{duration:.3f}",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        *_threads(),
         "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "320k",
         "-movflags", "+faststart",
@@ -184,9 +216,11 @@ def _export_format(
     )
     cmd = [
         get_ffmpeg_path(), "-y",
+        *_threads(),
         "-i", input_path,
         "-vf", vf,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        *_threads(),
         "-pix_fmt", "yuv420p",
         "-c:a", "copy",
         "-movflags", "+faststart",
@@ -257,16 +291,107 @@ def _precheck_audio(input_path: str, max_seconds: float | None = None) -> dict:
     return {"mean_db": mean_db, "max_db": max_db, "warnings": warnings}
 
 
+# 720p editor proxy, written next to the normalized file. Every preview
+# build (analysis preview, edit rebuilds, recompute-scenes) cuts from it
+# — about 7x less CPU per save than decoding the 1080p/4K mezzanine;
+# the render keeps using the normalized file. See preview_source().
+PROXY_NAME = "proxy.mp4"
+_PROXY_MAX_SIDE = 720
+# Long side capped, aspect kept, even sizes. (Unlike the if(gt())/
+# if(gt()) pair used elsewhere this also caps square video, where
+# both sides would be -2 = "keep the input size".)
+_PROXY_SCALE = (
+    f"scale=w='if(gte(iw,ih),min({_PROXY_MAX_SIDE},iw),-2)':"
+    f"h='if(gte(iw,ih),-2,min({_PROXY_MAX_SIDE},ih))'"
+)
+
+
+def _proxy_video_args() -> list[str]:
+    """Encoder settings of the proxy: veryfast crf 26 (a preview source,
+    not a mezzanine), same 1 s GOP as the normalized file so the per-run
+    seeks of _ffmpeg_cuts_preview stay cheap."""
+    return [
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+        *_threads(),
+        "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
+        "-pix_fmt", "yuv420p",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-colorspace", "bt709",
+    ]
+
+
+def preview_source(normalized_path: str) -> str:
+    """The file edit previews are cut from: the 720p proxy next to
+    `normalized_path` when there is one, else `normalized_path` itself
+    (jobs analysed before proxies existed, or a failed proxy encode).
+
+    The proxy always shows the same frames on the same timeline as the
+    normalized file it sits next to (analyze_only makes sure of that,
+    also for SmartCam), so segment times apply to both unchanged.
+    """
+    if not normalized_path:
+        return normalized_path
+    proxy = Path(normalized_path).with_name(PROXY_NAME)
+    return str(proxy) if proxy.is_file() else normalized_path
+
+
+def _default_streams(input_path: str) -> tuple[int | None, int | None]:
+    """(video, audio) stream indexes ffmpeg's automatic stream selection
+    picks: the video with the most pixels (cover art excluded), the audio
+    with the most channels; a stream flagged "default" gets ffmpeg's
+    bonus, ties go to the lower index. Raises when ffprobe fails.
+
+    The normalize+proxy call needs explicit maps (a filter_complex
+    output), and they must select what the plain `-vf` call selected.
+    """
+    r = subprocess.run(
+        [get_ffprobe_path(), "-v", "error",
+         "-show_entries",
+         "stream=index,codec_type,width,height,channels"
+         ":stream_disposition=default,attached_pic",
+         "-of", "json", input_path],
+        capture_output=True, text=True, timeout=30,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {r.stderr[-300:]}")
+    best: dict[str, tuple[int | None, int]] = {
+        "video": (None, -1), "audio": (None, -1),
+    }
+    for st in json.loads(r.stdout or "{}").get("streams") or []:
+        kind = st.get("codec_type")
+        disp = st.get("disposition") or {}
+        if kind == "video":
+            if disp.get("attached_pic"):
+                continue
+            score = int(st.get("width") or 0) * int(st.get("height") or 0)
+        elif kind == "audio":
+            score = int(st.get("channels") or 0)
+        else:
+            continue
+        score += 5_000_000 * (1 if disp.get("default") else 0)
+        if score > best[kind][1]:
+            best[kind] = (int(st["index"]), score)
+    return best["video"][0], best["audio"][0]
+
+
 def _normalize_orientation(
     input_path: str,
     output_path: str,
     max_side: int = 1920,
     max_seconds: float | None = None,
-) -> None:
+    proxy_path: str | None = None,
+) -> bool:
     """Re-encode upload with rotation baked in, audio cleaned + LUFS-normalized.
 
     `max_seconds` cuts the output there (everything downstream works on
     this file); see _max_seconds in analyze_only.
+
+    `proxy_path`: also write the 720p editor proxy (PROXY_NAME) from the
+    same decode — a `split` of the filtered video into a second output.
+    Returns True when the proxy was written. The proxy is optional: if
+    the combined call fails, the plain normalize runs again on its own
+    (returns False), so a proxy problem can never fail an analysis.
 
     Three passes folded into one ffmpeg call:
       1) Re-encode video without -noautorotate so rotation metadata
@@ -303,17 +428,17 @@ def _normalize_orientation(
     vf = (
         f"{_HDR_TONEMAP_CHAIN},{scale_filter}" if is_hdr else scale_filter
     )
+    cut = ["-t", f"{max_seconds:.3f}"] if max_seconds else []
 
-    cmd = [
-        get_ffmpeg_path(), "-y",
-        "-i", input_path,
-        "-vf", vf,
+    head = [get_ffmpeg_path(), "-y", *_threads(), "-i", input_path]
+    main_out = [
         # 'fast' preset + crf 18 — the normalized file is re-encoded
         # during burn, so investing extra encode time here pays off in
         # the final quality. Fast (~40% slower than veryfast) still
         # fits Railway's CPU budget for typical 60-90s videos, and
         # crf 18 is visually near-lossless as a source for the burn.
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        *_threads(),
         # Force a keyframe every ~1s. The web editor plays this file
         # directly and seeks over cut regions; sparse keyframes
         # (libx264's default ~10s) made the browser buffer for
@@ -328,36 +453,122 @@ def _normalize_orientation(
         # Bit-perfect audio passthrough — copies the source AAC stream
         # unchanged. No re-encode, no filter, no quality loss.
         "-c:a", "copy",
-        *(["-t", f"{max_seconds:.3f}"] if max_seconds else []),
+        *cut,
         "-movflags", "+faststart",
         output_path,
     ]
+
+    if proxy_path:
+        # Written under a temp name and renamed when complete, so a
+        # half-written proxy is never picked up by preview_source().
+        tmp_proxy = str(Path(proxy_path).with_suffix(".tmp.mp4"))
+        try:
+            v_idx, a_idx = _default_streams(input_path)
+        except Exception as e:
+            print(f"[normalize] stream probe failed, no proxy in this "
+                  f"pass: {e}", flush=True)
+            v_idx = a_idx = None
+        if v_idx is not None:
+            cmd = [
+                *head,
+                # split's second output has no label: ffmpeg attaches it
+                # to the first output file (normalized), whose audio is
+                # then still auto-selected exactly as with plain -vf.
+                "-filter_complex",
+                f"[0:{v_idx}]{vf},split=2[proxy_in];"
+                f"[proxy_in]{_PROXY_SCALE}[proxy]",
+                *main_out,
+                "-map", "[proxy]",
+                *(["-map", f"0:{a_idx}"] if a_idx is not None else []),
+                *_proxy_video_args(),
+                "-c:a", "copy",
+                *cut,
+                "-movflags", "+faststart",
+                tmp_proxy,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0 and Path(tmp_proxy).is_file():
+                os.replace(tmp_proxy, proxy_path)
+                return True
+            Path(tmp_proxy).unlink(missing_ok=True)
+            tail = result.stderr[-800:] if result.stderr else "(no stderr)"
+            if "No space left on device" in tail:
+                raise RuntimeError(
+                    f"ffmpeg orientation-normalize failed (hdr={is_hdr}):\n{tail}"
+                )
+            print(f"[normalize] normalize+proxy failed, retrying without "
+                  f"proxy:\n{tail}", flush=True)
+
+    cmd = [*head, "-vf", vf, *main_out]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         tail = result.stderr[-800:] if result.stderr else "(no stderr)"
         raise RuntimeError(
             f"ffmpeg orientation-normalize failed (hdr={is_hdr}):\n{tail}"
         )
+    return False
 
 
-def _ffmpeg_cuts_preview(
-    input_path: str,
+def _make_proxy(source_path: str, proxy_path: str) -> bool:
+    """Write the 720p editor proxy of `source_path` in a pass of its own
+    (SmartCam output, or a normalize that couldn't produce it). Returns
+    False — and leaves no proxy behind — on failure; previews then fall
+    back to the full-size file."""
+    tmp_proxy = str(Path(proxy_path).with_suffix(".tmp.mp4"))
+    cmd = [
+        get_ffmpeg_path(), "-y", *_threads(),
+        "-i", source_path,
+        "-map", "0:V:0", "-map", "0:a:0?",
+        "-vf", _PROXY_SCALE,
+        *_proxy_video_args(),
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        tmp_proxy,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0 and Path(tmp_proxy).is_file():
+        os.replace(tmp_proxy, proxy_path)
+        return True
+    Path(tmp_proxy).unlink(missing_ok=True)
+    Path(proxy_path).unlink(missing_ok=True)
+    tail = result.stderr[-400:] if result.stderr else "(no stderr)"
+    print(f"[proxy] encode failed, previews use the full file:\n{tail}",
+          flush=True)
+    return False
+
+
+# A segment may start this much before its predecessor ends (float
+# noise in editor values) and still count as "in order": the single-
+# pass build then holds at most that stretch of decoded frames.
+_ORDER_SLACK_S = 0.1
+
+
+def _ascending_runs(
     segments: list[tuple[float, float]],
-    output_path: str,
-) -> None:
-    """Produce a fast preview MP4 of the source with cut segments concatenated.
+) -> list[list[tuple[float, float]]]:
+    """Split `segments` (timeline order) into maximal runs whose source
+    ranges ascend without overlapping. One run = the plain in-order case."""
+    runs: list[list[tuple[float, float]]] = []
+    for s, e in segments:
+        s, e = float(s), float(e)
+        if runs and s >= runs[-1][-1][1] - _ORDER_SLACK_S:
+            runs[-1].append((s, e))
+        else:
+            runs.append([(s, e)])
+    return runs
 
-    Single-pass `filter_complex` so the user can scrub in the browser
-    against the actual edit timeline (silence/fillers/voice-trigger
-    ranges already removed). No captions burned in — those will be
-    overlaid live in the UI for the review step.
-    """
-    if not segments:
-        raise ValueError("no segments to preview")
 
+def _preview_filter(
+    segments: list[tuple[float, float]],
+    offset: float = 0.0,
+) -> str:
+    """trim/atrim + concat graph for ascending `segments`; times are
+    shifted by `offset` (the input's -ss). Output pads [outv] [outa]."""
     filters = []
     parts = []
     for i, (s, e) in enumerate(segments):
+        s = max(0.0, s - offset)
+        e = max(0.0, e - offset)
         filters.append(
             f"[0:v]trim={s:.3f}:{e:.3f},setpts=PTS-STARTPTS[v{i}]"
         )
@@ -366,25 +577,20 @@ def _ffmpeg_cuts_preview(
         )
         parts.append(f"[v{i}][a{i}]")
     filters.append(
-        f"{''.join(parts)}concat=n={len(segments)}:v=1:a=1[outv][outa]"
+        f"{''.join(parts)}concat=n={len(segments)}:v=1:a=1[outvfull][outa]"
     )
-
     # Cap the preview at 720p on the longest side so iOS Safari can
     # play it inline — 4K MP4s often fail to start on the phone.
-    filters[-1] = filters[-1].replace(
-        "[outv]",
-        "[outvfull]",
-    )
     filters.append(
         "[outvfull]scale='if(gt(iw,ih),720,-2)':'if(gt(ih,iw),720,-2)'[outv]"
     )
+    return ";".join(filters)
 
-    cmd = [
-        get_ffmpeg_path(), "-y",
-        "-i", input_path,
-        "-filter_complex", ";".join(filters),
-        "-map", "[outv]", "-map", "[outa]",
+
+def _preview_video_args() -> list[str]:
+    return [
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+        *_threads(),
         # Force a keyframe every ~1s. Without this, libx264 ultrafast
         # produces GOPs of ~10s, which makes seeking + decoding at
         # segment concat points visibly stutter — the user sees the
@@ -394,14 +600,99 @@ def _ffmpeg_cuts_preview(
         "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
         "-pix_fmt", "yuv420p",
         "-profile:v", "main",
-        "-c:a", "aac", "-b:a", "128k",
-        "-movflags", "+faststart",
-        output_path,
     ]
+
+
+def _run_preview_ffmpeg(cmd: list[str]) -> None:
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         tail = result.stderr[-800:] if result.stderr else "(no stderr)"
         raise RuntimeError(f"ffmpeg preview-cut failed:\n{tail}")
+
+
+def _ffmpeg_cuts_preview(
+    input_path: str,
+    segments: list[tuple[float, float]],
+    output_path: str,
+) -> None:
+    """Produce a fast preview MP4 of the source with cut segments concatenated.
+
+    Lets the user scrub in the browser against the actual edit timeline
+    (silence/fillers/voice-trigger ranges already removed). No captions
+    burned in — those will be overlaid live in the UI for the review
+    step. Callers pass preview_source(normalized_path) as `input_path`.
+
+    Segments in ascending source order: one `filter_complex` pass.
+    Out of order (the editor's move-left/right) or overlapping, that
+    pass would buffer every decoded frame between the moved clip's
+    source position and its turn in the concat — ~100 MB per kept
+    second at 1080p (measured 1.7 GB for 14 s, 4.6 GB for 60 s: two
+    clicks could OOM the box). So each ascending run is encoded on its
+    own instead (seeking to its start), and the runs are joined with
+    the concat demuxer: memory stays that of one in-order pass.
+    """
+    if not segments:
+        raise ValueError("no segments to preview")
+
+    ff = get_ffmpeg_path()
+    runs = _ascending_runs(segments)
+    if len(runs) == 1:
+        _run_preview_ffmpeg([
+            ff, "-y", *_threads(),
+            "-i", input_path,
+            "-filter_complex", _preview_filter(runs[0]),
+            "-map", "[outv]", "-map", "[outa]",
+            *_preview_video_args(),
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            output_path,
+        ])
+        return
+
+    work = tempfile.mkdtemp(prefix="cleo_preview_")
+    try:
+        parts: list[str] = []
+        for i, run in enumerate(runs):
+            start = run[0][0]
+            end = max(e for _s, e in run)
+            part = os.path.join(work, f"run_{i:04d}.mov")
+            _run_preview_ffmpeg([
+                ff, "-y", *_threads(),
+                # Accurate input seek: decoding starts at the keyframe
+                # before `start` (≤ 1 s GOP), timestamps restart at 0.
+                "-ss", f"{start:.3f}",
+                "-t", f"{end - start + 1.0:.3f}",
+                "-i", input_path,
+                "-filter_complex", _preview_filter(run, offset=start),
+                "-map", "[outv]", "-map", "[outa]",
+                *_preview_video_args(),
+                # PCM in the parts: no AAC priming/padding per part, so
+                # joining them doesn't add audio at every boundary.
+                "-c:a", "pcm_s16le",
+                part,
+            ])
+            parts.append(part)
+        list_path = os.path.join(work, "parts.txt")
+        with open(list_path, "w") as f:
+            for part in parts:
+                f.write(f"file '{part}'\n")
+        _run_preview_ffmpeg([
+            ff, "-y",
+            "-f", "concat", "-safe", "0", "-i", list_path,
+            "-map", "0:v:0", "-map", "0:a:0",
+            # Same encoder settings in every part → stream copy.
+            "-c:v", "copy",
+            # A part lasts as long as its longer stream (video and audio
+            # differ by < 1 frame); re-lay the audio on the timestamps —
+            # silence into gaps, trim overlaps — so A/V sync resets at
+            # every join instead of drifting across many parts.
+            "-af", "aresample=async=1:min_hard_comp=0.01:first_pts=0",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            output_path,
+        ])
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def _generate_thumbnail(input_path: str, output_path: str, at_seconds: float = 1.0) -> None:

@@ -19,7 +19,12 @@ Run dev server:
 
 Production:
     ./venv313/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 \\
-        --workers 2
+        --workers 1
+
+Exactly ONE process: jobs run as threads of it, admission control (the
+analysis/render queues, per-user limits, disk reservations), editor
+save ordering and the SQLite job store are all in-process state. A
+second worker would double every limit and silently lose job updates.
 """
 from __future__ import annotations
 
@@ -39,7 +44,11 @@ try:
 except ImportError:
     pass
 
+import asyncio
+import functools
+import hashlib
 import hmac
+import inspect
 import io
 import json
 import math
@@ -49,7 +58,11 @@ import subprocess
 import tempfile
 import threading
 import traceback
+import uuid
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, Callable
 
 from contextlib import asynccontextmanager
 import time
@@ -59,14 +72,16 @@ from fastapi import (
 )
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+import backend.pipeline as pipeline
 from backend import accounts, auth, billing, costs
 from backend.auth import (
     User, current_user, get_owned_job, media_user, require_user,
 )
 from backend.jobs import DEFAULT_PLAN, new_job_id, retention_days, store
-from backend.pipeline import analyze_only, render_only
+from backend.pipeline import EXPORT_FORMATS, analyze_only, render_only
 
 # Media tokens (?t=) must not end up in the access log.
 auth.install_log_filter()
@@ -87,6 +102,365 @@ def _register_active(job_id: str) -> None:
 def _release_active(job_id: str) -> None:
     with _active_lock:
         _active_jobs.discard(job_id)
+
+
+# ── Admission control ────────────────────────────────────────────────
+# Overload becomes a visible queue instead of a crash. At most
+# CLEO_MAX_ANALYZE analyses and CLEO_MAX_RENDER renders run at once; the
+# others wait in line (status "processing", message "queued", with a
+# queue_position). Beyond CLEO_MAX_QUEUE waiting analyses new uploads get
+# 503 server_busy (+ Retry-After), one account may have at most
+# CLEO_MAX_ACTIVE_PER_USER jobs in flight (429 too_many_active_jobs),
+# uploads are capped in size and length (413) and each one reserves disk
+# space for what its analysis will write (507). All in-process state —
+# this backend is exactly one process (module docstring).
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "").strip() or default)
+    except ValueError:
+        return float(default)
+
+
+def _env_int(name: str, default: int) -> int:
+    return int(_env_float(name, default))
+
+
+def _plain(n: float) -> float | int:
+    """4.0 → 4 in error bodies."""
+    return int(n) if float(n).is_integer() else n
+
+
+class ApiRefusal(Exception):
+    """A deliberate refusal, answered as {"detail": code, **extra} with
+    `headers` (exception handler below)."""
+
+    def __init__(self, status: int, detail: str,
+                 headers: dict[str, str] | None = None, **extra: Any) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
+        self.headers = headers
+        self.extra = extra
+
+
+def _max_upload_gb() -> float:
+    return _env_float("CLEO_MAX_UPLOAD_GB", 4)
+
+
+def _max_minutes() -> float:
+    return _env_float("CLEO_MAX_MINUTES", 30)
+
+
+def _too_big(size: float | None) -> bool:
+    return size is not None and size > _max_upload_gb() * 1e9
+
+
+def _too_long(seconds: float | None) -> bool:
+    # +1 s: container durations and the browser's reading round a bit.
+    return seconds is not None and seconds > _max_minutes() * 60 + 1
+
+
+def _file_too_large() -> ApiRefusal:
+    return ApiRefusal(413, "file_too_large", max_gb=_plain(_max_upload_gb()))
+
+
+def _video_too_long() -> ApiRefusal:
+    return ApiRefusal(413, "video_too_long", max_minutes=_plain(_max_minutes()))
+
+
+def _server_busy() -> ApiRefusal:
+    return ApiRefusal(503, "server_busy", headers={"Retry-After": "120"})
+
+
+class _SlotQueue:
+    """Work slots handed out in arrival order: at most limit() jobs hold
+    one, the others wait and know their 1-based place in line — a fair
+    threading.BoundedSemaphore that can tell positions."""
+
+    def __init__(self, limit: Callable[[], int]) -> None:
+        self._limit = limit
+        self._cond = threading.Condition()
+        self._running: set[str] = set()
+        self._waiting: list[str] = []
+        self._closed = False
+
+    def limit(self) -> int:
+        return max(1, self._limit())
+
+    def _position(self, job_id: str) -> int | None:
+        free = max(0, self.limit() - len(self._running))
+        pos = self._waiting.index(job_id) + 1 - free
+        return pos if pos > 0 else None
+
+    def acquire(self, job_id: str,
+                on_wait: Callable[[int], None] | None = None) -> bool:
+        """Block until `job_id` may run. on_wait(position) is called
+        (without the lock) whenever its place in line changes. False,
+        with nothing acquired, for a job that is already queued or
+        running, and once the queue is closed (shutdown)."""
+        with self._cond:
+            if (self._closed or job_id in self._running
+                    or job_id in self._waiting):
+                return False
+            self._waiting.append(job_id)
+        reported: int | None = None
+        try:
+            while True:
+                with self._cond:
+                    while True:
+                        if self._closed:
+                            return False
+                        pos = self._position(job_id)
+                        if pos is None:
+                            self._waiting.remove(job_id)
+                            self._running.add(job_id)
+                            self._cond.notify_all()
+                            return True
+                        if pos != reported:
+                            break
+                        self._cond.wait()
+                reported = pos
+                if on_wait is not None:
+                    try:
+                        on_wait(pos)
+                    except Exception as e:
+                        print(f"[queue] position update for {job_id} "
+                              f"failed: {e}", flush=True)
+        finally:
+            with self._cond:
+                if job_id in self._waiting:
+                    self._waiting.remove(job_id)
+                    self._cond.notify_all()
+
+    def release(self, job_id: str) -> None:
+        with self._cond:
+            self._running.discard(job_id)
+            self._cond.notify_all()
+
+    def position(self, job_id: str) -> int | None:
+        with self._cond:
+            if job_id not in self._waiting:
+                return None
+            return self._position(job_id)
+
+    def close(self) -> None:
+        """Shutdown: nobody waiting starts any more (the boot after the
+        restart fails / refunds those jobs, like interrupted ones)."""
+        with self._cond:
+            self._closed = True
+            self._cond.notify_all()
+
+
+_ANALYZE_SLOTS = _SlotQueue(lambda: _env_int("CLEO_MAX_ANALYZE", 2))
+# Modal renders mostly wait on Modal (a thread + the mezzanine upload
+# each); without Modal a render is a local MoviePy encode, as heavy as
+# an analysis.
+_RENDER_SLOTS = _SlotQueue(lambda: _env_int(
+    "CLEO_MAX_RENDER", 4 if os.environ.get("MODAL_TOKEN_ID") else 2))
+
+
+def _bytes_on_disk(entry: dict) -> int:
+    """What an in-flight job has written so far (upload + job folder)."""
+    total = 0
+    paths = []
+    if entry.get("upload"):
+        paths.append(Path(entry["upload"]))
+    if entry.get("job_id"):
+        job_dir = _WORK_ROOT / entry["job_id"]
+        if job_dir.is_dir():
+            paths.extend(p for p in job_dir.iterdir())
+    for path in paths:
+        try:
+            if path.is_file():
+                total += path.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+class _Inflight:
+    """This process's work in flight, per owner: uploads being accepted
+    by POST /jobs (kind "upload") and analysis / render worker threads.
+    Feeds the per-user limit, the queue cap, queue-position hints and
+    the disk reservations. Entries of worker threads drop out by
+    themselves once the thread has ended."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._entries: dict[str, dict] = {}
+
+    def _live(self) -> list[dict]:
+        dead = [k for k, e in self._entries.items()
+                if e["thread"] is not None and not e["thread"].is_alive()]
+        for k in dead:
+            del self._entries[k]
+        return list(self._entries.values())
+
+    @staticmethod
+    def _entry(owner: str | None, kind: str) -> dict:
+        return {"owner": owner, "kind": kind, "thread": None, "need": 0.0,
+                "upload": None, "job_id": None}
+
+    def _check(self, user: User | None) -> None:
+        live = self._live()
+        if user is not None and not user.is_service:
+            limit = _env_int("CLEO_MAX_ACTIVE_PER_USER", 2)
+            if limit > 0 and sum(e["owner"] == user.id for e in live) >= limit:
+                raise ApiRefusal(429, "too_many_active_jobs")
+        backlog = sum(e["kind"] in ("upload", "analyze") for e in live)
+        waiting = backlog + 1 - _ANALYZE_SLOTS.limit()
+        if waiting > _env_int("CLEO_MAX_QUEUE", 20):
+            raise _server_busy()
+
+    def check(self, user: User | None) -> None:
+        """Would one more upload be admitted? (presign: say no before the
+        bytes are sent). Raises ApiRefusal 429 / 503."""
+        with self._lock:
+            self._check(user)
+
+    def admit(self, user: User | None) -> str:
+        """Hold a place for one upload (POST /jobs) or refuse it (429 /
+        503). Returns the token for reserve_disk / attach / release."""
+        with self._lock:
+            self._check(user)
+            token = f"upload:{uuid.uuid4().hex}"
+            self._entries[token] = self._entry(user.id if user else None,
+                                               "upload")
+            return token
+
+    def reserve_disk(self, token: str | None, size: float,
+                     upload_path: str | None = None) -> None:
+        """Size-aware free-space check: CLEO_DISK_FACTOR (3.5) × the
+        upload must fit beside what the other jobs in flight will still
+        write, plus the CLEO_MIN_FREE_GB floor — so parallel uploads
+        can't all pass the same check. Recorded under `token` (None =
+        only check, for presign). Raises 507 server_storage_full."""
+        need = _env_float("CLEO_DISK_FACTOR", 3.5) * max(0.0, size or 0.0)
+        with self._lock:
+            self._live()
+            others = sum(max(0.0, e["need"] - _bytes_on_disk(e))
+                         for k, e in self._entries.items() if k != token)
+            free = shutil.disk_usage(_WORK_ROOT).free
+            if free - others < need + _MIN_FREE_BYTES:
+                print(f"[jobs] refusing upload: {free / 1e9:.1f} GB free, "
+                      f"{others / 1e9:.1f} GB reserved, "
+                      f"{need / 1e9:.1f} GB needed", flush=True)
+                raise HTTPException(507, "server_storage_full")
+            entry = self._entries.get(token) if token else None
+            if entry is not None:
+                entry["need"] = need
+                entry["upload"] = upload_path
+
+    def attach(self, token: str, job_id: str,
+               thread: threading.Thread) -> None:
+        """The upload became job `job_id`, analysed by `thread`."""
+        with self._lock:
+            entry = self._entries.pop(token, None) or self._entry(None, "")
+            entry.update(kind="analyze", job_id=job_id, thread=thread)
+            self._entries[job_id] = entry
+
+    def track(self, job_id: str, owner: str | None, kind: str,
+              thread: threading.Thread) -> None:
+        with self._lock:
+            entry = self._entry(owner, kind)
+            entry.update(job_id=job_id, thread=thread)
+            self._entries[job_id] = entry
+
+    def release(self, key: str) -> None:
+        with self._lock:
+            self._entries.pop(key, None)
+
+    def next_position(self, kind: str, slots: _SlotQueue) -> int | None:
+        """Place in line a new job of `kind` would get (None: starts at
+        once) — for the first answer, before its worker thread runs."""
+        with self._lock:
+            ahead = sum(e["kind"] == kind for e in self._live())
+        pos = ahead + 1 - slots.limit()
+        return pos if pos > 0 else None
+
+
+_INFLIGHT = _Inflight()
+
+
+class _ProgressWriter:
+    """progress_cb of a worker: at most one store write per
+    CLEO_PROGRESS_INTERVAL_S (1 s) per job — ticks in between are
+    coalesced and the newest is written when the interval ends. Writes
+    only while the job is still 'processing', so a late tick can never
+    overwrite the result (awaiting_review / done / error) the worker
+    stored; close() before storing it."""
+
+    def __init__(self, job_id: str, interval: float | None = None) -> None:
+        self.job_id = job_id
+        self.interval = (_env_float("CLEO_PROGRESS_INTERVAL_S", 1.0)
+                         if interval is None else interval)
+        self._lock = threading.Lock()
+        self._last = float("-inf")
+        self._pending: tuple[str, float] | None = None
+        self._timer: threading.Timer | None = None
+        self._closed = False
+
+    def __call__(self, msg: str, pct: float) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._pending = (msg, pct)
+            wait = self._last + self.interval - time.monotonic()
+            if wait > 0:
+                if self._timer is None:
+                    self._timer = threading.Timer(wait, self._flush)
+                    self._timer.daemon = True
+                    self._timer.start()
+                return
+        self._flush()
+
+    def _flush(self) -> None:
+        # The write happens under our lock: ticks stay in order, and
+        # close() returns only after an in-progress write is done.
+        with self._lock:
+            self._timer = None
+            if self._closed or self._pending is None:
+                return
+            msg, pct = self._pending
+            self._pending = None
+            self._last = time.monotonic()
+            fields: dict[str, Any] = {"message": msg}
+            if pct is not None and pct >= 0:
+                fields["progress"] = pct
+            try:
+                store.update_if(self.job_id, "processing", **fields)
+            except Exception as e:
+                print(f"[job {self.job_id}] progress write failed: {e}",
+                      flush=True)
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            self._pending = None
+            timer, self._timer = self._timer, None
+        if timer is not None:
+            timer.cancel()
+
+
+def _queued_writer(job_id: str, expect: tuple[str, ...]
+                   ) -> Callable[[int], None]:
+    """on_wait for _SlotQueue.acquire: show the job as waiting in line."""
+    def _write(pos: int) -> None:
+        store.update_if(job_id, expect, status="processing",
+                        message="queued", queue_position=pos)
+    return _write
+
+
+def _accepts(fn: Callable, name: str) -> bool:
+    """Does fn take keyword `name`? (analyze_only's on_normalized.)"""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is p.VAR_KEYWORD
+                                 for p in params.values())
 
 
 @asynccontextmanager

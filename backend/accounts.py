@@ -152,6 +152,7 @@ def _db() -> sqlite3.Connection:
             conn = sqlite3.connect(path, check_same_thread=False,
                                    timeout=30, isolation_level=None)
             conn.row_factory = sqlite3.Row
+            jobs.tune_connection(conn)  # WAL + busy_timeout
             conn.executescript(_SCHEMA)
             _conn = conn
         return _conn
@@ -180,7 +181,13 @@ def _read(sql: str, args: tuple = ()) -> list[sqlite3.Row]:
 
 
 def meta_get_or_create(key: str, factory: Callable[[], str]) -> str:
-    """Value stored under `key`, created with factory() on first use."""
+    """Value stored under `key`, created with factory() on first use.
+    Reads first: only the very first call needs the write lock (media
+    tokens are checked on every media request)."""
+    value = meta_get(key)
+    if value is not None:
+        return value
+
     def _do(conn):
         row = conn.execute("SELECT value FROM meta WHERE key = ?",
                            (key,)).fetchone()
