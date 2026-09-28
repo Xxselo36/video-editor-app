@@ -38,11 +38,11 @@ RATES: dict[str, float] = {
     "railway_ram_gb_s": 10.0 / (30 * 86400),
     "railway_volume_gb_month": 0.15,
     # Modal: per physical core-second and GiB-second; the render
-    # function asks for cpu=16, memory=16 GiB (backend/modal_render.py)
+    # function asks for cpu=8, memory=8 GiB (backend/modal_render.py)
     "modal_core_s": 0.0000131,
     "modal_gib_s": 0.00000222,
-    "modal_cores": 16,
-    "modal_gib": 16,
+    "modal_cores": 8,
+    "modal_gib": 8,
 }
 try:
     RATES.update(json.loads(os.environ.get("CLEO_COST_RATES", "") or "{}"))
