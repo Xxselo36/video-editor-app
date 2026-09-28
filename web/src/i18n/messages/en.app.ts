@@ -34,6 +34,7 @@ export const enApp = {
   "app.errors.renderFailed":
     "Rendering failed. Your edits are saved — open the project and render again.",
   "app.errors.serverNoResponse": "Server did not respond. Please try again.",
+  "app.errors.serverBusy": "Our servers are busy right now. Please try again in a few minutes.",
   "app.errors.saveEditsFailed": "Couldn't save your edits — check your connection and try again.",
   "app.errors.title": "Something went wrong",
   "app.errors.tryAgain": "Try again",

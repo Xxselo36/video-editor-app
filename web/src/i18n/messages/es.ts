@@ -31,6 +31,7 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.errors.renderFailed":
     "El renderizado falló. Tus ediciones están guardadas — abre el proyecto y vuelve a renderizar.",
   "app.errors.serverNoResponse": "El servidor no respondió. Inténtalo de nuevo.",
+  "app.errors.serverBusy": "Nuestros servidores están ocupados ahora mismo. Inténtalo de nuevo en unos minutos.",
   "app.errors.saveEditsFailed": "No pudimos guardar tus ediciones — revisa tu conexión e inténtalo de nuevo.",
   "app.errors.title": "Algo salió mal",
   "app.errors.tryAgain": "Intentar de nuevo",

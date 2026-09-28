@@ -144,6 +144,19 @@ def _extract_hook_clip(
         raise RuntimeError(f"ffmpeg hook-extract failed:\n{tail}")
 
 
+def _video_size(path: str) -> tuple[int, int] | None:
+    """(width, height) of the first video stream as stored, or None."""
+    try:
+        r = subprocess.run(
+            [get_ffprobe_path(), "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x",
+             path], capture_output=True, text=True, timeout=15)
+        w, h = r.stdout.strip().split("x")[:2]
+        return int(w), int(h)
+    except Exception:
+        return None
+
+
 def _export_format(
     input_path: str,
     output_path: str,
@@ -154,7 +167,17 @@ def _export_format(
 
     Preserves the speaker (no cropping content out) — adds black bars
     on the dimension that doesn't match. Fast libx264 single-pass.
+    If the input already has the target size (e.g. a 9:16 export of a
+    9:16 primary), it is hard-linked instead — same bytes, no second
+    encode and no extra storage.
     """
+    if _video_size(input_path) == (target_w, target_h):
+        try:
+            Path(output_path).unlink(missing_ok=True)
+            os.link(input_path, output_path)
+        except OSError:
+            shutil.copyfile(input_path, output_path)
+        return
     vf = (
         f"scale=w={target_w}:h={target_h}:force_original_aspect_ratio=decrease,"
         f"pad=w={target_w}:h={target_h}:x=(ow-iw)/2:y=(oh-ih)/2:color=black"
@@ -1031,6 +1054,15 @@ def _try_modal_render(
                 local_out = str(
                     Path(output_dir) / f"cleo_output_{fmt.replace(':', '-')}.mp4"
                 )
+                if fname == primary_fname and Path(primary_out_path).exists():
+                    # Same file as the primary (export already had the
+                    # target size) — link it instead of downloading twice.
+                    Path(local_out).unlink(missing_ok=True)
+                    try:
+                        os.link(primary_out_path, local_out)
+                    except OSError:
+                        shutil.copyfile(primary_out_path, local_out)
+                    continue
             with open(local_out, "wb") as out_f:
                 for chunk in vol.read_file(remote_file):
                     out_f.write(chunk)

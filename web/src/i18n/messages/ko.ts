@@ -30,6 +30,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.errors.renderFailed":
     "렌더링에 실패했어요. 편집 내용은 저장돼 있어요 — 프로젝트를 열고 다시 렌더링해 주세요.",
   "app.errors.serverNoResponse": "서버가 응답하지 않았어요. 다시 시도해 주세요.",
+  "app.errors.serverBusy": "지금 서버가 혼잡해요. 몇 분 후에 다시 시도해 주세요.",
   "app.errors.saveEditsFailed": "편집 내용을 저장하지 못했어요 — 연결을 확인하고 다시 시도해 주세요.",
   "app.errors.title": "문제가 발생했어요",
   "app.errors.tryAgain": "다시 시도",

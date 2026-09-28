@@ -133,6 +133,8 @@ def _default_work_root() -> Path:
 
 _WORK_ROOT = _default_work_root()
 _WORK_ROOT.mkdir(parents=True, exist_ok=True)
+# New uploads are refused below this much free space on the work volume.
+_MIN_FREE_BYTES = float(os.environ.get("CLEO_MIN_FREE_GB", "2")) * 1e9
 
 def _remove_upload(path: str | None) -> None:
     """Delete an uploaded source file (only inside our work root)."""
@@ -336,7 +338,20 @@ def _run_analyze_inner(job_id: str) -> None:
         except Exception as e:
             tb = traceback.format_exc()
             print(f"[job {job_id}] ANALYZE FAILED: {e}\n{tb}", flush=True)
-            store.update(job_id, status="error", message=str(e), error=str(e))
+            # Nothing of a failed analysis can be reused (the user uploads
+            # again), so free the upload + partial files right away — a
+            # failed 10 min job used to leave ~1.5 GB on the volume.
+            _remove_upload(job.input_path)
+            shutil.rmtree(job_dir, ignore_errors=True)
+            key = (job.settings or {}).get("_r2_storage_key")
+            if key:
+                from backend.storage import delete_from_r2
+                delete_from_r2(key)
+            msg = str(e)
+            if "No space left on device" in msg:
+                msg = "server_storage_full"
+            store.update(job_id, status="error", message=msg[:300],
+                         error=msg[:2000], input_path=None)
     finally:
         _release_active(job_id)
 
@@ -558,6 +573,14 @@ async def create_job(
 
     job_input_dir = _WORK_ROOT / "uploads"
     job_input_dir.mkdir(parents=True, exist_ok=True)
+
+    # Refuse early instead of failing halfway through a multi-GB download
+    # or normalization when the volume is (nearly) full.
+    free = shutil.disk_usage(_WORK_ROOT).free
+    if free < _MIN_FREE_BYTES:
+        print(f"[jobs] refusing upload: only {free / 1e9:.1f} GB free",
+              flush=True)
+        raise HTTPException(507, "server_storage_full")
 
     input_path: str
     if storage_key:

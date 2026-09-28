@@ -369,8 +369,21 @@ def report(rows: list[dict], final: bool) -> str:
     return text
 
 
+def delete_jobs(ids: list[str]) -> None:
+    """Free the server volume — test jobs are big (hundreds of MB each)."""
+    for jid in ids:
+        try:
+            http("DELETE", f"/jobs/{jid}")
+            print(f"   deleted job {jid}", flush=True)
+        except Exception as e:
+            print(f"   could not delete {jid}: {e}", flush=True)
+
+
 def main() -> int:
-    runs = parse_runs(sys.argv[1] if len(sys.argv) > 1 else
+    if len(sys.argv) > 2 and sys.argv[1] == "--delete":
+        delete_jobs([x.strip() for x in sys.argv[2].split(",") if x.strip()])
+        return 0
+    runs = parse_runs(sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else
                       "phone1080:2,phone1080:10,phone4k:3,iphone4khdr:3")
     rows: list[dict] = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -419,6 +432,10 @@ def main() -> int:
             report(rows, final=False)  # summary survives a later cancel
 
     print(report(rows, final=True))
+    if os.environ.get("KEEP_JOBS", "").lower() not in ("1", "true", "yes"):
+        # Costs are in the summary now; the files would otherwise sit on
+        # the production volume for the whole retention period.
+        delete_jobs([r["job"] for r in rows if r["job"] != "-"])
     return 0 if all(r["status"] == "done" for r in rows) else 1
 
 

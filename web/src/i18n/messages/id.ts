@@ -30,6 +30,7 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.errors.renderFailed":
     "Rendering gagal. Editanmu sudah tersimpan — buka proyeknya dan render lagi.",
   "app.errors.serverNoResponse": "Server tidak merespons. Coba lagi.",
+  "app.errors.serverBusy": "Server kami sedang sibuk. Coba lagi dalam beberapa menit.",
   "app.errors.saveEditsFailed": "Editanmu tidak bisa disimpan — cek koneksimu dan coba lagi.",
   "app.errors.title": "Ada yang salah",
   "app.errors.tryAgain": "Coba lagi",
