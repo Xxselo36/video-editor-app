@@ -2,30 +2,40 @@
 
 Builds talking-head-like test videos (synthetic German speech with
 pauses and fillers over a moving test pattern), runs each through
-upload → analyze → render exactly like the web app, and reports the
-timings. The backend records the costs of these jobs; with the
-CLEO_ADMIN_TOKEN secret set, the per-job costs are printed too.
+upload → analyze → render exactly like the web app, and reports
+timings plus (with the CLEO_ADMIN_TOKEN secret) the per-job costs.
 
-Resolution, frame rate and bitrate change upload size, normalization,
-storage and render time a lot, so runs are "profile:minutes" pairs:
+Resolution, frame rate, codec, HDR and bitrate change upload size,
+normalization, storage and render time a lot, so each run is
 
-    python cost_test.py phone1080:2,phone1080:10,phone4k:3
+    profile:minutes[:preset]      e.g. phone1080:10  iphone4khdr:3:podcast
 
-Profiles (see PROFILES): synthetic (1080p, 1 Mbit/s — cheap baseline),
-phone1080 (1080p30, 16 Mbit/s with sensor-like noise), phone4k (4K30,
-45 Mbit/s, stored landscape with a rotation flag like an iPhone portrait
-clip) and phone4k60 (same at 60 fps, 60 Mbit/s). A bare number means
-"synthetic". Files over 90 MB go straight to R2 like in the web app.
+Profiles (PROFILES below):
+  synthetic    1080x1920 H.264 1 Mbit/s, clean test pattern (cheap baseline)
+  phone1080    1080x1920 30p H.264 High 16 Mbit/s, light sensor noise (SDR)
+  phone4k      4K 30p H.264 High 45 Mbit/s, stored landscape + rotation flag
+  iphone1080hdr 1080p 30p HEVC 10-bit HLG ~10 Mbit/s, rotated (iPhone default)
+  iphone4khdr  4K 30p HEVC 10-bit HLG ~45 Mbit/s, rotated (iPhone 4K HDR)
+Presets mirror web/src/app/app/page.tsx PRESETS (default: tiktok).
+A bare number means "synthetic". Files over 90 MB go straight to R2
+like in the web app. Jobs are tagged _cost_test so /admin/costs can
+exclude them (?exclude_tests=true).
+
+Known limits: the grain level is a guess, not calibrated against real
+footage (it strongly affects file sizes); egress is an estimate (every
+job file served once).
 """
 from __future__ import annotations
 
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 import wave
 from pathlib import Path
@@ -34,20 +44,52 @@ API = os.environ.get("CLEO_API", "https://api.cleocuts.com").rstrip("/")
 ADMIN = os.environ.get("CLEO_ADMIN_TOKEN", "")
 SUMMARY = os.environ.get("GITHUB_STEP_SUMMARY")
 R2_THRESHOLD = 90 * 1024 * 1024  # same cut-over as the web app
+SINGLE_PUT_LIMIT = 4.5e9         # R2 single PUT max is 5 GiB
+
+_H264 = ["-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p"]
+_HLG = ["-c:v", "libx265", "-tag:v", "hvc1", "-pix_fmt", "yuv420p10le",
+        "-x265-params", "log-level=error:colorprim=bt2020:"
+        "transfer=arib-std-b67:colormatrix=bt2020nc",
+        "-color_primaries", "bt2020", "-color_trc", "arib-std-b67",
+        "-colorspace", "bt2020nc"]
+_PHONE_AUDIO = ["-ar", "48000", "-ac", "2", "-b:a", "192k"]
 
 PROFILES: dict[str, dict] = {
-    "synthetic": {"w": 1080, "h": 1920, "fps": 30, "vb": "900k",
-                  "noise": 0, "preset": "veryfast", "rotate": False,
+    "synthetic": {"w": 1080, "h": 1920, "fps": 30, "vb": "900k", "noise": 0,
+                  "codec": _H264, "preset": "veryfast", "rotate": False,
                   "audio": ["-ar", "44100", "-ac", "1", "-b:a", "96k"]},
-    "phone1080": {"w": 1080, "h": 1920, "fps": 30, "vb": "16M",
-                  "noise": 12, "preset": "veryfast", "rotate": False,
-                  "audio": ["-ar", "48000", "-ac", "2", "-b:a", "192k"]},
-    "phone4k": {"w": 2160, "h": 3840, "fps": 30, "vb": "45M",
-                "noise": 12, "preset": "ultrafast", "rotate": True,
-                "audio": ["-ar", "48000", "-ac", "2", "-b:a", "192k"]},
-    "phone4k60": {"w": 2160, "h": 3840, "fps": 60, "vb": "60M",
-                  "noise": 12, "preset": "ultrafast", "rotate": True,
-                  "audio": ["-ar", "48000", "-ac", "2", "-b:a", "192k"]},
+    "phone1080": {"w": 1080, "h": 1920, "fps": 30, "vb": "16M", "noise": 6,
+                  "codec": _H264, "preset": "veryfast", "rotate": False,
+                  "audio": _PHONE_AUDIO},
+    "phone4k": {"w": 2160, "h": 3840, "fps": 30, "vb": "45M", "noise": 6,
+                "codec": _H264, "preset": "veryfast", "rotate": True,
+                "audio": _PHONE_AUDIO},
+    "iphone1080hdr": {"w": 1080, "h": 1920, "fps": 30, "vb": "10M", "noise": 6,
+                      "codec": _HLG, "preset": "superfast", "rotate": True,
+                      "audio": _PHONE_AUDIO},
+    "iphone4khdr": {"w": 2160, "h": 3840, "fps": 30, "vb": "45M", "noise": 6,
+                    "codec": _HLG, "preset": "superfast", "rotate": True,
+                    "audio": _PHONE_AUDIO},
+}
+
+# web/src/app/app/page.tsx PRESETS[*].settings, as sent by onProcess.
+PRESETS: dict[str, dict] = {
+    "tiktok": {"caption_preset": "clipper", "style": "tight",
+               "voice_triggers": True, "remove_fillers": True,
+               "smartcam_enabled": True, "smartcam_format": "portrait",
+               "output_formats": ["9:16"]},
+    "podcast": {"caption_preset": "clean", "style": "smooth",
+                "voice_triggers": True, "remove_fillers": True,
+                "smartcam_enabled": False, "smartcam_format": "landscape",
+                "output_formats": ["16:9", "9:16"]},
+    "vlog": {"caption_preset": "subtle", "style": "balanced",
+             "voice_triggers": True, "remove_fillers": True,
+             "smartcam_enabled": False, "smartcam_format": "portrait",
+             "output_formats": []},
+    "captions": {"caption_preset": "clean", "style": "smooth",
+                 "voice_triggers": False, "remove_fillers": False,
+                 "smartcam_enabled": False, "smartcam_format": "portrait",
+                 "output_formats": []},
 }
 
 SENTENCES = [
@@ -69,8 +111,18 @@ SENTENCES = [
 ]
 
 
+def redact(text: str) -> str:
+    """Strip query strings (presigned signatures) from any URL."""
+    return re.sub(r"(https?://[^\s?'\"]+)\?[^\s'\"]*", r"\1?…", str(text))
+
+
 def run(cmd: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, check=True, capture_output=True)
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(redact(
+            f"{Path(cmd[0]).name} exit {r.returncode}: "
+            f"{(r.stdout or '')[-400:]} {(r.stderr or '')[-400:]}"))
+    return r
 
 
 def wav_seconds(path: Path) -> float:
@@ -117,17 +169,16 @@ def make_video(profile: str, minutes: float, work: Path) -> Path:
         w, h = h, w
     vf = f"testsrc2=size={w}x{h}:rate={cfg['fps']}"
     if cfg["noise"]:
-        # Sensor-like grain so the encoder can't compress the frames
-        # unrealistically well (affects every size/time number).
+        # Light sensor-like grain so frames don't compress unrealistically
+        # well. Level is a guess — it moves every size/time number.
         vf += f",noise=alls={cfg['noise']}:allf=t+u"
     vb = cfg["vb"]
     num = float(vb[:-1]) * (1e6 if vb.endswith("M") else 1e3)
     raw = work / f"raw_{profile}_{minutes:g}.mp4"
     run(["ffmpeg", "-y", "-f", "lavfi", "-i", vf, "-i", str(audio),
-         "-shortest", "-c:v", "libx264", "-preset", cfg["preset"],
-         "-pix_fmt", "yuv420p", "-g", str(cfg["fps"]),
-         "-b:v", vb, "-maxrate", f"{int(num * 1.2)}",
-         "-bufsize", f"{int(num * 2)}",
+         "-shortest", *cfg["codec"], "-preset", cfg["preset"],
+         "-g", str(cfg["fps"]), "-b:v", vb, "-maxrate", str(int(num * 1.2)),
+         "-bufsize", str(int(num * 2)),
          "-c:a", "aac", *cfg["audio"], "-movflags", "+faststart", str(raw)])
     audio.unlink(missing_ok=True)
     out = work / f"{profile}_{minutes:g}min.mp4"
@@ -137,9 +188,9 @@ def make_video(profile: str, minutes: float, work: Path) -> Path:
                  "-c", "copy", "-movflags", "+faststart", str(out)])
             raw.unlink(missing_ok=True)
             return out
-        except subprocess.CalledProcessError as e:
-            print(f"   (rotation flag failed, using unrotated file: "
-                  f"{e.stderr[-200:]!r})", flush=True)
+        except RuntimeError as e:
+            print(f"   (rotation flag failed, using unrotated file: {e})",
+                  flush=True)
     raw.rename(out)
     return out
 
@@ -147,17 +198,18 @@ def make_video(profile: str, minutes: float, work: Path) -> Path:
 def probe(video: Path) -> str:
     r = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0",
-         "-show_entries", "stream=width,height,r_frame_rate,bit_rate:"
-         "stream_side_data=rotation", "-of", "json", str(video)],
-        capture_output=True, text=True)
+         "-show_entries", "stream=codec_name,profile,width,height,"
+         "r_frame_rate,bit_rate,color_transfer:stream_side_data=rotation",
+         "-of", "json", str(video)], capture_output=True, text=True)
     try:
         s = json.loads(r.stdout)["streams"][0]
         rot = next((d.get("rotation") for d in s.get("side_data_list", [])
                     if "rotation" in d), None)
-        fps = s.get("r_frame_rate", "?")
+        fps = s.get("r_frame_rate", "?").replace("/1", "")
         br = int(s.get("bit_rate") or 0) / 1e6
-        return (f"{s['width']}x{s['height']} @{fps} {br:.0f} Mbit/s"
-                + (f" rot {rot}" if rot is not None else ""))
+        hdr = " HLG" if s.get("color_transfer") == "arib-std-b67" else ""
+        return (f"{s['codec_name']} {s['width']}x{s['height']} {fps}fps "
+                f"{br:.0f}Mbit/s{hdr}" + (f" rot{rot}" if rot is not None else ""))
     except Exception:
         return "?"
 
@@ -166,136 +218,207 @@ def http(method: str, path: str, data: bytes | None = None,
          headers: dict | None = None) -> dict:
     req = urllib.request.Request(API + path, data=data, method=method,
                                  headers=headers or {})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(r.read() or b"{}")
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        body = e.read()[:500].decode(errors="replace")
+        raise RuntimeError(redact(f"{method} {path} → HTTP {e.code}: {body}"))
 
 
-SETTINGS = json.dumps({
-    # Same settings the web app sends for the TikTok / Reels preset.
-    "caption_preset": "clipper", "style": "balanced",
-    "voice_triggers": True, "remove_fillers": True,
-    "whisper_model": "medium", "smartcam_enabled": False,
-    "resolution": "1080", "output_formats": [],
-})
-
-
-def upload(video: Path) -> str:
-    if video.stat().st_size > R2_THRESHOLD:
+def upload(video: Path, preset: str) -> str:
+    settings = json.dumps({**PRESETS[preset], "whisper_model": "medium",
+                           "resolution": "1080", "_cost_test": True})
+    size = video.stat().st_size
+    if size > SINGLE_PUT_LIMIT:
+        raise RuntimeError(f"{size / 1e9:.1f} GB is over the single-PUT limit; "
+                           "use a shorter run")
+    if size > R2_THRESHOLD:
         # Big files: presigned PUT straight to R2, then /jobs with the key.
         info = http("POST", "/uploads/presign",
                     json.dumps({"filename": video.name,
                                 "content_type": "video/mp4"}).encode(),
                     {"Content-Type": "application/json"})
-        run(["curl", "-sS", "--fail", "-m", "3600", "-X", "PUT",
+        run(["curl", "-sS", "--fail-with-body", "-m", "3600", "-X", "PUT",
              "-H", "Content-Type: video/mp4", "-T", str(video),
              info["upload_url"]])
         form = ["-F", f"storage_key={info['storage_key']}",
                 "-F", f"filename={video.name}"]
     else:
         form = ["-F", f"file=@{video};type=video/mp4"]
-    out = subprocess.run(
-        ["curl", "-sS", "--fail-with-body", "-m", "1800", *form,
-         "-F", f"settings={SETTINGS}", f"{API}/jobs"],
-        check=True, capture_output=True, text=True)
+    out = run(["curl", "-sS", "--fail-with-body", "-m", "1800", *form,
+               "-F", f"settings={settings}", f"{API}/jobs"])
     return json.loads(out.stdout)["job_id"]
 
 
-def wait(job_id: str, until: set[str], timeout: float) -> dict:
+def wait(job_id: str, target: str, timeout: float) -> dict:
+    """Poll until `target` status, an error, or (while rendering) the
+    backend's render failure: status back to awaiting_review + error."""
     t0 = time.time()
     j: dict = {}
+    errors = 0
     while time.time() - t0 < timeout:
-        j = http("GET", f"/jobs/{job_id}")
-        if j["status"] in until or j["status"] == "error":
+        try:
+            j = http("GET", f"/jobs/{job_id}")
+            errors = 0
+        except Exception as e:  # transient, like the web app's poller
+            errors += 1
+            if errors >= 6:
+                raise RuntimeError(f"polling failed 6x in a row: {e}")
+            time.sleep(10)
+            continue
+        st = j.get("status")
+        if st == target or st == "error":
+            return j
+        if target == "done" and st == "awaiting_review" and j.get("error"):
             return j
         time.sleep(10)
-    raise TimeoutError(f"{job_id} stuck in {j.get('status')}: {j.get('message')}")
+    raise TimeoutError(f"{job_id} still {j.get('status')} after "
+                       f"{timeout:.0f}s: {j.get('message')}")
 
 
-def parse_runs(arg: str) -> list[tuple[str, float]]:
+SENTENCE_END = re.compile(r"[.!?…][\"'»)\]]*\s*$")
+
+
+def build_phrases(subs: list[dict]) -> list[dict]:
+    """Port of page.tsx buildPhrases + the onApplyRender flattening."""
+    phrases, cur = [], []
+
+    def words(t: str) -> int:
+        return len((t or "").split())
+
+    def flush() -> None:
+        if not cur:
+            return
+        first, last = cur[0], cur[-1]
+        text = " ".join((s.get("text") or "").strip() for s in cur).strip()
+        if text:
+            phrases.append({
+                "start": first["start"], "end": last["end"], "text": text,
+                "original_start": first.get("original_start", first["start"]),
+                "original_end": last.get("original_end", last["end"])})
+        cur.clear()
+
+    for s in subs:
+        if not (s.get("text") or "").strip():
+            continue
+        if cur:
+            prev = cur[-1]
+            if (SENTENCE_END.search((prev.get("text") or "").strip())
+                    or s["start"] - prev["end"] > 1.5
+                    or sum(words(x.get("text")) for x in cur)
+                    + words(s.get("text")) > 10):
+                flush()
+        cur.append(s)
+    flush()
+    return phrases
+
+
+def parse_runs(arg: str) -> list[tuple[str, float, str]]:
     runs = []
     for item in (x.strip() for x in arg.split(",")):
         if not item:
             continue
-        prof, _, mins = item.rpartition(":")
-        prof = prof or "synthetic"
+        bits = item.split(":")
+        if len(bits) == 1:
+            bits = ["synthetic", bits[0]]
+        prof, mins = bits[0], float(bits[1])
+        preset = bits[2] if len(bits) > 2 else "tiktok"
         if prof not in PROFILES:
             raise SystemExit(f"unknown profile {prof!r}; use {list(PROFILES)}")
-        runs.append((prof, float(mins)))
+        if preset not in PRESETS:
+            raise SystemExit(f"unknown preset {preset!r}; use {list(PRESETS)}")
+        runs.append((prof, mins, preset))
     return runs
 
 
+def report(rows: list[dict], final: bool) -> str:
+    lines = ["| Profil | Vorlage | Länge | Quelle | MB | Job | Status | "
+             "Upload | Analyse | Render |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
+    lines += [f"| {r['profile']} | {r['preset']} | {r['min']:g} min | "
+              f"{r['info']} | {r['mb']:.0f} | `{r['job']}` | {r['status']} | "
+              f"{r['up']:.0f}s | {r['an']:.0f}s | {r['re']:.0f}s |"
+              for r in rows]
+    if final and ADMIN:
+        try:
+            costs = http("GET", "/admin/costs",
+                         headers={"X-Admin-Token": ADMIN})
+            by_job = {c["job_id"]: c for c in costs["rows"]}
+            lines += ["", "| Profil | Min | Speicher MB | USD gesamt | USD/Min "
+                      "| Teile | Modal s / fallback | Dateien MB |",
+                      "|---|---|---|---|---|---|---|---|"]
+            for r in rows:
+                c = by_job.get(r["job"])
+                if not c:
+                    continue
+                parts = ", ".join(f"{k[4:]} {v:.4f}" for k, v in c["usd"].items()
+                                  if k != "usd_total")
+                u = c.get("usage", {})
+                lines.append(
+                    f"| {r['profile']} | {c['video_minutes']} | {c['storage_mb']} "
+                    f"| {c['usd_all_in']:.4f} | {c['usd_per_video_minute']} | "
+                    f"{parts} | {u.get('modal_s', 0):.0f} / "
+                    f"{int(u.get('modal_failed', 0))} | "
+                    f"{json.dumps(c.get('files_mb', {}))} |")
+        except Exception as e:
+            lines += ["", f"(cost table unavailable: {e})"]
+    text = "\n".join(lines)
+    if SUMMARY:
+        Path(SUMMARY).write_text("## Cost test\n\n" + text + "\n")
+    return text
+
+
 def main() -> int:
-    runs = parse_runs(sys.argv[1] if len(sys.argv) > 1
-                      else "phone1080:2,phone1080:10,phone4k:3")
-    rows = []
+    runs = parse_runs(sys.argv[1] if len(sys.argv) > 1 else
+                      "phone1080:2,phone1080:10,phone4k:3,iphone4khdr:3")
+    rows: list[dict] = []
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
-        for prof, m in runs:
-            t_gen = time.time()
-            video = make_video(prof, m, work)
-            size_mb = video.stat().st_size / 1e6
-            info = probe(video)
-            print(f"== {prof} {m:g} min: {info}, {size_mb:.0f} MB "
-                  f"(built in {time.time() - t_gen:.0f}s)", flush=True)
-            row = {"profile": prof, "min": m, "info": info, "mb": size_mb,
-                   "job": "-", "status": "?", "up": 0, "an": 0, "re": 0}
+        for prof, m, preset in runs:
+            row = {"profile": prof, "preset": preset, "min": m, "info": "?",
+                   "mb": 0.0, "job": "-", "status": "?", "up": 0, "an": 0,
+                   "re": 0}
             rows.append(row)
+            video = None
             try:
+                t_gen = time.time()
+                video = make_video(prof, m, work)
+                row["mb"] = video.stat().st_size / 1e6
+                row["info"] = probe(video)
+                print(f"== {prof}/{preset} {m:g} min: {row['info']}, "
+                      f"{row['mb']:.0f} MB (built in {time.time() - t_gen:.0f}s)",
+                      flush=True)
                 t0 = time.time()
-                row["job"] = upload(video)
+                row["job"] = upload(video, preset)
                 row["up"] = time.time() - t0
                 print(f"   job {row['job']} uploaded in {row['up']:.0f}s",
                       flush=True)
-                j = wait(row["job"], {"awaiting_review"}, 3600)
+                j = wait(row["job"], "awaiting_review", 3600)
                 row["an"] = time.time() - t0 - row["up"]
-                if j["status"] == "error":
+                if j["status"] != "awaiting_review":
                     row["status"] = f"analyze error: {j.get('message')}"
-                    print(f"   {row['status']}", flush=True)
-                    continue
-                subs = http("GET", f"/jobs/{row['job']}/subtitles")["subtitles"]
-                http("POST", f"/jobs/{row['job']}/render",
-                     json.dumps({"subtitles": subs,
-                                 "disabled_cuts": []}).encode(),
-                     {"Content-Type": "application/json"})
-                t1 = time.time()
-                j = wait(row["job"], {"done"}, 3600)
-                row["re"] = time.time() - t1
-                row["status"] = "done" if j["status"] == "done" else \
-                    f"render failed: {j.get('error') or j.get('message')}"
-                print(f"   analyze {row['an']:.0f}s, render {row['re']:.0f}s "
-                      f"→ {row['status']}", flush=True)
+                else:
+                    subs = http("GET", f"/jobs/{row['job']}/subtitles")
+                    http("POST", f"/jobs/{row['job']}/render",
+                         json.dumps({"subtitles": build_phrases(subs["subtitles"]),
+                                     "disabled_cuts": []}).encode(),
+                         {"Content-Type": "application/json"})
+                    t1 = time.time()
+                    j = wait(row["job"], "done", 3600)
+                    row["re"] = time.time() - t1
+                    row["status"] = "done" if j["status"] == "done" else \
+                        f"render failed: {j.get('error') or j.get('message')}"
             except Exception as e:  # keep going with the next run
-                row["status"] = f"failed: {e}"
-                print(f"   {row['status']}", flush=True)
+                row["status"] = f"failed: {redact(e)}"[:300]
             finally:
-                video.unlink(missing_ok=True)
+                if video is not None:
+                    video.unlink(missing_ok=True)
+            print(f"   analyze {row['an']:.0f}s, render {row['re']:.0f}s "
+                  f"→ {row['status']}", flush=True)
+            report(rows, final=False)  # summary survives a later cancel
 
-    lines = ["| Profil | Länge | Quelle | MB | Job | Status | Upload | Analyse | Render |",
-             "|---|---|---|---|---|---|---|---|---|"]
-    lines += [f"| {r['profile']} | {r['min']:g} min | {r['info']} | "
-              f"{r['mb']:.0f} | `{r['job']}` | {r['status']} | {r['up']:.0f}s | "
-              f"{r['an']:.0f}s | {r['re']:.0f}s |" for r in rows]
-    if ADMIN:
-        costs = http("GET", "/admin/costs", headers={"X-Admin-Token": ADMIN})
-        by_job = {r["job_id"]: r for r in costs["rows"]}
-        lines += ["", "| Profil | Job | Minuten | Speicher MB | USD gesamt | "
-                  "USD/Min | Teile | Dateien MB |",
-                  "|---|---|---|---|---|---|---|---|"]
-        for r in rows:
-            c = by_job.get(r["job"])
-            if not c:
-                continue
-            parts = ", ".join(f"{k[4:]} {v:.4f}" for k, v in c["usd"].items()
-                              if k != "usd_total")
-            lines.append(
-                f"| {r['profile']} | `{r['job']}` | {c['video_minutes']} | "
-                f"{c['storage_mb']} | {c['usd_all_in']:.4f} | "
-                f"{c['usd_per_video_minute']} | {parts} | "
-                f"{json.dumps(c.get('files_mb', {}))} |")
-    text = "\n".join(lines)
-    print(text)
-    if SUMMARY:
-        Path(SUMMARY).write_text("## Cost test\n\n" + text + "\n")
+    print(report(rows, final=True))
     return 0 if all(r["status"] == "done" for r in rows) else 1
 
 

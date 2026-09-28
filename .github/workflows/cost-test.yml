@@ -10,11 +10,11 @@ on:
     inputs:
       runs:
         description: >-
-          profile:minutes pairs, comma-separated. Profiles: synthetic
-          (1080p 1 Mbit/s), phone1080 (1080p30 16 Mbit/s), phone4k
-          (4K30 45 Mbit/s, rotated), phone4k60 (4K60 60 Mbit/s, rotated)
+          profile:minutes[:preset], comma-separated. Profiles: synthetic,
+          phone1080, phone4k, iphone1080hdr, iphone4khdr. Presets: tiktok
+          (default), podcast, vlog, captions. See .github/scripts/cost_test.py
         required: false
-        default: 'phone1080:2,phone1080:10,phone4k:3'
+        default: 'phone1080:2,phone1080:10,phone4k:3,iphone4khdr:3'
 
 permissions:
   contents: read

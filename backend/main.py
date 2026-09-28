@@ -47,6 +47,7 @@ from contextlib import asynccontextmanager
 import time
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
@@ -328,6 +329,10 @@ def _run_analyze_inner(job_id: str) -> None:
             # instead of keeping a second full-size copy for weeks.
             _remove_upload(job.input_path)
             store.update(job_id, input_path=None)
+            key = (job.settings or {}).get("_r2_storage_key")
+            if key:  # the R2 copy of a big upload isn't needed either
+                from backend.storage import delete_from_r2
+                delete_from_r2(key)
         except Exception as e:
             tb = traceback.format_exc()
             print(f"[job {job_id}] ANALYZE FAILED: {e}\n{tb}", flush=True)
@@ -570,7 +575,10 @@ async def create_job(
         ) as f:
             input_path = f.name
         try:
-            download_from_r2(storage_key, input_path)
+            # In a worker thread: a multi-GB download inside this async
+            # handler used to block the event loop, stalling every other
+            # request (polls, previews, uploads) until it finished.
+            await run_in_threadpool(download_from_r2, storage_key, input_path)
         except Exception as e:
             try:
                 os.remove(input_path)
@@ -585,7 +593,7 @@ async def create_job(
         with tempfile.NamedTemporaryFile(
             delete=False, suffix=suffix, dir=str(job_input_dir)
         ) as f:
-            shutil.copyfileobj(file.file, f)
+            await run_in_threadpool(shutil.copyfileobj, file.file, f)
             input_path = f.name
     else:
         raise HTTPException(
@@ -611,7 +619,8 @@ def get_job(job_id: str):
 
 
 @app.get("/admin/costs")
-def admin_costs(x_admin_token: str = Header(default="")):
+def admin_costs(x_admin_token: str = Header(default=""),
+                exclude_tests: bool = False):
     """What processing costs us — per job and per video minute.
 
     Protected by CLEO_ADMIN_TOKEN (send it as X-Admin-Token); disabled
@@ -633,14 +642,22 @@ def admin_costs(x_admin_token: str = Header(default="")):
             str(f.relative_to(job_dir)): f.stat().st_size
             for f in job_dir.rglob("*") if f.is_file()
         } if job_dir.exists() else {}
+        served = sum(files.values())
         if job.input_path and Path(job.input_path).exists():
             files["(original upload)"] = Path(job.input_path).stat().st_size
         size = sum(files.values())
         c["usd_storage"] = costs.storage_usd(size, retention_days(job.plan))
-        total = c.get("usd_total", 0.0) + c["usd_storage"]
+        # Everything in the job folder is sent to the browser at least
+        # once (source + preview in the editor, the final downloads).
+        c["usd_egress_est"] = costs.egress_usd(served)
+        total = c.get("usd_total", 0.0) + c["usd_storage"] + c["usd_egress_est"]
         minutes = (job.duration or 0) / 60
+        is_test = bool((job.settings or {}).get("_cost_test"))
+        if exclude_tests and is_test:
+            continue
         rows.append({
             "job_id": job.id,
+            "test": is_test,
             "status": job.status,
             "plan": job.plan,
             "video_minutes": round(minutes, 2),

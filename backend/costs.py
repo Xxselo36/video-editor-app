@@ -37,6 +37,9 @@ RATES: dict[str, float] = {
     "railway_vcpu_s": 20.0 / (30 * 86400),
     "railway_ram_gb_s": 10.0 / (30 * 86400),
     "railway_volume_gb_month": 0.15,
+    # Railway network egress, $ per GB (source + preview streamed to the
+    # editor, final videos downloaded)
+    "railway_egress_gb": 0.05,
     # Modal: per physical core-second and GiB-second; the render
     # function asks for cpu=8, memory=8 GiB (backend/modal_render.py)
     "modal_core_s": 0.0000131,
@@ -105,6 +108,18 @@ def record_modal(wall_seconds: float) -> None:
              + RATES["modal_gib_s"] * RATES["modal_gib"])
     _add(bucket, "modal_s", wall_seconds)
     _add(bucket, "usd_modal", wall_seconds * per_s)
+
+
+def record_event(name: str) -> None:
+    """Count a notable event on the job (e.g. modal_failed → local render)."""
+    bucket = _current()
+    if bucket is not None:
+        _add(bucket, name, 1)
+
+
+def egress_usd(total_bytes: int) -> float:
+    """Railway outbound traffic for serving `total_bytes` once."""
+    return total_bytes / 1e9 * RATES["railway_egress_gb"]
 
 
 def storage_usd(total_bytes: int, days: float) -> float:
