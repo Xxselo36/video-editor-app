@@ -30,6 +30,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.errors.renderFailed":
     "Renderowanie nie powiodło się. Twoje zmiany są zapisane — otwórz projekt i wyrenderuj ponownie.",
   "app.errors.serverNoResponse": "Serwer nie odpowiedział. Spróbuj ponownie.",
+  "app.errors.serverBusy": "Nasze serwery są teraz przeciążone. Spróbuj ponownie za kilka minut.",
   "app.errors.saveEditsFailed": "Nie udało się zapisać zmian — sprawdź połączenie i spróbuj ponownie.",
   "app.errors.title": "Coś poszło nie tak",
   "app.errors.tryAgain": "Spróbuj ponownie",

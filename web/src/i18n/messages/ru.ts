@@ -30,6 +30,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.errors.renderFailed":
     "Рендер не удался. Твои изменения сохранены — открой проект и запусти рендер снова.",
   "app.errors.serverNoResponse": "Сервер не отвечает. Попробуй ещё раз.",
+  "app.errors.serverBusy": "Наши серверы сейчас перегружены. Попробуй снова через несколько минут.",
   "app.errors.saveEditsFailed": "Не удалось сохранить изменения — проверь подключение и попробуй снова.",
   "app.errors.title": "Что-то пошло не так",
   "app.errors.tryAgain": "Попробовать снова",

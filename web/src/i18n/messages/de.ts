@@ -30,6 +30,7 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.errors.renderFailed":
     "Rendern fehlgeschlagen. Deine Bearbeitungen sind gespeichert — öffne das Projekt und rendere erneut.",
   "app.errors.serverNoResponse": "Der Server hat nicht geantwortet. Bitte versuch's erneut.",
+  "app.errors.serverBusy": "Unsere Server sind gerade ausgelastet. Bitte versuch es in ein paar Minuten erneut.",
   "app.errors.saveEditsFailed": "Deine Bearbeitungen konnten nicht gespeichert werden — prüfe deine Verbindung und versuch's erneut.",
   "app.errors.title": "Etwas ist schiefgelaufen",
   "app.errors.tryAgain": "Erneut versuchen",

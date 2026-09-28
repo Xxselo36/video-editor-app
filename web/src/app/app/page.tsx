@@ -67,6 +67,7 @@ const STORED_MESSAGE_KEYS: MessageKey[] = [
   "app.errors.noAudio",
   "app.errors.renderFailed",
   "app.errors.serverNoResponse",
+  "app.errors.serverBusy",
   "app.card.renderFailedNote",
 ];
 function localizeKnown(text: string, t: TFn): string {
@@ -86,6 +87,8 @@ function friendlyError(raw: unknown, t: TFn): string {
   if (known !== txt) return known;
   // Already a user-facing message (ours or the backend's).
   if (txt.endsWith(".") && /\b(Please|please)\b/.test(txt)) return txt;
+  if (l.includes("server_storage_full") || l.includes("507"))
+    return t("app.errors.serverBusy");
   if (l.includes("stalled") || l.includes("network") || l.includes("failed to fetch"))
     return t("app.errors.connection");
   if (l.includes("interrupted"))

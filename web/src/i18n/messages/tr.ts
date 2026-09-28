@@ -30,6 +30,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.errors.renderFailed":
     "Render başarısız oldu. Düzenlemelerin kaydedildi — projeyi aç ve yeniden render et.",
   "app.errors.serverNoResponse": "Sunucu yanıt vermedi. Lütfen tekrar dene.",
+  "app.errors.serverBusy": "Sunucularımız şu anda yoğun. Lütfen birkaç dakika sonra tekrar dene.",
   "app.errors.saveEditsFailed": "Düzenlemelerin kaydedilemedi — bağlantını kontrol edip tekrar dene.",
   "app.errors.title": "Bir şeyler ters gitti",
   "app.errors.tryAgain": "Tekrar dene",

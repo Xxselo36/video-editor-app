@@ -3,7 +3,9 @@ name: Cost test (live backend)
 # Runs synthetic talking-head videos through the live backend
 # (upload → analyze → render) so /admin/costs gets real numbers.
 # Costs a few cents per run (Groq, Claude, Modal). Per-job costs are
-# printed when the CLEO_ADMIN_TOKEN repo secret is set.
+# printed when the CLEO_ADMIN_TOKEN repo secret is set. Test jobs are
+# deleted afterwards unless keep_jobs is set. With delete_jobs set,
+# only those job ids are deleted and no test runs.
 
 on:
   workflow_dispatch:
@@ -15,6 +17,14 @@ on:
           (default), podcast, vlog, captions. See .github/scripts/cost_test.py
         required: false
         default: 'phone1080:2,phone1080:10,phone4k:3,iphone4khdr:3'
+      keep_jobs:
+        description: Keep the test jobs on the server afterwards
+        type: boolean
+        default: false
+      delete_jobs:
+        description: Only delete these job ids (comma-separated), run nothing
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -28,10 +38,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Delete jobs
+        if: inputs.delete_jobs != ''
+        env:
+          DELETE_JOBS: ${{ inputs.delete_jobs }}
+        run: python .github/scripts/cost_test.py --delete "$DELETE_JOBS"
       - name: Install ffmpeg + espeak-ng
+        if: inputs.delete_jobs == ''
         run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
       - name: Run
+        if: inputs.delete_jobs == ''
         env:
           CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
           RUNS: ${{ inputs.runs }}
+          KEEP_JOBS: ${{ inputs.keep_jobs }}
         run: python .github/scripts/cost_test.py "$RUNS"

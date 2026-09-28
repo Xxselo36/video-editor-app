@@ -30,6 +30,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.errors.renderFailed":
     "レンダリングに失敗しました。編集内容は保存されています — プロジェクトを開いて再度レンダリングしてください。",
   "app.errors.serverNoResponse": "サーバーからの応答がありません。もう一度お試しください。",
+  "app.errors.serverBusy": "現在サーバーが混み合っています。数分後にもう一度お試しください。",
   "app.errors.saveEditsFailed": "編集内容を保存できませんでした — 接続を確認して、もう一度お試しください。",
   "app.errors.title": "問題が発生しました",
   "app.errors.tryAgain": "再試行",

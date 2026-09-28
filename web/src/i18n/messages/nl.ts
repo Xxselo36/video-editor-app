@@ -30,6 +30,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.errors.renderFailed":
     "Renderen is mislukt. Je bewerkingen zijn opgeslagen — open het project en render opnieuw.",
   "app.errors.serverNoResponse": "De server reageerde niet. Probeer het opnieuw.",
+  "app.errors.serverBusy": "Onze servers zijn nu druk bezet. Probeer het over een paar minuten opnieuw.",
   "app.errors.saveEditsFailed": "Je bewerkingen konden niet worden opgeslagen — controleer je verbinding en probeer het opnieuw.",
   "app.errors.title": "Er ging iets mis",
   "app.errors.tryAgain": "Opnieuw proberen",

@@ -30,6 +30,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.errors.renderFailed":
     "रेंडर करना नाकाम रहा। आपके एडिट्स सेव हैं — प्रोजेक्ट खोलकर फिर से रेंडर करें।",
   "app.errors.serverNoResponse": "सर्वर से जवाब नहीं मिला। कृपया फिर कोशिश करें।",
+  "app.errors.serverBusy": "हमारे सर्वर अभी व्यस्त हैं। कृपया कुछ मिनट बाद फिर कोशिश करें।",
   "app.errors.saveEditsFailed": "आपके एडिट्स सेव नहीं हो पाए — अपना कनेक्शन चेक करके फिर कोशिश करें।",
   "app.errors.title": "कुछ गलत हो गया",
   "app.errors.tryAgain": "फिर कोशिश करें",

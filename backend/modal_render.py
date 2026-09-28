@@ -108,6 +108,7 @@ def render_burn_concat(
         _ffmpeg_concat,
         _export_format,
         _generate_thumbnail,
+        _video_size,
         EXPORT_FORMATS,
     )
 
@@ -154,8 +155,14 @@ def render_burn_concat(
     from concurrent.futures import ThreadPoolExecutor
     valid = [f for f in output_formats if f in EXPORT_FORMATS]
     if valid:
+        primary_size = _video_size(str(primary_out))
+
         def _do_export(fmt: str) -> tuple[str, str]:
             tw, th = EXPORT_FORMATS[fmt]
+            if primary_size == (tw, th):
+                # Primary already has this size: point at it, so the
+                # backend downloads and stores it only once.
+                return fmt, "output.mp4"
             fname = f"output_{fmt.replace(':', '-')}.mp4"
             _export_format(str(primary_out), str(job_dir / fname), tw, th)
             return fmt, fname
