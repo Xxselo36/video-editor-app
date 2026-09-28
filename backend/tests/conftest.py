@@ -55,7 +55,8 @@ WEBHOOK_SECRET = "whsec_test"
 _FEATURE_ENV = (
     "CLERK_ISSUER", "CLERK_JWT_KEY", "CLERK_AUTHORIZED_PARTIES",
     "CLERK_SECRET_KEY", "CLEO_ADMIN_TOKEN", "CLEO_MEDIA_SECRET",
-    "CLEO_BILLING_ENFORCE", "CLEO_COMP_USERS", "CLEO_APP_URL",
+    "CLEO_BILLING_ENFORCE", "CLEO_COMP_USERS", "CLEO_BILLING_TESTERS",
+    "CLEO_APP_URL",
     "LEMONSQUEEZY_API_KEY", "LEMONSQUEEZY_STORE_ID",
     "LEMONSQUEEZY_WEBHOOK_SECRET", "LEMONSQUEEZY_TEST_MODE",
     "LEMONSQUEEZY_VARIANT_STARTER", "LEMONSQUEEZY_VARIANT_PRO",
@@ -70,6 +71,7 @@ def clean_state(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     auth._jwks = None
     billing._price_cache.clear()
+    billing._refresh_tried.clear()
     with store._lock:
         store._conn.execute("DELETE FROM jobs")
         store._conn.commit()
@@ -229,10 +231,16 @@ def sign(raw: bytes, secret: str = WEBHOOK_SECRET) -> str:
     return hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
 
 
-def fixture_payload(name: str, user_id: str | None = None) -> dict:
+def fixture_payload(name: str, user_id: str | None = None,
+                    signed: bool = True) -> dict:
+    """A captured webhook, as if from one of our checkouts for user_id
+    (custom data signed like billing.create_checkout does)."""
     payload = json.loads((FIXTURES / name).read_text())
     if user_id is not None:
-        payload["meta"]["custom_data"]["user_id"] = user_id
+        custom = payload["meta"]["custom_data"]
+        custom["user_id"] = user_id
+        if signed:
+            custom["sig"] = billing.checkout_signature(user_id)
     return payload
 
 

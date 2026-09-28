@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
+import { AUTH_ENABLED } from "@/lib/auth";
 import { OPERATOR, RETENTION_DAYS } from "@/lib/legal";
 
 export const metadata: Metadata = { title: "Terms – CleoCuts" };
@@ -15,7 +17,10 @@ function H({ children }: { children: React.ReactNode }) {
   return <h2 className="mb-2 mt-8 font-semibold" style={{ color: "var(--text-strong)" }}>{children}</h2>;
 }
 
+// Accounts and paid plans only exist with auth on — without it, no page
+// (as in the anonymous beta; the footer link is hidden then too).
 export default function TermsPage() {
+  if (!AUTH_ENABLED) notFound();
   return (
     <main className="relative z-10 mx-auto w-full max-w-2xl px-5 py-12 text-sm leading-relaxed" style={{ color: "var(--text-body)" }}>
       <Link href="/" className="text-xs" style={{ color: "var(--text-muted)" }}>← CleoCuts</Link>

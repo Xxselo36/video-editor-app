@@ -41,6 +41,7 @@ jobs:
       - name: Delete jobs
         if: inputs.delete_jobs != ''
         env:
+          CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
           DELETE_JOBS: ${{ inputs.delete_jobs }}
         run: python .github/scripts/cost_test.py --delete "$DELETE_JOBS"
       - name: Install ffmpeg + espeak-ng

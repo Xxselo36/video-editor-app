@@ -9,10 +9,14 @@
  */
 
 import { storageScope } from "@/lib/auth";
+import { foldScopedKeys } from "@/lib/scopedStorage";
 
 export const ACTIVE_JOBS_KEY = "cleocuts.activeJobs.v1";
 // Per user when accounts are on (shared devices); unchanged when off.
-const key = () => ACTIVE_JOBS_KEY + storageScope();
+const key = () => {
+  foldScopedKeys(ACTIVE_JOBS_KEY);
+  return ACTIVE_JOBS_KEY + storageScope();
+};
 const CHANGE_EVENT = "cleocuts.activeJobs.change";
 
 function emitChange(): void {

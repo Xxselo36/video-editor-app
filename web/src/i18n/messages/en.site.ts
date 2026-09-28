@@ -93,6 +93,7 @@ export const enSite = {
   "site.pricing.vatNote":
     "Prices include VAT. Payments are handled by Lemon Squeezy, our Merchant of Record — they charge you and send your invoices.",
   "site.pricing.testMode": "Test mode — no real payments",
+  "site.pricing.testersOnly": "Plans can't be bought yet — checkout is in test mode for invited testers only.",
   "site.pricing.betaTitle": "Free during the open beta",
   "site.pricing.betaBody": "CleoCuts is free while we're in beta. Paid plans with more minutes are coming soon.",
 

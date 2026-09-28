@@ -198,12 +198,13 @@ def _export_format(
         raise RuntimeError(f"ffmpeg format-export failed:\n{tail}")
 
 
-def _precheck_audio(input_path: str) -> dict:
+def _precheck_audio(input_path: str, max_seconds: float | None = None) -> dict:
     """Quick volume / clipping / silence check via ffmpeg volumedetect.
 
     Runs before the heavy pipeline so we can warn the user about a bad
     recording (muted mic, distortion, totally silent) within ~2 seconds
-    instead of after a 5-minute render.
+    instead of after a 5-minute render. `max_seconds`: only look at the
+    start (see _max_seconds in analyze_only).
 
     Returns: {"mean_db": float|None, "max_db": float|None,
               "warnings": list[str]}
@@ -213,6 +214,7 @@ def _precheck_audio(input_path: str) -> dict:
         "-i", input_path,
         "-af", "volumedetect",
         "-vn", "-sn", "-dn",
+        *(["-t", f"{max_seconds:.3f}"] if max_seconds else []),
         "-f", "null", "-",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -259,8 +261,12 @@ def _normalize_orientation(
     input_path: str,
     output_path: str,
     max_side: int = 1920,
+    max_seconds: float | None = None,
 ) -> None:
     """Re-encode upload with rotation baked in, audio cleaned + LUFS-normalized.
+
+    `max_seconds` cuts the output there (everything downstream works on
+    this file); see _max_seconds in analyze_only.
 
     Three passes folded into one ffmpeg call:
       1) Re-encode video without -noautorotate so rotation metadata
@@ -322,6 +328,7 @@ def _normalize_orientation(
         # Bit-perfect audio passthrough — copies the source AAC stream
         # unchanged. No re-encode, no filter, no quality loss.
         "-c:a", "copy",
+        *(["-t", f"{max_seconds:.3f}"] if max_seconds else []),
         "-movflags", "+faststart",
         output_path,
     ]
@@ -724,8 +731,18 @@ def analyze_only(
         if progress_cb:
             progress_cb(msg, pct if pct is not None else -1)
 
+    # Set by the web backend (never by the client) when the minutes
+    # quota is enforced: the length that was charged plus a small
+    # tolerance. The charge is based on the container's duration header,
+    # which the uploader controls — without the cap a file claiming 1 s
+    # would still be transcribed and cleaned up in full.
+    try:
+        max_seconds = float(settings.get("_max_seconds") or 0) or None
+    except (TypeError, ValueError):
+        max_seconds = None
+
     _stage("Checking audio…", 1)
-    audio_precheck = _precheck_audio(input_path)
+    audio_precheck = _precheck_audio(input_path, max_seconds=max_seconds)
 
     _stage("Preparing video…", 3)
     normalized_path = str(Path(output_dir) / "normalized.mp4")
@@ -737,7 +754,8 @@ def analyze_only(
     _max_side = _res_map.get(_res_str.lower(), 1920)
     print(f"[render] resolution setting='{_res_str}' → "
           f"longest-side max={_max_side}", flush=True)
-    _normalize_orientation(input_path, normalized_path, max_side=_max_side)
+    _normalize_orientation(input_path, normalized_path, max_side=_max_side,
+                           max_seconds=max_seconds)
 
     # Optional SmartCam reframe — runs ONCE for the primary aspect the
     # user selected. Other multi-format outputs derive from the rendered

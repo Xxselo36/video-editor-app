@@ -431,6 +431,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "Fiyatlara KDV dahildir. Ödemeler, satıcı kaydımız (Merchant of Record) Lemon Squeezy üzerinden yapılır — ücreti onlar tahsil eder ve faturalarını onlar gönderir.",
   "site.pricing.testMode": "Test modu — gerçek ödeme yok",
+  "site.pricing.testersOnly": "Planlar henüz satın alınamıyor — ödeme test modunda, yalnızca davetli test kullanıcıları için.",
   "site.pricing.betaTitle": "Açık beta boyunca ücretsiz",
   "site.pricing.betaBody":
     "CleoCuts beta sürecinde ücretsiz. Daha fazla dakika sunan ücretli planlar yakında geliyor.",

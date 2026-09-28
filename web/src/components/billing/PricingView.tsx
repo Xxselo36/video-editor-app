@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { IconCheck } from "@/components/Icons";
 import { useLang, useT } from "@/i18n";
 import { signUpHref } from "@/lib/auth";
+import { ApiError } from "@/lib/api";
 import {
   fmtMinutes,
   loadBillingConfig,
@@ -40,7 +41,9 @@ export function PricingView() {
   const [error, setError] = useState<string | null>(null);
 
   // A plan subscribed via Lemon Squeezy (comp accounts have a plan but
-  // no subscription behind it and may still buy one).
+  // usually no subscription behind it and may still buy one; if they do
+  // have one — or a paused / unpaid one — the backend answers 409 and
+  // startCheckout opens the portal instead).
   const subscribedPlan = me?.subscription && me.plan && !me.comp ? me.plan : null;
 
   const choose = async (p: BillingPlan) => {
@@ -55,8 +58,16 @@ export function PricingView() {
       if (subscribedPlan) await openPortal();
       else await startCheckout(p.id, auth.email);
       // Navigating away — leave the button in its busy state.
-    } catch {
-      setError(t(subscribedPlan ? "app.account.portalFailed" : "site.pricing.checkoutFailed"));
+    } catch (e) {
+      setError(
+        t(
+          e instanceof ApiError && e.code === "test_mode_testers_only"
+            ? "site.pricing.testersOnly"
+            : subscribedPlan
+              ? "app.account.portalFailed"
+              : "site.pricing.checkoutFailed",
+        ),
+      );
       setBusy(null);
     }
   };

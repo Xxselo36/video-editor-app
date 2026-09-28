@@ -428,6 +428,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "価格はVAT(付加価値税)込みです。お支払いは販売事業者(Merchant of Record)であるLemon Squeezyが処理し、請求と請求書の発行を行います。",
   "site.pricing.testMode": "テストモード — 実際の請求は発生しません",
+  "site.pricing.testersOnly": "プランはまだ購入できません。チェックアウトはテストモードで、招待されたテスターのみ利用できます。",
   "site.pricing.betaTitle": "オープンベータ期間中は無料",
   "site.pricing.betaBody": "ベータ期間中、CleoCutsは無料でご利用いただけます。より多くの分数を含む有料プランを近日公開予定です。",
 

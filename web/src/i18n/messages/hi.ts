@@ -428,6 +428,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "कीमतों में VAT शामिल है। पेमेंट Lemon Squeezy संभालता है, जो हमारा Merchant of Record है — वही आपसे पेमेंट लेता है और आपको इनवॉइस भेजता है।",
   "site.pricing.testMode": "टेस्ट मोड — कोई असली पेमेंट नहीं",
+  "site.pricing.testersOnly": "प्लान अभी खरीदे नहीं जा सकते — चेकआउट टेस्ट मोड में है, सिर्फ़ आमंत्रित टेस्टर्स के लिए।",
   "site.pricing.betaTitle": "ओपन बीटा के दौरान फ़्री",
   "site.pricing.betaBody": "बीटा के दौरान CleoCuts फ़्री है। ज़्यादा मिनटों वाले पेड प्लान जल्द आ रहे हैं।",
 

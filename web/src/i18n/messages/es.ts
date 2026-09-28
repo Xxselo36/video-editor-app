@@ -436,6 +436,7 @@ export const es: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "Los precios incluyen IVA. Los pagos los gestiona Lemon Squeezy, nuestro comerciante registrado (Merchant of Record) — ellos te cobran y te envían las facturas.",
   "site.pricing.testMode": "Modo de prueba — sin pagos reales",
+  "site.pricing.testersOnly": "Aún no se pueden comprar planes: el pago está en modo de prueba, solo para testers invitados.",
   "site.pricing.betaTitle": "Gratis durante la beta abierta",
   "site.pricing.betaBody": "CleoCuts es gratis mientras estamos en beta. Pronto llegarán planes de pago con más minutos.",
 

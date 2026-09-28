@@ -429,6 +429,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "Prijzen zijn inclusief btw. Betalingen lopen via Lemon Squeezy, onze Merchant of Record — zij brengen de kosten in rekening en sturen je facturen.",
   "site.pricing.testMode": "Testmodus — geen echte betalingen",
+  "site.pricing.testersOnly": "Abonnementen zijn nog niet te koop — de checkout staat in testmodus, alleen voor uitgenodigde testers.",
   "site.pricing.betaTitle": "Gratis tijdens de open beta",
   "site.pricing.betaBody": "CleoCuts is gratis zolang we in beta zijn. Betaalde abonnementen met meer minuten komen binnenkort.",
 

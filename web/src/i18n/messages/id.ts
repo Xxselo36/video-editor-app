@@ -429,6 +429,7 @@ export const id: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "Harga sudah termasuk PPN. Pembayaran diurus oleh Lemon Squeezy, Merchant of Record kami — mereka yang menagihmu dan mengirim fakturmu.",
   "site.pricing.testMode": "Mode tes — tanpa pembayaran sungguhan",
+  "site.pricing.testersOnly": "Paket belum bisa dibeli — checkout masih dalam mode tes, khusus penguji undangan.",
   "site.pricing.betaTitle": "Gratis selama beta terbuka",
   "site.pricing.betaBody": "CleoCuts gratis selama masih beta. Paket berbayar dengan lebih banyak menit segera hadir.",
 

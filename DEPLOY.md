@@ -262,17 +262,52 @@ vorherigen voraus:
 
 ### 7.1 Reihenfolge beim Einschalten
 
+0. **Clerk-Production-Instanz fertig:** Domain in Clerk angelegt, die
+   DNS-Records (siehe 7.2) in Cloudflare gesetzt und in Clerk als
+   verifiziert angezeigt. Sonst lädt Clerk ab Schritt 1 nicht, und
+   `/app` zeigt allen nach ~15 s nur "Couldn't load sign-in" / "Die
+   Anmeldung konnte nicht geladen werden" — der Editor ist dann für
+   alle weg.
 1. **Frontend** mit Clerk-Keys deployen (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-   **und** `CLERK_SECRET_KEY` auf Vercel — immer beide zusammen). Es schickt
-   Tokens, das Backend ignoriert sie noch.
-2. **Backend** `CLERK_ISSUER` setzen → Login ist Pflicht. Beta-Projekte
-   (ohne Besitzer) übernimmt der erste eingeloggte User, der sie öffnet.
-   `/app?job=…`-Links funktionieren danach nur noch für den Besitzer.
-3. Frontend mit Billing-UI (liest `GET /billing/config`).
-4. **Backend** Lemon-Squeezy-Variablen setzen → Billing an.
-5. Erst wenn Checkout + Webhook getestet sind: `CLEO_BILLING_ENFORCE=1`.
+   **und** `CLERK_SECRET_KEY` auf Vercel — immer beide zusammen), dann
+   **Redeploy** (`NEXT_PUBLIC_*` wird beim Build eingebacken). **Ab jetzt
+   ist Login für `/app` Pflicht** — das entscheidet das Frontend allein,
+   egal was das Backend macht. Das Backend ignoriert die Tokens noch.
+2. **Backend** `CLERK_ISSUER` setzen → das Backend verlangt Login und
+   ordnet Jobs Accounts zu. Beta-Projekte (ohne Besitzer) übernimmt der
+   erste eingeloggte User, der sie öffnet. `/app?job=…`-Links
+   funktionieren danach nur noch für den Besitzer.
+3. **Backend** Lemon-Squeezy-Variablen setzen → Billing an. Die
+   Billing-UI (Preise, Konto-Seite, Minuten) ist seit Schritt 1 im
+   Frontend und folgt `GET /billing/config` von selbst — dafür muss im
+   Frontend nichts neu deployt werden.
+4. Erst wenn Checkout + Webhook getestet sind: `CLEO_BILLING_ENFORCE=1`.
+5. Optional, erst nach 3: `NEXT_PUBLIC_BILLING_ENABLED=1` auf Vercel +
+   Redeploy. Ändert nur die Landing-Page (Badge "Open beta · free" →
+   Link zu den Preisen).
 
 Umgekehrte Reihenfolge = User bekommen 401/402 ohne UI dafür.
+
+### 7.1b Ausschalten / Rollback
+
+Genau andersherum, damit niemand 401 ohne Login-UI bekommt:
+
+1. `CLEO_BILLING_ENFORCE` entfernen (niemand wird mehr blockiert).
+2. **Backend** `CLERK_ISSUER` entfernen → Backend wieder anonym (Job-ID
+   reicht, wie in der Beta).
+3. **Frontend** `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY`
+   (und ggf. `NEXT_PUBLIC_BILLING_ENABLED`) auf Vercel entfernen →
+   Redeploy.
+
+Was dabei mit den Projektlisten passiert: Mit Accounts liegen die
+Listen im Browser pro User (`cleo-library-v1:<user-id>` usw.). Nach dem
+Ausschalten führt die Web-App sie beim ersten Laden wieder in die
+anonyme Liste des Geräts zusammen — auf einem geteilten Gerät sieht
+man dann (wie in der Beta) alle Projekte, die dort je angelegt wurden.
+Die Server-Liste (`GET /jobs`) gibt es ohne Accounts nicht; Projekte,
+die nur auf einem anderen Gerät angelegt wurden, tauchen also nicht
+auf. Abos und Minuten bleiben in der DB und gelten wieder, sobald
+Accounts wieder an sind.
 
 ### 7.2 Variablen
 
@@ -286,10 +321,16 @@ CLERK_AUTHORIZED_PARTIES = https://cleocuts.com,https://www.cleocuts.com
                            (Origins der Web-App; Default zusätzlich
                             http://localhost:3000. LAN-Handy-Test:
                             http://192.168.x.y:3000 ergänzen)
-CLERK_JWT_KEY            = optional: PEM-Public-Key (Dashboard → API Keys →
-                           "JWT public key"), dann ohne JWKS-Abruf
-CLERK_SECRET_KEY         = sk_live_… — nur für die E-Mail-Adresse beim
-                           Checkout (Clerk Backend API)
+CLERK_JWT_KEY            = empfohlen für Production: PEM-Public-Key
+                           (Dashboard → API Keys → "JWT public key"). Dann
+                           prüft das Backend Tokens ohne Netz. Ohne: Keys
+                           per JWKS von Clerk (5 min gecacht) — ist Clerk
+                           beim Start nicht erreichbar, schlägt Login fehl.
+CLERK_SECRET_KEY         = sk_live_… — die E-Mail-Adresse der User (Clerk
+                           Backend API; Session-Tokens enthalten keine).
+                           Nötig für E-Mail-Einträge in CLEO_COMP_USERS /
+                           CLEO_BILLING_TESTERS (ohne passen nur Clerk-IDs;
+                           Log-Warnung beim Start) und vorbelegt im Checkout.
 CLEO_MEDIA_SECRET        = empfohlen: langer Zufallswert (openssl rand -hex 32)
                            für die ?t=-Tokens der Video-/Bild-URLs. Ohne:
                            wird einmal erzeugt und in der DB gespeichert.
@@ -315,14 +356,30 @@ LEMONSQUEEZY_WEBHOOK_SECRET  = Signing Secret des Webhooks
 LEMONSQUEEZY_VARIANT_STARTER = Variant-ID (nicht die "pending"-Default-Variante)
 LEMONSQUEEZY_VARIANT_PRO     = …
 LEMONSQUEEZY_VARIANT_STUDIO  = …
+                               Neue Variante (z.B. Preisänderung): die neue
+                               VORNE anhängen, die alte dahinter lassen:
+                               `900001,795658` — verkauft wird die erste,
+                               Bestandskunden der alten behalten ihren Plan.
+                               Eine Variante mit Abonnenten nie einfach
+                               entfernen: deren Abos gewähren dann keinen
+                               Plan mehr.
 LEMONSQUEEZY_TEST_MODE       = 1 → nur Test-Abos zählen, Checkouts im Test-
                                Modus (zum Durchspielen auf Production mit
-                               Testkarte). Sonst zählen nur Live-Abos.
+                               Testkarte). Checkout dann NUR für
+                               CLEO_BILLING_TESTERS / CLEO_COMP_USERS (alle
+                               anderen: 403) — sonst bekäme jeder mit der
+                               öffentlichen Testkarte 4242… einen Plan.
+                               Nicht dauerhaft auf einer öffentlichen
+                               Seite lassen. Sonst zählen nur Live-Abos.
+CLEO_BILLING_TESTERS         = user_2abc…,ich@example.com — dürfen im
+                               Test-Modus kaufen (wie CLEO_COMP_USERS:
+                               Clerk-IDs oder E-Mails)
 CLEO_APP_URL                 = https://cleocuts.com (Redirect nach dem Kauf:
                                /app/account?billing=success)
 CLEO_BILLING_ENFORCE         = 1 → Uploads brauchen Abo + Minuten
 CLEO_COMP_USERS              = user_2abc…,freund@example.com (Clerk-IDs
-                               oder E-Mails → Studio gratis)
+                               oder E-Mails → Studio gratis; E-Mails nur
+                               mit CLERK_SECRET_KEY)
 CLEO_PLAN_MINUTES_STARTER    = optional, Default 90 (Pro 300, Studio 900)
 ```
 
@@ -356,9 +413,16 @@ In Lemon Squeezy:
   aber nie gestartete Dateien. Keys sind jetzt `uploads/<user-id>/…`.
 - Minuten werden **einmal beim Upload** abgebucht (Länge per ffprobe,
   sekundengenau), nach der Analyse nachberechnet, wenn das Video länger
-  war, und nur bei Serverfehlern (voller Speicher, Neustart, ffmpeg)
-  erstattet — nicht bei "No speech detected". Rendern kostet nichts
-  extra. Ein Downgrade ändert die Aufbewahrung bestehender Projekte nicht.
+  war (auch wenn die Analyse danach scheitert, z.B. "No speech
+  detected"), und nur bei Serverfehlern (voller Speicher, Neustart,
+  ffmpeg) erstattet. Mit `CLEO_BILLING_ENFORCE` wird nie mehr analysiert
+  als abgebucht (+5 s): die Länge im Datei-Header kann gefälscht sein.
+  Rendern kostet nichts extra. Ein Downgrade ändert die Aufbewahrung
+  bestehender Projekte nicht.
+- **Käufe ohne unseren Checkout** (gehostete Buy-Links, Dashboard)
+  werden keinem Account zugeordnet: die User-ID in den Custom Data muss
+  vom Backend signiert sein. Kauft jemand trotzdem so, im LS-Dashboard
+  erstatten.
 
 ### 7.4 Neue Endpoints (Kurzüberblick)
 

@@ -138,11 +138,17 @@ export function useMediaReady(): boolean {
   return useSyncExternalStore(subscribeMedia, () => mediaReady, () => !AUTH_ENABLED);
 }
 
-export function whenMediaReady(timeoutMs = 10_000): Promise<void> {
-  if (mediaReady) return Promise.resolve();
+export function isMediaReady(): boolean {
+  return mediaReady;
+}
+
+/** Resolves true once media URLs can be built, false if that didn't
+ *  happen within `timeoutMs` — callers must not build URLs then. */
+export function whenMediaReady(timeoutMs = 10_000): Promise<boolean> {
+  if (mediaReady) return Promise.resolve(true);
   return new Promise((resolve) => {
-    mediaWaiters.push(resolve);
-    setTimeout(resolve, timeoutMs);
+    mediaWaiters.push(() => resolve(true));
+    setTimeout(() => resolve(mediaReady), timeoutMs);
   });
 }
 

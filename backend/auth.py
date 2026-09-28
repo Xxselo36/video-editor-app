@@ -8,8 +8,10 @@ before accounts existed (anonymous; a job id is all it takes).
 
 When on:
   * `Authorization: Bearer <Clerk session token>` (RS256). Keys come from
-    CLERK_JWT_KEY (PEM, networkless) or `<CLERK_ISSUER>/.well-known/jwks.json`
-    (cached). exp/nbf get 60 s leeway — a legacy upload can take longer
+    CLERK_JWT_KEY (PEM, networkless — recommended for production) or
+    `<CLERK_ISSUER>/.well-known/jwks.json` (key set cached 5 min, so a key
+    Clerk removes stops working; the last good set is kept while the
+    endpoint is down). exp/nbf get 60 s leeway — a legacy upload can take longer
     than the token's 60 s lifetime and FastAPI only runs dependencies
     after the whole body has arrived. `azp` must be one of
     CLERK_AUTHORIZED_PARTIES (comma list of the web app's origins).
@@ -47,6 +49,13 @@ DEFAULT_AUTHORIZED_PARTIES = (
 _LEEWAY_S = 60
 # Media tokens: one window per UTC day, current + previous accepted.
 _MEDIA_WINDOW_S = 86400
+# JWKS: fetch timeout; after a failed fetch, requests fail fast for this
+# long instead of each waiting out another timeout (the client holds a
+# lock while fetching, so they would queue up); the last good key set
+# is still served for up to _JWKS_STALE_S while the endpoint is down.
+_JWKS_TIMEOUT_S = 5
+_JWKS_RETRY_S = 30
+_JWKS_STALE_S = 6 * 3600
 
 
 @dataclass(frozen=True)
@@ -79,13 +88,54 @@ _jwks_lock = threading.Lock()
 _jwks: tuple[str, Any] | None = None  # (url, PyJWKClient)
 
 
+def _make_jwks_client(url: str):
+    """PyJWKClient without its per-kid LRU cache (`cache_keys`): that one
+    never expires, so a key Clerk removed from its JWKS (rotation after a
+    leak) stayed trusted until the process restarted. Only the key set
+    is cached (5 min). To not trade that for outages, the last good set
+    is served while the endpoint fails, and after a failure requests
+    fail fast for _JWKS_RETRY_S instead of queueing on the fetch lock."""
+    import jwt
+
+    class _Client(jwt.PyJWKClient):
+        _last_good: tuple[float, Any] | None = None
+        _failed_at = float("-inf")
+
+        def _stale(self, now: float):
+            if self._last_good and now - self._last_good[0] < _JWKS_STALE_S:
+                return self._last_good[1]
+            return None
+
+        def fetch_data(self):
+            now = time.monotonic()
+            if now - self._failed_at < _JWKS_RETRY_S:
+                stale = self._stale(now)
+                if stale is not None:
+                    return stale
+                raise jwt.PyJWKClientConnectionError(
+                    "JWKS unreachable (retrying shortly)")
+            try:
+                data = super().fetch_data()
+            except jwt.PyJWKClientConnectionError:
+                self._failed_at = now
+                stale = self._stale(now)
+                if stale is not None:
+                    print("[auth] JWKS fetch failed — using the last good "
+                          "key set", flush=True)
+                    return stale
+                raise
+            self._last_good = (now, data)
+            return data
+
+    return _Client(url, cache_keys=False, lifespan=300,
+                   timeout=_JWKS_TIMEOUT_S)
+
+
 def _jwks_client(url: str):
     global _jwks
-    import jwt
     with _jwks_lock:
         if _jwks is None or _jwks[0] != url:
-            _jwks = (url, jwt.PyJWKClient(url, cache_keys=True,
-                                          lifespan=300, timeout=10))
+            _jwks = (url, _make_jwks_client(url))
         return _jwks[1]
 
 
@@ -151,12 +201,37 @@ def _bearer_user(request: Request) -> User | None:
         claims = verify_token(token)
     except Exception as e:  # invalid, expired, JWKS unreachable, ...
         if type(e).__name__ != "ExpiredSignatureError":
-            print(f"[auth] token rejected: {type(e).__name__}: {e}",
-                  flush=True)
+            # repr + cut: messages can quote the token's (unverified)
+            # header, e.g. a `kid` with newlines forging log lines.
+            print(f"[auth] token rejected: {type(e).__name__}: "
+                  f"{str(e)[:120]!r}", flush=True)
         raise _auth_required() from None
     email = claims.get("email")
     return User(id=claims["sub"],
                 email=email if isinstance(email, str) else None)
+
+
+def log_status() -> None:
+    """Called at startup: recommend the networkless key, and warm the
+    JWKS cache in the background so the first request doesn't wait."""
+    if not auth_enabled():
+        return
+    if os.environ.get("CLERK_JWT_KEY", "").strip():
+        print("[auth] on — tokens verified with CLERK_JWT_KEY", flush=True)
+        return
+    url = f"{issuer()}/.well-known/jwks.json"
+    print(f"[auth] on — tokens verified with keys from {url}. Recommended "
+          "for production: set CLERK_JWT_KEY (Clerk Dashboard → API Keys → "
+          "JWT public key), then sign-in doesn't depend on reaching Clerk.",
+          flush=True)
+
+    def warm():
+        try:
+            _jwks_client(url).get_jwk_set()
+        except Exception as e:
+            print(f"[auth] JWKS prefetch failed: {str(e)[:120]!r}",
+                  flush=True)
+    threading.Thread(target=warm, daemon=True).start()
 
 
 # ── FastAPI dependencies (plain def: the JWKS fetch blocks) ──────────

@@ -429,6 +429,7 @@ export const de: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "Preise inkl. MwSt. Die Zahlung wickelt Lemon Squeezy als unser Merchant of Record ab — sie buchen den Betrag ab und schicken dir deine Rechnungen.",
   "site.pricing.testMode": "Testmodus — keine echten Zahlungen",
+  "site.pricing.testersOnly": "Pläne können noch nicht gekauft werden — der Checkout ist im Testmodus und nur für eingeladene Tester.",
   "site.pricing.betaTitle": "Kostenlos während der offenen Beta",
   "site.pricing.betaBody": "CleoCuts ist kostenlos, solange wir in der Beta sind. Bezahlte Tarife mit mehr Minuten kommen bald.",
 

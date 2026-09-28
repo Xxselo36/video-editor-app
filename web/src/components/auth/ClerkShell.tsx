@@ -9,7 +9,7 @@
  * app can read it without touching Clerk (whose hooks throw outside
  * the provider).
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ClerkFailed, ClerkProvider, useAuth, useClerk, useUser } from "@clerk/nextjs";
 import type { LocalizationResource } from "@clerk/nextjs/types";
 import { useLang, type Lang } from "@/i18n";
@@ -82,6 +82,27 @@ function AuthBridge() {
     return () => registerTokenGetter(null);
   }, [getToken]);
 
+  // Per-user data: plan/minutes/media token, and the beta's local
+  // projects. Declared before the effect that publishes the new user, so
+  // the previous user's media token is gone before the app remounts for
+  // the new one (AppGate keys on the user id).
+  const lastUserRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (isSignedIn && userId) {
+      // Switched accounts without signing out (Clerk multi-session):
+      // drop the previous user's /me, media token and in-flight request.
+      if (lastUserRef.current !== null && lastUserRef.current !== userId) clearMe();
+      lastUserRef.current = userId;
+      adoptLegacyLocalData(userId);
+      void getAuthToken();
+      void refreshMe();
+    } else {
+      lastUserRef.current = null;
+      clearMe();
+    }
+  }, [isLoaded, isSignedIn, userId]);
+
   useEffect(() => {
     publishAuthState({
       loaded: isLoaded,
@@ -90,18 +111,6 @@ function AuthBridge() {
       email,
     });
   }, [isLoaded, isSignedIn, userId, email]);
-
-  // Per-user data: plan/minutes/media token, and the beta's local projects.
-  useEffect(() => {
-    if (!isLoaded) return;
-    if (isSignedIn && userId) {
-      adoptLegacyLocalData(userId);
-      void getAuthToken();
-      void refreshMe();
-    } else {
-      clearMe();
-    }
-  }, [isLoaded, isSignedIn, userId]);
 
   // Keep the cached token fresh for saves sent while the page unloads
   // (tokens live ~60 s), and /me (minutes, daily media token) current.

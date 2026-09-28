@@ -20,6 +20,7 @@ import { apiError, apiFetch, backendUrl, detailCode, setMediaAccess } from "@/li
 import { LIBRARY_KEY, type LibraryEntry, type LibraryHookClip } from "@/lib/library";
 import { ACTIVE_JOBS_KEY } from "@/lib/activeJobs";
 import { ACTIVE_JOB_KEY } from "@/lib/activeJob";
+import { mergeStored, storedValue } from "@/lib/scopedStorage";
 
 /** Landing-page copy only ("Open beta · free" → pricing CTA). */
 export const BILLING_COPY =
@@ -81,7 +82,7 @@ export type MeState = { status: "idle" | "loading" | "ready" | "error"; me: Me |
 
 const meStore = createStore<MeState>({ status: "idle", me: null });
 const ME_OFF: MeState = { status: "idle", me: null };
-let meInflight: Promise<Me | null> | null = null;
+let meInflight: { gen: number; promise: Promise<Me | null> } | null = null;
 let meRetry: ReturnType<typeof setTimeout> | null = null;
 let meFailures = 0;
 let meGeneration = 0;
@@ -93,43 +94,49 @@ export function useMe(): MeState {
 /** (Re)load /me. Retries with backoff while it fails. */
 export function refreshMe(): Promise<Me | null> {
   if (!AUTH_ENABLED || typeof window === "undefined") return Promise.resolve(null);
-  if (meInflight) return meInflight;
+  // A request started before a sign-out / account switch belongs to the
+  // previous user: its answer is dropped, so start a fresh one.
+  if (meInflight && meInflight.gen === meGeneration) return meInflight.promise;
   const gen = meGeneration;
   const cur = meStore.get();
   if (!cur.me) meStore.set({ status: "loading", me: null });
-  meInflight = (async () => {
-    try {
-      const r = await apiFetch("/me");
-      let me: Me;
-      if (r.status === 404) {
-        // Backend without accounts yet (frontend deployed first): media
-        // works without a token there.
-        me = { auth_enabled: false };
-      } else if (!r.ok) {
-        throw await apiError(r);
-      } else {
-        me = (await r.json()) as Me;
-      }
-      if (gen !== meGeneration) return null; // signed out meanwhile
-      meFailures = 0;
-      meStore.set({ status: "ready", me });
-      setMediaAccess(me.media_token ?? null, true);
-      return me;
-    } catch {
-      if (gen !== meGeneration) return null;
-      meFailures++;
-      meStore.set({ status: "error", me: meStore.get().me });
-      if (meRetry) clearTimeout(meRetry);
-      meRetry = setTimeout(() => {
-        meRetry = null;
-        void refreshMe();
-      }, Math.min(60_000, 5_000 * 2 ** Math.min(meFailures - 1, 4)));
-      return null;
-    } finally {
-      meInflight = null;
+  const promise = loadMe(gen);
+  meInflight = { gen, promise };
+  void promise.finally(() => {
+    if (meInflight?.promise === promise) meInflight = null;
+  });
+  return promise;
+}
+
+async function loadMe(gen: number): Promise<Me | null> {
+  try {
+    const r = await apiFetch("/me");
+    let me: Me;
+    if (r.status === 404) {
+      // Backend without accounts yet (frontend deployed first): media
+      // works without a token there.
+      me = { auth_enabled: false };
+    } else if (!r.ok) {
+      throw await apiError(r);
+    } else {
+      me = (await r.json()) as Me;
     }
-  })();
-  return meInflight;
+    if (gen !== meGeneration) return null; // signed out / switched meanwhile
+    meFailures = 0;
+    meStore.set({ status: "ready", me });
+    setMediaAccess(me.media_token ?? null, true);
+    return me;
+  } catch {
+    if (gen !== meGeneration) return null;
+    meFailures++;
+    meStore.set({ status: "error", me: meStore.get().me });
+    if (meRetry) clearTimeout(meRetry);
+    meRetry = setTimeout(() => {
+      meRetry = null;
+      void refreshMe();
+    }, Math.min(60_000, 5_000 * 2 ** Math.min(meFailures - 1, 4)));
+    return null;
+  }
 }
 
 /** Signed out / user changed: forget everything user-specific. */
@@ -330,9 +337,12 @@ let adoptedFor: string | null = null;
 
 /**
  * The anonymous beta kept projects in un-namespaced localStorage keys.
- * Move them to the signed-in user's keys (once), and open each job once
- * so the backend assigns the ownerless beta job to this account —
- * otherwise it wouldn't show up in GET /jobs.
+ * Merge them into the signed-in user's keys (once) — merged, not only
+ * when the user has none yet: after accounts were switched off and on
+ * again the plain keys hold the projects made in between — and open
+ * each job once so the backend assigns the ownerless beta job to this
+ * account, otherwise it wouldn't show up in GET /jobs. The plain keys
+ * are removed, so the next account on a shared device doesn't get them.
  */
 export function adoptLegacyLocalData(userId: string): void {
   if (!AUTH_ENABLED || adoptedFor === userId || typeof window === "undefined") return;
@@ -343,7 +353,9 @@ export function adoptLegacyLocalData(userId: string): void {
       const legacy = localStorage.getItem(base);
       if (legacy === null) continue;
       const mine = `${base}:${userId}`;
-      if (localStorage.getItem(mine) === null) localStorage.setItem(mine, legacy);
+      const merged = mergeStored(localStorage.getItem(mine), legacy);
+      const value = storedValue(merged, base === ACTIVE_JOB_KEY);
+      if (value !== null) localStorage.setItem(mine, value);
       localStorage.removeItem(base);
       try {
         const parsed = JSON.parse(legacy) as unknown;

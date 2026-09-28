@@ -86,6 +86,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "Os preços já incluem impostos. Os pagamentos são processados pela Lemon Squeezy, nossa revendedora oficial (Merchant of Record) — ela faz a cobrança e envia suas faturas.",
   "site.pricing.testMode": "Modo de teste — sem pagamentos reais",
+  "site.pricing.testersOnly": "Ainda não é possível comprar planos — o checkout está em modo de teste, só para testadores convidados.",
   "site.pricing.betaTitle": "Gratuito durante o beta aberto",
   "site.pricing.betaBody": "A CleoCuts é gratuita enquanto estamos em beta. Planos pagos com mais minutos chegam em breve.",
 

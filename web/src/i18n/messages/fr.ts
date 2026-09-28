@@ -435,6 +435,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "Prix TTC. Les paiements sont gérés par Lemon Squeezy, notre revendeur officiel (Merchant of Record) — c'est lui qui encaisse tes paiements et t'envoie tes factures.",
   "site.pricing.testMode": "Mode test — aucun paiement réel",
+  "site.pricing.testersOnly": "Les forfaits ne sont pas encore en vente — le paiement est en mode test, réservé aux testeurs invités.",
   "site.pricing.betaTitle": "Gratuit pendant la bêta ouverte",
   "site.pricing.betaBody": "CleoCuts est gratuit pendant la bêta. Des offres payantes avec plus de minutes arrivent bientôt.",
 

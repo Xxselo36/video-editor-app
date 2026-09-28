@@ -9,11 +9,15 @@
  */
 
 import { storageScope } from "@/lib/auth";
+import { foldScopedKeys } from "@/lib/scopedStorage";
 
 export const LIBRARY_KEY = "cleo-library-v1";
 const MAX_ENTRIES = 30;
 // Per user when accounts are on (shared devices); unchanged when off.
-const key = () => LIBRARY_KEY + storageScope();
+const key = () => {
+  foldScopedKeys(LIBRARY_KEY);
+  return LIBRARY_KEY + storageScope();
+};
 
 export type LibraryHookClip = {
   key: string;

@@ -429,6 +429,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "Цены указаны с НДС. Платежи обрабатывает Lemon Squeezy — наш официальный продавец (Merchant of Record): он списывает оплату и присылает тебе счета.",
   "site.pricing.testMode": "Тестовый режим — без реальных платежей",
+  "site.pricing.testersOnly": "Тарифы пока нельзя купить — оплата в тестовом режиме, только для приглашённых тестировщиков.",
   "site.pricing.betaTitle": "Бесплатно во время открытой беты",
   "site.pricing.betaBody": "CleoCuts бесплатен, пока мы в бете. Скоро появятся платные тарифы с большим количеством минут.",
 

@@ -47,6 +47,10 @@ PLAN_MINUTES: dict[str, float] = {
 # LS statuses that keep access. `cancelled` does too, until ends_at;
 # paused / unpaid / expired don't.
 _GRANTING = {"active", "on_trial", "past_due"}
+# No access, but billing can start again (a paused subscription resumes,
+# an unpaid one recovers once the card is fixed): a second checkout now
+# would end in two paid subscriptions.
+_REACTIVATABLE = {"paused", "unpaid"}
 
 # The analysis may find the video longer than the upload probe said
 # (container durations can be wrong or crafted); beyond this many
@@ -189,6 +193,18 @@ def meta_get_or_create(key: str, factory: Callable[[], str]) -> str:
     return _tx(_do)
 
 
+def meta_get(key: str) -> str | None:
+    rows = _read("SELECT value FROM meta WHERE key = ?", (key,))
+    return rows[0]["value"] if rows else None
+
+
+def meta_set(key: str, value: str) -> None:
+    _tx(lambda conn: conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value)))
+
+
 def media_secret() -> str:
     """Key for media-URL tokens (backend/auth.py). CLEO_MEDIA_SECRET wins;
     otherwise one is generated once and kept in the DB, so tokens stay
@@ -197,6 +213,27 @@ def media_secret() -> str:
     if env:
         return env
     return meta_get_or_create("media_secret", lambda: secrets.token_hex(32))
+
+
+def checkout_secret() -> str:
+    """Key that signs the user id in our checkouts' custom data
+    (backend/billing.py). Generated once, kept in the DB."""
+    return meta_get_or_create("checkout_secret",
+                              lambda: secrets.token_hex(32))
+
+
+def note_checkout(user_id: str, now: float | None = None) -> None:
+    """Remember when the user last opened one of our checkouts."""
+    meta_set(f"checkout_at:{user_id}", repr(time.time() if now is None
+                                             else float(now)))
+
+
+def last_checkout_at(user_id: str) -> float | None:
+    value = meta_get(f"checkout_at:{user_id}")
+    try:
+        return float(value) if value else None
+    except ValueError:
+        return None
 
 
 # ── users ────────────────────────────────────────────────────────────
@@ -294,8 +331,12 @@ def get_subscription(sub_id: str) -> dict[str, Any] | None:
 
 
 def subscriptions_for(user_id: str) -> list[dict[str, Any]]:
+    """Newest first by Lemon Squeezy's own time. Not by `updated_at`: that
+    is the local sync time, bumped by every re-sync, so the order (and
+    the subscription GET /me shows) would flip with each refresh."""
     rows = _read("SELECT * FROM subscriptions WHERE user_id = ? "
-                 "ORDER BY updated_at DESC", (user_id,))
+                 "ORDER BY COALESCE(ls_updated_at, created_at, updated_at) "
+                 "DESC, id DESC", (user_id,))
     return [dict(r) for r in rows]
 
 
@@ -333,10 +374,11 @@ def test_mode() -> bool:
         "1", "true", "yes")
 
 
-def is_comp(user_id: str, email: str | None = None) -> bool:
-    """CLEO_COMP_USERS: comma list of Clerk user ids or emails that get
-    Studio without paying (testers, friends, grandfathered beta users)."""
-    raw = os.environ.get("CLEO_COMP_USERS", "")
+def _listed(env: str, user_id: str, email: str | None) -> bool:
+    """Is the user in the comma list of Clerk user ids / emails in `env`?
+    Emails match the token's email or the stored one — which is only
+    known with CLERK_SECRET_KEY set (session tokens carry none)."""
+    raw = os.environ.get(env, "")
     entries = {e.strip().lower() for e in raw.split(",") if e.strip()}
     if not entries:
         return False
@@ -346,6 +388,20 @@ def is_comp(user_id: str, email: str | None = None) -> bool:
         u = get_user(user_id)
         email = u["email"] if u else None
     return bool(email) and email.lower() in entries
+
+
+def is_comp(user_id: str, email: str | None = None) -> bool:
+    """CLEO_COMP_USERS: comma list of Clerk user ids or emails that get
+    Studio without paying (testers, friends, grandfathered beta users)."""
+    return _listed("CLEO_COMP_USERS", user_id, email)
+
+
+def is_billing_tester(user_id: str, email: str | None = None) -> bool:
+    """May check out while LEMONSQUEEZY_TEST_MODE is on: CLEO_BILLING_TESTERS
+    (same format as CLEO_COMP_USERS) and the comp users. Everyone else
+    would get a plan for a public test card number."""
+    return (_listed("CLEO_BILLING_TESTERS", user_id, email)
+            or is_comp(user_id, email))
 
 
 def grants_access(sub: dict[str, Any], now: float | None = None) -> bool:
@@ -379,9 +435,27 @@ def entitlement(user_id: str, email: str | None = None,
                        subscription=best)
 
 
+def open_subscription(user_id: str, now: float | None = None
+                      ) -> dict[str, Any] | None:
+    """A subscription in the configured mode that still grants access or
+    can resume billing (paused, unpaid) — mapped to a plan or not, comp
+    user or not. A new checkout then would mean paying twice; plan
+    changes, resuming and card updates go through the portal instead."""
+    mode = test_mode()
+    subs = [s for s in subscriptions_for(user_id)
+            if bool(s.get("test_mode")) == mode]
+    for sub in subs:
+        if grants_access(sub, now):
+            return sub
+    for sub in subs:
+        if sub.get("status") in _REACTIVATABLE:
+            return sub
+    return None
+
+
 def latest_subscription(user_id: str) -> dict[str, Any] | None:
-    """Most recently synced subscription in the configured mode, granting
-    or not (so the account page can say 'expired' / 'paused')."""
+    """Newest subscription in the configured mode, granting or not (so
+    the account page can say 'expired' / 'paused')."""
     mode = test_mode()
     for sub in subscriptions_for(user_id):
         if bool(sub.get("test_mode")) == mode:

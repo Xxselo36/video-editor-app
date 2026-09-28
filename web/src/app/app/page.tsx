@@ -52,10 +52,12 @@ import {
   apiFetch,
   authHeaders,
   backendUrl,
+  isMediaReady,
   mediaUrl,
   notifyAuthRequired,
   parseDetail,
   publicUrl,
+  useMediaReady,
   useMediaUrl,
   whenMediaReady,
 } from "@/lib/api";
@@ -66,6 +68,7 @@ import {
   planName,
   refreshMe,
   serverJobToLibraryEntry,
+  toMs,
   useBillingConfig,
   useMe,
   type Paywall,
@@ -628,7 +631,7 @@ export default function Home() {
       //   - otherwise legacy multipart POST /jobs (through Railway),
       //     also when this deployment has no R2 (presign 503).
       const R2_THRESHOLD = 90 * 1024 * 1024; // 90MB
-      let res: XMLHttpRequest;
+      let res: XMLHttpRequest | null = null;
       // Stored with the job so the server-side project list has names.
       const appendJobFields = (form: FormData) => {
         form.append("filename", targetFile.name);
@@ -654,21 +657,45 @@ export default function Home() {
       // Fetched now, i.e. after the R2 PUT: the token is short-lived.
       const auth = AUTH_ENABLED ? await authHeaders() : {};
 
+      // Set when POST /jobs gave no usable answer but created the job.
+      let createdJobId: string | null = null;
       if (storageKey) {
         // Create the job with the completed storage_key.
         const form = new FormData();
         form.append("storage_key", storageKey);
         appendJobFields(form);
-        res = await new Promise<XMLHttpRequest>((resolve, reject) => {
+        const postedAt = Date.now();
+        const post = new Promise<XMLHttpRequest>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("POST", `${backendUrl()}/jobs`);
           for (const [k, v] of Object.entries(auth)) xhr.setRequestHeader(k, v);
-          xhr.timeout = 120_000;
+          // The server answers after pulling the file from R2 and probing
+          // it — minutes for multi-GB files — and with accounts on it has
+          // charged the minutes by then: don't give up early.
+          xhr.timeout = AUTH_ENABLED ? 30 * 60_000 : 120_000;
           xhr.onload = () => resolve(xhr);
           xhr.onerror = () => reject(new Error("Network error"));
           xhr.ontimeout = () => reject(new Error(tEn("app.errors.serverNoResponse")));
           xhr.send(form);
         });
+        if (!AUTH_ENABLED) {
+          res = await post;
+        } else {
+          // No answer (timeout, dropped connection) or a proxy 5xx doesn't
+          // mean no job: look for it in the account's project list before
+          // reporting a failure — a retry would charge the minutes again.
+          let failure: unknown = null;
+          try {
+            res = await post;
+            if (res.status >= 500) failure = new Error(`Upload failed: ${res.responseText}`);
+          } catch (e) {
+            failure = e;
+          }
+          if (failure !== null) {
+            createdJobId = await findJobCreatedFor(targetFile.name, postedAt);
+            if (!createdJobId) throw failure;
+          }
+        }
       } else {
         // Legacy path — direct multipart upload to Railway.
         const form = new FormData();
@@ -713,14 +740,15 @@ export default function Home() {
         });
       }
 
-      if (res.status >= 400) {
+      if (createdJobId === null && res && res.status >= 400) {
         // 401 / 402 (plan, minutes) get their own handling below.
         if (res.status === 401 || res.status === 402) {
           throw new ApiError(res.status, parseDetail(res.responseText));
         }
         throw new Error(`Upload failed: ${res.responseText}`);
       }
-      const initial: JobStatus = JSON.parse(res.responseText);
+      const initial: Pick<JobStatus, "id"> =
+        createdJobId !== null ? { id: createdJobId } : JSON.parse(res!.responseText);
       // Minutes were charged: the "min left" hints should follow.
       if (AUTH_ENABLED) void refreshMe();
 
@@ -1024,7 +1052,8 @@ export default function Home() {
         return;
       }
       // The editor's <video> needs the media token (accounts on) —
-      // a tokenless first load would fail for good.
+      // a tokenless first load would fail for good. Usually there within
+      // the wait; if not, the editor sets its src once it arrives.
       if (AUTH_ENABLED) await whenMediaReady();
       setJob(s);
       {
@@ -1347,6 +1376,28 @@ function getPresetChips(p: (typeof PRESETS)[PresetId], t: TFn): string[] {
   }
 
   return chips;
+}
+
+/**
+ * POST /jobs (storage_key) gave no usable answer, but the server may
+ * have created — and charged — the job anyway: the newest job in the
+ * account's list with this file name, created since the request went
+ * out (10 min of clock slack) and not tracked on this device yet.
+ */
+async function findJobCreatedFor(filename: string, sinceMs: number): Promise<string | null> {
+  const jobs = await fetchServerJobs();
+  if (!jobs) return null;
+  const known = new Set([
+    ...getActiveJobs().map((j) => j.jobId),
+    ...getLibrary().map((e) => e.jobId),
+  ]);
+  const hit = jobs.find(
+    (j) =>
+      j.filename === filename &&
+      !known.has(j.id) &&
+      (toMs(j.created_at) ?? 0) >= sinceMs - 10 * 60_000,
+  );
+  return hit?.id ?? null;
 }
 
 /** Billing on: minutes left this period (→ account), or — when uploads
@@ -2731,10 +2782,17 @@ function ReviewScreen({
   const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
   // Set once: a changing src would restart playback. Later previews are
-  // swapped in imperatively (swapPreviewSrc), only while paused.
-  const [initialPreviewSrc] = useState(() =>
-    mediaUrl(jobId, "preview-video", { v: previewVersion }),
+  // swapped in imperatively (swapPreviewSrc), only while paused. With
+  // accounts on, not before the media token is known (/me can be slow):
+  // a tokenless src would fail for good.
+  const mediaReady = useMediaReady();
+  const [waitingVersion, setWaitingVersion] = useState(previewVersion);
+  const [initialPreviewSrc, setInitialPreviewSrc] = useState<string | null>(() =>
+    mediaReady ? mediaUrl(jobId, "preview-video", { v: previewVersion }) : null,
   );
+  if (initialPreviewSrc === null && mediaReady) {
+    setInitialPreviewSrc(mediaUrl(jobId, "preview-video", { v: waitingVersion }));
+  }
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
@@ -2894,6 +2952,11 @@ function ReviewScreen({
   const swapPreviewSrc = (version: number) => {
     const v = videoRef.current;
     if (!v) return;
+    if (!isMediaReady()) {
+      // No media token yet: the first src, set once it arrives, is this one.
+      setWaitingVersion(version);
+      return;
+    }
     const wasTime = v.currentTime;
     v.src = mediaUrl(jobId, "preview-video", { v: version });
     const restore = () => {
@@ -3197,7 +3260,7 @@ function ReviewScreen({
       <div className="relative overflow-hidden rounded-xl bg-[var(--surface-1)]">
         <video
           ref={videoRef}
-          src={initialPreviewSrc}
+          src={initialPreviewSrc ?? undefined}
           controls
           playsInline
           // metadata only: don't pull the whole preview over mobile data

@@ -13,10 +13,14 @@
  */
 
 import { storageScope } from "@/lib/auth";
+import { foldScopedKeys } from "@/lib/scopedStorage";
 
 export const ACTIVE_JOB_KEY = "cleocuts.activeJob.v1";
 // Per user when accounts are on (shared devices); unchanged when off.
-const key = () => ACTIVE_JOB_KEY + storageScope();
+const key = () => {
+  foldScopedKeys(ACTIVE_JOB_KEY, true);
+  return ACTIVE_JOB_KEY + storageScope();
+};
 
 // Phases that mean "backend is doing something" — worth resuming.
 // Upload isn't resumable (the XHR must run in the current tab).

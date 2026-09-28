@@ -141,6 +141,71 @@ def test_jwks_outage_is_401(client, monkeypatch, bearer):
     assert client.get("/me", headers=bearer()).status_code == 401
 
 
+def test_rejected_token_cannot_forge_log_lines(client, auth_on, make_token,
+                                              capsys):
+    """PyJWT quotes the unverified `kid` in its error; newlines in it
+    must not start a fake log line (e.g. a fake billing event)."""
+    token = make_token(headers={"kid": "x\n[billing] webhook "
+                                "subscription_created: {'applied': True}"})
+    r = client.get("/me", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401
+    out = capsys.readouterr().out
+    assert "[auth] token rejected" in out
+    assert not any(line.startswith("[billing]") for line in out.splitlines())
+
+
+def test_removed_jwks_key_stops_working(client, monkeypatch, bearer,
+                                        rsa_key, jwks):
+    """No per-kid cache without expiry: once Clerk drops a key from its
+    JWKS (and the 5 min key-set cache ends) tokens signed with it fail."""
+    monkeypatch.setenv("CLERK_ISSUER", ISSUER)
+    served = {"jwks": jwks}
+    monkeypatch.setattr(jwt.PyJWKClient, "fetch_data",
+                        lambda self: served["jwks"])
+    assert client.get("/me", headers=bearer()).status_code == 200
+    other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = jwt.algorithms.RSAAlgorithm.to_jwk(other.public_key(),
+                                             as_dict=True)
+    jwk.update({"kid": "test-key-2", "use": "sig", "alg": "RS256"})
+    served["jwks"] = {"keys": [jwk]}
+    auth._jwks[1].jwk_set_cache.put(None)  # = the 5 min lifespan ran out
+    assert client.get("/me", headers=bearer()).status_code == 401
+
+
+def test_jwks_outage_keeps_last_good_keys_and_fails_fast(
+        client, monkeypatch, bearer, jwks):
+    monkeypatch.setenv("CLERK_ISSUER", ISSUER)
+    state = {"up": True, "calls": 0}
+
+    def fetch(self):
+        state["calls"] += 1
+        if not state["up"]:
+            raise jwt.PyJWKClientConnectionError("timed out")
+        return jwks
+    monkeypatch.setattr(jwt.PyJWKClient, "fetch_data", fetch)
+    assert client.get("/me", headers=bearer()).status_code == 200
+    state["up"] = False
+    auth._jwks[1].jwk_set_cache.put(None)
+    # Endpoint down: the last good key set still verifies tokens …
+    for _ in range(3):
+        assert client.get("/me", headers=bearer()).status_code == 200
+    # … and after one failed fetch nobody waits for another for a while.
+    assert state["calls"] == 2
+
+
+def test_jwks_cold_start_outage_fails_fast(client, monkeypatch, bearer):
+    monkeypatch.setenv("CLERK_ISSUER", ISSUER)
+    calls = []
+
+    def down(self):
+        calls.append(1)
+        raise jwt.PyJWKClientConnectionError("timed out")
+    monkeypatch.setattr(jwt.PyJWKClient, "fetch_data", down)
+    for _ in range(3):
+        assert client.get("/me", headers=bearer()).status_code == 401
+    assert len(calls) == 1
+
+
 # ── ownership ────────────────────────────────────────────────────────
 
 

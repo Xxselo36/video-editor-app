@@ -428,6 +428,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "site.pricing.vatNote":
     "가격에는 부가세가 포함돼 있어요. 결제는 판매 대행사(Merchant of Record)인 Lemon Squeezy가 처리해요 — 요금 청구와 청구서 발송도 Lemon Squeezy가 맡아요.",
   "site.pricing.testMode": "테스트 모드 — 실제 결제 없음",
+  "site.pricing.testersOnly": "아직 플랜을 구매할 수 없습니다. 결제가 테스트 모드이며 초대된 테스터만 이용할 수 있습니다.",
   "site.pricing.betaTitle": "오픈 베타 기간 무료",
   "site.pricing.betaBody": "베타 기간에는 CleoCuts를 무료로 쓸 수 있어요. 더 많은 이용 시간을 제공하는 유료 요금제가 곧 나와요.",
 

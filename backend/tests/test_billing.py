@@ -204,6 +204,72 @@ def test_service_user_is_not_charged(client, enforce, bearer, probe,
     assert accounts.get_usage(r.json()["job_id"]) is None
 
 
+def test_presign_paywall_comes_before_no_r2(client, enforce, bearer):
+    """Without R2 the frontend falls back to the legacy upload (whole
+    file) on 503 — the 402 must come first."""
+    r = client.post("/uploads/presign", headers=bearer(), json={})
+    assert r.status_code == 402
+    assert r.json()["detail"]["code"] == "subscription_required"
+    add_sub(plan="starter", period_start=time.time() - 60)
+    r = client.post("/uploads/presign", headers=bearer(), json={"duration": 60})
+    assert r.status_code == 503
+
+
+def test_enforced_upload_caps_the_analysis(client, enforce, bearer, probe,
+                                           billing_on, monkeypatch):
+    """The charge trusts the container's duration header: analysis must
+    not process more than was charged (+ tolerance)."""
+    add_sub(plan="starter", period_start=time.time() - 60)
+    probe["seconds"] = 0.5  # a header claiming half a second
+    r = _upload(client, bearer())
+    assert r.status_code == 200
+    job = store.get(r.json()["job_id"])
+    assert accounts.get_usage(job.id)["seconds_billed"] == 1
+    assert job.settings["_max_seconds"] == 1 + accounts.TRUE_UP_TOLERANCE_S
+    # Clients can't set it themselves.
+    r = _upload(client, bearer(), settings='{"_max_seconds": 99999}')
+    assert store.get(r.json()["job_id"]).settings["_max_seconds"] == 6
+    # Not enforced: nobody is blocked, nothing is capped.
+    monkeypatch.delenv("CLEO_BILLING_ENFORCE")
+    r = _upload(client, bearer(), settings='{"_max_seconds": 3}')
+    assert "_max_seconds" not in store.get(r.json()["job_id"]).settings
+
+
+def test_normalize_respects_the_cap(tmp_path):
+    """Real ffmpeg: the cap cuts the normalized file (everything after
+    normalization — transcription, cleanup — works on that file)."""
+    import shutil
+    import subprocess
+    from backend import pipeline
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg or not shutil.which("ffprobe"):
+        pytest.skip("ffmpeg/ffprobe not installed")
+    src = tmp_path / "src.mp4"
+    subprocess.run([ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i",
+                    "testsrc=size=64x64:rate=10:duration=8", "-f", "lavfi",
+                    "-i", "sine=frequency=440:duration=8", "-c:a", "aac",
+                    "-shortest", str(src)], check=True)
+    out = tmp_path / "normalized.mp4"
+    pipeline._normalize_orientation(str(src), str(out), max_seconds=3.0)
+    assert M._probe_duration(str(out)) == pytest.approx(3.0, abs=0.3)
+
+
+def test_failed_analysis_is_trued_up(auth_on, monkeypatch):
+    """'No speech detected' comes after the transcription was paid for:
+    charge what the normalized file really holds, no refund."""
+    job = _analyzed_job(seconds=1)
+
+    def no_speech(input_path, output_dir, settings, progress_cb):
+        Path(output_dir, "normalized.mp4").write_bytes(b"x")
+        raise RuntimeError("No speech detected in the video.")
+    monkeypatch.setattr(M, "analyze_only", no_speech)
+    monkeypatch.setattr(M, "_probe_duration", lambda p: 250.0)
+    M._run_analyze_inner(job.id)
+    assert store.get(job.id).status == "error"
+    usage = accounts.get_usage(job.id)
+    assert usage["seconds_billed"] == 250 and usage["refunded"] == 0
+
+
 def test_presign_soft_check(client, enforce, bearer, monkeypatch):
     import backend.storage as storage
     monkeypatch.setattr(storage, "r2_available", lambda: True)
@@ -294,6 +360,7 @@ def test_deleting_a_job_keeps_the_usage(client, billing_on, bearer, probe):
 def test_checkout(client, billing_on, bearer, monkeypatch):
     monkeypatch.setenv("CLEO_APP_URL", "https://app.example/")
     monkeypatch.setenv("LEMONSQUEEZY_TEST_MODE", "1")
+    monkeypatch.setenv("CLEO_BILLING_TESTERS", "user_a")
     r = client.post("/billing/checkout", headers=bearer(),
                     json={"plan": "starter", "email": "typed@example.com"})
     assert r.status_code == 200, r.text
@@ -301,8 +368,11 @@ def test_checkout(client, billing_on, bearer, monkeypatch):
     method, path, body = billing_on.calls[-1]
     assert (method, path) == ("POST", "/checkouts")
     a = body["data"]["attributes"]
-    assert a["checkout_data"] == {"custom": {"user_id": "user_a"},
-                                  "email": "typed@example.com"}
+    assert a["checkout_data"] == {
+        "custom": {"user_id": "user_a",
+                   "sig": billing.checkout_signature("user_a")},
+        "email": "typed@example.com"}
+    assert accounts.last_checkout_at("user_a") is not None
     assert a["product_options"]["redirect_url"] == \
         "https://app.example/app/account?billing=success"
     assert a["product_options"]["enabled_variants"] == [111]
@@ -332,6 +402,61 @@ def test_checkout_refused_when_subscribed(client, billing_on, bearer):
     assert r.json()["detail"] == {"code": "already_subscribed",
                                   "portal_url": "https://portal.test/sub_1"}
     assert not any(c[1] == "/checkouts" for c in billing_on.calls)
+
+
+def test_test_mode_checkout_is_for_testers_only(client, billing_on, bearer,
+                                               monkeypatch):
+    """With LEMONSQUEEZY_TEST_MODE on production, the public must not get
+    a plan for the public test card number."""
+    monkeypatch.setenv("LEMONSQUEEZY_TEST_MODE", "1")
+    r = client.post("/billing/checkout", headers=bearer("user_stranger"),
+                    json={"plan": "pro"})
+    assert r.status_code == 403
+    assert r.json()["detail"] == {"code": "test_mode_testers_only"}
+    assert not any(c[1] == "/checkouts" for c in billing_on.calls)
+    monkeypatch.setenv("CLEO_BILLING_TESTERS", "owner@example.com")
+    accounts.ensure_user("user_owner", "owner@example.com")
+    assert client.post("/billing/checkout", headers=bearer("user_owner"),
+                       json={"plan": "pro"}).status_code == 200
+    monkeypatch.setenv("CLEO_COMP_USERS", "user_friend")
+    assert client.post("/billing/checkout", headers=bearer("user_friend"),
+                       json={"plan": "pro"}).status_code == 200
+    # Live mode: everyone.
+    monkeypatch.delenv("LEMONSQUEEZY_TEST_MODE")
+    assert client.post("/billing/checkout", headers=bearer("user_stranger"),
+                       json={"plan": "pro"}).status_code == 200
+
+
+def test_comp_user_with_subscription_cannot_buy_twice(client, billing_on,
+                                                      bearer, monkeypatch):
+    monkeypatch.setenv("CLEO_COMP_USERS", "user_a")
+    add_sub("sub_1", plan="pro")
+    billing_on.sub("sub_1")
+    r = client.post("/billing/checkout", headers=bearer(),
+                    json={"plan": "starter"})
+    assert r.status_code == 409
+    assert r.json()["detail"] == {"code": "already_subscribed",
+                                  "portal_url": "https://portal.test/sub_1"}
+    assert not any(c[1] == "/checkouts" for c in billing_on.calls)
+
+
+@pytest.mark.parametrize("status,blocked", [
+    ("paused", True), ("unpaid", True), ("expired", False)])
+def test_paused_or_unpaid_subscription_blocks_checkout(client, billing_on,
+                                                       bearer, status,
+                                                       blocked):
+    """Resuming / fixing the card goes through the portal — a second
+    checkout would bill twice once the old one comes back."""
+    add_sub("sub_old", plan="pro", status=status)
+    billing_on.sub("sub_old", status=status)
+    r = client.post("/billing/checkout", headers=bearer(),
+                    json={"plan": "pro"})
+    if blocked:
+        assert r.status_code == 409
+        assert r.json()["detail"]["portal_url"] == \
+            "https://portal.test/sub_old"
+    else:
+        assert r.status_code == 200
 
 
 def test_checkout_errors(client, billing_on, bearer, monkeypatch):
@@ -364,6 +489,35 @@ def test_billing_routes_off(client, auth_on, bearer):
 
 
 # ── config ───────────────────────────────────────────────────────────
+
+
+def test_price_survives_a_failed_currency_lookup(client, billing_on,
+                                                monkeypatch):
+    """One failed /stores lookup must not blank the formatted prices for
+    the variants' full cache hour — only until the store is retried."""
+    billing_on.variants["795658"] = {"price": 1900, "interval": "month"}
+    real = billing._ls_request
+    fail = {"store": True}
+
+    def flaky(method, path, body=None, timeout=15.0):
+        if path.startswith("/stores/") and fail["store"]:
+            raise billing.LemonSqueezyError(503, "down")
+        return real(method, path, body, timeout)
+    monkeypatch.setattr(billing, "_ls_request", flaky)
+    pro = lambda: {p["id"]: p for p in
+                   client.get("/billing/config").json()["plans"]}["pro"]
+    assert pro()["price_formatted"] is None
+    assert pro()["price"] == 1900
+    fail["store"] = False
+    # The failed store lookup is retried after 5 min …
+    key = f"store:{billing.store_id()}"
+    ts, value = billing._price_cache[key]
+    billing._price_cache[key] = (ts - 301, value)
+    variant_calls = sum(c[1].startswith("/variants/") for c in billing_on.calls)
+    assert pro()["price_formatted"] == "$19.00"
+    # … without refetching the (cached) variant.
+    assert sum(c[1].startswith("/variants/") for c in billing_on.calls) == \
+        variant_calls
 
 
 def test_config(client, billing_on, monkeypatch):
@@ -454,6 +608,48 @@ def test_me_refreshes_stale_subscription(client, billing_on, bearer):
     assert ("GET", "/subscriptions/sub_1", None) in billing_on.calls
     assert me["plan"] is None
     assert me["subscription"]["status"] == "cancelled"
+
+
+def test_me_refresh_backs_off_while_ls_is_down(client, billing_on, bearer):
+    add_sub("sub_1", renews_at=time.time() - 60)
+    add_sub("sub_2", plan="starter", renews_at=time.time() - 60)
+    with accounts._lock:
+        accounts._db().execute("UPDATE subscriptions SET updated_at = ?",
+                               (time.time() - 7200,))
+    billing_on.down = True
+    for _ in range(3):
+        assert client.get("/me", headers=bearer()).status_code == 200
+    fetches = [c for c in billing_on.calls if c[1].startswith("/subscriptions/")]
+    # One attempt, and the outage stopped the loop before sub_2.
+    assert len(fetches) == 1
+    # Tried again once the back-off has passed.
+    billing_on.down = False
+    billing.refresh_user("user_a", now=time.time() + 301)
+    fetches = [c for c in billing_on.calls if c[1].startswith("/subscriptions/")]
+    assert len(fetches) >= 3
+
+
+def test_latest_subscription_is_stable_across_resyncs(client, billing_on,
+                                                      bearer):
+    """The subscription /me shows is the newest by LS time, not by local
+    sync time (every re-sync bumped that and flipped the order)."""
+    t26, t25 = _ts("2026-03-01T00:00:00"), _ts("2025-06-01T00:00:00")
+    add_sub("pro26", plan="pro", status="paused", created_at=t26,
+            ls_updated_at=t26)
+    add_sub("starter25", plan="starter", status="expired", created_at=t25,
+            ls_updated_at=t25, ends_at=t25)
+    billing_on.sub("pro26", status="paused",
+                   created_at="2026-03-01T00:00:00Z",
+                   updated_at="2026-03-01T00:00:00Z")
+    billing_on.sub("starter25", status="expired", variant="111",
+                   created_at="2025-06-01T00:00:00Z",
+                   updated_at="2025-06-01T00:00:00Z")
+    for _ in range(3):
+        billing.reconcile()
+        assert accounts.latest_subscription("user_a")["id"] == "pro26"
+    me = client.get("/me", headers=bearer()).json()
+    assert me["subscription"]["status"] == "paused"
+    assert me["subscription"]["plan"] == "pro"
 
 
 def test_me_comp(client, billing_on, bearer, monkeypatch):

@@ -102,6 +102,7 @@ async def lifespan(app_: FastAPI):
     _refund_interrupted()
     threading.Thread(target=_retention_loop, daemon=True).start()
     auth.install_log_filter()
+    auth.log_status()
     billing.log_status()
     if billing.enabled():
         threading.Thread(target=billing.reconcile_loop, daemon=True).start()
@@ -283,6 +284,25 @@ def _true_up(job_id: str, duration: float) -> None:
                   f"{extra:.0f}s more", flush=True)
     except Exception as e:  # never fail a job over bookkeeping
         print(f"[job {job_id}] usage true-up failed: {e}", flush=True)
+
+
+def _true_up_from_file(job_id: str, job_dir: Path) -> None:
+    """True-up for an analysis that failed after normalizing: its result
+    (with the duration) never came, so probe the normalized file."""
+    if not auth.auth_enabled():
+        return
+    for name in ("normalized.mp4", "normalized_smartcam.mp4"):
+        path = job_dir / name
+        if not path.exists():
+            continue
+        try:
+            seconds = _probe_duration(str(path))
+        except Exception as e:
+            print(f"[job {job_id}] duration probe failed: {e}", flush=True)
+            return
+        if seconds:
+            _true_up(job_id, seconds)
+        return
 
 
 def _refund(job_id: str, note: str) -> None:
@@ -480,6 +500,10 @@ def _run_analyze_inner(job_id: str) -> None:
         except Exception as e:
             tb = traceback.format_exc()
             print(f"[job {job_id}] ANALYZE FAILED: {e}\n{tb}", flush=True)
+            # A content failure ("No speech detected") comes after the
+            # transcription was paid for: charge what was really
+            # processed (before the files go; refunds below still win).
+            _true_up_from_file(job_id, job_dir)
             # Nothing of a failed analysis can be reused (the user uploads
             # again), so free the upload + partial files right away — a
             # failed 10 min job used to leave ~1.5 GB on the volume.
@@ -607,12 +631,9 @@ def presign_upload_endpoint(
     the browser reads it) is compared with the minutes left.
     """
     from backend.storage import r2_available, presign_upload
-    if not r2_available():
-        raise HTTPException(
-            503,
-            "Direct upload not available on this deployment. "
-            "Contact support if you need multi-GB uploads."
-        )
+    # Paywall first, also without R2: the frontend falls back to the
+    # legacy upload on 503, which would send the whole file before
+    # POST /jobs could say "no plan".
     if _bills(user) and billing.enforce():
         ent = accounts.entitlement(user.id, user.email)
         if ent is None:
@@ -623,6 +644,12 @@ def presign_upload_endpoint(
             raise _quota_error("quota_exceeded",
                                remaining_seconds=round(remaining),
                                needed_seconds=needed or None)
+    if not r2_available():
+        raise HTTPException(
+            503,
+            "Direct upload not available on this deployment. "
+            "Contact support if you need multi-GB uploads."
+        )
     filename = str(payload.get("filename") or "upload.mp4").strip()
     content_type = str(
         payload.get("content_type") or "video/mp4"
@@ -765,6 +792,13 @@ async def create_job(
                                needed_seconds=round(e.needed_seconds))
         if ent is not None:
             plan = ent.plan  # fixed per job: a downgrade never shortens retention
+        if enforce:
+            # The charge trusts the container's duration header, which
+            # the uploader controls: analyse no more than was charged
+            # (+ the true-up tolerance), or a file claiming 1 s would be
+            # transcribed in full, however long it really is.
+            parsed["_max_seconds"] = (math.ceil(max(seconds, 0.0))
+                                      + accounts.TRUE_UP_TOLERANCE_S)
 
     try:
         job = store.create(
@@ -875,6 +909,8 @@ def billing_checkout(payload: dict, user: User = Depends(require_user)):
                     if isinstance(client_email, str) else None)
     try:
         url = billing.create_checkout(user, plan, client_email=client_email)
+    except billing.TestersOnly:
+        raise HTTPException(403, {"code": "test_mode_testers_only"})
     except billing.AlreadySubscribed as e:
         raise HTTPException(409, {"code": "already_subscribed",
                                   "portal_url": e.portal_url})

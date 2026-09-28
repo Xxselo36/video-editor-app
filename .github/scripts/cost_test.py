@@ -216,8 +216,11 @@ def probe(video: Path) -> str:
 
 def http(method: str, path: str, data: bytes | None = None,
          headers: dict | None = None) -> dict:
+    # The admin token doubles as a service identity once accounts are on
+    # (bypasses login + quota; lets the jobs keep the _cost_test tag).
+    hdrs = {**({"X-Admin-Token": ADMIN} if ADMIN else {}), **(headers or {})}
     req = urllib.request.Request(API + path, data=data, method=method,
-                                 headers=headers or {})
+                                 headers=hdrs)
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
             return json.loads(r.read() or b"{}")
@@ -246,7 +249,8 @@ def upload(video: Path, preset: str) -> str:
                 "-F", f"filename={video.name}"]
     else:
         form = ["-F", f"file=@{video};type=video/mp4"]
-    out = run(["curl", "-sS", "--fail-with-body", "-m", "1800", *form,
+    auth = ["-H", f"X-Admin-Token: {ADMIN}"] if ADMIN else []
+    out = run(["curl", "-sS", "--fail-with-body", "-m", "1800", *auth, *form,
                "-F", f"settings={settings}", f"{API}/jobs"])
     return json.loads(out.stdout)["job_id"]
 
