@@ -45,6 +45,13 @@ export const enApp = {
     "Not enough minutes left this period for this video. Please upgrade your plan or wait for the reset.",
   "app.errors.unreadableVideo":
     "We couldn't read this video file. Please export it again as MP4 or MOV and upload it.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "This file is larger than {max} GB. Please trim the video or export it smaller.",
+  "app.errors.videoTooLong":
+    "This video is longer than {max} minutes. Please trim it or split it into parts.",
+  "app.errors.tooManyJobs":
+    "You already have the maximum number of videos processing. Please wait until one is ready, then try again.",
 
   // ── Accounts ────────────────────────────────────────────────────────
   "app.auth.signInToContinue": "Sign in to open your projects.",
@@ -242,6 +249,10 @@ export const enApp = {
   "app.card.reviewing.sub": "Tap to open the editor and fine-tune the cut.",
   "app.card.rendering.title": "Rendering",
   "app.card.rendering.sub": "Putting your final video together.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "Waiting in line (#{n})",
+  "app.card.queued.titleNoPos": "Waiting in line",
+  "app.card.queued.sub": "Lots of videos right now — yours starts automatically. You can leave this page.",
   "app.card.open": "Open →",
   "app.card.remove": "✕ Remove",
   "app.card.renderFailedNote": "Render failed — your edits are saved. Open it and render again.",

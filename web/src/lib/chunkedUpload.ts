@@ -15,12 +15,40 @@ export const UPLOAD_STALL_MS = 60_000;
 export const UPLOAD_STALLED_MSG =
   "Upload stalled — no progress for 60 seconds. Check your connection and try again.";
 
+// Upload caps: the backend's CLEO_MAX_UPLOAD_GB / CLEO_MAX_MINUTES
+// defaults, checked here before any bytes are sent. The server checks
+// again (presign + POST /jobs) and its 413 names its own limit; set
+// these when the backend's differ. Literal references: only
+// `process.env.NEXT_PUBLIC_X` gets inlined at build time.
+const envNum = (v: string | undefined, dflt: number) => {
+  const n = Number(v);
+  return v && isFinite(n) && n > 0 ? n : dflt;
+};
+export const MAX_UPLOAD_GB = envNum(process.env.NEXT_PUBLIC_MAX_UPLOAD_GB, 4);
+export const MAX_MINUTES = envNum(process.env.NEXT_PUBLIC_MAX_MINUTES, 30);
+
+export type UploadLimitHit =
+  | { code: "file_too_large"; max: number }
+  | { code: "video_too_long"; max: number };
+
+/** Which cap a file breaks, if any (same rules as the backend: decimal
+ *  GB; one second of slack for how containers round their length).
+ *  `duration` null = the browser couldn't read it; the server probes. */
+export function uploadLimitHit(size: number, duration: number | null): UploadLimitHit | null {
+  if (size > MAX_UPLOAD_GB * 1e9) return { code: "file_too_large", max: MAX_UPLOAD_GB };
+  if (duration !== null && duration > MAX_MINUTES * 60 + 1) {
+    return { code: "video_too_long", max: MAX_MINUTES };
+  }
+  return null;
+}
+
 export async function uploadResumable(opts: {
   file: File;
   onProgress?: (pct: number) => void;
   signal?: AbortSignal;
   /** Seconds as the browser reads them: lets the backend refuse a video
-   *  longer than the minutes left before any bytes are uploaded. */
+   *  that is too long (or longer than the minutes left) before any bytes
+   *  are uploaded. */
   duration?: number | null;
 }): Promise<{ storage_key: string }> {
   const { file, onProgress, signal, duration } = opts;
@@ -30,13 +58,17 @@ export async function uploadResumable(opts: {
     body: JSON.stringify({
       filename: file.name,
       content_type: file.type || "video/mp4",
+      // Size cap, queue / per-user limits and disk space are checked
+      // against this before the PUT starts.
+      size: file.size,
       ...(duration ? { duration } : {}),
     }),
     signal,
   });
   if (!presignRes.ok) {
     // Typed so the caller can tell 401 (sign in) / 402 (plan needed,
-    // checked before any bytes are sent) / 503 (no R2 here) apart.
+    // checked before any bytes are sent) / 413 (too big / too long) /
+    // 429 (too many jobs) / 503 (server_busy, or no R2 here) apart.
     throw await apiError(presignRes);
   }
   const presign = (await presignRes.json()) as {

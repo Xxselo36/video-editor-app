@@ -1,9 +1,11 @@
 """Groq Whisper — cloud-hosted transcription.
 
 Uses `whisper-large-v3` (full) — fewer hallucinations, better command-
-word recognition in mixed DE/EN audio than turbo. Returns None on
-missing key / API failure so the caller can fall back to local
-faster-whisper without breaking the flow.
+word recognition in mixed DE/EN audio than turbo. Returns None when Groq
+isn't configured (no key / no openai package) so the caller can use
+local faster-whisper. A failed call is retried (honoring retry-after);
+when it still fails — for any chunk or pass — GroqTranscriptionError is
+raised: a transcript with holes must never pass as a complete one.
 
 Requires GROQ_API_KEY env var. Get one free-tier at console.groq.com.
 
@@ -18,6 +20,8 @@ MULTI-LANGUAGE STRATEGY (transcribe_via_groq_multilang):
 from __future__ import annotations
 
 import os
+import random
+import time
 from typing import Any
 
 
@@ -38,6 +42,76 @@ _MODEL = "whisper-large-v3"
 # pieces with a small overlap so word-level timestamps stitch cleanly.
 CHUNK_MAX_SECONDS = 300.0   # 5 minutes per chunk, well under 25MB even in WAV
 CHUNK_OVERLAP_SECONDS = 2.0  # tiny overlap to catch words on chunk edges
+
+# Retry policy per Groq call: MAX_ATTEMPTS tries; the wait before a retry
+# is the server's retry-after when it sends one, else RETRY_BACKOFF_S.
+# A retry-after above CLEO_GROQ_MAX_RETRY_WAIT (default 60 s; e.g. the
+# hourly audio quota is used up) fails right away instead of blocking a
+# worker for minutes.
+MAX_ATTEMPTS = 3
+RETRY_BACKOFF_S = (2.0, 6.0)
+REQUEST_TIMEOUT_S = 180.0
+# 408/409/429 and 5xx are worth another try; other 4xx (bad request,
+# auth, 413 too large) fail the same way again.
+_RETRY_STATUS = {408, 409, 429}
+
+
+class GroqTranscriptionError(ConnectionError):
+    """Groq transcription failed after retries (or with an error a retry
+    can't fix). A ConnectionError (an OSError) on purpose: the web
+    backend treats OSErrors as infrastructure failures and refunds the
+    minutes. The message starts with "transcription_unavailable:" and
+    carries no API response text (shown to users as-is)."""
+
+
+def _status_code(exc: BaseException) -> int | None:
+    code = getattr(exc, "status_code", None)
+    return code if isinstance(code, int) else None
+
+
+def _retryable(exc: BaseException) -> bool:
+    code = _status_code(exc)
+    if code is None:
+        # No HTTP status: connection error / timeout (openai's
+        # APIConnectionError, APITimeoutError) or an OS-level error.
+        return type(exc).__name__ in (
+            "APIConnectionError", "APITimeoutError",
+        ) or isinstance(exc, (ConnectionError, TimeoutError))
+    return code in _RETRY_STATUS or code >= 500
+
+
+def _retry_after(exc: BaseException) -> float | None:
+    """Seconds the server asked us to wait (retry-after-ms / retry-after
+    headers of the error's HTTP response), or None."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    try:
+        ms = headers.get("retry-after-ms")
+        if ms is not None:
+            return max(0.0, float(ms) / 1000.0)
+        sec = headers.get("retry-after")
+        if sec is not None:
+            return max(0.0, float(sec))
+    except (TypeError, ValueError):
+        pass  # HTTP-date form: fall back to our own backoff
+    return None
+
+
+def _max_retry_wait() -> float:
+    """CLEO_GROQ_MAX_RETRY_WAIT (seconds, default 60)."""
+    try:
+        return float(os.environ.get("CLEO_GROQ_MAX_RETRY_WAIT", "60"))
+    except ValueError:
+        return 60.0
+
+
+def _describe(exc: BaseException) -> str:
+    # Class name only: the message reaches the web UI, which keys some of
+    # its error texts on words and numbers ("audio", "404", "413"). The
+    # full error is in the log.
+    return type(exc).__name__
 
 
 def _probe_duration(audio_path: str) -> float:
@@ -65,9 +139,8 @@ def _extract_chunk(
     """
     import subprocess
     import tempfile
-    out = tempfile.NamedTemporaryFile(
-        suffix=".m4a", delete=False,
-    ).name
+    with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as tmp:
+        out = tmp.name
     cmd = [
         "ffmpeg", "-y",
         "-i", audio_path,
@@ -83,10 +156,15 @@ def _extract_chunk(
         if r.returncode != 0:
             print(f"[groq] chunk extract failed: {r.stderr[-200:]}",
                   flush=True)
+            os.remove(out)
             return None
         return out
     except Exception as e:
         print(f"[groq] chunk extract exception: {e}", flush=True)
+        try:
+            os.remove(out)
+        except OSError:
+            pass
         return None
 
 
@@ -103,7 +181,8 @@ def transcribe_via_groq(
 
     Returns a dict shaped like faster-whisper's output (segments with
     nested per-word timestamps) so `analyzer._transcription` stays
-    interface-compatible. Returns None on missing key / any error.
+    interface-compatible. Returns None when Groq isn't configured;
+    raises GroqTranscriptionError when a call failed after its retries.
     """
     duration = _probe_duration(audio_path)
     if duration > CHUNK_MAX_SECONDS:
@@ -143,21 +222,25 @@ def _transcribe_chunked(
             break
         chunk_path = _extract_chunk(audio_path, c_start, c_len)
         if chunk_path is None:
-            print(f"[groq] chunk {i} extract failed — skipping",
-                  flush=True)
-            continue
+            # Skipping it would silently drop up to 5 minutes of
+            # transcript (and every cut / caption in them).
+            raise GroqTranscriptionError(
+                f"transcription_unavailable: could not cut chunk "
+                f"{i + 1}/{n_chunks} for upload"
+            )
 
-        sub = _transcribe_single(
-            chunk_path,
-            initial_prompt=initial_prompt, language=language,
-        )
         try:
-            _os.remove(chunk_path)
-        except Exception:
-            pass
-        if sub is None:
-            print(f"[groq] chunk {i} transcription failed", flush=True)
-            continue
+            sub = _transcribe_single(
+                chunk_path,
+                initial_prompt=initial_prompt, language=language,
+            )
+        finally:
+            try:
+                _os.remove(chunk_path)
+            except Exception:
+                pass
+        if sub is None:  # Groq not configured (can't happen mid-file)
+            return None
 
         if detected_lang is None:
             detected_lang = sub.get("language")
@@ -192,9 +275,9 @@ def _transcribe_chunked(
                 })
                 seg_id += 1
 
-    if not all_words:
-        return None
-
+    # No words at all is a valid (silent) transcript, not a failure:
+    # the analysis then stops with "No speech detected" like a short
+    # silent file does.
     return {
         "text": " ".join(s["text"] for s in all_segments).strip(),
         "segments": all_segments,
@@ -207,7 +290,8 @@ def _transcribe_single(
     initial_prompt: str | None,
     language: str | None,
 ) -> dict[str, Any] | None:
-    """One Groq call, no chunking. Same interface as before."""
+    """One Groq request (no chunking), retried per the policy above.
+    None = Groq not configured; raises GroqTranscriptionError on failure."""
     key = os.environ.get("GROQ_API_KEY")
     if not key:
         return None
@@ -219,9 +303,12 @@ def _transcribe_single(
               flush=True)
         return None
 
+    # max_retries=0: the SDK's own retries would stack on ours.
     client = OpenAI(
         api_key=key,
         base_url="https://api.groq.com/openai/v1",
+        max_retries=0,
+        timeout=REQUEST_TIMEOUT_S,
     )
 
     kwargs: dict[str, Any] = {
@@ -234,15 +321,34 @@ def _transcribe_single(
     if language:
         kwargs["language"] = language
 
-    try:
-        with open(audio_path, "rb") as f:
-            resp = client.audio.transcriptions.create(
-                file=(os.path.basename(audio_path), f),
-                **kwargs,
-            )
-    except Exception as e:
-        print(f"[groq] transcription failed: {e}", flush=True)
-        return None
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            with open(audio_path, "rb") as f:
+                resp = client.audio.transcriptions.create(
+                    file=(os.path.basename(audio_path), f),
+                    **kwargs,
+                )
+            break
+        except Exception as e:
+            print(f"[groq] transcription attempt {attempt}/{MAX_ATTEMPTS} "
+                  f"failed: {e}", flush=True)
+            if not _retryable(e) or attempt >= MAX_ATTEMPTS:
+                raise GroqTranscriptionError(
+                    f"transcription_unavailable: Groq failed after "
+                    f"{attempt} attempt(s) ({_describe(e)})"
+                ) from e
+            wait = _retry_after(e)
+            if wait is None:
+                wait = RETRY_BACKOFF_S[min(attempt, len(RETRY_BACKOFF_S)) - 1]
+                wait *= 1 + random.uniform(-0.2, 0.2)
+            if wait > _max_retry_wait():
+                raise GroqTranscriptionError(
+                    f"transcription_unavailable: Groq asked to retry in "
+                    f"{wait:.0f} s ({_describe(e)})"
+                ) from e
+            time.sleep(wait)
 
     # Response is a pydantic model — convert to plain dict.
     data = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
@@ -358,7 +464,7 @@ def transcribe_via_groq_multilang(
     pass_auto = transcribe_via_groq(audio_path,
                                     initial_prompt=initial_prompt,
                                     language=None)
-    if pass_auto is None:
+    if pass_auto is None:  # Groq not configured
         return None
 
     detected_lang = pass_auto.get("language", "en")
@@ -370,13 +476,13 @@ def transcribe_via_groq_multilang(
         return pass_auto
 
     # The forced-English pass gets its own prompt (no German example
-    # text), so German disfluency priming can't leak into it.
+    # text), so German disfluency priming can't leak into it. A failure
+    # raises (after retries) instead of quietly returning the auto pass:
+    # English stretches would come out transliterated.
     pass_en = transcribe_via_groq(audio_path,
                                   initial_prompt=initial_prompt_en or initial_prompt,
                                   language="en")
-    if pass_en is None:
-        print("[groq] English pass failed — using auto pass only",
-              flush=True)
+    if pass_en is None:  # Groq not configured (can't happen here)
         return pass_auto
 
     def _all_words(t: dict) -> list[dict]:

@@ -102,6 +102,11 @@ class Job:
     preset_label: str | None = None
     # Unix time of the upload. 0 = legacy job.
     created_at: float = 0.0
+    # 1-based place in line while the job waits for a free analysis or
+    # render slot (status "processing", message "queued"); None otherwise.
+    # Written by the waiting worker thread (backend/main.py) whenever the
+    # line moves.
+    queue_position: int | None = None
 
     def expires_at(self) -> float | None:
         """Unix time when the project gets deleted, None = never."""
@@ -168,6 +173,7 @@ class Job:
             "preset_label": self.preset_label,
             "created_at": self.created_at or None,
             "updated_at": self.updated_at or None,
+            "queue_position": self.queue_position,
         }
 
 
@@ -180,6 +186,27 @@ def _db_path() -> str:
     if os.path.isdir("/data") and os.access("/data", os.W_OK):
         return "/data/cleo_jobs.db"
     return "/tmp/cleo_jobs.db"
+
+
+def tune_connection(conn: sqlite3.Connection) -> None:
+    """WAL + busy_timeout for both connections to the DB file (jobs here,
+    accounts in backend/accounts.py): readers no longer wait for a
+    writer, and a writer waits for the other connection's transaction
+    instead of failing with "database is locked"."""
+    conn.execute("PRAGMA busy_timeout = 30000")
+    try:
+        mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+        if str(mode).lower() != "wal":
+            print(f"[jobstore] WAL not available (journal_mode={mode})",
+                  flush=True)
+    except sqlite3.DatabaseError as e:
+        print(f"[jobstore] could not enable WAL: {e}", flush=True)
+
+
+# Scalar fields of GET /jobs/status rows (JobStore.status_many).
+_STATUS_FIELDS = ("id", "status", "message", "progress", "queue_position",
+                  "error", "output_path", "updated_at", "preview_version",
+                  "owner_id")
 
 
 # Fields that hold structured (list/dict) data — JSON-encode on write,
@@ -195,19 +222,32 @@ class JobStore:
     """SQLite-backed job store. Thread-safe via a single connection lock.
     Writes are synchronous so the current job survives a hard crash /
     OOM kill mid-render.
+
+    `job_keys` maps an upload's storage key to its job, so a retried
+    POST /jobs returns the job instead of creating (and charging) a
+    second one.
     """
     def __init__(self) -> None:
         self._lock = threading.Lock()
         db_path = _db_path()
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False,
+                                     timeout=30)
         self._conn.row_factory = sqlite3.Row
+        tune_connection(self._conn)
         self._init_schema()
 
     def _init_schema(self) -> None:
         with self._lock:
             self._conn.execute(
                 "CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, data TEXT NOT NULL)"
+            )
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS job_keys "
+                "(key TEXT PRIMARY KEY, job_id TEXT NOT NULL)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS job_keys_job ON job_keys(job_id)"
             )
             self._conn.commit()
 
@@ -239,22 +279,49 @@ class JobStore:
         input_path: str,
         settings: dict[str, Any],
         job_id: str | None = None,
+        idempotency_key: str | None = None,
         **extra: Any,
     ) -> Job:
         """Insert a new pending job. `job_id` lets the caller pick the id
         up front (the usage ledger is keyed by it before the job exists);
-        `extra` sets further Job fields (owner_id, plan, filename, ...)."""
+        `idempotency_key` (the upload's storage key) makes find_by_key
+        return this job; `extra` sets further Job fields (owner_id, plan,
+        filename, ...)."""
         job_id = job_id or new_job_id()
         now = time.time()
         job = Job(id=job_id, input_path=input_path, settings=settings,
                   updated_at=now, created_at=now, **extra)
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO jobs (id, data) VALUES (?, ?)",
-                (job_id, self._serialize(job)),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute(
+                    "INSERT INTO jobs (id, data) VALUES (?, ?)",
+                    (job_id, self._serialize(job)),
+                )
+                if idempotency_key:
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO job_keys (key, job_id) "
+                        "VALUES (?, ?)", (idempotency_key, job_id),
+                    )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
         return job
+
+    def find_by_key(self, key: str) -> Job | None:
+        """The job created from upload `key` (see create), if it still
+        exists."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT j.data FROM job_keys k JOIN jobs j ON j.id = k.job_id "
+                "WHERE k.key = ?", (key,)
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return self._deserialize(row["data"])
+        except Exception:
+            return None
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -271,25 +338,81 @@ class JobStore:
             return None
 
     def update(self, job_id: str, **fields_to_update: Any) -> None:
+        self._write(job_id, None, fields_to_update)
+
+    def update_if(self, job_id: str, expect_status: str | tuple[str, ...],
+                  **fields_to_update: Any) -> bool:
+        """Compare-and-set: apply the update only while the job's status
+        is `expect_status` (one status or a tuple of them). Returns
+        whether it was applied. Check and write happen under the store
+        lock, so of two concurrent callers expecting the same status and
+        moving it on, exactly one wins (POST /render, analysis start),
+        and a late progress tick can't overwrite a finished job."""
+        if isinstance(expect_status, str):
+            expect_status = (expect_status,)
+        return self._write(job_id, tuple(expect_status), fields_to_update)
+
+    def _write(self, job_id: str, expect: tuple[str, ...] | None,
+               fields_to_update: dict[str, Any]) -> bool:
         with self._lock:
             row = self._conn.execute(
                 "SELECT data FROM jobs WHERE id = ?", (job_id,)
             ).fetchone()
             if row is None:
-                return
+                return False
             try:
                 job = self._deserialize(row["data"])
             except Exception:
-                return
+                return False
+            if expect is not None and job.status not in expect:
+                return False
             for k, v in fields_to_update.items():
                 setattr(job, k, v)
             if "updated_at" not in fields_to_update:
                 job.updated_at = time.time()
-            self._conn.execute(
-                "UPDATE jobs SET data = ? WHERE id = ?",
-                (self._serialize(job), job_id),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute(
+                    "UPDATE jobs SET data = ? WHERE id = ?",
+                    (self._serialize(job), job_id),
+                )
+                self._conn.commit()
+            except BaseException:
+                # e.g. disk full: don't leave the shared connection in an
+                # open transaction that the next write would join.
+                self._conn.rollback()
+                raise
+            return True
+
+    def status_many(self, job_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Scalar status fields (_STATUS_FIELDS) of several jobs in one
+        query, keyed by id; missing ids are left out. The big structured
+        fields stay unparsed, so this is much cheaper than get()."""
+        ids = list(dict.fromkeys(i for i in job_ids if i))
+        if not ids:
+            return {}
+        marks = ",".join("?" for _ in ids)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT id, data FROM jobs WHERE id IN ({marks})", ids
+            ).fetchall()
+        defaults = {f.name: f.default for f in fields(Job)
+                    if f.name in _STATUS_FIELDS}
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            try:
+                d = json.loads(r["data"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(d, dict):
+                continue
+            out[r["id"]] = {k: d.get(k, defaults.get(k)) for k in _STATUS_FIELDS}
+            out[r["id"]]["id"] = r["id"]
+        return out
+
+    def ping(self) -> None:
+        """Trivial query for the readiness check (GET /ready)."""
+        with self._lock:
+            self._conn.execute("SELECT 1").fetchone()
 
     def claim(self, job_id: str, owner_id: str) -> str | None:
         """Give an unowned (beta) job to `owner_id`, atomically, without
@@ -318,6 +441,8 @@ class JobStore:
     def delete(self, job_id: str) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+            self._conn.execute("DELETE FROM job_keys WHERE job_id = ?",
+                               (job_id,))
             self._conn.commit()
 
     def list_all(self) -> list[Job]:
@@ -357,13 +482,16 @@ class JobStore:
             src_ok = bool(job.normalized_path) and Path(job.normalized_path).exists()
             if job.status in ("processing", "pending"):
                 if src_ok and job.segments:
-                    # Died while RENDERING: analysis + edits are intact,
-                    # send it back to review so the user can re-render.
+                    # Died while RENDERING (or waiting for a render
+                    # slot): analysis + edits are intact, send it back
+                    # to review so the user can re-render.
                     self.update(job.id, status="awaiting_review", progress=100.0,
-                                message="render_failed", error="container_restart")
+                                message="render_failed", error="container_restart",
+                                queue_position=None)
                 else:
                     self.update(job.id, status="error", message=message,
-                                error="container_restart", progress=0.0)
+                                error="container_restart", progress=0.0,
+                                queue_position=None)
                 marked += 1
             elif job.status == "awaiting_review" and not src_ok:
                 # Files are gone (old /tmp storage) — can't be edited.

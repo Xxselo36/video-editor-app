@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-from faster_whisper import WhisperModel
+# faster_whisper is imported lazily (AudioAnalyzer.whisper_model): the
+# web backend transcribes via Groq and must not load ctranslate2 & co.
 from moviepy.editor import VideoFileClip, AudioFileClip
 from scipy.io import wavfile
 from scipy import signal
@@ -33,6 +34,29 @@ def _disfluent_prompt_enabled() -> bool:
     return os.environ.get("CLEO_DISFLUENT_PROMPT", "1").strip().lower() not in (
         "0", "false", "no", "off",
     )
+
+
+class TranscriptionUnavailableError(ConnectionError):
+    """No transcription backend may run: Groq isn't usable and local
+    Whisper is switched off (CLEO_LOCAL_WHISPER). A ConnectionError (an
+    OSError) on purpose — the web backend counts OSErrors as its own
+    infrastructure failures and gives the minutes back."""
+
+
+def _local_whisper_allowed() -> bool:
+    """May we transcribe with local faster-whisper?
+
+    CLEO_LOCAL_WHISPER=1/0; unset = only when GROQ_API_KEY isn't set
+    (desktop app, dev). On the web server a Groq outage or rate limit
+    must fail the job instead of loading a ~1.5 GB 'medium' model per
+    job on the API box — exactly under peak load.
+    """
+    v = os.environ.get("CLEO_LOCAL_WHISPER", "").strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    return not os.environ.get("GROQ_API_KEY")
 
 
 @dataclass
@@ -91,6 +115,7 @@ class AudioAnalyzer:
     def whisper_model(self):
         """Lazy-Loading des Whisper Modells (faster-whisper)."""
         if self._whisper_model is None:
+            from faster_whisper import WhisperModel
             self._report(f"Lade Whisper Modell '{self.whisper_model_name}'...")
             self._whisper_model = WhisperModel(
                 self.whisper_model_name,
@@ -106,9 +131,21 @@ class AudioAnalyzer:
         temp_audio.close()
 
         self._report("Extrahiere Audio aus Video...")
-        video = VideoFileClip(str(self.video_path))
-        video.audio.write_audiofile(temp_path, fps=target_sr, verbose=False, logger=None)
-        video.close()
+        video = None
+        try:
+            video = VideoFileClip(str(self.video_path))
+            if video.audio is None:
+                raise ValueError("Video has no audio track")
+            video.audio.write_audiofile(temp_path, fps=target_sr, verbose=False, logger=None)
+        except BaseException:
+            # The callers' cleanup only starts once we return: don't leave
+            # the (possibly half-written) copy of the speech in /tmp.
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise
+        finally:
+            if video is not None:
+                video.close()
 
         return temp_path
 
@@ -207,7 +244,18 @@ class AudioAnalyzer:
             return self._subtitles
 
         audio_path = self.extract_audio()
+        try:
+            return self._transcribe_audio(audio_path)
+        finally:
+            # Every path, also Groq success (which used to return
+            # before the cleanup and leave the 16 kHz WAV in /tmp).
+            if os.path.exists(audio_path):
+                os.unlink(audio_path)
 
+    def _transcribe_audio(self, audio_path: str) -> list[Subtitle]:
+        """Groq Whisper first; local faster-whisper only when Groq isn't
+        configured or failed AND _local_whisper_allowed(). Otherwise a
+        Groq failure fails the transcription (no silent fallback)."""
         # Wake-word priming — heavy repetition + example sentences so
         # Whisper's language model biases toward transcribing English
         # command words correctly instead of re-mapping them to close-
@@ -246,16 +294,27 @@ class AudioAnalyzer:
             local_hotwords = f"{DISFLUENT_EN} {DISFLUENT_DE}"
 
         # Try Groq first: cloud Whisper, ~10x faster than local CPU.
-        # Silently falls back to local if GROQ_API_KEY is missing or
-        # any error occurs — same interface either way.
+        # transcribe_via_groq_multilang returns None when Groq isn't
+        # configured (no GROQ_API_KEY) and raises when it failed even
+        # after its retries. Local Whisper takes over in both cases only
+        # if _local_whisper_allowed() (desktop / dev); on the web server
+        # a Groq failure fails the job (refunded) instead.
+        groq_error: Exception | None = None
         try:
             from backend.whisper_groq import transcribe_via_groq_multilang
-            self._report("Transkribiere Audio mit Whisper (Groq)...")
-            groq_result = transcribe_via_groq_multilang(
-                audio_path,
-                initial_prompt=groq_prompt,
-                initial_prompt_en=groq_prompt_en,
-            )
+        except ImportError:  # desktop build without backend/
+            transcribe_via_groq_multilang = None
+        if transcribe_via_groq_multilang is not None:
+            try:
+                self._report("Transkribiere Audio mit Whisper (Groq)...")
+                groq_result = transcribe_via_groq_multilang(
+                    audio_path,
+                    initial_prompt=groq_prompt,
+                    initial_prompt_en=groq_prompt_en,
+                )
+            except Exception as e:
+                groq_result = None
+                groq_error = e
             if groq_result is not None:
                 print(f"[whisper] Groq returned "
                       f"{len(groq_result.get('segments', []))} segments, "
@@ -265,91 +324,95 @@ class AudioAnalyzer:
                 # Whisper path.
                 self._build_subtitles_from_transcription()
                 return self._subtitles
-        except Exception as e:
-            print(f"[whisper] Groq failed, using local: {e}", flush=True)
 
-        try:
-            self._report("Transkribiere Audio mit Whisper (local)...")
-            segments_iter, info = self.whisper_model.transcribe(
-                audio_path,
-                language=None,  # Automatische Spracherkennung
-                task="transcribe",
-                word_timestamps=True,  # Wort-genaue Timestamps
-                # condition_on_previous_text OFF: with it ON, Whisper
-                # biases short standalone segments (wake commands after
-                # a pause) toward the surrounding sentence context and
-                # drops the command. Voice triggers were dying here.
-                condition_on_previous_text=False,
-                # no_speech_threshold near-max: at 0.6 Whisper would
-                # DISCARD entire 30s segments if the majority looked
-                # like silence — which nuked isolated 'Cleo cut'
-                # commands surrounded by pauses. 0.98 means only
-                # truly-silent-full-segment gets skipped.
-                no_speech_threshold=0.98,
-                initial_prompt=wake_prompt,
-                hotwords=local_hotwords,
+        if not _local_whisper_allowed():
+            if groq_error is not None:
+                raise groq_error
+            raise TranscriptionUnavailableError(
+                "transcription_unavailable: Groq is not configured "
+                "(GROQ_API_KEY) and local Whisper is off (CLEO_LOCAL_WHISPER=0)"
             )
+        if groq_error is not None:
+            print(f"[whisper] Groq failed, using local: {groq_error}",
+                  flush=True)
 
-            # Build openai-whisper-compatible dict so downstream code
-            # (filler_detection, subtitle generation) keeps working unchanged.
-            # Emit throttled live progress as faster-whisper yields segments.
-            segments_list = []
-            text_parts = []
-            total_duration = info.duration if info.duration else 0.0
-            last_report_t = 0.0
-            for seg in segments_iter:
-                seg_dict = {
-                    "id": seg.id,
-                    "seek": seg.seek,
-                    "start": float(seg.start),
-                    "end": float(seg.end),
-                    "text": seg.text,
-                    "tokens": list(seg.tokens) if seg.tokens else [],
-                    "avg_logprob": float(seg.avg_logprob),
-                    "compression_ratio": float(seg.compression_ratio),
-                    "no_speech_prob": float(seg.no_speech_prob),
-                    "words": [
-                        {
-                            "word": w.word,
-                            "start": float(w.start),
-                            "end": float(w.end),
-                            "probability": float(w.probability),
-                        }
-                        for w in (seg.words or [])
-                    ],
-                }
-                segments_list.append(seg_dict)
-                text_parts.append(seg.text)
+        self._report("Transkribiere Audio mit Whisper (local)...")
+        segments_iter, info = self.whisper_model.transcribe(
+            audio_path,
+            language=None,  # Automatische Spracherkennung
+            task="transcribe",
+            word_timestamps=True,  # Wort-genaue Timestamps
+            # condition_on_previous_text OFF: with it ON, Whisper
+            # biases short standalone segments (wake commands after
+            # a pause) toward the surrounding sentence context and
+            # drops the command. Voice triggers were dying here.
+            condition_on_previous_text=False,
+            # no_speech_threshold near-max: at 0.6 Whisper would
+            # DISCARD entire 30s segments if the majority looked
+            # like silence — which nuked isolated 'Cleo cut'
+            # commands surrounded by pauses. 0.98 means only
+            # truly-silent-full-segment gets skipped.
+            no_speech_threshold=0.98,
+            initial_prompt=wake_prompt,
+            hotwords=local_hotwords,
+        )
 
-                # Throttle at ~300 ms so the GUI's batched word ticker
-                # gets enough new text to keep animating without flooding.
-                if total_duration > 0:
-                    import time as _t
-                    now = _t.monotonic()
-                    if now - last_report_t > 0.3:
-                        last_report_t = now
-                        prog = min(0.99, seg.end / total_duration)
-                        latest = (seg.text or "").strip()
-                        if latest:
-                            self._report(
-                                f"Transcribing speech: {latest}",
-                                step=1, total_steps=6, progress=prog,
-                            )
-
-            result = {
-                "text": "".join(text_parts),
-                "segments": segments_list,
-                "language": info.language,
+        # Build openai-whisper-compatible dict so downstream code
+        # (filler_detection, subtitle generation) keeps working unchanged.
+        # Emit throttled live progress as faster-whisper yields segments.
+        segments_list = []
+        text_parts = []
+        total_duration = info.duration if info.duration else 0.0
+        last_report_t = 0.0
+        for seg in segments_iter:
+            seg_dict = {
+                "id": seg.id,
+                "seek": seg.seek,
+                "start": float(seg.start),
+                "end": float(seg.end),
+                "text": seg.text,
+                "tokens": list(seg.tokens) if seg.tokens else [],
+                "avg_logprob": float(seg.avg_logprob),
+                "compression_ratio": float(seg.compression_ratio),
+                "no_speech_prob": float(seg.no_speech_prob),
+                "words": [
+                    {
+                        "word": w.word,
+                        "start": float(w.start),
+                        "end": float(w.end),
+                        "probability": float(w.probability),
+                    }
+                    for w in (seg.words or [])
+                ],
             }
-            self._transcription = result
+            segments_list.append(seg_dict)
+            text_parts.append(seg.text)
 
-            self._build_subtitles_from_transcription()
+            # Throttle at ~300 ms so the GUI's batched word ticker
+            # gets enough new text to keep animating without flooding.
+            if total_duration > 0:
+                import time as _t
+                now = _t.monotonic()
+                if now - last_report_t > 0.3:
+                    last_report_t = now
+                    prog = min(0.99, seg.end / total_duration)
+                    latest = (seg.text or "").strip()
+                    if latest:
+                        self._report(
+                            f"Transcribing speech: {latest}",
+                            step=1, total_steps=6, progress=prog,
+                        )
 
-            self._report(f"  {len(self._subtitles)} Untertitel-Segmente erstellt")
+        result = {
+            "text": "".join(text_parts),
+            "segments": segments_list,
+            "language": info.language,
+        }
+        self._transcription = result
 
-        finally:
-            if os.path.exists(audio_path):
-                os.unlink(audio_path)
+        self._build_subtitles_from_transcription()
+
+        self._report(f"  {len(self._subtitles)} Untertitel-Segmente erstellt")
 
         return self._subtitles
 

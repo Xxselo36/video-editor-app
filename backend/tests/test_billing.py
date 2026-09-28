@@ -153,7 +153,8 @@ def test_enforced_upload_needs_subscription(client, enforce, bearer, probe):
 
 
 def test_enforced_upload_charges_and_refuses_over_quota(
-        client, enforce, bearer, probe, clean_state):
+        client, enforce, bearer, probe, clean_state, monkeypatch):
+    monkeypatch.setenv("CLEO_MAX_MINUTES", "120")  # above the 30 min cap
     add_sub(plan="starter", period_start=time.time() - 60)  # 5400 s
     probe["seconds"] = 5000.2
     r = _upload(client, bearer())

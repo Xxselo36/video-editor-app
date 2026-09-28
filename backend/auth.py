@@ -22,11 +22,19 @@ When on:
     the UTC day, valid that day and the next, so a player's src never
     changes during an editing session.
 
+The dependencies are async: they run on the event loop instead of
+taking one of the 40 threadpool tokens per request, so a starved
+threadpool (preview rebuilds, downloads) can't freeze authenticated
+traffic. Verifying a JWT is ~70 µs of CPU; the key comes from
+CLERK_JWT_KEY or the cached key set. Only a JWKS fetch (cache expired
+or unknown `kid`, every ~5 min) runs in a small thread pool of its own.
+
 PyJWT is imported lazily: with auth off the backend runs without it.
 Only backend/main.py imports this module.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -34,10 +42,12 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 
 from backend import accounts
 from backend.jobs import Job, store
@@ -86,6 +96,9 @@ def authorized_parties() -> set[str]:
 
 _jwks_lock = threading.Lock()
 _jwks: tuple[str, Any] | None = None  # (url, PyJWKClient)
+# JWKS fetches (network, up to _JWKS_TIMEOUT_S) run here, off the event
+# loop and off the request threadpool.
+_JWKS_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="jwks")
 
 
 def _make_jwks_client(url: str):
@@ -139,27 +152,85 @@ def _jwks_client(url: str):
         return _jwks[1]
 
 
-def _signing_key(token: str):
+def _pem_key() -> str | None:
     pem = os.environ.get("CLERK_JWT_KEY", "").strip()
+    # Env UIs often keep the PEM on one line with literal "\n".
+    return pem.replace("\\n", "\n") if pem else None
+
+
+def _signing_key(token: str):
+    pem = _pem_key()
     if pem:
-        # Env UIs often keep the PEM on one line with literal "\n".
-        return pem.replace("\\n", "\n")
+        return pem
     url = f"{issuer()}/.well-known/jwks.json"
     return _jwks_client(url).get_signing_key_from_jwt(token).key
 
 
-def verify_token(token: str) -> dict[str, Any]:
-    """Claims of a valid Clerk session token; raises jwt.InvalidTokenError
-    (or PyJWKClientError when the keys can't be fetched)."""
+def _checked_header(token: str) -> dict[str, Any]:
     import jwt
     header = jwt.get_unverified_header(token)
     if header.get("typ", "JWT") != "JWT":  # e.g. OAuth "at+jwt"
         raise jwt.InvalidTokenError("wrong token type")
     if header.get("cat") == "cl_B7d4PD333AAA":  # Clerk M2M token
         raise jwt.InvalidTokenError("machine token")
+    return header
+
+
+def _cached_signing_key(header: dict[str, Any]):
+    """The key for a token with this header if it is at hand without any
+    I/O — CLERK_JWT_KEY, or the `kid` in the unexpired cached key set —
+    else None (then verify_token fetches, in _JWKS_POOL). Reads the cache
+    directly: PyJWKClient holds its lock during a fetch, which must not
+    block the event loop."""
+    pem = _pem_key()
+    if pem:
+        return pem
+    url = f"{issuer()}/.well-known/jwks.json"
+    with _jwks_lock:
+        entry = _jwks
+    if entry is None or entry[0] != url:
+        return None
+    cache = getattr(entry[1], "jwk_set_cache", None)
+    jwk_set = cache.get() if cache is not None else None
+    if jwk_set is None:
+        return None
+    if isinstance(jwk_set, dict):  # older PyJWT caches the raw payload
+        try:
+            import jwt
+            jwk_set = jwt.PyJWKSet.from_dict(jwk_set)
+        except Exception:
+            return None
+    kid = header.get("kid")
+    for key in getattr(jwk_set, "keys", ()):
+        if (key.key_id and key.key_id == kid
+                and getattr(key, "public_key_use", None) in ("sig", None)):
+            return key.key
+    return None
+
+
+def verify_token(token: str) -> dict[str, Any]:
+    """Claims of a valid Clerk session token; raises jwt.InvalidTokenError
+    (or PyJWKClientError when the keys can't be fetched). Blocking: may
+    fetch the JWKS."""
+    _checked_header(token)
+    return _decode(token, _signing_key(token))
+
+
+async def verify_token_async(token: str) -> dict[str, Any]:
+    """verify_token for the event loop: on the loop when the key is
+    cached (the normal case), otherwise in _JWKS_POOL."""
+    key = _cached_signing_key(_checked_header(token))
+    if key is None:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(_JWKS_POOL, verify_token, token)
+    return _decode(token, key)
+
+
+def _decode(token: str, key) -> dict[str, Any]:
+    import jwt
     claims = jwt.decode(
         token,
-        _signing_key(token),
+        key,
         algorithms=["RS256"],
         issuer=issuer(),
         leeway=_LEEWAY_S,
@@ -191,14 +262,14 @@ def _admin_user(request: Request) -> User | None:
     return None
 
 
-def _bearer_user(request: Request) -> User | None:
+async def _bearer_user(request: Request) -> User | None:
     header = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
     token = token.strip()
     if scheme.lower() != "bearer" or not token:
         return None
     try:
-        claims = verify_token(token)
+        claims = await verify_token_async(token)
     except Exception as e:  # invalid, expired, JWKS unreachable, ...
         if type(e).__name__ != "ExpiredSignatureError":
             # repr + cut: messages can quote the token's (unverified)
@@ -234,29 +305,29 @@ def log_status() -> None:
     threading.Thread(target=warm, daemon=True).start()
 
 
-# ── FastAPI dependencies (plain def: the JWKS fetch blocks) ──────────
+# ── FastAPI dependencies (async, see the module docstring) ───────────
 
 
-def current_user(request: Request) -> User | None:
+async def current_user(request: Request) -> User | None:
     """The caller. None only while auth is off (anonymous, as before
     accounts); otherwise a verified user or 401 auth_required."""
     if not auth_enabled():
         return None
-    user = _admin_user(request) or _bearer_user(request)
+    user = _admin_user(request) or await _bearer_user(request)
     if user is None:
         raise _auth_required()
     return user
 
 
-def require_user(request: Request) -> User:
+async def require_user(request: Request) -> User:
     """For routes that only exist with accounts: 404 not_available while
     auth is off (the frontend then keeps using localStorage)."""
     if not auth_enabled():
         raise HTTPException(404, "not_available")
-    return current_user(request)
+    return await current_user(request)
 
 
-def media_user(request: Request) -> User | None:
+async def media_user(request: Request) -> User | None:
     """current_user, or the `t` media token for <video>/<img>/<a> URLs."""
     if not auth_enabled():
         return None
@@ -264,12 +335,14 @@ def media_user(request: Request) -> User | None:
     if user is not None:
         return user
     try:
-        user = _bearer_user(request)
+        user = await _bearer_user(request)
     except HTTPException:
         if not request.query_params.get("t"):
             raise
         user = None
-    user = user or _media_token_user(request)
+    if user is None and request.query_params.get("t"):
+        # The media secret may have to be read from the accounts DB.
+        user = await run_in_threadpool(_media_token_user, request)
     if user is None:
         raise _auth_required()
     return user

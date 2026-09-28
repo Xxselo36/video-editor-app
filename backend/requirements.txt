@@ -26,22 +26,19 @@ modal>=0.65.0
 moviepy==1.0.3
 numpy>=1.21.0
 Pillow>=9.0.0
+# Local Whisper — only used when CLEO_LOCAL_WHISPER=1 (or no GROQ_API_KEY);
+# imported lazily, so the Groq path never loads it.
 faster-whisper>=1.2.0
 pydub>=0.25.1
 scipy>=1.9.0
 imageio_ffmpeg>=0.4.9
 
-# Headless OpenCV (no GUI/X11 deps) keeps the Linux image small.
+# Headless OpenCV (no GUI/X11 deps) keeps the Linux image small. SmartCam's
+# YuNet face detector runs on OpenCV's own DNN module (cv2.FaceDetectorYN).
 opencv-python-headless>=4.8.0
 
-# YuNet face detection (SmartCam).
-ultralytics>=8.0.0
-
-# CPU-only torch — much smaller than CUDA build. Install via the wheel
-# index from the deploy host (Railway/Render) since pip won't pick the
-# CPU build by default. See Dockerfile for the exact install line.
-torch>=2.0.0
-torchvision
+# No torch / torchvision / ultralytics: nothing on the web path imports
+# them (only the desktop app's src/intelligence.py + src/image_gen.py do).
 
 # Process utils.
 psutil>=5.9.0

@@ -65,14 +65,24 @@ export async function authHeaders(): Promise<Record<string, string>> {
 export class ApiError extends Error {
   status: number;
   detail: unknown;
-  constructor(status: number, detail: unknown) {
+  /** The whole JSON body: refusals put extra fields next to `detail`
+   *  ({"detail":"file_too_large","max_gb":4}). */
+  body: Record<string, unknown> | null;
+  constructor(status: number, detail: unknown, body: Record<string, unknown> | null = null) {
     super(`${status}: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
     this.status = status;
     this.detail = detail;
+    this.body = body;
   }
   /** detail.code ({"detail":{"code":…}}) or a plain string detail. */
   get code(): string | null {
     return detailCode(this.detail);
+  }
+  /** A numeric field of the answer, from the body or from detail. */
+  num(field: string): number | null {
+    const d = this.detail && typeof this.detail === "object" ? (this.detail as Record<string, unknown>) : {};
+    const v = this.body?.[field] ?? d[field];
+    return typeof v === "number" && isFinite(v) ? v : null;
   }
 }
 
@@ -94,6 +104,18 @@ export function detailCode(detail: unknown): string | null {
   return null;
 }
 
+/** ApiError from a status + raw body (fetch or XHR answers). */
+export function apiErrorFromText(status: number, text: string): ApiError {
+  let body: Record<string, unknown> | null = null;
+  try {
+    const j = JSON.parse(text);
+    if (j && typeof j === "object" && !Array.isArray(j)) body = j;
+  } catch {
+    /* not JSON */
+  }
+  return new ApiError(status, parseDetail(text), body);
+}
+
 export async function apiError(r: Response): Promise<ApiError> {
   let text = "";
   try {
@@ -101,7 +123,7 @@ export async function apiError(r: Response): Promise<ApiError> {
   } catch {
     /* body unreadable */
   }
-  return new ApiError(r.status, parseDetail(text));
+  return apiErrorFromText(r.status, text);
 }
 
 // ── Media URLs ────────────────────────────────────────────────────────

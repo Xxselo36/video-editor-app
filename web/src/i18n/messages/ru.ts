@@ -41,6 +41,12 @@ export const ru: Partial<Record<MessageKey, string>> = {
     "В этом периоде не хватает минут для этого видео. Повысь тариф или дождись сброса.",
   "app.errors.unreadableVideo":
     "Не удалось прочитать этот видеофайл. Экспортируй его заново в MP4 или MOV и загрузи снова.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "Этот файл больше {max} ГБ. Обрежь видео или экспортируй его в меньшем размере.",
+  "app.errors.videoTooLong": "Это видео длиннее {max} мин. Обрежь его или раздели на части.",
+  "app.errors.tooManyJobs":
+    "У тебя уже обрабатывается максимальное количество видео. Дождись, пока одно из них будет готово, и попробуй снова.",
 
   // ── Accounts ────────────────────────────────────────────────────────
   "app.auth.signInToContinue": "Войди, чтобы открыть свои проекты.",
@@ -238,6 +244,11 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.card.reviewing.sub": "Нажми, чтобы открыть редактор и доработать монтаж.",
   "app.card.rendering.title": "Рендер",
   "app.card.rendering.sub": "Собираем твоё финальное видео.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "В очереди (#{n})",
+  "app.card.queued.titleNoPos": "В очереди",
+  "app.card.queued.sub":
+    "Сейчас много видео — твоё запустится автоматически. Можешь уйти с этой страницы.",
   "app.card.open": "Открыть →",
   "app.card.remove": "✕ Удалить",
   "app.card.renderFailedNote": "Рендер не удался — твои изменения сохранены. Открой и запусти рендер снова.",

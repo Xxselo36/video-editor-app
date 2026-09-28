@@ -2576,10 +2576,19 @@ def _detect_orientation(video_path):
 
 
 def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
-                             progress_cb=None, cancel_check=None):
+                             progress_cb=None, cancel_check=None,
+                             output_path=None, threads=None):
     """Reframe `video_path` with face-tracking before the main /analyze
     pipeline. Returns the path to the reframed video on success, or None
     on failure (caller falls back to the original).
+
+    `output_path`: where to write the result. Default (None) is the
+    plugin cache below, named <input basename>_smartcam_<unix second>
+    — fine for one Premiere user, but the web backend runs many jobs
+    whose input is always "normalized.mp4", so it passes a job-scoped
+    path. `threads`: cap for ffmpeg (-threads) and OpenCV
+    (cv2.setNumThreads) on a shared server; None = library defaults.
+    Intermediates live in a private temp dir that is always removed.
 
     Mirrors the standalone GUI's `_smartcam_preprocess` flow:
       - Portrait output: target 1080x1920 (or 720x1280 at 720p)
@@ -2592,12 +2601,17 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
         persists across `/tmp` cleanups while still being out of the user's
         normal output folder.
     """
+    import shutil as _shutil
+    video_only_dir = None
     try:
         import time as _time
         from pathlib import Path
         import tempfile
         from src.effects import smartcam_reframe_file
         from src.ffmpeg_utils import get_ffmpeg_path
+
+        # ffmpeg thread cap, as input (decoder) and output (encoder) option
+        _thr = ["-threads", str(int(threads))] if threads else []
 
         resolution = str(resolution_label or "1080")
         smartcam_format = (smartcam_format or "portrait").lower()
@@ -2621,20 +2635,25 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
         print(f"[SmartCam/plugin] input={orient} out={smartcam_format} "
               f"zoom={zoom_factor} target={target_size}", flush=True)
 
-        # Persistent cache so Premiere/DaVinci can still resolve the clip
-        # after a system reboot (vs. /tmp which gets wiped). Web/server
-        # deploys override via CLEO_CACHE_DIR — same code, different home.
-        _cache_env = os.environ.get("CLEO_CACHE_DIR")
-        if _cache_env:
-            cache_dir = Path(_cache_env)
+        if output_path:
+            final_path = str(output_path)
+            Path(final_path).parent.mkdir(parents=True, exist_ok=True)
         else:
-            cache_dir = Path.home() / "Movies" / "Videos" / ".smartcut_plugin_cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        base = os.path.splitext(os.path.basename(video_path))[0][:32]
-        stamp = int(_time.time()) % 1000000
+            # Persistent cache so Premiere/DaVinci can still resolve the
+            # clip after a system reboot (vs. /tmp which gets wiped).
+            # Server deploys override via CLEO_CACHE_DIR — same code,
+            # different home.
+            _cache_env = os.environ.get("CLEO_CACHE_DIR")
+            if _cache_env:
+                cache_dir = Path(_cache_env)
+            else:
+                cache_dir = Path.home() / "Movies" / "Videos" / ".smartcut_plugin_cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            base = os.path.splitext(os.path.basename(video_path))[0][:32]
+            stamp = int(_time.time()) % 1000000
+            final_path = str(cache_dir / f"{base}_smartcam_{stamp}.mp4")
         video_only_dir = tempfile.mkdtemp(prefix="smartcam_pre_")
         video_only = os.path.join(video_only_dir, "video.mp4")
-        final_path = str(cache_dir / f"{base}_smartcam_{stamp}.mp4")
 
         def _cb(phase, frame_idx, total):
             if progress_cb is None:
@@ -2687,7 +2706,7 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
                         and (cw < _sw * 0.95 or ch < _sh * 0.95)):
                     cropped_path = os.path.join(video_only_dir, "decroped.mp4")
                     crop_cmd = [
-                        ff, "-y", "-i", video_path,
+                        ff, "-y", *_thr, "-i", video_path,
                         "-vf", f"crop={cw}:{ch}:{cx}:{cy}",
                         "-c:v", "h264_videotoolbox", "-b:v", "12M",
                         "-pix_fmt", "yuv420p",
@@ -2750,10 +2769,12 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
             if cfr_res.returncode != 0 or not os.path.isfile(cfr_path):
                 cfr_cmd_sw = [
                     get_ffmpeg_path(), "-y",
+                    *_thr,
                     "-i", crop_input,
                     "-vsync", "cfr",
                     "-r", f"{_src_fps:.6f}",
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
+                    *_thr,
                     "-pix_fmt", "yuv420p", "-bf", "0",
                     "-c:a", "copy",
                     "-movflags", "+faststart",
@@ -2773,6 +2794,12 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
             print(f"[SmartCam/plugin] CFR pre-convert error: {e}",
                   flush=True)
 
+        if threads:
+            try:
+                import cv2 as _cv2
+                _cv2.setNumThreads(int(threads))
+            except Exception:
+                pass
         ok = smartcam_reframe_file(
             cfr_input, video_only, target_size,
             progress_cb=_cb,
@@ -2830,6 +2857,7 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
             # Fallback Software-Encoder
             mux_sw = [
                 get_ffmpeg_path(), "-y",
+                *_thr,
                 "-fflags", "+genpts",
                 "-i", video_only,
                 "-i", cfr_input,
@@ -2838,6 +2866,7 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
                 "[1:a]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[a]",
                 "-map", "[v]", "-map", "[a]",
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
+                *_thr,
                 "-pix_fmt", "yuv420p", "-bf", "0",
                 "-c:a", "aac", "-b:a", "320k",
                 "-avoid_negative_ts", "make_zero",
@@ -2854,8 +2883,10 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
             # input). Still produces a playable Premiere clip.
             alt_cmd = [
                 get_ffmpeg_path(), "-y",
+                *_thr,
                 "-i", video_only,
                 "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                *_thr,
                 "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
                 final_path,
@@ -2869,6 +2900,12 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
         print(f"[SmartCam/plugin] EXCEPTION: {e}", flush=True)
         _tb.print_exc()
         return None
+    finally:
+        # decroped.mp4 / input_cfr.mp4 / video.mp4 are only inputs of
+        # the steps above; they used to stay in /tmp for good
+        # (~0.3 GB per video-minute).
+        if video_only_dir:
+            _shutil.rmtree(video_only_dir, ignore_errors=True)
 
 
 def _probe_video(video_path):
