@@ -8,10 +8,13 @@ name: Cost test (live backend)
 on:
   workflow_dispatch:
     inputs:
-      minutes:
-        description: 'Video lengths in minutes, comma-separated'
+      runs:
+        description: >-
+          profile:minutes pairs, comma-separated. Profiles: synthetic
+          (1080p 1 Mbit/s), phone1080 (1080p30 16 Mbit/s), phone4k
+          (4K30 45 Mbit/s, rotated), phone4k60 (4K60 60 Mbit/s, rotated)
         required: false
-        default: '2,10'
+        default: 'phone1080:2,phone1080:10,phone4k:3'
 
 permissions:
   contents: read
@@ -19,7 +22,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,5 +33,5 @@ jobs:
       - name: Run
         env:
           CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
-          MINUTES: ${{ inputs.minutes }}
-        run: python .github/scripts/cost_test.py "$MINUTES"
+          RUNS: ${{ inputs.runs }}
+        run: python .github/scripts/cost_test.py "$RUNS"
