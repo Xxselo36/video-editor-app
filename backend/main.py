@@ -133,15 +133,19 @@ def _default_work_root() -> Path:
 _WORK_ROOT = _default_work_root()
 _WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
+def _remove_upload(path: str | None) -> None:
+    """Delete an uploaded source file (only inside our work root)."""
+    if path and Path(path).resolve().is_relative_to(_WORK_ROOT.resolve()):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def _delete_job(job) -> None:
     """Remove a job's files (work dir, uploaded source, R2 object) and row."""
     shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
-    inp = job.input_path
-    if inp and Path(inp).resolve().is_relative_to(_WORK_ROOT.resolve()):
-        try:
-            os.remove(inp)
-        except OSError:
-            pass
+    _remove_upload(job.input_path)
     key = (job.settings or {}).get("_r2_storage_key")
     if key:
         from backend.storage import delete_from_r2
@@ -319,6 +323,11 @@ def _run_analyze_inner(job_id: str) -> None:
                 audio_levels=res.get("audio_levels", {}),
                 scene_events=res.get("scene_events", []),
             )
+            # The original upload is only needed to build normalized.mp4;
+            # editing and rendering work from that. Free the space now
+            # instead of keeping a second full-size copy for weeks.
+            _remove_upload(job.input_path)
+            store.update(job_id, input_path=None)
         except Exception as e:
             tb = traceback.format_exc()
             print(f"[job {job_id}] ANALYZE FAILED: {e}\n{tb}", flush=True)
@@ -619,7 +628,14 @@ def admin_costs(x_admin_token: str = Header(default="")):
         c = dict(job.costs or {})
         if not c:
             continue
-        size = costs.dir_bytes(_WORK_ROOT / job.id)
+        job_dir = _WORK_ROOT / job.id
+        files = {
+            str(f.relative_to(job_dir)): f.stat().st_size
+            for f in job_dir.rglob("*") if f.is_file()
+        } if job_dir.exists() else {}
+        if job.input_path and Path(job.input_path).exists():
+            files["(original upload)"] = Path(job.input_path).stat().st_size
+        size = sum(files.values())
         c["usd_storage"] = costs.storage_usd(size, retention_days(job.plan))
         total = c.get("usd_total", 0.0) + c["usd_storage"]
         minutes = (job.duration or 0) / 60
@@ -629,6 +645,8 @@ def admin_costs(x_admin_token: str = Header(default="")):
             "plan": job.plan,
             "video_minutes": round(minutes, 2),
             "storage_mb": round(size / 1e6, 1),
+            "files_mb": {k: round(v / 1e6, 1) for k, v in
+                         sorted(files.items(), key=lambda kv: -kv[1])},
             "usd": {k: round(v, 5) for k, v in c.items() if k.startswith("usd_")},
             "usd_all_in": round(total, 5),
             "usd_per_video_minute": round(total / minutes, 5) if minutes else None,

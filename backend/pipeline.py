@@ -7,6 +7,7 @@ per-segment clips into a single MP4 for the web user to download.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -635,7 +636,11 @@ def _ffmpeg_concat(
         "-movflags", "+faststart",
         output_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    finally:
+        if use_source_audio:
+            shutil.rmtree(audio_segs_dir, ignore_errors=True)
     if result.returncode != 0:
         raise RuntimeError(
             f"ffmpeg concat failed: {result.stderr[-800:]}"
@@ -713,7 +718,13 @@ def analyze_only(
             progress_cb=progress_cb,
         )
         if sc_out and Path(sc_out).exists():
-            normalized_path = sc_out
+            # The SmartCam helper writes into a home-dir cache that is
+            # not on the persistent volume — move the result into the
+            # job folder and drop the now-unused plain normalized.mp4.
+            sc_dest = str(Path(output_dir) / "normalized_smartcam.mp4")
+            shutil.move(sc_out, sc_dest)
+            Path(normalized_path).unlink(missing_ok=True)
+            normalized_path = sc_dest
         else:
             print("[smartcam] reframe returned no file — falling back to source",
                   flush=True)
@@ -1242,11 +1253,15 @@ def render_only(
         # the audio track directly from normalized.mp4 (bit-perfect
         # source copy) instead of stream-copying MoviePy's numpy-
         # processed audio out of each burned segment.
-        _ffmpeg_concat(
-            clip_paths, primary_path,
-            source_audio_path=normalized_path,
-            audio_segments=segments,
-        )
+        try:
+            _ffmpeg_concat(
+                clip_paths, primary_path,
+                source_audio_path=normalized_path,
+                audio_segments=segments,
+            )
+        finally:
+            # Per-clip burns are only concat input — don't keep them.
+            shutil.rmtree(burn_dir, ignore_errors=True)
 
         _generate_thumbnail(primary_path, thumbnail_path)
 
