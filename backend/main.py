@@ -82,7 +82,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import backend.pipeline as pipeline
-from backend import accounts, auth, billing, costs, db
+from backend import accounts, auth, billing, costs, db, observability
 from backend.auth import (
     User, current_user, get_owned_job, media_user, require_user,
 )
@@ -91,9 +91,13 @@ from backend.jobs import (
     new_job_id, retention_days, store,
 )
 from backend.pipeline import EXPORT_FORMATS, analyze_only, render_only
+from backend.security_headers import SecurityHeadersMiddleware
 
 # Media tokens (?t=) must not end up in the access log.
 auth.install_log_filter()
+
+# Error monitoring (Sentry): a no-op unless SENTRY_DSN is set.
+observability.init_sentry()
 
 # Track active worker threads so shutdown can wait for them before
 # letting the container die. Deploys used to kill mid-flight jobs;
@@ -1253,6 +1257,13 @@ class _BodyLimitMiddleware:
 
 app.add_middleware(_BodyLimitMiddleware)
 
+# nosniff, no-referrer, DENY, HSTS and Cross-Origin-Resource-Policy:
+# cross-origin on every response (also the body limit's 413s). The
+# frontend runs with COEP=require-corp (ffmpeg.wasm), so without CORP the
+# browser blocks thumbnails, videos and uploads. Pure ASGI: never buffers
+# streamed or Range video.
+app.add_middleware(SecurityHeadersMiddleware)
+
 # CORS configuration:
 #   - Dev (default): allow LAN IPs on :3000 for phone/tablet testing.
 #   - Prod: set CLEO_ALLOWED_ORIGINS="https://cleo.video,https://www.cleo.video"
@@ -1286,16 +1297,6 @@ else:
     )
 
 
-# Cross-Origin-Resource-Policy on every response so the frontend
-# (which runs with COEP=require-corp for ffmpeg.wasm's SharedArrayBuffer)
-# can load /jobs/*/thumbnail, /jobs/*/watch, and POST uploads to us.
-# Without this the browser blocks the response at the network layer
-# and the upload just hangs at 0%.
-@app.middleware("http")
-async def add_corp_header(request, call_next):
-    response = await call_next(request)
-    response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
-    return response
 
 
 @app.get("/")
@@ -1446,6 +1447,7 @@ def _analysis_failed(job_id: str, job_dir: Path, exc: Exception,
     settles it later."""
     tb = traceback.format_exc()
     print(f"[job {job_id}] ANALYZE FAILED: {exc}\n{tb}", flush=True)
+    observability.capture(exc, job_id=job_id, phase="analyze")
     msg = str(exc)
     if "No space left on device" in msg:
         msg = "server_storage_full"
@@ -1481,6 +1483,7 @@ def _render_failed(job_id: str, exc: Exception) -> None:
     the job later)."""
     tb = traceback.format_exc()
     print(f"[job {job_id}] RENDER FAILED: {exc}\n{tb}", flush=True)
+    observability.capture(exc, job_id=job_id, phase="render")
     _db_retry(job_id, "saving the failure", store.update, job_id,
               status="awaiting_review", progress=100.0,
               message="render_failed", error=str(exc)[:500])
@@ -2315,6 +2318,7 @@ async def billing_webhook(request: Request):
     except Exception as e:
         print(f"[billing] webhook {event} FAILED: {e}\n"
               f"{traceback.format_exc()}", flush=True)
+        observability.capture(e, phase="billing_webhook")
         raise HTTPException(500, "webhook processing failed")
     print(f"[billing] webhook {event}: {result}", flush=True)
     return {"ok": True, **result}

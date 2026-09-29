@@ -18,6 +18,11 @@ PyJWT[crypto]==2.15.0
 psycopg[binary]>=3.2
 psycopg_pool>=3.2
 
+# ── Error monitoring (only with SENTRY_DSN; see backend/observability.py) ──
+# Only backend/observability.py imports it, lazily — desktop app and Modal
+# image never load it.
+sentry-sdk[fastapi]>=2.71,<3
+
 # ── LLM ──
 anthropic==0.111.0
 

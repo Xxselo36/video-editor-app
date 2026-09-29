@@ -14,6 +14,11 @@ on:
       - 'plugins/**'
       - '.github/workflows/modal-deploy.yml'
   workflow_dispatch:
+    inputs:
+      diagnose:
+        description: Don't deploy; print the render app's state and recent logs
+        type: boolean
+        default: false
 
 concurrency:
   group: modal-deploy
@@ -47,8 +52,22 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Diagnose
+        if: steps.creds.outputs.ok == 'true' && inputs.diagnose
+        # Public log: only the render app's state and error lines.
+        run: |
+          pip install -q "modal>=1.0"
+          modal app list 2>&1 | head -20
+          modal container list 2>&1 | head -20
+          timeout 40 modal app logs cleocuts-render 2>&1 \
+            | grep -iE "error|exception|traceback|timeout|killed|memory|oom|limit|fail|cancel|start|finish|stopp" \
+            | tail -60 || true
+          # Can Modal run a call at all? Fails this run with an ::error::
+          # that says what to do (spend limit, tokens, deploy, no answer).
+          python .github/scripts/modal_probe.py --timeout 180
+
       - name: Deploy
-        if: steps.creds.outputs.ok == 'true'
+        if: steps.creds.outputs.ok == 'true' && !inputs.diagnose
         run: |
           pip install "modal>=1.0"
           modal deploy backend/modal_render.py

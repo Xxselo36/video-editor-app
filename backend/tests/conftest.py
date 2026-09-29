@@ -149,6 +149,9 @@ import jwt  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+# Never report test errors to Sentry: empty, not unset, so load_dotenv
+# can't fill it in from a local .env.
+os.environ["SENTRY_DSN"] = ""
 import backend.main as M  # noqa: E402
 from backend import accounts, auth, billing, db  # noqa: E402
 from backend.jobs import store  # noqa: E402

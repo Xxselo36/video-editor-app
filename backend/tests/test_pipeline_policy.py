@@ -68,7 +68,7 @@ class FakeModal:
             def __init__(self, outcome):
                 self.outcome = outcome
 
-            def get(self):
+            def get(self, timeout=None):
                 if isinstance(self.outcome, BaseException):
                     raise self.outcome
                 return self.outcome
