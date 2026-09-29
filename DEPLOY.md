@@ -788,7 +788,10 @@ Proxies nicht erzeugen), `CLEO_MEDIA_ORPHAN_MAX` (200 Präfixe pro Lauf),
 `CLEO_PROXY_CACHE_GB` (5), `CLEO_PROBE_WORKERS` (4),
 `CLEO_MODAL_DEADLINE_S_PER_GB` (60, siehe 9.3), `CLEO_MEDIA_ROOT`
 (Ordner der lokalen Medien, Default `<CLEO_WORK_ROOT>/media`),
-`R2_ENDPOINT_URL` (nur Tests).
+`R2_ENDPOINT_URL` (nur Tests), `CLEO_UPLOAD_INITS_PER_HOUR` (30:
+so viele fortsetzbare Uploads darf ein Nutzer pro Stunde beginnen —
+bzw. eine Adresse, wenn Accounts aus sind; darüber 429
+`too_many_uploads`, die Web-App sagt "später nochmal"; 0 = kein Limit).
 
 Außerhalb von Railway:
 - **Modal-Secret `cleocuts-r2`** (10.2 Schritt 4): ohne es wird nur
@@ -968,11 +971,18 @@ python -m backend.r2_backfill                    # für echt (--limit N, --job I
 
 Pro Job (neueste zuerst, laufende übersprungen): alles hochladen, per
 HEAD gegen die lokale Größe prüfen, dann **in einem Schritt** am Job
-setzen — aber nur, wenn sich der Job in der Zwischenzeit nicht geändert
-hat (sonst "skipped", der nächste Lauf macht ihn). Danach liefert R2 aus;
-die lokale Kopie eines verschobenen Jobs wird einen Tag später gelöscht.
-Idempotent: ein zweiter Lauf tut nichts. Am Ende eine Zusammenfassung
-mit `local_only_left` — **Ziel: 0**. Alternativ `CLEO_BACKFILL=1`: der
+setzen — gegen den Job, wie er *jetzt* ist: Hat der Nutzer ihn in der
+Zwischenzeit bearbeitet, gewinnt seine Änderung (neue Vorschau,
+Zeitstempel für die Aufbewahrung); der Backfill setzt nur, was noch
+fehlt, und nicht mehr gebrauchte Kopien (alte Vorschau-Version) werden
+einen Tag später gelöscht. Ein verschobener Job ("keyed-local") wird
+ganz oder gar nicht umgestellt (sonst "skipped", der nächste Lauf macht
+ihn). Danach liefert R2 aus; die lokale Kopie eines verschobenen Jobs
+wird einen Tag später gelöscht. Ein Proxy, der sich nicht erzeugen
+lässt, wird gemerkt und nicht jede Stunde neu versucht ("skipped: proxy
+could not be made"; der Editor spielt dann die Vorschau). Idempotent:
+ein zweiter Lauf tut nichts. Am Ende eine Zusammenfassung mit
+`local_only_left` — **Ziel: 0**. Alternativ `CLEO_BACKFILL=1`: der
 stündliche Loop erledigt es in kleinen Portionen (danach wieder
 entfernen). Grob 5 GB insgesamt ≈ $0,25 Railway-Egress.
 
@@ -983,9 +993,12 @@ python -m backend.r2_backfill --delete-local --dry-run
 python -m backend.r2_backfill --delete-local
 ```
 
-Löscht nur bei Jobs, deren Medien in R2 liegen und deren Keys per HEAD
-mit der gespeicherten Größe bestätigt sind. Das Volume selbst fällt erst
-in WP6 weg.
+Löscht nur bei Jobs, für die der Backfill nichts mehr zu tun hat und bei
+denen **jede** zu löschende Datei eine Kopie in R2 hat, die per HEAD mit
+der gespeicherten Größe bestätigt ist (sonst "skipped" mit Grund). Die
+Pfade am Job werden zuerst geleert (nur wenn sich der Job nicht geändert
+hat), erst danach werden die Dateien gelöscht. Das Volume selbst fällt
+erst in WP6 weg.
 
 ### 10.6 Arbeitsordner (`CLEO_TMP_ROOT`)
 
@@ -1027,6 +1040,17 @@ des Plans.
   `ORPHAN SWEEP REFUSED`. Meldet er das in Produktion ohne erkennbaren
   Grund: Variable löschen und nachsehen, nicht die Marke überschreiben.
 - `media_gc` ist Teil der Postgres-Backups und des SQLite→Postgres-Umzugs.
+- **Lifecycle-Regeln für `uploads/`** prüft das Backend einmal am Tag
+  selbst (mit `R2_*`): fehlen sie, steht im Log **`[media] R2 LIFECYCLE
+  MISSING`** (Fehler-Level) — dann bleiben abgebrochene Uploads für
+  immer liegen; 10.2 Schritt 4 nachholen. Darf der Token sie nicht lesen,
+  steht dort nur ein Hinweis.
+- **Videos ohne Längenangabe** (Bildschirmaufnahmen als "Streaming"-WebM,
+  der Browser kennt die Länge auch nicht): werden angenommen; die Analyse
+  misst die Länge zuerst selbst. Zu lang → Fehler "video_too_long", mit
+  Abrechnung: erst dann abgebucht, zu wenig Minuten → "quota_exceeded" —
+  in beiden Fällen wird nichts transkribiert und der Upload gelöscht.
+  Jede Analyse hört spätestens bei `CLEO_MAX_MINUTES` auf.
 - `GET /admin/costs`: Speicher aus `media_bytes` der Jobs (R2-Preis für
   R2-Jobs), plus alte lokale Dateien.
 
