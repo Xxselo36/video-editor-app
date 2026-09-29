@@ -37,6 +37,9 @@ RATES: dict[str, float] = {
     "railway_vcpu_s": 20.0 / (30 * 86400),
     "railway_ram_gb_s": 10.0 / (30 * 86400),
     "railway_volume_gb_month": 0.15,
+    # Cloudflare R2: $ per GB-month stored (egress is free; operations
+    # are ~$4.50 / $0.36 per million, negligible per job)
+    "r2_gb_month": 0.015,
     # Railway network egress, $ per GB (source + preview streamed to the
     # editor, final videos downloaded)
     "railway_egress_gb": 0.05,
@@ -122,10 +125,12 @@ def egress_usd(total_bytes: int) -> float:
     return total_bytes / 1e9 * RATES["railway_egress_gb"]
 
 
-def storage_usd(total_bytes: int, days: float) -> float:
-    """Volume cost of keeping `total_bytes` for `days`."""
+def storage_usd(total_bytes: int, days: float,
+                rate: str = "railway_volume_gb_month") -> float:
+    """Cost of keeping `total_bytes` for `days` (the Railway volume, or
+    rate="r2_gb_month")."""
     gb = total_bytes / 1e9
-    return gb * RATES["railway_volume_gb_month"] * days / 30
+    return gb * RATES[rate] * days / 30
 
 
 def dir_bytes(path: Path) -> int:

@@ -1,0 +1,7 @@
+# Test-only dependencies (never installed in the image). On top of
+# backend/requirements.txt:
+#   pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+# moto fakes R2 (S3 API) in the backend tests — in-process (mock_aws)
+# and as a server (ThreadedMotoServer) for the ffprobe / browser tests;
+# CLEO_TEST_MEDIA=r2 runs the whole suite on it.
+moto[s3]>=5.2

@@ -22,7 +22,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Iterable, Literal
 
 from backend import db
 
@@ -45,6 +45,10 @@ def retention_days(plan: str | None) -> float:
     return PLAN_RETENTION_DAYS.get(plan or DEFAULT_PLAN,
                                    PLAN_RETENTION_DAYS["starter"])
 
+
+# The editor proxy's file name next to a legacy job's normalized file
+# (backend.pipeline.PROXY_NAME).
+LEGACY_PROXY_NAME = "proxy.mp4"
 
 JobStatus = Literal[
     "pending", "processing", "awaiting_review", "done", "error", "cancelled",
@@ -114,21 +118,27 @@ class Job:
     # Written by the waiting worker thread (backend/main.py) whenever the
     # line moves.
     queue_position: int | None = None
-    # ── Media keys (WP3: R2 / media store) ──
-    # This release only carries them: it can't read or write that
-    # media, but it must neither lose these fields when it writes a row
-    # nor treat a keyed job as broken because its local paths are gone
-    # (it is the rollback target of the release that fills them).
+    # ── Media keys (backend/media.py; R2 or the local media root) ──
+    # Where the job's files live. Set once the object is stored; a key
+    # never changes its content (a new version gets a new key). The
+    # local path fields above (input_path, normalized_path, preview_path,
+    # output_path, outputs, hook_clips[].path) are only read for jobs
+    # from before the keys (not yet backfilled, backend/r2_backfill.py).
+    # (The WP3-prep release carries these fields without using them: it
+    # is the rollback target and must neither drop them nor treat a
+    # keyed job as broken.)
     source_key: str | None = None      # upload / source object
     mezz_key: str | None = None        # jobs/{id}/mezz.mp4 (render source)
     proxy_key: str | None = None       # jobs/{id}/proxy.mp4 (editor)
     preview_key: str | None = None     # jobs/{id}/preview/v{n}.mp4
-    # Render generation: outputs of generation g live under jobs/{id}/r{g}/.
+    # Render generation: POST /render bumps it; outputs of generation g
+    # live under jobs/{id}/r{g}/.
     render_gen: int = 0
-    # Format → key ("primary", "9:16", …, "hook_1", …); order = buttons.
+    # Format → key ("primary", "9:16", …, "hook_1", …). Same-size
+    # formats point at the primary's key.
     output_keys: dict[str, str] = field(default_factory=dict)
     thumb_key: str | None = None
-    # Key → size in bytes (storage accounting).
+    # Key → size in bytes (storage accounting, GET /admin/costs).
     media_bytes: dict[str, int] = field(default_factory=dict)
     # Where the job's keys live ("r2" / "local"); None = not recorded.
     media_store: str | None = None
@@ -137,6 +147,11 @@ class Job:
     # release can't drop them. Never part of the API.
     _extras: dict[str, Any] = field(default_factory=dict, repr=False,
                                     compare=False)
+
+    def source_ref(self) -> str | None:
+        """The upload object: source_key, or where jobs from before the
+        media keys kept it (settings._r2_storage_key)."""
+        return self.source_key or (self.settings or {}).get("_r2_storage_key")
 
     def has_mezz(self) -> bool:
         """Can this job still be edited / rendered: its render source is
@@ -185,6 +200,19 @@ class Job:
             })
         return out
 
+    def _has_output(self) -> bool:
+        if self.output_keys:
+            return bool(self.output_keys.get("primary"))
+        return self.output_path is not None and Path(self.output_path).exists()
+
+    def _has_proxy(self) -> bool:
+        """GET /jobs/{id}/proxy-video has something to play: the proxy
+        object, or (legacy jobs) proxy.mp4 next to the normalized file."""
+        if self.proxy_key:
+            return True
+        return bool(self.normalized_path) and (
+            Path(self.normalized_path).with_name(LEGACY_PROXY_NAME).is_file())
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -194,10 +222,12 @@ class Job:
             "message": self.message,
             "progress": self.progress,
             "error": self.error,
-            "has_output": self.output_path is not None and Path(self.output_path).exists(),
-            "outputs": list(self.outputs.keys()),
+            "has_output": self._has_output(),
+            "has_proxy": self._has_proxy(),
+            "outputs": list((self.output_keys or self.outputs).keys()),
             "social_caption": self.social_caption,
             "social_hashtags": self.social_hashtags,
+            # Media keys and local paths are never exposed.
             "hook_clips": [
                 {k: v for k, v in c.items() if k not in ("path", "object_key")}
                 for c in self.hook_clips
@@ -252,9 +282,19 @@ def tune_connection(conn: sqlite3.Connection) -> None:
 
 
 # Scalar fields of GET /jobs/status rows (JobStore.status_many).
+# output_keys only so has_output can be told without touching the disk.
 _STATUS_FIELDS = ("id", "status", "message", "progress", "queue_position",
                   "error", "output_path", "updated_at", "preview_version",
-                  "owner_id")
+                  "owner_id", "output_keys")
+
+
+# Durable queue of media prefixes / keys to delete (backend/main.py
+# _media_gc): a `jobs/{id}/…` prefix (ends with "/") or a single key.
+_MEDIA_GC_DDL = (
+    "CREATE TABLE IF NOT EXISTS media_gc ("
+    "prefix TEXT PRIMARY KEY, not_before REAL NOT NULL, "
+    "attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, "
+    "created_at REAL NOT NULL)")
 
 
 # Fields that hold structured (list/dict) data — JSON-encode on write,
@@ -358,6 +398,7 @@ class JobStore:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS job_keys_job ON job_keys(job_id)"
             )
+            self._conn.execute(_MEDIA_GC_DDL)
             self._conn.commit()
 
     def _serialize(self, job: Job) -> str:
@@ -561,11 +602,90 @@ class JobStore:
                 self._conn.commit()
             return job.owner_id
 
-    def delete(self, job_id: str) -> None:
+    def delete(self, job_id: str, gc: Iterable[str] = (),
+               not_before: float | None = None) -> None:
+        """Delete the job row; with `gc`, queue those media prefixes /
+        keys for deletion (media_gc) in the same transaction."""
+        entries = [e for e in gc if e]
         with self._lock:
-            self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
-            self._conn.execute("DELETE FROM job_keys WHERE job_id = ?",
-                               (job_id,))
+            try:
+                self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+                self._conn.execute("DELETE FROM job_keys WHERE job_id = ?",
+                                   (job_id,))
+                self._gc_insert(entries, time.time() if not_before is None
+                                else not_before)
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+    # ── media_gc: durable deletion queue (backend/main.py _media_gc) ──
+
+    def _gc_insert(self, entries: list[str], not_before: float) -> None:
+        now = time.time()
+        for entry in entries:
+            self._conn.execute(
+                "INSERT INTO media_gc (prefix, not_before, attempts, "
+                "last_error, created_at) VALUES (?, ?, 0, NULL, ?) "
+                "ON CONFLICT(prefix) DO UPDATE SET "
+                "not_before = min(media_gc.not_before, excluded.not_before)",
+                (entry, float(not_before), now))
+
+    def gc_add(self, entries: Iterable[str],
+               not_before: float | None = None) -> None:
+        """Queue media prefixes / keys for deletion at `not_before`
+        (default now). An entry already queued keeps the earlier time."""
+        entries = [e for e in entries if e]
+        if not entries:
+            return
+        with self._lock:
+            try:
+                self._gc_insert(entries, time.time() if not_before is None
+                                else not_before)
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+    def gc_due(self, now: float | None = None,
+               limit: int = 200) -> list[dict[str, Any]]:
+        """Entries whose time has come, oldest first."""
+        now = time.time() if now is None else now
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT prefix, not_before, attempts, last_error, created_at "
+                "FROM media_gc WHERE not_before <= ? ORDER BY not_before "
+                "LIMIT ?", (float(now), int(limit))).fetchall()
+        return [dict(r) for r in rows]
+
+    def gc_all(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT prefix, not_before, attempts, last_error, created_at "
+                "FROM media_gc ORDER BY not_before").fetchall()
+        return [dict(r) for r in rows]
+
+    def gc_done(self, prefix: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM media_gc WHERE prefix = ?",
+                               (prefix,))
+            self._conn.commit()
+
+    def gc_failed(self, prefix: str, error: str) -> int:
+        """attempts + 1 and the error; returns the new attempt count."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE media_gc SET attempts = attempts + 1, last_error = ? "
+                "WHERE prefix = ?", (error[:2000], prefix))
+            row = self._conn.execute(
+                "SELECT attempts FROM media_gc WHERE prefix = ?",
+                (prefix,)).fetchone()
+            self._conn.commit()
+        return int(row["attempts"]) if row else 0
+
+    def _truncate_gc_for_tests(self) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM media_gc")
             self._conn.commit()
 
     def list_all(self) -> list[Job]:
