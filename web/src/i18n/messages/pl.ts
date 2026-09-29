@@ -188,6 +188,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "albo przeciągnij plik tutaj",
   "app.upload.keepTabOpen":
     "Trzymaj tę zakładkę otwartą, aż przesyłanie się zakończy. Zmiana aplikacji albo zablokowanie telefonu przerwie przesyłanie.",
+  "app.upload.resuming":
+    "Wznawiamy przesyłanie od miejsca, w którym zostało przerwane — trzymaj tę stronę otwartą.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← wstecz",

@@ -188,6 +188,8 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "of sleep er een naartoe",
   "app.upload.keepTabOpen":
     "Houd dit tabblad open tot de upload klaar is. Wisselen van app of je telefoon vergrendelen annuleert de upload.",
+  "app.upload.resuming":
+    "De upload gaat verder waar hij gestopt was — houd deze pagina open.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← terug",

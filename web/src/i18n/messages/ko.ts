@@ -185,6 +185,8 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "또는 파일을 끌어다 놓기",
   "app.upload.keepTabOpen":
     "업로드가 끝날 때까지 이 탭을 열어 두세요. 앱을 전환하거나 휴대폰을 잠그면 업로드가 취소돼요.",
+  "app.upload.resuming":
+    "중단된 곳부터 업로드를 이어서 하고 있어요 — 이 페이지를 열어 두세요.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← 뒤로",

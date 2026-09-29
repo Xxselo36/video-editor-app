@@ -188,6 +188,8 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "oder eins hineinziehen",
   "app.upload.keepTabOpen":
     "Lass diesen Tab geöffnet, bis der Upload fertig ist. Ein App-Wechsel oder gesperrtes Handy bricht den Upload ab.",
+  "app.upload.resuming":
+    "Der Upload geht dort weiter, wo er unterbrochen wurde — lass diese Seite offen.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← zurück",

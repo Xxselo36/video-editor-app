@@ -192,6 +192,8 @@ export const enApp = {
   "app.upload.orDrag": "or drag one in",
   "app.upload.keepTabOpen":
     "Keep this tab open until the upload finishes. Switching apps or locking your phone will cancel the upload.",
+  "app.upload.resuming":
+    "Resuming the upload where it stopped — keep this page open.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← back",

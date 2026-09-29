@@ -34,6 +34,7 @@ import {
   MAX_MINUTES,
   MAX_UPLOAD_GB,
   readVideoDuration,
+  resumableProgress,
   uploadLimitHit,
   uploadResumable,
   UPLOAD_STALL_MS,
@@ -681,12 +682,21 @@ export default function Home() {
     // get thousands of progress ticks; every one used to write to
     // localStorage + fire a re-render across the dashboard.
     let lastUiUpdate = 0;
+    // Set while the card says "resuming" (an interrupted upload of this
+    // file continues); cleared if it starts over after all.
+    let resumingFrom: number | null = null;
     const setPct = (pct: number) => {
       setUploadPct(pct);
       const now = Date.now();
       if (now - lastUiUpdate > 200 || pct >= 100) {
         lastUiUpdate = now;
-        updateActiveJobV2(tempId, { uploadPct: pct, lastProgressAt: now });
+        const startedOver = resumingFrom !== null && pct + 1 < resumingFrom;
+        if (startedOver) resumingFrom = null;
+        updateActiveJobV2(tempId, {
+          uploadPct: pct,
+          lastProgressAt: now,
+          ...(startedOver ? { resuming: false } : {}),
+        });
       }
     };
 
@@ -707,16 +717,26 @@ export default function Home() {
 
     try {
       // Two upload paths:
-      //   - presigned R2 PUT direct from browser → then POST /jobs with
-      //     the storage_key so backend fetches from R2. For >90MB
-      //     (Railway's edge caps HTTP bodies around 100MB) and, with
-      //     accounts on, for every size: the ~60 s session token would
-      //     expire during a slow multipart upload (the backend checks it
-      //     after the body), and presign answers 402 before any bytes.
-      //   - otherwise legacy multipart POST /jobs (through Railway),
-      //     also when this deployment has no R2 (presign 503).
+      //   - straight to R2 (lib/chunkedUpload: resumable multipart, or
+      //     the single presigned PUT where the backend says so), then
+      //     POST /jobs with the storage_key — for every size whenever
+      //     this deployment has R2: a reload or a lost connection
+      //     resumes, and the backend refuses (402 / 413 / 429 / 503)
+      //     before any bytes are sent.
+      //   - the legacy multipart POST /jobs through Railway, only when
+      //     the backend has no R2 (503 that isn't server_busy) and the
+      //     file fits its body limit (Railway's edge caps ~100 MB).
       const R2_THRESHOLD = 90 * 1024 * 1024; // 90MB
       let res: XMLHttpRequest | null = null;
+
+      // An interrupted upload of this very file (same name, size, first
+      // and last MiB): the card starts where it stopped.
+      const resumedPct = await resumableProgress(targetFile);
+      if (resumedPct !== null) {
+        resumingFrom = resumedPct;
+        setUploadPct(resumedPct);
+        updateActiveJobV2(tempId, { uploadPct: resumedPct, resuming: true, lastProgressAt: Date.now() });
+      }
 
       // Over the size / length caps: say so now instead of after the
       // upload (the server would answer 413). The length is read from
@@ -738,67 +758,73 @@ export default function Home() {
       };
 
       let storageKey: string | null = null;
-      if (targetFile.size > R2_THRESHOLD || AUTH_ENABLED) {
-        try {
-          // Single presigned PUT to R2 (see lib/chunkedUpload).
-          ({ storage_key: storageKey } = await uploadResumable({
-            file: targetFile,
-            onProgress: (pct) => setPct(pct),
-            duration,
-          }));
-        } catch (e) {
-          // 503 without R2 here → legacy upload; 503 server_busy is a
-          // full queue and means "later", not "another way".
-          const noR2 = e instanceof ApiError && e.status === 503 && e.code !== "server_busy";
-          if (!(noR2 && targetFile.size <= R2_THRESHOLD)) throw e;
-        }
+      try {
+        ({ storage_key: storageKey } = await uploadResumable({
+          file: targetFile,
+          onProgress: (pct) => setPct(pct),
+          duration,
+        }));
+      } catch (e) {
+        // 503 without R2 here → legacy upload; 503 server_busy is a
+        // full queue and means "later", not "another way".
+        const noR2 = e instanceof ApiError && e.status === 503 && e.code !== "server_busy";
+        if (!(noR2 && targetFile.size <= R2_THRESHOLD)) throw e;
       }
-      // Fetched now, i.e. after the R2 PUT: the token is short-lived.
-      const auth = AUTH_ENABLED ? await authHeaders() : {};
 
       // Set when POST /jobs gave no usable answer but created the job.
       let createdJobId: string | null = null;
       if (storageKey) {
-        // Create the job with the completed storage_key.
+        // Create the job with the completed storage_key. The server
+        // answers in about a second whatever the size (it only checks
+        // and probes the object; the analysis downloads it), and POST
+        // /jobs is idempotent on the key: a network error or a 5xx is
+        // retried with the same key — never a second job or charge.
         const form = new FormData();
         form.append("storage_key", storageKey);
         appendJobFields(form);
+        // The browser's reading of the length: charged when the file's
+        // header has none (streamed WebM).
+        if (duration) form.append("duration", String(duration));
         const postedAt = Date.now();
-        const post = new Promise<XMLHttpRequest>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open("POST", `${backendUrl()}/jobs`);
-          for (const [k, v] of Object.entries(auth)) xhr.setRequestHeader(k, v);
-          // The server answers after pulling the file from R2 and probing
-          // it — minutes for multi-GB files — and with accounts on it has
-          // charged the minutes by then: don't give up early.
-          xhr.timeout = AUTH_ENABLED ? 30 * 60_000 : 120_000;
-          xhr.onload = () => resolve(xhr);
-          xhr.onerror = () => reject(new Error("Network error"));
-          xhr.ontimeout = () => reject(new Error(tEn("app.errors.serverNoResponse")));
-          xhr.send(form);
-        });
-        if (!AUTH_ENABLED) {
-          res = await post;
-        } else {
-          // No answer (timeout, dropped connection) or a proxy 5xx doesn't
-          // mean no job: look for it in the account's project list before
-          // reporting a failure — a retry would charge the minutes again.
-          let failure: unknown = null;
+        const post = async () => {
+          // Fetched per try: the token is short-lived.
+          const auth = AUTH_ENABLED ? await authHeaders() : {};
+          return new Promise<XMLHttpRequest>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", `${backendUrl()}/jobs`);
+            for (const [k, v] of Object.entries(auth)) xhr.setRequestHeader(k, v);
+            xhr.timeout = 120_000;
+            xhr.onload = () => resolve(xhr);
+            xhr.onerror = () => reject(new Error("Network error"));
+            xhr.ontimeout = () => reject(new Error(tEn("app.errors.serverNoResponse")));
+            xhr.send(form);
+          });
+        };
+        let failure: unknown = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * 3 ** (attempt - 1)));
+          failure = null;
           try {
-            res = await post;
-            // 503 server_busy / 507 are refusals: no job to look for.
+            res = await post();
+            // 503 server_busy / 507 are refusals (and 503
+            // storage_unavailable a short outage: retried).
             if (res.status >= 500 && !REFUSAL_CODES.has(apiErrorFromText(res.status, res.responseText).code ?? "")) {
               failure = new Error(`Upload failed: ${res.responseText}`);
             }
           } catch (e) {
             failure = e;
           }
-          if (failure !== null) {
-            createdJobId = await findJobCreatedFor(targetFile.name, postedAt);
-            if (!createdJobId) throw failure;
-          }
+          if (failure === null) break;
+        }
+        if (failure !== null) {
+          // Still no answer: with accounts on the job may exist anyway —
+          // look for it in the account's project list.
+          createdJobId = AUTH_ENABLED ? await findJobCreatedFor(targetFile.name, postedAt) : null;
+          if (!createdJobId) throw failure;
         }
       } else {
+        // Fetched now, i.e. after the upload attempt: the token is short-lived.
+        const auth = AUTH_ENABLED ? await authHeaders() : {};
         // Legacy path — direct multipart upload to Railway.
         const form = new FormData();
         form.append("file", targetFile);
@@ -4750,7 +4776,10 @@ function ActiveJobCard({
   const pct =
     job.phase === "uploading" ? job.uploadPct ?? 0 : status?.progress ?? 0;
   const canOpen = job.phase === "reviewing" && !isError;
-  const copy = phaseCopy[job.phase];
+  const copy =
+    job.phase === "uploading" && job.resuming
+      ? { ...phaseCopy.uploading, sub: t("app.upload.resuming") }
+      : phaseCopy[job.phase];
   const accent = phaseAccent[job.phase];
 
   return (

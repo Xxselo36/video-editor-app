@@ -185,6 +185,8 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "またはドラッグして追加",
   "app.upload.keepTabOpen":
     "アップロードが完了するまでこのタブを開いたままにしてください。アプリを切り替えたりスマホをロックしたりすると、アップロードが中断されます。",
+  "app.upload.resuming":
+    "中断したところからアップロードを再開しています — このページを開いたままにしてください。",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← 戻る",

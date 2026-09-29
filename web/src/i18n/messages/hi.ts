@@ -188,6 +188,8 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "या एक को यहां खींचकर लाएं",
   "app.upload.keepTabOpen":
     "अपलोड पूरा होने तक इस टैब को खुला रखें। ऐप बदलने या फ़ोन लॉक करने से अपलोड कैंसिल हो जाएगा।",
+  "app.upload.resuming":
+    "अपलोड वहीं से फिर शुरू हो रहा है जहाँ रुका था — इस पेज को खुला रखें।",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← वापस",

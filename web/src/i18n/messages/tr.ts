@@ -189,6 +189,8 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "veya birini sürükle",
   "app.upload.keepTabOpen":
     "Yükleme bitene kadar bu sekmeyi açık tut. Uygulama değiştirmek veya telefonunu kilitlemek yüklemeyi iptal eder.",
+  "app.upload.resuming":
+    "Yükleme kaldığı yerden devam ediyor — bu sayfayı açık tut.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← geri",

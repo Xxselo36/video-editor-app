@@ -189,6 +189,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "ou dépose-la ici",
   "app.upload.keepTabOpen":
     "Garde cet onglet ouvert jusqu'à la fin de l'envoi. Changer d'appli ou verrouiller ton téléphone annulera l'envoi.",
+  "app.upload.resuming":
+    "Reprise de l'envoi là où il s'était arrêté — garde cette page ouverte.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← retour",
