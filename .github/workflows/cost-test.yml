@@ -25,6 +25,10 @@ on:
         description: Only delete these job ids (comma-separated), run nothing
         required: false
         default: ''
+      inspect_jobs:
+        description: Only print the status of these job ids (comma-separated), run nothing
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -38,6 +42,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Inspect jobs
+        if: inputs.inspect_jobs != ''
+        env:
+          CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
+          INSPECT_JOBS: ${{ inputs.inspect_jobs }}
+        run: python .github/scripts/cost_test.py --inspect "$INSPECT_JOBS"
       - name: Delete jobs
         if: inputs.delete_jobs != ''
         env:
@@ -45,10 +55,10 @@ jobs:
           DELETE_JOBS: ${{ inputs.delete_jobs }}
         run: python .github/scripts/cost_test.py --delete "$DELETE_JOBS"
       - name: Install ffmpeg + espeak-ng
-        if: inputs.delete_jobs == ''
+        if: inputs.delete_jobs == '' && inputs.inspect_jobs == ''
         run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
       - name: Run
-        if: inputs.delete_jobs == ''
+        if: inputs.delete_jobs == '' && inputs.inspect_jobs == ''
         env:
           CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
           RUNS: ${{ inputs.runs }}
