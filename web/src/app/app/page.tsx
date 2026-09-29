@@ -143,13 +143,20 @@ const REFUSAL_CODES = new Set([
   "server_busy",
   "server_storage_full",
   "too_many_active_jobs",
+  "too_many_uploads",
   "file_too_large",
   "video_too_long",
 ]);
+// POST /jobs after an upload to R2: waits between tries on a network
+// error or a 5xx that isn't a refusal — about 75 s in all, so a backend
+// restart (every deploy) or a 502 / 503 from the edge doesn't turn a
+// finished multi-GB upload into an error.
+const POST_JOBS_RETRY_MS = [2_000, 4_000, 8_000, 15_000, 15_000, 15_000, 15_000];
 function refusalMessage(err: ApiError): string | null {
   switch (err.code) {
     case "server_busy":
     case "server_storage_full":
+    case "too_many_uploads":
       return tEn("app.errors.serverBusy");
     case "too_many_active_jobs":
       return tEn("app.errors.tooManyJobs");
@@ -758,12 +765,21 @@ export default function Home() {
       };
 
       let storageKey: string | null = null;
+      // Forgets the upload's resume record — only once POST /jobs has
+      // settled the upload (job created, or refused for good).
+      let releaseUpload: (() => Promise<void>) | undefined;
+      // The backend has no multipart API (a build from before WP3): its
+      // POST /jobs downloads the object inside the request.
+      let legacyApi = false;
       try {
-        ({ storage_key: storageKey } = await uploadResumable({
+        const up = await uploadResumable({
           file: targetFile,
           onProgress: (pct) => setPct(pct),
           duration,
-        }));
+        });
+        storageKey = up.storage_key;
+        releaseUpload = up.release;
+        legacyApi = Boolean(up.legacyApi);
       } catch (e) {
         // 503 without R2 here → legacy upload; 503 server_busy is a
         // full queue and means "later", not "another way".
@@ -778,7 +794,10 @@ export default function Home() {
         // answers in about a second whatever the size (it only checks
         // and probes the object; the analysis downloads it), and POST
         // /jobs is idempotent on the key: a network error or a 5xx is
-        // retried with the same key — never a second job or charge.
+        // retried with the same key — never a second job or charge —
+        // for about 75 s (a deploy restart, a 502 / 503 from the edge).
+        // A backend from before WP3 (legacyApi) downloads the object
+        // inside the request and isn't idempotent: one try, 30 min.
         const form = new FormData();
         form.append("storage_key", storageKey);
         appendJobFields(form);
@@ -793,7 +812,7 @@ export default function Home() {
             const xhr = new XMLHttpRequest();
             xhr.open("POST", `${backendUrl()}/jobs`);
             for (const [k, v] of Object.entries(auth)) xhr.setRequestHeader(k, v);
-            xhr.timeout = 120_000;
+            xhr.timeout = legacyApi ? 30 * 60_000 : 120_000;
             xhr.onload = () => resolve(xhr);
             xhr.onerror = () => reject(new Error("Network error"));
             xhr.ontimeout = () => reject(new Error(tEn("app.errors.serverNoResponse")));
@@ -801,8 +820,9 @@ export default function Home() {
           });
         };
         let failure: unknown = null;
-        for (let attempt = 0; attempt < 3; attempt++) {
-          if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * 3 ** (attempt - 1)));
+        const retryDelays = legacyApi ? [] : POST_JOBS_RETRY_MS;
+        for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, retryDelays[attempt - 1]));
           failure = null;
           try {
             res = await post();
@@ -868,6 +888,21 @@ export default function Home() {
         });
       }
 
+      if (releaseUpload) {
+        // The upload's resume record goes once the job exists or the
+        // server refused the upload for good (it deleted it: 400 / 402
+        // / 413, or it's gone: 409 / 410). Kept for a network failure,
+        // a 5xx, 401 (sign in again) and 429 (later): picking the file
+        // again goes straight to POST /jobs.
+        const s = createdJobId !== null ? 200 : (res?.status ?? 0);
+        if ((s >= 200 && s < 300) || (s >= 400 && s < 500 && s !== 401 && s !== 429)) {
+          try {
+            await releaseUpload();
+          } catch {
+            /* the record expires with its ticket anyway */
+          }
+        }
+      }
       if (createdJobId === null && res && res.status >= 400) {
         // 401 / 402 (plan, minutes) and the refusals (413 too big / too
         // long, 429 too many jobs, 503 busy, 507 full) get their own
