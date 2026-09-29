@@ -12,6 +12,12 @@ python-dotenv==1.2.2
 # Modal image don't need it.
 PyJWT[crypto]==2.15.0
 
+# ── Postgres (source of truth when DATABASE_URL is set; see backend/db.py) ──
+# Only backend/pg*.py import them, lazily — SQLite deployments, the
+# desktop app and the Modal image never load psycopg.
+psycopg[binary]>=3.2
+psycopg_pool>=3.2
+
 # ── LLM ──
 anthropic==0.111.0
 

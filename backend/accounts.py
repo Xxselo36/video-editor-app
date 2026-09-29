@@ -1,9 +1,16 @@
 """Accounts database: users, Lemon Squeezy subscriptions, minutes usage.
 
 Lives in the same SQLite file as the jobs (backend.jobs._db_path()) but
-in its own tables, with its own connection + lock. Only backend/main.py,
-backend/auth.py and backend/billing.py import this module; the desktop
-app and the Modal image never load it.
+in its own tables, with its own connection + lock — or, with Postgres
+active (backend/db.py), in the same-named Postgres tables (backend/pg.py).
+The SQL below is written once for both: `?` placeholders (the Postgres
+adapter turns them into %s), INSERT … ON CONFLICT, timestamps passed as
+db.ts(...) and read back as Unix floats, booleans as True/False. Writes
+run in _tx(fn, lock_key): SQLite BEGIN IMMEDIATE (one writer at a time),
+Postgres BEGIN + pg_advisory_xact_lock(hashtext(lock_key)), so a
+read-check-write (the quota charge) is atomic across processes too.
+Only backend/main.py, backend/auth.py and backend/billing.py import this
+module; the desktop app and the Modal image never load it.
 
 Tables (all CREATE TABLE IF NOT EXISTS, so adding them is migration-safe):
 
@@ -16,7 +23,8 @@ Tables (all CREATE TABLE IF NOT EXISTS, so adding them is migration-safe):
                                          doesn't give minutes back
     billing_events(key, created_at)      webhook idempotency
 
-All timestamps are Unix seconds (REAL).
+All timestamps are Unix seconds (REAL; timestamptz in Postgres,
+converted at the adapter boundary).
 """
 from __future__ import annotations
 
@@ -28,12 +36,14 @@ import secrets
 import sqlite3
 import threading
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from backend import jobs
+from backend import db, jobs
+from backend.db import ts
 
 # Minutes of video per billing period (one calendar month). Override per
 # plan with e.g. CLEO_PLAN_MINUTES_PRO=400. Retention per plan stays in
@@ -58,7 +68,8 @@ _REACTIVATABLE = {"paused", "unpaid"}
 TRUE_UP_TOLERANCE_S = 5.0
 
 _lock = threading.RLock()
-_conn: sqlite3.Connection | None = None
+# sqlite3.Connection, or backend.pg.AccountsDB while Postgres is active.
+_conn: Any = None
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -135,18 +146,29 @@ def db_path() -> str:
 
 def db_is_persistent() -> bool:
     """False when the DB silently fell back to /tmp (wiped on every
-    redeploy) — billing refuses to run on that."""
+    redeploy) — billing refuses to run on that. Postgres always is."""
+    if db.active() == "postgres":
+        return True
     if os.environ.get("CLEO_JOB_DB"):
         return True
     return db_path() != "/tmp/cleo_jobs.db"
 
 
-def _db() -> sqlite3.Connection:
-    """Open (once) the accounts connection. Autocommit mode: every write
-    below runs in an explicit BEGIN IMMEDIATE ... COMMIT."""
+def _db() -> Any:
+    """Open (once) the accounts connection: SQLite in autocommit mode
+    (every write below runs in an explicit BEGIN IMMEDIATE ... COMMIT),
+    or the Postgres adapter (backend.pg.AccountsDB: same execute() with
+    ? placeholders, rows as dicts) while Postgres is active."""
     global _conn
+    if _conn is not None:
+        return _conn
+    backend = db.active()
     with _lock:
         if _conn is None:
+            if backend == "postgres":
+                from backend import pg
+                _conn = pg.accounts_db()
+                return _conn
             path = db_path()
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(path, check_same_thread=False,
@@ -158,10 +180,28 @@ def _db() -> sqlite3.Connection:
         return _conn
 
 
-def _tx(fn: Callable[[sqlite3.Connection], Any]) -> Any:
-    """Run fn(conn) in one write transaction under the module lock."""
+def _is_sqlite(conn: Any) -> bool:
+    return isinstance(conn, sqlite3.Connection)
+
+
+def _local_lock(conn: Any):
+    """The module lock on SQLite (one connection shared by all threads);
+    nothing on Postgres, where every call gets its own pooled connection
+    and _tx's advisory lock does the serializing, across processes."""
+    return _lock if _is_sqlite(conn) else nullcontext()
+
+
+def _tx(fn: Callable[[Any], Any], lock_key: str | None = None) -> Any:
+    """Run fn(conn) in one write transaction. SQLite: BEGIN IMMEDIATE
+    under the module lock (the database-wide write lock; lock_key is
+    implied). Postgres: BEGIN, plus pg_advisory_xact_lock on
+    hashtext(lock_key) when given — callers with the same key run one
+    after the other, in any process."""
+    conn = _db()
+    if not _is_sqlite(conn):
+        with conn.transaction(lock_key) as tx:
+            return fn(tx)
     with _lock:
-        conn = _db()
         conn.execute("BEGIN IMMEDIATE")
         try:
             out = fn(conn)
@@ -172,9 +212,21 @@ def _tx(fn: Callable[[sqlite3.Connection], Any]) -> Any:
         return out
 
 
-def _read(sql: str, args: tuple = ()) -> list[sqlite3.Row]:
+def _xact_lock(conn: Any, key: str) -> None:
+    """Inside a _tx transaction: also serialize on `key` (Postgres advisory
+    lock until commit). SQLite's BEGIN IMMEDIATE holds the write lock
+    already."""
+    lock = getattr(conn, "lock", None)
+    if lock is not None:
+        lock(key)
+
+
+def _read(sql: str, args: tuple = ()) -> list[Any]:
+    conn = _db()
+    if not _is_sqlite(conn):
+        return conn.read(sql, args)
     with _lock:
-        return _db().execute(sql, args).fetchall()
+        return conn.execute(sql, args).fetchall()
 
 
 # ── meta ─────────────────────────────────────────────────────────────
@@ -197,7 +249,7 @@ def meta_get_or_create(key: str, factory: Callable[[], str]) -> str:
         conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)",
                      (key, value))
         return value
-    return _tx(_do)
+    return _tx(_do, lock_key=f"meta:{key}")
 
 
 def meta_get(key: str) -> str | None:
@@ -256,13 +308,13 @@ def ensure_user(user_id: str, email: str | None = None) -> dict[str, Any]:
         if row is None:
             conn.execute(
                 "INSERT INTO users (id, email, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?)", (user_id, email, now, now))
+                "VALUES (?, ?, ?, ?)", (user_id, email, ts(now), ts(now)))
         elif email and row["email"] != email:
             conn.execute("UPDATE users SET email = ?, updated_at = ? "
-                         "WHERE id = ?", (email, now, user_id))
+                         "WHERE id = ?", (email, ts(now), user_id))
         return dict(conn.execute("SELECT * FROM users WHERE id = ?",
                                  (user_id,)).fetchone())
-    return _tx(_do)
+    return _tx(_do, lock_key=f"user:{user_id}")
 
 
 def get_user(user_id: str) -> dict[str, Any] | None:
@@ -283,10 +335,28 @@ _SUB_COLUMNS = (
     "renews_at", "ends_at", "portal_url", "update_payment_url", "raw_json",
     "created_at", "ls_updated_at",
 )
+_SUB_TIMES = {"renews_at", "ends_at", "created_at", "ls_updated_at"}
 
 
-def upsert_subscription_tx(conn: sqlite3.Connection, sub: dict[str, Any]
-                           ) -> bool:
+def _sub_params(sub: dict[str, Any]) -> tuple:
+    """sub's _SUB_COLUMNS values as query parameters: times via ts(),
+    test_mode as a boolean (SQLite stores 1/0, Postgres a boolean),
+    raw_json marked as JSON (Postgres cleans what jsonb refuses, e.g. a
+    NUL in the buyer's name, instead of failing the webhook forever)."""
+    out = []
+    for c in _SUB_COLUMNS:
+        value = sub.get(c)
+        if c in _SUB_TIMES:
+            value = ts(value)
+        elif c == "test_mode" and value is not None:
+            value = bool(value)
+        elif c == "raw_json" and isinstance(value, str):
+            value = db.JsonText(value)
+        out.append(value)
+    return tuple(out)
+
+
+def upsert_subscription_tx(conn: Any, sub: dict[str, Any]) -> bool:
     """Insert or update one subscription inside the caller's transaction.
 
     Skips (returns False) when the stored row is newer than `sub`
@@ -294,6 +364,7 @@ def upsert_subscription_tx(conn: sqlite3.Connection, sub: dict[str, Any]
     back. period_start is only ever set by set_period_start_tx.
     """
     now = time.time()
+    _xact_lock(conn, f"sub:{sub['id']}")
     row = conn.execute("SELECT user_id, ls_updated_at FROM subscriptions "
                        "WHERE id = ?", (sub["id"],)).fetchone()
     if row is not None:
@@ -304,24 +375,24 @@ def upsert_subscription_tx(conn: sqlite3.Connection, sub: dict[str, Any]
         cols = ", ".join(f"{c} = ?" for c in _SUB_COLUMNS)
         conn.execute(
             f"UPDATE subscriptions SET {cols}, updated_at = ? WHERE id = ?",
-            tuple(sub.get(c) for c in _SUB_COLUMNS) + (now, sub["id"]))
+            _sub_params(sub) + (ts(now), sub["id"]))
         return True
     cols = ", ".join(("id",) + _SUB_COLUMNS + ("updated_at",))
     marks = ", ".join("?" for _ in range(len(_SUB_COLUMNS) + 2))
     conn.execute(
         f"INSERT INTO subscriptions ({cols}) VALUES ({marks})",
-        (sub["id"],) + tuple(sub.get(c) for c in _SUB_COLUMNS) + (now,))
+        (sub["id"],) + _sub_params(sub) + (ts(now),))
     return True
 
 
-def set_period_start_tx(conn: sqlite3.Connection, sub_id: str,
+def set_period_start_tx(conn: Any, sub_id: str,
                         period_start: float) -> None:
     """Move the quota period start forward (never back — an old invoice
     arriving late must not re-open a finished period)."""
     conn.execute(
         "UPDATE subscriptions SET period_start = ? WHERE id = ? AND "
         "(period_start IS NULL OR period_start < ?)",
-        (period_start, sub_id, period_start))
+        (ts(period_start), sub_id, ts(period_start)))
 
 
 def upsert_subscription(sub: dict[str, Any]) -> bool:
@@ -355,15 +426,17 @@ def event_seen(key: str) -> bool:
     return bool(_read("SELECT 1 FROM billing_events WHERE key = ?", (key,)))
 
 
-def apply_event(key: str, fn: Callable[[sqlite3.Connection], Any]) -> bool:
+def apply_event(key: str, fn: Callable[[Any], Any]) -> bool:
     """Record webhook `key` and run fn(conn) in ONE transaction: if fn
     fails nothing is recorded, so Lemon Squeezy's retry is processed
-    again. Returns False when the key was already processed."""
+    again. Returns False when the key was already processed (also when
+    another process records it at the same moment: its insert wins, ours
+    waits for it and then does nothing)."""
     def _do(conn):
-        try:
-            conn.execute("INSERT INTO billing_events (key, created_at) "
-                         "VALUES (?, ?)", (key, time.time()))
-        except sqlite3.IntegrityError:
+        cur = conn.execute("INSERT INTO billing_events (key, created_at) "
+                           "VALUES (?, ?) ON CONFLICT (key) DO NOTHING",
+                           (key, ts(time.time())))
+        if cur.rowcount == 0:
             return False
         fn(conn)
         return True
@@ -527,25 +600,27 @@ def limit_seconds(plan: str) -> float:
 # ── usage ledger ─────────────────────────────────────────────────────
 
 
-def _used_tx(conn: sqlite3.Connection, user_id: str,
-             period_start: float) -> float:
+def _used_tx(conn: Any, user_id: str, period_start: float) -> float:
     row = conn.execute(
         "SELECT COALESCE(SUM(seconds_billed), 0) AS s FROM usage "
-        "WHERE user_id = ? AND refunded = 0 AND created_at >= ?",
-        (user_id, period_start)).fetchone()
+        "WHERE user_id = ? AND refunded = ? AND created_at >= ?",
+        (user_id, False, ts(period_start))).fetchone()
     return float(row["s"] or 0)
 
 
 def used_seconds(user_id: str, period_start: float) -> float:
-    with _lock:
-        return _used_tx(_db(), user_id, period_start)
+    conn = _db()
+    with _local_lock(conn):
+        return _used_tx(conn, user_id, period_start)
 
 
 def charge(job_id: str, user_id: str, seconds: float, *,
            email: str | None = None, enforce: bool = True,
            now: float | None = None) -> Entitlement | None:
     """Check the quota and record `seconds` for job_id — atomically, so
-    two parallel uploads can't both spend the last minutes.
+    two parallel uploads can't both spend the last minutes: the sum and
+    the insert run in one transaction under the user's lock (SQLite: the
+    write lock; Postgres: advisory lock 'user:<id>', across processes).
 
     enforce=False records the usage (the account page shows it) but
     never refuses. Raises SubscriptionRequired / QuotaExceeded. Returns
@@ -553,7 +628,7 @@ def charge(job_id: str, user_id: str, seconds: float, *,
     """
     now = time.time() if now is None else now
     seconds = float(math.ceil(max(0.0, seconds)))
-    with _lock:
+    with _local_lock(_db()):
         ent = entitlement(user_id, email, now)
         if ent is None and enforce:
             raise SubscriptionRequired()
@@ -568,8 +643,8 @@ def charge(job_id: str, user_id: str, seconds: float, *,
             conn.execute(
                 "INSERT INTO usage (job_id, user_id, seconds_billed, "
                 "created_at, period_start) VALUES (?, ?, ?, ?, ?)",
-                (job_id, user_id, seconds, now, period_start))
-        _tx(_do)
+                (job_id, user_id, seconds, ts(now), ts(period_start)))
+        _tx(_do, lock_key=f"user:{user_id}")
         return ent
 
 
@@ -604,8 +679,9 @@ def refund(job_id: str, note: str = "") -> bool:
     Idempotent; returns True if something was refunded."""
     def _do(conn):
         cur = conn.execute(
-            "UPDATE usage SET refunded = 1, note = ? "
-            "WHERE job_id = ? AND refunded = 0", (note[:200], job_id))
+            "UPDATE usage SET refunded = ?, note = ? "
+            "WHERE job_id = ? AND refunded = ?",
+            (True, note[:200], job_id, False))
         return cur.rowcount > 0
     return _tx(_do)
 
@@ -667,10 +743,11 @@ def subscription_public(sub: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def _reset_for_tests() -> None:
-    """Close the connection so the next call reopens jobs._db_path()."""
+    """Close the connection so the next call reopens jobs._db_path()
+    (with Postgres: drops the adapter; the pool stays open)."""
     global _conn
     with _lock:
-        if _conn is not None:
+        if _conn is not None and _is_sqlite(_conn):
             _conn.close()
         _conn = None
 

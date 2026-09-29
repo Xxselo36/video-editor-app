@@ -543,6 +543,7 @@ def test_upload_dropped_after_success_without_the_hook(monkeypatch):
 # ── WAL ──────────────────────────────────────────────────────────────
 
 
+@pytest.mark.sqlite_only
 def test_both_connections_use_wal():
     with store._lock:
         mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]

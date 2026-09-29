@@ -277,7 +277,7 @@ def test_unmapped_variant_applies_on_every_sync_path(billing_on, path):
     add_sub("s1", plan="pro")
     with accounts._lock:
         accounts._db().execute("UPDATE subscriptions SET updated_at = ?",
-                               (time.time() - 7200,))
+                               (accounts.ts(time.time() - 7200),))
     billing_on.sub("s1", status="cancelled", variant="999999",
                    ends_at="2099-01-01T00:00:00Z",
                    updated_at="2099-01-01T00:00:00Z")

@@ -538,6 +538,7 @@ def test_config(client, billing_on, monkeypatch):
     assert len(billing_on.calls) == n  # cached
 
 
+@pytest.mark.sqlite_only
 def test_billing_refuses_tmp_db(client, billing_on, monkeypatch):
     import backend.jobs as jobs
     monkeypatch.delenv("CLEO_JOB_DB")
@@ -601,7 +602,7 @@ def test_me_refreshes_stale_subscription(client, billing_on, bearer):
     add_sub("sub_1", renews_at=time.time() - 60)
     with accounts._lock:
         accounts._db().execute("UPDATE subscriptions SET updated_at = ?",
-                               (time.time() - 7200,))
+                               (accounts.ts(time.time() - 7200),))
     billing_on.sub("sub_1", status="cancelled",
                    ends_at="2000-01-01T00:00:00Z",
                    updated_at="2099-01-01T00:00:00Z")
@@ -616,7 +617,7 @@ def test_me_refresh_backs_off_while_ls_is_down(client, billing_on, bearer):
     add_sub("sub_2", plan="starter", renews_at=time.time() - 60)
     with accounts._lock:
         accounts._db().execute("UPDATE subscriptions SET updated_at = ?",
-                               (time.time() - 7200,))
+                               (accounts.ts(time.time() - 7200),))
     billing_on.down = True
     for _ in range(3):
         assert client.get("/me", headers=bearer()).status_code == 200

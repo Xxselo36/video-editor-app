@@ -26,6 +26,7 @@ def test_legacy_create_signature_still_works():
     assert got.created_at > 0 and got.settings == {"caption_preset": "clipper"}
 
 
+@pytest.mark.sqlite_only
 def test_old_rows_load():
     # A row written before the new Job fields existed.
     import json
