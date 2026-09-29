@@ -55,9 +55,16 @@ def test_anonymous_flow(client, no_accounts_db, clean_state):
     assert body["status"] == "pending" and body["filename"] == "Clip.MOV"
     job = store.get(job_id)
     assert job.owner_id is None and job.plan == DEFAULT_PLAN
-    assert job.input_path.endswith(".MOV")
+    if M.media.is_r2():
+        # The body went to the media store; nothing stays on this box.
+        assert job.input_path is None
+        assert job.source_key == f"jobs/{job_id}/source.mov"
+        assert M.media.size(job.source_key) == 4
+    else:
+        assert job.input_path.endswith(".MOV")
     # _cost_test kept (cost_test.py runs without auth), forged key gone.
-    assert job.settings == {"style": "tight", "_cost_test": True}
+    assert job.settings == {"style": "tight", "_cost_test": True,
+                            "_max_seconds": 30 * 60 + 1}
     assert (job.preset_id, job.preset_label) == ("p1", "Vlog")
 
     assert client.get(f"/jobs/{job_id}").status_code == 200
@@ -110,7 +117,7 @@ def test_storage_key_outside_uploads_is_refused(client, no_accounts_db):
     assert r.status_code == 403
 
 
-def test_presign_still_503_without_r2(client, no_accounts_db):
+def test_presign_still_503_without_r2(client, no_accounts_db, no_r2):
     assert client.post("/uploads/presign", json={}).status_code == 503
 
 

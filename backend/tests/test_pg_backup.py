@@ -33,6 +33,11 @@ def _fill(database) -> None:
                         filename=f"tab\there\nline\\{i} ☃ 😀.mp4")
         st.update(job.id, subtitles=[{"text": "a\tb\nc\\d \"q\" ü"}] * 3,
                   audio_levels={"peak": float("nan")}, status="done")
+    # The media GC queue is backed up too (a restore must not forget
+    # superseded renders / previews of live jobs).
+    st.gc_add(["jobs/0123456789ab/r1/"], 1_790_000_000.5, store="r2")
+    st.gc_add(["jobs/0123456789ab/"], 1_790_000_100.0, store="local")
+    st.gc_add(["jobs/0123456789ab/"], 1_790_000_200.0)
     adb = pg.AccountsDB(database)
     with adb.transaction() as tx:
         tx.execute("INSERT INTO meta (key, value) VALUES (?, ?)",
@@ -77,7 +82,8 @@ def test_export_restores_identically(two_dbs, tmp_path):
     dump = tmp_path / "b.sql.gz"
     counts = pg_backup.export(src, str(dump))
     assert counts == {"meta": 1, "users": 1, "subscriptions": 1,
-                      "usage": 1, "billing_events": 1, "jobs": 25}
+                      "usage": 1, "billing_events": 1, "jobs": 25,
+                      "media_gc": 3}
     text = gzip.open(dump, "rt", encoding="utf-8").read()
     assert text.startswith("-- CleoCuts Postgres backup")
     assert "COPY jobs (id, owner_id" in text and text.rstrip().endswith(
@@ -91,6 +97,11 @@ def test_export_restores_identically(two_dbs, tmp_path):
         assert "\t" in job.filename and "😀" in job.filename
         assert job.audio_levels["peak"] != job.audio_levels["peak"]  # NaN
         assert dst.apply_schema() == []
+        gc = {(r["prefix"], r["store"]): r["not_before"]
+              for r in pg.PgJobStore(dst).gc_all()}
+        assert gc == {("jobs/0123456789ab/r1/", "r2"): 1_790_000_000.5,
+                      ("jobs/0123456789ab/", "local"): 1_790_000_100.0,
+                      ("jobs/0123456789ab/", None): 1_790_000_200.0}
         with pytest.raises(RuntimeError, match="not empty"):
             pg_backup.restore(dst_url, str(dump))
     finally:
@@ -152,9 +163,9 @@ def r2(monkeypatch, tmp_path):
     import backend.storage as storage
     fake = FakeR2(tmp_path)
     monkeypatch.setattr(storage, "r2_available", lambda: True)
-    monkeypatch.setattr(storage, "upload_to_r2", fake.upload)
-    monkeypatch.setattr(storage, "list_r2", fake.list)
-    monkeypatch.setattr(storage, "delete_from_r2", fake.delete)
+    monkeypatch.setattr(storage, "backup_put", fake.upload)
+    monkeypatch.setattr(storage, "backup_list", fake.list)
+    monkeypatch.setattr(storage, "backup_delete", fake.delete)
     return fake
 
 
@@ -219,3 +230,31 @@ def test_backup_needs_postgres_and_r2(two_dbs, monkeypatch, r2):
     monkeypatch.setattr(storage, "r2_available", lambda: True)
     M._backup_tick()
     assert list(r2.objects)[0].startswith("backups/pg/")
+
+
+def test_restored_database_is_not_the_media_owner(two_dbs, tmp_path):
+    """The orphan sweep's owner binding (meta media_owner_fp) stays out
+    of the dump: a restored database has the owner id but not the
+    binding, so it can't pass as the database that owns the bucket."""
+    src, dst_url = two_dbs
+    adb = pg.AccountsDB(src)
+    with adb.transaction() as tx:
+        tx.execute("INSERT INTO meta (key, value) VALUES (?, ?)",
+                   ("media_owner_fp", "fp-of-src"))
+        tx.execute("INSERT INTO meta (key, value) VALUES (?, ?)",
+                   ("media_owner_id", "owner-1"))
+    dump = tmp_path / "b.sql.gz"
+    assert pg_backup.export(src, str(dump))["meta"] == 2
+    pg_backup.restore(dst_url, str(dump))
+    dst = pg.Database(dst_url, max_size=2)
+    try:
+        meta = {r["key"]: r["value"] for r in
+                pg.AccountsDB(dst).read("SELECT key, value FROM meta")}
+        assert meta["media_owner_id"] == "owner-1"
+        assert "media_owner_fp" not in meta
+        # Another database of the same cluster is another identity.
+        ident = "SELECT (SELECT oid FROM pg_database WHERE datname = " \
+                "current_database())::text AS o"
+        assert pg.AccountsDB(dst).read(ident) != adb.read(ident)
+    finally:
+        dst.close()

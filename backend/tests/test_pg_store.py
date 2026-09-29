@@ -433,19 +433,24 @@ def test_charges_from_several_processes_never_exceed_quota(pgdb, tmp_path):
 
 
 @pytest.fixture
-def fake_r2(monkeypatch):
-    import backend.storage as storage
-    monkeypatch.setattr(storage, "r2_available", lambda: True)
-    state = {"downloads": [], "deleted": [], "barrier": None}
+def fake_r2(monkeypatch, r2):
+    """R2 (moto) with 1000-byte uploads (HEAD faked); the header probe
+    of POST /jobs records its calls and waits at state["barrier"]."""
+    state = {"probes": [], "deleted": [], "barrier": None}
+    real_delete = M.media.delete
 
-    def download(key, dest):
-        state["downloads"].append(key)
+    def delete(key, **kw):
+        state["deleted"].append(key)
+        real_delete(key, **kw)
+
+    def probe(url):
+        state["probes"].append(url)
         if state["barrier"] is not None:
             state["barrier"].wait(timeout=10)
-        Path(dest).write_bytes(b"v" * 16)
-    monkeypatch.setattr(storage, "object_size", lambda key: 1000)
-    monkeypatch.setattr(storage, "download_from_r2", download)
-    monkeypatch.setattr(storage, "delete_from_r2", state["deleted"].append)
+        return 60.0
+    monkeypatch.setattr(M.media, "size", lambda key, **kw: 1000)
+    monkeypatch.setattr(M.media, "delete", delete)
+    monkeypatch.setattr(M, "_probe_remote_duration", probe)
     monkeypatch.setattr(M, "_probe_duration", lambda p: 60.0)
     return state
 
@@ -493,13 +498,13 @@ def test_concurrent_post_jobs_same_key_make_one_job(
         [r.text for r in answers]
     assert answers[0].json()["job_id"] == answers[1].json()["job_id"]
     assert len(store.list_all()) == 1
-    assert fake_r2["downloads"] == ["uploads/user_a/v.mp4"] * 2
+    assert len(fake_r2["probes"]) == 2
     assert fake_r2["deleted"] == []
     assert clean_state == [answers[0].json()["job_id"]]  # one analysis
     ent = accounts.entitlement("user_a")
     assert accounts.used_seconds("user_a", accounts.period_for(ent)[0]) == 60
-    uploads = list((M._WORK_ROOT / "uploads").glob("*"))
-    assert len(uploads) == 1        # the loser's local copy is gone
+    # Nothing is downloaded by POST /jobs any more (the worker fetches).
+    assert list((M._WORK_ROOT / "uploads").glob("*")) == []
 
 
 def test_ready_and_list_on_postgres(pg_side, client, auth_on, bearer,
@@ -630,7 +635,7 @@ def test_same_key_when_the_quota_covers_one_charge(
     assert job.settings["_max_seconds"] == 60 + accounts.TRUE_UP_TOLERANCE_S
     ent = accounts.entitlement("user_a")
     assert accounts.used_seconds("user_a", accounts.period_for(ent)[0]) == 60
-    assert len(list((M._WORK_ROOT / "uploads").glob("*"))) == 1
+    assert list((M._WORK_ROOT / "uploads").glob("*")) == []
 
 
 @pytest.mark.parametrize("backend", ["active", "postgres"])

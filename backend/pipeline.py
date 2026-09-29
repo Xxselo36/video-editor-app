@@ -1424,8 +1424,10 @@ def _modal_retry_delays() -> list[float]:
 
 _log = logging.getLogger(__name__)
 
-# Modal's own hard cap per render call (modal_render.py `timeout=`).
-_MODAL_FUNCTION_TIMEOUT_S = 1800.0
+# Modal's own hard cap per render call (modal_render.py render_r2
+# `timeout=`; render_burn_concat, the default volume path, still has
+# 1800 — DEPLOY.md: renders over ~30 min only work with render_r2).
+_MODAL_FUNCTION_TIMEOUT_S = 3600.0
 # Workspace-level problems every retry would hit the same way, only
 # 10 + 30 s later: the spend limit or a quota (ResourceExhaustedError —
 # spawn raises it once the billing-cycle limit is reached), missing or
@@ -1472,11 +1474,16 @@ def _env_seconds(name: str, default: float) -> float:
         return default
 
 
-def _modal_deadline_s(segments: list[tuple[float, float]]) -> float:
+def _modal_deadline_s(segments: list[tuple[float, float]],
+                      mezz_bytes: int | None = None) -> float:
     """How long one Modal call may take from spawn to result before it
     is cancelled: CLEO_MODAL_DEADLINE_S_BASE (240) + CLEO_MODAL_DEADLINE_
-    S_PER_S (6) × output seconds, at most CLEO_MODAL_DEADLINE_S_MAX
-    (Modal's 1800 s function timeout + 120 s to get scheduled). It is
+    S_PER_S (6) × output seconds + CLEO_MODAL_DEADLINE_S_PER_GB (60) ×
+    the mezz's GB (render_r2 downloads it, and uploads outputs of about
+    that size, inside the call), at most CLEO_MODAL_DEADLINE_S_MAX
+    (Modal's 3600 s function timeout + 120 s to get scheduled; the volume
+    path's render_burn_concat is capped by Modal at 1800 s whatever this
+    says — renders that need longer fail there with render_timeout). It is
     for calls that never produce a result (never scheduled, lost) or
     render far slower than normal — without it the render thread waited
     forever and held its render slot. 0 is no "off" switch (it would
@@ -1487,10 +1494,12 @@ def _modal_deadline_s(segments: list[tuple[float, float]]) -> float:
     cap = _env_seconds("CLEO_MODAL_DEADLINE_S_MAX", default_cap) or default_cap
     base = _env_seconds("CLEO_MODAL_DEADLINE_S_BASE", 240.0)
     per_s = _env_seconds("CLEO_MODAL_DEADLINE_S_PER_S", 6.0)
+    per_gb = _env_seconds("CLEO_MODAL_DEADLINE_S_PER_GB", 60.0)
+    gb = max(0.0, float(mezz_bytes or 0)) / 1e9
     deadline = base + per_s * out_s
     if deadline <= 0:
         deadline = 240.0 + 6.0 * out_s
-    return min(deadline, cap)
+    return min(deadline + per_gb * gb, cap)
 
 
 def _modal_give_up(exc: BaseException, phase: str) -> tuple[str, str] | None:
@@ -2169,6 +2178,86 @@ def _merge_for_render(
     return [(a, b) for a, b in out_s], out_fx
 
 
+def _prepare_render(
+    segments: list,
+    settings: dict[str, Any],
+    cut_ranges: list[dict] | None,
+    disabled_cuts: list[int] | None,
+    duration: float | None,
+) -> tuple[list[tuple[float, float]], list[dict]]:
+    """The clips a render encodes, with their effects aligned 1:1: cuts
+    the user un-checked are re-included, then clips are merged."""
+    if disabled_cuts and cut_ranges and duration:
+        segments = _segments_from_disabled_cuts(
+            segments, cut_ranges, disabled_cuts, duration,
+        )
+    # min_gap=0: every gap between web-editor segments is a deliberate
+    # cut (silence, filler word, failed take, user trim). Bridging gaps
+    # up to 0.3 s — the Premiere plugin's encode-count optimisation —
+    # put short cut 'äh's back into the final video.
+    return _merge_for_render(
+        segments, (settings or {}).get("segment_effects") or [], min_gap=0.0,
+    )
+
+
+def _has_effects(effects: list[dict]) -> bool:
+    return bool(effects) and any(
+        (e.get("speed", 1.0) != 1.0)
+        or (e.get("fadeIn", 0.0) > 0)
+        or (e.get("fadeOut", 0.0) > 0)
+        or (e.get("volume", 1.0) != 1.0)
+        for e in effects
+    )
+
+
+def detect_hooks(
+    subtitles: list,
+    settings: dict[str, Any],
+    duration: float | None,
+    language: str | None,
+    progress_cb: Callable[[str, float], None] | None = None,
+) -> list[dict[str, Any]]:
+    """Short-form hook moments (LLM) in the edited subtitles — output
+    time, so independent of the encode. [] when off, too short (< 90 s,
+    < 4 lines) or the LLM fails (soft)."""
+    if not (
+        (settings or {}).get("hook_clips_enabled", True)
+        and len(subtitles) >= 4
+        and duration is not None
+        and duration >= 90.0
+    ):
+        return []
+    try:
+        from backend.llm import detect_hook_moments
+        if progress_cb:
+            progress_cb("Finding hook moments…", 5)
+        hooks = detect_hook_moments(
+            [
+                {
+                    "id": i,
+                    "text": s.get("text", ""),
+                    "start": s.get("start", 0.0),
+                    "end": s.get("end", 0.0),
+                }
+                for i, s in enumerate(subtitles)
+            ],
+            language=language,
+        )
+    except Exception as e:
+        print(f"[hooks] detection failed (soft): {e}", flush=True)
+        return []
+    out = []
+    for h in hooks or []:
+        try:
+            out.append({"start": float(h["start"]), "end": float(h["end"]),
+                        "title": str(h.get("title")
+                                     or f"Hook {len(out) + 1}"),
+                        "reason": str(h.get("reason") or "")})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
 def render_only(
     normalized_path: str,
     output_dir: str,
@@ -2181,29 +2270,26 @@ def render_only(
     duration: float | None = None,
     progress_cb: Callable[[str, float], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    hooks: list[dict[str, Any]] | None = None,
+    use_modal: bool = True,
 ) -> dict[str, Any]:
     """Render edited subtitles + segments into the final MP4.
 
     If the user un-checked some cuts in the timeline UI, we expand the
     segment list to re-include those ranges before handing off to the
     burn step.
+
+    `hooks`: hook moments found beforehand (detect_hooks) — cut as
+    given instead of asking the LLM here. `use_modal=False`: render on
+    this machine even with Modal configured (the fallback after a
+    failed render_r2, see render_to_keys).
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     caption_preset = settings.get("caption_preset", "clean")
 
-    if disabled_cuts and cut_ranges and duration:
-        segments = _segments_from_disabled_cuts(
-            segments, cut_ranges, disabled_cuts, duration,
-        )
-
-    # min_gap=0: every gap between web-editor segments is a deliberate
-    # cut (silence, filler word, failed take, user trim). Bridging gaps
-    # up to 0.3 s — the Premiere plugin's encode-count optimisation —
-    # put short cut 'äh's back into the final video.
-    segments, seg_effects = _merge_for_render(
-        segments, settings.get("segment_effects") or [], min_gap=0.0,
-    )
+    segments, seg_effects = _prepare_render(
+        segments, settings, cut_ranges, disabled_cuts, duration)
 
     def _stage(msg: str, pct: float) -> None:
         if progress_cb:
@@ -2219,7 +2305,7 @@ def render_only(
     thumbnail_path = str(Path(output_dir) / "cleo_thumbnail.jpg")
     modal_ok = False
     try:
-        modal_ok = _try_modal_render(
+        modal_ok = use_modal and _try_modal_render(
             normalized_path=normalized_path,
             segments=segments,
             subtitles=subtitles,
@@ -2355,27 +2441,11 @@ def render_only(
     # Only meaningful for content over ~2 min (single-clip videos have
     # nothing to slice into hooks).
     hook_clips: list[dict[str, Any]] = []
-    if (
-        settings.get("hook_clips_enabled", True)
-        and len(subtitles) >= 4
-        and duration is not None
-        and duration >= 90.0
-    ):
+    if hooks is None:
+        hooks = detect_hooks(subtitles, settings, duration, language,
+                             lambda msg, pct: _stage(msg, 95))
+    if hooks:
         try:
-            from backend.llm import detect_hook_moments
-            _stage("Finding hook moments…", 95)
-            hooks = detect_hook_moments(
-                [
-                    {
-                        "id": i,
-                        "text": s.get("text", ""),
-                        "start": s.get("start", 0.0),
-                        "end": s.get("end", 0.0),
-                    }
-                    for i, s in enumerate(subtitles)
-                ],
-                language=language,
-            )
             for i, h in enumerate(hooks):
                 clip_path = str(Path(output_dir) / f"cleo_hook_{i + 1}.mp4")
                 _stage(f"Cutting hook {i + 1}/{len(hooks)}…", 96 + i)
@@ -2400,3 +2470,406 @@ def render_only(
 
     _stage("Done", 100)
     return {"outputs": outputs, "hook_clips": hook_clips}
+
+
+# ── WP3: renders read and write job media (backend/media.py, R2) ─────
+# The render source is the job's mezz object; every output goes under
+# jobs/{id}/r{gen}/ (a new prefix per render: keys are never reused).
+# Default: the volume path — Modal's render_burn_concat (render_only)
+# renders, the API stores the outputs in the job's store. Opt-in
+# (CLEO_MODAL_RENDER_FN=render_r2, for jobs whose media is in R2):
+# Modal's render_r2 reads the mezz from R2 and writes the outputs there
+# itself — burn, concat, effects, thumbnail, formats and hook cuts all
+# run on Modal, nothing big passes through the API. If render_r2 isn't
+# deployed (NotFoundError: the Modal secret "cleocuts-r2" is missing, so
+# the deploy left it out) the render takes the volume path instead.
+# Without Modal (or with CLEO_LOCAL_RENDER_FALLBACK=1 after a failure)
+# the render runs here (render_only) and is stored the same way.
+
+RENDER_KEY_THUMB = "thumb.jpg"
+
+
+def modal_render_fn(r2: bool) -> str:
+    """The Modal function that renders a job: render_r2 only when
+    CLEO_MODAL_RENDER_FN=render_r2 AND the job's media is in R2 (`r2`:
+    render_r2 reads and writes R2 itself); render_burn_concat (the
+    volume path) otherwise — the default."""
+    name = os.environ.get("CLEO_MODAL_RENDER_FN", "").strip()
+    return "render_r2" if (r2 and name == "render_r2") else "render_burn_concat"
+
+
+class _RenderR2Missing(Exception):
+    """render_r2 isn't deployed on Modal (NotFoundError before any call
+    ran): render on the volume path instead."""
+
+
+def output_key(out_prefix: str, fmt: str) -> str:
+    """jobs/{id}/r{g}/primary.mp4, …/16x9.mp4, …/hook_1.mp4."""
+    if fmt == "primary":
+        return f"{out_prefix}primary.mp4"
+    return f"{out_prefix}{fmt.replace(':', 'x')}.mp4"
+
+
+def render_to_dir(
+    mezz_path: str,
+    out_dir: str,
+    segments: list[tuple[float, float]],
+    effects: list[dict],
+    subtitles: list[dict],
+    caption_preset: str,
+    cut_style: str,
+    language: str | None,
+    output_formats: list[str],
+    hooks: list[dict],
+    *,
+    parallelism: int | None = None,
+    source_audio: bool = False,
+    progress_cb: Callable[[str, float], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    timings: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """burn → concat → effects → thumbnail → formats → hook cuts, all in
+    `out_dir` (render_r2 on Modal). `segments` / `effects` come from
+    _prepare_render. Returns {"primary": path, "thumb": path | None,
+    "formats": {fmt: path} (a format with the primary's size IS the
+    primary's path), "hooks": [{k, path, title, reason, start, end}]}."""
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    stage = progress_cb or (lambda msg, pct: None)
+    timings = timings if timings is not None else {}
+    t = time.monotonic()
+
+    def lap(name: str) -> None:
+        nonlocal t
+        now = time.monotonic()
+        timings[name] = round(now - t, 3)
+        t = now
+
+    burn_dir = out / "burn"
+    burn_dir.mkdir(exist_ok=True)
+    extra: dict[str, Any] = {}
+    if parallelism:
+        extra["parallelism"] = parallelism
+    stage(f"Rendering {len(segments)} clip(s)…", 10)
+    clips = _multi_clip_burn(
+        input_video=str(mezz_path), segments=segments, subtitles=subtitles,
+        caption_preset=caption_preset, output_dir=str(burn_dir),
+        cut_style=cut_style, cancel_check=cancel_check, language=language,
+        merge_gap=0.0, **extra)
+    if not clips:
+        raise RuntimeError("Render produced no output clips.")
+    lap("burn")
+    primary = out / "primary.mp4"
+    stage("Stitching clips…", 70)
+    try:
+        if source_audio:
+            _ffmpeg_concat([p for p, _d in clips], str(primary),
+                           source_audio_path=str(mezz_path),
+                           audio_segments=segments)
+        else:
+            _ffmpeg_concat([p for p, _d in clips], str(primary))
+    finally:
+        shutil.rmtree(burn_dir, ignore_errors=True)
+    lap("concat")
+    if _has_effects(effects):
+        fx = out / "primary_fx.mp4"
+        stage("Applying effects…", 80)
+        try:
+            _apply_segment_effects(str(primary), str(fx), segments, effects)
+            if fx.exists():
+                os.replace(fx, primary)
+        except Exception as e:
+            print(f"[effects] failed, using un-effected output: {e}",
+                  flush=True)
+            fx.unlink(missing_ok=True)
+        lap("effects")
+    thumb = out / "thumb.jpg"
+    _generate_thumbnail(str(primary), str(thumb))
+    lap("thumbnail")
+    formats: dict[str, str] = {}
+    valid = [f for f in output_formats or [] if f in EXPORT_FORMATS]
+    if valid:
+        from concurrent.futures import ThreadPoolExecutor
+        stage(f"Exporting {len(valid)} extra format(s)…", 85)
+        size = _video_size(str(primary))
+
+        def _do(fmt: str) -> tuple[str, str]:
+            tw, th = EXPORT_FORMATS[fmt]
+            if size == (tw, th):
+                return fmt, str(primary)   # same size: alias the primary
+            path = out / f"{fmt.replace(':', 'x')}.mp4"
+            _export_format(str(primary), str(path), tw, th)
+            return fmt, str(path)
+        with ThreadPoolExecutor(max_workers=min(4, len(valid))) as ex:
+            for fmt, path in ex.map(_do, valid):
+                formats[fmt] = path
+        lap("formats")
+    hook_files: list[dict[str, Any]] = []
+    for i, h in enumerate(hooks or []):
+        k = i + 1
+        path = out / f"hook_{k}.mp4"
+        stage(f"Cutting hook {k}/{len(hooks)}…", 90 + min(k, 8))
+        try:
+            _extract_hook_clip(str(primary), str(path), float(h["start"]),
+                               float(h["end"]))
+        except Exception as e:
+            print(f"[hooks] clip {k} extract failed: {e}", flush=True)
+            continue
+        hook_files.append({"k": k, "path": str(path),
+                           "title": h.get("title") or f"Hook {k}",
+                           "reason": h.get("reason", ""),
+                           "start": h["start"], "end": h["end"]})
+    if hooks:
+        lap("hooks")
+    return {"primary": str(primary),
+            "thumb": str(thumb) if thumb.is_file() else None,
+            "formats": formats, "hooks": hook_files}
+
+
+def store_render_files(
+    files: dict[str, Any],
+    out_prefix: str,
+    put: Callable[..., int],
+) -> dict[str, Any]:
+    """Upload what render_to_dir (or render_only, see _files_of) made
+    under `out_prefix` with put(path, key, content_type=…). A file that
+    is the same file as the primary (same path, or a hard link: a
+    same-size format) is stored once and aliases the primary's key.
+    Returns {"outputs": {fmt: {key, size}}, "thumb": {key, size} | None,
+    "hooks": [{k, key, size, title, reason, start, end}]}."""
+    def ident(path: str) -> tuple:
+        st = os.stat(path)
+        return (st.st_dev, st.st_ino)
+
+    stored: dict[tuple, dict[str, Any]] = {}
+
+    def store(path: str, key: str, ctype: str) -> dict[str, Any]:
+        i = ident(path)
+        if i in stored:
+            return stored[i]
+        stored[i] = {"key": key, "size": put(path, key, content_type=ctype)}
+        return stored[i]
+
+    outputs = {"primary": store(files["primary"],
+                                output_key(out_prefix, "primary"),
+                                "video/mp4")}
+    for fmt, path in (files.get("formats") or {}).items():
+        outputs[fmt] = store(path, output_key(out_prefix, fmt), "video/mp4")
+    thumb = None
+    if files.get("thumb") and os.path.isfile(files["thumb"]):
+        thumb = store(files["thumb"], out_prefix + RENDER_KEY_THUMB,
+                      "image/jpeg")
+    hooks = []
+    for h in files.get("hooks") or []:
+        ref = store(h["path"], output_key(out_prefix, f"hook_{h['k']}"),
+                    "video/mp4")
+        hooks.append({**{k: v for k, v in h.items() if k != "path"}, **ref})
+    return {"outputs": outputs, "thumb": thumb, "hooks": hooks}
+
+
+def _files_of(res: dict[str, Any], output_dir: str) -> dict[str, Any]:
+    """render_only's result as render_to_dir's."""
+    outputs = dict(res["outputs"])
+    primary = outputs.pop("primary")
+    thumb = Path(output_dir) / "cleo_thumbnail.jpg"
+    hooks = []
+    for i, h in enumerate(res.get("hook_clips") or []):
+        outputs.pop(h.get("key"), None)
+        try:
+            k = int(str(h.get("key")).rsplit("_", 1)[1])
+        except (IndexError, ValueError):
+            k = i + 1
+        hooks.append({"k": k, "path": h["path"],
+                      "title": h.get("title"), "reason": h.get("reason", ""),
+                      "start": h.get("start"), "end": h.get("end")})
+    formats = {f: p for f, p in outputs.items() if f in EXPORT_FORMATS}
+    return {"primary": primary,
+            "thumb": str(thumb) if thumb.is_file() else None,
+            "formats": formats, "hooks": hooks}
+
+
+def render_to_keys(
+    *,
+    job_id: str,
+    gen: int,
+    mezz_key: str,
+    out_prefix: str,
+    segments: list,
+    subtitles: list,
+    settings: dict[str, Any],
+    language: str | None,
+    cut_ranges: list[dict] | None,
+    disabled_cuts: list[int] | None,
+    duration: float | None,
+    workspace: str,
+    progress_cb: Callable[[str, float], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    store: str | None = None,
+    mezz_bytes: int | None = None,
+) -> dict[str, Any]:
+    """Render job `job_id` (generation `gen`) from its mezz object into
+    keys under `out_prefix`, both in `store` (the job's, media.store_of).
+    Hook moments are found first (LLM, output time). Returns
+    store_render_files' shape (+ "timings"). Raises
+    RenderUnavailableError like render_only."""
+    import functools
+    from backend import media
+
+    def _stage(msg: str, pct: float) -> None:
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    settings = settings or {}
+    hooks = detect_hooks(subtitles, settings, duration, language, _stage)
+    where = store or media.backend()
+    r2 = where == "r2"
+    use_modal = _modal_configured()
+    if use_modal and modal_render_fn(r2) == "render_r2":
+        clips, effects = _prepare_render(segments, settings, cut_ranges,
+                                         disabled_cuts, duration)
+        try:
+            return _try_modal_render_r2(
+                job_id=job_id, gen=gen, mezz_key=mezz_key,
+                out_prefix=out_prefix, segments=clips, effects=effects,
+                subtitles=subtitles,
+                caption_preset=settings.get("caption_preset", "clean"),
+                cut_style=settings.get("style", "balanced"),
+                language=language,
+                output_formats=settings.get("output_formats") or [],
+                hooks=hooks, _stage=_stage, cancel_check=cancel_check,
+                mezz_bytes=mezz_bytes)
+        except _RenderR2Missing as e:
+            print(f"[modal] render_r2 is not deployed ({e}) — rendering "
+                  "on the volume path (render_burn_concat)", flush=True)
+        except RenderUnavailableError as e:
+            if not local_render_fallback_enabled():
+                raise
+            print(f"[modal] {e} — rendering locally "
+                  "(CLEO_LOCAL_RENDER_FALLBACK=1)", flush=True)
+            use_modal = False
+    # Volume path (render_burn_concat) or a local render: the mezz and
+    # the outputs pass through this machine.
+    ws = Path(workspace)
+    ws.mkdir(parents=True, exist_ok=True)
+    mezz = ws / "mezz.mp4"
+    _stage("Preparing render…", 2)
+    media.get_file(mezz_key, mezz, store=where)
+    out_dir = ws / "out"
+    res = render_only(
+        normalized_path=str(mezz), output_dir=str(out_dir),
+        segments=segments, subtitles=subtitles, settings=settings,
+        language=language, cut_ranges=cut_ranges,
+        disabled_cuts=disabled_cuts, duration=duration,
+        progress_cb=progress_cb, cancel_check=cancel_check, hooks=hooks,
+        use_modal=use_modal)
+    _stage("Saving…", 99)
+    return store_render_files(_files_of(res, str(out_dir)), out_prefix,
+                              functools.partial(media.put_file, store=where))
+
+
+def _try_modal_render_r2(
+    *,
+    job_id: str,
+    gen: int,
+    mezz_key: str,
+    out_prefix: str,
+    segments: list[tuple[float, float]],
+    effects: list[dict],
+    subtitles: list[dict],
+    caption_preset: str,
+    cut_style: str,
+    language: str | None,
+    output_formats: list[str],
+    hooks: list[dict],
+    _stage,
+    cancel_check: Callable[[], bool] | None = None,
+    mezz_bytes: int | None = None,
+) -> dict[str, Any]:
+    """render_r2 on Modal: reads the mezz from R2, writes every output
+    under `out_prefix`, returns their keys and sizes. Same policy as
+    _try_modal_render — bounded wait (_await_modal_call), retries with
+    backoff, spend limit / auth / not deployed / never started fail at
+    once (_modal_give_up) — minus the volume. A retry renders into the
+    same prefix (an uncommitted one; a cancelled or finished attempt
+    can't write there any more, and S3 PUTs are atomic). Raises
+    _RenderR2Missing when render_r2 isn't deployed."""
+    _bound_modal_throttling()
+    try:
+        import modal
+    except ImportError as e:
+        raise RenderUnavailableError("modal package not installed") from e
+    import traceback
+    from backend import costs, storage
+
+    delays = _modal_retry_delays()
+    attempts = len(delays) + 1
+    deadline_s = _modal_deadline_s(segments, mezz_bytes)
+    last_exc: BaseException | None = None
+    attempt = 0
+    for attempt in range(1, attempts + 1):
+        phase = "render"
+        try:
+            _stage(f"Rendering {len(segments)} clip(s) on Modal…", 10)
+            fn = modal.Function.from_name("cleocuts-render", "render_r2")
+            t0 = time.monotonic()
+            call = None
+            billed = True
+            try:
+                call = fn.spawn(
+                    job_id=job_id, gen=int(gen), mezz_key=mezz_key,
+                    out_prefix=out_prefix,
+                    segments=[[float(s), float(e)] for s, e in segments],
+                    subtitles=subtitles, caption_preset=caption_preset,
+                    cut_style=cut_style, language=language,
+                    output_formats=list(output_formats),
+                    segment_effects=list(effects), hooks=list(hooks),
+                    bucket=storage.bucket())
+                result = _await_modal_call(fn, call, t0, deadline_s,
+                                           len(segments), _stage,
+                                           cancel_check)
+            except BaseException as e:
+                billed = call is not None and getattr(
+                    e, "started", None) is not False
+                if call is not None:
+                    _cancel_modal_call(call)
+                raise
+            finally:
+                if billed:
+                    costs.record_modal(time.monotonic() - t0)
+            if not isinstance(result, dict) or not (
+                    result.get("outputs") or {}).get("primary"):
+                raise RuntimeError(f"render_r2 returned no primary: {result!r}"[:300])
+            print(f"[modal] render_r2 complete for job {job_id} r{gen} "
+                  f"(attempt {attempt}/{attempts}) {result.get('timings')}",
+                  flush=True)
+            return result
+        except InterruptedError:
+            raise
+        except Exception as e:
+            if type(e).__name__ == "NotFoundError" and attempt == 1:
+                # Not deployed (no cleocuts-r2 secret yet): nothing ran.
+                raise _RenderR2Missing(f"{type(e).__name__}: {e}") from e
+            last_exc = e
+            costs.record_event("modal_failed")
+            print(f"[modal] render attempt {attempt}/{attempts} failed: "
+                  f"{e}\n{traceback.format_exc()}", flush=True)
+            verdict = _modal_give_up(e, phase)
+            if verdict is not None:
+                code, reason = verdict
+                _modal_alert(code, reason)
+                raise RenderUnavailableError(reason, code=code) from e
+            if attempt >= attempts:
+                break
+            delay = delays[attempt - 1]
+            _stage(f"Render worker unavailable, retrying in "
+                   f"{delay:.0f} s…", 10)
+            waited = 0.0
+            while waited < delay:
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Cancelled")
+                step = min(1.0, delay - waited)
+                time.sleep(step)
+                waited += step
+    raise RenderUnavailableError(
+        f"Modal render failed after {attempt} attempt(s): "
+        f"{type(last_exc).__name__}: {last_exc}") from last_exc

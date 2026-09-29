@@ -264,6 +264,38 @@ def meta_set(key: str, value: str) -> None:
         (key, value)))
 
 
+def sqlite_identity(path: str) -> str:
+    """The SQLite file's identity: its real path and inode. A copy (a
+    clone, a backup put in place of the file) is a new file."""
+    real = os.path.realpath(path)
+    try:
+        ino = os.stat(real).st_ino
+    except OSError:
+        ino = 0
+    return f"sqlite:{real}:{ino}"
+
+
+def db_identity() -> str:
+    """What this database physically is — unlike anything stored IN it
+    (meta), which a clone, dump or restore copies along. SQLite: the
+    file (sqlite_identity). Postgres: the cluster's system_identifier
+    (new for every initdb — a restore elsewhere, a fresh staging server)
+    plus the database's name and OID (new for every CREATE DATABASE — a
+    restore into an empty database of the same cluster). Without the
+    rights to read pg_control_system() the system_identifier is "?"."""
+    conn = _db()
+    if _is_sqlite(conn):
+        return sqlite_identity(db_path())
+    try:
+        sysid = str(conn.read("SELECT system_identifier::text AS v "
+                              "FROM pg_control_system()")[0]["v"])
+    except Exception:
+        sysid = "?"
+    row = conn.read("SELECT current_database() AS d, (SELECT oid::text FROM "
+                    "pg_database WHERE datname = current_database()) AS o")[0]
+    return f"pg:{sysid}:{row['d']}:{row['o']}"
+
+
 def media_secret() -> str:
     """Key for media-URL tokens (backend/auth.py). CLEO_MEDIA_SECRET wins;
     otherwise one is generated once and kept in the DB, so tokens stay

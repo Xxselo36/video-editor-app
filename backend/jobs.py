@@ -22,7 +22,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Iterable, Literal
 
 from backend import db
 
@@ -45,6 +45,10 @@ def retention_days(plan: str | None) -> float:
     return PLAN_RETENTION_DAYS.get(plan or DEFAULT_PLAN,
                                    PLAN_RETENTION_DAYS["starter"])
 
+
+# The editor proxy's file name next to a legacy job's normalized file
+# (backend.pipeline.PROXY_NAME).
+LEGACY_PROXY_NAME = "proxy.mp4"
 
 JobStatus = Literal[
     "pending", "processing", "awaiting_review", "done", "error", "cancelled",
@@ -114,21 +118,27 @@ class Job:
     # Written by the waiting worker thread (backend/main.py) whenever the
     # line moves.
     queue_position: int | None = None
-    # ── Media keys (WP3: R2 / media store) ──
-    # This release only carries them: it can't read or write that
-    # media, but it must neither lose these fields when it writes a row
-    # nor treat a keyed job as broken because its local paths are gone
-    # (it is the rollback target of the release that fills them).
+    # ── Media keys (backend/media.py; R2 or the local media root) ──
+    # Where the job's files live. Set once the object is stored; a key
+    # never changes its content (a new version gets a new key). The
+    # local path fields above (input_path, normalized_path, preview_path,
+    # output_path, outputs, hook_clips[].path) are only read for jobs
+    # from before the keys (not yet backfilled, backend/r2_backfill.py).
+    # (The WP3-prep release carries these fields without using them: it
+    # is the rollback target and must neither drop them nor treat a
+    # keyed job as broken.)
     source_key: str | None = None      # upload / source object
     mezz_key: str | None = None        # jobs/{id}/mezz.mp4 (render source)
     proxy_key: str | None = None       # jobs/{id}/proxy.mp4 (editor)
     preview_key: str | None = None     # jobs/{id}/preview/v{n}.mp4
-    # Render generation: outputs of generation g live under jobs/{id}/r{g}/.
+    # Render generation: POST /render bumps it; outputs of generation g
+    # live under jobs/{id}/r{g}/.
     render_gen: int = 0
-    # Format → key ("primary", "9:16", …, "hook_1", …); order = buttons.
+    # Format → key ("primary", "9:16", …, "hook_1", …). Same-size
+    # formats point at the primary's key.
     output_keys: dict[str, str] = field(default_factory=dict)
     thumb_key: str | None = None
-    # Key → size in bytes (storage accounting).
+    # Key → size in bytes (storage accounting, GET /admin/costs).
     media_bytes: dict[str, int] = field(default_factory=dict)
     # Where the job's keys live ("r2" / "local"); None = not recorded.
     media_store: str | None = None
@@ -138,6 +148,11 @@ class Job:
     _extras: dict[str, Any] = field(default_factory=dict, repr=False,
                                     compare=False)
 
+    def source_ref(self) -> str | None:
+        """The upload object: source_key, or where jobs from before the
+        media keys kept it (settings._r2_storage_key)."""
+        return self.source_key or (self.settings or {}).get("_r2_storage_key")
+
     def has_mezz(self) -> bool:
         """Can this job still be edited / rendered: its render source is
         stored (mezz_key) or, for a legacy job, on the local disk."""
@@ -145,10 +160,11 @@ class Job:
             bool(self.normalized_path) and Path(self.normalized_path).exists())
 
     def has_media_keys(self) -> bool:
-        """Does this job keep (some of) its media in the media store
-        (R2), written by a later release? Such a job is intact even when
-        its local paths are missing; this release can't serve, edit or
-        delete that media (routes answer 409 media_unavailable)."""
+        """Does this job keep (some of) its media under media keys
+        (backend/media.py, in R2 or the local media root)? Such a job is
+        intact even when its legacy local paths are missing (boot
+        sweep). The WP3-prep release — the rollback target — answers 409
+        media_unavailable for these jobs."""
         return bool(
             self.source_key or self.mezz_key or self.proxy_key
             or self.preview_key or self.output_keys or self.thumb_key
@@ -185,6 +201,22 @@ class Job:
             })
         return out
 
+    def _has_output(self) -> bool:
+        if self.output_keys:
+            return bool(self.output_keys.get("primary"))
+        return self.output_path is not None and Path(self.output_path).exists()
+
+    def _has_proxy(self) -> bool:
+        """GET /jobs/{id}/proxy-video has something to play: the proxy
+        object, or (legacy jobs) proxy.mp4 next to the normalized file.
+        Always False unless CLEO_PROXY_VIDEO=1 (the route's lever)."""
+        if os.environ.get("CLEO_PROXY_VIDEO", "").strip() != "1":
+            return False
+        if self.proxy_key:
+            return True
+        return bool(self.normalized_path) and (
+            Path(self.normalized_path).with_name(LEGACY_PROXY_NAME).is_file())
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -194,10 +226,12 @@ class Job:
             "message": self.message,
             "progress": self.progress,
             "error": self.error,
-            "has_output": self.output_path is not None and Path(self.output_path).exists(),
-            "outputs": list(self.outputs.keys()),
+            "has_output": self._has_output(),
+            "has_proxy": self._has_proxy(),
+            "outputs": list((self.output_keys or self.outputs).keys()),
             "social_caption": self.social_caption,
             "social_hashtags": self.social_hashtags,
+            # Media keys and local paths are never exposed.
             "hook_clips": [
                 {k: v for k, v in c.items() if k not in ("path", "object_key")}
                 for c in self.hook_clips
@@ -252,9 +286,53 @@ def tune_connection(conn: sqlite3.Connection) -> None:
 
 
 # Scalar fields of GET /jobs/status rows (JobStore.status_many).
+# output_keys only so has_output can be told without touching the disk.
 _STATUS_FIELDS = ("id", "status", "message", "progress", "queue_position",
                   "error", "output_path", "updated_at", "preview_version",
-                  "owner_id")
+                  "owner_id", "output_keys")
+
+
+# Durable queue of media prefixes / keys to delete (backend/main.py
+# _media_gc): a `jobs/{id}/…` prefix (ends with "/") or a single key, in
+# `store` ("local" / "r2"; "" = queued before stores were recorded:
+# deleted in both). Only entries media.gc_entry_ok accepts get in.
+_MEDIA_GC_DDL = (
+    "CREATE TABLE IF NOT EXISTS media_gc ("
+    "prefix TEXT NOT NULL, store TEXT NOT NULL DEFAULT '', "
+    "not_before REAL NOT NULL, "
+    "attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, "
+    "created_at REAL NOT NULL, PRIMARY KEY (prefix, store))")
+
+# Failed deletes wait before the next try: GC_BACKOFF_BASE_S × 2^(n-1),
+# at most GC_BACKOFF_MAX_S (a stuck row must not block newer ones: rows
+# are taken oldest not_before first).
+GC_BACKOFF_BASE_S = 300.0
+GC_BACKOFF_MAX_S = 6 * 3600.0
+
+
+def gc_backoff_s(attempts: int) -> float:
+    return min(GC_BACKOFF_MAX_S,
+               GC_BACKOFF_BASE_S * 2 ** max(0, int(attempts) - 1))
+
+
+def gc_clean_entries(entries: Iterable[str]) -> list[str]:
+    """The entries the media GC may take (media.gc_entry_ok); anything
+    else is refused loudly and not queued."""
+    from backend import media
+    ok = []
+    for e in entries:
+        if not e:
+            continue
+        if media.gc_entry_ok(e):
+            ok.append(e)
+        else:
+            print(f"[media] REFUSING to queue {e!r} for deletion: not a "
+                  "GC-able media key or prefix", flush=True)
+    return ok
+
+
+def gc_store(store: str | None) -> str:
+    return store if store in ("local", "r2") else ""
 
 
 # Fields that hold structured (list/dict) data — JSON-encode on write,
@@ -358,6 +436,8 @@ class JobStore:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS job_keys_job ON job_keys(job_id)"
             )
+            self._gc_migrate()
+            self._conn.execute(_MEDIA_GC_DDL)
             self._conn.commit()
 
     def _serialize(self, job: Job) -> str:
@@ -561,11 +641,135 @@ class JobStore:
                 self._conn.commit()
             return job.owner_id
 
-    def delete(self, job_id: str) -> None:
+    def delete(self, job_id: str, gc: Iterable[str] = (),
+               not_before: float | None = None,
+               gc_store: str | None = None) -> None:
+        """Delete the job row; with `gc`, queue those media prefixes /
+        keys (in `gc_store`, the job's) for deletion (media_gc) in the
+        same transaction."""
+        entries = gc_clean_entries(gc)
         with self._lock:
-            self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
-            self._conn.execute("DELETE FROM job_keys WHERE job_id = ?",
-                               (job_id,))
+            try:
+                self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+                self._conn.execute("DELETE FROM job_keys WHERE job_id = ?",
+                                   (job_id,))
+                self._gc_insert(entries, time.time() if not_before is None
+                                else not_before, gc_store)
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+    def exists(self, job_id: str) -> bool:
+        """Is there a row for `job_id` — readable or not (the orphan
+        sweep: a row get() can't parse still owns its media)."""
+        with self._lock:
+            return self._conn.execute(
+                "SELECT 1 FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone() is not None
+
+    # ── media_gc: durable deletion queue (backend/main.py _media_gc) ──
+
+    def _gc_migrate(self) -> None:
+        """A media_gc from before stores were recorded (prefix alone as
+        the key): rebuilt with store '' (= both)."""
+        cols = [r["name"] for r in self._conn.execute(
+            "PRAGMA table_info(media_gc)")]
+        if cols and "store" not in cols:
+            self._conn.execute("ALTER TABLE media_gc RENAME TO media_gc_v1")
+            self._conn.execute(_MEDIA_GC_DDL)
+            self._conn.execute(
+                "INSERT INTO media_gc (prefix, store, not_before, attempts, "
+                "last_error, created_at) SELECT prefix, '', not_before, "
+                "attempts, last_error, created_at FROM media_gc_v1")
+            self._conn.execute("DROP TABLE media_gc_v1")
+
+    def _gc_insert(self, entries: list[str], not_before: float,
+                   store: str | None = None) -> None:
+        now = time.time()
+        for entry in entries:
+            self._conn.execute(
+                "INSERT INTO media_gc (prefix, store, not_before, attempts, "
+                "last_error, created_at) VALUES (?, ?, ?, 0, NULL, ?) "
+                "ON CONFLICT(prefix, store) DO UPDATE SET "
+                "not_before = min(media_gc.not_before, excluded.not_before)",
+                (entry, gc_store(store), float(not_before), now))
+
+    def gc_add(self, entries: Iterable[str],
+               not_before: float | None = None,
+               store: str | None = None) -> None:
+        """Queue media prefixes / keys in `store` for deletion at
+        `not_before` (default now). An entry already queued keeps the
+        earlier time. Entries outside the GC whitelist are refused."""
+        entries = gc_clean_entries(entries)
+        if not entries:
+            return
+        with self._lock:
+            try:
+                self._gc_insert(entries, time.time() if not_before is None
+                                else not_before, store)
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+    _GC_COLS = "prefix, store, not_before, attempts, last_error, created_at"
+
+    @staticmethod
+    def _gc_row(r) -> dict[str, Any]:
+        d = dict(r)
+        d["store"] = d.get("store") or None
+        return d
+
+    def gc_due(self, now: float | None = None,
+               limit: int = 200) -> list[dict[str, Any]]:
+        """Entries whose time has come, oldest first."""
+        now = time.time() if now is None else now
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT {self._GC_COLS} "
+                "FROM media_gc WHERE not_before <= ? ORDER BY not_before "
+                "LIMIT ?", (float(now), int(limit))).fetchall()
+        return [self._gc_row(r) for r in rows]
+
+    def gc_all(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT {self._GC_COLS} "
+                "FROM media_gc ORDER BY not_before").fetchall()
+        return [self._gc_row(r) for r in rows]
+
+    def gc_done(self, prefix: str, store: str | None = None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM media_gc WHERE prefix = ? AND store = ?",
+                (prefix, gc_store(store)))
+            self._conn.commit()
+
+    def gc_failed(self, prefix: str, error: str,
+                  store: str | None = None,
+                  now: float | None = None) -> int:
+        """attempts + 1, the error, and the next try pushed back
+        (gc_backoff_s); returns the new attempt count."""
+        now = time.time() if now is None else now
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT attempts FROM media_gc WHERE prefix = ? AND store = ?",
+                (prefix, gc_store(store))).fetchone()
+            if row is None:
+                return 0
+            attempts = int(row["attempts"]) + 1
+            self._conn.execute(
+                "UPDATE media_gc SET attempts = ?, last_error = ?, "
+                "not_before = ? WHERE prefix = ? AND store = ?",
+                (attempts, error[:2000], now + gc_backoff_s(attempts),
+                 prefix, gc_store(store)))
+            self._conn.commit()
+        return attempts
+
+    def _truncate_gc_for_tests(self) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM media_gc")
             self._conn.commit()
 
     def list_all(self) -> list[Job]:

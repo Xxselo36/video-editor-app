@@ -7,7 +7,6 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from pathlib import Path
 
 import httpx
 import jwt
@@ -16,6 +15,7 @@ import pytest
 import backend.main as M
 from backend import auth
 from backend.jobs import store
+from conftest import analysis_result
 
 REAL_RUN_ANALYZE = M._run_analyze  # conftest stubs it per test
 
@@ -84,10 +84,11 @@ def test_uploads_queue_up_and_positions_move(client, monkeypatch):
         ev = gates.setdefault(output_dir, threading.Event())
         progress_cb("Analyzing audio…", 10)
         assert ev.wait(10)
-        return {"normalized_path": str(Path(output_dir) / "n.mp4"),
-                "preview_path": "/p.mp4", "segments": [(0.0, 1.0)],
-                "subtitles": [], "duration": 10.0, "language": "en"}
+        return analysis_result(output_dir, 10.0)
     monkeypatch.setattr(M, "analyze_only", analyze)
+
+    def ws(job_id):
+        return str(M._workspace(job_id))
 
     ids = []
     for i in range(3):
@@ -96,7 +97,7 @@ def test_uploads_queue_up_and_positions_move(client, monkeypatch):
         assert r.status_code == 200, r.text
         ids.append(r.json()["job_id"])
         if i == 0:
-            assert _wait_for(lambda: str(M._WORK_ROOT / ids[0]) in gates)
+            assert _wait_for(lambda: ws(ids[0]) in gates)
 
     def status():
         body = client.get("/jobs/status",
@@ -105,16 +106,17 @@ def test_uploads_queue_up_and_positions_move(client, monkeypatch):
                 for j in body["jobs"]]
     assert _wait_for(lambda: status()[1:] == [("processing", "queued", 1),
                                               ("processing", "queued", 2)])
-    assert status()[0][:2] == ("processing", "Analyzing audio…")
+    assert _wait_for(lambda: status()[0][:2] == ("processing",
+                                                 "Analyzing audio…"))
     assert client.get(f"/jobs/{ids[2]}").json()["queue_position"] == 2
 
-    gates[str(M._WORK_ROOT / ids[0])].set()
-    assert _wait_for(lambda: str(M._WORK_ROOT / ids[1]) in gates)
+    gates[ws(ids[0])].set()
+    assert _wait_for(lambda: ws(ids[1]) in gates)
     assert _wait_for(lambda: status()[2] == ("processing", "queued", 1))
     assert status()[0] == ("awaiting_review", "Review subtitles", None)
     for job_id in ids[1:]:
-        _wait_for(lambda: str(M._WORK_ROOT / job_id) in gates)
-        gates[str(M._WORK_ROOT / job_id)].set()
+        _wait_for(lambda: ws(job_id) in gates)
+        gates[ws(job_id)].set()
     assert _wait_for(lambda: [s[0] for s in status()] == ["awaiting_review"] * 3)
 
 
@@ -129,9 +131,7 @@ def test_twenty_uploads_two_run_eighteen_wait(client, monkeypatch):
     def analyze(input_path, output_dir, settings, progress_cb):
         running.append(output_dir)
         assert release.wait(20)
-        return {"normalized_path": "/n.mp4", "preview_path": "/p.mp4",
-                "segments": [(0.0, 1.0)], "subtitles": [], "duration": 120.0,
-                "language": "en"}
+        return analysis_result(output_dir, 120.0)
     monkeypatch.setattr(M, "analyze_only", analyze)
 
     def upload(i):
@@ -165,8 +165,10 @@ def test_render_waits_for_a_render_slot(client, monkeypatch):
 
     def render(**kw):
         assert release.wait(10)
-        return {"outputs": {"primary": "/nope.mp4"}}
-    monkeypatch.setattr(M, "render_only", render)
+        return {"outputs": {"primary": {"key": kw["out_prefix"] + "p.mp4",
+                                        "size": 1}},
+                "thumb": None, "hooks": []}
+    monkeypatch.setattr(M.pipeline, "render_to_keys", render)
     import backend.llm as llm
     monkeypatch.setattr(llm, "generate_social_caption",
                         lambda text, language=None: {"caption": "",
@@ -174,7 +176,8 @@ def test_render_waits_for_a_render_slot(client, monkeypatch):
     ids = []
     for _ in range(2):
         job = store.create("/x.mp4", {})
-        store.update(job.id, status="awaiting_review", normalized_path="/n",
+        store.update(job.id, status="awaiting_review",
+                     mezz_key=f"jobs/{job.id}/mezz.mp4",
                      segments=[(0.0, 1.0)])
         ids.append(job.id)
     assert client.post(f"/jobs/{ids[0]}/render",

@@ -190,6 +190,8 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "o arrastra uno aquí",
   "app.upload.keepTabOpen":
     "Mantén esta pestaña abierta hasta que termine la subida. Cambiar de app o bloquear tu teléfono cancelará la subida.",
+  "app.upload.resuming":
+    "Reanudando la subida donde se quedó — mantén esta página abierta.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← atrás",

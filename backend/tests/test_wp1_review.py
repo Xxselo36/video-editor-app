@@ -32,9 +32,12 @@ def _wait_for(pred, timeout=5.0):
 
 @pytest.fixture
 def r2_deletes(monkeypatch):
-    from backend import storage
+    """Keys deleted through backend.media (the upload objects)."""
     deleted: list[str] = []
-    monkeypatch.setattr(storage, "delete_from_r2", deleted.append)
+    real = M.media.delete
+    monkeypatch.setattr(M.media, "delete",
+                        lambda key, **kw: (deleted.append(key),
+                                           real(key, **kw))[1])
     return deleted
 
 

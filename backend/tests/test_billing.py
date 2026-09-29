@@ -12,7 +12,7 @@ import pytest
 import backend.main as M
 from backend import accounts, billing
 from backend.jobs import DEFAULT_PLAN, store
-from conftest import add_sub
+from conftest import add_sub, analysis_result
 
 
 def _ts(s: str) -> float:
@@ -205,7 +205,7 @@ def test_service_user_is_not_charged(client, enforce, bearer, probe,
     assert accounts.get_usage(r.json()["job_id"]) is None
 
 
-def test_presign_paywall_comes_before_no_r2(client, enforce, bearer):
+def test_presign_paywall_comes_before_no_r2(client, enforce, bearer, no_r2):
     """Without R2 the frontend falls back to the legacy upload (whole
     file) on 503 — the 402 must come first."""
     r = client.post("/uploads/presign", headers=bearer(), json={})
@@ -230,8 +230,12 @@ def test_enforced_upload_caps_the_analysis(client, enforce, bearer, probe,
     # Clients can't set it themselves.
     r = _upload(client, bearer(), settings='{"_max_seconds": 99999}')
     assert store.get(r.json()["job_id"]).settings["_max_seconds"] == 6
-    # Not enforced: nobody is blocked, nothing is capped.
+    # Not enforced: nobody is blocked; capped at CLEO_MAX_MINUTES only
+    # (the client's value is dropped).
     monkeypatch.delenv("CLEO_BILLING_ENFORCE")
+    r = _upload(client, bearer(), settings='{"_max_seconds": 3}')
+    assert store.get(r.json()["job_id"]).settings["_max_seconds"] == 1801
+    monkeypatch.setenv("CLEO_MAX_MINUTES", "0")    # cap off
     r = _upload(client, bearer(), settings='{"_max_seconds": 3}')
     assert "_max_seconds" not in store.get(r.json()["job_id"]).settings
 
@@ -302,17 +306,11 @@ def _analyzed_job(owner="user_a", seconds=100):
     return job
 
 
-def _fake_result(duration):
-    return {"normalized_path": "/n.mp4", "preview_path": "/p.mp4",
-            "segments": [(0.0, duration)], "subtitles": [],
-            "duration": duration, "language": "en"}
-
-
 @pytest.mark.parametrize("actual,billed", [(200.4, 201), (103, 100)])
 def test_true_up(auth_on, monkeypatch, actual, billed):
     job = _analyzed_job(seconds=100)
     monkeypatch.setattr(M, "analyze_only",
-                        lambda **kw: _fake_result(actual))
+                        lambda **kw: analysis_result(kw["output_dir"], actual))
     M._run_analyze_inner(job.id)
     assert store.get(job.id).status == "awaiting_review"
     usage = accounts.get_usage(job.id)

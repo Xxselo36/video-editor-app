@@ -16,7 +16,7 @@ import pytest
 import backend.main as M
 from backend import accounts, auth
 from backend.jobs import store
-from conftest import add_sub
+from conftest import add_sub, analysis_result
 
 REAL_RUN_ANALYZE = M._run_analyze  # conftest stubs it per test
 
@@ -36,28 +36,51 @@ def wp1_state(monkeypatch):
 
 
 @pytest.fixture
-def fake_r2(monkeypatch):
+def fake_r2(monkeypatch, r2):
+    """R2 configured (moto), uploads of state["size"] bytes (HEAD is
+    faked: no multi-GB objects in memory), presign handing out a fixed
+    key. POST /jobs never downloads; state["probes"] / "deleted" record
+    the header probes and deleted upload objects, state["delay"] makes a
+    probe slow."""
     import backend.storage as storage
-    monkeypatch.setattr(storage, "r2_available", lambda: True)
     monkeypatch.setattr(storage, "presign_upload",
                         lambda filename, content_type, prefix: {
                             "storage_key": f"{prefix}abc.mp4"})
-    state = {"size": 1000, "downloads": [], "deleted": [], "delay": 0.0}
+    state = {"size": 1000, "downloads": [], "deleted": [], "delay": 0.0,
+             "probes": []}
+    real_size, real_delete = M.media.size, M.media.delete
 
-    def download(key, dest):
+    def size(key, **kw):
+        return (state["size"] if key.startswith("uploads/")
+                else real_size(key, **kw))
+
+    def delete(key, **kw):
+        state["deleted"].append(key)
+        real_delete(key, **kw)
+
+    def get_file(key, path, **kw):
         state["downloads"].append(key)
-        time.sleep(state["delay"])
-        Path(dest).write_bytes(b"v" * 16)
-    monkeypatch.setattr(storage, "object_size", lambda key: state["size"])
-    monkeypatch.setattr(storage, "download_from_r2", download)
-    monkeypatch.setattr(storage, "delete_from_r2", state["deleted"].append)
+        Path(path).write_bytes(b"v" * 16)
+    monkeypatch.setattr(M.media, "size", size)
+    monkeypatch.setattr(M.media, "delete", delete)
+    monkeypatch.setattr(M.media, "get_file", get_file)
     return state
 
 
 @pytest.fixture
 def probe(monkeypatch):
+    """Duration the probes report: of a legacy body (local file) and of
+    an R2 upload (ffprobe over a presigned URL, header only)."""
     seconds = {"value": 60.0}
     monkeypatch.setattr(M, "_probe_duration", lambda p: seconds["value"])
+
+    def remote(url):
+        state = seconds.get("state")
+        if state is not None:
+            state["probes"].append(url)
+            time.sleep(state["delay"])
+        return seconds["value"]
+    monkeypatch.setattr(M, "_probe_remote_duration", remote)
     return seconds
 
 
@@ -104,7 +127,9 @@ def test_settings_whitelist(client, probe):
         "caption_preset": "clipper", "style": "tight",
         "voice_triggers": True, "remove_fillers": False,
         "smartcam_enabled": True, "smartcam_format": "portrait",
-        "resolution": "1080", "output_formats": ["9:16"]}
+        "resolution": "1080", "output_formats": ["9:16"],
+        # set by the server, not the client's 99999: CLEO_MAX_MINUTES
+        "_max_seconds": 30 * 60 + 1}
 
 
 @pytest.mark.parametrize("value,kept", [
@@ -147,7 +172,7 @@ def test_post_jobs_size_cap_uses_r2_head(client, fake_r2, monkeypatch):
                                    "storage_key": "uploads/big.mp4"})
     assert r.status_code == 413
     assert r.json() == {"detail": "file_too_large", "max_gb": 0.5}
-    assert fake_r2["downloads"] == []           # refused before downloading
+    assert fake_r2["downloads"] == []           # nothing is downloaded
     assert fake_r2["deleted"] == ["uploads/big.mp4"]
     assert store.list_all() == []
 
@@ -273,13 +298,14 @@ def test_disk_reservation_is_size_aware(client, fake_r2, probe, monkeypatch):
 def test_post_jobs_is_idempotent_on_storage_key(client, enforce, bearer,
                                                 fake_r2, probe, clean_state):
     add_sub(plan="pro", period_start=time.time() - 60)
+    probe["state"] = fake_r2
     form = {"settings": "{}", "storage_key": "uploads/user_a/v.mp4"}
     r1 = client.post("/jobs", headers=bearer(), data=form)
     r2 = client.post("/jobs", headers=bearer(), data=form)
     assert r1.status_code == r2.status_code == 200
     assert r1.json()["job_id"] == r2.json()["job_id"]
     assert len(store.list_all()) == 1
-    assert fake_r2["downloads"] == ["uploads/user_a/v.mp4"]
+    assert len(fake_r2["probes"]) == 1 and fake_r2["downloads"] == []
     assert clean_state == [r1.json()["job_id"]]  # one analysis
     rows = accounts._read("SELECT * FROM usage")
     assert len(rows) == 1 and rows[0]["seconds_billed"] == 60
@@ -292,7 +318,8 @@ def test_post_jobs_is_idempotent_on_storage_key(client, enforce, bearer,
 
 def test_concurrent_posts_of_one_key_make_one_job(fake_r2, probe,
                                                   clean_state):
-    fake_r2["delay"] = 0.3  # the first POST is still downloading
+    probe["state"] = fake_r2
+    fake_r2["delay"] = 0.3  # the first POST is still probing
 
     async def main():
         transport = httpx.ASGITransport(app=M.app)
@@ -304,7 +331,7 @@ def test_concurrent_posts_of_one_key_make_one_job(fake_r2, probe,
     responses = asyncio.run(main())
     assert [r.status_code for r in responses] == [200] * 5
     assert len({r.json()["job_id"] for r in responses}) == 1
-    assert fake_r2["downloads"] == ["uploads/same.mp4"]
+    assert len(fake_r2["probes"]) == 1 and fake_r2["downloads"] == []
     assert len(clean_state) == 1 and len(store.list_all()) == 1
 
 
@@ -492,7 +519,12 @@ def test_caption_previews_are_cached(client, monkeypatch):
 # ── upload deleted right after normalization ─────────────────────────
 
 
-def _src_job(tmp_key="uploads/u.mp4"):
+# A browser upload key as storage.presign_upload makes them (the media
+# GC only takes keys of that shape).
+SRC_KEY = "uploads/0123456789abcdef0123456789abcdef.mp4"
+
+
+def _src_job(tmp_key=SRC_KEY):
     up = Path(M._WORK_ROOT) / "uploads"
     up.mkdir(parents=True, exist_ok=True)
     f = up / f"in-{time.time_ns()}.mp4"
@@ -500,11 +532,21 @@ def _src_job(tmp_key="uploads/u.mp4"):
     return store.create(str(f), {"_r2_storage_key": tmp_key}), f
 
 
+def _media_deletes(monkeypatch) -> list:
+    deleted: list[str] = []
+    real = M.media.delete
+    monkeypatch.setattr(M.media, "delete",
+                        lambda key, **kw: (deleted.append(key),
+                                           real(key, **kw))[1])
+    return deleted
+
+
 def test_upload_is_dropped_after_normalize_and_failure_tolerates_it(
         monkeypatch):
-    import backend.storage as storage
-    deleted = []
-    monkeypatch.setattr(storage, "delete_from_r2", deleted.append)
+    """on_normalized frees the LOCAL copy right away; the upload object
+    stays until the analysis ends (WP3 §6) — here a failure, which
+    queues it for deletion (media_gc) with the job's prefix."""
+    deleted = _media_deletes(monkeypatch)
     job, f = _src_job()
     seen = {}
 
@@ -514,30 +556,27 @@ def test_upload_is_dropped_after_normalize_and_failure_tolerates_it(
         on_normalized()
         seen["gone"] = not f.exists()
         seen["input_path"] = store.get(job.id).input_path
+        seen["deleted"] = list(deleted)
         raise RuntimeError("No speech detected in the video.")
     monkeypatch.setattr(M, "analyze_only", analyze)
     M._run_analyze_inner(job.id)
-    assert seen == {"gone": True, "input_path": None}
-    assert deleted == ["uploads/u.mp4"]  # once, not again on failure
+    assert seen == {"gone": True, "input_path": None, "deleted": []}
     got = store.get(job.id)
     assert got.status == "error" and got.input_path is None
+    queued = {r["prefix"] for r in store.gc_all()}
+    assert queued == {SRC_KEY, f"jobs/{job.id}/"}
+    assert not M._workspace(job.id).exists()
 
 
 def test_upload_dropped_after_success_without_the_hook(monkeypatch):
-    import backend.storage as storage
-    deleted = []
-    monkeypatch.setattr(storage, "delete_from_r2", deleted.append)
+    deleted = _media_deletes(monkeypatch)
     job, f = _src_job()
     monkeypatch.setattr(M, "analyze_only", lambda input_path, output_dir,
-                        settings, progress_cb: {
-                            "normalized_path": "/n.mp4",
-                            "preview_path": "/p.mp4",
-                            "segments": [(0.0, 1.0)], "subtitles": [],
-                            "duration": 1.0, "language": "en"})
+                        settings, progress_cb: analysis_result(output_dir))
     M._run_analyze_inner(job.id)
     got = store.get(job.id)
     assert got.status == "awaiting_review" and got.input_path is None
-    assert not f.exists() and deleted == ["uploads/u.mp4"]
+    assert not f.exists() and deleted == [SRC_KEY]
 
 
 # ── WAL ──────────────────────────────────────────────────────────────

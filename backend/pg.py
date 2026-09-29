@@ -57,7 +57,7 @@ from dataclasses import fields
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterable, Iterator
 
 import psycopg
 from psycopg.types.string import TextLoader
@@ -66,7 +66,7 @@ from psycopg_pool import ConnectionPool
 from backend import db
 from backend.jobs import (
     RUNNING_STATUSES, DuplicateKey, Job, _JSON_FIELDS, _STATUS_FIELDS,
-    job_from_dict, job_to_dict,
+    gc_backoff_s, gc_clean_entries, gc_store, job_from_dict, job_to_dict,
     new_job_id,
 )
 
@@ -156,8 +156,34 @@ CREATE INDEX IF NOT EXISTS jobs_running
 CREATE INDEX IF NOT EXISTS jobs_updated ON jobs (updated_at);
 """
 
+# WP3: durable queue of job media to delete (backend/main.py _media_gc).
+# Part of TABLES (backups and the cutover): a restore must not forget
+# what was queued (superseded renders and previews of live jobs are
+# found by nothing else).
+_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS media_gc (
+    prefix text COLLATE "C" PRIMARY KEY,
+    not_before timestamptz NOT NULL,
+    attempts integer NOT NULL DEFAULT 0,
+    last_error text,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS media_gc_due ON media_gc (not_before);
+"""
+
+# WP3: the store each media_gc entry is in ("local" / "r2"; "" = both,
+# rows queued before stores were recorded).
+_SCHEMA_V3 = """
+ALTER TABLE media_gc ADD COLUMN IF NOT EXISTS store text COLLATE "C"
+    NOT NULL DEFAULT '';
+ALTER TABLE media_gc DROP CONSTRAINT IF EXISTS media_gc_pkey;
+ALTER TABLE media_gc ADD PRIMARY KEY (prefix, store);
+"""
+
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _SCHEMA_V1),
+    (2, _SCHEMA_V2),
+    (3, _SCHEMA_V3),
 ]
 
 _SCHEMA_MIGRATIONS_DDL = (
@@ -168,7 +194,7 @@ _SCHEMA_MIGRATIONS_DDL = (
 
 # Data tables, in restore order (backend/pg_backup.py, pg_cutover.py).
 TABLES = ("meta", "users", "subscriptions", "usage", "billing_events",
-          "jobs")
+          "jobs", "media_gc")
 
 # Column lists (and which are timestamps / booleans / JSON), for copies
 # in and out.
@@ -185,13 +211,16 @@ COLUMNS: dict[str, tuple[str, ...]] = {
     "billing_events": ("key", "created_at"),
     "jobs": ("id", "owner_id", "status", "plan", "created_at", "updated_at",
              "idempotency_key", "data"),
+    "media_gc": ("prefix", "store", "not_before", "attempts", "last_error",
+                 "created_at"),
 }
 TIME_COLUMNS = {"created_at", "updated_at", "renews_at", "ends_at",
-                "period_start", "ls_updated_at"}
+                "period_start", "ls_updated_at", "not_before"}
 BOOL_COLUMNS = {"test_mode", "refunded"}
 JSON_COLUMNS = {"raw_json", "data"}
 PRIMARY_KEYS = {"meta": "key", "users": "id", "subscriptions": "id",
-                "usage": "job_id", "billing_events": "key", "jobs": "id"}
+                "usage": "job_id", "billing_events": "key", "jobs": "id",
+                "media_gc": "prefix, store"}
 
 
 def _configure(conn: psycopg.Connection) -> None:
@@ -677,11 +706,105 @@ class PgJobStore:
                                (job_id,)).fetchone()
         return row[0] if row is not None else None
 
-    def delete(self, job_id: str) -> None:
+    def delete(self, job_id: str, gc: Iterable[str] = (),
+               not_before: float | None = None,
+               gc_store: str | None = None) -> None:
+        """Delete the job row; with `gc`, queue those media prefixes /
+        keys (in `gc_store`, the job's) in media_gc in the same
+        transaction."""
+        entries = gc_clean_entries(gc)
+        with self._db.connection() as conn:
+            if _is_id(job_id):
+                conn.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
+            self._gc_insert(conn, entries, not_before, gc_store)
+
+    def exists(self, job_id: str) -> bool:
+        """Is there a row for `job_id` — readable or not (the orphan
+        sweep: a row get() can't parse still owns its media)."""
         if not _is_id(job_id):
+            return False
+        with self._db.connection() as conn:
+            return conn.execute("SELECT 1 FROM jobs WHERE id = %s",
+                                (job_id,)).fetchone() is not None
+
+    # ── media_gc (backend.jobs.JobStore has the same methods) ──
+
+    @staticmethod
+    def _gc_insert(conn: psycopg.Connection, entries: list[str],
+                   not_before: float | None,
+                   store: str | None = None) -> None:
+        when = _dt(time.time() if not_before is None else not_before)
+        for entry in entries:
+            conn.execute(
+                "INSERT INTO media_gc (prefix, store, not_before) "
+                "VALUES (%s, %s, %s) "
+                "ON CONFLICT (prefix, store) DO UPDATE SET not_before = "
+                "least(media_gc.not_before, EXCLUDED.not_before)",
+                (clean_text(entry), gc_store(store), when))
+
+    def gc_add(self, entries: Iterable[str],
+               not_before: float | None = None,
+               store: str | None = None) -> None:
+        entries = gc_clean_entries(entries)
+        if not entries:
             return
         with self._db.connection() as conn:
-            conn.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
+            self._gc_insert(conn, entries, not_before, store)
+
+    _GC_COLS = "prefix, store, not_before, attempts, last_error, created_at"
+
+    def _gc_rows(self, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
+        with self._db.connection() as conn:
+            rows = conn.execute(sql, args).fetchall()
+        return [{"prefix": r[0], "store": r[1] or None,
+                 "not_before": r[2].timestamp(),
+                 "attempts": r[3], "last_error": r[4],
+                 "created_at": r[5].timestamp() if r[5] else None}
+                for r in rows]
+
+    def gc_due(self, now: float | None = None,
+               limit: int = 200) -> list[dict[str, Any]]:
+        return self._gc_rows(
+            f"SELECT {self._GC_COLS} "
+            "FROM media_gc WHERE not_before <= %s ORDER BY not_before "
+            "LIMIT %s", (_dt(time.time() if now is None else now),
+                         int(limit)))
+
+    def gc_all(self) -> list[dict[str, Any]]:
+        return self._gc_rows(
+            f"SELECT {self._GC_COLS} FROM media_gc ORDER BY not_before")
+
+    def gc_done(self, prefix: str, store: str | None = None) -> None:
+        with self._db.connection() as conn:
+            conn.execute(
+                "DELETE FROM media_gc WHERE prefix = %s AND store = %s",
+                (clean_text(prefix), gc_store(store)))
+
+    def gc_failed(self, prefix: str, error: str,
+                  store: str | None = None,
+                  now: float | None = None) -> int:
+        """attempts + 1, the error, the next try pushed back
+        (jobs.gc_backoff_s); returns the new attempt count."""
+        now = time.time() if now is None else now
+        with self._db.connection() as conn:
+            row = conn.execute(
+                "SELECT attempts FROM media_gc WHERE prefix = %s AND "
+                "store = %s FOR UPDATE",
+                (clean_text(prefix), gc_store(store))).fetchone()
+            if row is None:
+                return 0
+            attempts = int(row[0]) + 1
+            conn.execute(
+                "UPDATE media_gc SET attempts = %s, last_error = %s, "
+                "not_before = %s WHERE prefix = %s AND store = %s",
+                (attempts, clean_text(error)[:2000],
+                 _dt(now + gc_backoff_s(attempts)),
+                 clean_text(prefix), gc_store(store)))
+        return attempts
+
+    def _truncate_gc_for_tests(self) -> None:
+        with self._db.connection() as conn:
+            conn.execute("TRUNCATE media_gc")
 
     def list_all(self) -> list[Job]:
         return self._jobs("SELECT id, data FROM jobs")

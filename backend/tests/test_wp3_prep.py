@@ -7,9 +7,12 @@ on a store of its own):
 - keep keys of a stored row it doesn't know (a later release's fields)
   on every write — update, update_if, modify, claim, the boot sweep;
 - treat a job with media keys as intact although its local files are
-  missing (boot sweep, orphaned-job sweep, _clean_interrupted, the
-  retention sweep) and answer 409 media_unavailable on the routes that
-  would need its media (it can't read R2 media).
+  missing (boot sweep, orphaned-job sweep).
+
+The prep release also answered 409 media_unavailable for keyed jobs and
+kept them out of its sweeps; this release serves and deletes their
+media itself (tests in test_wp3_*.py), so those prep-only tests are not
+here any more.
 """
 from __future__ import annotations
 
@@ -295,28 +298,6 @@ def test_boot_sweep_keeps_keyed_jobs(bk, tmp_path):
     assert b.st.mark_stuck_as_error() == 0
 
 
-def test_clean_interrupted_leaves_keyed_jobs_alone(bk, monkeypatch):
-    b = bk
-    deletes: list[str] = []
-    import backend.storage as storage
-    monkeypatch.setattr(storage, "delete_from_r2", deletes.append)
-    uploads = M._WORK_ROOT / "uploads"
-    uploads.mkdir(parents=True, exist_ok=True)
-    src = uploads / "keyed.mp4"
-    src.write_bytes(b"u")
-    job = b.st.create(str(src), {"_r2_storage_key": "uploads/u/k.mp4"})
-    b.st.update(job.id, status="error", error="container_restart",
-                source_key="uploads/u/k.mp4",
-                mezz_key=f"jobs/{job.id}/mezz.mp4")
-    work = M._WORK_ROOT / job.id
-    work.mkdir(parents=True, exist_ok=True)
-    M._clean_interrupted()
-    assert src.exists() and work.exists() and deletes == []
-    assert b.st.get(job.id).input_path == str(src)
-    src.unlink()
-    work.rmdir()
-
-
 def test_orphan_sweep_uses_mezz_key(bk, monkeypatch):
     b = bk
     render = _keyed(b, status="processing", message="Rendering…")
@@ -331,56 +312,13 @@ def test_orphan_sweep_uses_mezz_key(bk, monkeypatch):
     assert (cur.status, cur.message) == ("awaiting_review", "render_failed")
     cur = b.st.get(analysis.id)
     assert (cur.status, cur.error) == ("error", "container_restart")
-    assert work.exists()        # keyed: not this release's to delete
-    work.rmdir()
+    # This release frees an interrupted analysis's work folder and
+    # queues its media for GC (the prep release left both alone).
+    assert not work.exists()
     _assert_extras_kept(b, render.id)
 
 
-def test_retention_keeps_keyed_jobs(bk):
-    b = bk
-    keyed = _keyed(b, status="done")
-    plain = b.st.create(None, {})
-    b.st.update(plain.id, status="done")
-    old = time.time() - 400 * 86400
-    for job in (keyed, plain):
-        b.st.update(job.id, updated_at=old)
-    assert M.purge_expired_jobs() == 1
-    assert b.st.get(plain.id) is None
-    assert b.st.get(keyed.id) is not None
-    _assert_extras_kept(b, keyed.id)
-
-
 # ── routes ───────────────────────────────────────────────────────────
-
-
-def test_routes_answer_409_for_keyed_jobs(bk, client):
-    b = bk
-    job = _keyed(b)
-    jid = job.id
-    for path in ("preview-video", "watch", "download", "thumbnail",
-                 "watch?format=9:16"):
-        r = client.get(f"/jobs/{jid}/{path}")
-        assert r.status_code == 409, (path, r.status_code, r.text)
-        assert r.json()["detail"] == "media_unavailable", path
-    r = client.post(f"/jobs/{jid}/edit-segments",
-                    json={"segments": [{"start": 0, "end": 1}]})
-    assert (r.status_code, r.json()["detail"]) == (409, "media_unavailable")
-    r = client.post(f"/jobs/{jid}/recompute-scenes", json={"events": []})
-    assert (r.status_code, r.json()["detail"]) == (409, "media_unavailable")
-    r = client.post(f"/jobs/{jid}/render", json={"subtitles": []})
-    assert (r.status_code, r.json()["detail"]) == (409, "media_unavailable")
-    assert b.st.get(jid).status == "awaiting_review"     # not flipped
-    r = client.delete(f"/jobs/{jid}")
-    assert (r.status_code, r.json()["detail"]) == (409, "media_unavailable")
-    assert b.st.get(jid) is not None
-    # Reading the job works; keys are never exposed.
-    r = client.get(f"/jobs/{jid}")
-    assert r.status_code == 200
-    body = json.dumps(r.json())
-    assert "jobs/" not in body and "future_" not in body
-    r = client.get(f"/jobs/{jid}/subtitles")
-    assert r.status_code == 200
-    _assert_extras_kept(b, jid)
 
 
 def test_routes_unchanged_for_legacy_jobs(bk, client, tmp_path):

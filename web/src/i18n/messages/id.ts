@@ -188,6 +188,8 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "atau seret satu ke sini",
   "app.upload.keepTabOpen":
     "Biarkan tab ini terbuka sampai unggahan selesai. Berpindah aplikasi atau mengunci HP akan membatalkan unggahan.",
+  "app.upload.resuming":
+    "Melanjutkan unggahan dari titik terakhirnya — biarkan halaman ini terbuka.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← kembali",
