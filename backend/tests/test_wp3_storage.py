@@ -230,7 +230,12 @@ def test_backend_choice(monkeypatch, no_r2):
     assert media.backend() == "local"
     for k, v in R2_ENV.items():
         monkeypatch.setenv(k, v)
-    assert media.backend() == "r2"
+    # Opt-in: R2 configured alone (as in production today, for
+    # /uploads/presign) doesn't move new jobs' media.
+    assert media.backend() == "local"
+    monkeypatch.setenv("CLEO_MEDIA_BACKEND", "auto")
+    with pytest.raises(media.ConfigError):
+        media.backend()
     monkeypatch.setenv("CLEO_MEDIA_BACKEND", "local")
     assert media.backend() == "local"
     monkeypatch.setenv("CLEO_MEDIA_BACKEND", "r2")

@@ -11,7 +11,9 @@ an advisory lock — pooler-safe, no session locks), uploads
 backups/pg/<YYYY-MM-DD>.sql.gz to R2 and deletes backups older than
 CLEO_PG_BACKUP_KEEP_DAYS (default 14). Only with Postgres active and R2
 configured. The dump holds everything, including meta's media/checkout
-secrets — keep the bucket private.
+secrets — keep the bucket private; R2_BACKUP_BUCKET puts the dumps into a
+bucket of their own (recommended: the Modal render token then has no
+access to them, backend/storage.py).
 
 CLI (DATABASE_URL and the R2_* variables from the environment):
     python -m backend.pg_backup export FILE.sql.gz
@@ -215,10 +217,10 @@ def prune(now: float, days: float | None = None) -> list[str]:
     cutoff = (datetime.fromtimestamp(now, tz=timezone.utc)
               - timedelta(days=days)).strftime("%Y-%m-%d")
     deleted = []
-    for obj in storage.list_r2(PREFIX):
+    for obj in storage.backup_list(PREFIX):
         m = _KEY_RE.match(obj["key"])
         if m and m.group(1) < cutoff:
-            storage.delete_from_r2(obj["key"])
+            storage.backup_delete(obj["key"])
             deleted.append(obj["key"])
     return deleted
 
@@ -243,7 +245,7 @@ def maybe_run(database: pg.Database | None = None, now: float | None = None,
         try:
             counts = export(database, tmp)
             size = os.path.getsize(tmp)
-            storage.upload_to_r2(tmp, key)
+            storage.backup_put(tmp, key)
         finally:
             os.unlink(tmp)
         try:
@@ -298,12 +300,12 @@ def _main(argv: list[str]) -> int:
         return 0
     if cmd == "list" and not args:
         from backend import storage
-        for obj in sorted(storage.list_r2(PREFIX), key=lambda o: o["key"]):
+        for obj in sorted(storage.backup_list(PREFIX), key=lambda o: o["key"]):
             print(f"{obj['key']}\t{obj['size']}\t{obj['last_modified']}")
         return 0
     if cmd == "download" and len(args) == 2:
         from backend import storage
-        storage.download_from_r2(args[0], args[1])
+        storage.backup_get(args[0], args[1])
         print(args[1])
         return 0
     print("usage:" + usage.split("\n", 1)[1], file=sys.stderr)

@@ -12,8 +12,12 @@
         multipart upload through size-signed presigned part URLs (plain
         HTTP PUTs, like the browser) plus a wrong-length PUT that must be
         refused, a day-aligned presigned GET (today's and yesterday's
-        00:00Z signature, Range → 206), and with --origin the CORS
-        preflight for a part PUT. Exit status 0 when everything passed.
+        00:00Z signature, Range → 206), a 70 MiB put / get round trip
+        (the multipart path every mezz and render output takes), the
+        lifecycle rules for uploads/ (--skip-lifecycle when the token
+        may not read them — then check them in the dashboard), and with
+        --origin the CORS preflight for a part PUT. Exit status 0 when
+        everything passed.
 
 The probe objects live under uploads/_r2check/ (the uploads lifecycle
 rule removes them should a delete fail).
@@ -86,7 +90,34 @@ class Checks:
         return ok
 
 
-def check(origin: str | None = None) -> int:
+# The big round trip: above storage.put_file's 64 MiB multipart
+# threshold (CreateMultipartUpload + UploadPart + Complete, like every
+# mezz and render output).
+BIG_BYTES = 70 * 1024 * 1024
+
+
+def lifecycle_problems(rules: list[dict]) -> list[str]:
+    """What the bucket's lifecycle rules lack for uploads/ (abandoned or
+    refused browser uploads must expire; the orphan sweep skips them)."""
+    def prefix(r: dict) -> str:
+        f = r.get("Filter") or {}
+        return (f.get("Prefix") if "Prefix" in f
+                else (f.get("And") or {}).get("Prefix", r.get("Prefix", "")))
+    live = [r for r in rules if r.get("Status") == "Enabled"
+            and "uploads/".startswith(prefix(r) or "")]
+    problems = []
+    days = [int((r.get("Expiration") or {}).get("Days") or 0) for r in live]
+    if not any(0 < d <= 7 for d in days):
+        problems.append("no enabled rule expires uploads/ within 7 days")
+    mpu = [int((r.get("AbortIncompleteMultipartUpload") or {})
+               .get("DaysAfterInitiation") or 0) for r in live]
+    if not any(0 < d <= 7 for d in mpu):
+        problems.append("no enabled rule aborts incomplete multipart "
+                        "uploads under uploads/")
+    return problems
+
+
+def check(origin: str | None = None, lifecycle: bool = True) -> int:
     if not storage.r2_available():
         print("R2 is not configured (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, "
               "R2_SECRET_ACCESS_KEY, R2_BUCKET)", flush=True)
@@ -120,16 +151,17 @@ def check(origin: str | None = None) -> int:
         st, hd, data = _http("GET", url, headers={"Range": "bytes=0-1"})
         ok("presigned GET, Range bytes=0-1 → 206",
            st == 206 and data == body[:2], f"HTTP {st}")
-        ok("presigned GET is day-aligned (X-Amz-Date=…T000000Z)",
-           "T000000Z" in url and "X-Amz-Expires=172800" in url)
-        today = dt.datetime.now(dt.timezone.utc).replace(
-            tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
-        with mock.patch("botocore.auth.get_current_datetime",
-                        return_value=today - dt.timedelta(days=1)):
-            old = storage.presign_get(key)
-        st, _, _ = _http("GET", old, headers={"Range": "bytes=0-1"})
-        ok("yesterday's 00:00Z presign (48 h expiry) still serves → 206",
-           st == 206, f"HTTP {st}")
+        if storage.presign_mode() == "day":
+            ok("presigned GET is day-aligned (X-Amz-Date=…T000000Z)",
+               "T000000Z" in url and "X-Amz-Expires=172800" in url)
+            today = dt.datetime.now(dt.timezone.utc).replace(
+                tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+            with mock.patch("botocore.auth.get_current_datetime",
+                            return_value=today - dt.timedelta(days=1)):
+                old = storage.presign_get(key)
+            st, _, _ = _http("GET", old, headers={"Range": "bytes=0-1"})
+            ok("yesterday's 00:00Z presign (48 h expiry) still serves → 206",
+               st == 206, f"HTTP {st}")
         att = storage.presign_get(key, filename="cleo_check.mp4",
                                   attachment=True)
         st, hd, _ = _http("GET", att, headers={"Range": "bytes=0-0"})
@@ -143,6 +175,61 @@ def check(origin: str | None = None) -> int:
     finally:
         tmp.unlink(missing_ok=True)
         Path(str(tmp) + ".back").unlink(missing_ok=True)
+
+    # 70 MiB round trip: the multipart path of put_file / get_file
+    key = base + ".big"
+    fd, name = tempfile.mkstemp(prefix="r2check-big-")
+    os.close(fd)
+    big = Path(name)
+    try:
+        import hashlib
+        h = hashlib.sha256()
+        with big.open("wb") as f:
+            left = BIG_BYTES
+            while left:
+                chunk = os.urandom(min(left, 4 * 1024 * 1024))
+                h.update(chunk)
+                f.write(chunk)
+                left -= len(chunk)
+        size = storage.put_file(str(big), key, content_type="video/mp4")
+        ok("70 MiB put_file (multipart)", size == BIG_BYTES
+           and storage.head(key) == BIG_BYTES)
+        storage.get_file(key, str(big) + ".back")
+        h2 = hashlib.sha256()
+        with open(str(big) + ".back", "rb") as f:
+            for chunk in iter(lambda: f.read(4 * 1024 * 1024), b""):
+                h2.update(chunk)
+        ok("70 MiB get_file, same bytes", h.digest() == h2.digest())
+        storage.delete(key)
+    except Exception as e:
+        ok("70 MiB round trip", False, f"{type(e).__name__}: {e}")
+        try:
+            storage.delete(key)
+        except Exception:
+            pass
+    finally:
+        big.unlink(missing_ok=True)
+        Path(str(big) + ".back").unlink(missing_ok=True)
+
+    if lifecycle:
+        try:
+            rules = client.get_bucket_lifecycle_configuration(
+                Bucket=bucket).get("Rules") or []
+        except Exception as e:
+            if "NoSuchLifecycleConfiguration" in str(e):
+                rules = []
+            else:
+                rules = None
+                ok("lifecycle rules for uploads/", False,
+                   f"can't read them ({type(e).__name__}: {e}) — check "
+                   "them in the Cloudflare dashboard (bucket → Settings → "
+                   "Object lifecycle rules, --print-config shows them) "
+                   "and rerun with --skip-lifecycle")
+        if rules is not None:
+            problems = lifecycle_problems(rules)
+            ok("lifecycle rules for uploads/", not problems,
+               "; ".join(problems) + (" — apply --print-config's lifecycle"
+                                      if problems else ""))
 
     # multipart with size-signed parts
     key = base + ".mp4"
@@ -196,6 +283,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--origin", default=None,
                     help="also check the CORS preflight from this origin")
+    ap.add_argument("--skip-lifecycle", action="store_true",
+                    help="don't read the bucket's lifecycle rules (a token "
+                         "without that right; check them in the dashboard)")
     ap.add_argument("--print-config", action="store_true")
     ap.add_argument("--origins", default=",".join(DEFAULT_ORIGINS),
                     help="comma-separated AllowedOrigins for --print-config")
@@ -211,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.check:
             return 0
     if args.check:
-        return check(args.origin)
+        return check(args.origin, lifecycle=not args.skip_lifecycle)
     ap.print_help()
     return 2
 

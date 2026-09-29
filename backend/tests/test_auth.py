@@ -327,8 +327,8 @@ def fake_r2(monkeypatch, r2):
                         lambda url: probed.append(url) or 60.0)
     downloaded = []
     real_get = M.media.get_file
-    monkeypatch.setattr(M.media, "get_file", lambda key, path: (
-        downloaded.append(key), real_get(key, path))[1])
+    monkeypatch.setattr(M.media, "get_file", lambda key, path, **kw: (
+        downloaded.append(key), real_get(key, path, **kw))[1])
     return downloaded, probed
 
 
@@ -359,9 +359,10 @@ def test_foreign_storage_key_is_403(client, auth_on, bearer, fake_r2):
 
 
 def test_multipart_routes_need_auth_and_a_ticket(client, auth_on, bearer,
-                                                 no_r2):
+                                                 no_r2, monkeypatch):
     """The resumable upload routes are back (WP3) — with ownership: a
     session, and a ticket signed for that user."""
+    monkeypatch.setenv("CLEO_UPLOAD_MODE", "multipart")
     paths = ("/uploads/multipart/init", "/uploads/multipart/sign",
              "/uploads/multipart/parts", "/uploads/multipart/complete",
              "/uploads/multipart/abort", "/uploads/telemetry")

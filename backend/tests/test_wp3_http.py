@@ -51,6 +51,10 @@ def r2_http(moto_server, monkeypatch):
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("R2_ENDPOINT_URL", moto_server)
     monkeypatch.setenv("CLEO_DISK_FACTOR", "0")
+    # Every WP3 lever on (all opt-in).
+    monkeypatch.setenv("CLEO_MEDIA_BACKEND", "r2")
+    monkeypatch.setenv("CLEO_UPLOAD_MODE", "multipart")
+    monkeypatch.setenv("CLEO_PROXY_VIDEO", "1")
     s3 = boto3.session.Session().client(
         "s3", endpoint_url=moto_server, region_name="us-east-1",
         aws_access_key_id="AK", aws_secret_access_key="SK")

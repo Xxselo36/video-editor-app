@@ -32,12 +32,13 @@ locks for the quota) — but keep --workers 1 until the task queue (WP4)
 replaces the in-process state. The SQLite store (no DATABASE_URL) is
 one-process only.
 
-Job media (backend/media.py): with R2 configured every byte of a job —
-upload, mezzanine, proxy, previews, renders — lives in R2 under
-jobs/{id}/ (uploads/ for browser uploads); media routes answer with a
-307 to a presigned GET. Without R2 the same keys live on the local disk
-(CLEO_MEDIA_ROOT). Analyses and local renders work in a per-job
-workspace under CLEO_TMP_ROOT (container disk), removed when they end.
+Job media (backend/media.py): every byte of a job — upload, mezzanine,
+proxy, previews, renders — lives under jobs/{id}/ (uploads/ for browser
+uploads) in the job's store (Job.media_store): the local disk
+(CLEO_MEDIA_ROOT, the default) or, for jobs created while
+CLEO_MEDIA_BACKEND=r2, R2 — media routes then answer with a 307 to a
+presigned GET. Analyses and local renders work in a per-job workspace
+under CLEO_TMP_ROOT (default <work root>/tmp), removed when they end.
 """
 from __future__ import annotations
 
@@ -91,6 +92,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import backend.pipeline as pipeline
 from backend import accounts, auth, billing, costs, db, media, observability
+from backend import storage
 from backend import uploads as upl
 from backend.auth import (
     User, current_user, get_owned_job, media_user, require_user,
@@ -600,10 +602,16 @@ async def lifespan(app_: FastAPI):
     except media.ConfigError as e:
         print(f"[media] NOT STARTING: {e}", flush=True)
         raise
-    print(f"[media] backend: {media_backend}"
+    print(f"[media] new jobs' media: {media_backend}"
           + (f" (bucket {os.environ.get('R2_BUCKET')})"
-             if media_backend == "r2" else f" ({media.local_root()})"),
-          flush=True)
+             if media_backend == "r2" else f" ({media.local_root()})")
+          + "; existing jobs stay in their own store"
+          + f"; R2 {'configured' if storage.r2_available() else 'NOT configured'}"
+          + f"; uploads {_upload_mode()}"
+          + f"; render {os.environ.get('CLEO_MODAL_RENDER_FN') or 'render_burn_concat'}"
+          + f"; proxy-video {'on' if _proxy_video_enabled() else 'off'}"
+          + f"; orphan sweep {'on' if _orphan_sweep_enabled() else 'off'}"
+          + f"; tmp {_TMP_ROOT}", flush=True)
     # Any job stuck in 'processing'/'pending' from the previous
     # container generation is unrecoverable — its worker thread died
     # with the process. Surface it as a real error so the frontend can
@@ -674,11 +682,20 @@ def _default_work_root() -> Path:
 
 _WORK_ROOT = _default_work_root()
 _WORK_ROOT.mkdir(parents=True, exist_ok=True)
-# Scratch space on the container disk (not the volume): analysis
-# workspaces (jobs/{id}/), the editor's proxy cache (proxy-cache/) and
-# spooled legacy uploads with media in R2 (uploads/). Nothing in it
-# outlives the work that made it.
-_TMP_ROOT = Path(os.environ.get("CLEO_TMP_ROOT", "").strip() or "/tmp/cleo")
+# Scratch space: analysis workspaces (jobs/{id}/), the editor's proxy
+# cache (proxy-cache/) and spooled legacy uploads with media in R2
+# (uploads/). Nothing in it outlives the work that made it. Default:
+# <work root>/tmp, i.e. on the volume, like the analysis before WP3.
+# Moving it to the container disk (CLEO_TMP_ROOT=/tmp/cleo) is a later,
+# separate step: only after `df -h /tmp` in the Railway shell shows the
+# room (reserve_disk measures this path; on overlayfs that is the
+# host's free space, not the plan's cap).
+def _default_tmp_root(work_root: Path) -> Path:
+    return Path(os.environ.get("CLEO_TMP_ROOT", "").strip()
+                or str(work_root / "tmp"))
+
+
+_TMP_ROOT = _default_tmp_root(_WORK_ROOT)
 _TMP_ROOT.mkdir(parents=True, exist_ok=True)
 
 
@@ -688,16 +705,29 @@ def _workspace(job_id: str, sub: str | None = None) -> Path:
     return ws / sub if sub else ws
 
 
+# Creating a sub-workspace and removing the job's (then empty) folder
+# are serialized: otherwise one preview rebuild's cleanup can remove the
+# folder between another's mkdir of it and of its own sub-folder.
+_WS_LOCK = threading.Lock()
+
+
+def _make_workspace(path: Path) -> Path:
+    with _WS_LOCK:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _drop_workspace(path: Path) -> None:
     """rmtree a workspace (or a sub-folder of one), and the job's folder
     when that leaves it empty."""
     shutil.rmtree(path, ignore_errors=True)
     parent = path.parent
     if parent != _TMP_ROOT / "jobs" and parent.parent == _TMP_ROOT / "jobs":
-        try:
-            parent.rmdir()
-        except OSError:
-            pass
+        with _WS_LOCK:
+            try:
+                parent.rmdir()
+            except OSError:
+                pass
 
 
 def _clean_workspaces() -> None:
@@ -742,7 +772,8 @@ def _remove_upload(path: str | None) -> None:
 
 
 # Folders of the work root that aren't job folders.
-_WORK_ROOT_RESERVED = frozenset({"media", "uploads", "modal_folders", "jobs"})
+_WORK_ROOT_RESERVED = frozenset({"media", "uploads", "modal_folders", "jobs",
+                                 "tmp"})
 
 
 def _media_of(job: Job) -> list[str]:
@@ -759,21 +790,23 @@ def _media_of(job: Job) -> list[str]:
 
 def _delete_job(job) -> None:
     """Remove a job: in one transaction its row goes and its media
-    (jobs/{id}/ + the upload) are queued in media_gc; then that GC is
-    tried right away (best effort — the GC loop retries). Legacy local
-    files (work dir, upload) are removed directly."""
+    (jobs/{id}/ + the upload, in the job's store) are queued in
+    media_gc; then that GC is tried right away (best effort — the GC
+    loop retries). Legacy local files (work dir, upload) are removed
+    directly."""
     if job.id and job.id not in _WORK_ROOT_RESERVED and "/" not in job.id:
         shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
         shutil.rmtree(_workspace(job.id), ignore_errors=True)
     _remove_upload(job.input_path)
     entries = _media_of(job)
-    store.delete(job.id, gc=entries)
+    where = media.store_of(job)
+    store.delete(job.id, gc=entries, gc_store=where)
     _proxy_cache_drop(job.id)
     with _EDIT_GUARD:
         _EDIT_SEQ.pop(job.id, None)
         _PREVIEW_LOCKS.pop(job.id, None)
     for entry in entries:
-        _gc_one(entry)
+        _gc_one(entry, where)
 
 
 def purge_expired_jobs(now: float | None = None) -> int:
@@ -872,31 +905,35 @@ _GC_STUCK_ATTEMPTS = 10
 _GC_RUN = threading.Lock()   # one GC runner per process
 
 
-def _gc_later(entries: list[str], delay_s: float = 0.0) -> None:
-    """Queue media for deletion (best effort: a failure is logged)."""
+def _gc_later(entries: list[str], delay_s: float = 0.0,
+              store_: str | None = None) -> None:
+    """Queue media (in store `store_`, the job's) for deletion (best
+    effort: a failure is logged)."""
     entries = [e for e in entries if e]
     if not entries:
         return
     try:
-        store.gc_add(entries, time.time() + delay_s)
+        store.gc_add(entries, time.time() + delay_s, store=store_)
     except Exception as e:
         print(f"[media] could not queue {entries} for deletion: {e}",
               flush=True)
 
 
-def _gc_one(entry: str) -> bool:
-    """Delete one media_gc entry now; drop its row on success, count the
-    failure otherwise. True once it is gone."""
+def _gc_one(entry: str, where: str | None = None) -> bool:
+    """Delete one media_gc entry (in its store) now; drop its row on
+    success, otherwise count the failure (the row's next try is pushed
+    back, jobs.gc_backoff_s). True once it is gone."""
     try:
-        n = media.delete_any(entry)
+        n = media.delete_any(entry, where)
     except Exception as e:
         try:
-            attempts = store.gc_failed(entry, f"{type(e).__name__}: {e}")
+            attempts = store.gc_failed(entry, f"{type(e).__name__}: {e}",
+                                       store=where)
         except Exception:
             attempts = 0
-        if attempts >= _GC_STUCK_ATTEMPTS:
-            line = (f"[media] GC STUCK — {entry}: {attempts} attempts, "
-                    f"last error: {e}")
+        if attempts >= _GC_STUCK_ATTEMPTS or isinstance(e, ValueError):
+            line = (f"[media] GC STUCK — {entry} ({where or 'both'}): "
+                    f"{attempts} attempts, last error: {e}")
             print(line, flush=True)
             logging.getLogger("backend.media").error(line)
         else:
@@ -904,7 +941,7 @@ def _gc_one(entry: str) -> bool:
                   f"{e}", flush=True)
         return False
     try:
-        store.gc_done(entry)
+        store.gc_done(entry, store=where)
     except Exception as e:
         print(f"[media] {entry} deleted, but its GC row stays: {e}",
               flush=True)
@@ -921,52 +958,126 @@ def run_media_gc(now: float | None = None, limit: int = 500) -> int:
     try:
         done = 0
         for row in store.gc_due(now, limit):
-            if _gc_one(row["prefix"]):
+            if _gc_one(row["prefix"], row.get("store")):
                 done += 1
         return done
     finally:
         _GC_RUN.release()
 
 
-# Weekly: jobs/{id}/ prefixes without a job row (a delete whose GC row
-# was lost, e.g. restored backup) older than 2 days → media_gc.
+# Weekly, OPT-IN (CLEO_MEDIA_ORPHAN_SWEEP=1): jobs/{id}/ prefixes without
+# a job row (a delete whose GC row was lost) older than 2 days →
+# media_gc. "No row in MY database" only proves an orphan if the store
+# belongs to this database: jobs/.owner must hold this database's
+# media_owner_id (meta), else the sweep refuses, loudly. The first
+# sweep runs a week after the first boot (the stamp is seeded then).
 _ORPHAN_SWEEP_EVERY_S = 7 * 86400.0
 _ORPHAN_MIN_AGE_S = 2 * 86400.0
+_ORPHAN_OWNER_META = "media_owner_id"
+_ORPHAN_STAMP_META = "media_orphan_sweep_at"
+
+
+def _orphan_sweep_enabled() -> bool:
+    return os.environ.get("CLEO_MEDIA_ORPHAN_SWEEP", "").strip() == "1"
+
+
+def _orphan_max() -> int:
+    """At most this many prefixes per sweep (CLEO_MEDIA_ORPHAN_MAX)."""
+    return max(1, _env_int("CLEO_MEDIA_ORPHAN_MAX", 200))
+
+
+def _media_owner_id() -> str:
+    return accounts.meta_get_or_create(_ORPHAN_OWNER_META,
+                                       lambda: uuid.uuid4().hex)
+
+
+def _claim_store_owner(where: str) -> bool:
+    """Is `where`'s jobs/ ours? Writes jobs/.owner when there is none
+    yet — only when the store has no job prefixes at all or every one
+    of them has a row here (a fresh bucket, or ours from before the
+    marker). False (loud) otherwise."""
+    mine = _media_owner_id()
+    owner = media.read_owner(where)
+    if owner == mine:
+        return True
+    if owner is not None:
+        print(f"[media] ORPHAN SWEEP REFUSED ({where}): jobs/.owner is "
+              f"{owner!r}, this database is {mine!r} — the store belongs "
+              "to another deployment (or this database was restored). "
+              "Nothing deleted. Fix: point R2_BUCKET / CLEO_MEDIA_ROOT at "
+              "this deployment's own store, or turn "
+              "CLEO_MEDIA_ORPHAN_SWEEP off.", flush=True)
+        logging.getLogger("backend.media").error(
+            "orphan sweep refused: store %s owned by %s", where, owner)
+        return False
+    # Known ids (and ids that aren't job ids — never swept) aren't
+    # looked into; anything listed is a prefix nobody here owns.
+    for job_id, _newest in media.list_job_prefixes(
+            where, skip=lambda j: (not media.valid_job_id(j)
+                                   or store.exists(j))):
+        if not store.exists(job_id):
+            print(f"[media] ORPHAN SWEEP REFUSED ({where}): no jobs/.owner "
+                  f"and jobs/{job_id}/ has no row in this database — "
+                  "can't tell whose store this is. Nothing deleted. If "
+                  "the store is this deployment's, write "
+                  f"{mine!r} to jobs/.owner.", flush=True)
+            logging.getLogger("backend.media").error(
+                "orphan sweep refused: store %s has no owner marker", where)
+            return False
+    media.write_owner(where, mine)
+    print(f"[media] {where}: jobs/.owner set to this database ({mine})",
+          flush=True)
+    return True
 
 
 def sweep_media_orphans(now: float | None = None) -> int:
     """Queue job prefixes whose job is gone (newest object older than
-    _ORPHAN_MIN_AGE_S; uploads/ is left to the bucket's lifecycle rule).
-    Returns how many were queued."""
+    _ORPHAN_MIN_AGE_S; uploads/ is left to the bucket's lifecycle rule)
+    in every store — only where jobs/.owner is ours (_claim_store_owner),
+    only well-formed job ids, existence checked on the raw row (a row
+    get() can't read still owns its media), at most _orphan_max() per
+    run. Returns how many were queued."""
     now = time.time() if now is None else now
-    found = []
-    for job_id, newest in media.list_job_prefixes(
-            skip=lambda job_id: store.get(job_id) is not None):
-        if newest < now - _ORPHAN_MIN_AGE_S:
-            if store.get(job_id) is None:  # still gone (a race with create)
-                found.append(f"jobs/{job_id}/")
-    if found:
-        _gc_later(found)
-        print(f"[media] orphan sweep: {len(found)} job prefix(es) without a "
-              "job queued for deletion", flush=True)
-    return len(found)
+    stores = ["local"] + (["r2"] if storage.r2_available() else [])
+    cap = _orphan_max()
+    queued = 0
+    for where in stores:
+        if not _claim_store_owner(where):
+            continue
+        found = []
+        for job_id, newest in media.list_job_prefixes(
+                where, skip=lambda j: (not media.valid_job_id(j)
+                                       or store.exists(j))):
+            if newest >= now - _ORPHAN_MIN_AGE_S:
+                continue
+            if store.exists(job_id):  # still gone? (a race with create)
+                continue
+            found.append(media.job_prefix(job_id))
+            if queued + len(found) >= cap:
+                break
+        if found:
+            _gc_later(found, store_=where)
+            queued += len(found)
+            print(f"[media] orphan sweep ({where}): {len(found)} job "
+                  "prefix(es) without a job queued for deletion", flush=True)
+        if queued >= cap:
+            print(f"[media] orphan sweep: cap of {cap} reached, the rest "
+                  "waits for the next run", flush=True)
+            break
+    return queued
 
 
 def _orphan_sweep_due(now: float) -> bool:
-    """At most once per _ORPHAN_SWEEP_EVERY_S, across restarts (a stamp
-    file in the work root)."""
-    stamp = _WORK_ROOT / "media_orphan_sweep.stamp"
-    try:
-        last = stamp.stat().st_mtime
-    except OSError:
-        last = 0.0
+    """CLEO_MEDIA_ORPHAN_SWEEP=1 and at most once per
+    _ORPHAN_SWEEP_EVERY_S, across restarts and processes (a stamp in
+    meta, seeded with the first boot's time: never due at once)."""
+    if not _orphan_sweep_enabled():
+        return False
+    last = _to_float(accounts.meta_get_or_create(
+        _ORPHAN_STAMP_META, lambda: repr(now)))
     if now - last < _ORPHAN_SWEEP_EVERY_S:
         return False
-    try:
-        stamp.touch()
-        os.utime(stamp, (now, now))
-    except OSError:
-        pass
+    accounts.meta_set(_ORPHAN_STAMP_META, repr(now))
     return True
 
 
@@ -1159,18 +1270,20 @@ def _refund_interrupted() -> None:
         _refund(job.id, "container_restart")
 
 
-def _discard_upload(input_path: str | None, storage_key: str | None) -> None:
-    """Throw away a refused upload (local copy + its object). An object
-    that can't be deleted now goes to media_gc."""
+def _discard_upload(input_path: str | None, storage_key: str | None,
+                    where: str | None = None) -> None:
+    """Throw away a refused upload (local copy + its object, in store
+    `where`: the job's; uploads/ are in R2 anyway). An object that can't
+    be deleted now goes to media_gc."""
     _remove_upload(input_path)
     if storage_key:
         try:
-            media.delete(storage_key)
+            media.delete(storage_key, store=where)
         except ValueError:
             pass   # not a key of ours
         except Exception as e:
             print(f"[media] deleting {storage_key} failed: {e}", flush=True)
-            _gc_later([storage_key])
+            _gc_later([storage_key], store_=where)
 
 
 # ── Upload claims (POST /jobs) ───────────────────────────────────────
@@ -1253,11 +1366,12 @@ def _sweep_stale_claims(now: float | None = None) -> int:
                 settings=settings):
             continue
         try:
-            _discard_upload(job.input_path, job.source_ref())
+            _discard_upload(job.input_path, job.source_ref(),
+                            media.store_of(job))
         except Exception as e:  # R2 unreachable: retention later
             print(f"[claims] dropping the upload of {job.id} failed: {e}",
                   flush=True)
-        _gc_later(_media_of(job))
+        _gc_later(_media_of(job), store_=media.store_of(job))
         settled += 1
     return settled
 
@@ -1303,13 +1417,14 @@ def _sweep_orphaned_jobs(now: float | None = None) -> int:
                 progress=0.0, queue_position=None, input_path=None):
             continue
         try:
-            _discard_upload(job.input_path, job.source_ref())
+            _discard_upload(job.input_path, job.source_ref(),
+                            media.store_of(job))
         except Exception as e:  # R2 unreachable: retention later
             print(f"[jobs] dropping the upload of {job.id} failed: {e}",
                   flush=True)
         shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
         shutil.rmtree(_workspace(job.id), ignore_errors=True)
-        _gc_later(_media_of(job))
+        _gc_later(_media_of(job), store_=media.store_of(job))
         settled += 1
     return settled
 
@@ -1331,13 +1446,14 @@ def _clean_interrupted() -> None:
         job_dir = _WORK_ROOT / job.id
         if job.input_path or job.source_key or job_dir.exists():
             try:
-                _discard_upload(job.input_path, job.source_ref())
+                _discard_upload(job.input_path, job.source_ref(),
+                            media.store_of(job))
             except Exception as e:  # R2 unreachable: retention later
                 print(f"[startup] dropping the upload of {job.id} "
                       f"failed: {e}", flush=True)
             shutil.rmtree(job_dir, ignore_errors=True)
             # Whatever the interrupted analysis had stored already.
-            _gc_later(_media_of(job))
+            _gc_later(_media_of(job), store_=media.store_of(job))
             store.update(job.id, input_path=None, source_key=None,
                          updated_at=job.updated_at)
     # Uploads of all other jobs (the ones above have none any more).
@@ -1689,7 +1805,8 @@ class MediaTransferError(RuntimeError):
 
 def _analysis_failed(job_id: str, job_dir: Path, exc: Exception,
                      drop_upload: Callable[[], None],
-                     media_entries: list[str] | None = None) -> None:
+                     media_entries: list[str] | None = None,
+                     where: str | None = None) -> None:
     """An analysis failed (or its result couldn't be saved): the minutes
     back first when it was our fault, then the error state, then free
     the upload + partial files (the workspace, and `media_entries` —
@@ -1728,7 +1845,7 @@ def _analysis_failed(job_id: str, job_dir: Path, exc: Exception,
     drop_upload()
     shutil.rmtree(job_dir, ignore_errors=True)
     if media_entries:
-        _gc_later(media_entries)
+        _gc_later(media_entries, store_=where)
 
 
 def _render_failed(job_id: str, exc: Exception) -> None:
@@ -1764,11 +1881,13 @@ def _run_analyze(job_id: str) -> None:
 
 
 def _store_analysis(job_id: str, res: dict,
-                    progress: Callable[[str, float], None]) -> dict:
+                    progress: Callable[[str, float], None],
+                    where: str) -> dict:
     """Upload what the analysis made — the render source (normalized or
     SmartCam output) as mezz.mp4, the editor proxy, the first preview as
-    preview/v1.mp4 — and return the job fields for them ("Saving…",
-    96–99 %). Raises MediaTransferError."""
+    preview/v1.mp4 — into store `where` (the job's) and return the job
+    fields for them, media_store included ("Saving…", 96–99 %). Raises
+    MediaTransferError."""
     prefix = media.job_prefix(job_id)
     mezz = Path(res["normalized_path"])
     items = [(mezz, prefix + "mezz.mp4", "mezz_key")]
@@ -1779,11 +1898,12 @@ def _store_analysis(job_id: str, res: dict,
     if preview and Path(preview).is_file():
         items.append((Path(preview), prefix + "preview/v1.mp4",
                       "preview_key"))
-    fields: dict[str, Any] = {"media_bytes": {}}
+    fields: dict[str, Any] = {"media_bytes": {}, "media_store": where}
     for i, (path, key, field_name) in enumerate(items):
         progress("Saving…", 96 + i)
         try:
-            size = media.put_file(path, key, content_type="video/mp4")
+            size = media.put_file(path, key, content_type="video/mp4",
+                                  store=where)
         except Exception as e:
             raise MediaTransferError(
                 f"storing {key} failed: {type(e).__name__}: {e}") from e
@@ -1808,6 +1928,7 @@ def _run_analyze_inner(job_id: str) -> None:
         source_key = job.source_ref() if job is not None else None
         if job is None or (job.input_path is None and not source_key):
             return
+        where = media.store_of(job)
         # Start exactly once, and only while the job still waits to start.
         if not _db_retry(job_id, "starting", store.update_if, job_id,
                          ("pending", "processing"), status="processing",
@@ -1854,7 +1975,7 @@ def _run_analyze_inner(job_id: str) -> None:
                 progress("Fetching upload…", 1)
                 local_copy = ws / ("source" + upl.upload_ext(source_key))
                 try:
-                    media.get_file(source_key, local_copy)
+                    media.get_file(source_key, local_copy, store=where)
                 except Exception as e:
                     raise MediaTransferError(
                         f"fetching the upload failed: "
@@ -1867,10 +1988,11 @@ def _run_analyze_inner(job_id: str) -> None:
                 progress_cb=progress,
                 **extra,
             )
-            stored = _store_analysis(job_id, res, progress)
+            stored = _store_analysis(job_id, res, progress, where)
         except Exception as e:
             progress.close()
-            _analysis_failed(job_id, ws, e, _drop_upload, media_entries)
+            _analysis_failed(job_id, ws, e, _drop_upload, media_entries,
+                             where)
             return
         progress.close()
         try:
@@ -1897,13 +2019,14 @@ def _run_analyze_inner(job_id: str) -> None:
         except Exception as e:
             # Not saved (the database stayed down, or a bad result): a
             # failed analysis — refunded when the database was the cause.
-            _analysis_failed(job_id, ws, e, _drop_upload, media_entries)
+            _analysis_failed(job_id, ws, e, _drop_upload, media_entries,
+                             where)
             return
         _true_up(job_id, res.get("duration", 0.0))
         _drop_upload()  # if the pipeline didn't already
         if source_key:
             # Committed: the upload object isn't needed any more.
-            _discard_upload(None, source_key)
+            _discard_upload(None, source_key, where)
     finally:
         if progress is not None:
             progress.close()
@@ -1954,13 +2077,16 @@ def _run_render_inner(
                   queue_position=None)
         gen = max(1, int(job.render_gen or 0))
         out_prefix = f"{media.job_prefix(job_id)}r{gen}/"
+        where = media.store_of(job)
+        _make_workspace(ws)
         try:
             if not job.has_mezz():
                 raise FileNotFoundError("the render source is gone")
-            mezz_key = job.mezz_key or _backfill_mezz(job, progress)
+            mezz_key = job.mezz_key or _backfill_mezz(job, progress, where)
             result = pipeline.render_to_keys(
                 job_id=job_id, gen=gen, mezz_key=mezz_key,
-                out_prefix=out_prefix,
+                out_prefix=out_prefix, store=where,
+                mezz_bytes=(job.media_bytes or {}).get(mezz_key),
                 segments=job.segments,
                 subtitles=edited_subtitles,
                 settings=job.settings,
@@ -1987,7 +2113,10 @@ def _run_render_inner(
                       flush=True)
         except Exception as e:
             progress.close()
-            _gc_later([out_prefix])   # partial outputs of this generation
+            # Partial outputs of this generation — not before a Modal
+            # call that wasn't really stopped (_cancel_modal_call doesn't
+            # kill its container) can't write there any more.
+            _gc_later([out_prefix], _render_gc_delay_s(), store_=where)
             _render_failed(job_id, e)
             return
         progress.close()
@@ -1996,17 +2125,17 @@ def _run_render_inner(
             # (edits need awaiting_review): computed from a fresh read.
             cur = _db_retry(job_id, "reading the job", store.get, job_id)
             if cur is None:
-                _gc_later([out_prefix])
+                _gc_later([out_prefix], _render_gc_delay_s(), store_=where)
                 return
             done, superseded = _render_commit(cur, result, out_prefix, social)
             _db_retry(job_id, "saving the render", store.update, job_id,
                       **done)
         except Exception as e:
-            _gc_later([out_prefix])
+            _gc_later([out_prefix], _render_gc_delay_s(), store_=where)
             _render_failed(job_id, e)
             return
         # The previous render stays a day: someone may still stream it.
-        _gc_later(superseded, _SUPERSEDED_KEEP_S)
+        _gc_later(superseded, _SUPERSEDED_KEEP_S, store_=where)
     finally:
         if progress is not None:
             progress.close()
@@ -2053,19 +2182,34 @@ def _render_commit(cur: Job, result: dict, out_prefix: str,
     ), superseded
 
 
-def _backfill_mezz(job: Job, progress: Callable[[str, float], None]) -> str:
+def _render_gc_delay_s() -> float:
+    """How long a failed render's r{g}/ prefix waits for the GC: past
+    Modal's function timeout, so a call that kept running after we gave
+    up can't write into it after the delete."""
+    return pipeline._MODAL_FUNCTION_TIMEOUT_S + 300.0
+
+
+def _backfill_mezz(job: Job, progress: Callable[[str, float], None],
+                   where: str) -> str:
     """A job from before the media keys: its local normalized file
-    becomes jobs/{id}/mezz.mp4 (lazy backfill, before its first render
-    after WP3). Returns the key."""
+    becomes jobs/{id}/mezz.mp4 in store `where` (lazy backfill, before
+    its first render after WP3; the job's store is recorded with it).
+    Returns the key."""
     key = media.job_prefix(job.id) + "mezz.mp4"
     progress("Preparing render…", 2)
-    size = media.put_file(job.normalized_path, key, content_type="video/mp4")
+    size = media.put_file(job.normalized_path, key, content_type="video/mp4",
+                          store=where)
 
-    def _set(cur: Job) -> dict:
+    def _set(cur: Job) -> dict | None:
+        if cur.media_store and cur.media_store != where:
+            return None   # moved to another store meanwhile (backfill)
         return {"mezz_key": key,
+                "media_store": cur.media_store or where,
                 "media_bytes": {**(cur.media_bytes or {}), key: size},
                 "updated_at": cur.updated_at}
-    store.modify(job.id, _set)
+    if store.modify(job.id, _set) is None:
+        raise RuntimeError(f"job {job.id} is gone or its media moved "
+                           "meanwhile")
     return key
 
 
@@ -2100,14 +2244,23 @@ def _no_direct_upload() -> HTTPException:
 # loss (IndexedDB on the client, ListParts here), and completes through
 # the server, which completes with the ETags it lists itself — so R2 CORS
 # needn't expose ETag. Stateless: the ticket (backend/uploads.py) carries
-# everything, any replica can serve any call. Kill switch:
-# CLEO_UPLOAD_MODE=single → init answers 409 use_single_put and the web
-# app uses the single presigned PUT (/uploads/presign).
+# everything, any replica can serve any call. Opt-in:
+# CLEO_UPLOAD_MODE=multipart turns it on; unset / "single" (the default)
+# → init, parts and sign answer 409 use_single_put and the web app uses
+# the single presigned PUT (/uploads/presign) — a browser resuming a
+# saved upload (parts / sign, no init) drops it and starts over with
+# the single PUT too. complete / abort keep working (a finished or
+# abandoned upload can still be settled).
 
 
 def _upload_mode() -> str:
     mode = os.environ.get("CLEO_UPLOAD_MODE", "").strip().lower()
-    return "single" if mode == "single" else "multipart"
+    return "multipart" if mode == "multipart" else "single"
+
+
+def _require_multipart() -> None:
+    if _upload_mode() != "multipart":
+        raise ApiRefusal(409, "use_single_put")
 
 
 def _ticket_secret() -> str:
@@ -2169,10 +2322,10 @@ def multipart_init(payload: dict, user: User | None = Depends(current_user)):
     → {ticket, storage_key, part_size, parts_total, expires_at, parts:
     [{part_number, url}] (the first up to 8)}. Refuses like
     /uploads/presign, in the same order: 402, 413, 429 / 503 server_busy,
-    507, 503 without R2; 409 use_single_put while CLEO_UPLOAD_MODE=single."""
+    507, 503 without R2; 409 use_single_put unless
+    CLEO_UPLOAD_MODE=multipart."""
     from backend import storage
-    if _upload_mode() == "single":
-        raise ApiRefusal(409, "use_single_put")
+    _require_multipart()
     duration = _to_float(payload.get("duration") or 0)
     _paywall_soft_check(user, duration)
     size = _to_float(payload.get("size") or 0)
@@ -2206,7 +2359,9 @@ def multipart_init(payload: dict, user: User | None = Depends(current_user)):
 def multipart_sign(payload: dict, user: User | None = Depends(current_user)):
     """{ticket, part_numbers: [≤ 64]} → {parts: [{part_number, url}]},
     each URL signed for exactly that part's length, valid ≤ 6 h (the
-    client signs again when a PUT answers 403)."""
+    client signs again when a PUT answers 403). 409 use_single_put
+    unless CLEO_UPLOAD_MODE=multipart."""
+    _require_multipart()
     t = _read_ticket(payload, user)
     numbers = payload.get("part_numbers")
     if (not isinstance(numbers, list) or not 1 <= len(numbers) <= 64
@@ -2237,7 +2392,9 @@ def _completed_size(t: dict) -> int | None:
 def multipart_parts(payload: dict, user: User | None = Depends(current_user)):
     """{ticket} → {parts: [{part_number, size}]}: what R2 has. A resume
     trusts this list, not its own. Already completed → every part
-    ("completed": true); gone → 410 upload_expired."""
+    ("completed": true); gone → 410 upload_expired. 409 use_single_put
+    unless CLEO_UPLOAD_MODE=multipart."""
+    _require_multipart()
     t = _read_ticket(payload, user)
     parts = _uploaded_parts(t)
     if parts is None:
@@ -2517,6 +2674,7 @@ async def _claim_upload(
     user: User | None,
     job_id: str | None = None,
     source_key: str | None = None,
+    media_store: str | None = None,
 ) -> Job | dict:
     """Insert this upload's job row as a claim (see _settled). Returns the
     claimed Job — or, when another request holds the storage key, that
@@ -2532,6 +2690,7 @@ async def _claim_upload(
                 job_id=job_id,
                 idempotency_key=storage_key,
                 source_key=source_key,
+                media_store=media_store,
                 owner_id=user.id if user else None,
                 plan=DEFAULT_PLAN,
                 filename=_short(filename or (file.filename if file else None),
@@ -2641,13 +2800,16 @@ async def _accept_upload(
             seconds = 0.0  # not enforced: the true-up after analysis fixes it
 
         source_key = storage_key
+        # The job's store is recorded with its first own key (here, or
+        # the analysis' mezz; media.store_of until then).
+        media_store: str | None = None
         if not storage_key and media.is_r2():
             # The body goes to the media store; nothing stays on this box.
             own_key = (media.job_prefix(job_id) + "source"
                        + upl.upload_ext(file.filename or filename))
             try:
                 await run_in_threadpool(functools.partial(
-                    media.put_file, input_path, own_key,
+                    media.put_file, input_path, own_key, store="r2",
                     content_type=upl.upload_content_type(file.content_type)))
             except Exception as e:
                 print(f"[jobs] storing the upload failed: {e}", flush=True)
@@ -2656,6 +2818,7 @@ async def _accept_upload(
             await run_in_threadpool(_remove_upload, input_path)
             input_path = None
             source_key = own_key
+            media_store = "r2"
 
         # Claim first, charge second (see _settled / _abandon_claim): a
         # parallel request for this upload in another process waits for
@@ -2663,7 +2826,8 @@ async def _accept_upload(
         claimed = await _claim_upload(parsed, file, input_path, storage_key,
                                       filename, preset_id, preset_label,
                                       user, job_id=job_id,
-                                      source_key=source_key)
+                                      source_key=source_key,
+                                      media_store=media_store)
         if isinstance(claimed, dict):  # another request's job: a retry
             await run_in_threadpool(_remove_upload, input_path)
             input_path = None
@@ -2748,7 +2912,7 @@ async def _accept_upload(
             if input_path is not None:
                 _remove_upload(input_path)
             if own_key is not None:
-                _gc_later([own_key])
+                _gc_later([own_key], store_="r2")
         raise
     finally:
         _INFLIGHT.release(token)
@@ -3048,11 +3212,11 @@ def admin_costs(x_admin_token: str = Header(default=""),
     if not hmac.compare_digest(x_admin_token, token):
         raise HTTPException(401, "bad admin token")
     rows = []
-    r2 = media.backend() == "r2"
     for job in store.list_all():
         c = dict(job.costs or {})
         if not c:
             continue
+        r2 = media.store_of(job) == "r2"
         stored = {k: int(v) for k, v in (job.media_bytes or {}).items()}
         job_dir = _WORK_ROOT / job.id
         files = {
@@ -3163,24 +3327,42 @@ def get_subtitles(job_id: str, user: User | None = Depends(current_user)):
 # files.
 
 
-def _media(key: str, media_type: str, not_ready: str,
+def _media(job: Job, key: str, media_type: str, not_ready: str,
            download_name: str | None = None,
            cache: str | None = None):
+    """`key` of `job`, from the job's store (media.store_of)."""
+    where = media.store_of(job)
+    if where == "r2" and not storage.r2_available():
+        # The job's media is in R2 but R2_* are missing / incomplete:
+        # never answer from the local disk instead.
+        print(f"[media] job {job.id} has its media in R2, but R2 is not "
+              "configured (R2_* env vars)", flush=True)
+        raise ApiRefusal(503, "storage_unavailable",
+                         headers={"Retry-After": "60"})
     try:
         return media.media_response(key, media_type=media_type,
-                                    download_name=download_name, cache=cache)
+                                    download_name=download_name, cache=cache,
+                                    store=where)
     except FileNotFoundError:
         raise HTTPException(409, not_ready)
+
+
+def _proxy_video_enabled() -> bool:
+    return os.environ.get("CLEO_PROXY_VIDEO", "").strip() == "1"
 
 
 @app.get("/jobs/{job_id}/proxy-video")
 def proxy_video(job_id: str, user: User | None = Depends(media_user)):
     """The editor proxy: the whole normalized source at ≤ 720p (seconds =
     source seconds), which the editor plays and cuts client-side. 404
-    proxy_not_ready without one (the editor then plays preview-video)."""
+    proxy_not_ready without one (the editor then plays preview-video),
+    and always unless CLEO_PROXY_VIDEO=1 (opt-in: client-side playback
+    from the proxy isn't switched on by the merge)."""
     job = get_owned_job(job_id, user)
+    if not _proxy_video_enabled():
+        raise HTTPException(404, "proxy_not_ready")
     if job.proxy_key:
-        return _media(job.proxy_key, "video/mp4", "proxy_not_ready",
+        return _media(job, job.proxy_key, "video/mp4", "proxy_not_ready",
                       cache="private, max-age=86400")
     if job.normalized_path:
         legacy = Path(job.normalized_path).with_name(pipeline.PROXY_NAME)
@@ -3201,7 +3383,7 @@ def preview_video(job_id: str, user: User | None = Depends(media_user)):
     if job.preview_key:
         # A new version gets a new key; the local file is still answered
         # with no-cache, as before (the URL may be asked without ?v=).
-        return _media(job.preview_key, "video/mp4", "preview video not ready",
+        return _media(job, job.preview_key, "video/mp4", "preview video not ready",
                       cache="no-cache")
     # Legacy job: prefer the cut preview, fall back to the normalized file.
     path = job.preview_path if job.preview_path else job.normalized_path
@@ -3263,10 +3445,20 @@ def _preview_source(normalized_path: str | None) -> str | None:
 
 
 def _job_preview_source(job: Job) -> str | None:
-    """A local file previews of `job` are cut from, or None: it has media
-    keys, _rebuild_preview gets the source itself (in the pool)."""
-    if job.proxy_key or job.mezz_key or not job.normalized_path:
+    """A local file previews of `job` are cut from, or None:
+    _rebuild_preview gets the source itself (in the pool, from the
+    proxy cache). While the job has no proxy_key, a legacy job's local
+    720p proxy (or normalized file) is still preferred — also after the
+    lazy mezz backfill of its first render, which would otherwise make
+    every rebuild download the full-resolution mezz."""
+    if job.proxy_key or not job.normalized_path:
         return None
+    local = Path(job.normalized_path)
+    if job.mezz_key:
+        proxy = local.with_name(pipeline.PROXY_NAME)
+        if proxy.is_file():
+            return str(proxy)
+        return str(local) if local.is_file() else None
     return _preview_source(job.normalized_path)
 
 
@@ -3382,7 +3574,7 @@ def _cached_proxy(job: Job) -> str:
             return str(path)
         tmp = path.with_suffix(f".{uuid.uuid4().hex[:8]}.part")
         try:
-            media.get_file(key, tmp)
+            media.get_file(key, tmp, store=media.store_of(job))
             os.replace(tmp, path)
         finally:
             tmp.unlink(missing_ok=True)
@@ -3402,21 +3594,25 @@ def _rebuild_preview(job_id: str, source: str | None, segments) -> None:
         raise FileNotFoundError(f"job {job_id} is gone")
     if source is None:
         source = _cached_proxy(job)
-    ws = _workspace(job_id, f"preview-{threading.get_ident()}")
-    ws.mkdir(parents=True, exist_ok=True)
+    ws = _make_workspace(_workspace(job_id,
+                                    f"preview-{threading.get_ident()}"))
     try:
         out = ws / "preview.mp4"
         _ffmpeg_cuts_preview(source, segments, str(out))
         version = (job.preview_version or 0) + 1
         key = f"{media.job_prefix(job_id)}preview/v{version}.mp4"
-        size = media.put_file(out, key, content_type="video/mp4")
+        where = media.store_of(job)
+        size = media.put_file(out, key, content_type="video/mp4",
+                              store=where)
     finally:
         _drop_workspace(ws)
     shown = [[float(s), float(e)] for s, e in segments]
     old: list[str] = []
 
-    def _point(cur: Job) -> dict:
+    def _point(cur: Job) -> dict | None:
         old.clear()
+        if cur.media_store and cur.media_store != where:
+            return None   # moved to another store meanwhile (backfill)
         if cur.preview_key and cur.preview_key != key:
             old.append(cur.preview_key)
         sizes = {k: v for k, v in (cur.media_bytes or {}).items()
@@ -3425,10 +3621,13 @@ def _rebuild_preview(job_id: str, source: str | None, segments) -> None:
         # preview_version + 1 on the stored value, under the row lock.
         return {"preview_key": key, "preview_segments": shown,
                 "preview_version": (cur.preview_version or 0) + 1,
+                "media_store": cur.media_store or where,
                 "media_bytes": sizes}
-    store.modify(job_id, _point)
+    if store.modify(job_id, _point) is None:
+        raise RuntimeError(f"job {job_id} is gone or its media moved "
+                           "meanwhile — preview not stored")
     # A player may still stream the previous version for a while.
-    _gc_later(old, _SUPERSEDED_KEEP_S)
+    _gc_later(old, _SUPERSEDED_KEEP_S, store_=where)
 
 
 @app.post("/jobs/{job_id}/edit-segments")
@@ -3787,7 +3986,7 @@ def download_job(job_id: str, format: str = "primary",
         key = job.output_keys.get(format)
         if not key:
             raise HTTPException(409, "requested format not ready")
-        return _media(key, "video/mp4", "requested format not ready",
+        return _media(job, key, "video/mp4", "requested format not ready",
                       download_name=f"cleo_{job_id}_{safe}.mp4")
     path = job.outputs.get(format) or (
         job.output_path if format == "primary" else None
@@ -3813,7 +4012,7 @@ def watch_job(job_id: str, format: str = "primary",
         key = job.output_keys.get(format)
         if not key:
             raise HTTPException(409, "requested format not ready")
-        return _media(key, "video/mp4", "requested format not ready")
+        return _media(job, key, "video/mp4", "requested format not ready")
     path = job.outputs.get(format) or (
         job.output_path if format == "primary" else None
     )
@@ -3835,7 +4034,7 @@ def job_thumbnail(job_id: str, user: User | None = Depends(media_user)):
     # Behind a per-user token once accounts are on: no shared caches.
     cache = ("private" if auth.auth_enabled() else "public") + ", max-age=86400"
     if job.thumb_key:
-        return _media(job.thumb_key, "image/jpeg", "thumbnail not ready",
+        return _media(job, job.thumb_key, "image/jpeg", "thumbnail not ready",
                       cache=cache)
     if job.output_keys:
         raise HTTPException(404, "thumbnail not ready")

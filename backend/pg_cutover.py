@@ -196,7 +196,8 @@ def _sqlite_columns(src: sqlite3.Connection, table: str) -> list[str] | None:
 def _value(table: str, column: str, value: Any) -> Any:
     """A SQLite value as the Postgres column wants it."""
     if value is None:
-        return None
+        # media_gc.store: '' = "both stores" (rows from before stores).
+        return "" if (table, column) == ("media_gc", "store") else None
     if column in pg.TIME_COLUMNS:
         try:
             return pg._param(db.Epoch(float(value)))

@@ -40,6 +40,8 @@ IMMUTABLE = "private, max-age=31536000, immutable"
 # Presigned GET lifetime: counted from X-Amz-Date (today 00:00Z), so a
 # URL handed out at 23:59 is still good for 24 h.
 PRESIGN_GET_EXPIRES = 172800
+# CLEO_MEDIA_PRESIGN=standard: counted from now.
+PRESIGN_GET_STANDARD_EXPIRES = 86400
 _MIB = 1024 * 1024
 
 try:  # registered once per process, at import (see module doc)
@@ -103,8 +105,9 @@ _clients_lock = threading.Lock()
 
 def _client(kind: str = "api"):
     """The cached client ("api": everything; "get": presigned GETs with
-    the day-aligned signer). Raises if unconfigured. Keyed by the config,
-    so changed credentials get a new client."""
+    the day-aligned signer; "get-std": presigned GETs with the standard
+    signer, CLEO_MEDIA_PRESIGN=standard). Raises if unconfigured. Keyed
+    by the config, so changed credentials get a new client."""
     cfg = _r2_config()
     if cfg is None:
         raise RuntimeError(
@@ -124,8 +127,14 @@ def _client(kind: str = "api"):
             except ImportError as e:
                 raise RuntimeError("boto3 not installed") from e
             conf = Config(
-                signature_version="s3v4" if kind == "api" else "cleo-day",
+                signature_version="cleo-day" if kind == "get" else "s3v4",
                 s3={"addressing_style": "path"},
+                # Only the checksums S3 requires: botocore >= 1.36 adds
+                # CRC32 trailers / ChecksumCRC32 to every PUT and part by
+                # default ("when_supported"), which the R2 multipart
+                # path (>= 64 MiB: every mezz and output) doesn't need.
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
                 retries={"mode": "standard", "max_attempts": 5},
                 connect_timeout=5, read_timeout=60,
                 max_pool_connections=32)
@@ -186,8 +195,22 @@ def presign_get(key: str, *, filename: str | None = None,
         params["ResponseContentDisposition"] = disp
     if content_type:
         params["ResponseContentType"] = content_type
+    if presign_mode() == "standard":
+        # The lever: X-Amz-Date = now (no day alignment, a new URL per
+        # request), valid PRESIGN_GET_STANDARD_EXPIRES.
+        return _client("get-std").generate_presigned_url(
+            "get_object", Params=params,
+            ExpiresIn=PRESIGN_GET_STANDARD_EXPIRES)
     return _client("get").generate_presigned_url(
         "get_object", Params=params, ExpiresIn=PRESIGN_GET_EXPIRES)
+
+
+def presign_mode() -> str:
+    """CLEO_MEDIA_PRESIGN: "day" (default: day-aligned, see module doc)
+    or "standard" (botocore's own presign — the lever if R2 ever
+    refuses the backdated X-Amz-Date)."""
+    v = os.environ.get("CLEO_MEDIA_PRESIGN", "").strip().lower()
+    return "standard" if v == "standard" else "day"
 
 
 def put_file(path: str, key: str, *, content_type: str,
@@ -226,6 +249,23 @@ def head(key: str) -> int | None:
 
 def delete(key: str) -> None:
     _client().delete_object(Bucket=bucket(), Key=key)
+
+
+def get_text(key: str) -> str | None:
+    """A small text object (e.g. jobs/.owner); None when missing."""
+    try:
+        body = _client().get_object(Bucket=bucket(), Key=key)["Body"]
+    except Exception as e:
+        if is_not_found(e):
+            return None
+        raise
+    return body.read().decode("utf-8", "replace").strip() or None
+
+
+def put_text(key: str, text: str) -> None:
+    _client().put_object(Bucket=bucket(), Key=key,
+                         Body=text.encode("utf-8"),
+                         ContentType="text/plain")
 
 
 def delete_prefix(prefix: str) -> int:
@@ -378,6 +418,40 @@ def presign_upload(
     }
 
 
+# ── Database backups (backend/pg_backup.py) ──────────────────────────
+# R2_BACKUP_BUCKET (optional, recommended): a bucket of its own for the
+# dumps (same account and credentials). The Modal render token
+# (secret "cleocuts-r2") then can't be given access to them: create it
+# with an R2 API token scoped to the media bucket only. Unset → the
+# media bucket (backups/pg/…).
+
+
+def backup_bucket() -> str:
+    return os.environ.get("R2_BACKUP_BUCKET", "").strip() or bucket()
+
+
+def backup_put(path: str, key: str) -> None:
+    """Put a dump into the backup bucket (multipart for big files)."""
+    _client().upload_file(path, backup_bucket(), key)
+
+
+def backup_get(key: str, dest_path: str) -> None:
+    Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
+    _client().download_file(backup_bucket(), key, str(dest_path))
+
+
+def backup_list(prefix: str) -> list[dict[str, Any]]:
+    return list_r2(prefix, bucket_name=backup_bucket())
+
+
+def backup_delete(key: str) -> None:
+    """Soft: a failure is only logged."""
+    try:
+        _client().delete_object(Bucket=backup_bucket(), Key=key)
+    except Exception as e:
+        print(f"[storage] backup delete failed for {key}: {e}", flush=True)
+
+
 def delete_from_r2(storage_key: str) -> None:
     """Soft delete: remove an object, only logging a failure."""
     if not r2_available():
@@ -389,25 +463,23 @@ def delete_from_r2(storage_key: str) -> None:
               flush=True)
 
 
-# ── Database backups (backend/pg_backup.py) ──────────────────────────
-
-
 def upload_to_r2(path: str, storage_key: str) -> None:
     """Put a local file into R2 (multipart for big files). Raises."""
     _client().upload_file(path, bucket(), storage_key)
 
 
 def download_from_r2(storage_key: str, dest_path: str) -> None:
-    """Fetch an object into a local file (pg_backup restore). Raises."""
+    """Fetch an object into a local file. Raises."""
     get_file(storage_key, dest_path)
 
 
-def list_r2(prefix: str) -> list[dict[str, Any]]:
+def list_r2(prefix: str, bucket_name: str | None = None
+            ) -> list[dict[str, Any]]:
     """Objects under `prefix`: [{"key", "size", "last_modified"}]. Raises."""
     client = _client()
     out: list[dict[str, Any]] = []
     for page in client.get_paginator("list_objects_v2").paginate(
-            Bucket=bucket(), Prefix=prefix):
+            Bucket=bucket_name or bucket(), Prefix=prefix):
         for obj in page.get("Contents") or []:
             out.append({"key": obj["Key"], "size": obj.get("Size"),
                         "last_modified": obj.get("LastModified")})

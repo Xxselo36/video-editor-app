@@ -1425,7 +1425,8 @@ def _modal_retry_delays() -> list[float]:
 _log = logging.getLogger(__name__)
 
 # Modal's own hard cap per render call (modal_render.py render_r2
-# `timeout=`; render_burn_concat, kept for rollback, still has 1800).
+# `timeout=`; render_burn_concat, the default volume path, still has
+# 1800 — DEPLOY.md: renders over ~30 min only work with render_r2).
 _MODAL_FUNCTION_TIMEOUT_S = 3600.0
 # Workspace-level problems every retry would hit the same way, only
 # 10 + 30 s later: the spend limit or a quota (ResourceExhaustedError —
@@ -1473,11 +1474,16 @@ def _env_seconds(name: str, default: float) -> float:
         return default
 
 
-def _modal_deadline_s(segments: list[tuple[float, float]]) -> float:
+def _modal_deadline_s(segments: list[tuple[float, float]],
+                      mezz_bytes: int | None = None) -> float:
     """How long one Modal call may take from spawn to result before it
     is cancelled: CLEO_MODAL_DEADLINE_S_BASE (240) + CLEO_MODAL_DEADLINE_
-    S_PER_S (6) × output seconds, at most CLEO_MODAL_DEADLINE_S_MAX
-    (Modal's 3600 s function timeout + 120 s to get scheduled). It is
+    S_PER_S (6) × output seconds + CLEO_MODAL_DEADLINE_S_PER_GB (60) ×
+    the mezz's GB (render_r2 downloads it, and uploads outputs of about
+    that size, inside the call), at most CLEO_MODAL_DEADLINE_S_MAX
+    (Modal's 3600 s function timeout + 120 s to get scheduled; the volume
+    path's render_burn_concat is capped by Modal at 1800 s whatever this
+    says — renders that need longer fail there with render_timeout). It is
     for calls that never produce a result (never scheduled, lost) or
     render far slower than normal — without it the render thread waited
     forever and held its render slot. 0 is no "off" switch (it would
@@ -1488,10 +1494,12 @@ def _modal_deadline_s(segments: list[tuple[float, float]]) -> float:
     cap = _env_seconds("CLEO_MODAL_DEADLINE_S_MAX", default_cap) or default_cap
     base = _env_seconds("CLEO_MODAL_DEADLINE_S_BASE", 240.0)
     per_s = _env_seconds("CLEO_MODAL_DEADLINE_S_PER_S", 6.0)
+    per_gb = _env_seconds("CLEO_MODAL_DEADLINE_S_PER_GB", 60.0)
+    gb = max(0.0, float(mezz_bytes or 0)) / 1e9
     deadline = base + per_s * out_s
     if deadline <= 0:
         deadline = 240.0 + 6.0 * out_s
-    return min(deadline, cap)
+    return min(deadline + per_gb * gb, cap)
 
 
 def _modal_give_up(exc: BaseException, phase: str) -> tuple[str, str] | None:
@@ -2467,11 +2475,14 @@ def render_only(
 # ── WP3: renders read and write job media (backend/media.py, R2) ─────
 # The render source is the job's mezz object; every output goes under
 # jobs/{id}/r{gen}/ (a new prefix per render: keys are never reused).
-# With media in R2, Modal's render_r2 reads the mezz from R2 and writes
-# the outputs there itself — burn, concat, effects, thumbnail, formats
-# and hook cuts all run on Modal, nothing big passes through the API.
-# CLEO_MODAL_RENDER_FN=render_burn_concat is the rollback lever: the old
-# volume path (render_only), after which the API stores the outputs.
+# Default: the volume path — Modal's render_burn_concat (render_only)
+# renders, the API stores the outputs in the job's store. Opt-in
+# (CLEO_MODAL_RENDER_FN=render_r2, for jobs whose media is in R2):
+# Modal's render_r2 reads the mezz from R2 and writes the outputs there
+# itself — burn, concat, effects, thumbnail, formats and hook cuts all
+# run on Modal, nothing big passes through the API. If render_r2 isn't
+# deployed (NotFoundError: the Modal secret "cleocuts-r2" is missing, so
+# the deploy left it out) the render takes the volume path instead.
 # Without Modal (or with CLEO_LOCAL_RENDER_FALLBACK=1 after a failure)
 # the render runs here (render_only) and is stored the same way.
 
@@ -2479,14 +2490,17 @@ RENDER_KEY_THUMB = "thumb.jpg"
 
 
 def modal_render_fn(r2: bool) -> str:
-    """The Modal function that renders: CLEO_MODAL_RENDER_FN
-    (render_r2 | render_burn_concat), default render_r2. render_r2
-    reads and writes R2 itself, so with local media it is always the
-    volume path."""
+    """The Modal function that renders a job: render_r2 only when
+    CLEO_MODAL_RENDER_FN=render_r2 AND the job's media is in R2 (`r2`:
+    render_r2 reads and writes R2 itself); render_burn_concat (the
+    volume path) otherwise — the default."""
     name = os.environ.get("CLEO_MODAL_RENDER_FN", "").strip()
-    if not r2:
-        return "render_burn_concat"
-    return name if name in ("render_r2", "render_burn_concat") else "render_r2"
+    return "render_r2" if (r2 and name == "render_r2") else "render_burn_concat"
+
+
+class _RenderR2Missing(Exception):
+    """render_r2 isn't deployed on Modal (NotFoundError before any call
+    ran): render on the volume path instead."""
 
 
 def output_key(out_prefix: str, fmt: str) -> str:
@@ -2690,11 +2704,15 @@ def render_to_keys(
     workspace: str,
     progress_cb: Callable[[str, float], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    store: str | None = None,
+    mezz_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Render job `job_id` (generation `gen`) from its mezz object into
-    keys under `out_prefix`. Hook moments are found first (LLM, output
-    time). Returns store_render_files' shape (+ "timings"). Raises
+    keys under `out_prefix`, both in `store` (the job's, media.store_of).
+    Hook moments are found first (LLM, output time). Returns
+    store_render_files' shape (+ "timings"). Raises
     RenderUnavailableError like render_only."""
+    import functools
     from backend import media
 
     def _stage(msg: str, pct: float) -> None:
@@ -2703,7 +2721,8 @@ def render_to_keys(
 
     settings = settings or {}
     hooks = detect_hooks(subtitles, settings, duration, language, _stage)
-    r2 = media.backend() == "r2"
+    where = store or media.backend()
+    r2 = where == "r2"
     use_modal = _modal_configured()
     if use_modal and modal_render_fn(r2) == "render_r2":
         clips, effects = _prepare_render(segments, settings, cut_ranges,
@@ -2717,7 +2736,11 @@ def render_to_keys(
                 cut_style=settings.get("style", "balanced"),
                 language=language,
                 output_formats=settings.get("output_formats") or [],
-                hooks=hooks, _stage=_stage, cancel_check=cancel_check)
+                hooks=hooks, _stage=_stage, cancel_check=cancel_check,
+                mezz_bytes=mezz_bytes)
+        except _RenderR2Missing as e:
+            print(f"[modal] render_r2 is not deployed ({e}) — rendering "
+                  "on the volume path (render_burn_concat)", flush=True)
         except RenderUnavailableError as e:
             if not local_render_fallback_enabled():
                 raise
@@ -2730,7 +2753,7 @@ def render_to_keys(
     ws.mkdir(parents=True, exist_ok=True)
     mezz = ws / "mezz.mp4"
     _stage("Preparing render…", 2)
-    media.get_file(mezz_key, mezz)
+    media.get_file(mezz_key, mezz, store=where)
     out_dir = ws / "out"
     res = render_only(
         normalized_path=str(mezz), output_dir=str(out_dir),
@@ -2741,7 +2764,7 @@ def render_to_keys(
         use_modal=use_modal)
     _stage("Saving…", 99)
     return store_render_files(_files_of(res, str(out_dir)), out_prefix,
-                              media.put_file)
+                              functools.partial(media.put_file, store=where))
 
 
 def _try_modal_render_r2(
@@ -2760,6 +2783,7 @@ def _try_modal_render_r2(
     hooks: list[dict],
     _stage,
     cancel_check: Callable[[], bool] | None = None,
+    mezz_bytes: int | None = None,
 ) -> dict[str, Any]:
     """render_r2 on Modal: reads the mezz from R2, writes every output
     under `out_prefix`, returns their keys and sizes. Same policy as
@@ -2767,18 +2791,19 @@ def _try_modal_render_r2(
     backoff, spend limit / auth / not deployed / never started fail at
     once (_modal_give_up) — minus the volume. A retry renders into the
     same prefix (an uncommitted one; a cancelled or finished attempt
-    can't write there any more, and S3 PUTs are atomic)."""
+    can't write there any more, and S3 PUTs are atomic). Raises
+    _RenderR2Missing when render_r2 isn't deployed."""
     _bound_modal_throttling()
     try:
         import modal
     except ImportError as e:
         raise RenderUnavailableError("modal package not installed") from e
     import traceback
-    from backend import costs
+    from backend import costs, storage
 
     delays = _modal_retry_delays()
     attempts = len(delays) + 1
-    deadline_s = _modal_deadline_s(segments)
+    deadline_s = _modal_deadline_s(segments, mezz_bytes)
     last_exc: BaseException | None = None
     attempt = 0
     for attempt in range(1, attempts + 1):
@@ -2797,7 +2822,8 @@ def _try_modal_render_r2(
                     subtitles=subtitles, caption_preset=caption_preset,
                     cut_style=cut_style, language=language,
                     output_formats=list(output_formats),
-                    segment_effects=list(effects), hooks=list(hooks))
+                    segment_effects=list(effects), hooks=list(hooks),
+                    bucket=storage.bucket())
                 result = _await_modal_call(fn, call, t0, deadline_s,
                                            len(segments), _stage,
                                            cancel_check)
@@ -2820,6 +2846,9 @@ def _try_modal_render_r2(
         except InterruptedError:
             raise
         except Exception as e:
+            if type(e).__name__ == "NotFoundError" and attempt == 1:
+                # Not deployed (no cleocuts-r2 secret yet): nothing ran.
+                raise _RenderR2Missing(f"{type(e).__name__}: {e}") from e
             last_exc = e
             costs.record_event("modal_failed")
             print(f"[modal] render attempt {attempt}/{attempts} failed: "
