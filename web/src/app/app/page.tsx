@@ -28,6 +28,8 @@ import {
 import { VideoModal } from "@/components/VideoModal";
 import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
 import { trackSave, waitForSaves } from "@/lib/pendingSaves";
+import { buildPlan, EditPlayer, probeProxy } from "@/lib/editPlayback";
+import { sameTimeline, saveOutcome, type SaveOutcome, type TimelineSeg } from "@/lib/editSave";
 import {
   MAX_MINUTES,
   MAX_UPLOAD_GB,
@@ -399,6 +401,9 @@ type JobStatus = {
   // Segments the served preview.mp4 was built from + its version.
   preview_segments?: [number, number][];
   preview_version?: number;
+  // GET /jobs/{id}/proxy-video exists: the editor plays it and applies
+  // the edit itself (lib/editPlayback). Missing = unknown, probed.
+  has_proxy?: boolean;
   caption_preset?: string | null;
 };
 
@@ -1343,6 +1348,7 @@ export default function Home() {
             savedSegments={job.edit_segments ?? []}
             previewSegments={job.preview_segments ?? []}
             previewVersion={job.preview_version ?? 0}
+            hasProxy={job.has_proxy}
             phrases={phrases}
             captionPreset={captionPreset}
             audioWarnings={job.audio_warnings ?? []}
@@ -2929,6 +2935,7 @@ function ReviewScreen({
   savedSegments,
   previewSegments,
   previewVersion,
+  hasProxy,
   phrases,
   captionPreset,
   audioWarnings,
@@ -2946,6 +2953,8 @@ function ReviewScreen({
   savedSegments: SavedSeg[];
   previewSegments: [number, number][];
   previewVersion: number;
+  /** GET /jobs/{id} has_proxy: true / false, undefined = not reported. */
+  hasProxy: boolean | undefined;
   phrases: Phrase[];
   captionPreset: string;
   audioWarnings: string[];
@@ -2961,18 +2970,48 @@ function ReviewScreen({
 }) {
   const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
-  // Set once: a changing src would restart playback. Later previews are
-  // swapped in imperatively (swapPreviewSrc), only while paused. With
-  // accounts on, not before the media token is known (/me can be slow):
-  // a tokenless src would fail for good.
-  const mediaReady = useMediaReady();
-  const [waitingVersion, setWaitingVersion] = useState(previewVersion);
-  const [initialPreviewSrc, setInitialPreviewSrc] = useState<string | null>(() =>
-    mediaReady ? mediaUrl(jobId, "preview-video", { v: previewVersion }) : null,
+  // How the player shows the edit:
+  //   proxy   — plays the job's full-source proxy and follows the edit
+  //             list itself (lib/editPlayback): edits show instantly and
+  //             nothing waits for the server's preview rebuild.
+  //   preview — backend without a proxy: plays the server-built cut
+  //             preview.mp4 and swaps in each rebuild.
+  //   probing — has_proxy not reported: one small request decides.
+  //             The preview already loads meanwhile (no extra round
+  //             trip before the video shows); a "yes" swaps to the proxy
+  //             unless the user has already started playing.
+  const [mode, setMode] = useState<"probing" | "proxy" | "preview">(
+    hasProxy === true ? "proxy" : hasProxy === false ? "preview" : "probing",
   );
-  if (initialPreviewSrc === null && mediaReady) {
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const mediaReady = useMediaReady();
+  // Frozen for the element's lifetime, like every media src.
+  const proxySrc = useMediaUrl(jobId, "proxy-video");
+  useEffect(() => {
+    if (mode !== "probing" || !mediaReady) return;
+    let live = true;
+    void probeProxy(mediaUrl(jobId, "proxy-video")).then((ok) => {
+      if (!live) return;
+      const v = videoRef.current;
+      // Already playing (or played) the preview: don't yank the src.
+      const started = !!v && (!v.paused || v.played.length > 0);
+      setMode(ok && !started ? "proxy" : "preview");
+    });
+    return () => {
+      live = false;
+    };
+  }, [mode, mediaReady, jobId]);
+  // Preview mode — set once: a changing src would restart playback.
+  // Later previews are swapped in imperatively (swapPreviewSrc), only
+  // while paused. With accounts on, not before the media token is known
+  // (/me can be slow): a tokenless src would fail for good.
+  const [waitingVersion, setWaitingVersion] = useState(previewVersion);
+  const [initialPreviewSrc, setInitialPreviewSrc] = useState<string | null>(null);
+  if (initialPreviewSrc === null && mediaReady && mode !== "proxy") {
     setInitialPreviewSrc(mediaUrl(jobId, "preview-video", { v: waitingVersion }));
   }
+  const videoSrc = mode === "proxy" ? proxySrc : initialPreviewSrc;
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
@@ -3036,6 +3075,8 @@ function ReviewScreen({
   }, [keptSegments.length]);
 
   const originalTime = useMemo(() => {
+    // The proxy's timeline IS the source timeline.
+    if (mode === "proxy") return currentTime;
     const src = videoSegments.length ? videoSegments : keptSegments;
     if (!src.length) return currentTime;
     let acc = 0;
@@ -3045,7 +3086,7 @@ function ReviewScreen({
       acc += segDur;
     }
     return duration;
-  }, [currentTime, videoSegments, keptSegments, duration]);
+  }, [mode, currentTime, videoSegments, keptSegments, duration]);
 
   // Editable segments — starts from keptSegments and can be trimmed,
   // split, deleted, or reordered by the user in the timeline editor.
@@ -3115,6 +3156,10 @@ function ReviewScreen({
   const inflightRef = useRef<Promise<void> | null>(null);
   const swapWhenPausedRef = useRef(false);
   const pendingSwapRef = useRef<{ segs: [number, number][]; version: number } | null>(null);
+  // The save on the wire (its request answers only after the preview
+  // rebuild), so proxy mode can wait for it to be STORED instead.
+  const inflightSaveRef = useRef<{ payload: TimelineSeg[]; response: Promise<Response> } | null>(null);
+  const applyingRef = useRef(false);
 
   const editPath = `/jobs/${jobId}/edit-segments`;
   const toPayload = (segs: EditableSeg[]) =>
@@ -3155,6 +3200,14 @@ function ReviewScreen({
   // list it was built from (the server's, not ours), so the playhead
   // mapping always matches the file that is playing.
   const applyPreview = (segs: [number, number][], version: number) => {
+    if (modeRef.current === "proxy") {
+      // Proxy: nothing to reload. Only remember the newest preview, in
+      // case the player falls back to preview mode. (Probing plays the
+      // preview until the probe answers, so it swaps like preview.)
+      setVideoSegments(segs);
+      setWaitingVersion(version);
+      return;
+    }
     const v = videoRef.current;
     if (v && v.paused) {
       setVideoSegments(segs);
@@ -3189,12 +3242,24 @@ function ReviewScreen({
     if (active.length === 0) return;
     const run = (async () => {
       setEditSaving(true);
-      try {
-        const r = await apiFetch(editPath, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ segments: active }),
+      const request = apiFetch(editPath, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segments: active }),
+      });
+      inflightSaveRef.current = { payload: active, response: request };
+      if (modeRef.current === "proxy") {
+        // The answer only comes after the preview rebuild, which proxy
+        // mode never uses: end "saving" once the edit is stored (unless a
+        // newer edit is already waiting). Errors are still handled below.
+        void saveOutcome(jobId, active, duration, request).then((o) => {
+          if (o === "stored" && !pendingRebuildRef.current && !closedRef.current) {
+            setEditSaving(false);
+          }
         });
+      }
+      try {
+        const r = await request;
         if ([400, 404, 409, 410].includes(r.status)) {
           // Permanent: retrying can't help.
           setSaveError("failed");
@@ -3207,17 +3272,21 @@ function ReviewScreen({
           applyPreview(data.preview_segments, data.preview_version ?? Date.now());
         }
       } catch {
-        if (closedRef.current) return;
+        // Apply & render already sent the timeline on screen.
+        if (closedRef.current || applyingRef.current) return;
         // Keep the edit unless a newer one replaced it, and retry.
         if (!pendingRebuildRef.current) pendingRebuildRef.current = next;
         setSaveError("retrying");
         scheduleRebuild(3000);
       } finally {
+        if (inflightSaveRef.current?.response === request) inflightSaveRef.current = null;
         setEditSaving(false);
       }
     })();
     inflightRef.current = run;
-    trackSave(jobId, run);
+    // Reopening the job waits for this save — in proxy mode only until
+    // it is stored, not for the preview rebuild (see flushOnLeave).
+    if (modeRef.current !== "proxy") trackSave(jobId, run);
     try {
       await run;
     } finally {
@@ -3232,13 +3301,20 @@ function ReviewScreen({
       clearTimeout(rebuildTimerRef.current);
       rebuildTimerRef.current = null;
     }
+    const proxy = modeRef.current === "proxy";
+    const inflight = inflightSaveRef.current;
     const next = pendingRebuildRef.current;
-    if (!next) return;
     pendingRebuildRef.current = null;
-    const active = toPayload(next);
+    const active = next ? toPayload(next) : [];
+    // Only when no newer save goes out now: that one replaces the
+    // in-flight timeline on the server, so the in-flight one would never
+    // be seen stored and reopening would wait for its rebuild.
+    if (proxy && inflight && !unloading && active.length === 0) {
+      trackSave(jobId, saveOutcome(jobId, inflight.payload, duration, inflight.response, { timeoutMs: 10_000 }));
+    }
     if (active.length === 0) return;
     const body = JSON.stringify({ segments: active });
-    const p = apiFetch(editPath, {
+    const request = apiFetch(editPath, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
@@ -3246,8 +3322,13 @@ function ReviewScreen({
       // the page alive), and only under the browser's 64 KB cap.
       keepalive: unloading && body.length < 60_000,
       unloading,
-    }).catch(() => {});
-    trackSave(jobId, p);
+    });
+    trackSave(
+      jobId,
+      proxy && !unloading
+        ? saveOutcome(jobId, active, duration, request, { timeoutMs: 10_000 })
+        : request.catch(() => {}),
+    );
   };
   useEffect(() => {
     // Re-armed on (re)mount — React dev mode mounts effects twice.
@@ -3264,8 +3345,10 @@ function ReviewScreen({
 
   // Reopened while the last save's preview was still rendering: the
   // saved edit is newer than the preview we loaded. Poll until the
-  // server has the matching preview, then switch to it.
+  // server has the matching preview, then switch to it. (Proxy mode
+  // plays the edit itself and never needs it.)
   useEffect(() => {
+    if (mode !== "preview") return;
     const key = (xs: [number, number][]) =>
       JSON.stringify(xs.map(([a, b]) => [+a.toFixed(3), +b.toFixed(3)]));
     const want = key(savedSegments.map((x) => [x.start, x.end]));
@@ -3290,7 +3373,7 @@ function ReviewScreen({
     }, 2000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mode]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -3316,6 +3399,30 @@ function ReviewScreen({
     pendingRebuildRef.current = next;
     scheduleRebuild(800);
   };
+
+  // Proxy mode: the player follows the edit list client-side — the
+  // timeline shows on the next frame, no preview rebuild involved.
+  const playerRef = useRef<EditPlayer | null>(null);
+  const fadeRef = useRef<HTMLDivElement>(null);
+  const [playingSegId, setPlayingSegId] = useState<string | null>(null);
+  useEffect(() => {
+    const v = videoRef.current;
+    // Only once the element has its src (the media token may still be
+    // loading): loading a src resets the element's rate and position.
+    if (mode !== "proxy" || !v || !proxySrc) return;
+    const player = new EditPlayer(v, { onSegment: setPlayingSegId, fadeEl: fadeRef.current });
+    player.setPlan(buildPlan(editSegs, duration));
+    playerRef.current = player;
+    return () => {
+      player.destroy();
+      playerRef.current = null;
+      setPlayingSegId(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, proxySrc]);
+  useEffect(() => {
+    playerRef.current?.setPlan(buildPlan(editSegs, duration));
+  }, [editSegs, duration]);
 
   // The preview follows the user's edited timeline, so phrases are
   // matched on SOURCE time (original_start / original_end) against the
@@ -3382,6 +3489,12 @@ function ReviewScreen({
   };
   const seekToPhrase = (p: Phrase) => {
     if (!videoRef.current) return;
+    if (mode === "proxy") {
+      if (playerRef.current?.seekRange(p.original_start, p.original_end)) {
+        videoRef.current.play().catch(() => {});
+      }
+      return;
+    }
     // A phrase may start inside a removed stretch — jump to its first
     // moment that is still in the cut.
     let t = previewTimeFor(p.original_start);
@@ -3437,11 +3550,21 @@ function ReviewScreen({
           (no client-side seek hops). Rebuild happens in the background
           via a debounced POST; we swap src only while paused so the
           user never sees a reload mid-playback. */}
-      <div className="relative overflow-hidden rounded-xl bg-[var(--surface-1)]">
+      <div className="group relative overflow-hidden rounded-xl bg-[var(--surface-1)]">
         <video
           ref={videoRef}
-          src={initialPreviewSrc ?? undefined}
+          src={videoSrc ?? undefined}
+          data-playback={mode}
+          // The proxy can't be played after all (gone, codec): fall back
+          // to the server-built preview.
+          onError={() => {
+            if (modeRef.current === "proxy") setMode("preview");
+          }}
           controls
+          // Proxy mode: no native speed menu — it would show the clip's
+          // effective rate, not the user's speed (EditPlayer still copes
+          // with browsers that ignore this).
+          controlsList={mode === "proxy" ? "noplaybackrate" : undefined}
           playsInline
           // metadata only: don't pull the whole preview over mobile data
           // before the user presses play.
@@ -3470,8 +3593,20 @@ function ReviewScreen({
             </span>
           </div>
         )}
-        <PlaybackDebug videoRef={videoRef} />
-        {editSaving && (
+        {/* Clip fades (proxy mode), faded in and out by EditPlayer. Drawn
+            over the captions, as the render fades burned-in subtitles
+            too. Hidden while the pointer is over the video so the native
+            control bar under it stays readable. */}
+        {mode === "proxy" && (
+          <div
+            ref={fadeRef}
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-black opacity-0 group-hover:opacity-0!"
+          />
+        )}
+        <PlaybackDebug videoRef={videoRef} mode={mode} />
+        {/* Proxy mode has no preview to update: the edit already plays. */}
+        {editSaving && mode !== "proxy" && (
           <div
             className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold backdrop-blur-md"
             style={{
@@ -3551,12 +3686,17 @@ function ReviewScreen({
           segments={editSegs}
           duration={duration}
           playhead={originalTime}
+          playheadSegId={mode === "proxy" ? playingSegId : null}
           open={activeTab === "timeline"}
           saving={editSaving}
           saveError={saveError}
           onToggleOpen={() => {}}
           onCommit={(next) => void commitEditSegs(next)}
-          onSeekOriginal={(time) => {
+          onSeekOriginal={(time, segId) => {
+            if (mode === "proxy") {
+              playerRef.current?.seek(time, segId);
+              return;
+            }
             // time comes in on the ORIGINAL timeline; map it through the
             // segments of the preview that is actually playing (an edit
             // may not be rebuilt into it yet).
@@ -3749,6 +3889,43 @@ function ReviewScreen({
           }
           pendingRebuildRef.current = null;
           setApplying(true);
+          if (modeRef.current === "proxy") {
+            // The player already shows this edit, so render as soon as
+            // the server has STORED it — not after its preview rebuild.
+            applyingRef.current = true;
+            setApplyError(null);
+            const active = toPayload(editSegs);
+            let outcome: SaveOutcome = "stored";
+            // An autosave on the wire lands first, so it can't overwrite
+            // this save; when it already carries this edit, that's it.
+            const prev = inflightSaveRef.current;
+            const prevOutcome = prev
+              ? await saveOutcome(jobId, prev.payload, duration, prev.response, {
+                  settleOnAnswer: true,
+                  timeoutMs: 8_000,
+                })
+              : null;
+            const covered =
+              prev && prevOutcome === "stored" && sameTimeline(prev.payload, active, duration);
+            if (active.length > 0 && !covered) {
+              const request = apiFetch(editPath, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ segments: active }),
+              });
+              outcome = await saveOutcome(jobId, active, duration, request);
+            }
+            if (outcome !== "stored") {
+              // Never render an older cut than the one on screen.
+              setApplyError(t("app.errors.saveEditsFailed"));
+              pendingRebuildRef.current = editSegs;
+              applyingRef.current = false;
+              setApplying(false);
+              return;
+            }
+            onApply();
+            return;
+          }
           while (inflightRef.current) await inflightRef.current;
           setApplyError(null);
           try {
@@ -3791,11 +3968,15 @@ function ReviewScreen({
 // main-thread jank so we know which layer causes the hitches.
 function PlaybackDebug({
   videoRef,
+  mode,
 }: {
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  mode?: string;
 }) {
   const [enabled, setEnabled] = useState(false);
   const [text, setText] = useState("");
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   useEffect(() => {
     setEnabled(new URLSearchParams(window.location.search).has("debug"));
   }, []);
@@ -3841,7 +4022,7 @@ function PlaybackDebug({
       const q = v.getVideoPlaybackQuality?.();
       setText(
         [
-          `${v.paused ? "paused" : "playing"} · ready=${v.readyState} · buffer +${ahead.toFixed(1)}s`,
+          `${modeRef.current ?? ""} ${v.paused ? "paused" : "playing"} · ready=${v.readyState} · buffer +${ahead.toFixed(1)}s · ${v.playbackRate}×`,
           `waits=${waits} · janks=${janks} (max ${Math.round(worstJank)}ms)`,
           `dropped=${q?.droppedVideoFrames ?? "?"}/${q?.totalVideoFrames ?? "?"}`,
           ...log,
@@ -4830,6 +5011,7 @@ function TimelineEditor({
   segments,
   duration,
   playhead,
+  playheadSegId,
   open,
   saving,
   saveError,
@@ -4842,12 +5024,15 @@ function TimelineEditor({
   segments: EditorSeg[];
   duration: number;
   playhead: number;
+  /** The clip playing (proxy mode): a split point or a clip moved away
+   *  from its footage's neighbours can't be told apart by time alone. */
+  playheadSegId?: string | null;
   open: boolean;
   saving: boolean;
   saveError?: "retrying" | "failed" | null;
   onToggleOpen: () => void;
   onCommit: (next: EditorSeg[]) => void;
-  onSeekOriginal: (t: number) => void;
+  onSeekOriginal: (t: number, segId?: string) => void;
   getVideoTime: () => number;
   onPlayPauseKey?: () => void;
 }) {
@@ -5090,6 +5275,16 @@ function TimelineEditor({
 
   // Playhead position on the CUT timeline (what the strip lays out).
   const playheadCut = (() => {
+    if (playheadSegId) {
+      let acc = 0;
+      for (const s of segments) {
+        if (s.disabled) continue;
+        if (s.id === playheadSegId && playhead >= s.start - 0.05 && playhead <= s.end + 0.05) {
+          return acc + Math.min(s.end - s.start, Math.max(0, playhead - s.start));
+        }
+        acc += s.end - s.start;
+      }
+    }
     let acc = 0;
     for (const s of segments) {
       if (s.disabled) continue;
@@ -5222,7 +5417,7 @@ function TimelineEditor({
       if (s.disabled) continue;
       const d = s.end - s.start;
       if (cut <= acc + d) {
-        onSeekOriginal(Math.min(s.end, s.start + (cut - acc)));
+        onSeekOriginal(Math.min(s.end, s.start + (cut - acc)), s.id);
         return;
       }
       acc += d;
@@ -5461,7 +5656,7 @@ function TimelineEditor({
                       <div
                         onClick={() => {
                           setSelected(s.id);
-                          onSeekOriginal(s.start);
+                          onSeekOriginal(s.start, s.id);
                         }}
                         className="@container group relative flex h-full cursor-pointer flex-col justify-between overflow-clip rounded-md transition-[box-shadow,border-color] duration-150"
                         style={{

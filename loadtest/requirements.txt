@@ -1,0 +1,4 @@
+# Load-test harness (python -m loadtest). Everything else is stdlib;
+# burst additionally needs ffmpeg + espeak-ng (cost_test.make_video),
+# abuse uploads need ffmpeg.
+aiohttp==3.14.3

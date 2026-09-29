@@ -1,0 +1,135 @@
+name: Load test (WP7)
+
+# Load tests against the API with the harness in loadtest/ (see
+# loadtest/README.md). poll-soak, editor-saves, media and abuse are
+# cheap; burst uploads real videos and costs money (Groq, Claude,
+# Modal) — it only runs with i_understand_this_costs_money ticked, and
+# deletes its jobs afterwards. The report goes to the job summary and
+# is kept as an artifact (markdown + JSON).
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Scenario
+        type: choice
+        options: [poll-soak, editor-saves, media, abuse, burst]
+        default: poll-soak
+      base_url:
+        description: >-
+          API base URL — only https://api.cleocuts.com, https://*.up.railway.app
+          or localhost (the run sends the admin token / test-user tokens there)
+        required: true
+        default: https://api.cleocuts.com
+      job_ids:
+        description: >-
+          Job ids, comma-separated (editor-saves and media need test jobs,
+          e.g. from the cost-test workflow with keep_jobs)
+        required: false
+        default: ''
+      args:
+        description: >-
+          Extra arguments, e.g. "--users 1000 --minutes 30" (poll-soak),
+          "--editors 100" (editor-saves), "--streams 200 --downloads 50"
+          (media), "--clips synthetic:2x50,synthetic:10x10" (burst).
+          See python -m loadtest <scenario> --help
+        required: false
+        default: ''
+      identity:
+        description: >-
+          Send the load as admin (X-Admin-Token), user (Clerk test users) or
+          none. auto = admin when the token is set — that skips JWT checks,
+          ownership and the per-user Library (the report WARNs); use user for
+          the WP7 gate
+        type: choice
+        options: [auto, admin, user, none]
+        default: auto
+      i_understand_this_costs_money:
+        description: Required for burst and for uploads in abuse
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-test
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # Run step ≤ 200 min (burst refuses a budget above 185 min before it
+    # starts), then up to 35 min for the always() cleanup.
+    timeout-minutes: 260
+    steps:
+      - name: Check the target
+        id: target
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          # The admin token and test-user tokens go to this host: no typos.
+          host=$(python3 -c 'import sys, urllib.parse as u; p = u.urlsplit(sys.argv[1]); print(p.scheme + " " + (p.hostname or "").lower())' "$BASE_URL")
+          case "$host" in
+            "https api.cleocuts.com"|"https "*.up.railway.app|"http localhost"|"http 127.0.0.1") echo "target ok: $BASE_URL" ;;
+            *) echo "::error::base_url '$BASE_URL' is not an allowed target (https://api.cleocuts.com, https://*.up.railway.app, http://localhost)"; exit 2 ;;
+          esac
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the harness
+        run: pip install -r loadtest/requirements.txt
+      - name: Harness self-test
+        run: python -m unittest discover -s loadtest/tests -t .
+      - name: Install ffmpeg + espeak-ng
+        if: inputs.scenario == 'burst' || inputs.scenario == 'abuse'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
+      - name: Run
+        timeout-minutes: 200
+        env:
+          CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
+          CLEO_TEST_BEARER: ${{ secrets.CLEO_TEST_BEARER }}
+          CLEO_TEST_SESSION_IDS: ${{ secrets.CLEO_TEST_SESSION_IDS }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          SCENARIO: ${{ inputs.scenario }}
+          BASE_URL: ${{ inputs.base_url }}
+          JOB_IDS: ${{ inputs.job_ids }}
+          EXTRA_ARGS: ${{ inputs.args }}
+          IDENTITY: ${{ inputs.identity }}
+          COSTS_OK: ${{ inputs.i_understand_this_costs_money }}
+          # burst refuses to start when its timeouts could outlast the step.
+          LOADTEST_TIME_BUDGET_MIN: '185'
+        run: |
+          set -f  # no filename globbing in EXTRA_ARGS
+          argv=("$SCENARIO" --base-url "$BASE_URL" --identity "$IDENTITY" --out loadtest-results)
+          if [ -n "$JOB_IDS" ]; then argv+=(--ids "$JOB_IDS"); fi
+          if [ "$COSTS_OK" = "true" ]; then argv+=(--i-understand-this-costs-money); fi
+          # EXTRA_ARGS is split into words on purpose.
+          # exec: on cancel the runner's SIGINT/SIGTERM reach python itself
+          # (not just bash), so the harness's own cleanup starts at once.
+          # Every created job id is in loadtest-results/created-ids.txt.
+          # shellcheck disable=SC2086
+          exec python -m loadtest "${argv[@]}" $EXTRA_ARGS
+      - name: Delete the jobs this run created
+        # Also after a cancel, a step timeout or a crash: the harness's own
+        # cleanup may not have finished (it waits for running analyses).
+        if: >-
+          always() && steps.target.outcome == 'success' &&
+          (inputs.scenario == 'burst' || inputs.scenario == 'abuse')
+        timeout-minutes: 35
+        env:
+          CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          f=loadtest-results/created-ids.txt
+          if [ ! -s "$f" ]; then echo "no jobs were created"; exit 0; fi
+          echo "deleting $(grep -c . "$f") recorded job ids (already deleted ones answer 404)"
+          python -m loadtest cleanup --base-url "$BASE_URL" --identity auto --ids-file "$f"
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-${{ inputs.scenario }}-${{ github.run_id }}
+          path: loadtest-results/
+          if-no-files-found: ignore

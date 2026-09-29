@@ -255,12 +255,29 @@ def upload(video: Path, preset: str) -> str:
     return json.loads(out.stdout)["job_id"]
 
 
+POLL_S = 10.0
+
+
 def wait(job_id: str, target: str, timeout: float) -> dict:
     """Poll until `target` status, an error, or (while rendering) the
-    backend's render failure: status back to awaiting_review + error."""
+    backend's render failure: status back to awaiting_review + error.
+
+    Stall detection: when the job's (status, message, progress,
+    updated_at) haven't changed for CLEO_STALL_S (900 s; 0 = off) it
+    raises a "stalled" error instead of sitting out the whole timeout —
+    a live job writes progress (a Modal render at least every 300 s).
+    Time waiting in line for an analyze / render slot doesn't count: a
+    queued job is only written when its place changes, and the slot
+    ahead may be busy for longer than that."""
+    try:
+        stall_s = float(os.environ.get("CLEO_STALL_S", "") or 900)
+    except ValueError:
+        stall_s = 900.0
     t0 = time.time()
     j: dict = {}
     errors = 0
+    seen: tuple | None = None
+    changed_at = t0
     while time.time() - t0 < timeout:
         try:
             j = http("GET", f"/jobs/{job_id}")
@@ -269,14 +286,25 @@ def wait(job_id: str, target: str, timeout: float) -> dict:
             errors += 1
             if errors >= 6:
                 raise RuntimeError(f"polling failed 6x in a row: {e}")
-            time.sleep(10)
+            time.sleep(POLL_S)
             continue
         st = j.get("status")
         if st == target or st == "error":
             return j
         if target == "done" and st == "awaiting_review" and j.get("error"):
             return j
-        time.sleep(10)
+        now = time.time()
+        state = (st, j.get("message"), j.get("progress"), j.get("updated_at"))
+        queued = (j.get("queue_position") is not None
+                  or j.get("message") == "queued")
+        if state != seen or queued:
+            seen, changed_at = state, now
+        elif stall_s > 0 and now - changed_at >= stall_s:
+            raise RuntimeError(
+                f"{job_id} stalled: no change for {now - changed_at:.0f}s "
+                f"(status {st}, progress {j.get('progress')}, "
+                f"message {j.get('message')!r})")
+        time.sleep(POLL_S)
     raise TimeoutError(f"{job_id} still {j.get('status')} after "
                        f"{timeout:.0f}s: {j.get('message')}")
 
@@ -383,9 +411,31 @@ def delete_jobs(ids: list[str]) -> None:
             print(f"   could not delete {jid}: {e}", flush=True)
 
 
+def inspect_jobs(ids: list[str]) -> None:
+    """Print the server's view of stuck jobs (status fields only — no
+    media URLs or transcripts, the Actions log is public)."""
+    for path in ("/health", "/ready"):
+        try:
+            print(f"{path}: {json.dumps(http('GET', path))[:300]}", flush=True)
+        except Exception as e:
+            print(f"{path}: {redact(e)}", flush=True)
+    keys = ("status", "message", "progress", "queue_position", "error",
+            "created_at", "updated_at", "has_output")
+    for jid in ids:
+        try:
+            j = http("GET", f"/jobs/{jid}")
+            print(f"{jid}: " + json.dumps({k: j.get(k) for k in keys}),
+                  flush=True)
+        except Exception as e:
+            print(f"{jid}: {redact(e)}", flush=True)
+
+
 def main() -> int:
     if len(sys.argv) > 2 and sys.argv[1] == "--delete":
         delete_jobs([x.strip() for x in sys.argv[2].split(",") if x.strip()])
+        return 0
+    if len(sys.argv) > 2 and sys.argv[1] == "--inspect":
+        inspect_jobs([x.strip() for x in sys.argv[2].split(",") if x.strip()])
         return 0
     runs = parse_runs(sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else
                       "phone1080:2,phone1080:10,phone4k:3,iphone4khdr:3")
