@@ -102,6 +102,14 @@ def render_burn_concat(
     # so Railway never has to hold the whole file in memory.
     job_dir = Path(VOLUME_MOUNT) / job_id
     input_path = job_dir / input_filename
+    # A warm container (previous render, or the ops-watch probe) still
+    # sees the volume as it was when it started: without a reload the
+    # input the backend just committed is missing, and every retry lands
+    # on the same container.
+    try:
+        render_volume.reload()
+    except Exception as e:  # never worse than before: check the file anyway
+        print(f"[modal] volume reload failed: {e}", flush=True)
     if not input_path.exists():
         raise FileNotFoundError(f"input not found at {input_path}")
     work_dir = Path(tempfile.mkdtemp(prefix="cleo_modal_"))
