@@ -187,6 +187,8 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "или перетащи файл",
   "app.upload.keepTabOpen":
     "Не закрывай эту вкладку, пока загрузка не завершится. Переключение на другое приложение или блокировка телефона прервёт загрузку.",
+  "app.upload.resuming":
+    "Продолжаем загрузку с того места, где она прервалась — держи эту страницу открытой.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "← назад",

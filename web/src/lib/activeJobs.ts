@@ -55,6 +55,9 @@ export type ActiveJobV2 = {
   // Last time the uploading tab reported progress (ms epoch). Lets
   // other tabs / a reloaded page tell a live upload from a dead one.
   lastProgressAt?: number;
+  // The upload continues an interrupted one of the same file (resume
+  // state in IndexedDB, lib/chunkedUpload): the card says so.
+  resuming?: boolean;
   // Populated when the upload or a later phase fails. Card renders a
   // retry button instead of the normal progress bar when set.
   error?: string;

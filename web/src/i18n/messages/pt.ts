@@ -325,6 +325,8 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.upload.orDrag": "ou arraste um arquivo aqui",
   "app.upload.keepTabOpen":
     "Mantenha esta aba aberta até o envio terminar. Trocar de app ou bloquear o celular vai cancelar o envio.",
+  "app.upload.resuming":
+    "Retomando o envio de onde parou — mantenha esta página aberta.",
 
   // ── app: configure (custom settings) ──
   "app.configure.back": "← voltar",
