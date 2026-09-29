@@ -1,11 +1,16 @@
-"""SQLite-backed job store for the web backend.
+"""Job store for the web backend.
 
 Persists across container restarts so a Railway deploy doesn't nuke
 in-flight jobs (which was killing users mid-render). Same API surface
 as the old in-memory version — callers use store.create / .get / .update.
 
-DB file lives at CLEO_JOB_DB (default /data/cleo_jobs.db). On Railway
-that's a mounted persistent volume; locally it defaults to /tmp.
+`store` is the store of the active database (backend/db.py): this
+module's SQLite JobStore, or — with DATABASE_URL set — backend.pg's
+PgJobStore (same methods, Postgres as the source of truth). This module
+stays stdlib-only; psycopg is imported only when Postgres is active.
+
+SQLite file lives at CLEO_JOB_DB (default /data/cleo_jobs.db). On
+Railway that's a mounted persistent volume; locally it defaults to /tmp.
 """
 from __future__ import annotations
 
@@ -17,7 +22,9 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
+
+from backend import db
 
 # Subscription plans and how long an idle project is kept (days after
 # the last change). No free tier. Override per plan with e.g.
@@ -217,16 +224,60 @@ _JSON_FIELDS = {
     "social_hashtags", "hook_clips", "scene_events",
 }
 
+# Statuses of jobs a worker thread is (or was) busy with.
+RUNNING_STATUSES = ("pending", "processing")
+
+
+class DuplicateKey(Exception):
+    """create(idempotency_key=k): another job already holds k (a second
+    POST /jobs for the same upload, e.g. in another process). `job_id`
+    is that job's id."""
+
+    def __init__(self, job_id: str | None) -> None:
+        super().__init__(f"idempotency key already used by job {job_id}")
+        self.job_id = job_id
+
+
+def job_from_dict(d: dict[str, Any]) -> Job:
+    """Job from a stored JSON object. Structured fields may be nested
+    JSON strings (the SQLite blob format) or plain JSON values (Postgres);
+    unknown keys are ignored (schema-tolerant reads)."""
+    d = dict(d)
+    for k in _JSON_FIELDS:
+        if k in d and isinstance(d[k], str):
+            try:
+                d[k] = json.loads(d[k])
+            except (json.JSONDecodeError, TypeError):
+                pass
+    # Reconstruct segments as tuples (JSON gives lists)
+    if isinstance(d.get("segments"), list):
+        d["segments"] = [tuple(s) for s in d["segments"]]
+    known = {f.name for f in fields(Job)}
+    d = {k: v for k, v in d.items() if k in known}
+    return Job(**d)
+
+
+def _list_key(job: Job) -> tuple[bool, float, str]:
+    """Sort key of list_by_owner, newest first when reversed: by
+    created_at, legacy jobs (created_at 0) last, ties by id."""
+    return (bool(job.created_at), float(job.created_at or 0), job.id)
+
 
 class JobStore:
     """SQLite-backed job store. Thread-safe via a single connection lock.
     Writes are synchronous so the current job survives a hard crash /
-    OOM kill mid-render.
+    OOM kill mid-render. One process only: the read-modify-write in
+    update() is guarded by a process-local lock (Postgres, backend/pg.py,
+    is safe across processes).
 
     `job_keys` maps an upload's storage key to its job, so a retried
     POST /jobs returns the job instead of creating (and charging) a
     second one.
     """
+    # list_by_owner reads the whole table on every call, so a caller
+    # wanting all of an account's jobs asks once, not page by page.
+    PAGES_BY_INDEX = False
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         db_path = _db_path()
@@ -259,20 +310,7 @@ class JobStore:
         return json.dumps(d)
 
     def _deserialize(self, row_data: str) -> Job:
-        d = json.loads(row_data)
-        for k in _JSON_FIELDS:
-            if k in d and isinstance(d[k], str):
-                try:
-                    d[k] = json.loads(d[k])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-        # Reconstruct segments as tuples (JSON gives lists)
-        if isinstance(d.get("segments"), list):
-            d["segments"] = [tuple(s) for s in d["segments"]]
-        # Filter to known Job fields (schema-tolerant reads)
-        known = {f.name for f in fields(Job)}
-        d = {k: v for k, v in d.items() if k in known}
-        return Job(**d)
+        return job_from_dict(json.loads(row_data))
 
     def create(
         self,
@@ -285,13 +323,20 @@ class JobStore:
         """Insert a new pending job. `job_id` lets the caller pick the id
         up front (the usage ledger is keyed by it before the job exists);
         `idempotency_key` (the upload's storage key) makes find_by_key
-        return this job; `extra` sets further Job fields (owner_id, plan,
-        filename, ...)."""
+        return this job — raises DuplicateKey if another job holds it;
+        `extra` sets further Job fields (owner_id, plan, filename, ...)."""
         job_id = job_id or new_job_id()
         now = time.time()
         job = Job(id=job_id, input_path=input_path, settings=settings,
                   updated_at=now, created_at=now, **extra)
         with self._lock:
+            if idempotency_key:
+                row = self._conn.execute(
+                    "SELECT k.job_id FROM job_keys k JOIN jobs j "
+                    "ON j.id = k.job_id WHERE k.key = ?", (idempotency_key,)
+                ).fetchone()
+                if row is not None:
+                    raise DuplicateKey(row["job_id"])
             try:
                 self._conn.execute(
                     "INSERT INTO jobs (id, data) VALUES (?, ?)",
@@ -350,22 +395,42 @@ class JobStore:
         and a late progress tick can't overwrite a finished job."""
         if isinstance(expect_status, str):
             expect_status = (expect_status,)
-        return self._write(job_id, tuple(expect_status), fields_to_update)
+        return self._write(job_id, tuple(expect_status),
+                           fields_to_update) is not None
+
+    def modify(self, job_id: str,
+               fn: Callable[[Job], dict[str, Any] | None]
+               ) -> dict[str, Any] | None:
+        """Read-check-write in one step: fn(job) gets the stored job and
+        returns the fields to change — computed from it, e.g. a counter
+        + 1 or a merged settings dict — or None to leave the job alone
+        (e.g. an older revision). Returns what was written; None if fn
+        declined or the job doesn't exist. Nothing can change the job
+        between the read and the write: here the store lock, on Postgres
+        the row lock (SELECT … FOR UPDATE), which holds across processes
+        — so call sites need no lock of their own. fn runs under that
+        lock: keep it quick and don't call the store from it."""
+        return self._write(job_id, None, fn)
 
     def _write(self, job_id: str, expect: tuple[str, ...] | None,
-               fields_to_update: dict[str, Any]) -> bool:
+               change: dict[str, Any] | Callable[[Job], Any]
+               ) -> dict[str, Any] | None:
+        """update / update_if / modify: the fields written, or None."""
         with self._lock:
             row = self._conn.execute(
                 "SELECT data FROM jobs WHERE id = ?", (job_id,)
             ).fetchone()
             if row is None:
-                return False
+                return None
             try:
                 job = self._deserialize(row["data"])
             except Exception:
-                return False
+                return None
             if expect is not None and job.status not in expect:
-                return False
+                return None
+            fields_to_update = change(job) if callable(change) else change
+            if fields_to_update is None:
+                return None
             for k, v in fields_to_update.items():
                 setattr(job, k, v)
             if "updated_at" not in fields_to_update:
@@ -381,7 +446,7 @@ class JobStore:
                 # open transaction that the next write would join.
                 self._conn.rollback()
                 raise
-            return True
+            return fields_to_update
 
     def status_many(self, job_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Scalar status fields (_STATUS_FIELDS) of several jobs in one
@@ -459,9 +524,43 @@ class JobStore:
                 continue
         return jobs
 
-    def list_by_owner(self, owner_id: str) -> list[Job]:
-        """Jobs of one account (GET /jobs)."""
-        return [j for j in self.list_all() if j.owner_id == owner_id]
+    def list_by_owner(self, owner_id: str, limit: int | None = None,
+                      before: tuple[float, str] | None = None,
+                      summary: bool = False) -> list[Job]:
+        """Jobs of one account (GET /jobs). With `limit` / `before` (the
+        (created_at, id) of the last job of the previous page): newest
+        first by created_at (legacy jobs without one last), keyset-paged.
+        `summary` lets a store leave out the big editor fields (Postgres
+        does; SQLite returns whole jobs anyway)."""
+        rows = [j for j in self.list_all() if j.owner_id == owner_id]
+        if limit is None and before is None:
+            return rows
+        rows.sort(key=_list_key, reverse=True)
+        if before is not None:
+            cursor = (bool(before[0]), float(before[0] or 0), before[1])
+            rows = [j for j in rows if _list_key(j) < cursor]
+        return rows[:limit] if limit is not None else rows
+
+    def list_by_status(self, *statuses: str,
+                       error: str | None = None) -> list[Job]:
+        """Jobs in one of `statuses` (and with job.error == `error`, if
+        given) — the boot scans."""
+        return [j for j in self.list_all() if j.status in statuses
+                and (error is None or j.error == error)]
+
+    def retention_candidates(self, before: float | None) -> list[Job]:
+        """Jobs the retention sweep has to look at: not running, and idle
+        since before `before` (None: none by age) or without updated_at
+        (legacy, to be stamped). The sweep checks each job's own
+        expires_at()."""
+        return [j for j in self.list_all()
+                if j.status not in RUNNING_STATUSES
+                and (not j.updated_at
+                     or (before is not None and j.updated_at < before))]
+
+    def input_paths(self) -> set[str]:
+        """input_path of every job that still has one (uploads in use)."""
+        return {j.input_path for j in self.list_all() if j.input_path}
 
     def mark_stuck_as_error(
         self,
@@ -506,5 +605,50 @@ def new_job_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+# The store of the active database, opened on first use (_open_store).
+_store_impl: Any = None
+_store_lock = threading.Lock()
+
+
+def _open_store() -> Any:
+    impl = _store_impl
+    if impl is not None:
+        return impl
+    backend = db.active()  # may run the Postgres cutover (backend/db.py)
+    return _set_store(backend)
+
+
+def _set_store(backend: str) -> Any:
+    global _store_impl
+    with _store_lock:
+        if _store_impl is None:
+            if backend == "postgres":
+                from backend import pg
+                _store_impl = pg.job_store()
+            else:
+                _store_impl = JobStore()
+        return _store_impl
+
+
+class _ActiveStore:
+    """`store`: forwards to the job store of the active database — the
+    SQLite JobStore above, or backend.pg.PgJobStore. Opened on first
+    use. Attribute writes go to that store too, so monkeypatching
+    store.<method> works as it did on the plain JobStore."""
+    __slots__ = ()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_open_store(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(_open_store(), name, value)
+
+    def __delattr__(self, name: str) -> None:
+        delattr(_open_store(), name)
+
+    def __repr__(self) -> str:
+        return f"<backend.jobs.store → {_store_impl!r}>"
+
+
 # Singleton — one store per process
-store = JobStore()
+store = _ActiveStore()

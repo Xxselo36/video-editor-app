@@ -263,3 +263,35 @@ def delete_from_r2(storage_key: str) -> None:
     except Exception as e:
         print(f"[storage] r2 delete failed for {storage_key}: {e}",
               flush=True)
+
+
+# ── Database backups (backend/pg_backup.py) ──────────────────────────
+
+
+def upload_to_r2(path: str, storage_key: str) -> None:
+    """Put a local file into R2 (multipart for big files). Raises."""
+    cfg = _r2_config()
+    if cfg is None:
+        raise RuntimeError("R2 not configured")
+    _r2_client().upload_file(path, cfg["R2_BUCKET"], storage_key)
+
+
+def list_r2(prefix: str) -> list[dict[str, Any]]:
+    """Objects under `prefix`: [{"key", "size", "last_modified"}]. Raises."""
+    cfg = _r2_config()
+    if cfg is None:
+        raise RuntimeError("R2 not configured")
+    client = _r2_client()
+    out: list[dict[str, Any]] = []
+    token: str | None = None
+    while True:
+        kw: dict[str, Any] = {"Bucket": cfg["R2_BUCKET"], "Prefix": prefix}
+        if token:
+            kw["ContinuationToken"] = token
+        page = client.list_objects_v2(**kw)
+        for obj in page.get("Contents") or []:
+            out.append({"key": obj["Key"], "size": obj.get("Size"),
+                        "last_modified": obj.get("LastModified")})
+        token = page.get("NextContinuationToken")
+        if not page.get("IsTruncated") or not token:
+            return out

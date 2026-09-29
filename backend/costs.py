@@ -164,15 +164,17 @@ def tracking(job_id: str, stage: str):
         _add(bucket, "usd_railway",
              cpu_s * RATES["railway_vcpu_s"]
              + wall_s * 2 * RATES["railway_ram_gb_s"])
+        def _merge(job):
+            # On the stored job, under its row lock (store.modify): no
+            # other stage's costs get lost, in any process.
+            merged = dict(job.costs or {})
+            for k, v in bucket.items():
+                _add(merged, k, v)
+            merged["usd_total"] = sum(
+                v for k, v in merged.items()
+                if k.startswith("usd_") and k != "usd_total")
+            return {"costs": merged, "updated_at": job.updated_at}
         try:
-            job = store.get(job_id)
-            if job is not None:
-                merged = dict(job.costs or {})
-                for k, v in bucket.items():
-                    _add(merged, k, v)
-                merged["usd_total"] = sum(
-                    v for k, v in merged.items()
-                    if k.startswith("usd_") and k != "usd_total")
-                store.update(job_id, costs=merged, updated_at=job.updated_at)
+            store.modify(job_id, _merge)
         except Exception as e:  # never break a job over bookkeeping
             print(f"[costs] save failed for {job_id}: {e}", flush=True)

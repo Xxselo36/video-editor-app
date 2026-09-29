@@ -22,9 +22,15 @@ Production:
         --workers 1
 
 Exactly ONE process: jobs run as threads of it, admission control (the
-analysis/render queues, per-user limits, disk reservations), editor
-save ordering and the SQLite job store are all in-process state. A
-second worker would double every limit and silently lose job updates.
+analysis/render queues, per-user limits, disk reservations) and editor
+save ordering are in-process state. A second worker would double every
+limit, and the boot recovery (mark_stuck_as_error) and the orphaned-job
+sweep (_sweep_orphaned_jobs) would fail the other worker's running jobs. The database is not the limit any more: with
+DATABASE_URL set, Postgres (backend/db.py, backend/pg.py) is the source
+of truth and safe across processes (row locks, compare-and-set, advisory
+locks for the quota) — but keep --workers 1 until the task queue (WP4)
+replaces the in-process state. The SQLite store (no DATABASE_URL) is
+one-process only.
 """
 from __future__ import annotations
 
@@ -76,11 +82,14 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import backend.pipeline as pipeline
-from backend import accounts, auth, billing, costs
+from backend import accounts, auth, billing, costs, db
 from backend.auth import (
     User, current_user, get_owned_job, media_user, require_user,
 )
-from backend.jobs import DEFAULT_PLAN, new_job_id, retention_days, store
+from backend.jobs import (
+    DEFAULT_PLAN, PLAN_RETENTION_DAYS, RUNNING_STATUSES, DuplicateKey, Job,
+    new_job_id, retention_days, store,
+)
 from backend.pipeline import EXPORT_FORMATS, analyze_only, render_only
 
 # Media tokens (?t=) must not end up in the access log.
@@ -462,6 +471,12 @@ class _Inflight:
         with self._lock:
             self._entries.pop(key, None)
 
+    def job_ids(self) -> set[str]:
+        """Jobs with a live worker thread (analysis or render, also
+        while it waits in line) in this process."""
+        with self._lock:
+            return {e["job_id"] for e in self._live() if e["job_id"]}
+
 
 _INFLIGHT = _Inflight()
 
@@ -556,7 +571,16 @@ def _accepts(fn: Callable, name: str) -> bool:
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
-    # STARTUP: any job stuck in 'processing'/'pending' from the previous
+    # STARTUP: pick the database first — with DATABASE_URL this opens
+    # Postgres and, on the first boot, copies the SQLite data into it
+    # (backend/db.py). Raises (no start) on a bad CLEO_DB_BACKEND, or if
+    # Postgres is gone after the cutover.
+    try:
+        db.startup()
+    except (db.ConfigError, db.Unavailable) as e:
+        print(f"[db] NOT STARTING: {e}", flush=True)
+        raise
+    # Any job stuck in 'processing'/'pending' from the previous
     # container generation is unrecoverable — its worker thread died
     # with the process. Surface it as a real error so the frontend can
     # show a retry button instead of polling forever, refund it and free
@@ -567,6 +591,8 @@ async def lifespan(app_: FastAPI):
               f"(container restart)", flush=True)
     _refund_interrupted()
     _clean_interrupted()
+    if db.fell_back():
+        threading.Thread(target=_cutover_watch, daemon=True).start()
     threading.Thread(target=_retention_loop, daemon=True).start()
     threading.Thread(target=_prerender_caption_previews, daemon=True).start()
     auth.install_log_filter()
@@ -669,7 +695,7 @@ def purge_expired_jobs(now: float | None = None) -> int:
     with _active_lock:
         active = set(_active_jobs)
     deleted = 0
-    for job in store.list_all():
+    for job in store.retention_candidates(_retention_cutoff(now)):
         if job.id in active or job.status in ("processing", "pending"):
             continue
         if not job.updated_at:
@@ -683,6 +709,61 @@ def purge_expired_jobs(now: float | None = None) -> int:
     return deleted
 
 
+def _retention_cutoff(now: float) -> float | None:
+    """Jobs idle since before this can have expired (the shortest
+    retention of any plan); None: retention is off. The store only
+    returns those (indexed on Postgres), purge checks each one."""
+    days = [d for d in (retention_days(p) for p in (*PLAN_RETENTION_DAYS,
+                                                     None)) if d > 0]
+    return now - min(days) * 86400 if days else None
+
+
+def _backup_tick() -> None:
+    """Nightly Postgres backup to R2 (backend/pg_backup.py): runs at most
+    once per 24 h across all processes, only with Postgres + R2."""
+    if not db.is_postgres():
+        return
+    from backend import pg_backup
+    key = pg_backup.maybe_run()
+    if key:
+        print(f"[backup] Postgres backup uploaded to R2: {key}", flush=True)
+
+
+# How often a process on the SQLite fallback checks whether another one
+# cut over to Postgres meanwhile (_cutover_watch).
+_CUTOVER_WATCH_S = 30.0
+
+
+def _exit_process(code: int) -> None:  # replaced in tests
+    os._exit(code)
+
+
+def _cutover_watch() -> None:
+    """While this process runs on the SQLite fallback after a failed
+    cutover (backend/db.py): if another process — a second worker or
+    replica, or a later boot — cuts over to Postgres, what this one
+    writes to SQLite from then on would never reach Postgres. Stop it
+    (exit status 1, so the platform restarts it; the new boot runs on
+    Postgres)."""
+    while db.fell_back():
+        time.sleep(_CUTOVER_WATCH_S)
+        try:
+            why = db.peer_cut_over()
+        except Exception as e:
+            print(f"[db] cutover check failed: {e}", flush=True)
+            continue
+        if why:
+            since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(
+                (db._fallback or {}).get("since", 0)))
+            print(f"[db] !!! another process cut over to Postgres ({why}) "
+                  f"while this one runs on the SQLite fallback (since "
+                  f"{since}) — exiting, the restart runs on Postgres. What "
+                  "this process wrote to SQLite since then is NOT in "
+                  "Postgres. !!!", flush=True)
+            _exit_process(1)
+            return
+
+
 def _retention_loop() -> None:
     while True:
         try:
@@ -691,6 +772,24 @@ def _retention_loop() -> None:
                 print(f"[retention] deleted {n} expired job(s)", flush=True)
         except Exception as e:
             print(f"[retention] sweep failed: {e}", flush=True)
+        try:
+            n = _sweep_stale_claims()
+            if n:
+                print(f"[claims] settled {n} upload claim(s) whose request "
+                      "died", flush=True)
+        except Exception as e:
+            print(f"[claims] sweep failed: {e}", flush=True)
+        try:
+            n = _sweep_orphaned_jobs()
+            if n:
+                print(f"[jobs] settled {n} running job(s) whose worker is "
+                      "gone", flush=True)
+        except Exception as e:
+            print(f"[jobs] orphaned-job sweep failed: {e}", flush=True)
+        try:
+            _backup_tick()
+        except Exception as e:
+            print(f"[backup] Postgres backup FAILED: {e}", flush=True)
         try:
             n = pipeline.sweep_modal_folders()
             if n:
@@ -752,10 +851,12 @@ def _is_infra_failure(exc: BaseException, msg: str) -> bool:
     """Analysis failures that are our fault (full disk, IO, ffmpeg,
     restart) give the minutes back. Content problems ("No speech
     detected") don't — they already cost Groq/Claude time, and a refund
-    would let the same file be retried for free forever."""
+    would let the same file be retried for free forever. The database
+    staying down (a finished analysis that couldn't be saved) is ours
+    too."""
     if msg in ("server_storage_full", "container_restart"):
         return True
-    if isinstance(exc, (OSError, MemoryError)):
+    if isinstance(exc, (OSError, MemoryError)) or db.is_transient(exc):
         return True
     return msg.lower().startswith("ffmpeg")
 
@@ -791,15 +892,21 @@ def _true_up_from_file(job_id: str, job_dir: Path) -> None:
         return
 
 
-def _refund(job_id: str, note: str) -> None:
+def _refund(job_id: str, note: str) -> bool:
+    """Give the job's minutes back (if any were charged). Blocking (a DB
+    transaction): from async code only via run_in_threadpool. Returns
+    False when the database call failed — the ledger is settled
+    otherwise (refunded now, before, or nothing charged)."""
     if not auth.auth_enabled():
-        return
+        return True
     try:
         if accounts.refund(job_id, note):
             print(f"[job {job_id}] minutes refunded ({note[:60]})",
                   flush=True)
+        return True
     except Exception as e:
         print(f"[job {job_id}] refund failed: {e}", flush=True)
+        return False
 
 
 def _refund_interrupted() -> None:
@@ -807,9 +914,8 @@ def _refund_interrupted() -> None:
     back (mark_stuck_as_error tagged them container_restart). Idempotent."""
     if not auth.auth_enabled():
         return
-    for job in store.list_all():
-        if job.status == "error" and job.error == "container_restart":
-            _refund(job.id, "container_restart")
+    for job in store.list_by_status("error", error="container_restart"):
+        _refund(job.id, "container_restart")
 
 
 def _discard_upload(input_path: str | None, storage_key: str | None) -> None:
@@ -818,6 +924,146 @@ def _discard_upload(input_path: str | None, storage_key: str | None) -> None:
     if storage_key:
         from backend.storage import delete_from_r2
         delete_from_r2(storage_key)
+
+
+# ── Upload claims (POST /jobs) ───────────────────────────────────────
+# POST /jobs inserts the job row BEFORE it charges the minutes: status
+# pending, settings._accepting set — a claim on the upload (its storage
+# key is the row's UNIQUE idempotency key). A second request for the
+# same key, in any process, runs into that constraint before it touches
+# the quota and answers with the claimed job once it is accepted, or
+# claims the key itself if the first request was refused (402). The
+# claim becomes the job when the charge went through (update_if
+# pending: settings without _accepting, the plan); a refused or failed
+# request deletes it again.
+
+# How long a request waits for another request's claim on its upload to
+# be accepted or dropped (normally milliseconds: one charge).
+_CLAIM_WAIT_S = 30.0
+# A claim this old belongs to a request that died (process killed, the
+# database failing while it cleaned up): _sweep_stale_claims settles it.
+_CLAIM_STALE_S = 900.0
+
+
+def _is_claim(job: Job) -> bool:
+    return job.status == "pending" and bool(
+        (job.settings or {}).get("_accepting"))
+
+
+async def _settled(job: Job | None) -> Job | None:
+    """`job` once no request is accepting it any more: as it is if it's
+    not a claim, re-read until its request accepted it, None if that
+    request dropped it (refused). After _CLAIM_WAIT_S as it is."""
+    deadline = time.monotonic() + _CLAIM_WAIT_S
+    delay = 0.02
+    while (job is not None and _is_claim(job)
+           and time.monotonic() < deadline):
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 0.5)
+        job = await run_in_threadpool(store.get, job.id)
+    return job
+
+
+def _abandon_claim(job_id: str, input_path: str | None,
+                   storage_key: str | None, refund_note: str | None) -> None:
+    """POST /jobs gives up its claim (refused, or failed after claiming):
+    the minutes back first (refund_note: they were charged), then the
+    row, the local copy and — with storage_key — the R2 object. If the
+    refund or the delete fails, the row stays a claim and
+    _sweep_stale_claims settles it later. Blocking: run_in_threadpool."""
+    try:
+        if refund_note is None or _refund(job_id, refund_note):
+            store.delete(job_id)
+    except Exception as e:
+        print(f"[job {job_id}] dropping the upload claim failed: {e} — "
+              "the stale-claim sweep settles it", flush=True)
+    try:
+        _discard_upload(input_path, storage_key)
+    except Exception as e:
+        print(f"[job {job_id}] dropping the upload failed: {e}", flush=True)
+
+
+def _sweep_stale_claims(now: float | None = None) -> int:
+    """Claims older than _CLAIM_STALE_S (their POST /jobs died): minutes
+    back if any were charged, then failed like a job interrupted by a
+    restart (error container_restart) and their upload freed. A refund
+    that fails leaves the claim for the next sweep. Returns how many
+    were settled."""
+    cutoff = (time.time() if now is None else now) - _CLAIM_STALE_S
+    settled = 0
+    for job in store.list_by_status("pending"):
+        if not _is_claim(job) or (job.created_at or 0) > cutoff:
+            continue
+        if not _refund(job.id, "container_restart"):
+            continue
+        settings = {k: v for k, v in (job.settings or {}).items()
+                    if k != "_accepting"}
+        if not store.update_if(
+                job.id, "pending", status="error", error="container_restart",
+                message="Processing was interrupted. "
+                        "Please upload the video again.",
+                progress=0.0, queue_position=None, input_path=None,
+                settings=settings):
+            continue
+        try:
+            _discard_upload(job.input_path, settings.get("_r2_storage_key"))
+        except Exception as e:  # R2 unreachable: retention later
+            print(f"[claims] dropping the upload of {job.id} failed: {e}",
+                  flush=True)
+        settled += 1
+    return settled
+
+
+# A running job (pending / processing) with no worker thread in this
+# process that hasn't changed for this long lost its worker: it died on
+# a database outage its retries (_db_retry) couldn't ride out, or the
+# request that started it failed half-way. _sweep_orphaned_jobs settles
+# it like the boot does (mark_stuck_as_error): a render goes back to
+# review, an analysis fails with its minutes refunded and its files
+# freed. Relies on this backend being ONE process (module docstring).
+_ORPHAN_STALE_S = 600.0
+
+
+def _sweep_orphaned_jobs(now: float | None = None) -> int:
+    """Settle running jobs whose worker is gone (see _ORPHAN_STALE_S)
+    instead of leaving them 'processing' until the next deploy (DELETE
+    and render answer 409 meanwhile). A refund that fails leaves the job
+    for the next sweep. Returns how many were settled."""
+    cutoff = (time.time() if now is None else now) - _ORPHAN_STALE_S
+    with _active_lock:
+        live = set(_active_jobs)
+    live |= _INFLIGHT.job_ids()
+    settled = 0
+    for job in store.list_by_status(*RUNNING_STATUSES):
+        if (job.id in live or _is_claim(job)
+                or (job.updated_at or 0) > cutoff):
+            continue
+        if (job.normalized_path and job.segments
+                and Path(job.normalized_path).exists()):
+            # A render: analysis + edits are intact, back to review.
+            if store.update_if(job.id, job.status, status="awaiting_review",
+                               progress=100.0, message="render_failed",
+                               error="container_restart",
+                               queue_position=None):
+                settled += 1
+            continue
+        if not _refund(job.id, "container_restart"):
+            continue
+        if not store.update_if(
+                job.id, job.status, status="error", error="container_restart",
+                message="Processing was interrupted. "
+                        "Please upload the video again.",
+                progress=0.0, queue_position=None, input_path=None):
+            continue
+        try:
+            _discard_upload(job.input_path,
+                            (job.settings or {}).get("_r2_storage_key"))
+        except Exception as e:  # R2 unreachable: retention later
+            print(f"[jobs] dropping the upload of {job.id} failed: {e}",
+                  flush=True)
+        shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
+        settled += 1
+    return settled
 
 
 # Process start: files in uploads/ older than this can't belong to an
@@ -833,22 +1079,20 @@ def _clean_interrupted() -> None:
     instead of keeping them for the whole retention period. Then delete
     files in uploads/ that no job refers to (a restart in the middle of
     POST /jobs). Idempotent."""
-    referenced: set[Path] = set()
-    for job in store.list_all():
-        if job.status == "error" and job.error == "container_restart":
-            job_dir = _WORK_ROOT / job.id
-            if job.input_path or job_dir.exists():
-                try:
-                    _discard_upload(job.input_path,
-                                    (job.settings or {}).get("_r2_storage_key"))
-                except Exception as e:  # R2 unreachable: retention later
-                    print(f"[startup] dropping the upload of {job.id} "
-                          f"failed: {e}", flush=True)
-                shutil.rmtree(job_dir, ignore_errors=True)
-                store.update(job.id, input_path=None,
-                             updated_at=job.updated_at)
-        elif job.input_path:
-            referenced.add(Path(job.input_path).resolve())
+    for job in store.list_by_status("error", error="container_restart"):
+        job_dir = _WORK_ROOT / job.id
+        if job.input_path or job_dir.exists():
+            try:
+                _discard_upload(job.input_path,
+                                (job.settings or {}).get("_r2_storage_key"))
+            except Exception as e:  # R2 unreachable: retention later
+                print(f"[startup] dropping the upload of {job.id} "
+                      f"failed: {e}", flush=True)
+            shutil.rmtree(job_dir, ignore_errors=True)
+            store.update(job.id, input_path=None,
+                         updated_at=job.updated_at)
+    # Uploads of all other jobs (the ones above have none any more).
+    referenced = {Path(p).resolve() for p in store.input_paths()}
     uploads = _WORK_ROOT / "uploads"
     if not uploads.is_dir():
         return
@@ -1162,6 +1406,86 @@ async def caption_preview(preset: str, w: int = 280, h: int = 100):
     )
 
 
+# The worker threads' job-state writes ride out a database outage
+# (Postgres restarting or failing over) this long before they give up:
+# retried with backoff from _DB_RETRY_DELAY_S up to 15 s between tries.
+_DB_RETRY_S = 180.0
+_DB_RETRY_DELAY_S = 1.0
+
+
+def _db_retry(job_id: str, what: str, fn: Callable[..., Any], /,
+              *args: Any, **kwargs: Any) -> Any:
+    """fn(*args, **kwargs), tried again while the database is
+    unavailable (db.is_transient: Postgres down, the pool timing out),
+    for up to _DB_RETRY_S. Other errors — and the last one — are
+    raised. Only for reads and writes that may run twice (store.update
+    sets the same fields again; update_if's expected status allows the
+    state it sets)."""
+    deadline = time.monotonic() + _DB_RETRY_S
+    delay = _DB_RETRY_DELAY_S
+    while True:
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            left = deadline - time.monotonic()
+            if not db.is_transient(e) or left <= 0:
+                raise
+            print(f"[job {job_id}] {what}: database unavailable ({e}) — "
+                  f"trying again for up to {left:.0f} s", flush=True)
+            time.sleep(min(delay, left))
+            delay = min(delay * 2, 15.0)
+
+
+def _analysis_failed(job_id: str, job_dir: Path, exc: Exception,
+                     drop_upload: Callable[[], None]) -> None:
+    """An analysis failed (or its result couldn't be saved): the minutes
+    back first when it was our fault, then the error state, then free
+    the upload + partial files. Raises when the refund or the error
+    state can't be written — then the job stays running, nothing is
+    deleted, and _sweep_orphaned_jobs (or the next boot) refunds and
+    settles it later."""
+    tb = traceback.format_exc()
+    print(f"[job {job_id}] ANALYZE FAILED: {exc}\n{tb}", flush=True)
+    msg = str(exc)
+    if "No space left on device" in msg:
+        msg = "server_storage_full"
+    if not db.is_transient(exc):
+        # A content failure ("No speech detected") comes after the
+        # transcription was paid for: charge what was really processed
+        # (before the files go; refunds below still win).
+        _true_up_from_file(job_id, job_dir)
+    if _is_infra_failure(exc, msg) and auth.auth_enabled():
+        # Before the error state: once that is stored nothing refunds
+        # the job any more (the boot and the sweep only settle running
+        # jobs), so a refund that fails — or the process dying while the
+        # upload is dropped below — would charge the user for our
+        # failure for good. accounts.refund is idempotent.
+        if _db_retry(job_id, "refunding", accounts.refund, job_id, msg):
+            print(f"[job {job_id}] minutes refunded ({msg[:60]})",
+                  flush=True)
+    _db_retry(job_id, "saving the failure", store.update, job_id,
+              status="error", message=msg[:300], error=msg[:2000],
+              input_path=None)
+    # Nothing of a failed analysis can be reused (the user uploads
+    # again), so free the upload + partial files right away — a failed
+    # 10 min job used to leave ~1.5 GB on the volume.
+    drop_upload()
+    shutil.rmtree(job_dir, ignore_errors=True)
+
+
+def _render_failed(job_id: str, exc: Exception) -> None:
+    """A render failed (or its result couldn't be saved): back to review
+    instead of a dead 'error' — the user's edits and the source are
+    still on disk, so they can open the editor and render again without
+    re-uploading. Raises when that can't be written (the sweep settles
+    the job later)."""
+    tb = traceback.format_exc()
+    print(f"[job {job_id}] RENDER FAILED: {exc}\n{tb}", flush=True)
+    _db_retry(job_id, "saving the failure", store.update, job_id,
+              status="awaiting_review", progress=100.0,
+              message="render_failed", error=str(exc)[:500])
+
+
 def _run_analyze(job_id: str) -> None:
     """Worker thread: wait in line for an analysis slot, then analyze.
     The wait isn't billed to the job's costs."""
@@ -1181,17 +1505,21 @@ def _run_analyze(job_id: str) -> None:
 
 
 def _run_analyze_inner(job_id: str) -> None:
-    """Worker: normalize + analyze. Job pauses on success awaiting render."""
+    """Worker: normalize + analyze. Job pauses on success awaiting render.
+    Its state writes ride out a short database outage (_db_retry); if
+    they still fail the thread ends, and _sweep_orphaned_jobs settles
+    the job later."""
     _register_active(job_id)
     progress: _ProgressWriter | None = None
     try:
-        job = store.get(job_id)
+        job = _db_retry(job_id, "reading the job", store.get, job_id)
         if job is None or job.input_path is None:
             return
         # Start exactly once, and only while the job still waits to start.
-        if not store.update_if(job_id, ("pending", "processing"),
-                               status="processing", message="Starting…",
-                               progress=1.0, queue_position=None):
+        if not _db_retry(job_id, "starting", store.update_if, job_id,
+                         ("pending", "processing"), status="processing",
+                         message="Starting…", progress=1.0,
+                         queue_position=None):
             return
 
         job_dir = _WORK_ROOT / job_id
@@ -1229,10 +1557,16 @@ def _run_analyze_inner(job_id: str) -> None:
                 progress_cb=progress,
                 **extra,
             )
+        except Exception as e:
             progress.close()
+            _analysis_failed(job_id, job_dir, e, _drop_upload)
+            return
+        progress.close()
+        try:
             # Pause here: status "awaiting_review" tells the UI to show the
             # subtitle editor. Render starts when client POSTs /jobs/{id}/render.
-            store.update(
+            _db_retry(
+                job_id, "saving the analysis", store.update,
                 job_id,
                 status="awaiting_review",
                 message="Review subtitles",
@@ -1250,28 +1584,13 @@ def _run_analyze_inner(job_id: str) -> None:
                 audio_levels=res.get("audio_levels", {}),
                 scene_events=res.get("scene_events", []),
             )
-            _true_up(job_id, res.get("duration", 0.0))
-            _drop_upload()  # if the pipeline didn't already
         except Exception as e:
-            progress.close()
-            tb = traceback.format_exc()
-            print(f"[job {job_id}] ANALYZE FAILED: {e}\n{tb}", flush=True)
-            # A content failure ("No speech detected") comes after the
-            # transcription was paid for: charge what was really
-            # processed (before the files go; refunds below still win).
-            _true_up_from_file(job_id, job_dir)
-            # Nothing of a failed analysis can be reused (the user uploads
-            # again), so free the upload + partial files right away — a
-            # failed 10 min job used to leave ~1.5 GB on the volume.
-            _drop_upload()
-            shutil.rmtree(job_dir, ignore_errors=True)
-            msg = str(e)
-            if "No space left on device" in msg:
-                msg = "server_storage_full"
-            store.update(job_id, status="error", message=msg[:300],
-                         error=msg[:2000], input_path=None)
-            if _is_infra_failure(e, msg):
-                _refund(job_id, msg)
+            # Not saved (the database stayed down, or a bad result): a
+            # failed analysis — refunded when the database was the cause.
+            _analysis_failed(job_id, job_dir, e, _drop_upload)
+            return
+        _true_up(job_id, res.get("duration", 0.0))
+        _drop_upload()  # if the pipeline didn't already
     finally:
         if progress is not None:
             progress.close()
@@ -1304,69 +1623,72 @@ def _run_render_inner(
     edited_subtitles: list,
     disabled_cuts: list[int] | None = None,
 ) -> None:
-    """Worker: render + concat into final MP4."""
+    """Worker: render + concat into final MP4. Its state writes ride out
+    a short database outage (_db_retry); if they still fail the thread
+    ends, and _sweep_orphaned_jobs sends the job back to review later."""
     _register_active(job_id)
-    job = store.get(job_id)
-    if job is None or job.normalized_path is None:
-        _release_active(job_id)
-        return
-    job_dir = _WORK_ROOT / job_id
-    _progress = _ProgressWriter(job_id)
-
-    store.update(job_id, status="processing", message="Rendering…",
-                 progress=1.0, queue_position=None)
+    progress: _ProgressWriter | None = None
     try:
-        render_result = render_only(
-            normalized_path=job.normalized_path,
-            output_dir=str(job_dir),
-            segments=job.segments,
-            subtitles=edited_subtitles,
-            settings=job.settings,
-            language=job.language,
-            cut_ranges=job.cut_ranges,
-            disabled_cuts=disabled_cuts or [],
-            duration=job.duration,
-            progress_cb=_progress,
-        )
-        outputs = render_result["outputs"]
-        hook_clips = render_result.get("hook_clips", [])
-        # Social caption / hashtags from the (possibly edited) transcript.
-        # Soft-fails if no ANTHROPIC_API_KEY is set.
-        social = {"caption": "", "hashtags": []}
+        job = _db_retry(job_id, "reading the job", store.get, job_id)
+        if job is None or job.normalized_path is None:
+            return
+        job_dir = _WORK_ROOT / job_id
+        progress = _ProgressWriter(job_id)
+        _db_retry(job_id, "starting the render", store.update, job_id,
+                  status="processing", message="Rendering…", progress=1.0,
+                  queue_position=None)
         try:
-            from backend.llm import generate_social_caption
-            full = " ".join(
-                (s.get("text") or "").strip()
-                for s in edited_subtitles
-                if (s.get("text") or "").strip()
+            render_result = render_only(
+                normalized_path=job.normalized_path,
+                output_dir=str(job_dir),
+                segments=job.segments,
+                subtitles=edited_subtitles,
+                settings=job.settings,
+                language=job.language,
+                cut_ranges=job.cut_ranges,
+                disabled_cuts=disabled_cuts or [],
+                duration=job.duration,
+                progress_cb=progress,
             )
-            social = generate_social_caption(full, language=job.language)
+            outputs = render_result["outputs"]
+            hook_clips = render_result.get("hook_clips", [])
+            # Social caption / hashtags from the (possibly edited)
+            # transcript. Soft-fails if no ANTHROPIC_API_KEY is set.
+            social = {"caption": "", "hashtags": []}
+            try:
+                from backend.llm import generate_social_caption
+                full = " ".join(
+                    (s.get("text") or "").strip()
+                    for s in edited_subtitles
+                    if (s.get("text") or "").strip()
+                )
+                social = generate_social_caption(full, language=job.language)
+            except Exception as e:
+                print(f"[job {job_id}] social-caption skipped: {e}",
+                      flush=True)
+            done = dict(
+                status="done",
+                message="Done",
+                progress=100.0,
+                output_path=outputs.get("primary"),
+                outputs=outputs,
+                hook_clips=hook_clips,
+                social_caption=social.get("caption", ""),
+                social_hashtags=social.get("hashtags", []),
+            )
         except Exception as e:
-            print(f"[job {job_id}] social-caption skipped: {e}", flush=True)
-
-        _progress.close()
-        store.update(
-            job_id,
-            status="done",
-            message="Done",
-            progress=100.0,
-            output_path=outputs.get("primary"),
-            outputs=outputs,
-            hook_clips=hook_clips,
-            social_caption=social.get("caption", ""),
-            social_hashtags=social.get("hashtags", []),
-        )
-    except Exception as e:
-        _progress.close()
-        tb = traceback.format_exc()
-        print(f"[job {job_id}] RENDER FAILED: {e}\n{tb}", flush=True)
-        # Back to review instead of a dead 'error': the user's edits and
-        # the source are still on disk, so they can open the editor and
-        # render again without re-uploading.
-        store.update(job_id, status="awaiting_review", progress=100.0,
-                     message="render_failed", error=str(e)[:500])
+            progress.close()
+            _render_failed(job_id, e)
+            return
+        progress.close()
+        try:
+            _db_retry(job_id, "saving the render", store.update, job_id,
+                      **done)
+        except Exception as e:
+            _render_failed(job_id, e)
     finally:
-        _progress.close()
+        if progress is not None:
+            progress.close()
         _release_active(job_id)
 
 
@@ -1506,7 +1828,9 @@ async def create_job(
         await busy.wait()
     claim = _CREATING_KEYS[storage_key] = asyncio.Event()
     try:
-        existing = await run_in_threadpool(store.find_by_key, storage_key)
+        # A request in another process may still be accepting it.
+        existing = await _settled(
+            await run_in_threadpool(store.find_by_key, storage_key))
         if existing is not None:
             if (user is not None and not user.is_service
                     and existing.owner_id not in (None, user.id)):
@@ -1536,6 +1860,50 @@ def _upload_size(file: UploadFile) -> int | None:
 def _copy_upload(file: UploadFile, dest: str) -> None:
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
+
+
+async def _claim_upload(
+    parsed: dict,
+    file: UploadFile | None,
+    input_path: str,
+    storage_key: str | None,
+    filename: str | None,
+    preset_id: str | None,
+    preset_label: str | None,
+    user: User | None,
+) -> Job | dict:
+    """Insert this upload's job row as a claim (see _settled). Returns the
+    claimed Job — or, when another request holds the storage key, that
+    request's answer once it settled: its job (200, like a retry). If
+    that request dropped its claim (refused), claim the key again."""
+    for _ in range(5):
+        try:
+            return await run_in_threadpool(functools.partial(
+                store.create,
+                input_path=input_path,
+                settings={**parsed, "_accepting": True},
+                job_id=new_job_id(),
+                idempotency_key=storage_key,
+                owner_id=user.id if user else None,
+                plan=DEFAULT_PLAN,
+                filename=_short(filename or (file.filename if file else None),
+                                255),
+                preset_id=_short(preset_id, 100),
+                preset_label=_short(preset_label, 200),
+            ))
+        except DuplicateKey as dup:
+            # Another request (another process: the in-process
+            # _CREATING_KEYS guard can't see it) holds this upload.
+            other = (await run_in_threadpool(store.get, dup.job_id)
+                     if dup.job_id else None)
+            other = await _settled(other)
+            if other is None:
+                continue  # it was refused and let go of the key
+            if (user is not None and not user.is_service
+                    and other.owner_id not in (None, user.id)):
+                raise HTTPException(409, "upload_already_used")
+            return {"job_id": other.id, **other.to_dict()}
+    raise HTTPException(409, "upload_already_used")
 
 
 async def _accept_upload(
@@ -1622,60 +1990,74 @@ async def _accept_upload(
             await run_in_threadpool(_discard_upload, input_path, storage_key)
             raise _video_too_long()
 
-        job_id = new_job_id()
         plan = DEFAULT_PLAN
-        if bills:
-            if seconds is None:
-                if enforce:
-                    await run_in_threadpool(_discard_upload, input_path,
-                                            storage_key)
-                    raise HTTPException(400, "unreadable_video")
-                seconds = 0.0  # not enforced: the true-up after analysis fixes it
-            # Quota check + ledger insert are atomic inside charge() (the
-            # accounts lock), so two uploads of one user can't both spend
-            # the last minutes.
-            try:
-                ent = await run_in_threadpool(functools.partial(
-                    accounts.charge, job_id, user.id, seconds,
-                    email=user.email, enforce=enforce))
-            except accounts.SubscriptionRequired:
-                await run_in_threadpool(_discard_upload, input_path,
-                                        storage_key)
-                raise _quota_error("subscription_required")
-            except accounts.QuotaExceeded as e:
-                await run_in_threadpool(_discard_upload, input_path,
-                                        storage_key)
-                raise _quota_error("quota_exceeded",
-                                   remaining_seconds=round(e.remaining_seconds),
-                                   needed_seconds=round(e.needed_seconds))
-            if ent is not None:
-                plan = ent.plan  # fixed per job: a downgrade never shortens retention
+        if bills and seconds is None:
             if enforce:
-                # The charge trusts the container's duration header, which
-                # the uploader controls: analyse no more than was charged
-                # (+ the true-up tolerance), or a file claiming 1 s would be
-                # transcribed in full, however long it really is.
-                parsed["_max_seconds"] = (math.ceil(max(seconds, 0.0))
-                                          + accounts.TRUE_UP_TOLERANCE_S)
+                await run_in_threadpool(_discard_upload, input_path,
+                                        storage_key)
+                raise HTTPException(400, "unreadable_video")
+            seconds = 0.0  # not enforced: the true-up after analysis fixes it
 
+        # Claim first, charge second (see _settled / _abandon_claim): a
+        # parallel request for this upload in another process waits for
+        # this one instead of charging — or being refused — on its own.
+        claimed = await _claim_upload(parsed, file, input_path, storage_key,
+                                      filename, preset_id, preset_label,
+                                      user)
+        if isinstance(claimed, dict):  # another request's job: a retry
+            await run_in_threadpool(_remove_upload, input_path)
+            input_path = None
+            return claimed
+        job_id = claimed.id
+        charged = False
         try:
-            job = await run_in_threadpool(functools.partial(
-                store.create,
-                input_path=input_path,
-                settings=parsed,
-                job_id=job_id,
-                idempotency_key=storage_key,
-                owner_id=user.id if user else None,
-                plan=plan,
-                filename=_short(filename or (file.filename if file else None),
-                                255),
-                preset_id=_short(preset_id, 100),
-                preset_label=_short(preset_label, 200),
-            ))
-        except Exception:
             if bills:
-                _refund(job_id, "create_failed")
+                # Quota check + ledger insert are atomic inside charge()
+                # (one transaction under the user's lock — across
+                # processes with Postgres), so two uploads of one user
+                # can't both spend the last minutes.
+                try:
+                    ent = await run_in_threadpool(functools.partial(
+                        accounts.charge, job_id, user.id, seconds,
+                        email=user.email, enforce=enforce))
+                except accounts.SubscriptionRequired:
+                    raise _quota_error("subscription_required")
+                except accounts.QuotaExceeded as e:
+                    raise _quota_error(
+                        "quota_exceeded",
+                        remaining_seconds=round(e.remaining_seconds),
+                        needed_seconds=round(e.needed_seconds))
+                charged = True
+                if ent is not None:
+                    plan = ent.plan  # fixed per job: a downgrade never shortens retention
+                if enforce:
+                    # The charge trusts the container's duration header,
+                    # which the uploader controls: analyse no more than was
+                    # charged (+ the true-up tolerance), or a file claiming
+                    # 1 s would be transcribed in full, however long it
+                    # really is.
+                    parsed["_max_seconds"] = (math.ceil(max(seconds, 0.0))
+                                              + accounts.TRUE_UP_TOLERANCE_S)
+            # Accepted: the claim becomes the job.
+            if not await run_in_threadpool(functools.partial(
+                    store.update_if, job_id, "pending", settings=parsed,
+                    plan=plan)):
+                raise RuntimeError(f"job {job_id} vanished while its upload "
+                                   "was being accepted")
+        except HTTPException:
+            # Refused (402): retrying can't help — the upload goes too.
+            await run_in_threadpool(_abandon_claim, job_id, input_path,
+                                    storage_key, None)
+            input_path = None
             raise
+        except BaseException:
+            # Failed: minutes back; the R2 object stays for a retry.
+            await run_in_threadpool(_abandon_claim, job_id, input_path,
+                                    None, "create_failed" if charged else None)
+            input_path = None
+            raise
+        claimed.settings, claimed.plan = parsed, plan
+        job = claimed
         thread = threading.Thread(target=_run_analyze, args=(job.id,),
                                   daemon=True)
         # The place in line is taken right here (no await in between), so
@@ -1717,12 +2099,36 @@ _LIST_FIELDS = (
 )
 
 
+# GET /jobs reads the caller's projects in keyset pages of this many
+# (index-backed on Postgres, each query bounded).
+_LIST_LIMIT = 200
+
+
+def _owner_jobs(owner_id: str) -> list[Job]:
+    """All jobs of one account (list fields only), page by page — or in
+    one call where every page would scan the whole table (SQLite)."""
+    if not store.PAGES_BY_INDEX:
+        return store.list_by_owner(owner_id)
+    rows: list[Job] = []
+    before: tuple[float, str] | None = None
+    while True:
+        page = store.list_by_owner(owner_id, limit=_LIST_LIMIT,
+                                   before=before, summary=True)
+        rows.extend(page)
+        if len(page) < _LIST_LIMIT:
+            return rows
+        before = (page[-1].created_at, page[-1].id)
+
+
 @app.get("/jobs")
 def list_jobs(user: User = Depends(require_user)):
-    """The caller's projects, newest first (404 not_available while
-    accounts are off — the frontend keeps its localStorage list then).
-    Beta jobs show up once claimed, i.e. after any /jobs/{id} request."""
-    rows = store.list_all() if user.is_service else store.list_by_owner(user.id)
+    """The caller's projects, newest first — all of them: the Library
+    shows this list as the projects of every device (404 not_available
+    while accounts are off — the frontend keeps its localStorage list
+    then). Beta jobs show up once claimed, i.e. after any /jobs/{id}
+    request."""
+    rows = (store.list_all() if user.is_service else
+            _owner_jobs(user.id))
     rows.sort(key=lambda j: j.created_at or j.updated_at, reverse=True)
     out = []
     for job in rows:
@@ -2045,7 +2451,11 @@ def preview_video(job_id: str, user: User | None = Depends(media_user)):
 # a sequence number and stores its segments under _EDIT_GUARD, so the
 # newest request always wins even when several run at once. Preview
 # rebuilds are serialized per job and skipped when a newer request has
-# already arrived (it will rebuild instead).
+# already arrived (it will rebuild instead). Both are process memory
+# (one worker, DEPLOY.md 8.1): across processes the save ORDER isn't
+# kept — but every read-modify-write of the job itself (merged
+# settings, preview_version + 1, the phrases revision check) runs in
+# store.modify, under the row lock, so no process loses another's write.
 _EDIT_GUARD = threading.Lock()
 _EDIT_SEQ: dict[str, int] = {}
 _PREVIEW_LOCKS: dict[str, asyncio.Lock] = {}
@@ -2150,13 +2560,14 @@ def _rebuild_preview(job_id: str, source: str, segments) -> None:
                 tmp_path.unlink()
             except OSError:
                 pass
-    cur = store.get(job_id)
-    store.update(
-        job_id,
-        preview_path=str(final_path),
-        preview_segments=[[float(s), float(e)] for s, e in segments],
-        preview_version=(cur.preview_version if cur else 0) + 1,
-    )
+    shown = [[float(s), float(e)] for s, e in segments]
+    # preview_version + 1 on the stored value, under the row lock: two
+    # rebuilds (even in two processes) always bump it twice.
+    store.modify(job_id, lambda cur: {
+        "preview_path": str(final_path),
+        "preview_segments": shown,
+        "preview_version": (cur.preview_version or 0) + 1,
+    })
 
 
 @app.post("/jobs/{job_id}/edit-segments")
@@ -2256,25 +2667,26 @@ def _save_edit_segments(job_id: str, payload: dict, user: User | None
         raise HTTPException(400, "no valid segments after cleaning")
     _check_timeline_length(cleaned, dur)
 
+    def _save(cur: Job) -> dict:
+        # On the stored job, under its row lock: settings merged into
+        # what is there now, not into what we read above.
+        new_settings = dict(cur.settings or {})
+        new_settings["segment_effects"] = effects
+        out = {"segments": [list(seg) for seg in cleaned],
+               "settings": new_settings}
+        if not cur.preview_segments:
+            # Job from before preview_segments existed: its preview.mp4
+            # was built from the segments we are about to replace.
+            out["preview_segments"] = [[float(a), float(b)]
+                                       for a, b in cur.segments]
+        return out
+
     # Store under the guard so the request with the highest sequence
     # number is also the one whose segments end up in the store.
     with _EDIT_GUARD:
         seq = _EDIT_SEQ.get(job_id, 0) + 1
         _EDIT_SEQ[job_id] = seq
-        cur = store.get(job_id) or job
-        new_settings = dict(cur.settings or {})
-        new_settings["segment_effects"] = effects
-        extra = {}
-        if not cur.preview_segments:
-            # Job from before preview_segments existed: its preview.mp4
-            # was built from the segments we are about to replace.
-            extra["preview_segments"] = [[float(a), float(b)] for a, b in cur.segments]
-        store.update(
-            job_id,
-            segments=[list(seg) for seg in cleaned],
-            settings=new_settings,
-            **extra,
-        )
+        store.modify(job_id, _save)
     return seq, _preview_source(job.normalized_path), cleaned
 
 
@@ -2312,15 +2724,23 @@ def post_phrases(job_id: str, payload: dict,
         cleaned.append(item)
     # Saves can arrive out of order (slow network, flush on leave while
     # a debounced save is still in flight): keep the newest revision.
+    # Check and write in one store.modify (row lock), so an older save
+    # can't overwrite a newer one, whichever process handles either.
     try:
         rev = float(payload.get("rev") or 0)
     except (TypeError, ValueError):
         rev = 0.0
-    with _EDIT_GUARD:
-        cur = store.get(job_id)
-        if cur is not None and rev and rev < (cur.edited_phrases_rev or 0):
-            return {"ok": True, "count": len(cleaned), "stale": True}
-        store.update(job_id, edited_phrases=cleaned, edited_phrases_rev=rev)
+    stale = False
+
+    def _save(cur: Job) -> dict | None:
+        nonlocal stale
+        if rev and rev < (cur.edited_phrases_rev or 0):
+            stale = True
+            return None
+        return {"edited_phrases": cleaned, "edited_phrases_rev": rev}
+    store.modify(job_id, _save)
+    if stale:
+        return {"ok": True, "count": len(cleaned), "stale": True}
     return {"ok": True, "count": len(cleaned)}
 
 
@@ -2408,34 +2828,37 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
         raise ApiRefusal(400, "too_many_segments",
                          max_segments=_max_edit_segments())
 
-    # Update cut_ranges to include the new scene cuts alongside existing
-    old_cut_ranges = list(job.cut_ranges or [])
-    next_id = (max((c.get("id", 0) for c in old_cut_ranges), default=-1)) + 1
-    new_cut_range_dicts = []
-    for (rs, re_) in cut_ranges_scene:
-        new_cut_range_dicts.append({
-            "id": next_id, "start": float(rs), "end": float(re_),
-            "source": "user_edit",
-        })
-        next_id += 1
+    scene_events = [
+        {"type": t, "start": s, "end": end, "source": "user"}
+        for (t, s, end, _i) in clean
+    ]
 
-    store.update(
-        job_id,
-        segments=new_segments,
-        cut_ranges=old_cut_ranges + new_cut_range_dicts,
-        scene_events=[
-            {"type": t, "start": s, "end": end, "source": "user"}
-            for (t, s, end, _i) in clean
-        ],
-    )
-
-    # Segment count may have changed, so per-segment effects no longer
-    # line up with it — reset them rather than apply them to wrong clips.
-    if len(new_segments) != len(base_segments):
-        cur = store.get(job_id)
-        settings = dict((cur.settings if cur else job.settings) or {})
-        settings.pop("segment_effects", None)
-        store.update(job_id, settings=settings)
+    def _save(cur: Job) -> dict:
+        # On the stored job, under its row lock (store.modify): the new
+        # scene cuts go next to the cut_ranges stored now, and settings
+        # are merged into the stored ones.
+        old_cut_ranges = list(cur.cut_ranges or [])
+        next_id = (max((c.get("id", 0) for c in old_cut_ranges),
+                       default=-1)) + 1
+        new_cut_range_dicts = []
+        for (rs, re_) in cut_ranges_scene:
+            new_cut_range_dicts.append({
+                "id": next_id, "start": float(rs), "end": float(re_),
+                "source": "user_edit",
+            })
+            next_id += 1
+        out = {"segments": new_segments,
+               "cut_ranges": old_cut_ranges + new_cut_range_dicts,
+               "scene_events": scene_events}
+        # Segment count may have changed, so per-segment effects no
+        # longer line up with it — reset them rather than apply them to
+        # wrong clips.
+        if len(new_segments) != len(cur.segments):
+            settings = dict(cur.settings or {})
+            settings.pop("segment_effects", None)
+            out["settings"] = settings
+        return out
+    store.modify(job_id, _save)
     return _preview_source(job.normalized_path), new_segments
 
 

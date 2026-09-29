@@ -86,6 +86,9 @@ In Railway → dein Projekt → Service "video-editor-app":
 - **Start Command**: leer lassen (Dockerfile's CMD reicht)
 - **Healthcheck Path**: `/health`
 - **Healthcheck Timeout**: 300 (Whisper-Modell-Download dauert beim Boot)
+- **Restart Policy**: `Always` (Railway-Default ist "On Failure" mit
+  max. 10 Versuchen — danach bleibt der Service tot, bis jemand von Hand
+  neu deployt; mit Postgres siehe 8.2 "Sicherung gegen Split-Brain")
 
 **Tab "Variables"** (Env-Vars):
 
@@ -398,13 +401,15 @@ In Lemon Squeezy:
 
 ### 7.3 Betrieb
 
-- **Billing braucht das Volume.** Liegt die DB auf `/tmp` (kein `/data`,
-  kein `CLEO_JOB_DB`), bleibt Billing aus — Log beim Start:
-  `[billing] !!! BILLING DISABLED: the job DB is on /tmp …`,
-  `GET /billing/config` meldet `"reason": "db_not_persistent"`.
+- **Billing braucht eine persistente DB.** Liegt die SQLite-DB auf `/tmp`
+  (kein `/data`, kein `CLEO_JOB_DB`, kein Postgres), bleibt Billing aus —
+  Log beim Start: `[billing] !!! BILLING DISABLED: the job DB is on /tmp …`,
+  `GET /billing/config` meldet `"reason": "db_not_persistent"`. Mit
+  Postgres (Abschnitt 8) ist das erfüllt.
 - **Backup:** Abos lassen sich aus der LS-API neu aufbauen, das
-  Minuten-Ledger (`usage`-Tabelle in `/data/cleo_jobs.db`) nicht →
-  Railway-Volume-Backups einschalten.
+  Minuten-Ledger (`usage`-Tabelle) nicht → mit Postgres: nächtliches
+  Backup nach R2 + Railway-Backups (Abschnitt 8.4); ohne:
+  Railway-Volume-Backups für `/data/cleo_jobs.db` einschalten.
 - **Verlorene Webhooks** (z.B. während eines Deploys): das Backend
   gleicht stündlich alle Abos mit der LS-API ab und beim Aufruf von
   `/me`, wenn ein Abo veraltet aussieht. Notfalls im LS-Dashboard
@@ -429,7 +434,7 @@ In Lemon Squeezy:
 | Endpoint | Zweck |
 |---|---|
 | `GET /me` | User, Plan, Abo, Minuten, `media_token` (AUTH aus: `{"auth_enabled": false}`) |
-| `GET /jobs` | Projekte des Users (AUTH aus: 404 `not_available`) |
+| `GET /jobs` | alle Projekte des Users, neueste zuerst (intern in Seiten à 200 gelesen; AUTH aus: 404 `not_available`) |
 | `GET /billing/config` | öffentlich: Billing an?, Pläne + Preise |
 | `POST /billing/checkout` | `{plan}` → `{url}`; 409 `already_subscribed` → Portal |
 | `GET /billing/portal` | frische Customer-Portal-URL |
@@ -437,3 +442,249 @@ In Lemon Squeezy:
 
 Entfernt: `/uploads/multipart/*` und `/jobs/{id}/source-video` (vom
 Frontend nie benutzt).
+
+---
+
+## 8. Postgres (`DATABASE_URL`)
+
+Sobald `DATABASE_URL` gesetzt ist, ist **Postgres die Quelle der
+Wahrheit** für Jobs, User, Abos, Minuten-Ledger (`usage`),
+Webhook-Events und `meta` (Media-/Checkout-Secret). Ohne bleibt alles
+wie bisher auf SQLite (`/data/cleo_jobs.db`) — das bleibt für lokale
+Entwicklung, Tests und als Fallback. Code: `backend/db.py` (Auswahl +
+Umstieg), `backend/pg.py` (Pool, Schema, Stores), `backend/pg_cutover.py`
+(Kopie SQLite → Postgres), `backend/pg_backup.py` (Backups).
+
+### 8.1 Variablen (Railway → Backend-Service)
+
+```
+DATABASE_URL           = ${{Postgres.DATABASE_URL}}
+                         (Railway-Referenz auf den Postgres-Service, privates
+                          Netz, direkte Verbindung — so lassen. Neon & Co.:
+                          die DIREKTE URL nehmen, nicht die "pooled"; siehe
+                          unten)
+CLEO_DB_BACKEND        = leer lassen (= Postgres, wenn DATABASE_URL gesetzt).
+                         sqlite   → SQLite erzwingen (Rollback, siehe 8.3)
+                         postgres → Postgres Pflicht: ohne DATABASE_URL
+                                    startet das Backend nicht
+CLEO_DB_POOL_MAX       = optional, Default 10 Verbindungen pro Prozess
+CLEO_DB_BOOT_WAIT_S    = optional, Default 180: so lange wartet ein Boot
+                         nach dem Umzug auf ein nicht erreichbares Postgres
+                         (Retry mit Backoff), bevor er abbricht (8.2)
+CLEO_PG_BACKUP_KEEP_DAYS = optional, Default 14 (Backups in R2, 8.4)
+```
+
+Verbindung: Pool (1–`CLEO_DB_POOL_MAX`), 5 s Connect-Timeout,
+`statement_timeout` 15 s, jede Schreiboperation in einer eigenen
+Transaktion. `GET /ready` prüft die DB über den Pool.
+
+**Kurzer Postgres-Ausfall** (Restart/Redeploy des Postgres-Service):
+Requests scheitern, solange Postgres weg ist (`/ready` → 503). Der Pool
+baut danach binnen Sekunden neu auf (Reconnect-Zyklen à 20 s statt
+wachsender Pausen bis 2 min). Analyse-/Render-Worker wiederholen ihre
+Status-Schreibvorgänge bis zu 3 min; hält der Ausfall länger, wird eine
+fertige Analyse als unser Fehler gewertet (Fehler + Minuten zurück), ein
+Render geht zurück in den Review. Ein Job, dessen Worker dabei ganz
+ausgestiegen ist, wird vom stündlichen Retention-Loop nach 10 min ohne
+Änderung aufgeräumt wie bei einem Neustart (`[jobs] settled … running
+job(s) whose worker is gone`) — nicht erst beim nächsten Deploy.
+
+**Pooled URL / PgBouncer (Transaction-Pooling):** `statement_timeout`
+15 s und die Zeitzone UTC setzt das Backend per `SET` einmal pro
+Verbindung (Session-Ebene). Hinter einem Transaction-Pooler landet jede
+Transaktion auf irgendeiner Server-Verbindung — die Einstellungen gelten
+dort **nicht** (der 15-s-Timeout fehlt still), und sie können auf fremde
+Verbindungen durchschlagen. Deshalb die direkte URL nehmen. Geht es nur
+über den Pooler, die Werte auf der Rolle setzen (einmal, in der
+Postgres-Konsole; `<user>` = der User aus der URL):
+
+```sql
+ALTER ROLE <user> SET statement_timeout = '15s';
+ALTER ROLE <user> SET timezone = 'UTC';
+```
+
+**Weiterhin `--workers 1`** (Dockerfile) und **ein** Replica: die DB ist
+jetzt mehrprozess-sicher (Row-Locks, Compare-and-set, Advisory-Locks für
+das Minutenkonto, UNIQUE auf dem Upload-Key), aber Warteschlange,
+Admission-Control und die Reihenfolge der Editor-Speicherungen sind noch
+Prozess-Speicher, und der Boot-Check würde die laufenden Jobs eines
+zweiten Workers als "interrupted" markieren. Das ändert erst die
+DB-Task-Queue (WP4).
+
+### 8.2 Automatischer Umzug (erster Boot mit `DATABASE_URL`)
+
+Nichts manuell kopieren. Ablauf:
+
+1. Railway: **+ New → Database → PostgreSQL** im selben Projekt.
+2. Backend-Service → Variables: `DATABASE_URL = ${{Postgres.DATABASE_URL}}`
+   → Deploy. **Das Volume `/data` bleibt gemountet** — daraus wird kopiert.
+3. Beim Start (vor allem anderen): Schema anlegen, dann — nur wenn in
+   Postgres `meta.migrated_from_sqlite` fehlt — unter einem globalen Lock
+   **alle Tabellen in EINER Transaktion kopieren**, prüfen (Zeilen pro
+   Tabelle; pro User die Summe der nicht erstatteten `seconds_billed`),
+   Marker setzen, committen. Dauert Sekunden bis ~1 min (5k Jobs ≈
+   250 MB); der Healthcheck-Timeout (300 s) reicht.
+4. Die SQLite-Datei wird **nicht** umbenannt oder gelöscht (read-only
+   Backup). Daneben entsteht `/data/cleo_jobs.db.migrated-to-postgres`.
+
+**Im Log prüfen** (Deployments → Logs):
+
+```
+[db] applied schema migration(s) [1]
+[db] migrated SQLite → Postgres (postgres.railway.internal:5432/railway):
+     meta=3, users=…, subscriptions=…, usage=…, billing_events=…, jobs=…,
+     job_keys=… The SQLite file stays as a read-only backup: /data/cleo_jobs.db
+[db] backend: postgres (postgres.railway.internal:5432/railway, pool max 10, schema v1)
+```
+
+Bei jedem späteren Boot nur noch die letzte Zeile. Gegenprobe in der
+Postgres-Konsole (Railway → Postgres → Data/Query):
+
+```sql
+SELECT value FROM meta WHERE key = 'migrated_from_sqlite';  -- Zeit + Zählungen
+SELECT count(*) FROM jobs;  SELECT count(*) FROM usage;
+```
+
+**Wenn der Umzug scheitert**, läuft das Backend normal weiter — auf
+SQLite, für diese Prozess-Laufzeit. In Postgres ist dann nichts
+geschrieben (Rollback); der nächste Boot versucht es erneut. Drei Arten:
+
+1. **Eine Zeile ist kaputt** — nur dann nennt die Meldung eine Zeile und
+   endet auf `fix or delete it in SQLite`:
+
+   ```
+   [db] MIGRATION FAILED — staying on SQLite: jobs row 'abc123def456' can't be read (…) — fix or delete it in SQLite
+   ```
+
+   Das gibt es nur bei Datenfehlern: die Zeile ist kein JSON / kein Job
+   (`can't be read`), ein Wert passt nicht (`usage row '…': usage.created_at:
+   … is not a Unix time`), wir konnten sie nicht schreiben (Python-Fehler
+   beim Umwandeln, `DataError`), oder Postgres lehnt sie als Daten ab
+   (SQLSTATE-Klasse 22 "data exception", z.B. `InvalidTextRepresentation`,
+   oder 23 "integrity constraint", z.B. `UniqueViolation`). Dann diese
+   Zeile in SQLite reparieren oder löschen — über die Railway-Shell:
+   `python -c "import sqlite3; c = sqlite3.connect('/data/cleo_jobs.db'); c.execute(\"DELETE FROM jobs WHERE id = 'abc123def456'\"); c.commit()"`
+   (löscht das Projekt eines echten Users: vorher `SELECT data …` ansehen)
+   und neu deployen/restarten.
+2. **Postgres oder die Verbindung ist ausgefallen** (Verbindung weg,
+   `QueryCanceled`, `AdminShutdown`, `DiskFull`, `PoolTimeout`, …) —
+   dann nennt die Meldung **keine** Zeile:
+
+   ```
+   [db] MIGRATION FAILED — staying on SQLite: copying jobs to Postgres failed (OperationalError: …) — the database or the connection failed, not a row: nothing was committed and nothing needs fixing in SQLite; the next boot tries again
+   ```
+
+   **Nichts in SQLite löschen** — an den Daten liegt es nicht. Postgres
+   wieder zum Laufen bringen (bei `DiskFull`: Postgres-Volume
+   vergrößern; der Umzug schreibt etwa das Doppelte der SQLite-Größe,
+   WAL eingerechnet) und neu starten.
+3. **Die SQLite-Datei selbst ist nicht lesbar** (beschädigte Seite auf
+   dem Volume) — keine Zeile, und Postgres ist nicht schuld:
+
+   ```
+   [db] MIGRATION FAILED — staying on SQLite: reading jobs from SQLite failed (DatabaseError: database disk image is malformed) — the SQLite file can't be read, not Postgres: nothing was committed. A damaged file fails every boot like this until it is checked (PRAGMA integrity_check) and repaired or restored (DEPLOY.md 8.2)
+   ```
+
+   Ein Neustart hilft hier **nicht** — jeder Boot scheitert gleich, und
+   das Backend läuft solange auf der beschädigten Datei weiter (soweit
+   sie lesbar ist). Über die Railway-Shell prüfen:
+   `python -c "import sqlite3; print(sqlite3.connect('/data/cleo_jobs.db').execute('PRAGMA integrity_check').fetchall())"`.
+   Dann die Datei reparieren — Kopie ziehen, lokal
+   `sqlite3 kopie.db .recover | sqlite3 gerettet.db`, Zählungen
+   vergleichen (was auf der kaputten Seite stand, fehlt danach), die
+   gerettete Datei bei gestopptem Backend nach `/data/cleo_jobs.db`
+   legen (alte `cleo_jobs.db-wal` / `-shm` daneben entfernen) — oder ein
+   Volume-Backup zurückspielen — und neu deployen.
+
+`Postgres table … already has rows but meta.migrated_from_sqlite is
+missing` heißt: `DATABASE_URL` zeigt auf eine benutzte Datenbank — eine
+leere nehmen.
+
+Ohne SQLite-Datei (frisches Deployment ohne Volume) wird nur das Schema
+angelegt (`[db] fresh Postgres database …`). **Achtung:** fehlt beim
+ersten Boot versehentlich das Volume, gilt die Datenbank danach als
+"fresh" und es wird später nichts mehr kopiert — dann den Postgres-Inhalt
+leeren (neue Datenbank) und mit Volume neu starten.
+
+**Sicherung gegen Split-Brain:** Die `.migrated-to-postgres`-Datei wird
+**vor** dem Commit des Umzugs geschrieben (fsync, zuerst als "pending");
+scheitert das (z.B. Volume voll), wird nichts committet und der Boot
+bleibt auf SQLite. Solange die Datei existiert:
+
+- Ist Postgres beim Boot nicht erreichbar, versucht es der Boot
+  `CLEO_DB_BOOT_WAIT_S` lang (Default 180 s, Backoff bis 30 s) weiter und
+  bricht dann ab (`[db] NOT STARTING: [db] Postgres (…) failed and this
+  deployment was already cut over …`) — statt still auf der veralteten
+  SQLite-Kopie zu laufen. Railway startet den Container danach **nur
+  gemäß Restart Policy** neu: mit dem Default ("On Failure", max. 10
+  Versuche) ist nach ~10 × 3 min Schluss und der Service bleibt aus, bis
+  jemand neu deployt. Deshalb Restart Policy `Always` (2.2) — dann läuft
+  das Backend von selbst wieder an, sobald Postgres zurück ist.
+- Zeigt `DATABASE_URL` auf eine Datenbank **ohne** Umzugs-Marker (neu
+  angelegt, geleert, falsche Referenz), startet der Boot **nicht** — egal
+  ob die SQLite-Datei noch da ist: die alte SQLite-Kopie wird nicht
+  erneut importiert (sie hätte gelöschte Projekte, verbrauchte Minuten
+  und alte Abos zurückgebracht), und ohne SQLite-Datei wird die leere
+  Datenbank nicht als "fresh" übernommen (alle Projekte, Minuten und
+  Abos wären scheinbar weg, alle signierten Media-Links kaputt). Log:
+  `[db] NOT STARTING: [db] refusing to start: Postgres (…) has no cutover
+  marker but … says this SQLite file was already migrated …`. Abhilfe:
+  `DATABASE_URL` auf die richtige Datenbank zeigen lassen oder ein Backup
+  einspielen (8.4) — bei einem Restore erst `DATABASE_URL` umstellen,
+  wenn der Restore durch ist. Nur wer den alten Stand bewusst importieren
+  (bzw. ohne SQLite-Datei bewusst leer anfangen) will, löscht die Datei
+  (8.3).
+
+Nicht die `.migrated-to-postgres`-Datei löschen, um einen Boot-Abbruch
+zu "reparieren".
+
+Scheitert der Umzug in einem Prozess, prüft er vor dem Rückfall auf
+SQLite noch einmal Postgres (wartet dabei auf einen gerade kopierenden
+anderen Prozess): hat inzwischen jemand umgezogen, läuft er auf
+Postgres. Ist er doch auf SQLite gelandet und zieht später ein anderer
+Prozess um, beendet er sich (`[db] !!! another process cut over to
+Postgres …`, Exit 1); der Neustart läuft auf Postgres.
+
+### 8.3 Rollback
+
+`CLEO_DB_BACKEND=sqlite` setzen → Deploy: das Backend läuft wieder auf
+`/data/cleo_jobs.db` (Log: `[db] !!! WARNING: running on SQLite …`).
+**Nur direkt nach dem Umzug sinnvoll:** alles, was seit dem Umzug in
+Postgres geschrieben wurde (neue Jobs, Abos, Minuten), ist in SQLite
+**nicht** enthalten und wird nicht zurückkopiert. Umgekehrt landet, was
+während des Rollbacks in SQLite geschrieben wird, beim Zurückschalten
+nicht in Postgres (der Marker ist gesetzt). Für einen zweiten, sauberen
+Umzug: neue leere Postgres-Datenbank, `.migrated-to-postgres`-Datei
+löschen, `CLEO_DB_BACKEND` entfernen, deployen.
+
+### 8.4 Backups + Restore
+
+- **Automatisch:** mit Postgres **und** R2 (`R2_*`-Variablen) lädt das
+  Backend einmal pro 24 h (stündliche Prüfung im Retention-Loop, genau
+  ein Prozess) einen logischen Dump nach
+  `backups/pg/<YYYY-MM-DD>.sql.gz` in den R2-Bucket (alle Tabellen, eine
+  konsistente Momentaufnahme) und löscht Dumps älter als 14 Tage. Log:
+  `[backup] backups/pg/2026-09-28.sql.gz: 12.3 MB, rows {…}`; Fehler:
+  `[backup] Postgres backup FAILED: …` (nächste Stunde neuer Versuch).
+  Der Dump enthält auch das Media-/Checkout-Secret → Bucket privat halten.
+- **Zweite Ebene:** Railway → Postgres-Service → **Backups** aktivieren
+  (Volume-Snapshots, Zeitplan täglich/wöchentlich).
+- **Sofort ein Backup:** Railway-Shell des Backends:
+  `python -m backend.pg_backup run` (nach R2) oder
+  `python -m backend.pg_backup export /tmp/now.sql.gz` (Datei).
+
+**Restore** (in eine **leere** Datenbank — nie über die laufende):
+
+1. Dump holen: `python -m backend.pg_backup list`, dann
+   `python -m backend.pg_backup download backups/pg/2026-09-28.sql.gz /tmp/b.sql.gz`
+   (oder im Cloudflare-Dashboard herunterladen).
+2. Leere Datenbank anlegen (Railway: neuer Postgres-Service, oder
+   `CREATE DATABASE restore_0928;` auf dem bestehenden Server).
+3. Einspielen — eins von beiden:
+   `gunzip -c /tmp/b.sql.gz | psql "<NEUE_URL>" -v ON_ERROR_STOP=1`
+   oder `DATABASE_URL="<NEUE_URL>" python -m backend.pg_backup restore /tmp/b.sql.gz`
+   (legt das Schema selbst an; bricht ab, wenn die Ziel-DB nicht leer ist).
+4. Backend-`DATABASE_URL` auf die neue Datenbank zeigen lassen, deployen.
+   Der Dump enthält den Umzugs-Marker → es wird nichts erneut aus SQLite
+   kopiert. Log: `[db] backend: postgres (…)`.
+

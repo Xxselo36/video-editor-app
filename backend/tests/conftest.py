@@ -9,6 +9,15 @@ Run from the repo root:
     python -m pytest backend/tests -q
 (needs fastapi, httpx, PyJWT[crypto] and the pipeline deps of
 backend/requirements.txt; no network, no API keys.)
+
+Database: SQLite by default. CLEO_TEST_DB=postgres runs the whole suite
+on Postgres instead — an embedded server (pip install pgserver, plus
+psycopg[binary] and psycopg_pool) started once for the session, with
+DATABASE_URL pointed at a fresh database whose tables are emptied
+before every test. Tests marked sqlite_only (SQLite internals: WAL
+pragmas, raw rows, the /tmp fallback) are skipped there. The Postgres
+tests (test_pg_*.py) run in both modes, each on databases of their own
+(fixture pg_server; skipped without pgserver).
 """
 from __future__ import annotations
 
@@ -34,12 +43,114 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+TEST_DB = os.environ.get("CLEO_TEST_DB", "sqlite").strip().lower() or "sqlite"
+if TEST_DB not in ("sqlite", "postgres"):
+    raise RuntimeError(f"CLEO_TEST_DB={TEST_DB!r}: use sqlite or postgres")
+os.environ.pop("CLEO_DB_BACKEND", None)
+os.environ.pop("DATABASE_URL", None)
+
+
+class _PgServer:
+    """One embedded Postgres (pgserver) for the session; fresh() makes a
+    new empty database on it and returns its URL."""
+
+    def __init__(self) -> None:
+        import pgserver
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self._relocate_binaries()
+        # cleanup_mode=None + our own stop: pgserver's `pg_ctl stop` runs
+        # as its unprivileged user and fails when the tests run as root,
+        # leaving the server running.
+        self.server = pgserver.get_server(str(_TMP / "pg"),
+                                          cleanup_mode=None)
+        atexit.register(self.stop)
+        self._n = 0
+
+    @staticmethod
+    def _relocate_binaries() -> None:
+        """As root, pgserver runs postgres as an unprivileged user, which
+        must be able to reach the binaries; inside a private parent
+        directory (e.g. a venv under a 0700 temp dir) it can't. Use a
+        copy under the system temp dir instead (made once, reused)."""
+        import pgserver._commands as cmds
+        import pgserver.postgres_server as srv
+        # site-packages/pgserver/pginstall/bin; the binaries find their
+        # libraries in site-packages/pgserver.libs ($ORIGIN/../../..).
+        src = Path(cmds.POSTGRES_BIN_PATH).parents[2]
+        tag = hashlib.sha1(str(src).encode()).hexdigest()[:10]
+        dst = Path(tempfile.gettempdir()) / f"cleo-pgserver-{tag}"
+        rel = ("pgserver/pginstall", "pgserver.libs")
+        if not (dst / "pgserver/pginstall/bin/pg_ctl").exists():
+            tmp = Path(tempfile.mkdtemp(prefix="cleo-pgserver-",
+                                        dir=tempfile.gettempdir()))
+            os.chmod(tmp, 0o755)
+            for part in rel:
+                if (src / part).exists():
+                    shutil.copytree(src / part, tmp / part)
+            try:
+                os.rename(tmp, dst)
+            except OSError:  # another session made it meanwhile
+                shutil.rmtree(tmp, ignore_errors=True)
+        for mod in (cmds, srv):
+            mod.POSTGRES_BIN_PATH = dst / "pgserver/pginstall/bin"
+
+    def stop(self) -> None:
+        """Fast shutdown of the postmaster (SIGINT), waiting up to 10 s."""
+        import signal
+        pid = self.server.get_pid()
+        if not pid:
+            return
+        try:
+            os.kill(pid, signal.SIGINT)
+        except OSError:
+            return
+        for _ in range(100):
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return
+            time.sleep(0.1)
+
+    def fresh(self, name: str | None = None) -> str:
+        import psycopg
+        self._n += 1
+        name = name or f"t{os.getpid()}_{self._n}"
+        with psycopg.connect(self.server.get_uri(), autocommit=True) as c:
+            c.execute(f'DROP DATABASE IF EXISTS "{name}"')
+            c.execute(f'CREATE DATABASE "{name}"')
+        return self.server.get_uri(name)
+
+
+_PG: _PgServer | None = None
+
+
+def pg_server_or_skip() -> _PgServer:
+    global _PG
+    if _PG is None:
+        import warnings
+        with warnings.catch_warnings():
+            # platformdirs (via pgserver), in containers without a login
+            # session.
+            warnings.filterwarnings("ignore", "XDG_RUNTIME_DIR is not set")
+            try:
+                import pgserver  # noqa: F401
+                import psycopg  # noqa: F401
+                import psycopg_pool  # noqa: F401
+            except ImportError as e:
+                pytest.skip(f"Postgres tests need pgserver + psycopg: {e}")
+            _PG = _PgServer()
+    return _PG
+
+
+if TEST_DB == "postgres":
+    os.environ["DATABASE_URL"] = pg_server_or_skip().fresh("cleo_suite")
+
 import jwt  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 import backend.main as M  # noqa: E402
-from backend import accounts, auth, billing  # noqa: E402
+from backend import accounts, auth, billing, db  # noqa: E402
 from backend.jobs import store  # noqa: E402
 
 # Real test-mode webhook captures (see fixtures/lemon_squeezy/NOTICE).
@@ -65,6 +176,28 @@ _FEATURE_ENV = (
 )
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "sqlite_only: tests SQLite internals; skipped with "
+        "CLEO_TEST_DB=postgres")
+
+
+def pytest_collection_modifyitems(config, items):
+    if TEST_DB != "postgres":
+        return
+    skip = pytest.mark.skip(reason="SQLite-specific (CLEO_TEST_DB=postgres)")
+    for item in items:
+        if "sqlite_only" in item.keywords:
+            item.add_marker(skip)
+
+
+@pytest.fixture(scope="session")
+def pg_server():
+    """The session's embedded Postgres (see _PgServer); skips the test
+    without pgserver / psycopg."""
+    return pg_server_or_skip()
+
+
 @pytest.fixture(autouse=True)
 def clean_state(monkeypatch):
     for k in _FEATURE_ENV:
@@ -72,15 +205,20 @@ def clean_state(monkeypatch):
     auth._jwks = None
     billing._price_cache.clear()
     billing._refresh_tried.clear()
-    with store._lock:
-        store._conn.execute("DELETE FROM jobs")
-        store._conn.commit()
-    shutil.rmtree(M._WORK_ROOT / "uploads", ignore_errors=True)
-    conn = accounts._db()
-    with accounts._lock:
-        for table in ("meta", "users", "subscriptions", "usage",
-                      "billing_events"):
-            conn.execute(f"DELETE FROM {table}")
+    if db.active() == "postgres":
+        store._truncate_for_tests()
+        shutil.rmtree(M._WORK_ROOT / "uploads", ignore_errors=True)
+        accounts._db().truncate_for_tests()
+    else:
+        with store._lock:
+            store._conn.execute("DELETE FROM jobs")
+            store._conn.commit()
+        shutil.rmtree(M._WORK_ROOT / "uploads", ignore_errors=True)
+        conn = accounts._db()
+        with accounts._lock:
+            for table in ("meta", "users", "subscriptions", "usage",
+                          "billing_events"):
+                conn.execute(f"DELETE FROM {table}")
     # Never start real analysis threads from POST /jobs.
     started: list[str] = []
     monkeypatch.setattr(M, "_run_analyze", lambda job_id: started.append(job_id))
