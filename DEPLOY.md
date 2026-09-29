@@ -667,6 +667,10 @@ löschen, `CLEO_DB_BACKEND` entfernen, deployen.
   `[backup] backups/pg/2026-09-28.sql.gz: 12.3 MB, rows {…}`; Fehler:
   `[backup] Postgres backup FAILED: …` (nächste Stunde neuer Versuch).
   Der Dump enthält auch das Media-/Checkout-Secret → Bucket privat halten.
+  Empfohlen: `R2_BACKUP_BUCKET` = ein eigener Bucket nur für die Dumps
+  (gleicher Account, der Railway-Token braucht Zugriff) — dann kann der
+  Modal-Token (nur Media-Bucket, 10.2) die Backups nicht lesen. `list`
+  und `download` unten nehmen automatisch diesen Bucket.
 - **Zweite Ebene:** Railway → Postgres-Service → **Backups** aktivieren
   (Volume-Snapshots, Zeitplan täglich/wöchentlich).
 - **Sofort ein Backup:** Railway-Shell des Backends:
@@ -721,7 +725,7 @@ der CSP in `web/next.config.ts` erlauben.
 | Variable | Default | Wirkung |
 |---|---|---|
 | `CLEO_MODAL_POLL_S` | 10 | so oft wird auf das Ergebnis gewartet/geprüft |
-| `CLEO_MODAL_DEADLINE_S_BASE` / `_PER_S` / `_MAX` | 240 / 6 / 3720 | Render-Frist: 240 s + 6 × Videolänge, höchstens 62 min (Modal-Timeout von `render_r2`: 60 min) → `render_timeout` |
+| `CLEO_MODAL_DEADLINE_S_BASE` / `_PER_S` / `_PER_GB` / `_MAX` | 240 / 6 / 60 / 3720 | Render-Frist: 240 s + 6 × Videolänge + 60 s pro GB Mezzanine, höchstens 62 min → `render_timeout`. Modal selbst bricht `render_r2` nach 60 min ab, `render_burn_concat` (der Default-Weg) schon nach **30 min** |
 | `CLEO_MODAL_START_TIMEOUT_S` | 120 | Aufruf nach 120 s nicht gestartet → `render_unavailable` (0 = aus) |
 | `CLEO_MODAL_HEARTBEAT_S` | 300 | Lebenszeichen am Job während langer Renders (0 = aus) |
 | `CLEO_MODAL_TRANSFER_S_MAX` | 3600 | Obergrenze für Upload/Download zu Modal |
@@ -735,155 +739,226 @@ kann später erneut rendern. Überwachung und Alarme: `OPERATIONS.md`.
 
 ## 10. Media storage (R2)
 
-Mit R2 liegt **jedes Byte eines Jobs in R2** — Upload, Mezzanine
-(`mezz.mp4`, die Render-Quelle), Editor-Proxy, Vorschauen, Renders,
-Thumbnail — und nichts mehr auf dem Railway-Volume. Media-Routen
-(`/jobs/{id}/proxy-video|preview-video|watch|download|thumbnail`) prüfen
-Login + Besitz und antworten mit **307 auf eine presigned R2-URL**
-(Range geht, kein Byte läuft über Railway). Uploads gehen direkt vom
-Browser nach R2, **fortsetzbar** (Multipart, Stand im IndexedDB des
-Browsers). `POST /jobs` antwortet in ~1 s, egal wie groß die Datei ist
-(HEAD + Längen-Probe über den Header); die Analyse lädt die Datei selbst.
-Der Modal-Render (`render_r2`) liest und schreibt R2 direkt.
+**Kurz:** Dieser Code *kann* jedes Byte eines Jobs in R2 halten
+(Upload, Mezzanine `mezz.mp4`, Editor-Proxy, Vorschauen, Renders,
+Thumbnail) und Renders direkt aus R2 machen (`render_r2` auf Modal).
+**Nach dem Merge ist aber alles aus.** Jeder Teil wird einzeln mit einer
+Railway-Variable eingeschaltet — und genauso wieder aus. Solange keine
+dieser Variablen gesetzt ist, verhält sich die App für Nutzer wie vorher:
+Medien auf dem Railway-Volume, Render über den bisherigen Modal-Weg
+(`render_burn_concat`), Upload per einfachem PUT.
 
-**Aus, bis konfiguriert:** ohne `R2_*`-Variablen läuft alles wie bisher
-auf der lokalen Platte (Media-Backend `local`: gleiche Keys unter
-`<CLEO_WORK_ROOT>/media`). Code: `backend/storage.py` (R2-Client),
-`backend/media.py` (die Media-API des Backends), `backend/uploads.py`
-(Upload-Tickets), `backend/r2_backfill.py`, `backend/r2_setup.py`,
+**Wichtigste Regel:** Jeder Job merkt sich, *wo* seine Medien liegen
+(Feld `media_store`: `local` oder `r2`). `CLEO_MEDIA_BACKEND` entscheidet
+nur, wohin die Medien **neuer** Jobs kommen. Umschalten in beide
+Richtungen ist deshalb jederzeit sicher: alte Jobs werden weiter von dort
+ausgeliefert, wo sie liegen. Einzige Bedingung: **Solange es Jobs mit
+Medien in R2 gibt, müssen die `R2_*`-Variablen gesetzt bleiben** (fehlen
+sie, antworten deren Medien-Links mit 503, nichts wird gelöscht).
+
+Code: `backend/storage.py` (R2-Client), `backend/media.py` (Medien-API,
+Speicherort pro Job), `backend/uploads.py` (Upload-Tickets),
+`backend/r2_backfill.py`, `backend/r2_setup.py`,
 `web/src/lib/chunkedUpload.ts`.
 
-### 10.1 Variablen und Schalter (Railway → Backend-Service)
+### 10.1 Alle Schalter auf einen Blick (Railway → Backend-Service → Variables)
 
-```
-R2_ACCOUNT_ID          = Cloudflare Account-ID
-R2_ACCESS_KEY_ID       = API-Token "cleocuts-api" (Object Read & Write, nur
-R2_SECRET_ACCESS_KEY     dieser Bucket) — siehe 10.2
-R2_BUCKET              = cleocuts-media  (Staging: cleocuts-media-staging)
+Achtung: **Jede Änderung einer Railway-Variable startet das Backend neu**
+(= ein Deploy). Laufende Analysen brechen dabei ab (Minuten werden
+erstattet, der Nutzer lädt neu hoch), laufende Renders gehen zurück in
+den Editor. Darum Schalter nur umlegen, wenn gerade niemand hochlädt
+oder rendert (Railway-Log: keine `[job …]`-Zeilen der letzten Minuten),
+am besten nachts.
 
-CLEO_MEDIA_BACKEND     = leer lassen (= r2, wenn R2_* gesetzt; sonst local).
-                         local → Medien auf der lokalen Platte (Rollback, 10.5)
-                         r2    → R2 Pflicht: ohne R2_* startet das Backend
-                                 nicht ("[media] NOT STARTING")
-CLEO_UPLOAD_MODE       = multipart (Default) | single
-                         single → /uploads/multipart/init antwortet 409
-                         use_single_put, die Website lädt per einfachem
-                         presigned PUT hoch (Kill-Switch, sofort, ohne Deploy)
-CLEO_TMP_ROOT          = /tmp/cleo (Default; Container-Platte, NICHT das
-                         Volume): Analyse-Arbeitsordner, Proxy-Cache,
-                         Legacy-Uploads (≤ 100 MB) auf dem Weg nach R2
-CLEO_PROXY_CACHE_GB    = 5: lokaler LRU-Cache der Editor-Proxies für die
-                         Vorschau-Neubauten (/edit-segments)
-CLEO_PROBE_WORKERS     = 4: parallele Längen-Proben (ffprobe über presigned
-                         URL) in POST /jobs, eigener Thread-Pool
-CLEO_BACKFILL          = 1 → der stündliche Loop verschiebt alte lokale Jobs
-                         nach R2 (je CLEO_BACKFILL_BATCH=5 Jobs, höchstens
-                         CLEO_BACKFILL_MBPS=40 MB/s; fehlende Proxies werden
-                         erzeugt, außer CLEO_BACKFILL_MAKE_PROXY=0) — 10.4
-CLEO_MODAL_RENDER_FN   = leer (= render_r2). render_burn_concat → der alte
-                         Volume-Weg (Rollback, 10.5)
-CLEO_MEDIA_ROOT        = nur Media-Backend local: Ordner der Keys
-                         (Default <CLEO_WORK_ROOT>/media)
-R2_ENDPOINT_URL        = nur Tests / lokaler S3-Ersatz (Default
-                         https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com)
-```
+| Variable | Default (nicht gesetzt) | Eingeschaltet | Zurück |
+|---|---|---|---|
+| `CLEO_MEDIA_BACKEND` | `local`: neue Jobs auf dem Volume | `r2`: neue Jobs in R2 (ohne `R2_*` startet das Backend nicht: `[media] NOT STARTING`) | Variable löschen: neue Jobs wieder lokal, R2-Jobs bleiben in R2 |
+| `CLEO_MODAL_RENDER_FN` | `render_burn_concat` (bisheriger Weg) | `render_r2`: Jobs mit Medien in R2 rendern direkt aus R2 (lokale Jobs immer auf dem alten Weg). Fehlt `render_r2` auf Modal, wird automatisch der alte Weg genommen | Variable löschen |
+| `CLEO_PROXY_VIDEO` | aus: `/jobs/{id}/proxy-video` → 404, der Editor spielt wie bisher die Vorschau | `1`: Editor spielt den 720p-Proxy direkt | Variable löschen |
+| `CLEO_UPLOAD_MODE` | `single`: einfacher presigned PUT wie bisher; `init`, `parts`, `sign` antworten 409 `use_single_put` | `multipart`: fortsetzbare Uploads | Variable löschen — auch Browser mitten in einem fortgesetzten Upload wechseln dann auf den einfachen PUT |
+| `CLEO_MEDIA_PRESIGN` | `day`: R2-Links gleich für den ganzen UTC-Tag (Browser-Cache) | `standard`: normale presigned URLs (falls R2/ein Gerät die tagesgenauen ablehnt) | Variable löschen |
+| `CLEO_TMP_ROOT` | `<CLEO_WORK_ROOT>/tmp`, also **auf dem Volume** (wie bisher) | z. B. `/tmp/cleo` (Container-Platte) — erst nach Prüfung, 10.6 | Variable löschen |
+| `CLEO_BACKFILL` | aus | `1`: stündlich ein paar alte Jobs nach R2 verschieben (10.5) | Variable löschen |
+| `CLEO_MEDIA_ORPHAN_SWEEP` | aus | `1`: wöchentlicher Waisen-Check (10.7) | Variable löschen |
+| `R2_BACKUP_BUCKET` | Postgres-Backups im Media-Bucket (`backups/pg/`) | eigener Bucket für die Backups (empfohlen, 10.2 Schritt 1) | Variable löschen |
+
+Weitere, nur bei Bedarf: `CLEO_BACKFILL_BATCH` (5 Jobs pro Stunde),
+`CLEO_BACKFILL_MBPS` (40), `CLEO_BACKFILL_MAKE_PROXY` (1; 0 = fehlende
+Proxies nicht erzeugen), `CLEO_MEDIA_ORPHAN_MAX` (200 Präfixe pro Lauf),
+`CLEO_PROXY_CACHE_GB` (5), `CLEO_PROBE_WORKERS` (4),
+`CLEO_MODAL_DEADLINE_S_PER_GB` (60, siehe 9.3), `CLEO_MEDIA_ROOT`
+(Ordner der lokalen Medien, Default `<CLEO_WORK_ROOT>/media`),
+`R2_ENDPOINT_URL` (nur Tests).
+
+Außerhalb von Railway:
+- **Modal-Secret `cleocuts-r2`** (10.2 Schritt 4): ohne es wird nur
+  `render_burn_concat` deployt (die GitHub-Action prüft das selbst und
+  warnt). Beim Deploy von Hand: `CLEO_MODAL_R2=1 modal deploy
+  backend/modal_render.py` (mit Secret) bzw. ohne die Variable (ohne).
+- **GitHub → Settings → Secrets and variables → Actions → Variables:**
+  `CLEO_MODAL_RENDER_FN` — immer denselben Wert wie auf Railway, damit
+  der Modal-Check (ops-watch, alle 6 h) die Funktion prüft, die wirklich
+  benutzt wird.
 
 `boto3`/`botocore` sind auf eine Minor-Version gepinnt
-(`backend/requirements.txt`): die tagesgenauen presigned URLs (gleiche URL
-den ganzen UTC-Tag, 48 h gültig ab 00:00Z → Browser-Cache trifft) nutzen
+(`backend/requirements.txt`): die tagesgenauen presigned URLs nutzen
 botocore-Interna. Beim Anheben beide zusammen, dann
 `pytest backend/tests/test_wp3_storage.py`.
 
-### 10.2 Einrichtung (in dieser Reihenfolge)
+### 10.2 Reihenfolge — Schritt für Schritt
 
-**Achtung:** Sind `R2_*` auf Railway schon gesetzt (der bisherige
-Direkt-Upload per `/uploads/presign` nutzt sie), schaltet schon der
-Deploy dieses Codes die Medien auf R2 und die Renders auf `render_r2`.
-Dann die Schritte 1–6 **vor** dem Deploy erledigen — oder vorher
-`CLEO_MEDIA_BACKEND=local` setzen und es nach Schritt 6 wieder löschen.
+Jeden Schritt erst machen, wenn der vorige einen Tag ohne Auffälligkeiten
+lief. Nach jedem Schritt im Railway-Log die Startzeile ansehen:
+`[media] new jobs' media: … ; uploads … ; render … ; proxy-video … ;
+orphan sweep … ; tmp …` — sie zeigt, was gerade an ist.
 
-1. **Bucket** je Umgebung: `cleocuts-media`, `cleocuts-media-staging`
-   (Cloudflare → R2 → Create bucket). Privat lassen, **r2.dev-Zugriff
-   aus**, keine Custom Domain (presigned URLs gehen nur über
-   `<account>.r2.cloudflarestorage.com`). Den bestehenden `R2_BUCKET`
-   weiter zu nutzen geht auch — dann dort die Regeln unten setzen. Die
-   Postgres-Backups (8.4) liegen im selben Bucket unter `backups/` und
-   sind von keiner Regel unten betroffen.
-2. **Tokens** (R2 → Manage API tokens):
-   - "cleocuts-api": *Object Read & Write*, nur dieser Bucket →
-     Railway: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
-     `R2_BUCKET` (**noch nicht deployen**, erst Schritt 3–6).
-   - Gleiche Rechte für Modal (eigener Token oder derselbe):
-     ```
-     modal secret create cleocuts-r2 R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… \
-         R2_SECRET_ACCESS_KEY=… R2_BUCKET=…
-     ```
-   - Ein Bucket-Admin-Token ("Workers R2 Storage Write" / Admin Read &
-     Write) **nur auf dem eigenen Rechner** für CORS und Lifecycle — nie
-     deployen.
-3. **CORS** (Bucket → Settings → CORS policy, oder mit dem Admin-Token
-   `aws s3api put-bucket-cors --bucket cleocuts-media --endpoint-url
-   https://<account>.r2.cloudflarestorage.com --cors-configuration
-   file://cors.json`). `python -m backend.r2_setup --print-config`
-   druckt beide JSONs (im Dashboard nur die Liste in `CORSRules`
-   einfügen):
+**Schritt 0 — WP3-prep zuerst (Rückfall-Version).** Den Branch
+`wp3-prep` mergen und deployen, mindestens 2–3 Tage laufen lassen. Er
+ändert für Nutzer nichts, versteht aber die neuen Job-Felder. Er ist ab
+jetzt die Version, auf die man zurückrollt (10.8). **Nie auf eine
+Version vor WP3-prep zurückrollen, sobald WP3 lief** — das würde die
+Medien-Felder neuer Jobs löschen.
+
+**Schritt 1 — WP3 mergen.** Das startet drei Deploys gleichzeitig:
+Railway (Backend), GitHub-Action "Deploy Modal render" und Vercel
+(Website). Nichts wird eingeschaltet:
+- Railway-Log: `[media] new jobs' media: local … uploads single; render
+  render_burn_concat; proxy-video off; orphan sweep off`.
+- GitHub → Actions → "Deploy Modal render": grün, mit der Warnung
+  "render_r2 not deployed" (das Secret gibt es noch nicht) — richtig so.
+- Test: ein kurzes Video hochladen, im Editor schneiden, rendern,
+  herunterladen. Alles wie vorher.
+Laufende Analysen während des Deploys brechen ab (erstattet) — wie bei
+jedem Deploy.
+
+**Schritt 2 — R2 vorbereiten** (ändert noch nichts an der App):
+1. **Bucket:** den bestehenden `R2_BUCKET` weiter nutzen (einfachste
+   Variante). Einen *neuen* Bucket nur jetzt, bevor irgendein Job Medien
+   in R2 hat — und dann bedenken: Uploads, die gerade laufen, und die
+   Backups unter `backups/` bleiben im alten Bucket (alten Bucket nicht
+   löschen). Staging bekommt **immer** einen eigenen Bucket
+   (`cleocuts-media-staging`), nie den von Produktion.
+   Bucket privat lassen, **r2.dev-Zugriff aus**, keine Custom Domain.
+   Empfohlen zusätzlich: ein Bucket `cleocuts-backups` →
+   Railway `R2_BACKUP_BUCKET=cleocuts-backups` (der Railway-Token muss
+   auch diesen Bucket dürfen).
+2. **Tokens** (Cloudflare → R2 → Manage API tokens):
+   - Railway-Token (die vorhandenen `R2_*`): *Object Read & Write* auf
+     den Media-Bucket (und den Backup-Bucket).
+   - **Eigener Token für Modal**: *Object Read & Write* **nur auf den
+     Media-Bucket** — so kann Modal die Datenbank-Backups nicht lesen.
+   - Ein Admin-Token nur auf dem eigenen Rechner für CORS und Lifecycle
+     — nie deployen.
+3. **CORS** (Bucket → Settings → CORS policy). `python -m
+   backend.r2_setup --print-config` druckt das JSON (im Dashboard nur
+   die Liste in `CORSRules` einfügen):
    ```json
    {"CORSRules":[{"AllowedOrigins":["https://cleocuts.com","https://www.cleocuts.com"],
      "AllowedMethods":["GET","HEAD","PUT"],"AllowedHeaders":["content-type","range"],
      "ExposeHeaders":["ETag","Content-Length","Content-Range","Accept-Ranges"],"MaxAgeSeconds":7200}]}
    ```
-   Staging zusätzlich: die Vercel-Preview-Origin(s),
-   `http://localhost:3000`, `http://localhost:3123`
-   (`--print-config --origins https://…,http://localhost:3000,…`).
-   `<video>`, `<img>` und Download-Links brauchen kein CORS — nur die
-   Upload-PUTs.
-4. **Lifecycle** (`aws s3api put-bucket-lifecycle-configuration … 
-   --lifecycle-configuration file://lifecycle.json`):
+   Staging zusätzlich die Vercel-Preview-Origin(s), `http://localhost:3000`,
+   `http://localhost:3123`. `<video>`, `<img>` und Download-Links brauchen
+   kein CORS — nur die Upload-PUTs.
+4. **Lifecycle** (Bucket → Settings → Object lifecycle rules, oder
+   `aws s3api put-bucket-lifecycle-configuration … --lifecycle-configuration
+   file://lifecycle.json`):
    ```json
    {"Rules":[
     {"ID":"uploads-expire-2d","Status":"Enabled","Filter":{"Prefix":"uploads/"},"Expiration":{"Days":2}},
     {"ID":"uploads-abort-mpu-1d","Status":"Enabled","Filter":{"Prefix":"uploads/"},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}},
     {"ID":"jobs-abort-mpu-2d","Status":"Enabled","Filter":{"Prefix":"jobs/"},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":2}}]}
    ```
-   **Keine** Alters-Regel auf `jobs/`: R2 zählt das Objektalter, die
-   Aufbewahrung zählt die Untätigkeit — ein Studio-Projekt, das vor 120
-   Tagen angelegt und letzten Monat bearbeitet wurde, verlöre sonst seine
-   Medien. Gelöscht wird über `media_gc` (10.6).
-5. **Prüfen** (mit dem API-Token, lokal mit den Railway-Werten als
-   Env-Vars): `python -m backend.r2_setup --check --origin
-   https://cleocuts.com` — HeadBucket, put/get/Range/delete, ein
-   2-Teile-Multipart über presigned Part-URLs (plus ein PUT mit falscher
-   Länge, der **abgelehnt** werden muss), presigned GET von heute und
-   gestern 00:00Z (→ 206), CORS-Preflight. Muss "all checks passed"
-   melden.
-6. **Modal deployen** (neue Funktion `render_r2`, Image mit boto3):
-   `modal deploy backend/modal_render.py` — mit dem Secret aus Schritt 2,
-   sonst schlägt der Deploy fehl. `render_burn_concat` und das Volume
-   bleiben (Rollback).
-7. **Railway deployen** mit den Variablen aus Schritt 2 und — beim ersten
-   Mal — `CLEO_UPLOAD_MODE=single` (10.3). Im Log: `[media] backend: r2
-   (bucket …)`.
+   **Keine** Alters-Regel auf `jobs/` (R2 zählt das Objektalter, die
+   Aufbewahrung die Untätigkeit — aktive Projekte verlören sonst ihre
+   Medien). Gelöscht wird über die Warteschlange `media_gc` (10.7).
+5. **Prüfen** (auf dem eigenen Rechner mit den Railway-`R2_*`-Werten als
+   Env-Vars, oder in der Railway-Shell):
+   `python -m backend.r2_setup --check --origin https://cleocuts.com`.
+   Muss **"all checks passed"** melden. Geprüft werden: Bucket erreichbar,
+   put/get/Range/delete, ein 70-MiB-Upload und -Download (der Weg, den
+   jede Mezzanine und jeder Render nimmt), Multipart über presigned
+   Part-URLs (ein PUT mit falscher Länge muss abgelehnt werden),
+   presigned GET von heute und gestern 00:00Z, die Lifecycle-Regeln für
+   `uploads/` und der CORS-Preflight. Darf der Token die Lifecycle-Regeln
+   nicht lesen: im Dashboard nachsehen und mit `--skip-lifecycle`
+   wiederholen.
 
-### 10.3 Rollout
+**Schritt 3 — Modal-Secret anlegen, `render_r2` deployen** (wird noch
+nicht benutzt):
+```
+modal secret create cleocuts-r2 R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=<Modal-Token> \
+    R2_SECRET_ACCESS_KEY=<Modal-Token> R2_BUCKET=<derselbe Bucket wie Railway>
+```
+Dann GitHub → Actions → "Deploy Modal render" → **Run workflow**
+(diagnose nicht ankreuzen). Im Log: "Modal secret cleocuts-r2 found —
+deploying render_burn_concat and render_r2". Der Bucket-Name muss exakt
+dem auf Railway entsprechen (`render_r2` bricht sonst mit "bucket
+mismatch" ab und der Render geht zurück in den Editor).
 
-1. **Staging:** Bucket + 10.2 komplett, `r2_setup --check`, dann ein
-   Burst (20 Uploads in 60 s mit mehreren GB: POST /jobs p95 < 1,5 s,
-   kein ENOSPC) und die Geräte-Checkliste (iOS Safari 17/18, Android
-   Chrome: 2-GB-4K-HEVC aus Fotos mit Flugmodus bei ~50 % → setzt fort;
-   Tab beendet + Datei neu gewählt → setzt fort; Proxy-Wiedergabe und
-   Springen im Editor über 307; Download öffnet).
-2. **Produktion mit `CLEO_UPLOAD_MODE=single`:** alles andere von WP3 ist
-   aktiv — Medien und Renders laufen über R2, der Backfill läuft (10.4),
-   Uploads noch per einfachem PUT.
-3. **Nach 2 Tagen ohne Auffälligkeiten:** `CLEO_UPLOAD_MODE=multipart`
-   (oder die Variable löschen). 48 h lang die `[upload] …`-Zeilen im Log
-   beobachten (Retries / Fehlschläge einzelner Parts mit User-Agent).
+**Schritt 4 — neue Jobs nach R2:** Railway `CLEO_MEDIA_BACKEND=r2`.
+Log: `[media] new jobs' media: r2 (bucket …)`. Test: neues Video
+hochladen → Editor → Vorschau spielt, Rendern, Download öffnet (die Links
+sind jetzt Weiterleitungen nach R2). Alte Projekte weiter öffnen und
+herunterladen — sie kommen weiter vom Volume. Renders laufen noch über
+den alten Weg (die Mezzanine geht über Railway zu Modal).
 
-### 10.4 Backfill (alte Jobs vom Volume nach R2)
+**Schritt 5 — Renders direkt aus R2:** Railway
+`CLEO_MODAL_RENDER_FN=render_r2` **und** dieselbe GitHub-Variable (10.1).
+Log eines Renders: `[modal] render_r2 complete for job …`. Steht dort
+`render_r2 is not deployed … rendering on the volume path`, fehlt
+Schritt 3 — die Renders funktionieren trotzdem.
 
-Nach dem Deploy liegen neue Jobs in R2; alte werden weiter von der Platte
-ausgeliefert. Umziehen (Railway → Service → Shell, oder
-`railway run`):
+**Schritt 6 — Editor spielt den Proxy:** Railway `CLEO_PROXY_VIDEO=1`.
+Test auf iPhone (Safari) und Android (Chrome): Projekt öffnen, im Editor
+springen und abspielen. Geht es auf einem Gerät nicht: Variable löschen
+(der Editor spielt dann wieder die Vorschau) und ggf.
+`CLEO_MEDIA_PRESIGN=standard` probieren.
+
+**Schritt 7 — fortsetzbare Uploads:** Railway
+`CLEO_UPLOAD_MODE=multipart`. 48 h lang die `[upload] …`-Zeilen im Log
+beobachten. Test: großes Video hochladen, bei ~50 % WLAN aus, wieder an →
+setzt fort.
+
+**Schritt 8 — alte Jobs umziehen** (Backfill, 10.5).
+
+**Schritt 9 (optional) — Waisen-Check:** `CLEO_MEDIA_ORPHAN_SWEEP=1`
+(10.7). Erst nach dem Backfill.
+
+**Schritt 10 (optional, später) — Arbeitsordner auf die
+Container-Platte:** 10.6.
+
+### 10.3 Staging (vor Schritt 4–7 in Produktion)
+
+Eigener Bucket, alle Schritte oben dort zuerst. Dann ein Burst (20
+Uploads in 60 s mit mehreren GB: POST /jobs p95 < 1,5 s, kein ENOSPC)
+und die Geräte-Checkliste (iOS Safari 17/18, Android Chrome: 2-GB-4K-HEVC
+aus Fotos mit Flugmodus bei ~50 % → setzt fort; Tab beendet + Datei neu
+gewählt → setzt fort; Proxy-Wiedergabe und Springen im Editor über die
+Weiterleitung; Download öffnet).
+
+### 10.4 Was jeder Schalter im Fehlerfall tut (Kurzfassung)
+
+- **Uploads machen Ärger:** `CLEO_UPLOAD_MODE` löschen. (Neustart →
+  laufende Analysen brechen ab und werden erstattet; es gibt keinen
+  Schalter "ohne Neustart".)
+- **Editor-Wiedergabe macht Ärger:** `CLEO_PROXY_VIDEO` löschen; bei
+  Problemen mit R2-Links allgemein zusätzlich `CLEO_MEDIA_PRESIGN=standard`.
+- **Renders aus R2 machen Ärger:** `CLEO_MODAL_RENDER_FN` löschen → alter
+  Weg. Achtung: der alte Weg (`render_burn_concat`) hat auf Modal ein
+  hartes Limit von **30 min pro Render** (`render_r2`: 60 min) — sehr
+  lange Videos, die mit `render_r2` gingen, brechen dort mit
+  `render_timeout` ab.
+- **R2 selbst macht Ärger:** `CLEO_MEDIA_BACKEND` löschen → neue Jobs
+  wieder aufs Volume. Jobs, die schon in R2 sind, brauchen R2 weiterhin
+  (`R2_*` **nicht** löschen).
+
+### 10.5 Backfill (Jobs vom Volume nach R2)
+
+Verschiebt **alte Jobs** (von vor WP3, nur lokale Dateien) und **Jobs,
+die mit `CLEO_MEDIA_BACKEND` = local angelegt wurden**, nach R2. Braucht
+nur die `R2_*`-Variablen (unabhängig von `CLEO_MEDIA_BACKEND`). In der
+Railway-Shell (Service → Shell) oder mit `railway run`:
 
 ```
 python -m backend.r2_backfill --dry-run          # was, wie viel, ~Egress
@@ -891,56 +966,89 @@ python -m backend.r2_backfill                    # für echt (--limit N, --job I
                                                  #  --max-mbps 40)
 ```
 
-Pro Job (neueste zuerst, laufende übersprungen): Quelle, `mezz.mp4`,
-Proxy (fehlt er, wird er erzeugt: ~27 CPU-s pro Videominute, einmalig),
-Vorschau, Renders unter `r1/` (hart verlinkte Formate nur **einmal**
-hochgeladen), Thumbnail, Hook-Clips; dann HEAD jedes Keys gegen die
-lokale Größe und erst dann die Keys am Job setzen. Idempotent: ein
-zweiter Lauf tut nichts. Am Ende eine Zusammenfassung mit
-`local_only_left` — **Ziel: 0**. Alternativ `CLEO_BACKFILL=1` setzen:
-der stündliche Loop erledigt es in kleinen Portionen (danach wieder
+Pro Job (neueste zuerst, laufende übersprungen): alles hochladen, per
+HEAD gegen die lokale Größe prüfen, dann **in einem Schritt** am Job
+setzen — aber nur, wenn sich der Job in der Zwischenzeit nicht geändert
+hat (sonst "skipped", der nächste Lauf macht ihn). Danach liefert R2 aus;
+die lokale Kopie eines verschobenen Jobs wird einen Tag später gelöscht.
+Idempotent: ein zweiter Lauf tut nichts. Am Ende eine Zusammenfassung
+mit `local_only_left` — **Ziel: 0**. Alternativ `CLEO_BACKFILL=1`: der
+stündliche Loop erledigt es in kleinen Portionen (danach wieder
 entfernen). Grob 5 GB insgesamt ≈ $0,25 Railway-Egress.
 
-Frühestens **7 Tage später** die lokalen Dateien löschen:
+Frühestens **7 Tage später** die lokalen Dateien der alten Jobs löschen:
 
 ```
 python -m backend.r2_backfill --delete-local --dry-run
 python -m backend.r2_backfill --delete-local
 ```
 
-Löscht nur bei Jobs, deren Keys per HEAD mit der gespeicherten Größe
-bestätigt sind. Das Volume selbst fällt erst in WP6 weg (zusammen mit
-dem SQLite-Backup).
+Löscht nur bei Jobs, deren Medien in R2 liegen und deren Keys per HEAD
+mit der gespeicherten Größe bestätigt sind. Das Volume selbst fällt erst
+in WP6 weg.
 
-### 10.5 Rollback
+### 10.6 Arbeitsordner (`CLEO_TMP_ROOT`)
 
-- **Uploads:** `CLEO_UPLOAD_MODE=single` — sofort, ohne Deploy.
-- **Render:** `CLEO_MODAL_RENDER_FN=render_burn_concat` → der alte
-  Volume-Weg (Mezzanine rüber zum Modal-Volume, Ergebnisse zurück, dann
-  nach R2). Geht, solange `render_burn_concat` deployed ist (bis WP4).
-- **Medien:** `CLEO_MEDIA_BACKEND=local` ist **nur sicher, bevor neue
-  Jobs Medien ausschließlich in R2 haben** (also direkt nach dem ersten
-  Deploy). Danach gilt: ein Code-Rollback liefert die alten lokalen Jobs
-  weiter aus, aber Jobs mit R2-Medien brauchen diesen Code — also nicht
-  auf eine Version vor WP3 zurückrollen, sondern vorwärts reparieren.
+Analysen arbeiten in `CLEO_TMP_ROOT/jobs/{id}` (mehrere GB pro großem
+Upload), dazu der Proxy-Cache und kleine Uploads auf dem Weg nach R2.
+Default ist `<CLEO_WORK_ROOT>/tmp` auf dem Volume — dort, wo die Analyse
+vorher auch lief, und dort misst die Platz-Prüfung (507
+`server_storage_full`) richtig. Auf die Container-Platte (`/tmp/cleo`)
+erst umstellen, wenn in der Railway-Shell `df -h /tmp` genug Platz für
+mehrere gleichzeitige Analysen zeigt (≥ 3,5 × die größte erlaubte
+Upload-Größe × `CLEO_MAX_ANALYZE` + 1 GB). Vorsicht: auf der
+Container-Platte meldet `df` evtl. den Platz des Hosts, nicht das Limit
+des Plans.
 
-### 10.6 Betrieb
+### 10.7 Betrieb
 
-- **Löschen ist eine Warteschlange** (Tabelle `media_gc`): Projekt
-  löschen / Aufbewahrung abgelaufen → Zeile + Objekte `jobs/{id}/` und
-  der Upload werden sofort versucht, sonst alle 5 min erneut.
-  Überholte Renders (`r{g}/`) und Vorschau-Versionen erst nach 24 h
-  (jemand streamt sie evtl. noch). Log `[media] deleted …`; schlägt
-  es 10× fehl: **`[media] GC STUCK — …`** (Fehler-Level, geht an Sentry).
-- **Wöchentlicher Waisen-Check:** `jobs/{id}/`-Präfixe ohne Job, deren
-  neuestes Objekt > 2 Tage alt ist, kommen in `media_gc`. `uploads/`
-  räumt die Lifecycle-Regel ab.
-- `GET /admin/costs`: Speicher aus `media_bytes` der Jobs (R2-Preis),
-  plus alte lokale Dateien.
-- `media_gc` ist nicht Teil der Postgres-Backups; nach einem Restore
-  findet der Waisen-Check die Präfixe gelöschter Jobs.
+- **Löschen ist eine Warteschlange** (Tabelle `media_gc`, mit Speicherort
+  pro Zeile): Projekt löschen / Aufbewahrung abgelaufen → `jobs/{id}/`
+  und der Upload werden sofort versucht, sonst später erneut — jeder
+  Fehlschlag verschiebt den nächsten Versuch (5 min, 10 min, 20 min, …
+  höchstens 6 h), damit eine hängende Zeile die anderen nicht blockiert.
+  Überholte Renders (`r{g}/`) und Vorschau-Versionen erst nach 24 h, die
+  Teil-Ergebnisse eines fehlgeschlagenen Renders erst nach gut einer
+  Stunde (ein Modal-Aufruf könnte noch schreiben). Log `[media] deleted …`;
+  nach 10 Fehlschlägen **`[media] GC STUCK — …`** (Fehler-Level, Sentry).
+- **Nur erlaubte Keys werden gelöscht:** `jobs/<id>/`, `jobs/<id>/r<n>/`,
+  `jobs/<id>/preview/v<n>.mp4`, `jobs/<id>/source.<ext>` und
+  `uploads/[<user>/]<uuid>.<ext>`. Alles andere (z. B. `jobs/`,
+  `uploads/`, `backups/`) wird abgelehnt und geloggt.
+- **Waisen-Check (nur mit `CLEO_MEDIA_ORPHAN_SWEEP=1`, wöchentlich,
+  frühestens eine Woche nach dem Einschalten):** `jobs/{id}/`-Präfixe
+  ohne Job-Zeile in *dieser* Datenbank, deren neuestes Objekt > 2 Tage
+  alt ist, kommen in `media_gc` (höchstens `CLEO_MEDIA_ORPHAN_MAX` pro
+  Lauf). Schutz: im Bucket liegt `jobs/.owner` mit der ID dieser
+  Datenbank. Beim ersten Lauf wird sie nur geschrieben, wenn jedes
+  vorhandene Präfix einen Job hat; passt sie nicht (anderes Deployment,
+  Staging mit Prod-Bucket, Entwickler-Rechner mit der Prod-`.env`,
+  zurückgespieltes Backup), löscht der Check **nichts** und loggt
+  `ORPHAN SWEEP REFUSED`. Meldet er das in Produktion ohne erkennbaren
+  Grund: Variable löschen und nachsehen, nicht die Marke überschreiben.
+- `media_gc` ist Teil der Postgres-Backups und des SQLite→Postgres-Umzugs.
+- `GET /admin/costs`: Speicher aus `media_bytes` der Jobs (R2-Preis für
+  R2-Jobs), plus alte lokale Dateien.
 
-### 10.7 Kosten (R2: $0,015/GB-Monat, Class A $4,50/M, Class B $0,36/M, Egress frei; gratis: 10 GB, 1 M A, 10 M B pro Monat)
+### 10.8 Rollback
+
+- **Einzelne Teile:** die Variable löschen (10.1, 10.4). Das ist immer
+  der erste Weg.
+- **Code:** nur auf **WP3-prep** zurückrollen (Railway → Deployments →
+  der WP3-prep-Deploy → Redeploy), **nie weiter zurück**. Unter WP3-prep
+  bleiben Jobs mit Medien in R2 (oder unter den neuen lokalen Keys)
+  erhalten, zeigen aber "nicht verfügbar" (409 `media_unavailable`) und
+  können nicht gelöscht werden, bis wieder vorwärts deployt wird. Ein
+  Rollback hinter WP3-prep löscht die Medien-Felder dieser Jobs
+  endgültig.
+- **Website mit zurückrollen:** Vercel → Deployments → den Deploy von vor
+  dem WP3-Merge → "Promote to Production" — Backend und Website immer
+  zusammen (die neue Website wartet bei alten Backends zu kurz auf große
+  Uploads).
+- **Modal:** der alte `render_burn_concat` bleibt immer deployt; nichts
+  zu tun.
+
+### 10.9 Kosten (R2: $0,015/GB-Monat, Class A $4,50/M, Class B $0,36/M, Egress frei; gratis: 10 GB, 1 M A, 10 M B pro Monat)
 
 Pro 2-Minuten-SmartCam-Job ≈ 0,51 GB gespeichert (Mezzanine 318 MB,
 Renders 90, Proxy ≈ 20, Vorschau 19, Hooks ≤ 83) ≈ $0,0077/Monat;
@@ -955,7 +1063,7 @@ beim Hochladen der Ergebnisse, ≈ $0,03).
 | 10.000 | $38 ($22) | gratis (≈ 0,2 M) | gratis (≈ 2,5 M) | ≈ $38 |
 | 100.000 | $383 ($225) | ≈ $5 | ≈ $5 | ≈ $390 |
 
-### 10.8 Key-Layout
+### 10.10 Key-Layout
 
 ```
 uploads/{user}/{uuid32}{ext}   Browser-Upload (ohne Accounts: uploads/{uuid32}{ext})
@@ -968,7 +1076,10 @@ jobs/{id}/r{g}/{fmt}.mp4       weitere Formate (":"→"x", z. B. 16x9.mp4); glei
                                primary → derselbe Key
 jobs/{id}/r{g}/hook_{k}.mp4    Hook-Clips
 jobs/{id}/r{g}/thumb.jpg       Thumbnail
-backups/pg/…                   Postgres-Backups (8.4), von nichts hier berührt
+backups/pg/…                   Postgres-Backups (8.4; mit R2_BACKUP_BUCKET in dessen Bucket),
+                               von nichts hier berührt (die Lösch-Warteschlange nimmt nur
+                               jobs/<id>/… und uploads/…-Keys, siehe 10.7)
+jobs/.owner                    Besitzer-Marke für den Waisen-Check (10.7)
 ```
 
 Keys sind unveränderlich: ein Key, auf den ein Job zeigt, wird nie
