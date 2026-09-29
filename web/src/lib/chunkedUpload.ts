@@ -89,6 +89,22 @@ type UploadRecord = {
   parts_total: number;
   done: number[];
   created_at: number;
+  /** Completed in R2, POST /jobs not answered yet: kept (a reload, a
+   *  deploy restart or a 502 doesn't cost a second upload) until the
+   *  job exists or the server refused the upload. */
+  completed?: boolean;
+};
+
+/** A finished upload: its key, and — for a resumable one — the call
+ *  that forgets its resume record once POST /jobs has settled it.
+ *  `legacyApi`: the backend has no multipart API (init answered 404 /
+ *  405: a build from before WP3) — its POST /jobs downloads the object
+ *  inside the request (minutes for multi-GB) and isn't idempotent, so
+ *  the caller waits long and doesn't retry. */
+export type UploadResult = {
+  storage_key: string;
+  release?: () => Promise<void>;
+  legacyApi?: boolean;
 };
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
@@ -378,7 +394,7 @@ function wantsSinglePut(e: ApiError): boolean {
 
 // ── the resumable upload ─────────────────────────────────────────────
 
-export async function uploadResumable(opts: UploadOptions): Promise<{ storage_key: string }> {
+export async function uploadResumable(opts: UploadOptions): Promise<UploadResult> {
   const { file, onProgress, duration } = opts;
   const outer = opts.signal;
   if (outer?.aborted) throw abortError();
@@ -433,7 +449,10 @@ export async function uploadResumable(opts: UploadOptions): Promise<{ storage_ke
       if (!r.ok) {
         // Typed so the caller can tell 401 / 402 / 413 / 429 / 503 apart.
         const e = await apiError(r);
-        if (wantsSinglePut(e)) return await uploadSingle({ ...opts, signal });
+        if (wantsSinglePut(e)) {
+          const single = await uploadSingle({ ...opts, signal });
+          return { ...single, legacyApi: e.status === 404 || e.status === 405 };
+        }
         throw e;
       }
       const init = (await r.json()) as {
@@ -588,8 +607,19 @@ export async function uploadResumable(opts: UploadOptions): Promise<{ storage_ke
     }
     report(true);
     onProgress?.(100);
-    if (state.fp) await dropRecord(state.fp);
-    return { storage_key: state.storage_key };
+    // Kept until POST /jobs has the job (release): picking the file
+    // again after a failed POST resumes at "complete" — no re-upload.
+    if (state.fp) {
+      state.completed = true;
+      await saveRecord(state);
+    }
+    const fp = state.fp;
+    return {
+      storage_key: state.storage_key,
+      release: async () => {
+        if (fp) await dropRecord(fp);
+      },
+    };
   } catch (e) {
     if (outer?.aborted) throw abortError();
     throw e;
@@ -599,7 +629,7 @@ export async function uploadResumable(opts: UploadOptions): Promise<{ storage_ke
 }
 
 /** The single presigned PUT (≤ 5 GiB; no resume). */
-export async function uploadSingle(opts: UploadOptions): Promise<{ storage_key: string }> {
+export async function uploadSingle(opts: UploadOptions): Promise<UploadResult> {
   const { file, onProgress, signal, duration } = opts;
   const presignRes = await apiFetch("/uploads/presign", {
     method: "POST",
