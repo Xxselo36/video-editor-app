@@ -129,8 +129,9 @@ def llm(monkeypatch):
 @pytest.fixture
 def modal_r2(r2, monkeypatch, llm):
     monkeypatch.setenv("MODAL_TOKEN_ID", "tok")
-    for k in ("CLEO_LOCAL_RENDER_FALLBACK", "CLEO_MODAL_RENDER_FN"):
-        monkeypatch.delenv(k, raising=False)
+    monkeypatch.delenv("CLEO_LOCAL_RENDER_FALLBACK", raising=False)
+    # render_r2 is opt-in (default: the volume path, render_burn_concat).
+    monkeypatch.setenv("CLEO_MODAL_RENDER_FN", "render_r2")
     monkeypatch.setenv("CLEO_MODAL_RETRY_DELAYS", "0")
     monkeypatch.setenv("CLEO_MODAL_POLL_S", "0.05")
     fake = FakeR2Modal(r2)
@@ -203,7 +204,8 @@ def test_render_r2_gets_keys_and_commits_outputs(client, modal_r2):
     d = client.get(f"/jobs/{job.id}").json()
     assert d["has_output"] and d["outputs"][:3] == ["primary", "9:16", "1:1"]
     assert store.gc_all() == []
-    assert not M._workspace(job.id).exists()
+    # (removed in the worker's finally, just after the status write)
+    assert _wait_for(lambda: not M._workspace(job.id).exists())
 
 
 def test_rerender_gets_a_new_prefix_and_the_old_one_goes_a_day_later(
@@ -234,7 +236,10 @@ def test_rerender_gets_a_new_prefix_and_the_old_one_goes_a_day_later(
     assert left and all(o["key"].startswith(p + "r2/") for o in left)
 
 
-def test_failed_render_queues_its_prefix_now(client, modal_r2):
+def test_failed_render_queues_its_prefix_after_modals_timeout(client,
+                                                              modal_r2):
+    """A failed render's r{g}/ is deleted only once a Modal call that
+    may still be running can't write there any more."""
     modal_r2.plan[:] = [AuthError("Token missing")]
     job = _review_job()
     assert client.post(f"/jobs/{job.id}/render",
@@ -245,7 +250,9 @@ def test_failed_render_queues_its_prefix_now(client, modal_r2):
     assert got.error.startswith("render_unavailable: AuthError")
     rows = store.gc_all()
     assert [r["prefix"] for r in rows] == [f"jobs/{job.id}/r1/"]
-    assert rows[0]["not_before"] <= time.time() + 1
+    assert rows[0]["store"] == "r2"
+    due = time.time() + pipeline._MODAL_FUNCTION_TIMEOUT_S
+    assert due <= rows[0]["not_before"] <= due + 400
     assert got.output_keys == {}
 
 
@@ -301,7 +308,8 @@ def test_local_fallback_uploads_to_the_same_keys(client, r2, llm, monkeypatch,
     assert M.media.size(p + "primary.mp4") == 8
     assert got.hook_clips == [{"key": "hook_2", "title": "B", "reason": "r",
                                "start": 1.0, "end": 2.0}]
-    assert not M._workspace(job.id).exists()
+    # (removed in the worker's finally, just after the status write)
+    assert _wait_for(lambda: not M._workspace(job.id).exists())
 
 
 def test_legacy_job_mezz_is_backfilled_before_its_render(client, r2, llm,
@@ -392,15 +400,23 @@ def test_render_to_dir_order_and_aliases(tmp_path, monkeypatch):
 def test_modal_function_definition():
     src = (REPO / "backend" / "modal_render.py").read_text()
     tree = ast.parse(src)
-    fns = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    fns = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
     assert {"render_r2", "render_burn_concat"} <= set(fns)
+    # render_r2 only exists in a deploy with CLEO_MODAL_R2=1 (the workflow
+    # sets it when the cleocuts-r2 secret exists) — and always inside
+    # Modal's containers.
+    [guard] = [n for n in tree.body if isinstance(n, ast.If)
+               and any(isinstance(b, ast.FunctionDef)
+                       and b.name == "render_r2" for b in n.body)]
+    assert ast.unparse(guard.test) == "WITH_R2"
+    assert "CLEO_MODAL_R2" in src and "modal.is_local()" in src
     deco = ast.unparse(fns["render_r2"].decorator_list[0])
     assert "timeout=3600" in deco and "Secret.from_name('cleocuts-r2')" in deco
     assert "cpu=8.0" in deco and "memory=8192" in deco
     args = [a.arg for a in fns["render_r2"].args.args]
     assert args == ["job_id", "gen", "mezz_key", "out_prefix", "segments",
                     "subtitles", "caption_preset", "cut_style", "language",
-                    "output_formats", "segment_effects", "hooks"]
+                    "output_formats", "segment_effects", "hooks", "bucket"]
     assert '"boto3' in src
     assert pipeline._MODAL_FUNCTION_TIMEOUT_S == 3600.0
 
@@ -408,10 +424,13 @@ def test_modal_function_definition():
 # ── media GC ─────────────────────────────────────────────────────────
 
 
+SRC = "uploads/u/0123456789abcdef0123456789abcdef.mp4"
+
+
 def _stored_job(r2, n=3):
-    job = store.create(None, {}, source_key="uploads/u/src.mp4")
+    job = store.create(None, {}, source_key=SRC)
     b = storage.bucket()
-    r2.put_object(Bucket=b, Key="uploads/u/src.mp4", Body=b"s")
+    r2.put_object(Bucket=b, Key=SRC, Body=b"s")
     for i in range(n):
         r2.put_object(Bucket=b, Key=f"jobs/{job.id}/r1/f{i}.mp4", Body=b"x")
     store.update(job.id, status="done")
@@ -424,7 +443,7 @@ def test_delete_queues_then_deletes(client, r2):
     assert client.delete(f"/jobs/{job.id}").status_code == 200
     assert store.get(job.id) is None
     assert storage.list_r2(f"jobs/{job.id}/") == []
-    assert storage.head("uploads/u/src.mp4") is None
+    assert storage.head(SRC) is None
     assert store.gc_all() == []
     assert len(storage.list_r2(f"jobs/{other.id}/")) == 3
 
@@ -434,25 +453,27 @@ def test_gc_retries_a_failed_delete(client, r2, monkeypatch, caplog):
     real = M.media.delete_any
     down = {"on": True}
 
-    def flaky(entry):
+    def flaky(entry, where=None):
         if down["on"]:
             raise ConnectionError("R2 unreachable")
-        return real(entry)
+        return real(entry, where)
     monkeypatch.setattr(M.media, "delete_any", flaky)
     assert client.delete(f"/jobs/{job.id}").status_code == 200
     assert store.get(job.id) is None             # the row went anyway
     rows = {r["prefix"]: r for r in store.gc_all()}
-    assert set(rows) == {f"jobs/{job.id}/", "uploads/u/src.mp4"}
+    assert set(rows) == {f"jobs/{job.id}/", SRC}
     assert all(r["attempts"] == 1 and "unreachable" in r["last_error"]
                for r in rows.values())
     assert len(storage.list_r2(f"jobs/{job.id}/")) == 3
     caplog.set_level(logging.ERROR, logger="backend.media")
-    for _ in range(9):
-        M.run_media_gc()
+    for i in range(9):
+        # A failure pushes the row back (backoff): not due right away.
+        assert M.run_media_gc() == 0 and store.gc_due() == []
+        M.run_media_gc(now=time.time() + 7 * 3600)
     assert {r["attempts"] for r in store.gc_all()} == {10}
     assert any("GC STUCK" in r.getMessage() for r in caplog.records)
     down["on"] = False
-    assert M.run_media_gc() == 2
+    assert M.run_media_gc(now=time.time() + 7 * 3600) == 2
     assert store.gc_all() == [] and storage.list_r2(f"jobs/{job.id}/") == []
 
 
@@ -467,26 +488,36 @@ def test_gc_keeps_the_earlier_time_and_waits_for_it(r2):
 
 
 def test_orphan_sweep(r2, monkeypatch):
+    monkeypatch.setenv("CLEO_MEDIA_ORPHAN_SWEEP", "1")
     known = _stored_job(r2)
     b = storage.bucket()
+    # Ours: jobs/.owner holds this database's id.
+    r2.put_object(Bucket=b, Key="jobs/.owner", Body=M._media_owner_id())
     r2.put_object(Bucket=b, Key="jobs/aaaaaaaaaaaa/mezz.mp4", Body=b"o")
     r2.put_object(Bucket=b, Key="uploads/u/left.mp4", Body=b"u")
     assert M.sweep_media_orphans() == 0            # younger than 2 days
     later = time.time() + 3 * 86400
     assert M.sweep_media_orphans(now=later) == 1
-    assert [r["prefix"] for r in store.gc_all()] == ["jobs/aaaaaaaaaaaa/"]
+    assert [(r["prefix"], r["store"]) for r in store.gc_all()] == [
+        ("jobs/aaaaaaaaaaaa/", "r2")]
     assert M.run_media_gc() == 1
     assert storage.list_r2("jobs/aaaaaaaaaaaa/") == []
     assert len(storage.list_r2(f"jobs/{known.id}/")) == 3
     assert storage.head("uploads/u/left.mp4") == 1   # lifecycle's job
 
 
-def test_orphan_sweep_runs_weekly(tmp_path, monkeypatch):
-    monkeypatch.setattr(M, "_WORK_ROOT", tmp_path)
+def test_orphan_sweep_is_opt_in_and_runs_weekly(monkeypatch):
     now = time.time()
-    assert M._orphan_sweep_due(now) is True
+    monkeypatch.delenv("CLEO_MEDIA_ORPHAN_SWEEP", raising=False)
+    assert M._orphan_sweep_due(now) is False
+    monkeypatch.setenv("CLEO_MEDIA_ORPHAN_SWEEP", "1")
+    # The first check seeds the stamp: never due at once (a fresh
+    # deployment — or one pointed at someone else's bucket — doesn't
+    # sweep at boot).
+    assert M._orphan_sweep_due(now) is False
     assert M._orphan_sweep_due(now + 3600) is False
     assert M._orphan_sweep_due(now + 7 * 86400 + 1) is True
+    assert M._orphan_sweep_due(now + 7 * 86400 + 2) is False
 
 
 # ── backfill ─────────────────────────────────────────────────────────
@@ -614,7 +645,8 @@ def test_backfill_cli(r2, tmp_path, capsys):
     job, _ = _legacy_job(tmp_path)
     assert r2_backfill.main(["--dry-run", "--job", job.id]) == 0
     out = capsys.readouterr().out
-    assert "media backend: r2 (dry run)" in out and "dry-run" in out
+    assert "target: R2 bucket" in out and "(dry run)" in out
+    assert "dry-run" in out
     assert r2_backfill.main(["--job", job.id, "--max-mbps", "1000"]) == 0
     assert store.get(job.id).mezz_key
 

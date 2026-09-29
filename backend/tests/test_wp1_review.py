@@ -36,7 +36,8 @@ def r2_deletes(monkeypatch):
     deleted: list[str] = []
     real = M.media.delete
     monkeypatch.setattr(M.media, "delete",
-                        lambda key: (deleted.append(key), real(key))[1])
+                        lambda key, **kw: (deleted.append(key),
+                                           real(key, **kw))[1])
     return deleted
 
 

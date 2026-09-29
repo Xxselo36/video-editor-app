@@ -21,7 +21,7 @@ tests (test_pg_*.py) run in both modes, each on databases of their own
 
 Media: the local media backend by default (backend/media.py; files
 under the test work root). CLEO_TEST_MEDIA=r2 runs the whole suite with
-media in R2, faked in-process by moto (pip install "moto[s3]>=5.2",
+media in R2 (R2_* set and CLEO_MEDIA_BACKEND=r2), faked in-process by moto (pip install "moto[s3]>=5.2",
 backend/requirements-dev.txt): R2_* env vars point at a moto bucket for
 every test. Tests of local-disk internals are marked local_media_only
 and skipped there. The fixture `r2` gives a single test R2 on moto in
@@ -48,8 +48,12 @@ os.environ["CLEO_JOB_DB"] = str(_TMP / "jobs.db")
 os.environ["CLEO_WORK_ROOT"] = str(_TMP / "work")
 os.environ["CLEO_TMP_ROOT"] = str(_TMP / "tmp")
 os.environ["CLEO_MIN_FREE_GB"] = "0"
-for _k in ("CLEO_MEDIA_BACKEND", "CLEO_MEDIA_ROOT", "CLEO_UPLOAD_MODE",
-           "CLEO_MODAL_RENDER_FN", "CLEO_BACKFILL", "R2_ENDPOINT_URL"):
+_OPT_IN_ENV = ("CLEO_MEDIA_BACKEND", "CLEO_UPLOAD_MODE", "CLEO_MODAL_RENDER_FN",
+               "CLEO_PROXY_VIDEO", "CLEO_MEDIA_ORPHAN_SWEEP",
+               "CLEO_MEDIA_ORPHAN_MAX", "CLEO_MEDIA_PRESIGN",
+               "R2_BACKUP_BUCKET", "CLEO_MODAL_R2")
+for _k in (*_OPT_IN_ENV, "CLEO_MEDIA_ROOT", "CLEO_BACKFILL",
+           "R2_ENDPOINT_URL"):
     os.environ.pop(_k, None)
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
@@ -200,6 +204,7 @@ if TEST_MEDIA == "r2":
     _SESSION_MOTO.start()
     atexit.register(_SESSION_MOTO.stop)
     os.environ.update(R2_ENV)
+    os.environ["CLEO_MEDIA_BACKEND"] = "r2"
     _moto_bucket()
 
 import jwt  # noqa: E402
@@ -266,11 +271,12 @@ def pg_server():
 def clean_state(monkeypatch):
     for k in _FEATURE_ENV:
         monkeypatch.delenv(k, raising=False)
-    for k in ("CLEO_MEDIA_BACKEND", "CLEO_UPLOAD_MODE", "CLEO_MODAL_RENDER_FN"):
+    for k in _OPT_IN_ENV:
         monkeypatch.delenv(k, raising=False)
     if TEST_MEDIA == "r2":
         for k, v in R2_ENV.items():
             monkeypatch.setenv(k, v)
+        monkeypatch.setenv("CLEO_MEDIA_BACKEND", "r2")
     store._truncate_gc_for_tests()
     shutil.rmtree(M._WORK_ROOT / "media", ignore_errors=True)
     shutil.rmtree(M._TMP_ROOT / "proxy-cache", ignore_errors=True)
@@ -308,15 +314,18 @@ def no_r2(monkeypatch):
     """A deployment without R2 (also under CLEO_TEST_MEDIA=r2)."""
     for k in R2_ENV:
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.delenv("CLEO_MEDIA_BACKEND", raising=False)
 
 
 @pytest.fixture
 def r2(monkeypatch):
     """R2 for this test, faked in-process by moto (the session's mock
-    with CLEO_TEST_MEDIA=r2, else one of its own): R2_* env set, bucket
-    emptied. Returns a boto3 client on it."""
+    with CLEO_TEST_MEDIA=r2, else one of its own): R2_* env set, new
+    jobs' media in R2 (CLEO_MEDIA_BACKEND=r2), bucket emptied. Returns a
+    boto3 client on it."""
     for k, v in R2_ENV.items():
         monkeypatch.setenv(k, v)
+    monkeypatch.setenv("CLEO_MEDIA_BACKEND", "r2")
     if _SESSION_MOTO is not None:
         yield _moto_bucket()
         return

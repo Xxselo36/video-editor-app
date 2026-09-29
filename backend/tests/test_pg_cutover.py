@@ -105,10 +105,14 @@ def build_sqlite(path: Path, monkeypatch, corrupt: bool = False) -> dict:
             st._conn.execute("INSERT INTO jobs (id, data) VALUES (?, ?)",
                              ("badjob", "{not json"))
         st._conn.commit()
+    # Queued media deletes move over too (with their store).
+    st.gc_add(["jobs/0123456789ab/r1/"], 1_790_000_000.5, store="r2")
+    st.gc_add(["jobs/0123456789ab/"], 1_790_000_100.0)
     st._conn.close()
     return {"secret": secret, "counts": {
         "meta": 2, "users": 2, "subscriptions": 2, "usage": 3,
-        "billing_events": 1, "jobs": 4 + corrupt, "job_keys": 2}}
+        "billing_events": 1, "jobs": 4 + corrupt, "job_keys": 2,
+        "media_gc": 2}}
 
 
 def _sha(path: Path) -> str:
@@ -142,6 +146,10 @@ def test_cutover_copies_verifies_and_marks(pg_server, tmp_path, monkeypatch):
         assert marker["counts"] == built["counts"]
         assert marker["sqlite_path"] == str(path)
         assert _sha(path) == before              # SQLite left untouched
+        gc = {(r["prefix"], r["store"]): r["not_before"]
+              for r in pg.PgJobStore(database).gc_all()}
+        assert gc == {("jobs/0123456789ab/r1/", "r2"): 1_790_000_000.5,
+                      ("jobs/0123456789ab/", None): 1_790_000_100.0}
 
         # jobs: every field, via the store APIs of both sides
         monkeypatch.setenv("CLEO_JOB_DB", str(path))

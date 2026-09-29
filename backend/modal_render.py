@@ -13,18 +13,32 @@ Idle = $0. A 10-min video render at ~2-3 min on 8-CPU worker ≈ $0.05.
 Compared to ~$0.50 on Railway shared tier.
 
 Two functions:
-  - render_r2 (WP3, the default with media in R2): reads the job's mezz
-    object from R2 and writes every output (primary, formats, hook
-    clips, thumbnail) back to R2 under the render's prefix. Needs the
-    Modal secret "cleocuts-r2" (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
-    R2_SECRET_ACCESS_KEY, R2_BUCKET — see DEPLOY.md, "Media storage").
-  - render_burn_concat: the older volume path (the backend uploads the
-    source into a Modal Volume and downloads the outputs). Kept for
-    rollback (CLEO_MODAL_RENDER_FN=render_burn_concat) until WP4.
+  - render_burn_concat: the volume path (the backend uploads the source
+    into a Modal Volume and downloads the outputs) — the default.
+  - render_r2 (WP3, opt-in: CLEO_MODAL_RENDER_FN=render_r2 on Railway,
+    for jobs whose media is in R2): reads the job's mezz object from R2
+    and writes every output (primary, formats, hook clips, thumbnail)
+    back to R2 under the render's prefix. Needs the Modal secret
+    "cleocuts-r2" (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+    R2_BUCKET — see DEPLOY.md, "Media storage"). Only deployed with
+    CLEO_MODAL_R2=1 in the deploying environment (the GitHub workflow
+    sets it when that secret exists): Modal resolves the secret before
+    it publishes, so without it the whole deploy — render_burn_concat
+    included — would fail. The backend falls back to the volume path
+    while render_r2 isn't deployed.
 """
 from __future__ import annotations
 
+import os
+
 import modal
+
+# render_r2 in this deploy? Decided where `modal deploy` runs; inside
+# Modal's containers the module is imported again without that env var
+# (only the running function is hydrated there), so it is always
+# defined in the container.
+WITH_R2 = (os.environ.get("CLEO_MODAL_R2", "").strip() == "1"
+           or not modal.is_local())
 
 app = modal.App("cleocuts-render")
 
@@ -202,67 +216,76 @@ def render_burn_concat(
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-@app.function(
-    image=image,
-    cpu=8.0,
-    memory=8192,
-    timeout=3600,      # pipeline._MODAL_FUNCTION_TIMEOUT_S follows it
-    secrets=[modal.Secret.from_name("cleocuts-r2")],
-)
-def render_r2(
-    job_id: str,
-    gen: int,
-    mezz_key: str,
-    out_prefix: str,
-    segments: list[list[float]],
-    subtitles: list[dict],
-    caption_preset: str,
-    cut_style: str,
-    language: str | None,
-    output_formats: list[str],
-    segment_effects: list[dict],
-    hooks: list[dict],
-) -> dict:
-    """One render, R2 in and out: get the mezz to local SSD, then burn →
-    concat → effects → thumbnail → formats → hook cuts, and put every
-    output under `out_prefix` (jobs/{job_id}/r{gen}/). Same-size formats
-    alias the primary's key. Returns {outputs: {fmt: {key, size}},
-    thumb: {key, size} | None, hooks: [{k, key, size, title, reason,
-    start, end}], timings}. Outputs are written locally and uploaded —
-    never through a CloudBucketMount (faststart needs seek)."""
-    import os
-    import shutil
-    import sys
-    import tempfile
-    import time
-    from pathlib import Path
+if WITH_R2:
+    @app.function(
+        image=image,
+        cpu=8.0,
+        memory=8192,
+        timeout=3600,      # pipeline._MODAL_FUNCTION_TIMEOUT_S follows it
+        secrets=[modal.Secret.from_name("cleocuts-r2")],
+    )
+    def render_r2(
+        job_id: str,
+        gen: int,
+        mezz_key: str,
+        out_prefix: str,
+        segments: list[list[float]],
+        subtitles: list[dict],
+        caption_preset: str,
+        cut_style: str,
+        language: str | None,
+        output_formats: list[str],
+        segment_effects: list[dict],
+        hooks: list[dict],
+        bucket: str | None = None,
+    ) -> dict:
+        """One render, R2 in and out: get the mezz to local SSD, then burn →
+        concat → effects → thumbnail → formats → hook cuts, and put every
+        output under `out_prefix` (jobs/{job_id}/r{gen}/). Same-size formats
+        alias the primary's key. Returns {outputs: {fmt: {key, size}},
+        thumb: {key, size} | None, hooks: [{k, key, size, title, reason,
+        start, end}], timings}. Outputs are written locally and uploaded —
+        never through a CloudBucketMount (faststart needs seek)."""
+        import os
+        import shutil
+        import sys
+        import tempfile
+        import time
+        from pathlib import Path
 
-    sys.path.insert(0, "/app")
-    os.environ.setdefault("CLEO_FFMPEG_THREADS", "0")
-    if not out_prefix.startswith(f"jobs/{job_id}/r{int(gen)}/"):
-        raise ValueError(f"out_prefix {out_prefix!r} doesn't belong to "
-                         f"job {job_id} r{gen}")
-    from backend import storage
-    from backend.pipeline import render_to_dir, store_render_files
+        sys.path.insert(0, "/app")
+        os.environ.setdefault("CLEO_FFMPEG_THREADS", "0")
+        if not out_prefix.startswith(f"jobs/{job_id}/r{int(gen)}/"):
+            raise ValueError(f"out_prefix {out_prefix!r} doesn't belong to "
+                             f"job {job_id} r{gen}")
+        from backend import storage
+        from backend.pipeline import render_to_dir, store_render_files
+        if bucket is not None and bucket != storage.bucket():
+            # The secret points at another bucket than the API's: the
+            # mezz isn't there, and outputs would land where nobody
+            # finds them.
+            raise ValueError(f"bucket mismatch: the API uses {bucket!r}, "
+                             "the Modal secret cleocuts-r2 "
+                             f"{storage.bucket()!r}")
 
-    work = Path(tempfile.mkdtemp(prefix="cleo_r2_"))
-    timings: dict[str, float] = {}
-    try:
-        t = time.monotonic()
-        mezz = work / "mezz.mp4"
-        storage.get_file(mezz_key, str(mezz))
-        timings["get"] = round(time.monotonic() - t, 3)
-        files = render_to_dir(
-            str(mezz), str(work / "out"),
-            [(float(s), float(e)) for s, e in segments],
-            segment_effects or [], subtitles, caption_preset, cut_style,
-            language, output_formats or [], hooks or [],
-            parallelism=8, timings=timings)
-        t = time.monotonic()
-        result = store_render_files(files, out_prefix, storage.put_file)
-        timings["put"] = round(time.monotonic() - t, 3)
-        result["timings"] = timings
-        return result
-    finally:
-        # One user's video: never left on a warm container.
-        shutil.rmtree(work, ignore_errors=True)
+        work = Path(tempfile.mkdtemp(prefix="cleo_r2_"))
+        timings: dict[str, float] = {}
+        try:
+            t = time.monotonic()
+            mezz = work / "mezz.mp4"
+            storage.get_file(mezz_key, str(mezz))
+            timings["get"] = round(time.monotonic() - t, 3)
+            files = render_to_dir(
+                str(mezz), str(work / "out"),
+                [(float(s), float(e)) for s, e in segments],
+                segment_effects or [], subtitles, caption_preset, cut_style,
+                language, output_formats or [], hooks or [],
+                parallelism=8, timings=timings)
+            t = time.monotonic()
+            result = store_render_files(files, out_prefix, storage.put_file)
+            timings["put"] = round(time.monotonic() - t, 3)
+            result["timings"] = timings
+            return result
+        finally:
+            # One user's video: never left on a warm container.
+            shutil.rmtree(work, ignore_errors=True)

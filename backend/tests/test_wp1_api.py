@@ -50,14 +50,15 @@ def fake_r2(monkeypatch, r2):
              "probes": []}
     real_size, real_delete = M.media.size, M.media.delete
 
-    def size(key):
-        return state["size"] if key.startswith("uploads/") else real_size(key)
+    def size(key, **kw):
+        return (state["size"] if key.startswith("uploads/")
+                else real_size(key, **kw))
 
-    def delete(key):
+    def delete(key, **kw):
         state["deleted"].append(key)
-        real_delete(key)
+        real_delete(key, **kw)
 
-    def get_file(key, path):
+    def get_file(key, path, **kw):
         state["downloads"].append(key)
         Path(path).write_bytes(b"v" * 16)
     monkeypatch.setattr(M.media, "size", size)
@@ -516,7 +517,12 @@ def test_caption_previews_are_cached(client, monkeypatch):
 # ── upload deleted right after normalization ─────────────────────────
 
 
-def _src_job(tmp_key="uploads/u.mp4"):
+# A browser upload key as storage.presign_upload makes them (the media
+# GC only takes keys of that shape).
+SRC_KEY = "uploads/0123456789abcdef0123456789abcdef.mp4"
+
+
+def _src_job(tmp_key=SRC_KEY):
     up = Path(M._WORK_ROOT) / "uploads"
     up.mkdir(parents=True, exist_ok=True)
     f = up / f"in-{time.time_ns()}.mp4"
@@ -528,7 +534,8 @@ def _media_deletes(monkeypatch) -> list:
     deleted: list[str] = []
     real = M.media.delete
     monkeypatch.setattr(M.media, "delete",
-                        lambda key: (deleted.append(key), real(key))[1])
+                        lambda key, **kw: (deleted.append(key),
+                                           real(key, **kw))[1])
     return deleted
 
 
@@ -555,7 +562,7 @@ def test_upload_is_dropped_after_normalize_and_failure_tolerates_it(
     got = store.get(job.id)
     assert got.status == "error" and got.input_path is None
     queued = {r["prefix"] for r in store.gc_all()}
-    assert queued == {"uploads/u.mp4", f"jobs/{job.id}/"}
+    assert queued == {SRC_KEY, f"jobs/{job.id}/"}
     assert not M._workspace(job.id).exists()
 
 
@@ -567,7 +574,7 @@ def test_upload_dropped_after_success_without_the_hook(monkeypatch):
     M._run_analyze_inner(job.id)
     got = store.get(job.id)
     assert got.status == "awaiting_review" and got.input_path is None
-    assert not f.exists() and deleted == ["uploads/u.mp4"]
+    assert not f.exists() and deleted == [SRC_KEY]
 
 
 # ── WAL ──────────────────────────────────────────────────────────────

@@ -19,9 +19,10 @@
  *
  * uploadSingle: the single presigned PUT (/uploads/presign), used when
  * the backend has no multipart API (404 / 405 — older backend), is
- * switched to it (409 use_single_put: CLEO_UPLOAD_MODE=single, the
- * kill switch) or has no R2 (503 that isn't server_busy; the caller
- * then falls back to the legacy upload through POST /jobs).
+ * switched to it (409 use_single_put from init, and from parts / sign
+ * for a resumed upload: CLEO_UPLOAD_MODE isn't "multipart" — the
+ * default) or has no R2 (503 that isn't server_busy; the caller then
+ * falls back to the legacy upload through POST /jobs).
  */
 import { ApiError, apiError, apiFetch } from "@/lib/api";
 

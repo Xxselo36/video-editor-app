@@ -26,6 +26,8 @@ def job_state(monkeypatch):
     for k in ("CLEO_MAX_UPLOAD_GB", "CLEO_MAX_MINUTES", "CLEO_MAX_QUEUE",
               "CLEO_MAX_ACTIVE_PER_USER"):
         monkeypatch.delenv(k, raising=False)
+    # The editor proxy route is opt-in (CLEO_PROXY_VIDEO=1).
+    monkeypatch.setenv("CLEO_PROXY_VIDEO", "1")
     monkeypatch.setenv("CLEO_DISK_FACTOR", "0")
     with M._INFLIGHT._lock:
         M._INFLIGHT._entries.clear()
@@ -163,7 +165,7 @@ def test_same_key_is_idempotent(client, auth_on, bearer, upload,
 
 def test_storage_down_is_a_retryable_503(client, auth_on, bearer, upload,
                                          monkeypatch):
-    def boom(key):
+    def boom(key, **kw):
         raise ConnectionError("R2 unreachable")
     monkeypatch.setattr(M.media, "size", boom)
     r = _post(client, bearer())
@@ -205,9 +207,9 @@ def test_worker_stores_keys_and_commits_once(r2, monkeypatch):
     deleted_at = []
     real_delete = M.media.delete
 
-    def delete(key):
+    def delete(key, **kw):
         deleted_at.append((key, store.get(job.id).status))
-        real_delete(key)
+        real_delete(key, **kw)
     monkeypatch.setattr(M.media, "delete", delete)
 
     M._run_analyze_inner(job.id)
@@ -476,8 +478,8 @@ def test_preview_rebuild_uses_the_proxy_cache_and_a_new_key(client, r2,
                  media_bytes={p + "preview/v1.mp4": 3})
     fetched, cuts = [], []
     real_get = M.media.get_file
-    monkeypatch.setattr(M.media, "get_file", lambda key, path: (
-        fetched.append(key), real_get(key, path))[1])
+    monkeypatch.setattr(M.media, "get_file", lambda key, path, **kw: (
+        fetched.append(key), real_get(key, path, **kw))[1])
 
     def cut(source, segments, output):
         cuts.append((Path(source).read_bytes(), [list(s) for s in segments]))

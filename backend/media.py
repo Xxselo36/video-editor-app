@@ -1,16 +1,27 @@
 """Job media, backend-neutral: the only API the rest of the backend uses
 to store and serve a job's files.
 
-Two backends, chosen per process from the environment:
+Two stores. Every job records where its media lives (Job.media_store,
+"r2" | "local", set when its first keys are written); every read,
+write and delete of a job's media goes to THAT store, whatever the
+process setting says now. The process setting only decides where the
+media of NEW jobs goes:
 
-    R2 configured (backend/storage.py), CLEO_MEDIA_BACKEND unset → "r2"
-    CLEO_MEDIA_BACKEND=local                                  → "local"
-    no R2_* env vars                                          → "local"
-    CLEO_MEDIA_BACKEND=r2 without R2 config                   → refuse to
-                                                                start
-                                                                (ConfigError)
+    CLEO_MEDIA_BACKEND unset / "local"                     → "local"
+    CLEO_MEDIA_BACKEND=r2 (R2 configured, backend/storage)  → "r2"
+    CLEO_MEDIA_BACKEND=r2 without R2 config                 → refuse to
+                                                              start
+                                                              (ConfigError)
 
-Both use the same keys (layout in DEPLOY.md, "Media storage (R2)"):
+So switching CLEO_MEDIA_BACKEND in either direction never strands a
+job: old jobs keep being served from where they are (R2 must stay
+configured while any job has media_store="r2"); r2_backfill can move
+keyed-local jobs to R2.
+
+Browser uploads (uploads/…) are in R2 whenever R2 is configured — the
+upload API needs it — whatever the job's store.
+
+Both stores use the same keys (layout in DEPLOY.md, "Media storage"):
 
     uploads/{user}/{uuid32}{ext}   browser upload target
     jobs/{id}/source{ext}          a source that didn't come via uploads/
@@ -58,13 +69,15 @@ REDIRECT_CACHE = "private, max-age=3600"
 _JOB_ID = re.compile(r"^[0-9a-f]{12}$")
 
 
+STORES = ("local", "r2")
+
+
 def backend() -> str:
-    """'r2' or 'local' (see module doc). Raises ConfigError for
+    """Where the media of NEW jobs goes: 'local' (default) or 'r2' (only
+    with CLEO_MEDIA_BACKEND=r2). Raises ConfigError for
     CLEO_MEDIA_BACKEND=r2 without R2 config or an unknown value."""
     choice = os.environ.get("CLEO_MEDIA_BACKEND", "").strip().lower()
-    if choice in ("", "auto"):
-        return "r2" if storage.r2_available() else "local"
-    if choice == "local":
+    if choice in ("", "local"):
         return "local"
     if choice == "r2":
         if not storage.r2_available():
@@ -74,20 +87,56 @@ def backend() -> str:
                 "R2_BUCKET, or remove CLEO_MEDIA_BACKEND")
         return "r2"
     raise ConfigError(f"CLEO_MEDIA_BACKEND={choice!r}: use 'r2' or 'local' "
-                      "(or leave it unset)")
+                      "(or leave it unset = local)")
 
 
 def is_r2() -> bool:
+    """Do NEW jobs keep their media in R2?"""
     return backend() == "r2"
 
 
-def _where(key: str) -> str:
-    """Browser uploads (uploads/…) are in R2 whenever R2 is configured —
-    the upload API needs it, also with CLEO_MEDIA_BACKEND=local; every
-    other key is in the media backend."""
+def _job_keys(job: Any) -> list[str]:
+    keys = [getattr(job, k, None) for k in (
+        "source_key", "mezz_key", "proxy_key", "preview_key", "thumb_key")]
+    keys += list((getattr(job, "output_keys", None) or {}).values())
+    return [k for k in keys if isinstance(k, str) and k
+            and not k.startswith("uploads/")]
+
+
+def store_of(job: Any) -> str:
+    """The store a job's media lives in: Job.media_store; for a job
+    without one — no keys yet (legacy or not analysed), or keys written
+    before the store was recorded — where its keys are found (a local
+    file wins, else R2 when configured), else where new media goes."""
+    s = getattr(job, "media_store", None)
+    if s in STORES:
+        return s
+    keys = _job_keys(job)
+    if keys:
+        for k in keys:
+            try:
+                if local_path(k).is_file():
+                    return "local"
+            except ValueError:
+                continue
+        if storage.r2_available():
+            return "r2"
+        return "local"
+    return backend()
+
+
+def _where(key: str, store: str | None) -> str:
+    """The store `key` is in: browser uploads (uploads/…) are in R2
+    whenever R2 is configured (the upload API needs it); every other key
+    is in `store` (the job's, media.store_of). None: the process
+    default (new media)."""
     if key.startswith("uploads/") and storage.r2_available():
         return "r2"
-    return backend()
+    if store is None:
+        return backend()
+    if store not in STORES:
+        raise ValueError(f"unknown media store {store!r}")
+    return store
 
 
 def check_key(key: Any) -> str:
@@ -158,13 +207,16 @@ def _link_or_copy(src: str | Path, dest: Path) -> None:
 
 
 # ── API ──────────────────────────────────────────────────────────────
+# `store`: the job's store (store_of(job)); None = the process default
+# (only right for media of a job that has no store yet — the caller then
+# records media_store=backend() with the keys).
 
 
 def put_file(path: str | Path, key: str, *, content_type: str,
-             cache_control: str = IMMUTABLE) -> int:
+             cache_control: str = IMMUTABLE, store: str | None = None) -> int:
     """Store a local file under `key`. Returns its size. Raises."""
     check_key(key)
-    if backend() == "r2":
+    if _where(key, store) == "r2":
         return storage.put_file(str(path), key, content_type=content_type,
                                 cache_control=cache_control)
     size = os.path.getsize(path)
@@ -172,11 +224,11 @@ def put_file(path: str | Path, key: str, *, content_type: str,
     return size
 
 
-def get_file(key: str, path: str | Path) -> None:
+def get_file(key: str, path: str | Path, *, store: str | None = None) -> None:
     """Fetch `key` into a local file. Raises (FileNotFoundError locally)."""
     check_key(key)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    if _where(key) == "r2":
+    if _where(key, store) == "r2":
         storage.get_file(key, str(path))
         return
     src = local_path(key)
@@ -185,10 +237,10 @@ def get_file(key: str, path: str | Path) -> None:
     _link_or_copy(src, Path(path))
 
 
-def size(key: str) -> int | None:
+def size(key: str, *, store: str | None = None) -> int | None:
     """Size of `key`; None when it doesn't exist. Raises on errors."""
     check_key(key)
-    if _where(key) == "r2":
+    if _where(key, store) == "r2":
         return storage.head(key)
     try:
         return local_path(key).stat().st_size
@@ -196,28 +248,30 @@ def size(key: str) -> int | None:
         return None
 
 
-def exists(key: str | None) -> bool:
+def exists(key: str | None, *, store: str | None = None) -> bool:
     try:
-        return bool(key) and size(key) is not None
+        return bool(key) and size(key, store=store) is not None
     except ValueError:
         return False
 
 
-def delete(key: str) -> None:
+def delete(key: str, *, store: str | None = None) -> None:
     check_key(key)
-    if _where(key) == "r2":
+    if _where(key, store) == "r2":
         storage.delete(key)
         return
     local_path(key).unlink(missing_ok=True)
 
 
-def delete_prefix(prefix: str) -> int:
-    """Delete everything under a `jobs/{id}/…` or `uploads/…/` prefix.
-    Returns how many objects. Raises."""
+def delete_prefix(prefix: str, *, store: str | None = None) -> int:
+    """Delete everything under a GC-able prefix (gc_entry_ok). Returns
+    how many objects. Raises."""
     check_key(prefix)
     if not prefix.endswith("/"):
         raise ValueError(f"not a prefix: {prefix!r}")
-    if _where(prefix) == "r2":
+    if not gc_entry_ok(prefix):
+        raise ValueError(f"refusing to delete prefix {prefix!r}")
+    if _where(prefix, store) == "r2":
         return storage.delete_prefix(prefix)
     root = local_path(prefix)
     if not root.exists():
@@ -227,12 +281,61 @@ def delete_prefix(prefix: str) -> int:
     return n
 
 
-def delete_any(entry: str) -> int:
-    """A media_gc entry: a prefix (ends with '/') or a single key."""
-    if entry.endswith("/"):
-        return delete_prefix(entry)
-    delete(entry)
-    return 1
+# What the media GC may delete — nothing else, whatever a row says
+# (one bad row must not wipe jobs/, uploads/ or backups/):
+#   jobs/<id>/                 a whole job
+#   jobs/<id>/r<g>/            one render generation
+#   jobs/<id>/preview/v<n>.mp4 one preview version
+#   jobs/<id>/source.<ext>     a body upload
+#   uploads/[<user>/]<uuid32>.<ext>   a browser upload
+_GC_JOB = re.compile(
+    r"^jobs/[0-9a-f]{12}/((r[0-9]+/)|preview/v[0-9]+\.mp4|source\.[a-z0-9]+)?$")
+_GC_UPLOAD = re.compile(
+    r"^uploads/([A-Za-z0-9_-]+/)?[0-9a-f]{32}\.[a-z0-9]+$")
+
+
+def gc_entry_ok(entry: Any) -> bool:
+    """Is `entry` something the media GC may delete (see above)?"""
+    return isinstance(entry, str) and bool(
+        _GC_JOB.match(entry) or _GC_UPLOAD.match(entry))
+
+
+def gc_stores(store: str | None) -> list[str]:
+    """The stores a media_gc row is deleted in: its own; a row without
+    one (queued before stores were recorded) in both — local, and R2
+    when configured. An "r2" row is deleted in R2 whenever R2 is
+    configured (whatever CLEO_MEDIA_BACKEND says); without R2 config it
+    fails and stays queued."""
+    if store in STORES:
+        return [store]
+    return ["local"] + (["r2"] if storage.r2_available() else [])
+
+
+def delete_any(entry: str, store: str | None = None) -> int:
+    """A media_gc entry: a prefix (ends with '/') or a single key, in
+    the row's store (gc_stores). Raises ValueError for an entry outside
+    the GC whitelist (gc_entry_ok), RuntimeError for an "r2" row
+    without R2 config."""
+    if not gc_entry_ok(entry):
+        raise ValueError(f"refusing to delete {entry!r}: not a GC-able "
+                         "media key or prefix")
+    if entry.startswith("uploads/"):
+        # Browser uploads are in R2 whenever it is configured (_where),
+        # whatever the row says.
+        stores = ["r2"] if storage.r2_available() else ["local"]
+    else:
+        stores = gc_stores(store)
+    n = 0
+    for where in stores:
+        if where == "r2" and not storage.r2_available():
+            raise RuntimeError("R2 is not configured — can't delete R2 "
+                               f"media {entry}")
+        if entry.endswith("/"):
+            n += delete_prefix(entry, store=where)
+        else:
+            delete(entry, store=where)
+            n += 1
+    return n
 
 
 def presign_get(key: str, *, filename: str | None = None,
@@ -246,14 +349,15 @@ def presign_get(key: str, *, filename: str | None = None,
 
 def media_response(key: str, *, media_type: str,
                    download_name: str | None = None,
-                   cache: str | None = None):
-    """What a media route answers for `key`: r2 → 307 to a presigned GET
-    (Cache-Control: private, max-age=3600); local → FileResponse (Range,
-    `cache` as its Cache-Control, an attachment when `download_name`).
-    Raises FileNotFoundError when a local object is missing."""
+                   cache: str | None = None, store: str | None = None):
+    """What a media route answers for `key` in `store`: r2 → 307 to a
+    presigned GET (Cache-Control: private, max-age=3600); local →
+    FileResponse (Range, `cache` as its Cache-Control, an attachment
+    when `download_name`). Raises FileNotFoundError when a local object
+    is missing."""
     from fastapi.responses import FileResponse, RedirectResponse
     check_key(key)
-    if _where(key) == "r2":
+    if _where(key, store) == "r2":
         url = presign_get(key, filename=download_name,
                           attachment=bool(download_name),
                           content_type=media_type)
@@ -271,28 +375,33 @@ def media_response(key: str, *, media_type: str,
 
 def delete_user(user_id: str) -> int:
     """Account deletion (for later use): the user's upload prefix plus the
-    media of each of their jobs. Returns how many objects went. The job
-    rows themselves are the caller's business."""
+    media of each of their jobs (each in its own store). Returns how
+    many objects went. The job rows themselves are the caller's
+    business."""
     from backend import auth
-    from backend.jobs import store
-    removed = delete_prefix(auth.upload_prefix(auth.User(id=user_id)))
-    for job in store.list_by_owner(user_id):
+    from backend.jobs import store as jobs_store
+    removed = 0
+    if storage.r2_available():
+        removed += storage.delete_prefix(
+            auth.upload_prefix(auth.User(id=user_id)))
+    for job in jobs_store.list_by_owner(user_id):
+        where = store_of(job)
         if valid_job_id(job.id):
-            removed += delete_prefix(job_prefix(job.id))
+            removed += delete_prefix(job_prefix(job.id), store=where)
         if job.source_key:
             try:
-                delete(job.source_key)
+                delete(job.source_key, store=where)
                 removed += 1
             except ValueError:
                 pass
     return removed
 
 
-def list_job_prefixes(skip=None):
+def list_job_prefixes(store: str, skip=None):
     """(job id, newest object time as a Unix float) of every jobs/{id}/
-    prefix — the orphan sweep. Ids for which skip(id) is true aren't
-    looked into."""
-    if backend() == "r2":
+    prefix in `store` — the orphan sweep. Ids for which skip(id) is
+    true aren't looked into."""
+    if store == "r2":
         for job_id, newest in storage.list_job_prefixes(skip):
             yield job_id, newest.timestamp()
         return
@@ -312,3 +421,30 @@ def list_job_prefixes(skip=None):
                 pass
         if newest is not None:
             yield d.name, newest
+
+
+# ── bucket owner marker (the orphan sweep) ───────────────────────────
+# jobs/.owner holds the id of the database that owns the store's jobs/
+# (meta media_owner_id). The orphan sweep deletes nothing unless they
+# match: another deployment sharing the bucket (staging, a dev box with
+# the prod .env, a restored backup) must never treat our jobs as its
+# orphans.
+OWNER_KEY = "jobs/.owner"
+
+
+def read_owner(store: str) -> str | None:
+    if store == "r2":
+        return storage.get_text(OWNER_KEY)
+    try:
+        return local_path(OWNER_KEY).read_text().strip() or None
+    except FileNotFoundError:
+        return None
+
+
+def write_owner(store: str, owner: str) -> None:
+    if store == "r2":
+        storage.put_text(OWNER_KEY, owner)
+        return
+    p = local_path(OWNER_KEY)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(owner)

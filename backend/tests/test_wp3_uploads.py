@@ -28,6 +28,8 @@ def upload_state(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     # Sizes up to 4 GB without 14 GB of free disk here.
     monkeypatch.setenv("CLEO_DISK_FACTOR", "0")
+    # Multipart is opt-in (default: single PUT, 409 use_single_put).
+    monkeypatch.setenv("CLEO_UPLOAD_MODE", "multipart")
     with M._INFLIGHT._lock:
         M._INFLIGHT._entries.clear()
     yield

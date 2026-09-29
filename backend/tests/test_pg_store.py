@@ -439,16 +439,16 @@ def fake_r2(monkeypatch, r2):
     state = {"probes": [], "deleted": [], "barrier": None}
     real_delete = M.media.delete
 
-    def delete(key):
+    def delete(key, **kw):
         state["deleted"].append(key)
-        real_delete(key)
+        real_delete(key, **kw)
 
     def probe(url):
         state["probes"].append(url)
         if state["barrier"] is not None:
             state["barrier"].wait(timeout=10)
         return 60.0
-    monkeypatch.setattr(M.media, "size", lambda key: 1000)
+    monkeypatch.setattr(M.media, "size", lambda key, **kw: 1000)
     monkeypatch.setattr(M.media, "delete", delete)
     monkeypatch.setattr(M, "_probe_remote_duration", probe)
     monkeypatch.setattr(M, "_probe_duration", lambda p: 60.0)
