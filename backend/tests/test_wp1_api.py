@@ -127,7 +127,9 @@ def test_settings_whitelist(client, probe):
         "caption_preset": "clipper", "style": "tight",
         "voice_triggers": True, "remove_fillers": False,
         "smartcam_enabled": True, "smartcam_format": "portrait",
-        "resolution": "1080", "output_formats": ["9:16"]}
+        "resolution": "1080", "output_formats": ["9:16"],
+        # set by the server, not the client's 99999: CLEO_MAX_MINUTES
+        "_max_seconds": 30 * 60 + 1}
 
 
 @pytest.mark.parametrize("value,kept", [

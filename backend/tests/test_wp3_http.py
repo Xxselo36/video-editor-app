@@ -21,7 +21,7 @@ import pytest
 import backend.main as M
 from backend import accounts, auth, storage
 from backend.jobs import store
-from conftest import R2_ENV, add_sub
+from conftest import R2_ENV, add_sub, analysis_result
 
 pytestmark = pytest.mark.skipif(
     not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
@@ -169,12 +169,30 @@ def test_streamed_webm_falls_back_to_the_client_duration(
         assert r.status_code == 200, r.text
         assert url_probe == [None]            # no duration in the header
         assert accounts.get_usage(r.json()["job_id"])["seconds_billed"] == 4
+        # No duration from the browser either (MediaRecorder reports
+        # Infinity): accepted, measured and charged by the worker — the
+        # real packet scan of the real object.
         key2 = _upload(client, h, data, "rec2.webm")
         r = client.post("/jobs", headers=h, data={"settings": "{}",
                                                    "storage_key": key2})
-        assert (r.status_code, r.json()) == (400,
-                                             {"detail": "unreadable_video"})
-        assert storage.head(key2) is None
+        assert r.status_code == 200, r.text
+        job_id = r.json()["job_id"]
+        assert accounts.get_usage(job_id) is None
+        seen = {}
+
+        def analyze(input_path, output_dir, settings, **kw):
+            seen["settings"] = settings
+            return analysis_result(output_dir, 3.0)
+        mp.setattr(M, "analyze_only", analyze)
+        M._run_analyze_inner(job_id)
+        got = store.get(job_id)
+        assert got.status == "awaiting_review", got.error
+        billed = accounts.get_usage(job_id)["seconds_billed"]
+        assert billed in (3, 4)
+        assert seen["settings"] == {
+            "_max_seconds": billed + accounts.TRUE_UP_TOLERANCE_S}
+        assert got.settings == seen["settings"] and got.plan == "pro"
+        assert storage.head(key2) is None     # consumed
     finally:
         mp.undo()
 

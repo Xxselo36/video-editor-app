@@ -194,6 +194,26 @@ def _video_too_long() -> ApiRefusal:
     return ApiRefusal(413, "video_too_long", max_minutes=_plain(_max_minutes()))
 
 
+def _analysis_cap_s() -> float | None:
+    """The most of any upload that is analysed (CLEO_MAX_MINUTES, with
+    _too_long's second of slack); None when the cap is off (<= 0)."""
+    minutes = _max_minutes()
+    return minutes * 60 + 1 if minutes > 0 else None
+
+
+def _cap_settings(settings: dict) -> dict:
+    """settings["_max_seconds"] no higher than _analysis_cap_s()."""
+    cap = _analysis_cap_s()
+    if cap is None:
+        return settings
+    try:
+        cur = float(settings.get("_max_seconds") or 0) or None
+    except (TypeError, ValueError):
+        cur = None
+    settings["_max_seconds"] = cap if cur is None else min(cur, cap)
+    return settings
+
+
 def _server_busy() -> ApiRefusal:
     return ApiRefusal(503, "server_busy", headers={"Retry-After": "120"})
 
@@ -809,6 +829,37 @@ def _delete_job(job) -> None:
         _gc_one(entry, where)
 
 
+def delete_user_media(user_id: str) -> dict[str, int]:
+    """Account deletion (for later use): each of the user's jobs removed
+    like DELETE /jobs/{id} does (_delete_job: the row, jobs/{id}/ and
+    the upload in the job's store, legacy files, the proxy cache —
+    queued in media_gc in the row's transaction, so an R2 error mid-way
+    is retried, not left half-done), then every object under the user's
+    upload prefix queued the same way. Running jobs are left (their
+    worker would write again): "running" says how many — call again
+    once they have settled. Returns {"jobs", "uploads", "running"}."""
+    with _active_lock:
+        active = set(_active_jobs)
+    active |= _INFLIGHT.job_ids()
+    out = {"jobs": 0, "uploads": 0, "running": 0}
+    for job in store.list_by_owner(user_id):
+        if job.id in active or job.status in RUNNING_STATUSES:
+            out["running"] += 1
+            continue
+        _delete_job(job)
+        out["jobs"] += 1
+    if storage.r2_available():
+        prefix = auth.upload_prefix(User(id=user_id))
+        keys = [o["key"] for o in storage.list_r2(prefix)
+                if media.gc_entry_ok(o["key"])]
+        if keys:
+            store.gc_add(keys, store="r2")
+            for key in keys:
+                _gc_one(key, "r2")
+        out["uploads"] = len(keys)
+    return out
+
+
 def purge_expired_jobs(now: float | None = None) -> int:
     """Delete jobs idle longer than their plan's retention period
     (backend.jobs.PLAN_RETENTION_DAYS; the privacy page states the same).
@@ -1081,6 +1132,49 @@ def _orphan_sweep_due(now: float) -> bool:
     return True
 
 
+# The uploads/ lifecycle rules (expire abandoned or refused browser
+# uploads, abort open multipart uploads) are the only retention uploads/
+# has — nothing else deletes an upload nobody turned into a job. Checked
+# at runtime once a day while R2 is configured, not only by
+# `r2_setup --check`: missing rules are logged as an error every day
+# until fixed.
+_LIFECYCLE_EVERY_S = 86400.0
+_lifecycle_checked_at = float("-inf")
+
+
+def check_uploads_lifecycle(now: float | None = None) -> list[str] | None:
+    """Problems of the bucket's uploads/ lifecycle rules ([] = fine), or
+    None when there is no R2 / the check isn't due / the token may not
+    read them (said once a day in the log)."""
+    global _lifecycle_checked_at
+    if not storage.r2_available():
+        return None
+    now = time.monotonic() if now is None else now
+    if now - _lifecycle_checked_at < _LIFECYCLE_EVERY_S:
+        return None
+    _lifecycle_checked_at = now
+    from backend import r2_setup
+    try:
+        rules = storage._client().get_bucket_lifecycle_configuration(
+            Bucket=storage.bucket()).get("Rules") or []
+    except Exception as e:
+        if "NoSuchLifecycleConfiguration" not in str(e):
+            print(f"[media] can't read the R2 lifecycle rules "
+                  f"({type(e).__name__}) — check that uploads/ expires "
+                  "(DEPLOY.md §10, r2_setup --print-config)", flush=True)
+            return None
+        rules = []
+    problems = r2_setup.lifecycle_problems(rules)
+    if problems:
+        line = ("[media] R2 LIFECYCLE MISSING: " + "; ".join(problems)
+                + " — abandoned uploads stay forever. Apply "
+                "`python -m backend.r2_setup --print-config`'s lifecycle "
+                "rules (DEPLOY.md §10)")
+        print(line, flush=True)
+        logging.getLogger("backend.media").error(line)
+    return problems
+
+
 def _backfill_tick() -> None:
     """CLEO_BACKFILL=1: move a few legacy jobs' local files to the media
     store per hour (backend/r2_backfill.py; one runner)."""
@@ -1130,6 +1224,10 @@ def _hourly() -> None:
             sweep_media_orphans()
     except Exception as e:
         print(f"[media] orphan sweep failed: {e}", flush=True)
+    try:
+        check_uploads_lifecycle()
+    except Exception as e:
+        print(f"[media] lifecycle check failed: {e}", flush=True)
     try:
         _backfill_tick()
     except Exception as e:
@@ -1848,6 +1946,100 @@ def _analysis_failed(job_id: str, job_dir: Path, exc: Exception,
         _gc_later(media_entries, store_=where)
 
 
+class AnalysisRefused(Exception):
+    """The analysis worker refuses an upload before transcribing it
+    (_length_gate): too long, unreadable, over the minutes left. `text`
+    is the job's error (the code, JSON with the limit like the HTTP
+    refusals, so the web app can word it)."""
+
+    def __init__(self, code: str, **extra: Any) -> None:
+        super().__init__(code)
+        self.code = code
+        self.text = (json.dumps({"detail": code, **extra},
+                                separators=(",", ":"))
+                     if extra else code)
+
+
+def _length_gate(job: Job, input_path: str,
+                 progress: Callable[[str, float], None]) -> dict:
+    """Before the analysis: the settings to analyse with. For an upload
+    accepted without a known length (POST /jobs: _measure_length) the
+    local copy is measured (packet scan) — over CLEO_MAX_MINUTES →
+    video_too_long; billed (_charge) → charged here, refused
+    quota_exceeded / subscription_required / unreadable_video (enforced)
+    exactly like POST /jobs would have. _max_seconds is capped at
+    CLEO_MAX_MINUTES for every job. Raises AnalysisRefused; the flags
+    leave the stored settings (with the plan of the charge)."""
+    settings = dict(job.settings or {})
+    measure = bool(settings.pop("_measure_length", False))
+    charge = settings.pop("_charge", None)
+    changed: dict[str, Any] = {}
+    if measure:
+        progress("Checking the video…", 1)
+        seconds = _probe_duration(input_path)
+        if _too_long(seconds):
+            raise AnalysisRefused("video_too_long",
+                                  max_minutes=_plain(_max_minutes()))
+        if charge in ("enforce", "record") and job.owner_id:
+            enforce = charge == "enforce"
+            if seconds is None and enforce:
+                raise AnalysisRefused("unreadable_video")
+            email = None
+            try:
+                email = (accounts.get_user(job.owner_id) or {}).get("email")
+            except Exception:
+                pass
+            try:
+                # Once (usage is keyed by the job): not through _db_retry.
+                ent = accounts.charge(job.id, job.owner_id, seconds or 0.0,
+                                      email=email, enforce=enforce)
+            except accounts.SubscriptionRequired:
+                raise AnalysisRefused("subscription_required")
+            except accounts.QuotaExceeded as e:
+                raise AnalysisRefused(
+                    "quota_exceeded",
+                    remaining_seconds=round(e.remaining_seconds),
+                    needed_seconds=round(e.needed_seconds))
+            if ent is not None:
+                changed["plan"] = ent.plan
+            if enforce:
+                settings["_max_seconds"] = (
+                    math.ceil(max(seconds or 0.0, 0.0))
+                    + accounts.TRUE_UP_TOLERANCE_S)
+    _cap_settings(settings)
+    if measure or charge or settings != (job.settings or {}):
+        changed["settings"] = settings
+    if changed:
+        _db_retry(job.id, "saving the settings", store.update, job.id,
+                  **changed)
+    return settings
+
+
+def _analysis_refused(job_id: str, job_dir: Path, exc: AnalysisRefused,
+                      drop_upload: Callable[[], None],
+                      media_entries: list[str] | None = None,
+                      where: str | None = None,
+                      source_key: str | None = None) -> None:
+    """_length_gate refused the upload: whatever was charged back, the
+    error state, the upload and the workspace freed (nothing was
+    transcribed; like a refused POST /jobs). Raises like
+    _analysis_failed when the database won't take it."""
+    print(f"[job {job_id}] refused before analysis: {exc.text}", flush=True)
+    if auth.auth_enabled():
+        _db_retry(job_id, "refunding", accounts.refund, job_id, exc.code)
+    _db_retry(job_id, "saving the refusal", store.update, job_id,
+              status="error", message=exc.text[:300], error=exc.text[:2000],
+              progress=0.0, input_path=None)
+    drop_upload()
+    shutil.rmtree(job_dir, ignore_errors=True)
+    if source_key:
+        # Retrying can't help: the upload goes now (media_gc if R2 fails).
+        _discard_upload(None, source_key, where)
+    if media_entries:
+        _gc_later([e for e in media_entries if e != source_key],
+                  store_=where)
+
+
 def _render_failed(job_id: str, exc: Exception) -> None:
     """A render failed (or its result couldn't be saved): back to review
     instead of a dead 'error' — the user's edits and the source are
@@ -1981,14 +2173,20 @@ def _run_analyze_inner(job_id: str) -> None:
                         f"fetching the upload failed: "
                         f"{type(e).__name__}: {e}") from e
                 input_path = str(local_copy)
+            settings = _length_gate(job, input_path, progress)
             res = analyze_only(
                 input_path=input_path,
                 output_dir=str(ws),
-                settings=job.settings,
+                settings=settings,
                 progress_cb=progress,
                 **extra,
             )
             stored = _store_analysis(job_id, res, progress, where)
+        except AnalysisRefused as e:
+            progress.close()
+            _analysis_refused(job_id, ws, e, _drop_upload, media_entries,
+                              where, source_key)
+            return
         except Exception as e:
             progress.close()
             _analysis_failed(job_id, ws, e, _drop_upload, media_entries,
@@ -1998,9 +2196,13 @@ def _run_analyze_inner(job_id: str) -> None:
         try:
             # Pause here: status "awaiting_review" tells the UI to show the
             # subtitle editor. Render starts when client POSTs /jobs/{id}/render.
-            _db_retry(
-                job_id, "saving the analysis", store.update,
-                job_id,
+            # Only while the job is still ours to finish ("processing"):
+            # a job another process settled meanwhile (error
+            # container_restart, its media GC'd) or deleted must not come
+            # back with keys pointing at deleted objects.
+            committed = _db_retry(
+                job_id, "saving the analysis", store.update_if,
+                job_id, "processing",
                 status="awaiting_review",
                 message="Review subtitles",
                 progress=100.0,
@@ -2016,11 +2218,33 @@ def _run_analyze_inner(job_id: str) -> None:
                 scene_events=res.get("scene_events", []),
                 **stored,
             )
+            cur = None
+            if not committed:
+                # A retry after a write that did land (the connection
+                # broke on the answer) finds its own commit: go on.
+                cur = _db_retry(job_id, "reading the job", store.get, job_id)
+                committed = (cur is not None
+                             and cur.status == "awaiting_review"
+                             and cur.mezz_key == stored.get("mezz_key")
+                             and media.store_of(cur) == where)
         except Exception as e:
             # Not saved (the database stayed down, or a bad result): a
             # failed analysis — refunded when the database was the cause.
             _analysis_failed(job_id, ws, e, _drop_upload, media_entries,
                              where)
+            return
+        if not committed:
+            # Settled elsewhere (error: nothing of it is used again) or
+            # deleted: what this run stored belongs to nobody. The upload
+            # object is left to whoever settled the job.
+            gone = cur is None or cur.status == "error"
+            print(f"[job {job_id}] analysis finished, but the job is no "
+                  f"longer processing ({cur.status if cur else 'deleted'})"
+                  " — not saved" + ("; its stored files queued for "
+                                    "deletion" if gone else ""), flush=True)
+            _drop_upload()
+            if gone and media.valid_job_id(job_id):
+                _gc_later([media.job_prefix(job_id)], store_=where)
             return
         _true_up(job_id, res.get("duration", 0.0))
         _drop_upload()  # if the pipeline didn't already
@@ -2316,13 +2540,39 @@ def _storage_call(what: str, fn: Callable, *args: Any) -> Any:
         raise ApiRefusal(502, "storage_error")
 
 
+# Multipart uploads a caller may open per hour (CLEO_UPLOAD_INITS_PER_HOUR,
+# 0 = no limit): each one is an open upload in R2 (Class-A operations,
+# parts kept until the lifecycle rule aborts it a day later) — POST
+# /jobs's admission doesn't see them. Per user; per client address with
+# auth off. In-process (one uvicorn process).
+def _init_limit() -> int:
+    return max(0, _env_int("CLEO_UPLOAD_INITS_PER_HOUR", 30))
+
+
+_INIT_RATE = upl.RateLimit(_init_limit(), 3600.0)
+
+
+def _check_init_rate(user: User | None, request: Request) -> None:
+    limit = _init_limit()
+    if limit <= 0:
+        return
+    _INIT_RATE.limit = limit
+    who = (f"u:{user.id}" if user is not None
+           else f"ip:{request.client.host if request.client else ''}")
+    if not _INIT_RATE.allow(who):
+        raise ApiRefusal(429, "too_many_uploads",
+                         headers={"Retry-After": "600"})
+
+
 @app.post("/uploads/multipart/init")
-def multipart_init(payload: dict, user: User | None = Depends(current_user)):
+def multipart_init(payload: dict, request: Request,
+                   user: User | None = Depends(current_user)):
     """Start a resumable upload: {filename, content_type, size, duration?}
     → {ticket, storage_key, part_size, parts_total, expires_at, parts:
     [{part_number, url}] (the first up to 8)}. Refuses like
     /uploads/presign, in the same order: 402, 413, 429 / 503 server_busy,
-    507, 503 without R2; 409 use_single_put unless
+    507, 503 without R2; then 429 too_many_uploads (+ Retry-After) past
+    CLEO_UPLOAD_INITS_PER_HOUR; 409 use_single_put unless
     CLEO_UPLOAD_MODE=multipart."""
     from backend import storage
     _require_multipart()
@@ -2337,6 +2587,7 @@ def multipart_init(payload: dict, user: User | None = Depends(current_user)):
     _INFLIGHT.reserve_disk(None, size)
     if not storage.r2_available():
         raise _no_direct_upload()
+    _check_init_rate(user, request)
     size = int(size)
     ps, n = upl.part_plan(size)
     key = (auth.upload_prefix(user) + uuid.uuid4().hex
@@ -2592,8 +2843,13 @@ async def create_job(
     `filename`, `preset_id`, `preset_label` are stored for the Library.
     With billing on, the upload's length is probed and charged against
     the caller's minutes here, once (402 subscription_required /
-    quota_exceeded when enforced; 400 unreadable_video if it has no
-    readable length).
+    quota_exceeded when enforced; 400 unreadable_video for a body upload
+    without a readable length). An R2 upload whose length neither its
+    header nor the client knows (streamed WebM) is accepted; the
+    analysis worker measures its copy first and refuses it there
+    (error video_too_long / quota_exceeded / unreadable_video, the
+    upload deleted, nothing charged) or charges it then. Every analysis
+    stops at CLEO_MAX_MINUTES (settings._max_seconds).
 
     Refusals (see presign): 413 file_too_large / video_too_long, 429
     too_many_active_jobs, 503 server_busy + Retry-After, 507
@@ -2791,7 +3047,21 @@ async def _accept_upload(
             raise _video_too_long()
 
         plan = DEFAULT_PLAN
-        if bills and seconds is None:
+        # Charged in the analysis worker instead of here (see
+        # _length_gate): "enforce" / "record" (billing not enforced).
+        deferred: str | None = None
+        if seconds is None and storage_key:
+            # Neither the container header (streamed / fragmented WebM)
+            # nor the browser knows the length. Accepted: the worker
+            # measures its local copy (packet scan) before anything is
+            # transcribed, refuses it there when it is too long (or,
+            # billed, over the minutes left) and charges then.
+            parsed["_measure_length"] = True
+            if bills:
+                deferred = "enforce" if enforce else "record"
+                parsed["_charge"] = deferred
+        elif bills and seconds is None:
+            # A body upload was packet-scanned already: really unreadable.
             if enforce:
                 await run_in_threadpool(_discard_upload, input_path,
                                         storage_key)
@@ -2834,7 +3104,7 @@ async def _accept_upload(
             return claimed
         charged = False
         try:
-            if bills:
+            if bills and deferred is None:
                 # Quota check + ledger insert are atomic inside charge()
                 # (one transaction under the user's lock — across
                 # processes with Postgres), so two uploads of one user
@@ -2861,6 +3131,9 @@ async def _accept_upload(
                     # transcribed in full, however long it really is.
                     parsed["_max_seconds"] = (math.ceil(max(seconds, 0.0))
                                               + accounts.TRUE_UP_TOLERANCE_S)
+            # Never more than CLEO_MAX_MINUTES, billed or not: the length
+            # this was accepted with may be the uploader's claim.
+            _cap_settings(parsed)
             # Accepted: the claim becomes the job.
             if not await run_in_threadpool(functools.partial(
                     store.update_if, job_id, "pending", settings=parsed,

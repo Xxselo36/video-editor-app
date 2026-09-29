@@ -26,18 +26,30 @@ Per job, newest updated_at first, skipping pending / processing jobs:
   6. thumbnail and hook clips                  → jobs/{id}/r1/thumb.jpg,
                                                   hook_{k}.mp4
   7. commit: HEAD every key, compare with the local size, then one
-     compare-and-set (store.modify): only if the job still has the
-     status, store and keys it had when the run started — else nothing
-     is written (the next run retries) and the copies are queued for
-     GC. A moved keyed-local job's local copy goes to the media GC a
-     day later (a player may still stream it).
+     compare-and-set (store.modify) against the job as it is NOW, not
+     the snapshot of the run's start:
+       - a move: only if the job still has the status, store and keys
+         it had — all or nothing (the next run retries);
+       - a legacy job: only with the same status and no media in
+         another store; each key only if the job still has none for it
+         (the preview only for the version it was made for, outputs
+         only for the render generation), media_bytes merged into the
+         stored ones, updated_at kept (a user's edit meanwhile wins).
+     Uploaded copies that weren't committed go to the media GC a day
+     later where the GC takes them one by one (preview versions); the
+     fixed names (mezz, proxy, r1/…) are uploaded over by the next run.
+     A moved keyed-local job's local copy goes to the media GC a day
+     later (a player may still stream it).
 
-Idempotent and resumable: what is already in R2 is skipped. One line per
-job, then a summary (jobs, bytes, estimated Railway egress at $0.05/GB).
+Idempotent and resumable: what is already in R2 is skipped. A proxy that
+can't be made is remembered (accounts meta) and not tried again. One
+line per job, then a summary (jobs, bytes, estimated Railway egress at
+$0.05/GB); --limit counts the jobs worked on, committed or not.
 
---delete-local (a separate run, >= 7 days later): for legacy jobs whose
-keys all verify by HEAD (size as recorded in media_bytes), delete the
-local files and clear the local path fields.
+--delete-local (a separate run, >= 7 days later): for jobs the backfill
+has nothing left to do for, whose every local file has a key that
+verifies by HEAD (size as recorded in media_bytes): clear the local path
+fields (compare-and-set), then delete the files.
 
 The retention loop runs it in small batches when CLEO_BACKFILL=1
 (backend/main.py _backfill_tick; one runner per process).
@@ -208,6 +220,119 @@ def move_plan(job: Job) -> list[dict[str, Any]]:
     return items
 
 
+# Jobs whose proxy couldn't be made (pipeline._make_proxy failed): not
+# tried again — every hourly batch would burn the same CPU on them. In
+# the accounts meta table (survives restarts), keyed by the job and the
+# mezz's size; in-process when that table can't be written.
+_PROXY_FAILED_META = "backfill_proxy_failed:"
+_proxy_failed_here: set[tuple[str, int]] = set()
+
+
+def _mezz_size(job: Job) -> int:
+    f = _file(job.normalized_path)
+    return f.stat().st_size if f is not None else -1
+
+
+def proxy_failed(job: Job) -> bool:
+    ident = (job.id, _mezz_size(job))
+    if ident in _proxy_failed_here:
+        return True
+    try:
+        from backend import accounts
+        return accounts.meta_get(_PROXY_FAILED_META + job.id) == str(ident[1])
+    except Exception:
+        return False
+
+
+def _remember_proxy_failure(job: Job) -> None:
+    ident = (job.id, _mezz_size(job))
+    _proxy_failed_here.add(ident)
+    try:
+        from backend import accounts
+        accounts.meta_set(_PROXY_FAILED_META + job.id, str(ident[1]))
+    except Exception as e:
+        print(f"[backfill] {job.id}: remembering the proxy failure in the "
+              f"database failed ({e}) — remembered in this process",
+              flush=True)
+
+
+_LEGACY_SINGLE = ("source_key", "mezz_key", "proxy_key")
+
+
+def _legacy_commit(job: Job, fields: dict[str, Any]):
+    """store.modify callback of a legacy job's backfill: only while the
+    job has the status it had at the start and no media in another
+    store; each key only if the job still has none for it (the preview
+    only for the preview version it was made for, outputs only for the
+    render generation), media_bytes merged into what is stored now,
+    updated_at kept (the backfill isn't a use of the project). None when
+    nothing is left to set."""
+    def fn(cur: Job) -> dict | None:
+        if cur.status != job.status or cur.status in RUNNING_STATUSES:
+            return None
+        if cur.media_store not in (None, "r2") or (
+                media._job_keys(cur) and media.store_of(cur) != "r2"):
+            return None
+        commit: dict[str, Any] = {}
+        for f in _LEGACY_SINGLE:
+            if f in fields and getattr(cur, f) is None:
+                commit[f] = fields[f]
+        if ("preview_key" in fields and cur.preview_key is None
+                and cur.preview_version == job.preview_version):
+            commit["preview_key"] = fields["preview_key"]
+        if ("output_keys" in fields and not cur.output_keys
+                and (cur.render_gen or 0) == (job.render_gen or 0)):
+            commit["output_keys"] = fields["output_keys"]
+            commit["render_gen"] = fields["render_gen"]
+            if "thumb_key" in fields and cur.thumb_key is None:
+                commit["thumb_key"] = fields["thumb_key"]
+        if not commit:
+            return None
+        committed = set(_committed_keys(commit))
+        return {**commit, "media_store": "r2",
+                "media_bytes": {**(cur.media_bytes or {}),
+                                **{k: v for k, v in fields["media_bytes"]
+                                   .items() if k in committed}},
+                "updated_at": cur.updated_at}
+    return fn
+
+
+def _committed_keys(fields: dict[str, Any]) -> list[str]:
+    keys = [fields[f] for f in (*_LEGACY_SINGLE, "preview_key", "thumb_key")
+            if isinstance(fields.get(f), str)]
+    keys += list((fields.get("output_keys") or {}).values())
+    return keys
+
+
+def _gc_uncommitted(job_id: str, uploaded: list[str],
+                    retried: set[str]) -> list[str]:
+    """Copies this run uploaded that the job doesn't use (not committed):
+    to the media GC a day later — only keys the GC takes one by one
+    (preview versions), nothing the job references now and nothing the
+    next run uploads and commits again under the same key (`retried`: a
+    move's keys); the whole prefix if the job is gone. Other keys (mezz,
+    proxy, r1/…) are fixed names: the next run uploads over them, and
+    the job's delete takes them. Returns what was queued."""
+    cur = store.get(job_id)
+    if cur is None:
+        entries = ([media.job_prefix(job_id)]
+                   if media.valid_job_id(job_id) else [])
+    else:
+        used = set(media._job_keys(cur)) if media.store_of(cur) == "r2" \
+            else set()
+        entries = [k for k in dict.fromkeys(uploaded)
+                   if k not in used and k not in retried
+                   and media.gc_entry_ok(k)]
+    if entries:
+        try:
+            store.gc_add(entries, time.time() + 24 * 3600, store="r2")
+        except Exception as e:
+            print(f"[backfill] {job_id}: queueing {entries} for deletion "
+                  f"failed: {e}", flush=True)
+            return []
+    return entries
+
+
 def backfill_job(job: Job, *, dry_run: bool = False,
                  throttle: _Throttle | None = None,
                  make_proxy: bool = True) -> dict[str, Any]:
@@ -216,6 +341,8 @@ def backfill_job(job: Job, *, dry_run: bool = False,
     "failed", "bytes", "detail"}."""
     from backend import storage
     out = {"job": job.id, "status": "nothing", "bytes": 0, "detail": ""}
+    if make_proxy and not job.proxy_key and proxy_failed(job):
+        make_proxy = False    # failed before: not every hour again
     if job.status in RUNNING_STATUSES:
         out.update(status="skipped", detail=job.status)
         return out
@@ -241,7 +368,9 @@ def backfill_job(job: Job, *, dry_run: bool = False,
             detail=", ".join(sorted({it["key"].rsplit("/", 1)[-1]
                                      for it in items})))
         return out
+    out["attempted"] = True     # counts toward a batch's --limit
     tmp_proxy: Path | None = None
+    uploaded: list[str] = []
     try:
         sizes: dict[str, int] = {}
         for it in items:
@@ -252,10 +381,12 @@ def backfill_job(job: Job, *, dry_run: bool = False,
                 if not pipeline._make_proxy(str(it["make_from"]),
                                             str(tmp_proxy)):
                     it["skip"] = True
+                    _remember_proxy_failure(job)
                     continue
                 it["path"] = tmp_proxy
             if it.get("alias"):
                 continue
+            uploaded.append(it["key"])
             size = media.put_file(it["path"], it["key"],
                                   content_type=it["ctype"], store="r2")
             sizes[it["key"]] = size
@@ -263,6 +394,11 @@ def backfill_job(job: Job, *, dry_run: bool = False,
             if throttle is not None:
                 throttle.add(size)
         items = [it for it in items if not it.get("skip")]
+        if not items:
+            # Nothing was uploaded (the proxy couldn't be made): not a
+            # "done" — and not tried again (proxy_failed).
+            out.update(status="skipped", detail="proxy could not be made")
+            return out
         for it in items:     # verify: HEAD every key against the file
             want = it["path"].stat().st_size
             got = media.size(it["key"], store="r2")
@@ -271,32 +407,56 @@ def backfill_job(job: Job, *, dry_run: bool = False,
                                    f"local {want} B")
         fields = _commit_fields(job, [it for it in items
                                       if it["field"] != "move"], sizes)
-        before = (job.status, job.media_store, _keys_of(job))
+        if moving:
+            # A move is all or nothing: every key of the job as it was
+            # (a key added meanwhile would be left behind locally).
+            before = (job.status, job.media_store, _keys_of(job))
 
-        def _cas(cur: Job) -> dict | None:
-            if (cur.status, cur.media_store, _keys_of(cur)) != before:
-                return None
-            # Merged into what is stored now; updated_at stays (the
-            # backfill isn't a use of the project).
-            return {**fields, "media_store": "r2",
-                    "media_bytes": {**(cur.media_bytes or {}),
-                                    **fields["media_bytes"]},
-                    "updated_at": cur.updated_at}
-        if store.modify(job.id, _cas) is None:
-            # Not committed. The R2 copies stay: the next run uploads
-            # the same keys again and commits them (a deleted job's are
-            # found by the orphan sweep).
-            out.update(status="skipped", detail="job changed meanwhile")
+            def _cas(cur: Job) -> dict | None:
+                if (cur.status, cur.media_store, _keys_of(cur)) != before:
+                    return None
+                return {**fields, "media_store": "r2",
+                        "media_bytes": {**(cur.media_bytes or {}),
+                                        **fields["media_bytes"]},
+                        "updated_at": cur.updated_at}
+            written = store.modify(job.id, _cas)
+        else:
+            written = store.modify(job.id, _legacy_commit(job, fields))
+        committed = set(_committed_keys(written or {}))
+        if moving and written is not None:
+            committed |= {it["key"] for it in moving}
+        left = [k for k in uploaded if k not in committed]
+        queued = (_gc_uncommitted(job.id, left,
+                                  {it["key"] for it in moving})
+                  if left else [])
+        for k in committed:
+            # Defensive: nothing committed stays queued for deletion.
+            store.gc_done(k, "r2")
+        if written is None:
+            out.update(status="skipped", detail="job changed meanwhile"
+                       + (f"; {len(queued)} copy(ies) queued for deletion"
+                          if queued else ""))
             return out
         if moving:
             # The local copy: a player may still stream it for a while.
             store.gc_add([media.job_prefix(job.id)],
                          time.time() + 24 * 3600, store="local")
-        out.update(status="done", detail=", ".join(
-            sorted({it["key"].rsplit("/", 1)[-1] for it in items})))
+        detail = ", ".join(sorted({k.rsplit("/", 1)[-1]
+                                   for k in committed}))
+        if left:
+            detail += (f" (not committed, the job changed: "
+                       f"{', '.join(k.rsplit('/', 1)[-1] for k in left)})")
+        out.update(status="done", detail=detail)
         return out
     except Exception as e:
         out.update(status="failed", detail=f"{type(e).__name__}: {e}")
+        try:
+            if uploaded and store.get(job.id) is None:
+                # Deleted while we uploaded (its delete's GC may have run
+                # before our last uploads): the prefix goes again.
+                _gc_uncommitted(job.id, uploaded, set())
+        except Exception:
+            pass
         return out
     finally:
         if tmp_proxy is not None:
@@ -328,18 +488,49 @@ def _commit_fields(job: Job, items: list[dict[str, Any]],
     return fields
 
 
-def _local_files(job: Job) -> list[Path]:
-    files = [_file(job.input_path), _file(job.normalized_path),
-             _proxy_file(job), _file(job.preview_path), _thumb_file(job)]
-    files += list(_output_files(job).values())
-    files += [_file(c.get("path")) for c in job.hook_clips or []]
-    return [f for f in files if f is not None]
+def _local_files(job: Job) -> list[tuple[Path, str | None]]:
+    """The job's local files, each with the key that holds its copy
+    (None: no key for it)."""
+    outs = job.output_keys or {}
+    files = [(_file(job.input_path), job.source_key),
+             (_file(job.normalized_path), job.mezz_key),
+             (_proxy_file(job), job.proxy_key),
+             (_file(job.preview_path), job.preview_key),
+             (_thumb_file(job), job.thumb_key)]
+    files += [(path, outs.get(fmt))
+              for fmt, path in _output_files(job).items()]
+    for i, clip in enumerate(job.hook_clips or []):
+        files.append((_file(clip.get("path")),
+                      outs.get(str(clip.get("key") or f"hook_{i + 1}"))))
+    seen: set[Path] = set()
+    out = []
+    for f, key in files:
+        if f is not None and f not in seen:
+            seen.add(f)
+            out.append((f, key))
+    return out
+
+
+_MEDIA_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".mp4", ".mov",
+                             ".webm", ".mkv", ".m4v"})
+
+
+def _path_fields(job: Job) -> tuple:
+    return (job.input_path, job.normalized_path, job.preview_path,
+            job.output_path, tuple(sorted((job.outputs or {}).items())),
+            tuple(c.get("path") for c in job.hook_clips or []))
 
 
 def delete_local(job: Job, *, dry_run: bool = False,
                  work_root: Path | None = None) -> dict[str, Any]:
-    """Remove a backfilled job's local files once every key verifies by
-    HEAD (size as recorded in media_bytes)."""
+    """Remove a backfilled job's local files — only when the backfill has
+    nothing left to do for it (plan() and move_plan() empty) and every
+    file to delete has a key whose copy verifies by HEAD (size as
+    recorded in media_bytes). The path fields are cleared first, in one
+    compare-and-set (store.modify: same status, same paths, updated_at
+    kept); the files go only after that committed. The job folder goes
+    too unless something that looks like media without a copy is left
+    in it."""
     out = {"job": job.id, "status": "nothing", "bytes": 0, "detail": ""}
     files = _local_files(job)
     job_dir = (work_root or media.work_root()) / job.id
@@ -348,30 +539,54 @@ def delete_local(job: Job, *, dry_run: bool = False,
     if job.status in RUNNING_STATUSES:
         out.update(status="skipped", detail=job.status)
         return out
-    keys = [k for k in [job.mezz_key, job.proxy_key, job.preview_key,
-                        job.thumb_key, *(job.output_keys or {}).values()]
-            if k]
-    if not job.mezz_key or not keys or media.store_of(job) != "r2":
+    if not job.mezz_key or media.store_of(job) != "r2":
         out.update(status="skipped", detail="not backfilled")
         return out
-    for key in dict.fromkeys(keys):
+    left = move_plan(job) + plan(job, make_proxy=False)
+    if left:
+        out.update(status="skipped", detail="not fully backfilled: " + ", ".join(
+            sorted({it["key"].rsplit("/", 1)[-1] for it in left})))
+        return out
+    no_copy = [f.name for f, key in files if not key]
+    if no_copy:
+        out.update(status="skipped",
+                   detail=f"no copy in R2 of {', '.join(no_copy)}")
+        return out
+    out["attempted"] = True
+    for key in dict.fromkeys(key for _f, key in files):
         want = (job.media_bytes or {}).get(key)
         got = media.size(key, store="r2")
         if got is None or (want is not None and got != want):
             out.update(status="skipped", detail=f"{key} does not verify")
             return out
-    out["bytes"] = sum(f.stat().st_size for f in files)
+    out["bytes"] = sum(f.stat().st_size for f, _key in files)
     if dry_run:
         out.update(status="dry-run", detail=f"{len(files)} file(s)")
         return out
-    for f in files:
+    before = (job.status, _path_fields(job))
+
+    def _clear(cur: Job) -> dict | None:
+        if (cur.status, _path_fields(cur)) != before or \
+                media.store_of(cur) != "r2":
+            return None
+        return {"input_path": None, "normalized_path": None,
+                "preview_path": None, "output_path": None, "outputs": {},
+                "hook_clips": [{k: v for k, v in c.items() if k != "path"}
+                               for c in cur.hook_clips or []],
+                "updated_at": cur.updated_at}
+    if store.modify(job.id, _clear) is None:
+        out.update(status="skipped", detail="job changed meanwhile")
+        return out
+    for f, _key in files:
         f.unlink(missing_ok=True)
+    kept = [p for p in job_dir.rglob("*")
+            if p.is_file() and p.suffix.lower() in _MEDIA_SUFFIXES] \
+        if job_dir.is_dir() else []
+    if kept:
+        out.update(status="done", detail=f"{len(files)} file(s); kept "
+                   f"{job_dir} ({len(kept)} other media file(s))")
+        return out
     shutil.rmtree(job_dir, ignore_errors=True)
-    hooks = [{k: v for k, v in c.items() if k != "path"}
-             for c in job.hook_clips or []]
-    store.update(job.id, input_path=None, normalized_path=None,
-                 preview_path=None, output_path=None, outputs={},
-                 hook_clips=hooks, updated_at=job.updated_at)
     out.update(status="done", detail=f"{len(files)} file(s)")
     return out
 
@@ -402,8 +617,12 @@ def run(*, dry_run: bool = False, delete_local_files: bool = False,
                                     "1").strip() != "0"
         throttle = _Throttle(max_mbps)
         summary = {"jobs": 0, "bytes": 0, "failed": 0, "skipped": 0}
+        # --limit counts jobs worked on (uploads tried, a proxy made,
+        # files verified), whatever came of it: a batch whose jobs keep
+        # failing still ends, and one that commits nothing isn't "done".
+        worked = 0
         for job in _candidates(job_id):
-            if limit is not None and summary["jobs"] >= limit:
+            if limit is not None and worked >= limit:
                 break
             if delete_local_files:
                 res = delete_local(job, dry_run=dry_run)
@@ -412,6 +631,9 @@ def run(*, dry_run: bool = False, delete_local_files: bool = False,
                                    make_proxy=make_proxy)
             if res["status"] == "nothing":
                 continue
+            if res.get("attempted") or res["status"] in ("done", "dry-run",
+                                                         "failed"):
+                worked += 1
             echo(f"[backfill] {res['job']} {res['status']} "
                  f"{res['bytes'] / 1e6:.1f} MB {res['detail']}")
             if res["status"] in ("done", "dry-run"):

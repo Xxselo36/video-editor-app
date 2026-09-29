@@ -373,28 +373,8 @@ def media_response(key: str, *, media_type: str,
                         filename=download_name, headers=headers)
 
 
-def delete_user(user_id: str) -> int:
-    """Account deletion (for later use): the user's upload prefix plus the
-    media of each of their jobs (each in its own store). Returns how
-    many objects went. The job rows themselves are the caller's
-    business."""
-    from backend import auth
-    from backend.jobs import store as jobs_store
-    removed = 0
-    if storage.r2_available():
-        removed += storage.delete_prefix(
-            auth.upload_prefix(auth.User(id=user_id)))
-    for job in jobs_store.list_by_owner(user_id):
-        where = store_of(job)
-        if valid_job_id(job.id):
-            removed += delete_prefix(job_prefix(job.id), store=where)
-        if job.source_key:
-            try:
-                delete(job.source_key, store=where)
-                removed += 1
-            except ValueError:
-                pass
-    return removed
+# Account deletion: backend.main.delete_user_media (each job the way
+# DELETE /jobs/{id} removes it, through the media GC).
 
 
 def list_job_prefixes(store: str, skip=None):

@@ -293,9 +293,12 @@ def test_service_user(client, auth_on, monkeypatch, bearer):
                       ).status_code == 401
     # The cost test tags its jobs; real users can't.
     r = _upload(client, svc, settings='{"_cost_test": true, "_r2_storage_key": "x"}')
-    assert store.get(r.json()["job_id"]).settings == {"_cost_test": True}
+    # (_max_seconds: every analysis stops at CLEO_MAX_MINUTES.)
+    assert store.get(r.json()["job_id"]).settings == {
+        "_cost_test": True, "_max_seconds": 30 * 60 + 1}
     r = _upload(client, bearer(), settings='{"_cost_test": true, "style": "tight"}')
-    assert store.get(r.json()["job_id"]).settings == {"style": "tight"}
+    assert store.get(r.json()["job_id"]).settings == {
+        "style": "tight", "_max_seconds": 30 * 60 + 1}
     assert len(client.get("/jobs", headers=svc).json()) == 3
 
 

@@ -85,7 +85,7 @@ def test_analysis_result_write_rides_out_a_short_outage(
         auth_on, fast_retry, monkeypatch):
     job, _ = _charged_job()
     monkeypatch.setattr(M, "analyze_only", _analysis)
-    left = _failing(monkeypatch, "update",
+    left = _failing(monkeypatch, "update_if",
                     lambda kw: kw.get("status") == "awaiting_review",
                     times=2)
     M._run_analyze_inner(job.id)
@@ -105,7 +105,7 @@ def test_analysis_that_cant_be_saved_fails_as_our_fault(
     once that error state is stored."""
     job, upload = _charged_job()
     monkeypatch.setattr(M, "analyze_only", _analysis)
-    _failing(monkeypatch, "update",
+    _failing(monkeypatch, "update_if",
              lambda kw: kw.get("status") == "awaiting_review")
     impl = jobs._open_store()
     real = impl.update
@@ -137,8 +137,10 @@ def test_analysis_left_running_by_an_outage_is_settled_by_the_sweep(
     monkeypatch.setattr(M, "analyze_only",
                         lambda output_dir, **kw: _analysis(output_dir))
     with monkeypatch.context() as outage:
+        _failing(outage, "update_if",
+                 lambda kw: kw.get("status") == "awaiting_review")
         _failing(outage, "update",
-                 lambda kw: kw.get("status") in ("awaiting_review", "error"))
+                 lambda kw: kw.get("status") == "error")
         with pytest.raises(PoolTimeout):
             M._run_analyze_inner(job.id)
     # the database is back
@@ -184,7 +186,7 @@ def test_refund_of_a_failed_analysis_rides_out_a_short_outage(
     refunds later)."""
     job, upload = _charged_job()
     monkeypatch.setattr(M, "analyze_only", _analysis)
-    _failing(monkeypatch, "update",
+    _failing(monkeypatch, "update_if",
              lambda kw: kw.get("status") == "awaiting_review")
     calls = _failing_refund(monkeypatch, times=1)
     M._run_analyze_inner(job.id)
@@ -203,7 +205,7 @@ def test_refund_that_cant_be_written_leaves_the_job_to_the_sweep(
     monkeypatch.setattr(M, "analyze_only",
                         lambda output_dir, **kw: _analysis(output_dir))
     with monkeypatch.context() as outage:
-        _failing(outage, "update",
+        _failing(outage, "update_if",
                  lambda kw: kw.get("status") == "awaiting_review")
         _failing_refund(outage)
         with pytest.raises(PoolTimeout):
