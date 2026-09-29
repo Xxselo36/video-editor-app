@@ -673,6 +673,15 @@ def _remove_upload(path: str | None) -> None:
             pass
 
 
+def _refuse_keyed(job) -> None:
+    """409 media_unavailable for a job whose media lives in the media
+    store (R2) of a later release (Job.has_media_keys): this release
+    can't serve, edit, render or delete that media. The job itself is
+    intact — the release that wrote the keys serves it again."""
+    if job.has_media_keys():
+        raise ApiRefusal(409, "media_unavailable")
+
+
 def _delete_job(job) -> None:
     """Remove a job's files (work dir, uploaded source, R2 object) and row."""
     shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
@@ -701,6 +710,11 @@ def purge_expired_jobs(now: float | None = None) -> int:
     deleted = 0
     for job in store.retention_candidates(_retention_cutoff(now)):
         if job.id in active or job.status in ("processing", "pending"):
+            continue
+        if job.has_media_keys():
+            # Its media is in the media store, which this release can't
+            # delete: keep the job for the release that wrote the keys
+            # (its own retention sweep deletes it with its media).
             continue
         if not job.updated_at:
             store.update(job.id, updated_at=now)
@@ -1042,8 +1056,7 @@ def _sweep_orphaned_jobs(now: float | None = None) -> int:
         if (job.id in live or _is_claim(job)
                 or (job.updated_at or 0) > cutoff):
             continue
-        if (job.normalized_path and job.segments
-                and Path(job.normalized_path).exists()):
+        if job.segments and job.has_mezz():
             # A render: analysis + edits are intact, back to review.
             if store.update_if(job.id, job.status, status="awaiting_review",
                                progress=100.0, message="render_failed",
@@ -1059,6 +1072,9 @@ def _sweep_orphaned_jobs(now: float | None = None) -> int:
                         "Please upload the video again.",
                 progress=0.0, queue_position=None, input_path=None):
             continue
+        settled += 1
+        if job.has_media_keys():
+            continue  # its media is a later release's (_refuse_keyed)
         try:
             _discard_upload(job.input_path,
                             (job.settings or {}).get("_r2_storage_key"))
@@ -1066,7 +1082,6 @@ def _sweep_orphaned_jobs(now: float | None = None) -> int:
             print(f"[jobs] dropping the upload of {job.id} failed: {e}",
                   flush=True)
         shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
-        settled += 1
     return settled
 
 
@@ -1084,6 +1099,9 @@ def _clean_interrupted() -> None:
     files in uploads/ that no job refers to (a restart in the middle of
     POST /jobs). Idempotent."""
     for job in store.list_by_status("error", error="container_restart"):
+        if job.has_media_keys():
+            # Media of a later release (media store): not ours to free.
+            continue
         job_dir = _WORK_ROOT / job.id
         if job.input_path or job_dir.exists():
             try:
@@ -2411,6 +2429,7 @@ def delete_job(job_id: str, user: User | None = Depends(current_user)):
         busy = job_id in _active_jobs
     if busy or job.status in ("processing", "pending"):
         raise HTTPException(409, "job is still processing")
+    _refuse_keyed(job)
     _delete_job(job)
     return {"deleted": job_id}
 
@@ -2437,6 +2456,7 @@ def preview_video(job_id: str, user: User | None = Depends(media_user)):
     element can seek without downloading the full file.
     """
     job = get_owned_job(job_id, user)
+    _refuse_keyed(job)
     # Prefer the cut preview (segments concatenated, no captions). Falls
     # back to the normalized file if the preview render isn't there yet.
     path = job.preview_path if job.preview_path else job.normalized_path
@@ -2633,6 +2653,7 @@ def _save_edit_segments(job_id: str, payload: dict, user: User | None
         raise HTTPException(
             409, f"job not in review state (status={job.status})"
         )
+    _refuse_keyed(job)
     if not job.normalized_path or not Path(job.normalized_path).exists():
         raise HTTPException(410, "normalized video no longer on disk")
 
@@ -2781,6 +2802,7 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
         raise HTTPException(
             409, f"job not in review state (status={job.status})"
         )
+    _refuse_keyed(job)
     if not job.normalized_path or not Path(job.normalized_path).exists():
         raise HTTPException(410, "normalized video no longer on disk")
 
@@ -2877,6 +2899,7 @@ def post_render(job_id: str, payload: dict,
     job = get_owned_job(job_id, user)
     if job.status != "awaiting_review":
         raise HTTPException(409, f"job not in review state (status={job.status})")
+    _refuse_keyed(job)
 
     edited = payload.get("subtitles")
     if not isinstance(edited, list):
@@ -2918,6 +2941,7 @@ def post_render(job_id: str, payload: dict,
 def download_job(job_id: str, format: str = "primary",
                  user: User | None = Depends(media_user)):
     job = get_owned_job(job_id, user)
+    _refuse_keyed(job)
     path = job.outputs.get(format) or (
         job.output_path if format == "primary" else None
     )
@@ -2938,6 +2962,7 @@ def watch_job(job_id: str, format: str = "primary",
     the Library modal can play it inline via <video src=...>. Supports
     HTTP Range so seeking works without downloading the whole file."""
     job = get_owned_job(job_id, user)
+    _refuse_keyed(job)
     path = job.outputs.get(format) or (
         job.output_path if format == "primary" else None
     )
@@ -2956,6 +2981,7 @@ def job_thumbnail(job_id: str, user: User | None = Depends(media_user)):
     lives next to the primary output at a fixed filename so we can
     derive the path without storing it on the Job."""
     job = get_owned_job(job_id, user)
+    _refuse_keyed(job)
     if not job.output_path:
         raise HTTPException(409, "thumbnail not ready")
     thumb = Path(job.output_path).parent / "cleo_thumbnail.jpg"
