@@ -795,7 +795,8 @@ bzw. eine Adresse, wenn Accounts aus sind; darüber 429
 `too_many_uploads`, die Web-App sagt "später nochmal"; 0 = kein Limit).
 
 Außerhalb von Railway:
-- **Modal-Secret `cleocuts-r2`** (10.2 Schritt 4): ohne es wird nur
+- **Modal-Secret `cleocuts-r2`** (10.2 Schritt 3, am einfachsten per
+  GitHub-Action "R2 setup"): ohne es wird nur
   `render_burn_concat` deployt (die GitHub-Action prüft das selbst und
   warnt). Beim Deploy von Hand: `CLEO_MODAL_R2=1 modal deploy
   backend/modal_render.py` (mit Secret) bzw. ohne die Variable (ohne).
@@ -835,6 +836,57 @@ Railway (Backend), GitHub-Action "Deploy Modal render" und Vercel
 Laufende Analysen während des Deploys brechen ab (erstattet) — wie bei
 jedem Deploy.
 
+**Schritt 2 + 3 ohne eigenen Rechner — GitHub-Action "R2 setup"
+(empfohlen).** Sie setzt CORS und Lifecycle des Buckets (genau das JSON
+aus Schritt 2, Punkt 3 und 4), legt das Modal-Secret `cleocuts-r2` an
+bzw. ersetzt es und prüft danach alles (Punkt 5 und Schritt 3). Den
+Bucket selbst (Punkt 1) legt sie nicht an.
+1. Cloudflare → R2 → *Manage API tokens* → **zwei R2-Tokens** anlegen.
+   Nach dem Anlegen zeigt Cloudflare u. a. *Access Key ID* und *Secret
+   Access Key* — genau diese beiden Werte brauchen wir (nicht den
+   "Token value"):
+   - **Admin-Token**: Permission *Admin Read & Write*. Achtung:
+     Cloudflare lässt *Admin*-Rechte **nicht auf einen Bucket
+     beschränken** — dieser Token darf alle Buckets des Accounts ändern
+     und löschen. Darum nur als GitHub-Secret ablegen, nirgends sonst
+     (nie auf Railway/Modal). Wer mag, löscht ihn nach dem Lauf in
+     Cloudflare wieder — für spätere Läufe (auch mode check) dann neu
+     anlegen und die zwei Admin-Secrets ersetzen.
+   - **Modal-Token**: Permission *Object Read & Write*, *Apply to
+     specific buckets only* → **nur der Media-Bucket**.
+2. GitHub → Repo → Settings → Secrets and variables → Actions → *New
+   repository secret*, Namen exakt so:
+
+   | Secret | Wert |
+   |---|---|
+   | `R2_ACCOUNT_ID` | Cloudflare Account ID (32 Zeichen, steht in R2 auf der Übersichtsseite) |
+   | `R2_BUCKET` | Name des Media-Buckets — derselbe wie `R2_BUCKET` auf Railway |
+   | `R2_ADMIN_ACCESS_KEY_ID` | Access Key ID des Admin-Tokens |
+   | `R2_ADMIN_SECRET_ACCESS_KEY` | Secret Access Key des Admin-Tokens |
+   | `R2_MODAL_ACCESS_KEY_ID` | Access Key ID des Modal-Tokens |
+   | `R2_MODAL_SECRET_ACCESS_KEY` | Secret Access Key des Modal-Tokens |
+
+   `MODAL_TOKEN_ID` und `MODAL_TOKEN_SECRET` sind schon da ("Deploy
+   Modal render").
+3. GitHub → Actions → **"R2 setup"** → *Run workflow* → mode **apply**
+   → *Run workflow*. Grün = fertig. Rot: oben im Lauf steht, welches
+   Secret fehlt oder falsch ist. Werte stehen nie im Log (das Repo ist
+   öffentlich); Bucket-Name und Account ID erscheinen als `***`.
+   Lifecycle-Regeln, die schon am Bucket hängen (z. B. eine
+   Standard-Regel von Cloudflare), ersetzt apply — das Log nennt ihre
+   IDs unter "replaced".
+4. Danach **einmal** GitHub → Actions → **"Deploy Modal render"** →
+   *Run workflow* (diagnose nicht ankreuzen): findet das Secret und
+   deployt `render_r2` (Log: "Modal secret cleocuts-r2 found — deploying
+   render_burn_concat and render_r2").
+
+Später jederzeit prüfen: "R2 setup" mit mode **check** (ändert nichts;
+nur kurz ein paar Testdateien unter `uploads/_r2check/`). Den
+Railway-Token prüft die Action nicht (dessen Werte stehen nur auf
+Railway). Mit der Action bleiben von Schritt 2 unten nur Punkt 1
+(Bucket) und der Railway-Token aus Punkt 2; Punkt 3–5 und Schritt 3 sind
+der Weg von Hand.
+
 **Schritt 2 — R2 vorbereiten** (ändert noch nichts an der App):
 1. **Bucket:** den bestehenden `R2_BUCKET` weiter nutzen (einfachste
    Variante). Einen *neuen* Bucket nur jetzt, bevor irgendein Job Medien
@@ -851,8 +903,8 @@ jedem Deploy.
      den Media-Bucket (und den Backup-Bucket).
    - **Eigener Token für Modal**: *Object Read & Write* **nur auf den
      Media-Bucket** — so kann Modal die Datenbank-Backups nicht lesen.
-   - Ein Admin-Token nur auf dem eigenen Rechner für CORS und Lifecycle
-     — nie deployen.
+   - Ein Admin-Token für CORS und Lifecycle — nur als GitHub-Secret für
+     "R2 setup" (oben) oder auf dem eigenen Rechner, nie deployen.
 3. **CORS** (Bucket → Settings → CORS policy). `python -m
    backend.r2_setup --print-config` druckt das JSON (im Dashboard nur
    die Liste in `CORSRules` einfügen):
