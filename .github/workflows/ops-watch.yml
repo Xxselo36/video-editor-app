@@ -44,7 +44,11 @@ jobs:
       - name: Install the Modal client
         run: pip install -q "modal>=1.0,<2"
       - name: Probe
-        run: python .github/scripts/modal_probe.py --timeout 180
+        # The function the API uses: the repo variable CLEO_MODAL_RENDER_FN
+        # mirrors Railway's (unset = render_burn_concat).
+        run: |
+          python .github/scripts/modal_probe.py --timeout 180 \
+            --function "${{ vars.CLEO_MODAL_RENDER_FN || 'render_burn_concat' }}"
 
   costs:
     name: Spend in the last 24 h

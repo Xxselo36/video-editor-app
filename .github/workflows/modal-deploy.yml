@@ -64,10 +64,33 @@ jobs:
             | tail -60 || true
           # Can Modal run a call at all? Fails this run with an ::error::
           # that says what to do (spend limit, tokens, deploy, no answer).
-          python .github/scripts/modal_probe.py --timeout 180
+          # Probes the function the API uses (vars.CLEO_MODAL_RENDER_FN,
+          # set it to render_r2 as a repo variable once Railway uses it).
+          python .github/scripts/modal_probe.py --timeout 180 \
+            --function "${{ vars.CLEO_MODAL_RENDER_FN || 'render_burn_concat' }}"
 
       - name: Deploy
         if: steps.creds.outputs.ok == 'true' && !inputs.diagnose
+        # render_r2 (media in R2) needs the Modal secret "cleocuts-r2";
+        # Modal resolves secrets before it publishes, so deploying it
+        # without the secret would fail the WHOLE deploy — and keep the
+        # old render_burn_concat live. So: with the secret, deploy both
+        # (CLEO_MODAL_R2=1, see backend/modal_render.py); without it,
+        # deploy render_burn_concat alone and say so. The backend falls
+        # back to render_burn_concat while render_r2 is missing.
         run: |
           pip install "modal>=1.0"
+          # A failed listing is not "no secret": deploying without
+          # render_r2 would take it down while the API may use it.
+          if ! secrets=$(modal secret list --json); then
+            echo "::error title=Modal secret list failed::Could not list the Modal secrets (network / token?). Nothing deployed; re-run the workflow."
+            exit 1
+          fi
+          if printf '%s' "$secrets" | python -c 'import json,sys; names={s.get("name") or s.get("Name") for s in json.load(sys.stdin)}; sys.exit(0 if "cleocuts-r2" in names else 1)'; then
+            echo "Modal secret cleocuts-r2 found — deploying render_burn_concat and render_r2."
+            export CLEO_MODAL_R2=1
+          else
+            echo "::warning title=render_r2 not deployed::The Modal secret cleocuts-r2 does not exist, so only render_burn_concat is deployed. Renders keep working on the volume path. To enable render_r2 create the secret (DEPLOY.md section 10.2, step 3) and re-run this workflow."
+            export CLEO_MODAL_R2=0
+          fi
           modal deploy backend/modal_render.py
