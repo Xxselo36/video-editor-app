@@ -688,3 +688,46 @@ löschen, `CLEO_DB_BACKEND` entfernen, deployen.
    Der Dump enthält den Umzugs-Marker → es wird nichts erneut aus SQLite
    kopiert. Log: `[db] backend: postgres (…)`.
 
+
+## 9. Fehlerberichte (Sentry), Sicherheits-Header, Modal-Grenzen
+
+### 9.1 Sentry (aus, bis ein DSN gesetzt ist)
+
+- **Backend (Railway):** `SENTRY_DSN` = DSN eines Sentry-*Python*-Projekts.
+  Optional `SENTRY_ENVIRONMENT` (sonst `RAILWAY_ENVIRONMENT_NAME`) und
+  `SENTRY_TRACES_SAMPLE_RATE` (leer/0 = kein Tracing, bleibt im Gratis-Kontingent).
+  Log beim Start ohne DSN: nichts; mit DSN und fehlendem Paket: eine Warnung.
+- **Website (Vercel):** `NEXT_PUBLIC_SENTRY_DSN` (eigenes *Browser*-Projekt),
+  danach neu deployen (`NEXT_PUBLIC_*` wird beim Build eingebacken).
+- **Beide zusammen ein- oder ausschalten:** die Datenschutzseite nennt die
+  Fehlerberichte, sobald `NEXT_PUBLIC_SENTRY_DSN` gesetzt ist.
+- In Sentry je Projekt: *Settings → Security & Privacy* → "Prevent Storing
+  of IP Addresses" und den serverseitigen "Data Scrubber" einschalten.
+- Gemeldet werden: unerwartete Fehler in Requests, fehlgeschlagene Analysen
+  und Renders (Tag `phase`, `job_id`) und fehlgeschlagene LS-Webhooks.
+  Tokens, E-Mails, Query-Strings und Request-Bodies werden vorher entfernt
+  (`backend/observability.py`).
+
+### 9.2 Sicherheits-Header
+
+Kommen immer, ohne Variable: Backend über `backend/security_headers.py`
+(nosniff, no-referrer, DENY, HSTS, `Cross-Origin-Resource-Policy:
+cross-origin`), Website über `web/next.config.ts` (CSP, HSTS, …). Wer der
+Website eine neue externe Quelle hinzufügt (Skript, Bild, API), muss sie in
+der CSP in `web/next.config.ts` erlauben.
+
+### 9.3 Modal-Render: Zeitgrenzen (Defaults passen, nur bei Bedarf setzen)
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `CLEO_MODAL_POLL_S` | 10 | so oft wird auf das Ergebnis gewartet/geprüft |
+| `CLEO_MODAL_DEADLINE_S_BASE` / `_PER_S` / `_MAX` | 240 / 6 / 1920 | Render-Frist: 240 s + 6 × Videolänge, höchstens 32 min → `render_timeout` |
+| `CLEO_MODAL_START_TIMEOUT_S` | 120 | Aufruf nach 120 s nicht gestartet → `render_unavailable` (0 = aus) |
+| `CLEO_MODAL_HEARTBEAT_S` | 300 | Lebenszeichen am Job während langer Renders (0 = aus) |
+| `CLEO_MODAL_TRANSFER_S_MAX` | 3600 | Obergrenze für Upload/Download zu Modal |
+| `CLEO_MODAL_TRANSFER_IDLE_S` | 300 | Download bricht ab, wenn so lange keine Daten kommen |
+| `MODAL_MAX_THROTTLE_WAIT` | 60 | wie lange der Modal-Client bei Drosselung wartet |
+
+Ist das Modal-Budget erschöpft (Spend Limit), schlagen Renders sofort mit
+`render_unavailable` fehl, der Job geht zurück in den Editor, der Nutzer
+kann später erneut rendern. Überwachung und Alarme: `OPERATIONS.md`.

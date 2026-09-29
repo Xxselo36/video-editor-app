@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AUTH_ENABLED } from "@/lib/auth";
 import { AuthProvider } from "@/components/auth/AuthProvider";
+import { ERROR_REPORTING_ENABLED } from "@/lib/errorReporting";
+import { ErrorReporting } from "@/components/ErrorReporting";
 
 // No web fonts: the UI uses the system font stack (globals.css), the
 // Geist fonts were preloaded on every page without being used.
@@ -41,6 +43,8 @@ export default function RootLayout({
         {/* Accounts (Clerk) only when configured — otherwise no provider
             and no Clerk code at all, exactly like the anonymous beta. */}
         {AUTH_ENABLED ? <AuthProvider>{children}</AuthProvider> : children}
+        {/* Browser error reports only with NEXT_PUBLIC_SENTRY_DSN. */}
+        {ERROR_REPORTING_ENABLED && <ErrorReporting />}
       </body>
     </html>
   );

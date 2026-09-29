@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { OPERATOR, RETENTION_DAYS } from "@/lib/legal";
 import { AUTH_ENABLED } from "@/lib/auth";
+import { ERROR_REPORTING_ENABLED } from "@/lib/errorReporting";
 
 export const metadata: Metadata = { title: "Privacy – CleoCuts" };
 
@@ -27,6 +28,9 @@ export default function PrivacyPage() {
         <li><b>Transcript and edits</b> you make in the editor (cuts, effects, caption text).</li>
         <li><b>Technical data</b> needed to run the service (IP address, browser, time of requests) in server logs.</li>
         <li><b>Voice test</b>: only if you start it, camera and microphone are used live in your browser; nothing is uploaded.</li>
+        {ERROR_REPORTING_ENABLED && (
+          <li><b>Error reports</b>: if the website fails in your browser or our server fails while processing your video, a technical report so we can fix it: the error message, the page address without parameters, browser, operating system, language and time zone, and the clicks, page changes, requests and technical log messages on that page just before the error. Server reports contain the error message and the project ID. Reports contain no video content and no account data, and are configured not to store your IP address.</li>
+        )}
         {AUTH_ENABLED && (
           <>
             <li><b>Your account</b>: email address, sign-in method and session data, so you can sign in and find your projects on every device. Your list of projects (file name, workflow, dates) is stored with your account on our server.</li>
@@ -37,7 +41,7 @@ export default function PrivacyPage() {
       <p className="mt-2">Legal basis: performance of the service you request (Art. 6(1)(b) GDPR){AUTH_ENABLED && ", our legal obligations to keep billing records (Art. 6(1)(c) GDPR)"} and our legitimate interest in operating it securely (Art. 6(1)(f) GDPR).</p>
 
       <H>3. Processors</H>
-      <p>To provide the service we use: hosting of the website (Vercel), the processing server (Railway), file storage (Cloudflare R2), cloud rendering (Modal), speech-to-text (Groq){AUTH_ENABLED && ", user accounts and sign-in (Clerk)"} and text cleanup (Anthropic). They process data only on our behalf. Some of them are located outside the EU; transfers rely on the EU standard contractual clauses or an adequacy decision.</p>
+      <p>To provide the service we use: hosting of the website (Vercel), the processing server (Railway), file storage (Cloudflare R2), cloud rendering (Modal), speech-to-text (Groq){AUTH_ENABLED && ", user accounts and sign-in (Clerk)"}{ERROR_REPORTING_ENABLED && ", error reporting (Sentry)"} and text cleanup (Anthropic). They process data only on our behalf. Some of them are located outside the EU; transfers rely on the EU standard contractual clauses or an adequacy decision.</p>
       {AUTH_ENABLED && (
         <p className="mt-2"><b>Payments.</b> Paid plans are sold by Lemon Squeezy (Lemon Squeezy LLC, USA) as Merchant of Record: Lemon Squeezy is the seller of your subscription and processes your payment and billing data (name, address, payment method, tax details) as an independent controller under its own privacy policy. We receive your email address, the plan and the subscription status — never your card details.</p>
       )}

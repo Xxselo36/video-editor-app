@@ -7,6 +7,7 @@ per-segment clips into a single MP4 for the web user to download.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import shutil
@@ -1375,7 +1376,15 @@ def _apply_segment_effects(
 class RenderUnavailableError(RuntimeError):
     """The render worker (Modal) still failed after its retries and the
     local fallback is off. The web backend turns any render exception
-    into `render_failed` (job back to review; renders aren't charged)."""
+    into `render_failed` (job back to review; renders aren't charged)
+    and stores str(e) as the job's error — so with a `code` the text
+    starts with it: "render_unavailable: …" (Modal can't run renders
+    now: spend limit, quota, credentials, not deployed, nothing
+    scheduled) or "render_timeout: …" (no result in time)."""
+
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(f"{code}: {message}" if code else message)
+        self.code = code
 
 
 def _env_flag(name: str) -> bool | None:
@@ -1413,9 +1422,293 @@ def _modal_retry_delays() -> list[float]:
         return [10.0, 30.0]
 
 
-def _modal_retryable(exc: BaseException) -> bool:
-    # A render that hit Modal's function timeout will hit it again.
-    return type(exc).__name__ != "FunctionTimeoutError"
+_log = logging.getLogger(__name__)
+
+# Modal's own hard cap per render call (modal_render.py `timeout=`).
+_MODAL_FUNCTION_TIMEOUT_S = 1800.0
+# Workspace-level problems every retry would hit the same way, only
+# 10 + 30 s later: the spend limit or a quota (ResourceExhaustedError —
+# spawn raises it once the billing-cycle limit is reached), missing or
+# revoked credentials (AuthError, PermissionDeniedError). NotFoundError
+# (render app / volume not deployed) joins them except while
+# downloading, where it is just a missing output file.
+_MODAL_UNAVAILABLE = frozenset(
+    {"ResourceExhaustedError", "AuthError", "PermissionDeniedError"})
+# modal's client retries a throttled RPC (RESOURCE_EXHAUSTED with a
+# server retry policy) for as long as the server keeps throttling: its
+# `max_throttle_wait` config defaults to None = no limit, and neither
+# the poll's timeout nor Retry.attempt_timeout stops it
+# (modal/_utils/grpc_utils.py _retry_transient_errors). A long throttle
+# on spawn (FunctionMap), a poll (FunctionGetOutputs), cancel or
+# get_call_graph would hold the render thread past its deadline. Capped
+# here unless the operator set MODAL_MAX_THROTTLE_WAIT; the client then
+# raises ResourceExhaustedError → render_unavailable.
+_MODAL_MAX_THROTTLE_WAIT_S = "60"
+
+
+def _bound_modal_throttling() -> None:
+    """Before any Modal RPC: cap the client's throttle retries (modal
+    reads its config from the environment on every RPC)."""
+    os.environ.setdefault("MODAL_MAX_THROTTLE_WAIT",
+                          _MODAL_MAX_THROTTLE_WAIT_S)
+
+
+class _ModalGiveUp(Exception):
+    """Internal: end this render now, no retry. `code` becomes the
+    RenderUnavailableError code; started=False: the call never ran (so
+    Modal billed nothing for it)."""
+
+    def __init__(self, code: str, reason: str,
+                 started: bool | None = None) -> None:
+        super().__init__(reason)
+        self.code = code
+        self.started = started
+
+
+def _env_seconds(name: str, default: float) -> float:
+    try:
+        return max(0.0, float(os.environ.get(name, "").strip() or default))
+    except ValueError:
+        return default
+
+
+def _modal_deadline_s(segments: list[tuple[float, float]]) -> float:
+    """How long one Modal call may take from spawn to result before it
+    is cancelled: CLEO_MODAL_DEADLINE_S_BASE (240) + CLEO_MODAL_DEADLINE_
+    S_PER_S (6) × output seconds, at most CLEO_MODAL_DEADLINE_S_MAX
+    (Modal's 1800 s function timeout + 120 s to get scheduled). It is
+    for calls that never produce a result (never scheduled, lost) or
+    render far slower than normal — without it the render thread waited
+    forever and held its render slot. 0 is no "off" switch (it would
+    fail every render at once): a MAX of 0, or a BASE + PER_S of 0,
+    falls back to the defaults."""
+    out_s = sum(max(0.0, float(e) - float(s)) for s, e in segments)
+    default_cap = _MODAL_FUNCTION_TIMEOUT_S + 120.0
+    cap = _env_seconds("CLEO_MODAL_DEADLINE_S_MAX", default_cap) or default_cap
+    base = _env_seconds("CLEO_MODAL_DEADLINE_S_BASE", 240.0)
+    per_s = _env_seconds("CLEO_MODAL_DEADLINE_S_PER_S", 6.0)
+    deadline = base + per_s * out_s
+    if deadline <= 0:
+        deadline = 240.0 + 6.0 * out_s
+    return min(deadline, cap)
+
+
+def _modal_give_up(exc: BaseException, phase: str) -> tuple[str, str] | None:
+    """(code, reason) when a failed attempt must not be retried, else
+    None (retry after the CLEO_MODAL_RETRY_DELAYS backoff).
+
+    A deadline miss (render_timeout) is deliberately NOT retried either:
+    the call was then either never scheduled — a capacity / billing
+    problem another spawn won't fix — or rendering far slower than
+    normal, and a retry would double the worst-case wait (2 × ~32 min)
+    while the user stares at a progress bar. Same for Modal's own
+    FunctionTimeoutError: the same render hits the same cap again."""
+    if isinstance(exc, _ModalGiveUp):
+        return exc.code, str(exc)
+    name = type(exc).__name__
+    if name == "FunctionTimeoutError":
+        return "render_timeout", f"{name}: {exc}"
+    if name in _MODAL_UNAVAILABLE or (name == "NotFoundError"
+                                      and phase != "download"):
+        return "render_unavailable", f"{name}: {exc}"
+    return None
+
+
+def _modal_alert(code: str, reason: str) -> None:
+    """One loud line per render Modal couldn't do: stdout like the other
+    [modal] lines, and logging.ERROR so an error tracker's logging
+    integration (Sentry) reports it."""
+    title = ("RENDER UNAVAILABLE" if code == "render_unavailable"
+             else "RENDER TIMEOUT")
+    line = f"[modal] {title} — {reason}"
+    print(line, flush=True)
+    _log.error(line)
+
+
+def _is_poll_timeout(exc: BaseException) -> bool:
+    """FunctionCall.get(timeout=…) has no result yet. modal 1.x raises
+    the builtin TimeoutError there (modal/_functions.py poll_function);
+    compared by exact class name, because the subclasses of
+    modal.exception.TimeoutError mean something else: OutputExpiredError
+    (no result will ever come), FunctionTimeoutError (Modal's cap)."""
+    return type(exc).__name__ == "TimeoutError"
+
+
+def _modal_call_state(fn, call, log: bool = True) -> str:
+    """'started', 'stuck' or 'unknown' for a spawned call without a
+    result yet. FunctionCall.get_call_graph() is best-effort and may lag
+    (Modal's docs), and its PENDING status covers queued and running —
+    so it is only trusted to say 'started' (a container was assigned).
+    'stuck' needs Function.get_current_stats() (live, per function) to
+    report no container at all: then nothing can be running this call.
+    Other renders' containers running → 'unknown' (it may just wait in
+    line; the deadline still applies)."""
+    try:
+        for info in call.get_call_graph() or []:
+            if getattr(info, "task_id", "") or int(getattr(info, "status", 0)):
+                return "started"
+    except Exception:
+        pass
+    try:
+        runners = int(fn.get_current_stats().num_total_runners)
+    except Exception as e:
+        if log:
+            print(f"[modal] can't tell whether the call started: "
+                  f"{type(e).__name__}: {e}", flush=True)
+        return "unknown"
+    return "stuck" if runners == 0 else "unknown"
+
+
+def _await_modal_call(
+    fn,
+    call,
+    t0: float,
+    deadline_s: float,
+    n_clips: int,
+    _stage,
+    cancel_check: Callable[[], bool] | None = None,
+):
+    """call.get(), bounded. Polls every CLEO_MODAL_POLL_S (10 s). Every
+    CLEO_MODAL_HEARTBEAT_S (300 s; 0 = never) it writes the elapsed time
+    to the job, so a long render still moves the job's updated_at
+    (cost_test.py's stall check) — no screen shows it, and a write every
+    poll would keep the dashboard from backing off its status polling
+    (it slows down after 60 s without a change). Raises _ModalGiveUp
+    render_timeout at t0 + deadline_s, and render_unavailable when the
+    call still hasn't started after CLEO_MODAL_START_TIMEOUT_S (120 s;
+    0 = don't check) on two probes in a row. The caller cancels the call
+    on any exception."""
+    poll_s = max(0.01, _env_seconds("CLEO_MODAL_POLL_S", 10.0))
+    start_s = _env_seconds("CLEO_MODAL_START_TIMEOUT_S", 120.0)
+    beat_s = _env_seconds("CLEO_MODAL_HEARTBEAT_S", 300.0)
+    last_beat = t0
+    started = False
+    stuck = 0
+    probes = 0
+    while True:
+        if cancel_check and cancel_check():
+            raise InterruptedError("Cancelled")
+        remaining = t0 + deadline_s - time.monotonic()
+        if remaining <= 0:
+            raise _ModalGiveUp(
+                "render_timeout",
+                f"no result from Modal within {deadline_s:.0f} s")
+        wait_s = min(poll_s, remaining)
+        t_poll = time.monotonic()
+        try:
+            return call.get(timeout=wait_s)
+        except Exception as e:
+            # Modal's "no result yet" comes only after the whole wait
+            # (pop_function_call_outputs loops until then). A TimeoutError
+            # sooner is the render's own (remote) exception, which every
+            # further get() returns at once: an ordinary failed attempt —
+            # polling on would spin on it until the deadline.
+            if not (_is_poll_timeout(e)
+                    and time.monotonic() - t_poll >= wait_s / 2):
+                raise
+        now = time.monotonic()
+        elapsed = now - t0
+        if beat_s > 0 and now - last_beat >= beat_s:
+            last_beat = now
+            _stage(f"Rendering {n_clips} clip(s) on Modal… "
+                   f"{int(elapsed) // 60}:{int(elapsed) % 60:02d}", 10)
+        if start_s > 0 and not started and elapsed >= start_s:
+            # A probe every poll until it is known; a failing one is
+            # logged at most every 30th probe (~5 min), not every poll.
+            state = _modal_call_state(fn, call, log=probes % 30 == 0)
+            probes += 1
+            started = state == "started"
+            stuck = stuck + 1 if state == "stuck" else 0
+            if stuck >= 2:
+                raise _ModalGiveUp(
+                    "render_unavailable",
+                    f"Modal hasn't started the render after "
+                    f"{elapsed:.0f} s and runs no container for it "
+                    "(spend limit, quota or capacity?)",
+                    started=False)
+
+
+# Volume transfers (upload of the source, download of the outputs).
+# modal's block GETs / PUTs have no read timeout — Volume.read_file and
+# the block uploads retry with attempt_timeout=None on an aiohttp session
+# built with ClientTimeout(total=None) — so one stalled connection would
+# block the render thread (and its slot) forever. Upload: at most
+# _MODAL_UPLOAD_S_BASE + the file at _MODAL_UPLOAD_MIN_BPS; download: at
+# most CLEO_MODAL_TRANSFER_IDLE_S (300; 0 = no idle check) without a new
+# block (8 MiB); both at most CLEO_MODAL_TRANSFER_S_MAX (3600).
+_MODAL_UPLOAD_S_BASE = 300.0
+_MODAL_UPLOAD_MIN_BPS = 2_000_000
+
+
+class _TransferAbandoned(Exception):
+    """Raised inside a transfer thread that was given up on."""
+
+
+def _modal_transfer_max_s() -> float:
+    # 0 is no "off" switch (it would fail every transfer at once).
+    return _env_seconds("CLEO_MODAL_TRANSFER_S_MAX", 3600.0) or 3600.0
+
+
+def _modal_upload_limit_s(path: str) -> float:
+    try:
+        nbytes = os.path.getsize(path)
+    except OSError:
+        nbytes = 0
+    return min(_MODAL_UPLOAD_S_BASE + nbytes / _MODAL_UPLOAD_MIN_BPS,
+               _modal_transfer_max_s())
+
+
+def _run_modal_transfer(
+    work: Callable[[Callable[[], None]], None],
+    what: str,
+    limit_s: float,
+    idle_s: float = 0.0,
+    cancel_check: Callable[[], bool] | None = None,
+) -> None:
+    """Run work(tick) in a helper thread and wait at most limit_s for it
+    — and, with idle_s, at most idle_s between two tick() calls (work
+    calls tick() after each piece of data). Raises _ModalGiveUp
+    render_timeout when it isn't done in time and InterruptedError on
+    the user's cancel; work's own exception is re-raised here. A thread
+    given up on is left behind (daemon): its next tick() raises, so it
+    writes nothing more once it wakes up."""
+    stop = threading.Event()
+    last = [time.monotonic()]
+    box: dict[str, BaseException] = {}
+
+    def tick() -> None:
+        if stop.is_set():
+            raise _TransferAbandoned(what)
+        last[0] = time.monotonic()
+
+    def run() -> None:
+        try:
+            work(tick)
+        except BaseException as e:  # noqa: BLE001 — handed to the waiter
+            box["exc"] = e
+
+    t0 = time.monotonic()
+    th = threading.Thread(target=run, name=f"modal-{what}", daemon=True)
+    th.start()
+    step = min(1.0, max(0.01, _env_seconds("CLEO_MODAL_POLL_S", 10.0)))
+    while True:
+        th.join(step)
+        if not th.is_alive():
+            break
+        if cancel_check and cancel_check():
+            stop.set()
+            raise InterruptedError("Cancelled")
+        now = time.monotonic()
+        if now - t0 >= limit_s:
+            reason = f"Modal {what} not done within {limit_s:.0f} s"
+        elif idle_s > 0 and now - last[0] >= idle_s:
+            reason = f"Modal {what} stalled: no data for {now - last[0]:.0f} s"
+        else:
+            continue
+        stop.set()
+        raise _ModalGiveUp("render_timeout", reason)
+    if "exc" in box:
+        raise box["exc"]
 
 
 # ── Modal volume folders ─────────────────────────────────────────────
@@ -1430,8 +1723,10 @@ def _modal_retryable(exc: BaseException) -> bool:
 MODAL_LEDGER_DIR: str | None = None
 _MODAL_VOLUME = "cleocuts-render-volume"
 # A marker stays until its folder can no longer be written to: longer
-# than any call of it can run (3 attempts × the 30 min function timeout
-# + backoff).
+# than any call of it can run (3 attempts × the ~32 min call deadline,
+# _modal_deadline_s, + backoff). A render that left something behind
+# (an uncancelled call, a stalled upload) refreshes its marker as it
+# ends, so the age counts from then.
 _MODAL_ORPHAN_AGE_S = 2 * 3600
 _MODAL_ACTIVE: set[str] = set()   # folders of renders running here
 _MODAL_LOCK = threading.Lock()
@@ -1498,6 +1793,7 @@ def sweep_modal_folders(now: float | None = None) -> int:
                if p.is_file() and p.name not in active]
     if not markers:
         return 0
+    _bound_modal_throttling()
     try:
         import modal
         vol = modal.Volume.from_name(_MODAL_VOLUME)
@@ -1533,15 +1829,21 @@ def _try_modal_render(
     """Offload the burn+concat step to a Modal.com worker.
 
     Returns False if Modal isn't configured (MODAL_TOKEN_ID unset), True
-    once the outputs are on disk. A failed attempt (outage, quota,
-    crashed container) is retried after the CLEO_MODAL_RETRY_DELAYS
-    backoff; when all attempts failed it raises RenderUnavailableError
-    and the caller decides whether a local render may take over
+    once the outputs are on disk. A failed attempt (outage, crashed
+    container) is retried after the CLEO_MODAL_RETRY_DELAYS backoff;
+    when all attempts failed it raises RenderUnavailableError and the
+    caller decides whether a local render may take over
     (local_render_fallback_enabled). Never silently returns False after
-    a failure.
+    a failure, and never waits forever: each call is bounded by
+    _modal_deadline_s and each volume transfer by _run_modal_transfer
+    (→ code render_timeout), throttled RPCs by MODAL_MAX_THROTTLE_WAIT
+    (_bound_modal_throttling), and a spend limit / quota / auth /
+    not-deployed error or a call Modal doesn't start fails at once,
+    without retries (→ code render_unavailable) — see _modal_give_up.
     """
     if not _modal_configured():
         return False
+    _bound_modal_throttling()
     try:
         import modal
     except ImportError as e:
@@ -1556,6 +1858,7 @@ def _try_modal_render(
     input_filename = os.path.basename(normalized_path)
     delays = _modal_retry_delays()
     attempts = len(delays) + 1
+    deadline_s = _modal_deadline_s(segments)
     vol = None
     uploaded = False
     touched = False     # something may be in /<job_id> on the volume
@@ -1567,6 +1870,7 @@ def _try_modal_render(
     _modal_ledger_add(job_id)
     try:
         for attempt in range(1, attempts + 1):
+            phase = "upload"
             try:
                 if vol is None:
                     vol = modal.Volume.from_name(_MODAL_VOLUME)
@@ -1577,17 +1881,31 @@ def _try_modal_render(
                     # internally. force: a retry may overwrite a partial
                     # upload of the failed attempt.
                     touched = True
-                    with vol.batch_upload(force=True) as batch:
-                        batch.put_file(normalized_path,
-                                       f"/{job_id}/{input_filename}")
+
+                    def _upload(tick, vol=vol):
+                        with vol.batch_upload(force=True) as batch:
+                            batch.put_file(normalized_path,
+                                           f"/{job_id}/{input_filename}")
+                    try:
+                        _run_modal_transfer(
+                            _upload, "upload",
+                            _modal_upload_limit_s(normalized_path),
+                            cancel_check=cancel_check)
+                    except (_ModalGiveUp, InterruptedError):
+                        # The upload left behind may still land in the
+                        # folder: keep its ledger marker for the sweep.
+                        abandoned = True
+                        raise
                     uploaded = True
 
+                phase = "render"
                 _stage(f"Rendering {len(segments)} clip(s) on Modal…", 10)
                 # Modal 1.x renamed lookup → from_name
                 fn = modal.Function.from_name(
                     "cleocuts-render", "render_burn_concat")
                 _modal_t0 = time.monotonic()
                 call = None
+                billed = True
                 try:
                     # spawn + get (not remote): a failed attempt's call can
                     # be cancelled before the retry renders into the same
@@ -1602,29 +1920,47 @@ def _try_modal_render(
                         language=language,
                         output_formats=list(output_formats),
                     )
-                    result_map = call.get()
-                except BaseException:
+                    result_map = _await_modal_call(
+                        fn, call, _modal_t0, deadline_s, len(segments),
+                        _stage, cancel_check)
+                except BaseException as e:
+                    billed = call is not None and getattr(
+                        e, "started", None) is not False
                     if call is None or not _cancel_modal_call(call):
                         abandoned = True
                     raise
                 finally:
-                    # Failed attempts are billed by Modal too.
-                    costs.record_modal(time.monotonic() - _modal_t0)
+                    # Failed attempts are billed by Modal too (a call
+                    # that never started isn't).
+                    if billed:
+                        costs.record_modal(time.monotonic() - _modal_t0)
 
+                phase = "download"
                 _stage("Downloading from Modal…", 88)
-                _download_modal_outputs(
-                    vol, job_id, result_map, primary_out_path,
-                    thumbnail_out_path, output_dir,
-                )
+                _run_modal_transfer(
+                    lambda tick, vol=vol, result_map=result_map:
+                        _download_modal_outputs(
+                            vol, job_id, result_map, primary_out_path,
+                            thumbnail_out_path, output_dir, tick=tick),
+                    "download", _modal_transfer_max_s(),
+                    idle_s=_env_seconds("CLEO_MODAL_TRANSFER_IDLE_S", 300.0),
+                    cancel_check=cancel_check)
                 print(f"[modal] render complete for job {job_id} "
                       f"(attempt {attempt}/{attempts})", flush=True)
                 return True
+            except InterruptedError:
+                raise   # cancelled by the user: no retry, no alert
             except Exception as e:
                 last_exc = e
                 costs.record_event("modal_failed")
                 print(f"[modal] render attempt {attempt}/{attempts} failed: "
                       f"{e}\n{traceback.format_exc()}", flush=True)
-                if attempt >= attempts or not _modal_retryable(e):
+                verdict = _modal_give_up(e, phase)
+                if verdict is not None:
+                    code, reason = verdict
+                    _modal_alert(code, reason)
+                    raise RenderUnavailableError(reason, code=code) from e
+                if attempt >= attempts:
                     break
                 delay = delays[attempt - 1]
                 _stage(f"Render worker unavailable, retrying in "
@@ -1650,6 +1986,8 @@ def _try_modal_render(
                                and _remove_modal_folder(vol, job_id))
         if gone and not abandoned:
             _modal_ledger_drop(job_id)
+        elif abandoned:
+            _modal_ledger_add(job_id)   # restart the marker's age
 
 
 def _download_modal_outputs(
@@ -1659,10 +1997,17 @@ def _download_modal_outputs(
     primary_out_path: str,
     thumbnail_out_path: str,
     output_dir: str,
+    tick: Callable[[], None] | None = None,
 ) -> None:
     """Stream each result file out of the Modal Volume. Each file goes to
     a temp name first, so a download that dies half-way never replaces
-    the outputs of an earlier successful render."""
+    the outputs of an earlier successful render. tick() is called after
+    every block and before each output is put in place: it raises once
+    _run_modal_transfer gave up on this download. The temp name is
+    unique, so a download left behind never touches another one's."""
+    import uuid
+
+    tick = tick or (lambda: None)
     # result_map is {"primary": "output.mp4", "_thumbnail": "thumbnail.jpg", "9:16": "output_9-16.mp4", ...}
     primary_fname = result_map.get("primary")
     if not primary_fname:
@@ -1680,17 +2025,20 @@ def _download_modal_outputs(
             if fname == primary_fname and Path(primary_out_path).exists():
                 # Same file as the primary (export already had the
                 # target size) — link it instead of downloading twice.
+                tick()
                 Path(local_out).unlink(missing_ok=True)
                 try:
                     os.link(primary_out_path, local_out)
                 except OSError:
                     shutil.copyfile(primary_out_path, local_out)
                 continue
-        part = local_out + ".part"
+        part = f"{local_out}.{uuid.uuid4().hex[:8]}.part"
         try:
             with open(part, "wb") as out_f:
                 for chunk in vol.read_file(f"/{job_id}/{fname}"):
                     out_f.write(chunk)
+                    tick()
+            tick()
             os.replace(part, local_out)
         finally:
             Path(part).unlink(missing_ok=True)

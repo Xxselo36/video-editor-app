@@ -1,0 +1,78 @@
+name: Uptime
+
+# Every 10 minutes: is the API ready (/ready checks its database too)
+# and does the web app's front page load? Each URL gets a second try
+# 30 s after a failure; the run fails only if both tries fail, and a
+# failed scheduled run is what makes GitHub email you — see
+# OPERATIONS.md. The log is public: status codes and latency only.
+# Other URLs: repo variables CLEO_API_URL / CLEO_WEB_URL.
+
+on:
+  schedule:
+    # GitHub starts scheduled runs late (often by minutes) under load;
+    # off the round minutes it's a bit better.
+    - cron: '4-59/10 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      API_URL: ${{ vars.CLEO_API_URL || 'https://api.cleocuts.com' }}
+      WEB_URL: ${{ vars.CLEO_WEB_URL || 'https://cleocuts.com' }}
+    steps:
+      - name: API /ready and web front page
+        run: |
+          # probe NAME URL → prints "NAME: <code> in <ms> ms"; 0 on 2xx.
+          probe() {
+            local out rc=0 code secs ms
+            out=$(curl -s -o /dev/null -L --max-redirs 5 \
+                    --connect-timeout 10 --max-time 20 \
+                    -A 'cleocuts-uptime (GitHub Actions)' \
+                    -w '%{http_code} %{time_total}' "$2") || rc=$?
+            code=${out%% *}
+            secs=${out##* }
+            ms=$(awk -v s="$secs" 'BEGIN { printf "%d", s * 1000 }')
+            if [ "$rc" -ne 0 ]; then
+              echo "$1: no answer (curl exit $rc) after $ms ms"
+              return 1
+            fi
+            echo "$1: $code in $ms ms"
+            [ "$code" -ge 200 ] && [ "$code" -lt 300 ]
+          }
+          target() {
+            case "$1" in
+              api) probe "API /ready" "${API_URL%/}/ready" ;;
+              web) probe "Web /" "${WEB_URL%/}/" ;;
+            esac
+          }
+
+          failed=()
+          for t in api web; do target "$t" || failed+=("$t"); done
+          if [ ${#failed[@]} -eq 0 ]; then exit 0; fi
+
+          sleep 30
+          down=()
+          for t in "${failed[@]}"; do target "$t" || down+=("$t"); done
+          if [ ${#down[@]} -eq 0 ]; then
+            echo "Recovered on the second try."
+            exit 0
+          fi
+
+          for t in "${down[@]}"; do
+            if [ "$t" = api ]; then
+              # Liveness tells "app down" from "database down".
+              probe "API /health (liveness, for comparison)" "${API_URL%/}/health" || true
+              echo "::error title=API not ready::/ready failed twice, 30 s apart. /health up = database problem, down too = backend down. See OPERATIONS.md → API down."
+            else
+              echo "::error title=Web app down::The front page failed twice, 30 s apart. See OPERATIONS.md → Web app down."
+            fi
+          done
+          exit 1

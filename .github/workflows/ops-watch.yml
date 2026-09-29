@@ -1,0 +1,62 @@
+name: Ops watch
+
+# Every 6 hours, two independent checks (details and what to do per
+# alert: OPERATIONS.md):
+#   modal — can Modal still run a render? Spawns a call that fails fast
+#           with FileNotFoundError when Modal works; a reached spend
+#           limit, bad tokens, a missing deploy or no answer fail the
+#           job (.github/scripts/modal_probe.py).
+#   costs — is the last 24 h of processing spend at most the repo
+#           secret COST_ALERT_USD_PER_DAY (default 10 USD)?
+#           (.github/scripts/cost_guard.py)
+# A failed scheduled run is what makes GitHub email you. Logs are
+# public: OK / what's wrong only, never amounts or job ids. The
+# threshold is a secret, not a variable: the runner prints every step
+# env value in the log and masks only secrets.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-watch
+  cancel-in-progress: false
+
+jobs:
+  modal:
+    name: Modal can render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the Modal client
+        run: pip install -q "modal>=1.0,<2"
+      - name: Probe
+        run: python .github/scripts/modal_probe.py --timeout 180
+
+  costs:
+    name: Spend in the last 24 h
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - name: Cost guard
+        env:
+          CLEO_API: ${{ vars.CLEO_API_URL || 'https://api.cleocuts.com' }}
+          CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
+          COST_ALERT_USD_PER_DAY: ${{ secrets.COST_ALERT_USD_PER_DAY }}
+        run: python3 .github/scripts/cost_guard.py
