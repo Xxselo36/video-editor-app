@@ -18,6 +18,14 @@ before every test. Tests marked sqlite_only (SQLite internals: WAL
 pragmas, raw rows, the /tmp fallback) are skipped there. The Postgres
 tests (test_pg_*.py) run in both modes, each on databases of their own
 (fixture pg_server; skipped without pgserver).
+
+Media: the local media backend by default (backend/media.py; files
+under the test work root). CLEO_TEST_MEDIA=r2 runs the whole suite with
+media in R2, faked in-process by moto (pip install "moto[s3]>=5.2",
+backend/requirements-dev.txt): R2_* env vars point at a moto bucket for
+every test. Tests of local-disk internals are marked local_media_only
+and skipped there. The fixture `r2` gives a single test R2 on moto in
+either mode (an emptied bucket).
 """
 from __future__ import annotations
 
@@ -38,7 +46,11 @@ _TMP = Path(tempfile.mkdtemp(prefix="cleo-tests-"))
 atexit.register(shutil.rmtree, _TMP, ignore_errors=True)
 os.environ["CLEO_JOB_DB"] = str(_TMP / "jobs.db")
 os.environ["CLEO_WORK_ROOT"] = str(_TMP / "work")
+os.environ["CLEO_TMP_ROOT"] = str(_TMP / "tmp")
 os.environ["CLEO_MIN_FREE_GB"] = "0"
+for _k in ("CLEO_MEDIA_BACKEND", "CLEO_MEDIA_ROOT", "CLEO_UPLOAD_MODE",
+           "CLEO_MODAL_RENDER_FN", "CLEO_BACKFILL", "R2_ENDPOINT_URL"):
+    os.environ.pop(_k, None)
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
@@ -145,6 +157,51 @@ def pg_server_or_skip() -> _PgServer:
 if TEST_DB == "postgres":
     os.environ["DATABASE_URL"] = pg_server_or_skip().fresh("cleo_suite")
 
+TEST_MEDIA = os.environ.get("CLEO_TEST_MEDIA", "local").strip().lower() or "local"
+if TEST_MEDIA not in ("local", "r2"):
+    raise RuntimeError(f"CLEO_TEST_MEDIA={TEST_MEDIA!r}: use local or r2")
+R2_BUCKET = "cleo-test-media"
+R2_ENV = {"R2_ACCOUNT_ID": "acct0test", "R2_ACCESS_KEY_ID": "AKIATESTKEY",
+          "R2_SECRET_ACCESS_KEY": "test-secret", "R2_BUCKET": R2_BUCKET}
+R2_ENDPOINT = f"https://{R2_ENV['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
+# moto answers S3 calls to the R2 endpoint too.
+os.environ["MOTO_S3_CUSTOM_ENDPOINTS"] = R2_ENDPOINT
+_SESSION_MOTO = None
+
+
+def _moto_bucket(empty: bool = True):
+    """The test bucket on the active moto mock (created once), emptied."""
+    import boto3
+    s3 = boto3.session.Session().client(
+        "s3", endpoint_url=R2_ENDPOINT, region_name="us-east-1",
+        aws_access_key_id=R2_ENV["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=R2_ENV["R2_SECRET_ACCESS_KEY"])
+    try:
+        s3.head_bucket(Bucket=R2_BUCKET)
+    except Exception:
+        s3.create_bucket(Bucket=R2_BUCKET)
+    if empty:
+        for page in s3.get_paginator("list_objects_v2").paginate(
+                Bucket=R2_BUCKET):
+            keys = [{"Key": o["Key"]} for o in page.get("Contents") or []]
+            if keys:
+                s3.delete_objects(Bucket=R2_BUCKET,
+                                  Delete={"Objects": keys, "Quiet": True})
+        for up in s3.list_multipart_uploads(
+                Bucket=R2_BUCKET).get("Uploads") or []:
+            s3.abort_multipart_upload(Bucket=R2_BUCKET, Key=up["Key"],
+                                      UploadId=up["UploadId"])
+    return s3
+
+
+if TEST_MEDIA == "r2":
+    from moto import mock_aws
+    _SESSION_MOTO = mock_aws()
+    _SESSION_MOTO.start()
+    atexit.register(_SESSION_MOTO.stop)
+    os.environ.update(R2_ENV)
+    _moto_bucket()
+
 import jwt  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -183,15 +240,19 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "sqlite_only: tests SQLite internals; skipped with "
         "CLEO_TEST_DB=postgres")
+    config.addinivalue_line(
+        "markers", "local_media_only: tests local-disk media internals; "
+        "skipped with CLEO_TEST_MEDIA=r2")
 
 
 def pytest_collection_modifyitems(config, items):
-    if TEST_DB != "postgres":
-        return
-    skip = pytest.mark.skip(reason="SQLite-specific (CLEO_TEST_DB=postgres)")
+    skip_pg = pytest.mark.skip(reason="SQLite-specific (CLEO_TEST_DB=postgres)")
+    skip_r2 = pytest.mark.skip(reason="local media only (CLEO_TEST_MEDIA=r2)")
     for item in items:
-        if "sqlite_only" in item.keywords:
-            item.add_marker(skip)
+        if TEST_DB == "postgres" and "sqlite_only" in item.keywords:
+            item.add_marker(skip_pg)
+        if TEST_MEDIA == "r2" and "local_media_only" in item.keywords:
+            item.add_marker(skip_r2)
 
 
 @pytest.fixture(scope="session")
@@ -205,6 +266,14 @@ def pg_server():
 def clean_state(monkeypatch):
     for k in _FEATURE_ENV:
         monkeypatch.delenv(k, raising=False)
+    for k in ("CLEO_MEDIA_BACKEND", "CLEO_UPLOAD_MODE", "CLEO_MODAL_RENDER_FN"):
+        monkeypatch.delenv(k, raising=False)
+    if TEST_MEDIA == "r2":
+        for k, v in R2_ENV.items():
+            monkeypatch.setenv(k, v)
+    store._truncate_gc_for_tests()
+    shutil.rmtree(M._WORK_ROOT / "media", ignore_errors=True)
+    shutil.rmtree(M._TMP_ROOT / "proxy-cache", ignore_errors=True)
     auth._jwks = None
     billing._price_cache.clear()
     billing._refresh_tried.clear()
@@ -232,6 +301,28 @@ def clean_state(monkeypatch):
 def client():
     # Not a context manager: no lifespan, so no background loops.
     return TestClient(M.app)
+
+
+@pytest.fixture
+def no_r2(monkeypatch):
+    """A deployment without R2 (also under CLEO_TEST_MEDIA=r2)."""
+    for k in R2_ENV:
+        monkeypatch.delenv(k, raising=False)
+
+
+@pytest.fixture
+def r2(monkeypatch):
+    """R2 for this test, faked in-process by moto (the session's mock
+    with CLEO_TEST_MEDIA=r2, else one of its own): R2_* env set, bucket
+    emptied. Returns a boto3 client on it."""
+    for k, v in R2_ENV.items():
+        monkeypatch.setenv(k, v)
+    if _SESSION_MOTO is not None:
+        yield _moto_bucket()
+        return
+    from moto import mock_aws
+    with mock_aws():
+        yield _moto_bucket()
 
 
 # ── auth ─────────────────────────────────────────────────────────────
@@ -366,6 +457,24 @@ def billing_on(monkeypatch, auth_on, ls):
 def enforce(monkeypatch, billing_on):
     monkeypatch.setenv("CLEO_BILLING_ENFORCE", "1")
     return billing_on
+
+
+def analysis_result(output_dir, duration: float = 1.0, segments=None,
+                    **extra) -> dict:
+    """What backend.pipeline.analyze_only returns, with small stand-in
+    files in output_dir (the job's workspace): normalized.mp4, the
+    editor proxy and the first preview — the worker stores them."""
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for name, body in (("normalized.mp4", b"mezz"), ("proxy.mp4", b"proxy"),
+                       ("preview.mp4", b"prev")):
+        (out / name).write_bytes(body)
+    res = {"normalized_path": str(out / "normalized.mp4"),
+           "preview_path": str(out / "preview.mp4"),
+           "segments": segments or [(0.0, duration)], "subtitles": [],
+           "duration": duration, "language": "en"}
+    res.update(extra)
+    return res
 
 
 def sign(raw: bytes, secret: str = WEBHOOK_SECRET) -> str:

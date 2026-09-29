@@ -311,22 +311,25 @@ def test_admin_costs_lists_owner(client, auth_on, monkeypatch):
 
 
 @pytest.fixture
-def fake_r2(monkeypatch):
+def fake_r2(monkeypatch, r2):
+    """R2 on moto with the caller's upload in it; presign handing out a
+    fixed key; the duration probe faked (no ffprobe over the network)."""
     import backend.storage as storage
-    monkeypatch.setattr(storage, "r2_available", lambda: True)
 
     def presign(filename, expires_in=3600, content_type="video/mp4",
                 prefix="uploads/"):
         return {"storage_key": f"{prefix}abc.mp4", "upload_url": "https://r2/x"}
     monkeypatch.setattr(storage, "presign_upload", presign)
-    downloaded, deleted = [], []
-
-    def download(key, dest):
-        downloaded.append(key)
-        Path(dest).write_bytes(b"video")
-    monkeypatch.setattr(storage, "download_from_r2", download)
-    monkeypatch.setattr(storage, "delete_from_r2", deleted.append)
-    return downloaded, deleted
+    r2.put_object(Bucket=storage.bucket(), Key="uploads/user_a/abc.mp4",
+                  Body=b"video")
+    probed = []
+    monkeypatch.setattr(M, "_probe_remote_duration",
+                        lambda url: probed.append(url) or 60.0)
+    downloaded = []
+    real_get = M.media.get_file
+    monkeypatch.setattr(M.media, "get_file", lambda key, path: (
+        downloaded.append(key), real_get(key, path))[1])
+    return downloaded, probed
 
 
 def test_presign_keys_are_namespaced(client, auth_on, bearer, fake_r2):
@@ -347,16 +350,31 @@ def test_foreign_storage_key_is_403(client, auth_on, bearer, fake_r2):
     r = client.post("/jobs", headers=bearer("user_a"),
                     data={"settings": "{}", "filename": "big.mov",
                           "storage_key": "uploads/user_a/abc.mp4"})
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     job = store.get(r.json()["job_id"])
-    assert job.settings["_r2_storage_key"] == "uploads/user_a/abc.mp4"
+    assert job.source_key == "uploads/user_a/abc.mp4"
+    assert "_r2_storage_key" not in job.settings
     assert job.filename == "big.mov"
+    assert downloaded == []   # the analysis worker fetches it, not POST /jobs
 
 
-def test_multipart_routes_and_source_video_are_gone(client, auth_on, bearer):
-    for path in ("/uploads/multipart/init", "/uploads/multipart/sign",
-                 "/uploads/multipart/complete", "/uploads/multipart/abort"):
-        assert client.post(path, json={}, headers=bearer()).status_code == 404
+def test_multipart_routes_need_auth_and_a_ticket(client, auth_on, bearer,
+                                                 no_r2):
+    """The resumable upload routes are back (WP3) — with ownership: a
+    session, and a ticket signed for that user."""
+    paths = ("/uploads/multipart/init", "/uploads/multipart/sign",
+             "/uploads/multipart/parts", "/uploads/multipart/complete",
+             "/uploads/multipart/abort", "/uploads/telemetry")
+    for path in paths:
+        assert client.post(path, json={"event": "x"}).status_code == 401
+    # No R2 on this deployment: init says so (not "server_busy", so the
+    # web app falls back to the legacy upload).
+    r = client.post("/uploads/multipart/init", headers=bearer(),
+                    json={"size": 1000, "filename": "a.mp4"})
+    assert r.status_code == 503 and r.json()["detail"] != "server_busy"
+    for path in paths[1:-1]:
+        r = client.post(path, headers=bearer(), json={"ticket": "x.y"})
+        assert r.status_code == 403 and r.json() == {"detail": "bad_ticket"}
     job = _job(owner="user_a")
     r = client.get(f"/jobs/{job.id}/source-video", headers=bearer())
     assert r.status_code == 404

@@ -163,6 +163,9 @@ def modal_env(monkeypatch, tmp_path):
     """Modal on, default retry delays (10 s, 30 s — recorded, not slept),
     fast polls. Returns install(plan, **kw) → FakeModal."""
     monkeypatch.setenv("MODAL_TOKEN_ID", "tok")
+    # These tests are about the volume path (render_burn_concat, kept for
+    # rollback); render_r2 has tests of its own (test_wp3_render.py).
+    monkeypatch.setenv("CLEO_MODAL_RENDER_FN", "render_burn_concat")
     monkeypatch.setattr(pipeline, "MODAL_LEDGER_DIR", str(tmp_path / "ledger"))
     for k in ("CLEO_LOCAL_RENDER_FALLBACK", "CLEO_MODAL_RETRY_DELAYS",
               "CLEO_MODAL_DEADLINE_S_BASE", "CLEO_MODAL_DEADLINE_S_PER_S",
@@ -432,8 +435,8 @@ def test_deadline_scales_with_output(monkeypatch):
               "CLEO_MODAL_DEADLINE_S_MAX"):
         monkeypatch.delenv(k, raising=False)
     assert pipeline._modal_deadline_s([(0, 30), (40, 70)]) == 240 + 6 * 60
-    # Capped just above Modal's own 1800 s function timeout.
-    assert pipeline._modal_deadline_s([(0, 3600)]) == 1920
+    # Capped just above Modal's own 3600 s function timeout (render_r2).
+    assert pipeline._modal_deadline_s([(0, 3600)]) == 3720
     monkeypatch.setenv("CLEO_MODAL_DEADLINE_S_BASE", "10")
     monkeypatch.setenv("CLEO_MODAL_DEADLINE_S_PER_S", "2")
     monkeypatch.setenv("CLEO_MODAL_DEADLINE_S_MAX", "nonsense")
@@ -441,7 +444,7 @@ def test_deadline_scales_with_output(monkeypatch):
     # 0 is no "off" switch that fails every render at once.
     monkeypatch.setenv("CLEO_MODAL_DEADLINE_S_MAX", "0")
     assert pipeline._modal_deadline_s([(0, 5)]) == 20
-    assert pipeline._modal_deadline_s([(0, 3600)]) == 1920
+    assert pipeline._modal_deadline_s([(0, 3600)]) == 3720
     monkeypatch.setenv("CLEO_MODAL_DEADLINE_S_BASE", "0")
     monkeypatch.setenv("CLEO_MODAL_DEADLINE_S_PER_S", "0")
     assert pipeline._modal_deadline_s([(0, 10)]) == 240 + 6 * 10
