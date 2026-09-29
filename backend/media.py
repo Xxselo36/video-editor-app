@@ -407,8 +407,9 @@ def list_job_prefixes(store: str, skip=None):
 # jobs/.owner holds the id of the database that owns the store's jobs/
 # (meta media_owner_id). The orphan sweep deletes nothing unless they
 # match: another deployment sharing the bucket (staging, a dev box with
-# the prod .env, a restored backup) must never treat our jobs as its
-# orphans.
+# the prod .env) must never treat our jobs as its orphans. A clone or
+# restore of our database has our id too — main._media_owner refuses
+# those (the id is bound to the database's physical identity).
 OWNER_KEY = "jobs/.owner"
 
 

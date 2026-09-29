@@ -810,16 +810,20 @@ def _media_of(job: Job) -> list[str]:
 
 def _delete_job(job) -> None:
     """Remove a job: in one transaction its row goes and its media
-    (jobs/{id}/ + the upload, in the job's store) are queued in
-    media_gc; then that GC is tried right away (best effort — the GC
-    loop retries). Legacy local files (work dir, upload) are removed
+    (jobs/{id}/ + the upload) are queued in media_gc — in EVERY store
+    (store "": local, and R2 when configured), not only the job's: a
+    backfill whose commit was refused, a move that lost its
+    compare-and-set, or a move committing while this runs leaves copies
+    in the other store that nothing else would delete (a missing prefix
+    costs one LIST). Then that GC is tried right away (best effort — the
+    GC loop retries). Legacy local files (work dir, upload) are removed
     directly."""
     if job.id and job.id not in _WORK_ROOT_RESERVED and "/" not in job.id:
         shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
         shutil.rmtree(_workspace(job.id), ignore_errors=True)
     _remove_upload(job.input_path)
     entries = _media_of(job)
-    where = media.store_of(job)
+    where = None  # every store (media.gc_stores)
     store.delete(job.id, gc=entries, gc_store=where)
     _proxy_cache_drop(job.id)
     with _EDIT_GUARD:
@@ -1020,11 +1024,18 @@ def run_media_gc(now: float | None = None, limit: int = 500) -> int:
 # a job row (a delete whose GC row was lost) older than 2 days →
 # media_gc. "No row in MY database" only proves an orphan if the store
 # belongs to this database: jobs/.owner must hold this database's
-# media_owner_id (meta), else the sweep refuses, loudly. The first
-# sweep runs a week after the first boot (the stamp is seeded then).
+# media_owner_id (meta), else the sweep refuses, loudly. meta is copied
+# by a clone, a dump or a restore, so the id alone proves nothing: it
+# is also bound to where it was made (media_owner_fp: the database's
+# physical identity + RAILWAY_ENVIRONMENT_ID, _owner_fingerprint). A
+# database whose fingerprint differs (a clone, a restore, a cutover) or
+# that has the id without one (the dump leaves it out) refuses until an
+# operator re-arms it (CLEO_MEDIA_OWNER_REARM=<its fingerprint>). The
+# first sweep runs a week after the first boot (the stamp is seeded).
 _ORPHAN_SWEEP_EVERY_S = 7 * 86400.0
 _ORPHAN_MIN_AGE_S = 2 * 86400.0
 _ORPHAN_OWNER_META = "media_owner_id"
+_ORPHAN_FP_META = "media_owner_fp"
 _ORPHAN_STAMP_META = "media_orphan_sweep_at"
 
 
@@ -1038,23 +1049,65 @@ def _orphan_max() -> int:
 
 
 def _media_owner_id() -> str:
+    """meta media_owner_id; a new one is bound to where it's made
+    (media_owner_fp, written before the id exists)."""
+    if accounts.meta_get(_ORPHAN_OWNER_META) is None:
+        accounts.meta_get_or_create(_ORPHAN_FP_META, _owner_fingerprint)
     return accounts.meta_get_or_create(_ORPHAN_OWNER_META,
                                        lambda: uuid.uuid4().hex)
+
+
+def _owner_fingerprint() -> str:
+    """Where this database is: its physical identity (accounts.db_identity
+    — not copied by a clone or restore) and the Railway environment."""
+    raw = "|".join((accounts.db_identity(),
+                    os.environ.get("RAILWAY_ENVIRONMENT_ID", "").strip()))
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+def _media_owner() -> str | None:
+    """This database's media_owner_id — or None (loud) when the id isn't
+    bound to this database: made elsewhere (a clone, a restored backup,
+    the SQLite→Postgres cutover) and not re-armed by the operator."""
+    mine = _media_owner_id()
+    fp = _owner_fingerprint()
+    bound = accounts.meta_get(_ORPHAN_FP_META)
+    if bound == fp:
+        return mine
+    if os.environ.get("CLEO_MEDIA_OWNER_REARM", "").strip() == fp:
+        accounts.meta_set(_ORPHAN_FP_META, fp)
+        print(f"[media] orphan sweep re-armed: media owner {mine} bound to "
+              f"this database ({fp}); remove CLEO_MEDIA_OWNER_REARM",
+              flush=True)
+        return mine
+    print(f"[media] ORPHAN SWEEP REFUSED: this database is not where its "
+          f"media owner id was made (bound to {bound!r}, this is {fp!r}) — "
+          "a clone, a restored backup or the move to Postgres. Nothing "
+          "deleted. A clone or staging copy: turn CLEO_MEDIA_ORPHAN_SWEEP "
+          "off and give it its own bucket. Only if this IS the deployment "
+          f"the store belongs to (and no rows were lost): set "
+          f"CLEO_MEDIA_OWNER_REARM={fp} once.", flush=True)
+    logging.getLogger("backend.media").error(
+        "orphan sweep refused: media owner id not bound to this database")
+    return None
 
 
 def _claim_store_owner(where: str) -> bool:
     """Is `where`'s jobs/ ours? Writes jobs/.owner when there is none
     yet — only when the store has no job prefixes at all or every one
     of them has a row here (a fresh bucket, or ours from before the
-    marker). False (loud) otherwise."""
-    mine = _media_owner_id()
+    marker). False (loud) otherwise, and when our id isn't bound to this
+    database (_media_owner: a clone or a restore)."""
+    mine = _media_owner()
+    if mine is None:
+        return False
     owner = media.read_owner(where)
     if owner == mine:
         return True
     if owner is not None:
         print(f"[media] ORPHAN SWEEP REFUSED ({where}): jobs/.owner is "
               f"{owner!r}, this database is {mine!r} — the store belongs "
-              "to another deployment (or this database was restored). "
+              "to another deployment. "
               "Nothing deleted. Fix: point R2_BUCKET / CLEO_MEDIA_ROOT at "
               "this deployment's own store, or turn "
               "CLEO_MEDIA_ORPHAN_SWEEP off.", flush=True)
