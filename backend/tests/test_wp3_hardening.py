@@ -351,6 +351,30 @@ def test_backfill_of_a_job_deleted_meanwhile_queues_its_copies(
     assert (p, "r2") in {(r["prefix"], r["store"]) for r in store.gc_all()}
 
 
+def test_delete_after_a_refused_backfill_commit_removes_its_copies(
+        r2, tmp_path, monkeypatch, client):
+    """A backfill whose commit is refused (the job changed meanwhile)
+    leaves its R2 copies to the job's delete — which must look in R2
+    although the job's own store is still local."""
+    monkeypatch.delenv("CLEO_MEDIA_BACKEND", raising=False)  # local
+    job, _ = _legacy_job(tmp_path)
+    real = media.put_file
+    p = f"jobs/{job.id}/"
+
+    def put(path, key, **kw):
+        size = real(path, key, **kw)
+        store.update(job.id, status="awaiting_review")  # the user edits
+        return size
+    monkeypatch.setattr(media, "put_file", put)
+    res = r2_backfill.backfill_job(store.get(job.id))
+    monkeypatch.setattr(media, "put_file", real)
+    assert res["status"] == "skipped" and storage.list_r2(p)
+    assert media.store_of(store.get(job.id)) == "local"
+    assert client.delete(f"/jobs/{job.id}").status_code == 200
+    M.run_media_gc(now=time.time() + 10)
+    assert storage.list_r2(p) == []
+
+
 def test_backfill_proxy_failure_is_reported_and_remembered(
         r2, tmp_path, monkeypatch):
     """Minor 5: a job whose only missing piece is a proxy that can't be

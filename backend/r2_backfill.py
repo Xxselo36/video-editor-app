@@ -312,7 +312,8 @@ def _gc_uncommitted(job_id: str, uploaded: list[str],
     next run uploads and commits again under the same key (`retried`: a
     move's keys); the whole prefix if the job is gone. Other keys (mezz,
     proxy, r1/…) are fixed names: the next run uploads over them, and
-    the job's delete takes them. Returns what was queued."""
+    the job's delete takes them (it queues jobs/{id}/ in every store,
+    whatever the job's own). Returns what was queued."""
     cur = store.get(job_id)
     if cur is None:
         entries = ([media.job_prefix(job_id)]

@@ -785,6 +785,7 @@ am besten nachts.
 Weitere, nur bei Bedarf: `CLEO_BACKFILL_BATCH` (5 Jobs pro Stunde),
 `CLEO_BACKFILL_MBPS` (40), `CLEO_BACKFILL_MAKE_PROXY` (1; 0 = fehlende
 Proxies nicht erzeugen), `CLEO_MEDIA_ORPHAN_MAX` (200 Präfixe pro Lauf),
+`CLEO_MEDIA_OWNER_REARM` (nur einmalig nach Umzug/Restore, 10.7),
 `CLEO_PROXY_CACHE_GB` (5), `CLEO_PROBE_WORKERS` (4),
 `CLEO_MODAL_DEADLINE_S_PER_GB` (60, siehe 9.3), `CLEO_MEDIA_ROOT`
 (Ordner der lokalen Medien, Default `<CLEO_WORK_ROOT>/media`),
@@ -1035,10 +1036,28 @@ des Plans.
   Lauf). Schutz: im Bucket liegt `jobs/.owner` mit der ID dieser
   Datenbank. Beim ersten Lauf wird sie nur geschrieben, wenn jedes
   vorhandene Präfix einen Job hat; passt sie nicht (anderes Deployment,
-  Staging mit Prod-Bucket, Entwickler-Rechner mit der Prod-`.env`,
-  zurückgespieltes Backup), löscht der Check **nichts** und loggt
-  `ORPHAN SWEEP REFUSED`. Meldet er das in Produktion ohne erkennbaren
-  Grund: Variable löschen und nachsehen, nicht die Marke überschreiben.
+  Entwickler-Rechner mit der Prod-`.env`), löscht der Check **nichts**
+  und loggt `ORPHAN SWEEP REFUSED`. Die ID steht in `meta` und wird von
+  jeder Kopie der Datenbank mitkopiert — deshalb ist sie zusätzlich an
+  *diese* Datenbank gebunden (Postgres: Cluster-`system_identifier` +
+  Datenbank-OID; SQLite: die Datei; dazu `RAILWAY_ENVIRONMENT_ID`). Eine
+  geklonte Datenbank (Staging aus Prod geklont), ein in eine neue
+  Datenbank zurückgespieltes Backup (`pg_backup restore`, der Dump
+  enthält die Bindung nicht) und der Umzug SQLite→Postgres verweigern
+  deshalb ebenfalls (`ORPHAN SWEEP REFUSED: this database is not where
+  its media owner id was made …`). **Nicht** erkannt wird eine Kopie, die
+  dieselbe Datenbank *an Ort und Stelle* überschreibt (Railway-Volume-
+  Backup derselben Postgres-Instanz, SQLite-Datei per `cp` über die alte
+  kopiert): vor so einer Wiederherstellung `CLEO_MEDIA_ORPHAN_SWEEP`
+  löschen — sonst löscht der nächste Lauf die Medien der Jobs, die nach
+  dem Backup entstanden sind. Grundsätzlich: Staging nie mit dem
+  Prod-Bucket und `CLEO_MEDIA_ORPHAN_SWEEP=1` betreiben.
+  Nach einem Umzug oder Restore *der Produktion* (und nur dort, wenn
+  keine Job-Zeilen fehlen): den im Log genannten Wert einmal als
+  `CLEO_MEDIA_OWNER_REARM=<wert>` setzen, Log `orphan sweep re-armed`
+  abwarten, Variable wieder löschen. Meldet er `REFUSED` in Produktion
+  ohne erkennbaren Grund: Variable löschen und nachsehen, nicht die Marke
+  überschreiben.
 - `media_gc` ist Teil der Postgres-Backups und des SQLite→Postgres-Umzugs.
 - **Lifecycle-Regeln für `uploads/`** prüft das Backend einmal am Tag
   selbst (mit `R2_*`): fehlen sie, steht im Log **`[media] R2 LIFECYCLE

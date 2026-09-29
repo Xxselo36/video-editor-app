@@ -230,3 +230,31 @@ def test_backup_needs_postgres_and_r2(two_dbs, monkeypatch, r2):
     monkeypatch.setattr(storage, "r2_available", lambda: True)
     M._backup_tick()
     assert list(r2.objects)[0].startswith("backups/pg/")
+
+
+def test_restored_database_is_not_the_media_owner(two_dbs, tmp_path):
+    """The orphan sweep's owner binding (meta media_owner_fp) stays out
+    of the dump: a restored database has the owner id but not the
+    binding, so it can't pass as the database that owns the bucket."""
+    src, dst_url = two_dbs
+    adb = pg.AccountsDB(src)
+    with adb.transaction() as tx:
+        tx.execute("INSERT INTO meta (key, value) VALUES (?, ?)",
+                   ("media_owner_fp", "fp-of-src"))
+        tx.execute("INSERT INTO meta (key, value) VALUES (?, ?)",
+                   ("media_owner_id", "owner-1"))
+    dump = tmp_path / "b.sql.gz"
+    assert pg_backup.export(src, str(dump))["meta"] == 2
+    pg_backup.restore(dst_url, str(dump))
+    dst = pg.Database(dst_url, max_size=2)
+    try:
+        meta = {r["key"]: r["value"] for r in
+                pg.AccountsDB(dst).read("SELECT key, value FROM meta")}
+        assert meta["media_owner_id"] == "owner-1"
+        assert "media_owner_fp" not in meta
+        # Another database of the same cluster is another identity.
+        ident = "SELECT (SELECT oid FROM pg_database WHERE datname = " \
+                "current_database())::text AS o"
+        assert pg.AccountsDB(dst).read(ident) != adb.read(ident)
+    finally:
+        dst.close()

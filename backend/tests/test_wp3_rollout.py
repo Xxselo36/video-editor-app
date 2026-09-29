@@ -473,6 +473,68 @@ def _drop_row(job_id: str) -> None:
             conn.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
 
 
+def test_orphan_sweep_refuses_a_cloned_or_restored_database(sweep_on,
+                                                            monkeypatch,
+                                                            capsys):
+    """meta (media_owner_id) comes along in a clone, a dump or a
+    restore: the id is bound to the database it was made in, so a copy
+    elsewhere refuses although jobs/.owner matches — until re-armed."""
+    from backend import accounts
+    media.write_owner("local", M._media_owner_id())   # prod claimed it
+    real = accounts.db_identity()
+    # The clone: same meta, another database (or Railway environment).
+    monkeypatch.setattr(accounts, "db_identity", lambda: real + "-clone")
+    orphan = _local_prefix("aaaaaaaaaaaa")          # prod's newer job
+    assert media.read_owner("local") == M._media_owner_id()
+    assert M.sweep_media_orphans() == 0
+    assert "ORPHAN SWEEP REFUSED" in capsys.readouterr().out
+    assert store.gc_all() == [] and orphan.exists()
+    monkeypatch.setattr(accounts, "db_identity", lambda: real)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID", "env-staging")
+    assert M.sweep_media_orphans() == 0 and orphan.exists()
+    # A restored dump: the id without its binding (pg_backup leaves
+    # media_owner_fp out) refuses too.
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_ID")
+    accounts._tx(lambda c: c.execute("DELETE FROM meta WHERE key = ?",
+                                     ("media_owner_fp",)))
+    assert M.sweep_media_orphans() == 0 and orphan.exists()
+    assert store.gc_all() == []
+    # The operator re-arms this database explicitly (a wrong value
+    # doesn't).
+    monkeypatch.setenv("CLEO_MEDIA_OWNER_REARM", "nope")
+    assert M.sweep_media_orphans() == 0
+    monkeypatch.setenv("CLEO_MEDIA_OWNER_REARM", M._owner_fingerprint())
+    assert M.sweep_media_orphans() == 1
+    monkeypatch.delenv("CLEO_MEDIA_OWNER_REARM")
+    assert accounts.meta_get("media_owner_fp") == M._owner_fingerprint()
+
+
+def test_db_identity_changes_with_a_copy(tmp_path):
+    """A copied SQLite file (a clone, a backup put in its place) is
+    another database; the live one keeps its identity."""
+    import shutil
+    from backend import accounts
+    a = tmp_path / "a" / "jobs.db"
+    a.parent.mkdir()
+    a.write_bytes(b"x")
+    b = tmp_path / "b" / "jobs.db"
+    b.parent.mkdir()
+    shutil.copy(a, b)
+    assert accounts.sqlite_identity(str(a)) == accounts.sqlite_identity(
+        str(a))
+    assert accounts.sqlite_identity(str(a)) != accounts.sqlite_identity(
+        str(b))
+    before = accounts.sqlite_identity(str(a))
+    shutil.copy(b, tmp_path / "a" / "new.db")
+    os.replace(tmp_path / "a" / "new.db", a)  # a backup moved in place
+    assert accounts.sqlite_identity(str(a)) != before
+    ident = accounts.db_identity()
+    assert ident == accounts.db_identity()
+    assert ident.startswith(("sqlite:", "pg:"))
+    if ident.startswith("pg:"):
+        assert not ident.startswith("pg:?:")  # system_identifier readable
+
+
 def test_orphan_sweep_is_off_by_default(no_r2, monkeypatch):
     monkeypatch.delenv("CLEO_MEDIA_ORPHAN_SWEEP", raising=False)
     orphan = _local_prefix("aaaaaaaaaaaa")

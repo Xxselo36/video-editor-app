@@ -392,6 +392,20 @@ function wantsSinglePut(e: ApiError): boolean {
   );
 }
 
+/** Does this /uploads/multipart/parts answer say the saved upload can't
+ *  be resumed (so its record goes)? Only definitive answers — never a
+ *  5xx, 401 or 429. */
+export function recordGone(e: ApiError): boolean {
+  return (
+    e.status === 400 ||
+    e.status === 403 ||
+    e.status === 404 ||
+    e.status === 405 ||
+    e.status === 410 ||
+    (e.status === 409 && e.code === "use_single_put")
+  );
+}
+
 // ── the resumable upload ─────────────────────────────────────────────
 
 export async function uploadResumable(opts: UploadOptions): Promise<UploadResult> {
@@ -409,6 +423,22 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
     let completed = false;
     const urls = new Map<number, string>();
 
+    if (rec?.completed) {
+      // Uploaded and completed before; only POST /jobs failed. Straight
+      // to POST /jobs with the key — it decides (and a refusal there
+      // drops the record): no /parts round trip that a 5xx during a
+      // deploy, or the single-PUT kill switch, could turn into a full
+      // re-upload.
+      const fp = rec.fp;
+      onProgress?.(100);
+      return {
+        storage_key: rec.storage_key,
+        release: async () => {
+          if (fp) await dropRecord(fp);
+        },
+      };
+    }
+
     if (rec) {
       // Resume: the server's list of parts wins over ours.
       const r = await postJson("/uploads/multipart/parts", { ticket: rec.ticket }, signal);
@@ -424,10 +454,16 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
         rec = { ...rec, done: [...doneSet] };
         void saveRecord(rec);
         telemetry(rec.ticket, "resume", { loaded: doneBytes(rec.done, rec.part_size, file.size, rec.parts_total) });
-      } else if (r.status === 401) {
-        throw await apiError(r);
       } else {
-        // Expired (410), not ours any more (403), or no multipart API.
+        const e = await apiError(r);
+        if (!recordGone(e)) {
+          // 401 (sign in again), a 5xx while the backend restarts, 429 …:
+          // not an answer about the upload — the record stays for the
+          // next try.
+          throw e;
+        }
+        // Expired (410), not ours any more (403), no multipart API
+        // (404 / 405) or switched to single PUTs (409).
         await dropRecord(rec.fp);
         rec = null;
       }

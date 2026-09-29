@@ -10,10 +10,10 @@ at most once per 24 h across all processes (a claim in meta, taken under
 an advisory lock — pooler-safe, no session locks), uploads
 backups/pg/<YYYY-MM-DD>.sql.gz to R2 and deletes backups older than
 CLEO_PG_BACKUP_KEEP_DAYS (default 14). Only with Postgres active and R2
-configured. The dump holds everything, including meta's media/checkout
-secrets — keep the bucket private; R2_BACKUP_BUCKET puts the dumps into a
-bucket of their own (recommended: the Modal render token then has no
-access to them, backend/storage.py).
+configured. The dump holds everything (but meta.media_owner_fp),
+including meta's media/checkout secrets — keep the bucket private;
+R2_BACKUP_BUCKET puts the dumps into a bucket of their own (recommended:
+the Modal render token then has no access to them, backend/storage.py).
 
 CLI (DATABASE_URL and the R2_* variables from the environment):
     python -m backend.pg_backup export FILE.sql.gz
@@ -100,8 +100,13 @@ def export(database: pg.Database, path: str) -> dict[str, int]:
             cols = ", ".join(pg.COLUMNS[table])
             w(f"COPY {table} ({cols}) FROM stdin;\n")
             n = 0
+            # The media owner's binding (backend/main.py _media_owner)
+            # stays out: a restored database must not pass as the one
+            # that owns the bucket's jobs/ (the orphan sweep refuses it).
+            where = (" WHERE key <> 'media_owner_fp'" if table == "meta"
+                     else "")
             with conn.cursor() as cur, cur.copy(
-                    f"COPY (SELECT {cols} FROM {table} ORDER BY "
+                    f"COPY (SELECT {cols} FROM {table}{where} ORDER BY "
                     f"{pg.PRIMARY_KEYS[table]}) TO STDOUT") as cp:
                 for chunk in cp:
                     data = bytes(chunk)
