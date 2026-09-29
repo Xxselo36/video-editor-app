@@ -118,11 +118,18 @@ def test_client_duration_when_the_header_has_none(client, enforce, bearer,
 
 
 def test_no_duration_at_all(client, enforce, bearer, upload):
+    """Neither the header nor the browser knows the length (streamed
+    WebM): accepted uncharged — the analysis worker measures and charges
+    it (test_wp3_hardening.py)."""
     add_sub(plan="pro", period_start=time.time() - 60)
     upload.seconds = None
     r = _post(client, bearer())
-    assert (r.status_code, r.json()) == (400, {"detail": "unreadable_video"})
-    assert storage.head(KEY) is None and store.list_all() == []
+    assert r.status_code == 200, r.text
+    job = store.get(r.json()["job_id"])
+    assert accounts.get_usage(job.id) is None
+    assert job.settings == {"_measure_length": True, "_charge": "enforce",
+                            "_max_seconds": 30 * 60 + 1}
+    assert storage.head(KEY) == 10          # kept for the worker
 
 
 def test_no_duration_without_billing_is_accepted(client, upload, r2):
@@ -204,6 +211,12 @@ def test_worker_stores_keys_and_commits_once(r2, monkeypatch):
         writes.append(kw)
         return impl_update(job_id, **kw)
     monkeypatch.setattr(store, "update", update)
+    impl_update_if = store.update_if
+
+    def update_if(job_id, expect, **kw):
+        writes.append({**kw, "_expect": expect})
+        return impl_update_if(job_id, expect, **kw)
+    monkeypatch.setattr(store, "update_if", update_if)
     deleted_at = []
     real_delete = M.media.delete
 
@@ -228,6 +241,7 @@ def test_worker_stores_keys_and_commits_once(r2, monkeypatch):
     # One write sets the keys, media_bytes and the status together.
     [commit] = [w for w in writes if w.get("status") == "awaiting_review"]
     assert {"mezz_key", "proxy_key", "preview_key", "media_bytes"} <= set(commit)
+    assert commit["_expect"] == "processing"     # only while still ours
     # The source object goes after that commit; the workspace is gone.
     assert deleted_at == [(KEY, "awaiting_review")]
     assert storage.head(KEY) is None

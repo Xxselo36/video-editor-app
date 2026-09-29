@@ -63,7 +63,8 @@ def test_anonymous_flow(client, no_accounts_db, clean_state):
     else:
         assert job.input_path.endswith(".MOV")
     # _cost_test kept (cost_test.py runs without auth), forged key gone.
-    assert job.settings == {"style": "tight", "_cost_test": True}
+    assert job.settings == {"style": "tight", "_cost_test": True,
+                            "_max_seconds": 30 * 60 + 1}
     assert (job.preset_id, job.preset_label) == ("p1", "Vlog")
 
     assert client.get(f"/jobs/{job_id}").status_code == 200

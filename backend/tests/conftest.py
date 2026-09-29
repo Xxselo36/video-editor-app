@@ -283,6 +283,8 @@ def clean_state(monkeypatch):
     auth._jwks = None
     billing._price_cache.clear()
     billing._refresh_tried.clear()
+    with M._INIT_RATE._lock:
+        M._INIT_RATE._events.clear()
     if db.active() == "postgres":
         store._truncate_for_tests()
         shutil.rmtree(M._WORK_ROOT / "uploads", ignore_errors=True)
