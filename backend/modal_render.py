@@ -12,8 +12,15 @@ Cost model: pay-per-second CPU time only when a job is running.
 Idle = $0. A 10-min video render at ~2-3 min on 8-CPU worker ≈ $0.05.
 Compared to ~$0.50 on Railway shared tier.
 
-The function takes the pre-normalized video + all cut/caption info and
-returns the finished primary + extra-format MP4s as raw bytes.
+Two functions:
+  - render_r2 (WP3, the default with media in R2): reads the job's mezz
+    object from R2 and writes every output (primary, formats, hook
+    clips, thumbnail) back to R2 under the render's prefix. Needs the
+    Modal secret "cleocuts-r2" (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY, R2_BUCKET — see DEPLOY.md, "Media storage").
+  - render_burn_concat: the older volume path (the backend uploads the
+    source into a Modal Volume and downloads the outputs). Kept for
+    rollback (CLEO_MODAL_RENDER_FN=render_burn_concat) until WP4.
 """
 from __future__ import annotations
 
@@ -50,6 +57,11 @@ image = (
         "pydub>=0.25.1",
         "anthropic==0.111.0",
         "openai>=1.50.0",
+        # render_r2 reads / writes R2 (backend/storage.py); same pin as
+        # backend/requirements.txt (the day-aligned signer uses botocore
+        # internals).
+        "boto3>=1.43,<1.44",
+        "botocore>=1.43,<1.44",
     )
     # Bundle the SmartCut source so _multi_clip_burn + _ffmpeg_concat
     # + _export_format can all run inside the Modal container without
@@ -188,3 +200,69 @@ def render_burn_concat(
         return result_map
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@app.function(
+    image=image,
+    cpu=8.0,
+    memory=8192,
+    timeout=3600,      # pipeline._MODAL_FUNCTION_TIMEOUT_S follows it
+    secrets=[modal.Secret.from_name("cleocuts-r2")],
+)
+def render_r2(
+    job_id: str,
+    gen: int,
+    mezz_key: str,
+    out_prefix: str,
+    segments: list[list[float]],
+    subtitles: list[dict],
+    caption_preset: str,
+    cut_style: str,
+    language: str | None,
+    output_formats: list[str],
+    segment_effects: list[dict],
+    hooks: list[dict],
+) -> dict:
+    """One render, R2 in and out: get the mezz to local SSD, then burn →
+    concat → effects → thumbnail → formats → hook cuts, and put every
+    output under `out_prefix` (jobs/{job_id}/r{gen}/). Same-size formats
+    alias the primary's key. Returns {outputs: {fmt: {key, size}},
+    thumb: {key, size} | None, hooks: [{k, key, size, title, reason,
+    start, end}], timings}. Outputs are written locally and uploaded —
+    never through a CloudBucketMount (faststart needs seek)."""
+    import os
+    import shutil
+    import sys
+    import tempfile
+    import time
+    from pathlib import Path
+
+    sys.path.insert(0, "/app")
+    os.environ.setdefault("CLEO_FFMPEG_THREADS", "0")
+    if not out_prefix.startswith(f"jobs/{job_id}/r{int(gen)}/"):
+        raise ValueError(f"out_prefix {out_prefix!r} doesn't belong to "
+                         f"job {job_id} r{gen}")
+    from backend import storage
+    from backend.pipeline import render_to_dir, store_render_files
+
+    work = Path(tempfile.mkdtemp(prefix="cleo_r2_"))
+    timings: dict[str, float] = {}
+    try:
+        t = time.monotonic()
+        mezz = work / "mezz.mp4"
+        storage.get_file(mezz_key, str(mezz))
+        timings["get"] = round(time.monotonic() - t, 3)
+        files = render_to_dir(
+            str(mezz), str(work / "out"),
+            [(float(s), float(e)) for s, e in segments],
+            segment_effects or [], subtitles, caption_preset, cut_style,
+            language, output_formats or [], hooks or [],
+            parallelism=8, timings=timings)
+        t = time.monotonic()
+        result = store_render_files(files, out_prefix, storage.put_file)
+        timings["put"] = round(time.monotonic() - t, 3)
+        result["timings"] = timings
+        return result
+    finally:
+        # One user's video: never left on a warm container.
+        shutil.rmtree(work, ignore_errors=True)
