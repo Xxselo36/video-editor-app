@@ -54,7 +54,11 @@ opencv-python-headless>=4.8.0
 # Process utils.
 psutil>=5.9.0
 
-# ── Direct-to-storage upload (Cloudflare R2, S3-compatible) ──
-# Used for presigned URLs so client uploads bypass Railway's edge
-# router for large files (multi-GB iPhone ProRes).
-boto3>=1.35.0
+# ── Job media + direct browser uploads (Cloudflare R2, S3 API) ──
+# backend/storage.py imports it lazily. Pinned to ONE minor version:
+# the day-aligned presign ("cleo-day" signer) subclasses botocore's
+# S3SigV4QueryAuth and registers in botocore.auth.AUTH_TYPE_MAPS —
+# internals; backend/tests/test_wp3_storage.py checks it against
+# botocore's own presign. Bump both together, run that test.
+boto3>=1.43,<1.44
+botocore>=1.43,<1.44
