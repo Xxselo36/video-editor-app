@@ -21,6 +21,7 @@ import pytest
 import backend.main as M
 from backend import accounts, jobs
 from backend.jobs import store
+from conftest import analysis_result
 
 psycopg = pytest.importorskip("psycopg")
 from psycopg_pool import PoolTimeout  # noqa: E402
@@ -46,14 +47,14 @@ def _charged_job(owner="user_a", seconds=100):
 
 
 def _analysis(output_dir, on_normalized=None, **kw):
-    normalized = Path(output_dir, "normalized.mp4")
-    normalized.write_bytes(b"n")
+    res = analysis_result(output_dir)
     if on_normalized is not None:
         on_normalized()
-    return {"normalized_path": str(normalized),
-            "preview_path": str(Path(output_dir, "preview.mp4")),
-            "segments": [(0.0, 1.0)], "subtitles": [], "duration": 1.0,
-            "language": "en"}
+    return res
+
+
+def _gc_prefixes() -> set[str]:
+    return {r["prefix"] for r in store.gc_all()}
 
 
 def _failing(monkeypatch, method, when, times=None, exc=None):
@@ -91,7 +92,8 @@ def test_analysis_result_write_rides_out_a_short_outage(
     got = store.get(job.id)
     assert left["n"] == 0
     assert got.status == "awaiting_review" and got.segments
-    assert (M._WORK_ROOT / job.id / "normalized.mp4").exists()
+    assert M.media.size(got.mezz_key) == 4      # stored, workspace gone
+    assert not M._workspace(job.id).exists()
     assert not _refunded(job.id)
     assert job.id not in M._active_jobs
 
@@ -111,14 +113,16 @@ def test_analysis_that_cant_be_saved_fails_as_our_fault(
 
     def update(job_id, **kw):
         if kw.get("status") == "error":
-            seen["dir_at_error_write"] = (M._WORK_ROOT / job_id).exists()
+            seen["dir_at_error_write"] = M._workspace(job_id).exists()
         return real(job_id, **kw)
     monkeypatch.setattr(impl, "update", update)
     M._run_analyze_inner(job.id)
     got = store.get(job.id)
     assert (got.status, got.error) == ("error", DOWN)
     assert seen == {"dir_at_error_write": True}
-    assert not (M._WORK_ROOT / job.id).exists() and not upload.exists()
+    assert not M._workspace(job.id).exists() and not upload.exists()
+    # What it had stored already goes (media_gc).
+    assert f"jobs/{job.id}/" in _gc_prefixes()
     assert _refunded(job.id)
     assert M._is_infra_failure(PoolTimeout(DOWN), DOWN)
     assert M._is_infra_failure(psycopg.OperationalError("lost"), "lost")
@@ -139,8 +143,10 @@ def test_analysis_left_running_by_an_outage_is_settled_by_the_sweep(
             M._run_analyze_inner(job.id)
     # the database is back
     got = store.get(job.id)
-    assert (got.status, got.message) == ("processing", "Starting…")
-    assert (M._WORK_ROOT / job.id / "normalized.mp4").exists()
+    # (the last progress tick: its results were being stored)
+    assert (got.status, got.message) == ("processing", "Saving…")
+    # The workspace goes in any case (WP3); the upload stays.
+    assert not M._workspace(job.id).exists()
     assert upload.exists()
     assert _refunded(job.id)                # the minutes went back first
     assert job.id not in M._active_jobs
@@ -151,7 +157,8 @@ def test_analysis_left_running_by_an_outage_is_settled_by_the_sweep(
     assert (got.status, got.error) == ("error", "container_restart")
     assert got.input_path is None
     assert _refunded(job.id)
-    assert not (M._WORK_ROOT / job.id).exists() and not upload.exists()
+    assert not upload.exists()
+    assert f"jobs/{job.id}/" in _gc_prefixes()
     assert M._sweep_orphaned_jobs(now=later) == 0
 
 
@@ -184,7 +191,7 @@ def test_refund_of_a_failed_analysis_rides_out_a_short_outage(
     got = store.get(job.id)
     assert (got.status, got.error) == ("error", DOWN)
     assert len(calls) == 2 and _refunded(job.id)
-    assert not (M._WORK_ROOT / job.id).exists() and not upload.exists()
+    assert not M._workspace(job.id).exists() and not upload.exists()
 
 
 def test_refund_that_cant_be_written_leaves_the_job_to_the_sweep(
@@ -203,14 +210,15 @@ def test_refund_that_cant_be_written_leaves_the_job_to_the_sweep(
             M._run_analyze_inner(job.id)
     got = store.get(job.id)
     assert got.status == "processing" and not _refunded(job.id)
-    assert upload.exists() and (M._WORK_ROOT / job.id).exists()
+    assert upload.exists()          # (the workspace goes in any case)
     assert job.id not in M._active_jobs
     later = time.time() + M._ORPHAN_STALE_S + 1
     assert M._sweep_orphaned_jobs(now=later) == 1
     got = store.get(job.id)
     assert (got.status, got.error) == ("error", "container_restart")
     assert _refunded(job.id)
-    assert not (M._WORK_ROOT / job.id).exists() and not upload.exists()
+    assert not upload.exists()
+    assert f"jobs/{job.id}/" in _gc_prefixes()
 
 
 class _Killed(BaseException):
@@ -220,7 +228,7 @@ class _Killed(BaseException):
 def test_kill_while_dropping_the_upload_keeps_the_refund(
         auth_on, fast_retry, monkeypatch):
     """An ffmpeg failure (ours: refund due) before normalizing, and the
-    process dies inside the upload's R2 delete: the minutes are already
+    process dies while the upload is deleted: the minutes are already
     back — the job is 'error' by then, which no boot or sweep refunds."""
     job, upload = _charged_job()
 
@@ -229,12 +237,12 @@ def test_kill_while_dropping_the_upload_keeps_the_refund(
     monkeypatch.setattr(M, "analyze_only", analysis)
     seen = {}
 
-    def discard(input_path, key):
+    def remove(path):
         got = store.get(job.id)
         seen.update(status=got.status, refunded=_refunded(job.id))
         raise _Killed()
     with monkeypatch.context() as m:
-        m.setattr(M, "_discard_upload", discard)
+        m.setattr(M, "_remove_upload", remove)
         with pytest.raises(_Killed):
             M._run_analyze_inner(job.id)
     assert seen == {"status": "error", "refunded": True}
@@ -267,14 +275,16 @@ def _review_job(tmp_path):
 @pytest.fixture
 def fake_render(monkeypatch, tmp_path):
     import backend.llm as llm
-    out = tmp_path / "out.mp4"
-    out.write_bytes(b"o")
-    monkeypatch.setattr(M, "render_only",
-                        lambda **kw: {"outputs": {"primary": str(out)}})
+
+    def render(**kw):
+        key = kw["out_prefix"] + "primary.mp4"
+        return {"outputs": {"primary": {"key": key, "size": 1}},
+                "thumb": None, "hooks": []}
+    monkeypatch.setattr(M.pipeline, "render_to_keys", render)
     monkeypatch.setattr(llm, "generate_social_caption",
                         lambda text, language=None: {"caption": "c",
                                                      "hashtags": []})
-    return out
+    return render
 
 
 def test_render_rides_out_a_short_outage(fast_retry, fake_render, tmp_path,
@@ -286,7 +296,10 @@ def test_render_rides_out_a_short_outage(fast_retry, fake_render, tmp_path,
     M._run_render_inner(job.id, [{"text": "hi"}])
     assert got_left["n"] == 0 and done_left["n"] == 0
     got = store.get(job.id)
-    assert (got.status, got.output_path) == ("done", str(fake_render))
+    assert got.status == "done"
+    assert got.output_keys == {"primary": f"jobs/{job.id}/r1/primary.mp4"}
+    # The legacy job's normalized file became its mezz (lazy backfill).
+    assert got.mezz_key == f"jobs/{job.id}/mezz.mp4"
 
 
 def test_render_left_running_by_an_outage_goes_back_to_review(
