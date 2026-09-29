@@ -1,0 +1,203 @@
+name: R2 setup
+
+# Sets up and checks the media bucket (Cloudflare R2) and the Modal
+# secret "cleocuts-r2" from repository secrets, so nothing has to run
+# on anyone's computer (DEPLOY.md 10.2). Manual only:
+#   Actions → "R2 setup" → Run workflow
+#     mode=check (default): verify, change nothing
+#     mode=apply: set the bucket's CORS + lifecycle rules (exactly
+#       `python -m backend.r2_setup --print-config`), create or replace
+#       the Modal secret cleocuts-r2, then verify
+# After a successful apply run "Deploy Modal render" once: it finds the
+# secret and deploys render_r2.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   R2_ACCOUNT_ID, R2_BUCKET
+#   R2_ADMIN_ACCESS_KEY_ID, R2_ADMIN_SECRET_ACCESS_KEY
+#       R2 token "Admin Read & Write": bucket settings + the full check
+#   R2_MODAL_ACCESS_KEY_ID, R2_MODAL_SECRET_ACCESS_KEY
+#       R2 token "Object Read & Write", media bucket only: what goes
+#       into the Modal secret (render_r2 uses it)
+#   MODAL_TOKEN_ID, MODAL_TOKEN_SECRET (as for "Deploy Modal render")
+#
+# The repo is public, so is this log: PASS/FAIL lines, rule IDs and
+# counts only. Secrets and inputs reach the scripts through step env
+# only (never inside a run: script — the log shows those expanded);
+# bucket name and account ID are masked on top; the Modal secret's
+# values reach the modal CLI in a 0600 temp file, never on a command
+# line (.github/scripts/modal_r2_secret.py).
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'check = verify only; apply = set bucket rules + Modal secret, then verify'
+        type: choice
+        options:
+          - check
+          - apply
+        default: check
+      origin:
+        description: Website origin for the CORS check (must be in the bucket's CORS rules)
+        type: string
+        default: https://cleocuts.com
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r2-setup
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  r2:
+    name: R2 + Modal secret (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check the repository secrets
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ADMIN_ACCESS_KEY_ID: ${{ secrets.R2_ADMIN_ACCESS_KEY_ID }}
+          R2_ADMIN_SECRET_ACCESS_KEY: ${{ secrets.R2_ADMIN_SECRET_ACCESS_KEY }}
+          R2_MODAL_ACCESS_KEY_ID: ${{ secrets.R2_MODAL_ACCESS_KEY_ID }}
+          R2_MODAL_SECRET_ACCESS_KEY: ${{ secrets.R2_MODAL_SECRET_ACCESS_KEY }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ORIGIN: ${{ inputs.origin }}
+        # Names only, never values. Formats: Cloudflare account IDs and
+        # R2 access key IDs are 32 hex characters, R2 secret access keys
+        # 64 (a mismatch is only a warning: the S3 calls decide).
+        run: |
+          acct="${R2_ACCOUNT_ID//[[:space:]]/}"
+          bucket="${R2_BUCKET//[[:space:]]/}"
+          if [ -n "$acct" ]; then echo "::add-mask::$acct"; fi
+          if [ -n "$bucket" ]; then echo "::add-mask::$bucket"; fi
+          fail=0
+          for name in R2_ACCOUNT_ID R2_BUCKET \
+              R2_ADMIN_ACCESS_KEY_ID R2_ADMIN_SECRET_ACCESS_KEY \
+              R2_MODAL_ACCESS_KEY_ID R2_MODAL_SECRET_ACCESS_KEY \
+              MODAL_TOKEN_ID MODAL_TOKEN_SECRET; do
+            v="${!name//[[:space:]]/}"
+            if [ -z "$v" ]; then
+              echo "::error title=Missing secret $name::The repository secret $name is not set. Add it under Settings → Secrets and variables → Actions → New repository secret (DEPLOY.md 10.2)."
+              fail=1
+            fi
+          done
+          if [ -n "$acct" ] && ! [[ "$acct" =~ ^[0-9a-fA-F]{32}$ ]]; then
+            echo "::error title=R2_ACCOUNT_ID::R2_ACCOUNT_ID must be just the 32-character Cloudflare Account ID — not the endpoint URL, not a token."
+            fail=1
+          fi
+          if [ -n "$bucket" ] && ! [[ "$bucket" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]]; then
+            echo "::error title=R2_BUCKET::R2_BUCKET must be just the bucket name (lowercase letters, digits, hyphens), e.g. cleocuts-media."
+            fail=1
+          fi
+          for who in ADMIN MODAL; do
+            id="R2_${who}_ACCESS_KEY_ID"
+            key="R2_${who}_SECRET_ACCESS_KEY"
+            v="${!id//[[:space:]]/}"
+            if [ -n "$v" ] && ! [[ "$v" =~ ^[0-9a-fA-F]{32}$ ]]; then
+              echo "::warning title=$id::$id does not look like an R2 Access Key ID (32 characters). Use the \"Access Key ID\" Cloudflare shows after creating the R2 token, not the \"Token value\"."
+            fi
+            v="${!key//[[:space:]]/}"
+            if [ -n "$v" ] && ! [[ "$v" =~ ^[0-9a-fA-F]{64}$ ]]; then
+              echo "::warning title=$key::$key does not look like an R2 Secret Access Key (64 characters). Use the \"Secret Access Key\" Cloudflare shows after creating the R2 token."
+            fi
+          done
+          admin="${R2_ADMIN_ACCESS_KEY_ID//[[:space:]]/}"
+          if [ -n "$admin" ] && [ "$admin" = "${R2_MODAL_ACCESS_KEY_ID//[[:space:]]/}" ]; then
+            echo "::error title=Same R2 token twice::R2_MODAL_ACCESS_KEY_ID is the admin token. Modal needs a token of its own: \"Object Read & Write\", only the media bucket (the admin token can change every bucket of the account)."
+            fail=1
+          fi
+          if ! [[ "$ORIGIN" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
+            echo "::error title=origin::The input origin must look like https://cleocuts.com (no path, no trailing slash)."
+            fail=1
+          fi
+          exit "$fail"
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            backend
+            .github/scripts
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install boto3 and the Modal client
+        id: install
+        # boto3/botocore: the pin of backend/requirements.txt (the
+        # day-aligned presign the check tests relies on botocore
+        # internals); modal: the 1.x CLI (`secret create --force`,
+        # `secret list --json`), as in ops-watch.yml.
+        run: pip install -q "boto3>=1.43,<1.44" "botocore>=1.43,<1.44" "modal>=1.0,<2"
+
+      - name: Set the bucket's CORS and lifecycle rules (admin token)
+        id: bucket
+        if: inputs.mode == 'apply'
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ADMIN_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_ADMIN_SECRET_ACCESS_KEY }}
+        run: python -m backend.r2_setup --apply
+
+      # Before the Modal secret is written: a token that can't use the
+      # bucket must not replace one that can.
+      - name: Put / get / delete with the Modal token
+        id: roundtrip
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_MODAL_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_MODAL_SECRET_ACCESS_KEY }}
+        run: python -m backend.r2_setup --roundtrip
+
+      - name: Create or update the Modal secret cleocuts-r2
+        id: modal_secret
+        if: ${{ !cancelled() && inputs.mode == 'apply' && steps.bucket.outcome == 'success' && steps.roundtrip.outcome == 'success' }}
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_MODAL_ACCESS_KEY_ID: ${{ secrets.R2_MODAL_ACCESS_KEY_ID }}
+          R2_MODAL_SECRET_ACCESS_KEY: ${{ secrets.R2_MODAL_SECRET_ACCESS_KEY }}
+        run: python .github/scripts/modal_r2_secret.py apply
+
+      - name: Check the bucket (admin token)
+        id: check
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ADMIN_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_ADMIN_SECRET_ACCESS_KEY }}
+          ORIGIN: ${{ inputs.origin }}
+        run: python -m backend.r2_setup --check --origin "$ORIGIN"
+
+      - name: Check the Modal secret cleocuts-r2 exists
+        id: secret_exists
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: python .github/scripts/modal_r2_secret.py check
+
+      - name: Done
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$MODE" = apply ]; then
+            echo "::notice title=Next step::R2 and the Modal secret cleocuts-r2 are set up. Now run Actions → \"Deploy Modal render\" → Run workflow once (diagnose unticked): it finds the secret and deploys render_r2."
+          else
+            echo "::notice title=All checks passed::Bucket, Modal token and Modal secret cleocuts-r2 are OK."
+          fi
