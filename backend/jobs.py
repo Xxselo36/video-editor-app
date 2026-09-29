@@ -114,6 +114,47 @@ class Job:
     # Written by the waiting worker thread (backend/main.py) whenever the
     # line moves.
     queue_position: int | None = None
+    # ── Media keys (WP3: R2 / media store) ──
+    # This release only carries them: it can't read or write that
+    # media, but it must neither lose these fields when it writes a row
+    # nor treat a keyed job as broken because its local paths are gone
+    # (it is the rollback target of the release that fills them).
+    source_key: str | None = None      # upload / source object
+    mezz_key: str | None = None        # jobs/{id}/mezz.mp4 (render source)
+    proxy_key: str | None = None       # jobs/{id}/proxy.mp4 (editor)
+    preview_key: str | None = None     # jobs/{id}/preview/v{n}.mp4
+    # Render generation: outputs of generation g live under jobs/{id}/r{g}/.
+    render_gen: int = 0
+    # Format → key ("primary", "9:16", …, "hook_1", …); order = buttons.
+    output_keys: dict[str, str] = field(default_factory=dict)
+    thumb_key: str | None = None
+    # Key → size in bytes (storage accounting).
+    media_bytes: dict[str, int] = field(default_factory=dict)
+    # Where the job's keys live ("r2" / "local"); None = not recorded.
+    media_store: str | None = None
+    # Keys of the stored row this code doesn't know (a later release's
+    # fields): kept as stored and written back on every write, so this
+    # release can't drop them. Never part of the API.
+    _extras: dict[str, Any] = field(default_factory=dict, repr=False,
+                                    compare=False)
+
+    def has_mezz(self) -> bool:
+        """Can this job still be edited / rendered: its render source is
+        stored (mezz_key) or, for a legacy job, on the local disk."""
+        return bool(self.mezz_key) or (
+            bool(self.normalized_path) and Path(self.normalized_path).exists())
+
+    def has_media_keys(self) -> bool:
+        """Does this job keep (some of) its media in the media store
+        (R2), written by a later release? Such a job is intact even when
+        its local paths are missing; this release can't serve, edit or
+        delete that media (routes answer 409 media_unavailable)."""
+        return bool(
+            self.source_key or self.mezz_key or self.proxy_key
+            or self.preview_key or self.output_keys or self.thumb_key
+            or self.media_store
+            or any(isinstance(c, dict) and c.get("object_key")
+                   for c in self.hook_clips or ()))
 
     def expires_at(self) -> float | None:
         """Unix time when the project gets deleted, None = never."""
@@ -158,7 +199,7 @@ class Job:
             "social_caption": self.social_caption,
             "social_hashtags": self.social_hashtags,
             "hook_clips": [
-                {k: v for k, v in c.items() if k != "path"}
+                {k: v for k, v in c.items() if k not in ("path", "object_key")}
                 for c in self.hook_clips
             ],
             "audio_warnings": self.audio_warnings,
@@ -238,10 +279,14 @@ class DuplicateKey(Exception):
         self.job_id = job_id
 
 
+_EXTRAS = "_extras"
+
+
 def job_from_dict(d: dict[str, Any]) -> Job:
     """Job from a stored JSON object. Structured fields may be nested
     JSON strings (the SQLite blob format) or plain JSON values (Postgres);
-    unknown keys are ignored (schema-tolerant reads)."""
+    unknown keys are kept, as stored, in job._extras (job_to_dict writes
+    them back)."""
     d = dict(d)
     for k in _JSON_FIELDS:
         if k in d and isinstance(d[k], str):
@@ -252,9 +297,22 @@ def job_from_dict(d: dict[str, Any]) -> Job:
     # Reconstruct segments as tuples (JSON gives lists)
     if isinstance(d.get("segments"), list):
         d["segments"] = [tuple(s) for s in d["segments"]]
-    known = {f.name for f in fields(Job)}
+    known = {f.name for f in fields(Job)} - {_EXTRAS}
+    extras = {k: v for k, v in d.items() if k not in known and k != _EXTRAS}
     d = {k: v for k, v in d.items() if k in known}
-    return Job(**d)
+    return Job(**d, _extras=extras)
+
+
+def job_to_dict(job: Job) -> dict[str, Any]:
+    """The stored JSON object of a job (before the stores' own encoding
+    of structured fields): its fields plus the unknown keys it was read
+    with (job._extras), unchanged — a later release's fields survive
+    this code rewriting the row."""
+    d = asdict(job)
+    extras = d.pop(_EXTRAS, None) or {}
+    for k, v in extras.items():
+        d.setdefault(k, v)
+    return d
 
 
 def _list_key(job: Job) -> tuple[bool, float, str]:
@@ -303,7 +361,7 @@ class JobStore:
             self._conn.commit()
 
     def _serialize(self, job: Job) -> str:
-        d = asdict(job)
+        d = job_to_dict(job)
         for k in _JSON_FIELDS:
             if k in d and not isinstance(d[k], str):
                 d[k] = json.dumps(d[k])
@@ -578,7 +636,7 @@ class JobStore:
         """
         marked = 0
         for job in self.list_all():
-            src_ok = bool(job.normalized_path) and Path(job.normalized_path).exists()
+            src_ok = job.has_mezz()
             if job.status in ("processing", "pending"):
                 if src_ok and job.segments:
                     # Died while RENDERING (or waiting for a render
@@ -592,8 +650,11 @@ class JobStore:
                                 error="container_restart", progress=0.0,
                                 queue_position=None)
                 marked += 1
-            elif job.status == "awaiting_review" and not src_ok:
+            elif (job.status == "awaiting_review" and not src_ok
+                  and not job.has_media_keys()):
                 # Files are gone (old /tmp storage) — can't be edited.
+                # (A job with media keys keeps its files in the media
+                # store: intact, even though this release can't open it.)
                 self.update(job.id, status="error", error="files_expired",
                             message="This project's files have expired. "
                                     "Please upload the video again.")

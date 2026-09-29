@@ -53,7 +53,7 @@ import re
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import asdict, fields
+from dataclasses import fields
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -66,7 +66,7 @@ from psycopg_pool import ConnectionPool
 from backend import db
 from backend.jobs import (
     RUNNING_STATUSES, DuplicateKey, Job, _JSON_FIELDS, _STATUS_FIELDS,
-    job_from_dict,
+    job_from_dict, job_to_dict,
     new_job_id,
 )
 
@@ -423,7 +423,7 @@ def _nested_json(value: Any) -> str:
 # _JSON_FIELDS plus the ones SQLite keeps inline (its blob is text, so
 # their key order survives there too).
 _NESTED_FIELDS = frozenset(_JSON_FIELDS) | {
-    "preview_segments", "edited_phrases", "costs"}
+    "preview_segments", "edited_phrases", "costs", "output_keys"}
 
 
 def dump_job(job: Job) -> str:
@@ -431,8 +431,10 @@ def dump_job(job: Job) -> str:
     nested JSON strings — jsonb sorts object keys, and e.g. the order of
     `outputs`, "primary" first, is the order of the download buttons),
     made storable by to_json. load_job reads this and the earlier shape
-    with the structured fields as real JSON."""
-    d = asdict(job)
+    with the structured fields as real JSON. Keys the job was read with
+    but this code doesn't know (job._extras, a later release's fields)
+    are written back exactly as they were stored."""
+    d = job_to_dict(job)
     for k in _NESTED_FIELDS:
         if isinstance(d.get(k), (dict, list, tuple)):
             d[k] = _nested_json(d[k])
@@ -469,6 +471,16 @@ def _hot(job: Job) -> tuple:
 
 
 # ── job store ────────────────────────────────────────────────────────
+
+# SQL tests for "the job has media keys" (Job.has_media_keys, which the
+# boot sweep re-checks per row): a non-empty scalar key or a non-empty
+# output_keys (stored as a nested JSON string or as an object).
+_KEYED_SQL = [
+    *(f"coalesce(data->>'{k}', '') <> ''" for k in (
+        "source_key", "mezz_key", "proxy_key", "preview_key", "thumb_key",
+        "media_store")),
+    "coalesce(data->>'output_keys', '') NOT IN ('', '{}')",
+]
 
 # Left out of list_by_owner(summary=True): the editor's big fields.
 _SUMMARY_DROP = ["settings", "subtitles", "segments", "cut_ranges",
@@ -736,8 +748,7 @@ class PgJobStore:
         normalized_path only)."""
         marked = 0
         for job in self.list_by_status(*RUNNING_STATUSES):
-            src_ok = (bool(job.normalized_path)
-                      and Path(job.normalized_path).exists())
+            src_ok = job.has_mezz()
             if src_ok and job.segments:
                 fields_ = dict(status="awaiting_review", progress=100.0,
                                message="render_failed",
@@ -749,12 +760,18 @@ class PgJobStore:
                                queue_position=None)
             if self.update_if(job.id, job.status, **fields_):
                 marked += 1
+        # A job with media keys (a later release's) is intact even
+        # without local files.
         with self._db.connection() as conn:
             rows = conn.execute(
                 "SELECT id, data->>'normalized_path' FROM jobs "
-                "WHERE status = 'awaiting_review'").fetchall()
+                "WHERE status = 'awaiting_review' AND NOT ("
+                + " OR ".join(_KEYED_SQL) + ")").fetchall()
         for job_id, normalized in rows:
             if normalized and Path(normalized).exists():
+                continue
+            job = self.get(job_id)
+            if job is None or job.has_media_keys():
                 continue
             # Files are gone (old /tmp storage) — can't be edited.
             if self.update_if(job_id, "awaiting_review", status="error",
