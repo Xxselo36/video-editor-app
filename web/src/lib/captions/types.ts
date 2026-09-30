@@ -201,6 +201,11 @@ export interface Ctx2D {
   clearRect(x: number, y: number, w: number, h: number): void;
   fillText(text: string, x: number, y: number): void;
   strokeText(text: string, x: number, y: number): void;
+  /**
+   * Optional: draw.ts measures each word at its draw font and compresses a
+   * word the rasterizer draws wider than its layout box (fitScale).
+   */
+  measureText?(text: string): { width: number };
   createLinearGradient(x0: number, y0: number, x1: number, y1: number): GradientLike;
   // drawImage is typed loosely: every backend has its own image types.
   drawImage(image: never, dx: number, dy: number): void;
