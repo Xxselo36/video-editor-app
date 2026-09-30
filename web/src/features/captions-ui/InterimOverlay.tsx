@@ -181,6 +181,8 @@ function InterimOverlay({ videoRef, phrases, units, captionPreset, mode, segment
       idleHandle = idle.requestIdleCallback ? idle.requestIdleCallback(run, { timeout: 1000 }) : window.setTimeout(run, 100);
     }
 
+    // Fonts that failed (offline) are asked for again once back online.
+    const retry = () => L.prepare();
     // Style (per frame size), fonts, renderer: whenever words, preset or size change.
     const prepare = () => {
       if (!L.W || !L.H) return;
@@ -201,6 +203,23 @@ function InterimOverlay({ videoRef, phrases, units, captionPreset, mode, segment
         )
         .then((ok) => {
           if (gen !== L.gen) return; // superseded
+          if (!ok) {
+            // Fonts (or the font tables) didn't load — offline, a failed
+            // request: no renderer (it would throw without metric tables,
+            // or draw a fallback font), nothing drawn. Retried when the
+            // browser is back online.
+            L.renderer?.dispose();
+            L.renderer = null;
+            L.ready = false;
+            ctx.clearRect(0, 0, L.W, L.H);
+            if (hook) {
+              hook.fontsReady = false;
+              hook.fontsOk = false;
+            }
+            window.removeEventListener("online", retry);
+            window.addEventListener("online", retry, { once: true });
+            return;
+          }
           const input = { words, style, W: L.W, H: L.H, lang, breaks: L.breaks };
           if (L.renderer) L.renderer.update(input);
           else L.renderer = new CaptionRenderer(input);
@@ -270,6 +289,7 @@ function InterimOverlay({ videoRef, phrases, units, captionPreset, mode, segment
       v.removeEventListener("resize", layout);
       window.removeEventListener("resize", layout);
       v.removeEventListener("seeked", onSeeked);
+      window.removeEventListener("online", retry);
       L.gen++;
       L.renderer?.dispose();
       L.renderer = null;

@@ -161,6 +161,24 @@ test.describe("interim preview captions", () => {
     expect((await pixels(page)).opaque).toBeGreaterThan(100);
   });
 
+  test("caption fonts that fail (offline): nothing drawn, no error; back online: drawn", async ({ page, stub }) => {
+    let fail = true;
+    await page.route("**/fonts/captions/**", (route) => (fail ? route.abort("internetdisconnected") : route.continue()));
+    const job = await stub.seed("review", { proxy: "on" });
+    await editor(page, job.id, "proxy");
+    await userSeek(page, 1.0);
+    await page.waitForTimeout(800);
+    const h = await hook(page);
+    expect(h?.fontsReady).toBe(false);
+    expect(h?.draws).toBe(0);
+    expect((await pixels(page)).opaque).toBe(0);
+    // Back online: the overlay asks again and draws (pageErrors: no throw).
+    fail = false;
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect.poll(async () => (await hook(page))?.draws ?? 0).toBeGreaterThan(0);
+    expect((await hook(page))?.fontsOk).toBe(true);
+  });
+
   test("a clean job: Minimal style at the export's position, with the Preview chip", async ({ page, stub }) => {
     const job = await stub.seed("review", { proxy: "on", caption_preset: "clean" });
     await editor(page, job.id, "proxy");
