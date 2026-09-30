@@ -72,6 +72,7 @@ def test_slot_queue_is_fifo_with_positions():
     assert q.acquire("d") is False
 
 
+@pytest.mark.wp1_only("WP1 analysis threads and their workspaces; ported: test_wp4_queue.py::test_positions_move_and_only_the_limit_runs")
 def test_uploads_queue_up_and_positions_move(client, monkeypatch):
     """CLEO_MAX_ANALYZE=1: the second and third upload wait in line and
     GET /jobs/status shows their moving queue_position."""

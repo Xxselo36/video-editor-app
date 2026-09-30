@@ -105,6 +105,7 @@ def test_restart_frees_interrupted_analyses(r2_deletes):
 # ── queue positions ──────────────────────────────────────────────────
 
 
+@pytest.mark.wp1_only("positions of the WP1 _SlotQueue; ported: test_wp4_queue.py::test_positions_move_and_only_the_limit_runs")
 def test_concurrent_uploads_get_distinct_real_positions(monkeypatch):
     """A burst of uploads with one analysis slot: each answer carries
     its own place in line — the order the queue really serves — instead

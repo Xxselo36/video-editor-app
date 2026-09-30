@@ -203,6 +203,7 @@ def test_post_jobs_duration_cap(client, fake_r2, probe):
 # ── admission: queue cap (503) and per-user limit (429) ──────────────
 
 
+@pytest.mark.wp1_only("fills _INFLIGHT / _SlotQueue by hand; ported: test_wp4_queue.py::test_queue_cap_is_503_with_retry_after")
 def test_queue_cap_is_503_with_retry_after(client, fake_r2, probe,
                                            monkeypatch):
     monkeypatch.setenv("CLEO_MAX_ANALYZE", "1")
@@ -239,6 +240,7 @@ def test_queue_cap_is_503_with_retry_after(client, fake_r2, probe,
         slots.close()
 
 
+@pytest.mark.wp1_only("fills _INFLIGHT by hand; ported: test_wp4_queue.py::test_ten_concurrent_uploads_of_one_user")
 def test_per_user_limit_is_429(client, auth_on, bearer, fake_r2, probe,
                                monkeypatch):
     monkeypatch.setenv("CLEO_MAX_ACTIVE_PER_USER", "2")
@@ -338,6 +340,7 @@ def test_concurrent_posts_of_one_key_make_one_job(fake_r2, probe,
 # ── render compare-and-set ───────────────────────────────────────────
 
 
+@pytest.mark.wp1_only("counts WP1 render threads (M._run_render); ported: test_wp4_queue.py::test_render_cas_one_task_for_thirty_posts")
 def test_concurrent_render_posts_start_one_render(client, monkeypatch):
     started = []
     monkeypatch.setattr(M, "_run_render",

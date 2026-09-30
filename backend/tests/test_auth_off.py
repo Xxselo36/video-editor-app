@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import backend.main as M
+from conftest import NEW_JOB_STATUS
 from backend import accounts
 from backend.jobs import DEFAULT_PLAN, store
 
@@ -52,7 +53,7 @@ def test_anonymous_flow(client, no_accounts_db, clean_state):
     body = r.json()
     job_id = body["job_id"]
     assert clean_state == [job_id]
-    assert body["status"] == "pending" and body["filename"] == "Clip.MOV"
+    assert body["status"] == NEW_JOB_STATUS and body["filename"] == "Clip.MOV"
     job = store.get(job_id)
     assert job.owner_id is None and job.plan == DEFAULT_PLAN
     if M.media.is_r2():

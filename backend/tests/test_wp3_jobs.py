@@ -16,7 +16,7 @@ import pytest
 import backend.main as M
 from backend import accounts, auth, pipeline, storage
 from backend.jobs import store
-from conftest import R2_ENDPOINT, add_sub, analysis_result
+from conftest import NEW_JOB_STATUS, R2_ENDPOINT, add_sub, analysis_result
 
 KEY = "uploads/user_a/0123456789abcdef0123456789abcdef.mp4"
 
@@ -84,7 +84,7 @@ def test_post_jobs_answers_fast_for_a_1gb_upload_without_download(
     assert took < 1.0
     job = store.get(r.json()["job_id"])
     assert job.source_key == KEY and job.input_path is None
-    assert job.status == "pending" and clean_state == [job.id]
+    assert job.status == NEW_JOB_STATUS and clean_state == [job.id]
     # The probe: ffprobe over a day-aligned presigned GET of the key, in
     # its own pool (never the default threadpool).
     [(url, thread)] = upload.calls

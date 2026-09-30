@@ -306,6 +306,7 @@ def test_init_refusals_in_presign_order(client, r2, enforce, bearer,
     assert (r.status_code, r.json()) == (409, {"detail": "use_single_put"})
 
 
+@pytest.mark.wp1_only("fills _INFLIGHT by hand; ported: test_wp4_queue.py::test_presign_per_user_limit_from_the_database")
 def test_init_per_user_limit(client, r2, auth_on, bearer, monkeypatch):
     monkeypatch.setenv("CLEO_MAX_ACTIVE_PER_USER", "1")
     import threading
