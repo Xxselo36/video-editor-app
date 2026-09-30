@@ -400,7 +400,7 @@ test.describe("how the editor picks proxy or preview", () => {
       await new Promise((res) => setTimeout(res, 800));
       await r.continue();
     });
-    await page.goto(`/app?job=${job.id}`);
+    await page.goto(`/app/edit/${job.id}`);
     await expect(page.getByTestId("apply-render")).toBeVisible({ timeout: 45_000 });
     const early = [await playbackMode(page), (await editorVideo(page).getAttribute("src")) ?? ""];
     expect(early[0]).toBe("probing");
@@ -416,7 +416,7 @@ test.describe("how the editor picks proxy or preview", () => {
   test("has_proxy: false → preview at once, no probe", async ({ page, stub }) => {
     const job = await stub.seed("review", { proxy: "off" });
     const { reqs } = collect(page);
-    await page.goto(`/app?job=${job.id}`);
+    await page.goto(`/app/edit/${job.id}`);
     await expect(page.getByTestId("apply-render")).toBeVisible({ timeout: 45_000 });
     expect(await playbackMode(page)).toBe("preview");
     await expect(editorVideo(page)).toHaveAttribute("src", /preview-video\?v=\d+/);

@@ -41,7 +41,7 @@ test("no speech: the card says so, and that the minutes came back", async ({ pag
   await expect(page.getByRole("heading", { level: 1 }).first()).toHaveText("1 video failed");
 });
 
-test("no speech without a code (older backend): the same honest text, no refund claim", async ({ page, stub }) => {
+test("no speech, nothing refunded: the same honest text, no refund claim", async ({ page, stub }) => {
   const job = await stub.seed("error");
   await openWithStorage(page, "/app", { [ACTIVE_JOBS]: [card(job.id, "analyzing", "stumm.mov")] });
   const status = jobCard(page, "stumm.mov").getByTestId("job-card-status");
@@ -81,18 +81,26 @@ test("an upload without a sound track: refused with a clear message, nothing cha
   await expect(status).toContainText("Nothing was charged");
 });
 
-test("Apply on a job that is already exporting leaves the editor with a note, no raw error", async ({ page, stub }) => {
+test("Apply on a job that is already exporting shows its project, no raw error", async ({ page, stub }) => {
   const job = await stub.seed("review");
   await openEditor(page, job.id);
   await page.route(`**/jobs/${job.id}/render`, (r) =>
     r.fulfill({
       status: 409,
       contentType: "application/json",
-      body: JSON.stringify({ detail: "job not in review state (status=rendering)" }),
+      body: JSON.stringify({ detail: "job not in review state (status=processing)", code: "not_in_review", params: {} }),
     }),
   );
+  // Another tab started the export: the job is exporting.
+  await page.route(`**/jobs/${job.id}`, async (r) => {
+    const res = await r.fetch();
+    const body = { ...(await res.json()), status: "processing", stage: "render.encode", message: "Rendering…" };
+    await r.fulfill({ response: res, body: JSON.stringify(body) });
+  });
   await page.getByTestId("apply-render").click();
-  await expect(page.getByTestId("notice")).toContainText("already being exported");
+  await expect(page).toHaveURL(new RegExp(`/app/p/${job.id}$`));
+  await expect(page.getByTestId("project")).toHaveAttribute("data-status", "processing");
+  await expect(page.getByTestId("job-card")).toHaveAttribute("data-phase", "rendering");
   await expect(page.getByTestId("error-screen")).toHaveCount(0);
   await expect(page.getByTestId("editor")).toHaveCount(0);
 });
@@ -111,4 +119,25 @@ test("Apply that fails shows a mapped message, never the raw answer", async ({ p
   const screen = page.getByTestId("error-screen");
   await expect(screen).toContainText("servers are busy");
   await expect(screen).not.toContainText("detail");
+});
+
+// UX5 (§1.7 rows 2 and 4): refused before the upload finishes and before
+// any charge, worded from the code — by the browser where it can tell
+// (an audio file's type), else by the server's probe (the real stub).
+test("an audio file and a too-short clip are refused with their own message", async ({ page, stub }) => {
+  const upload = async (name: string, mimeType: string, file: "audio.m4a" | "short.mp4") => {
+    await page.goto("/app/new");
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByTestId("picker-card-tiktok").click(),
+    ]);
+    await chooser.setFiles({ name, mimeType, buffer: await stub.media(file) });
+    return jobCard(page, name).getByTestId("job-card-status");
+  };
+  await openWithStorage(page, "/app/new");
+  const audio = await upload("podcast.m4a", "audio/mp4", "audio.m4a");
+  await expect(audio).toContainText("This is an audio file");
+  const short = await upload("kurz.mp4", "video/mp4", "short.mp4");
+  await expect(short).toContainText("shorter than 3 seconds", { timeout: 30_000 });
+  await expect(short).toContainText("Nothing was charged");
 });

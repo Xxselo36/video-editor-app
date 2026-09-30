@@ -94,9 +94,9 @@ async function editorReady(page: Page) {
   await expect(clips(page).first()).toBeVisible();
 }
 
-/** Open the editor by URL (/app?job=…, what a reload does). */
+/** Open the editor by URL (/app/edit/<id>, what a reload does). */
 export async function openEditor(page: Page, jobId: string) {
-  await page.goto(`/app?job=${jobId}`);
+  await page.goto(`/app/edit/${jobId}`);
   await editorReady(page);
 }
 

@@ -278,7 +278,7 @@ vorherigen voraus:
    egal was das Backend macht. Das Backend ignoriert die Tokens noch.
 2. **Backend** `CLERK_ISSUER` setzen → das Backend verlangt Login und
    ordnet Jobs Accounts zu. Beta-Projekte (ohne Besitzer) übernimmt der
-   erste eingeloggte User, der sie öffnet. `/app?job=…`-Links
+   erste eingeloggte User, der sie öffnet. `/app/edit/…`-Links
    funktionieren danach nur noch für den Besitzer.
 3. **Backend** Lemon-Squeezy-Variablen setzen → Billing an. Die
    Billing-UI (Preise, Konto-Seite, Minuten) ist seit Schritt 1 im
@@ -1122,6 +1122,12 @@ des Plans.
   Abrechnung: erst dann abgebucht, zu wenig Minuten → "quota_exceeded" —
   in beiden Fällen wird nichts transkribiert und der Upload gelöscht.
   Jede Analyse hört spätestens bei `CLEO_MAX_MINUTES` auf.
+- **Grenzen fürs Web (UX5)**: das Frontend liest `CLEO_MAX_UPLOAD_GB`,
+  `CLEO_MAX_MINUTES` und `CLEO_MIN_SECONDS` (Standard 3; `0` = aus) über
+  `GET /config` — keine `NEXT_PUBLIC_MAX_*`-Variablen und kein Web-Build
+  mehr nötig, wenn sie sich ändern. Audiodateien (`no_video`), Videos ohne
+  Ton (`no_audio`) und Clips unter `CLEO_MIN_SECONDS` (`video_too_short`)
+  lehnt `POST /jobs` vor jeder Abbuchung ab.
 - `GET /admin/costs`: Speicher aus `media_bytes` der Jobs (R2-Preis für
   R2-Jobs), plus alte lokale Dateien.
 

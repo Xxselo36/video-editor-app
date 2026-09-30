@@ -58,6 +58,9 @@ export function loadLang(lang: Lang): Promise<boolean> {
     p = LOADERS[lang as Exclude<Lang, "en">]()
       .then((dict) => {
         DICTS[lang] = dict;
+        // For tests and debugging: <html data-i18n="en de"> lists the
+        // languages whose messages are here.
+        document.documentElement.dataset.i18n = Object.keys(DICTS).join(" ");
         dictListeners.forEach((f) => f());
         return true;
       })

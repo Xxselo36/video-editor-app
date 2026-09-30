@@ -9,7 +9,7 @@ import { useAuthState } from "@/lib/account";
 
 /**
  * /app/* with accounts on: signed-out visitors are sent to sign-in and
- * come back to the exact URL (so /app?job=… reopens that project).
+ * come back to the exact URL (so /app/edit/… reopens that project).
  * Only mounted when AUTH_ENABLED (see app/app/layout.tsx).
  */
 export function AppGate({ children }: { children: React.ReactNode }) {

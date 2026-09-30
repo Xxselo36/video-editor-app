@@ -192,7 +192,7 @@ export default function ClerkShell({ children }: { children: React.ReactNode }) 
       appearance={APPEARANCE}
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
-      // Fallbacks only: a ?redirect_url= (e.g. back to /app?job=…) wins.
+      // Fallbacks only: a ?redirect_url= (e.g. back to /app/edit/…) wins.
       signInFallbackRedirectUrl="/app"
       signUpFallbackRedirectUrl="/app"
       afterSignOutUrl="/"

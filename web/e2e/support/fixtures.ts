@@ -20,6 +20,8 @@ export type SeedName =
   | "queued"
   | "rendering"
   | "error"
+  | "err_no_speech"
+  | "err_unreadable"
   | "done"
   | "done_land";
 
@@ -105,8 +107,11 @@ export class Stub {
     expect(r.ok()).toBeTruthy();
   }
 
-  /** A stub clip to upload: grid.mp4, speech.mp4, speech_land.mp4, long.webm. */
-  async media(name: "grid.mp4" | "speech.mp4" | "speech_land.mp4" | "long.webm"): Promise<Buffer> {
+  /** A stub clip to upload: grid.mp4, speech.mp4, speech_land.mp4, long.webm,
+   *  and ones POST /jobs refuses (audio.m4a, silent.mp4, short.mp4). */
+  async media(
+    name: "grid.mp4" | "speech.mp4" | "speech_land.mp4" | "long.webm" | "audio.m4a" | "silent.mp4" | "short.mp4",
+  ): Promise<Buffer> {
     const r = await this.api.get(`/_test/media/${name}`, { timeout: 240_000 });
     expect(r.ok(), `media ${name}`).toBeTruthy();
     return r.body();
