@@ -270,6 +270,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.review.backToDashboard": "← Tableau de bord",
   "app.review.audioHeadsUp": "À savoir sur l'audio",
   "app.review.updatingPreview": "Mise à jour de l'aperçu…",
+  "app.review.captionPreviewChip": "Aperçu",
+  "app.review.captionPreviewTip": "L'export peut légèrement différer tant que la nouvelle technologie de sous-titres n'est pas en ligne.",
   "app.review.tabTimeline": "Chronologie",
   "app.review.tabTranscript": "Transcription",
   "app.review.tabCaptions": "Sous-titres",

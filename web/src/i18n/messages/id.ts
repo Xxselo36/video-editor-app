@@ -269,6 +269,8 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.review.backToDashboard": "← Dashboard",
   "app.review.audioHeadsUp": "Info audio",
   "app.review.updatingPreview": "Memperbarui pratinjau…",
+  "app.review.captionPreviewChip": "Pratinjau",
+  "app.review.captionPreviewTip": "Hasil ekspor mungkin sedikit berbeda sampai teknologi teks baru aktif.",
   "app.review.tabTimeline": "Linimasa",
   "app.review.tabTranscript": "Transkrip",
   "app.review.tabCaptions": "Teks",

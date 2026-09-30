@@ -265,6 +265,8 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.review.backToDashboard": "← 대시보드",
   "app.review.audioHeadsUp": "오디오 참고 사항",
   "app.review.updatingPreview": "미리보기를 업데이트하고 있어요…",
+  "app.review.captionPreviewChip": "미리보기",
+  "app.review.captionPreviewTip": "새 자막 기술이 적용되기 전까지는 내보내기 결과가 약간 다를 수 있어요.",
   "app.review.tabTimeline": "타임라인",
   "app.review.tabTranscript": "스크립트",
   "app.review.tabCaptions": "자막",

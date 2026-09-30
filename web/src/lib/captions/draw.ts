@@ -8,7 +8,11 @@
  * that the caller clips to the spoken part.
  *
  * Every word is drawn with fillText/strokeText at the x the layout computed
- * from the metric tables; the canvas only rasterises.
+ * from the metric tables; the canvas only rasterises. A rasterizer may draw
+ * a word wider than the tables say (Linux Chromium without subpixel
+ * positioning rounds every glyph advance up): such a word is compressed
+ * horizontally into its layout box (fitScale), so its ink never runs into
+ * the space and line breaks and positions stay identical everywhere.
  */
 import { cssFont, faceChain } from "./fonts";
 import type { CaptionStyle, Ctx2D, Page, PageLayout, WordBox } from "./types";
@@ -118,7 +122,45 @@ type Ctx = {
   state: DrawState;
   lang?: string;
   fonts: Map<string, string>;
+  /** Horizontal fit per font + text (see fitScale). */
+  fits: Map<string, number>;
 };
+
+/**
+ * Horizontal factor that fits text the canvas draws `drawn` px wide into
+ * its layout box of `box` px: 1 unless it is wider by more than
+ * `tolerance` px (sub-pixel noise), else box / drawn.
+ */
+export function fitScale(drawn: number, box: number, tolerance = 0.25): number {
+  if (!(drawn > 0) || !(box > 0) || drawn <= box + tolerance) return 1;
+  return box / drawn;
+}
+
+/** fillText / strokeText of a word at its layout box, compressed to fit it if needed. */
+function drawWordText(c: Ctx, r: WordBox, op: "fill" | "stroke", text = r.text) {
+  const { ctx } = c;
+  let fit = 1;
+  if (typeof ctx.measureText === "function") {
+    const key = `${ctx.font}|${text}|${r.width}`;
+    let f = c.fits.get(key);
+    if (f === undefined) {
+      f = fitScale(ctx.measureText(text).width, r.width);
+      c.fits.set(key, f);
+    }
+    fit = f;
+  }
+  if (fit === 1) {
+    if (op === "fill") ctx.fillText(text, r.x, r.baseline);
+    else ctx.strokeText(text, r.x, r.baseline);
+    return;
+  }
+  ctx.save();
+  ctx.translate(r.x, 0);
+  ctx.scale(fit, 1);
+  if (op === "fill") ctx.fillText(text, 0, r.baseline);
+  else ctx.strokeText(text, 0, r.baseline);
+  ctx.restore();
+}
 
 function withWord(c: Ctx, r: WordBox, fn: () => void) {
   const { ctx, style, state } = c;
@@ -182,7 +224,7 @@ export function drawPage(
   state: DrawState,
   lang?: string,
 ): void {
-  const c: Ctx = { ctx, page, layout, style, state, lang, fonts: new Map() };
+  const c: Ctx = { ctx, page, layout, style, state, lang, fonts: new Map(), fits: new Map() };
   const words = layout.lines.flatMap((l) => l.words);
   const alpha = pageAlpha(style, state.pageP);
   ctx.save();
@@ -250,7 +292,7 @@ export function drawPage(
         ctx.shadowColor = G.color;
         ctx.shadowBlur = G.blur * r.px;
         ctx.fillStyle = G.color;
-        for (let i = 0; i < G.passes; i++) ctx.fillText(text, r.x, r.baseline);
+        for (let i = 0; i < G.passes; i++) drawWordText(c, r, "fill", text);
         ctx.restore();
       }
       if (S) {
@@ -264,10 +306,10 @@ export function drawPage(
           ctx.miterLimit = 2;
           ctx.lineWidth = 2 * K.width * r.px;
           ctx.strokeStyle = K.color;
-          ctx.strokeText(text, r.x, r.baseline);
+          drawWordText(c, r, "stroke", text);
         } else {
           ctx.fillStyle = rgba(S.color, S.opacity);
-          ctx.fillText(text, r.x, r.baseline);
+          drawWordText(c, r, "fill", text);
         }
         ctx.restore();
       }
@@ -276,7 +318,7 @@ export function drawPage(
         ctx.miterLimit = 2;
         ctx.lineWidth = 2 * K.width * r.px;
         ctx.strokeStyle = K.color;
-        ctx.strokeText(text, r.x, r.baseline);
+        drawWordText(c, r, "stroke", text);
       }
     });
   }
@@ -287,7 +329,7 @@ export function drawPage(
     withWord(c, r, () => {
       setFont(c, r);
       ctx.fillStyle = fillFor(c, r);
-      ctx.fillText(r.text, r.x, r.baseline);
+      drawWordText(c, r, "fill");
     });
   }
   ctx.restore();
@@ -306,14 +348,14 @@ export function drawSweep(
   if (H.mode !== "karaoke" || !H.color) return;
   const r = layout.lines.flatMap((l) => l.words).find((x) => x.k === state.active);
   if (!r) return;
-  const c: Ctx = { ctx, page, layout, style, state, lang, fonts: new Map() };
+  const c: Ctx = { ctx, page, layout, style, state, lang, fonts: new Map(), fits: new Map() };
   ctx.save();
   prepareText(ctx);
   pageTransform(ctx, style, layout, state);
   withWord(c, r, () => {
     setFont(c, r);
     ctx.fillStyle = H.color;
-    ctx.fillText(r.text, r.x, r.baseline);
+    drawWordText(c, r, "fill");
   });
   ctx.restore();
 }

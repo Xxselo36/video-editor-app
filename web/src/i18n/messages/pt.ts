@@ -404,6 +404,8 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.review.backToDashboard": "← Painel",
   "app.review.audioHeadsUp": "Aviso de áudio",
   "app.review.updatingPreview": "Atualizando prévia…",
+  "app.review.captionPreviewChip": "Prévia",
+  "app.review.captionPreviewTip": "A exportação pode ficar um pouco diferente até a nova tecnologia de legendas entrar no ar.",
   "app.review.tabTimeline": "Linha do tempo",
   "app.review.tabTranscript": "Transcrição",
   "app.review.tabCaptions": "Legendas",

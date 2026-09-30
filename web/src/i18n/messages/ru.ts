@@ -268,6 +268,8 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.review.backToDashboard": "← Главная",
   "app.review.audioHeadsUp": "Важно про звук",
   "app.review.updatingPreview": "Обновляем превью…",
+  "app.review.captionPreviewChip": "Превью",
+  "app.review.captionPreviewTip": "Экспорт может немного отличаться, пока новая технология субтитров не запущена.",
   "app.review.tabTimeline": "Таймлайн",
   "app.review.tabTranscript": "Транскрипт",
   "app.review.tabCaptions": "Субтитры",

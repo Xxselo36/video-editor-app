@@ -22,6 +22,10 @@ const web = process.env.E2E_WEB ?? (MODE === "auth" ? "dev" : "start");
 const webEnv: Record<string, string> = {
   NEXT_PUBLIC_BACKEND_URL: API,
   NEXT_TELEMETRY_DISABLED: "1",
+  // UT1 interim captions on, with their test hook (captions-interim.spec).
+  // E2E_WEB=start serves a build made with the same two (CI: web.yml).
+  NEXT_PUBLIC_CAPTIONS_INTERIM: "1",
+  NEXT_PUBLIC_TEST_PAGES: "1",
   ...(MODE === "auth" ? { NEXT_PUBLIC_AUTH_TEST: "1" } : {}),
 };
 const webCommand = {
