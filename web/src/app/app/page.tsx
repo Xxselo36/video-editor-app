@@ -31,6 +31,10 @@ import { trackSave, waitForSaves } from "@/lib/pendingSaves";
 import { buildPlan, EditPlayer, probeProxy } from "@/lib/editPlayback";
 import { sameTimeline, saveOutcome, type SaveOutcome, type TimelineSeg } from "@/lib/editSave";
 import { phrasesToUnits } from "@/features/editor/legacy/phraseUnits";
+import dynamic from "next/dynamic";
+// UT1: engine captions over the editor video (flag; its own chunk).
+const CAPTIONS_INTERIM = process.env.NEXT_PUBLIC_CAPTIONS_INTERIM === "1";
+const InterimOverlay = dynamic(() => import("@/features/captions-ui/InterimOverlay"), { ssr: false });
 import {
   MAX_MINUTES,
   MAX_UPLOAD_GB,
@@ -1451,6 +1455,7 @@ export default function Home() {
             previewVersion={job.preview_version ?? 0}
             hasProxy={job.has_proxy}
             phrases={phrases}
+            units={unitsRef}
             captionPreset={captionPreset}
             audioWarnings={job.audio_warnings ?? []}
             cutRanges={job.cut_ranges ?? []}
@@ -3093,6 +3098,7 @@ function ReviewScreen({
   previewVersion,
   hasProxy,
   phrases,
+  units,
   captionPreset,
   audioWarnings,
   cutRanges,
@@ -3112,6 +3118,7 @@ function ReviewScreen({
   /** GET /jobs/{id} has_proxy: true / false, undefined = not reported. */
   hasProxy: boolean | undefined;
   phrases: Phrase[];
+  units: { readonly current: Subtitle[] };
   captionPreset: string;
   audioWarnings: string[];
   cutRanges: CutRange[];
@@ -3761,7 +3768,18 @@ function ReviewScreen({
         {/* Live caption preview: the current transcript line, so the
             user sees their text on the video before rendering. (The
             exact caption style is applied in the final render.) */}
-        {captionPreset !== "none" && activeIdx !== null && phrases[activeIdx]?.text.trim() && (
+        {CAPTIONS_INTERIM && captionPreset !== "none" && (
+          <InterimOverlay
+            videoRef={videoRef}
+            phrases={phrases}
+            units={units}
+            captionPreset={captionPreset}
+            mode={mode}
+            segments={mode === "proxy" ? editSegs.filter((s) => !s.disabled).map((s) => [s.start, s.end] as const) : videoSegments.length ? videoSegments : keptSegments}
+            duration={duration}
+          />
+        )}
+        {!CAPTIONS_INTERIM && captionPreset !== "none" && activeIdx !== null && phrases[activeIdx]?.text.trim() && (
           <div
             aria-hidden
             data-testid="caption-overlay"
