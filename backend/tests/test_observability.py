@@ -50,7 +50,7 @@ FFMPEG_TAIL = ("ffmpeg orientation-normalize failed (hdr=False):\n"
 def _sentry_env(monkeypatch):
     for name in ("SENTRY_DSN", "SENTRY_TRACES_SAMPLE_RATE",
                  "SENTRY_ENVIRONMENT", "RAILWAY_ENVIRONMENT_NAME",
-                 "RAILWAY_GIT_COMMIT_SHA"):
+                 *obs._RELEASE_ENV):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(obs, "_enabled", False)
 
@@ -642,3 +642,26 @@ def test_real_sdk_round_trip(tmp_path, traces):
         for span in tx.get("spans", []):
             if span.get("op") == "subprocess":
                 assert span["description"].startswith("python")
+
+
+def test_release_is_the_deployed_git_sha(monkeypatch):
+    """UX3: events carry the git SHA of the deploy (the web app tags its
+    events with the same one, NEXT_PUBLIC_RELEASE)."""
+    assert obs.release() is None
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    assert obs.release() == "a" * 40
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "b" * 40)
+    assert obs.release() == "b" * 40
+    monkeypatch.setenv("SENTRY_RELEASE", "cleocuts@c0ffee")
+    assert obs.release() == "cleocuts@c0ffee"
+
+
+def test_init_uses_the_explicit_release(monkeypatch):
+    sentry_sdk = pytest.importorskip("sentry_sdk")
+    seen: dict = {}
+    monkeypatch.setattr(sentry_sdk, "init", lambda **kw: seen.update(kw))
+    monkeypatch.setenv("SENTRY_DSN", FAKE_DSN)
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "0b28b96deadbeef")
+    monkeypatch.setenv("SENTRY_RELEASE", "f00dfeed")
+    assert obs.init_sentry() is True
+    assert seen["release"] == "f00dfeed"
