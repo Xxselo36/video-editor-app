@@ -26,12 +26,16 @@ on:
       - 'backend/**'
       - 'src/**'
       - 'plugins/premiere/**'
+      # The code catalogue's export (backend/tests/test_ux5_contract.py).
+      - 'web/src/lib/errorCodes.json'
       - '.github/workflows/backend.yml'
   pull_request:
     paths:
       - 'backend/**'
       - 'src/**'
       - 'plugins/premiere/**'
+      # The code catalogue's export (backend/tests/test_ux5_contract.py).
+      - 'web/src/lib/errorCodes.json'
       - '.github/workflows/backend.yml'
   workflow_dispatch:
 
