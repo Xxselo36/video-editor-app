@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from backend import errors
 from src.ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
 
 
@@ -319,7 +320,9 @@ def _precheck_audio(input_path: str, max_seconds: float | None = None) -> dict:
     start (see _max_seconds in analyze_only).
 
     Returns: {"mean_db": float|None, "max_db": float|None,
-              "warnings": list[str]}
+              "warnings": list[str]} — warnings are codes
+    (backend/errors.py AUDIO_WARNINGS: audio_silent, audio_quiet,
+    audio_clipping); the web app words them.
     """
     cmd = [
         get_ffmpeg_path(), "-hide_banner",
@@ -348,23 +351,15 @@ def _precheck_audio(input_path: str, max_seconds: float | None = None) -> dict:
     warnings: list[str] = []
     # Silent / no input
     if mean_db is None or (max_db is not None and max_db < -50):
-        warnings.append(
-            "Audio looks silent — check your microphone is on and not muted."
-        )
+        warnings.append("audio_silent")
     elif mean_db < -45:
-        warnings.append(
-            "Audio is very quiet — speak closer to the microphone for best results."
-        )
-    elif mean_db < -35:
-        warnings.append(
-            "Audio is on the quiet side but should still work."
-        )
+        # (-45..-35 dB used to add "on the quiet side but should still
+        # work" — a note with nothing to do about it; dropped in UX5.)
+        warnings.append("audio_quiet")
 
     # Clipping / distortion
     if max_db is not None and max_db >= -0.3:
-        warnings.append(
-            "Audio is clipping at peaks — recording too loud, distortion likely."
-        )
+        warnings.append("audio_clipping")
 
     return {"mean_db": mean_db, "max_db": max_db, "warnings": warnings}
 
@@ -1227,9 +1222,12 @@ def analyze_only(
     cut_keywords = settings.get("cut_keywords")
     continue_keywords = settings.get("continue_keywords")
 
-    def _stage(msg: str, pct: float) -> None:
+    def _stage(code: str, pct: float, text: str | None = None,
+               **params: Any) -> None:
+        # The stage code (backend/errors.py STAGES) and its English
+        # message for old clients, in one StageMessage.
         if progress_cb:
-            progress_cb(msg, pct)
+            progress_cb(errors.stage_message(code, text, **params), pct)
 
     def _analyze_cb(msg: str, step=None, total_steps=None, progress=None) -> None:
         if progress is not None:
@@ -1251,10 +1249,10 @@ def analyze_only(
     except (TypeError, ValueError):
         max_seconds = None
 
-    _stage("Checking audio…", 1)
+    _stage("analyze.normalize", 1, "Checking audio…")
     audio_precheck = _precheck_audio(input_path, max_seconds=max_seconds)
 
-    _stage("Preparing video…", 3)
+    _stage("analyze.normalize", 3)
     normalized_path = str(Path(output_dir) / "normalized.mp4")
     # Resolution: 'resolution' setting is a string like '1080', '1440',
     # '2160'. Map to max longest side. Default 1080p to preserve the
@@ -1311,7 +1309,8 @@ def analyze_only(
     # primary via simple letterbox-pad in the render step.
     if smartcam:
         sc_resolution = settings.get("resolution", "1080")
-        _stage(f"SmartCam tracking faces ({sc_format})…", 6)
+        _stage("analyze.smartcam", 6,
+               f"SmartCam tracking faces ({sc_format})…", format=sc_format)
         # Written straight into this job's folder (job-scoped name; the
         # plugin's shared-cache default collides between jobs).
         sc_dest = str(Path(output_dir) / "normalized_smartcam.mp4")
@@ -1329,7 +1328,7 @@ def analyze_only(
             Path(sc_dest).unlink(missing_ok=True)  # partial output
             print("[smartcam] reframe returned no file — falling back to source",
                   flush=True)
-        _stage("Preparing preview…", 9)
+        _stage("analyze.smartcam", 9, "Preparing preview…")
         _make_proxy(normalized_path, proxy_path)
 
     mezz_fps: float | None = cfr_fps
@@ -1363,7 +1362,7 @@ def analyze_only(
                                     name="audio-measure", daemon=True)
     audio_thread.start()
 
-    _stage("Analyzing audio…", 10)
+    _stage("analyze.transcribe", 10)
     result = analyze_video(
         video_path=normalized_path,
         whisper_model=whisper_model,
@@ -1389,7 +1388,7 @@ def analyze_only(
 
     # LLM cleanup + bad-take detection. Runs only if ANTHROPIC_API_KEY
     # is set; soft-fails to no-op otherwise so dev works without a key.
-    _stage("Polishing transcript…", 85)
+    _stage("analyze.cleanup", 85)
     has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
     cleaned: dict[int, str] = {}
     print(f"[llm] cleanup starting — API key present: {has_key}, "
@@ -1437,7 +1436,7 @@ def analyze_only(
                                    daemon=True)
     font_thread.start()
 
-    _stage("Building preview…", 95)
+    _stage("analyze.cuts", 95)
     preview_path = str(Path(output_dir) / "preview.mp4")
     _ffmpeg_cuts_preview(preview_source(normalized_path), segments,
                          preview_path)
@@ -1923,8 +1922,9 @@ def _await_modal_call(
         elapsed = now - t0
         if beat_s > 0 and now - last_beat >= beat_s:
             last_beat = now
-            _stage(f"Rendering {n_clips} clip(s) on Modal… "
-                   f"{int(elapsed) // 60}:{int(elapsed) % 60:02d}", 10)
+            _stage(errors.stage_message(
+                "render.encode", f"Rendering {n_clips} clip(s) on Modal… "
+                f"{int(elapsed) // 60}:{int(elapsed) % 60:02d}", n=n_clips), 10)
         if start_s > 0 and not started and elapsed >= start_s:
             # A probe every poll until it is known; a failing one is
             # logged at most every 30th probe (~5 min), not every poll.
@@ -2188,7 +2188,8 @@ def _try_modal_render(
                 if vol is None:
                     vol = modal.Volume.from_name(_MODAL_VOLUME)
                 if not uploaded:
-                    _stage("Uploading to Modal storage…", 5)
+                    _stage(errors.stage_message(
+                        "render.prepare", "Uploading to Modal storage…"), 5)
                     # Stream file into Modal Volume — no Railway RAM spike
                     # from reading the whole file. Volume SDK chunks it
                     # internally. force: a retry may overwrite a partial
@@ -2212,7 +2213,10 @@ def _try_modal_render(
                     uploaded = True
 
                 phase = "render"
-                _stage(f"Rendering {len(segments)} clip(s) on Modal…", 10)
+                _stage(errors.stage_message(
+                    "render.encode",
+                    f"Rendering {len(segments)} clip(s) on Modal…",
+                    n=len(segments)), 10)
                 # Modal 1.x renamed lookup → from_name
                 fn = modal.Function.from_name(
                     "cleocuts-render", "render_burn_concat")
@@ -2249,7 +2253,8 @@ def _try_modal_render(
                         costs.record_modal(time.monotonic() - _modal_t0)
 
                 phase = "download"
-                _stage("Downloading from Modal…", 88)
+                _stage(errors.stage_message(
+                    "render.finish", "Downloading from Modal…"), 88)
                 _run_modal_transfer(
                     lambda tick, vol=vol, result_map=result_map:
                         _download_modal_outputs(
@@ -2276,8 +2281,9 @@ def _try_modal_render(
                 if attempt >= attempts:
                     break
                 delay = delays[attempt - 1]
-                _stage(f"Render worker unavailable, retrying in "
-                       f"{delay:.0f} s…", 10)
+                _stage(errors.stage_message(
+                    "render.encode", "Render worker unavailable, retrying in "
+                    f"{delay:.0f} s…", retry_s=round(delay)), 10)
                 waited = 0.0
                 while waited < delay:
                     if cancel_check and cancel_check():
@@ -2575,7 +2581,8 @@ def detect_hooks(
     try:
         from backend.llm import detect_hook_moments
         if progress_cb:
-            progress_cb("Finding hook moments…", 5)
+            progress_cb(errors.stage_message(
+                "render.hooks", "Finding hook moments…"), 5)
         hooks = detect_hook_moments(
             [{"id": i, **line} for i, line in enumerate(lines)],
             language=language,
@@ -2669,7 +2676,9 @@ def render_only(
                 "CLEO_LOCAL_RENDER_FALLBACK=0"
             )
         # Local path (dev without Modal, or explicitly allowed fallback)
-        _stage(f"Rendering {len(segments)} clip(s)…", 0)
+        _stage(errors.stage_message(
+            "render.encode", f"Rendering {len(segments)} clip(s)…",
+            n=len(segments)), 0)
         burn_dir = tempfile.mkdtemp(prefix="cleo_burn_", dir=output_dir)
         clip_outputs = _multi_clip_burn(
             input_video=normalized_path,
@@ -2690,7 +2699,7 @@ def render_only(
 
         clip_paths = [p for (p, _dur) in clip_outputs]
 
-        _stage("Stitching clips…", 80)
+        _stage(errors.stage_message("render.encode", "Stitching clips…"), 80)
         # Pass source audio + original segment times so concat rebuilds
         # the audio track directly from normalized.mp4 (bit-perfect
         # source copy) instead of stream-copying MoviePy's numpy-
@@ -2722,7 +2731,8 @@ def render_only(
     ):
         try:
             fx_path = str(Path(output_dir) / "cleo_output_fx.mp4")
-            _stage("Applying effects…", 92)
+            _stage(errors.stage_message("render.encode", "Applying effects…"),
+                   92)
             _apply_segment_effects(
                 primary_path, fx_path, segments, effects,
             )
@@ -2760,7 +2770,9 @@ def render_only(
         # ffmpeg pass off the same primary file, so they don't contend
         # on shared state. Cuts multi-format export time roughly Nx.
         from concurrent.futures import ThreadPoolExecutor
-        _stage(f"Exporting {len(valid_formats)} extra format(s)…", 85)
+        _stage(errors.stage_message(
+            "render.encode", f"Exporting {len(valid_formats)} extra format(s)…",
+            formats=len(valid_formats)), 85)
 
         def _do_export(fmt: str) -> tuple[str, str]:
             tw, th = EXPORT_FORMATS[fmt]
@@ -2786,7 +2798,9 @@ def render_only(
         try:
             for i, h in enumerate(hooks):
                 clip_path = str(Path(output_dir) / f"cleo_hook_{i + 1}.mp4")
-                _stage(f"Cutting hook {i + 1}/{len(hooks)}…", 96 + i)
+                _stage(errors.stage_message(
+                    "render.hooks", f"Cutting hook {i + 1}/{len(hooks)}…",
+                    i=i + 1, n=len(hooks)), 96 + i)
                 try:
                     _extract_hook_clip(
                         primary_path, clip_path, h["start"], h["end"],
@@ -2806,7 +2820,7 @@ def render_only(
         except Exception as e:
             print(f"[hooks] detection failed (soft): {e}", flush=True)
 
-    _stage("Done", 100)
+    _stage(errors.stage_message("render.finish", "Done"), 100)
     return {"outputs": outputs, "hook_clips": hook_clips}
 
 
@@ -2898,7 +2912,7 @@ def render_to_dir(
         raise RuntimeError("Render produced no output clips.")
     lap("burn")
     primary = out / "primary.mp4"
-    stage("Stitching clips…", 70)
+    stage(errors.stage_message("render.encode", "Stitching clips…"), 70)
     try:
         if source_audio:
             _ffmpeg_concat([p for p, _d in clips], str(primary),
@@ -2911,7 +2925,7 @@ def render_to_dir(
     lap("concat")
     if _has_effects(effects):
         fx = out / "primary_fx.mp4"
-        stage("Applying effects…", 80)
+        stage(errors.stage_message("render.encode", "Applying effects…"), 80)
         try:
             _apply_segment_effects(str(primary), str(fx), segments, effects)
             if fx.exists():
@@ -3090,7 +3104,7 @@ def render_to_keys(
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
     mezz = ws / "mezz.mp4"
-    _stage("Preparing render…", 2)
+    _stage(errors.stage_message("render.prepare"), 2)
     media.get_file(mezz_key, mezz, store=where)
     out_dir = ws / "out"
     res = render_only(
@@ -3100,7 +3114,7 @@ def render_to_keys(
         disabled_cuts=disabled_cuts, duration=duration,
         progress_cb=progress_cb, cancel_check=cancel_check, hooks=hooks,
         use_modal=use_modal)
-    _stage("Saving…", 99)
+    _stage(errors.stage_message("render.finish"), 99)
     return store_render_files(_files_of(res, str(out_dir)), out_prefix,
                               functools.partial(media.put_file, store=where))
 
@@ -3147,7 +3161,9 @@ def _try_modal_render_r2(
     for attempt in range(1, attempts + 1):
         phase = "render"
         try:
-            _stage(f"Rendering {len(segments)} clip(s) on Modal…", 10)
+            _stage(errors.stage_message(
+                "render.encode", f"Rendering {len(segments)} clip(s) on Modal…",
+                n=len(segments)), 10)
             fn = modal.Function.from_name("cleocuts-render", "render_r2")
             t0 = time.monotonic()
             call = None
@@ -3199,8 +3215,9 @@ def _try_modal_render_r2(
             if attempt >= attempts:
                 break
             delay = delays[attempt - 1]
-            _stage(f"Render worker unavailable, retrying in "
-                   f"{delay:.0f} s…", 10)
+            _stage(errors.stage_message(
+                "render.encode", "Render worker unavailable, retrying in "
+                f"{delay:.0f} s…", retry_s=round(delay)), 10)
             waited = 0.0
             while waited < delay:
                 if cancel_check and cancel_check():

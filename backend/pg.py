@@ -53,7 +53,6 @@ import re
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import fields
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -67,7 +66,7 @@ from backend import db
 from backend.jobs import (
     RUNNING_STATUSES, DuplicateKey, Job, _JSON_FIELDS, _STATUS_FIELDS,
     gc_backoff_s, gc_clean_entries, gc_store, job_from_dict, job_to_dict,
-    new_job_id,
+    new_job_id, status_defaults,
 )
 
 STATEMENT_TIMEOUT_MS = 15_000
@@ -832,8 +831,7 @@ class PgJobStore:
                 "FROM jsonb_each(data) WHERE key = ANY(%s)) "
                 "FROM jobs WHERE id = ANY(%s)",
                 (list(_STATUS_FIELDS), ids)).fetchall()
-        defaults = {f.name: f.default for f in fields(Job)
-                    if f.name in _STATUS_FIELDS}
+        defaults = status_defaults()
         out: dict[str, dict[str, Any]] = {}
         for job_id, text in rows:
             try:
@@ -1090,8 +1088,9 @@ class PgJobStore:
                                queue_position=None)
             else:
                 fields_ = dict(status="error", message=message,
-                               error="container_restart", progress=0.0,
-                               queue_position=None)
+                               error="container_restart",
+                               error_code="processing_interrupted",
+                               progress=0.0, queue_position=None)
             if self.update_if(job.id, job.status, **fields_):
                 marked += 1
         # A job with media keys (a later release's) is intact even
@@ -1110,6 +1109,7 @@ class PgJobStore:
             # Files are gone (old /tmp storage) — can't be edited.
             if self.update_if(job_id, "awaiting_review", status="error",
                               error="files_expired",
+                              error_code="media_expired",
                               message="This project's files have expired. "
                                       "Please upload the video again."):
                 marked += 1

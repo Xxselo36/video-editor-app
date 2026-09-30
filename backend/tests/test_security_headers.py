@@ -39,7 +39,7 @@ class _BodyLimit:
             for name, value in scope.get("headers") or ():
                 if name == b"content-length" and int(value) > self.limit:
                     return await JSONResponse(
-                        {"detail": "request_too_large"}, status_code=413,
+                        {"detail": "request_too_large", "code": "request_too_large", "params": {}}, status_code=413,
                         headers={"Connection": "close"},
                     )(scope, receive, send)
         await self.app(scope, receive, send)
@@ -166,7 +166,7 @@ def test_body_limit_413_gets_headers_and_cors(client):
     r = client.post("/upload", content=b"x" * 2048,
                     headers={"Origin": WEB})
     assert r.status_code == 413
-    assert r.json() == {"detail": "request_too_large"}
+    assert r.json() == {"detail": "request_too_large", "code": "request_too_large", "params": {}}
     assert r.headers["access-control-allow-origin"] == WEB
     _assert_security_headers(r)
 

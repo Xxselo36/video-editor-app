@@ -24,14 +24,19 @@ needs_ffmpeg = pytest.mark.skipif(
 KEY = "uploads/user_a/00112233445566778899aabbccddeeff.mp4"
 
 
-def _clip(path: Path, audio: bool) -> Path:
-    args = [FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
-            "testsrc=size=64x64:rate=10:duration=2"]
+def _clip(path: Path, audio: bool, video: bool = True,
+          seconds: float = 4.0) -> Path:
+    """A test clip (4 s: over the 3-second minimum, UX5)."""
+    args = [FFMPEG, "-y", "-v", "error"]
+    if video:
+        args += ["-f", "lavfi", "-i",
+                 f"testsrc=size=64x64:rate=10:duration={seconds}"]
     if audio:
-        args += ["-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+        args += ["-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
                  "-c:a", "aac", "-shortest"]
-    subprocess.run([*args, "-c:v", "libx264", "-preset", "ultrafast",
-                    "-pix_fmt", "yuv420p", str(path)], check=True)
+    if video:
+        args += ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+    subprocess.run([*args, str(path)], check=True)
     return path
 
 
@@ -66,11 +71,30 @@ def test_probes_tell_sound_from_silence(tmp_path):
     assert M._probe_audio(str(junk)) is None
     # The remote probe is one ffprobe run for length + streams (ffprobe
     # reads a local path like a URL).
-    seconds, has_audio = M._probe_remote(str(silent))
-    assert seconds == pytest.approx(2.0, abs=0.2) and has_audio is False
-    seconds, has_audio = M._probe_remote(str(with_audio))
-    assert seconds == pytest.approx(2.0, abs=0.2) and has_audio is True
-    assert M._probe_remote(str(junk)) == (None, None)
+    seconds, has_audio, has_video = M._probe_remote(str(silent))
+    assert seconds == pytest.approx(4.0, abs=0.2) and has_audio is False
+    assert has_video is True
+    seconds, has_audio, has_video = M._probe_remote(str(with_audio))
+    assert seconds == pytest.approx(4.0, abs=0.2) and has_audio is True
+    assert M._probe_remote(str(junk)) == (None, None, None)
+    # UX5: an audio file has no picture (no_video).
+    song = _clip(tmp_path / "song.m4a", audio=True, video=False)
+    assert M._probe_streams(str(song)) == (True, False)
+    assert M._probe_remote(str(song))[1:] == (True, False)
+
+
+@pytest.mark.parametrize("streams,verdict", [
+    ([{"codec_type": "video"}, {"codec_type": "audio"}], True),
+    ([{"codec_type": "audio"}], False),
+    # An mp3's cover art is a "video" stream: still an audio file.
+    ([{"codec_type": "audio"},
+      {"codec_type": "video", "disposition": {"attached_pic": 1}}], False),
+    ([{"codec_type": "video", "disposition": {"attached_pic": 0}}], True),
+    ([], None),
+    (None, None),
+])
+def test_video_verdict(streams, verdict):
+    assert M._video_verdict(streams) is verdict
 
 
 # ── POST /jobs, body upload ──────────────────────────────────────────
@@ -94,7 +118,7 @@ def test_body_upload_without_sound_is_refused_before_the_charge(
     silent = _clip(tmp_path / "screen.mp4", audio=False).read_bytes()
     r = _upload_body(client, bearer(), silent)
     assert r.status_code == 400
-    assert r.json() == {"detail": "no_audio"}
+    assert r.json() == {"detail": "no_audio", "code": "no_audio", "params": {}}
     assert store.list_all() == [] and clean_state == []   # no job, no analysis
     assert _usage_rows() == []                             # 0 minutes
     assert _uploads_left() == []                           # upload deleted
@@ -110,8 +134,47 @@ def test_body_upload_without_sound_refused_with_billing_off(
         client, tmp_path, clean_state, no_r2):
     silent = _clip(tmp_path / "screen.mp4", audio=False).read_bytes()
     r = _upload_body(client, {}, silent)
-    assert (r.status_code, r.json()) == (400, {"detail": "no_audio"})
+    assert (r.status_code, r.json()) == (400, {"detail": "no_audio", "code": "no_audio", "params": {}})
     assert store.list_all() == [] and clean_state == []
+
+
+@needs_ffmpeg
+def test_audio_file_and_short_clip_are_refused_before_the_charge(
+        client, enforce, bearer, tmp_path, clean_state, no_r2):
+    """UX5 (§1.7 rows 2 and 4): an audio file (400 no_video) and a clip
+    under CLEO_MIN_SECONDS (400 video_too_short {min_seconds}) — no job,
+    0 minutes, the upload deleted."""
+    add_sub(plan="pro", period_start=time.time() - 60)
+    song = _clip(tmp_path / "song.m4a", audio=True, video=False).read_bytes()
+    r = _upload_body(client, bearer(), song)
+    assert (r.status_code, r.json()) == (
+        400, {"detail": "no_video", "code": "no_video", "params": {}})
+    short = _clip(tmp_path / "short.mp4", audio=True, seconds=1.5).read_bytes()
+    r = _upload_body(client, bearer(), short)
+    assert (r.status_code, r.json()) == (
+        400, {"detail": "video_too_short", "min_seconds": 3,
+              "code": "video_too_short", "params": {"min_seconds": 3}})
+    assert store.list_all() == [] and clean_state == []
+    assert _usage_rows() == []
+    assert _uploads_left() == []
+
+
+def test_r2_audio_file_is_refused(client, r2_upload, clean_state):
+    r2_upload.update(has_audio=True, has_video=False)
+    r = _post_key(client, {})
+    assert (r.status_code, r.json()["code"]) == (400, "no_video")
+    assert store.find_by_key(KEY) is None and storage.head(KEY) is None
+
+
+def test_r2_short_clip_is_refused(client, r2, r2_upload, clean_state,
+                                  monkeypatch):
+    r2_upload.update(has_audio=True, seconds=2.0)
+    r = _post_key(client, {})
+    assert (r.status_code, r.json()["params"]) == (400, {"min_seconds": 3})
+    # CLEO_MIN_SECONDS=0 turns the check off.
+    monkeypatch.setenv("CLEO_MIN_SECONDS", "0")
+    r2.put_object(Bucket=storage.bucket(), Key=KEY, Body=b"v" * 10)
+    assert _post_key(client, {}).status_code == 200
 
 
 def test_unreadable_body_upload_is_still_accepted(client, clean_state,
@@ -134,7 +197,7 @@ def r2_upload(r2, monkeypatch):
 
     def probe(url):
         verdict["probes"] += 1
-        return verdict["seconds"], verdict["has_audio"]
+        return verdict["seconds"], verdict["has_audio"], verdict.get("has_video")
     monkeypatch.setattr(M, "_probe_remote", probe)
     return verdict
 
@@ -148,7 +211,7 @@ def test_r2_upload_without_sound_is_refused_before_the_charge(
         client, enforce, bearer, r2_upload, clean_state):
     add_sub(plan="pro", period_start=time.time() - 60)
     r = _post_key(client, bearer())
-    assert (r.status_code, r.json()) == (400, {"detail": "no_audio"})
+    assert (r.status_code, r.json()) == (400, {"detail": "no_audio", "code": "no_audio", "params": {}})
     assert r2_upload["probes"] == 1
     assert store.list_all() == [] and clean_state == []
     assert store.find_by_key(KEY) is None                  # never claimed

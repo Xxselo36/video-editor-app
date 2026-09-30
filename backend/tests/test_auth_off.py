@@ -97,7 +97,7 @@ def test_media_without_token(client, no_accounts_db):
 def test_new_routes_when_off(client, no_accounts_db):
     assert client.get("/me").json() == {"auth_enabled": False}
     r = client.get("/jobs")
-    assert r.status_code == 404 and r.json() == {"detail": "not_available"}
+    assert r.status_code == 404 and r.json() == {"detail": "not_available", "code": "not_available", "params": {}}
     assert client.post("/billing/checkout",
                        json={"plan": "pro"}).status_code == 404
     assert client.get("/billing/portal").status_code == 404
@@ -127,5 +127,7 @@ def test_analysis_hooks_are_noops(no_accounts_db, monkeypatch):
     monkeypatch.setattr(M, "analyze_only", lambda **kw: (_ for _ in ()).throw(
         OSError("No space left on device")))
     M._run_analyze_inner(job.id)
-    assert store.get(job.id).message == "server_storage_full"
+    # UX5: the code for clients, the catalogue text as the message.
+    assert store.get(job.id).error_code == "server_storage_full"
+    assert store.get(job.id).message == "The server is out of storage."
     M._refund_interrupted()

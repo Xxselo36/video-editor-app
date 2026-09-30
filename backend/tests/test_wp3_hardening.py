@@ -48,7 +48,7 @@ def headerless(r2, monkeypatch):
     (streamed WebM); the worker's packet scan says `measured.seconds`."""
     for key in (KEY, ANON_KEY):
         r2.put_object(Bucket=storage.bucket(), Key=key, Body=b"w" * 64)
-    monkeypatch.setattr(M, "_probe_remote", lambda url: (None, None))
+    monkeypatch.setattr(M, "_probe_remote", lambda url: (None, None, None))
     measured = type("Measured", (), {"seconds": 60.0, "calls": []})()
 
     def probe(path):
@@ -207,7 +207,7 @@ def test_multipart_inits_are_rate_limited_per_caller(client, r2, auth_on,
     for _ in range(3):
         assert _init(client, bearer()).status_code == 200
     r = _init(client, bearer())
-    assert (r.status_code, r.json()) == (429, {"detail": "too_many_uploads"})
+    assert (r.status_code, r.json()) == (429, {"detail": "too_many_uploads", "code": "too_many_uploads", "params": {}})
     assert r.headers["Retry-After"] == "600"
     # No upload was opened for the refused call.
     open_ = r2.list_multipart_uploads(Bucket=storage.bucket()).get("Uploads")

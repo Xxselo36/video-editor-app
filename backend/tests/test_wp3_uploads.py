@@ -157,12 +157,12 @@ def test_ticket_tamper_expiry_and_other_users(client, r2, auth_on, bearer,
                 f"{payload}x.{sig}", "nonsense", None, 7):
         r = client.post("/uploads/multipart/parts", json={"ticket": bad},
                         headers=bearer("user_a"))
-        assert (r.status_code, r.json()) == (403, {"detail": "bad_ticket"})
+        assert (r.status_code, r.json()) == (403, {"detail": "bad_ticket", "code": "bad_ticket", "params": {}})
     # Someone else's ticket.
     for path in ("sign", "parts", "complete", "abort"):
         r = client.post(f"/uploads/multipart/{path}", json=ok,
                         headers=bearer("user_b"))
-        assert (r.status_code, r.json()) == (403, {"detail": "bad_ticket"})
+        assert (r.status_code, r.json()) == (403, {"detail": "bad_ticket", "code": "bad_ticket", "params": {}})
     # Expired (23 h): the same claims, signed with the real key.
     expired = upl.make_ticket(M._ticket_secret(),
                               dict(claims, exp=int(time.time()) - 1))
@@ -171,7 +171,7 @@ def test_ticket_tamper_expiry_and_other_users(client, r2, auth_on, bearer,
                         json={"ticket": expired, "part_numbers": [1]},
                         headers=bearer("user_a"))
         assert (r.status_code, r.json()) == (410,
-                                             {"detail": "upload_expired"})
+                                             {"detail": "upload_expired", "code": "upload_expired", "params": {}})
 
 
 def test_ticket_unit():
@@ -208,7 +208,8 @@ def test_complete_checks_parts_and_is_idempotent(client, r2):
     _put(r2, t, 1, 16 * MIB)
     r = client.post("/uploads/multipart/complete", json={"ticket": t})
     assert (r.status_code, r.json()) == (409, {"detail": "parts_missing",
-                                               "missing": [2]})
+                                               "missing": [2], "code": "parts_missing",
+                                               "params": {"missing": [2]}})
     _put(r2, t, 2, 99)                      # wrong length counts as missing
     r = client.post("/uploads/multipart/complete", json={"ticket": t})
     assert (r.status_code, r.json()["missing"]) == (409, [2])
@@ -263,7 +264,7 @@ def test_abort_is_idempotent(client, r2):
     assert not r2.list_multipart_uploads(
         Bucket=storage.bucket()).get("Uploads")
     r = client.post("/uploads/multipart/parts", json={"ticket": body["ticket"]})
-    assert (r.status_code, r.json()) == (410, {"detail": "upload_expired"})
+    assert (r.status_code, r.json()) == (410, {"detail": "upload_expired", "code": "upload_expired", "params": {}})
     r = client.post("/uploads/multipart/complete",
                     json={"ticket": body["ticket"]})
     assert r.status_code == 410
@@ -284,26 +285,26 @@ def test_init_refusals_in_presign_order(client, r2, enforce, bearer,
     for size in (0, -5, 4.1e9):
         r = _init(client, size, headers=h)
         assert (r.status_code, r.json()) == (
-            413, {"detail": "file_too_large", "max_gb": 4})
+            413, {"detail": "file_too_large", "max_gb": 4, "code": "file_too_large", "params": {"max_gb": 4}})
     monkeypatch.setenv("CLEO_MAX_MINUTES", "1")
     r = _init(client, 10, headers=h, duration=120)
     assert (r.status_code, r.json()) == (
-        413, {"detail": "video_too_long", "max_minutes": 1})
+        413, {"detail": "video_too_long", "max_minutes": 1, "code": "video_too_long", "params": {"max_minutes": 1}})
     monkeypatch.delenv("CLEO_MAX_MINUTES")
     monkeypatch.setenv("CLEO_MAX_ACTIVE_PER_USER", "0")
     monkeypatch.setenv("CLEO_MAX_QUEUE", "-2")
     r = _init(client, 10, headers=h, duration=10)
-    assert r.status_code == 503 and r.json() == {"detail": "server_busy"}
+    assert r.status_code == 503 and r.json() == {"detail": "server_busy", "code": "server_busy", "params": {}}
     assert r.headers["retry-after"] == "120"
     monkeypatch.setenv("CLEO_MAX_QUEUE", "20")
     monkeypatch.setenv("CLEO_DISK_FACTOR", "1e12")
     r = _init(client, 10, headers=h, duration=10)
-    assert (r.status_code, r.json()) == (507, {"detail": "server_storage_full"})
+    assert (r.status_code, r.json()) == (507, {"detail": "server_storage_full", "code": "server_storage_full", "params": {}})
     monkeypatch.setenv("CLEO_DISK_FACTOR", "0")
     assert _init(client, 10, headers=h, duration=10).status_code == 200
     monkeypatch.setenv("CLEO_UPLOAD_MODE", "single")
     r = _init(client, 10, headers=h, duration=10)
-    assert (r.status_code, r.json()) == (409, {"detail": "use_single_put"})
+    assert (r.status_code, r.json()) == (409, {"detail": "use_single_put", "code": "use_single_put", "params": {}})
 
 
 @pytest.mark.wp1_only("fills _INFLIGHT by hand; ported: test_wp4_queue.py::test_presign_per_user_limit_from_the_database")
@@ -317,7 +318,7 @@ def test_init_per_user_limit(client, r2, auth_on, bearer, monkeypatch):
         M._INFLIGHT.track("busyjob00001", "user_a", "analyze", t)
         r = _init(client, 10, headers=bearer("user_a"))
         assert (r.status_code, r.json()) == (429,
-                                             {"detail": "too_many_active_jobs"})
+                                             {"detail": "too_many_active_jobs", "code": "too_many_active_jobs", "params": {}})
         assert _init(client, 10, headers=bearer("user_b")).status_code == 200
     finally:
         ev.set()

@@ -21,11 +21,11 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import MISSING, asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Literal
 
-from backend import db, taskq
+from backend import db, errors, taskq
 
 # Subscription plans and how long an idle project is kept (days after
 # the last change). No free tier. Override per plan with e.g.
@@ -74,6 +74,14 @@ class Job:
     # was charged or it isn't known). `error` keeps the raw text.
     error_code: str | None = None
     refunded: bool | None = None
+    # The numbers error_code's message needs ({"max_minutes": 30}); UX5.
+    error_params: dict[str, Any] = field(default_factory=dict)
+    # Where a running job is (backend/errors.py STAGES: "analyze.transcribe",
+    # "render.encode", …) and that stage's numbers; None = not recorded
+    # (jobs from before UX5). `message` keeps the English text for old
+    # clients.
+    stage: str | None = None
+    stage_params: dict[str, Any] = field(default_factory=dict)
     settings: dict[str, Any] = field(default_factory=dict)
     # Set after analyze; consumed by render. Each subtitle is
     # {start, end, text, original_start, original_end}.
@@ -247,7 +255,11 @@ class Job:
         return bool(self.normalized_path) and (
             Path(self.normalized_path).with_name(LEGACY_PROXY_NAME).is_file())
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, admin: bool = False) -> dict[str, Any]:
+        """The job as the API serves it. `error` — the raw failure text
+        (paths, provider answers, transcript words) — only to admins;
+        everyone else gets its code there (backend/errors.py
+        public_error), which clients from before UX5 map like the text."""
         return {
             "id": self.id,
             "status": self.status,
@@ -255,9 +267,13 @@ class Job:
             "expires_at": self.expires_at(),
             "message": self.message,
             "progress": self.progress,
-            "error": self.error,
+            "error": (self.error if admin
+                      else errors.public_error(self.error, self.error_code)),
             "error_code": self.error_code,
+            "error_params": dict(self.error_params or {}),
             "refunded": self.refunded,
+            "stage": self.stage,
+            "stage_params": dict(self.stage_params or {}),
             "has_output": self._has_output(),
             "has_proxy": self._has_proxy(),
             "outputs": list((self.output_keys or self.outputs).keys()),
@@ -268,7 +284,9 @@ class Job:
                 {k: v for k, v in c.items() if k not in ("path", "object_key")}
                 for c in self.hook_clips
             ],
-            "audio_warnings": self.audio_warnings,
+            # Codes (backend/errors.py AUDIO_WARNINGS); older jobs stored
+            # English sentences, mapped here.
+            "audio_warnings": errors.audio_warning_codes(self.audio_warnings),
             "audio_levels": self.audio_levels,
             "duration": self.duration,
             "cut_ranges": self.cut_ranges,
@@ -333,8 +351,23 @@ def tune_connection(conn: sqlite3.Connection) -> None:
 # Scalar fields of GET /jobs/status rows (JobStore.status_many).
 # output_keys only so has_output can be told without touching the disk.
 _STATUS_FIELDS = ("id", "status", "message", "progress", "queue_position",
-                  "error", "error_code", "refunded", "output_path",
+                  "error", "error_code", "error_params", "refunded",
+                  "stage", "stage_params", "output_path",
                   "updated_at", "preview_version", "owner_id", "output_keys")
+
+
+def status_defaults() -> dict[str, Any]:
+    """Defaults of the _STATUS_FIELDS a stored row may lack (rows from
+    before a field existed)."""
+    out: dict[str, Any] = {}
+    for f in fields(Job):
+        if f.name not in _STATUS_FIELDS:
+            continue
+        if f.default_factory is not MISSING:
+            out[f.name] = f.default_factory()
+        elif f.default is not MISSING:
+            out[f.name] = f.default
+    return out
 
 
 # Durable queue of media prefixes / keys to delete (backend/main.py
@@ -768,8 +801,7 @@ class JobStore:
             rows = self._conn.execute(
                 f"SELECT id, data FROM jobs WHERE id IN ({marks})", ids
             ).fetchall()
-        defaults = {f.name: f.default for f in fields(Job)
-                    if f.name in _STATUS_FIELDS}
+        defaults = status_defaults()
         out: dict[str, dict[str, Any]] = {}
         for r in rows:
             try:
@@ -1082,8 +1114,9 @@ class JobStore:
                                 queue_position=None)
                 else:
                     self.update(job.id, status="error", message=message,
-                                error="container_restart", progress=0.0,
-                                queue_position=None)
+                                error="container_restart",
+                                error_code="processing_interrupted",
+                                progress=0.0, queue_position=None)
                 marked += 1
             elif (job.status == "awaiting_review" and not src_ok
                   and not job.has_media_keys()):
@@ -1091,6 +1124,7 @@ class JobStore:
                 # (A job with media keys keeps its files in the media
                 # store: intact, even though this release can't open it.)
                 self.update(job.id, status="error", error="files_expired",
+                            error_code="media_expired",
                             message="This project's files have expired. "
                                     "Please upload the video again.")
                 marked += 1

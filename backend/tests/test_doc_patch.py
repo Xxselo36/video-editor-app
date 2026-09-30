@@ -91,7 +91,8 @@ def test_stale_rev(client):
     assert _patch(client, job.id, {"base_rev": 0, "rev": 5, "format": {"aspect": "9:16"}}).status_code == 200
     # another tab still on rev 0
     r = _patch(client, job.id, {"base_rev": 0, "rev": 6, "format": {"aspect": "16:9"}})
-    assert r.status_code == 409 and r.json() == {"detail": "stale_rev", "rev": 5}
+    assert r.status_code == 409 and r.json() == {"detail": "stale_rev", "rev": 5,
+                                                "code": "stale_rev", "params": {"rev": 5}}
     # not newer than the stored rev
     r = _patch(client, job.id, {"base_rev": 5, "rev": 5, "format": {"aspect": "16:9"}})
     assert r.status_code == 409

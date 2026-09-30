@@ -58,7 +58,7 @@ def upload(r2, monkeypatch):
 
     def probe(url):
         probes.append((url, threading.current_thread().name))
-        return probe.seconds, None
+        return probe.seconds, None, None
     probe.seconds = 60.0
     probe.calls = probes
     monkeypatch.setattr(M, "_probe_remote", probe)
@@ -143,12 +143,12 @@ def test_no_duration_without_billing_is_accepted(client, upload, r2):
 def test_upload_incomplete_and_too_long(client, auth_on, bearer, upload,
                                         monkeypatch):
     r = _post(client, bearer(), key="uploads/user_a/missing.mp4")
-    assert (r.status_code, r.json()) == (409, {"detail": "upload_incomplete"})
+    assert (r.status_code, r.json()) == (409, {"detail": "upload_incomplete", "code": "upload_incomplete", "params": {}})
     assert store.list_all() == []
     upload.seconds = 31 * 60
     r = _post(client, bearer())
     assert (r.status_code, r.json()) == (
-        413, {"detail": "video_too_long", "max_minutes": 30})
+        413, {"detail": "video_too_long", "max_minutes": 30, "code": "video_too_long", "params": {"max_minutes": 30}})
     assert storage.head(KEY) is None           # deleted: retrying can't help
 
 
@@ -176,7 +176,7 @@ def test_storage_down_is_a_retryable_503(client, auth_on, bearer, upload,
         raise ConnectionError("R2 unreachable")
     monkeypatch.setattr(M.media, "size", boom)
     r = _post(client, bearer())
-    assert (r.status_code, r.json()) == (503, {"detail": "storage_unavailable"})
+    assert (r.status_code, r.json()) == (503, {"detail": "storage_unavailable", "code": "storage_unavailable", "params": {}})
     assert r.headers["retry-after"] == "10"
 
 
@@ -431,7 +431,7 @@ def test_job_flags_come_from_the_keys(client, r2):
     d = client.get(f"/jobs/{bare.id}").json()
     assert d["has_output"] is False and d["has_proxy"] is False
     r = client.get(f"/jobs/{bare.id}/proxy-video")
-    assert (r.status_code, r.json()) == (404, {"detail": "proxy_not_ready"})
+    assert (r.status_code, r.json()) == (404, {"detail": "proxy_not_ready", "code": "proxy_not_ready", "params": {}})
     assert client.get(f"/jobs/{bare.id}/preview-video").status_code == 409
     assert client.get(f"/jobs/{bare.id}/thumbnail").status_code == 409
 

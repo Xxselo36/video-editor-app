@@ -79,7 +79,7 @@ def probe(monkeypatch):
         if state is not None:
             state["probes"].append(url)
             time.sleep(state["delay"])
-        return seconds["value"], None
+        return seconds["value"], None, None
     monkeypatch.setattr(M, "_probe_remote", remote)
     return seconds
 
@@ -156,10 +156,10 @@ def test_presign_caps(client, fake_r2, monkeypatch):
     monkeypatch.setenv("CLEO_MAX_UPLOAD_GB", "4")
     r = client.post("/uploads/presign", json={"size": 4.2e9})
     assert r.status_code == 413
-    assert r.json() == {"detail": "file_too_large", "max_gb": 4}
+    assert r.json() == {"detail": "file_too_large", "max_gb": 4, "code": "file_too_large", "params": {"max_gb": 4}}
     r = client.post("/uploads/presign", json={"duration": 31 * 60})
     assert r.status_code == 413
-    assert r.json() == {"detail": "video_too_long", "max_minutes": 30}
+    assert r.json() == {"detail": "video_too_long", "max_minutes": 30, "code": "video_too_long", "params": {"max_minutes": 30}}
     r = client.post("/uploads/presign",
                     json={"size": 1e8, "duration": 29 * 60})
     assert r.status_code == 200, r.text
@@ -171,7 +171,7 @@ def test_post_jobs_size_cap_uses_r2_head(client, fake_r2, monkeypatch):
     r = client.post("/jobs", data={"settings": "{}",
                                    "storage_key": "uploads/big.mp4"})
     assert r.status_code == 413
-    assert r.json() == {"detail": "file_too_large", "max_gb": 0.5}
+    assert r.json() == {"detail": "file_too_large", "max_gb": 0.5, "code": "file_too_large", "params": {"max_gb": 0.5}}
     assert fake_r2["downloads"] == []           # nothing is downloaded
     assert fake_r2["deleted"] == ["uploads/big.mp4"]
     assert store.list_all() == []
@@ -190,7 +190,7 @@ def test_post_jobs_duration_cap(client, fake_r2, probe):
     r = client.post("/jobs", data={"settings": "{}",
                                    "storage_key": "uploads/long.mp4"})
     assert r.status_code == 413
-    assert r.json() == {"detail": "video_too_long", "max_minutes": 30}
+    assert r.json() == {"detail": "video_too_long", "max_minutes": 30, "code": "video_too_long", "params": {"max_minutes": 30}}
     assert fake_r2["deleted"] == ["uploads/long.mp4"]
     assert store.list_all() == []
     assert not list((M._WORK_ROOT / "uploads").glob("*"))
@@ -222,11 +222,11 @@ def test_queue_cap_is_503_with_retry_after(client, fake_r2, probe,
         r = client.post("/jobs", data={"settings": "{}",
                                        "storage_key": "uploads/k.mp4"})
         assert r.status_code == 503
-        assert r.json() == {"detail": "server_busy"}
+        assert r.json() == {"detail": "server_busy", "code": "server_busy", "params": {}}
         assert r.headers["retry-after"] == "120"
         assert fake_r2["downloads"] == [] and fake_r2["deleted"] == []
         assert client.post("/uploads/presign", json={}).json() == {
-            "detail": "server_busy"}
+            "detail": "server_busy", "code": "server_busy", "params": {}}
         M._INFLIGHT.release("busy2")
         r = client.post("/jobs", data={"settings": "{}",
                                        "storage_key": "uploads/k.mp4"})
@@ -252,7 +252,7 @@ def test_per_user_limit_is_429(client, auth_on, bearer, fake_r2, probe,
                         data={"settings": "{}",
                               "storage_key": "uploads/user_a/k.mp4"})
         assert r.status_code == 429
-        assert r.json() == {"detail": "too_many_active_jobs"}
+        assert r.json() == {"detail": "too_many_active_jobs", "code": "too_many_active_jobs", "params": {}}
         r = client.post("/uploads/presign", headers=bearer("user_a"), json={})
         assert r.status_code == 429
         # Other users aren't affected, nor is the service user.
@@ -394,7 +394,7 @@ def test_json_body_over_1mb_is_413_before_the_handler(client, monkeypatch):
                     headers={"Content-Type": "application/json",
                              "Origin": "http://localhost:3000"})
     assert r.status_code == 413
-    assert r.json() == {"detail": "request_too_large"}
+    assert r.json() == {"detail": "request_too_large", "code": "request_too_large", "params": {}}
     # CORS wraps the limiter: the browser can read the 413.
     assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert called == []
@@ -408,7 +408,7 @@ def test_chunked_body_is_cut_off_while_streaming(client):
     r = client.post(f"/jobs/{job.id}/edit-segments", content=chunks(),
                     headers={"Content-Type": "application/json"})
     assert r.status_code == 413
-    assert r.json() == {"detail": "request_too_large"}
+    assert r.json() == {"detail": "request_too_large", "code": "request_too_large", "params": {}}
 
 
 def test_huge_content_length_is_refused_without_reading():
@@ -428,7 +428,7 @@ def test_huge_content_length_is_refused_without_reading():
     asyncio.run(M._BodyLimitMiddleware(M.app.router)(scope, receive, send))
     assert time.perf_counter() - t0 < 0.05
     assert sent[0]["status"] == 413
-    assert json.loads(sent[1]["body"]) == {"detail": "request_too_large"}
+    assert json.loads(sent[1]["body"]) == {"detail": "request_too_large", "code": "request_too_large", "params": {}}
 
 
 def test_webhook_and_upload_limits(client, billing_on, monkeypatch):
@@ -438,7 +438,7 @@ def test_webhook_and_upload_limits(client, billing_on, monkeypatch):
     r = client.post("/jobs", data={"settings": "{}"},
                     files={"file": ("a.mp4", b"x" * 20_000, "video/mp4")})
     assert r.status_code == 413
-    assert r.json() == {"detail": "file_too_large", "max_gb": 0.0}
+    assert r.json() == {"detail": "file_too_large", "max_gb": 0.0, "code": "file_too_large", "params": {"max_gb": 0.0}}
     assert store.list_all() == []
 
 
@@ -457,7 +457,8 @@ def test_batch_status_with_etag(client):
     assert body["missing"] == ["nope"]
     assert set(body["jobs"][0]) == {
         "id", "status", "message", "progress", "queue_position", "error",
-        "error_code", "refunded", "has_output", "updated_at",
+        "error_code", "error_params", "refunded", "stage", "stage_params",
+        "has_output", "updated_at",
         "preview_version"}
     assert body["jobs"][1]["queue_position"] == 3
     etag = r.headers["etag"]

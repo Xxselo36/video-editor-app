@@ -447,7 +447,7 @@ def fake_r2(monkeypatch, r2):
         state["probes"].append(url)
         if state["barrier"] is not None:
             state["barrier"].wait(timeout=10)
-        return 60.0, None
+        return 60.0, None, None
     monkeypatch.setattr(M.media, "size", lambda key, **kw: 1000)
     monkeypatch.setattr(M.media, "delete", delete)
     monkeypatch.setattr(M, "_probe_remote", probe)

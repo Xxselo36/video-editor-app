@@ -86,6 +86,8 @@ from fastapi import (
     Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile,
 )
 from fastapi.concurrency import run_in_threadpool
+from fastapi.encoders import jsonable_encoder  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -94,6 +96,7 @@ import backend.pipeline as pipeline
 from backend import accounts, auth, billing, costs, db, media, observability
 from backend import doc as edit_doc  # noqa: E402
 from backend import font_subset  # noqa: E402
+from backend import errors  # noqa: E402
 from backend import storage
 from backend import taskq  # noqa: E402
 from backend import leader as task_leader  # noqa: E402
@@ -188,7 +191,22 @@ def _too_big(size: float | None) -> bool:
 
 def _too_long(seconds: float | None) -> bool:
     # +1 s: container durations and the browser's reading round a bit.
-    return seconds is not None and seconds > _max_minutes() * 60 + 1
+    # CLEO_MAX_MINUTES <= 0: no cap (like _analysis_cap_s and GET /config).
+    return (seconds is not None and _max_minutes() > 0
+            and seconds > _max_minutes() * 60 + 1)
+
+
+def _min_seconds() -> float:
+    """The shortest upload that is analysed (CLEO_MIN_SECONDS, default 3;
+    0 turns the check off)."""
+    return _env_float("CLEO_MIN_SECONDS", 3)
+
+
+def _too_short(seconds: float | None) -> bool:
+    # 0.1 s of slack for how containers round their length. Unknown
+    # (None) passes: the analysis finds out.
+    return (seconds is not None and _min_seconds() > 0
+            and seconds < _min_seconds() - 0.1)
 
 
 def _file_too_large() -> ApiRefusal:
@@ -565,7 +583,8 @@ class _ProgressWriter:
             msg, pct = self._pending
             self._pending = None
             self._last = time.monotonic()
-            fields: dict[str, Any] = {"message": msg}
+            # message, plus stage / stage_params for a StageMessage.
+            fields: dict[str, Any] = errors.stage_fields(msg)
             if pct is not None and pct >= 0:
                 fields["progress"] = pct
             try:
@@ -588,15 +607,17 @@ def _queued_writer(job_id: str, expect: tuple[str, ...]
     """on_wait for _SlotQueue.acquire: show the job as waiting in line."""
     def _write(pos: int) -> None:
         store.update_if(job_id, expect, status="processing",
-                        message="queued", queue_position=pos)
+                        **errors.stage("queued"), queue_position=pos)
     return _write
 
 
 def _start_writer(job_id: str, expect: tuple[str, ...], message: str
                   ) -> Callable[[], None]:
-    """on_start for _SlotQueue.acquire: the job left the line."""
+    """on_start for _SlotQueue.acquire: the job left the line.
+    `message`: its progress text (a StageMessage writes the stage too)."""
     def _write() -> None:
-        store.update_if(job_id, expect, status="processing", message=message,
+        store.update_if(job_id, expect, status="processing",
+                        **errors.stage_fields(message),
                         progress=1.0, queue_position=None)
     return _write
 
@@ -1406,66 +1427,21 @@ def _probe_duration(path: str) -> float | None:
     return dur if dur > 0 else None
 
 
-def _is_infra_failure(exc: BaseException, msg: str) -> bool:
-    """Analysis failures that are our fault (full disk, IO, ffmpeg,
-    restart) give the minutes back. Content problems don't — they
-    already cost Groq/Claude time, and a refund would let the same file
-    be retried for free forever — except a video with (almost) no
-    speech at all (_refund_content_failure). The database staying down
-    (a finished analysis that couldn't be saved) is ours too."""
-    if msg in ("server_storage_full", "container_restart"):
-        return True
-    if isinstance(exc, (OSError, MemoryError)) or db.is_transient(exc):
-        return True
-    return msg.lower().startswith("ffmpeg")
-
+# Failure classification: backend/errors.py (shared with the task
+# queue's worker, backend/worker.py).
+_is_infra_failure = errors.is_infra_failure
+_analysis_error_code = errors.analysis_error_code
+_render_error_code = errors.render_error_code
 
 # A "no speech" failure with less detected speech than this gets its
 # minutes back (owner decision, PLAN 6.1 #10): the user uploaded music
 # or a silent screen recording by mistake — nothing was worth charging.
 NO_SPEECH_REFUND_S = _env_float("CLEO_NO_SPEECH_REFUND_S", 10.0)
 
-# The English sentence pipelines from before NoSpeechError raise.
-_NO_SPEECH_TEXT = "No speech detected in the video."
-# How the transcription step says the video has no sound track at all
-# (src/audio.py: "Video has no audio track") — an upload POST /jobs
-# couldn't probe (no_audio is normally refused there, before the charge).
-_NO_AUDIO_TEXTS = ("no audio track", "no audio stream", "has no audio")
-
-
-def _analysis_error_code(exc: BaseException, msg: str) -> str | None:
-    """The client-facing code of a failed analysis (job.error_code), or
-    None when there is no specific one (the client shows a generic
-    message). The full catalogue comes with backend/errors.py (UX5)."""
-    if isinstance(exc, pipeline.NoSpeechError) or msg.strip() == _NO_SPEECH_TEXT:
-        return "no_speech"
-    if any(t in msg.lower() for t in _NO_AUDIO_TEXTS):
-        return "no_audio"
-    if msg == "server_storage_full":
-        return "server_storage_full"
-    return None
-
 
 def _refund_content_failure(exc: BaseException, code: str | None) -> bool:
-    """A content failure whose minutes still go back: no sound track at
-    all (never charged), or no speech with less than NO_SPEECH_REFUND_S
-    of it detected."""
-    if code == "no_audio":
-        return True
-    if code != "no_speech":
-        return False
-    speech = getattr(exc, "speech_seconds", 0.0) or 0.0
-    return float(speech) < NO_SPEECH_REFUND_S
-
-
-def _render_error_code(exc: BaseException) -> str:
-    """job.error_code of a failed render: render_timeout / render_unavailable
-    when the render worker gave up (RenderUnavailableError), else
-    render_failed."""
-    if isinstance(exc, pipeline.RenderUnavailableError):
-        return ("render_timeout" if exc.code == "render_timeout"
-                else "render_unavailable")
-    return "render_failed"
+    """errors.refund_content_failure with NO_SPEECH_REFUND_S."""
+    return errors.refund_content_failure(exc, code, NO_SPEECH_REFUND_S)
 
 
 # ── Job events (reliability numbers, GET /admin/metrics) ─────────────
@@ -1654,8 +1630,7 @@ def _sweep_stale_claims(now: float | None = None) -> int:
                     if k != "_accepting"}
         if not store.update_if(
                 job.id, "pending", status="error", error="container_restart",
-                message="Processing was interrupted. "
-                        "Please upload the video again.",
+                **errors.job_error("processing_interrupted"),
                 progress=0.0, queue_position=None, input_path=None,
                 settings=settings):
             continue
@@ -1707,8 +1682,7 @@ def _sweep_orphaned_jobs(now: float | None = None) -> int:
             continue
         if not store.update_if(
                 job.id, job.status, status="error", error="container_restart",
-                message="Processing was interrupted. "
-                        "Please upload the video again.",
+                **errors.job_error("processing_interrupted"),
                 progress=0.0, queue_position=None, input_path=None):
             continue
         try:
@@ -1817,10 +1791,31 @@ def _quota_error(code: str, **extra) -> HTTPException:
     return HTTPException(402, {"code": code, **extra})
 
 
+# ── Error bodies: {"detail", "code", "params"} (backend/errors.py) ────
+# `detail` exactly as before (clients from before UX5 read it), the
+# refusals' extra fields next to it as before; `code` is always a
+# catalogue code and `params` its numbers.
+
+
 @app.exception_handler(ApiRefusal)
 async def _api_refusal(request: Request, exc: ApiRefusal):
-    return JSONResponse({"detail": exc.detail, **exc.extra},
+    return JSONResponse(errors.http_body(exc.status, exc.detail, exc.extra),
                         status_code=exc.status, headers=exc.headers)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException):
+    headers = getattr(exc, "headers", None)
+    if exc.status_code in (204, 304):
+        return Response(status_code=exc.status_code, headers=headers)
+    return JSONResponse(errors.http_body(exc.status_code, exc.detail),
+                        status_code=exc.status_code, headers=headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    body = errors.http_body(422, jsonable_encoder(exc.errors()))
+    return JSONResponse(body, status_code=422)
 
 
 # ── Request body limits ──────────────────────────────────────────────
@@ -1837,14 +1832,14 @@ def _body_limit(scope) -> tuple[int, dict]:
     """(max body bytes, 413 answer) for a request."""
     method, path = scope.get("method"), scope.get("path")
     if method == "POST" and path == "/billing/webhook":
-        return 256 * _KIB, {"detail": "request_too_large"}
+        return 256 * _KIB, errors.refusal_body("request_too_large")
     if method == "POST" and path == "/jobs":
         # Legacy multipart upload through Railway; big files go to R2.
         limit = int(_env_float("CLEO_MAX_FORM_UPLOAD_MB", 100) * _MIB)
-        return limit, {"detail": "file_too_large",
-                       "max_gb": _plain(round(limit / 1e9, 2))}
+        return limit, errors.refusal_body(
+            "file_too_large", max_gb=_plain(round(limit / 1e9, 2)))
     return (int(_env_float("CLEO_MAX_BODY_KB", 1024) * _KIB),
-            {"detail": "request_too_large"})
+            errors.refusal_body("request_too_large"))
 
 
 class _BodyTooLarge(StarletteHTTPException):
@@ -1970,6 +1965,45 @@ def root():
 async def health():
     """Liveness: answered on the event loop, whatever the threads do."""
     return {"status": "ok"}
+
+
+def public_config() -> dict[str, Any]:
+    """Body of GET /config: what the web app needs to know about this
+    deployment before it sends anything (it used to be baked into the
+    build as NEXT_PUBLIC_MAX_*)."""
+    max_minutes = _max_minutes()
+    return {
+        "limits": {
+            "max_upload_bytes": int(_max_upload_gb() * 1e9),
+            # None: no length cap (CLEO_MAX_MINUTES <= 0).
+            "max_seconds": _plain(max_minutes * 60) if max_minutes > 0 else None,
+            "min_seconds": _plain(_min_seconds()),
+        },
+        "formats": list(EXPORT_FORMATS),
+        # v1 engine presets (the configure screen's picker). `scripts`:
+        # null = not declared per preset yet (UT4/UT5 fill it for the v2
+        # engine).
+        "caption_presets": [
+            {"id": p, "name_key": f"app.captions.{p}", "status": "live",
+             "scripts": None}
+            for p in CAPTION_PRESETS
+        ],
+        # Transcription detects the spoken language itself today (UX6
+        # adds a choice).
+        "spoken_languages": ["auto"],
+        # Renders are free today: no fair-use count (UX11).
+        "free_renders": None,
+        "billing": {"enabled": billing.enabled()},
+        # Incident banner (UX20: admin-editable).
+        "incident": None,
+    }
+
+
+@app.get("/config")
+async def get_config():
+    """Public deployment settings for the web app; cacheable a minute."""
+    return JSONResponse(await run_in_threadpool(public_config),
+                        headers={"Cache-Control": "public, max-age=60"})
 
 
 # One thread: a hung DB makes checks queue up and time out (not ready)
@@ -2137,9 +2171,10 @@ def _analysis_failed(job_id: str, job_dir: Path, exc: Exception,
             print(f"[job {job_id}] minutes refunded ({(code or msg)[:60]})",
                   flush=True)
             refunded = True
+    # The raw text only in `error` (admins; Sentry has it above).
     _db_retry(job_id, "saving the failure", store.update, job_id,
-              status="error", message=msg[:300], error=msg[:2000],
-              error_code=code, refunded=refunded, input_path=None)
+              status="error", error=msg[:2000], **errors.job_error(code),
+              refunded=refunded, input_path=None)
     _record_event("analysis_failed", job_id, code=code or "unknown",
                   infra=bool(infra), refunded=bool(refunded))
     # Nothing of a failed analysis can be reused (the user uploads
@@ -2160,6 +2195,7 @@ class AnalysisRefused(Exception):
     def __init__(self, code: str, **extra: Any) -> None:
         super().__init__(code)
         self.code = code
+        self.params = extra   # the job's error_params
         self.text = (json.dumps({"detail": code, **extra},
                                 separators=(",", ":"))
                      if extra else code)
@@ -2180,7 +2216,8 @@ def _length_gate(job: Job, input_path: str,
     charge = settings.pop("_charge", None)
     changed: dict[str, Any] = {}
     if measure:
-        progress("Checking the video…", 1)
+        progress(errors.stage_message("analyze.normalize",
+                                      "Checking the video…"), 1)
         seconds = _probe_duration(input_path)
         if _too_long(seconds):
             raise AnalysisRefused("video_too_long",
@@ -2235,8 +2272,8 @@ def _analysis_refused(job_id: str, job_dir: Path, exc: AnalysisRefused,
         if _db_retry(job_id, "refunding", accounts.refund, job_id, exc.code):
             refunded = True
     _db_retry(job_id, "saving the refusal", store.update, job_id,
-              status="error", message=exc.text[:300], error=exc.text[:2000],
-              error_code=exc.code, refunded=refunded,
+              status="error", error=exc.text[:2000],
+              **errors.job_error(exc.code, **exc.params), refunded=refunded,
               progress=0.0, input_path=None)
     _record_event("analysis_refused", job_id, code=exc.code)
     drop_upload()
@@ -2261,10 +2298,11 @@ def _render_failed(job_id: str, exc: Exception, gen: int | None = None,
     print(f"[job {job_id}] RENDER FAILED: {exc}\n{tb}", flush=True)
     observability.capture(exc, job_id=job_id, phase="render")
     code = _render_error_code(exc)
+    # message "render_failed": what clients before UX5 look for.
     _db_retry(job_id, "saving the failure", store.update, job_id,
               status="awaiting_review", progress=100.0,
               message="render_failed", error=str(exc)[:500],
-              error_code=code)
+              error_code=code, error_params={})
     _record_event("render_failed", job_id, code=code, gen=gen,
                   wall_s=_since(started_at))
 
@@ -2276,7 +2314,8 @@ def _run_analyze(job_id: str) -> None:
         waiting = ("pending", "processing")
         if not _ANALYZE_SLOTS.acquire(
                 job_id, on_wait=_queued_writer(job_id, waiting),
-                on_start=_start_writer(job_id, waiting, "Starting…")):
+                on_start=_start_writer(job_id, waiting, errors.stage_message(
+                    "analyze.normalize", "Starting…"))):
             return
         try:
             with costs.tracking(job_id, "analyze"):
@@ -2307,7 +2346,7 @@ def _store_analysis(job_id: str, res: dict,
                       "preview_key"))
     fields: dict[str, Any] = {"media_bytes": {}, "media_store": where}
     for i, (path, key, field_name) in enumerate(items):
-        progress("Saving…", 96 + i)
+        progress(errors.stage_message("analyze.cuts", "Saving…"), 96 + i)
         try:
             size = media.put_file(path, key, content_type="video/mp4",
                                   store=where)
@@ -2350,8 +2389,9 @@ def _run_analyze_inner(job_id: str) -> None:
         # Start exactly once, and only while the job still waits to start.
         if not _db_retry(job_id, "starting", store.update_if, job_id,
                          ("pending", "processing"), status="processing",
-                         message="Starting…", progress=1.0,
-                         queue_position=None):
+                         **errors.stage_fields(errors.stage_message(
+                             "analyze.normalize", "Starting…")),
+                         progress=1.0, queue_position=None):
             return
 
         ws.mkdir(parents=True, exist_ok=True)
@@ -2390,7 +2430,8 @@ def _run_analyze_inner(job_id: str) -> None:
         try:
             input_path = job.input_path
             if not input_path:
-                progress("Fetching upload…", 1)
+                progress(errors.stage_message("analyze.normalize",
+                                              "Fetching upload…"), 1)
                 local_copy = ws / ("source" + upl.upload_ext(source_key))
                 try:
                     media.get_file(source_key, local_copy, store=where)
@@ -2432,7 +2473,7 @@ def _run_analyze_inner(job_id: str) -> None:
             # PATCH /jobs/{id}).
             change = edit_doc.commit_change(dict(
                 status="awaiting_review",
-                message="Review subtitles",
+                **errors.stage("analyze.done"),
                 progress=100.0,
                 segments=res["segments"],
                 preview_segments=[list(s) for s in res["segments"]],
@@ -2507,7 +2548,8 @@ def _run_render(
         if not _RENDER_SLOTS.acquire(
                 job_id, on_wait=_queued_writer(job_id, ("processing",)),
                 on_start=_start_writer(job_id, ("processing",),
-                                       "Rendering…")):
+                                       errors.stage_message(
+                                           "render.prepare", "Rendering…"))):
             return
         try:
             with costs.tracking(job_id, "render"):
@@ -2588,8 +2630,9 @@ def _run_render_inner(
             return
         progress = _ProgressWriter(job_id)
         _db_retry(job_id, "starting the render", store.update, job_id,
-                  status="processing", message="Rendering…", progress=1.0,
-                  queue_position=None)
+                  status="processing", **errors.stage_fields(
+                      errors.stage_message("render.prepare", "Rendering…")),
+                  progress=1.0, queue_position=None)
         gen = max(1, int(job.render_gen or 0))
         out_prefix = f"{media.job_prefix(job_id)}r{gen}/"
         where = media.store_of(job)
@@ -2683,7 +2726,7 @@ def _render_commit(cur: Job, result: dict, out_prefix: str,
     media_bytes.update(sizes)
     return dict(
         status="done",
-        message="Done",
+        **errors.stage_fields(errors.stage_message("render.finish", "Done")),
         progress=100.0,
         output_keys=output_keys,
         thumb_key=thumb["key"] if thumb else None,
@@ -2708,7 +2751,7 @@ def _backfill_mezz(job: Job, progress: Callable[[str, float], None],
     its first render after WP3; the job's store is recorded with it).
     Returns the key."""
     key = media.job_prefix(job.id) + "mezz.mp4"
-    progress("Preparing render…", 2)
+    progress(errors.stage_message("render.prepare"), 2)
     size = media.put_file(job.normalized_path, key, content_type="video/mp4",
                           store=where)
 
@@ -2806,7 +2849,7 @@ def _queue_admit(job_id: str, user: User | None, parsed: dict, plan: str,
                "est_audio_s": taskq.est_audio_s(charged),
                "size": float(size or 0.0)}
     fields = dict(settings=parsed, plan=plan, status="processing",
-                  message="queued", progress=0.0, queue_position=None)
+                  **errors.stage("queued"), progress=0.0, queue_position=None)
     return _tasks().admit_ingest(
         job_id, owner_id=user.id if user else None,
         count_user=bool(user is not None and not service),
@@ -2818,6 +2861,11 @@ def _queue_admit(job_id: str, user: User | None, parsed: dict, plan: str,
         max_attempts=taskq.max_attempts(), job_fields=fields)
 
 
+# The job fields of a render that just started (POST /render).
+_RENDER_STARTED = errors.stage_fields(
+    errors.stage_message("render.prepare", "Rendering…"))
+
+
 def _queue_start_render(job_id: str, edited: list, disabled_cuts: list,
                         owner_id: str | None, plan: str | None
                         ) -> int | None:
@@ -2826,8 +2874,8 @@ def _queue_start_render(job_id: str, edited: list, disabled_cuts: list,
     def _start(cur: Job) -> dict | None:
         if cur.status != "awaiting_review":
             return None
-        return dict(status="processing", message="Rendering…", progress=1.0,
-                    error=None, error_code=None, queue_position=None,
+        return dict(status="processing", **_RENDER_STARTED, progress=1.0,
+                    **errors.no_error(), queue_position=None,
                     render_gen=int(cur.render_gen or 0) + 1)
 
     def _payload(written: dict | None) -> dict:
@@ -2912,7 +2960,8 @@ class _QueueOps:
                         sort_offset_s=taskq.priority_offset_s(job.plan),
                         max_attempts=taskq.max_attempts(),
                         job_expect=("pending", "processing"),
-                        job_change=dict(status="processing", message="queued",
+                        job_change=dict(status="processing",
+                                        **errors.stage("queued"),
                                         progress=0.0, queue_position=None))
                 except taskq.TaskActive:
                     continue
@@ -2926,8 +2975,7 @@ class _QueueOps:
             if not store.update_if(
                     job.id, job.status, status="error",
                     error="container_restart",
-                    message="Processing was interrupted. "
-                            "Please upload the video again.",
+                    **errors.job_error("processing_interrupted"),
                     progress=0.0, queue_position=None, input_path=None):
                 continue
             try:
@@ -3001,13 +3049,14 @@ class _QueueOps:
         refused = r.get("refused")
         if refused:
             text = str(r.get("text") or refused)
+            params = r.get("params") if isinstance(r.get("params"), dict) else {}
             refunded = None
             if auth.auth_enabled():
                 accounts.refund(job.id, refused)
                 refunded = _ledger_refunded(job.id)
             store.update_if(job.id, ("pending", "processing"),
-                            status="error", message=text[:300],
-                            error=text[:2000], error_code=refused,
+                            status="error", error=text[:2000],
+                            **errors.job_error(refused, **params),
                             refunded=refunded, progress=0.0,
                             input_path=None)
             _remove_upload(job.input_path)
@@ -3022,6 +3071,9 @@ class _QueueOps:
             job_code, refund, infra = None, True, True
             print(f"[job {job.id}] analysis given up: {err[:300]}",
                   flush=True)
+            # The raw text reaches only admins (job.error): Sentry too.
+            observability.capture(RuntimeError(f"analysis given up: {err[:500]}"),
+                                  job_id=job.id, phase="analyze")
         else:
             msg = str(r.get("message") or t.last_error or "failed")
             err = str(r.get("error") or msg)
@@ -3036,10 +3088,14 @@ class _QueueOps:
                 print(f"[job {job.id}] minutes refunded "
                       f"({(job_code or msg)[:60]})", flush=True)
             refunded = _ledger_refunded(job.id)
+        # The client sees the code and its catalogue text; the raw text
+        # stays in `error` (admins).
+        # (A task given up keeps its last attempt's code, e.g. Groq down.)
+        client_code = job_code or r.get("job_code") or (
+            "processing_interrupted" if t.state == "dead" or not r else None)
         store.update_if(job.id, ("pending", "processing"), status="error",
-                        message=msg[:300], error=err[:2000],
-                        error_code=job_code, refunded=refunded,
-                        input_path=None)
+                        error=err[:2000], **errors.job_error(client_code),
+                        refunded=refunded, input_path=None)
         _remove_upload(job.input_path)
         _gc_later(_media_of(job), store_=where)
         return ("analysis_failed", job.id, {
@@ -3065,11 +3121,13 @@ class _QueueOps:
             code = "render_unavailable"
             error = (f"render_unavailable: {t.error_code or 'failed'}: "
                      f"{t.last_error or ''}")
+            observability.capture(RuntimeError(f"render given up: {error[:500]}"),
+                                  job_id=job.id, phase="render")
         else:
             code, error = r["job_code"], str(r.get("error") or t.last_error)
         store.update_if(job.id, "processing", status="awaiting_review",
                         progress=100.0, message="render_failed",
-                        error=error[:500], error_code=code)
+                        error=error[:500], error_code=code, error_params={})
         return ("render_failed", job.id, {
             "code": code, "gen": gen, "wall_s": _wall_s(t),
             "test": bool((job.settings or {}).get("_cost_test"))})
@@ -3760,7 +3818,7 @@ async def _accept_upload(
             else:
                 await run_in_threadpool(_INFLIGHT.reserve_disk, token, size,
                                         None)
-            seconds, has_audio = await _probe_upload(storage_key)
+            seconds, has_audio, has_video = await _probe_upload(storage_key)
             if seconds is None and client_duration:
                 seconds = client_duration
         else:
@@ -3784,19 +3842,29 @@ async def _accept_upload(
                                         size or 0, input_path)
             await run_in_threadpool(_copy_upload, file, input_path)
             seconds = await run_in_threadpool(_probe_duration, input_path)
-            has_audio = await run_in_threadpool(_probe_audio, input_path)
+            has_audio, has_video = await run_in_threadpool(_probe_streams,
+                                                           input_path)
 
         if _too_long(seconds):
             await run_in_threadpool(_discard_upload, input_path, storage_key)
             input_path = None
             raise _video_too_long()
-        if has_audio is False:
-            # Nothing to transcribe, so nothing to cut or caption: refused
-            # before the claim and the charge — 0 minutes, and the upload
-            # goes (a retry can't help).
+        # Content the analysis can't use, refused before the claim and the
+        # charge — 0 minutes, and the upload goes (a retry can't help):
+        # an audio file (no_video), a video without a sound track
+        # (nothing to transcribe: no_audio), a clip too short to cut.
+        content_refusal: ApiRefusal | None = None
+        if has_video is False:
+            content_refusal = ApiRefusal(400, "no_video")
+        elif has_audio is False:
+            content_refusal = ApiRefusal(400, "no_audio")
+        elif _too_short(seconds):
+            content_refusal = ApiRefusal(
+                400, "video_too_short", min_seconds=_plain(_min_seconds()))
+        if content_refusal is not None:
             await run_in_threadpool(_discard_upload, input_path, storage_key)
             input_path = None
-            raise ApiRefusal(400, "no_audio")
+            raise content_refusal
 
         plan = DEFAULT_PLAN
         # Charged in the analysis worker instead of here (see
@@ -3953,7 +4021,7 @@ async def _accept_upload(
             # any more); it keeps the position current while it waits.
             await run_in_threadpool(functools.partial(
                 store.update_if, job.id, "pending", status="processing",
-                message="queued", queue_position=pos))
+                **errors.stage("queued"), queue_position=pos))
             job = await run_in_threadpool(store.get, job.id) or job
         return {"job_id": job.id, **job.to_dict()}
     except BaseException:
@@ -3991,67 +4059,105 @@ def _audio_verdict(streams: Any) -> bool | None:
     return "audio" in kinds
 
 
-def _probe_audio(path: str) -> bool | None:
-    """Does a local upload have a sound track? (_audio_verdict)"""
+def _video_verdict(streams: Any) -> bool | None:
+    """From ffprobe's stream list: True = there is a picture, False =
+    streams were read and none is video (an audio file; its cover art —
+    an attached picture — doesn't count), None = unknown. Only a clear
+    False refuses an upload (no_video)."""
+    if not isinstance(streams, list) or not streams:
+        return None
+    for s in streams:
+        if not isinstance(s, dict) or s.get("codec_type") != "video":
+            continue
+        disp = s.get("disposition") if isinstance(s.get("disposition"), dict) else {}
+        if not disp.get("attached_pic"):
+            return True
+    return False
+
+
+# One ffprobe run tells length, sound and picture.
+_PROBE_ENTRIES = "stream=codec_type:stream_disposition=attached_pic"
+
+
+def _probe_streams(path: str) -> tuple[bool | None, bool | None]:
+    """(has a sound track, has a picture) of a local upload
+    (_audio_verdict, _video_verdict)."""
     from src.ffmpeg_utils import get_ffprobe_path
     try:
         r = subprocess.run(
             [get_ffprobe_path(), "-v", "error", "-show_entries",
-             "stream=codec_type", "-of", "json", path],
+             _PROBE_ENTRIES, "-of", "json", path],
             capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
-        return None
+        return None, None
     if r.returncode != 0:
-        return None
+        return None, None
     try:
-        return _audio_verdict(json.loads(r.stdout or "{}").get("streams"))
+        streams = json.loads(r.stdout or "{}").get("streams")
     except (ValueError, AttributeError):
-        return None
+        return None, None
+    return _audio_verdict(streams), _video_verdict(streams)
 
 
-def _probe_remote(url: str) -> tuple[float | None, bool | None]:
-    """(length, has a sound track) of a remote file from its container
-    header, in one ffprobe run: a few ranged GETs (moov at the end of an
-    MP4 included), no packet scan — that would read the whole object.
-    The length is None if the header doesn't say (streamed WebM), the
-    sound verdict as _audio_verdict; (None, None) if nothing can be read
-    within 20 s."""
+def _probe_audio(path: str) -> bool | None:
+    """Does a local upload have a sound track? (_audio_verdict)"""
+    return _probe_streams(path)[0]
+
+
+def _probe_remote(url: str) -> tuple[float | None, bool | None, bool | None]:
+    """(length, has a sound track, has a picture) of a remote file from
+    its container header, in one ffprobe run: a few ranged GETs (moov at
+    the end of an MP4 included), no packet scan — that would read the
+    whole object. The length is None if the header doesn't say (streamed
+    WebM), the verdicts as _audio_verdict / _video_verdict; all None if
+    nothing can be read within 20 s."""
     from src.ffmpeg_utils import get_ffprobe_path
+    nothing = (None, None, None)
     try:
         r = subprocess.run(
             [get_ffprobe_path(), "-v", "error", "-rw_timeout", "15000000",
-             "-show_entries", "format=duration:stream=codec_type",
+             "-show_entries", f"format=duration:{_PROBE_ENTRIES}",
              "-of", "json", url],
             capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.TimeoutExpired):
-        return None, None
+        return nothing
     if r.returncode != 0:
-        return None, None
+        return nothing
     try:
         data = json.loads(r.stdout or "{}")
     except ValueError:
-        return None, None
+        return nothing
     if not isinstance(data, dict):
-        return None, None
+        return nothing
     fmt = data.get("format") if isinstance(data.get("format"), dict) else {}
     dur = _to_float(str(fmt.get("duration") or 0))
-    return (dur if dur > 0 else None), _audio_verdict(data.get("streams"))
+    streams = data.get("streams")
+    return ((dur if dur > 0 else None), _audio_verdict(streams),
+            _video_verdict(streams))
 
 
-async def _probe_upload(key: str) -> tuple[float | None, bool | None]:
+async def _probe_upload(key: str
+                        ) -> tuple[float | None, bool | None, bool | None]:
     """_probe_remote of an upload in R2 (over a presigned GET)."""
     try:
         url = media.presign_get(key)
     except Exception as e:
         print(f"[jobs] presign for the probe of {key} failed: {e}", flush=True)
-        return None, None
+        return None, None, None
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_PROBE_POOL, _probe_remote, url)
 
 
+def _is_admin(user: User | None) -> bool:
+    """The caller may see a job's raw error text (Job.to_dict): the
+    service user (X-Admin-Token, backend/auth.py)."""
+    return user is not None and user.is_service
+
+
 # Fields of GET /jobs rows (the Library's server-side list).
 _LIST_FIELDS = (
-    "id", "status", "message", "progress", "error", "error_code", "refunded",
+    "id", "status", "message", "progress", "error", "error_code",
+    "error_params", "refunded", "stage", "stage_params",
     "filename", "preset_id",
     "preset_label", "created_at", "updated_at", "expires_at", "has_output",
     "outputs", "hook_clips", "social_caption", "social_hashtags", "duration",
@@ -4091,14 +4197,25 @@ def list_jobs(user: User = Depends(require_user)):
             _owner_jobs(user.id))
     rows.sort(key=lambda j: j.created_at or j.updated_at, reverse=True)
     out = []
+    admin = _is_admin(user)
     for job in rows:
-        d = job.to_dict()
+        d = job.to_dict(admin=admin)
         out.append({k: d.get(k) for k in _LIST_FIELDS})
     return out
 
 
 # GET /jobs/status: at most this many ids per call.
 _STATUS_MAX_IDS = 50
+
+
+def _as_dict(value: Any) -> dict:
+    """A status row's object field (nested JSON text in some rows)."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return {}
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _status_rows(ids: list[str], user: User | None) -> dict:
@@ -4127,15 +4244,21 @@ def _status_rows(ids: list[str], user: User | None) -> dict:
                 keys = None
         has_output = (bool(keys.get("primary")) if isinstance(keys, dict)
                       and keys else bool(out) and Path(out).exists())
+        code = row.get("error_code")
         jobs.append({
             "id": job_id,
             "status": row["status"],
             "message": row["message"],
             "progress": row["progress"],
             "queue_position": row["queue_position"],
-            "error": row["error"],
-            "error_code": row.get("error_code"),
+            # The raw text only for admins (Job.to_dict).
+            "error": (row["error"] if _is_admin(user)
+                      else errors.public_error(row["error"], code)),
+            "error_code": code,
+            "error_params": _as_dict(row.get("error_params")),
             "refunded": row.get("refunded"),
+            "stage": row.get("stage"),
+            "stage_params": _as_dict(row.get("stage_params")),
             "has_output": has_output,
             "updated_at": row["updated_at"] or None,
             "preview_version": row["preview_version"],
@@ -4158,7 +4281,8 @@ async def jobs_status(request: Request, ids: str = "",
                       user: User | None = Depends(current_user)):
     """Status of several jobs in one request, for the dashboard poll:
     `?ids=a,b,c` (at most 50) → {"jobs": [{id, status, message, progress,
-    queue_position, error, error_code, refunded, has_output, updated_at,
+    queue_position, error (its code unless admin), error_code,
+    error_params, refunded, stage, stage_params, has_output, updated_at,
     preview_version}],
     "missing": [ids that don't exist or aren't the caller's]}. With a
     weak ETag: send it back as If-None-Match and an unchanged answer is
@@ -4179,7 +4303,7 @@ async def jobs_status(request: Request, ids: str = "",
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str, user: User | None = Depends(current_user)):
-    return get_owned_job(job_id, user).to_dict()
+    return get_owned_job(job_id, user).to_dict(admin=_is_admin(user))
 
 
 # ── Edit document (UT3) ──────────────────────────────────────────────
@@ -5400,8 +5524,9 @@ def post_render(job_id: str, payload: dict,
         if pos is not None:
             t = _tasks().get(task_id)
             if t is not None and t.state == "queued":
-                store.patch_status(job_id, "processing", message="queued")
-        out = store.get(job_id).to_dict()
+                store.patch_status(job_id, "processing",
+                                   **errors.stage("queued"))
+        out = store.get(job_id).to_dict(admin=_is_admin(user))
         if pos is not None:
             out["queue_position"] = pos
         return out
@@ -5414,8 +5539,8 @@ def post_render(job_id: str, payload: dict,
     def _start(cur: Job) -> dict | None:
         if cur.status != "awaiting_review":
             return None
-        return dict(status="processing", message="Rendering…", progress=1.0,
-                    error=None, error_code=None, queue_position=None,
+        return dict(status="processing", **_RENDER_STARTED, progress=1.0,
+                    **errors.no_error(), queue_position=None,
                     render_gen=int(cur.render_gen or 0) + 1)
     if not store.modify(job_id, _start):
         cur = store.get(job_id)
@@ -5430,14 +5555,14 @@ def post_render(job_id: str, payload: dict,
     pos = _RENDER_SLOTS.enqueue(job_id, thread)
     try:
         if pos is not None:
-            store.update_if(job_id, "processing", message="queued",
+            store.update_if(job_id, "processing", **errors.stage("queued"),
                             queue_position=pos)
         thread.start()
     except BaseException:
         _RENDER_SLOTS.cancel(job_id)
         raise
     _INFLIGHT.track(job_id, job.owner_id, "render", thread)
-    return store.get(job_id).to_dict()
+    return store.get(job_id).to_dict(admin=_is_admin(user))
 
 
 @app.get("/jobs/{job_id}/download")

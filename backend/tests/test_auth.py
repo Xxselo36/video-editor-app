@@ -52,7 +52,7 @@ def test_missing_token_is_401_not_404(client, auth_on):
     job = _job(owner="user_a")
     r = client.get(f"/jobs/{job.id}")
     assert r.status_code == 401
-    assert r.json() == {"detail": "auth_required"}
+    assert r.json() == {"detail": "auth_required", "code": "auth_required", "params": {}}
     assert client.get("/me").status_code == 401
 
 
@@ -68,7 +68,7 @@ def test_missing_token_is_401_not_404(client, auth_on):
 def test_bad_claims_are_rejected(client, auth_on, bearer, overrides):
     r = client.get("/me", headers=bearer("user_a", **overrides))
     assert r.status_code == 401
-    assert r.json() == {"detail": "auth_required"}
+    assert r.json() == {"detail": "auth_required", "code": "auth_required", "params": {}}
 
 
 def test_recently_expired_token_is_accepted(client, auth_on, bearer):
@@ -231,7 +231,7 @@ def test_upload_is_owned_and_hidden_from_others(client, auth_on, bearer):
         kw = {"json": {}} if method == "POST" else {}
         r = client.request(method, path, headers=bearer("user_b"), **kw)
         assert r.status_code == 404, (method, path, r.text)
-        assert r.json() == {"detail": "job not found"}
+        assert r.json() == {"detail": "job not found", "code": "not_found", "params": {}}
     assert store.get(job_id) is not None  # B's delete did nothing
 
 
@@ -327,7 +327,7 @@ def fake_r2(monkeypatch, r2):
                   Body=b"video")
     probed = []
     monkeypatch.setattr(M, "_probe_remote",
-                        lambda url: (probed.append(url) or 60.0, None))
+                        lambda url: (probed.append(url) or 60.0, None, None))
     downloaded = []
     real_get = M.media.get_file
     monkeypatch.setattr(M.media, "get_file", lambda key, path, **kw: (
@@ -378,7 +378,7 @@ def test_multipart_routes_need_auth_and_a_ticket(client, auth_on, bearer,
     assert r.status_code == 503 and r.json()["detail"] != "server_busy"
     for path in paths[1:-1]:
         r = client.post(path, headers=bearer(), json={"ticket": "x.y"})
-        assert r.status_code == 403 and r.json() == {"detail": "bad_ticket"}
+        assert r.status_code == 403 and r.json() == {"detail": "bad_ticket", "code": "bad_ticket", "params": {}}
     job = _job(owner="user_a")
     r = client.get(f"/jobs/{job.id}/source-video", headers=bearer())
     assert r.status_code == 404
