@@ -334,7 +334,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "聞き取れました!",
   "app.voice.listening": "聞き取り中…",
   "app.voice.heardPrefix": "認識: ",
-  "app.voice.permissionHint": "カメラとマイクを使用します。すべてブラウザ内で処理されます。",
+  "app.voice.permissionHint": "マイクを使用します。音声のテキスト化はブラウザが行い、Chrome は Google に、Safari は Apple に音声を送信します。CleoCuts には何も送信されません。",
   "app.voice.requesting": "リクエスト中…",
   "app.voice.start": "開始",
   "app.voice.denied": "権限が拒否されました。ブラウザの設定で許可し、再読み込みしてください。",
@@ -474,6 +474,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "プレビューを閉じる",
   "common.videoModal.close": "閉じる",
+  "common.videoModal.dialogLabel": "動画のプレビュー",
 
   "common.auth.signIn": "サインイン",
   "common.auth.account": "アカウント",

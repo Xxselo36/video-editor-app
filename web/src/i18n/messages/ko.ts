@@ -334,7 +334,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "들었어요!",
   "app.voice.listening": "듣고 있어요…",
   "app.voice.heardPrefix": "들은 말: ",
-  "app.voice.permissionHint": "카메라와 마이크를 사용해요. 모든 데이터는 브라우저 안에만 남아요.",
+  "app.voice.permissionHint": "마이크를 사용해요. 음성을 텍스트로 바꾸는 건 브라우저가 해요. 이때 Chrome은 Google로, Safari는 Apple로 음성을 보내요. CleoCuts로는 아무것도 보내지 않아요.",
   "app.voice.requesting": "요청 중…",
   "app.voice.start": "시작",
   "app.voice.denied": "권한이 거부됐어요. 브라우저 설정에서 허용하고 새로고침해 주세요.",
@@ -474,6 +474,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "미리보기 닫기",
   "common.videoModal.close": "닫기",
+  "common.videoModal.dialogLabel": "영상 미리보기",
 
   "common.auth.signIn": "로그인",
   "common.auth.account": "계정",

@@ -338,7 +338,7 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Kedengaran!",
   "app.voice.listening": "Mendengarkan…",
   "app.voice.heardPrefix": "terdengar: ",
-  "app.voice.permissionHint": "Memakai kamera + mikmu. Semuanya tetap di browsermu.",
+  "app.voice.permissionHint": "Memakai mikrofonmu. Browser-mu mengubah suaramu jadi teks: Chrome mengirimnya ke Google untuk itu, Safari ke Apple. Tidak ada yang dikirim ke CleoCuts.",
   "app.voice.requesting": "Meminta izin…",
   "app.voice.start": "Mulai",
   "app.voice.denied": "Izin ditolak. Aktifkan di pengaturan browser + muat ulang.",
@@ -481,6 +481,7 @@ export const id: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Tutup pratinjau",
   "common.videoModal.close": "Tutup",
+  "common.videoModal.dialogLabel": "Pratinjau video",
 
   /* ── Accounts (header, all pages) ── */
   "common.auth.signIn": "Masuk",

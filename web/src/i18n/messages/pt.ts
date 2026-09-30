@@ -132,6 +132,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   // ── shared components ──
   "common.videoModal.closeAria": "Fechar prévia",
   "common.videoModal.close": "Fechar",
+  "common.videoModal.dialogLabel": "Prévia do vídeo",
   "common.auth.signIn": "Entrar",
   "common.auth.account": "Conta",
   "common.auth.pricing": "Preços",
@@ -472,7 +473,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Ouvi você!",
   "app.voice.listening": "Ouvindo…",
   "app.voice.heardPrefix": "ouvi: ",
-  "app.voice.permissionHint": "Usa sua câmera + microfone. Tudo fica no seu navegador.",
+  "app.voice.permissionHint": "Usa seu microfone. Seu navegador transforma sua fala em texto: o Chrome envia a voz para o Google, o Safari para a Apple. Nada vai para a CleoCuts.",
   "app.voice.requesting": "Solicitando…",
   "app.voice.start": "Começar",
   "app.voice.denied": "Permissão negada. Ative nas configurações do navegador e recarregue.",

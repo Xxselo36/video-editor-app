@@ -338,7 +338,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Usłyszano cię!",
   "app.voice.listening": "Słuchanie…",
   "app.voice.heardPrefix": "usłyszano: ",
-  "app.voice.permissionHint": "Wykorzystuje twoją kamerę i mikrofon. Wszystko zostaje w twojej przeglądarce.",
+  "app.voice.permissionHint": "Korzysta z mikrofonu. Przeglądarka zamienia twoją mowę na tekst: Chrome wysyła ją w tym celu do Google, Safari do Apple. Nic nie trafia do CleoCuts.",
   "app.voice.requesting": "Żądanie dostępu…",
   "app.voice.start": "Start",
   "app.voice.denied": "Brak uprawnień. Włącz je w ustawieniach przeglądarki i odśwież stronę.",
@@ -481,6 +481,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Zamknij podgląd",
   "common.videoModal.close": "Zamknij",
+  "common.videoModal.dialogLabel": "Podgląd filmu",
 
   "common.auth.signIn": "Zaloguj się",
   "common.auth.account": "Konto",

@@ -341,7 +341,7 @@ export const enApp = {
   "app.voice.heardYou": "Heard you!",
   "app.voice.listening": "Listening…",
   "app.voice.heardPrefix": "heard: ",
-  "app.voice.permissionHint": "Uses your camera + mic. Everything stays in your browser.",
+  "app.voice.permissionHint": "Uses your microphone. Your browser turns your speech into text: Chrome sends it to Google for that, Safari to Apple. Nothing goes to CleoCuts.",
   "app.voice.requesting": "Requesting…",
   "app.voice.start": "Start",
   "app.voice.denied": "Permission denied. Enable in browser settings + reload.",

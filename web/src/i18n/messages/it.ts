@@ -339,7 +339,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Ti ho sentito!",
   "app.voice.listening": "In ascolto…",
   "app.voice.heardPrefix": "sentito: ",
-  "app.voice.permissionHint": "Usa la fotocamera e il microfono. Tutto resta nel tuo browser.",
+  "app.voice.permissionHint": "Usa il microfono. Il browser trasforma la tua voce in testo: Chrome la invia a Google, Safari ad Apple. A CleoCuts non arriva nulla.",
   "app.voice.requesting": "Richiesta in corso…",
   "app.voice.start": "Avvia",
   "app.voice.denied": "Permesso negato. Attivalo nelle impostazioni del browser e ricarica.",
@@ -497,6 +497,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   // ── Shared components ── */
   "common.videoModal.closeAria": "Chiudi anteprima",
   "common.videoModal.close": "Chiudi",
+  "common.videoModal.dialogLabel": "Anteprima del video",
 
   // ── Accounts (header, all pages) ── */
   "common.auth.signIn": "Accedi",

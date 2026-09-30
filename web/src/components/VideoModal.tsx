@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect } from "react";
 import { useT } from "@/i18n";
 import { useMediaUrl } from "@/lib/api";
+import { Dialog } from "@/components/ui/Dialog";
 
 /* ── Inline video preview modal ──
  * Full-screen overlay used from Library + Picker's Recent-Projects.
- * Click backdrop or press Escape to close. Body-scroll lock while open.
- * Uses /jobs/:id/watch (no attachment header) so <video> can stream
- * with HTTP Range for smooth seeking. The URL is fixed while the modal
- * is open (and waits for the media token when accounts are on).
+ * Click backdrop or press Escape to close (components/ui/Dialog: portal,
+ * focus trap, body-scroll lock). Uses /jobs/:id/watch (no attachment
+ * header) so <video> can stream with HTTP Range for smooth seeking. The
+ * URL is fixed while the modal is open (and waits for the media token
+ * when accounts are on).
  */
 export function VideoModal({
   jobId,
@@ -20,56 +21,37 @@ export function VideoModal({
 }) {
   const t = useT();
   const src = useMediaUrl(jobId, "watch");
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
 
   return (
-    <div
-      onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(6px)" }}
-      role="dialog"
-      aria-modal="true"
-      data-testid="dialog-video"
+    <Dialog
+      onClose={onClose}
+      label={t("common.videoModal.dialogLabel")}
+      testId="dialog-video"
+      backdrop="rgba(0,0,0,0.85)"
+      panelClassName="relative flex max-h-[92vh] w-full max-w-[440px] flex-col items-center"
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="relative flex max-h-[92vh] w-full max-w-[440px] flex-col items-center"
+      <button
+        onClick={onClose}
+        data-testid="dialog-close"
+        className="absolute -top-10 right-0 flex items-center gap-1.5 text-xs text-white/70 transition-opacity hover:opacity-100"
+        aria-label={t("common.videoModal.closeAria")}
       >
-        <button
-          onClick={onClose}
-          data-testid="dialog-close"
-          className="absolute -top-10 right-0 flex items-center gap-1.5 text-xs text-white/70 transition-opacity hover:opacity-100"
-          aria-label={t("common.videoModal.closeAria")}
-        >
-          {t("common.videoModal.close")} ✕
-        </button>
-        {src && (
-          /* eslint-disable-next-line jsx-a11y/media-has-caption */
-          <video
-            src={src}
-            controls
-            autoPlay
-            playsInline
-            className="max-h-[92vh] w-full rounded-2xl"
-            style={{
-              background: "#000",
-              boxShadow:
-                "0 0 0 1px rgba(139,92,246,0.35), 0 12px 60px rgba(139,92,246,0.35)",
-            }}
-          />
-        )}
-      </div>
-    </div>
+        {t("common.videoModal.close")} ✕
+      </button>
+      {src && (
+        <video
+          src={src}
+          controls
+          autoPlay
+          playsInline
+          className="max-h-[92vh] w-full rounded-2xl"
+          style={{
+            background: "#000",
+            boxShadow:
+              "0 0 0 1px rgba(139,92,246,0.35), 0 12px 60px rgba(139,92,246,0.35)",
+          }}
+        />
+      )}
+    </Dialog>
   );
 }

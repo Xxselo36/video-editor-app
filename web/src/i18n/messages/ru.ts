@@ -337,7 +337,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Услышали тебя!",
   "app.voice.listening": "Слушаем…",
   "app.voice.heardPrefix": "слышно: ",
-  "app.voice.permissionHint": "Используются камера и микрофон. Всё остаётся в твоём браузере.",
+  "app.voice.permissionHint": "Используется микрофон. Браузер превращает речь в текст: Chrome отправляет её для этого в Google, Safari — в Apple. В CleoCuts ничего не уходит.",
   "app.voice.requesting": "Запрашиваем…",
   "app.voice.start": "Начать",
   "app.voice.denied": "Доступ запрещён. Включи его в настройках браузера и перезагрузи страницу.",
@@ -481,6 +481,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Закрыть превью",
   "common.videoModal.close": "Закрыть",
+  "common.videoModal.dialogLabel": "Превью видео",
 
   // ── Accounts (header, all pages) ────────────────────────────────────
   "common.auth.signIn": "Войти",

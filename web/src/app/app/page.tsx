@@ -83,6 +83,7 @@ import {
 } from "@/lib/account";
 import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { PaywallDialog } from "@/components/billing/PaywallDialog";
+import { Dialog } from "@/components/ui/Dialog";
 
 // English translator for text that gets PERSISTED (localStorage job
 // cards / library entries). Stored text stays English and is mapped
@@ -4247,15 +4248,30 @@ function VoiceCommandsModal({ onClose }: { onClose: () => void }) {
   return <VoiceCommandsTestStep onDone={onClose} />;
 }
 
-// Live mic + camera test. User grants permissions, sees themselves,
-// says commands, gets real-time feedback. Uses the browser's Web
-// Speech API (webkitSpeechRecognition) — no backend, no cost,
-// works in Safari + Chrome on macOS/iOS/Android.
+// Speech recognition locale for the UI language: the browser's own
+// regional variant when it prefers one ("de-AT"), else a common default.
+const SPEECH_LOCALE: Record<string, string> = {
+  en: "en-US", de: "de-DE", es: "es-ES", fr: "fr-FR", pt: "pt-BR", it: "it-IT", tr: "tr-TR",
+  pl: "pl-PL", nl: "nl-NL", ru: "ru-RU", ja: "ja-JP", ko: "ko-KR", id: "id-ID", hi: "hi-IN",
+};
+function speechLocale(lang: string): string {
+  const preferred = typeof navigator !== "undefined" ? navigator.languages ?? [] : [];
+  const regional = preferred.find((tag) => tag.toLowerCase().startsWith(`${lang}-`));
+  return regional ?? SPEECH_LOCALE[lang] ?? "en-US";
+}
+
+// Live mic test. User grants the microphone, says commands, gets
+// real-time feedback. Uses the browser's Web Speech API
+// (webkitSpeechRecognition) — nothing goes to the CleoCuts backend; the
+// browser's recognizer may send the audio to its maker (Google in
+// Chrome, Apple in Safari), which app.voice.permissionHint says.
 function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   const t = useT();
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const lang = useLang();
   const streamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<any>(null);
+  // Set when the dialog closes: onend must not restart recognition then.
+  const closedRef = useRef(false);
   const [permStatus, setPermStatus] = useState<
     "idle" | "requesting" | "granted" | "denied" | "unsupported"
   >("idle");
@@ -4288,15 +4304,12 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   const startTest = async () => {
     setPermStatus("requesting");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 640, height: 480 },
-        audio: true,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (closedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
       }
+      streamRef.current = stream;
 
       // Web Speech API
       const SR =
@@ -4311,7 +4324,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
       const recognition = new SR();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = "de-DE";
+      recognition.lang = speechLocale(lang);
       recognition.onresult = (event: any) => {
         let text = "";
         for (let i = 0; i < event.results.length; i++) {
@@ -4332,7 +4345,8 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
         if (event.error === "not-allowed") setPermStatus("denied");
       };
       recognition.onend = () => {
-        // Auto-restart while modal is open
+        // Auto-restart while the dialog is open (never after it closed).
+        if (closedRef.current) return;
         try {
           recognition.start();
         } catch {
@@ -4348,7 +4362,9 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   };
 
   useEffect(() => {
+    closedRef.current = false;
     return () => {
+      closedRef.current = true;
       try {
         recognitionRef.current?.stop();
       } catch {
@@ -4361,21 +4377,17 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   const pulseActive = Date.now() - lastHitAt < 800;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
-      onClick={onDone}
-      data-testid="dialog-voice-test"
+    <Dialog
+      onClose={onDone}
+      labelledBy="voice-test-title"
+      testId="dialog-voice-test"
+      panelClassName="relative flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl"
+      panelStyle={{
+        background: "var(--surface-0)",
+        border: "1px solid var(--border)",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+      }}
     >
-      <div
-        className="relative flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl"
-        style={{
-          background: "var(--surface-0)",
-          border: "1px solid var(--border)",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
         {/* Compact header — one line title, one line explanation */}
         <div
           className="flex items-center justify-between p-4"
@@ -4383,6 +4395,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
         >
           <div className="flex-1">
             <div
+              id="voice-test-title"
               className="text-base font-bold"
               style={{ color: "var(--text-strong)" }}
             >
@@ -4407,22 +4420,24 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {/* Camera preview OR permission prompt */}
+          {/* Mic status OR permission prompt */}
           <div
             className="relative overflow-hidden"
             style={{
               background: "var(--surface-1)",
-              aspectRatio: "16 / 10",
+              aspectRatio: "16 / 7",
               borderBottom: "1px solid var(--border)",
             }}
           >
-            <video
-              ref={videoRef}
-              className="h-full w-full object-cover"
-              style={{ transform: "scaleX(-1)" }}
-              muted
-              playsInline
-            />
+            {permStatus === "granted" && (
+              <div
+                aria-hidden
+                className="flex h-full w-full items-center justify-center"
+                style={{ color: pulseActive ? "#4ECC77" : "var(--text-muted)" }}
+              >
+                <IconMic size={40} strokeWidth={2} />
+              </div>
+            )}
             {permStatus === "granted" && (
               <>
                 <div
@@ -4472,7 +4487,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
                       onClick={startTest}
                       disabled={permStatus === "requesting"}
                       className="rounded-xl px-6 py-2.5 text-sm font-semibold disabled:opacity-60"
-                      style={{ background: "var(--brand)", color: "white" }}
+                      style={{ background: "var(--brand-solid)", color: "white" }}
                     >
                       {permStatus === "requesting" ? t("app.voice.requesting") : t("app.voice.start")}
                     </button>
@@ -4546,15 +4561,14 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
             onClick={onDone}
             className="w-full rounded-xl py-2.5 text-sm font-semibold transition-transform hover:scale-[0.99]"
             style={{
-              background: "var(--brand)",
+              background: "var(--brand-solid)",
               color: "white",
             }}
           >
             {t("app.voice.done")}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
 

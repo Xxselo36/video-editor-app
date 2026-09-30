@@ -338,7 +338,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Je gehoord!",
   "app.voice.listening": "Luistert…",
   "app.voice.heardPrefix": "gehoord: ",
-  "app.voice.permissionHint": "Gebruikt je camera + microfoon. Alles blijft in je browser.",
+  "app.voice.permissionHint": "Gebruikt je microfoon. Je browser zet je spraak om in tekst: Chrome stuurt die daarvoor naar Google, Safari naar Apple. Er gaat niets naar CleoCuts.",
   "app.voice.requesting": "Aanvragen…",
   "app.voice.start": "Start",
   "app.voice.denied": "Toegang geweigerd. Schakel in bij browserinstellingen + herlaad de pagina.",
@@ -482,6 +482,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Voorbeeld sluiten",
   "common.videoModal.close": "Sluiten",
+  "common.videoModal.dialogLabel": "Voorbeeld van de video",
 
   "common.auth.signIn": "Inloggen",
   "common.auth.account": "Account",

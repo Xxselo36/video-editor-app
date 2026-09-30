@@ -338,7 +338,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "आपको सुन लिया!",
   "app.voice.listening": "सुन रहा है…",
   "app.voice.heardPrefix": "सुना: ",
-  "app.voice.permissionHint": "आपके कैमरा + माइक का इस्तेमाल करता है। सब कुछ आपके ब्राउज़र में ही रहता है।",
+  "app.voice.permissionHint": "आपके माइक का इस्तेमाल करता है। आपकी आवाज़ को टेक्स्ट में आपका ब्राउज़र बदलता है: इसके लिए Chrome उसे Google को भेजता है, Safari Apple को। CleoCuts को कुछ नहीं भेजा जाता।",
   "app.voice.requesting": "रिक्वेस्ट भेजी जा रही है…",
   "app.voice.start": "शुरू करें",
   "app.voice.denied": "परमिशन नहीं मिली। ब्राउज़र सेटिंग्स में इनेबल करें + पेज रीलोड करें।",
@@ -481,6 +481,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "प्रीव्यू बंद करें",
   "common.videoModal.close": "बंद करें",
+  "common.videoModal.dialogLabel": "वीडियो प्रीव्यू",
 
   "common.auth.signIn": "साइन इन करें",
   "common.auth.account": "अकाउंट",

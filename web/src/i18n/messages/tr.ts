@@ -339,7 +339,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Seni duydum!",
   "app.voice.listening": "Dinliyor…",
   "app.voice.heardPrefix": "duyulan: ",
-  "app.voice.permissionHint": "Kameranı + mikrofonunu kullanır. Her şey tarayıcında kalır.",
+  "app.voice.permissionHint": "Mikrofonunu kullanır. Tarayıcın konuşmanı metne çevirir: Chrome bunun için sesini Google'a, Safari Apple'a gönderir. CleoCuts'a hiçbir şey gitmez.",
   "app.voice.requesting": "İsteniyor…",
   "app.voice.start": "Başlat",
   "app.voice.denied": "İzin verilmedi. Tarayıcı ayarlarından etkinleştir + sayfayı yenile.",
@@ -484,6 +484,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Önizlemeyi kapat",
   "common.videoModal.close": "Kapat",
+  "common.videoModal.dialogLabel": "Video önizlemesi",
   "common.auth.signIn": "Giriş yap",
   "common.auth.account": "Hesap",
   "common.auth.pricing": "Fiyatlandırma",
