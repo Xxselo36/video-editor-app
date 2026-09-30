@@ -64,11 +64,29 @@ export function pageAlpha(style: CaptionStyle, pageP: number): number {
   return style.animation.pageIn === "fade" && pageP < 1 ? easeOutCubic(pageP) : 1;
 }
 
-function wordScale(style: CaptionStyle, k: number, s: DrawState): number {
+function wordScale(style: CaptionStyle, k: number, s: DrawState, room = Infinity): number {
   if (k !== s.active) return 1;
   let scale = style.highlight.mode === "scale" ? (style.highlight.scale ?? 1.12) : 1;
-  if (style.animation.wordIn === "pop" && s.wordP < 1) scale *= 1 + 0.25 * (1 - easeOutCubic(s.wordP));
+  if (style.animation.wordIn === "pop" && s.wordP < 1) {
+    // the pop may use at most 70 % of the gap to each neighbour, so a
+    // popping word never covers the word next to it
+    const pop = 1 + 0.25 * (1 - easeOutCubic(s.wordP));
+    scale *= Math.max(1, Math.min(pop, room));
+  }
   return scale;
+}
+
+/** Largest pop scale that keeps 30 % of the gaps to both neighbours free. */
+function popRoom(c: Ctx, r: WordBox): number {
+  const line = c.layout.lines.find((l) => l.words.includes(r));
+  if (!line) return Infinity;
+  const i = line.words.indexOf(r);
+  const prev = line.words[i - 1];
+  const next = line.words[i + 1];
+  const left = prev ? r.x - (prev.x + prev.width) : Infinity;
+  const right = next ? next.x - (r.x + r.width) : Infinity;
+  const gap = Math.min(left, right);
+  return gap === Infinity ? Infinity : 1 + (2 * 0.7 * gap) / Math.max(1, r.width);
 }
 
 function visible(style: CaptionStyle, k: number, s: DrawState): boolean {
@@ -104,7 +122,7 @@ type Ctx = {
 
 function withWord(c: Ctx, r: WordBox, fn: () => void) {
   const { ctx, style, state } = c;
-  const s = wordScale(style, r.k, state);
+  const s = wordScale(style, r.k, state, style.animation.wordIn === "pop" ? popRoom(c, r) : Infinity);
   ctx.save();
   ctx.globalAlpha = pageAlpha(style, state.pageP) * wordAlpha(style, r.k, state);
   if (s !== 1) {

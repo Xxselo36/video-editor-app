@@ -6,7 +6,7 @@ import type { CaptionWord } from "../types";
 
 export const FONTS_DIR = fileURLToPath(new URL("../../../../public/fonts/captions/", import.meta.url));
 
-export function useRealFonts(): FontTables {
+export function loadRealFonts(): FontTables {
   const tables = fontsJson as unknown as FontTables;
   setFontTables(tables);
   return tables;

@@ -14,7 +14,7 @@ import samplesJson from "../samples.json";
 import { presetSupport } from "../scripts";
 import { loadShaper, registerShapingFont } from "../shape-hb";
 import type { CaptionStyle } from "../types";
-import { AUDIT_WORDS, FONTS_DIR, timed, useRealFonts } from "./helpers";
+import { AUDIT_WORDS, FONTS_DIR, timed, loadRealFonts } from "./helpers";
 
 const W = 540;
 const H = 960;
@@ -32,7 +32,7 @@ function describeLayout(id: string, lang: string): string[] {
 }
 
 beforeAll(async () => {
-  useRealFonts();
+  loadRealFonts();
   await loadShaper();
   for (const id of ["poppins-800", "poppins-900"]) {
     const face = getFont(id)!.face("devanagari")!;

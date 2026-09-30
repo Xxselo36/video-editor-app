@@ -4,7 +4,7 @@ import { buildPages, layoutPage } from "../layout";
 import type { FontJson } from "../metrics";
 import { resolveStyle } from "../presets";
 import type { CaptionStyle, CaptionWord, Page } from "../types";
-import { AUDIT_WORDS, timed, useRealFonts } from "./helpers";
+import { AUDIT_WORDS, timed, loadRealFonts } from "./helpers";
 
 const W = 1080;
 const H = 1920;
@@ -12,7 +12,7 @@ const style = (id: string, o = {}) => resolveStyle(id, o, { W, H }) as CaptionSt
 const texts = (pages: Page[]) => pages.map((p) => p.words.map((w) => w.source).join(" "));
 
 beforeAll(() => {
-  useRealFonts();
+  loadRealFonts();
 });
 
 describe("paging rules (captions.md §4.4)", () => {

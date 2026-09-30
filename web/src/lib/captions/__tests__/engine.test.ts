@@ -8,12 +8,12 @@ import { nodeFontLoader } from "../node/fonts";
 import { resolveStyle } from "../presets";
 import { mapToOutput, type SourceWord } from "../timeline";
 import type { CaptionStyle, Ctx2D, Surface } from "../types";
-import { AUDIT_WORDS, FONTS_DIR, useRealFonts } from "./helpers";
+import { AUDIT_WORDS, FONTS_DIR, loadRealFonts } from "./helpers";
 
 const W = 540;
 const H = 960;
 const style = (id: string, o = {}) => resolveStyle(id, o, { W, H }) as CaptionStyle;
-useRealFonts();
+loadRealFonts();
 
 beforeAll(async () => {
   setDefaultFontLoader(nodeFontLoader(GlobalFonts, { fontsDir: FONTS_DIR }));

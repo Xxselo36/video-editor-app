@@ -17,7 +17,7 @@ import { buildPages } from "../layout";
 import { nodeFontLoader } from "../node/fonts";
 import { LAUNCH_PRESETS, resolveStyle } from "../presets";
 import type { CaptionStyle, Ctx2D, Surface } from "../types";
-import { AUDIT_WORDS, FONTS_DIR, useRealFonts } from "./helpers";
+import { AUDIT_WORDS, FONTS_DIR, loadRealFonts } from "./helpers";
 
 const W = 540;
 const H = 960;
@@ -35,7 +35,7 @@ function inkPixels(data: Uint8ClampedArray): number {
 }
 
 beforeAll(() => {
-  useRealFonts();
+  loadRealFonts();
   setDefaultFontLoader(nodeFontLoader(GlobalFonts, { fontsDir: FONTS_DIR }));
 });
 

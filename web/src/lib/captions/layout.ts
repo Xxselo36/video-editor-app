@@ -89,7 +89,7 @@ const OPENING = /^[\p{Ps}\p{Pi}¿¡]+$/u;
  */
 function gluePunctuation(units: Unit[]): Unit[] {
   const out: Unit[] = [];
-  let lead: Unit | null = null;
+  let lead = null as Unit | null;
   for (const u of units) {
     if (PUNCT_ONLY.test(u.source)) {
       const prev = out[out.length - 1];

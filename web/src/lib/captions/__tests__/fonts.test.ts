@@ -6,7 +6,7 @@ import { fontTables, getFont, type Face } from "../metrics";
 import { resolveStyle } from "../presets";
 import { hasShapingFont, shaperReady } from "../shape-hb";
 import type { CaptionStyle } from "../types";
-import { FONTS_DIR, useRealFonts } from "./helpers";
+import { FONTS_DIR, loadRealFonts } from "./helpers";
 
 const style = (id: string) => resolveStyle(id, {}, { W: 1080, H: 1920 }) as CaptionStyle;
 
@@ -25,7 +25,7 @@ function fakeLoader(fail: string[] = []) {
 }
 
 beforeAll(() => {
-  useRealFonts();
+  loadRealFonts();
 });
 
 describe("fonts.json manifest", () => {

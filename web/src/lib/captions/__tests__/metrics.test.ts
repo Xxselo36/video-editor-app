@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { faceChain } from "../fonts";
 import { getFont, measureText, type Face } from "../metrics";
 import { hasShapingFont, loadShaper, registerShapingFont } from "../shape-hb";
-import { FONTS_DIR, useRealFonts } from "./helpers";
+import { FONTS_DIR, loadRealFonts } from "./helpers";
 
 const NO_LIGATURES = ["liga", "clig", "calt", "dlig", "rlig"].map((f) => new hb.Feature(f, 0));
 const hbFonts = new Map<string, InstanceType<typeof hb.Font>>();
@@ -35,7 +35,7 @@ let ttfNames: Record<string, string> = {};
 const ttfOf = (face: Face) => ttfNames[face.fontId];
 
 beforeAll(() => {
-  const tables = useRealFonts();
+  const tables = loadRealFonts();
   ttfNames = Object.fromEntries(Object.entries(tables.fonts).map(([id, f]) => [id, f.ttf!]));
 });
 
@@ -43,7 +43,7 @@ const LATIN = ["Nobody", "WAITS", "Tomorrow", "AVATAR", "Yesterday", "PRÄSIDENT
 const CYRILLIC = ["Привет,", "дела?", "ТЕЛЕВИЗОР", "съешь", "ещё", "«Да»", "Юля:"];
 
 describe("metric tables vs HarfBuzz (kerning, no ligatures)", () => {
-  const tables = () => Object.keys(useRealFonts().fonts);
+  const tables = () => Object.keys(loadRealFonts().fonts);
 
   it.each(["latin", "cyrillic"] as const)("%s faces", (subset) => {
     let checked = 0;
