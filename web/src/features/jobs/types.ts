@@ -31,7 +31,6 @@ export type JobStatus = {
   audio_levels?: { mean_db?: number | null; max_db?: number | null };
   duration?: number;
   cut_ranges?: CutRange[];
-  scene_events?: SceneEvent[];
   // The user's saved timeline (job.segments + effects). Seed the editor
   // from this — cut_ranges only describe the automatic cuts.
   edit_segments?: SavedSeg[];
@@ -51,14 +50,6 @@ export type SavedSeg = {
   fadeIn?: number;
   fadeOut?: number;
   volume?: number;
-};
-
-export type SceneEvent = {
-  type: "start" | "restart" | "keep" | "finish";
-  start: number;
-  end: number;
-  raw_text?: string;
-  source?: "exact" | "phonetic" | "llm" | "user";
 };
 
 export type CutRange = {

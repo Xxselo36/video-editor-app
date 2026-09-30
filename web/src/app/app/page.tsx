@@ -3,9 +3,8 @@
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LogoMark } from "@/components/Logo";
-import { getLibrary, saveEntry, type LibraryHookClip } from "@/lib/library";
-import { clearActiveJob, saveActiveJob, updateActiveJob } from "@/lib/activeJob";
-import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
+import { getLibrary } from "@/lib/library";
+import { requestNotificationPermission } from "@/lib/notify";
 import { trackSave, waitForSaves } from "@/lib/pendingSaves";
 import { phrasesToUnits } from "@/features/editor/legacy/phraseUnits";
 import {
@@ -22,9 +21,9 @@ import {
   removeActiveJob,
   updateActiveJob as updateActiveJobV2,
   liveUploads,
+  dropLegacyActiveJob,
 } from "@/lib/activeJobs";
 import { LanguageSwitcher, useT } from "@/i18n";
-import type { MessageKey } from "@/i18n/messages/en";
 import { AUTH_ENABLED } from "@/lib/auth";
 import {
   ApiError,
@@ -63,8 +62,7 @@ import {
   type Subtitle,
 } from "@/features/editor/legacy/buildPhrases";
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
-import type { CutRange, JobStatus, SceneEvent } from "@/features/jobs/types";
-import { fmtTime } from "@/features/editor/format";
+import type { JobStatus } from "@/features/jobs/types";
 import { ReviewScreen } from "@/features/editor/legacy/ReviewScreen";
 import { ErrorView } from "@/features/project/ErrorView";
 import { ConfigureScreen } from "@/features/start/ConfigureScreen";
@@ -77,16 +75,7 @@ import { PickerScreen } from "@/features/start/PickerScreen";
 // finished multi-GB upload into an error.
 const POST_JOBS_RETRY_MS = [2_000, 4_000, 8_000, 15_000, 15_000, 15_000, 15_000];
 
-type Phase =
-  | "picker"
-  | "idle"
-  | "configuring"
-  | "uploading"
-  | "analyzing"
-  | "reviewing"
-  | "rendering"
-  | "done"
-  | "error";
+type Phase = "picker" | "idle" | "configuring" | "reviewing" | "error";
 
 export default function Home() {
   const t = useT();
@@ -97,7 +86,6 @@ export default function Home() {
   const [cutStyle, setCutStyle] = useState("balanced");
   const [voiceTriggers, setVoiceTriggers] = useState(true);
   const [removeFillers, setRemoveFillers] = useState(true);
-  const [uploadPct, setUploadPct] = useState(0);
   const [job, setJob] = useState<JobStatus | null>(null);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
   // The job's word units (GET /subtitles): what the render gets, matched to
@@ -113,7 +101,6 @@ export default function Home() {
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setNotice(null), 5000);
   };
-  const [disabledCuts, setDisabledCuts] = useState<number[]>([]);
   const [smartcamEnabled, setSmartcamEnabled] = useState(false);
   const [smartcamFormat, setSmartcamFormat] = useState<"portrait" | "landscape">(
     "portrait",
@@ -126,6 +113,8 @@ export default function Home() {
 
   // Mount: always land on picker. Active jobs render as cards there —
   // no need to jump users into a fullscreen wait or rehydrate state.
+  // (Until one release after UX4: drop the old single-job store.)
+  useEffect(() => dropLegacyActiveJob(), []);
 
   const pickPreset = (id: PresetId) => {
     const p = PRESETS[id];
@@ -180,9 +169,6 @@ export default function Home() {
     if (f) onFileChange(f);
   };
 
-  const [downscalePct, setDownscalePct] = useState<number | null>(null);
-  const [downscaleLabel, setDownscaleLabel] = useState<string | null>(null);
-
   const onProcess = async (fileOverride?: File) => {
     // Guard: a click event must never be treated as the file.
     let targetFile = fileOverride instanceof File ? fileOverride : file;
@@ -194,13 +180,6 @@ export default function Home() {
     // this one uploads.
     setPhase("picker");
     setErrorMsg(null);
-    setDownscalePct(null);
-
-    // Client-side downscale removed: WASM ffmpeg was slower for a
-    // typical user (2-5 min transcode) than just uploading raw and
-    // letting the server's native ffmpeg downscale (~30-60s). Kept
-    // the helper module in case we ever bring it back for extreme
-    // low-bandwidth scenarios.
 
     // Resolve settings from preset when we're on the skip-configure path
     // (state may not have flushed yet when pickPreset + onFileChange
@@ -213,7 +192,6 @@ export default function Home() {
       style: applyPreset ? p!.settings.cutStyle : cutStyle,
       voice_triggers: applyPreset ? p!.settings.voiceTriggers : voiceTriggers,
       remove_fillers: applyPreset ? p!.settings.removeFillers : removeFillers,
-      whisper_model: "medium",
       smartcam_enabled: applyPreset
         ? p!.settings.smartcamEnabled
         : smartcamEnabled,
@@ -239,7 +217,7 @@ export default function Home() {
       fileSize: targetFile.size,
       presetId: selectedPreset,
       presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
-      presetIcon: presetInfo?.icon ?? null,
+      presetIcon: null,
       captionPreset: settings.caption_preset,
       uploadPct: 0,
       lastProgressAt: Date.now(),
@@ -254,7 +232,6 @@ export default function Home() {
     // file continues); cleared if it starts over after all.
     let resumingFrom: number | null = null;
     const setPct = (pct: number) => {
-      setUploadPct(pct);
       const now = Date.now();
       if (now - lastUiUpdate > 200 || pct >= 100) {
         lastUiUpdate = now;
@@ -302,7 +279,6 @@ export default function Home() {
       const resumedPct = await resumableProgress(targetFile);
       if (resumedPct !== null) {
         resumingFrom = resumedPct;
-        setUploadPct(resumedPct);
         updateActiveJobV2(tempId, { uploadPct: resumedPct, resuming: true, lastProgressAt: Date.now() });
       }
 
@@ -489,19 +465,7 @@ export default function Home() {
       requestNotificationPermission();
 
       // Swap the temporary uploading card for the real backend job.
-      // Single-job activeJob kept for backward compat in case any
-      // legacy code still checks it.
       removeActiveJob(tempId);
-      saveActiveJob({
-        jobId: initial.id,
-        phase: "analyzing",
-        timestamp: Date.now(),
-        filename: targetFile.name,
-        presetId: selectedPreset,
-        presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
-        presetIcon: presetInfo?.icon ?? null,
-        captionPreset: settings.caption_preset,
-      });
       addActiveJob({
         jobId: initial.id,
         phase: "analyzing",
@@ -510,7 +474,7 @@ export default function Home() {
         fileSize: targetFile.size,
         presetId: selectedPreset,
         presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
-        presetIcon: presetInfo?.icon ?? null,
+        presetIcon: null,
         captionPreset: settings.caption_preset,
       });
 
@@ -520,7 +484,6 @@ export default function Home() {
       setFile(null);
       setSelectedPreset(null);
       setJob(null);
-      setUploadPct(0);
     } catch (err) {
       // Upload failed — mark the temp card with an error message so
       // the user can hit Retry from the dashboard. No fullscreen error
@@ -555,75 +518,6 @@ export default function Home() {
       }
     }
   };
-
-  // Polls during analyzing and rendering. On awaiting_review, fetch
-  // subtitles and switch to the editor phase.
-  useEffect(() => {
-    if ((phase !== "analyzing" && phase !== "rendering") || !job) return;
-    const id = setInterval(async () => {
-      try {
-        const r = await apiFetch(`/jobs/${job.id}`);
-        if (!r.ok) return;
-        const s: JobStatus = await r.json();
-        setJob(s);
-        if (s.status === "done") {
-          setPhase("done");
-          notifyIfHidden(
-            t("app.notify.readyTitle"),
-            file?.name ?? t("app.notify.clickToView"),
-          );
-          // Job finished — remove from active tracking, promote to Library
-          clearActiveJob();
-          // Persist to library so the user can find this render later
-          // even after tab-close. Backend keeps files for a while.
-          try {
-            const p = selectedPreset ? PRESETS[selectedPreset] : null;
-            const withOutputs = s as JobStatus & {
-              outputs?: string[];
-              social_caption?: string;
-              social_hashtags?: string[];
-              hook_clips?: LibraryHookClip[];
-            };
-            saveEntry({
-              jobId: s.id,
-              timestamp: Date.now(),
-              presetId: selectedPreset,
-              presetIcon: p?.icon ?? null,
-              presetLabel: p ? tEn(p.labelKey) : null,
-              filename: file?.name ?? t("app.library.untitled"),
-              outputs: withOutputs.outputs ?? ["primary"],
-              hookClips: withOutputs.hook_clips ?? [],
-              socialCaption: withOutputs.social_caption ?? "",
-              socialHashtags: withOutputs.social_hashtags ?? [],
-            });
-          } catch {
-            /* library-save failure is non-fatal */
-          }
-        }
-        else if (s.status === "error") {
-          setErrorMsg(jobErrorText(s, t));
-          setPhase("error");
-          clearActiveJob();
-        } else if (s.status === "awaiting_review" && phase === "analyzing") {
-          const subRes = await apiFetch(`/jobs/${job.id}/subtitles`);
-          if (subRes.ok) {
-            const data = await subRes.json();
-            unitsRef.current = data.subtitles ?? [];
-            setPhrases(phrasesFromSubtitlesResponse(data));
-            setPhase("reviewing");
-            updateActiveJob({ phase: "reviewing" });
-            notifyIfHidden(
-              t("app.notify.reviewTitle"),
-              t("app.notify.reviewBody"),
-            );
-          }
-        }
-      } catch {
-        // transient — keep polling
-      }
-    }, 1000);
-    return () => clearInterval(id);
-  }, [phase, job]);
 
   // Transcript edits are saved (debounced) so they survive leaving the
   // job; GET /subtitles hands them back as `phrases` on re-entry.
@@ -684,7 +578,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subtitles,
-          disabled_cuts: disabledCuts,
+          disabled_cuts: [],
         }),
       });
       // 409: the job isn't in review any more — already exporting (a
@@ -695,13 +589,10 @@ export default function Home() {
       else track("export_started", { caption_style: captionPreset, lines: phrases.length });
       // Send user back to the dashboard — the card takes over from
       // here. No fullscreen "rendering" screen anymore.
-      updateActiveJob({ phase: "rendering" });
       updateActiveJobV2(job.id, { phase: "rendering", note: undefined });
       setFile(null);
       setJob(null);
       setPhrases([]);
-      setDisabledCuts([]);
-      setUploadPct(0);
       setSelectedPreset(null);
       setPhase("picker");
     } catch (err) {
@@ -820,12 +711,9 @@ export default function Home() {
     setFile(null);
     setJob(null);
     setPhrases([]);
-    setDisabledCuts([]);
     setErrorMsg(null);
-    setUploadPct(0);
     setSelectedPreset(null);
     setPhase("picker");
-    clearActiveJob();
   };
   resetRef.current = reset;
 
@@ -974,24 +862,6 @@ export default function Home() {
             audioWarnings={job.audio_warnings ?? []}
             cutRanges={job.cut_ranges ?? []}
             duration={job.duration ?? 0}
-            disabledCuts={disabledCuts}
-            setDisabledCuts={setDisabledCuts}
-            sceneEvents={job.scene_events ?? []}
-            onSceneEventsChange={async (evts) => {
-              try {
-                const r = await apiFetch(`/jobs/${job.id}/recompute-scenes`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ events: evts }),
-                });
-                if (r.ok) {
-                  const updated = await r.json();
-                  setJob(updated);
-                }
-              } catch {
-                // ignore
-              }
-            }}
             onChange={(next) => {
               setPhrases(next);
               schedulePhraseSave(job.id, next);
@@ -1044,474 +914,4 @@ async function findJobCreatedFor(filename: string, sinceMs: number): Promise<str
       (toMs(j.created_at) ?? 0) >= sinceMs - 10 * 60_000,
   );
   return hit?.id ?? null;
-}
-
-/* Named stages so the user sees WHAT is happening, not raw ffmpeg
- * messages. Percentages match the backend's _stage() reports:
- *   analyze pipeline: 1→10 prep, 10→80 whisper, 80→95 cuts+LLM, 95→100 preview
- *   render pipeline:  0→80 segment burn, 80→95 stitch+formats, 95→100 hooks+done
- */
-type Stage = { key: string; labelKey: MessageKey; from: number; to: number };
-const ANALYZE_STAGES: Stage[] = [
-  { key: "prep", labelKey: "app.progress.stage.prep", from: 0, to: 10 },
-  { key: "listen", labelKey: "app.progress.stage.listen", from: 10, to: 80 },
-  { key: "polish", labelKey: "app.progress.stage.polish", from: 80, to: 95 },
-  { key: "preview", labelKey: "app.progress.stage.preview", from: 95, to: 100 },
-];
-
-const RENDER_STAGES: Stage[] = [
-  { key: "burn", labelKey: "app.progress.stage.burn", from: 0, to: 70 },
-  { key: "stitch", labelKey: "app.progress.stage.stitch", from: 70, to: 90 },
-  { key: "finish", labelKey: "app.progress.stage.finish", from: 90, to: 100 },
-];
-
-function ProgressScreen({
-  label,
-  pct,
-  phase,
-}: {
-  label: string;
-  pct: number;
-  phase?: "analyzing" | "rendering" | "uploading";
-}) {
-  const t = useT();
-  const stages =
-    phase === "rendering" ? RENDER_STAGES
-    : phase === "analyzing" ? ANALYZE_STAGES
-    : null;
-
-  return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-8">
-      {/* Big overall percentage */}
-      <div className="text-center">
-        <div
-          className="text-5xl font-bold tabular-nums"
-          style={{ color: "var(--brand)" }}
-        >
-          {Math.round(pct)}
-          <span className="text-2xl" style={{ color: "var(--text-muted)" }}>
-            %
-          </span>
-        </div>
-        <div
-          className="mt-1 text-xs uppercase tracking-[0.2em]"
-          style={{ color: "var(--text-muted)" }}
-        >
-          {phase === "uploading"
-            ? t("app.progress.uploading")
-            : phase === "rendering"
-              ? t("app.progress.rendering")
-              : t("app.progress.processing")}
-        </div>
-        {/* Live message — tells the user WHAT is happening right now
-            (e.g. 'Optimizing video (56%)…', 'Clip 3/12…'). Was passed
-            in as label but never rendered — user only saw the phase
-            name so long transcode steps looked frozen. */}
-        {label && (
-          <div
-            className="mt-3 text-sm"
-            style={{ color: "var(--text-body)" }}
-          >
-            {label}
-          </div>
-        )}
-        {/* iOS Safari kills background tabs after ~30s, aborting the
-            upload. Explicit warning so users don't switch apps mid-
-            upload and lose their progress. Only shown for the upload
-            phase — rendering runs on the server and doesn't care. */}
-        {phase === "uploading" && (
-          <div
-            className="mt-5 flex items-start gap-2 rounded-xl px-3 py-2 text-left"
-            style={{
-              background: "var(--warn)/10",
-              border: "1px solid var(--warn)/30",
-              color: "var(--warn)",
-              maxWidth: "320px",
-            }}
-          >
-            <div className="mt-0.5 shrink-0 text-base">⚠️</div>
-            <div className="text-[11px] leading-relaxed">
-              {t("app.upload.keepTabOpen")}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Progress bar */}
-      <div
-        className="h-2 w-full max-w-sm overflow-hidden rounded-full"
-        style={{ background: "var(--surface-2)" }}
-      >
-        <div
-          className="h-full transition-all duration-500 ease-out"
-          style={{
-            width: `${Math.max(0, Math.min(100, pct))}%`,
-            background:
-              "linear-gradient(90deg, var(--brand) 0%, var(--brand-hover) 100%)",
-            boxShadow: "0 0 12px var(--brand-glow)",
-          }}
-        />
-      </div>
-
-      {/* Named stages checklist */}
-      {stages && (
-        <div className="flex w-full max-w-sm flex-col gap-2">
-          {stages.map((s) => {
-            const done = pct >= s.to;
-            const active = pct >= s.from && pct < s.to;
-            return (
-              <div
-                key={s.key}
-                className="flex items-center gap-3 rounded-lg px-3 py-2 transition-all"
-                style={{
-                  background: active ? "var(--brand-tint)" : "transparent",
-                  border: active
-                    ? "1px solid var(--brand-hover)"
-                    : "1px solid transparent",
-                  opacity: !done && !active ? 0.35 : 1,
-                }}
-              >
-                <div
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
-                  style={{
-                    background: done
-                      ? "var(--brand-solid)"
-                      : active
-                        ? "var(--brand-tint)"
-                        : "var(--surface-2)",
-                    color: done ? "white" : "var(--text-muted)",
-                    border: active ? "2px solid var(--brand)" : "none",
-                  }}
-                >
-                  {done ? "✓" : active ? (
-                    <span
-                      className="pulse-dot inline-block h-1.5 w-1.5 rounded-full"
-                      style={{ background: "var(--brand)" }}
-                    />
-                  ) : ""}
-                </div>
-                <span
-                  className="text-sm"
-                  style={{
-                    color: active
-                      ? "var(--text-strong)"
-                      : done
-                        ? "var(--text-body)"
-                        : "var(--text-muted)",
-                    fontWeight: active ? 600 : 400,
-                  }}
-                >
-                  {t(s.labelKey)}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Timeline({
-  duration,
-  cuts,
-  disabled,
-  onToggle,
-  playhead,
-}: {
-  duration: number;
-  cuts: CutRange[];
-  disabled: number[];
-  onToggle: (id: number) => void;
-  playhead?: number;
-}) {
-  const t = useT();
-  const disabledSet = new Set(disabled);
-  const totalCutSeconds = cuts
-    .filter((c) => !disabledSet.has(c.id))
-    .reduce((acc, c) => acc + (c.end - c.start), 0);
-  const playheadPct =
-    playhead !== undefined && duration > 0
-      ? Math.max(0, Math.min(100, (playhead / duration) * 100))
-      : null;
-  return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
-        <span>{t("app.timeline.cuts")}</span>
-        <span className="text-[var(--text-faint)]">
-          {t("app.timeline.cutsRemoved", { sec: totalCutSeconds.toFixed(1) })}
-          {disabled.length > 0 && t("app.timeline.cutsRestored", { count: disabled.length })}
-        </span>
-      </div>
-      <div className="relative h-3 overflow-visible rounded-full bg-[var(--success)]/30">
-        {cuts.map((c) => {
-          const leftPct = (c.start / duration) * 100;
-          const widthPct = Math.max(
-            0.6, // never thinner than ~6px on 1000px-wide screens
-            ((c.end - c.start) / duration) * 100,
-          );
-          const isOff = disabledSet.has(c.id);
-          return (
-            <button
-              key={c.id}
-              onClick={() => onToggle(c.id)}
-              title={t(
-                isOff ? "app.timeline.cutTitleRemoveAgain" : "app.timeline.cutTitleRestore",
-                { from: fmtTime(c.start), to: fmtTime(c.end) },
-              )}
-              className={`absolute top-1/2 -translate-y-1/2 h-5 cursor-pointer rounded-sm border border-black/40 transition-colors ${
-                isOff
-                  ? "bg-[var(--success)]/70 hover:bg-[var(--success)]"
-                  : "bg-[var(--danger)]/85 hover:bg-[var(--danger)]"
-              }`}
-              style={{
-                left: `${leftPct}%`,
-                width: `${widthPct}%`,
-                minWidth: "6px",
-              }}
-            />
-          );
-        })}
-        {playheadPct !== null && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute"
-            style={{
-              left: `${playheadPct}%`,
-              top: "-6px",
-              bottom: "-6px",
-              width: "2px",
-              background: "var(--brand-hover)",
-              boxShadow: "0 0 8px var(--brand-glow)",
-              transform: "translateX(-50%)",
-              zIndex: 10,
-              borderRadius: "1px",
-            }}
-          />
-        )}
-      </div>
-      <div className="mt-1 text-[10px] text-[var(--text-faint)]">
-        {t("app.timeline.cutsLegend")}
-      </div>
-    </div>
-  );
-}
-
-// Scene commands panel — shown in the review screen. Lists every
-// detected Cleo-command (start/cut/keep/finish) with its timestamp
-// and the raw Whisper text that triggered it. User can:
-//   - toggle each event off (false positive)
-//   - add a missing command at any timestamp via 'Add command'
-//   - click timestamps to seek the video preview
-// Changes are debounced then POSTed to /jobs/:id/recompute-scenes.
-function SceneCommandsPanel({
-  events,
-  duration,
-  onChange,
-  onSeek,
-}: {
-  events: SceneEvent[];
-  duration: number;
-  onChange: (evts: SceneEvent[]) => void | Promise<void>;
-  onSeek: (t: number) => void;
-}) {
-  const t = useT();
-  const [enabled, setEnabled] = useState<boolean[]>(() =>
-    events.map(() => true),
-  );
-  const [addOpen, setAddOpen] = useState(false);
-  const [pending, setPending] = useState(false);
-
-  // Reset local state when incoming events change (e.g. after
-  // recompute) so toggles stay in sync.
-  useEffect(() => {
-    setEnabled(events.map(() => true));
-  }, [events]);
-
-  const COLORS: Record<SceneEvent["type"], string> = {
-    start: "#5A9FFF",
-    keep: "#4ECC77",
-    restart: "#F26E6E",
-    finish: "#B979FF",
-  };
-  const LABELS: Record<SceneEvent["type"], string> = {
-    start: t("app.voice.scene.type.start"),
-    keep: t("app.voice.scene.type.keep"),
-    restart: t("app.voice.scene.type.restart"),
-    finish: t("app.voice.scene.type.finish"),
-  };
-
-  const commit = async (nextEnabled: boolean[]) => {
-    setPending(true);
-    try {
-      const filtered = events.filter((_, i) => nextEnabled[i]);
-      await onChange(filtered);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const toggle = (i: number) => {
-    const next = [...enabled];
-    next[i] = !next[i];
-    setEnabled(next);
-    void commit(next);
-  };
-
-  const addAt = async (at: number, type: SceneEvent["type"]) => {
-    const kept = events.filter((_, i) => enabled[i]);
-    const added: SceneEvent = {
-      type,
-      start: at,
-      end: Math.min(at + 0.5, duration || at + 0.5),
-      source: "user",
-    };
-    const next: SceneEvent[] = [...kept, added].sort(
-      (a, b) => a.start - b.start,
-    );
-    setPending(true);
-    setAddOpen(false);
-    try {
-      await onChange(next);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const fmtT = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    return `${m}:${sec.toString().padStart(2, "0")}`;
-  };
-
-  return (
-    <div
-      className="mb-3 overflow-hidden rounded-2xl"
-      style={{
-        background: "var(--surface-1)",
-        border: "1px solid var(--border)",
-      }}
-    >
-      <div
-        className="flex items-center justify-between border-b px-4 py-3"
-        style={{ borderColor: "var(--border)" }}
-      >
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
-            {t("app.voice.scene.heading", {
-              count: events.filter((_, i) => enabled[i]).length,
-            })}
-          </div>
-          <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
-            {t("app.voice.scene.hint")}
-          </div>
-        </div>
-        <button
-          onClick={() => setAddOpen(!addOpen)}
-          disabled={pending}
-          className="rounded-lg px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50"
-          style={{
-            background: "var(--brand-tint)",
-            color: "var(--brand-strong)",
-            border: "1px solid var(--brand)/30",
-          }}
-        >
-          {t("app.voice.scene.add")}
-        </button>
-      </div>
-
-      {addOpen && (
-        <div
-          className="border-b p-3"
-          style={{
-            borderColor: "var(--border)",
-            background: "var(--surface-0)",
-          }}
-        >
-          <div className="mb-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-            {t("app.voice.scene.addAt")}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {(["start", "keep", "restart", "finish"] as const).map((type) => (
-              <button
-                key={type}
-                onClick={() => {
-                  const videoEl = document.querySelector(
-                    "video",
-                  ) as HTMLVideoElement | null;
-                  const now = videoEl?.currentTime ?? 0;
-                  void addAt(now, type);
-                }}
-                className="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
-                style={{
-                  background: "var(--surface-1)",
-                  color: COLORS[type],
-                  border: `1px solid ${COLORS[type]}66`,
-                }}
-              >
-                {LABELS[type]}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="max-h-[220px] overflow-y-auto p-2">
-        {events.length === 0 && (
-          <div className="p-3 text-center text-xs text-[var(--text-muted)]">
-            {t("app.voice.scene.none")}
-          </div>
-        )}
-        {events.map((ev, i) => {
-          const on = enabled[i];
-          return (
-            <div
-              key={`${ev.type}-${ev.start}-${i}`}
-              className="mb-1 flex items-center gap-2 rounded-lg p-2 transition-colors"
-              style={{
-                background: on ? "var(--surface-0)" : "transparent",
-                border: `1px solid ${on ? COLORS[ev.type] + "40" : "var(--border)"}`,
-                opacity: on ? 1 : 0.5,
-              }}
-            >
-              <button
-                onClick={() => toggle(i)}
-                disabled={pending}
-                aria-label={on ? t("app.voice.scene.disable") : t("app.voice.scene.enable")}
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold transition-colors disabled:opacity-50"
-                style={{
-                  background: on ? COLORS[ev.type] : "var(--surface-2)",
-                  color: on ? "white" : "var(--text-muted)",
-                  border: `1px solid ${on ? COLORS[ev.type] : "var(--border)"}`,
-                }}
-              >
-                {on ? "✓" : "○"}
-              </button>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="text-xs font-semibold"
-                    style={{ color: on ? "var(--text-strong)" : "var(--text-muted)" }}
-                  >
-                    {LABELS[ev.type]}
-                  </span>
-                  <button
-                    onClick={() => onSeek(ev.start)}
-                    className="text-[10px] tabular-nums text-[var(--text-muted)] hover:text-[var(--text-strong)]"
-                  >
-                    ▸ {fmtT(ev.start)}
-                  </button>
-                </div>
-                {ev.raw_text && (
-                  <div className="mt-0.5 truncate text-[10px] text-[var(--text-faint)]">
-                    {t("app.voice.scene.heard", { text: ev.raw_text })}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }

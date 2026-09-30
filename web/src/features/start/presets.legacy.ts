@@ -41,7 +41,6 @@ export const PRESETS: Record<
   PresetId,
   {
     labelKey: MessageKey;
-    icon: string;
     taglineKey: MessageKey;
     descKey: MessageKey;
     settings: {
@@ -58,7 +57,6 @@ export const PRESETS: Record<
 > = {
   tiktok: {
     labelKey: "app.preset.tiktok.label",
-    icon: "📱",
     taglineKey: "app.preset.tiktok.tagline",
     descKey: "app.preset.tiktok.desc",
     settings: {
@@ -74,7 +72,6 @@ export const PRESETS: Record<
   },
   podcast: {
     labelKey: "app.preset.podcast.label",
-    icon: "🎙",
     taglineKey: "app.preset.podcast.tagline",
     descKey: "app.preset.podcast.desc",
     settings: {
@@ -90,7 +87,6 @@ export const PRESETS: Record<
   },
   vlog: {
     labelKey: "app.preset.vlog.label",
-    icon: "✂️",
     taglineKey: "app.preset.vlog.tagline",
     descKey: "app.preset.vlog.desc",
     settings: {
@@ -106,7 +102,6 @@ export const PRESETS: Record<
   },
   captions: {
     labelKey: "app.preset.captions.label",
-    icon: "💬",
     taglineKey: "app.preset.captions.tagline",
     descKey: "app.preset.captions.desc",
     settings: {
@@ -122,7 +117,6 @@ export const PRESETS: Record<
   },
   custom: {
     labelKey: "app.preset.custom.label",
-    icon: "🎛",
     taglineKey: "app.preset.custom.tagline",
     descKey: "app.preset.custom.desc",
     settings: {

@@ -13,7 +13,7 @@ import { trackSave } from "@/lib/pendingSaves";
 import { PlaybackDebug } from "@/features/editor/debug/PlaybackDebug";
 import { fmtTime, fmtTimecode } from "@/features/editor/format";
 import { TimelineEditor } from "@/features/editor/timeline/TimelineEditor";
-import type { CutRange, JobStatus, SavedSeg, SceneEvent } from "@/features/jobs/types";
+import type { CutRange, JobStatus, SavedSeg } from "@/features/jobs/types";
 import { captionLabel } from "@/features/start/presets.legacy";
 import type { Phrase, Subtitle } from "./buildPhrases";
 
@@ -33,10 +33,6 @@ export function ReviewScreen({
   audioWarnings,
   cutRanges,
   duration,
-  disabledCuts,
-  setDisabledCuts,
-  sceneEvents,
-  onSceneEventsChange,
   onChange,
   onApply,
   onBack,
@@ -53,10 +49,6 @@ export function ReviewScreen({
   audioWarnings: string[];
   cutRanges: CutRange[];
   duration: number;
-  disabledCuts: number[];
-  setDisabledCuts: (ids: number[]) => void;
-  sceneEvents: SceneEvent[];
-  onSceneEventsChange: (evts: SceneEvent[]) => void | Promise<void>;
   onChange: (p: Phrase[]) => void;
   onApply: () => void;
   onBack: () => void;
