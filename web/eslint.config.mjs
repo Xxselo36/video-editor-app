@@ -12,6 +12,13 @@ import nextTs from "eslint-config-next/typescript";
 // files get the rules as errors. Remove an entry once its file is clean.
 const LEGACY_FILES = [
   "src/app/app/page.tsx",
+  // Moved verbatim out of page.tsx by UX4 (same findings).
+  "src/features/editor/debug/PlaybackDebug.tsx",
+  "src/features/editor/legacy/ReviewScreen.tsx",
+  "src/features/editor/timeline/TimelineEditor.tsx",
+  "src/features/jobs/JobStatusPoller.ts",
+  "src/features/start/PickerScreen.tsx",
+  "src/features/voice-test/VoiceTestDialog.tsx",
   "src/app/app/library/page.tsx",
   "src/components/billing/AccountView.tsx",
   "src/components/billing/PricingView.tsx",
