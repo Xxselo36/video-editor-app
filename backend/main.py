@@ -93,7 +93,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import backend.pipeline as pipeline
 from backend import accounts, auth, billing, costs, db, media, observability
 from backend import storage
+from backend import taskq  # noqa: E402
+from backend import leader as task_leader  # noqa: E402
 from backend import uploads as upl
+from backend import worker as task_worker  # noqa: E402
 from backend.auth import (
     User, current_user, get_owned_job, media_user, require_user,
 )
@@ -639,28 +642,62 @@ async def lifespan(app_: FastAPI):
           + f"; proxy-video {'on' if _proxy_video_enabled() else 'off'}"
           + f"; orphan sweep {'on' if _orphan_sweep_enabled() else 'off'}"
           + f"; tmp {_TMP_ROOT}", flush=True)
-    # Any job stuck in 'processing'/'pending' from the previous
-    # container generation is unrecoverable — its worker thread died
-    # with the process. Surface it as a real error so the frontend can
-    # show a retry button instead of polling forever, refund it and free
-    # its files.
-    stuck = store.mark_stuck_as_error()
-    if stuck:
-        print(f"[startup] marked {stuck} stuck job(s) as error "
-              f"(container restart)", flush=True)
-    _refund_interrupted()
-    _clean_interrupted()
+    global _LEADER
+    queue = taskq.enabled()
+    if queue:
+        # The task queue (WP4): interrupted work lives on as tasks; the
+        # leader re-dispatches it (reaper) and re-enqueues or settles
+        # jobs left without a task (_QueueOps.on_leadership) — the WP1
+        # boot scans below would fail jobs that only wait in line.
+        try:
+            task_leader.check_config()
+        except task_leader.ConfigError as e:
+            print(f"[queue] NOT STARTING: {e}", flush=True)
+            raise
+    else:
+        # Any job stuck in 'processing'/'pending' from the previous
+        # container generation is unrecoverable — its worker thread died
+        # with the process. Surface it as a real error so the frontend
+        # can show a retry button instead of polling forever, refund it
+        # and free its files.
+        stuck = store.mark_stuck_as_error()
+        if stuck:
+            print(f"[startup] marked {stuck} stuck job(s) as error "
+                  f"(container restart)", flush=True)
+        _refund_interrupted()
+        _clean_interrupted()
     _clean_workspaces()
     if db.fell_back():
         threading.Thread(target=_cutover_watch, daemon=True).start()
-    threading.Thread(target=_retention_loop, daemon=True).start()
+    if queue:
+        # Retention, media GC, the Postgres backup and the Lemon Squeezy
+        # reconcile run under the leader (one process at a time).
+        _LEADER = task_leader.Leader(_QueueOps()).start()
+        print(f"[queue] task queue ON (CLEO_TASK_QUEUE=1): executors "
+              f"ingest={taskq.executor('ingest')} "
+              f"render={taskq.executor('render')}, running limits "
+              f"{taskq.running_limit('ingest')}/"
+              f"{taskq.running_limit('render')}, queue cap "
+              f"{taskq.max_queue()}", flush=True)
+    else:
+        threading.Thread(target=_retention_loop, daemon=True).start()
     threading.Thread(target=_prerender_caption_previews, daemon=True).start()
     auth.install_log_filter()
     auth.log_status()
     billing.log_status()
-    if billing.enabled():
+    if billing.enabled() and not queue:
         threading.Thread(target=billing.reconcile_loop, daemon=True).start()
     yield
+    if queue and _LEADER is not None:
+        # SHUTDOWN: no new dispatches; running local tasks get the grace
+        # period, then they are interrupted and the next leader runs
+        # them again (their tasks are durable).
+        leader, _LEADER = _LEADER, None
+        left = await asyncio.to_thread(leader.stop, _shutdown_grace_sec)
+        print("[shutdown] task queue: all local tasks finished" if not left
+              else f"[shutdown] task queue: {left} task(s) interrupted — "
+                   "the next leader runs them again", flush=True)
+        return
     # SHUTDOWN: wait for in-flight worker threads to finish before
     # letting Uvicorn exit. Railway sends SIGTERM, then SIGKILL after
     # RAILWAY_DEPLOYMENT_DRAINING_SECONDS (default 0!) — set that to
@@ -852,6 +889,8 @@ def delete_user_media(user_id: str) -> dict[str, int]:
     with _active_lock:
         active = set(_active_jobs)
     active |= _INFLIGHT.job_ids()
+    if taskq.enabled():
+        active |= _tasks().unsettled_job_ids()
     out = {"jobs": 0, "uploads": 0, "running": 0}
     for job in store.list_by_owner(user_id):
         if job.id in active or job.status in RUNNING_STATUSES:
@@ -882,6 +921,8 @@ def purge_expired_jobs(now: float | None = None) -> int:
     now = time.time() if now is None else now
     with _active_lock:
         active = set(_active_jobs)
+    if taskq.enabled():
+        active |= _tasks().unsettled_job_ids()
     deleted = 0
     for job in store.retention_candidates(_retention_cutoff(now)):
         if job.id in active or job.status in ("processing", "pending"):
@@ -1262,7 +1303,9 @@ def _hourly() -> None:
     except Exception as e:
         print(f"[claims] sweep failed: {e}", flush=True)
     try:
-        n = _sweep_orphaned_jobs()
+        # With the task queue the reaper settles lost work (leases);
+        # this sweep would fail jobs that are only waiting in line.
+        n = 0 if taskq.enabled() else _sweep_orphaned_jobs()
         if n:
             print(f"[jobs] settled {n} running job(s) whose worker is "
                   "gone", flush=True)
@@ -2659,6 +2702,439 @@ def _backfill_mezz(job: Job, progress: Callable[[str, float], None],
     return key
 
 
+# ── WP4 task queue (CLEO_TASK_QUEUE=1, backend/taskq.py) ─────────────
+# With the queue on, POST /jobs and POST /render insert a durable task
+# in the job's transaction instead of starting a thread; the leader
+# (backend/leader.py, in this process: CLEO_ROLE=all, phase P0)
+# dispatches it to the `local` executor — backend/worker.py in a thread
+# of this process, running the functions bound below — and its
+# finalizer settles the outcome here (_QueueOps): the job's terminal
+# state, refunds / true-ups, media GC and the job event. Off (the
+# default), none of this runs and the WP1 path above is unchanged.
+
+# The local executor runs the API process's own implementations (looked
+# up per call, so they are the ones the WP1 path uses).
+task_worker.bind(analyze_only=lambda: analyze_only,
+                 probe_duration=lambda: _probe_duration,
+                 tmp_root=lambda: _TMP_ROOT)
+
+_LEADER: task_leader.Leader | None = None
+
+
+def _tasks():
+    from backend.jobs import task_store
+    return task_store()
+
+
+def _queue_soft_check(user: User | None) -> None:
+    """Queue mode, before any bytes move (presign, multipart init, POST
+    /jobs): the WP1 refusals from the database, without a lock — 429
+    too_many_active_jobs, 503 server_busy. POST /jobs checks again,
+    binding, in the enqueue transaction."""
+    owner = user.id if (user is not None and not user.is_service) else None
+    n_user, queued, active = _tasks().admission_counts(owner)
+    limit = taskq.max_active_per_user()
+    if owner and limit > 0 and n_user >= limit:
+        raise ApiRefusal(429, "too_many_active_jobs")
+    if queued + active + 1 - taskq.running_limit("ingest") > taskq.max_queue():
+        raise _server_busy()
+
+
+def _queue_disk_check(size: float | None) -> None:
+    """Queue mode with the local ingest executor: could this upload's
+    analysis (CLEO_DISK_FACTOR × its size + CLEO_MIN_FREE_GB) fit on this
+    box at all? 507 otherwise. Each analysis also waits for room before
+    it is dispatched (_QueueOps.local_room). Nothing with Modal."""
+    if taskq.executor("ingest") != "local":
+        return
+    need = _env_float("CLEO_DISK_FACTOR", 3.5) * max(0.0, size or 0.0)
+    free = shutil.disk_usage(_TMP_ROOT).free
+    if free < need + _MIN_FREE_BYTES:
+        print(f"[jobs] refusing upload: {free / 1e9:.1f} GB free, "
+              f"{need / 1e9:.1f} GB needed", flush=True)
+        raise HTTPException(507, "server_storage_full")
+
+
+def _queue_position_now(task_id: int | None, kind: str) -> int | None:
+    """The place in line of a task just enqueued (the leader's
+    queue_positions only has it from its next tick): its rank among the
+    queued tasks of its kind minus the free slots; None = it starts now."""
+    if task_id is None:
+        return None
+    ts = _tasks()
+    rank = ts.rank(task_id)
+    if rank is None:
+        return None
+    free = max(0, taskq.running_limit(kind) - ts.active_count(kind))
+    pos = rank - free
+    return pos if pos > 0 else None
+
+
+def _queue_admit(job_id: str, user: User | None, parsed: dict, plan: str,
+                 seconds: float | None, size: float | None,
+                 source_key: str | None) -> str:
+    """POST /jobs after the charge: admission + the claim becoming the
+    job (processing / queued) + its ingest task, in one transaction."""
+    service = user is not None and user.is_service
+    charged = seconds if seconds else parsed.get("_max_seconds")
+    payload = {"v": taskq.WORKER_PROTOCOL, "job_id": job_id,
+               "source_key": source_key, "charged_s": seconds,
+               "max_seconds": parsed.get("_max_seconds"),
+               "est_audio_s": taskq.est_audio_s(charged),
+               "size": float(size or 0.0)}
+    fields = dict(settings=parsed, plan=plan, status="processing",
+                  message="queued", progress=0.0, queue_position=None)
+    return _tasks().admit_ingest(
+        job_id, owner_id=user.id if user else None,
+        count_user=bool(user is not None and not service),
+        user_limit=taskq.max_active_per_user(),
+        queue_cap=taskq.max_queue(),
+        running_limit=taskq.running_limit("ingest"),
+        payload=payload, plan=plan,
+        sort_offset_s=taskq.priority_offset_s(plan, service),
+        max_attempts=taskq.max_attempts(), job_fields=fields)
+
+
+def _queue_start_render(job_id: str, edited: list, disabled_cuts: list,
+                        owner_id: str | None, plan: str | None
+                        ) -> int | None:
+    """POST /render: the compare-and-set to processing and the render
+    task, in one transaction. None: not in review (409)."""
+    def _start(cur: Job) -> dict | None:
+        if cur.status != "awaiting_review":
+            return None
+        return dict(status="processing", message="Rendering…", progress=1.0,
+                    error=None, error_code=None, queue_position=None,
+                    render_gen=int(cur.render_gen or 0) + 1)
+
+    def _payload(written: dict | None) -> dict:
+        return {"v": taskq.WORKER_PROTOCOL, "job_id": job_id,
+                "gen": int((written or {}).get("render_gen") or 1),
+                "subtitles": edited, "disabled_cuts": disabled_cuts}
+    try:
+        task_id, written = _tasks().enqueue(
+            job_id, "render", _payload, owner_id=owner_id, plan=plan,
+            sort_offset_s=taskq.priority_offset_s(plan),
+            max_attempts=taskq.max_attempts(), job_change=_start)
+    except taskq.TaskActive:
+        return None
+    return task_id if written is not None else None
+
+
+def _wall_s(t: taskq.Task) -> float | None:
+    if not t.finished_at or not t.created_at:
+        return None
+    return round(max(0.0, t.finished_at - t.created_at), 3)
+
+
+def _ledger_refunded(job_id: str) -> bool | None:
+    if not auth.auth_enabled():
+        return None
+    row = accounts.get_usage(job_id)
+    return True if row and row.get("refunded") else None
+
+
+class _QueueOps:
+    """backend/leader.py LeaderOps: the job side of the task queue."""
+
+    def __init__(self, periodic: bool = True) -> None:
+        self._periodic = periodic
+
+    # ── take-over ────────────────────────────────────────────────────
+
+    def on_leadership(self) -> None:
+        """Replaces the WP1 boot scans (mark_stuck_as_error,
+        _refund_interrupted, _clean_interrupted): jobs pending /
+        processing without an active or unsettled task — killed WP1
+        threads, a rollback, a restore — are re-enqueued while their
+        upload exists (the analysis runs again), else failed and
+        refunded like an interrupted job; renders go back to review.
+        Claims of POST /jobs in flight are left to the stale-claim
+        sweep. Idempotent; runs at every takeover."""
+        ts = _tasks()
+        moved = 0
+        for job_id in ts.running_jobs_without_tasks():
+            job = store.get(job_id)
+            if job is None or _is_claim(job):
+                continue
+            if job.segments and job.has_mezz():
+                if store.update_if(job.id, job.status,
+                                   status="awaiting_review", progress=100.0,
+                                   message="render_failed",
+                                   error="container_restart",
+                                   error_code="render_failed",
+                                   queue_position=None):
+                    moved += 1
+                continue
+            where = media.store_of(job)
+            src = job.source_ref()
+            has_input = bool(job.input_path and Path(job.input_path).exists())
+            try:
+                has_src = bool(src) and media.exists(src, store=where)
+            except Exception:
+                has_src = False
+            if has_input or has_src:
+                seconds = ((accounts.get_usage(job.id) or {}).get(
+                    "seconds_billed") if auth.auth_enabled() else None)
+                cap = (job.settings or {}).get("_max_seconds")
+                try:
+                    tid, _ = ts.enqueue(
+                        job.id, "ingest",
+                        {"v": taskq.WORKER_PROTOCOL, "job_id": job.id,
+                         "source_key": src, "charged_s": seconds,
+                         "max_seconds": cap,
+                         "est_audio_s": taskq.est_audio_s(seconds or cap),
+                         "size": 0.0, "requeued": "takeover"},
+                        owner_id=job.owner_id, plan=job.plan,
+                        sort_offset_s=taskq.priority_offset_s(job.plan),
+                        max_attempts=taskq.max_attempts(),
+                        job_expect=("pending", "processing"),
+                        job_change=dict(status="processing", message="queued",
+                                        progress=0.0, queue_position=None))
+                except taskq.TaskActive:
+                    continue
+                if tid is not None:
+                    moved += 1
+                    print(f"[leader] job {job.id}: its analysis was "
+                          "interrupted — queued again", flush=True)
+                continue
+            if not _refund(job.id, "container_restart"):
+                continue
+            if not store.update_if(
+                    job.id, job.status, status="error",
+                    error="container_restart",
+                    message="Processing was interrupted. "
+                            "Please upload the video again.",
+                    progress=0.0, queue_position=None, input_path=None):
+                continue
+            try:
+                _discard_upload(job.input_path, src, where)
+            except Exception as e:
+                print(f"[leader] dropping the upload of {job.id} failed: "
+                      f"{e}", flush=True)
+            shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
+            _gc_later(_media_of(job), store_=where)
+            moved += 1
+        if moved:
+            print(f"[leader] took over: {moved} job(s) without a task "
+                  "re-queued or settled", flush=True)
+
+    # ── finalizer ────────────────────────────────────────────────────
+
+    def finalize_success(self, t: taskq.Task) -> tuple | None:
+        r = t.result or {}
+        ts = _tasks()
+        if t.kind == "ingest":
+            job = store.get(t.job_id)
+            if job is not None:
+                _true_up(job.id, float(r.get("duration") or 0.0))
+                if job.input_path:
+                    _remove_upload(job.input_path)
+                    store.update(job.id, input_path=None,
+                                 updated_at=job.updated_at)
+                src = job.source_ref()
+                if src:
+                    # Committed: the upload object isn't needed any more.
+                    _discard_upload(None, src, media.store_of(job))
+            task_leader.note_provider_success(ts, "groq")
+            if r.get("llm_ok"):
+                task_leader.note_provider_success(ts, "anthropic")
+            return ("analysis_done", t.job_id, {
+                "work_s": r.get("work_s"),
+                "duration_s": round(float(r.get("duration") or 0.0), 3),
+                "test": bool(r.get("test"))})
+        if t.kind == "render":
+            return ("render_done", t.job_id, {
+                "gen": r.get("gen"), "wall_s": _wall_s(t),
+                "work_s": r.get("work_s"), "output_s": r.get("output_s"),
+                "test": bool(r.get("test"))})
+        return None
+
+    def finalize_terminal(self, t: taskq.Task) -> tuple | None:
+        if t.state == "cancelled":
+            return None
+        if t.kind == "ingest":
+            return self._ingest_ended(t)
+        if t.kind == "render":
+            return self._render_ended(t)
+        return None
+
+    def _ingest_ended(self, t: taskq.Task) -> tuple | None:
+        r = t.result or {}
+        job = store.get(t.job_id)
+        if job is None:
+            return None
+        where = media.store_of(job)
+        if t.error_code == taskq.JOB_CHANGED:
+            # Settled elsewhere (the worker saw it): what an attempt
+            # stored belongs to nobody if the job failed. (A job already
+            # in `error` here otherwise is this finalizer's own earlier
+            # pass: its steps are idempotent, the event is recorded once.)
+            if job.status == "error" and media.valid_job_id(job.id):
+                _gc_later([media.job_prefix(job.id)], store_=where)
+            return None
+        test = bool((job.settings or {}).get("_cost_test"))
+        src = job.source_ref()
+        refused = r.get("refused")
+        if refused:
+            text = str(r.get("text") or refused)
+            refunded = None
+            if auth.auth_enabled():
+                accounts.refund(job.id, refused)
+                refunded = _ledger_refunded(job.id)
+            store.update_if(job.id, ("pending", "processing"),
+                            status="error", message=text[:300],
+                            error=text[:2000], error_code=refused,
+                            refunded=refunded, progress=0.0,
+                            input_path=None)
+            _remove_upload(job.input_path)
+            if src:
+                _discard_upload(None, src, where)
+            _gc_later([e for e in _media_of(job) if e != src], store_=where)
+            return ("analysis_refused", job.id, {"code": refused,
+                                                 "test": test})
+        if t.state == "dead" or not r:
+            msg = "Processing was interrupted. Please upload the video again."
+            err = f"{t.error_code or 'failed'}: {t.last_error or ''}"
+            job_code, refund, infra = None, True, True
+            print(f"[job {job.id}] analysis given up: {err[:300]}",
+                  flush=True)
+        else:
+            msg = str(r.get("message") or t.last_error or "failed")
+            err = str(r.get("error") or msg)
+            job_code = r.get("job_code")
+            refund, infra = bool(r.get("refund")), bool(r.get("infra"))
+        if not refund and r.get("processed_s"):
+            # A content failure: what was really processed is charged.
+            _true_up(job.id, float(r["processed_s"]))
+        refunded = None
+        if refund and auth.auth_enabled():
+            if accounts.refund(job.id, job_code or msg):
+                print(f"[job {job.id}] minutes refunded "
+                      f"({(job_code or msg)[:60]})", flush=True)
+            refunded = _ledger_refunded(job.id)
+        store.update_if(job.id, ("pending", "processing"), status="error",
+                        message=msg[:300], error=err[:2000],
+                        error_code=job_code, refunded=refunded,
+                        input_path=None)
+        _remove_upload(job.input_path)
+        _gc_later(_media_of(job), store_=where)
+        return ("analysis_failed", job.id, {
+            "code": job_code or ("unknown" if t.state != "dead"
+                                 else t.error_code or "unknown"),
+            "infra": infra, "refunded": bool(refunded), "test": test})
+
+    def _render_ended(self, t: taskq.Task) -> tuple | None:
+        r = t.result or {}
+        job = store.get(t.job_id)
+        gen = r.get("gen") or (t.payload or {}).get("gen")
+        prefix = r.get("out_prefix") or (
+            f"{media.job_prefix(t.job_id)}r{gen}/" if gen
+            and media.valid_job_id(t.job_id) else None)
+        where = r.get("where") or (media.store_of(job) if job else None)
+        if prefix:
+            # Past Modal's own timeout: a call that kept running can't
+            # write there after the delete.
+            _gc_later([prefix], _render_gc_delay_s(), store_=where)
+        if job is None or t.error_code == taskq.JOB_CHANGED:
+            return None
+        if t.state == "dead" or not r.get("job_code"):
+            code = "render_unavailable"
+            error = (f"render_unavailable: {t.error_code or 'failed'}: "
+                     f"{t.last_error or ''}")
+        else:
+            code, error = r["job_code"], str(r.get("error") or t.last_error)
+        store.update_if(job.id, "processing", status="awaiting_review",
+                        progress=100.0, message="render_failed",
+                        error=error[:500], error_code=code)
+        return ("render_failed", job.id, {
+            "code": code, "gen": gen, "wall_s": _wall_s(t),
+            "test": bool((job.settings or {}).get("_cost_test"))})
+
+    # ── executor ─────────────────────────────────────────────────────
+
+    def run_local(self, t: taskq.Task, stop: threading.Event) -> None:
+        task_worker.run(t.kind, t.id, t.job_id, t.attempts,
+                        (t.payload or {}).get("v"), stop=stop)
+
+    def local_room(self, tasks: list[taskq.Task]) -> int:
+        """How many of these analyses (in order) fit on this box's disk
+        now: CLEO_DISK_FACTOR × the upload + CLEO_MIN_FREE_GB each."""
+        factor = _env_float("CLEO_DISK_FACTOR", 3.5)
+        try:
+            free = shutil.disk_usage(_TMP_ROOT).free
+        except OSError:
+            return len(tasks)
+        n = 0
+        for t in tasks:
+            need = factor * float((t.payload or {}).get("size") or 0.0)
+            if free - need < _MIN_FREE_BYTES:
+                break
+            free -= need
+            n += 1
+        return n
+
+    # ── maintenance ──────────────────────────────────────────────────
+
+    def periodic(self) -> list[task_leader.Periodic]:
+        if not self._periodic:
+            return []
+        return [
+            task_leader.Periodic("retention", 3600.0, _hourly),
+            task_leader.Periodic("media GC", _GC_TICK_S, run_media_gc),
+            task_leader.Periodic("billing reconcile", billing._SYNC_EVERY_S,
+                                 _reconcile_once, first_s=60.0),
+            task_leader.Periodic("queue stats", 300.0, _queue_stats_log,
+                                 first_s=300.0),
+        ]
+
+
+def _reconcile_once() -> None:
+    if billing.enabled():
+        n = billing.reconcile()
+        if n:
+            print(f"[billing] reconcile updated {n} subscription(s)",
+                  flush=True)
+
+
+def queue_stats() -> dict[str, Any]:
+    """Counts per kind, the oldest waiting task, breakers (GET
+    /admin/queue and the leader's 5-minute [queue] line)."""
+    ts = _tasks()
+    now = time.time()
+    out: dict[str, Any] = {"enabled": taskq.enabled(), "kinds": {},
+                           "breakers": {}}
+    for kind in task_leader.KINDS:
+        queued_tasks = ts.queued(kind)
+        queued, active = ts.counts(kind)
+        oldest = min((t.created_at for t in queued_tasks), default=None)
+        out["kinds"][kind] = {
+            "executor": taskq.executor(kind), "queued": queued,
+            "running": active, "limit": taskq.running_limit(kind),
+            "oldest_queued_s": round(now - oldest, 1) if oldest else None}
+    for p in taskq.PROVIDERS:
+        b = ts.breaker(p)
+        out["breakers"][p] = {"state": b.state(now), "opens": b.opens,
+                              "open_until": b.open_until, "reason": b.reason}
+    out["leader"] = (_LEADER.id if _LEADER is not None and _LEADER.leading
+                     else None)
+    return out
+
+
+def _queue_stats_log() -> None:
+    s = queue_stats()
+    parts = []
+    for kind, k in s["kinds"].items():
+        age = k["oldest_queued_s"]
+        parts.append(f"{kind}: queued {k['queued']}"
+                     + (f" (oldest {age:.0f} s)" if age else "")
+                     + f", running {k['running']}/{k['limit']}")
+    opened = [p for p, b in s["breakers"].items() if b["state"] != "closed"]
+    print("[queue] " + "; ".join(parts)
+          + (f"; breakers not closed: {', '.join(opened)}" if opened else ""),
+          flush=True)
+
+
 def _paywall_soft_check(user: User | None, duration: float) -> None:
     """Before any bytes are sent: with billing enforced, 402 when there
     is no plan or not enough minutes left for `duration` (the binding
@@ -2805,8 +3281,12 @@ def multipart_init(payload: dict, request: Request,
         raise _file_too_large()
     if _too_long(duration):
         raise _video_too_long()
-    _INFLIGHT.check(user)
-    _INFLIGHT.reserve_disk(None, size)
+    if taskq.enabled():
+        _queue_soft_check(user)
+        _queue_disk_check(size)
+    else:
+        _INFLIGHT.check(user)
+        _INFLIGHT.reserve_disk(None, size)
     if not storage.r2_available():
         raise _no_direct_upload()
     _check_init_rate(user, request)
@@ -3013,9 +3493,14 @@ def presign_upload_endpoint(
         raise _file_too_large()
     if _too_long(duration):
         raise _video_too_long()
-    _INFLIGHT.check(user)
-    if size > 0:
-        _INFLIGHT.reserve_disk(None, size)
+    if taskq.enabled():
+        _queue_soft_check(user)
+        if size > 0:
+            _queue_disk_check(size)
+    else:
+        _INFLIGHT.check(user)
+        if size > 0:
+            _INFLIGHT.reserve_disk(None, size)
     if not r2_available():
         raise _no_direct_upload()
     filename = str(payload.get("filename") or "upload.mp4").strip()
@@ -3220,7 +3705,13 @@ async def _accept_upload(
         raise _quota_error("subscription_required")
 
     # 429 / 503 before anything moves; the upload is kept for a retry.
-    token = _INFLIGHT.admit(user)
+    queue = taskq.enabled()
+    token: str | None = None
+    if queue:
+        await run_in_threadpool(_queue_soft_check, user)
+    else:
+        token = _INFLIGHT.admit(user)
+    refusal: str | None = None
     input_path: str | None = None
     # Our own copy of a legacy body in the media store: dropped on any
     # refusal or failure (nobody can retry with it).
@@ -3241,7 +3732,11 @@ async def _accept_upload(
                 await run_in_threadpool(_discard_upload, None, storage_key)
                 raise _file_too_large()
             # The analysis downloads + normalizes it in its workspace.
-            await run_in_threadpool(_INFLIGHT.reserve_disk, token, size, None)
+            if queue:
+                await run_in_threadpool(_queue_disk_check, size)
+            else:
+                await run_in_threadpool(_INFLIGHT.reserve_disk, token, size,
+                                        None)
             seconds, has_audio = await _probe_upload(storage_key)
             if seconds is None and client_duration:
                 seconds = client_duration
@@ -3259,8 +3754,11 @@ async def _accept_upload(
                 input_path = f.name
             # Refuse early instead of failing halfway through
             # normalization when the disk is (nearly) full.
-            await run_in_threadpool(_INFLIGHT.reserve_disk, token, size or 0,
-                                    input_path)
+            if queue:
+                await run_in_threadpool(_queue_disk_check, size or 0)
+            else:
+                await run_in_threadpool(_INFLIGHT.reserve_disk, token,
+                                        size or 0, input_path)
             await run_in_threadpool(_copy_upload, file, input_path)
             seconds = await run_in_threadpool(_probe_duration, input_path)
             has_audio = await run_in_threadpool(_probe_audio, input_path)
@@ -3366,7 +3864,22 @@ async def _accept_upload(
             # this was accepted with may be the uploader's claim.
             _cap_settings(parsed)
             # Accepted: the claim becomes the job.
-            if not await run_in_threadpool(functools.partial(
+            if queue:
+                # ... with its ingest task, after the binding admission
+                # checks, in one transaction (the task queue).
+                outcome = await run_in_threadpool(functools.partial(
+                    _queue_admit, job_id, user, parsed, plan, seconds, size,
+                    source_key))
+                if outcome == "too_many_active_jobs":
+                    refusal = outcome
+                    raise ApiRefusal(429, outcome)
+                if outcome == "server_busy":
+                    refusal = outcome
+                    raise _server_busy()
+                if outcome != "ok":
+                    raise RuntimeError(f"job {job_id} vanished while its "
+                                       "upload was being accepted")
+            elif not await run_in_threadpool(functools.partial(
                     store.update_if, job_id, "pending", settings=parsed,
                     plan=plan)):
                 raise RuntimeError(f"job {job_id} vanished while its upload "
@@ -3381,11 +3894,24 @@ async def _accept_upload(
             # Failed: minutes back; the client's R2 object stays for a
             # retry (our own copy of a body doesn't).
             await run_in_threadpool(_abandon_claim, job_id, input_path,
-                                    own_key, "create_failed" if charged else None)
+                                    own_key, (refusal or "create_failed")
+                                    if charged else None)
             input_path = own_key = None
             raise
         claimed.settings, claimed.plan = parsed, plan
         job = claimed
+        if queue:
+            # The leader dispatches it (woken by the enqueue); answer
+            # with its place in line when it has to wait.
+            task = await run_in_threadpool(_tasks().active_task, job.id,
+                                           "ingest")
+            pos = await run_in_threadpool(
+                _queue_position_now, task.id if task else None, "ingest")
+            job = await run_in_threadpool(store.get, job.id) or job
+            out = job.to_dict()
+            if pos is not None:
+                out["queue_position"] = pos
+            return {"job_id": job.id, **out}
         thread = threading.Thread(target=_run_analyze, args=(job.id,),
                                   daemon=True)
         # The place in line is taken right here (no await in between), so
@@ -3419,7 +3945,8 @@ async def _accept_upload(
                 _gc_later([own_key], store_="r2")
         raise
     finally:
-        _INFLIGHT.release(token)
+        if token is not None:
+            _INFLIGHT.release(token)
 
 
 # The duration probe (ffprobe over a presigned URL, header only) runs in
@@ -3978,6 +4505,15 @@ def admin_metrics(days: float = 14, include_tests: bool = False,
     return metrics_summary(events, days=days, since=since, until=until)
 
 
+@app.get("/admin/queue")
+def admin_queue(x_admin_token: str = Header(default="")):
+    """The task queue (WP4): per kind queued / running / limit and the
+    age of the oldest waiting task, the provider breakers, this
+    process's leadership. Admin only (see /admin/costs)."""
+    _require_admin(x_admin_token)
+    return queue_stats()
+
+
 @app.post("/admin/sentry-test")
 def admin_sentry_test(x_admin_token: str = Header(default="")):
     """Send a test error to Sentry — the check that error reports arrive
@@ -3995,6 +4531,9 @@ def admin_sentry_test(x_admin_token: str = Header(default="")):
 def delete_job(job_id: str, user: User | None = Depends(current_user)):
     """Delete a project and all its files right away (user request)."""
     job = get_owned_job(job_id, user)
+    # (With the task queue every job with a task in flight is
+    # processing; a stale task of a settled job goes with the job — its
+    # worker is fenced out.)
     with _active_lock:
         busy = job_id in _active_jobs
     if busy or job.status in ("processing", "pending"):
@@ -4639,6 +5178,26 @@ def post_render(job_id: str, payload: dict,
     disabled_cuts = payload.get("disabled_cuts") or []
     if not isinstance(disabled_cuts, list):
         raise HTTPException(400, "payload.disabled_cuts must be a list")
+
+    if taskq.enabled():
+        # The compare-and-set and the render task in one transaction
+        # (the unique active-task index guards it too, across replicas).
+        task_id = _queue_start_render(job_id, edited, disabled_cuts,
+                                      job.owner_id, job.plan)
+        if task_id is None:
+            cur = store.get(job_id)
+            raise HTTPException(
+                409, "job not in review state "
+                     f"(status={cur.status if cur else None})")
+        pos = _queue_position_now(task_id, "render")
+        if pos is not None:
+            t = _tasks().get(task_id)
+            if t is not None and t.state == "queued":
+                store.patch_status(job_id, "processing", message="queued")
+        out = store.get(job_id).to_dict()
+        if pos is not None:
+            out["queue_position"] = pos
+        return out
 
     # Flip to processing right away (and clear a previous render error)
     # so a poll between this response and the worker start can't see

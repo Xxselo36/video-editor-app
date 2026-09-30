@@ -22,6 +22,17 @@ server URL whose user may create databases, e.g. CI's Postgres service)
 replaces the embedded server: the suite and the pg_server databases are
 made there.
 
+Task queue (WP4): off by default, like a deployment. CLEO_TEST_QUEUE=1
+runs the whole suite with CLEO_TASK_QUEUE=1: POST /jobs and POST /render
+enqueue tasks, and every test gets a leader of its own (fixture
+task_leader: dispatcher + finalizer + the local executor; no reaper
+grace, no maintenance loops). Mirroring the WP1 stub of _run_analyze,
+it leaves analyses queued unless a test puts the real _run_analyze back;
+`clean_state` then lists the jobs whose analysis was enqueued. Tests of
+WP1 internals (the slot queue, the in-process admission) are marked
+wp1_only and skipped there; tests of the queue itself are marked
+no_task_leader (they run leaders of their own).
+
 Media: the local media backend by default (backend/media.py; files
 under the test work root). CLEO_TEST_MEDIA=r2 runs the whole suite with
 media in R2 (R2_* set and CLEO_MEDIA_BACKEND=r2), faked in-process by moto (pip install "moto[s3]>=5.2",
@@ -67,6 +78,11 @@ if TEST_DB not in ("sqlite", "postgres"):
     raise RuntimeError(f"CLEO_TEST_DB={TEST_DB!r}: use sqlite or postgres")
 os.environ.pop("CLEO_DB_BACKEND", None)
 os.environ.pop("DATABASE_URL", None)
+TEST_QUEUE = os.environ.get("CLEO_TEST_QUEUE", "").strip() in ("1", "true")
+# A job right after POST /jobs: WP1 leaves it 'pending' until its thread
+# starts; the task queue stores it 'processing' / 'queued' (WP4 §3.1).
+NEW_JOB_STATUS = "processing" if TEST_QUEUE else "pending"
+os.environ.pop("CLEO_TASK_QUEUE", None)
 
 
 class _PgServer:
@@ -246,6 +262,10 @@ import backend.main as M  # noqa: E402
 from backend import accounts, auth, billing, db  # noqa: E402
 from backend.jobs import store  # noqa: E402
 
+# The real one (clean_state stubs it per test; a test that puts it back
+# wants its analyses to run — with the task queue: to be dispatched).
+REAL_RUN_ANALYZE = M._run_analyze
+
 # Real test-mode webhook captures (see fixtures/lemon_squeezy/NOTICE).
 FIXTURES = Path(__file__).parent / "fixtures" / "lemon_squeezy"
 
@@ -278,6 +298,13 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "local_media_only: tests local-disk media internals; "
         "skipped with CLEO_TEST_MEDIA=r2")
+    config.addinivalue_line(
+        "markers", "wp1_only(reason): tests internals of the WP1 in-process "
+        "path (slot queue, in-process admission); skipped with "
+        "CLEO_TEST_QUEUE=1")
+    config.addinivalue_line(
+        "markers", "no_task_leader: no automatic leader with "
+        "CLEO_TEST_QUEUE=1 (the test runs its own)")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -288,6 +315,11 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_pg)
         if TEST_MEDIA == "r2" and "local_media_only" in item.keywords:
             item.add_marker(skip_r2)
+        mark = item.get_closest_marker("wp1_only")
+        if TEST_QUEUE and mark is not None:
+            why = (mark.args[0] if mark.args else "WP1 internals")
+            item.add_marker(pytest.mark.skip(
+                reason=f"WP1 path only (CLEO_TEST_QUEUE=1): {why}"))
 
 
 @pytest.fixture(scope="session")
@@ -303,6 +335,14 @@ def clean_state(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     for k in _OPT_IN_ENV:
         monkeypatch.delenv(k, raising=False)
+    if TEST_QUEUE:
+        monkeypatch.setenv("CLEO_TASK_QUEUE", "1")
+        # WP1's stubbed analysis thread ends at once, so its jobs never
+        # count against the per-user limit; queued-forever jobs would.
+        # Tests of the limit set it themselves.
+        monkeypatch.setenv("CLEO_MAX_ACTIVE_PER_USER", "0")
+    else:
+        monkeypatch.delenv("CLEO_TASK_QUEUE", raising=False)
     if TEST_MEDIA == "r2":
         for k, v in R2_ENV.items():
             monkeypatch.setenv(k, v)
@@ -317,6 +357,7 @@ def clean_state(monkeypatch):
     billing._refresh_tried.clear()
     with M._INIT_RATE._lock:
         M._INIT_RATE._events.clear()
+    store.tasks._truncate_for_tests()
     if db.active() == "postgres":
         store._truncate_for_tests()
         shutil.rmtree(M._WORK_ROOT / "uploads", ignore_errors=True)
@@ -334,7 +375,49 @@ def clean_state(monkeypatch):
     # Never start real analysis threads from POST /jobs.
     started: list[str] = []
     monkeypatch.setattr(M, "_run_analyze", lambda job_id: started.append(job_id))
-    yield started
+    yield _QueuedAnalyses() if TEST_QUEUE else started
+
+
+class _QueuedAnalyses:
+    """clean_state with the task queue: the jobs whose analysis was
+    handed over (an ingest task enqueued), in order — read from the
+    database each time."""
+
+    def _ids(self) -> list[str]:
+        return store.tasks.job_ids("ingest")
+
+    def __eq__(self, other):
+        return self._ids() == list(other)
+
+    def __len__(self):
+        return len(self._ids())
+
+    def __iter__(self):
+        return iter(self._ids())
+
+    def __getitem__(self, i):
+        return self._ids()[i]
+
+    def __repr__(self):
+        return f"<queued analyses {self._ids()!r}>"
+
+
+@pytest.fixture(autouse=True)
+def task_leader(request, clean_state):
+    """CLEO_TEST_QUEUE=1: a leader for this test (see the module doc)."""
+    if not TEST_QUEUE or "no_task_leader" in request.keywords:
+        yield None
+        return
+    from backend import leader as task_leader_mod
+
+    def kinds():
+        return (("ingest", "render") if M._run_analyze is REAL_RUN_ANALYZE
+                else ("render",))
+    ld = task_leader_mod.Leader(M._QueueOps(periodic=False), kinds=kinds)
+    ld.start()
+    assert ld.wait_leading(10), "the test leader didn't get leadership"
+    yield ld
+    ld.stop(grace_s=10)
 
 
 @pytest.fixture

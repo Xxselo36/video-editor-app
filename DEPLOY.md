@@ -1181,3 +1181,106 @@ Keys sind unveränderlich: ein Key, auf den ein Job zeigt, wird nie
 überschrieben; eine neue Version bekommt einen neuen Key (daher
 `Cache-Control: private, max-age=31536000, immutable` auf allen Objekten
 unter `jobs/`).
+
+## 11. Task-Warteschlange (WP4)
+
+**Kurz:** Mit `CLEO_TASK_QUEUE=1` laufen Analysen und Renders nicht mehr
+als Threads, die mit dem Prozess sterben, sondern als **dauerhafte
+Tasks in der Datenbank** (Tabelle `tasks`, gleiche Transaktion wie der
+Job). Ein **Leader** — genau ein Prozess, per Postgres-Advisory-Lock
+gewählt (auf SQLite: der eine Prozess) — verteilt sie an den
+**`local`-Executor** (Threads desselben Prozesses, also dieselbe
+Maschine und derselbe Code wie bisher), holt verlorene Arbeit zurück
+(**Reaper**: Lease ohne Heartbeat → neuer Versuch mit Backoff) und
+schließt fertige/fehlgeschlagene Tasks ab (**Finalizer**: Job-Status,
+Erstattung/True-up, Medien-GC, Metrik-Event). Ein Deploy oder Absturz
+mitten in einer Analyse oder einem Render verliert den Job nicht mehr:
+er läuft nach dem Neustart erneut (höchstens 3 gezählte Versuche, danach
+Fehler + Erstattung bzw. zurück in den Editor wie heute).
+
+**Nach dem Merge ist die Queue aus** (Phase P0): ohne die Variable läuft
+exakt der bisherige Weg (WP1). Für Nutzer ändert sich auch mit Queue
+nichts sichtbar: gleiche Status, `queued` + `queue_position`, gleiche
+Ablehnungen (429 `too_many_active_jobs`, 503 `server_busy` +
+Retry-After, 507, 413). Einziger Unterschied: ein frisch hochgeladener
+Job steht sofort auf `processing` / `queued` statt kurz auf `pending`.
+
+Code: `backend/taskq.py` (Schalter, Regeln), `backend/leader.py`
+(Leader, Dispatcher, Reaper, Finalizer), `backend/worker.py` (ein
+Versuch eines Tasks), `backend/pg_tasks.py` / `backend/jobs.py`
+(`PgTaskStore` / `SqliteTaskStore`), Schema-Migration v5
+(`tasks`, `provider_state`, `queue_positions`).
+
+### 11.1 Schalter (Railway → Backend-Service → Variables)
+
+| Variable | Default | Bedeutung |
+|---|---|---|
+| `CLEO_TASK_QUEUE` | aus | `1`: Task-Warteschlange an (dieser Abschnitt). Löschen = zurück zu WP1 |
+| `CLEO_EXECUTOR_INGEST` / `CLEO_EXECUTOR_RENDER` | `local` (auch wenn `MODAL_TOKEN_ID` gesetzt ist) | `modal` gibt es in dieser Version noch nicht (Phase P1) — gesetzt startet das Backend nicht (`[queue] NOT STARTING`) |
+| `CLEO_MAX_RUNNING_INGEST` | `CLEO_MAX_ANALYZE`, sonst 2 | gleichzeitige Analysen (wie bisher `CLEO_MAX_ANALYZE`) |
+| `CLEO_MAX_RUNNING_RENDER` | `CLEO_MAX_RENDER`, sonst 4 mit Modal / 2 ohne | gleichzeitige Renders (wie bisher `CLEO_MAX_RENDER`) |
+| `CLEO_MAX_QUEUE` | 20 | wartende Analysen, danach 503 `server_busy` (wie bisher) |
+| `CLEO_MAX_ACTIVE_PER_USER` | 2 | laufende Jobs pro Konto, danach 429 (wie bisher) |
+| `CLEO_TASK_MAX_ATTEMPTS` | 3 | gezählte Versuche (verlorene Lease, Infrastruktur-Fehler) |
+| `CLEO_TASK_RETRY_BACKOFF_S` | `30,120,600` | Wartezeit vor Versuch 2, 3, … |
+| `CLEO_TASK_LEASE_S` / `CLEO_TASK_HEARTBEAT_S` | 180 / 30 | ohne Heartbeat so lange → Reaper holt den Task zurück |
+| `CLEO_START_TIMEOUT_S` | 300 | verteilt, aber von keinem Worker übernommen → zurück |
+| `CLEO_REAPER_GRACE_S` | 200 | nach Übernahme der Führung so lange nichts zurückholen (laufende Worker bekommen eine volle Lease) |
+| `CLEO_PRIORITY_OFFSETS_S` | `{"studio":-120,"pro":-60,"starter":0,"service":600}` | Vorrang als Zeitgutschrift (Kosten-/Lasttests weichen 10 min) |
+| `CLEO_GROQ_ASH_BUDGET` | 160000 | geschätzte Groq-Audio-Sekunden pro Stunde, darüber warten Analysen |
+| `CLEO_PROVIDER_HOLD_S` | 1800 | so lange wartet ein Task auf Groq / Anthropic-Ausgabenlimit / Plattenplatz, dann Fehler + Erstattung (Anthropic: danach ohne LLM-Schritte weiter) |
+| `CLEO_LLM_OUTAGE_POLICY` | `hold` | `degrade`: bei Anthropic-Ausgabenlimit sofort ohne LLM-Schritte weiter (mit `processing_warnings`) |
+| `CLEO_PROVIDER_RETRY_MIN_S` | 60 | kürzeste Wartezeit nach einem Provider-Fehler |
+| `DATABASE_DIRECT_URL` | = `DATABASE_URL` | nur falls `DATABASE_URL` über einen Transaction-Pooler geht: direkte URL für den Leader-Lock |
+| `CLEO_FAULT_GROQ_429` | aus | nur Staging/Tests: `1` bzw. `0.2` = jede bzw. jede fünfte Analyse scheitert wie ein Groq-429 |
+
+Mit Queue laufen Aufräumen, Medien-GC, Waisen-Check, Backfill,
+Postgres-Backup und Lemon-Squeezy-Abgleich **im Leader** (nur ein
+Prozess). Die Boot-Scans (`mark_stuck_as_error` …) und der stündliche
+Waisen-Job-Sweep entfallen: der Leader nimmt Jobs ohne Task beim Start
+selbst auf (Upload noch da → Analyse läuft erneut; sonst Fehler +
+Erstattung; Render → zurück in den Editor).
+
+### 11.2 Einschalten
+
+1. Merge + Deploy wie immer. Railway-Log: `[db] applied schema
+   migration(s) [5]` (einmal), sonst keine Änderung.
+2. Einen ruhigen Moment wählen (Variablen-Änderung = Neustart; mit Queue
+   ist das künftig egal, beim Umschalten selbst gilt noch WP1).
+3. Railway → Backend-Service → Variables → `CLEO_TASK_QUEUE` = `1` →
+   Deploy.
+4. Im Log beim Start prüfen:
+   - `[queue] task queue ON (CLEO_TASK_QUEUE=1): executors ingest=local render=local, running limits 2/4, queue cap 20`
+   - `[leader] leader:… leads (dispatcher, reaper, finalizer, maintenance); executors ingest=local render=local`
+   - falls es beim Umschalten laufende Jobs gab:
+     `[leader] took over: N job(s) without a task re-queued or settled`.
+5. Kosten-Test (`synthetic:1`) laufen lassen: muss wie vorher `done`
+   erreichen; `GET /admin/queue` (Header `X-Admin-Token`) zeigt Zähler,
+   ältesten wartenden Task und Breaker.
+
+### 11.3 Drei Tage beobachten (Ausstiegskriterium Phase P0)
+
+Täglich im Railway-Log suchen:
+
+| Suche | Erwartet | Wenn nicht |
+|---|---|---|
+| `[queue] ` (alle 5 min) | `oldest …` nie über ein paar Minuten, `running` ≤ Limit | hängt eine Kind fest: `GET /admin/queue`, dann 11.4 |
+| `[reaper]` | selten, nur nach Deploys/Abstürzen, danach `→ queued` und der Job wird fertig | häufig → Worker hängen (Heartbeats fehlen): Log um die Zeit prüfen |
+| `→ dead` / `given up` / `LEADERSHIP LOST` | keine | Job-ID notieren, `inspect_jobs` im Kosten-Test-Workflow |
+| `[finalizer] … not settled yet` | keine (einzelne bei DB-Aussetzern ok) | wiederholt → DB-Problem; Tasks bleiben liegen, nichts geht verloren |
+| `BREAKER OPEN`, `SPEND LIMIT`, `audio budget` | keine | OPERATIONS.md „Task-Warteschlange“ |
+| `/admin/metrics` | Erfolgsraten wie vor dem Umschalten | Rückfall (11.4) |
+
+Nach drei Tagen ohne hängende Tasks und mit grünen Metriken ist P0 durch.
+
+### 11.4 Ausschalten / Rollback
+
+- **Schalter:** `CLEO_TASK_QUEUE` löschen → Deploy. Der WP1-Weg läuft
+  wieder. Beim Start markiert WP1 wie bisher alle Jobs in
+  `pending`/`processing` als unterbrochen (`container_restart`, Minuten
+  erstattet, Renders zurück in den Editor) — auch Jobs, die nur in der
+  Warteschlange standen. Deren Tasks bleiben unbeachtet in der Tabelle
+  liegen. Harmlos: schaltet man die Queue wieder ein, beendet ein Worker
+  so einen Task sofort ohne Arbeit, weil sein Job nicht mehr läuft.
+- **Code-Rollback** auf eine Version vor WP4: genauso (die neuen
+  Tabellen stören alte Versionen nicht; die Migration bleibt).

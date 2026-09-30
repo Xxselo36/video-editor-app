@@ -27,6 +27,10 @@ from conftest import REPO, add_sub
 pg = pytest.importorskip("backend.pg")
 from backend import pg_cutover  # noqa: E402
 
+# These tests reset backend.db's process state; a background test leader
+# (CLEO_TEST_QUEUE=1) would open the store meanwhile.
+pytestmark = pytest.mark.no_task_leader
+
 UNREACHABLE = "postgresql://nobody:x@127.0.0.1:9/nothing"
 
 

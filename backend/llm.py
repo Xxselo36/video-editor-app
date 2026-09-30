@@ -13,10 +13,13 @@ Cost per call (Haiku, June 2026):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from backend import costs
 
@@ -59,6 +62,135 @@ def _client():
     except Exception as e:
         print(f"[llm] anthropic init failed: {e}", flush=True)
         return None
+
+
+# ── Outages (the WP4 task queue) ─────────────────────────────────────
+# The task queue's worker (backend/worker.py) watches the LLM steps of
+# one task attempt through an Observer on its thread: every failed call
+# is classified (Anthropic's spend limit → the worker holds the analysis
+# and the leader opens the `anthropic` breaker; unavailable after the
+# SDK's retries → the step is left out with a warning), and in degraded
+# mode (skip=True) every step is left out at once. Without an Observer —
+# the WP1 path, the desktop app — nothing here changes what a call does.
+
+SPEND_LIMIT = "spend_limit"
+UNAVAILABLE = "unavailable"
+OTHER = "other"
+
+
+class LLMSpendLimit(RuntimeError):
+    """Anthropic refused for the account's spend limit / billing."""
+
+
+class LLMUnavailable(RuntimeError):
+    """Anthropic unreachable, overloaded or rate-limited after the SDK's
+    retries."""
+
+
+_UNAVAILABLE_ERRORS = frozenset({
+    "RateLimitError", "OverloadedError", "ServiceUnavailableError",
+    "InternalServerError", "APIConnectionError", "APITimeoutError",
+    "DeadlineExceededError"})
+
+
+def classify_error(exc: BaseException) -> str:
+    """SPEND_LIMIT (a 429 enforced_spend_limit_reached / "spend limit",
+    a billing_error / 402), UNAVAILABLE (rate limits, overload, 5xx,
+    connection problems, timeouts) or OTHER (keeps today's soft skip)."""
+    status = getattr(exc, "status_code", None)
+    body = getattr(exc, "body", None)
+    etype = getattr(exc, "type", None)
+    if isinstance(body, dict):
+        err = body.get("error") if isinstance(body.get("error"), dict) else body
+        etype = etype or err.get("type")
+    text = " ".join(str(x) for x in (getattr(exc, "message", ""), body, exc)
+                    if x).lower()
+    if "enforced_spend_limit_reached" in text or "spend limit" in text:
+        return SPEND_LIMIT
+    if etype == "billing_error" or status == 402:
+        return SPEND_LIMIT
+    if type(exc).__name__ in _UNAVAILABLE_ERRORS:
+        return UNAVAILABLE
+    if isinstance(status, int) and (status >= 500 or status in (408, 409,
+                                                                429)):
+        return UNAVAILABLE
+    return OTHER
+
+
+class Observer:
+    """What the LLM steps of one task attempt ran into."""
+
+    def __init__(self, skip: bool = False) -> None:
+        self.skip = skip
+        self.skipped: list[str] = []
+        self.failed: list[tuple[str, str]] = []
+        self.spend_limit = False
+        self.detail = ""
+
+    def warnings(self) -> list[str]:
+        """processing_warnings: llm_skipped:<step> for every step left
+        out (degraded mode, or Anthropic unavailable / at its limit)."""
+        steps = list(self.skipped) + [
+            s for s, kind in self.failed if kind in (SPEND_LIMIT, UNAVAILABLE)]
+        return [f"llm_skipped:{s}" for s in dict.fromkeys(steps)]
+
+    def merge(self, other: "Observer") -> None:
+        self.skipped += other.skipped
+        self.failed += other.failed
+        self.spend_limit = self.spend_limit or other.spend_limit
+        self.detail = self.detail or other.detail
+
+
+_obs = threading.local()
+_raw_logged = False
+
+
+@contextmanager
+def observing(observer: Observer) -> Iterator[Observer]:
+    """The LLM calls of this thread report to `observer`."""
+    prev = getattr(_obs, "observer", None)
+    _obs.observer = observer
+    try:
+        yield observer
+    finally:
+        _obs.observer = prev
+
+
+def _observer() -> Observer | None:
+    return getattr(_obs, "observer", None)
+
+
+def _skip(step: str) -> bool:
+    """Degraded mode: leave `step` out (recorded as a warning)."""
+    obs = _observer()
+    if obs is None or not obs.skip:
+        return False
+    obs.skipped.append(step)
+    print(f"[llm] {step} skipped (LLM degraded mode)", flush=True)
+    return True
+
+
+def _note_failure(step: str, exc: BaseException) -> None:
+    """A call of `step` failed: classified for the observer (if any)."""
+    global _raw_logged
+    obs = _observer()
+    if obs is None:
+        return
+    kind = classify_error(exc)
+    obs.failed.append((step, kind))
+    costs.record_event(f"llm_failed:{step}")
+    if kind != SPEND_LIMIT:
+        return
+    obs.spend_limit = True
+    obs.detail = obs.detail or f"{type(exc).__name__} in {step}"
+    line = f"[llm] SPEND LIMIT hit in {step}: {type(exc).__name__}"
+    if not _raw_logged:
+        # The exact body isn't verified (WP4 §8.2): the first one is
+        # logged as it came (bounded), to confirm the detection.
+        _raw_logged = True
+        line += f" — first occurrence, raw: {str(getattr(exc, 'body', exc))[:500]}"
+    print(line, flush=True)
+    logging.getLogger("backend.llm").error(line)
 
 
 def _extract_json(text: str) -> Any | None:
@@ -112,6 +244,8 @@ def correct_voice_commands(
     Soft-fails on no key / model error — returns transcription unchanged.
     """
     if not transcription:
+        return transcription
+    if _skip("command_fix"):
         return transcription
     client = _client()
     if client is None:
@@ -196,6 +330,7 @@ Empty corrections list is a valid answer.
         )
     except Exception as e:
         print(f"[llm] command-fix call failed: {e}", flush=True)
+        _note_failure("command_fix", e)
         return transcription
 
     parsed = _extract_json(text)
@@ -269,6 +404,8 @@ def cleanup_transcript(
     """
     if not phrases:
         return {}
+    if _skip("cleanup"):
+        return {}
     client = _client()
     if client is None:
         return {}
@@ -316,6 +453,7 @@ Respond with ONLY a JSON object in this exact shape:
         )
     except Exception as e:
         print(f"[llm] cleanup call failed: {e}", flush=True)
+        _note_failure("cleanup", e)
         return {}
 
     parsed = _extract_json(text)
@@ -355,6 +493,8 @@ def detect_hook_moments(
         in score-desc order. Empty on no-key / failure.
     """
     if not phrases:
+        return []
+    if _skip("hooks"):
         return []
     client = _client()
     if client is None:
@@ -423,6 +563,7 @@ within {int(min_seconds)}-{int(max_seconds)} seconds total per clip.
         )
     except Exception as e:
         print(f"[llm] hook-detection call failed: {e}", flush=True)
+        _note_failure("hooks", e)
         return []
 
     parsed = _extract_json(text)
@@ -452,6 +593,8 @@ def generate_social_caption(
 ) -> dict[str, Any]:
     """Generate a short-form caption + hashtags for the final render."""
     if not full_transcript.strip():
+        return {"caption": "", "hashtags": []}
+    if _skip("caption"):
         return {"caption": "", "hashtags": []}
     client = _client()
     if client is None:
@@ -489,6 +632,7 @@ Respond with ONLY a JSON object:
         )
     except Exception as e:
         print(f"[llm] social-caption call failed: {e}", flush=True)
+        _note_failure("caption", e)
         return {"caption": "", "hashtags": []}
 
     parsed = _extract_json(text)

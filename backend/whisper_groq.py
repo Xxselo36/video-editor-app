@@ -101,7 +101,13 @@ class GroqTranscriptionError(ConnectionError):
     can't fix). A ConnectionError (an OSError) on purpose: the web
     backend treats OSErrors as infrastructure failures and refunds the
     minutes. The message starts with "transcription_unavailable:" and
-    carries no API response text (shown to users as-is)."""
+    carries no API response text (shown to users as-is).
+
+    `retry_after_s`: the wait the server asked for with its last error
+    (retry-after-ms / retry-after), if any — the task queue's Groq
+    breaker opens at once above 60 s (backend/leader.py)."""
+
+    retry_after_s: float | None = None
 
 
 def _status_code(exc: BaseException) -> int | None:
@@ -374,20 +380,25 @@ def _transcribe_single(
         except Exception as e:
             print(f"[groq] transcription attempt {attempt}/{MAX_ATTEMPTS} "
                   f"failed: {e}", flush=True)
+            asked = _retry_after(e)
             if not _retryable(e) or attempt >= MAX_ATTEMPTS:
-                raise GroqTranscriptionError(
+                err = GroqTranscriptionError(
                     f"transcription_unavailable: Groq failed after "
                     f"{attempt} attempt(s) ({_describe(e)})"
-                ) from e
-            wait = _retry_after(e)
+                )
+                err.retry_after_s = asked
+                raise err from e
+            wait = asked
             if wait is None:
                 wait = RETRY_BACKOFF_S[min(attempt, len(RETRY_BACKOFF_S)) - 1]
                 wait *= 1 + random.uniform(-0.2, 0.2)
             if wait > _max_retry_wait():
-                raise GroqTranscriptionError(
+                err = GroqTranscriptionError(
                     f"transcription_unavailable: Groq asked to retry in "
                     f"{wait:.0f} s ({_describe(e)})"
-                ) from e
+                )
+                err.retry_after_s = wait
+                raise err from e
             time.sleep(wait)
 
     # Response is a pydantic model — convert to plain dict.

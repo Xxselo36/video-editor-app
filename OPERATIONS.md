@@ -263,6 +263,29 @@ Der Text der Annotation sagt, was fehlt:
 - **not configured / misconfigured**: Secret `CLEO_ADMIN_TOKEN` fehlt,
   oder das Secret `COST_ALERT_USD_PER_DAY` ist keine positive Zahl.
 
+## Task-Warteschlange (WP4, nur mit `CLEO_TASK_QUEUE=1`)
+
+Die Warteschlange (DEPLOY.md Abschnitt 11) hat noch keinen eigenen
+GitHub-Check; beobachtet wird über das Railway-Log und
+`GET /admin/queue` (Header `X-Admin-Token`: Zähler pro Art, Alter des
+ältesten wartenden Tasks, Breaker, führender Prozess). Für den späteren
+Alarm-Ausbau (WP6) sind das die Signale:
+
+| Log-Zeile / Wert | Bedeutung | Tun |
+|---|---|---|
+| `[queue] ingest: queued N (oldest S s), running R/L; render: …` (alle 5 min) | Lage der Warteschlange | `oldest` über ~10 min bei `running` < Limit → Dispatcher hängt: Log nach `[leader]` durchsuchen, notfalls Backend neu starten (nichts geht verloren) |
+| `[leader] … leads …` | dieser Prozess führt (nach jedem Start genau einmal) | — |
+| `[leader] LEADERSHIP LOST` | die Leader-Verbindung zu Postgres ist weg | kommt sie nicht binnen einer Minute wieder (`leads`), Postgres prüfen |
+| `[leader] took over: N job(s) …` | beim Start liegengebliebene Jobs neu eingereiht oder abgeschlossen | nur nach Umschalten/Restore erwartet |
+| `[reaper] task … lease expired … → queued` | ein Worker ist verschwunden (Deploy, Absturz, Hänger); der Task läuft erneut | gelegentlich normal; häufig → Worker hängen |
+| `… → dead` (ERROR) | ein Task hat alle Versuche verbraucht: Analyse → Fehler + Erstattung, Render → zurück in den Editor | Job-ID ansehen (Kosten-Test-Workflow, `inspect_jobs`) |
+| `[finalizer] task … not settled yet` | Abschluss eines Tasks scheiterte (meist DB), wird alle 2 s wiederholt | wiederholt über Minuten → Datenbank prüfen |
+| `[groq] BREAKER OPEN until …` (ERROR) | Groq lehnt ab (Stundenkontingent / 429-Serie); Analysen warten, nach 30 min Fehler + Erstattung | Groq-Konsole: Kontingent/Tier; `CLEO_GROQ_ASH_BUDGET` senken |
+| `[groq] audio budget: … analyses wait` | das eigene Stundenbudget ist voll, Analysen warten | nur Stoßzeiten; dauerhaft → Tier erhöhen, dann Budget anheben |
+| `[llm] SPEND LIMIT hit in …` / `[llm] SPEND LIMIT REACHED — breaker open` (ERROR) | Anthropic-Ausgabenlimit erreicht; Analysen warten (danach ohne LLM-Schritte, `processing_warnings`), Renders ohne Hooks/Caption | Anthropic Console → Limits/Billing erhöhen; der Breaker prüft stündlich selbst |
+| `[worker] PROTOCOL MISMATCH` / `SCHEMA BEHIND` (ERROR) | Deploy-Versatz zwischen API und Worker; wird wiederholt | nur kurz nach Deploys erwartet |
+| `[queue] NOT STARTING` | `CLEO_EXECUTOR_*=modal` in einer Version ohne Modal-Executor | Variable löschen |
+
 ## Was kosten die Checks?
 
 **GitHub Actions**: Für öffentliche Repos sind Standard-Runner

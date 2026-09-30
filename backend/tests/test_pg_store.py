@@ -703,6 +703,8 @@ def test_accept_failure_refunds_in_a_worker_thread(
     def update_if(*a, **kw):
         raise RuntimeError("database gone")
     monkeypatch.setattr(_open_store(), "update_if", update_if)
+    # (with the task queue the claim becomes the job in admit_ingest)
+    monkeypatch.setattr(_open_store().tasks, "admit_ingest", update_if)
     client = TestClient(M.app, raise_server_exceptions=False)
     r = client.post("/jobs", headers=bearer(),
                     data={"settings": "{}",
@@ -744,6 +746,8 @@ def test_failed_refund_leaves_a_claim_the_sweep_settles(
             raise RuntimeError("database gone")
         return real_update_if(job_id, expect, **kw)
     monkeypatch.setattr(_open_store(), "update_if", update_if)
+    # (with the task queue the claim becomes the job in admit_ingest)
+    monkeypatch.setattr(_open_store().tasks, "admit_ingest", update_if)
     client = TestClient(M.app, raise_server_exceptions=False)
     r = client.post("/jobs", headers=bearer(),
                     data={"settings": "{}",
