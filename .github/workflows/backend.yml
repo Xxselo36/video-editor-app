@@ -4,11 +4,15 @@ name: Backend
 # every change to the backend or the code it imports (src/ and the
 # Premiere plugin's burn), in three parallel runs:
 #   SQLite         the default: SQLite job store, media on local disk
-#   Postgres       CLEO_TEST_DB=postgres against a Postgres service
-#                  container (CLEO_TEST_PG_URL; conftest.py makes a
-#                  fresh database per suite / Postgres test)
+#   Postgres       CLEO_TEST_DB=postgres: the whole suite on Postgres
 #   R2 (moto)      CLEO_TEST_MEDIA=r2: every job's media in R2, faked by
 #                  moto in-process
+# Postgres is a service container in every run (CLEO_TEST_PG_URL;
+# conftest.py makes fresh databases there): the Postgres run's suite
+# database, and the test_pg_* files' own databases in all three runs.
+# (pgserver, the embedded Postgres used locally, has no Python 3.13
+# wheels; the one test that needs it — stopping and restarting a server
+# of its own — is skipped here.)
 # Includes the stub backend's smoke test (test_stub_server.py) — the web
 # e2e suites run against that stub — and, once UX2 lands, the caption
 # burn golden test.
@@ -63,8 +67,7 @@ jobs:
             media: r2
     services:
       postgres:
-        # Only the Postgres run starts it (an empty image skips the service).
-        image: ${{ matrix.db == 'postgres' && 'postgres:17' || '' }}
+        image: postgres:17
         env:
           POSTGRES_USER: cleo
           POSTGRES_PASSWORD: cleo-ci
@@ -79,7 +82,7 @@ jobs:
     env:
       CLEO_TEST_DB: ${{ matrix.db }}
       CLEO_TEST_MEDIA: ${{ matrix.media }}
-      CLEO_TEST_PG_URL: ${{ matrix.db == 'postgres' && 'postgresql://cleo:cleo-ci@localhost:5432/cleo' || '' }}
+      CLEO_TEST_PG_URL: postgresql://cleo:cleo-ci@localhost:5432/cleo
       # stub_media.py's generated clips (test_stub_server.py).
       STUB_MEDIA_DIR: ${{ github.workspace }}/.stub-media
       PYTHONUNBUFFERED: '1'

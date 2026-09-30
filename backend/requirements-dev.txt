@@ -9,7 +9,8 @@ httpx>=0.27
 # and as a server (ThreadedMotoServer) for the ffprobe / browser tests;
 # CLEO_TEST_MEDIA=r2 runs the whole suite on it.
 moto[s3]>=5.2
-# An embedded Postgres for CLEO_TEST_DB=postgres and the test_pg_* files
-# (CI uses a Postgres service instead: CLEO_TEST_PG_URL; the outage test
-# still starts a pgserver of its own).
-pgserver>=0.1.4
+# An embedded Postgres for CLEO_TEST_DB=postgres and the test_pg_* files.
+# No wheels for Python ≥ 3.13 yet: there (and in CI) CLEO_TEST_PG_URL
+# names a Postgres server instead, and the outage test (which stops and
+# starts a pgserver of its own) is skipped.
+pgserver>=0.1.4; python_version < "3.13"
