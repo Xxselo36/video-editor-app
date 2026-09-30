@@ -17,5 +17,10 @@ export const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 3501);
 export const STUB_PORT = Number(process.env.E2E_STUB_PORT ?? 8501);
 export const WEB = `http://localhost:${WEB_PORT}`;
 export const API = `http://localhost:${STUB_PORT}`;
+/**
+ * E2E_EDITOR_V2=1: the web build has NEXT_PUBLIC_EDITOR_V2=1 (UX7) and the
+ * run executes the @editor-v2 suites only; without it they are skipped.
+ */
+export const EDITOR_V2 = process.env.E2E_EDITOR_V2 === "1";
 /** Suites tagged @nightly run only with E2E_NIGHTLY=1. */
 export const NIGHTLY = process.env.E2E_NIGHTLY === "1";

@@ -8,6 +8,8 @@ name: Web
 #             pixel7   mobile emulation, anonymous beta
 #             auth     test auth (NEXT_PUBLIC_AUTH_TEST / CLEO_AUTH_TEST),
 #                      the @auth suites on desktop + pixel7
+#             editor-v2  NEXT_PUBLIC_EDITOR_V2=1 build, the @editor-v2
+#                      suites (UX7 shell layout) on desktop + pixel7
 # Nightly (and "Run workflow" with nightly ticked):
 #             webkit   the anonymous suites on WebKit (required for release
 #                      from UX18)
@@ -107,10 +109,17 @@ jobs:
           - name: auth
             mode: auth
             projects: --project=desktop --project=pixel7
+          # UX7: a build with the v2 editor shell, its @editor-v2 suites only
+          - name: editor-v2
+            mode: anon
+            projects: --project=desktop --project=pixel7
+            editor_v2: '1'
     env:
       E2E_MODE: ${{ matrix.mode }}
       E2E_WEB: start
       NEXT_PUBLIC_AUTH_TEST: ${{ matrix.mode == 'auth' && '1' || '' }}
+      NEXT_PUBLIC_EDITOR_V2: ${{ matrix.editor_v2 || '' }}
+      E2E_EDITOR_V2: ${{ matrix.editor_v2 || '' }}
       # UT1 interim captions + their test hook (e2e/captions-interim.spec.ts)
       NEXT_PUBLIC_CAPTIONS_INTERIM: '1'
       NEXT_PUBLIC_TEST_PAGES: '1'
