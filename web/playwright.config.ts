@@ -15,7 +15,7 @@
  *         start) or dev (`next dev`; the default in auth mode)
  */
 import { defineConfig, devices, type PlaywrightTestConfig } from "@playwright/test";
-import { API, MODE, NIGHTLY, STUB_PORT, WEB, WEB_PORT } from "./e2e/support/env";
+import { API, EDITOR_V2, MODE, NIGHTLY, STUB_PORT, WEB, WEB_PORT } from "./e2e/support/env";
 
 const CI = Boolean(process.env.CI);
 const web = process.env.E2E_WEB ?? (MODE === "auth" ? "dev" : "start");
@@ -27,6 +27,8 @@ const webEnv: Record<string, string> = {
   NEXT_PUBLIC_CAPTIONS_INTERIM: "1",
   NEXT_PUBLIC_TEST_PAGES: "1",
   ...(MODE === "auth" ? { NEXT_PUBLIC_AUTH_TEST: "1" } : {}),
+  // UX7: the v2 editor shell (E2E_EDITOR_V2=1 runs; CI: the editor-v2 entry).
+  ...(EDITOR_V2 ? { NEXT_PUBLIC_EDITOR_V2: "1" } : {}),
 };
 const webCommand = {
   start: `npx next start -p ${WEB_PORT}`,
@@ -42,11 +44,13 @@ const stubFlags = [
   MODE === "r2" ? "--r2" : "",
 ].join(" ");
 
-// Mode tags: a run executes its own mode's suites only.
-const grep = MODE === "anon" ? undefined : new RegExp(`@${MODE}\\b`);
+// Mode tags: a run executes its own mode's suites only. A v2-editor run
+// (E2E_EDITOR_V2=1) executes the @editor-v2 suites only; other runs skip them.
+const grep = EDITOR_V2 ? /@editor-v2\b/ : MODE === "anon" ? undefined : new RegExp(`@${MODE}\\b`);
 const grepInvert = [
   ...(MODE === "anon" ? [/@(auth|r2)\b/] : []),
   ...(NIGHTLY ? [] : [/@nightly\b/]),
+  ...(EDITOR_V2 ? [] : [/@editor-v2\b/]),
 ];
 
 // The editor plays video without a user gesture (video.play() in tests).
