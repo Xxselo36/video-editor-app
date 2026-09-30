@@ -31,7 +31,6 @@ import json
 import math
 import os
 import re
-from bisect import bisect_right
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -349,34 +348,59 @@ def check_words(words: list[dict], duration: float | None = None) -> None:
 
 def merge_words(words: list[dict], upsert: list[dict],
                 delete: list[str]) -> list[dict]:
-    """PATCH words: delete ids (unknown ones ignored), replace words by id
-    in place, insert new ones at their start (after equal starts)."""
+    """PATCH words, in one linear pass: delete ids (unknown ones
+    ignored), replace words by id in place, insert new ones.
+
+    A new word "<parent>.<k>" (a split made by the editor's textEdit.ts)
+    goes next to its parent: before it when it starts earlier (tokens
+    typed in front of a word), else right after it and its earlier
+    children — in the client's order. That keeps zero-length and equal-
+    start words where the edit put them. Any other new word goes to its
+    start, after the words already there with that start; new words with
+    equal starts keep the client's order."""
     gone = set(delete)
-    out = [w for w in words if w["id"] not in gone]
-    pos = {w["id"]: i for i, w in enumerate(out)}
-    fresh = []
-    for w in upsert:
-        if w["id"] in gone:
-            continue
-        i = pos.get(w["id"])
-        if i is not None:
-            out[i] = w
+    by_id = {w["id"]: w for w in upsert if w["id"] not in gone}
+    out = [by_id.pop(w["id"], w) for w in words if w["id"] not in gone]
+    present = {w["id"] for w in out} | set(by_id)
+    children: dict[str, list[dict]] = {}
+    free: list[dict] = []
+    for w in by_id.values():  # new words, client order
+        parent = w["id"].rsplit(".", 1)[0] if "." in w["id"] else None
+        if parent is not None and parent in present and parent != w["id"]:
+            children.setdefault(parent, []).append(w)
         else:
-            fresh.append(w)
-    for w in fresh:
-        i = bisect_right([x["start"] for x in out], w["start"])
-        out.insert(i, w)
-    return out
+            free.append(w)
+    free.sort(key=lambda w: w["start"])  # stable: client order on ties
+    merged: list[dict] = []
+
+    def emit(w: dict) -> None:
+        kids = children.pop(w["id"], ())
+        for c in kids:
+            if c["start"] < w["start"]:
+                emit(c)
+        merged.append(w)
+        for c in kids:
+            if not c["start"] < w["start"]:
+                emit(c)
+
+    i = 0
+    for w in out:
+        while i < len(free) and free[i]["start"] < w["start"]:
+            emit(free[i])
+            i += 1
+        emit(w)
+    while i < len(free):
+        emit(free[i])
+        i += 1
+    for kids in list(children.values()):  # a parent cycle: keep them anyway
+        merged.extend(kids)
+    return merged
 
 
-def apply_patch(doc: dict, cur_rev: float, payload: Any, *,
-                duration: float | None = None,
-                live: list[str] | None = None) -> tuple[dict, float]:
-    """PATCH /jobs/{id}/doc: (new doc, new rev) or DocError. `payload`:
-    {base_rev, rev, style?, format?, words?: {upsert, delete}}. base_rev
-    must be the stored rev (else 409 stale_rev: another tab or device
-    saved meanwhile) and rev must be newer. Checks run on the merged doc,
-    so a refused patch changes nothing."""
+def prepare_patch(payload: Any, live: list[str] | None = None) -> dict[str, Any]:
+    """Everything of a PATCH that doesn't need the stored doc: shape,
+    revisions, style, format, words — checked before the row lock.
+    Raises DocError 400."""
     if not isinstance(payload, dict):
         raise DocError(400, "bad_request")
     extra = set(payload) - {"base_rev", "rev", "style", "format", "words"}
@@ -387,14 +411,11 @@ def apply_patch(doc: dict, cur_rev: float, payload: Any, *,
     base, rev = payload.get("base_rev"), payload.get("rev")
     if not (_num(base) and _num(rev)):
         raise DocError(400, "bad_rev")
-    cur = float(cur_rev or 0)
-    if float(base) != cur or float(rev) <= cur:
-        raise DocError(409, "stale_rev", rev=cur)
-    new = copy.deepcopy(doc)
+    out: dict[str, Any] = {"base_rev": float(base), "rev": float(rev)}
     if "style" in payload:
-        new["style"] = validate_style(payload["style"], live)
+        out["style"] = validate_style(payload["style"], live)
     if "format" in payload:
-        new["format"] = validate_format(payload["format"])
+        out["format"] = validate_format(payload["format"])
     if "words" in payload:
         ops = payload["words"]
         if not isinstance(ops, dict) or set(ops) - {"upsert", "delete"}:
@@ -404,11 +425,40 @@ def apply_patch(doc: dict, cur_rev: float, payload: Any, *,
                 or not all(isinstance(x, str) for x in de)
                 or len(up) > MAX_WORDS or len(de) > MAX_WORDS):
             raise DocError(400, "bad_words")
-        new["words"] = merge_words(new.get("words") or [],
-                                   [validate_word(w) for w in up], de)
+        out["words"] = ([validate_word(w) for w in up], de)
+    return out
+
+
+def apply_prepared(doc: dict, cur_rev: float, prep: dict[str, Any], *,
+                   duration: float | None = None) -> tuple[dict, float]:
+    """The part of a PATCH that needs the stored doc (under the row
+    lock): the revision rule, the word merge and its checks. The doc is
+    copied shallowly: words are never changed in place."""
+    cur = float(cur_rev or 0)
+    if prep["base_rev"] != cur or prep["rev"] <= cur:
+        raise DocError(409, "stale_rev", rev=cur)
+    new = dict(doc)
+    for k in ("style", "format"):
+        if k in prep:
+            new[k] = copy.deepcopy(prep[k])
+    if "words" in prep:
+        up, de = prep["words"]
+        new["words"] = merge_words(doc.get("words") or [], up, de)
         check_words(new["words"], duration)
-    new["rev"] = float(rev)
-    return new, float(rev)
+    new["rev"] = prep["rev"]
+    return new, prep["rev"]
+
+
+def apply_patch(doc: dict, cur_rev: float, payload: Any, *,
+                duration: float | None = None,
+                live: list[str] | None = None) -> tuple[dict, float]:
+    """PATCH /jobs/{id}/doc: (new doc, new rev) or DocError. `payload`:
+    {base_rev, rev, style?, format?, words?: {upsert, delete}}. base_rev
+    must be the stored rev (else 409 stale_rev: another tab or device
+    saved meanwhile) and rev must be newer. Checks run on the merged doc,
+    so a refused patch changes nothing."""
+    prep = prepare_patch(payload, live)
+    return apply_prepared(doc, cur_rev, prep, duration=duration)
 
 
 # ── text edits (shared with the web: testdata/text_edit_vectors.json) ─

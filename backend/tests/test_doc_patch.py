@@ -225,3 +225,54 @@ def test_font_refresh(client):
     # a non-CJK doc needs none
     en = _review_job()
     assert client.post(f"/jobs/{en.id}/fonts/refresh").json() == {"font_subsets": {}}
+
+
+# ── merge order and cost (review findings) ───────────────────────────
+
+
+def _w(i, t, s, e):
+    return {"id": i, "text": t, "start": s, "end": e}
+
+
+def test_split_word_goes_after_its_parent_even_at_equal_starts():
+    words = [_w("w0001", "a", 1.0, 1.0), _w("w0002", "b", 1.0, 1.2)]
+    out = D.merge_words(words, [_w("w0001.1", "x", 1.0, 1.0)], [])
+    assert [w["id"] for w in out] == ["w0001", "w0001.1", "w0002"]
+    # siblings in the client's order, after the parent
+    out = D.merge_words(words, [_w("w0001.1", "x", 1.0, 1.0), _w("w0001.2", "y", 1.0, 1.0)], [])
+    assert [w["id"] for w in out] == ["w0001", "w0001.1", "w0001.2", "w0002"]
+    # a child of a new child
+    out = D.merge_words(words, [_w("w0001.1", "x", 1.0, 1.0), _w("w0001.1.1", "z", 1.0, 1.0)], [])
+    assert [w["id"] for w in out] == ["w0001", "w0001.1", "w0001.1.1", "w0002"]
+
+
+def test_merge_matches_the_text_edit_splice():
+    """Upserting what apply_text_edit (= web textEdit.ts) returns for a
+    span gives the span's words in the edit's own order."""
+    words = [_w("w0001", "so", 0.0, 0.2), _w("w0002", "world", 0.3, 0.8),
+             _w("w0003", "a", 1.0, 1.0), _w("w0004", "b", 1.0, 1.2)]
+    for span, text in (([1], "hello world"), ([2], "a x y"), ([1, 2], "big wide world a")):
+        edited = D.apply_text_edit([words[i] for i in span], text, {w["id"] for w in words})
+        gone = [words[i]["id"] for i in span if words[i]["id"] not in {w["id"] for w in edited}]
+        out = D.merge_words(words, edited, gone)
+        expect = words[:span[0]] + edited + words[span[-1] + 1:]
+        assert [w["id"] for w in out] == [w["id"] for w in expect], text
+        D.check_words(out)
+
+
+def test_new_words_without_parent_go_by_start_client_order_on_ties():
+    words = [_w("w0001", "a", 1.0, 1.1), _w("w0002", "b", 2.0, 2.1)]
+    out = D.merge_words(words, [_w("n2", "q", 2.0, 2.0), _w("n1", "p", 2.0, 2.0),
+                                _w("n0", "o", 0.5, 0.6)], [])
+    assert [w["id"] for w in out] == ["n0", "w0001", "w0002", "n2", "n1"]
+
+
+def test_big_patch_merge_is_linear():
+    import time
+    words = [_w(f"w{i:05d}", "x", i * 0.3, i * 0.3 + 0.2) for i in range(48_000)]
+    fresh = [_w(f"n{i}", "y", i * 10.0 + 0.25, i * 10.0 + 0.26) for i in range(1400)]
+    t0 = time.perf_counter()
+    out = D.merge_words(words, fresh, [])
+    assert time.perf_counter() - t0 < 0.5
+    assert len(out) == 49_400
+    D.check_words(out)

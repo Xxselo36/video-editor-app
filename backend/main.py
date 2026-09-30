@@ -4242,7 +4242,10 @@ def _patch_doc(job_id: str, payload: Any, user: User | None) -> dict:
     refusal = _doc_state_refusal(job)
     if refusal is not None:
         raise refusal
-    live = edit_doc.live_presets()
+    try:  # validation outside the row lock
+        prep = edit_doc.prepare_patch(payload, edit_doc.live_presets())
+    except edit_doc.DocError as e:
+        raise _doc_refusal(e)
     outcome: dict[str, Any] = {}
 
     def change(cur: Job) -> dict | None:
@@ -4250,8 +4253,8 @@ def _patch_doc(job_id: str, payload: Any, user: User | None) -> dict:
             outcome["refusal"] = _doc_state_refusal(cur)
             return None
         try:
-            doc, rev = edit_doc.apply_patch(cur.doc, cur.doc_rev, payload,
-                                            duration=cur.duration, live=live)
+            doc, rev = edit_doc.apply_prepared(cur.doc, cur.doc_rev, prep,
+                                               duration=cur.duration)
         except edit_doc.DocError as e:
             outcome["refusal"] = _doc_refusal(e)
             return None
