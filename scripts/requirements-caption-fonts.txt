@@ -1,0 +1,5 @@
+# scripts/build-caption-fonts.py and scripts/font-coverage.py.
+# Pinned: the woff2 bytes (and so the --check hashes) depend on these versions.
+fonttools==4.66.0
+brotli==1.2.0
+uharfbuzz==0.56.2
