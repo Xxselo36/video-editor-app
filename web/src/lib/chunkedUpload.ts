@@ -161,10 +161,10 @@ const idbPut = (rec: UploadRecord) => idb<unknown>("readwrite", (s) => s.put(rec
 const idbDelete = (fp: string) => idb<unknown>("readwrite", (s) => s.delete(fp));
 const idbAll = () => idb<UploadRecord[]>("readonly", (s) => s.getAll());
 
-// name:size of the stored records, so hasResumableUpload can answer
+// name:size of the stored records (knownKey), so hasResumableUpload can answer
 // synchronously (refreshed on every change).
 const known = new Set<string>();
-const knownKey = (name: string, size: number) => `${size}:${name}`;
+export const knownKey = (name: string, size: number) => `${size}:${name}`;
 
 async function refreshKnown(): Promise<void> {
   const all = (await idbAll()) ?? [];
@@ -181,7 +181,7 @@ const fpCache = new WeakMap<File, Promise<string | null>>();
 
 /** size + ":" + hex(SHA-256(name ‖ first 1 MiB ‖ last 1 MiB)). Null
  *  where crypto.subtle is missing (plain-http LAN dev): no resume. */
-function fingerprint(file: File): Promise<string | null> {
+export function fingerprint(file: File): Promise<string | null> {
   let p = fpCache.get(file);
   if (!p) {
     p = (async () => {
@@ -259,12 +259,12 @@ export async function abortResumable(opts: { file: File }): Promise<void> {
   await dropRecord(rec.fp);
 }
 
-// ── helpers ──────────────────────────────────────────────────────────
+// ── helpers (the pure ones are exported for chunkedUpload.test.ts) ───
 
-const partLength = (n: number, partSize: number, size: number, total: number) =>
+export const partLength = (n: number, partSize: number, size: number, total: number) =>
   n < total ? partSize : size - partSize * (total - 1);
 
-function doneBytes(done: number[], partSize: number, size: number, total: number): number {
+export function doneBytes(done: number[], partSize: number, size: number, total: number): number {
   return done.reduce((s, n) => s + partLength(n, partSize, size, total), 0);
 }
 

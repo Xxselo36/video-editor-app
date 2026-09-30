@@ -108,6 +108,12 @@ def test_ascending_runs():
     assert len(runs([(4, 5), (2, 3), (0, 1)])) == 3
 
 
+# Peak child RSS allowed for a preview build. The old single-pass build
+# peaked at 4.6 GB; x264 frame threads grow with the core count (~450 MB
+# on 2 cores, ~650 MB on a 4-vCPU CI runner).
+_PREVIEW_PEAK_MB = 1000
+
+
 @pytest.fixture(scope="module")
 def clip60(tmp_path_factory):
     """60 s 1080x1920 30p — the size the audit measured (4.6 GB peak
@@ -125,7 +131,7 @@ def test_reordered_preview_memory_is_bounded(clip60, tmp_path, monkeypatch):
     pipeline._ffmpeg_cuts_preview(str(clip60), moved, str(out))
     print(f"reordered preview: {len(run.calls)} ffmpeg calls, "
           f"peak child RSS {run.peak_mb:.0f} MB")
-    assert run.peak_mb < 600
+    assert run.peak_mb < _PREVIEW_PEAK_MB
     # One pass through the concat demuxer (+ the start-time probe).
     assert [Path(c[0]).name.startswith("ffprobe") for c, _ in run.calls] \
         == [True, False]
@@ -136,7 +142,7 @@ def test_reordered_preview_memory_is_bounded(clip60, tmp_path, monkeypatch):
     # The in-order timeline still takes the single-pass path.
     run.calls.clear()
     pipeline._ffmpeg_cuts_preview(str(clip60), segs, str(out))
-    assert len(run.calls) == 1 and run.peak_mb < 600
+    assert len(run.calls) == 1 and run.peak_mb < _PREVIEW_PEAK_MB
 
 
 def _event_clip(path: Path, seconds: int = 20) -> Path:

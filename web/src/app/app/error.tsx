@@ -40,6 +40,10 @@ export default function AppError({
     // Runs after the crashed editor's cleanup queued its last save.
     if (!hasPendingSaves()) return;
     let alive = true;
+    // Deliberately in the effect, not a lazy initial state: the crashed
+    // editor's cleanup queues its last save before this runs, not before
+    // the first render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSaves("saving");
     void waitForAllSaves().then((ok) => {
       if (alive) setSaves(ok ? "saved" : "unsaved");

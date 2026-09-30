@@ -31,6 +31,16 @@ or unknown `kid`, every ~5 min) runs in a small thread pool of its own.
 
 PyJWT is imported lazily: with auth off the backend runs without it.
 Only backend/main.py imports this module.
+
+Test auth (CLEO_AUTH_TEST=1, for the e2e suites and staging only):
+`X-Test-User: <id>[;plan=<plan>]` signs a request in as that user —
+the same User a Clerk token gives, without Clerk; `plan` (starter, pro,
+studio or none) overrides the user's entitlement. It turns accounts on
+like CLERK_ISSUER does. Anyone could sign in as anyone with it, so it
+is refused where that matters: with CLEO_ENV=production, in Railway's
+production environment, or next to a live Clerk secret (sk_live_…) the
+API does not start (check_test_auth in main.lifespan) and the header is
+ignored.
 """
 from __future__ import annotations
 
@@ -83,7 +93,71 @@ def issuer() -> str:
 
 
 def auth_enabled() -> bool:
-    return bool(issuer())
+    return bool(issuer()) or test_auth_enabled()
+
+
+# ── test auth (CLEO_AUTH_TEST) ───────────────────────────────────────
+
+TEST_USER_HEADER = "x-test-user"
+_TEST_USER_ID = re.compile(r"^[A-Za-z0-9_.:@-]{1,128}$")
+TEST_PLANS = ("starter", "pro", "studio", "none")
+
+
+class TestAuthRefused(RuntimeError):
+    """CLEO_AUTH_TEST=1 where it must never run (the API won't start)."""
+
+
+def _test_auth_requested() -> bool:
+    return os.environ.get("CLEO_AUTH_TEST", "").strip().lower() in (
+        "1", "true", "yes")
+
+
+def test_auth_refusal() -> str | None:
+    """Why test auth must not run in this environment, or None."""
+    if os.environ.get("CLEO_ENV", "").strip().lower() in ("production",
+                                                           "prod"):
+        return "CLEO_ENV=production"
+    for k in ("RAILWAY_ENVIRONMENT_NAME", "RAILWAY_ENVIRONMENT"):
+        if os.environ.get(k, "").strip().lower() == "production":
+            return f"{k}=production"
+    if os.environ.get("CLERK_SECRET_KEY", "").strip().startswith("sk_live_"):
+        return "a live Clerk secret (CLERK_SECRET_KEY=sk_live_…)"
+    return None
+
+
+def test_auth_enabled() -> bool:
+    """CLEO_AUTH_TEST=1 and not refused here (see test_auth_refusal)."""
+    return _test_auth_requested() and test_auth_refusal() is None
+
+
+def check_test_auth() -> None:
+    """At startup: refuse to start with CLEO_AUTH_TEST=1 in production or
+    next to a live Clerk secret — test auth lets anyone sign in as
+    anyone. Raises TestAuthRefused."""
+    if not _test_auth_requested():
+        return
+    why = test_auth_refusal()
+    if why:
+        raise TestAuthRefused(
+            f"CLEO_AUTH_TEST=1 is refused with {why}: test auth lets anyone "
+            "sign in as anyone. Remove CLEO_AUTH_TEST.")
+    print("[auth] TEST AUTH ON — requests sign in with X-Test-User; never "
+          "use this outside tests / staging", flush=True)
+
+
+def _test_user(request: Request) -> User | None:
+    """The user an `X-Test-User: <id>[;plan=<plan>]` header names (test
+    auth only; else None). A malformed header is a 401."""
+    raw = request.headers.get(TEST_USER_HEADER, "").strip()
+    if not raw or not test_auth_enabled():
+        return None
+    user_id, *params = [p.strip() for p in raw.split(";")]
+    opts = dict(p.split("=", 1) for p in params if "=" in p)
+    plan = opts.get("plan", "").strip().lower() or None
+    if not _TEST_USER_ID.match(user_id) or (plan and plan not in TEST_PLANS):
+        raise _auth_required()
+    accounts.set_test_plan(user_id, plan)
+    return User(id=user_id)
 
 
 def authorized_parties() -> set[str]:
@@ -284,8 +358,9 @@ async def _bearer_user(request: Request) -> User | None:
 
 def log_status() -> None:
     """Called at startup: recommend the networkless key, and warm the
-    JWKS cache in the background so the first request doesn't wait."""
-    if not auth_enabled():
+    JWKS cache in the background so the first request doesn't wait.
+    (Test auth announces itself in check_test_auth.)"""
+    if not issuer():
         return
     if os.environ.get("CLERK_JWT_KEY", "").strip():
         print("[auth] on — tokens verified with CLERK_JWT_KEY", flush=True)
@@ -313,7 +388,8 @@ async def current_user(request: Request) -> User | None:
     accounts); otherwise a verified user or 401 auth_required."""
     if not auth_enabled():
         return None
-    user = _admin_user(request) or await _bearer_user(request)
+    user = (_admin_user(request) or _test_user(request)
+            or await _bearer_user(request))
     if user is None:
         raise _auth_required()
     return user
@@ -331,7 +407,7 @@ async def media_user(request: Request) -> User | None:
     """current_user, or the `t` media token for <video>/<img>/<a> URLs."""
     if not auth_enabled():
         return None
-    user = _admin_user(request)
+    user = _admin_user(request) or _test_user(request)
     if user is not None:
         return user
     try:

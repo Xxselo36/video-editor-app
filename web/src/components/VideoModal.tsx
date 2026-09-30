@@ -40,6 +40,7 @@ export function VideoModal({
       style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(6px)" }}
       role="dialog"
       aria-modal="true"
+      data-testid="dialog-video"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -47,6 +48,7 @@ export function VideoModal({
       >
         <button
           onClick={onClose}
+          data-testid="dialog-close"
           className="absolute -top-10 right-0 flex items-center gap-1.5 text-xs text-white/70 transition-opacity hover:opacity-100"
           aria-label={t("common.videoModal.closeAria")}
         >

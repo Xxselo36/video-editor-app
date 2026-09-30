@@ -381,8 +381,13 @@ def test_pool_serves_again_soon_after_postgres_is_back(pg_server,
     until its attempt at ~31 s. With RECONNECT_TIMEOUT_S each cycle
     gives up early and the next request starts a new one from 1 s (the
     cycle is shortened here to keep the test short)."""
-    import pgserver
-    from conftest import _TMP
+    # A server of its own to stop and start (also with CLEO_TEST_PG_URL,
+    # where conftest never started pgserver: as root it needs the
+    # binaries where its unprivileged user reaches them).
+    pgserver = pytest.importorskip("pgserver")
+    from conftest import _TMP, _PgServer
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        _PgServer._relocate_binaries()
     pg = pytest.importorskip("backend.pg")
     assert pg.RECONNECT_TIMEOUT_S <= 30
     monkeypatch.setattr(pg, "RECONNECT_TIMEOUT_S", 3.0)

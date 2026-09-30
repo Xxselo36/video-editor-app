@@ -1,7 +1,16 @@
 # Test-only dependencies (never installed in the image). On top of
 # backend/requirements.txt:
 #   pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+# CI: .github/workflows/backend.yml (and web.yml, for the stub backend).
+pytest>=8.3
+# FastAPI's TestClient.
+httpx>=0.27
 # moto fakes R2 (S3 API) in the backend tests — in-process (mock_aws)
-# and as a server (ThreadedMotoServer) for the ffprobe / browser tests;
+# and as a server (ThreadedMotoServer, needs the server extra) for the ffprobe / browser tests;
 # CLEO_TEST_MEDIA=r2 runs the whole suite on it.
-moto[s3]>=5.2
+moto[s3,server]>=5.2
+# An embedded Postgres for CLEO_TEST_DB=postgres and the test_pg_* files.
+# No wheels for Python ≥ 3.13 yet: there (and in CI) CLEO_TEST_PG_URL
+# names a Postgres server instead, and the outage test (which stops and
+# starts a pgserver of its own) is skipped.
+pgserver>=0.1.4; python_version < "3.13"

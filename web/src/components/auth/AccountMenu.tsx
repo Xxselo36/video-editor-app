@@ -7,7 +7,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useT } from "@/i18n";
-import { AUTH_ENABLED, signInHref } from "@/lib/auth";
+import { AUTH_ENABLED, AUTH_TEST, signInHref } from "@/lib/auth";
 import { useAuthState, useBillingEnabled } from "@/lib/account";
 
 function AvatarPlaceholder() {
@@ -24,6 +24,13 @@ const ClerkUserButton = dynamic(() => import("./ClerkUserButton"), {
   ssr: false,
   loading: () => <AvatarPlaceholder />,
 });
+// Test auth (NEXT_PUBLIC_AUTH_TEST=1): no Clerk, a sign-out button instead.
+const MockUserButton = AUTH_TEST
+  ? dynamic(() => import("./MockAuthProvider").then((m) => m.MockUserButton), {
+      ssr: false,
+      loading: () => <AvatarPlaceholder />,
+    })
+  : null;
 
 /**
  * Signed in: "Account" link (hidden on phones) + avatar menu.
@@ -59,7 +66,7 @@ export function AccountMenu({ returnHere = true }: { returnHere?: boolean }) {
       >
         {t("common.auth.account")}
       </Link>
-      <ClerkUserButton accountLabel={t("common.auth.account")} />
+      {MockUserButton ? <MockUserButton /> : <ClerkUserButton accountLabel={t("common.auth.account")} />}
     </>
   );
 }

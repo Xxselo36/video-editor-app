@@ -608,7 +608,14 @@ def _accepts(fn: Callable, name: str) -> bool:
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
-    # STARTUP: pick the database first — with DATABASE_URL this opens
+    # STARTUP: never with test auth (CLEO_AUTH_TEST) in production or next
+    # to a live Clerk secret — it would let anyone sign in as anyone.
+    try:
+        auth.check_test_auth()
+    except auth.TestAuthRefused as e:
+        print(f"[auth] NOT STARTING: {e}", flush=True)
+        raise
+    # Then pick the database — with DATABASE_URL this opens
     # Postgres and, on the first boot, copies the SQLite data into it
     # (backend/db.py). Raises (no start) on a bad CLEO_DB_BACKEND, or if
     # Postgres is gone after the cutover.

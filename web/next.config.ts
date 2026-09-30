@@ -38,6 +38,18 @@ const release = gitSha();
 
 const isDev = process.env.NODE_ENV === "development";
 
+// Test auth (NEXT_PUBLIC_AUTH_TEST=1, lib/auth AUTH_TEST) lets anyone sign
+// in as anyone: e2e runs and staging only, never a production deployment.
+if (
+  process.env.NEXT_PUBLIC_AUTH_TEST === "1" &&
+  (process.env.VERCEL_ENV === "production" ||
+    /^pk_live_/.test(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? ""))
+) {
+  throw new Error(
+    "NEXT_PUBLIC_AUTH_TEST=1 is refused in a production deployment (VERCEL_ENV=production or a live Clerk key)",
+  );
+}
+
 /** Origin of an absolute URL from env, or null. */
 function originOf(url: string | undefined): string | null {
   if (!url) return null;

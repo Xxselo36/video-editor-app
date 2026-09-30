@@ -291,7 +291,7 @@ const English = (
         ? "Your list of projects is stored with your account and removed together with each project. Account data is kept until you delete your account; records of subscriptions and usage are kept as long as needed for billing and the statutory retention periods."
         : "Your list of projects is stored only in your browser (local storage) and can be removed by clearing the site data."}{" "}
       The processing statistics are deleted after {EVENTS_KEEP_DAYS} days, server logs after the hosting
-      provider's log retention period.
+      provider&apos;s log retention period.
     </p>
 
     <H>5. Voice test</H>
