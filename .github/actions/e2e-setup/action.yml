@@ -51,6 +51,12 @@ runs:
       with:
         path: ${{ github.workspace }}/.stub-media
         key: stub-media-${{ runner.os }}-${{ hashFiles('backend/tests/stub_media.py') }}
+    - name: Stub media
+      # Built up front on a cache miss (~15 s), not inside a test's timeout.
+      shell: bash
+      env:
+        STUB_MEDIA_DIR: ${{ github.workspace }}/.stub-media
+      run: python backend/tests/stub_media.py all
 
     - name: Playwright version
       id: pw
