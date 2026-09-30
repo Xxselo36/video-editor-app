@@ -153,6 +153,13 @@ def test_words_keep_every_token_and_flag_fillers():
     assert words[0]["conf"] == 0.91 and "conf" not in words[2]   # 1.0 = no real value
 
 
+def test_sentence_punctuation_tokens_stay_visible():
+    words = D.words_from_transcript([{"word": "晴れ", "start": 0, "end": 0.4},
+                                     {"word": "。", "start": 0.4, "end": 0.45},
+                                     {"word": "…", "start": 0.5, "end": 0.9}])
+    assert [bool(w.get("hidden")) for w in words] == [False, False, True]
+
+
 def test_cleanup_diff_keeps_timing():
     words = D.words_from_transcript(RAW)
     # the caption units of src/audio.py (fillers dropped, <= 3 chars glued)

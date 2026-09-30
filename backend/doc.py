@@ -73,7 +73,10 @@ _HEX = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 # JavaScript's \s, so tokens split exactly like the web port's.
 _WS = "\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 _TOKEN = re.compile(f"[^{_WS}]+")
-_PUNCT_ONLY = re.compile(r"^[^\w]+$")
+# Whisper's mark for an audible but unrecognised sound ("...", "…", "—"):
+# a hesitation, flagged like a filler. Other punctuation-only tokens (a
+# separate "。" or "?") stay visible: they end sentences and pages.
+_HESITATION = re.compile(r"^(?:\.{2,}|…+|[-–—]+)$")
 
 
 class DocError(Exception):
@@ -606,8 +609,8 @@ def words_from_transcript(raw: Iterable[dict],
                           fillers: Iterable[dict] | None = None) -> list[dict]:
     """Doc words (ids w0001…, SOURCE times rounded to ms, sorted by
     start) from transcription words ({word|text, start, end,
-    probability?}). filler: a filler sound, a punctuation-only
-    hesitation mark ("…") or a detected filler range; fillers are hidden."""
+    probability?}). filler: a filler sound, a hesitation mark
+    ("...", "…") or a detected filler range; fillers are hidden."""
     ranges = [(float(f["start"]), float(f["end"])) for f in (fillers or ())
               if f.get("start") is not None and f.get("end") is not None]
     out: list[dict] = []
@@ -625,7 +628,7 @@ def words_from_transcript(raw: Iterable[dict],
         p = w.get("probability")
         if _num(p) and 0 <= p < 1:
             word["conf"] = round(float(p), 3)
-        if (_vocal(text) or _PUNCT_ONLY.match(text)
+        if (_vocal(text) or _HESITATION.match(text)
                 or any(fs - 0.002 <= s and e <= fe + 0.002 for fs, fe in ranges)):
             word["filler"] = True
             word["hidden"] = True
