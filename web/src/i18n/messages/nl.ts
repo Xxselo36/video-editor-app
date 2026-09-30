@@ -493,4 +493,16 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "common.footer.legalAria": "Juridisch",
   "legal.onlyDeEn":
     "Deze pagina is alleen beschikbaar in het Duits en het Engels. Je leest de Engelse versie.",
+  "common.backHome": "Terug naar de startpagina",
+  "common.notFound.title": "Pagina niet gevonden",
+  "common.notFound.body": "Deze pagina bestaat niet of is verplaatst.",
+  "common.error.title": "Er ging iets mis",
+  "common.error.body": "Deze pagina kon niet worden weergegeven. Probeer het opnieuw.",
+  "common.error.retry": "Opnieuw proberen",
+  "common.error.ref": "Foutreferentie: {id}",
+  "app.crash.saving": "Je laatste wijzigingen worden opgeslagen…",
+  "app.crash.saved": "Je laatste wijzigingen zijn opgeslagen.",
+  "app.crash.unsaved": "Je laatste wijzigingen zijn mogelijk niet opgeslagen.",
+  "app.crash.body": "Laad de pagina opnieuw om verder te gaan waar je gebleven was.",
+  "app.crash.reload": "Pagina opnieuw laden",
 };

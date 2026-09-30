@@ -492,4 +492,16 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "common.footer.legalAria": "कानूनी जानकारी",
   "legal.onlyDeEn":
     "यह पेज सिर्फ़ जर्मन और अंग्रेज़ी में उपलब्ध है। आप अंग्रेज़ी संस्करण पढ़ रहे हैं।",
+  "common.backHome": "होम पर वापस जाएं",
+  "common.notFound.title": "पेज नहीं मिला",
+  "common.notFound.body": "यह पेज मौजूद नहीं है या कहीं और चला गया है।",
+  "common.error.title": "कुछ गड़बड़ हो गई",
+  "common.error.body": "यह पेज दिखाया नहीं जा सका। कृपया फिर से कोशिश करें।",
+  "common.error.retry": "फिर कोशिश करें",
+  "common.error.ref": "एरर रेफ़रेंस: {id}",
+  "app.crash.saving": "आपके आख़िरी बदलाव सेव हो रहे हैं…",
+  "app.crash.saved": "आपके आख़िरी बदलाव सेव हो गए हैं।",
+  "app.crash.unsaved": "हो सकता है आपके आख़िरी बदलाव सेव न हुए हों।",
+  "app.crash.body": "जहाँ छोड़ा था वहीं से जारी रखने के लिए पेज रीलोड करें।",
+  "app.crash.reload": "पेज रीलोड करें",
 };

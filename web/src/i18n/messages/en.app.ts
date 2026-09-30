@@ -365,4 +365,9 @@ export const enApp = {
   "app.voice.scene.type.keep": "Keep",
   "app.voice.scene.type.restart": "Cut / Restart",
   "app.voice.scene.type.finish": "Finish",
+  "app.crash.saving": "Saving your latest changes…",
+  "app.crash.saved": "Your latest changes are saved.",
+  "app.crash.unsaved": "Your latest changes may not have been saved.",
+  "app.crash.body": "Reload the page to continue where you left off.",
+  "app.crash.reload": "Reload page",
 };

@@ -493,4 +493,16 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "common.footer.legalAria": "Правовая информация",
   "legal.onlyDeEn":
     "Эта страница доступна только на немецком и английском. Ты читаешь английскую версию.",
+  "common.backHome": "На главную",
+  "common.notFound.title": "Страница не найдена",
+  "common.notFound.body": "Такой страницы нет, или она переехала.",
+  "common.error.title": "Что-то пошло не так",
+  "common.error.body": "Не удалось показать эту страницу. Попробуй ещё раз.",
+  "common.error.retry": "Попробовать снова",
+  "common.error.ref": "Код ошибки: {id}",
+  "app.crash.saving": "Сохраняем твои последние изменения…",
+  "app.crash.saved": "Твои последние изменения сохранены.",
+  "app.crash.unsaved": "Последние изменения могли не сохраниться.",
+  "app.crash.body": "Перезагрузи страницу, чтобы продолжить с того же места.",
+  "app.crash.reload": "Перезагрузить страницу",
 };

@@ -494,4 +494,16 @@ export const id: Partial<Record<MessageKey, string>> = {
   "common.footer.legalAria": "Informasi hukum",
   "legal.onlyDeEn":
     "Halaman ini hanya tersedia dalam bahasa Jerman dan Inggris. Kamu sedang membaca versi bahasa Inggris.",
+  "common.backHome": "Kembali ke beranda",
+  "common.notFound.title": "Halaman tidak ditemukan",
+  "common.notFound.body": "Halaman ini tidak ada atau sudah dipindahkan.",
+  "common.error.title": "Terjadi kesalahan",
+  "common.error.body": "Halaman ini tidak bisa ditampilkan. Coba lagi.",
+  "common.error.retry": "Coba lagi",
+  "common.error.ref": "Referensi error: {id}",
+  "app.crash.saving": "Menyimpan perubahan terakhirmu…",
+  "app.crash.saved": "Perubahan terakhirmu sudah tersimpan.",
+  "app.crash.unsaved": "Perubahan terakhirmu mungkin belum tersimpan.",
+  "app.crash.body": "Muat ulang halaman untuk melanjutkan dari posisi terakhirmu.",
+  "app.crash.reload": "Muat ulang halaman",
 };

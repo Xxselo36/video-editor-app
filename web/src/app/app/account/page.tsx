@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { AUTH_ENABLED } from "@/lib/auth";
 import { AccountView } from "@/components/billing/AccountView";
 
-export const metadata: Metadata = { title: "Account – CleoCuts" };
+export const metadata: Metadata = { title: "Account" };
 
 // Behind the /app sign-in gate (app/app/layout.tsx).
 export default function AccountPage() {

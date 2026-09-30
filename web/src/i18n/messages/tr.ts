@@ -494,4 +494,16 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "common.footer.legalAria": "Yasal bilgiler",
   "legal.onlyDeEn":
     "Bu sayfa yalnızca Almanca ve İngilizce olarak mevcut. İngilizce sürümünü okuyorsun.",
+  "common.backHome": "Ana sayfaya dön",
+  "common.notFound.title": "Sayfa bulunamadı",
+  "common.notFound.body": "Bu sayfa yok ya da taşındı.",
+  "common.error.title": "Bir şeyler ters gitti",
+  "common.error.body": "Bu sayfa gösterilemedi. Lütfen tekrar dene.",
+  "common.error.retry": "Tekrar dene",
+  "common.error.ref": "Hata referansı: {id}",
+  "app.crash.saving": "Son değişikliklerin kaydediliyor…",
+  "app.crash.saved": "Son değişikliklerin kaydedildi.",
+  "app.crash.unsaved": "Son değişikliklerin kaydedilmemiş olabilir.",
+  "app.crash.body": "Kaldığın yerden devam etmek için sayfayı yenile.",
+  "app.crash.reload": "Sayfayı yenile",
 };

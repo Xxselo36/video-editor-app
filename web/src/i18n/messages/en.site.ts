@@ -151,4 +151,11 @@ export const enSite = {
   "common.footer.legalAria": "Legal",
   "legal.onlyDeEn":
     "This page is available in German and English only. You are reading the English version.",
+  "common.backHome": "Back to home",
+  "common.notFound.title": "Page not found",
+  "common.notFound.body": "This page doesn't exist or has moved.",
+  "common.error.title": "Something went wrong",
+  "common.error.body": "This page couldn't be shown. Please try again.",
+  "common.error.retry": "Try again",
+  "common.error.ref": "Error reference: {id}",
 };

@@ -505,4 +505,16 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "common.footer.legalAria": "Informations légales",
   "legal.onlyDeEn":
     "Cette page n'est disponible qu'en allemand et en anglais. Tu lis la version anglaise.",
+  "common.backHome": "Retour à l'accueil",
+  "common.notFound.title": "Page introuvable",
+  "common.notFound.body": "Cette page n'existe pas ou a été déplacée.",
+  "common.error.title": "Une erreur s'est produite",
+  "common.error.body": "Impossible d'afficher cette page. Réessaie.",
+  "common.error.retry": "Réessayer",
+  "common.error.ref": "Référence de l'erreur : {id}",
+  "app.crash.saving": "Enregistrement de tes dernières modifications…",
+  "app.crash.saved": "Tes dernières modifications sont enregistrées.",
+  "app.crash.unsaved": "Tes dernières modifications n'ont peut-être pas été enregistrées.",
+  "app.crash.body": "Recharge la page pour reprendre là où tu en étais.",
+  "app.crash.reload": "Recharger la page",
 };
