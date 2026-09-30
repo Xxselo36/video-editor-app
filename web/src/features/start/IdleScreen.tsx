@@ -60,17 +60,7 @@ export function IdleScreen({
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
         data-testid="upload-dropzone"
-        className="group w-full rounded-2xl px-6 py-16 text-center transition-all hover:scale-[1.01]"
-        style={{
-          background: "var(--surface-1)",
-          border: "2px dashed var(--border-strong)",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = "var(--brand)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = "var(--border-strong)";
-        }}
+        className="group w-full rounded-2xl border-2 border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-6 py-16 text-center transition-all hover:scale-[1.01] hover:border-[var(--brand)]"
       >
         <div
           className="mx-auto mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl transition-transform group-hover:scale-110"

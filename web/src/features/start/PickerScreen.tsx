@@ -4,8 +4,8 @@
 // job cards, the recent projects and their status poll.
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight } from "lucide-react";
-import { IconArrowRight, IconMic, IconSliders } from "@/components/Icons";
+import { ArrowLeft } from "lucide-react";
+import { IconArrowRight, IconSliders } from "@/components/Icons";
 import { Icon } from "@/components/ui/Icon";
 import { VideoModal } from "@/components/VideoModal";
 import { useT } from "@/i18n";
@@ -23,6 +23,7 @@ import { tEn } from "@/lib/errors.legacy";
 import { getLibrary, type LibraryEntry } from "@/lib/library";
 import { Dashboard } from "@/features/jobs/Dashboard";
 import { useJobStatusPoller } from "@/features/jobs/JobStatusPoller";
+import { VoiceTeaser } from "@/features/voice-test/VoiceTeaser";
 import { VoiceTestDialog } from "@/features/voice-test/VoiceTestDialog";
 import { getPresetChips, PRESET_ACCENTS, PRESET_ICONS, PRESETS, type PresetId } from "./presets.legacy";
 import { useBillingHint } from "./useBillingHint";
@@ -243,27 +244,14 @@ export function PickerScreen({
 
         {/* Voice-commands teaser — link to the onboarding modal so
             users can always re-open the cheat sheet. */}
-        <button
-          onClick={() => setShowVoiceOnboarding(true)}
-          data-testid="voice-teaser"
-          className="mt-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
-          style={{
-            background: "var(--brand-tint)",
-            color: "var(--brand-strong)",
-            border: "1px solid var(--brand)/30",
-          }}
-        >
-          <IconMic size={14} strokeWidth={2.5} />
-          {t("app.dashboard.voiceTeaser")}
-          <Icon icon={ArrowRight} className="opacity-70" />
-        </button>
+        <VoiceTeaser onClick={() => setShowVoiceOnboarding(true)} className="mt-5" />
       </div>
 
       {/* Preset grid — big cards with per-preset accent glow + config chips */}
       <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
         {featured.map((id) => {
           const p = PRESETS[id];
-          const Icon = PRESET_ICONS[id];
+          const PresetIcon = PRESET_ICONS[id];
           const accent = PRESET_ACCENTS[id];
           const chips = getPresetChips(p, t);
           return (
@@ -271,18 +259,8 @@ export function PickerScreen({
               key={id}
               onClick={() => onPick(id)}
               data-testid={`picker-card-${id}`}
-              className="group relative flex flex-col overflow-hidden rounded-2xl p-5 text-left transition-all hover:-translate-y-0.5"
-              style={{
-                background: "var(--surface-1)",
-                border: "1px solid var(--border)",
-                minHeight: "180px",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = "var(--brand-hover)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = "var(--border)";
-              }}
+              className="group relative flex flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-5 text-left transition-all hover:-translate-y-0.5 hover:border-[var(--brand-hover)]"
+              style={{ minHeight: "180px" }}
             >
               {/* Ambient accent glow — top-right corner */}
               <div
@@ -300,7 +278,7 @@ export function PickerScreen({
                     color: "var(--brand)",
                   }}
                 >
-                  <Icon size={24} strokeWidth={2} />
+                  <PresetIcon size={24} strokeWidth={2} />
                 </div>
                 <span
                   className="translate-x-0 opacity-0 transition-all group-hover:translate-x-1 group-hover:opacity-100"
@@ -351,19 +329,7 @@ export function PickerScreen({
       <button
         onClick={() => onPick("custom")}
         data-testid="picker-card-custom"
-        className="mt-4 flex items-center gap-3 rounded-2xl p-4 text-left transition-colors"
-        style={{
-          background: "transparent",
-          border: "1px dashed var(--border-hover)",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = "var(--border-strong)";
-          e.currentTarget.style.background = "var(--surface-1)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = "var(--border-hover)";
-          e.currentTarget.style.background = "transparent";
-        }}
+        className="mt-4 flex items-center gap-3 rounded-2xl border border-dashed border-[var(--border-hover)] bg-transparent p-4 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-1)]"
       >
         <div
           className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"

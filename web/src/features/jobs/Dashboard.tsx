@@ -5,13 +5,14 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ArrowRight, Plus } from "lucide-react";
-import { IconArrowRight, IconMic } from "@/components/Icons";
+import { IconArrowRight } from "@/components/Icons";
 import { Button } from "@/components/ui/Button";
 import { SectionLabel } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import type { ActiveJobV2 } from "@/lib/activeJobs";
 import type { LibraryEntry } from "@/lib/library";
+import { VoiceTeaser } from "@/features/voice-test/VoiceTeaser";
 import { ActiveJobCard } from "./ActiveJobCard";
 import { RecentProjectCard } from "./RecentProjectCard";
 import type { CardStatus } from "./types";
@@ -140,17 +141,7 @@ export function Dashboard({
       {activeJobs.length === 0 && (!recent || recent.length === 0) && (
         <button
           onClick={onNewVideo}
-          className="flex items-center gap-4 rounded-2xl p-6 text-left transition-colors"
-          style={{
-            background: "var(--surface-1)",
-            border: "1px dashed var(--border-hover)",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "var(--brand)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "var(--border-hover)";
-          }}
+          className="flex items-center gap-4 rounded-2xl border border-dashed border-[var(--border-hover)] bg-[var(--surface-1)] p-6 text-left transition-colors hover:border-[var(--brand)]"
         >
           <div
             className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
@@ -177,20 +168,7 @@ export function Dashboard({
 
       {/* Voice teaser pinned at the bottom of the dashboard so it
           stays a reminder without competing with the CTA. */}
-      <button
-        onClick={onVoiceTest}
-        data-testid="voice-teaser"
-        className="mt-2 inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
-        style={{
-          background: "var(--brand-tint)",
-          color: "var(--brand-strong)",
-          border: "1px solid var(--brand)/30",
-        }}
-      >
-        <IconMic size={14} strokeWidth={2.5} />
-        {t("app.dashboard.voiceTeaser")}
-        <Icon icon={ArrowRight} className="opacity-70" />
-      </button>
+      <VoiceTeaser onClick={onVoiceTest} className="mt-2 w-fit" />
 
       {children}
     </div>
