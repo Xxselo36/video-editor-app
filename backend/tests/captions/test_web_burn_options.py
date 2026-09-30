@@ -146,6 +146,21 @@ def test_local_render_passes_the_web_options(tmp_path, monkeypatch):
     assert got["bounce_anchor"] == "caption" and got["sub_pos"] == 0.72
 
 
+def test_pipeline_imports_without_modal_and_boto3():
+    """render_burn_concat imports web_burn_kwargs from backend.pipeline;
+    the module still loads without modal / boto3 / botocore."""
+    import subprocess
+    import sys
+    code = ("import sys\n"
+            "for m in ('modal', 'boto3', 'botocore'): sys.modules[m] = None\n"
+            "import backend.pipeline as p\n"
+            "assert p.web_burn_kwargs('subtle')['sub_pos'] == 0.76\n"
+            "print('OK')\n")
+    r = subprocess.run([sys.executable, "-c", code], cwd=str(REPO),
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0 and r.stdout.strip().endswith("OK"), r.stderr[-2000:]
+
+
 def test_modal_volume_path_passes_the_web_options():
     """render_burn_concat (Modal's default path) calls _multi_clip_burn
     itself: it must add web_burn_kwargs(caption_preset) there too."""

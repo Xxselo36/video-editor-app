@@ -76,19 +76,24 @@ def _log_raw_sample(words: list, segments: list) -> None:
         if isinstance(x, dict):
             return dict(x)
         dump = getattr(x, "model_dump", None)
-        return dump() if callable(dump) else {"repr": repr(x)[:200]}
+        # No repr(): it would print the word's text.
+        return dump() if callable(dump) else {"unparsed": type(x).__name__}
 
-    word = plain(words[0]) if words else None
-    if isinstance(word, dict):
-        for k in ("word", "text"):
-            if isinstance(word.get(k), str):
-                word[k] = f"<{len(word[k])} chars>"
-    seg = plain(segments[0]) if segments else None
-    has_p = isinstance(word, dict) and word.get("probability") is not None
-    print("[groq] debug: raw verbose_json word = "
-          f"{json.dumps(word, default=str)[:500]}; per-word probability: "
-          f"{'yes' if has_p else 'NO'}; segment keys: "
-          f"{sorted(seg) if isinstance(seg, dict) else None}", flush=True)
+    try:
+        word = plain(words[0]) if words else None
+        if isinstance(word, dict):
+            for k in ("word", "text"):
+                if isinstance(word.get(k), str):
+                    word[k] = f"<{len(word[k])} chars>"
+        seg = plain(segments[0]) if segments else None
+        has_p = isinstance(word, dict) and word.get("probability") is not None
+        print("[groq] debug: raw verbose_json word = "
+              f"{json.dumps(word, default=str)[:500]}; per-word probability: "
+              f"{'yes' if has_p else 'NO'}; segment keys: "
+              f"{sorted(seg) if isinstance(seg, dict) else None}", flush=True)
+    except Exception as e:  # a debug line must never cost a transcript
+        print(f"[groq] debug: could not log a raw word ({type(e).__name__})",
+              flush=True)
 
 
 class GroqTranscriptionError(ConnectionError):

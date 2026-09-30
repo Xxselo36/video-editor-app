@@ -59,6 +59,15 @@ def test_logs_one_raw_word_without_its_text(monkeypatch, tmp_path, capsys):
     assert "'avg_logprob'" in line                     # segment keys
 
 
+def test_never_prints_text_or_breaks_the_transcript(capsys):
+    word = types.SimpleNamespace(word="secret", start=0.1, end=0.2)
+    whisper_groq._log_raw_sample([word], [object()])
+    whisper_groq._log_raw_sample([{"word": "x", "start": object()}], [])
+    out = capsys.readouterr().out
+    assert "secret" not in out and '"unparsed": "SimpleNamespace"' in out
+    assert out.count("[groq] debug") == 2
+
+
 def test_reports_probability_when_groq_sends_it(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("CLEO_GROQ_DEBUG", "1")
     payload = copy.deepcopy(PAYLOAD)
