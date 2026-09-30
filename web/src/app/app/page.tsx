@@ -85,6 +85,7 @@ import {
 import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { PaywallDialog } from "@/components/billing/PaywallDialog";
 import { Dialog } from "@/components/ui/Dialog";
+import { track } from "@/lib/analytics";
 
 // English translator for text that gets PERSISTED (localStorage job
 // cards / library entries). Stored text stays English and is mapped
@@ -638,6 +639,11 @@ export default function Home() {
 
   const onFileChange = (f: File | null) => {
     if (!f) return;
+    track("file_chosen", {
+      preset: selectedPreset ?? "custom",
+      size_mb: Math.round(f.size / 1e6),
+      video: f.type.startsWith("video/"),
+    });
     setFile(f);
     // Skip Configure screen when a non-custom preset was picked — settings
     // are already applied. Custom preset shows the Configure UI so the
@@ -952,6 +958,12 @@ export default function Home() {
         createdJobId !== null ? { id: createdJobId } : JSON.parse(res!.responseText);
       // Minutes were charged: the "min left" hints should follow.
       if (AUTH_ENABLED) void refreshMe();
+      track("upload_done", {
+        preset: selectedPreset ?? "custom",
+        size_mb: Math.round(targetFile.size / 1e6),
+        minutes: duration ? Math.round(duration / 6) / 10 : null,
+        r2: storageKey !== null,
+      });
 
       // Ask for notification permission on job start — user won't be
       // interrupted mid-task, and gets pinged when the render is done
@@ -1162,6 +1174,7 @@ export default function Home() {
       // which; go there instead of an error screen.
       if (r.status === 409) showNotice(t("app.notice.alreadyExporting"));
       else if (!r.ok) throw await apiError(r);
+      else track("export_started", { caption_style: captionPreset, lines: phrases.length });
       // Send user back to the dashboard — the card takes over from
       // here. No fullscreen "rendering" screen anymore.
       updateActiveJob({ phase: "rendering" });
@@ -1207,6 +1220,11 @@ export default function Home() {
       url.searchParams.delete("job");
       window.history.replaceState({ cleo: "picker" }, "", url);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, job?.id]);
+  // Analytics: the editor opened (after an analysis or reopened).
+  useEffect(() => {
+    if (phase === "reviewing" && job?.id) track("editor_opened", { lines: phrases.length });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, job?.id]);
   useEffect(() => {
@@ -1785,6 +1803,10 @@ function PickerScreen({
               : withOutputs.outputs && typeof withOutputs.outputs === "object"
                 ? Object.keys(withOutputs.outputs)
                 : ["primary"];
+            track("export_done", {
+              outputs: outputKeys.length,
+              hooks: withOutputs.hook_clips?.length ?? 0,
+            });
             saveEntry({
               jobId: j.jobId,
               timestamp: Date.now(),
@@ -3599,6 +3621,8 @@ function ReviewScreen({
     });
   }, [activeIdx]);
 
+  // The line's text when its field got focus (words_edited on blur).
+  const editStartRef = useRef<string | null>(null);
   const updateText = (idx: number, text: string) => {
     const next = phrases.slice();
     next[idx] = { ...next[idx], text };
@@ -3608,6 +3632,7 @@ function ReviewScreen({
   const [lastRemoved, setLastRemoved] = useState<{ idx: number; phrase: Phrase } | null>(null);
   const removedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const remove = (idx: number) => {
+    track("words_edited", { action: "line_deleted" });
     setLastRemoved({ idx, phrase: phrases[idx] });
     if (removedTimer.current) clearTimeout(removedTimer.current);
     removedTimer.current = setTimeout(() => setLastRemoved(null), 6000);
@@ -3615,6 +3640,7 @@ function ReviewScreen({
   };
   const undoRemove = () => {
     if (!lastRemoved) return;
+    track("undo", { area: "transcript" });
     const next = phrases.slice();
     next.splice(Math.min(lastRemoved.idx, next.length), 0, lastRemoved.phrase);
     onChange(next);
@@ -3971,6 +3997,16 @@ function ReviewScreen({
                   </div>
                   <textarea
                     value={p.text}
+                    // Analytics: one words_edited per line edit (focus → blur).
+                    onFocus={() => {
+                      editStartRef.current = p.text;
+                    }}
+                    onBlur={() => {
+                      if (editStartRef.current !== null && editStartRef.current !== p.text) {
+                        track("words_edited", { action: "text" });
+                      }
+                      editStartRef.current = null;
+                    }}
                     onChange={(e) => updateText(i, e.target.value)}
                     rows={Math.min(4, Math.max(1, Math.ceil(p.text.length / 38)))}
                     className="w-full resize-none bg-transparent text-base leading-snug text-[var(--text-strong)] focus:outline-none"
@@ -5257,6 +5293,7 @@ function TimelineEditor({
   };
   const undo = () => {
     if (history.length === 0) return;
+    track("undo", { area: "timeline" });
     const prev = history[history.length - 1];
     setHistory(history.slice(0, -1));
     setFuture((f) => [segments, ...f].slice(0, 30));
