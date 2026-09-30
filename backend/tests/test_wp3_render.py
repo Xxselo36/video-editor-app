@@ -30,6 +30,15 @@ def _wait_for(pred, timeout=10.0):
     return False
 
 
+def _settled(job_id: str, status: str, timeout=10.0) -> bool:
+    """The job reached `status` AND its render thread let go of it. The
+    thread writes the status first and then records its event and queues
+    media GC; a test that reads the GC rows or ends right at the status
+    could miss them — or leave them for the next test."""
+    return _wait_for(lambda: store.get(job_id).status == status
+                     and job_id not in M._active_jobs, timeout)
+
+
 class AuthError(Exception):
     """Same class name as modal.exception.AuthError."""
 
@@ -169,7 +178,7 @@ def test_render_r2_gets_keys_and_commits_outputs(client, modal_r2):
     job = _review_job()
     r = client.post(f"/jobs/{job.id}/render", json={"subtitles": SUBS})
     assert r.status_code == 200
-    assert _wait_for(lambda: store.get(job.id).status == "done")
+    assert _settled(job.id, "done")
     assert modal_r2.names == ["cleocuts-render/render_r2"]
     [kw] = modal_r2.spawns
     p = f"jobs/{job.id}/"
@@ -214,11 +223,11 @@ def test_rerender_gets_a_new_prefix_and_the_old_one_goes_a_day_later(
     job = _review_job()
     assert client.post(f"/jobs/{job.id}/render",
                        json={"subtitles": SUBS}).status_code == 200
-    assert _wait_for(lambda: store.get(job.id).status == "done")
+    assert _settled(job.id, "done")
     store.update(job.id, status="awaiting_review")
     assert client.post(f"/jobs/{job.id}/render",
                        json={"subtitles": SUBS}).status_code == 200
-    assert _wait_for(lambda: store.get(job.id).status == "done")
+    assert _settled(job.id, "done")
     got = store.get(job.id)
     p = f"jobs/{job.id}/"
     assert [s["out_prefix"] for s in modal_r2.spawns] == [p + "r1/", p + "r2/"]
@@ -244,7 +253,7 @@ def test_failed_render_queues_its_prefix_after_modals_timeout(client,
     job = _review_job()
     assert client.post(f"/jobs/{job.id}/render",
                        json={"subtitles": SUBS}).status_code == 200
-    assert _wait_for(lambda: store.get(job.id).status == "awaiting_review")
+    assert _settled(job.id, "awaiting_review")
     got = store.get(job.id)
     assert got.message == "render_failed"
     assert got.error.startswith("render_unavailable: AuthError")
@@ -294,7 +303,7 @@ def test_local_fallback_uploads_to_the_same_keys(client, r2, llm, monkeypatch,
         puts.append(key), real_put(path, key, **kw))[1])
     assert client.post(f"/jobs/{job.id}/render",
                        json={"subtitles": SUBS}).status_code == 200
-    assert _wait_for(lambda: store.get(job.id).status == "done")
+    assert _settled(job.id, "done")
     assert seen["hooks"] == HOOKS and seen["use_modal"] is False
     got = store.get(job.id)
     p = f"jobs/{job.id}/r1/"
@@ -330,7 +339,7 @@ def test_legacy_job_mezz_is_backfilled_before_its_render(client, r2, llm,
                 "hook_clips": []}
     monkeypatch.setattr(pipeline, "render_only", render_only)
     client.post(f"/jobs/{job.id}/render", json={"subtitles": []})
-    assert _wait_for(lambda: store.get(job.id).status == "done")
+    assert _settled(job.id, "done")
     got = store.get(job.id)
     assert got.mezz_key == f"jobs/{job.id}/mezz.mp4"
     assert M.media.size(got.mezz_key) == 11 and got_mezz == [b"legacy-mezz"]
