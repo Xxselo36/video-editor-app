@@ -1,0 +1,63 @@
+{
+ "presets": {
+  "clipper": {
+   "fonts": [
+    "Bangers-Regular.ttf#0"
+   ],
+   "frames_per_clip": [
+    62,
+    56
+   ]
+  },
+  "clean": {
+   "fonts": [
+    "DejaVuSans.ttf#0"
+   ],
+   "frames_per_clip": [
+    62,
+    56
+   ]
+  },
+  "classic": {
+   "fonts": [
+    "DejaVuSans-Bold.ttf#0"
+   ],
+   "frames_per_clip": [
+    62,
+    56
+   ]
+  }
+ },
+ "frames": [
+  [
+   0,
+   3
+  ],
+  [
+   0,
+   25
+  ],
+  [
+   0,
+   57
+  ],
+  [
+   1,
+   1
+  ],
+  [
+   1,
+   30
+  ]
+ ],
+ "crop_y": [
+  0.36,
+  0.97
+ ],
+ "size": [
+  540,
+  960
+ ],
+ "fps": 25,
+ "pythonhashseed": "0"
+}
