@@ -16,6 +16,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Nie udało się teraz wczytać projektu. Spróbuj ponownie za chwilę.",
   "app.notice.done": "Ten film jest gotowy — znajdziesz go w Ostatnich i w swojej Bibliotece.",
   "app.notice.processing": "Ten film wciąż jest przetwarzany. Karta pokazuje postęp.",
+  "app.notice.alreadyExporting": "Ten film jest już eksportowany. Postęp widać na jego karcie.",
   "app.notice.offline": "Nie można połączyć się z serwerem. Sprawdź internet i spróbuj ponownie.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const pl: Partial<Record<MessageKey, string>> = {
     "Przesyłanie zostało przerwane (strona się odświeżyła albo zmieniono aplikację). Wgraj film ponownie.",
   "app.errors.tooLarge": "Plik jest za duży. Przytnij film albo wyeksportuj mniejszą wersję.",
   "app.errors.noAudio": "W filmie nie znaleziono użytecznego audio.",
+  "app.errors.noSpeech": "W tym filmie nie znaleźliśmy mowy. CleoCuts tnie i napisuje filmy, w których ktoś mówi — spróbuj z klipem, w którym słychać głos.",
+  "app.errors.noSpeechRefunded": "W tym filmie nie znaleźliśmy mowy. CleoCuts tnie i napisuje filmy, w których ktoś mówi — spróbuj z klipem, w którym słychać głos. Minuty zostały ci zwrócone.",
+  "app.errors.noAudioTrack": "Ten film nie ma ścieżki dźwiękowej, więc nie ma czego ciąć ani napisywać. Nic nie zostało pobrane.",
   "app.errors.renderFailed":
     "Renderowanie nie powiodło się. Twoje zmiany są zapisane — otwórz projekt i wyrenderuj ponownie.",
   "app.errors.serverNoResponse": "Serwer nie odpowiedział. Spróbuj ponownie.",
@@ -159,6 +163,10 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Twój obszar pracy",
   "app.dashboard.inProgressCountOne": "{count} film w trakcie",
   "app.dashboard.inProgressCountOther": "{count} filmów w trakcie",
+  "app.dashboard.readyCountOne": "{count} film gotowy do przejrzenia",
+  "app.dashboard.readyCountOther": "Filmy gotowe do przejrzenia: {count}",
+  "app.dashboard.failedCountOne": "{count} film z błędem",
+  "app.dashboard.failedCountOther": "Filmy z błędem: {count}",
   "app.dashboard.readyWhenYouAre": "Gotowe, kiedy będziesz gotowy",
   "app.dashboard.newVideo": "Nowy film",
   "app.dashboard.inProgress": "W trakcie",
@@ -186,6 +194,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     "MP4 lub MOV z telefonu albo komputera. Trzymaj tę stronę otwartą, aż przesyłanie się zakończy.",
   "app.upload.tapToChoose": "Dotknij, aby wybrać",
   "app.upload.orDrag": "albo przeciągnij plik tutaj",
+  "app.upload.privacyLink": "Jak postępujemy z twoimi filmami",
   "app.upload.keepTabOpen":
     "Trzymaj tę zakładkę otwartą, aż przesyłanie się zakończy. Zmiana aplikacji albo zablokowanie telefonu przerwie przesyłanie.",
   "app.upload.resuming":
@@ -258,12 +267,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Panel",
-  "app.review.sentencesOne": "{count} zdanie",
-  "app.review.sentencesOther": "{count} zdań",
   "app.review.audioHeadsUp": "Uwaga dot. audio",
   "app.review.updatingPreview": "Aktualizowanie podglądu…",
-  "app.review.captionSampleAlt": "Przykład napisów {style}",
-  "app.review.captionsLookLike": "Tak będą wyglądać napisy",
   "app.review.tabTimeline": "Oś czasu",
   "app.review.tabTranscript": "Transkrypt",
   "app.review.tabCaptions": "Napisy",
@@ -295,16 +300,13 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Twoja ostatnia zmiana jeszcze nie dotarła do serwera. Próbuję ponownie…",
   "app.timeline.notSaved": "niezapisane",
   "app.timeline.notSavedRetrying": "niezapisane · próba ponownie",
-  "app.timeline.hintDesktop":
-    "Przewijanie = przesuwanie · Ctrl/⌘ + przewijanie = zoom · przeciągnij krawędzie, by przyciąć · Spacja odtwarzanie · ⌫ usuń · ⌘Z wróć",
-  "app.timeline.hintMobile":
-    "Przesuń, by przewinąć · uszczypnij, by zmienić zoom · dotknij klipu, by edytować · przeciągnij linijkę, by przewijać",
   "app.timeline.undoTitle": "Wróć (⌘Z)",
   "app.timeline.undoAria": "Wróć",
   "app.timeline.redoTitle": "Powtórz (⌘⇧Z)",
   "app.timeline.redoAria": "Powtórz",
   "app.timeline.splitTitle": "Podziel klip pod głowicą odtwarzania",
   "app.timeline.split": "⧉ Podziel",
+  "app.timeline.splitUnavailable": "Ustaw głowicę odtwarzania wewnątrz klipu, żeby go podzielić (nie na samym początku ani końcu).",
   "app.timeline.zoomOutTitle": "Zmniejsz (pokaż więcej filmu)",
   "app.timeline.zoomOutAria": "Zmniejsz",
   "app.timeline.fitTitle": "Zmieść cały film",
@@ -338,7 +340,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Usłyszano cię!",
   "app.voice.listening": "Słuchanie…",
   "app.voice.heardPrefix": "usłyszano: ",
-  "app.voice.permissionHint": "Wykorzystuje twoją kamerę i mikrofon. Wszystko zostaje w twojej przeglądarce.",
+  "app.voice.permissionHint": "Korzysta z mikrofonu. Przeglądarka zamienia twoją mowę na tekst: Chrome wysyła ją w tym celu do Google, Safari do Apple. Nic nie trafia do CleoCuts.",
   "app.voice.requesting": "Żądanie dostępu…",
   "app.voice.start": "Start",
   "app.voice.denied": "Brak uprawnień. Włącz je w ustawieniach przeglądarki i odśwież stronę.",
@@ -481,6 +483,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Zamknij podgląd",
   "common.videoModal.close": "Zamknij",
+  "common.videoModal.dialogLabel": "Podgląd filmu",
 
   "common.auth.signIn": "Zaloguj się",
   "common.auth.account": "Konto",

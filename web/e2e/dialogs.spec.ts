@@ -1,17 +1,14 @@
 /**
  * Dialogs cover the viewport (scratchpad audit/techtmp/modal.mjs and the
- * overlay probe of audit/stub/verify.mjs). Today every /app dialog is
- * mispositioned: it renders inside the animated `.phase-fade` container,
- * whose finished animation leaves a transform — a containing block for
- * `position: fixed` (tech.md T1). UX3 moves dialogs into a portal and
- * removes the fixme marker.
+ * overlay probe of audit/stub/verify.mjs). Every /app dialog used to be
+ * mispositioned: it rendered inside the animated `.phase-fade` container,
+ * whose finished animation left a transform — a containing block for
+ * `position: fixed` (tech.md T1). Since UX3 they render through
+ * components/ui/Dialog (a portal into <body>, focus trap, Escape).
  */
 import { expect, test } from "./support/fixtures";
 import { LIBRARY, libEntry, openWithStorage } from "./support/app";
-import { SKIP_KNOWN_BUGS } from "./support/fixme";
 import type { Locator, Page } from "@playwright/test";
-
-test.fixme(SKIP_KNOWN_BUGS, "T1: dialogs render inside .phase-fade (fixed by UX3)");
 
 async function expectCoversViewport(page: Page, dialog: Locator) {
   await expect(dialog).toBeVisible();
@@ -36,6 +33,29 @@ test("the voice-test dialog covers the viewport", async ({ page }) => {
   await openWithStorage(page, "/app");
   await page.getByTestId("voice-teaser").click();
   await expectCoversViewport(page, page.getByTestId("dialog-voice-test"));
+});
+
+test("a dialog keeps focus inside, closes on Escape and gives focus back", async ({ page }) => {
+  await openWithStorage(page, "/app");
+  const teaser = page.getByTestId("voice-teaser");
+  await teaser.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByTestId("dialog-voice-test");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await expect(page.getByRole("dialog", { name: /./ })).toBeVisible();
+  // Focus moved in, and Tab cycles without leaving the dialog.
+  const inside = () => dialog.evaluate((d) => d.contains(document.activeElement));
+  expect(await inside()).toBe(true);
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Tab");
+    expect(await inside()).toBe(true);
+  }
+  await page.keyboard.press("Shift+Tab");
+  expect(await inside()).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(teaser).toBeFocused();
 });
 
 test("the paywall dialog covers the viewport", async ({ page }) => {

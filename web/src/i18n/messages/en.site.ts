@@ -138,6 +138,7 @@ export const enSite = {
   /* ── Shared components ── */
   "common.videoModal.closeAria": "Close preview",
   "common.videoModal.close": "Close",
+  "common.videoModal.dialogLabel": "Video preview",
 
   /* ── Accounts (header, all pages) ── */
   "common.auth.signIn": "Sign in",

@@ -16,6 +16,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "प्रोजेक्ट अभी लोड नहीं हो पाया। कृपया थोड़ी देर में फिर कोशिश करें।",
   "app.notice.done": "यह वीडियो तैयार है — इसे Recent में और अपनी लाइब्रेरी में देखें।",
   "app.notice.processing": "यह वीडियो अभी प्रोसेस हो रहा है। कार्ड पर प्रोग्रेस दिख रहा है।",
+  "app.notice.alreadyExporting": "यह वीडियो पहले से एक्सपोर्ट हो रहा है। प्रगति उसके कार्ड पर दिखती है।",
   "app.notice.offline": "सर्वर से कनेक्ट नहीं हो पा रहा। अपना इंटरनेट चेक करके फिर कोशिश करें।",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const hi: Partial<Record<MessageKey, string>> = {
     "अपलोड बीच में रुक गया (पेज रीलोड हुआ या ऐप बदला गया)। कृपया वीडियो फिर से अपलोड करें।",
   "app.errors.tooLarge": "फ़ाइल बहुत बड़ी है। कृपया वीडियो को ट्रिम करें या छोटे साइज़ में एक्सपोर्ट करें।",
   "app.errors.noAudio": "वीडियो में कोई भी काम का ऑडियो नहीं मिला।",
+  "app.errors.noSpeech": "इस वीडियो में हमें कोई बोली गई बात नहीं मिली। CleoCuts ऐसे वीडियो काटता है और उनमें कैप्शन लगाता है जिनमें कोई बोल रहा हो — किसी आवाज़ वाली क्लिप के साथ आज़माएँ।",
+  "app.errors.noSpeechRefunded": "इस वीडियो में हमें कोई बोली गई बात नहीं मिली। CleoCuts ऐसे वीडियो काटता है और उनमें कैप्शन लगाता है जिनमें कोई बोल रहा हो — किसी आवाज़ वाली क्लिप के साथ आज़माएँ। मिनट वापस जोड़ दिए गए हैं।",
+  "app.errors.noAudioTrack": "इस वीडियो में कोई ऑडियो ट्रैक नहीं है, इसलिए काटने या कैप्शन लगाने के लिए कुछ नहीं है। कोई शुल्क नहीं लिया गया।",
   "app.errors.renderFailed":
     "रेंडर करना नाकाम रहा। आपके एडिट्स सेव हैं — प्रोजेक्ट खोलकर फिर से रेंडर करें।",
   "app.errors.serverNoResponse": "सर्वर से जवाब नहीं मिला। कृपया फिर कोशिश करें।",
@@ -159,6 +163,10 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "आपका वर्कस्पेस",
   "app.dashboard.inProgressCountOne": "{count} वीडियो प्रोसेस हो रहा है",
   "app.dashboard.inProgressCountOther": "{count} वीडियो प्रोसेस हो रहे हैं",
+  "app.dashboard.readyCountOne": "{count} वीडियो रिव्यू के लिए तैयार",
+  "app.dashboard.readyCountOther": "{count} वीडियो रिव्यू के लिए तैयार",
+  "app.dashboard.failedCountOne": "{count} वीडियो फ़ेल हुआ",
+  "app.dashboard.failedCountOther": "{count} वीडियो फ़ेल हुए",
   "app.dashboard.readyWhenYouAre": "जब आप तैयार हों",
   "app.dashboard.newVideo": "नया वीडियो",
   "app.dashboard.inProgress": "प्रोसेस हो रहा है",
@@ -186,6 +194,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
     "अपने फ़ोन या कंप्यूटर से MP4 या MOV। अपलोड पूरा होने तक इस पेज को खुला रखें।",
   "app.upload.tapToChoose": "चुनने के लिए टैप करें",
   "app.upload.orDrag": "या एक को यहां खींचकर लाएं",
+  "app.upload.privacyLink": "हम आपके वीडियो कैसे संभालते हैं",
   "app.upload.keepTabOpen":
     "अपलोड पूरा होने तक इस टैब को खुला रखें। ऐप बदलने या फ़ोन लॉक करने से अपलोड कैंसिल हो जाएगा।",
   "app.upload.resuming":
@@ -258,12 +267,8 @@ export const hi: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← डैशबोर्ड",
-  "app.review.sentencesOne": "{count} वाक्य",
-  "app.review.sentencesOther": "{count} वाक्य",
   "app.review.audioHeadsUp": "ऑडियो अलर्ट",
   "app.review.updatingPreview": "प्रीव्यू अपडेट हो रहा है…",
-  "app.review.captionSampleAlt": "{style} कैप्शन सैंपल",
-  "app.review.captionsLookLike": "कैप्शन ऐसे दिखेंगे",
   "app.review.tabTimeline": "टाइमलाइन",
   "app.review.tabTranscript": "ट्रांसक्रिप्ट",
   "app.review.tabCaptions": "कैप्शन",
@@ -295,16 +300,13 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "आपका आख़िरी बदलाव अभी सर्वर तक नहीं पहुंचा है। फिर कोशिश हो रही है…",
   "app.timeline.notSaved": "सेव नहीं हुआ",
   "app.timeline.notSavedRetrying": "सेव नहीं हुआ · फिर कोशिश हो रही है",
-  "app.timeline.hintDesktop":
-    "स्क्रोल से मूव करें · Ctrl/⌘ + स्क्रोल से ज़ूम करें · किनारे खींचकर ट्रिम करें · Space से प्ले · ⌫ से डिलीट · ⌘Z अनडू",
-  "app.timeline.hintMobile":
-    "स्क्रोल के लिए स्वाइप करें · ज़ूम के लिए पिंच करें · एडिट के लिए क्लिप टैप करें · स्क्रब के लिए रूलर खींचें",
   "app.timeline.undoTitle": "अनडू (⌘Z)",
   "app.timeline.undoAria": "अनडू",
   "app.timeline.redoTitle": "रीडू (⌘⇧Z)",
   "app.timeline.redoAria": "रीडू",
   "app.timeline.splitTitle": "प्लेहेड के नीचे वाली क्लिप को स्प्लिट करें",
   "app.timeline.split": "⧉ स्प्लिट",
+  "app.timeline.splitUnavailable": "क्लिप को स्प्लिट करने के लिए प्लेहेड को उसके अंदर ले जाएँ (ठीक शुरुआत या अंत पर नहीं)।",
   "app.timeline.zoomOutTitle": "ज़ूम आउट करें (वीडियो का ज़्यादा हिस्सा दिखाएं)",
   "app.timeline.zoomOutAria": "ज़ूम आउट",
   "app.timeline.fitTitle": "पूरा वीडियो फ़िट करें",
@@ -338,7 +340,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "आपको सुन लिया!",
   "app.voice.listening": "सुन रहा है…",
   "app.voice.heardPrefix": "सुना: ",
-  "app.voice.permissionHint": "आपके कैमरा + माइक का इस्तेमाल करता है। सब कुछ आपके ब्राउज़र में ही रहता है।",
+  "app.voice.permissionHint": "आपके माइक का इस्तेमाल करता है। आपकी आवाज़ को टेक्स्ट में आपका ब्राउज़र बदलता है: इसके लिए Chrome उसे Google को भेजता है, Safari Apple को। CleoCuts को कुछ नहीं भेजा जाता।",
   "app.voice.requesting": "रिक्वेस्ट भेजी जा रही है…",
   "app.voice.start": "शुरू करें",
   "app.voice.denied": "परमिशन नहीं मिली। ब्राउज़र सेटिंग्स में इनेबल करें + पेज रीलोड करें।",
@@ -481,6 +483,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "प्रीव्यू बंद करें",
   "common.videoModal.close": "बंद करें",
+  "common.videoModal.dialogLabel": "वीडियो प्रीव्यू",
 
   "common.auth.signIn": "साइन इन करें",
   "common.auth.account": "अकाउंट",

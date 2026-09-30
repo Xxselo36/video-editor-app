@@ -57,6 +57,7 @@ import type { MessageKey } from "@/i18n/messages/en";
 import { AUTH_ENABLED } from "@/lib/auth";
 import {
   ApiError,
+  apiError,
   apiErrorFromText,
   apiFetch,
   authHeaders,
@@ -83,6 +84,8 @@ import {
 } from "@/lib/account";
 import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { PaywallDialog } from "@/components/billing/PaywallDialog";
+import { Dialog } from "@/components/ui/Dialog";
+import { track } from "@/lib/analytics";
 
 // English translator for text that gets PERSISTED (localStorage job
 // cards / library entries). Stored text stays English and is mapped
@@ -109,6 +112,9 @@ const STORED_MESSAGE_KEYS: MessageKey[] = [
   "app.errors.fileTooLarge",
   "app.errors.videoTooLong",
   "app.errors.tooManyJobs",
+  "app.errors.noSpeech",
+  "app.errors.noSpeechRefunded",
+  "app.errors.noAudioTrack",
   "app.card.renderFailedNote",
 ];
 function localizeKnown(text: string, t: TFn): string {
@@ -147,6 +153,7 @@ const REFUSAL_CODES = new Set([
   "too_many_uploads",
   "file_too_large",
   "video_too_long",
+  "no_audio",
 ]);
 // POST /jobs after an upload to R2: waits between tries on a network
 // error or a 5xx that isn't a refusal — about 75 s in all, so a backend
@@ -165,8 +172,27 @@ function refusalMessage(err: ApiError): string | null {
       return tEn("app.errors.fileTooLarge", { max: err.num("max_gb") ?? MAX_UPLOAD_GB });
     case "video_too_long":
       return tEn("app.errors.videoTooLong", { max: err.num("max_minutes") ?? MAX_MINUTES });
+    // 400 before the charge: the file has no sound track.
+    case "no_audio":
+      return tEn("app.errors.noAudioTrack");
     default:
       return null;
+  }
+}
+
+// A failed job's message: its error_code first (the interim codes; the
+// full catalogue comes with backend/errors.py in UX5), else the text.
+function jobErrorText(
+  s: { error?: string | null; message?: string | null; error_code?: string | null; refunded?: boolean | null },
+  t: TFn,
+): string {
+  switch (s.error_code) {
+    case "no_speech":
+      return t(s.refunded ? "app.errors.noSpeechRefunded" : "app.errors.noSpeech");
+    case "no_audio":
+      return t("app.errors.noAudioTrack");
+    default:
+      return friendlyError(s.error ?? s.message, t);
   }
 }
 
@@ -178,8 +204,9 @@ function friendlyError(raw: unknown, t: TFn): string {
   const l = txt.toLowerCase();
   if (!txt) return t("app.errors.generic");
   // One of our own (stored in English) → current language.
+  // (Unchanged when the viewer reads English: still one of ours.)
   const known = localizeKnown(txt, t);
-  if (known !== txt) return known;
+  if (known !== txt || STORED_MESSAGE_KEYS.some((k) => matchTemplate(translate("en", k), txt))) return known;
   // Already a user-facing message (ours or the backend's).
   if (txt.endsWith(".") && /\b(Please|please)\b/.test(txt)) return txt;
   // transcription_unavailable: the speech service failed even after
@@ -198,6 +225,11 @@ function friendlyError(raw: unknown, t: TFn): string {
   }
   if (l.includes("unreadable_video"))
     return t("app.errors.unreadableVideo");
+  // Backends / stored errors without an error_code (see jobErrorText).
+  if (l.includes("no_audio") || l.includes("no audio track") || l.includes("has no audio"))
+    return t("app.errors.noAudioTrack");
+  if (l.includes("no_speech") || l.includes("no speech detected"))
+    return t("app.errors.noSpeech");
   // Accounts / billing (backend codes; only sent when switched on)
   if (l.includes("auth_required"))
     return t("app.errors.signInRequired");
@@ -398,6 +430,8 @@ type JobStatus = {
   message: string;
   progress: number;
   error: string | null;
+  error_code?: string | null;
+  refunded?: boolean | null;
   has_output: boolean;
   audio_warnings?: string[];
   audio_levels?: { mean_db?: number | null; max_db?: number | null };
@@ -605,6 +639,11 @@ export default function Home() {
 
   const onFileChange = (f: File | null) => {
     if (!f) return;
+    track("file_chosen", {
+      preset: selectedPreset ?? "custom",
+      size_mb: Math.round(f.size / 1e6),
+      video: f.type.startsWith("video/"),
+    });
     setFile(f);
     // Skip Configure screen when a non-custom preset was picked — settings
     // are already applied. Custom preset shows the Configure UI so the
@@ -919,6 +958,12 @@ export default function Home() {
         createdJobId !== null ? { id: createdJobId } : JSON.parse(res!.responseText);
       // Minutes were charged: the "min left" hints should follow.
       if (AUTH_ENABLED) void refreshMe();
+      track("upload_done", {
+        preset: selectedPreset ?? "custom",
+        size_mb: Math.round(targetFile.size / 1e6),
+        minutes: duration ? Math.round(duration / 6) / 10 : null,
+        r2: storageKey !== null,
+      });
 
       // Ask for notification permission on job start — user won't be
       // interrupted mid-task, and gets pinged when the render is done
@@ -1038,7 +1083,7 @@ export default function Home() {
           }
         }
         else if (s.status === "error") {
-          setErrorMsg(s.error ?? s.message);
+          setErrorMsg(jobErrorText(s, t));
           setPhase("error");
           clearActiveJob();
         } else if (s.status === "awaiting_review" && phase === "analyzing") {
@@ -1124,7 +1169,12 @@ export default function Home() {
           disabled_cuts: disabledCuts,
         }),
       });
-      if (!r.ok) throw new Error(await r.text());
+      // 409: the job isn't in review any more — already exporting (a
+      // double click, another tab) or finished. Its dashboard card shows
+      // which; go there instead of an error screen.
+      if (r.status === 409) showNotice(t("app.notice.alreadyExporting"));
+      else if (!r.ok) throw await apiError(r);
+      else track("export_started", { caption_style: captionPreset, lines: phrases.length });
       // Send user back to the dashboard — the card takes over from
       // here. No fullscreen "rendering" screen anymore.
       updateActiveJob({ phase: "rendering" });
@@ -1137,7 +1187,10 @@ export default function Home() {
       setSelectedPreset(null);
       setPhase("picker");
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      // Mapped, never the raw answer (tech.md T3). A 401 has opened the
+      // sign-in already (apiFetch).
+      const raw = err instanceof ApiError ? (err.code ?? err.message) : err instanceof Error ? err.message : String(err);
+      setErrorMsg(err instanceof ApiError && err.status === 401 ? t("app.errors.signInRequired") : friendlyError(raw, t));
       setPhase("error");
     }
   };
@@ -1167,6 +1220,11 @@ export default function Home() {
       url.searchParams.delete("job");
       window.history.replaceState({ cleo: "picker" }, "", url);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, job?.id]);
+  // Analytics: the editor opened (after an analysis or reopened).
+  useEffect(() => {
+    if (phase === "reviewing" && job?.id) track("editor_opened", { lines: phrases.length });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, job?.id]);
   useEffect(() => {
@@ -1210,7 +1268,7 @@ export default function Home() {
           s.status === "done"
             ? t("app.notice.done")
             : s.status === "error"
-              ? friendlyError(s.error ?? s.message, t)
+              ? jobErrorText(s, t)
               : t("app.notice.processing"),
         );
         return;
@@ -1253,7 +1311,6 @@ export default function Home() {
   };
   resetRef.current = reset;
 
-  const currentPreset = selectedPreset ? PRESETS[selectedPreset] : null;
   // Accounts + billing (all null / off with auth off).
   const { me } = useMe();
   const billing = useBillingConfig();
@@ -1277,22 +1334,6 @@ export default function Home() {
             <LogoMark size={24} />
             <span className="text-xl font-bold tracking-tight">CleoCuts</span>
           </Link>
-          {currentPreset && phase !== "picker" && (
-            <>
-              <span style={{ color: "var(--text-faint)" }}>/</span>
-              <button
-                onClick={reset}
-                className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors"
-                style={{
-                  color: "var(--brand-strong)",
-                  background: "var(--brand-tint)",
-                }}
-              >
-                <span>{t(currentPreset.labelKey)}</span>
-                <span style={{ color: "var(--brand-strong)", opacity: 0.6 }}>✕</span>
-              </button>
-            </>
-          )}
         </div>
         <div className="flex items-center gap-3 sm:gap-4">
           <PricingLink className="hidden sm:inline" />
@@ -1762,6 +1803,10 @@ function PickerScreen({
               : withOutputs.outputs && typeof withOutputs.outputs === "object"
                 ? Object.keys(withOutputs.outputs)
                 : ["primary"];
+            track("export_done", {
+              outputs: outputKeys.length,
+              hooks: withOutputs.hook_clips?.length ?? 0,
+            });
             saveEntry({
               jobId: j.jobId,
               timestamp: Date.now(),
@@ -1783,7 +1828,7 @@ function PickerScreen({
           setRecent(getLibrary().slice(0, 3));
         } else if (s.status === "error") {
           updateActiveJobV2(j.jobId, {
-            error: friendlyError(s.error ?? s.message, tEn),
+            error: jobErrorText(s, tEn),
           });
         }
       }
@@ -1873,6 +1918,25 @@ function PickerScreen({
     }
   };
 
+  // Headline counts (T7): working (uploading / analyzing / exporting),
+  // ready for review and failed are counted apart — a failed or waiting
+  // card is not "in progress". Same failure test as ActiveJobCard.
+  const counts = { working: 0, ready: 0, failed: 0 };
+  for (const j of activeJobs) {
+    if (jobStatuses[j.jobId]?.status === "error" || j.error) counts.failed++;
+    else if (j.phase === "reviewing") counts.ready++;
+    else counts.working++;
+  }
+  const headline = (
+    [
+      [counts.working, "app.dashboard.inProgressCountOne", "app.dashboard.inProgressCountOther"],
+      [counts.ready, "app.dashboard.readyCountOne", "app.dashboard.readyCountOther"],
+      [counts.failed, "app.dashboard.failedCountOne", "app.dashboard.failedCountOther"],
+    ] as const
+  )
+    .filter(([n]) => n > 0)
+    .map(([n, one, other]) => t(n === 1 ? one : other, { count: n }));
+
   if (view === "dashboard") {
     return (
       <div className="relative z-10 flex flex-col" data-testid="dashboard">
@@ -1891,23 +1955,25 @@ function PickerScreen({
               className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl"
               style={{ color: "var(--text-strong)" }}
             >
-              {activeJobs.length > 0
-                ? t(
-                    activeJobs.length === 1
-                      ? "app.dashboard.inProgressCountOne"
-                      : "app.dashboard.inProgressCountOther",
-                    { count: activeJobs.length },
-                  )
-                : t("app.dashboard.readyWhenYouAre")}
+              {headline[0] ?? t("app.dashboard.readyWhenYouAre")}
             </h1>
+            {headline.length > 1 && (
+              <div
+                data-testid="dashboard-counts"
+                className="mt-1 text-sm"
+                style={{ color: "var(--text-body)" }}
+              >
+                {headline.slice(1).join(" · ")}
+              </div>
+            )}
           </div>
           <button
             onClick={() => setView("picker")}
             data-testid="dashboard-new-video"
             className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold transition-transform hover:-translate-y-0.5"
             style={{
-              background: "var(--brand)",
-              color: "#0f0f0f",
+              background: "var(--brand-solid)",
+              color: "white",
             }}
           >
             <span className="text-base leading-none">+</span>
@@ -2253,6 +2319,16 @@ function PickerScreen({
         </span>
       </button>
 
+      {/* The cards open the file chooser: the privacy note sits here. */}
+      <Link
+        href="/privacy"
+        data-testid="picker-privacy"
+        className="mt-3 w-fit text-xs underline underline-offset-2 hover:opacity-80"
+        style={{ color: "var(--text-muted)" }}
+      >
+        {t("app.upload.privacyLink")}
+      </Link>
+
       {playingJobId && (
         <VideoModal
           jobId={playingJobId}
@@ -2392,7 +2468,15 @@ function IdleScreen({
         {t("app.upload.title")}
       </h1>
       <p className="mb-8 text-sm" style={{ color: "var(--text-muted)" }}>
-        {t("app.upload.hint")}
+        {t("app.upload.hint")}{" "}
+        <Link
+          href="/privacy"
+          data-testid="upload-privacy"
+          className="whitespace-nowrap text-xs underline underline-offset-2 hover:opacity-80"
+          style={{ color: "var(--text-muted)" }}
+        >
+          {t("app.upload.privacyLink")}
+        </Link>
       </p>
       {billingHint && (
         <Link
@@ -2616,7 +2700,7 @@ function ConfigureScreen(props: {
         onClick={() => props.onProcess()}
         data-testid="configure-process"
         // Sticky on phones: the options list is ~2 screens tall.
-        className="sticky bottom-3 z-20 mt-2 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold shadow-lg hover:bg-[var(--brand-hover)] active:scale-[0.99]"
+        className="sticky bottom-3 z-20 mt-2 w-full rounded-xl bg-[var(--brand-solid)] px-6 py-4 text-base font-semibold text-white shadow-lg hover:bg-[var(--brand-solid-hover)] active:scale-[0.99]"
       >
         {t("app.configure.process")}
       </button>
@@ -2805,7 +2889,7 @@ function ProgressScreen({
                   className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
                   style={{
                     background: done
-                      ? "var(--brand)"
+                      ? "var(--brand-solid)"
                       : active
                         ? "var(--brand-tint)"
                         : "var(--surface-2)",
@@ -2943,7 +3027,7 @@ function DoneScreen({
               download
               className={`rounded-xl px-5 py-3 text-center font-semibold ${
                 f === "primary"
-                  ? "bg-[var(--brand)] hover:bg-[var(--brand-hover)]"
+                  ? "bg-[var(--brand-solid)] text-white hover:bg-[var(--brand-solid-hover)]"
                   : "border border-[var(--brand)] text-[var(--brand-strong)] hover:bg-[var(--brand)]/10"
               }`}
             >
@@ -3496,6 +3580,34 @@ function ReviewScreen({
     playerRef.current?.setPlan(buildPlan(editSegs, duration));
   }, [editSegs, duration]);
 
+  // The chip on the video: the playhead's place in the EDIT and the
+  // edit's length (the native control bar shows the file's own time —
+  // the whole source in proxy mode). Same mapping as the timeline readout.
+  const cutClock = (() => {
+    let at: number | null = null;
+    let total = 0;
+    const find = (matchSeg: boolean) => {
+      let acc = 0;
+      for (const s of editSegs) {
+        if (s.disabled) continue;
+        const d = s.end - s.start;
+        if (
+          at === null &&
+          (!matchSeg || s.id === playingSegId) &&
+          originalTime >= s.start - 0.05 &&
+          originalTime <= s.end + 0.05
+        ) {
+          at = acc + Math.min(d, Math.max(0, originalTime - s.start));
+        }
+        acc += d;
+      }
+      total = acc;
+    };
+    if (mode === "proxy" && playingSegId) find(true);
+    if (at === null) find(false);
+    return { at: at ?? 0, total };
+  })();
+
   // The preview follows the user's edited timeline, so phrases are
   // matched on SOURCE time (original_start / original_end) against the
   // playhead mapped back through the segments of the playing preview.
@@ -3527,6 +3639,8 @@ function ReviewScreen({
     });
   }, [activeIdx]);
 
+  // The line's text when its field got focus (words_edited on blur).
+  const editStartRef = useRef<string | null>(null);
   const updateText = (idx: number, text: string) => {
     const next = phrases.slice();
     next[idx] = { ...next[idx], text };
@@ -3536,6 +3650,7 @@ function ReviewScreen({
   const [lastRemoved, setLastRemoved] = useState<{ idx: number; phrase: Phrase } | null>(null);
   const removedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const remove = (idx: number) => {
+    track("words_edited", { action: "line_deleted" });
     setLastRemoved({ idx, phrase: phrases[idx] });
     if (removedTimer.current) clearTimeout(removedTimer.current);
     removedTimer.current = setTimeout(() => setLastRemoved(null), 6000);
@@ -3543,6 +3658,7 @@ function ReviewScreen({
   };
   const undoRemove = () => {
     if (!lastRemoved) return;
+    track("undo", { area: "transcript" });
     const next = phrases.slice();
     next.splice(Math.min(lastRemoved.idx, next.length), 0, lastRemoved.phrase);
     onChange(next);
@@ -3588,7 +3704,7 @@ function ReviewScreen({
 
 
   return (
-    <div className="flex flex-col gap-3" data-testid="editor">
+    <div className="flex flex-col gap-3" data-testid="editor" data-editor-root>
       <div className="flex items-center justify-between">
         <button
           onClick={onBack}
@@ -3597,12 +3713,6 @@ function ReviewScreen({
         >
           {t("app.review.backToDashboard")}
         </button>
-        <div className="text-xs text-[var(--text-body)]">
-          {t(
-            phrases.length === 1 ? "app.review.sentencesOne" : "app.review.sentencesOther",
-            { count: phrases.length },
-          )}
-        </div>
       </div>
 
       {audioWarnings.length > 0 && (
@@ -3635,10 +3745,11 @@ function ReviewScreen({
             if (modeRef.current === "proxy") setMode("preview");
           }}
           controls
-          // Proxy mode: no native speed menu — it would show the clip's
-          // effective rate, not the user's speed (EditPlayer still copes
-          // with browsers that ignore this).
-          controlsList={mode === "proxy" ? "noplaybackrate" : undefined}
+          // No download (it would be the source or a draft preview, not
+          // the export), no speed menu (in proxy mode it would show the
+          // clip's effective rate, not the user's speed; EditPlayer still
+          // copes with browsers that ignore this), no casting.
+          controlsList="nodownload noplaybackrate noremoteplayback"
           playsInline
           // metadata only: don't pull the whole preview over mobile data
           // before the user presses play.
@@ -3679,6 +3790,15 @@ function ReviewScreen({
             className="pointer-events-none absolute inset-0 bg-black opacity-0 group-hover:opacity-0!"
           />
         )}
+        {cutClock.total > 0 && (
+          <div
+            data-testid="editor-cut-time"
+            className="pointer-events-none absolute left-3 top-3 rounded-full px-2.5 py-1 font-mono text-[11px] tabular-nums"
+            style={{ background: "rgba(0,0,0,0.55)", color: "#fff" }}
+          >
+            {fmtTimecode(cutClock.at)} / {fmtTimecode(cutClock.total)}
+          </div>
+        )}
         <PlaybackDebug videoRef={videoRef} mode={mode} />
         {/* Proxy mode has no preview to update: the edit already plays. */}
         {editSaving && mode !== "proxy" && (
@@ -3699,24 +3819,9 @@ function ReviewScreen({
         )}
       </div>
 
-      {captionPreset !== "none" && (
-        <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] px-3 py-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={publicUrl(`/caption-previews/${captionPreset}.png?w=200&h=72`)}
-            alt={t("app.review.captionSampleAlt", { style: captionPreset })}
-            className="h-10 w-28 rounded-md object-cover"
-          />
-          <div className="flex-1">
-            <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-              {t("app.review.captionsLookLike")}
-            </div>
-            <div className="text-sm font-medium capitalize">{captionLabel(captionPreset, t)}</div>
-          </div>
-        </div>
-      )}
       {/* Tab bar — clean 3-way switch for the editor */}
       <div
+        role="tablist"
         className="flex overflow-hidden rounded-xl"
         style={{
           background: "var(--surface-1)",
@@ -3735,6 +3840,8 @@ function ReviewScreen({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              role="tab"
+              aria-selected={isActive}
               data-testid={`editor-tab-${tab.id}`}
               className="flex-1 px-3 py-2.5 text-sm font-medium transition-colors"
               style={{
@@ -3908,6 +4015,16 @@ function ReviewScreen({
                   </div>
                   <textarea
                     value={p.text}
+                    // Analytics: one words_edited per line edit (focus → blur).
+                    onFocus={() => {
+                      editStartRef.current = p.text;
+                    }}
+                    onBlur={() => {
+                      if (editStartRef.current !== null && editStartRef.current !== p.text) {
+                        track("words_edited", { action: "text" });
+                      }
+                      editStartRef.current = null;
+                    }}
                     onChange={(e) => updateText(i, e.target.value)}
                     rows={Math.min(4, Math.max(1, Math.ceil(p.text.length / 38)))}
                     className="w-full resize-none bg-transparent text-base leading-snug text-[var(--text-strong)] focus:outline-none"
@@ -4031,7 +4148,7 @@ function ReviewScreen({
         // longer flip it to "Preparing…" every few seconds.
         disabled={applying}
         data-testid="apply-render"
-        className="mt-1 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99] disabled:opacity-60"
+        className="mt-1 w-full rounded-xl bg-[var(--brand-solid)] px-6 py-4 text-base font-semibold text-white hover:bg-[var(--brand-solid-hover)] active:scale-[0.99] disabled:opacity-60"
       >
         {applying ? t("app.review.preparing") : t("app.review.applyRender")}
       </button>
@@ -4247,15 +4364,30 @@ function VoiceCommandsModal({ onClose }: { onClose: () => void }) {
   return <VoiceCommandsTestStep onDone={onClose} />;
 }
 
-// Live mic + camera test. User grants permissions, sees themselves,
-// says commands, gets real-time feedback. Uses the browser's Web
-// Speech API (webkitSpeechRecognition) — no backend, no cost,
-// works in Safari + Chrome on macOS/iOS/Android.
+// Speech recognition locale for the UI language: the browser's own
+// regional variant when it prefers one ("de-AT"), else a common default.
+const SPEECH_LOCALE: Record<string, string> = {
+  en: "en-US", de: "de-DE", es: "es-ES", fr: "fr-FR", pt: "pt-BR", it: "it-IT", tr: "tr-TR",
+  pl: "pl-PL", nl: "nl-NL", ru: "ru-RU", ja: "ja-JP", ko: "ko-KR", id: "id-ID", hi: "hi-IN",
+};
+function speechLocale(lang: string): string {
+  const preferred = typeof navigator !== "undefined" ? navigator.languages ?? [] : [];
+  const regional = preferred.find((tag) => tag.toLowerCase().startsWith(`${lang}-`));
+  return regional ?? SPEECH_LOCALE[lang] ?? "en-US";
+}
+
+// Live mic test. User grants the microphone, says commands, gets
+// real-time feedback. Uses the browser's Web Speech API
+// (webkitSpeechRecognition) — nothing goes to the CleoCuts backend; the
+// browser's recognizer may send the audio to its maker (Google in
+// Chrome, Apple in Safari), which app.voice.permissionHint says.
 function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   const t = useT();
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const lang = useLang();
   const streamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<any>(null);
+  // Set when the dialog closes: onend must not restart recognition then.
+  const closedRef = useRef(false);
   const [permStatus, setPermStatus] = useState<
     "idle" | "requesting" | "granted" | "denied" | "unsupported"
   >("idle");
@@ -4288,15 +4420,12 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   const startTest = async () => {
     setPermStatus("requesting");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 640, height: 480 },
-        audio: true,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (closedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
       }
+      streamRef.current = stream;
 
       // Web Speech API
       const SR =
@@ -4311,7 +4440,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
       const recognition = new SR();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = "de-DE";
+      recognition.lang = speechLocale(lang);
       recognition.onresult = (event: any) => {
         let text = "";
         for (let i = 0; i < event.results.length; i++) {
@@ -4332,7 +4461,8 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
         if (event.error === "not-allowed") setPermStatus("denied");
       };
       recognition.onend = () => {
-        // Auto-restart while modal is open
+        // Auto-restart while the dialog is open (never after it closed).
+        if (closedRef.current) return;
         try {
           recognition.start();
         } catch {
@@ -4348,7 +4478,9 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   };
 
   useEffect(() => {
+    closedRef.current = false;
     return () => {
+      closedRef.current = true;
       try {
         recognitionRef.current?.stop();
       } catch {
@@ -4361,21 +4493,17 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
   const pulseActive = Date.now() - lastHitAt < 800;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
-      onClick={onDone}
-      data-testid="dialog-voice-test"
+    <Dialog
+      onClose={onDone}
+      labelledBy="voice-test-title"
+      testId="dialog-voice-test"
+      panelClassName="relative flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl"
+      panelStyle={{
+        background: "var(--surface-0)",
+        border: "1px solid var(--border)",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+      }}
     >
-      <div
-        className="relative flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl"
-        style={{
-          background: "var(--surface-0)",
-          border: "1px solid var(--border)",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
         {/* Compact header — one line title, one line explanation */}
         <div
           className="flex items-center justify-between p-4"
@@ -4383,6 +4511,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
         >
           <div className="flex-1">
             <div
+              id="voice-test-title"
               className="text-base font-bold"
               style={{ color: "var(--text-strong)" }}
             >
@@ -4407,22 +4536,24 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {/* Camera preview OR permission prompt */}
+          {/* Mic status OR permission prompt */}
           <div
             className="relative overflow-hidden"
             style={{
               background: "var(--surface-1)",
-              aspectRatio: "16 / 10",
+              aspectRatio: "16 / 7",
               borderBottom: "1px solid var(--border)",
             }}
           >
-            <video
-              ref={videoRef}
-              className="h-full w-full object-cover"
-              style={{ transform: "scaleX(-1)" }}
-              muted
-              playsInline
-            />
+            {permStatus === "granted" && (
+              <div
+                aria-hidden
+                className="flex h-full w-full items-center justify-center"
+                style={{ color: pulseActive ? "#4ECC77" : "var(--text-muted)" }}
+              >
+                <IconMic size={40} strokeWidth={2} />
+              </div>
+            )}
             {permStatus === "granted" && (
               <>
                 <div
@@ -4472,7 +4603,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
                       onClick={startTest}
                       disabled={permStatus === "requesting"}
                       className="rounded-xl px-6 py-2.5 text-sm font-semibold disabled:opacity-60"
-                      style={{ background: "var(--brand)", color: "white" }}
+                      style={{ background: "var(--brand-solid)", color: "white" }}
                     >
                       {permStatus === "requesting" ? t("app.voice.requesting") : t("app.voice.start")}
                     </button>
@@ -4546,15 +4677,14 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
             onClick={onDone}
             className="w-full rounded-xl py-2.5 text-sm font-semibold transition-transform hover:scale-[0.99]"
             style={{
-              background: "var(--brand)",
+              background: "var(--brand-solid)",
               color: "white",
             }}
           >
             {t("app.voice.done")}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -4912,7 +5042,7 @@ function ActiveJobCard({
           className="relative z-10 mb-3 text-xs"
           style={{ color: "#F26E6E" }}
         >
-          {friendlyError(job.error ?? status?.message, t)}
+          {job.error || !status ? friendlyError(job.error, t) : jobErrorText(status, t)}
         </div>
       ) : (
         <div
@@ -4995,7 +5125,6 @@ type EditorSeg = {
   volume?: number;     // 0 – 2.5, default 1
 };
 
-const TIMELINE_DEFAULT_PPS = 40; // px per second on open
 // Trimming snaps onto a neighbouring clip's footage when it would leave
 // less than this much of the removed gap between them.
 const TRIM_SNAP_S = 0.3;
@@ -5132,14 +5261,17 @@ function TimelineEditor({
   const [selected, setSelected] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragMode, setDragMode] = useState<"start" | "end" | null>(null);
-  // Zoom as pixels per second. Starts zoomed in so the strip scrolls
-  // and the 0.5s / 0.1s ruler marks are readable; "Fit" shows it all.
-  const [pps, setPps] = useState(TIMELINE_DEFAULT_PPS);
+  // Zoom as pixels per second. 0 = "Fit" (effPps below never goes under
+  // the fit zoom): the timeline opens showing the whole edit.
+  const [pps, setPps] = useState(0);
   const [history, setHistory] = useState<EditorSeg[][]>([]);
   const [future, setFuture] = useState<EditorSeg[][]>([]);
   const stripRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragPreviewRef = useRef<EditorSeg[] | null>(null);
+  // When the last trim drag ended: the click that follows its mouseup
+  // must not seek (the trim itself places the playhead).
+  const dragEndedAtRef = useRef(0);
   const scrubbingRef = useRef(false);
   const [, forceRender] = useState({});
 
@@ -5179,6 +5311,7 @@ function TimelineEditor({
   };
   const undo = () => {
     if (history.length === 0) return;
+    track("undo", { area: "timeline" });
     const prev = history[history.length - 1];
     setHistory(history.slice(0, -1));
     setFuture((f) => [segments, ...f].slice(0, 30));
@@ -5258,6 +5391,7 @@ function TimelineEditor({
 
     const handleUp = () => {
       const final = dragPreviewRef.current;
+      dragEndedAtRef.current = performance.now();
       dragTotalRef.current = null;
       setDraggingId(null);
       setDragMode(null);
@@ -5292,12 +5426,27 @@ function TimelineEditor({
     commit(segments.filter((s) => s.id !== id));
     setSelected(null);
   };
+  // Split needs the playhead inside a clip, at least 0.1 s from its
+  // edges. When it can't split, the button says why (title + a short
+  // note on click) instead of doing nothing.
+  const [splitNote, setSplitNote] = useState<string | null>(null);
+  const splitNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (splitNoteTimer.current) clearTimeout(splitNoteTimer.current);
+  }, []);
+  const splittable = (at: number) =>
+    segments.findIndex((s) => !s.disabled && at > s.start + 0.1 && at < s.end - 0.1);
+  const canSplit = splittable(playhead) !== -1;
   const splitAtPlayhead = () => {
     const at = getVideoTime();
-    const idx = segments.findIndex(
-      (s) => !s.disabled && at > s.start + 0.1 && at < s.end - 0.1,
-    );
-    if (idx === -1) return;
+    const idx = splittable(at);
+    if (idx === -1) {
+      setSplitNote(t("app.timeline.splitUnavailable"));
+      if (splitNoteTimer.current) clearTimeout(splitNoteTimer.current);
+      splitNoteTimer.current = setTimeout(() => setSplitNote(null), 4000);
+      return;
+    }
+    setSplitNote(null);
     const cur = segments[idx];
     const first: EditorSeg = { ...cur, end: at, id: `${cur.id}-a` };
     const second: EditorSeg = {
@@ -5329,17 +5478,21 @@ function TimelineEditor({
   };
 
   // Keyboard shortcuts: Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z (redo),
-  // Delete (remove selected), Space (play/pause via callback).
+  // Delete (remove selected), Space (play/pause via callback). They work
+  // on every editor tab (Delete only while the timeline shows, where the
+  // selection is visible), but only for keys aimed at the editor or the
+  // page itself — not in a dialog or elsewhere in the app — and never
+  // for text fields. A focused button, tab or link keeps its own Space /
+  // Enter / Backspace (tech.md T4).
   useEffect(() => {
-    if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const inField =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.isContentEditable;
-      if (inField) return;
+      if (e.defaultPrevented) return;
+      const target = e.target instanceof Element ? e.target : null;
+      const onPage = !target || target === document.body || target === document.documentElement;
+      if (!onPage && !target?.closest("[data-editor-root]")) return;
+      if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])")) return;
       const meta = e.metaKey || e.ctrlKey;
+      if (!meta && target?.closest("button, a, [role=tab], [role=button], summary")) return;
       if (meta && e.key.toLowerCase() === "z" && !e.shiftKey) {
         e.preventDefault();
         undo();
@@ -5350,10 +5503,10 @@ function TimelineEditor({
       ) {
         e.preventDefault();
         redo();
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selected) {
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selected && open) {
         e.preventDefault();
         del(selected);
-      } else if (e.key === " " || e.code === "Space") {
+      } else if (!meta && (e.key === " " || e.code === "Space")) {
         e.preventDefault();
         onPlayPauseKey?.();
       }
@@ -5588,12 +5741,6 @@ function TimelineEditor({
               </span>
             )}
           </div>
-          <div className="mt-1 hidden text-[11px] text-[var(--text-faint)] sm:block">
-            {t("app.timeline.hintDesktop")}
-          </div>
-          <div className="mt-1 text-[11px] text-[var(--text-faint)] sm:hidden">
-            {t("app.timeline.hintMobile")}
-          </div>
         </div>
 
       </button>
@@ -5633,9 +5780,12 @@ function TimelineEditor({
             <button
               onClick={splitAtPlayhead}
               data-testid="timeline-split"
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors hover:border-[var(--brand)] sm:px-2.5 sm:py-1"
+              // aria-disabled, not disabled: a click still explains why.
+              aria-disabled={!canSplit}
+              aria-describedby={splitNote ? "timeline-split-note" : undefined}
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors hover:border-[var(--brand)] aria-disabled:opacity-40 sm:px-2.5 sm:py-1"
               style={{ ...toolBtn, color: "var(--text-strong)" }}
-              title={t("app.timeline.splitTitle")}
+              title={canSplit ? t("app.timeline.splitTitle") : t("app.timeline.splitUnavailable")}
             >
               {t("app.timeline.split")}
             </button>
@@ -5694,6 +5844,16 @@ function TimelineEditor({
                 </button>
               </div>
             </div>
+          </div>
+
+          <div
+            id="timeline-split-note"
+            role="status"
+            data-testid="timeline-split-note"
+            className={splitNote ? "-mt-1 mb-2 text-xs" : "sr-only"}
+            style={{ color: "var(--warn)" }}
+          >
+            {splitNote}
           </div>
 
           {/* Ruler + clip strip — width scales with zoom, in a scroll container */}
@@ -5757,9 +5917,14 @@ function TimelineEditor({
                       style={{ width: `${width}%`, minWidth: "14px" }}
                     >
                       <div
-                        onClick={() => {
+                        onClick={(e) => {
                           setSelected(s.id);
-                          onSeekOriginal(s.start, s.id);
+                          if (performance.now() - dragEndedAtRef.current < 300) return;
+                          // Seek to the clicked point of the clip (not its
+                          // start), so Split right after works there.
+                          const r = e.currentTarget.getBoundingClientRect();
+                          const f = r.width > 0 ? Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) : 0;
+                          onSeekOriginal(Math.max(s.start, Math.min(s.end - 0.05, s.start + f * (s.end - s.start))), s.id);
                         }}
                         data-testid={`clip-${i}`}
                         className="@container group relative flex h-full cursor-pointer flex-col justify-between overflow-clip rounded-md transition-[box-shadow,border-color] duration-150"
@@ -5859,7 +6024,7 @@ function TimelineEditor({
                               {s.speed && s.speed !== 1 && (
                                 <span
                                   className="rounded px-1 text-[8px] font-semibold"
-                                  style={{ background: "var(--brand)", color: "white" }}
+                                  style={{ background: "var(--brand-solid)", color: "white" }}
                                 >
                                   {s.speed}×
                                 </span>

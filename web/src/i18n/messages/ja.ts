@@ -16,6 +16,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "プロジェクトを読み込めませんでした。少し時間をおいて、もう一度お試しください。",
   "app.notice.done": "この動画は完成しています — 「最近」とライブラリから見つけられます。",
   "app.notice.processing": "この動画はまだ処理中です。カードに進行状況が表示されます。",
+  "app.notice.alreadyExporting": "この動画はすでに書き出し中です。進行状況はカードに表示されます。",
   "app.notice.offline": "サーバーに接続できません。インターネット接続を確認して、もう一度お試しください。",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const ja: Partial<Record<MessageKey, string>> = {
     "アップロードが中断されました(ページの再読み込みやアプリの切り替えが原因の可能性があります)。動画を再度アップロードしてください。",
   "app.errors.tooLarge": "ファイルが大きすぎます。動画を短くするか、サイズを小さくして書き出してください。",
   "app.errors.noAudio": "動画内に使用できる音声が見つかりませんでした。",
+  "app.errors.noSpeech": "この動画から話し声が見つかりませんでした。CleoCuts は人が話している動画をカットして字幕を付けます。声の入ったクリップでお試しください。",
+  "app.errors.noSpeechRefunded": "この動画から話し声が見つかりませんでした。CleoCuts は人が話している動画をカットして字幕を付けます。声の入ったクリップでお試しください。利用時間（分）は返還しました。",
+  "app.errors.noAudioTrack": "この動画には音声トラックがないため、カットや字幕付けができません。料金は発生していません。",
   "app.errors.renderFailed":
     "レンダリングに失敗しました。編集内容は保存されています — プロジェクトを開いて再度レンダリングしてください。",
   "app.errors.serverNoResponse": "サーバーからの応答がありません。もう一度お試しください。",
@@ -156,6 +160,10 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "あなたのワークスペース",
   "app.dashboard.inProgressCountOne": "{count} 件の動画が処理中",
   "app.dashboard.inProgressCountOther": "{count} 件の動画が処理中",
+  "app.dashboard.readyCountOne": "{count} 件の動画を確認できます",
+  "app.dashboard.readyCountOther": "{count} 件の動画を確認できます",
+  "app.dashboard.failedCountOne": "{count} 件の動画でエラー",
+  "app.dashboard.failedCountOther": "{count} 件の動画でエラー",
   "app.dashboard.readyWhenYouAre": "準備ができたらどうぞ",
   "app.dashboard.newVideo": "新しい動画",
   "app.dashboard.inProgress": "処理中",
@@ -183,6 +191,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
     "スマホやパソコンからMP4またはMOVを選んでください。アップロードが完了するまでこのページを開いたままにしてください。",
   "app.upload.tapToChoose": "タップして選択",
   "app.upload.orDrag": "またはドラッグして追加",
+  "app.upload.privacyLink": "動画の取り扱いについて",
   "app.upload.keepTabOpen":
     "アップロードが完了するまでこのタブを開いたままにしてください。アプリを切り替えたりスマホをロックしたりすると、アップロードが中断されます。",
   "app.upload.resuming":
@@ -254,12 +263,8 @@ export const ja: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← ダッシュボード",
-  "app.review.sentencesOne": "{count} 文",
-  "app.review.sentencesOther": "{count} 文",
   "app.review.audioHeadsUp": "音声に関する注意",
   "app.review.updatingPreview": "プレビューを更新中…",
-  "app.review.captionSampleAlt": "{style}字幕サンプル",
-  "app.review.captionsLookLike": "字幕はこのように表示されます",
   "app.review.tabTimeline": "タイムライン",
   "app.review.tabTranscript": "文字起こし",
   "app.review.tabCaptions": "字幕",
@@ -291,16 +296,13 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "直前の変更がまだサーバーに届いていません。再試行しています…",
   "app.timeline.notSaved": "未保存",
   "app.timeline.notSavedRetrying": "未保存 · 再試行中",
-  "app.timeline.hintDesktop":
-    "スクロールで移動 · Ctrl/⌘ + スクロールでズーム · 端をドラッグでトリム · スペースキーで再生 · ⌫で削除 · ⌘Zで元に戻す",
-  "app.timeline.hintMobile":
-    "スワイプでスクロール · ピンチでズーム · クリップをタップして編集 · 目盛りをドラッグしてスクラブ",
   "app.timeline.undoTitle": "元に戻す (⌘Z)",
   "app.timeline.undoAria": "元に戻す",
   "app.timeline.redoTitle": "やり直す (⌘⇧Z)",
   "app.timeline.redoAria": "やり直す",
   "app.timeline.splitTitle": "再生位置のクリップを分割",
   "app.timeline.split": "⧉ 分割",
+  "app.timeline.splitUnavailable": "分割するには、再生位置をクリップの中に置いてください（先頭や末尾ちょうどは不可）。",
   "app.timeline.zoomOutTitle": "縮小(動画をより広く表示)",
   "app.timeline.zoomOutAria": "縮小",
   "app.timeline.fitTitle": "動画全体を表示",
@@ -334,7 +336,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "聞き取れました!",
   "app.voice.listening": "聞き取り中…",
   "app.voice.heardPrefix": "認識: ",
-  "app.voice.permissionHint": "カメラとマイクを使用します。すべてブラウザ内で処理されます。",
+  "app.voice.permissionHint": "マイクを使用します。音声のテキスト化はブラウザが行い、Chrome は Google に、Safari は Apple に音声を送信します。CleoCuts には何も送信されません。",
   "app.voice.requesting": "リクエスト中…",
   "app.voice.start": "開始",
   "app.voice.denied": "権限が拒否されました。ブラウザの設定で許可し、再読み込みしてください。",
@@ -474,6 +476,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "プレビューを閉じる",
   "common.videoModal.close": "閉じる",
+  "common.videoModal.dialogLabel": "動画のプレビュー",
 
   "common.auth.signIn": "サインイン",
   "common.auth.account": "アカウント",

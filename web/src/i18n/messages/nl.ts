@@ -16,6 +16,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Het project kon nu niet geladen worden. Probeer het straks nog eens.",
   "app.notice.done": "Deze video is klaar — je vindt hem onder Recent en in je bibliotheek.",
   "app.notice.processing": "Deze video wordt nog verwerkt. De kaart toont de voortgang.",
+  "app.notice.alreadyExporting": "Deze video wordt al geëxporteerd. De kaart toont de voortgang.",
   "app.notice.offline": "Kan de server niet bereiken. Controleer je internetverbinding en probeer het opnieuw.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const nl: Partial<Record<MessageKey, string>> = {
     "De upload werd onderbroken (pagina herladen of app gewisseld). Upload de video opnieuw.",
   "app.errors.tooLarge": "Het bestand is te groot. Verklein de video of exporteer hem kleiner.",
   "app.errors.noAudio": "Er is geen bruikbare audio gevonden in de video.",
+  "app.errors.noSpeech": "We hebben geen spraak in deze video gevonden. CleoCuts knipt en ondertitelt video's waarin iemand praat — probeer een clip met een stem.",
+  "app.errors.noSpeechRefunded": "We hebben geen spraak in deze video gevonden. CleoCuts knipt en ondertitelt video's waarin iemand praat — probeer een clip met een stem. De minuten zijn teruggeboekt.",
+  "app.errors.noAudioTrack": "Deze video heeft geen audiospoor, dus er valt niets te knippen of te ondertitelen. Er is niets in rekening gebracht.",
   "app.errors.renderFailed":
     "Renderen is mislukt. Je bewerkingen zijn opgeslagen — open het project en render opnieuw.",
   "app.errors.serverNoResponse": "De server reageerde niet. Probeer het opnieuw.",
@@ -159,6 +163,10 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Jouw werkruimte",
   "app.dashboard.inProgressCountOne": "{count} video bezig",
   "app.dashboard.inProgressCountOther": "{count} video's bezig",
+  "app.dashboard.readyCountOne": "{count} video klaar om te bekijken",
+  "app.dashboard.readyCountOther": "{count} video's klaar om te bekijken",
+  "app.dashboard.failedCountOne": "{count} video mislukt",
+  "app.dashboard.failedCountOther": "{count} video's mislukt",
   "app.dashboard.readyWhenYouAre": "Klaar wanneer jij het bent",
   "app.dashboard.newVideo": "Nieuwe video",
   "app.dashboard.inProgress": "Bezig",
@@ -186,6 +194,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
     "MP4 of MOV vanaf je telefoon of computer. Houd deze pagina open tot de upload klaar is.",
   "app.upload.tapToChoose": "Tik om te kiezen",
   "app.upload.orDrag": "of sleep er een naartoe",
+  "app.upload.privacyLink": "Zo gaan we met je video's om",
   "app.upload.keepTabOpen":
     "Houd dit tabblad open tot de upload klaar is. Wisselen van app of je telefoon vergrendelen annuleert de upload.",
   "app.upload.resuming":
@@ -258,12 +267,8 @@ export const nl: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Dashboard",
-  "app.review.sentencesOne": "{count} zin",
-  "app.review.sentencesOther": "{count} zinnen",
   "app.review.audioHeadsUp": "Audio-melding",
   "app.review.updatingPreview": "Voorbeeld wordt bijgewerkt…",
-  "app.review.captionSampleAlt": "Voorbeeld van {style}-ondertitels",
-  "app.review.captionsLookLike": "Zo zien de ondertitels eruit",
   "app.review.tabTimeline": "Tijdlijn",
   "app.review.tabTranscript": "Transcript",
   "app.review.tabCaptions": "Ondertitels",
@@ -295,16 +300,13 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Je laatste wijziging is nog niet bij de server aangekomen. Opnieuw proberen…",
   "app.timeline.notSaved": "niet opgeslagen",
   "app.timeline.notSavedRetrying": "niet opgeslagen · opnieuw proberen",
-  "app.timeline.hintDesktop":
-    "Scrollen om te bewegen · Ctrl/⌘ + scrollen om te zoomen · rand slepen om te trimmen · Spatie afspelen · ⌫ verwijderen · ⌘Z ongedaan maken",
-  "app.timeline.hintMobile":
-    "Swipe om te scrollen · knijp om te zoomen · tik op een clip om te bewerken · sleep de liniaal om te scrubben",
   "app.timeline.undoTitle": "Ongedaan maken (⌘Z)",
   "app.timeline.undoAria": "Ongedaan maken",
   "app.timeline.redoTitle": "Opnieuw (⌘⇧Z)",
   "app.timeline.redoAria": "Opnieuw",
   "app.timeline.splitTitle": "Splits de clip onder de afspeelkop",
   "app.timeline.split": "⧉ Splitsen",
+  "app.timeline.splitUnavailable": "Zet de afspeelkop in een clip om die te splitsen (niet precies aan het begin of einde).",
   "app.timeline.zoomOutTitle": "Uitzoomen (meer van de video tonen)",
   "app.timeline.zoomOutAria": "Uitzoomen",
   "app.timeline.fitTitle": "Hele video passend maken",
@@ -338,7 +340,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Je gehoord!",
   "app.voice.listening": "Luistert…",
   "app.voice.heardPrefix": "gehoord: ",
-  "app.voice.permissionHint": "Gebruikt je camera + microfoon. Alles blijft in je browser.",
+  "app.voice.permissionHint": "Gebruikt je microfoon. Je browser zet je spraak om in tekst: Chrome stuurt die daarvoor naar Google, Safari naar Apple. Er gaat niets naar CleoCuts.",
   "app.voice.requesting": "Aanvragen…",
   "app.voice.start": "Start",
   "app.voice.denied": "Toegang geweigerd. Schakel in bij browserinstellingen + herlaad de pagina.",
@@ -482,6 +484,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Voorbeeld sluiten",
   "common.videoModal.close": "Sluiten",
+  "common.videoModal.dialogLabel": "Voorbeeld van de video",
 
   "common.auth.signIn": "Inloggen",
   "common.auth.account": "Account",

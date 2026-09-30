@@ -20,6 +20,7 @@ export const enApp = {
   "app.notice.loadFailed": "Couldn't load the project right now. Please try again in a moment.",
   "app.notice.done": "This video is done — find it under Recent and in your Library.",
   "app.notice.processing": "This video is still processing. The card shows its progress.",
+  "app.notice.alreadyExporting": "This video is already being exported. Its card shows the progress.",
   "app.notice.offline": "Can't reach the server. Check your internet and try again.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -31,6 +32,9 @@ export const enApp = {
     "The upload was interrupted (page reloaded or app switched). Please upload the video again.",
   "app.errors.tooLarge": "The file is too large. Please trim the video or export it smaller.",
   "app.errors.noAudio": "No usable audio was found in the video.",
+  "app.errors.noSpeech": "We couldn't find any speech in this video. CleoCuts cuts and captions videos where someone talks — try a clip with a voice.",
+  "app.errors.noSpeechRefunded": "We couldn't find any speech in this video. CleoCuts cuts and captions videos where someone talks — try a clip with a voice. The minutes were credited back.",
+  "app.errors.noAudioTrack": "This video has no sound track, so there's nothing to cut or caption. Nothing was charged.",
   "app.errors.renderFailed":
     "Rendering failed. Your edits are saved — open the project and render again.",
   "app.errors.serverNoResponse": "Server did not respond. Please try again.",
@@ -163,6 +167,10 @@ export const enApp = {
   "app.dashboard.workspace": "Your workspace",
   "app.dashboard.inProgressCountOne": "{count} video in progress",
   "app.dashboard.inProgressCountOther": "{count} videos in progress",
+  "app.dashboard.readyCountOne": "{count} video ready to review",
+  "app.dashboard.readyCountOther": "{count} videos ready to review",
+  "app.dashboard.failedCountOne": "{count} video failed",
+  "app.dashboard.failedCountOther": "{count} videos failed",
   "app.dashboard.readyWhenYouAre": "Ready when you are",
   "app.dashboard.newVideo": "New video",
   "app.dashboard.inProgress": "In progress",
@@ -190,6 +198,7 @@ export const enApp = {
     "MP4 or MOV from your phone or computer. Keep this page open until the upload has finished.",
   "app.upload.tapToChoose": "Tap to choose",
   "app.upload.orDrag": "or drag one in",
+  "app.upload.privacyLink": "How we handle your videos",
   "app.upload.keepTabOpen":
     "Keep this tab open until the upload finishes. Switching apps or locking your phone will cancel the upload.",
   "app.upload.resuming":
@@ -261,12 +270,8 @@ export const enApp = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Dashboard",
-  "app.review.sentencesOne": "{count} sentence",
-  "app.review.sentencesOther": "{count} sentences",
   "app.review.audioHeadsUp": "Audio heads-up",
   "app.review.updatingPreview": "Updating preview…",
-  "app.review.captionSampleAlt": "{style} caption sample",
-  "app.review.captionsLookLike": "Captions will look like",
   "app.review.tabTimeline": "Timeline",
   "app.review.tabTranscript": "Transcript",
   "app.review.tabCaptions": "Captions",
@@ -298,16 +303,13 @@ export const enApp = {
   "app.timeline.saveRetryingTitle": "Your last change hasn't reached the server yet. Retrying…",
   "app.timeline.notSaved": "not saved",
   "app.timeline.notSavedRetrying": "not saved · retrying",
-  "app.timeline.hintDesktop":
-    "Scroll to move · Ctrl/⌘ + scroll to zoom · drag edges to trim · Space play · ⌫ delete · ⌘Z undo",
-  "app.timeline.hintMobile":
-    "Swipe to scroll · pinch to zoom · tap a clip to edit · drag the ruler to scrub",
   "app.timeline.undoTitle": "Undo (⌘Z)",
   "app.timeline.undoAria": "Undo",
   "app.timeline.redoTitle": "Redo (⌘⇧Z)",
   "app.timeline.redoAria": "Redo",
   "app.timeline.splitTitle": "Split the clip under the playhead",
   "app.timeline.split": "⧉ Split",
+  "app.timeline.splitUnavailable": "Move the playhead into a clip to split it (not right at its start or end).",
   "app.timeline.zoomOutTitle": "Zoom out (show more of the video)",
   "app.timeline.zoomOutAria": "Zoom out",
   "app.timeline.fitTitle": "Fit the whole video",
@@ -341,7 +343,7 @@ export const enApp = {
   "app.voice.heardYou": "Heard you!",
   "app.voice.listening": "Listening…",
   "app.voice.heardPrefix": "heard: ",
-  "app.voice.permissionHint": "Uses your camera + mic. Everything stays in your browser.",
+  "app.voice.permissionHint": "Uses your microphone. Your browser turns your speech into text: Chrome sends it to Google for that, Safari to Apple. Nothing goes to CleoCuts.",
   "app.voice.requesting": "Requesting…",
   "app.voice.start": "Start",
   "app.voice.denied": "Permission denied. Enable in browser settings + reload.",

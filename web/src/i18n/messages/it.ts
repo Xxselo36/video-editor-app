@@ -17,6 +17,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Non riusciamo a caricare il progetto ora. Riprova in un momento.",
   "app.notice.done": "Questo video è pronto — lo trovi in Recenti e nella tua Libreria.",
   "app.notice.processing": "Questo video è ancora in elaborazione. La card mostra i progressi.",
+  "app.notice.alreadyExporting": "Questo video è già in esportazione. La sua scheda mostra l'avanzamento.",
   "app.notice.offline": "Impossibile raggiungere il server. Controlla la connessione e riprova.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -28,6 +29,9 @@ export const it: Partial<Record<MessageKey, string>> = {
     "L'upload è stato interrotto (pagina ricaricata o app cambiata). Carica di nuovo il video.",
   "app.errors.tooLarge": "Il file è troppo grande. Taglia il video o esportalo più leggero.",
   "app.errors.noAudio": "Non è stato trovato audio utilizzabile nel video.",
+  "app.errors.noSpeech": "In questo video non abbiamo trovato parlato. CleoCuts taglia e sottotitola video in cui qualcuno parla: prova con una clip con una voce.",
+  "app.errors.noSpeechRefunded": "In questo video non abbiamo trovato parlato. CleoCuts taglia e sottotitola video in cui qualcuno parla: prova con una clip con una voce. I minuti ti sono stati riaccreditati.",
+  "app.errors.noAudioTrack": "Questo video non ha una traccia audio, quindi non c'è niente da tagliare o sottotitolare. Non ti è stato addebitato nulla.",
   "app.errors.renderFailed":
     "Il rendering è fallito. Le tue modifiche sono salvate — apri il progetto e renderizza di nuovo.",
   "app.errors.serverNoResponse": "Il server non ha risposto. Riprova.",
@@ -160,6 +164,10 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Il tuo spazio di lavoro",
   "app.dashboard.inProgressCountOne": "{count} video in corso",
   "app.dashboard.inProgressCountOther": "{count} video in corso",
+  "app.dashboard.readyCountOne": "{count} video pronto da rivedere",
+  "app.dashboard.readyCountOther": "{count} video pronti da rivedere",
+  "app.dashboard.failedCountOne": "{count} video non riuscito",
+  "app.dashboard.failedCountOther": "{count} video non riusciti",
   "app.dashboard.readyWhenYouAre": "Pronti quando vuoi",
   "app.dashboard.newVideo": "Nuovo video",
   "app.dashboard.inProgress": "In corso",
@@ -187,6 +195,7 @@ export const it: Partial<Record<MessageKey, string>> = {
     "MP4 o MOV dal telefono o dal computer. Tieni questa pagina aperta finché l'upload non è terminato.",
   "app.upload.tapToChoose": "Tocca per scegliere",
   "app.upload.orDrag": "oppure trascinane uno qui",
+  "app.upload.privacyLink": "Come trattiamo i tuoi video",
   "app.upload.keepTabOpen":
     "Tieni questa scheda aperta finché l'upload non termina. Cambiare app o bloccare il telefono annullerà l'upload.",
   "app.upload.resuming":
@@ -259,12 +268,8 @@ export const it: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Dashboard",
-  "app.review.sentencesOne": "{count} frase",
-  "app.review.sentencesOther": "{count} frasi",
   "app.review.audioHeadsUp": "Avviso audio",
   "app.review.updatingPreview": "Aggiornamento anteprima…",
-  "app.review.captionSampleAlt": "Esempio sottotitoli {style}",
-  "app.review.captionsLookLike": "I sottotitoli avranno questo aspetto",
   "app.review.tabTimeline": "Timeline",
   "app.review.tabTranscript": "Trascrizione",
   "app.review.tabCaptions": "Sottotitoli",
@@ -296,16 +301,13 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "L'ultima modifica non è ancora arrivata al server. Nuovo tentativo…",
   "app.timeline.notSaved": "non salvato",
   "app.timeline.notSavedRetrying": "non salvato · nuovo tentativo",
-  "app.timeline.hintDesktop":
-    "Scorri per muoverti · Ctrl/⌘ + scorri per zoomare · trascina i bordi per tagliare · Spazio play · ⌫ elimina · ⌘Z annulla",
-  "app.timeline.hintMobile":
-    "Scorri con il dito · pizzica per zoomare · tocca una clip per modificarla · trascina il righello per scorrere",
   "app.timeline.undoTitle": "Annulla (⌘Z)",
   "app.timeline.undoAria": "Annulla",
   "app.timeline.redoTitle": "Ripeti (⌘⇧Z)",
   "app.timeline.redoAria": "Ripeti",
   "app.timeline.splitTitle": "Dividi la clip sotto il cursore",
   "app.timeline.split": "⧉ Dividi",
+  "app.timeline.splitUnavailable": "Porta il cursore dentro una clip per dividerla (non proprio all'inizio o alla fine).",
   "app.timeline.zoomOutTitle": "Rimpicciolisci (mostra più video)",
   "app.timeline.zoomOutAria": "Rimpicciolisci",
   "app.timeline.fitTitle": "Adatta l'intero video",
@@ -339,7 +341,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Ti ho sentito!",
   "app.voice.listening": "In ascolto…",
   "app.voice.heardPrefix": "sentito: ",
-  "app.voice.permissionHint": "Usa la fotocamera e il microfono. Tutto resta nel tuo browser.",
+  "app.voice.permissionHint": "Usa il microfono. Il browser trasforma la tua voce in testo: Chrome la invia a Google, Safari ad Apple. A CleoCuts non arriva nulla.",
   "app.voice.requesting": "Richiesta in corso…",
   "app.voice.start": "Avvia",
   "app.voice.denied": "Permesso negato. Attivalo nelle impostazioni del browser e ricarica.",
@@ -497,6 +499,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   // ── Shared components ── */
   "common.videoModal.closeAria": "Chiudi anteprima",
   "common.videoModal.close": "Chiudi",
+  "common.videoModal.dialogLabel": "Anteprima del video",
 
   // ── Accounts (header, all pages) ── */
   "common.auth.signIn": "Accedi",

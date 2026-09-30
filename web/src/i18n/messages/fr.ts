@@ -16,6 +16,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Impossible de charger le projet pour le moment. Réessaie dans un instant.",
   "app.notice.done": "Cette vidéo est terminée — retrouve-la dans Récents et dans ta bibliothèque.",
   "app.notice.processing": "Cette vidéo est encore en traitement. La carte affiche sa progression.",
+  "app.notice.alreadyExporting": "Cette vidéo est déjà en cours d'export. Sa carte affiche la progression.",
   "app.notice.offline": "Impossible de joindre le serveur. Vérifie ta connexion et réessaie.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const fr: Partial<Record<MessageKey, string>> = {
     "L'envoi a été interrompu (page rechargée ou changement d'appli). Merci de réenvoyer la vidéo.",
   "app.errors.tooLarge": "Le fichier est trop volumineux. Rogne la vidéo ou exporte-la en plus petit.",
   "app.errors.noAudio": "Aucun son exploitable n'a été trouvé dans la vidéo.",
+  "app.errors.noSpeech": "Nous n'avons trouvé aucune parole dans cette vidéo. CleoCuts coupe et sous-titre les vidéos où quelqu'un parle — essaie avec un clip où l'on entend une voix.",
+  "app.errors.noSpeechRefunded": "Nous n'avons trouvé aucune parole dans cette vidéo. CleoCuts coupe et sous-titre les vidéos où quelqu'un parle — essaie avec un clip où l'on entend une voix. Les minutes t'ont été recréditées.",
+  "app.errors.noAudioTrack": "Cette vidéo n'a pas de piste audio : il n'y a rien à couper ni à sous-titrer. Rien n'a été facturé.",
   "app.errors.renderFailed":
     "Le rendu a échoué. Tes modifications sont enregistrées — ouvre le projet et relance le rendu.",
   "app.errors.serverNoResponse": "Le serveur ne répond pas. Réessaie.",
@@ -160,6 +164,10 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Ton espace de travail",
   "app.dashboard.inProgressCountOne": "{count} vidéo en cours",
   "app.dashboard.inProgressCountOther": "{count} vidéos en cours",
+  "app.dashboard.readyCountOne": "{count} vidéo prête à vérifier",
+  "app.dashboard.readyCountOther": "{count} vidéos prêtes à vérifier",
+  "app.dashboard.failedCountOne": "{count} vidéo en échec",
+  "app.dashboard.failedCountOther": "{count} vidéos en échec",
   "app.dashboard.readyWhenYouAre": "Prêt quand tu veux",
   "app.dashboard.newVideo": "Nouvelle vidéo",
   "app.dashboard.inProgress": "En cours",
@@ -187,6 +195,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     "MP4 ou MOV depuis ton téléphone ou ton ordinateur. Garde cette page ouverte jusqu'à la fin de l'envoi.",
   "app.upload.tapToChoose": "Touche pour choisir",
   "app.upload.orDrag": "ou dépose-la ici",
+  "app.upload.privacyLink": "Comment nous traitons tes vidéos",
   "app.upload.keepTabOpen":
     "Garde cet onglet ouvert jusqu'à la fin de l'envoi. Changer d'appli ou verrouiller ton téléphone annulera l'envoi.",
   "app.upload.resuming":
@@ -259,12 +268,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Tableau de bord",
-  "app.review.sentencesOne": "{count} phrase",
-  "app.review.sentencesOther": "{count} phrases",
   "app.review.audioHeadsUp": "À savoir sur l'audio",
   "app.review.updatingPreview": "Mise à jour de l'aperçu…",
-  "app.review.captionSampleAlt": "Exemple de sous-titres {style}",
-  "app.review.captionsLookLike": "À quoi ressembleront les sous-titres",
   "app.review.tabTimeline": "Chronologie",
   "app.review.tabTranscript": "Transcription",
   "app.review.tabCaptions": "Sous-titres",
@@ -296,16 +301,13 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Ta dernière modification n'a pas encore atteint le serveur. Nouvelle tentative…",
   "app.timeline.notSaved": "non enregistré",
   "app.timeline.notSavedRetrying": "non enregistré · nouvelle tentative",
-  "app.timeline.hintDesktop":
-    "Défiler pour se déplacer · Ctrl/⌘ + défiler pour zoomer · glisser les bords pour rogner · Espace pour lire · ⌫ supprimer · ⌘Z annuler",
-  "app.timeline.hintMobile":
-    "Balayer pour défiler · pincer pour zoomer · toucher un clip pour l'éditer · glisser la règle pour naviguer",
   "app.timeline.undoTitle": "Annuler (⌘Z)",
   "app.timeline.undoAria": "Annuler",
   "app.timeline.redoTitle": "Rétablir (⌘⇧Z)",
   "app.timeline.redoAria": "Rétablir",
   "app.timeline.splitTitle": "Scinder le clip sous la tête de lecture",
   "app.timeline.split": "⧉ Scinder",
+  "app.timeline.splitUnavailable": "Place la tête de lecture dans un clip pour le scinder (pas pile au début ni à la fin).",
   "app.timeline.zoomOutTitle": "Dézoomer (afficher plus de vidéo)",
   "app.timeline.zoomOutAria": "Dézoomer",
   "app.timeline.fitTitle": "Ajuster pour voir toute la vidéo",
@@ -339,7 +341,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Entendu !",
   "app.voice.listening": "Écoute…",
   "app.voice.heardPrefix": "entendu : ",
-  "app.voice.permissionHint": "Utilise ta caméra + micro. Tout reste dans ton navigateur.",
+  "app.voice.permissionHint": "Utilise ton micro. Ton navigateur transforme ta voix en texte : Chrome l'envoie pour cela à Google, Safari à Apple. Rien n'est envoyé à CleoCuts.",
   "app.voice.requesting": "Demande en cours…",
   "app.voice.start": "Démarrer",
   "app.voice.denied": "Autorisation refusée. Active-la dans les réglages du navigateur + recharge.",
@@ -495,6 +497,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   // ── Shared components ── //
   "common.videoModal.closeAria": "Fermer l'aperçu",
   "common.videoModal.close": "Fermer",
+  "common.videoModal.dialogLabel": "Aperçu de la vidéo",
   "common.auth.signIn": "Se connecter",
   "common.auth.account": "Compte",
   "common.auth.pricing": "Tarifs",

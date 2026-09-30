@@ -16,6 +16,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Proje şu an yüklenemedi. Lütfen birazdan tekrar dene.",
   "app.notice.done": "Bu video tamamlandı — Son İşlemler'de ve Kütüphanen'de bulabilirsin.",
   "app.notice.processing": "Bu video hâlâ işleniyor. Kart ilerlemeyi gösteriyor.",
+  "app.notice.alreadyExporting": "Bu video zaten dışa aktarılıyor. İlerlemeyi kartında görebilirsin.",
   "app.notice.offline": "Sunucuya erişilemiyor. İnternetini kontrol edip tekrar dene.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const tr: Partial<Record<MessageKey, string>> = {
     "Yükleme kesildi (sayfa yenilendi veya uygulama değiştirildi). Lütfen videoyu yeniden yükle.",
   "app.errors.tooLarge": "Dosya çok büyük. Videoyu kısalt veya daha küçük dışa aktar.",
   "app.errors.noAudio": "Videoda kullanılabilir ses bulunamadı.",
+  "app.errors.noSpeech": "Bu videoda konuşma bulamadık. CleoCuts, birinin konuştuğu videoları keser ve altyazılar — sesli bir klip dene.",
+  "app.errors.noSpeechRefunded": "Bu videoda konuşma bulamadık. CleoCuts, birinin konuştuğu videoları keser ve altyazılar — sesli bir klip dene. Dakikaların iade edildi.",
+  "app.errors.noAudioTrack": "Bu videonun ses kanalı yok; kesilecek ya da altyazı eklenecek bir şey bulunmuyor. Hiçbir ücret alınmadı.",
   "app.errors.renderFailed":
     "Render başarısız oldu. Düzenlemelerin kaydedildi — projeyi aç ve yeniden render et.",
   "app.errors.serverNoResponse": "Sunucu yanıt vermedi. Lütfen tekrar dene.",
@@ -160,6 +164,10 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Çalışma alanın",
   "app.dashboard.inProgressCountOne": "{count} video işleniyor",
   "app.dashboard.inProgressCountOther": "{count} video işleniyor",
+  "app.dashboard.readyCountOne": "{count} video incelemeye hazır",
+  "app.dashboard.readyCountOther": "{count} video incelemeye hazır",
+  "app.dashboard.failedCountOne": "{count} video başarısız",
+  "app.dashboard.failedCountOther": "{count} video başarısız",
   "app.dashboard.readyWhenYouAre": "Sen hazır olduğunda hazır",
   "app.dashboard.newVideo": "Yeni video",
   "app.dashboard.inProgress": "İşleniyor",
@@ -187,6 +195,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
     "Telefonundan veya bilgisayarından MP4 ya da MOV. Yükleme bitene kadar bu sayfayı açık tut.",
   "app.upload.tapToChoose": "Seçmek için dokun",
   "app.upload.orDrag": "veya birini sürükle",
+  "app.upload.privacyLink": "Videolarını nasıl işliyoruz",
   "app.upload.keepTabOpen":
     "Yükleme bitene kadar bu sekmeyi açık tut. Uygulama değiştirmek veya telefonunu kilitlemek yüklemeyi iptal eder.",
   "app.upload.resuming":
@@ -259,12 +268,8 @@ export const tr: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Panel",
-  "app.review.sentencesOne": "{count} cümle",
-  "app.review.sentencesOther": "{count} cümle",
   "app.review.audioHeadsUp": "Ses uyarısı",
   "app.review.updatingPreview": "Önizleme güncelleniyor…",
-  "app.review.captionSampleAlt": "{style} altyazı örneği",
-  "app.review.captionsLookLike": "Altyazılar şöyle görünecek",
   "app.review.tabTimeline": "Zaman Çizelgesi",
   "app.review.tabTranscript": "Transkript",
   "app.review.tabCaptions": "Altyazılar",
@@ -296,16 +301,13 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Son değişikliğin henüz sunucuya ulaşmadı. Yeniden deneniyor…",
   "app.timeline.notSaved": "kaydedilmedi",
   "app.timeline.notSavedRetrying": "kaydedilmedi · yeniden deneniyor",
-  "app.timeline.hintDesktop":
-    "Kaydırmak için scroll · Ctrl/⌘ + scroll ile yakınlaştır · kenarları sürükleyerek kırp · Boşluk oynat · ⌫ sil · ⌘Z geri al",
-  "app.timeline.hintMobile":
-    "Kaydırmak için sürükle · yakınlaştırmak için sıkıştır · düzenlemek için klibe dokun · gezinmek için cetveli sürükle",
   "app.timeline.undoTitle": "Geri al (⌘Z)",
   "app.timeline.undoAria": "Geri al",
   "app.timeline.redoTitle": "Yinele (⌘⇧Z)",
   "app.timeline.redoAria": "Yinele",
   "app.timeline.splitTitle": "Oynatma imlecinin altındaki klibi böl",
   "app.timeline.split": "⧉ Böl",
+  "app.timeline.splitUnavailable": "Bölmek için oynatma imlecini bir klibin içine getir (tam başına ya da sonuna değil).",
   "app.timeline.zoomOutTitle": "Uzaklaştır (videonun daha fazlasını göster)",
   "app.timeline.zoomOutAria": "Uzaklaştır",
   "app.timeline.fitTitle": "Videonun tamamını sığdır",
@@ -339,7 +341,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Seni duydum!",
   "app.voice.listening": "Dinliyor…",
   "app.voice.heardPrefix": "duyulan: ",
-  "app.voice.permissionHint": "Kameranı + mikrofonunu kullanır. Her şey tarayıcında kalır.",
+  "app.voice.permissionHint": "Mikrofonunu kullanır. Tarayıcın konuşmanı metne çevirir: Chrome bunun için sesini Google'a, Safari Apple'a gönderir. CleoCuts'a hiçbir şey gitmez.",
   "app.voice.requesting": "İsteniyor…",
   "app.voice.start": "Başlat",
   "app.voice.denied": "İzin verilmedi. Tarayıcı ayarlarından etkinleştir + sayfayı yenile.",
@@ -484,6 +486,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Önizlemeyi kapat",
   "common.videoModal.close": "Kapat",
+  "common.videoModal.dialogLabel": "Video önizlemesi",
   "common.auth.signIn": "Giriş yap",
   "common.auth.account": "Hesap",
   "common.auth.pricing": "Fiyatlandırma",

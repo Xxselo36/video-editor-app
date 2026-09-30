@@ -16,6 +16,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Не удалось загрузить проект. Попробуй ещё раз через минуту.",
   "app.notice.done": "Это видео готово — найдёшь его в разделе «Недавние» и в библиотеке.",
   "app.notice.processing": "Это видео ещё обрабатывается. Прогресс показан на карточке.",
+  "app.notice.alreadyExporting": "Это видео уже экспортируется. Прогресс видно на его карточке.",
   "app.notice.offline": "Не получается связаться с сервером. Проверь интернет и попробуй снова.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const ru: Partial<Record<MessageKey, string>> = {
     "Загрузка была прервана (страница перезагрузилась или приложение переключилось). Загрузи видео заново.",
   "app.errors.tooLarge": "Файл слишком большой. Обрежь видео или экспортируй его в меньшем размере.",
   "app.errors.noAudio": "В видео не найдено пригодной для обработки аудиодорожки.",
+  "app.errors.noSpeech": "Мы не нашли в этом видео речи. CleoCuts режет и субтитрует видео, где кто-то говорит, — попробуй клип с голосом.",
+  "app.errors.noSpeechRefunded": "Мы не нашли в этом видео речи. CleoCuts режет и субтитрует видео, где кто-то говорит, — попробуй клип с голосом. Минуты возвращены на твой счёт.",
+  "app.errors.noAudioTrack": "В этом видео нет звуковой дорожки — резать и субтитровать нечего. Ничего не списано.",
   "app.errors.renderFailed":
     "Рендер не удался. Твои изменения сохранены — открой проект и запусти рендер снова.",
   "app.errors.serverNoResponse": "Сервер не отвечает. Попробуй ещё раз.",
@@ -158,6 +162,10 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Твоё рабочее пространство",
   "app.dashboard.inProgressCountOne": "{count} видео в обработке",
   "app.dashboard.inProgressCountOther": "{count} видео в обработке",
+  "app.dashboard.readyCountOne": "{count} видео готово к проверке",
+  "app.dashboard.readyCountOther": "Готово к проверке: {count} видео",
+  "app.dashboard.failedCountOne": "{count} видео с ошибкой",
+  "app.dashboard.failedCountOther": "Видео с ошибкой: {count}",
   "app.dashboard.readyWhenYouAre": "Готовы, когда скажешь",
   "app.dashboard.newVideo": "Новое видео",
   "app.dashboard.inProgress": "В обработке",
@@ -185,6 +193,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
     "MP4 или MOV с телефона или компьютера. Держи эту страницу открытой, пока загрузка не завершится.",
   "app.upload.tapToChoose": "Нажми, чтобы выбрать",
   "app.upload.orDrag": "или перетащи файл",
+  "app.upload.privacyLink": "Как мы обращаемся с твоими видео",
   "app.upload.keepTabOpen":
     "Не закрывай эту вкладку, пока загрузка не завершится. Переключение на другое приложение или блокировка телефона прервёт загрузку.",
   "app.upload.resuming":
@@ -257,12 +266,8 @@ export const ru: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Главная",
-  "app.review.sentencesOne": "{count} предложение",
-  "app.review.sentencesOther": "{count} предложений",
   "app.review.audioHeadsUp": "Важно про звук",
   "app.review.updatingPreview": "Обновляем превью…",
-  "app.review.captionSampleAlt": "Образец субтитров {style}",
-  "app.review.captionsLookLike": "Так будут выглядеть субтитры",
   "app.review.tabTimeline": "Таймлайн",
   "app.review.tabTranscript": "Транскрипт",
   "app.review.tabCaptions": "Субтитры",
@@ -294,16 +299,13 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Твоё последнее изменение пока не дошло до сервера. Повторяем попытку…",
   "app.timeline.notSaved": "не сохранено",
   "app.timeline.notSavedRetrying": "не сохранено · повтор",
-  "app.timeline.hintDesktop":
-    "Прокрутка — сдвинуть · Ctrl/⌘ + прокрутка — масштаб · тяни края — обрезка · пробел — воспроизведение · ⌫ — удалить · ⌘Z — отменить",
-  "app.timeline.hintMobile":
-    "Свайп — прокрутка · щипок — масштаб · нажми на клип — редактировать · тяни линейку — перемотка",
   "app.timeline.undoTitle": "Отменить (⌘Z)",
   "app.timeline.undoAria": "Отменить",
   "app.timeline.redoTitle": "Повторить (⌘⇧Z)",
   "app.timeline.redoAria": "Повторить",
   "app.timeline.splitTitle": "Разрезать клип под курсором",
   "app.timeline.split": "⧉ Разрезать",
+  "app.timeline.splitUnavailable": "Чтобы разрезать клип, поставь курсор внутрь него (не в самое начало и не в конец).",
   "app.timeline.zoomOutTitle": "Уменьшить (показать больше видео)",
   "app.timeline.zoomOutAria": "Уменьшить",
   "app.timeline.fitTitle": "Вписать всё видео",
@@ -337,7 +339,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Услышали тебя!",
   "app.voice.listening": "Слушаем…",
   "app.voice.heardPrefix": "слышно: ",
-  "app.voice.permissionHint": "Используются камера и микрофон. Всё остаётся в твоём браузере.",
+  "app.voice.permissionHint": "Используется микрофон. Браузер превращает речь в текст: Chrome отправляет её для этого в Google, Safari — в Apple. В CleoCuts ничего не уходит.",
   "app.voice.requesting": "Запрашиваем…",
   "app.voice.start": "Начать",
   "app.voice.denied": "Доступ запрещён. Включи его в настройках браузера и перезагрузи страницу.",
@@ -481,6 +483,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Закрыть превью",
   "common.videoModal.close": "Закрыть",
+  "common.videoModal.dialogLabel": "Превью видео",
 
   // ── Accounts (header, all pages) ────────────────────────────────────
   "common.auth.signIn": "Войти",

@@ -16,6 +16,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "지금은 프로젝트를 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
   "app.notice.done": "이 영상은 완료됐어요 — 최근 항목과 라이브러리에서 확인할 수 있어요.",
   "app.notice.processing": "이 영상은 아직 처리 중이에요. 카드에 진행 상황이 표시돼요.",
+  "app.notice.alreadyExporting": "이 영상은 이미 내보내는 중이에요. 진행 상황은 카드에서 볼 수 있어요.",
   "app.notice.offline": "서버에 연결할 수 없어요. 인터넷 연결을 확인하고 다시 시도해 주세요.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const ko: Partial<Record<MessageKey, string>> = {
     "업로드가 중단됐어요(페이지 새로고침 또는 앱 전환). 영상을 다시 업로드해 주세요.",
   "app.errors.tooLarge": "파일이 너무 커요. 영상을 잘라내거나 더 작게 내보내 주세요.",
   "app.errors.noAudio": "영상에서 사용할 수 있는 오디오를 찾지 못했어요.",
+  "app.errors.noSpeech": "이 영상에서 말소리를 찾지 못했어요. CleoCuts는 누군가 말하는 영상을 컷 편집하고 자막을 달아요. 목소리가 담긴 클립으로 다시 해 보세요.",
+  "app.errors.noSpeechRefunded": "이 영상에서 말소리를 찾지 못했어요. CleoCuts는 누군가 말하는 영상을 컷 편집하고 자막을 달아요. 목소리가 담긴 클립으로 다시 해 보세요. 이용 시간(분)은 돌려드렸어요.",
+  "app.errors.noAudioTrack": "이 영상에는 오디오 트랙이 없어서 편집하거나 자막을 달 내용이 없어요. 요금은 청구되지 않았어요.",
   "app.errors.renderFailed":
     "렌더링에 실패했어요. 편집 내용은 저장돼 있어요 — 프로젝트를 열고 다시 렌더링해 주세요.",
   "app.errors.serverNoResponse": "서버가 응답하지 않았어요. 다시 시도해 주세요.",
@@ -156,6 +160,10 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "내 작업 공간",
   "app.dashboard.inProgressCountOne": "{count}개 영상 처리 중",
   "app.dashboard.inProgressCountOther": "{count}개 영상 처리 중",
+  "app.dashboard.readyCountOne": "{count}개 영상 검토 준비 완료",
+  "app.dashboard.readyCountOther": "{count}개 영상 검토 준비 완료",
+  "app.dashboard.failedCountOne": "{count}개 영상 실패",
+  "app.dashboard.failedCountOther": "{count}개 영상 실패",
   "app.dashboard.readyWhenYouAre": "준비되면 시작해요",
   "app.dashboard.newVideo": "새 영상",
   "app.dashboard.inProgress": "처리 중",
@@ -183,6 +191,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
     "휴대폰이나 컴퓨터에 있는 MP4 또는 MOV 파일. 업로드가 끝날 때까지 이 페이지를 열어 두세요.",
   "app.upload.tapToChoose": "탭해서 선택",
   "app.upload.orDrag": "또는 파일을 끌어다 놓기",
+  "app.upload.privacyLink": "영상 처리 방식 안내",
   "app.upload.keepTabOpen":
     "업로드가 끝날 때까지 이 탭을 열어 두세요. 앱을 전환하거나 휴대폰을 잠그면 업로드가 취소돼요.",
   "app.upload.resuming":
@@ -254,12 +263,8 @@ export const ko: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← 대시보드",
-  "app.review.sentencesOne": "문장 {count}개",
-  "app.review.sentencesOther": "문장 {count}개",
   "app.review.audioHeadsUp": "오디오 참고 사항",
   "app.review.updatingPreview": "미리보기를 업데이트하고 있어요…",
-  "app.review.captionSampleAlt": "{style} 자막 예시",
-  "app.review.captionsLookLike": "자막은 이런 모습이에요",
   "app.review.tabTimeline": "타임라인",
   "app.review.tabTranscript": "스크립트",
   "app.review.tabCaptions": "자막",
@@ -291,16 +296,13 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "마지막 변경 내용이 서버에 아직 전달되지 않았어요. 다시 시도하는 중…",
   "app.timeline.notSaved": "저장되지 않음",
   "app.timeline.notSavedRetrying": "저장되지 않음 · 재시도 중",
-  "app.timeline.hintDesktop":
-    "스크롤로 이동 · Ctrl/⌘ + 스크롤로 확대·축소 · 가장자리를 드래그해 트리밍 · Space 재생 · ⌫ 삭제 · ⌘Z 실행 취소",
-  "app.timeline.hintMobile":
-    "스와이프로 이동 · 핀치로 확대·축소 · 클립을 탭해 편집 · 눈금자를 드래그해 스크러빙",
   "app.timeline.undoTitle": "실행 취소 (⌘Z)",
   "app.timeline.undoAria": "실행 취소",
   "app.timeline.redoTitle": "다시 실행 (⌘⇧Z)",
   "app.timeline.redoAria": "다시 실행",
   "app.timeline.splitTitle": "재생 위치의 클립을 분할해요",
   "app.timeline.split": "⧉ 분할",
+  "app.timeline.splitUnavailable": "분할하려면 재생 위치를 클립 안으로 옮기세요(시작이나 끝 지점은 안 돼요).",
   "app.timeline.zoomOutTitle": "축소 (영상을 더 많이 보기)",
   "app.timeline.zoomOutAria": "축소",
   "app.timeline.fitTitle": "전체 영상에 맞추기",
@@ -334,7 +336,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "들었어요!",
   "app.voice.listening": "듣고 있어요…",
   "app.voice.heardPrefix": "들은 말: ",
-  "app.voice.permissionHint": "카메라와 마이크를 사용해요. 모든 데이터는 브라우저 안에만 남아요.",
+  "app.voice.permissionHint": "마이크를 사용해요. 음성을 텍스트로 바꾸는 건 브라우저가 해요. 이때 Chrome은 Google로, Safari는 Apple로 음성을 보내요. CleoCuts로는 아무것도 보내지 않아요.",
   "app.voice.requesting": "요청 중…",
   "app.voice.start": "시작",
   "app.voice.denied": "권한이 거부됐어요. 브라우저 설정에서 허용하고 새로고침해 주세요.",
@@ -474,6 +476,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "미리보기 닫기",
   "common.videoModal.close": "닫기",
+  "common.videoModal.dialogLabel": "영상 미리보기",
 
   "common.auth.signIn": "로그인",
   "common.auth.account": "계정",

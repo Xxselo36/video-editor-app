@@ -132,6 +132,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   // ── shared components ──
   "common.videoModal.closeAria": "Fechar prévia",
   "common.videoModal.close": "Fechar",
+  "common.videoModal.dialogLabel": "Prévia do vídeo",
   "common.auth.signIn": "Entrar",
   "common.auth.account": "Conta",
   "common.auth.pricing": "Preços",
@@ -152,6 +153,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Não foi possível carregar o projeto agora. Tente novamente em um instante.",
   "app.notice.done": "Este vídeo está pronto — encontre-o em Recentes e na sua Biblioteca.",
   "app.notice.processing": "Este vídeo ainda está sendo processado. O card mostra o progresso.",
+  "app.notice.alreadyExporting": "Este vídeo já está sendo exportado. O cartão dele mostra o progresso.",
   "app.notice.offline": "Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.",
 
   // ── app: errors ──
@@ -163,6 +165,9 @@ export const pt: Partial<Record<MessageKey, string>> = {
     "O envio foi interrompido (a página recarregou ou você trocou de app). Envie o vídeo novamente.",
   "app.errors.tooLarge": "O arquivo é muito grande. Corte o vídeo ou exporte em um tamanho menor.",
   "app.errors.noAudio": "Nenhum áudio utilizável foi encontrado no vídeo.",
+  "app.errors.noSpeech": "Não encontramos fala neste vídeo. A CleoCuts corta e legenda vídeos em que alguém fala — tente um clipe com voz.",
+  "app.errors.noSpeechRefunded": "Não encontramos fala neste vídeo. A CleoCuts corta e legenda vídeos em que alguém fala — tente um clipe com voz. Os minutos foram devolvidos.",
+  "app.errors.noAudioTrack": "Este vídeo não tem faixa de áudio, então não há nada para cortar ou legendar. Nada foi cobrado.",
   "app.errors.renderFailed":
     "A renderização falhou. Suas edições foram salvas — abra o projeto e renderize novamente.",
   "app.errors.serverNoResponse": "O servidor não respondeu. Tente novamente.",
@@ -293,6 +298,10 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Seu espaço de trabalho",
   "app.dashboard.inProgressCountOne": "{count} vídeo em andamento",
   "app.dashboard.inProgressCountOther": "{count} vídeos em andamento",
+  "app.dashboard.readyCountOne": "{count} vídeo pronto para revisar",
+  "app.dashboard.readyCountOther": "{count} vídeos prontos para revisar",
+  "app.dashboard.failedCountOne": "{count} vídeo com falha",
+  "app.dashboard.failedCountOther": "{count} vídeos com falha",
   "app.dashboard.readyWhenYouAre": "Pronto quando você quiser",
   "app.dashboard.newVideo": "Novo vídeo",
   "app.dashboard.inProgress": "Em andamento",
@@ -320,6 +329,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
     "MP4 ou MOV do seu celular ou computador. Mantenha esta página aberta até o envio terminar.",
   "app.upload.tapToChoose": "Toque para escolher",
   "app.upload.orDrag": "ou arraste um arquivo aqui",
+  "app.upload.privacyLink": "Como tratamos seus vídeos",
   "app.upload.keepTabOpen":
     "Mantenha esta aba aberta até o envio terminar. Trocar de app ou bloquear o celular vai cancelar o envio.",
   "app.upload.resuming":
@@ -392,12 +402,8 @@ export const pt: Partial<Record<MessageKey, string>> = {
 
   // ── app: review (editor) ──
   "app.review.backToDashboard": "← Painel",
-  "app.review.sentencesOne": "{count} frase",
-  "app.review.sentencesOther": "{count} frases",
   "app.review.audioHeadsUp": "Aviso de áudio",
   "app.review.updatingPreview": "Atualizando prévia…",
-  "app.review.captionSampleAlt": "Exemplo de legenda {style}",
-  "app.review.captionsLookLike": "As legendas vão parecer com isto",
   "app.review.tabTimeline": "Linha do tempo",
   "app.review.tabTranscript": "Transcrição",
   "app.review.tabCaptions": "Legendas",
@@ -429,16 +435,13 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Sua última alteração ainda não chegou ao servidor. Tentando novamente…",
   "app.timeline.notSaved": "não salvo",
   "app.timeline.notSavedRetrying": "não salvo · tentando novamente",
-  "app.timeline.hintDesktop":
-    "Role para mover · Ctrl/⌘ + rolar para zoom · arraste as bordas para cortar · Espaço para reproduzir · ⌫ excluir · ⌘Z desfazer",
-  "app.timeline.hintMobile":
-    "Deslize para rolar · pince para zoom · toque em um clipe para editar · arraste a régua para navegar",
   "app.timeline.undoTitle": "Desfazer (⌘Z)",
   "app.timeline.undoAria": "Desfazer",
   "app.timeline.redoTitle": "Refazer (⌘⇧Z)",
   "app.timeline.redoAria": "Refazer",
   "app.timeline.splitTitle": "Dividir o clipe sob o cursor",
   "app.timeline.split": "⧉ Dividir",
+  "app.timeline.splitUnavailable": "Coloque o cursor dentro de um clipe para dividi-lo (não bem no início nem no fim).",
   "app.timeline.zoomOutTitle": "Diminuir zoom (ver mais do vídeo)",
   "app.timeline.zoomOutAria": "Diminuir zoom",
   "app.timeline.fitTitle": "Ajustar o vídeo inteiro",
@@ -472,7 +475,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Ouvi você!",
   "app.voice.listening": "Ouvindo…",
   "app.voice.heardPrefix": "ouvi: ",
-  "app.voice.permissionHint": "Usa sua câmera + microfone. Tudo fica no seu navegador.",
+  "app.voice.permissionHint": "Usa seu microfone. Seu navegador transforma sua fala em texto: o Chrome envia a voz para o Google, o Safari para a Apple. Nada vai para a CleoCuts.",
   "app.voice.requesting": "Solicitando…",
   "app.voice.start": "Começar",
   "app.voice.denied": "Permissão negada. Ative nas configurações do navegador e recarregue.",

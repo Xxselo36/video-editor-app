@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vitest/config";
 
 const PAGE = fileURLToPath(new URL("./src/app/app/page.tsx", import.meta.url));
-const PAGE_INTERNALS = ["buildPhrases", "friendlyError", "localizeKnown", "matchTemplate"];
+const PAGE_INTERNALS = ["buildPhrases", "friendlyError", "jobErrorText", "localizeKnown", "matchTemplate"];
 
 function pageInternals(): Plugin {
   const id = "virtual:page-internals";

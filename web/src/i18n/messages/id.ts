@@ -16,6 +16,7 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Proyek tidak bisa dimuat sekarang. Coba lagi sebentar lagi.",
   "app.notice.done": "Video ini sudah selesai — cek di Terbaru dan di Perpustakaanmu.",
   "app.notice.processing": "Video ini masih diproses. Kartunya menunjukkan progresnya.",
+  "app.notice.alreadyExporting": "Video ini sudah sedang diekspor. Kartunya menampilkan progresnya.",
   "app.notice.offline": "Tidak bisa terhubung ke server. Cek internetmu dan coba lagi.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const id: Partial<Record<MessageKey, string>> = {
     "Unggahan terputus (halaman dimuat ulang atau ganti aplikasi). Silakan unggah videonya lagi.",
   "app.errors.tooLarge": "Filenya terlalu besar. Potong videonya atau ekspor dengan ukuran lebih kecil.",
   "app.errors.noAudio": "Tidak ada audio yang bisa dipakai di video ini.",
+  "app.errors.noSpeech": "Kami tidak menemukan ucapan di video ini. CleoCuts memotong dan memberi teks video yang berisi orang berbicara — coba klip yang ada suaranya.",
+  "app.errors.noSpeechRefunded": "Kami tidak menemukan ucapan di video ini. CleoCuts memotong dan memberi teks video yang berisi orang berbicara — coba klip yang ada suaranya. Menitnya sudah dikembalikan.",
+  "app.errors.noAudioTrack": "Video ini tidak punya trek audio, jadi tidak ada yang bisa dipotong atau diberi teks. Tidak ada biaya yang dikenakan.",
   "app.errors.renderFailed":
     "Rendering gagal. Editanmu sudah tersimpan — buka proyeknya dan render lagi.",
   "app.errors.serverNoResponse": "Server tidak merespons. Coba lagi.",
@@ -159,6 +163,10 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Ruang kerjamu",
   "app.dashboard.inProgressCountOne": "{count} video sedang diproses",
   "app.dashboard.inProgressCountOther": "{count} video sedang diproses",
+  "app.dashboard.readyCountOne": "{count} video siap ditinjau",
+  "app.dashboard.readyCountOther": "{count} video siap ditinjau",
+  "app.dashboard.failedCountOne": "{count} video gagal",
+  "app.dashboard.failedCountOther": "{count} video gagal",
   "app.dashboard.readyWhenYouAre": "Siap kapan pun kamu siap",
   "app.dashboard.newVideo": "Video baru",
   "app.dashboard.inProgress": "Sedang diproses",
@@ -186,6 +194,7 @@ export const id: Partial<Record<MessageKey, string>> = {
     "MP4 atau MOV dari HP atau komputermu. Biarkan halaman ini terbuka sampai unggahan selesai.",
   "app.upload.tapToChoose": "Ketuk untuk memilih",
   "app.upload.orDrag": "atau seret satu ke sini",
+  "app.upload.privacyLink": "Cara kami menangani videomu",
   "app.upload.keepTabOpen":
     "Biarkan tab ini terbuka sampai unggahan selesai. Berpindah aplikasi atau mengunci HP akan membatalkan unggahan.",
   "app.upload.resuming":
@@ -258,12 +267,8 @@ export const id: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Dashboard",
-  "app.review.sentencesOne": "{count} kalimat",
-  "app.review.sentencesOther": "{count} kalimat",
   "app.review.audioHeadsUp": "Info audio",
   "app.review.updatingPreview": "Memperbarui pratinjau…",
-  "app.review.captionSampleAlt": "Contoh teks {style}",
-  "app.review.captionsLookLike": "Tampilan teksnya akan seperti ini",
   "app.review.tabTimeline": "Linimasa",
   "app.review.tabTranscript": "Transkrip",
   "app.review.tabCaptions": "Teks",
@@ -295,16 +300,13 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Perubahan terakhirmu belum sampai ke server. Mencoba lagi…",
   "app.timeline.notSaved": "belum tersimpan",
   "app.timeline.notSavedRetrying": "belum tersimpan · mencoba lagi",
-  "app.timeline.hintDesktop":
-    "Scroll untuk geser · Ctrl/⌘ + scroll untuk zoom · seret tepi untuk trim · Spasi main · ⌫ hapus · ⌘Z batalkan",
-  "app.timeline.hintMobile":
-    "Swipe untuk geser · cubit untuk zoom · ketuk klip untuk edit · seret penggaris untuk scrub",
   "app.timeline.undoTitle": "Batalkan (⌘Z)",
   "app.timeline.undoAria": "Batalkan",
   "app.timeline.redoTitle": "Ulangi (⌘⇧Z)",
   "app.timeline.redoAria": "Ulangi",
   "app.timeline.splitTitle": "Pisahkan klip di posisi playhead",
   "app.timeline.split": "⧉ Pisahkan",
+  "app.timeline.splitUnavailable": "Letakkan playhead di dalam klip untuk memisahkannya (jangan tepat di awal atau akhir).",
   "app.timeline.zoomOutTitle": "Perkecil (tampilkan lebih banyak video)",
   "app.timeline.zoomOutAria": "Perkecil",
   "app.timeline.fitTitle": "Sesuaikan seluruh video",
@@ -338,7 +340,7 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.voice.heardYou": "Kedengaran!",
   "app.voice.listening": "Mendengarkan…",
   "app.voice.heardPrefix": "terdengar: ",
-  "app.voice.permissionHint": "Memakai kamera + mikmu. Semuanya tetap di browsermu.",
+  "app.voice.permissionHint": "Memakai mikrofonmu. Browser-mu mengubah suaramu jadi teks: Chrome mengirimnya ke Google untuk itu, Safari ke Apple. Tidak ada yang dikirim ke CleoCuts.",
   "app.voice.requesting": "Meminta izin…",
   "app.voice.start": "Mulai",
   "app.voice.denied": "Izin ditolak. Aktifkan di pengaturan browser + muat ulang.",
@@ -481,6 +483,7 @@ export const id: Partial<Record<MessageKey, string>> = {
 
   "common.videoModal.closeAria": "Tutup pratinjau",
   "common.videoModal.close": "Tutup",
+  "common.videoModal.dialogLabel": "Pratinjau video",
 
   /* ── Accounts (header, all pages) ── */
   "common.auth.signIn": "Masuk",
