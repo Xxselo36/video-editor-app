@@ -17,7 +17,9 @@
  */
 import { useSyncExternalStore } from "react";
 import type { Paywall } from "@/lib/account";
-import type { PresetId } from "@/features/start/presets.legacy";
+import { addActiveJob, liveUploads, updateActiveJob } from "@/lib/activeJobs";
+import { tEn } from "@/lib/errors";
+import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import type { UploadSettings } from "./uploadJob";
 
 export type LiveUpload = {
@@ -83,6 +85,30 @@ export function _version(): number {
   return version;
 }
 
+/** Put up the card of a new upload (its temporary id until POST /jobs
+ *  names the job); marked as this page's (liveUploads). */
+export function uploadCard(file: File, settings: UploadSettings, preset: PresetId | null): string {
+  const tempId = `upl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const info = preset ? PRESETS[preset] : null;
+  liveUploads.add(tempId);
+  addActiveJob({
+    jobId: tempId,
+    phase: "uploading",
+    timestamp: Date.now(),
+    filename: file.name,
+    fileSize: file.size,
+    presetId: preset,
+    presetLabel: info ? tEn(info.labelKey) : null,
+    presetIcon: null,
+    captionPreset: settings.caption_preset,
+    uploadPct: 0,
+    lastProgressAt: Date.now(),
+  });
+  live.set(tempId, { id: tempId, pct: 0, resuming: false });
+  emit();
+  return tempId;
+}
+
 /**
  * Upload `file` and create its job, in the background whatever route is
  * shown; resolves when that is over (callers don't wait for it). Never
@@ -95,10 +121,24 @@ export async function startUpload(
   preset: PresetId | null,
   onCreated?: (jobId: string) => void,
 ): Promise<void> {
+  // The card goes up now, before anything is awaited: the dashboard the
+  // user is sent to shows it the moment it opens.
+  const tempId = uploadCard(file, settings, preset);
   // The upload code is its own chunk: pages that only show cards (the
   // dashboard) don't load it.
-  const { uploadJob } = await import("./uploadJob");
+  let uploadJob: typeof import("./uploadJob").uploadJob;
+  try {
+    ({ uploadJob } = await import("./uploadJob"));
+  } catch {
+    // The chunk didn't load (offline): the card says so.
+    liveUploads.delete(tempId);
+    live.delete(tempId);
+    updateActiveJob(tempId, { error: "connection_lost" });
+    emit();
+    return;
+  }
   return uploadJob(file, settings, preset, {
+    tempId,
     onPaywall: (pw) => {
       paywall = pw;
       emit();

@@ -72,7 +72,9 @@ export async function uploadJob(
   targetFile: File,
   settings: UploadSettings,
   selectedPreset: PresetId | null,
-  { onPaywall, onCreated, onProgress, onEnd }: {
+  { tempId, onPaywall, onCreated, onProgress, onEnd }: {
+    /** The upload card's temporary id (uploadCard). */
+    tempId: string;
     /** Billing refused the upload (402): the dialog with a way to a plan. */
     onPaywall: (pw: Paywall) => void;
     /** The job exists (its card replaced the upload's). */
@@ -88,21 +90,9 @@ export async function uploadJob(
   // we use a temporary local ID and swap it in once the response
   // arrives. Poll loop skips uploading-phase cards so no ghost
   // requests are fired against a non-existent job.
-  const tempId = `upl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // (The caller — uploadManager — put the card up already: at once, so
+  // the dashboard shows it the moment it opens.)
   const presetInfo = selectedPreset ? PRESETS[selectedPreset] : null;
-  addActiveJob({
-    jobId: tempId,
-    phase: "uploading",
-    timestamp: Date.now(),
-    filename: targetFile.name,
-    fileSize: targetFile.size,
-    presetId: selectedPreset,
-    presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
-    presetIcon: null,
-    captionPreset: settings.caption_preset,
-    uploadPct: 0,
-    lastProgressAt: Date.now(),
-  });
   liveUploads.add(tempId);
 
   // Progress ticks (thousands on a multi-GB file) only go to the live

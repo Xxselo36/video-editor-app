@@ -109,9 +109,11 @@ test("a deep link works in a new browser context", async ({ browser, stub }) => 
   const page = await ctx.newPage();
   await page.goto(`/app/edit/${job.id}`);
   await expect(page.getByTestId("apply-render")).toBeVisible({ timeout: 45_000 });
-  // Back to the dashboard from a deep link: the app's own route.
+  // Back from a deep link stays in the app: the dashboard, which — with
+  // nothing on this device yet — goes on to the picker.
   await page.getByTestId("editor-back").click();
-  await expect(page).toHaveURL(`${WEB}/app`);
+  await expect(page).toHaveURL(`${WEB}/app/new`);
+  await expect(page.getByTestId("picker")).toBeVisible();
   await ctx.close();
 });
 
