@@ -101,7 +101,7 @@ describe("glossary", () => {
   });
 
   it("docs/i18n-glossary.md stays machine-readable: 8 concepts in every language", () => {
-    const langs = readLangs(fs.readFileSync(path.join(HERE, "../src/i18n/index.tsx"), "utf8"));
+    const langs = readLangs(fs.readFileSync(path.join(HERE, "../src/i18n/langs.ts"), "utf8"));
     const g = parseGlossary(fs.readFileSync(path.join(HERE, "../../docs/i18n-glossary.md"), "utf8"));
     expect(Object.keys(g.terms)).toEqual([
       "Take",

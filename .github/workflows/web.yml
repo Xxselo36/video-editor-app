@@ -138,6 +138,10 @@ jobs:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.nightly)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # WebKit has never run against these suites yet: report its results
+    # without failing the nightly run (no failure mail every night) until
+    # UX18 makes it a release requirement.
+    continue-on-error: ${{ startsWith(matrix.name, 'webkit') }}
     strategy:
       fail-fast: false
       matrix:

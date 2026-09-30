@@ -4,7 +4,7 @@
  *
  * Reads the message files (src/i18n/messages; English is the source of
  * truth: en.ts = en.site.ts + en.app.ts) of every language in LANGS
- * (src/i18n/index.tsx) and checks:
+ * (src/i18n/langs.ts) and checks:
  *
  *   errors (exit 1)
  *     missing       a language lacks a key English has
@@ -57,16 +57,16 @@ export function loadTs(file, cache = new Map()) {
   return mod.exports;
 }
 
-/** Language codes of LANGS in src/i18n/index.tsx, English first. */
+/** Language codes of LANGS in src/i18n/langs.ts, English first. */
 export function readLangs(indexSource) {
   const block = /export const LANGS\s*=\s*\{([\s\S]*?)\}/.exec(indexSource);
-  if (!block) throw new Error("src/i18n/index.tsx: LANGS not found");
+  if (!block) throw new Error("src/i18n/langs.ts: LANGS not found");
   return [...block[1].matchAll(/^\s*["']?([a-z]{2}(?:-[A-Z]{2})?)["']?\s*:/gm)].map((m) => m[1]);
 }
 
 /** { lang: { key: message } } for every language; English complete. */
 export function loadMessages() {
-  const langs = readLangs(fs.readFileSync(path.join(SRC, "i18n", "index.tsx"), "utf8"));
+  const langs = readLangs(fs.readFileSync(path.join(SRC, "i18n", "langs.ts"), "utf8"));
   const cache = new Map();
   const dicts = {};
   for (const lang of langs) {
