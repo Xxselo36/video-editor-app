@@ -3,77 +3,27 @@
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LogoMark } from "@/components/Logo";
-import { getLibrary } from "@/lib/library";
-import { requestNotificationPermission } from "@/lib/notify";
-import { trackSave, waitForSaves } from "@/lib/pendingSaves";
-import { phrasesToUnits } from "@/features/editor/legacy/phraseUnits";
-import {
-  readVideoDuration,
-  resumableProgress,
-  uploadLimitHit,
-  uploadResumable,
-  UPLOAD_STALL_MS,
-  UPLOAD_STALLED_MSG,
-} from "@/lib/chunkedUpload";
-import {
-  addActiveJob,
-  getActiveJobs,
-  removeActiveJob,
-  updateActiveJob as updateActiveJobV2,
-  liveUploads,
-  dropLegacyActiveJob,
-} from "@/lib/activeJobs";
-import { LanguageSwitcher, useT } from "@/i18n";
-import { AUTH_ENABLED } from "@/lib/auth";
-import {
-  ApiError,
-  apiError,
-  apiErrorFromText,
-  apiFetch,
-  authHeaders,
-  backendUrl,
-  notifyAuthRequired,
-  whenMediaReady,
-} from "@/lib/api";
-import {
-  fetchServerJobs,
-  paywallFrom,
-  planName,
-  refreshMe,
-  toMs,
-  useBillingConfig,
-  useMe,
-  type Paywall,
-} from "@/lib/account";
 import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { PaywallDialog } from "@/components/billing/PaywallDialog";
+import { LanguageSwitcher, useT } from "@/i18n";
+import { planName, useBillingConfig, useMe, type Paywall } from "@/lib/account";
+import { dropLegacyActiveJob, updateActiveJob as updateActiveJobV2 } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
-import {
-  FRIENDLY_EXPIRED_KEY,
-  friendlyError,
-  jobErrorText,
-  REFUSAL_CODES,
-  refusalMessage,
-  tEn,
-} from "@/lib/errors.legacy";
-import {
-  phrasesFromSubtitlesResponse,
-  type Phrase,
-  type Subtitle,
-} from "@/features/editor/legacy/buildPhrases";
-import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
-import type { JobStatus } from "@/features/jobs/types";
+import { apiFetch, whenMediaReady } from "@/lib/api";
+import { AUTH_ENABLED } from "@/lib/auth";
+import { FRIENDLY_EXPIRED_KEY, jobErrorText, tEn } from "@/lib/errors.legacy";
+import { waitForSaves } from "@/lib/pendingSaves";
+import { applyRender, applyRenderErrorText } from "@/features/editor/legacy/applyRender";
+import { phrasesFromSubtitlesResponse, type Phrase, type Subtitle } from "@/features/editor/legacy/buildPhrases";
 import { ReviewScreen } from "@/features/editor/legacy/ReviewScreen";
+import { usePhraseAutosave } from "@/features/editor/legacy/usePhraseAutosave";
+import type { JobStatus } from "@/features/jobs/types";
 import { ErrorView } from "@/features/project/ErrorView";
 import { ConfigureScreen } from "@/features/start/ConfigureScreen";
 import { IdleScreen } from "@/features/start/IdleScreen";
 import { PickerScreen } from "@/features/start/PickerScreen";
-
-// POST /jobs after an upload to R2: waits between tries on a network
-// error or a 5xx that isn't a refusal — about 75 s in all, so a backend
-// restart (every deploy) or a 502 / 503 from the edge doesn't turn a
-// finished multi-GB upload into an error.
-const POST_JOBS_RETRY_MS = [2_000, 4_000, 8_000, 15_000, 15_000, 15_000, 15_000];
+import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
+import { uploadJob } from "@/features/upload/uploadJob";
 
 type Phase = "picker" | "idle" | "configuring" | "reviewing" | "error";
 
@@ -202,404 +152,38 @@ export default function Home() {
       output_formats: applyPreset ? p!.settings.outputFormats : outputFormats,
     };
 
-    // Add a placeholder dashboard card while the upload is in flight.
-    // The real backend job ID isn't known until POST /jobs returns, so
-    // we use a temporary local ID and swap it in once the response
-    // arrives. Poll loop skips uploading-phase cards so no ghost
-    // requests are fired against a non-existent job.
-    const tempId = `upl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const presetInfo = selectedPreset ? PRESETS[selectedPreset] : null;
-    addActiveJob({
-      jobId: tempId,
-      phase: "uploading",
-      timestamp: Date.now(),
-      filename: targetFile.name,
-      fileSize: targetFile.size,
-      presetId: selectedPreset,
-      presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
-      presetIcon: null,
-      captionPreset: settings.caption_preset,
-      uploadPct: 0,
-      lastProgressAt: Date.now(),
+    await uploadJob(targetFile, settings, selectedPreset, {
+      onPaywall: setPaywall,
+      onCreated: () => {
+        // Reset local state — the job now lives as a card on the
+        // dashboard, backend keeps processing regardless of where the
+        // user goes next.
+        setFile(null);
+        setSelectedPreset(null);
+        setJob(null);
+      },
     });
-    liveUploads.add(tempId);
-
-    // Throttle uploadPct updates to ~5/sec. On big files (multi-GB) we
-    // get thousands of progress ticks; every one used to write to
-    // localStorage + fire a re-render across the dashboard.
-    let lastUiUpdate = 0;
-    // Set while the card says "resuming" (an interrupted upload of this
-    // file continues); cleared if it starts over after all.
-    let resumingFrom: number | null = null;
-    const setPct = (pct: number) => {
-      const now = Date.now();
-      if (now - lastUiUpdate > 200 || pct >= 100) {
-        lastUiUpdate = now;
-        const startedOver = resumingFrom !== null && pct + 1 < resumingFrom;
-        if (startedOver) resumingFrom = null;
-        updateActiveJobV2(tempId, {
-          uploadPct: pct,
-          lastProgressAt: now,
-          ...(startedOver ? { resuming: false } : {}),
-        });
-      }
-    };
-
-    // Acquire a Wake Lock so the OS doesn't put the tab to sleep
-    // mid-upload. iOS 16.4+ / Android Chrome 84+ / desktop most.
-    // Silent no-op if unsupported (older iOS, private mode).
-    let _wakeLock: { release: () => Promise<void> } | null = null;
-    try {
-      const nav = navigator as unknown as {
-        wakeLock?: { request: (t: string) => Promise<{ release: () => Promise<void> }> };
-      };
-      if (nav.wakeLock?.request) {
-        _wakeLock = await nav.wakeLock.request("screen");
-      }
-    } catch {
-      // ignore — unsupported, permission denied, or lost focus
-    }
-
-    try {
-      // Two upload paths:
-      //   - straight to R2 (lib/chunkedUpload: resumable multipart, or
-      //     the single presigned PUT where the backend says so), then
-      //     POST /jobs with the storage_key — for every size whenever
-      //     this deployment has R2: a reload or a lost connection
-      //     resumes, and the backend refuses (402 / 413 / 429 / 503)
-      //     before any bytes are sent.
-      //   - the legacy multipart POST /jobs through Railway, only when
-      //     the backend has no R2 (503 that isn't server_busy) and the
-      //     file fits its body limit (Railway's edge caps ~100 MB).
-      const R2_THRESHOLD = 90 * 1024 * 1024; // 90MB
-      let res: XMLHttpRequest | null = null;
-
-      // An interrupted upload of this very file (same name, size, first
-      // and last MiB): the card starts where it stopped.
-      const resumedPct = await resumableProgress(targetFile);
-      if (resumedPct !== null) {
-        resumingFrom = resumedPct;
-        updateActiveJobV2(tempId, { uploadPct: resumedPct, resuming: true, lastProgressAt: Date.now() });
-      }
-
-      // Over the size / length caps: say so now instead of after the
-      // upload (the server would answer 413). The length is read from
-      // the file's metadata; when the browser can't, the server probes.
-      const duration = await readVideoDuration(targetFile);
-      const limit = uploadLimitHit(targetFile.size, duration);
-      if (limit) {
-        throw new ApiError(413, limit.code, {
-          detail: limit.code,
-          [limit.code === "file_too_large" ? "max_gb" : "max_minutes"]: limit.max,
-        });
-      }
-      // Stored with the job so the server-side project list has names.
-      const appendJobFields = (form: FormData) => {
-        form.append("filename", targetFile.name);
-        form.append("settings", JSON.stringify(settings));
-        if (selectedPreset) form.append("preset_id", selectedPreset);
-        if (presetInfo) form.append("preset_label", tEn(presetInfo.labelKey));
-      };
-
-      let storageKey: string | null = null;
-      // Forgets the upload's resume record — only once POST /jobs has
-      // settled the upload (job created, or refused for good).
-      let releaseUpload: (() => Promise<void>) | undefined;
-      // The backend has no multipart API (a build from before WP3): its
-      // POST /jobs downloads the object inside the request.
-      let legacyApi = false;
-      try {
-        const up = await uploadResumable({
-          file: targetFile,
-          onProgress: (pct) => setPct(pct),
-          duration,
-        });
-        storageKey = up.storage_key;
-        releaseUpload = up.release;
-        legacyApi = Boolean(up.legacyApi);
-      } catch (e) {
-        // 503 without R2 here → legacy upload; 503 server_busy is a
-        // full queue and means "later", not "another way".
-        const noR2 = e instanceof ApiError && e.status === 503 && e.code !== "server_busy";
-        if (!(noR2 && targetFile.size <= R2_THRESHOLD)) throw e;
-      }
-
-      // Set when POST /jobs gave no usable answer but created the job.
-      let createdJobId: string | null = null;
-      if (storageKey) {
-        // Create the job with the completed storage_key. The server
-        // answers in about a second whatever the size (it only checks
-        // and probes the object; the analysis downloads it), and POST
-        // /jobs is idempotent on the key: a network error or a 5xx is
-        // retried with the same key — never a second job or charge —
-        // for about 75 s (a deploy restart, a 502 / 503 from the edge).
-        // A backend from before WP3 (legacyApi) downloads the object
-        // inside the request and isn't idempotent: one try, 30 min.
-        const form = new FormData();
-        form.append("storage_key", storageKey);
-        appendJobFields(form);
-        // The browser's reading of the length: charged when the file's
-        // header has none (streamed WebM).
-        if (duration) form.append("duration", String(duration));
-        const postedAt = Date.now();
-        const post = async () => {
-          // Fetched per try: the token is short-lived.
-          const auth = AUTH_ENABLED ? await authHeaders() : {};
-          return new Promise<XMLHttpRequest>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open("POST", `${backendUrl()}/jobs`);
-            for (const [k, v] of Object.entries(auth)) xhr.setRequestHeader(k, v);
-            xhr.timeout = legacyApi ? 30 * 60_000 : 120_000;
-            xhr.onload = () => resolve(xhr);
-            xhr.onerror = () => reject(new Error("Network error"));
-            xhr.ontimeout = () => reject(new Error(tEn("app.errors.serverNoResponse")));
-            xhr.send(form);
-          });
-        };
-        let failure: unknown = null;
-        const retryDelays = legacyApi ? [] : POST_JOBS_RETRY_MS;
-        for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
-          if (attempt > 0) await new Promise((r) => setTimeout(r, retryDelays[attempt - 1]));
-          failure = null;
-          try {
-            res = await post();
-            // 503 server_busy / 507 are refusals (and 503
-            // storage_unavailable a short outage: retried).
-            if (res.status >= 500 && !REFUSAL_CODES.has(apiErrorFromText(res.status, res.responseText).code ?? "")) {
-              failure = new Error(`Upload failed: ${res.responseText}`);
-            }
-          } catch (e) {
-            failure = e;
-          }
-          if (failure === null) break;
-        }
-        if (failure !== null) {
-          // Still no answer: with accounts on the job may exist anyway —
-          // look for it in the account's project list.
-          createdJobId = AUTH_ENABLED ? await findJobCreatedFor(targetFile.name, postedAt) : null;
-          if (!createdJobId) throw failure;
-        }
-      } else {
-        // Fetched now, i.e. after the upload attempt: the token is short-lived.
-        const auth = AUTH_ENABLED ? await authHeaders() : {};
-        // Legacy path — direct multipart upload to Railway.
-        const form = new FormData();
-        form.append("file", targetFile);
-        appendJobFields(form);
-        res = await new Promise<XMLHttpRequest>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open("POST", `${backendUrl()}/jobs`);
-          for (const [k, v] of Object.entries(auth)) xhr.setRequestHeader(k, v);
-          // Abort when no upload progress arrives for a while, so a
-          // dropped connection shows an error instead of hanging.
-          let stallTimer: ReturnType<typeof setTimeout> | undefined;
-          const armStall = () => {
-            clearTimeout(stallTimer);
-            stallTimer = setTimeout(() => {
-              // Reject first: abort() fires onabort synchronously.
-              reject(new Error(UPLOAD_STALLED_MSG));
-              xhr.abort();
-            }, UPLOAD_STALL_MS);
-          };
-          xhr.upload.onprogress = (ev) => {
-            armStall();
-            if (ev.lengthComputable) {
-              setPct(Math.round((ev.loaded / ev.total) * 100));
-            }
-          };
-          xhr.upload.onload = () => clearTimeout(stallTimer);
-          xhr.onload = () => {
-            clearTimeout(stallTimer);
-            resolve(xhr);
-          };
-          xhr.onerror = () => {
-            clearTimeout(stallTimer);
-            reject(new Error("Network error"));
-          };
-          xhr.onabort = () => {
-            clearTimeout(stallTimer);
-            reject(new Error("Upload aborted"));
-          };
-          armStall();
-          xhr.send(form);
-        });
-      }
-
-      if (releaseUpload) {
-        // The upload's resume record goes once the job exists or the
-        // server refused the upload for good (it deleted it: 400 / 402
-        // / 413, or it's gone: 409 / 410). Kept for a network failure,
-        // a 5xx, 401 (sign in again) and 429 (later): picking the file
-        // again goes straight to POST /jobs.
-        const s = createdJobId !== null ? 200 : (res?.status ?? 0);
-        if ((s >= 200 && s < 300) || (s >= 400 && s < 500 && s !== 401 && s !== 429)) {
-          try {
-            await releaseUpload();
-          } catch {
-            /* the record expires with its ticket anyway */
-          }
-        }
-      }
-      if (createdJobId === null && res && res.status >= 400) {
-        // 401 / 402 (plan, minutes) and the refusals (413 too big / too
-        // long, 429 too many jobs, 503 busy, 507 full) get their own
-        // handling below.
-        const e = apiErrorFromText(res.status, res.responseText);
-        if (res.status === 401 || res.status === 402 || REFUSAL_CODES.has(e.code ?? "")) throw e;
-        throw new Error(`Upload failed: ${res.responseText}`);
-      }
-      const initial: Pick<JobStatus, "id"> =
-        createdJobId !== null ? { id: createdJobId } : JSON.parse(res!.responseText);
-      // Minutes were charged: the "min left" hints should follow.
-      if (AUTH_ENABLED) void refreshMe();
-      track("upload_done", {
-        preset: selectedPreset ?? "custom",
-        size_mb: Math.round(targetFile.size / 1e6),
-        minutes: duration ? Math.round(duration / 6) / 10 : null,
-        r2: storageKey !== null,
-      });
-
-      // Ask for notification permission on job start — user won't be
-      // interrupted mid-task, and gets pinged when the render is done
-      // even if the tab is in the background.
-      requestNotificationPermission();
-
-      // Swap the temporary uploading card for the real backend job.
-      removeActiveJob(tempId);
-      addActiveJob({
-        jobId: initial.id,
-        phase: "analyzing",
-        timestamp: Date.now(),
-        filename: targetFile.name,
-        fileSize: targetFile.size,
-        presetId: selectedPreset,
-        presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
-        presetIcon: null,
-        captionPreset: settings.caption_preset,
-      });
-
-      // Reset local state — the job now lives as a card on the
-      // dashboard, backend keeps processing regardless of where the
-      // user goes next.
-      setFile(null);
-      setSelectedPreset(null);
-      setJob(null);
-    } catch (err) {
-      // Upload failed — mark the temp card with an error message so
-      // the user can hit Retry from the dashboard. No fullscreen error
-      // takeover, no scary redirect.
-      let msg = err instanceof Error ? err.message : String(err);
-      if (err instanceof ApiError && err.status === 401) {
-        notifyAuthRequired();
-        msg = tEn("app.errors.signInRequired");
-      } else if (err instanceof ApiError) {
-        // No plan / not enough minutes: explain it with a way out.
-        const pw = paywallFrom(err.status, err.detail);
-        if (pw) {
-          setPaywall(pw);
-          msg = tEn(
-            pw.code === "quota_exceeded"
-              ? "app.errors.quotaExceeded"
-              : "app.errors.subscriptionRequired",
-          );
-        } else {
-          // Too big / too long / too many jobs / servers busy.
-          msg = refusalMessage(err) ?? msg;
-        }
-      }
-      updateActiveJobV2(tempId, { error: msg });
-    } finally {
-      liveUploads.delete(tempId);
-      // Release wake lock when upload path exits (success OR error).
-      try {
-        await _wakeLock?.release();
-      } catch {
-        // ignore
-      }
-    }
   };
 
-  // Transcript edits are saved (debounced) so they survive leaving the
-  // job; GET /subtitles hands them back as `phrases` on re-entry.
-  const phraseRevRef = useRef(0);
-  const phraseSaveRef = useRef<{
-    timer: ReturnType<typeof setTimeout> | null;
-    jobId: string;
-    phrases: Phrase[];
-  } | null>(null);
-  const sendPhrases = (jobId: string, list: Phrase[], unloading = false) => {
-    // Increasing revision: the server ignores a save older than the
-    // one it has, so out-of-order requests can't restore stale text.
-    phraseRevRef.current = Math.max(phraseRevRef.current + 1, Date.now());
-    const body = JSON.stringify({ phrases: list, rev: phraseRevRef.current });
-    const p = apiFetch(`/jobs/${jobId}/phrases`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-      keepalive: unloading && body.length < 60_000,
-      unloading,
-    }).catch(() => {});
-    trackSave(jobId, p);
-    return p;
-  };
-  const flushPhraseSave = (unloading = false) => {
-    const pend = phraseSaveRef.current;
-    if (!pend) return;
-    if (pend.timer) clearTimeout(pend.timer);
-    phraseSaveRef.current = null;
-    void sendPhrases(pend.jobId, pend.phrases, unloading);
-  };
-  const schedulePhraseSave = (jobId: string, list: Phrase[]) => {
-    const prev = phraseSaveRef.current;
-    if (prev?.timer) clearTimeout(prev.timer);
-    if (prev && prev.jobId !== jobId) void sendPhrases(prev.jobId, prev.phrases);
-    phraseSaveRef.current = {
-      jobId,
-      phrases: list,
-      timer: setTimeout(() => flushPhraseSave(), 800),
-    };
-  };
-  useEffect(() => {
-    const onHide = () => flushPhraseSave(true);
-    window.addEventListener("pagehide", onHide);
-    return () => window.removeEventListener("pagehide", onHide);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const { flushPhraseSave, schedulePhraseSave } = usePhraseAutosave();
 
   const onApplyRender = async () => {
     if (!job) return;
     flushPhraseSave();
-    // Word units with their source times, not one subtitle per sentence:
-    // the burn highlights each word at its own time (UX2).
-    const subtitles: Subtitle[] = phrasesToUnits(phrases, unitsRef.current);
     try {
-      const r = await apiFetch(`/jobs/${job.id}/render`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subtitles,
-          disabled_cuts: [],
-        }),
-      });
-      // 409: the job isn't in review any more — already exporting (a
-      // double click, another tab) or finished. Its dashboard card shows
+      const started = await applyRender(job.id, phrases, unitsRef.current, captionPreset);
+      // Already exporting or finished (409): its dashboard card shows
       // which; go there instead of an error screen.
-      if (r.status === 409) showNotice(t("app.notice.alreadyExporting"));
-      else if (!r.ok) throw await apiError(r);
-      else track("export_started", { caption_style: captionPreset, lines: phrases.length });
+      if (started === "not_in_review") showNotice(t("app.notice.alreadyExporting"));
       // Send user back to the dashboard — the card takes over from
       // here. No fullscreen "rendering" screen anymore.
-      updateActiveJobV2(job.id, { phase: "rendering", note: undefined });
       setFile(null);
       setJob(null);
       setPhrases([]);
       setSelectedPreset(null);
       setPhase("picker");
     } catch (err) {
-      // Mapped, never the raw answer (tech.md T3). A 401 has opened the
-      // sign-in already (apiFetch).
-      const raw = err instanceof ApiError ? (err.code ?? err.message) : err instanceof Error ? err.message : String(err);
-      setErrorMsg(err instanceof ApiError && err.status === 401 ? t("app.errors.signInRequired") : friendlyError(raw, t));
+      setErrorMsg(applyRenderErrorText(err, t));
       setPhase("error");
     }
   };
@@ -892,26 +476,4 @@ export default function Home() {
       </div>
     </main>
   );
-}
-
-/**
- * POST /jobs (storage_key) gave no usable answer, but the server may
- * have created — and charged — the job anyway: the newest job in the
- * account's list with this file name, created since the request went
- * out (10 min of clock slack) and not tracked on this device yet.
- */
-async function findJobCreatedFor(filename: string, sinceMs: number): Promise<string | null> {
-  const jobs = await fetchServerJobs();
-  if (!jobs) return null;
-  const known = new Set([
-    ...getActiveJobs().map((j) => j.jobId),
-    ...getLibrary().map((e) => e.jobId),
-  ]);
-  const hit = jobs.find(
-    (j) =>
-      j.filename === filename &&
-      !known.has(j.id) &&
-      (toMs(j.created_at) ?? 0) >= sinceMs - 10 * 60_000,
-  );
-  return hit?.id ?? null;
 }
