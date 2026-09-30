@@ -1,8 +1,12 @@
 "use client";
 // The voice-command test (moved verbatim from app/app/page.tsx in UX4).
 import { useEffect, useRef, useState } from "react";
+import { Check, Circle, X } from "lucide-react";
 import { IconMic } from "@/components/Icons";
+import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
+import { Icon } from "@/components/ui/Icon";
+import { IconButton } from "@/components/ui/IconButton";
 import { useLang, useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
 
@@ -174,15 +178,15 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
               {t("app.voice.subtitle")}
             </div>
           </div>
-          <button
+          <IconButton
             onClick={onDone}
             data-testid="dialog-close"
-            aria-label={t("app.voice.close")}
+            label={t("app.voice.close")}
             className="ml-3 shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--surface-2)]"
             style={{ color: "var(--text-muted)" }}
           >
-            ✕
-          </button>
+            <Icon icon={X} />
+          </IconButton>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -249,14 +253,9 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
                     >
                       {t("app.voice.permissionHint")}
                     </div>
-                    <button
-                      onClick={startTest}
-                      disabled={permStatus === "requesting"}
-                      className="rounded-xl px-6 py-2.5 text-sm font-semibold disabled:opacity-60"
-                      style={{ background: "var(--brand-solid)", color: "white" }}
-                    >
+                    <Button onClick={startTest} disabled={permStatus === "requesting"}>
                       {permStatus === "requesting" ? t("app.voice.requesting") : t("app.voice.start")}
-                    </button>
+                    </Button>
                   </>
                 )}
                 {permStatus === "denied" && (
@@ -297,7 +296,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
                       color: hit ? "white" : "var(--text-muted)",
                     }}
                   >
-                    {hit ? "✓" : "○"}
+                    <Icon icon={hit ? Check : Circle} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div
@@ -323,16 +322,9 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
           className="p-3"
           style={{ borderTop: "1px solid var(--border)" }}
         >
-          <button
-            onClick={onDone}
-            className="w-full rounded-xl py-2.5 text-sm font-semibold transition-transform hover:scale-[0.99]"
-            style={{
-              background: "var(--brand-solid)",
-              color: "white",
-            }}
-          >
+          <Button onClick={onDone} className="w-full">
             {t("app.voice.done")}
-          </button>
+          </Button>
         </div>
     </Dialog>
   );

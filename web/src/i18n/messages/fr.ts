@@ -169,7 +169,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "Nouvelle vidéo",
   "app.dashboard.inProgress": "En cours",
   "app.dashboard.recentProjects": "Projets récents",
-  "app.dashboard.viewAll": "Tout voir →",
+  "app.dashboard.viewAll": "Tout voir",
   "app.dashboard.startFirst": "Lance ta première vidéo",
   "app.dashboard.startFirstSub": "Choisis un workflow — CleoCuts gère les sous-titres, le format, le nettoyage",
   "app.dashboard.voiceTeaser": "Dis « Cleo » en filmant — gagne des heures de montage",
@@ -186,7 +186,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "Choisis toi-même chaque option — sous-titres, coupes, formats",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← Retour",
+  "app.upload.back": "Retour",
   "app.upload.title": "Choisir une vidéo",
   "app.upload.hint":
     "MP4 ou MOV depuis ton téléphone ou ton ordinateur. Garde cette page ouverte jusqu'à la fin de l'envoi.",
@@ -197,7 +197,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     "Reprise de l'envoi là où il s'était arrêté — garde cette page ouverte.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← retour",
+  "app.configure.back": "retour",
   "app.configure.fileInfo": "{name} · {size} Mo",
   "app.configure.captionStyle": "Style de sous-titres",
   "app.configure.captionPreviewAlt": "Aperçu des sous-titres {style}",
@@ -245,12 +245,12 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.card.queued.titleNoPos": "En file d'attente",
   "app.card.queued.sub":
     "Beaucoup de vidéos en ce moment — la tienne démarrera automatiquement. Tu peux quitter cette page.",
-  "app.card.open": "Ouvrir →",
-  "app.card.remove": "✕ Supprimer",
+  "app.card.open": "Ouvrir",
+  "app.card.remove": "Supprimer",
   "app.card.renderFailedNote": "Le rendu a échoué — tes modifications sont enregistrées. Ouvre-le et relance le rendu.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← Tableau de bord",
+  "app.review.backToDashboard": "Tableau de bord",
   "app.review.audioHeadsUp": "À savoir sur l'audio",
   "app.review.updatingPreview": "Mise à jour de l'aperçu…",
   "app.review.captionPreviewChip": "Aperçu",
@@ -263,7 +263,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Ligne supprimée",
-  "app.transcript.undo": "↶ Annuler",
+  "app.transcript.undo": "Annuler",
   "app.transcript.headingOne": "Transcription · {count} ligne",
   "app.transcript.headingOther": "Transcription · {count} lignes",
   "app.transcript.hint": "Corrige les fautes, supprime une ligne avec ✕, touche une carte pour aller à ce moment.",
@@ -291,7 +291,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "Rétablir (⌘⇧Z)",
   "app.timeline.redoAria": "Rétablir",
   "app.timeline.splitTitle": "Scinder le clip sous la tête de lecture",
-  "app.timeline.split": "⧉ Scinder",
+  "app.timeline.split": "Scinder",
   "app.timeline.splitUnavailable": "Place la tête de lecture dans un clip pour le scinder (pas pile au début ni à la fin).",
   "app.timeline.zoomOutTitle": "Dézoomer (afficher plus de vidéo)",
   "app.timeline.zoomOutAria": "Dézoomer",
@@ -303,7 +303,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "Déplacer le clip vers la gauche",
   "app.timeline.moveRight": "Déplacer le clip vers la droite",
   "app.timeline.deleteTitle": "Supprimer le clip (⌫)",
-  "app.timeline.delete": "✕ Supprimer",
+  "app.timeline.delete": "Supprimer",
   "app.timeline.speed": "Vitesse",
   "app.timeline.speedNormal": "1× (normal)",
   "app.timeline.volume": "Volume",

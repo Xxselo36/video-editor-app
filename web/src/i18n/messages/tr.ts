@@ -169,7 +169,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "Yeni video",
   "app.dashboard.inProgress": "İşleniyor",
   "app.dashboard.recentProjects": "Son projeler",
-  "app.dashboard.viewAll": "Tümünü gör →",
+  "app.dashboard.viewAll": "Tümünü gör",
   "app.dashboard.startFirst": "İlk videonu başlat",
   "app.dashboard.startFirstSub": "Bir iş akışı seç — CleoCuts altyazı, format ve temizliği halleder",
   "app.dashboard.voiceTeaser": "Kayıt sırasında “Cleo” de — düzenlemede saatler kazan",
@@ -186,7 +186,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "Her düğmeyi kendin seç — altyazı, kesim, format",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← Geri",
+  "app.upload.back": "Geri",
   "app.upload.title": "Video seç",
   "app.upload.hint":
     "Telefonundan veya bilgisayarından MP4 ya da MOV. Yükleme bitene kadar bu sayfayı açık tut.",
@@ -197,7 +197,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
     "Yükleme kaldığı yerden devam ediyor — bu sayfayı açık tut.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← geri",
+  "app.configure.back": "geri",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "Altyazı stili",
   "app.configure.captionPreviewAlt": "{style} altyazı önizlemesi",
@@ -245,12 +245,12 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.card.queued.titleNoPos": "Sırada bekliyor",
   "app.card.queued.sub":
     "Şu an çok fazla video var — seninki otomatik olarak başlayacak. Bu sayfadan ayrılabilirsin.",
-  "app.card.open": "Aç →",
-  "app.card.remove": "✕ Kaldır",
+  "app.card.open": "Aç",
+  "app.card.remove": "Kaldır",
   "app.card.renderFailedNote": "Render başarısız oldu — düzenlemelerin kaydedildi. Aç ve yeniden render et.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← Panel",
+  "app.review.backToDashboard": "Panel",
   "app.review.audioHeadsUp": "Ses uyarısı",
   "app.review.updatingPreview": "Önizleme güncelleniyor…",
   "app.review.captionPreviewChip": "Önizleme",
@@ -263,7 +263,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Satır silindi",
-  "app.transcript.undo": "↶ Geri al",
+  "app.transcript.undo": "Geri al",
   "app.transcript.headingOne": "Transkript · {count} satır",
   "app.transcript.headingOther": "Transkript · {count} satır",
   "app.transcript.hint": "Yazım hatalarını düzelt, ✕ ile satırı sil, o ana atlamak için karta dokun.",
@@ -291,7 +291,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "Yinele (⌘⇧Z)",
   "app.timeline.redoAria": "Yinele",
   "app.timeline.splitTitle": "Oynatma imlecinin altındaki klibi böl",
-  "app.timeline.split": "⧉ Böl",
+  "app.timeline.split": "Böl",
   "app.timeline.splitUnavailable": "Bölmek için oynatma imlecini bir klibin içine getir (tam başına ya da sonuna değil).",
   "app.timeline.zoomOutTitle": "Uzaklaştır (videonun daha fazlasını göster)",
   "app.timeline.zoomOutAria": "Uzaklaştır",
@@ -303,7 +303,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "Klibi sola taşı",
   "app.timeline.moveRight": "Klibi sağa taşı",
   "app.timeline.deleteTitle": "Klibi sil (⌫)",
-  "app.timeline.delete": "✕ Sil",
+  "app.timeline.delete": "Sil",
   "app.timeline.speed": "Hız",
   "app.timeline.speedNormal": "1× (normal)",
   "app.timeline.volume": "Ses düzeyi",

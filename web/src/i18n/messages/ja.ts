@@ -165,7 +165,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "新しい動画",
   "app.dashboard.inProgress": "処理中",
   "app.dashboard.recentProjects": "最近のプロジェクト",
-  "app.dashboard.viewAll": "すべて見る →",
+  "app.dashboard.viewAll": "すべて見る",
   "app.dashboard.startFirst": "最初の動画を始めましょう",
   "app.dashboard.startFirstSub": "ワークフローを選ぶだけ — 字幕、フォーマット、クリーンアップはCleoCutsにお任せ",
   "app.dashboard.voiceTeaser": "録画中に「Cleo」と言うだけ — 編集の手間を大幅に削減",
@@ -182,7 +182,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "字幕、カット、フォーマットをすべて自分で選択",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← 戻る",
+  "app.upload.back": "戻る",
   "app.upload.title": "動画を選択",
   "app.upload.hint":
     "スマホやパソコンからMP4またはMOVを選んでください。アップロードが完了するまでこのページを開いたままにしてください。",
@@ -193,7 +193,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
     "中断したところからアップロードを再開しています — このページを開いたままにしてください。",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← 戻る",
+  "app.configure.back": "戻る",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "字幕スタイル",
   "app.configure.captionPreviewAlt": "{style}字幕プレビュー",
@@ -240,12 +240,12 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.card.queued.title": "順番待ち(#{n})",
   "app.card.queued.titleNoPos": "順番待ち",
   "app.card.queued.sub": "現在たくさんの動画が処理待ちです — 順番が来たら自動的に始まります。このページを離れても大丈夫です。",
-  "app.card.open": "開く →",
-  "app.card.remove": "✕ 削除",
+  "app.card.open": "開く",
+  "app.card.remove": "削除",
   "app.card.renderFailedNote": "レンダリングに失敗しました — 編集内容は保存されています。開いて再度レンダリングしてください。",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← ダッシュボード",
+  "app.review.backToDashboard": "ダッシュボード",
   "app.review.audioHeadsUp": "音声に関する注意",
   "app.review.updatingPreview": "プレビューを更新中…",
   "app.review.captionPreviewChip": "プレビュー",
@@ -258,7 +258,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "行を削除しました",
-  "app.transcript.undo": "↶ 元に戻す",
+  "app.transcript.undo": "元に戻す",
   "app.transcript.headingOne": "文字起こし · {count} 行",
   "app.transcript.headingOther": "文字起こし · {count} 行",
   "app.transcript.hint": "誤字を修正、✕で行を削除、カードをタップしてその場面にジャンプできます。",
@@ -286,7 +286,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "やり直す (⌘⇧Z)",
   "app.timeline.redoAria": "やり直す",
   "app.timeline.splitTitle": "再生位置のクリップを分割",
-  "app.timeline.split": "⧉ 分割",
+  "app.timeline.split": "分割",
   "app.timeline.splitUnavailable": "分割するには、再生位置をクリップの中に置いてください（先頭や末尾ちょうどは不可）。",
   "app.timeline.zoomOutTitle": "縮小(動画をより広く表示)",
   "app.timeline.zoomOutAria": "縮小",
@@ -298,7 +298,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "クリップを左に移動",
   "app.timeline.moveRight": "クリップを右に移動",
   "app.timeline.deleteTitle": "クリップを削除 (⌫)",
-  "app.timeline.delete": "✕ 削除",
+  "app.timeline.delete": "削除",
   "app.timeline.speed": "速度",
   "app.timeline.speedNormal": "1倍(標準)",
   "app.timeline.volume": "音量",

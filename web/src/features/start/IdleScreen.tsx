@@ -1,7 +1,9 @@
 "use client";
 // Moved verbatim from app/app/page.tsx (UX4).
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { IconPhone } from "@/components/Icons";
+import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import { useBillingHint } from "./useBillingHint";
 
@@ -24,7 +26,7 @@ export function IdleScreen({
         className="mb-4 -ml-2 w-fit rounded-lg px-2 py-2 text-sm"
         style={{ color: "var(--text-muted)" }}
       >
-        {t("app.upload.back")}
+        <Icon icon={ArrowLeft} /> {t("app.upload.back")}
       </button>
       <h1
         className="mb-2 text-4xl font-bold tracking-tight sm:text-5xl"
@@ -49,7 +51,7 @@ export function IdleScreen({
           className="-mt-5 mb-6 w-fit text-xs font-medium transition-opacity hover:opacity-80"
           style={{ color: "var(--brand-strong)" }}
         >
-          {billingHint.text} →
+          {billingHint.text} <Icon icon={ArrowRight} />
         </Link>
       )}
 

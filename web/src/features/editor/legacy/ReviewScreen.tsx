@@ -4,6 +4,12 @@
 // autosave with flush-on-leave, and Apply & render.
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Pencil, Play, Timer, Type, Undo2, X } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Card, SectionLabel } from "@/components/ui/Card";
+import { Icon } from "@/components/ui/Icon";
+import { IconButton } from "@/components/ui/IconButton";
+import { Tabs } from "@/components/ui/Tabs";
 import { useT } from "@/i18n";
 import { track } from "@/lib/analytics";
 import { apiFetch, isMediaReady, mediaUrl, publicUrl, useMediaReady, useMediaUrl } from "@/lib/api";
@@ -640,7 +646,7 @@ export function ReviewScreen({
           data-testid="editor-back"
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
         >
-          {t("app.review.backToDashboard")}
+          <Icon icon={ArrowLeft} /> {t("app.review.backToDashboard")}
         </button>
       </div>
 
@@ -760,46 +766,16 @@ export function ReviewScreen({
       </div>
 
       {/* Tab bar — clean 3-way switch for the editor */}
-      <div
-        role="tablist"
-        className="flex overflow-hidden rounded-xl"
-        style={{
-          background: "var(--surface-1)",
-          border: "1px solid var(--border)",
-        }}
-      >
-        {(
-          [
-            { id: "timeline" as const, labelKey: "app.review.tabTimeline" as const, icon: "⏱" },
-            { id: "transcript" as const, labelKey: "app.review.tabTranscript" as const, icon: "T" },
-            { id: "style" as const, labelKey: "app.review.tabCaptions" as const, icon: "✎" },
-          ]
-        ).map((tab) => {
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              role="tab"
-              aria-selected={isActive}
-              data-testid={`editor-tab-${tab.id}`}
-              className="flex-1 px-3 py-2.5 text-sm font-medium transition-colors"
-              style={{
-                background: isActive
-                  ? "var(--brand-tint)"
-                  : "transparent",
-                color: isActive
-                  ? "var(--brand-strong)"
-                  : "var(--text-muted)",
-                borderRight: tab.id !== "style" ? "1px solid var(--border)" : "none",
-              }}
-            >
-              <span className="mr-1.5">{tab.icon}</span>
-              {t(tab.labelKey)}
-            </button>
-          );
-        })}
-      </div>
+      <Tabs
+        tabs={[
+          { id: "timeline", label: t("app.review.tabTimeline"), icon: <Icon icon={Timer} /> },
+          { id: "transcript", label: t("app.review.tabTranscript"), icon: <Icon icon={Type} /> },
+          { id: "style", label: t("app.review.tabCaptions"), icon: <Icon icon={Pencil} /> },
+        ]}
+        active={activeTab}
+        onChange={setActiveTab}
+        testIdPrefix="editor-tab"
+      />
 
       {/* Timeline tab — everything for cut/trim/effects lives here */}
       {/* Stays mounted when another tab is open (just hidden), so undo
@@ -848,24 +824,13 @@ export function ReviewScreen({
           style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
         >
           <span style={{ color: "var(--text-body)" }}>{t("app.transcript.lineDeleted")}</span>
-          <button
-            onClick={undoRemove}
-            data-testid="transcript-undo"
-            className="rounded-lg px-3 py-1.5 text-sm font-semibold"
-            style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
-          >
-            {t("app.transcript.undo")}
-          </button>
+          <Button variant="tint" size="sm" onClick={undoRemove} data-testid="transcript-undo">
+            <Icon icon={Undo2} /> {t("app.transcript.undo")}
+          </Button>
         </div>
       )}
       {activeTab === "transcript" && (
-        <div
-          className="overflow-hidden rounded-2xl"
-          style={{
-            background: "var(--surface-1)",
-            border: "1px solid var(--border)",
-          }}
-        >
+        <Card>
           <div
             className="border-b px-4 pt-3 pb-2"
             style={{
@@ -873,12 +838,12 @@ export function ReviewScreen({
               background: "var(--surface-1)",
             }}
           >
-            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+            <SectionLabel>
               {t(
                 phrases.length === 1 ? "app.transcript.headingOne" : "app.transcript.headingOther",
                 { count: phrases.length },
               )}
-            </div>
+            </SectionLabel>
             <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
               {t("app.transcript.hint")}
             </div>
@@ -932,7 +897,7 @@ export function ReviewScreen({
                       data-testid="transcript-seek"
                       className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-strong)]"
                     >
-                      ▸ {fmtTime(p.original_start)}
+                      <Icon icon={Play} className="fill-current" /> {fmtTime(p.original_start)}
                     </button>
                     <div className="flex items-center gap-2">
                       {lowConfidence && (
@@ -940,17 +905,17 @@ export function ReviewScreen({
                           {t("app.transcript.verify")}
                         </span>
                       )}
-                      <button
+                      <IconButton
                         onClick={(e) => {
                           e.stopPropagation();
                           remove(i);
                         }}
                         className="-m-2 flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-faint)] hover:text-[var(--danger)]"
-                        aria-label={t("app.transcript.deleteSentence")}
+                        label={t("app.transcript.deleteSentence")}
                         title={t("app.transcript.deleteSentence")}
                       >
-                        ✕
-                      </button>
+                        <Icon icon={X} />
+                      </IconButton>
                     </div>
                   </div>
                   <textarea
@@ -973,21 +938,15 @@ export function ReviewScreen({
               );
             })}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Captions tab — style picker */}
       {activeTab === "style" && (
-        <div
-          className="overflow-hidden rounded-2xl p-4"
-          style={{
-            background: "var(--surface-1)",
-            border: "1px solid var(--border)",
-          }}
-        >
-          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+        <Card className="p-4">
+          <SectionLabel className="mb-3">
             {t("app.captions.styleHeading", { style: captionPreset })}
-          </div>
+          </SectionLabel>
           {captionPreset !== "none" ? (
             <div
               className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3"
@@ -1011,10 +970,11 @@ export function ReviewScreen({
               {t("app.captions.disabled")}
             </div>
           )}
-        </div>
+        </Card>
       )}
 
-      <button
+      <Button
+        size="lg"
         onClick={async () => {
           // Push the user's edited segments (with effects) to the
           // backend before we hit /render — the render reads them from
@@ -1088,10 +1048,10 @@ export function ReviewScreen({
         // longer flip it to "Preparing…" every few seconds.
         disabled={applying}
         data-testid="apply-render"
-        className="mt-1 w-full rounded-xl bg-[var(--brand-solid)] px-6 py-4 text-base font-semibold text-white hover:bg-[var(--brand-solid-hover)] active:scale-[0.99] disabled:opacity-60"
+        className="mt-1 w-full"
       >
         {applying ? t("app.review.preparing") : t("app.review.applyRender")}
-      </button>
+      </Button>
       {applyError && (
         <div className="text-center text-xs" style={{ color: "var(--danger)" }} data-testid="apply-error">
           {applyError}

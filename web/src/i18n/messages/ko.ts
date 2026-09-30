@@ -165,7 +165,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "새 영상",
   "app.dashboard.inProgress": "처리 중",
   "app.dashboard.recentProjects": "최근 프로젝트",
-  "app.dashboard.viewAll": "전체 보기 →",
+  "app.dashboard.viewAll": "전체 보기",
   "app.dashboard.startFirst": "첫 영상을 시작해 보세요",
   "app.dashboard.startFirstSub": "워크플로우를 선택하면 CleoCuts가 자막, 포맷, 정리를 처리해요",
   "app.dashboard.voiceTeaser": "녹화하면서 “Cleo”라고 말해 보세요 — 편집 시간을 몇 시간 아낄 수 있어요",
@@ -182,7 +182,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "자막, 컷, 포맷을 하나하나 직접 선택해요",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← 뒤로",
+  "app.upload.back": "뒤로",
   "app.upload.title": "영상 선택",
   "app.upload.hint":
     "휴대폰이나 컴퓨터에 있는 MP4 또는 MOV 파일. 업로드가 끝날 때까지 이 페이지를 열어 두세요.",
@@ -193,7 +193,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
     "중단된 곳부터 업로드를 이어서 하고 있어요 — 이 페이지를 열어 두세요.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← 뒤로",
+  "app.configure.back": "뒤로",
   "app.configure.fileInfo": "{name} · {size}MB",
   "app.configure.captionStyle": "자막 스타일",
   "app.configure.captionPreviewAlt": "{style} 자막 미리보기",
@@ -240,12 +240,12 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.card.queued.title": "대기 중 (#{n})",
   "app.card.queued.titleNoPos": "대기 중",
   "app.card.queued.sub": "지금 영상이 많아요 — 순서가 되면 자동으로 시작돼요. 이 페이지를 나가도 괜찮아요.",
-  "app.card.open": "열기 →",
-  "app.card.remove": "✕ 삭제",
+  "app.card.open": "열기",
+  "app.card.remove": "삭제",
   "app.card.renderFailedNote": "렌더링에 실패했어요 — 편집 내용은 저장돼 있어요. 열어서 다시 렌더링해 주세요.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← 대시보드",
+  "app.review.backToDashboard": "대시보드",
   "app.review.audioHeadsUp": "오디오 참고 사항",
   "app.review.updatingPreview": "미리보기를 업데이트하고 있어요…",
   "app.review.captionPreviewChip": "미리보기",
@@ -258,7 +258,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "줄이 삭제됐어요",
-  "app.transcript.undo": "↶ 실행 취소",
+  "app.transcript.undo": "실행 취소",
   "app.transcript.headingOne": "스크립트 · {count}줄",
   "app.transcript.headingOther": "스크립트 · {count}줄",
   "app.transcript.hint": "오타를 고치고, ✕로 줄을 지우고, 카드를 탭해 해당 순간으로 이동해 보세요.",
@@ -286,7 +286,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "다시 실행 (⌘⇧Z)",
   "app.timeline.redoAria": "다시 실행",
   "app.timeline.splitTitle": "재생 위치의 클립을 분할해요",
-  "app.timeline.split": "⧉ 분할",
+  "app.timeline.split": "분할",
   "app.timeline.splitUnavailable": "분할하려면 재생 위치를 클립 안으로 옮기세요(시작이나 끝 지점은 안 돼요).",
   "app.timeline.zoomOutTitle": "축소 (영상을 더 많이 보기)",
   "app.timeline.zoomOutAria": "축소",
@@ -298,7 +298,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "클립을 왼쪽으로 이동",
   "app.timeline.moveRight": "클립을 오른쪽으로 이동",
   "app.timeline.deleteTitle": "클립 삭제 (⌫)",
-  "app.timeline.delete": "✕ 삭제",
+  "app.timeline.delete": "삭제",
   "app.timeline.speed": "속도",
   "app.timeline.speedNormal": "1× (기본)",
   "app.timeline.volume": "볼륨",

@@ -170,7 +170,7 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "Nuevo video",
   "app.dashboard.inProgress": "En progreso",
   "app.dashboard.recentProjects": "Proyectos recientes",
-  "app.dashboard.viewAll": "Ver todos →",
+  "app.dashboard.viewAll": "Ver todos",
   "app.dashboard.startFirst": "Empieza tu primer video",
   "app.dashboard.startFirstSub": "Elige un flujo de trabajo — CleoCuts se encarga de subtítulos, formato y limpieza",
   "app.dashboard.voiceTeaser": "Di “Cleo” mientras grabas — ahorra horas de edición",
@@ -187,7 +187,7 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "Elige cada detalle tú mismo — subtítulos, cortes, formatos",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← Atrás",
+  "app.upload.back": "Atrás",
   "app.upload.title": "Elige un video",
   "app.upload.hint":
     "MP4 o MOV desde tu teléfono o computadora. Mantén esta página abierta hasta que termine la subida.",
@@ -198,7 +198,7 @@ export const es: Partial<Record<MessageKey, string>> = {
     "Reanudando la subida donde se quedó — mantén esta página abierta.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← atrás",
+  "app.configure.back": "atrás",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "Estilo de subtítulos",
   "app.configure.captionPreviewAlt": "Vista previa de subtítulos {style}",
@@ -246,12 +246,12 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.card.queued.titleNoPos": "En cola",
   "app.card.queued.sub":
     "Hay muchos videos ahora mismo — el tuyo empezará automáticamente. Puedes salir de esta página.",
-  "app.card.open": "Abrir →",
-  "app.card.remove": "✕ Eliminar",
+  "app.card.open": "Abrir",
+  "app.card.remove": "Eliminar",
   "app.card.renderFailedNote": "El renderizado falló — tus ediciones están guardadas. Ábrelo y vuelve a renderizar.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← Panel",
+  "app.review.backToDashboard": "Panel",
   "app.review.audioHeadsUp": "Aviso de audio",
   "app.review.updatingPreview": "Actualizando vista previa…",
   "app.review.captionPreviewChip": "Vista previa",
@@ -264,7 +264,7 @@ export const es: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Línea eliminada",
-  "app.transcript.undo": "↶ Deshacer",
+  "app.transcript.undo": "Deshacer",
   "app.transcript.headingOne": "Transcripción · {count} línea",
   "app.transcript.headingOther": "Transcripción · {count} líneas",
   "app.transcript.hint": "Corrige errores, elimina una línea con ✕, toca una tarjeta para ir a ese momento.",
@@ -292,7 +292,7 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "Rehacer (⌘⇧Z)",
   "app.timeline.redoAria": "Rehacer",
   "app.timeline.splitTitle": "Divide el clip bajo el cabezal de reproducción",
-  "app.timeline.split": "⧉ Dividir",
+  "app.timeline.split": "Dividir",
   "app.timeline.splitUnavailable": "Coloca el cabezal dentro de un clip para dividirlo (no justo al inicio ni al final).",
   "app.timeline.zoomOutTitle": "Alejar (mostrar más del video)",
   "app.timeline.zoomOutAria": "Alejar",
@@ -304,7 +304,7 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "Mover clip a la izquierda",
   "app.timeline.moveRight": "Mover clip a la derecha",
   "app.timeline.deleteTitle": "Eliminar clip (⌫)",
-  "app.timeline.delete": "✕ Eliminar",
+  "app.timeline.delete": "Eliminar",
   "app.timeline.speed": "Velocidad",
   "app.timeline.speedNormal": "1× (normal)",
   "app.timeline.volume": "Volumen",

@@ -169,7 +169,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "Nuovo video",
   "app.dashboard.inProgress": "In corso",
   "app.dashboard.recentProjects": "Progetti recenti",
-  "app.dashboard.viewAll": "Vedi tutti →",
+  "app.dashboard.viewAll": "Vedi tutti",
   "app.dashboard.startFirst": "Inizia il tuo primo video",
   "app.dashboard.startFirstSub": "Scegli un workflow — CleoCuts gestisce sottotitoli, formato e pulizia",
   "app.dashboard.voiceTeaser": "Di' “Cleo” mentre registri — risparmia ore di editing",
@@ -186,7 +186,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "Scegli tu ogni opzione — sottotitoli, tagli, formati",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← Indietro",
+  "app.upload.back": "Indietro",
   "app.upload.title": "Scegli un video",
   "app.upload.hint":
     "MP4 o MOV dal telefono o dal computer. Tieni questa pagina aperta finché l'upload non è terminato.",
@@ -197,7 +197,7 @@ export const it: Partial<Record<MessageKey, string>> = {
     "Il caricamento riprende da dove si era interrotto — tieni questa pagina aperta.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← indietro",
+  "app.configure.back": "indietro",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "Stile sottotitoli",
   "app.configure.captionPreviewAlt": "Anteprima sottotitoli {style}",
@@ -245,12 +245,12 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.card.queued.titleNoPos": "In coda",
   "app.card.queued.sub":
     "Ci sono molti video in questo momento — il tuo partirà in automatico. Puoi lasciare questa pagina.",
-  "app.card.open": "Apri →",
-  "app.card.remove": "✕ Rimuovi",
+  "app.card.open": "Apri",
+  "app.card.remove": "Rimuovi",
   "app.card.renderFailedNote": "Rendering fallito — le tue modifiche sono salvate. Apri e renderizza di nuovo.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← Dashboard",
+  "app.review.backToDashboard": "Dashboard",
   "app.review.audioHeadsUp": "Avviso audio",
   "app.review.updatingPreview": "Aggiornamento anteprima…",
   "app.review.captionPreviewChip": "Anteprima",
@@ -263,7 +263,7 @@ export const it: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Riga eliminata",
-  "app.transcript.undo": "↶ Annulla",
+  "app.transcript.undo": "Annulla",
   "app.transcript.headingOne": "Trascrizione · {count} riga",
   "app.transcript.headingOther": "Trascrizione · {count} righe",
   "app.transcript.hint": "Correggi errori, elimina una riga con ✕, tocca una card per andare a quel momento.",
@@ -291,7 +291,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "Ripeti (⌘⇧Z)",
   "app.timeline.redoAria": "Ripeti",
   "app.timeline.splitTitle": "Dividi la clip sotto il cursore",
-  "app.timeline.split": "⧉ Dividi",
+  "app.timeline.split": "Dividi",
   "app.timeline.splitUnavailable": "Porta il cursore dentro una clip per dividerla (non proprio all'inizio o alla fine).",
   "app.timeline.zoomOutTitle": "Rimpicciolisci (mostra più video)",
   "app.timeline.zoomOutAria": "Rimpicciolisci",
@@ -303,7 +303,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "Sposta la clip a sinistra",
   "app.timeline.moveRight": "Sposta la clip a destra",
   "app.timeline.deleteTitle": "Elimina clip (⌫)",
-  "app.timeline.delete": "✕ Elimina",
+  "app.timeline.delete": "Elimina",
   "app.timeline.speed": "Velocità",
   "app.timeline.speedNormal": "1× (normale)",
   "app.timeline.volume": "Volume",

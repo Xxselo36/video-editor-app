@@ -4,7 +4,9 @@
 // job cards, the recent projects and their status poll.
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { IconArrowRight, IconMic, IconSliders } from "@/components/Icons";
+import { Icon } from "@/components/ui/Icon";
 import { VideoModal } from "@/components/VideoModal";
 import { useT } from "@/i18n";
 import { fetchServerJobs, serverJobToLibraryEntry } from "@/lib/account";
@@ -184,7 +186,7 @@ export function PickerScreen({
           className="mb-6 inline-flex w-fit items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
           style={{ color: "var(--text-muted)" }}
         >
-          <span className="text-base leading-none">←</span>
+          <Icon icon={ArrowLeft} size={16} />
           {t("app.picker.backToDashboard")}
         </button>
       )}
@@ -253,7 +255,7 @@ export function PickerScreen({
         >
           <IconMic size={14} strokeWidth={2.5} />
           {t("app.dashboard.voiceTeaser")}
-          <span className="opacity-70">→</span>
+          <Icon icon={ArrowRight} className="opacity-70" />
         </button>
       </div>
 

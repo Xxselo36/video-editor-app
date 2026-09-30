@@ -168,7 +168,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "नया वीडियो",
   "app.dashboard.inProgress": "प्रोसेस हो रहा है",
   "app.dashboard.recentProjects": "हाल के प्रोजेक्ट्स",
-  "app.dashboard.viewAll": "सभी देखें →",
+  "app.dashboard.viewAll": "सभी देखें",
   "app.dashboard.startFirst": "अपना पहला वीडियो शुरू करें",
   "app.dashboard.startFirstSub": "एक वर्कफ़्लो चुनें — CleoCuts कैप्शन, फॉर्मेट और क्लीनअप खुद संभालेगा",
   "app.dashboard.voiceTeaser": "रिकॉर्डिंग के दौरान “Cleo” बोलें — एडिटिंग के घंटों बचाएं",
@@ -185,7 +185,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "हर चीज़ खुद चुनें — कैप्शन, कट्स, फॉर्मेट",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← वापस",
+  "app.upload.back": "वापस",
   "app.upload.title": "वीडियो चुनें",
   "app.upload.hint":
     "अपने फ़ोन या कंप्यूटर से MP4 या MOV। अपलोड पूरा होने तक इस पेज को खुला रखें।",
@@ -196,7 +196,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
     "अपलोड वहीं से फिर शुरू हो रहा है जहाँ रुका था — इस पेज को खुला रखें।",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← वापस",
+  "app.configure.back": "वापस",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "कैप्शन स्टाइल",
   "app.configure.captionPreviewAlt": "{style} कैप्शन प्रीव्यू",
@@ -244,12 +244,12 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.card.queued.titleNoPos": "कतार में",
   "app.card.queued.sub":
     "अभी बहुत सारे वीडियो हैं — आपका वीडियो अपने-आप शुरू हो जाएगा। आप यह पेज छोड़ सकते हैं।",
-  "app.card.open": "खोलें →",
-  "app.card.remove": "✕ हटाएं",
+  "app.card.open": "खोलें",
+  "app.card.remove": "हटाएं",
   "app.card.renderFailedNote": "रेंडर नाकाम रहा — आपके एडिट्स सेव हैं। इसे खोलकर फिर से रेंडर करें।",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← डैशबोर्ड",
+  "app.review.backToDashboard": "डैशबोर्ड",
   "app.review.audioHeadsUp": "ऑडियो अलर्ट",
   "app.review.updatingPreview": "प्रीव्यू अपडेट हो रहा है…",
   "app.review.captionPreviewChip": "प्रीव्यू",
@@ -262,7 +262,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "लाइन डिलीट हुई",
-  "app.transcript.undo": "↶ अनडू",
+  "app.transcript.undo": "अनडू",
   "app.transcript.headingOne": "ट्रांसक्रिप्ट · {count} लाइन",
   "app.transcript.headingOther": "ट्रांसक्रिप्ट · {count} लाइनें",
   "app.transcript.hint": "टाइपो ठीक करें, ✕ से लाइन हटाएं, उस पल पर जाने के लिए कार्ड टैप करें।",
@@ -290,7 +290,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "रीडू (⌘⇧Z)",
   "app.timeline.redoAria": "रीडू",
   "app.timeline.splitTitle": "प्लेहेड के नीचे वाली क्लिप को स्प्लिट करें",
-  "app.timeline.split": "⧉ स्प्लिट",
+  "app.timeline.split": "स्प्लिट",
   "app.timeline.splitUnavailable": "क्लिप को स्प्लिट करने के लिए प्लेहेड को उसके अंदर ले जाएँ (ठीक शुरुआत या अंत पर नहीं)।",
   "app.timeline.zoomOutTitle": "ज़ूम आउट करें (वीडियो का ज़्यादा हिस्सा दिखाएं)",
   "app.timeline.zoomOutAria": "ज़ूम आउट",
@@ -302,7 +302,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "क्लिप को बाईं ओर मूव करें",
   "app.timeline.moveRight": "क्लिप को दाईं ओर मूव करें",
   "app.timeline.deleteTitle": "क्लिप डिलीट करें (⌫)",
-  "app.timeline.delete": "✕ डिलीट",
+  "app.timeline.delete": "डिलीट",
   "app.timeline.speed": "स्पीड",
   "app.timeline.speedNormal": "1× (नॉर्मल)",
   "app.timeline.volume": "वॉल्यूम",

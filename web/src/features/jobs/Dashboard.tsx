@@ -4,7 +4,11 @@
 // the state and passes it in).
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { ArrowRight, Plus } from "lucide-react";
 import { IconArrowRight, IconMic } from "@/components/Icons";
+import { Button } from "@/components/ui/Button";
+import { SectionLabel } from "@/components/ui/Card";
+import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import type { ActiveJobV2 } from "@/lib/activeJobs";
 import type { LibraryEntry } from "@/lib/library";
@@ -61,12 +65,7 @@ export function Dashboard({
           workflow picker lives on its own screen. */}
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <div
-            className="text-[11px] font-semibold uppercase tracking-[0.15em]"
-            style={{ color: "var(--text-muted)" }}
-          >
-            {t("app.dashboard.workspace")}
-          </div>
+          <SectionLabel>{t("app.dashboard.workspace")}</SectionLabel>
           <h1
             className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl"
             style={{ color: "var(--text-strong)" }}
@@ -83,29 +82,21 @@ export function Dashboard({
             </div>
           )}
         </div>
-        <button
+        <Button
+          size="pill"
           onClick={onNewVideo}
           data-testid="dashboard-new-video"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold transition-transform hover:-translate-y-0.5"
-          style={{
-            background: "var(--brand-solid)",
-            color: "white",
-          }}
+          className="inline-flex shrink-0 items-center gap-1.5 transition-transform hover:-translate-y-0.5"
         >
-          <span className="text-base leading-none">+</span>
+          <Icon icon={Plus} size={14} strokeWidth={2.5} />
           {t("app.dashboard.newVideo")}
-        </button>
+        </Button>
       </div>
 
       {/* Active jobs */}
       {activeJobs.length > 0 && (
         <div className="mb-10">
-          <div
-            className="mb-3 text-[11px] font-semibold uppercase tracking-[0.15em]"
-            style={{ color: "var(--text-muted)" }}
-          >
-            {t("app.dashboard.inProgress")}
-          </div>
+          <SectionLabel className="mb-3">{t("app.dashboard.inProgress")}</SectionLabel>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {activeJobs.map((j) => (
               <ActiveJobCard
@@ -124,18 +115,13 @@ export function Dashboard({
       {recent && recent.length > 0 && (
         <div className="mb-10">
           <div className="mb-3 flex items-center justify-between">
-            <div
-              className="text-[11px] font-semibold uppercase tracking-[0.15em]"
-              style={{ color: "var(--text-muted)" }}
-            >
-              {t("app.dashboard.recentProjects")}
-            </div>
+            <SectionLabel>{t("app.dashboard.recentProjects")}</SectionLabel>
             <Link
               href="/app/library"
               className="text-xs transition-opacity hover:opacity-70"
               style={{ color: "var(--brand-strong)" }}
             >
-              {t("app.dashboard.viewAll")}
+              {t("app.dashboard.viewAll")} <Icon icon={ArrowRight} />
             </Link>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -203,7 +189,7 @@ export function Dashboard({
       >
         <IconMic size={14} strokeWidth={2.5} />
         {t("app.dashboard.voiceTeaser")}
-        <span className="opacity-70">→</span>
+        <Icon icon={ArrowRight} className="opacity-70" />
       </button>
 
       {children}

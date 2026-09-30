@@ -168,7 +168,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "Nieuwe video",
   "app.dashboard.inProgress": "Bezig",
   "app.dashboard.recentProjects": "Recente projecten",
-  "app.dashboard.viewAll": "Alles bekijken →",
+  "app.dashboard.viewAll": "Alles bekijken",
   "app.dashboard.startFirst": "Start je eerste video",
   "app.dashboard.startFirstSub": "Kies een workflow — CleoCuts regelt ondertitels, formaat en opschoning",
   "app.dashboard.voiceTeaser": "Zeg “Cleo” tijdens het opnemen — bespaar uren aan monteren",
@@ -185,7 +185,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "Kies elke knop zelf — ondertitels, montage, formaten",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← Terug",
+  "app.upload.back": "Terug",
   "app.upload.title": "Kies een video",
   "app.upload.hint":
     "MP4 of MOV vanaf je telefoon of computer. Houd deze pagina open tot de upload klaar is.",
@@ -196,7 +196,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
     "De upload gaat verder waar hij gestopt was — houd deze pagina open.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← terug",
+  "app.configure.back": "terug",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "Ondertitelstijl",
   "app.configure.captionPreviewAlt": "Voorbeeld van {style}-ondertitels",
@@ -244,12 +244,12 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.card.queued.titleNoPos": "In de wachtrij",
   "app.card.queued.sub":
     "Er zijn nu veel video's — die van jou start automatisch. Je kunt deze pagina verlaten.",
-  "app.card.open": "Openen →",
-  "app.card.remove": "✕ Verwijderen",
+  "app.card.open": "Openen",
+  "app.card.remove": "Verwijderen",
   "app.card.renderFailedNote": "Renderen mislukt — je bewerkingen zijn opgeslagen. Open het project en render opnieuw.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← Dashboard",
+  "app.review.backToDashboard": "Dashboard",
   "app.review.audioHeadsUp": "Audio-melding",
   "app.review.updatingPreview": "Voorbeeld wordt bijgewerkt…",
   "app.review.captionPreviewChip": "Voorbeeld",
@@ -262,7 +262,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Regel verwijderd",
-  "app.transcript.undo": "↶ Ongedaan maken",
+  "app.transcript.undo": "Ongedaan maken",
   "app.transcript.headingOne": "Transcript · {count} regel",
   "app.transcript.headingOther": "Transcript · {count} regels",
   "app.transcript.hint": "Verbeter typefouten, verwijder een regel met ✕, tik op een kaart om naar dat moment te springen.",
@@ -290,7 +290,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "Opnieuw (⌘⇧Z)",
   "app.timeline.redoAria": "Opnieuw",
   "app.timeline.splitTitle": "Splits de clip onder de afspeelkop",
-  "app.timeline.split": "⧉ Splitsen",
+  "app.timeline.split": "Splitsen",
   "app.timeline.splitUnavailable": "Zet de afspeelkop in een clip om die te splitsen (niet precies aan het begin of einde).",
   "app.timeline.zoomOutTitle": "Uitzoomen (meer van de video tonen)",
   "app.timeline.zoomOutAria": "Uitzoomen",
@@ -302,7 +302,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "Clip naar links verplaatsen",
   "app.timeline.moveRight": "Clip naar rechts verplaatsen",
   "app.timeline.deleteTitle": "Clip verwijderen (⌫)",
-  "app.timeline.delete": "✕ Verwijderen",
+  "app.timeline.delete": "Verwijderen",
   "app.timeline.speed": "Snelheid",
   "app.timeline.speedNormal": "1× (normaal)",
   "app.timeline.volume": "Volume",

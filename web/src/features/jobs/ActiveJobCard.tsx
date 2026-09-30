@@ -1,5 +1,8 @@
 "use client";
 // Moved verbatim from app/app/page.tsx (UX4).
+import { ArrowRight, ArrowUp, CircleAlert, Play, Sparkle, X, type LucideIcon } from "lucide-react";
+import { Icon } from "@/components/ui/Icon";
+import { Progress } from "@/components/ui/Progress";
 import { useT } from "@/i18n";
 import type { ActiveJobV2 } from "@/lib/activeJobs";
 import { friendlyError, jobErrorText, localizeKnown } from "@/lib/errors.legacy";
@@ -30,26 +33,26 @@ export function ActiveJobCard({
     (job.phase === "analyzing" || job.phase === "rendering") &&
     status?.status === "processing" &&
     status.message === "queued";
-  const phaseCopy: Record<ActiveJobV2["phase"], { title: string; sub: string; icon: string }> = {
+  const phaseCopy: Record<ActiveJobV2["phase"], { title: string; sub: string; icon: LucideIcon }> = {
     uploading: {
       title: t("app.card.uploading.title"),
       sub: t("app.card.uploading.sub"),
-      icon: "↑",
+      icon: ArrowUp,
     },
     analyzing: {
       title: t("app.card.analyzing.title"),
       sub: t("app.card.analyzing.sub"),
-      icon: "✦",
+      icon: Sparkle,
     },
     reviewing: {
       title: t("app.card.reviewing.title"),
       sub: t("app.card.reviewing.sub"),
-      icon: "▸",
+      icon: Play,
     },
     rendering: {
       title: t("app.card.rendering.title"),
       sub: t("app.card.rendering.sub"),
-      icon: "✦",
+      icon: Sparkle,
     },
   };
   const presetLabel = presetLabelFor(job.presetId, job.presetLabel, t);
@@ -122,14 +125,14 @@ export function ActiveJobCard({
             className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-transform group-hover:translate-x-0.5"
             style={{ background: accent, color: "#0f0f0f" }}
           >
-            {t("app.card.open")}
+            {t("app.card.open")} <Icon icon={ArrowRight} />
           </div>
         ) : (
           <div
             className="shrink-0 text-lg leading-none opacity-70"
             style={{ color: isError ? "#F26E6E" : accent }}
           >
-            {isError ? "!" : copy.icon}
+            <Icon icon={isError ? CircleAlert : copy.icon} />
           </div>
         )}
       </div>
@@ -156,19 +159,7 @@ export function ActiveJobCard({
       {/* Progress bar for non-review phases */}
       {job.phase !== "reviewing" && !isError && (
         <div className="relative z-10">
-          <div
-            className="h-1.5 overflow-hidden rounded-full"
-            style={{ background: "var(--surface-2)" }}
-          >
-            <div
-              className="h-full transition-all duration-500"
-              style={{
-                width: `${Math.max(3, Math.min(100, pct))}%`,
-                background: accent,
-                boxShadow: `0 0 12px ${accent}80`,
-              }}
-            />
-          </div>
+          <Progress value={pct} color={accent} min={3} label={copy.title} />
           <div
             className="mt-1.5 flex items-center justify-between text-[10px]"
             style={{ color: "var(--text-muted)" }}
@@ -199,6 +190,7 @@ export function ActiveJobCard({
             color: "var(--brand-strong)",
           }}
         >
+          <Icon icon={X} />
           {t("app.card.remove")}
         </span>
       )}

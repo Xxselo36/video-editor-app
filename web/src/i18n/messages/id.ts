@@ -168,7 +168,7 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "Video baru",
   "app.dashboard.inProgress": "Sedang diproses",
   "app.dashboard.recentProjects": "Proyek terbaru",
-  "app.dashboard.viewAll": "Lihat semua →",
+  "app.dashboard.viewAll": "Lihat semua",
   "app.dashboard.startFirst": "Mulai video pertamamu",
   "app.dashboard.startFirstSub": "Pilih workflow — CleoCuts yang urus teks, format, dan pembersihan",
   "app.dashboard.voiceTeaser": "Bilang “Cleo” saat merekam — hemat berjam-jam waktu edit",
@@ -185,7 +185,7 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "Pilih tiap detail sendiri — teks, potongan, format",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← Kembali",
+  "app.upload.back": "Kembali",
   "app.upload.title": "Pilih video",
   "app.upload.hint":
     "MP4 atau MOV dari HP atau komputermu. Biarkan halaman ini terbuka sampai unggahan selesai.",
@@ -196,7 +196,7 @@ export const id: Partial<Record<MessageKey, string>> = {
     "Melanjutkan unggahan dari titik terakhirnya — biarkan halaman ini terbuka.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← kembali",
+  "app.configure.back": "kembali",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "Gaya teks",
   "app.configure.captionPreviewAlt": "Pratinjau teks {style}",
@@ -244,12 +244,12 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.card.queued.titleNoPos": "Dalam antrean",
   "app.card.queued.sub":
     "Sedang banyak video — videomu akan mulai otomatis. Kamu bisa meninggalkan halaman ini.",
-  "app.card.open": "Buka →",
-  "app.card.remove": "✕ Hapus",
+  "app.card.open": "Buka",
+  "app.card.remove": "Hapus",
   "app.card.renderFailedNote": "Rendering gagal — editanmu sudah tersimpan. Buka dan render lagi.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← Dashboard",
+  "app.review.backToDashboard": "Dashboard",
   "app.review.audioHeadsUp": "Info audio",
   "app.review.updatingPreview": "Memperbarui pratinjau…",
   "app.review.captionPreviewChip": "Pratinjau",
@@ -262,7 +262,7 @@ export const id: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Baris dihapus",
-  "app.transcript.undo": "↶ Batalkan",
+  "app.transcript.undo": "Batalkan",
   "app.transcript.headingOne": "Transkrip · {count} baris",
   "app.transcript.headingOther": "Transkrip · {count} baris",
   "app.transcript.hint": "Perbaiki typo, hapus baris dengan ✕, ketuk kartu untuk lompat ke momen itu.",
@@ -290,7 +290,7 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "Ulangi (⌘⇧Z)",
   "app.timeline.redoAria": "Ulangi",
   "app.timeline.splitTitle": "Pisahkan klip di posisi playhead",
-  "app.timeline.split": "⧉ Pisahkan",
+  "app.timeline.split": "Pisahkan",
   "app.timeline.splitUnavailable": "Letakkan playhead di dalam klip untuk memisahkannya (jangan tepat di awal atau akhir).",
   "app.timeline.zoomOutTitle": "Perkecil (tampilkan lebih banyak video)",
   "app.timeline.zoomOutAria": "Perkecil",
@@ -302,7 +302,7 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "Geser klip ke kiri",
   "app.timeline.moveRight": "Geser klip ke kanan",
   "app.timeline.deleteTitle": "Hapus klip (⌫)",
-  "app.timeline.delete": "✕ Hapus",
+  "app.timeline.delete": "Hapus",
   "app.timeline.speed": "Kecepatan",
   "app.timeline.speedNormal": "1× (normal)",
   "app.timeline.volume": "Volume",

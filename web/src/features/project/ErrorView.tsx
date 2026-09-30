@@ -1,5 +1,6 @@
 "use client";
 // Moved verbatim from app/app/page.tsx (UX4).
+import { TriangleAlert } from "lucide-react";
 import { useT } from "@/i18n";
 
 export function ErrorView({
@@ -12,7 +13,7 @@ export function ErrorView({
   const t = useT();
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4" data-testid="error-screen">
-      <div className="text-5xl">⚠️</div>
+      <TriangleAlert aria-hidden size={48} strokeWidth={1.75} className="text-[var(--warn)]" />
       <div className="text-base font-semibold">{t("app.errors.title")}</div>
       <div className="max-w-xs text-center text-xs text-[var(--text-muted)]">{message}</div>
       <button

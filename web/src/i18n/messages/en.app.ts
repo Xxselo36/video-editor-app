@@ -172,7 +172,7 @@ export const enApp = {
   "app.dashboard.newVideo": "New video",
   "app.dashboard.inProgress": "In progress",
   "app.dashboard.recentProjects": "Recent projects",
-  "app.dashboard.viewAll": "View all →",
+  "app.dashboard.viewAll": "View all",
   "app.dashboard.startFirst": "Start your first video",
   "app.dashboard.startFirstSub": "Pick a workflow — CleoCuts handles captions, format, cleanup",
   "app.dashboard.voiceTeaser": "Say “Cleo” while recording — save hours of editing",
@@ -189,7 +189,7 @@ export const enApp = {
   "app.picker.customSub": "Pick every knob yourself — captions, cuts, formats",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← Back",
+  "app.upload.back": "Back",
   "app.upload.title": "Choose a video",
   "app.upload.hint":
     "MP4 or MOV from your phone or computer. Keep this page open until the upload has finished.",
@@ -200,7 +200,7 @@ export const enApp = {
     "Resuming the upload where it stopped — keep this page open.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← back",
+  "app.configure.back": "back",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "Caption style",
   "app.configure.captionPreviewAlt": "{style} caption preview",
@@ -247,12 +247,12 @@ export const enApp = {
   "app.card.queued.title": "Waiting in line (#{n})",
   "app.card.queued.titleNoPos": "Waiting in line",
   "app.card.queued.sub": "Lots of videos right now — yours starts automatically. You can leave this page.",
-  "app.card.open": "Open →",
-  "app.card.remove": "✕ Remove",
+  "app.card.open": "Open",
+  "app.card.remove": "Remove",
   "app.card.renderFailedNote": "Render failed — your edits are saved. Open it and render again.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← Dashboard",
+  "app.review.backToDashboard": "Dashboard",
   "app.review.audioHeadsUp": "Audio heads-up",
   "app.review.updatingPreview": "Updating preview…",
   "app.review.captionPreviewChip": "Preview",
@@ -265,7 +265,7 @@ export const enApp = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Line deleted",
-  "app.transcript.undo": "↶ Undo",
+  "app.transcript.undo": "Undo",
   "app.transcript.headingOne": "Transcript · {count} line",
   "app.transcript.headingOther": "Transcript · {count} lines",
   "app.transcript.hint": "Fix typos, drop a line with ✕, tap a card to jump to that moment.",
@@ -293,7 +293,7 @@ export const enApp = {
   "app.timeline.redoTitle": "Redo (⌘⇧Z)",
   "app.timeline.redoAria": "Redo",
   "app.timeline.splitTitle": "Split the clip under the playhead",
-  "app.timeline.split": "⧉ Split",
+  "app.timeline.split": "Split",
   "app.timeline.splitUnavailable": "Move the playhead into a clip to split it (not right at its start or end).",
   "app.timeline.zoomOutTitle": "Zoom out (show more of the video)",
   "app.timeline.zoomOutAria": "Zoom out",
@@ -305,7 +305,7 @@ export const enApp = {
   "app.timeline.moveLeft": "Move clip left",
   "app.timeline.moveRight": "Move clip right",
   "app.timeline.deleteTitle": "Delete clip (⌫)",
-  "app.timeline.delete": "✕ Delete",
+  "app.timeline.delete": "Delete",
   "app.timeline.speed": "Speed",
   "app.timeline.speedNormal": "1× (normal)",
   "app.timeline.volume": "Volume",

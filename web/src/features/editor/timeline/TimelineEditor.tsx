@@ -1,6 +1,11 @@
 "use client";
 // Moved verbatim from app/app/page.tsx (UX4).
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, Minus, Plus, Redo2, SquareSplitHorizontal, Undo2, X } from "lucide-react";
+import { Card, SectionLabel } from "@/components/ui/Card";
+import { Icon } from "@/components/ui/Icon";
+import { IconButton } from "@/components/ui/IconButton";
+import { Slider } from "@/components/ui/Slider";
 import { useT } from "@/i18n";
 import { track } from "@/lib/analytics";
 import { fmtTimecode } from "@/features/editor/format";
@@ -489,21 +494,14 @@ export function TimelineEditor({
   } as const;
 
   return (
-    <div
-      className="mb-3 overflow-hidden rounded-2xl"
-      style={{
-        background: "var(--surface-1)",
-        border: "1px solid var(--border)",
-        boxShadow: "var(--shadow-md)",
-      }}
-    >
+    <Card className="mb-3" style={{ boxShadow: "var(--shadow-md)" }}>
       <button
         onClick={onToggleOpen}
         className="flex w-full items-center justify-between px-4 py-3 text-left"
         style={{ borderBottom: open ? "1px solid var(--border)" : "none" }}
       >
         <div>
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+          <SectionLabel className="flex items-center gap-2">
             {t("app.timeline.title")}
             <span
               className="rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal tabular-nums"
@@ -541,7 +539,7 @@ export function TimelineEditor({
                 {saveError === "failed" ? t("app.timeline.notSaved") : t("app.timeline.notSavedRetrying")}
               </span>
             )}
-          </div>
+          </SectionLabel>
         </div>
 
       </button>
@@ -551,18 +549,18 @@ export function TimelineEditor({
           {/* Toolbar */}
           <div className="mb-3 flex items-center gap-2">
             <div className="flex overflow-hidden rounded-lg" style={{ border: "1px solid var(--border)" }}>
-              <button
+              <IconButton
                 onClick={undo}
                 disabled={history.length === 0}
                 data-testid="timeline-undo"
                 className="px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 disabled:hover:bg-transparent sm:px-2.5 sm:py-1"
                 style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
                 title={t("app.timeline.undoTitle")}
-                aria-label={t("app.timeline.undoAria")}
+                label={t("app.timeline.undoAria")}
               >
-                ↶
-              </button>
-              <button
+                <Icon icon={Undo2} />
+              </IconButton>
+              <IconButton
                 onClick={redo}
                 disabled={future.length === 0}
                 data-testid="timeline-redo"
@@ -573,10 +571,10 @@ export function TimelineEditor({
                   borderLeft: "1px solid var(--border)",
                 }}
                 title={t("app.timeline.redoTitle")}
-                aria-label={t("app.timeline.redoAria")}
+                label={t("app.timeline.redoAria")}
               >
-                ↷
-              </button>
+                <Icon icon={Redo2} />
+              </IconButton>
             </div>
             <button
               onClick={splitAtPlayhead}
@@ -588,7 +586,7 @@ export function TimelineEditor({
               style={{ ...toolBtn, color: "var(--text-strong)" }}
               title={canSplit ? t("app.timeline.splitTitle") : t("app.timeline.splitUnavailable")}
             >
-              {t("app.timeline.split")}
+              <Icon icon={SquareSplitHorizontal} /> {t("app.timeline.split")}
             </button>
 
             <div className="ml-auto flex items-center gap-2">
@@ -603,17 +601,17 @@ export function TimelineEditor({
                 </span>
               </span>
               <div className="flex items-center overflow-hidden rounded-lg" style={{ border: "1px solid var(--border)" }}>
-                <button
+                <IconButton
                   onClick={() => zoomTo(effPps / 1.5, viewW / 2)}
                   disabled={!canZoomOut}
                   data-testid="timeline-zoom-out"
                   className="px-2.5 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 sm:px-2 sm:py-1"
                   style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
                   title={t("app.timeline.zoomOutTitle")}
-                  aria-label={t("app.timeline.zoomOutAria")}
+                  label={t("app.timeline.zoomOutAria")}
                 >
-                  −
-                </button>
+                  <Icon icon={Minus} />
+                </IconButton>
                 <button
                   onClick={() => zoomTo(fitPps, 0)}
                   disabled={!canZoomOut}
@@ -628,7 +626,7 @@ export function TimelineEditor({
                 >
                   {t("app.timeline.fit")}
                 </button>
-                <button
+                <IconButton
                   onClick={() => zoomTo(effPps * 1.5, viewW / 2)}
                   disabled={!canZoomIn}
                   data-testid="timeline-zoom-in"
@@ -639,10 +637,10 @@ export function TimelineEditor({
                     borderLeft: "1px solid var(--border)",
                   }}
                   title={t("app.timeline.zoomInTitle")}
-                  aria-label={t("app.timeline.zoomInAria")}
+                  label={t("app.timeline.zoomInAria")}
                 >
-                  +
-                </button>
+                  <Icon icon={Plus} />
+                </IconButton>
               </div>
             </div>
           </div>
@@ -914,26 +912,26 @@ export function TimelineEditor({
                   </span>
                 </span>
                 <div className="ml-auto flex items-center gap-1.5">
-                  <button
+                  <IconButton
                     onClick={() => moveLeft(selectedSeg.id)}
                     data-testid="clip-move-left"
                     className="rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] sm:px-2.5 sm:py-1"
                     style={toolBtn}
                     title={t("app.timeline.moveLeft")}
-                    aria-label={t("app.timeline.moveLeft")}
+                    label={t("app.timeline.moveLeft")}
                   >
-                    ←
-                  </button>
-                  <button
+                    <Icon icon={ArrowLeft} />
+                  </IconButton>
+                  <IconButton
                     onClick={() => moveRight(selectedSeg.id)}
                     data-testid="clip-move-right"
                     className="rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] sm:px-2.5 sm:py-1"
                     style={toolBtn}
                     title={t("app.timeline.moveRight")}
-                    aria-label={t("app.timeline.moveRight")}
+                    label={t("app.timeline.moveRight")}
                   >
-                    →
-                  </button>
+                    <Icon icon={ArrowRight} />
+                  </IconButton>
                   <button
                     onClick={() => del(selectedSeg.id)}
                     data-testid="clip-delete"
@@ -945,7 +943,7 @@ export function TimelineEditor({
                     }}
                     title={t("app.timeline.deleteTitle")}
                   >
-                    {t("app.timeline.delete")}
+                    <Icon icon={X} /> {t("app.timeline.delete")}
                   </button>
                 </div>
               </div>
@@ -977,16 +975,13 @@ export function TimelineEditor({
 
               <div className="flex items-center gap-2">
                 <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{t("app.timeline.volume")}</span>
-                <input
-                  type="range"
+                <Slider
                   min={0}
                   max={2.5}
                   step={0.05}
                   value={selectedSeg.volume ?? 1}
                   data-testid="clip-volume"
                   onChange={(e) => patchSeg(selectedSeg.id, { volume: Number(e.target.value) })}
-                  className="flex-1"
-                  style={{ accentColor: "var(--brand)" }}
                 />
                 <span
                   className="w-10 text-right tabular-nums"
@@ -998,16 +993,13 @@ export function TimelineEditor({
 
               <div className="flex items-center gap-2">
                 <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{t("app.timeline.fadeIn")}</span>
-                <input
-                  type="range"
+                <Slider
                   min={0}
                   max={2}
                   step={0.1}
                   value={selectedSeg.fadeIn ?? 0}
                   data-testid="clip-fade-in"
                   onChange={(e) => patchSeg(selectedSeg.id, { fadeIn: Number(e.target.value) })}
-                  className="flex-1"
-                  style={{ accentColor: "var(--brand)" }}
                 />
                 <span
                   className="w-10 text-right tabular-nums"
@@ -1019,16 +1011,13 @@ export function TimelineEditor({
 
               <div className="flex items-center gap-2">
                 <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{t("app.timeline.fadeOut")}</span>
-                <input
-                  type="range"
+                <Slider
                   min={0}
                   max={2}
                   step={0.1}
                   value={selectedSeg.fadeOut ?? 0}
                   data-testid="clip-fade-out"
                   onChange={(e) => patchSeg(selectedSeg.id, { fadeOut: Number(e.target.value) })}
-                  className="flex-1"
-                  style={{ accentColor: "var(--brand)" }}
                 />
                 <span
                   className="w-10 text-right tabular-nums"
@@ -1062,6 +1051,6 @@ export function TimelineEditor({
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

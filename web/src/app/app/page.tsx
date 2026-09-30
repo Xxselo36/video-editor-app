@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
+import { Toast } from "@/components/ui/Toast";
 import { PaywallDialog } from "@/components/billing/PaywallDialog";
 import { useT } from "@/i18n";
 import type { Paywall } from "@/lib/account";
@@ -312,34 +313,11 @@ export default function Home() {
           phase === "picker" ? "max-w-2xl" : phase === "reviewing" ? "max-w-3xl" : "max-w-md"
         }`}
       >
-        {resuming && (
-          <div
-            className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-xs font-semibold"
-            style={{
-              background: "var(--surface-2)",
-              color: "var(--text-strong)",
-              border: "1px solid var(--border)",
-              boxShadow: "var(--shadow-md)",
-            }}
-          >
-            {t("app.header.opening")}
-          </div>
-        )}
+        {resuming && <Toast compact>{t("app.header.opening")}</Toast>}
         {notice && (
-          <div
-            role="status"
-            data-testid="notice"
-            onClick={() => setNotice(null)}
-            className="fixed left-1/2 top-4 z-50 w-[min(92vw,420px)] -translate-x-1/2 rounded-2xl px-4 py-3 text-sm"
-            style={{
-              background: "var(--surface-2)",
-              color: "var(--text-strong)",
-              border: "1px solid var(--border)",
-              boxShadow: "var(--shadow-md)",
-            }}
-          >
+          <Toast testId="notice" onDismiss={() => setNotice(null)}>
             {notice}
-          </div>
+          </Toast>
         )}
         {phase === "picker" && (
           <PickerScreen

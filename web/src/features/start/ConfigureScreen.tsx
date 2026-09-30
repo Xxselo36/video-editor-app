@@ -1,5 +1,9 @@
 "use client";
 // Moved verbatim from app/app/page.tsx (UX4).
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/Icon";
+import { SwitchRow } from "@/components/ui/Switch";
 import { useT } from "@/i18n";
 import { publicUrl } from "@/lib/api";
 import { CAPTION_PRESETS, CUT_STYLES, EXPORT_FORMAT_OPTIONS } from "./presets.legacy";
@@ -34,7 +38,7 @@ export function ConfigureScreen(props: {
           data-testid="configure-back"
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
         >
-          {t("app.configure.back")}
+          <Icon icon={ArrowLeft} /> {t("app.configure.back")}
         </button>
         <div className="truncate text-xs text-[var(--text-body)]">
           {t("app.configure.fileInfo", { name: props.file.name, size: sizeMB })}
@@ -89,13 +93,13 @@ export function ConfigureScreen(props: {
       </Section>
 
       <Section title={t("app.configure.cleanup")}>
-        <ToggleRow
+        <SwitchRow
           label={t("app.configure.voiceTriggers")}
           desc={t("app.configure.voiceTriggersDesc")}
           checked={props.voiceTriggers}
           onChange={props.setVoiceTriggers}
         />
-        <ToggleRow
+        <SwitchRow
           label={t("app.configure.removeFillers")}
           desc={t("app.configure.removeFillersDesc")}
           checked={props.removeFillers}
@@ -104,7 +108,7 @@ export function ConfigureScreen(props: {
       </Section>
 
       <Section title={t("app.configure.smartReframe")}>
-        <ToggleRow
+        <SwitchRow
           label={t("app.configure.smartcam")}
           desc={t("app.configure.smartcamDesc")}
           checked={props.smartcamEnabled}
@@ -165,14 +169,15 @@ export function ConfigureScreen(props: {
         </div>
       </Section>
 
-      <button
+      <Button
+        size="lg"
         onClick={() => props.onProcess()}
         data-testid="configure-process"
         // Sticky on phones: the options list is ~2 screens tall.
-        className="sticky bottom-3 z-20 mt-2 w-full rounded-xl bg-[var(--brand-solid)] px-6 py-4 text-base font-semibold text-white shadow-lg hover:bg-[var(--brand-solid-hover)] active:scale-[0.99]"
+        className="sticky bottom-3 z-20 mt-2 w-full shadow-lg"
       >
         {t("app.configure.process")}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -191,40 +196,5 @@ function Section({
       </div>
       <div className="flex flex-col gap-2">{children}</div>
     </div>
-  );
-}
-
-function ToggleRow({
-  label,
-  desc,
-  checked,
-  onChange,
-}: {
-  label: string;
-  desc?: string;
-  checked: boolean;
-  onChange: (b: boolean) => void;
-}) {
-  return (
-    <button
-      onClick={() => onChange(!checked)}
-      className="flex w-full items-center justify-between rounded-xl border border-[var(--border)] px-4 py-3 text-left hover:border-[var(--border-strong)]"
-    >
-      <div>
-        <div className="text-sm">{label}</div>
-        {desc && <div className="text-[10px] text-[var(--text-muted)]">{desc}</div>}
-      </div>
-      <div
-        className={`h-6 w-10 rounded-full p-0.5 transition-colors ${
-          checked ? "bg-[var(--brand)]" : "bg-[var(--surface-tint)]"
-        }`}
-      >
-        <div
-          className={`h-5 w-5 rounded-full bg-white transition-transform ${
-            checked ? "translate-x-4" : ""
-          }`}
-        />
-      </div>
-    </button>
   );
 }
