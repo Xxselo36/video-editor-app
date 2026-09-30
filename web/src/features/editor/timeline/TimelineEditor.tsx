@@ -1,15 +1,31 @@
 "use client";
 // Moved from app/app/page.tsx (UX4).
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Minus, Plus, Redo2, SquareSplitHorizontal, Undo2, X } from "lucide-react";
 import { Card, SectionLabel } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { Slider } from "@/components/ui/Slider";
 import { useT } from "@/i18n";
-import { track } from "@/lib/analytics";
 import { fmtTimecode } from "@/features/editor/format";
+import { keyTargetAllowed } from "@/features/editor/shortcuts/keymap";
+import { useTimelineHistory } from "./history";
+import {
+  canDelete,
+  patchSeg as patchSegs,
+  playheadCutOf,
+  sourceAtCut,
+  splitAt,
+  splittableIndex,
+  stripDuration,
+  trimBounds,
+  trimTo,
+  type EditorSeg,
+} from "./mechanics";
 import { RulerTicks } from "./RulerTicks";
+import { useTimelineZoom } from "./useTimelineZoom";
+
+export type { EditorSeg } from "./mechanics";
 
 // Timeline editor with per-segment trim, split, delete, reorder.
 // Segments are rendered as blocks in a horizontal strip proportional
@@ -17,22 +33,8 @@ import { RulerTicks } from "./RulerTicks";
 // to trim; a Delete button removes a segment (soft-disable so it can
 // be restored); Split at playhead splits the current block into two;
 // drag-and-drop reorders. All edits POST to the backend which rebuilds
-// the preview MP4.
-export type EditorSeg = {
-  id: string;
-  start: number;
-  end: number;
-  disabled?: boolean;
-  speed?: number;      // 0.25 – 4.0, default 1
-  fadeIn?: number;     // seconds
-  fadeOut?: number;    // seconds
-  volume?: number;     // 0 – 2.5, default 1
-};
-
-// Trimming snaps onto a neighbouring clip's footage when it would leave
-// less than this much of the removed gap between them.
-const TRIM_SNAP_S = 0.3;
-const TIMELINE_MAX_PPS = 400; // 0.1s = 40px
+// the preview MP4. The mechanics (trim, split, zoom, history) live in
+// ./mechanics, ./history and ./useTimelineZoom, shared with the v2 dock.
 
 export function TimelineEditor({
   segments,
@@ -67,11 +69,6 @@ export function TimelineEditor({
   const [selected, setSelected] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragMode, setDragMode] = useState<"start" | "end" | null>(null);
-  // Zoom as pixels per second. 0 = "Fit" (effPps below never goes under
-  // the fit zoom): the timeline opens showing the whole edit.
-  const [pps, setPps] = useState(0);
-  const [history, setHistory] = useState<EditorSeg[][]>([]);
-  const [future, setFuture] = useState<EditorSeg[][]>([]);
   const stripRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragPreviewRef = useRef<EditorSeg[] | null>(null);
@@ -89,9 +86,7 @@ export function TimelineEditor({
   // started — otherwise shrinking a clip rescales every block under the
   // cursor and the trim runs away.
   const dragTotalRef = useRef<number | null>(null);
-  const totalDur =
-    dragTotalRef.current ??
-    (displaySegs.reduce((acc, s) => acc + (s.end - s.start), 0) || 1);
+  const totalDur = dragTotalRef.current ?? stripDuration(displaySegs);
   const activeCount = displaySegs.filter((s) => !s.disabled).length;
 
   const fmt = (secs: number) => {
@@ -100,36 +95,9 @@ export function TimelineEditor({
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Wrap onCommit to push history state
-  // `coalesce` groups rapid changes of the same control (a slider being
-  // dragged fires dozens of changes) into ONE undo step.
-  const lastCommitRef = useRef<{ key: string; t: number } | null>(null);
-  const commit = (next: EditorSeg[], coalesce?: string) => {
-    const now = Date.now();
-    const last = lastCommitRef.current;
-    const merge = coalesce && last && last.key === coalesce && now - last.t < 1000;
-    lastCommitRef.current = coalesce ? { key: coalesce, t: now } : null;
-    if (!merge) {
-      setHistory((h) => [...h, segments].slice(-50));
-    }
-    setFuture([]);
-    onCommit(next);
-  };
-  const undo = () => {
-    if (history.length === 0) return;
-    track("undo", { area: "timeline" });
-    const prev = history[history.length - 1];
-    setHistory(history.slice(0, -1));
-    setFuture((f) => [segments, ...f].slice(0, 30));
-    onCommit(prev);
-  };
-  const redo = () => {
-    if (future.length === 0) return;
-    const next = future[0];
-    setFuture(future.slice(1));
-    setHistory((h) => [...h, segments].slice(-30));
-    onCommit(next);
-  };
+  // Undo/redo (./history): commit() pushes the clip list it replaces;
+  // `coalesce` groups a slider drag into ONE undo step.
+  const { commit, undo, redo, history, future } = useTimelineHistory(segments, onCommit);
 
   // Trim drag — during the gesture we mutate a LOCAL preview so the
   // strip resizes visually without spamming the backend. Only on
@@ -149,15 +117,7 @@ export function TimelineEditor({
     dragPreviewRef.current = startSegs;
     // Growing a clip brings back removed source footage, but never
     // footage another clip already uses — that would play it twice.
-    const bounds = (() => {
-      const self = startSegs.find((x) => x.id === draggingId);
-      const others = startSegs.filter((x) => x.id !== draggingId && !x.disabled);
-      if (!self) return { prev: 0, next: duration };
-      return {
-        prev: Math.max(0, ...others.filter((o) => o.end <= self.start + 1e-6).map((o) => o.end)),
-        next: Math.min(duration, ...others.filter((o) => o.start >= self.end - 1e-6).map((o) => o.start)),
-      };
-    })();
+    const bounds = trimBounds(startSegs, draggingId, duration);
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
       // Touch: keep the page / strip from scrolling under the finger.
@@ -169,28 +129,7 @@ export function TimelineEditor({
       // strip's left edge brings back footage before it.
       const seconds = relX / pxPerSec;
 
-      let acc = 0;
-      const next = startSegs.map((s) => {
-        if (s.disabled) return s;
-        const sDur = s.end - s.start;
-        if (s.id === draggingId) {
-          if (dragMode === "start") {
-            const target = s.start + (seconds - acc);
-            let clamped = Math.max(bounds.prev, Math.min(s.end - 0.1, target));
-            // Snap onto the neighbouring clip's footage instead of
-            // leaving a sliver of the removed gap.
-            if (clamped < s.start && clamped - bounds.prev < TRIM_SNAP_S) clamped = bounds.prev;
-            return { ...s, start: clamped };
-          } else if (dragMode === "end") {
-            const target = s.start + Math.max(0.1, seconds - acc);
-            let clamped = Math.min(bounds.next, Math.max(s.start + 0.1, target));
-            if (clamped > s.end && bounds.next - clamped < TRIM_SNAP_S) clamped = bounds.next;
-            return { ...s, end: clamped };
-          }
-        }
-        acc += sDur;
-        return s;
-      });
+      const next = trimTo(startSegs, draggingId, dragMode, seconds, bounds);
       dragPreviewRef.current = next;
       forceRender({});
     };
@@ -224,8 +163,7 @@ export function TimelineEditor({
   const del = (id: string) => {
     // Refuse to remove the last clip — the backend would have nothing
     // to render. Undo (⌘Z / ↶) brings anything back.
-    const active = segments.filter((s) => !s.disabled);
-    if (active.length <= 1 && active.some((s) => s.id === id)) {
+    if (!canDelete(segments, id)) {
       setSelected(id);
       return;
     }
@@ -240,8 +178,7 @@ export function TimelineEditor({
   useEffect(() => () => {
     if (splitNoteTimer.current) clearTimeout(splitNoteTimer.current);
   }, []);
-  const splittable = (at: number) =>
-    segments.findIndex((s) => !s.disabled && at > s.start + 0.1 && at < s.end - 0.1);
+  const splittable = (at: number) => splittableIndex(segments, at);
   const canSplit = splittable(playhead) !== -1;
   const splitAtPlayhead = () => {
     const at = getVideoTime();
@@ -253,14 +190,7 @@ export function TimelineEditor({
       return;
     }
     setSplitNote(null);
-    const cur = segments[idx];
-    const first: EditorSeg = { ...cur, end: at, id: `${cur.id}-a` };
-    const second: EditorSeg = {
-      ...cur,
-      start: at,
-      id: `${cur.id}-b-${Date.now()}`,
-    };
-    commit([...segments.slice(0, idx), first, second, ...segments.slice(idx + 1)]);
+    commit(splitAt(segments, idx, at));
   };
   const moveLeft = (id: string) => {
     const idx = segments.findIndex((s) => s.id === id);
@@ -277,10 +207,7 @@ export function TimelineEditor({
     commit(next);
   };
   const patchSeg = (id: string, patch: Partial<EditorSeg>) => {
-    commit(
-      segments.map((s) => (s.id === id ? { ...s, ...patch } : s)),
-      `${id}:${Object.keys(patch).sort().join(",")}`,
-    );
+    commit(patchSegs(segments, id, patch), `${id}:${Object.keys(patch).sort().join(",")}`);
   };
 
   // Keyboard shortcuts: Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z (redo),
@@ -292,13 +219,11 @@ export function TimelineEditor({
   // Enter / Backspace (tech.md T4).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
       const target = e.target instanceof Element ? e.target : null;
       const onPage = !target || target === document.body || target === document.documentElement;
-      if (!onPage && !target?.closest("[data-editor-root]")) return;
-      if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])")) return;
+      // Target filtering: shortcuts/keymap.ts (UX3, tech.md T4).
+      if (!keyTargetAllowed(e, target, onPage)) return;
       const meta = e.metaKey || e.ctrlKey;
-      if (!meta && target?.closest("button, a, [role=tab], [role=button], summary")) return;
       if (meta && e.key.toLowerCase() === "z" && !e.shiftKey) {
         e.preventDefault();
         undo();
@@ -325,136 +250,15 @@ export function TimelineEditor({
   const selectedSeg = selected ? segments.find((x) => x.id === selected) : null;
 
   // Playhead position on the CUT timeline (what the strip lays out).
-  const playheadCut = (() => {
-    if (playheadSegId) {
-      let acc = 0;
-      for (const s of segments) {
-        if (s.disabled) continue;
-        if (s.id === playheadSegId && playhead >= s.start - 0.05 && playhead <= s.end + 0.05) {
-          return acc + Math.min(s.end - s.start, Math.max(0, playhead - s.start));
-        }
-        acc += s.end - s.start;
-      }
-    }
-    let acc = 0;
-    for (const s of segments) {
-      if (s.disabled) continue;
-      if (playhead >= s.start && playhead <= s.end) return acc + (playhead - s.start);
-      acc += s.end - s.start;
-    }
-    return null;
-  })();
+  const playheadCut = playheadCutOf(segments, playhead, playheadSegId);
   const playheadPct =
     playheadCut !== null ? Math.min(100, (playheadCut / totalDur) * 100) : null;
 
-  // Visible strip width, so ruler density adapts to phone vs desktop.
-  const [viewW, setViewW] = useState(640);
-  useEffect(() => {
-    const sc = scrollRef.current;
-    if (!sc) return;
-    const ro = new ResizeObserver(() => setViewW(sc.clientWidth || 640));
-    ro.observe(sc);
-    return () => ro.disconnect();
-  }, [open]);
-
-  // Effective zoom: never narrower than the view ("fit"), and capped
-  // so very long videos don't produce absurdly wide elements.
-  const fitPps = viewW / totalDur;
-  const maxPps = Math.max(fitPps, Math.min(TIMELINE_MAX_PPS, 200_000 / totalDur));
-  const effPps = Math.min(maxPps, Math.max(fitPps, pps));
-  const contentW = Math.max(viewW, Math.round(totalDur * effPps));
-  const canZoomOut = contentW > viewW + 1;
-  const canZoomIn = effPps < maxPps - 1e-6;
-
-  // Zoom while keeping the time under `anchorX` (px from the left edge
-  // of the visible strip) in place. The scroll correction is applied
-  // after the new width has been laid out.
-  const pendingAnchorRef = useRef<{ t: number; x: number } | null>(null);
-  const zoomStateRef = useRef({ effPps, contentW, totalDur, fitPps, maxPps });
-  zoomStateRef.current = { effPps, contentW, totalDur, fitPps, maxPps };
-  const zoomTo = (nextPps: number, anchorX: number) => {
-    const sc = scrollRef.current;
-    const z = zoomStateRef.current;
-    const clamped = Math.min(z.maxPps, Math.max(z.fitPps, nextPps));
-    if (sc) {
-      pendingAnchorRef.current = {
-        t: ((sc.scrollLeft + anchorX) / z.contentW) * z.totalDur,
-        x: anchorX,
-      };
-    }
-    setPps(clamped);
-  };
-  const zoomToRef = useRef(zoomTo);
-  zoomToRef.current = zoomTo;
-  useLayoutEffect(() => {
-    const sc = scrollRef.current;
-    const a = pendingAnchorRef.current;
-    if (!sc || !a) return;
-    pendingAnchorRef.current = null;
-    sc.scrollLeft = Math.max(0, (a.t / totalDur) * contentW - a.x);
-  }, [contentW, totalDur]);
-
-  // Mouse wheel scrolls the strip sideways (Ctrl/⌘ + wheel or a
-  // trackpad pinch zooms); two-finger pinch zooms on touch screens.
-  const lastUserScrollRef = useRef(0);
-  useEffect(() => {
-    const sc = scrollRef.current;
-    if (!sc) return;
-    const onWheel = (e: WheelEvent) => {
-      const rect = sc.getBoundingClientRect();
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        lastUserScrollRef.current = Date.now();
-        zoomToRef.current(
-          zoomStateRef.current.effPps * Math.exp(-e.deltaY * 0.01),
-          e.clientX - rect.left,
-        );
-        return;
-      }
-      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) {
-        lastUserScrollRef.current = Date.now();
-        return; // native horizontal scroll (trackpad, shift+wheel)
-      }
-      const max = sc.scrollWidth - sc.clientWidth;
-      // At either end, let the page scroll as usual.
-      if (max <= 0 || (e.deltaY < 0 && sc.scrollLeft <= 0) || (e.deltaY > 0 && sc.scrollLeft >= max - 1)) return;
-      e.preventDefault();
-      lastUserScrollRef.current = Date.now();
-      sc.scrollLeft += e.deltaY;
-    };
-    let pinch: { dist: number; pps: number } | null = null;
-    const dist = (t: TouchList) =>
-      Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-    const onTouchStart = (e: TouchEvent) => {
-      lastUserScrollRef.current = Date.now();
-      if (e.touches.length === 2) {
-        pinch = { dist: dist(e.touches), pps: zoomStateRef.current.effPps };
-      }
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      lastUserScrollRef.current = Date.now();
-      if (!pinch || e.touches.length !== 2) return;
-      e.preventDefault();
-      const rect = sc.getBoundingClientRect();
-      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
-      zoomToRef.current((pinch.pps * dist(e.touches)) / pinch.dist, midX);
-    };
-    const onTouchEnd = (e: TouchEvent) => {
-      if (e.touches.length < 2) pinch = null;
-    };
-    sc.addEventListener("wheel", onWheel, { passive: false });
-    sc.addEventListener("touchstart", onTouchStart, { passive: true });
-    sc.addEventListener("touchmove", onTouchMove, { passive: false });
-    sc.addEventListener("touchend", onTouchEnd);
-    sc.addEventListener("touchcancel", onTouchEnd);
-    return () => {
-      sc.removeEventListener("wheel", onWheel);
-      sc.removeEventListener("touchstart", onTouchStart);
-      sc.removeEventListener("touchmove", onTouchMove);
-      sc.removeEventListener("touchend", onTouchEnd);
-      sc.removeEventListener("touchcancel", onTouchEnd);
-    };
-  }, [open]);
+  // Zoom (0 = fit), the anchor-keeping zoomTo, wheel / pinch gestures and
+  // the visible width: ./useTimelineZoom. Re-attached when the strip
+  // mounts (`open`).
+  const { viewW, effPps, fitPps, contentW, canZoomIn, canZoomOut, zoomTo, lastUserScrollRef } =
+    useTimelineZoom(scrollRef, totalDur, open);
 
   // Click on the ruler → seek. Converts cut-timeline x into the
   // original time of whichever clip sits there.
@@ -463,16 +267,8 @@ export function TimelineEditor({
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const cut = Math.max(0, Math.min(totalDur, ((clientX - rect.left) / rect.width) * totalDur));
-    let acc = 0;
-    for (const s of segments) {
-      if (s.disabled) continue;
-      const d = s.end - s.start;
-      if (cut <= acc + d) {
-        onSeekOriginal(Math.min(s.end, s.start + (cut - acc)), s.id);
-        return;
-      }
-      acc += d;
-    }
+    const at = sourceAtCut(segments, cut);
+    if (at) onSeekOriginal(at.t, at.segId);
   };
 
   // Keep the playhead in view while it moves — unless the user just
