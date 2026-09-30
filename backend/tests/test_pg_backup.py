@@ -111,7 +111,11 @@ def test_export_restores_identically(two_dbs, tmp_path):
 def test_cli_export_and_psql_restore(two_dbs, tmp_path):
     """The documented restore path: the CLI writes the dump, plain psql
     loads it."""
-    import pgserver._commands as cmds
+    try:
+        import pgserver._commands as cmds
+        psql = Path(cmds.POSTGRES_BIN_PATH) / "psql"
+    except ImportError:  # an external server (CLEO_TEST_PG_URL)
+        psql = Path(shutil.which("psql") or "/nonexistent/psql")
     src, dst_url = two_dbs
     dump = tmp_path / "cli.sql.gz"
     r = subprocess.run([sys.executable, "-m", "backend.pg_backup", "export",
@@ -120,7 +124,6 @@ def test_cli_export_and_psql_restore(two_dbs, tmp_path):
                        env={**os.environ, "PYTHONPATH": str(REPO),
                             "DATABASE_URL": src.url})
     assert r.returncode == 0, r.stderr[-2000:]
-    psql = Path(cmds.POSTGRES_BIN_PATH) / "psql"
     if not psql.exists():
         pytest.skip("no psql binary")
     with gzip.open(dump, "rb") as f:

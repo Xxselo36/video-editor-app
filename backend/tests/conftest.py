@@ -17,7 +17,10 @@ DATABASE_URL pointed at a fresh database whose tables are emptied
 before every test. Tests marked sqlite_only (SQLite internals: WAL
 pragmas, raw rows, the /tmp fallback) are skipped there. The Postgres
 tests (test_pg_*.py) run in both modes, each on databases of their own
-(fixture pg_server; skipped without pgserver).
+(fixture pg_server; skipped without pgserver). CLEO_TEST_PG_URL (a
+server URL whose user may create databases, e.g. CI's Postgres service)
+replaces the embedded server: the suite and the pg_server databases are
+made there.
 
 Media: the local media backend by default (backend/media.py; files
 under the test work root). CLEO_TEST_MEDIA=r2 runs the whole suite with
@@ -137,24 +140,49 @@ class _PgServer:
         return self.server.get_uri(name)
 
 
-_PG: _PgServer | None = None
+class _ExternalPg:
+    """A Postgres server the run was given (CLEO_TEST_PG_URL, e.g. the CI
+    service container) in place of the embedded one: fresh() makes new
+    empty databases on it. Its user needs CREATEDB."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self._n = 0
+
+    def stop(self) -> None:
+        """Not ours to stop."""
+
+    def fresh(self, name: str | None = None) -> str:
+        import psycopg
+        from urllib.parse import urlsplit, urlunsplit
+        self._n += 1
+        name = name or f"t{os.getpid()}_{self._n}"
+        with psycopg.connect(self.url, autocommit=True) as c:
+            c.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+            c.execute(f'CREATE DATABASE "{name}"')
+        return urlunsplit(urlsplit(self.url)._replace(path=f"/{name}"))
 
 
-def pg_server_or_skip() -> _PgServer:
+_PG: _PgServer | _ExternalPg | None = None
+
+
+def pg_server_or_skip() -> _PgServer | _ExternalPg:
     global _PG
     if _PG is None:
+        external = os.environ.get("CLEO_TEST_PG_URL", "").strip()
         import warnings
         with warnings.catch_warnings():
             # platformdirs (via pgserver), in containers without a login
             # session.
             warnings.filterwarnings("ignore", "XDG_RUNTIME_DIR is not set")
             try:
-                import pgserver  # noqa: F401
+                if not external:
+                    import pgserver  # noqa: F401
                 import psycopg  # noqa: F401
                 import psycopg_pool  # noqa: F401
             except ImportError as e:
                 pytest.skip(f"Postgres tests need pgserver + psycopg: {e}")
-            _PG = _PgServer()
+            _PG = _ExternalPg(external) if external else _PgServer()
     return _PG
 
 

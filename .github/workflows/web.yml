@@ -1,0 +1,198 @@
+name: Web
+
+# Checks of the web app (web/) on every change to it (UX1, PLAN_TECH §3):
+#   checks  npm ci → typecheck → lint → vitest → i18n check
+#   e2e     next build → Playwright against the stub backend
+#           (backend/tests/stub_server.py), in parallel:
+#             desktop  Chromium 1440×900, anonymous beta
+#             pixel7   mobile emulation, anonymous beta
+#             auth     test auth (NEXT_PUBLIC_AUTH_TEST / CLEO_AUTH_TEST),
+#                      the @auth suites on desktop + pixel7
+# Nightly (and "Run workflow" with nightly ticked):
+#             webkit   the anonymous suites on WebKit (required for release
+#                      from UX18)
+#             r2       the R2 upload suite (@r2: moto as R2)
+#             visual   the screenshot suites (e2e/visual, anonymous + auth);
+#                      screenshots only, baselines come in UX18 — kept as
+#                      an artifact
+#
+# Locally: see web/playwright.config.ts (npm run test:e2e).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'backend/tests/stub_server.py'
+      - 'backend/tests/stub_media.py'
+      - 'docs/i18n-glossary.md'
+      - '.github/workflows/web.yml'
+  pull_request:
+    paths:
+      - 'web/**'
+      - 'backend/tests/stub_server.py'
+      - 'backend/tests/stub_media.py'
+      - 'docs/i18n-glossary.md'
+      - '.github/workflows/web.yml'
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      nightly:
+        description: Also run the nightly suites (webkit, R2 uploads, visual)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-${{ github.event_name }}-${{ github.ref }}
+  # A new push to a PR replaces its run; every run on main finishes.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+    working-directory: web
+
+env:
+  NODE_VERSION: '22'
+  # The stub runs the backend: same Python as its image (backend/Dockerfile).
+  PYTHON_VERSION: '3.13'
+  NEXT_TELEMETRY_DISABLED: '1'
+  # The build talks to the stub (e2e/support/env.ts: API).
+  NEXT_PUBLIC_BACKEND_URL: http://localhost:8501
+  # Generated test media (stub_media.py), cached between runs.
+  STUB_MEDIA_DIR: ${{ github.workspace }}/.stub-media
+
+jobs:
+  checks:
+    name: typecheck · lint · unit · i18n
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests (vitest)
+        run: npm test
+      - name: i18n check
+        run: npm run i18n:check
+
+  e2e:
+    name: e2e (${{ matrix.name }})
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: desktop
+            mode: anon
+            projects: --project=desktop
+          - name: pixel7
+            mode: anon
+            projects: --project=pixel7
+          - name: auth
+            mode: auth
+            projects: --project=desktop --project=pixel7
+    env:
+      E2E_MODE: ${{ matrix.mode }}
+      E2E_WEB: start
+      NEXT_PUBLIC_AUTH_TEST: ${{ matrix.mode == 'auth' && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/e2e-setup
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          browsers: chromium
+      - name: Build (next build)
+        run: npm run build
+      - name: Playwright
+        run: npx playwright test ${{ matrix.projects }}
+      - name: Keep the report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.name }}-${{ github.run_id }}
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  nightly:
+    name: nightly (${{ matrix.name }})
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.nightly)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: webkit
+            mode: anon
+            browsers: webkit
+            args: --project=webkit
+          - name: webkit-auth
+            mode: auth
+            browsers: webkit
+            args: --project=webkit
+          - name: r2
+            mode: r2
+            browsers: chromium
+            args: --project=desktop
+          - name: visual
+            mode: anon
+            browsers: chromium
+            args: e2e/visual --project=desktop --project=pixel7
+          - name: visual-auth
+            mode: auth
+            browsers: chromium
+            args: e2e/visual --project=desktop --project=pixel7
+    env:
+      E2E_MODE: ${{ matrix.mode }}
+      E2E_WEB: start
+      E2E_NIGHTLY: '1'
+      NEXT_PUBLIC_AUTH_TEST: ${{ matrix.mode == 'auth' && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/e2e-setup
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          browsers: ${{ matrix.browsers }}
+      - name: Build (next build)
+        run: npm run build
+      - name: Playwright
+        run: npx playwright test ${{ matrix.args }}
+      - name: Keep the screenshots
+        if: always() && startsWith(matrix.name, 'visual')
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ matrix.name }}-${{ github.run_id }}
+          path: web/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Keep the report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.name }}-${{ github.run_id }}
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
