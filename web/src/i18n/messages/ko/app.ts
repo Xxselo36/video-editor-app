@@ -1,0 +1,307 @@
+import type { AppKey } from "../en";
+
+export const koApp: Partial<Record<AppKey, string>> = {
+  // ── Header ──────────────────────────────────────────────────────────
+  "app.header.homeAria": "CleoCuts 홈",
+  "app.header.library": "라이브러리",
+  "app.header.beta": "베타",
+  "app.header.opening": "여는 중…",
+
+  // ── Browser notifications ───────────────────────────────────────────
+  "app.notify.readyTitle": "CleoCuts — 영상이 준비됐어요",
+
+  // ── Toasts / notices ────────────────────────────────────────────────
+  "app.notice.loadFailed": "지금은 프로젝트를 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
+  "app.notice.done": "이 영상은 완료됐어요 — 최근 항목과 라이브러리에서 확인할 수 있어요.",
+  "app.notice.processing": "이 영상은 아직 처리 중이에요. 카드에 진행 상황이 표시돼요.",
+  "app.notice.alreadyExporting": "이 영상은 이미 내보내는 중이에요. 진행 상황은 카드에서 볼 수 있어요.",
+  "app.notice.offline": "서버에 연결할 수 없어요. 인터넷 연결을 확인하고 다시 시도해 주세요.",
+
+  // ── Errors ──────────────────────────────────────────────────────────
+  "app.errors.expired":
+    "이 프로젝트는 서버에 더 이상 존재하지 않아요(만료 또는 서버 업데이트). 영상을 다시 업로드해 주세요.",
+  "app.errors.generic": "문제가 발생했어요. 다시 시도해 주세요.",
+  "app.errors.connection": "연결이 끊어졌어요. 인터넷 연결을 확인하고 다시 시도해 주세요.",
+  "app.errors.interrupted":
+    "업로드가 중단됐어요(페이지 새로고침 또는 앱 전환). 영상을 다시 업로드해 주세요.",
+  "app.errors.tooLarge": "파일이 너무 커요. 영상을 잘라내거나 더 작게 내보내 주세요.",
+  "app.errors.noAudio": "영상에서 사용할 수 있는 오디오를 찾지 못했어요.",
+  "app.errors.noSpeech": "이 영상에서 말소리를 찾지 못했어요. CleoCuts는 누군가 말하는 영상을 컷 편집하고 자막을 달아요. 목소리가 담긴 클립으로 다시 해 보세요.",
+  "app.errors.noSpeechRefunded": "이 영상에서 말소리를 찾지 못했어요. CleoCuts는 누군가 말하는 영상을 컷 편집하고 자막을 달아요. 목소리가 담긴 클립으로 다시 해 보세요. 이용 시간(분)은 돌려드렸어요.",
+  "app.errors.noAudioTrack": "이 영상에는 오디오 트랙이 없어서 편집하거나 자막을 달 내용이 없어요. 요금은 청구되지 않았어요.",
+  "app.errors.renderFailed":
+    "렌더링에 실패했어요. 편집 내용은 저장돼 있어요 — 프로젝트를 열고 다시 렌더링해 주세요.",
+  "app.errors.serverNoResponse": "서버가 응답하지 않았어요. 다시 시도해 주세요.",
+  "app.errors.serverBusy": "지금 서버가 혼잡해요. 몇 분 후에 다시 시도해 주세요.",
+  "app.errors.saveEditsFailed": "편집 내용을 저장하지 못했어요 — 연결을 확인하고 다시 시도해 주세요.",
+  "app.errors.title": "문제가 발생했어요",
+  "app.errors.tryAgain": "다시 시도",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "세션이 만료됐어요. 다시 로그인한 후 시도해 주세요.",
+  "app.errors.subscriptionRequired": "업로드하려면 요금제가 필요해요. 요금제 페이지에서 선택해 주세요.",
+  "app.errors.quotaExceeded":
+    "이번 기간에 남은 이용 시간이 이 영상에는 부족해요. 요금제를 업그레이드하거나 초기화될 때까지 기다려 주세요.",
+  "app.errors.unreadableVideo":
+    "이 영상 파일을 읽을 수 없어요. MP4 또는 MOV로 다시 내보낸 후 업로드해 주세요.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge": "이 파일은 {max}GB를 넘어요. 영상을 잘라내거나 더 작게 내보내 주세요.",
+  "app.errors.videoTooLong": "이 영상은 {max}분을 넘어요. 영상을 잘라내거나 여러 개로 나눠 주세요.",
+  "app.errors.tooManyJobs": "이미 처리 중인 영상이 최대 개수에 도달했어요. 하나가 완료될 때까지 기다린 후 다시 시도해 주세요.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "프로젝트를 열려면 로그인해 주세요.",
+  "app.auth.loadFailed":
+    "로그인 화면을 불러오지 못했어요. 연결을 확인하거나 콘텐츠 차단기에서 이 사이트를 허용한 후 다시 시도해 주세요.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "업로드하려면 요금제를 선택해 주세요",
+  "app.paywall.subscriptionBody":
+    "업로드하려면 이용 중인 요금제가 필요해요. 1분이면 선택할 수 있고, 언제든 해지할 수 있어요.",
+  "app.paywall.quotaTitle": "남은 이용 시간이 부족해요",
+  "app.paywall.quotaBody": "이번 기간에 {left}분 남았어요 — 이 영상에는 {needed}분이 필요해요.",
+  "app.paywall.quotaBodyUnknown": "이 영상은 이번 기간에 남은 이용 시간보다 길어요.",
+  "app.paywall.seePlans": "요금제 보기",
+  "app.paywall.upgrade": "요금제 업그레이드",
+  "app.paywall.close": "나중에",
+  "app.billing.minutesLeft": "이번 기간 {n}분 남음",
+  "app.billing.choosePlan": "업로드하려면 요금제를 선택하세요",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "계정",
+  "app.account.signedInAs": "{email} 계정으로 로그인됨",
+  "app.account.plan": "요금제",
+  "app.account.noPlan": "아직 요금제가 없어요",
+  "app.account.freeBeta": "오픈 베타 기간에는 CleoCuts를 무료로 쓸 수 있어요 — 요금제가 필요 없어요.",
+  "app.account.status.active": "이용 중 · {date}에 갱신",
+  "app.account.status.activeNoDate": "이용 중",
+  "app.account.status.trial": "무료 체험 · {date}에 첫 결제",
+  "app.account.status.cancelled": "{date}에 해지 예정",
+  "app.account.status.pastDue": "결제가 연체됐어요 — 결제 수단을 업데이트해 주세요.",
+  "app.account.status.paused": "일시 중지됨",
+  "app.account.status.expired": "만료됨",
+  "app.account.status.comp": "무료 제공",
+  "app.account.usage": "이번 기간 사용 시간",
+  "app.account.usageOf": "{limit}분 중 {used}분 사용",
+  "app.account.resetsOn": "{date}에 초기화돼요",
+  "app.account.manage": "구독 관리",
+  "app.account.manageHint": "청구서, 결제 수단, 해지는 Lemon Squeezy 고객 포털에서 관리해요.",
+  "app.account.changePlan": "요금제 변경",
+  "app.account.choosePlan": "요금제 선택",
+  "app.account.portalFailed": "결제 포털을 열 수 없어요. 잠시 후 다시 시도해 주세요.",
+  "app.account.loadFailed": "지금은 계정 정보를 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
+  "app.account.testMode": "테스트 모드",
+  "app.account.successPending": "감사해요! 결제가 완료됐어요 — 요금제를 활성화하는 중…",
+  "app.account.successDone": "{plan} 요금제가 활성화됐어요. 즐겁게 편집하세요!",
+  "app.account.successSlow":
+    "평소보다 오래 걸리고 있어요. 몇 분 안에 요금제가 여기에 표시될 거예요 — 페이지를 새로고침해서 확인해 보세요.",
+
+  // ── Library fallbacks ───────────────────────────────────────────────
+  "app.library.untitled": "제목 없음",
+
+  // ── Workflow presets ────────────────────────────────────────────────
+  "app.preset.tiktok.label": "TikTok / Reels",
+  "app.preset.tiktok.tagline": "세로형 짧은 영상",
+  "app.preset.tiktok.desc": "음성 트리거, Clipper 자막, 자동 세로 크롭",
+  "app.preset.tiktok.bullet1": "음성 트리거 켜짐: “Cleo cut”이라고 말하면 다시 찍기",
+  "app.preset.tiktok.bullet2": "굵은 Clipper 스타일 자막",
+  "app.preset.tiktok.bullet3": "얼굴 추적으로 자동 세로 9:16",
+  "app.preset.podcast.label": "팟캐스트 롱폼",
+  "app.preset.podcast.tagline": "전체 에피소드 + 클립",
+  "app.preset.podcast.desc": "AI 정리, 하이라이트 감지, 멀티 포맷 내보내기",
+  "app.preset.podcast.bullet1": "스크립트를 AI가 정리해요",
+  "app.preset.podcast.bullet2": "하이라이트 클립 3개를 자동으로 선택해요",
+  "app.preset.podcast.bullet3": "전체 에피소드 + 9:16 클립을 내보내요",
+  "app.preset.vlog.label": "블로그 정리",
+  "app.preset.vlog.tagline": "1인 토킹헤드",
+  "app.preset.vlog.desc": "필러 단어 제거, 은은한 자막, 화면비 유지",
+  "app.preset.vlog.bullet1": "“음”, “어” 같은 말과 긴 침묵을 제거해요",
+  "app.preset.vlog.bullet2": "시선을 뺏지 않는 은은한 자막",
+  "app.preset.vlog.bullet3": "원본 화면비를 그대로 유지해요",
+  "app.preset.captions.label": "자막만",
+  "app.preset.captions.tagline": "자막만 추가",
+  "app.preset.captions.desc": "영상에 자막만 입혀요 — 컷 없음, 정리 없음",
+  "app.preset.captions.bullet1": "선택한 스타일로 자막을 입혀요",
+  "app.preset.captions.bullet2": "컷 없음, 정리 없음",
+  "app.preset.captions.bullet3": "가장 빠름 — 자막만",
+  "app.preset.custom.label": "커스텀",
+  "app.preset.custom.tagline": "모든 걸 직접 설정",
+  "app.preset.custom.desc": "모든 설정 — 하나하나 직접 선택",
+  "app.preset.custom.bullet1": "모든 설정을 직접 볼 수 있어요",
+  "app.preset.custom.bullet2": "자막, 컷, 포맷을 직접 선택해요",
+  "app.preset.custom.bullet3": "원하는 게 확실할 때",
+
+  // ── Caption styles ──────────────────────────────────────────────────
+  "app.captions.clean": "Clean",
+  "app.captions.classic": "Classic",
+  "app.captions.clipper": "Clipper",
+  "app.captions.highlight": "Highlight",
+  "app.captions.flash": "Flash",
+  "app.captions.punch": "Punch",
+  "app.captions.elegant": "Elegant",
+  "app.captions.subtle": "Subtle",
+  "app.captions.none": "자막 없음",
+
+  // ── Cut styles ──────────────────────────────────────────────────────
+  "app.cutStyle.tight.label": "타이트",
+  "app.cutStyle.tight.desc": "적극적으로",
+  "app.cutStyle.balanced.label": "균형",
+  "app.cutStyle.balanced.desc": "기본값",
+  "app.cutStyle.smooth.label": "부드럽게",
+  "app.cutStyle.smooth.desc": "멈춤 유지",
+
+  // ── Export formats ──────────────────────────────────────────────────
+  "app.format.9x16.desc": "TikTok / Reels / Shorts",
+  "app.format.1x1.desc": "Instagram 피드",
+  "app.format.16x9.desc": "YouTube / 데스크톱",
+
+  // ── Dashboard ───────────────────────────────────────────────────────
+  "app.dashboard.workspace": "내 작업 공간",
+  "app.dashboard.inProgressCountOne": "{count}개 영상 처리 중",
+  "app.dashboard.inProgressCountOther": "{count}개 영상 처리 중",
+  "app.dashboard.readyCountOne": "{count}개 영상 검토 준비 완료",
+  "app.dashboard.readyCountOther": "{count}개 영상 검토 준비 완료",
+  "app.dashboard.failedCountOne": "{count}개 영상 실패",
+  "app.dashboard.failedCountOther": "{count}개 영상 실패",
+  "app.dashboard.readyWhenYouAre": "준비되면 시작해요",
+  "app.dashboard.newVideo": "새 영상",
+  "app.dashboard.inProgress": "처리 중",
+  "app.dashboard.recentProjects": "최근 프로젝트",
+  "app.dashboard.viewAll": "전체 보기",
+  "app.dashboard.startFirst": "첫 영상을 시작해 보세요",
+  "app.dashboard.startFirstSub": "워크플로우를 선택하면 CleoCuts가 자막, 포맷, 정리를 처리해요",
+  "app.dashboard.voiceTeaser": "녹화하면서 “Cleo”라고 말해 보세요 — 편집 시간을 몇 시간 아낄 수 있어요",
+
+  // ── Workflow picker ─────────────────────────────────────────────────
+  "app.picker.backToDashboard": "대시보드로 돌아가기",
+  "app.picker.freeDuringBeta": "베타 기간 무료",
+  "app.picker.title": "어디에 올릴 영상인가요?",
+  "app.picker.subtitle":
+    "워크플로우를 선택하면 CleoCuts가 해당 플랫폼에 맞게 자막, 포맷, 정리를 미리 설정해요.",
+  "app.picker.chipCaptions": "{style} 자막",
+  "app.picker.chipVoice": "\"Cleo cut\" 켜짐",
+  "app.picker.customTitle": "커스텀 설정",
+  "app.picker.customSub": "자막, 컷, 포맷을 하나하나 직접 선택해요",
+
+  // ── Upload (choose a file) ──────────────────────────────────────────
+  "app.upload.back": "뒤로",
+  "app.upload.title": "영상 선택",
+  "app.upload.hint":
+    "휴대폰이나 컴퓨터에 있는 MP4 또는 MOV 파일. 업로드가 끝날 때까지 이 페이지를 열어 두세요.",
+  "app.upload.tapToChoose": "탭해서 선택",
+  "app.upload.orDrag": "또는 파일을 끌어다 놓기",
+  "app.upload.privacyLink": "영상 처리 방식 안내",
+  "app.upload.resuming":
+    "중단된 곳부터 업로드를 이어서 하고 있어요 — 이 페이지를 열어 두세요.",
+
+  // ── Configure (custom settings) ─────────────────────────────────────
+  "app.configure.back": "뒤로",
+  "app.configure.fileInfo": "{name} · {size}MB",
+  "app.configure.captionStyle": "자막 스타일",
+  "app.configure.captionPreviewAlt": "{style} 자막 미리보기",
+  "app.configure.cutStyle": "컷 스타일",
+  "app.configure.cleanup": "정리",
+  "app.configure.voiceTriggers": "\"Cleo cut\" / \"Cleo go\" 감지하기",
+  "app.configure.voiceTriggersDesc": "실패한 촬영분을 자동으로 제거해요",
+  "app.configure.removeFillers": "필러 단어 제거",
+  "app.configure.removeFillersDesc": "“음”, “어”, “그” 같은 말을 잘라내요…",
+  "app.configure.smartReframe": "스마트 리프레임",
+  "app.configure.smartcam": "SmartCam 얼굴 추적",
+  "app.configure.smartcamDesc": "세로/가로 출력에 맞춰 자동으로 프레임을 맞춰요",
+  "app.configure.portrait": "세로",
+  "app.configure.landscape": "가로",
+  "app.configure.portraitDesc": "세로 9:16",
+  "app.configure.landscapeDesc": "가로 16:9",
+  "app.configure.extraFormats": "추가 출력 포맷",
+  "app.configure.extraFormatsHint":
+    "기본 출력은 SmartCam 포맷(또는 원본 화면비)이에요. 다른 플랫폼용으로 레터박스가 적용된 추가 버전을 선택할 수 있어요.",
+  "app.configure.process": "영상 처리하기",
+
+  // ── Done screen ─────────────────────────────────────────────────────
+  "app.done.readyToPost": "게시할 준비 완료",
+  "app.done.captionSuggestion": "캡션 추천",
+  "app.done.copy": "복사",
+  "app.done.downloadPrimary": "기본 버전 다운로드",
+  "app.done.downloadFormat": "{format} 다운로드",
+  "app.done.mainEdit": "메인 편집본",
+  "app.done.bonusClips": "보너스 클립",
+  "app.done.aiPicked": "AI 선택",
+  "app.done.processAnother": "다른 영상 처리하기",
+
+  // ── Dashboard job cards ─────────────────────────────────────────────
+  "app.card.noPreview": "미리보기 없음",
+  "app.card.uploading.title": "업로드 중",
+  "app.card.uploading.sub": "업로드 중이에요 — 이 페이지를 열어 두고 휴대폰을 잠그지 마세요.",
+  "app.card.analyzing.title": "분석 중",
+  "app.card.analyzing.sub": "받아쓰기와 침묵·필러 단어 컷 작업을 하고 있어요.",
+  "app.card.reviewing.title": "편집 준비 완료",
+  "app.card.reviewing.sub": "탭해서 편집기를 열고 컷을 다듬어 보세요.",
+  "app.card.rendering.title": "렌더링 중",
+  "app.card.rendering.sub": "최종 영상을 합치고 있어요.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "대기 중 (#{n})",
+  "app.card.queued.titleNoPos": "대기 중",
+  "app.card.queued.sub": "지금 영상이 많아요 — 순서가 되면 자동으로 시작돼요. 이 페이지를 나가도 괜찮아요.",
+  "app.card.open": "열기",
+  "app.card.remove": "삭제",
+  "app.card.renderFailedNote": "렌더링에 실패했어요 — 편집 내용은 저장돼 있어요. 열어서 다시 렌더링해 주세요.",
+
+  // ── Captions tab ────────────────────────────────────────────────────
+  "app.captions.styleHeading": "자막 스타일 · {style}",
+  "app.captions.appliedToOutput": "결과물에 적용됨",
+  "app.captions.disabled": "이 렌더링에서는 자막이 꺼져 있어요.",
+
+  // ── Voice test (dialog) ─────────────────────────────────────────────
+  "app.voice.title": "목소리 테스트",
+  "app.voice.subtitle": "명령어를 말해 보세요 — Cleo가 알아듣는지 확인해요.",
+  "app.voice.close": "닫기",
+  "app.voice.heardYou": "들었어요!",
+  "app.voice.listening": "듣고 있어요…",
+  "app.voice.heardPrefix": "들은 말: ",
+  "app.voice.permissionHint": "마이크를 사용해요. 음성을 텍스트로 바꾸는 건 브라우저가 해요. 이때 Chrome은 Google로, Safari는 Apple로 음성을 보내요. CleoCuts로는 아무것도 보내지 않아요.",
+  "app.voice.requesting": "요청 중…",
+  "app.voice.start": "시작",
+  "app.voice.denied": "권한이 거부됐어요. 브라우저 설정에서 허용하고 새로고침해 주세요.",
+  "app.voice.unsupported": "이 브라우저에서는 지원되지 않아요. Safari나 Chrome을 사용해 보세요.",
+  "app.voice.done": "완료",
+  "app.voice.cmd.start": "촬영 시작",
+  "app.voice.cmd.cut": "다시 찍기, 현재 촬영분 버리기",
+  "app.voice.cmd.keep": "촬영분 확정, 다음 장면으로",
+  "app.voice.cmd.finish": "영상 종료, 이후 전체 잘라내기",
+  "app.voice.cmd.stop": "잘못된 문장 한 개 건너뛰기 ('go'와 함께 사용)",
+  "app.voice.cmd.go": "'stop' 이후 다시 시작",
+  "app.crash.saving": "최근 변경 사항을 저장하고 있어요…",
+  "app.crash.saved": "최근 변경 사항이 저장됐어요.",
+  "app.crash.unsaved": "최근 변경 사항이 저장되지 않았을 수 있어요.",
+  "app.crash.body": "페이지를 새로고침하면 중단한 곳부터 이어서 할 수 있어요.",
+  "app.crash.reload": "페이지 새로고침",
+
+  // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
+  "app.errors.noVideoTrack": "오디오 파일입니다. CleoCuts에는 소리가 있는 동영상이 필요해요. 동영상 파일을 선택해 주세요. 요금은 청구되지 않았어요.",
+  "app.errors.videoTooShort": "이 동영상은 {min}초보다 짧아서 편집하기에 너무 짧아요. 요금은 청구되지 않았어요.",
+  "app.errors.processingInterrupted": "처리가 중단되었어요. 동영상을 다시 업로드해 주세요.",
+  "app.errors.mediaUnavailable": "원본 동영상을 더 이상 사용할 수 없어서 이 프로젝트는 다시 편집할 수 없어요.",
+  "app.errors.tooManyRenders": "진행 중인 내보내기가 너무 많아요. 하나가 끝날 때까지 기다려 주세요.",
+  "app.errors.renderLimit": "이 동영상은 오늘의 내보내기 한도에 도달했어요. 내일 다시 시도해 주세요.",
+  "app.errors.staleRev": "이 프로젝트가 다른 탭에서 변경되었어요. 새로고침하여 최신 버전을 확인하세요.",
+  "app.errors.docNotReady": "이 프로젝트는 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.",
+  "app.errors.refunded": "사용한 분을 돌려드렸어요.",
+  "app.errors.tryAnotherVideo": "다른 동영상 시도하기",
+  "app.warnings.scriptUnsupported": "이 언어의 문자에는 아직 자막을 사용할 수 없어요.",
+  "app.warnings.smartcamFailed": "이 동영상에서는 화자 추적이 되지 않아 가운데를 기준으로 잘랐어요.",
+  "app.audio.silent": "소리가 없는 것 같아요. 마이크가 켜져 있고 음소거되지 않았는지 확인하세요.",
+  "app.audio.quiet": "소리가 매우 작아요. 다음에는 마이크에 더 가까이서 말해 주세요.",
+  "app.audio.clipping": "최고점에서 소리가 찢어져요. 녹음이 너무 커서 왜곡이 생길 수 있어요.",
+  "app.stage.queued": "빈자리를 기다리는 중",
+  "app.stage.analyze.normalize": "동영상 준비 중",
+  "app.stage.analyze.smartcam": "화자 추적 중",
+  "app.stage.analyze.transcribe": "받아쓰는 중",
+  "app.stage.analyze.cleanup": "스크립트 다듬는 중",
+  "app.stage.analyze.cuts": "컷 찾는 중",
+  "app.stage.analyze.captions": "자막 준비 중",
+  "app.stage.analyze.done": "검토 준비 완료",
+  "app.stage.render.prepare": "내보내기 준비 중",
+  "app.stage.render.captions": "자막 추가 중 ({i}/{n})",
+  "app.stage.render.encode": "내보내는 중",
+  "app.stage.render.hooks": "하이라이트 자르는 중",
+  "app.stage.render.finish": "마무리 중",
+};

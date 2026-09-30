@@ -1,0 +1,307 @@
+import type { AppKey } from "../en";
+
+export const jaApp: Partial<Record<AppKey, string>> = {
+  // ── Header ──────────────────────────────────────────────────────────
+  "app.header.homeAria": "CleoCuts ホーム",
+  "app.header.library": "ライブラリ",
+  "app.header.beta": "ベータ",
+  "app.header.opening": "開いています…",
+
+  // ── Browser notifications ───────────────────────────────────────────
+  "app.notify.readyTitle": "CleoCuts — 動画の準備ができました",
+
+  // ── Toasts / notices ────────────────────────────────────────────────
+  "app.notice.loadFailed": "プロジェクトを読み込めませんでした。少し時間をおいて、もう一度お試しください。",
+  "app.notice.done": "この動画は完成しています — 「最近」とライブラリから見つけられます。",
+  "app.notice.processing": "この動画はまだ処理中です。カードに進行状況が表示されます。",
+  "app.notice.alreadyExporting": "この動画はすでに書き出し中です。進行状況はカードに表示されます。",
+  "app.notice.offline": "サーバーに接続できません。インターネット接続を確認して、もう一度お試しください。",
+
+  // ── Errors ──────────────────────────────────────────────────────────
+  "app.errors.expired":
+    "このプロジェクトはサーバー上に存在しません(期限切れ、またはサーバー更新の可能性があります)。動画を再度アップロードしてください。",
+  "app.errors.generic": "問題が発生しました。もう一度お試しください。",
+  "app.errors.connection": "接続が切れました。インターネット接続を確認して、もう一度お試しください。",
+  "app.errors.interrupted":
+    "アップロードが中断されました(ページの再読み込みやアプリの切り替えが原因の可能性があります)。動画を再度アップロードしてください。",
+  "app.errors.tooLarge": "ファイルが大きすぎます。動画を短くするか、サイズを小さくして書き出してください。",
+  "app.errors.noAudio": "動画内に使用できる音声が見つかりませんでした。",
+  "app.errors.noSpeech": "この動画から話し声が見つかりませんでした。CleoCuts は人が話している動画をカットして字幕を付けます。声の入ったクリップでお試しください。",
+  "app.errors.noSpeechRefunded": "この動画から話し声が見つかりませんでした。CleoCuts は人が話している動画をカットして字幕を付けます。声の入ったクリップでお試しください。利用時間（分）は返還しました。",
+  "app.errors.noAudioTrack": "この動画には音声トラックがないため、カットや字幕付けができません。料金は発生していません。",
+  "app.errors.renderFailed":
+    "レンダリングに失敗しました。編集内容は保存されています — プロジェクトを開いて再度レンダリングしてください。",
+  "app.errors.serverNoResponse": "サーバーからの応答がありません。もう一度お試しください。",
+  "app.errors.serverBusy": "現在サーバーが混み合っています。数分後にもう一度お試しください。",
+  "app.errors.saveEditsFailed": "編集内容を保存できませんでした — 接続を確認して、もう一度お試しください。",
+  "app.errors.title": "問題が発生しました",
+  "app.errors.tryAgain": "再試行",
+
+  "app.errors.signInRequired": "セッションが終了しました。もう一度サインインしてから、再度お試しください。",
+  "app.errors.subscriptionRequired": "アップロードにはプランが必要です。料金ページでプランをお選びください。",
+  "app.errors.quotaExceeded":
+    "今期間の残り時間では、この動画を処理できません。プランをアップグレードするか、リセットまでお待ちください。",
+  "app.errors.unreadableVideo":
+    "この動画ファイルを読み込めませんでした。MP4またはMOV形式で書き出し直してから、アップロードしてください。",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge": "このファイルは{max} GBを超えています。動画を短くするか、サイズを小さくして書き出してください。",
+  "app.errors.videoTooLong": "この動画は{max}分を超えています。短くするか、いくつかに分割してください。",
+  "app.errors.tooManyJobs": "処理中の動画がすでに上限に達しています。いずれかの動画が完成するまで待ってから、もう一度お試しください。",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "プロジェクトを開くにはサインインしてください。",
+  "app.auth.loadFailed":
+    "サインイン画面を読み込めませんでした。接続を確認して(またはコンテンツブロッカーでこのサイトを許可して)、もう一度お試しください。",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "プランを選んでアップロード",
+  "app.paywall.subscriptionBody":
+    "アップロードには有効なプランが必要です。選ぶのは1分ほどで、いつでも解約できます。",
+  "app.paywall.quotaTitle": "残り時間が足りません",
+  "app.paywall.quotaBody": "今期間の残りは{left}分ですが、この動画には{needed}分必要です。",
+  "app.paywall.quotaBodyUnknown": "この動画は、今期間の残り時間より長いです。",
+  "app.paywall.seePlans": "プランを見る",
+  "app.paywall.upgrade": "プランをアップグレード",
+  "app.paywall.close": "あとで",
+  "app.billing.minutesLeft": "今期間の残り {n}分",
+  "app.billing.choosePlan": "プランを選んでアップロード",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "アカウント",
+  "app.account.signedInAs": "{email} でサインイン中",
+  "app.account.plan": "プラン",
+  "app.account.noPlan": "プラン未加入",
+  "app.account.freeBeta": "CleoCutsはオープンベータ期間中は無料です — プランは必要ありません。",
+  "app.account.status.active": "有効 · {date}に更新",
+  "app.account.status.activeNoDate": "有効",
+  "app.account.status.trial": "トライアル中 · {date}に初回のお支払い",
+  "app.account.status.cancelled": "{date}に解約予定",
+  "app.account.status.pastDue": "お支払いが未完了です — お支払い方法を更新してください。",
+  "app.account.status.paused": "一時停止中",
+  "app.account.status.expired": "期限切れ",
+  "app.account.status.comp": "無償提供",
+  "app.account.usage": "今期間の利用時間",
+  "app.account.usageOf": "{limit}分中 {used}分を使用",
+  "app.account.resetsOn": "{date}にリセット",
+  "app.account.manage": "サブスクリプションを管理",
+  "app.account.manageHint": "請求書、お支払い方法、解約はLemon Squeezyのカスタマーポータルで管理できます。",
+  "app.account.changePlan": "プランを変更",
+  "app.account.choosePlan": "プランを選ぶ",
+  "app.account.portalFailed": "請求ポータルを開けませんでした。少し時間をおいて、もう一度お試しください。",
+  "app.account.loadFailed": "アカウント情報を読み込めませんでした。少し時間をおいて、もう一度お試しください。",
+  "app.account.testMode": "テストモード",
+  "app.account.successPending": "ありがとうございます!お支払いが完了しました — プランを有効化しています…",
+  "app.account.successDone": "{plan}プランが有効になりました。編集を楽しんでください!",
+  "app.account.successSlow":
+    "通常より時間がかかっています。数分以内にここにプランが表示されます — ページを再読み込みして確認してください。",
+
+  // ── Library fallbacks ───────────────────────────────────────────────
+  "app.library.untitled": "無題",
+
+  // ── Workflow presets ────────────────────────────────────────────────
+  "app.preset.tiktok.label": "TikTok / Reels",
+  "app.preset.tiktok.tagline": "縦型ショート動画",
+  "app.preset.tiktok.desc": "音声トリガー、Clipper字幕、自動縦型クロップ",
+  "app.preset.tiktok.bullet1": "音声トリガーON: 「Cleo cut」でやり直し",
+  "app.preset.tiktok.bullet2": "太めのClipper風字幕",
+  "app.preset.tiktok.bullet3": "顔トラッキングで自動的に縦型9:16",
+  "app.preset.podcast.label": "ポッドキャスト(ロング形式)",
+  "app.preset.podcast.tagline": "本編 + クリップ",
+  "app.preset.podcast.desc": "AIクリーンアップ、フック検出、複数フォーマット書き出し",
+  "app.preset.podcast.bullet1": "文字起こしをAIでクリーンアップ",
+  "app.preset.podcast.bullet2": "フッククリップを3本自動選出",
+  "app.preset.podcast.bullet3": "本編 + 9:16クリップを書き出し",
+  "app.preset.vlog.label": "Vlogクリーンアップ",
+  "app.preset.vlog.tagline": "一人語りのトーキングヘッド",
+  "app.preset.vlog.desc": "フィラーワードを除去、控えめな字幕、アスペクト比を維持",
+  "app.preset.vlog.bullet1": "「えーと」「あの…」、長い無音を除去",
+  "app.preset.vlog.bullet2": "気にならない控えめな字幕",
+  "app.preset.vlog.bullet3": "元のアスペクト比を維持",
+  "app.preset.captions.label": "字幕だけ",
+  "app.preset.captions.tagline": "字幕だけを追加",
+  "app.preset.captions.desc": "動画に字幕を焼き込むだけ — カットもクリーンアップもなし",
+  "app.preset.captions.bullet1": "選んだスタイルで字幕を焼き込み",
+  "app.preset.captions.bullet2": "カットもクリーンアップもなし",
+  "app.preset.captions.bullet3": "最速 — 字幕だけ",
+  "app.preset.custom.label": "カスタム",
+  "app.preset.custom.tagline": "すべて自分で設定",
+  "app.preset.custom.desc": "全設定 — すべてのつまみを自分で調整",
+  "app.preset.custom.bullet1": "すべての設定にアクセス可能",
+  "app.preset.custom.bullet2": "字幕、カット、フォーマットを自分で選択",
+  "app.preset.custom.bullet3": "やりたいことが決まっている人向け",
+
+  // ── Caption styles ──────────────────────────────────────────────────
+  "app.captions.clean": "Clean",
+  "app.captions.classic": "Classic",
+  "app.captions.clipper": "Clipper",
+  "app.captions.highlight": "Highlight",
+  "app.captions.flash": "Flash",
+  "app.captions.punch": "Punch",
+  "app.captions.elegant": "Elegant",
+  "app.captions.subtle": "Subtle",
+  "app.captions.none": "字幕なし",
+
+  // ── Cut styles ──────────────────────────────────────────────────────
+  "app.cutStyle.tight.label": "タイト",
+  "app.cutStyle.tight.desc": "積極的にカット",
+  "app.cutStyle.balanced.label": "バランス",
+  "app.cutStyle.balanced.desc": "デフォルト",
+  "app.cutStyle.smooth.label": "スムーズ",
+  "app.cutStyle.smooth.desc": "間を残す",
+
+  // ── Export formats ──────────────────────────────────────────────────
+  "app.format.9x16.desc": "TikTok / Reels / Shorts",
+  "app.format.1x1.desc": "Instagramフィード",
+  "app.format.16x9.desc": "YouTube / デスクトップ",
+
+  // ── Dashboard ───────────────────────────────────────────────────────
+  "app.dashboard.workspace": "あなたのワークスペース",
+  "app.dashboard.inProgressCountOne": "{count} 件の動画が処理中",
+  "app.dashboard.inProgressCountOther": "{count} 件の動画が処理中",
+  "app.dashboard.readyCountOne": "{count} 件の動画を確認できます",
+  "app.dashboard.readyCountOther": "{count} 件の動画を確認できます",
+  "app.dashboard.failedCountOne": "{count} 件の動画でエラー",
+  "app.dashboard.failedCountOther": "{count} 件の動画でエラー",
+  "app.dashboard.readyWhenYouAre": "準備ができたらどうぞ",
+  "app.dashboard.newVideo": "新しい動画",
+  "app.dashboard.inProgress": "処理中",
+  "app.dashboard.recentProjects": "最近のプロジェクト",
+  "app.dashboard.viewAll": "すべて見る",
+  "app.dashboard.startFirst": "最初の動画を始めましょう",
+  "app.dashboard.startFirstSub": "ワークフローを選ぶだけ — 字幕、フォーマット、クリーンアップはCleoCutsにお任せ",
+  "app.dashboard.voiceTeaser": "録画中に「Cleo」と言うだけ — 編集の手間を大幅に削減",
+
+  // ── Workflow picker ─────────────────────────────────────────────────
+  "app.picker.backToDashboard": "ダッシュボードに戻る",
+  "app.picker.freeDuringBeta": "ベータ期間中は無料",
+  "app.picker.title": "何を投稿しますか?",
+  "app.picker.subtitle":
+    "ワークフローを選んでください — プラットフォームに合わせて字幕、フォーマット、クリーンアップをCleoCutsが事前設定します。",
+  "app.picker.chipCaptions": "{style}字幕",
+  "app.picker.chipVoice": "「Cleo cut」ON",
+  "app.picker.customTitle": "カスタム設定",
+  "app.picker.customSub": "字幕、カット、フォーマットをすべて自分で選択",
+
+  // ── Upload (choose a file) ──────────────────────────────────────────
+  "app.upload.back": "戻る",
+  "app.upload.title": "動画を選択",
+  "app.upload.hint":
+    "スマホやパソコンからMP4またはMOVを選んでください。アップロードが完了するまでこのページを開いたままにしてください。",
+  "app.upload.tapToChoose": "タップして選択",
+  "app.upload.orDrag": "またはドラッグして追加",
+  "app.upload.privacyLink": "動画の取り扱いについて",
+  "app.upload.resuming":
+    "中断したところからアップロードを再開しています — このページを開いたままにしてください。",
+
+  // ── Configure (custom settings) ─────────────────────────────────────
+  "app.configure.back": "戻る",
+  "app.configure.fileInfo": "{name} · {size} MB",
+  "app.configure.captionStyle": "字幕スタイル",
+  "app.configure.captionPreviewAlt": "{style}字幕プレビュー",
+  "app.configure.cutStyle": "カットスタイル",
+  "app.configure.cleanup": "クリーンアップ",
+  "app.configure.voiceTriggers": "「Cleo cut」/「Cleo go」を検知",
+  "app.configure.voiceTriggersDesc": "失敗したテイクを自動的に除去",
+  "app.configure.removeFillers": "フィラーワードを除去",
+  "app.configure.removeFillersDesc": "「えーと」「あの…」などをカット…",
+  "app.configure.smartReframe": "スマートリフレーム",
+  "app.configure.smartcam": "SmartCam 顔トラッキング",
+  "app.configure.smartcamDesc": "縦型/横型の出力に合わせて自動リフレーム",
+  "app.configure.portrait": "縦型",
+  "app.configure.landscape": "横型",
+  "app.configure.portraitDesc": "縦型 9:16",
+  "app.configure.landscapeDesc": "横型 16:9",
+  "app.configure.extraFormats": "追加の出力フォーマット",
+  "app.configure.extraFormatsHint":
+    "メインの書き出しはSmartCamのフォーマット(または元のアスペクト比)になります。他のプラットフォーム用にレターボックス付きの追加バージョンを選べます。",
+  "app.configure.process": "動画を処理",
+
+  // ── Done screen ─────────────────────────────────────────────────────
+  "app.done.readyToPost": "投稿準備完了",
+  "app.done.captionSuggestion": "キャプション案",
+  "app.done.copy": "コピー",
+  "app.done.downloadPrimary": "メイン動画をダウンロード",
+  "app.done.downloadFormat": "{format} をダウンロード",
+  "app.done.mainEdit": "メイン編集",
+  "app.done.bonusClips": "ボーナスクリップ",
+  "app.done.aiPicked": "AIが選出",
+  "app.done.processAnother": "別の動画を処理",
+
+  // ── Dashboard job cards ─────────────────────────────────────────────
+  "app.card.noPreview": "プレビューなし",
+  "app.card.uploading.title": "アップロード中",
+  "app.card.uploading.sub": "アップロード中です — このページを開いたままにし、スマホをロックしないでください。",
+  "app.card.analyzing.title": "解析中",
+  "app.card.analyzing.sub": "文字起こしをしながら、無音とフィラーワードをカットしています。",
+  "app.card.reviewing.title": "編集準備完了",
+  "app.card.reviewing.sub": "タップしてエディタを開き、カットを調整しましょう。",
+  "app.card.rendering.title": "レンダリング中",
+  "app.card.rendering.sub": "最終的な動画をまとめています。",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "順番待ち(#{n})",
+  "app.card.queued.titleNoPos": "順番待ち",
+  "app.card.queued.sub": "現在たくさんの動画が処理待ちです — 順番が来たら自動的に始まります。このページを離れても大丈夫です。",
+  "app.card.open": "開く",
+  "app.card.remove": "削除",
+  "app.card.renderFailedNote": "レンダリングに失敗しました — 編集内容は保存されています。開いて再度レンダリングしてください。",
+
+  // ── Captions tab ────────────────────────────────────────────────────
+  "app.captions.styleHeading": "字幕スタイル · {style}",
+  "app.captions.appliedToOutput": "出力に適用済み",
+  "app.captions.disabled": "この書き出しでは字幕は無効です。",
+
+  // ── Voice test (dialog) ─────────────────────────────────────────────
+  "app.voice.title": "声をテスト",
+  "app.voice.subtitle": "コマンドを話して、Cleoが聞き取れるか確認しましょう。",
+  "app.voice.close": "閉じる",
+  "app.voice.heardYou": "聞き取れました!",
+  "app.voice.listening": "聞き取り中…",
+  "app.voice.heardPrefix": "認識: ",
+  "app.voice.permissionHint": "マイクを使用します。音声のテキスト化はブラウザが行い、Chrome は Google に、Safari は Apple に音声を送信します。CleoCuts には何も送信されません。",
+  "app.voice.requesting": "リクエスト中…",
+  "app.voice.start": "開始",
+  "app.voice.denied": "権限が拒否されました。ブラウザの設定で許可し、再読み込みしてください。",
+  "app.voice.unsupported": "このブラウザには対応していません。SafariまたはChromeをお試しください。",
+  "app.voice.done": "完了",
+  "app.voice.cmd.start": "テイクを開始",
+  "app.voice.cmd.cut": "やり直し、現在のテイクを破棄",
+  "app.voice.cmd.keep": "テイクを確定、次のシーンへ",
+  "app.voice.cmd.finish": "動画を終了、これ以降をすべてカット",
+  "app.voice.cmd.stop": "失敗した一文をスキップ(「go」とセットで使用)",
+  "app.voice.cmd.go": "「stop」の後に再開",
+  "app.crash.saving": "最新の変更を保存しています…",
+  "app.crash.saved": "最新の変更は保存されました。",
+  "app.crash.unsaved": "最新の変更が保存されていない可能性があります。",
+  "app.crash.body": "ページを再読み込みすると、中断したところから続けられます。",
+  "app.crash.reload": "ページを再読み込み",
+
+  // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
+  "app.errors.noVideoTrack": "これは音声ファイルです。CleoCuts には音声付きの動画が必要です。動画ファイルを選んでください。料金は発生していません。",
+  "app.errors.videoTooShort": "この動画は {min} 秒未満のため、カットするには短すぎます。料金は発生していません。",
+  "app.errors.processingInterrupted": "処理が中断されました。動画をもう一度アップロードしてください。",
+  "app.errors.mediaUnavailable": "元の動画は利用できなくなったため、このプロジェクトは再編集できません。",
+  "app.errors.tooManyRenders": "書き出しが多すぎます。いずれかが終わるまでお待ちください。",
+  "app.errors.renderLimit": "この動画は本日の書き出し上限に達しました。明日もう一度お試しください。",
+  "app.errors.staleRev": "このプロジェクトは別のタブで変更されました。再読み込みして最新の状態を表示してください。",
+  "app.errors.docNotReady": "このプロジェクトはまだ準備ができていません。少し待ってからもう一度お試しください。",
+  "app.errors.refunded": "利用時間（分）は払い戻されました。",
+  "app.errors.tryAnotherVideo": "別の動画を試す",
+  "app.warnings.scriptUnsupported": "この言語の文字では、字幕はまだ利用できません。",
+  "app.warnings.smartcamFailed": "この動画では話者の追跡がうまくいかなかったため、中央でトリミングしました。",
+  "app.audio.silent": "音声が無音のようです。マイクがオンで、ミュートになっていないか確認してください。",
+  "app.audio.quiet": "音声がとても小さいです。次回はマイクに近づいて話してください。",
+  "app.audio.clipping": "音声のピークが割れています。録音レベルが大きすぎ、歪みが生じる可能性があります。",
+  "app.stage.queued": "空きを待っています",
+  "app.stage.analyze.normalize": "動画を準備中",
+  "app.stage.analyze.smartcam": "話者を追跡中",
+  "app.stage.analyze.transcribe": "文字起こし中",
+  "app.stage.analyze.cleanup": "文字起こしを整えています",
+  "app.stage.analyze.cuts": "カット箇所を検出中",
+  "app.stage.analyze.captions": "字幕を準備中",
+  "app.stage.analyze.done": "確認の準備ができました",
+  "app.stage.render.prepare": "書き出しを準備中",
+  "app.stage.render.captions": "字幕を追加中 ({i}/{n})",
+  "app.stage.render.encode": "書き出し中",
+  "app.stage.render.hooks": "ハイライトを切り出し中",
+  "app.stage.render.finish": "仕上げ中",
+};

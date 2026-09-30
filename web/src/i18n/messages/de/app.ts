@@ -1,0 +1,311 @@
+import type { AppKey } from "../en";
+
+export const deApp: Partial<Record<AppKey, string>> = {
+  // ── Header ──────────────────────────────────────────────────────────
+  "app.header.homeAria": "CleoCuts Startseite",
+  "app.header.library": "Bibliothek",
+  "app.header.beta": "Beta",
+  "app.header.opening": "Wird geöffnet…",
+
+  // ── Browser notifications ───────────────────────────────────────────
+  "app.notify.readyTitle": "CleoCuts — dein Video ist fertig",
+
+  // ── Toasts / notices ────────────────────────────────────────────────
+  "app.notice.loadFailed": "Das Projekt konnte gerade nicht geladen werden. Bitte versuch's gleich noch mal.",
+  "app.notice.done": "Dieses Video ist fertig — du findest es unter Zuletzt und in deiner Bibliothek.",
+  "app.notice.processing": "Dieses Video wird noch verarbeitet. Die Karte zeigt den Fortschritt.",
+  "app.notice.alreadyExporting": "Dieses Video wird schon exportiert. Den Fortschritt siehst du auf seiner Karte.",
+  "app.notice.offline": "Der Server ist nicht erreichbar. Prüfe deine Internetverbindung und versuch's erneut.",
+
+  // ── Errors ──────────────────────────────────────────────────────────
+  "app.errors.expired":
+    "Dieses Projekt existiert auf dem Server nicht mehr (abgelaufen oder Server-Update). Lade das Video bitte erneut hoch.",
+  "app.errors.generic": "Etwas ist schiefgelaufen. Bitte versuch's erneut.",
+  "app.errors.connection": "Die Verbindung wurde unterbrochen. Prüfe deine Internetverbindung und versuch's erneut.",
+  "app.errors.interrupted":
+    "Der Upload wurde unterbrochen (Seite neu geladen oder App gewechselt). Lade das Video bitte erneut hoch.",
+  "app.errors.tooLarge": "Die Datei ist zu groß. Kürze das Video oder exportiere es kleiner.",
+  "app.errors.noAudio": "Im Video wurde kein brauchbares Audio gefunden.",
+  "app.errors.noSpeech": "In diesem Video haben wir keine Sprache gefunden. CleoCuts schneidet und untertitelt Videos, in denen jemand spricht – probier's mit einem Clip, in dem geredet wird.",
+  "app.errors.noSpeechRefunded": "In diesem Video haben wir keine Sprache gefunden. CleoCuts schneidet und untertitelt Videos, in denen jemand spricht – probier's mit einem Clip, in dem geredet wird. Die Minuten haben wir dir wieder gutgeschrieben.",
+  "app.errors.noAudioTrack": "Dieses Video hat keine Tonspur – da gibt es nichts zu schneiden oder zu untertiteln. Es wurde nichts berechnet.",
+  "app.errors.renderFailed":
+    "Rendern fehlgeschlagen. Deine Bearbeitungen sind gespeichert — öffne das Projekt und rendere erneut.",
+  "app.errors.serverNoResponse": "Der Server hat nicht geantwortet. Bitte versuch's erneut.",
+  "app.errors.serverBusy": "Unsere Server sind gerade ausgelastet. Bitte versuch es in ein paar Minuten erneut.",
+  "app.errors.saveEditsFailed": "Deine Bearbeitungen konnten nicht gespeichert werden — prüfe deine Verbindung und versuch's erneut.",
+  "app.errors.title": "Etwas ist schiefgelaufen",
+  "app.errors.tryAgain": "Erneut versuchen",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "Deine Sitzung ist abgelaufen. Bitte melde dich erneut an und versuch's noch mal.",
+  "app.errors.subscriptionRequired": "Zum Hochladen brauchst du einen Tarif. Wähl einen auf der Preisseite aus.",
+  "app.errors.quotaExceeded":
+    "Für dieses Video reichen deine restlichen Minuten in diesem Zeitraum nicht. Upgrade deinen Tarif oder warte, bis sie zurückgesetzt werden.",
+  "app.errors.unreadableVideo":
+    "Diese Videodatei konnten wir nicht lesen. Exportiere sie bitte erneut als MP4 oder MOV und lade sie hoch.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "Diese Datei ist größer als {max} GB. Kürze das Video oder exportiere es kleiner.",
+  "app.errors.videoTooLong":
+    "Dieses Video ist länger als {max} Minuten. Kürze es oder teile es in mehrere Teile auf.",
+  "app.errors.tooManyJobs":
+    "Du hast schon die maximale Anzahl an Videos in Bearbeitung. Warte, bis eins fertig ist, und versuch's dann erneut.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Melde dich an, um deine Projekte zu öffnen.",
+  "app.auth.loadFailed":
+    "Die Anmeldung konnte nicht geladen werden. Prüfe deine Verbindung (oder erlaube diese Seite in deinem Content-Blocker) und versuch's erneut.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Wähle einen Tarif zum Hochladen",
+  "app.paywall.subscriptionBody":
+    "Für Uploads brauchst du einen aktiven Tarif. Such dir einen aus — das dauert nur eine Minute, und du kannst jederzeit kündigen.",
+  "app.paywall.quotaTitle": "Nicht mehr genug Minuten",
+  "app.paywall.quotaBody": "Du hast in diesem Zeitraum noch {left} Min. übrig — dieses Video braucht {needed} Min.",
+  "app.paywall.quotaBodyUnknown": "Dieses Video ist länger als die Minuten, die du in diesem Zeitraum noch übrig hast.",
+  "app.paywall.seePlans": "Tarife ansehen",
+  "app.paywall.upgrade": "Tarif upgraden",
+  "app.paywall.close": "Nicht jetzt",
+  "app.billing.minutesLeft": "Noch {n} Min. in diesem Zeitraum",
+  "app.billing.choosePlan": "Wähle einen Tarif zum Hochladen",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Konto",
+  "app.account.signedInAs": "Angemeldet als {email}",
+  "app.account.plan": "Tarif",
+  "app.account.noPlan": "Noch kein Tarif",
+  "app.account.freeBeta": "CleoCuts ist während der offenen Beta kostenlos — du brauchst keinen Tarif.",
+  "app.account.status.active": "Aktiv · verlängert sich am {date}",
+  "app.account.status.activeNoDate": "Aktiv",
+  "app.account.status.trial": "Testphase · erste Zahlung am {date}",
+  "app.account.status.cancelled": "Endet am {date}",
+  "app.account.status.pastDue": "Zahlung überfällig — bitte aktualisiere deine Zahlungsmethode.",
+  "app.account.status.paused": "Pausiert",
+  "app.account.status.expired": "Abgelaufen",
+  "app.account.status.comp": "Gratis",
+  "app.account.usage": "Minuten in diesem Zeitraum",
+  "app.account.usageOf": "{used} von {limit} Min. genutzt",
+  "app.account.resetsOn": "Wird am {date} zurückgesetzt",
+  "app.account.manage": "Abo verwalten",
+  "app.account.manageHint": "Rechnungen, Zahlungsmethode und Kündigung verwaltest du im Kundenportal von Lemon Squeezy.",
+  "app.account.changePlan": "Tarif wechseln",
+  "app.account.choosePlan": "Tarif wählen",
+  "app.account.portalFailed": "Das Abrechnungsportal konnte nicht geöffnet werden. Bitte versuch's gleich noch mal.",
+  "app.account.loadFailed": "Dein Konto konnte gerade nicht geladen werden. Bitte versuch's gleich noch mal.",
+  "app.account.testMode": "Testmodus",
+  "app.account.successPending": "Danke! Deine Zahlung ist durch — dein Tarif wird aktiviert…",
+  "app.account.successDone": "Dein {plan}-Tarif ist aktiv. Viel Spaß beim Schneiden!",
+  "app.account.successSlow":
+    "Das dauert länger als sonst. Dein Tarif erscheint hier in ein paar Minuten — lade die Seite neu, um nachzusehen.",
+
+  // ── Library fallbacks ───────────────────────────────────────────────
+  "app.library.untitled": "Ohne Titel",
+
+  // ── Workflow presets ────────────────────────────────────────────────
+  "app.preset.tiktok.label": "TikTok / Reels",
+  "app.preset.tiktok.tagline": "Vertikal, kurzes Format",
+  "app.preset.tiktok.desc": "Sprachbefehle, Clipper-Untertitel, automatischer Hochformat-Zuschnitt",
+  "app.preset.tiktok.bullet1": "Sprachbefehle an: „Cleo cut“ zum Neumachen",
+  "app.preset.tiktok.bullet2": "Fette Clipper-Untertitel",
+  "app.preset.tiktok.bullet3": "Automatisch vertikal 9:16 mit Gesichtserkennung",
+  "app.preset.podcast.label": "Podcast (Langform)",
+  "app.preset.podcast.tagline": "Ganze Episode + Clips",
+  "app.preset.podcast.desc": "KI-Bereinigung, Hook-Erkennung, Multi-Format-Export",
+  "app.preset.podcast.bullet1": "KI-Bereinigung deines Transkripts",
+  "app.preset.podcast.bullet2": "3 Hook-Clips automatisch ausgewählt",
+  "app.preset.podcast.bullet3": "Ganze Episode + 9:16-Clips exportiert",
+  "app.preset.vlog.label": "Vlog-Bereinigung",
+  "app.preset.vlog.tagline": "Solo-Talking-Head",
+  "app.preset.vlog.desc": "Füllwörter entfernen, dezente Untertitel, Format bleibt erhalten",
+  "app.preset.vlog.bullet1": "Entfernt „ähm“, „öh“, lange Pausen",
+  "app.preset.vlog.bullet2": "Dezente Untertitel, die nicht ablenken",
+  "app.preset.vlog.bullet3": "Behält dein Originalformat bei",
+  "app.preset.captions.label": "Nur Untertitel",
+  "app.preset.captions.tagline": "Nur Untertitel hinzufügen",
+  "app.preset.captions.desc": "Untertitel ins Video einbrennen — keine Schnitte, keine Bereinigung",
+  "app.preset.captions.bullet1": "Brennt Untertitel im gewählten Stil ein",
+  "app.preset.captions.bullet2": "Keine Schnitte, keine Bereinigung",
+  "app.preset.captions.bullet3": "Am schnellsten — nur Untertitel",
+  "app.preset.custom.label": "Benutzerdefiniert",
+  "app.preset.custom.tagline": "Alles einstellen",
+  "app.preset.custom.desc": "Alle Einstellungen — jeden Regler selbst wählen",
+  "app.preset.custom.bullet1": "Jede Einstellung verfügbar",
+  "app.preset.custom.bullet2": "Untertitel, Schnitte, Format selbst wählen",
+  "app.preset.custom.bullet3": "Für alle, die genau wissen, was sie wollen",
+
+  // ── Caption styles ──────────────────────────────────────────────────
+  "app.captions.clean": "Clean",
+  "app.captions.classic": "Classic",
+  "app.captions.clipper": "Clipper",
+  "app.captions.highlight": "Highlight",
+  "app.captions.flash": "Flash",
+  "app.captions.punch": "Punch",
+  "app.captions.elegant": "Elegant",
+  "app.captions.subtle": "Subtle",
+  "app.captions.none": "Keine Untertitel",
+
+  // ── Cut styles ──────────────────────────────────────────────────────
+  "app.cutStyle.tight.label": "Straff",
+  "app.cutStyle.tight.desc": "Aggressiv",
+  "app.cutStyle.balanced.label": "Ausgewogen",
+  "app.cutStyle.balanced.desc": "Standard",
+  "app.cutStyle.smooth.label": "Sanft",
+  "app.cutStyle.smooth.desc": "Pausen behalten",
+
+  // ── Export formats ──────────────────────────────────────────────────
+  "app.format.9x16.desc": "TikTok / Reels / Shorts",
+  "app.format.1x1.desc": "Instagram-Feed",
+  "app.format.16x9.desc": "YouTube / Desktop",
+
+  // ── Dashboard ───────────────────────────────────────────────────────
+  "app.dashboard.workspace": "Dein Arbeitsbereich",
+  "app.dashboard.inProgressCountOne": "{count} Video in Bearbeitung",
+  "app.dashboard.inProgressCountOther": "{count} Videos in Bearbeitung",
+  "app.dashboard.readyCountOne": "{count} Video bereit zum Prüfen",
+  "app.dashboard.readyCountOther": "{count} Videos bereit zum Prüfen",
+  "app.dashboard.failedCountOne": "{count} Video fehlgeschlagen",
+  "app.dashboard.failedCountOther": "{count} Videos fehlgeschlagen",
+  "app.dashboard.readyWhenYouAre": "Bereit, wenn du bereit bist",
+  "app.dashboard.newVideo": "Neues Video",
+  "app.dashboard.inProgress": "In Bearbeitung",
+  "app.dashboard.recentProjects": "Letzte Projekte",
+  "app.dashboard.viewAll": "Alle anzeigen",
+  "app.dashboard.startFirst": "Starte dein erstes Video",
+  "app.dashboard.startFirstSub": "Wähle einen Workflow — CleoCuts kümmert sich um Untertitel, Format und Bereinigung",
+  "app.dashboard.voiceTeaser": "Sag „Cleo“ während der Aufnahme — spare Stunden beim Schneiden",
+
+  // ── Workflow picker ─────────────────────────────────────────────────
+  "app.picker.backToDashboard": "Zurück zur Übersicht",
+  "app.picker.freeDuringBeta": "Kostenlos während der Beta",
+  "app.picker.title": "Was postest du?",
+  "app.picker.subtitle":
+    "Wähle einen Workflow — CleoCuts richtet Untertitel, Format und Bereinigung für die Plattform vorab ein.",
+  "app.picker.chipCaptions": "{style}-Untertitel",
+  "app.picker.chipVoice": "„Cleo cut“ an",
+  "app.picker.customTitle": "Benutzerdefiniertes Setup",
+  "app.picker.customSub": "Jeden Regler selbst wählen — Untertitel, Schnitte, Formate",
+
+  // ── Upload (choose a file) ──────────────────────────────────────────
+  "app.upload.back": "Zurück",
+  "app.upload.title": "Video wählen",
+  "app.upload.hint":
+    "MP4 oder MOV von deinem Handy oder Computer. Lass diese Seite geöffnet, bis der Upload fertig ist.",
+  "app.upload.tapToChoose": "Tippen, um auszuwählen",
+  "app.upload.orDrag": "oder eins hineinziehen",
+  "app.upload.privacyLink": "So gehen wir mit deinen Videos um",
+  "app.upload.resuming":
+    "Der Upload geht dort weiter, wo er unterbrochen wurde — lass diese Seite offen.",
+
+  // ── Configure (custom settings) ─────────────────────────────────────
+  "app.configure.back": "zurück",
+  "app.configure.fileInfo": "{name} · {size} MB",
+  "app.configure.captionStyle": "Untertitel-Stil",
+  "app.configure.captionPreviewAlt": "{style}-Untertitel-Vorschau",
+  "app.configure.cutStyle": "Schnitt-Stil",
+  "app.configure.cleanup": "Bereinigung",
+  "app.configure.voiceTriggers": "Auf „Cleo cut“ / „Cleo go“ hören",
+  "app.configure.voiceTriggersDesc": "Entfernt misslungene Takes automatisch",
+  "app.configure.removeFillers": "Füllwörter entfernen",
+  "app.configure.removeFillersDesc": "Schneidet „ähm“, „öh“, „halt“ heraus…",
+  "app.configure.smartReframe": "Smart Reframe",
+  "app.configure.smartcam": "SmartCam Gesichtserkennung",
+  "app.configure.smartcamDesc": "Automatischer Zuschnitt für vertikale/horizontale Ausgabe",
+  "app.configure.portrait": "Hochformat",
+  "app.configure.landscape": "Querformat",
+  "app.configure.portraitDesc": "Vertikal 9:16",
+  "app.configure.landscapeDesc": "Horizontal 16:9",
+  "app.configure.extraFormats": "Zusätzliche Ausgabeformate",
+  "app.configure.extraFormatsHint":
+    "Der Haupt-Export nutzt dein SmartCam-Format (oder das Originalformat). Wähle zusätzliche Versionen mit Letterbox für andere Plattformen.",
+  "app.configure.process": "Video verarbeiten",
+
+  // ── Done screen ─────────────────────────────────────────────────────
+  "app.done.readyToPost": "Bereit zum Posten",
+  "app.done.captionSuggestion": "Vorschlag für die Beschreibung",
+  "app.done.copy": "kopieren",
+  "app.done.downloadPrimary": "Hauptversion herunterladen",
+  "app.done.downloadFormat": "{format} herunterladen",
+  "app.done.mainEdit": "Hauptschnitt",
+  "app.done.bonusClips": "Bonus-Clips",
+  "app.done.aiPicked": "von KI ausgewählt",
+  "app.done.processAnother": "Weiteres Video verarbeiten",
+
+  // ── Dashboard job cards ─────────────────────────────────────────────
+  "app.card.noPreview": "keine Vorschau",
+  "app.card.uploading.title": "Wird hochgeladen",
+  "app.card.uploading.sub": "Wird hochgeladen — lass diese Seite offen und sperre dein Handy nicht.",
+  "app.card.analyzing.title": "Wird analysiert",
+  "app.card.analyzing.sub": "Transkribiert und schneidet Pausen und Füllwörter heraus.",
+  "app.card.reviewing.title": "Bereit zum Bearbeiten",
+  "app.card.reviewing.sub": "Tippen, um den Editor zu öffnen und den Schnitt zu verfeinern.",
+  "app.card.rendering.title": "Wird gerendert",
+  "app.card.rendering.sub": "Dein fertiges Video wird zusammengesetzt.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "In der Warteschlange (#{n})",
+  "app.card.queued.titleNoPos": "In der Warteschlange",
+  "app.card.queued.sub":
+    "Gerade sind viele Videos dran — deins startet automatisch. Du kannst diese Seite verlassen.",
+  "app.card.open": "Öffnen",
+  "app.card.remove": "Entfernen",
+  "app.card.renderFailedNote": "Rendern fehlgeschlagen — deine Bearbeitungen sind gespeichert. Öffne es und rendere erneut.",
+
+  // ── Captions tab ────────────────────────────────────────────────────
+  "app.captions.styleHeading": "Untertitel-Stil · {style}",
+  "app.captions.appliedToOutput": "Auf die Ausgabe angewendet",
+  "app.captions.disabled": "Untertitel für dieses Rendering deaktiviert.",
+
+  // ── Voice test (dialog) ─────────────────────────────────────────────
+  "app.voice.title": "Teste deine Stimme",
+  "app.voice.subtitle": "Sag die Befehle — schau, ob Cleo dich hört.",
+  "app.voice.close": "Schließen",
+  "app.voice.heardYou": "Dich gehört!",
+  "app.voice.listening": "Hört zu…",
+  "app.voice.heardPrefix": "gehört: ",
+  "app.voice.permissionHint": "Nutzt dein Mikrofon. Dein Browser macht aus deiner Sprache Text: Chrome schickt sie dafür an Google, Safari an Apple. An CleoCuts geht nichts.",
+  "app.voice.requesting": "Wird angefragt…",
+  "app.voice.start": "Start",
+  "app.voice.denied": "Zugriff verweigert. In den Browser-Einstellungen aktivieren + Seite neu laden.",
+  "app.voice.unsupported": "In diesem Browser nicht unterstützt. Probier Safari oder Chrome.",
+  "app.voice.done": "Fertig",
+  "app.voice.cmd.start": "Deinen Take beginnen",
+  "app.voice.cmd.cut": "Neu machen, aktuellen Take verwerfen",
+  "app.voice.cmd.keep": "Take bestätigen, nächste Szene",
+  "app.voice.cmd.finish": "Video beenden, alles danach schneiden",
+  "app.voice.cmd.stop": "Einen schlechten Satz überspringen (zusammen mit „go“)",
+  "app.voice.cmd.go": "Weiter nach „stop“",
+  "app.crash.saving": "Deine letzten Änderungen werden gespeichert…",
+  "app.crash.saved": "Deine letzten Änderungen sind gespeichert.",
+  "app.crash.unsaved": "Deine letzten Änderungen wurden eventuell nicht gespeichert.",
+  "app.crash.body": "Lade die Seite neu, um dort weiterzumachen, wo du aufgehört hast.",
+  "app.crash.reload": "Seite neu laden",
+
+  // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
+  "app.errors.noVideoTrack": "Das ist eine Audiodatei. CleoCuts braucht ein Video mit Ton – wähl bitte eine Videodatei. Es wurde nichts berechnet.",
+  "app.errors.videoTooShort": "Dieses Video ist kürzer als {min} Sekunden – zu kurz zum Schneiden. Es wurde nichts berechnet.",
+  "app.errors.processingInterrupted": "Die Verarbeitung wurde unterbrochen. Lade das Video bitte erneut hoch.",
+  "app.errors.mediaUnavailable": "Das Originalvideo ist nicht mehr verfügbar, daher lässt sich dieses Projekt nicht mehr bearbeiten.",
+  "app.errors.tooManyRenders": "Es laufen zu viele Exporte. Bitte warte, bis einer fertig ist.",
+  "app.errors.renderLimit": "Für dieses Video ist das Export-Limit für heute erreicht. Bitte versuch es morgen erneut.",
+  "app.errors.staleRev": "Dieses Projekt wurde in einem anderen Tab geändert. Lade die Seite neu, um den neuesten Stand zu sehen.",
+  "app.errors.docNotReady": "Dieses Projekt ist noch nicht bereit. Bitte versuch es gleich noch einmal.",
+  "app.errors.refunded": "Die Minuten wurden dir wieder gutgeschrieben.",
+  "app.errors.tryAnotherVideo": "Anderes Video probieren",
+  "app.warnings.scriptUnsupported": "Untertitel sind für die Schrift dieser Sprache noch nicht verfügbar.",
+  "app.warnings.smartcamFailed": "Die Sprecher-Verfolgung hat bei diesem Video nicht funktioniert, daher wurde es mittig zugeschnitten.",
+  "app.audio.silent": "Der Ton scheint stumm zu sein – prüf, ob dein Mikrofon an und nicht stummgeschaltet ist.",
+  "app.audio.quiet": "Der Ton ist sehr leise – sprich beim nächsten Mal näher am Mikrofon.",
+  "app.audio.clipping": "Der Ton übersteuert an Spitzen – die Aufnahme ist zu laut, Verzerrungen sind wahrscheinlich.",
+  "app.stage.queued": "Wartet auf einen freien Platz",
+  "app.stage.analyze.normalize": "Video wird vorbereitet",
+  "app.stage.analyze.smartcam": "Sprecher wird verfolgt",
+  "app.stage.analyze.transcribe": "Wird transkribiert",
+  "app.stage.analyze.cleanup": "Transkript wird überarbeitet",
+  "app.stage.analyze.cuts": "Schnitte werden gesucht",
+  "app.stage.analyze.captions": "Untertitel werden vorbereitet",
+  "app.stage.analyze.done": "Bereit zur Prüfung",
+  "app.stage.render.prepare": "Export wird vorbereitet",
+  "app.stage.render.captions": "Untertitel werden eingefügt ({i}/{n})",
+  "app.stage.render.encode": "Wird exportiert",
+  "app.stage.render.hooks": "Highlights werden geschnitten",
+  "app.stage.render.finish": "Wird abgeschlossen",
+};

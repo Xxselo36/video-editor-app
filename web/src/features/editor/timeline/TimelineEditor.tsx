@@ -6,7 +6,8 @@ import { Card, SectionLabel } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { Slider } from "@/components/ui/Slider";
-import { useT } from "@/i18n";
+import { useLang, useT } from "@/i18n";
+import { plural } from "@/lib/i18n/plural";
 import { fmtTimecode } from "@/features/editor/format";
 import { keyTargetAllowed } from "@/features/editor/shortcuts/keymap";
 import { useTimelineHistory } from "./history";
@@ -66,6 +67,7 @@ export function TimelineEditor({
   onPlayPauseKey?: () => void;
 }) {
   const t = useT();
+  const lang = useLang();
   const [selected, setSelected] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragMode, setDragMode] = useState<"start" | "end" | null>(null);
@@ -303,7 +305,7 @@ export function TimelineEditor({
               className="rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal tabular-nums"
               style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
             >
-              {t(activeCount === 1 ? "app.timeline.clipsOne" : "app.timeline.clipsOther", {
+              {t(plural(lang, activeCount, { one: "app.timeline.clipsOne", other: "app.timeline.clipsOther" }), {
                 count: activeCount,
                 dur: fmt(totalDur),
               })}

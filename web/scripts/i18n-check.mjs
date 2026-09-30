@@ -2,15 +2,21 @@
 /**
  * i18n check — `npm run i18n:check` (CI: .github/workflows/web.yml).
  *
- * Reads the message files (src/i18n/messages; English is the source of
- * truth: en.ts = en.site.ts + en.app.ts) of every language in LANGS
- * (src/i18n/langs.ts) and checks:
+ * Reads the message files (src/i18n/messages/{lang}/{site,app,editor,
+ * mail}.ts, merged by {lang}/index.ts; English is the source of truth) of
+ * every language in LANGS (src/i18n/langs.ts) and checks:
  *
  *   errors (exit 1)
  *     missing       a language lacks a key English has
  *     extra         a language has a key English doesn't have
  *     placeholders  a translation's {placeholders} differ from English's
  *     empty         an empty message
+ *     misplaced     a key in another file than English's ({lang}/app.ts
+ *                   holds exactly en/app.ts's keys, …)
+ *     codes         a code of the backend's catalogue
+ *                   (src/lib/errorCodes.json, exported by the backend
+ *                   tests from backend/errors.py) without a message key in
+ *                   src/lib/errorKeys.ts, or mapped to a key English lacks
  *   warnings (exit 0; --strict turns them into errors)
  *     unused        an English key no source file uses — UX4 removes the
  *                   dead ones, then this becomes an error
@@ -64,21 +70,82 @@ export function readLangs(indexSource) {
   return [...block[1].matchAll(/^\s*["']?([a-z]{2}(?:-[A-Z]{2})?)["']?\s*:/gm)].map((m) => m[1]);
 }
 
-/** { lang: { key: message } } for every language; English complete. */
+/** The message files of a language, one per part of the app. */
+export const PARTS = ["site", "app", "editor", "mail"];
+
+/**
+ * { dicts: { lang: { key: message } }, parts: { lang: { part: [keys] } } }
+ * for every language; English complete.
+ */
 export function loadMessages() {
   const langs = readLangs(fs.readFileSync(path.join(SRC, "i18n", "langs.ts"), "utf8"));
   const cache = new Map();
   const dicts = {};
+  const parts = {};
   for (const lang of langs) {
-    const file = path.join(MESSAGES, `${lang}.ts`);
-    if (!fs.existsSync(file)) throw new Error(`no message file for ${lang} (${path.relative(WEB, file)})`);
+    const file = path.join(MESSAGES, lang, "index.ts");
+    if (!fs.existsSync(file)) throw new Error(`no message files for ${lang} (${path.relative(WEB, file)})`);
     const mod = loadTs(file, cache);
     const dict = mod[lang] ?? mod.default;
     if (!dict || typeof dict !== "object") throw new Error(`${path.relative(WEB, file)} exports no "${lang}" object`);
     dicts[lang] = dict;
+    parts[lang] = {};
+    for (const part of PARTS) {
+      const pfile = path.join(MESSAGES, lang, `${part}.ts`);
+      if (!fs.existsSync(pfile)) throw new Error(`no message file ${path.relative(WEB, pfile)}`);
+      const exported = Object.values(loadTs(pfile, cache)).find((v) => v && typeof v === "object");
+      parts[lang][part] = Object.keys(exported ?? {});
+    }
   }
-  return dicts;
+  return { dicts, parts };
 }
+
+/** Keys filed in another part than English files them in. */
+export function checkParts(parts, base = "en") {
+  const errors = [];
+  const home = {};
+  for (const [part, keys] of Object.entries(parts[base])) for (const k of keys) home[k] = part;
+  for (const [lang, byPart] of Object.entries(parts)) {
+    if (lang === base) continue;
+    for (const [part, keys] of Object.entries(byPart)) {
+      for (const key of keys) {
+        if (home[key] && home[key] !== part) {
+          errors.push({ rule: "misplaced", lang, key, detail: `in ${part}.ts, English has it in ${home[key]}.ts` });
+        }
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * The backend's codes (errorCodes.json: {errors, warnings,
+ * audio_warnings, stages, protocol}) against the web's code → key maps
+ * (errorKeys.ts: ERROR_KEYS, WARNING_KEYS, AUDIO_WARNING_KEYS,
+ * STAGE_KEYS). Every user-facing code needs a key English has; the
+ * translations are then covered by "missing".
+ */
+export function checkCodes(codes, maps, en) {
+  const errors = [];
+  const lists = [
+    ["errors", "ERROR_KEYS"],
+    ["warnings", "WARNING_KEYS"],
+    ["audio_warnings", "AUDIO_WARNING_KEYS"],
+    ["stages", "STAGE_KEYS"],
+  ];
+  for (const [list, mapName] of lists) {
+    const map = maps[mapName] ?? {};
+    for (const code of codes[list] ?? []) {
+      const key = map[code];
+      if (!key) errors.push({ rule: "codes", lang: "-", key: code, detail: `${list}: no key in ${mapName}` });
+      else if (!(key in en)) errors.push({ rule: "codes", lang: "en", key: code, detail: `${mapName} maps it to ${key}, which English lacks` });
+    }
+  }
+  return errors;
+}
+
+const CODES_FILE = path.join(SRC, "lib", "errorCodes.json");
+const KEYS_FILE = path.join(SRC, "lib", "errorKeys.ts");
 
 // ── checks ───────────────────────────────────────────────────────────
 
@@ -240,10 +307,16 @@ function main(argv) {
   const json = argv.includes("--json");
   const gha = Boolean(process.env.GITHUB_ACTIONS);
 
-  const dicts = loadMessages();
+  const { dicts, parts } = loadMessages();
   const langs = Object.keys(dicts);
   const enKeys = Object.keys(dicts.en);
-  const errors = checkDicts(dicts);
+  const errors = [...checkDicts(dicts), ...checkParts(parts)];
+  if (fs.existsSync(CODES_FILE)) {
+    const codes = JSON.parse(fs.readFileSync(CODES_FILE, "utf8"));
+    errors.push(...checkCodes(codes, loadTs(KEYS_FILE), dicts.en));
+  } else {
+    errors.push({ rule: "codes", lang: "-", key: "-", detail: `${path.relative(WEB, CODES_FILE)} is missing` });
+  }
   const sources = sourceFiles().map((f) => fs.readFileSync(f, "utf8"));
   const unused = unusedKeys(enKeys, sources);
   let glossary = { terms: {}, avoid: [] };
@@ -261,7 +334,7 @@ function main(argv) {
   console.log(`i18n check: ${langs.length} languages (${langs.join(" ")}), ${enKeys.length} keys`);
   const byRule = {};
   for (const e of errors) (byRule[e.rule] ??= []).push(e);
-  for (const rule of ["missing", "extra", "placeholders", "empty", "glossary"]) {
+  for (const rule of ["missing", "extra", "placeholders", "empty", "misplaced", "codes", "glossary"]) {
     const list = byRule[rule] ?? [];
     if (rule === "glossary" && !list.length) continue;
     console.log(`${list.length ? "✗" : "✓"} ${rule}: ${list.length ? `${list.length} error(s)` : "none"}`);

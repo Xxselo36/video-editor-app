@@ -24,6 +24,9 @@ export type Lang = keyof typeof LANGS;
 
 /** localStorage key of the language the user picked. */
 export const LANG_STORAGE_KEY = "cleocuts.lang";
+/** The same choice as a cookie, for the server (emails, the /de landing)
+ *  and as the fallback when localStorage is blocked. */
+export const LANG_COOKIE = "cleo_lang";
 
 export function isLang(value: unknown): value is Lang {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(LANGS, value);
@@ -48,10 +51,11 @@ export function detectLang(stored: string | null | undefined, preferred: readonl
  * Runs in <head> before anything renders (root layout): sets
  * <html lang> to detectLang's answer, so screen readers use the right
  * voice from the first paint and the legal pages show the right text
- * (globals.css). Same rules as detectLang, in plain ES5.
+ * (globals.css). Same rules as detectLang (the stored choice: localStorage,
+ * else the cookie), in plain ES5.
  */
 export const LANG_INIT_SCRIPT = `(function(){try{var L=${JSON.stringify(
   Object.keys(LANGS),
-)},s=null,l=null,p,i,b;try{s=localStorage.getItem(${JSON.stringify(
+)},s=null,l=null,p,i,b,c;try{s=localStorage.getItem(${JSON.stringify(
   LANG_STORAGE_KEY,
-)})}catch(e){}if(L.indexOf(s)>=0)l=s;else{p=navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language||""];for(i=0;i<p.length&&!l;i++){b=String(p[i]||"").toLowerCase().split(/[-_]/)[0];if(L.indexOf(b)>=0)l=b}}document.documentElement.lang=l||"en"}catch(e){}})();`;
+)})}catch(e){}if(L.indexOf(s)<0){c=document.cookie.match(/(?:^|;\\s*)${LANG_COOKIE}=([^;]*)/);s=c?c[1]:null}if(L.indexOf(s)>=0)l=s;else{p=navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language||""];for(i=0;i<p.length&&!l;i++){b=String(p[i]||"").toLowerCase().split(/[-_]/)[0];if(L.indexOf(b)>=0)l=b}}document.documentElement.lang=l||"en"}catch(e){}})();`;

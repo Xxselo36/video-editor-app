@@ -10,7 +10,8 @@ import {
   type LibraryEntry,
 } from "@/lib/library";
 import { VideoModal } from "@/components/VideoModal";
-import { LanguageSwitcher, useT, type TFn } from "@/i18n";
+import { LanguageSwitcher, useLang, useT, type TFn } from "@/i18n";
+import { plural } from "@/lib/i18n/plural";
 import { AUTH_ENABLED } from "@/lib/auth";
 import { apiFetch, mediaUrl, useMediaReady, useMediaUrl } from "@/lib/api";
 import { fetchServerJobs, serverJobToLibraryEntry } from "@/lib/account";
@@ -37,6 +38,7 @@ function relativeTime(ts: number, t: TFn): string {
 
 export default function Library() {
   const t = useT();
+  const lang = useLang();
   const [entries, setEntries] = useState<LibraryEntry[] | null>(null);
   const [playingJobId, setPlayingJobId] = useState<string | null>(null);
   // expires_at from the server list (accounts on) — saves a GET per card.
@@ -169,7 +171,7 @@ export default function Library() {
               className="mb-1 text-xs font-semibold uppercase tracking-[0.15em]"
               style={{ color: "var(--text-muted)" }}
             >
-              {t(entries.length === 1 ? "library.count.one" : "library.count.other", {
+              {t(plural(lang, entries.length, { one: "library.count.one", other: "library.count.other" }), {
                 count: entries.length,
               })}
             </div>
@@ -257,6 +259,7 @@ function LibraryCard({
   onPlay: (jobId: string) => void;
 }) {
   const t = useT();
+  const lang = useLang();
   const [thumbFailed, setThumbFailed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -462,7 +465,7 @@ function LibraryCard({
               border: "1px solid var(--border)",
             }}
           >
-            {t(entry.hookClips.length === 1 ? "library.card.hooks.one" : "library.card.hooks.other", {
+            {t(plural(lang, entry.hookClips.length, { one: "library.card.hooks.one", other: "library.card.hooks.other" }), {
               count: entry.hookClips.length,
             })}{" "}
             {expanded ? "▲" : "▼"}

@@ -4,8 +4,12 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   avoidRegex,
+  checkCodes,
   checkDicts,
   checkGlossary,
+  checkParts,
+  loadMessages,
+  loadTs,
   parseGlossary,
   placeholders,
   readLangs,
@@ -37,6 +41,45 @@ describe("checkDicts", () => {
       { rule: "empty", lang: "de", key: "a.three" },
       { rule: "extra", lang: "de", key: "a.four" },
     ]);
+  });
+});
+
+describe("checkParts", () => {
+  it("reports a key filed in another part than English files it in", () => {
+    const parts = {
+      en: { site: ["s.a"], app: ["a.b", "a.c"], editor: ["e.d"], mail: [] },
+      de: { site: ["s.a", "a.c"], app: ["a.b"], editor: ["e.d"], mail: [] },
+    };
+    expect(checkParts(parts)).toEqual([
+      { rule: "misplaced", lang: "de", key: "a.c", detail: "in site.ts, English has it in app.ts" },
+    ]);
+  });
+});
+
+describe("checkCodes", () => {
+  const en = { "k.speech": "No speech", "k.stage": "Transcribing" };
+  it("passes when every code maps to an English key", () => {
+    const codes = { errors: ["no_speech"], warnings: [], audio_warnings: [], stages: ["analyze.transcribe"] };
+    const maps = { ERROR_KEYS: { no_speech: "k.speech" }, STAGE_KEYS: { "analyze.transcribe": "k.stage" } };
+    expect(checkCodes(codes, maps, en)).toEqual([]);
+  });
+
+  it("reports codes without a key and keys English lacks", () => {
+    const codes = { errors: ["no_speech", "no_video"], stages: ["queued"] };
+    const maps = { ERROR_KEYS: { no_speech: "k.gone" }, STAGE_KEYS: {} };
+    expect(checkCodes(codes, maps, en)).toEqual([
+      { rule: "codes", lang: "en", key: "no_speech", detail: "ERROR_KEYS maps it to k.gone, which English lacks" },
+      { rule: "codes", lang: "-", key: "no_video", detail: "errors: no key in ERROR_KEYS" },
+      { rule: "codes", lang: "-", key: "queued", detail: "stages: no key in STAGE_KEYS" },
+    ]);
+  });
+
+  it("the app's catalogue: every backend code has a key in every language", () => {
+    const { dicts } = loadMessages();
+    const codes = JSON.parse(fs.readFileSync(path.join(HERE, "../src/lib/errorCodes.json"), "utf8"));
+    const maps = loadTs(path.join(HERE, "../src/lib/errorKeys.ts"));
+    expect(checkCodes(codes, maps, dicts.en)).toEqual([]);
+    expect(checkDicts(dicts)).toEqual([]);
   });
 });
 

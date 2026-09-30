@@ -9,7 +9,8 @@ import { IconArrowRight } from "@/components/Icons";
 import { Button } from "@/components/ui/Button";
 import { SectionLabel } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
-import { useT } from "@/i18n";
+import { useLang, useT } from "@/i18n";
+import { plural } from "@/lib/i18n/plural";
 import type { ActiveJobV2 } from "@/lib/activeJobs";
 import type { LibraryEntry } from "@/lib/library";
 import { VoiceTeaser } from "@/features/voice-test/VoiceTeaser";
@@ -40,6 +41,7 @@ export function Dashboard({
   children?: ReactNode;
 }) {
   const t = useT();
+  const lang = useLang();
   // Headline counts (T7): working (uploading / analyzing / exporting),
   // ready for review and failed are counted apart — a failed or waiting
   // card is not "in progress". Same failure test as ActiveJobCard.
@@ -57,7 +59,7 @@ export function Dashboard({
     ] as const
   )
     .filter(([n]) => n > 0)
-    .map(([n, one, other]) => t(n === 1 ? one : other, { count: n }));
+    .map(([n, one, other]) => t(plural(lang, n, { one, other }), { count: n }));
 
   return (
     <div className="relative z-10 flex flex-col" data-testid="dashboard">

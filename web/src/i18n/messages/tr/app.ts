@@ -1,0 +1,312 @@
+import type { AppKey } from "../en";
+
+export const trApp: Partial<Record<AppKey, string>> = {
+  // ── Header ──────────────────────────────────────────────────────────
+  "app.header.homeAria": "CleoCuts ana sayfa",
+  "app.header.library": "Kütüphane",
+  "app.header.beta": "Beta",
+  "app.header.opening": "Açılıyor…",
+
+  // ── Browser notifications ───────────────────────────────────────────
+  "app.notify.readyTitle": "CleoCuts — videon hazır",
+
+  // ── Toasts / notices ────────────────────────────────────────────────
+  "app.notice.loadFailed": "Proje şu an yüklenemedi. Lütfen birazdan tekrar dene.",
+  "app.notice.done": "Bu video tamamlandı — Son İşlemler'de ve Kütüphanen'de bulabilirsin.",
+  "app.notice.processing": "Bu video hâlâ işleniyor. Kart ilerlemeyi gösteriyor.",
+  "app.notice.alreadyExporting": "Bu video zaten dışa aktarılıyor. İlerlemeyi kartında görebilirsin.",
+  "app.notice.offline": "Sunucuya erişilemiyor. İnternetini kontrol edip tekrar dene.",
+
+  // ── Errors ──────────────────────────────────────────────────────────
+  "app.errors.expired":
+    "Bu proje artık sunucuda yok (süresi doldu veya sunucu güncellendi). Lütfen videoyu yeniden yükle.",
+  "app.errors.generic": "Bir şeyler ters gitti. Lütfen tekrar dene.",
+  "app.errors.connection": "Bağlantı kesildi. İnternetini kontrol edip tekrar dene.",
+  "app.errors.interrupted":
+    "Yükleme kesildi (sayfa yenilendi veya uygulama değiştirildi). Lütfen videoyu yeniden yükle.",
+  "app.errors.tooLarge": "Dosya çok büyük. Videoyu kısalt veya daha küçük dışa aktar.",
+  "app.errors.noAudio": "Videoda kullanılabilir ses bulunamadı.",
+  "app.errors.noSpeech": "Bu videoda konuşma bulamadık. CleoCuts, birinin konuştuğu videoları keser ve altyazılar — sesli bir klip dene.",
+  "app.errors.noSpeechRefunded": "Bu videoda konuşma bulamadık. CleoCuts, birinin konuştuğu videoları keser ve altyazılar — sesli bir klip dene. Dakikaların iade edildi.",
+  "app.errors.noAudioTrack": "Bu videonun ses kanalı yok; kesilecek ya da altyazı eklenecek bir şey bulunmuyor. Hiçbir ücret alınmadı.",
+  "app.errors.renderFailed":
+    "Render başarısız oldu. Düzenlemelerin kaydedildi — projeyi aç ve yeniden render et.",
+  "app.errors.serverNoResponse": "Sunucu yanıt vermedi. Lütfen tekrar dene.",
+  "app.errors.serverBusy": "Sunucularımız şu anda yoğun. Lütfen birkaç dakika sonra tekrar dene.",
+  "app.errors.saveEditsFailed": "Düzenlemelerin kaydedilemedi — bağlantını kontrol edip tekrar dene.",
+  "app.errors.title": "Bir şeyler ters gitti",
+  "app.errors.tryAgain": "Tekrar dene",
+  // Accounts + billing (only reachable when they are switched on)
+  "app.errors.signInRequired": "Oturumun sona erdi. Lütfen tekrar giriş yap ve yeniden dene.",
+  "app.errors.subscriptionRequired":
+    "Yükleme için bir plan gerekiyor. Lütfen fiyatlandırma sayfasından bir plan seç.",
+  "app.errors.quotaExceeded":
+    "Bu dönem bu video için yeterli dakikan kalmadı. Lütfen planını yükselt veya sıfırlanmayı bekle.",
+  "app.errors.unreadableVideo":
+    "Bu video dosyasını okuyamadık. Lütfen MP4 veya MOV olarak yeniden dışa aktarıp yükle.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "Bu dosya {max} GB sınırını aşıyor. Lütfen videoyu kısalt veya daha küçük dışa aktar.",
+  "app.errors.videoTooLong": "Bu video {max} dakikadan uzun. Lütfen kısalt veya parçalara böl.",
+  "app.errors.tooManyJobs":
+    "İşlenmekte olan video sayın zaten azami sınırda. Lütfen biri hazır olana kadar bekle, sonra tekrar dene.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Projelerini açmak için giriş yap.",
+  "app.auth.loadFailed":
+    "Giriş ekranı yüklenemedi. Bağlantını kontrol et (veya içerik engelleyicinde bu siteye izin ver) ve tekrar dene.",
+
+  // ── Billing: upload blocked (402) + minutes left ────────────────────
+  "app.paywall.subscriptionTitle": "Yüklemek için bir plan seç",
+  "app.paywall.subscriptionBody":
+    "Yükleme için aktif bir plan gerekiyor. Birini seç — sadece bir dakika sürer ve istediğin zaman iptal edebilirsin.",
+  "app.paywall.quotaTitle": "Yeterli dakikan kalmadı",
+  "app.paywall.quotaBody": "Bu dönem {left} dk kaldı — bu video için {needed} dk gerekiyor.",
+  "app.paywall.quotaBodyUnknown": "Bu video, bu dönem kalan dakikalarından daha uzun.",
+  "app.paywall.seePlans": "Planları gör",
+  "app.paywall.upgrade": "Planı yükselt",
+  "app.paywall.close": "Şimdi değil",
+  "app.billing.minutesLeft": "Bu dönem {n} dk kaldı",
+  "app.billing.choosePlan": "Yüklemek için bir plan seç",
+
+  // ── Account page (/app/account) ─────────────────────────────────────
+  "app.account.title": "Hesap",
+  "app.account.signedInAs": "{email} olarak giriş yapıldı",
+  "app.account.plan": "Plan",
+  "app.account.noPlan": "Henüz plan yok",
+  "app.account.freeBeta": "CleoCuts açık beta boyunca ücretsiz — plan gerekmiyor.",
+  "app.account.status.active": "Aktif · {date} tarihinde yenilenir",
+  "app.account.status.activeNoDate": "Aktif",
+  "app.account.status.trial": "Deneme · ilk ödeme {date} tarihinde",
+  "app.account.status.cancelled": "{date} tarihinde iptal edilecek",
+  "app.account.status.pastDue": "Ödeme gecikti — lütfen ödeme yöntemini güncelle.",
+  "app.account.status.paused": "Duraklatıldı",
+  "app.account.status.expired": "Süresi doldu",
+  "app.account.status.comp": "Hediye",
+  "app.account.usage": "Bu dönemki dakikalar",
+  "app.account.usageOf": "{used} / {limit} dk kullanıldı",
+  "app.account.resetsOn": "{date} tarihinde sıfırlanır",
+  "app.account.manage": "Aboneliği yönet",
+  "app.account.manageHint":
+    "Faturalar, ödeme yöntemi ve iptal işlemleri Lemon Squeezy müşteri portalında yönetilir.",
+  "app.account.changePlan": "Planı değiştir",
+  "app.account.choosePlan": "Bir plan seç",
+  "app.account.portalFailed": "Ödeme portalı açılamadı. Lütfen birazdan tekrar dene.",
+  "app.account.loadFailed": "Hesabın şu an yüklenemedi. Lütfen birazdan tekrar dene.",
+  "app.account.testMode": "Test modu",
+  "app.account.successPending": "Teşekkürler! Ödemen alındı — planın etkinleştiriliyor…",
+  "app.account.successDone": "{plan} planın aktif. İyi düzenlemeler!",
+  "app.account.successSlow":
+    "Bu normalden uzun sürüyor. Planın birkaç dakika içinde burada görünecek — kontrol etmek için sayfayı yenile.",
+
+  // ── Library fallbacks ───────────────────────────────────────────────
+  "app.library.untitled": "Başlıksız",
+
+  // ── Workflow presets ────────────────────────────────────────────────
+  "app.preset.tiktok.label": "TikTok / Reels",
+  "app.preset.tiktok.tagline": "Dikey, kısa format",
+  "app.preset.tiktok.desc": "Sesli komutlar, Clipper altyazılar, otomatik dikey kırpma",
+  "app.preset.tiktok.bullet1": "Sesli komutlar açık: yeniden çekmek için “Cleo cut” de",
+  "app.preset.tiktok.bullet2": "Kalın Clipper tarzı altyazılar",
+  "app.preset.tiktok.bullet3": "Yüz takibiyle otomatik dikey 9:16",
+  "app.preset.podcast.label": "Podcast Uzun Format",
+  "app.preset.podcast.tagline": "Tam bölüm + klipler",
+  "app.preset.podcast.desc": "AI temizliği, hook tespiti, çoklu format dışa aktarma",
+  "app.preset.podcast.bullet1": "Transkriptinde AI temizliği",
+  "app.preset.podcast.bullet2": "Otomatik seçilen 3 hook klip",
+  "app.preset.podcast.bullet3": "Tam bölüm + 9:16 klipler dışa aktarılır",
+  "app.preset.vlog.label": "Vlog Temizliği",
+  "app.preset.vlog.tagline": "Tek kişilik konuşma",
+  "app.preset.vlog.desc": "Dolgu kelimeleri kaldır, sade altyazılar, en-boy oranını koru",
+  "app.preset.vlog.bullet1": "“yani”, “işte”, uzun duraklamaları kaldırır",
+  "app.preset.vlog.bullet2": "Dikkat dağıtmayan sade altyazılar",
+  "app.preset.vlog.bullet3": "Orijinal en-boy oranını korur",
+  "app.preset.captions.label": "Sadece Altyazı",
+  "app.preset.captions.tagline": "Yalnızca altyazı ekle",
+  "app.preset.captions.desc": "Videona altyazı yakar — kesim yok, temizlik yok",
+  "app.preset.captions.bullet1": "Seçtiğin stilde altyazı yakar",
+  "app.preset.captions.bullet2": "Kesim yok, temizlik yok",
+  "app.preset.captions.bullet3": "En hızlısı — sadece altyazı",
+  "app.preset.custom.label": "Özel",
+  "app.preset.custom.tagline": "Her şeyi ayarla",
+  "app.preset.custom.desc": "Tüm ayarlar — her düğmeyi kendin seç",
+  "app.preset.custom.bullet1": "Tüm ayarlar erişilebilir",
+  "app.preset.custom.bullet2": "Altyazı, kesim, formatı kendin seç",
+  "app.preset.custom.bullet3": "Ne istediğini bilenler için",
+
+  // ── Caption styles ──────────────────────────────────────────────────
+  "app.captions.clean": "Clean",
+  "app.captions.classic": "Classic",
+  "app.captions.clipper": "Clipper",
+  "app.captions.highlight": "Highlight",
+  "app.captions.flash": "Flash",
+  "app.captions.punch": "Punch",
+  "app.captions.elegant": "Elegant",
+  "app.captions.subtle": "Subtle",
+  "app.captions.none": "Altyazı yok",
+
+  // ── Cut styles ──────────────────────────────────────────────────────
+  "app.cutStyle.tight.label": "Sıkı",
+  "app.cutStyle.tight.desc": "Agresif",
+  "app.cutStyle.balanced.label": "Dengeli",
+  "app.cutStyle.balanced.desc": "Varsayılan",
+  "app.cutStyle.smooth.label": "Yumuşak",
+  "app.cutStyle.smooth.desc": "Duraklamaları koru",
+
+  // ── Export formats ──────────────────────────────────────────────────
+  "app.format.9x16.desc": "TikTok / Reels / Shorts",
+  "app.format.1x1.desc": "Instagram akışı",
+  "app.format.16x9.desc": "YouTube / masaüstü",
+
+  // ── Dashboard ───────────────────────────────────────────────────────
+  "app.dashboard.workspace": "Çalışma alanın",
+  "app.dashboard.inProgressCountOne": "{count} video işleniyor",
+  "app.dashboard.inProgressCountOther": "{count} video işleniyor",
+  "app.dashboard.readyCountOne": "{count} video incelemeye hazır",
+  "app.dashboard.readyCountOther": "{count} video incelemeye hazır",
+  "app.dashboard.failedCountOne": "{count} video başarısız",
+  "app.dashboard.failedCountOther": "{count} video başarısız",
+  "app.dashboard.readyWhenYouAre": "Sen hazır olduğunda hazır",
+  "app.dashboard.newVideo": "Yeni video",
+  "app.dashboard.inProgress": "İşleniyor",
+  "app.dashboard.recentProjects": "Son projeler",
+  "app.dashboard.viewAll": "Tümünü gör",
+  "app.dashboard.startFirst": "İlk videonu başlat",
+  "app.dashboard.startFirstSub": "Bir iş akışı seç — CleoCuts altyazı, format ve temizliği halleder",
+  "app.dashboard.voiceTeaser": "Kayıt sırasında “Cleo” de — düzenlemede saatler kazan",
+
+  // ── Workflow picker ─────────────────────────────────────────────────
+  "app.picker.backToDashboard": "Panele dön",
+  "app.picker.freeDuringBeta": "Beta süresince ücretsiz",
+  "app.picker.title": "Ne paylaşıyorsun?",
+  "app.picker.subtitle":
+    "Bir iş akışı seç — CleoCuts platform için altyazı, format ve temizliği önceden ayarlar.",
+  "app.picker.chipCaptions": "{style} altyazılar",
+  "app.picker.chipVoice": "\"Cleo cut\" açık",
+  "app.picker.customTitle": "Özel kurulum",
+  "app.picker.customSub": "Her düğmeyi kendin seç — altyazı, kesim, format",
+
+  // ── Upload (choose a file) ──────────────────────────────────────────
+  "app.upload.back": "Geri",
+  "app.upload.title": "Video seç",
+  "app.upload.hint":
+    "Telefonundan veya bilgisayarından MP4 ya da MOV. Yükleme bitene kadar bu sayfayı açık tut.",
+  "app.upload.tapToChoose": "Seçmek için dokun",
+  "app.upload.orDrag": "veya birini sürükle",
+  "app.upload.privacyLink": "Videolarını nasıl işliyoruz",
+  "app.upload.resuming":
+    "Yükleme kaldığı yerden devam ediyor — bu sayfayı açık tut.",
+
+  // ── Configure (custom settings) ─────────────────────────────────────
+  "app.configure.back": "geri",
+  "app.configure.fileInfo": "{name} · {size} MB",
+  "app.configure.captionStyle": "Altyazı stili",
+  "app.configure.captionPreviewAlt": "{style} altyazı önizlemesi",
+  "app.configure.cutStyle": "Kesim stili",
+  "app.configure.cleanup": "Temizlik",
+  "app.configure.voiceTriggers": "\"Cleo cut\" / \"Cleo go\" için dinle",
+  "app.configure.voiceTriggersDesc": "Başarısız çekimleri otomatik kaldırır",
+  "app.configure.removeFillers": "Dolgu kelimeleri kaldır",
+  "app.configure.removeFillersDesc": "\"yani\", \"işte\", \"aa\" gibi kelimeleri keser…",
+  "app.configure.smartReframe": "Akıllı yeniden kadraj",
+  "app.configure.smartcam": "SmartCam yüz takibi",
+  "app.configure.smartcamDesc": "Dikey/yatay çıkış için otomatik yeniden kadraj",
+  "app.configure.portrait": "dikey",
+  "app.configure.landscape": "yatay",
+  "app.configure.portraitDesc": "Dikey 9:16",
+  "app.configure.landscapeDesc": "Yatay 16:9",
+  "app.configure.extraFormats": "Ek çıkış formatları",
+  "app.configure.extraFormatsHint":
+    "Birincil çıkış SmartCam formatını (veya orijinal en-boy oranını) kullanır. Diğer platformlar için ek letterbox'lı sürümler seç.",
+  "app.configure.process": "Videoyu işle",
+
+  // ── Done screen ─────────────────────────────────────────────────────
+  "app.done.readyToPost": "Paylaşıma hazır",
+  "app.done.captionSuggestion": "Açıklama önerisi",
+  "app.done.copy": "kopyala",
+  "app.done.downloadPrimary": "Ana sürümü indir",
+  "app.done.downloadFormat": "{format} indir",
+  "app.done.mainEdit": "Ana kurgu",
+  "app.done.bonusClips": "Bonus klipler",
+  "app.done.aiPicked": "AI tarafından seçildi",
+  "app.done.processAnother": "Başka bir video işle",
+
+  // ── Dashboard job cards ─────────────────────────────────────────────
+  "app.card.noPreview": "önizleme yok",
+  "app.card.uploading.title": "Yükleniyor",
+  "app.card.uploading.sub": "Yükleniyor — bu sayfayı açık tut ve telefonunu kilitleme.",
+  "app.card.analyzing.title": "Analiz ediliyor",
+  "app.card.analyzing.sub": "Duraklamalar ve dolgu kelimeler transkribe edilip kesiliyor.",
+  "app.card.reviewing.title": "Düzenlemeye hazır",
+  "app.card.reviewing.sub": "Editörü açıp kesimi ince ayarlamak için dokun.",
+  "app.card.rendering.title": "Render ediliyor",
+  "app.card.rendering.sub": "Son videon birleştiriliyor.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "Sırada bekliyor (#{n})",
+  "app.card.queued.titleNoPos": "Sırada bekliyor",
+  "app.card.queued.sub":
+    "Şu an çok fazla video var — seninki otomatik olarak başlayacak. Bu sayfadan ayrılabilirsin.",
+  "app.card.open": "Aç",
+  "app.card.remove": "Kaldır",
+  "app.card.renderFailedNote": "Render başarısız oldu — düzenlemelerin kaydedildi. Aç ve yeniden render et.",
+
+  // ── Captions tab ────────────────────────────────────────────────────
+  "app.captions.styleHeading": "Altyazı stili · {style}",
+  "app.captions.appliedToOutput": "Çıkışa uygulandı",
+  "app.captions.disabled": "Bu render için altyazılar devre dışı.",
+
+  // ── Voice test (dialog) ─────────────────────────────────────────────
+  "app.voice.title": "Sesini test et",
+  "app.voice.subtitle": "Komutları söyle — Cleo'nun seni duyup duymadığına bak.",
+  "app.voice.close": "Kapat",
+  "app.voice.heardYou": "Seni duydum!",
+  "app.voice.listening": "Dinliyor…",
+  "app.voice.heardPrefix": "duyulan: ",
+  "app.voice.permissionHint": "Mikrofonunu kullanır. Tarayıcın konuşmanı metne çevirir: Chrome bunun için sesini Google'a, Safari Apple'a gönderir. CleoCuts'a hiçbir şey gitmez.",
+  "app.voice.requesting": "İsteniyor…",
+  "app.voice.start": "Başlat",
+  "app.voice.denied": "İzin verilmedi. Tarayıcı ayarlarından etkinleştir + sayfayı yenile.",
+  "app.voice.unsupported": "Bu tarayıcıda desteklenmiyor. Safari veya Chrome dene.",
+  "app.voice.done": "Bitti",
+  "app.voice.cmd.start": "Çekimini başlat",
+  "app.voice.cmd.cut": "Yeniden çek, mevcut çekimi at",
+  "app.voice.cmd.keep": "Çekimi onayla, sonraki sahne",
+  "app.voice.cmd.finish": "Videoyu bitir, sonrasındaki her şeyi kes",
+  "app.voice.cmd.stop": "Kötü bir cümleyi atla ('go' ile birlikte kullan)",
+  "app.voice.cmd.go": "'stop' sonrası devam et",
+  "app.crash.saving": "Son değişikliklerin kaydediliyor…",
+  "app.crash.saved": "Son değişikliklerin kaydedildi.",
+  "app.crash.unsaved": "Son değişikliklerin kaydedilmemiş olabilir.",
+  "app.crash.body": "Kaldığın yerden devam etmek için sayfayı yenile.",
+  "app.crash.reload": "Sayfayı yenile",
+
+  // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
+  "app.errors.noVideoTrack": "Bu bir ses dosyası. CleoCuts'ın sesli bir videoya ihtiyacı var — lütfen bir video dosyası seç. Hiçbir ücret alınmadı.",
+  "app.errors.videoTooShort": "Bu video {min} saniyeden kısa — kesmek için çok kısa. Hiçbir ücret alınmadı.",
+  "app.errors.processingInterrupted": "İşlem yarıda kesildi. Lütfen videoyu tekrar yükle.",
+  "app.errors.mediaUnavailable": "Orijinal video artık mevcut değil, bu yüzden bu proje tekrar düzenlenemez.",
+  "app.errors.tooManyRenders": "Çok fazla dışa aktarma sürüyor. Lütfen birinin bitmesini bekle.",
+  "app.errors.renderLimit": "Bu video bugünkü dışa aktarma sınırına ulaştı. Lütfen yarın tekrar dene.",
+  "app.errors.staleRev": "Bu proje başka bir sekmede değiştirildi. En son sürümü görmek için sayfayı yenile.",
+  "app.errors.docNotReady": "Bu proje henüz hazır değil. Lütfen birazdan tekrar dene.",
+  "app.errors.refunded": "Dakikalar hesabına geri yüklendi.",
+  "app.errors.tryAnotherVideo": "Başka bir video dene",
+  "app.warnings.scriptUnsupported": "Bu dilin yazı sistemi için altyazılar henüz kullanılamıyor.",
+  "app.warnings.smartcamFailed": "Konuşmacı takibi bu videoda çalışmadı, bu yüzden video ortadan kırpıldı.",
+  "app.audio.silent": "Ses sessiz görünüyor — mikrofonunun açık olduğunu ve sessize alınmadığını kontrol et.",
+  "app.audio.quiet": "Ses çok kısık — bir dahaki sefere mikrofona daha yakın konuş.",
+  "app.audio.clipping": "Ses tepe noktalarında patlıyor — kayıt çok yüksek, bozulma olabilir.",
+  "app.stage.queued": "Boş bir yer bekleniyor",
+  "app.stage.analyze.normalize": "Videon hazırlanıyor",
+  "app.stage.analyze.smartcam": "Konuşmacı takip ediliyor",
+  "app.stage.analyze.transcribe": "Deşifre ediliyor",
+  "app.stage.analyze.cleanup": "Transkript düzenleniyor",
+  "app.stage.analyze.cuts": "Kesimler bulunuyor",
+  "app.stage.analyze.captions": "Altyazılar hazırlanıyor",
+  "app.stage.analyze.done": "İncelemeye hazır",
+  "app.stage.render.prepare": "Dışa aktarma hazırlanıyor",
+  "app.stage.render.captions": "Altyazılar ekleniyor ({i}/{n})",
+  "app.stage.render.encode": "Dışa aktarılıyor",
+  "app.stage.render.hooks": "Öne çıkanlar kesiliyor",
+  "app.stage.render.finish": "Tamamlanıyor",
+};
