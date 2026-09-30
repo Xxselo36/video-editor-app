@@ -12,6 +12,12 @@ root, with the expensive parts faked and a test API to create jobs:
 * Rendering: pipeline.render_to_keys is replaced — stage messages, then
   the clip's VP8 proxy stored as the rendered formats (or a failure, per
   job). Social captions are canned. No Groq / Claude / Modal is called.
+* Edit document (UT3): every analysed or seeded review job gets a doc
+  (backend/doc.py) from its clip's words — the speech clip's word
+  timings (fillers flagged), the grid clip's lines split into words — so
+  GET / PATCH /jobs/{id}/doc answer as for a real new job (the backend's
+  own routes). Seed option `doc: false` makes a job from before the doc
+  (404 no_doc).
 * Previews: the real cut preview (pipeline._ffmpeg_cuts_preview) is
   re-encoded to VP8 — Playwright's Chromium plays no H.264/AAC — and
   cached by source content + segments, so seeding is fast.
@@ -29,7 +35,7 @@ Test API (only this script registers it; never part of the backend):
        options: filename, owner (a user id: the job's owner_id),
               age_s (created that long ago), clip ("grid" | "speech"),
               orientation ("portrait" | "landscape"), settings (dict),
-              caption_preset,
+              caption_preset, doc (false: no edit document),
               proxy: "off"   has_proxy false, proxy-video 404 (today's
                              production default: CLEO_PROXY_VIDEO unset)
                      "on"    has_proxy true, proxy-video plays
@@ -275,8 +281,20 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
 
     pipeline._ffmpeg_cuts_preview = chromium_cuts_preview
 
+    from backend import doc as edit_doc
+
+    def clip_doc(clip: str, data: dict[str, Any], settings: dict | None) -> dict[str, Any]:
+        """The edit document of a stub clip, as the analysis builds it."""
+        if clip == "speech":
+            words = edit_doc.words_from_transcript(stub_media.speech_words())
+        else:
+            words = edit_doc.words_from_units(data["subtitles"])
+        return edit_doc.build_doc(words, data["language"], settings or {},
+                                  segments=data["segments"])
+
     def analysis_result(clip: str, orientation: str, out_dir: Path,
-                        audio_warnings: list[str] | None = None) -> dict[str, Any]:
+                        audio_warnings: list[str] | None = None,
+                        settings: dict | None = None) -> dict[str, Any]:
         """What pipeline.analyze_only returns, for a stub clip, with its
         files (normalized, proxy, first preview) in `out_dir`."""
         files = clip_files(clip, orientation)
@@ -291,7 +309,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                 "segments": [tuple(s) for s in data["segments"]], "subtitles": data["subtitles"],
                 "duration": data["duration"], "cut_ranges": data["cut_ranges"],
                 "language": data["language"], "audio_warnings": audio_warnings or [],
-                "audio_levels": {}, "scene_events": []}
+                "audio_levels": {}, "scene_events": [],
+                "doc": clip_doc(clip, data, settings)}
 
     def review_fields(res: dict[str, Any]) -> dict[str, Any]:
         """The job fields _run_analyze_inner commits for a finished analysis."""
@@ -300,7 +319,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                     preview_version=1, subtitles=res["subtitles"], duration=res["duration"],
                     cut_ranges=res["cut_ranges"], language=res["language"],
                     audio_warnings=res["audio_warnings"], audio_levels=res["audio_levels"],
-                    scene_events=res["scene_events"])
+                    scene_events=res["scene_events"], doc=res.get("doc"), doc_rev=0)
 
     # ── fake analysis (the real worker around it) ─────────────────────
     def fake_analyze_only(input_path: str, output_dir: str, settings: dict,
@@ -320,7 +339,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         orientation = "landscape" if landscape else "portrait"
         set_cfg(job_id, **{"proxy": "on", "render": "ok", "clip": clip,
                            "orientation": orientation, **per_file})
-        return analysis_result(clip, orientation, Path(output_dir))
+        return analysis_result(clip, orientation, Path(output_dir), settings=settings)
 
     M.analyze_only = fake_analyze_only
 
@@ -400,11 +419,14 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             store.update(job.id, settings={**job.settings, "caption_preset": opts["caption_preset"]})
         return job
 
-    def seed_review(job, clip: str, orientation: str, warnings: list[str] | None = None) -> None:
+    def seed_review(job, clip: str, orientation: str, warnings: list[str] | None = None,
+                    with_doc: bool = True) -> None:
         where = media.backend()
         ws = M._workspace(job.id, "seed")
         try:
-            res = analysis_result(clip, orientation, ws, warnings)
+            res = analysis_result(clip, orientation, ws, warnings, settings=job.settings)
+            if not with_doc:
+                res["doc"] = None
             stored = M._store_analysis(job.id, res, lambda *_a: None, where)
         finally:
             shutil.rmtree(M._workspace(job.id), ignore_errors=True)
@@ -444,13 +466,13 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         if name == "review":
             clip = clip or "grid"
             job = create(opts, {"caption_preset": "clipper"}, "test.mp4", (None, None))
-            seed_review(job, clip, orientation)
+            seed_review(job, clip, orientation, with_doc=opts.get("doc", True) is not False)
             proxy = "off"
         elif name in ("review_speech", "render_failed"):
             clip = clip or "speech"
             job = create(opts, TIKTOK, "tiktok_3_mistakes.mp4" if name == "review_speech"
                          else "interview_cut_final.mp4", tiktok)
-            seed_review(job, clip, orientation)
+            seed_review(job, clip, orientation, with_doc=opts.get("doc", True) is not False)
             if name == "render_failed":
                 store.update(job.id, message="render_failed",
                              error="Render worker unavailable (modal_unavailable)")
