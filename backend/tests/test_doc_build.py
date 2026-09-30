@@ -179,6 +179,31 @@ def test_cleanup_diff_keeps_timing():
     assert by_text["win."]["start"] == 2.2
 
 
+def test_cleanup_boundary_word_belongs_to_the_next_unit():
+    words = D.words_from_transcript([{"word": "so", "start": 1.0, "end": 1.2},
+                                     {"word": "good", "start": 1.25, "end": 1.6},
+                                     {"word": "yes", "start": 1.6, "end": 1.6}])
+    units = [{"text": "so good", "original_start": 1.0, "original_end": 1.6},
+             {"text": "yes", "original_start": 1.6, "original_end": 1.6}]
+    out = D.apply_cleanup(words, units, {0: "So good", 1: "Yes."})
+    assert [(w["id"], w["text"], w["start"], w["end"]) for w in out] == [
+        ("w0001", "So", 1.0, 1.2), ("w0002", "good", 1.25, 1.6), ("w0003", "Yes.", 1.6, 1.6)]
+    # only the first unit rewritten: "yes" is left alone, not deleted
+    out = D.apply_cleanup(words, units, {0: "so good!"})
+    assert [w["text"] for w in out] == ["so", "good!", "yes"]
+
+
+def test_cleanup_many_units_in_one_pass():
+    raw = [{"word": f"w{i}", "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(3000)]
+    units = [{"text": f"w{i}", "original_start": i * 0.5, "original_end": i * 0.5 + 0.4}
+             for i in range(3000)]
+    out = D.apply_cleanup(D.words_from_transcript(raw), units,
+                          {i: f"x{i} y{i}" for i in range(0, 3000, 2)})
+    assert len(out) == 4500
+    assert [w["text"] for w in out[:4]] == ["x0", "y0", "w1", "x2"]
+    D.check_words(out)
+
+
 def test_words_from_units_fallback():
     units = [{"text": "Hi there", "start": 0.0, "end": 1.0, "original_start": 2.0, "original_end": 3.0},
              {"text": "Hi there", "start": 1.0, "end": 1.2, "original_start": 2.0, "original_end": 3.0}]

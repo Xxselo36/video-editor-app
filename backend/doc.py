@@ -31,6 +31,7 @@ import json
 import math
 import os
 import re
+from bisect import bisect_right
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -716,39 +717,53 @@ def number_words(words: list[dict]) -> list[dict]:
 def apply_cleanup(words: list[dict], subtitles: list[dict],
                   cleaned: dict[int, str]) -> list[dict]:
     """The LLM cleanup's rewritten caption units (index → text) applied
-    to the words with apply_text_edit: a unit's words are the non-filler-
-    sound words inside its SOURCE time (original_start/end)."""
+    to the words with apply_text_edit.
+
+    Every non-filler-sound word belongs to at most one unit: the last
+    unit (by SOURCE start) that starts at or before it, if the word also
+    ends inside that unit. So a zero-length word on the boundary of two
+    units ("good" ending at 1.6, "yes" at [1.6, 1.6]) is the next unit's,
+    never pulled into both."""
     if not cleaned:
         return words
-    out = list(words)
-    done: set[tuple] = set()
-    for i in sorted(k for k in cleaned if isinstance(k, int)):
-        if not (0 <= i < len(subtitles)):
-            continue
-        text = cleaned[i]
-        u = subtitles[i]
+    units: dict[tuple[float, float], str | None] = {}
+    for i, u in enumerate(subtitles):
         s = u.get("original_start", u.get("start"))
         e = u.get("original_end", u.get("end"))
-        if not isinstance(text, str) or s is None or e is None or (s, e) in done:
+        if s is None or e is None:
             continue
-        done.add((s, e))
-        idx = [k for k, w in enumerate(out)
-               if w["start"] >= float(s) - 0.002 and w["end"] <= float(e) + 0.002
-               and not _vocal(w["text"])]
-        if not idx:
+        key = (float(s), float(e))
+        text = cleaned.get(i)
+        if key not in units or (units[key] is None and isinstance(text, str)):
+            units[key] = text if isinstance(text, str) else None
+    order = sorted(units)
+    starts = [k[0] for k in order]
+    members: dict[tuple[float, float], list[int]] = {}
+    for k, w in enumerate(words):
+        if _vocal(w["text"]):
             continue
-        span = [out[k] for k in idx]
+        j = bisect_right(starts, w["start"] + 0.002) - 1
+        if j >= 0 and w["end"] <= order[j][1] + 0.002:
+            members.setdefault(order[j], []).append(k)
+    taken = {w["id"] for w in words}
+    drop: set[int] = set()
+    placed: list[tuple[float, float, dict]] = []
+    for key in order:
+        text, idx = units[key], members.get(key)
+        if text is None or not idx:
+            continue
+        span = [words[k] for k in idx]
         if [w["text"] for w in span] == tokenize(text):
             continue
-        taken = {w["id"] for w in out}
         edited = apply_text_edit(span, text, taken)
-        drop = set(idx)
-        rest = [(w["start"], k, w) for k, w in enumerate(out) if k not in drop]
-        first = idx[0]
-        ins = [(w["start"], first + n / (len(edited) + 1), w)
-               for n, w in enumerate(edited)]
-        out = [w for _s, _k, w in sorted(rest + ins, key=lambda x: (x[0], x[1]))]
-    return out
+        taken |= {w["id"] for w in edited}
+        drop |= set(idx)
+        placed += [(w["start"], idx[0] + (n + 1) / (len(edited) + 2), w)
+                   for n, w in enumerate(edited)]
+    if not drop:
+        return list(words)
+    rest = [(w["start"], float(k), w) for k, w in enumerate(words) if k not in drop]
+    return [w for _s, _k, w in sorted(rest + placed, key=lambda x: (x[0], x[1]))]
 
 
 def words_per_second(words: list[dict], segments: Iterable | None = None) -> float | None:
