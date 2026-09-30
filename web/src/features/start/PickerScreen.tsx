@@ -187,7 +187,7 @@ export function PickerScreen({
           className="mb-6 inline-flex w-fit items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
           style={{ color: "var(--text-muted)" }}
         >
-          <Icon icon={ArrowLeft} size={16} />
+          <Icon icon={ArrowLeft} className="text-base" />
           {t("app.picker.backToDashboard")}
         </button>
       )}

@@ -768,8 +768,8 @@ export function ReviewScreen({
       {/* Tab bar — clean 3-way switch for the editor */}
       <Tabs
         tabs={[
-          { id: "timeline", label: t("app.review.tabTimeline"), icon: <Icon icon={Timer} /> },
-          { id: "transcript", label: t("app.review.tabTranscript"), icon: <Icon icon={Type} /> },
+          { id: "timeline", label: t("app.review.tabTimeline"), icon: <Icon icon={Timer} size="1em" className="mx-[0.1075em]" /> },
+          { id: "transcript", label: t("app.review.tabTranscript"), icon: <Icon icon={Type} size="0.61em" /> },
           { id: "style", label: t("app.review.tabCaptions"), icon: <Icon icon={Pencil} /> },
         ]}
         active={activeTab}
@@ -897,7 +897,7 @@ export function ReviewScreen({
                       data-testid="transcript-seek"
                       className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-strong)]"
                     >
-                      <Icon icon={Play} className="fill-current" /> {fmtTime(p.original_start)}
+                      <Icon icon={Play} size="0.5em" className="fill-current" /> {fmtTime(p.original_start)}
                     </button>
                     <div className="flex items-center gap-2">
                       {lowConfidence && (

@@ -586,7 +586,7 @@ export function TimelineEditor({
               style={{ ...toolBtn, color: "var(--text-strong)" }}
               title={canSplit ? t("app.timeline.splitTitle") : t("app.timeline.splitUnavailable")}
             >
-              <Icon icon={SquareSplitHorizontal} /> {t("app.timeline.split")}
+              <Icon icon={SquareSplitHorizontal} size="0.75em" /> {t("app.timeline.split")}
             </button>
 
             <div className="ml-auto flex items-center gap-2">

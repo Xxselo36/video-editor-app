@@ -89,7 +89,7 @@ export function Dashboard({
           data-testid="dashboard-new-video"
           className="inline-flex shrink-0 items-center gap-1.5 transition-transform hover:-translate-y-0.5"
         >
-          <Icon icon={Plus} size={14} strokeWidth={2.5} />
+          <Icon icon={Plus} strokeWidth={2.5} className="text-base" />
           {t("app.dashboard.newVideo")}
         </Button>
       </div>
