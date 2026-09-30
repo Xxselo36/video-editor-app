@@ -153,6 +153,7 @@ def render_burn_concat(
             _generate_thumbnail,
             _video_size,
             EXPORT_FORMATS,
+            web_burn_kwargs,
         )
 
         burn_dir = work_dir / "burn"
@@ -174,6 +175,10 @@ def render_burn_concat(
             # render_only already merged tiny gaps (keeping per-segment
             # effects aligned); don't merge again here.
             merge_gap=0.0,
+            # The web's caption options (one clip per caption, bounce
+            # around the caption, web positions); computed here, in the
+            # container, so the spawn signature doesn't change.
+            **web_burn_kwargs(caption_preset),
         )
 
         if not clip_outputs:

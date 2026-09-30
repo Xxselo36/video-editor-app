@@ -163,7 +163,10 @@ def record_render(monkeypatch, subtitles: list[dict], segments: list,
 
     lock = threading.Lock()
     events: list[dict] = []
-    real_render = vep._render_segment_with_standalone_captions
+    # The real renderer, also when an earlier record_render in the same
+    # test left its fake in place.
+    real_render = getattr(vep._render_segment_with_standalone_captions,
+                          "real", vep._render_segment_with_standalone_captions)
     current = threading.local()
 
     def fake_highlight(words, active_index, duration, video_size,
@@ -188,6 +191,7 @@ def record_render(monkeypatch, subtitles: list[dict], segments: list,
                     **kw)
         return False          # nothing written: _burn_one skips the mux
 
+    render_segment.real = real_render
     monkeypatch.setattr(moviepy.editor, "VideoFileClip", _FakeVideo)
     monkeypatch.setattr(fx, "create_highlight_phrase_subtitle",
                         fake_highlight)

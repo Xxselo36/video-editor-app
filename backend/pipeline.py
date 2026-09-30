@@ -62,6 +62,36 @@ EXPORT_FORMATS: dict[str, tuple[int, int]] = {
 }
 
 
+# ── Caption burn: the web's options (UX2) ─────────────────────────────
+# _multi_clip_burn is shared with the SmartCut desktop app's Premiere
+# plugin. The web turns these on by keyword; their defaults keep the
+# plugin's look (backend/tests/captions/test_burn_golden.py), and
+# src/styles.py's positions stay the desktop's.
+#
+# sub_pos = vertical CENTRE of the caption block as a fraction of the frame
+# height: _render_segment_with_standalone_captions passes it on as
+# subtitle_position_y, and every renderer centres its block there
+# (create_dynamic_subtitle: h*y - block/2; create_pil_text_clip: h*y -
+# image/2; highlight styles: h*y - fontsize/2). The desktop defaults put
+# Clean (0.50) on the speaker's mouth and Classic (0.85) / Subtle (0.90)
+# inside TikTok's bottom UI band (captions.md §1.5).
+WEB_SUB_POS: dict[str, float] = {"clean": 0.70, "classic": 0.72,
+                                 "subtle": 0.76}
+
+
+def web_burn_kwargs(caption_preset: str | None) -> dict[str, Any]:
+    """The keyword arguments every web render passes to _multi_clip_burn:
+    assign_by_midpoint (a caption is burned in one clip only, never twice
+    across a cut), bounce_anchor="caption" (Clipper's bounce-in no longer
+    moves the text), and the web position of Clean / Classic / Subtle."""
+    kw: dict[str, Any] = {"assign_by_midpoint": True,
+                          "bounce_anchor": "caption"}
+    pos = WEB_SUB_POS.get(caption_preset or "")
+    if pos is not None:
+        kw["sub_pos"] = pos
+    return kw
+
+
 # HDR transfer functions we tone-map to SDR. iPhone Dolby Vision is
 # smpte2084 (PQ); iPhone HDR Video (HLG mode) is arib-std-b67. Both must
 # be tone-mapped or the 4K→1080p re-encode clips highlights to pure
@@ -2345,6 +2375,7 @@ def render_only(
             language=language,
             progress_cb=_stage,
             merge_gap=0.0,  # already merged above, in sync with audio/effects
+            **web_burn_kwargs(caption_preset),
         )
 
         if not clip_outputs:
@@ -2547,7 +2578,7 @@ def render_to_dir(
 
     burn_dir = out / "burn"
     burn_dir.mkdir(exist_ok=True)
-    extra: dict[str, Any] = {}
+    extra: dict[str, Any] = web_burn_kwargs(caption_preset)
     if parallelism:
         extra["parallelism"] = parallelism
     stage(f"Rendering {len(segments)} clip(s)…", 10)

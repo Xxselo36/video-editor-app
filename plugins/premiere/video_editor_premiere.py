@@ -1631,7 +1631,7 @@ _CAPTION_STYLE_HINTS = {
 def _render_segment_with_standalone_captions(
     input_video, output_path, subtitles, cut_style, caption_preset,
     preloaded_clip=None, return_clips_only=False, time_offset=0.0,
-    sub_pos=None, sub_size=None, language=None,
+    sub_pos=None, sub_size=None, language=None, bounce_anchor="frame",
 ):
     """Render a single cut segment with subtitles burned in using the
     SAME MoviePy/PIL renderer the standalone GUI uses. This gives the
@@ -1639,6 +1639,11 @@ def _render_segment_with_standalone_captions(
     Clipper, green word highlight + bounce, Punch yellow glow, etc.).
 
     `subtitles` are clip-relative dicts: [{"start", "end", "text"}, ...].
+    `sub_pos`: vertical CENTRE of the caption block as a fraction of the
+    frame height (None: the preset's subtitle_position_y).
+    `bounce_anchor`: what the highlight styles' bounce-in scales around —
+    "frame" (the plugin's look) or "caption" (web; see
+    src.effects.create_highlight_phrase_subtitle).
     Returns True on success.
     """
     try:
@@ -1845,7 +1850,7 @@ def _render_segment_with_standalone_captions(
                         phrase_clip = create_highlight_phrase_subtitle(
                             words=words, active_index=0, duration=phrase_dur,
                             video_size=clip.size, subtitle_config=subtitle_config,
-                            word_times=word_times,
+                            word_times=word_times, bounce_anchor=bounce_anchor,
                         )
                         if phrase_clip:
                             all_clips.append(phrase_clip.set_start(phrase_start_t + time_offset))
@@ -2032,11 +2037,52 @@ def _merge_tiny_segments(segments, min_gap=0.3):
     return [(s, e) for s, e in merged]
 
 
+def _home_segments(subtitles, segments):
+    """For assign_by_midpoint: the segment(s) each subtitle is burned in,
+    one set of segment indices per subtitle.
+
+    A subtitle belongs to the segment that holds its original midpoint (if
+    the edit repeats that source range, every repeat holds it — the words
+    are heard again). A midpoint inside a cut goes to the segment the
+    subtitle overlaps most. A repeat of an earlier subtitle (same text,
+    same original times: a word unit _map_subtitles_to_segments mapped into
+    two clips because it spans a cut) goes nowhere.
+    """
+    homes = []
+    seen = set()
+    for sub in subtitles:
+        try:
+            os_ = float(sub.get("original_start", sub.get("start", 0)))
+            oe_ = float(sub.get("original_end", sub.get("end", 0)))
+            text = str(sub.get("text") or "").strip()
+        except (AttributeError, TypeError, ValueError):
+            homes.append(set())      # malformed (client payload): skipped
+            continue
+        key = (round(os_, 3), round(oe_, 3), text)
+        if not text or key in seen:
+            homes.append(set())
+            continue
+        seen.add(key)
+        mid = (os_ + oe_) / 2.0
+        home = {i for i, (s, e) in enumerate(segments) if s <= mid < e}
+        if not home:
+            best, best_overlap = None, 0.0
+            for i, (s, e) in enumerate(segments):
+                overlap = min(oe_, e) - max(os_, s)
+                if overlap > best_overlap:
+                    best, best_overlap = i, overlap
+            if best is not None:
+                home = {best}
+        homes.append(home)
+    return homes
+
+
 def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                      output_dir, cut_style="balanced", cancel_check=None,
                      sub_pos=None, sub_size=None, clip_name_prefix=None,
                      language=None, progress_cb=None, parallelism=3,
-                     merge_gap=0.3):
+                     merge_gap=0.3, assign_by_midpoint=False,
+                     bounce_anchor="frame"):
     """Per-Segment MoviePy render mit fresh VideoFileClip pro Segment.
 
     Returns list of (file_path, duration) tuples in timeline order.
@@ -2045,6 +2091,16 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
     On Railway's shared CPU tier 4 is a sweet spot; higher just
     contends and doesn't help. Output order is preserved regardless
     of completion order.
+
+    Web-only options (the web backend passes them; the defaults are the
+    plugin's behaviour, pinned by backend/tests/captions/
+    test_burn_golden.py):
+    - assign_by_midpoint: each subtitle is burned in ONE segment, the one
+      holding its original midpoint (_home_segments), clipped to it. By
+      default every segment a subtitle overlaps shows it, so a caption
+      crossing a cut is burned twice.
+    - bounce_anchor: "caption" scales the highlight styles' bounce-in
+      around the caption instead of the frame centre.
     """
     if not segments:
         return []
@@ -2071,11 +2127,17 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
     print(f"[multi-clip] burning {n_segments} segments with "
           f"parallelism={parallelism}", flush=True)
 
+    # Before the worker threads start: one pass over all subtitles.
+    homes = _home_segments(subtitles, segments) if assign_by_midpoint else None
+
     # Pre-compute per-segment work items so the worker function is
     # small and self-contained.
-    def _subs_for(s_start, s_end, seg_dur):
+    def _subs_for(s_start, s_end, seg_dur, seg_index=None,
+                  assign_by_midpoint=False):
         out = []
-        for sub in subtitles:
+        for k, sub in enumerate(subtitles):
+            if assign_by_midpoint and seg_index not in homes[k]:
+                continue
             os_ = sub.get("original_start", sub.get("start", 0))
             oe_ = sub.get("original_end", sub.get("end", 0))
             text = (sub.get("text") or "").strip()
@@ -2107,7 +2169,8 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
         seg_dur = s_end - s_start
         if seg_dur <= 0:
             return None
-        clip_subs = _subs_for(s_start, s_end, seg_dur)
+        clip_subs = _subs_for(s_start, s_end, seg_dur, seg_index=i,
+                              assign_by_midpoint=assign_by_midpoint)
         # Render video 50ms LONGER than the requested segment so the
         # post-mux -shortest step truncates video (not audio) to match
         # the AAC-snapped audio duration exactly. Without this padding
@@ -2131,7 +2194,7 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                 input_video, out_path, clip_subs, cut_style,
                 caption_preset, preloaded_clip=sub_clip,
                 sub_pos=sub_pos, sub_size=sub_size,
-                language=language,
+                language=language, bounce_anchor=bounce_anchor,
             )
         finally:
             try: full_clip.close()
