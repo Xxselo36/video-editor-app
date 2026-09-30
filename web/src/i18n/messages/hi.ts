@@ -269,6 +269,8 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.review.backToDashboard": "← डैशबोर्ड",
   "app.review.audioHeadsUp": "ऑडियो अलर्ट",
   "app.review.updatingPreview": "प्रीव्यू अपडेट हो रहा है…",
+  "app.review.captionPreviewChip": "प्रीव्यू",
+  "app.review.captionPreviewTip": "नई कैप्शन तकनीक लाइव होने तक एक्सपोर्ट थोड़ा अलग दिख सकता है।",
   "app.review.tabTimeline": "टाइमलाइन",
   "app.review.tabTranscript": "ट्रांसक्रिप्ट",
   "app.review.tabCaptions": "कैप्शन",

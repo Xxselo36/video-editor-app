@@ -269,6 +269,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.review.backToDashboard": "← Panel",
   "app.review.audioHeadsUp": "Uwaga dot. audio",
   "app.review.updatingPreview": "Aktualizowanie podglądu…",
+  "app.review.captionPreviewChip": "Podgląd",
+  "app.review.captionPreviewTip": "Eksport może się nieco różnić, dopóki nowa technologia napisów nie zostanie wdrożona.",
   "app.review.tabTimeline": "Oś czasu",
   "app.review.tabTranscript": "Transkrypt",
   "app.review.tabCaptions": "Napisy",

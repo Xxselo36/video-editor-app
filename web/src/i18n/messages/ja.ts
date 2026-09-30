@@ -265,6 +265,8 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.review.backToDashboard": "← ダッシュボード",
   "app.review.audioHeadsUp": "音声に関する注意",
   "app.review.updatingPreview": "プレビューを更新中…",
+  "app.review.captionPreviewChip": "プレビュー",
+  "app.review.captionPreviewTip": "新しい字幕技術が公開されるまで、書き出し結果が少し異なる場合があります。",
   "app.review.tabTimeline": "タイムライン",
   "app.review.tabTranscript": "文字起こし",
   "app.review.tabCaptions": "字幕",

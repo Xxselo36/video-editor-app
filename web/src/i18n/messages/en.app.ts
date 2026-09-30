@@ -272,6 +272,8 @@ export const enApp = {
   "app.review.backToDashboard": "← Dashboard",
   "app.review.audioHeadsUp": "Audio heads-up",
   "app.review.updatingPreview": "Updating preview…",
+  "app.review.captionPreviewChip": "Preview",
+  "app.review.captionPreviewTip": "The export may differ slightly until the new caption technology is live.",
   "app.review.tabTimeline": "Timeline",
   "app.review.tabTranscript": "Transcript",
   "app.review.tabCaptions": "Captions",

@@ -270,6 +270,8 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.review.backToDashboard": "← Panel",
   "app.review.audioHeadsUp": "Ses uyarısı",
   "app.review.updatingPreview": "Önizleme güncelleniyor…",
+  "app.review.captionPreviewChip": "Önizleme",
+  "app.review.captionPreviewTip": "Yeni altyazı teknolojisi yayına girene kadar dışa aktarma biraz farklı görünebilir.",
   "app.review.tabTimeline": "Zaman Çizelgesi",
   "app.review.tabTranscript": "Transkript",
   "app.review.tabCaptions": "Altyazılar",

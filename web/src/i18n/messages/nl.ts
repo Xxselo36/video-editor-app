@@ -269,6 +269,8 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.review.backToDashboard": "← Dashboard",
   "app.review.audioHeadsUp": "Audio-melding",
   "app.review.updatingPreview": "Voorbeeld wordt bijgewerkt…",
+  "app.review.captionPreviewChip": "Voorbeeld",
+  "app.review.captionPreviewTip": "De export kan iets afwijken totdat de nieuwe ondertiteltechnologie live is.",
   "app.review.tabTimeline": "Tijdlijn",
   "app.review.tabTranscript": "Transcript",
   "app.review.tabCaptions": "Ondertitels",
