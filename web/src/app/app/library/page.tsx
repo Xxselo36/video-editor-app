@@ -310,6 +310,7 @@ function LibraryCard({
   return (
     <div
       className="rounded-2xl p-5"
+      data-testid="library-card"
       style={{
         background: "var(--surface-1)",
         border: "1px solid var(--border)",
@@ -394,6 +395,7 @@ function LibraryCard({
           {(expiry === "gone" || daysLeft !== null) && (
             <div
               className="mt-1 text-[11px]"
+              data-testid="library-card-expiry"
               style={{
                 color:
                   expiry === "gone" || (daysLeft !== null && daysLeft <= 3)
@@ -431,6 +433,7 @@ function LibraryCard({
             key={f}
             href={mediaUrl(entry.jobId, "download", { format: f })}
             download
+            data-testid="library-download"
             className="rounded-full px-3.5 py-1.5 text-xs font-semibold transition-transform hover:scale-105"
             style={
               f === "primary"

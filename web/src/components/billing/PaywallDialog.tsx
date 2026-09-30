@@ -38,6 +38,7 @@ export function PaywallDialog({ paywall, onClose }: { paywall: Paywall; onClose:
       role="dialog"
       aria-modal="true"
       aria-labelledby="paywall-title"
+      data-testid="dialog-paywall"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -68,6 +69,7 @@ export function PaywallDialog({ paywall, onClose }: { paywall: Paywall; onClose:
           </Link>
           <button
             onClick={onClose}
+            data-testid="dialog-close"
             className="flex-1 rounded-xl px-4 py-3 text-sm"
             style={{
               background: "var(--surface-2)",

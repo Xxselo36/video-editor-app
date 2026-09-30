@@ -121,6 +121,7 @@ export function LanguageSwitcher({ className = "" }: { className?: string }) {
       <select
         value={lang}
         onChange={(e) => setLang(e.target.value as Lang)}
+        data-testid="language-switcher"
         className="appearance-none rounded-full py-1.5 pl-7 pr-3 text-base sm:text-xs"
         style={{
           background: "var(--surface-2)",

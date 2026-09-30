@@ -1353,6 +1353,7 @@ export default function Home() {
         {notice && (
           <div
             role="status"
+            data-testid="notice"
             onClick={() => setNotice(null)}
             className="fixed left-1/2 top-4 z-50 w-[min(92vw,420px)] -translate-x-1/2 rounded-2xl px-4 py-3 text-sm"
             style={{
@@ -1454,6 +1455,7 @@ export default function Home() {
           ref={fileInputRef}
           type="file"
           accept="video/*"
+          data-testid="upload-input"
           className="sr-only"
           onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
         />
@@ -1873,7 +1875,7 @@ function PickerScreen({
 
   if (view === "dashboard") {
     return (
-      <div className="relative z-10 flex flex-col">
+      <div className="relative z-10 flex flex-col" data-testid="dashboard">
         {/* Dashboard header — logo/tagline on the left, primary CTA on
             the right. This screen is deliberately jobs-only; the
             workflow picker lives on its own screen. */}
@@ -1901,6 +1903,7 @@ function PickerScreen({
           </div>
           <button
             onClick={() => setView("picker")}
+            data-testid="dashboard-new-video"
             className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold transition-transform hover:-translate-y-0.5"
             style={{
               background: "var(--brand)",
@@ -2011,6 +2014,7 @@ function PickerScreen({
             stays a reminder without competing with the CTA. */}
         <button
           onClick={() => setShowVoiceOnboarding(true)}
+          data-testid="voice-teaser"
           className="mt-2 inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
           style={{
             background: "var(--brand-tint)",
@@ -2037,13 +2041,14 @@ function PickerScreen({
   }
 
   return (
-    <div className="relative z-10 flex flex-col">
+    <div className="relative z-10 flex flex-col" data-testid="picker">
       {/* Back to dashboard — only rendered when there's a dashboard to
           go back to (existing jobs or library entries). Fresh users
           land here directly and don't see the back button. */}
       {(activeJobs.length > 0 || (recent && recent.length > 0)) && (
         <button
           onClick={() => setView("dashboard")}
+          data-testid="picker-back"
           className="mb-6 inline-flex w-fit items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
           style={{ color: "var(--text-muted)" }}
         >
@@ -2106,6 +2111,7 @@ function PickerScreen({
             users can always re-open the cheat sheet. */}
         <button
           onClick={() => setShowVoiceOnboarding(true)}
+          data-testid="voice-teaser"
           className="mt-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
           style={{
             background: "var(--brand-tint)",
@@ -2130,6 +2136,7 @@ function PickerScreen({
             <button
               key={id}
               onClick={() => onPick(id)}
+              data-testid={`picker-card-${id}`}
               className="group relative flex flex-col overflow-hidden rounded-2xl p-5 text-left transition-all hover:-translate-y-0.5"
               style={{
                 background: "var(--surface-1)",
@@ -2209,6 +2216,7 @@ function PickerScreen({
       {/* Custom setup — separated, distinct dashed treatment */}
       <button
         onClick={() => onPick("custom")}
+        data-testid="picker-card-custom"
         className="mt-4 flex items-center gap-3 rounded-2xl p-4 text-left transition-colors"
         style={{
           background: "transparent",
@@ -2275,6 +2283,7 @@ function RecentProjectCard({
   return (
     <button
       onClick={() => onPlay(entry.jobId)}
+      data-testid="recent-project"
       className="group flex flex-col overflow-hidden rounded-xl text-left transition-all hover:-translate-y-0.5"
       style={{
         background: "var(--surface-1)",
@@ -2370,6 +2379,7 @@ function IdleScreen({
     <div className="relative z-10 flex flex-col">
       <button
         onClick={onBack}
+        data-testid="upload-back"
         className="mb-4 -ml-2 w-fit rounded-lg px-2 py-2 text-sm"
         style={{ color: "var(--text-muted)" }}
       >
@@ -2398,6 +2408,7 @@ function IdleScreen({
         onClick={onPick}
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
+        data-testid="upload-dropzone"
         className="group w-full rounded-2xl px-6 py-16 text-center transition-all hover:scale-[1.01]"
         style={{
           background: "var(--surface-1)",
@@ -2467,6 +2478,7 @@ function ConfigureScreen(props: {
       <div className="flex items-center justify-between">
         <button
           onClick={props.onBack}
+          data-testid="configure-back"
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
         >
           {t("app.configure.back")}
@@ -2602,6 +2614,7 @@ function ConfigureScreen(props: {
 
       <button
         onClick={() => props.onProcess()}
+        data-testid="configure-process"
         // Sticky on phones: the options list is ~2 screens tall.
         className="sticky bottom-3 z-20 mt-2 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold shadow-lg hover:bg-[var(--brand-hover)] active:scale-[0.99]"
       >
@@ -3575,10 +3588,11 @@ function ReviewScreen({
 
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3" data-testid="editor">
       <div className="flex items-center justify-between">
         <button
           onClick={onBack}
+          data-testid="editor-back"
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)]"
         >
           {t("app.review.backToDashboard")}
@@ -3614,6 +3628,7 @@ function ReviewScreen({
           ref={videoRef}
           src={videoSrc ?? undefined}
           data-playback={mode}
+          data-testid="editor-video"
           // The proxy can't be played after all (gone, codec): fall back
           // to the server-built preview.
           onError={() => {
@@ -3638,6 +3653,7 @@ function ReviewScreen({
         {captionPreset !== "none" && activeIdx !== null && phrases[activeIdx]?.text.trim() && (
           <div
             aria-hidden
+            data-testid="caption-overlay"
             className="pointer-events-none absolute inset-x-3 bottom-12 flex justify-center"
           >
             <span
@@ -3667,6 +3683,7 @@ function ReviewScreen({
         {/* Proxy mode has no preview to update: the edit already plays. */}
         {editSaving && mode !== "proxy" && (
           <div
+            data-testid="preview-updating"
             className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold backdrop-blur-md"
             style={{
               background: "rgba(0,0,0,0.55)",
@@ -3718,6 +3735,7 @@ function ReviewScreen({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              data-testid={`editor-tab-${tab.id}`}
               className="flex-1 px-3 py-2.5 text-sm font-medium transition-colors"
               style={{
                 background: isActive
@@ -3785,6 +3803,7 @@ function ReviewScreen({
           <span style={{ color: "var(--text-body)" }}>{t("app.transcript.lineDeleted")}</span>
           <button
             onClick={undoRemove}
+            data-testid="transcript-undo"
             className="rounded-lg px-3 py-1.5 text-sm font-semibold"
             style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
           >
@@ -3844,6 +3863,7 @@ function ReviewScreen({
                     phraseRefs.current[i] = el;
                   }}
                   onClick={() => seekToPhrase(p)}
+                  data-testid="transcript-line"
                   className={`relative cursor-pointer rounded-xl p-3 transition-all ${extraClass}`}
                 >
                   {isActive && (
@@ -3862,6 +3882,7 @@ function ReviewScreen({
                         e.stopPropagation();
                         seekToPhrase(p);
                       }}
+                      data-testid="transcript-seek"
                       className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-strong)]"
                     >
                       ▸ {fmtTime(p.original_start)}
@@ -4009,12 +4030,13 @@ function ReviewScreen({
         // Only the render itself blocks the button — autosaves no
         // longer flip it to "Preparing…" every few seconds.
         disabled={applying}
+        data-testid="apply-render"
         className="mt-1 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99] disabled:opacity-60"
       >
         {applying ? t("app.review.preparing") : t("app.review.applyRender")}
       </button>
       {applyError && (
-        <div className="text-center text-xs" style={{ color: "var(--danger)" }}>
+        <div className="text-center text-xs" style={{ color: "var(--danger)" }} data-testid="apply-error">
           {applyError}
         </div>
       )}
@@ -4203,7 +4225,7 @@ function ErrorScreen({
 }) {
   const t = useT();
   return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4" data-testid="error-screen">
       <div className="text-5xl">⚠️</div>
       <div className="text-base font-semibold">{t("app.errors.title")}</div>
       <div className="max-w-xs text-center text-xs text-[var(--text-muted)]">{message}</div>
@@ -4343,6 +4365,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
       onClick={onDone}
+      data-testid="dialog-voice-test"
     >
       <div
         className="relative flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl"
@@ -4374,6 +4397,7 @@ function VoiceCommandsTestStep({ onDone }: { onDone: () => void }) {
           </div>
           <button
             onClick={onDone}
+            data-testid="dialog-close"
             aria-label={t("app.voice.close")}
             className="ml-3 shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--surface-2)]"
             style={{ color: "var(--text-muted)" }}
@@ -4821,6 +4845,8 @@ function ActiveJobCard({
       // Error cards stay enabled: a disabled <button> swallows clicks on
       // its children, which made the "Try again" chip below dead.
       disabled={!canOpen && !isError}
+      data-testid="job-card"
+      data-phase={job.phase}
       className={`group relative flex flex-col overflow-hidden rounded-2xl p-4 text-left transition-all ${
         canOpen ? "cursor-pointer hover:-translate-y-0.5" : "cursor-default"
       }`}
@@ -4863,6 +4889,7 @@ function ActiveJobCard({
         </div>
         {canOpen ? (
           <div
+            data-testid="job-card-open"
             className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-transform group-hover:translate-x-0.5"
             style={{ background: accent, color: "#0f0f0f" }}
           >
@@ -4881,6 +4908,7 @@ function ActiveJobCard({
       {/* Status line */}
       {isError ? (
         <div
+          data-testid="job-card-status"
           className="relative z-10 mb-3 text-xs"
           style={{ color: "#F26E6E" }}
         >
@@ -4888,6 +4916,7 @@ function ActiveJobCard({
         </div>
       ) : (
         <div
+          data-testid="job-card-status"
           className="relative z-10 mb-3 text-xs leading-relaxed"
           style={{ color: job.note ? "var(--warn)" : "var(--text-body)" }}
         >
@@ -4930,6 +4959,7 @@ function ActiveJobCard({
       {/* Error retry */}
       {isError && onRetry && (
         <span
+          data-testid="job-card-remove"
           onClick={(e) => {
             e.stopPropagation();
             onRetry();
@@ -5532,6 +5562,7 @@ function TimelineEditor({
             </span>
             {saving && (
               <span
+                data-testid="timeline-saving"
                 className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal"
                 style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
               >
@@ -5544,6 +5575,7 @@ function TimelineEditor({
             )}
             {saveError && !saving && (
               <span
+                data-testid="timeline-save-error"
                 className="rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal"
                 style={{ background: "rgba(239,107,87,0.14)", color: "var(--danger)" }}
                 title={
@@ -5574,6 +5606,7 @@ function TimelineEditor({
               <button
                 onClick={undo}
                 disabled={history.length === 0}
+                data-testid="timeline-undo"
                 className="px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 disabled:hover:bg-transparent sm:px-2.5 sm:py-1"
                 style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
                 title={t("app.timeline.undoTitle")}
@@ -5584,6 +5617,7 @@ function TimelineEditor({
               <button
                 onClick={redo}
                 disabled={future.length === 0}
+                data-testid="timeline-redo"
                 className="px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 disabled:hover:bg-transparent sm:px-2.5 sm:py-1"
                 style={{
                   background: "var(--surface-2)",
@@ -5598,6 +5632,7 @@ function TimelineEditor({
             </div>
             <button
               onClick={splitAtPlayhead}
+              data-testid="timeline-split"
               className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors hover:border-[var(--brand)] sm:px-2.5 sm:py-1"
               style={{ ...toolBtn, color: "var(--text-strong)" }}
               title={t("app.timeline.splitTitle")}
@@ -5607,6 +5642,7 @@ function TimelineEditor({
 
             <div className="ml-auto flex items-center gap-2">
               <span
+                data-testid="timeline-timecode"
                 className="rounded-md px-2 py-1 font-mono text-[11px] tabular-nums"
                 style={{ background: "var(--surface-0)", color: "var(--text-strong)" }}
               >
@@ -5619,6 +5655,7 @@ function TimelineEditor({
                 <button
                   onClick={() => zoomTo(effPps / 1.5, viewW / 2)}
                   disabled={!canZoomOut}
+                  data-testid="timeline-zoom-out"
                   className="px-2.5 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 sm:px-2 sm:py-1"
                   style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
                   title={t("app.timeline.zoomOutTitle")}
@@ -5629,6 +5666,7 @@ function TimelineEditor({
                 <button
                   onClick={() => zoomTo(fitPps, 0)}
                   disabled={!canZoomOut}
+                  data-testid="timeline-zoom-fit"
                   className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 sm:py-1"
                   style={{
                     background: "var(--surface-2)",
@@ -5642,6 +5680,7 @@ function TimelineEditor({
                 <button
                   onClick={() => zoomTo(effPps * 1.5, viewW / 2)}
                   disabled={!canZoomIn}
+                  data-testid="timeline-zoom-in"
                   className="px-2.5 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] disabled:opacity-40 sm:px-2 sm:py-1"
                   style={{
                     background: "var(--surface-2)",
@@ -5660,6 +5699,7 @@ function TimelineEditor({
           {/* Ruler + clip strip — width scales with zoom, in a scroll container */}
           <div
             ref={scrollRef}
+            data-testid="timeline-scroll"
             className="overflow-x-auto rounded-xl"
             style={{
               background: "var(--surface-0)",
@@ -5677,6 +5717,7 @@ function TimelineEditor({
             >
               {/* Time ruler */}
               <div
+                data-testid="timeline-ruler"
                 className="relative h-7 cursor-pointer sm:h-6"
                 style={{ borderBottom: "1px solid var(--border)", touchAction: "none" }}
                 onPointerDown={(e) => {
@@ -5720,6 +5761,7 @@ function TimelineEditor({
                           setSelected(s.id);
                           onSeekOriginal(s.start, s.id);
                         }}
+                        data-testid={`clip-${i}`}
                         className="@container group relative flex h-full cursor-pointer flex-col justify-between overflow-clip rounded-md transition-[box-shadow,border-color] duration-150"
                         style={{
                           background: s.disabled
@@ -5765,6 +5807,7 @@ function TimelineEditor({
                               // edge selects instead of trimming.
                               <div
                                 key={mode}
+                                data-testid={`clip-trim-${mode}`}
                                 onMouseDown={(e) => {
                                   e.stopPropagation();
                                   setDraggingId(s.id);
@@ -5907,6 +5950,7 @@ function TimelineEditor({
                 <div className="ml-auto flex items-center gap-1.5">
                   <button
                     onClick={() => moveLeft(selectedSeg.id)}
+                    data-testid="clip-move-left"
                     className="rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] sm:px-2.5 sm:py-1"
                     style={toolBtn}
                     title={t("app.timeline.moveLeft")}
@@ -5916,6 +5960,7 @@ function TimelineEditor({
                   </button>
                   <button
                     onClick={() => moveRight(selectedSeg.id)}
+                    data-testid="clip-move-right"
                     className="rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-[var(--surface-tint)] sm:px-2.5 sm:py-1"
                     style={toolBtn}
                     title={t("app.timeline.moveRight")}
@@ -5925,6 +5970,7 @@ function TimelineEditor({
                   </button>
                   <button
                     onClick={() => del(selectedSeg.id)}
+                    data-testid="clip-delete"
                     className="rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-[rgba(239,107,87,0.12)] sm:px-2.5 sm:py-1"
                     style={{
                       background: "var(--surface-2)",
@@ -5942,6 +5988,7 @@ function TimelineEditor({
                 <span className="w-14 text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{t("app.timeline.speed")}</span>
                 <select
                   value={selectedSeg.speed ?? 1}
+                  data-testid="clip-speed"
                   onChange={(e) => patchSeg(selectedSeg.id, { speed: Number(e.target.value) })}
                   className="flex-1 rounded-md px-2 py-1 text-base sm:text-xs"
                   style={{
@@ -5970,6 +6017,7 @@ function TimelineEditor({
                   max={2.5}
                   step={0.05}
                   value={selectedSeg.volume ?? 1}
+                  data-testid="clip-volume"
                   onChange={(e) => patchSeg(selectedSeg.id, { volume: Number(e.target.value) })}
                   className="flex-1"
                   style={{ accentColor: "var(--brand)" }}
@@ -5990,6 +6038,7 @@ function TimelineEditor({
                   max={2}
                   step={0.1}
                   value={selectedSeg.fadeIn ?? 0}
+                  data-testid="clip-fade-in"
                   onChange={(e) => patchSeg(selectedSeg.id, { fadeIn: Number(e.target.value) })}
                   className="flex-1"
                   style={{ accentColor: "var(--brand)" }}
@@ -6010,6 +6059,7 @@ function TimelineEditor({
                   max={2}
                   step={0.1}
                   value={selectedSeg.fadeOut ?? 0}
+                  data-testid="clip-fade-out"
                   onChange={(e) => patchSeg(selectedSeg.id, { fadeOut: Number(e.target.value) })}
                   className="flex-1"
                   style={{ accentColor: "var(--brand)" }}
