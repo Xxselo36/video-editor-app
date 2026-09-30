@@ -194,6 +194,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
     "MP4 of MOV vanaf je telefoon of computer. Houd deze pagina open tot de upload klaar is.",
   "app.upload.tapToChoose": "Tik om te kiezen",
   "app.upload.orDrag": "of sleep er een naartoe",
+  "app.upload.privacyLink": "Zo gaan we met je video's om",
   "app.upload.keepTabOpen":
     "Houd dit tabblad open tot de upload klaar is. Wisselen van app of je telefoon vergrendelen annuleert de upload.",
   "app.upload.resuming":

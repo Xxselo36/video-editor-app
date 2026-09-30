@@ -194,6 +194,7 @@ export const id: Partial<Record<MessageKey, string>> = {
     "MP4 atau MOV dari HP atau komputermu. Biarkan halaman ini terbuka sampai unggahan selesai.",
   "app.upload.tapToChoose": "Ketuk untuk memilih",
   "app.upload.orDrag": "atau seret satu ke sini",
+  "app.upload.privacyLink": "Cara kami menangani videomu",
   "app.upload.keepTabOpen":
     "Biarkan tab ini terbuka sampai unggahan selesai. Berpindah aplikasi atau mengunci HP akan membatalkan unggahan.",
   "app.upload.resuming":

@@ -195,6 +195,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
     "Telefonundan veya bilgisayarından MP4 ya da MOV. Yükleme bitene kadar bu sayfayı açık tut.",
   "app.upload.tapToChoose": "Seçmek için dokun",
   "app.upload.orDrag": "veya birini sürükle",
+  "app.upload.privacyLink": "Videolarını nasıl işliyoruz",
   "app.upload.keepTabOpen":
     "Yükleme bitene kadar bu sekmeyi açık tut. Uygulama değiştirmek veya telefonunu kilitlemek yüklemeyi iptal eder.",
   "app.upload.resuming":

@@ -1972,8 +1972,8 @@ function PickerScreen({
             data-testid="dashboard-new-video"
             className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold transition-transform hover:-translate-y-0.5"
             style={{
-              background: "var(--brand)",
-              color: "#0f0f0f",
+              background: "var(--brand-solid)",
+              color: "white",
             }}
           >
             <span className="text-base leading-none">+</span>
@@ -2319,6 +2319,16 @@ function PickerScreen({
         </span>
       </button>
 
+      {/* The cards open the file chooser: the privacy note sits here. */}
+      <Link
+        href="/privacy"
+        data-testid="picker-privacy"
+        className="mt-3 w-fit text-xs underline underline-offset-2 hover:opacity-80"
+        style={{ color: "var(--text-muted)" }}
+      >
+        {t("app.upload.privacyLink")}
+      </Link>
+
       {playingJobId && (
         <VideoModal
           jobId={playingJobId}
@@ -2458,7 +2468,15 @@ function IdleScreen({
         {t("app.upload.title")}
       </h1>
       <p className="mb-8 text-sm" style={{ color: "var(--text-muted)" }}>
-        {t("app.upload.hint")}
+        {t("app.upload.hint")}{" "}
+        <Link
+          href="/privacy"
+          data-testid="upload-privacy"
+          className="whitespace-nowrap text-xs underline underline-offset-2 hover:opacity-80"
+          style={{ color: "var(--text-muted)" }}
+        >
+          {t("app.upload.privacyLink")}
+        </Link>
       </p>
       {billingHint && (
         <Link
@@ -2682,7 +2700,7 @@ function ConfigureScreen(props: {
         onClick={() => props.onProcess()}
         data-testid="configure-process"
         // Sticky on phones: the options list is ~2 screens tall.
-        className="sticky bottom-3 z-20 mt-2 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold shadow-lg hover:bg-[var(--brand-hover)] active:scale-[0.99]"
+        className="sticky bottom-3 z-20 mt-2 w-full rounded-xl bg-[var(--brand-solid)] px-6 py-4 text-base font-semibold text-white shadow-lg hover:bg-[var(--brand-solid-hover)] active:scale-[0.99]"
       >
         {t("app.configure.process")}
       </button>
@@ -2871,7 +2889,7 @@ function ProgressScreen({
                   className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
                   style={{
                     background: done
-                      ? "var(--brand)"
+                      ? "var(--brand-solid)"
                       : active
                         ? "var(--brand-tint)"
                         : "var(--surface-2)",
@@ -3009,7 +3027,7 @@ function DoneScreen({
               download
               className={`rounded-xl px-5 py-3 text-center font-semibold ${
                 f === "primary"
-                  ? "bg-[var(--brand)] hover:bg-[var(--brand-hover)]"
+                  ? "bg-[var(--brand-solid)] text-white hover:bg-[var(--brand-solid-hover)]"
                   : "border border-[var(--brand)] text-[var(--brand-strong)] hover:bg-[var(--brand)]/10"
               }`}
             >
@@ -4130,7 +4148,7 @@ function ReviewScreen({
         // longer flip it to "Preparing…" every few seconds.
         disabled={applying}
         data-testid="apply-render"
-        className="mt-1 w-full rounded-xl bg-[var(--brand)] px-6 py-4 text-base font-semibold hover:bg-[var(--brand-hover)] active:scale-[0.99] disabled:opacity-60"
+        className="mt-1 w-full rounded-xl bg-[var(--brand-solid)] px-6 py-4 text-base font-semibold text-white hover:bg-[var(--brand-solid-hover)] active:scale-[0.99] disabled:opacity-60"
       >
         {applying ? t("app.review.preparing") : t("app.review.applyRender")}
       </button>
@@ -6006,7 +6024,7 @@ function TimelineEditor({
                               {s.speed && s.speed !== 1 && (
                                 <span
                                   className="rounded px-1 text-[8px] font-semibold"
-                                  style={{ background: "var(--brand)", color: "white" }}
+                                  style={{ background: "var(--brand-solid)", color: "white" }}
                                 >
                                   {s.speed}×
                                 </span>

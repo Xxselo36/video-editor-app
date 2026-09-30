@@ -191,6 +191,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
     "휴대폰이나 컴퓨터에 있는 MP4 또는 MOV 파일. 업로드가 끝날 때까지 이 페이지를 열어 두세요.",
   "app.upload.tapToChoose": "탭해서 선택",
   "app.upload.orDrag": "또는 파일을 끌어다 놓기",
+  "app.upload.privacyLink": "영상 처리 방식 안내",
   "app.upload.keepTabOpen":
     "업로드가 끝날 때까지 이 탭을 열어 두세요. 앱을 전환하거나 휴대폰을 잠그면 업로드가 취소돼요.",
   "app.upload.resuming":

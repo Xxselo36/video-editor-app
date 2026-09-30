@@ -193,6 +193,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
     "MP4 или MOV с телефона или компьютера. Держи эту страницу открытой, пока загрузка не завершится.",
   "app.upload.tapToChoose": "Нажми, чтобы выбрать",
   "app.upload.orDrag": "или перетащи файл",
+  "app.upload.privacyLink": "Как мы обращаемся с твоими видео",
   "app.upload.keepTabOpen":
     "Не закрывай эту вкладку, пока загрузка не завершится. Переключение на другое приложение или блокировка телефона прервёт загрузку.",
   "app.upload.resuming":

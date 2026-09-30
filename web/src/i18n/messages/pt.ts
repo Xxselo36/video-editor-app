@@ -329,6 +329,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
     "MP4 ou MOV do seu celular ou computador. Mantenha esta página aberta até o envio terminar.",
   "app.upload.tapToChoose": "Toque para escolher",
   "app.upload.orDrag": "ou arraste um arquivo aqui",
+  "app.upload.privacyLink": "Como tratamos seus vídeos",
   "app.upload.keepTabOpen":
     "Mantenha esta aba aberta até o envio terminar. Trocar de app ou bloquear o celular vai cancelar o envio.",
   "app.upload.resuming":

@@ -191,6 +191,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
     "スマホやパソコンからMP4またはMOVを選んでください。アップロードが完了するまでこのページを開いたままにしてください。",
   "app.upload.tapToChoose": "タップして選択",
   "app.upload.orDrag": "またはドラッグして追加",
+  "app.upload.privacyLink": "動画の取り扱いについて",
   "app.upload.keepTabOpen":
     "アップロードが完了するまでこのタブを開いたままにしてください。アプリを切り替えたりスマホをロックしたりすると、アップロードが中断されます。",
   "app.upload.resuming":

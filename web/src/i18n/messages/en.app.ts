@@ -198,6 +198,7 @@ export const enApp = {
     "MP4 or MOV from your phone or computer. Keep this page open until the upload has finished.",
   "app.upload.tapToChoose": "Tap to choose",
   "app.upload.orDrag": "or drag one in",
+  "app.upload.privacyLink": "How we handle your videos",
   "app.upload.keepTabOpen":
     "Keep this tab open until the upload finishes. Switching apps or locking your phone will cancel the upload.",
   "app.upload.resuming":
