@@ -15,6 +15,13 @@
 // Literal reference: only `process.env.NEXT_PUBLIC_X` gets inlined.
 export const AUTH_ENABLED = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
+/** Paid plans are advertised (landing copy, legal texts). Copy only —
+ *  whether billing is on is decided by the backend (GET /billing/config).
+ *  Lives here (no React) so server components can read it too. */
+export const BILLING_COPY =
+  AUTH_ENABLED &&
+  ["1", "true"].includes((process.env.NEXT_PUBLIC_BILLING_ENABLED ?? "").toLowerCase());
+
 export type AuthState = {
   /** Clerk finished loading (always true when auth is off). */
   loaded: boolean;

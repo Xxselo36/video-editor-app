@@ -48,7 +48,7 @@ def headerless(r2, monkeypatch):
     (streamed WebM); the worker's packet scan says `measured.seconds`."""
     for key in (KEY, ANON_KEY):
         r2.put_object(Bucket=storage.bucket(), Key=key, Body=b"w" * 64)
-    monkeypatch.setattr(M, "_probe_remote_duration", lambda url: None)
+    monkeypatch.setattr(M, "_probe_remote", lambda url: (None, None))
     measured = type("Measured", (), {"seconds": 60.0, "calls": []})()
 
     def probe(path):

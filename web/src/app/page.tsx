@@ -5,8 +5,9 @@ import { Fragment, useEffect, useState } from "react";
 import { LogoWord } from "@/components/Logo";
 import { LanguageSwitcher, useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
-import { AUTH_ENABLED } from "@/lib/auth";
 import { BILLING_COPY, useBillingEnabled } from "@/lib/account";
+import { track } from "@/lib/analytics";
+import { COPYRIGHT } from "@/lib/legal";
 import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import {
   IconArrowRight,
@@ -15,14 +16,15 @@ import {
   IconMic,
   IconPhone,
   IconSparkle,
-  IconVlog,
 } from "@/components/Icons";
 
-/* Voice commands and aspect ratios stay literal in every language —
- * they are passed into translations as placeholders. */
+/* Voice commands stay literal in every language — they are passed into
+ * translations as placeholders. */
 const CUT = "Cleo cut";
 const FINISH = "Cleo finish";
-const FORMATS = "9:16, 1:1, 16:9";
+/** Hook clips: at most this many (backend/llm.py detect_hook_moments),
+ *  only for videos of 90 s or more (pipeline.detect_hooks). */
+const MAX_HOOK_CLIPS = 3;
 
 /** Replace "{name}" placeholders in a translated string with React nodes. */
 function rich(text: string, nodes: Record<string, React.ReactNode>): React.ReactNode {
@@ -35,6 +37,9 @@ function rich(text: string, nodes: Record<string, React.ReactNode>): React.React
 export default function Landing() {
   const t = useT();
   const billingOn = useBillingEnabled();
+  useEffect(() => {
+    track("landing_view");
+  }, []);
   const brandQuote = (phrase: string) => (
     <span style={{ color: "var(--brand)", fontWeight: 600 }}>&ldquo;{phrase}&rdquo;</span>
   );
@@ -62,9 +67,10 @@ export default function Landing() {
           {/* Hidden on phones: the hero CTA right below does the same job. */}
           <Link
             href="/app"
+            onClick={() => track("cta_click", { location: "header" })}
             className="hidden items-center gap-1.5 rounded-full px-5 py-2 text-sm font-semibold transition-transform hover:scale-105 sm:inline-flex"
             style={{
-              background: "var(--brand)",
+              background: "var(--brand-solid)",
               color: "white",
               boxShadow: "var(--shadow-glow)",
             }}
@@ -138,14 +144,16 @@ export default function Landing() {
 
           <Link
             href="/app"
+            onClick={() => track("cta_click", { location: "hero" })}
             className="group inline-flex items-center gap-2 rounded-full px-7 py-4 text-base font-semibold transition-transform hover:scale-[1.02]"
             style={{
-              background: "var(--brand)",
+              background: "var(--brand-solid)",
               color: "white",
               boxShadow: "var(--shadow-glow)",
             }}
           >
-            {t("site.hero.cta")}
+            {/* No free tier once plans are live (owner decision): no "try". */}
+            {BILLING_COPY ? t("site.header.openEditor") : t("site.hero.cta")}
             <IconArrowRight size={18} strokeWidth={2.5} />
           </Link>
         </div>
@@ -186,34 +194,27 @@ export default function Landing() {
               accent="var(--accent)"
             />
 
-            {/* Row 2: three equal */}
+            {/* Row 2: two equal. Only what the product does today: no
+                style count, no extra formats (they were letterboxed). */}
             <BentoCard
               Icon={IconCaptions}
-              title={t("site.features.captions.title", { count: 9 })}
+              title={t("site.features.captions.title")}
               body={t("site.features.captions.body")}
-              span={2}
-              decoration={<CaptionMiniPreview />}
+              span={3}
             />
             <BentoCard
               Icon={IconPhone}
               title={t("site.features.vertical.title")}
               body={t("site.features.vertical.body")}
-              span={2}
+              span={3}
               decoration={<FaceFrameDecoration />}
-            />
-            <BentoCard
-              Icon={IconVlog}
-              title={t("site.features.multiformat.title")}
-              body={t("site.features.multiformat.body", { formats: FORMATS })}
-              span={2}
-              decoration={<FormatStackDecoration />}
             />
 
             {/* Row 3: wide feature */}
             <BentoCard
               Icon={IconArrowRight}
               title={t("site.features.hooks.title")}
-              body={t("site.features.hooks.body", { count: 3 })}
+              body={t("site.features.hooks.body", { count: MAX_HOOK_CLIPS })}
               span={6}
               decoration={<HookClipStrip />}
               accent="var(--brand)"
@@ -274,7 +275,7 @@ export default function Landing() {
               <Step
                 n="03"
                 title={t("site.steps.post.title")}
-                body={rich(t("site.steps.post.body"), { formats: strong(FORMATS) })}
+                body={t("site.steps.post.body")}
                 hint={t("site.steps.post.hint")}
                 Icon={IconCheck}
               />
@@ -301,15 +302,23 @@ export default function Landing() {
             {billingOn && (
               <Link href="/pricing" className="hover:opacity-70">{t("site.footer.pricing")}</Link>
             )}
-            <Link href="/imprint" className="hover:opacity-70">{t("site.footer.imprint")}</Link>
-            <Link href="/privacy" className="hover:opacity-70">{t("site.footer.privacy")}</Link>
-            {AUTH_ENABLED && (
-              <Link href="/terms" className="hover:opacity-70">{t("site.footer.terms")}</Link>
-            )}
+            <nav aria-label={t("common.footer.legalAria")}>
+              <ul className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+                <li>
+                  <Link href="/imprint" className="hover:opacity-70">{t("site.footer.imprint")}</Link>
+                </li>
+                <li>
+                  <Link href="/privacy" className="hover:opacity-70">{t("site.footer.privacy")}</Link>
+                </li>
+                <li>
+                  <Link href="/terms" className="hover:opacity-70">{t("site.footer.terms")}</Link>
+                </li>
+              </ul>
+            </nav>
           </div>
-          <div className="text-[11px]" style={{ color: "var(--text-faint)" }}>
-            © 2026 CleoCuts
-          </div>
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+            {COPYRIGHT}
+          </p>
         </div>
       </footer>
     </main>
@@ -627,25 +636,6 @@ function VoiceWaveDecoration() {
   );
 }
 
-function CaptionMiniPreview() {
-  const t = useT();
-  return (
-    <div className="absolute inset-0 flex items-end justify-center pb-4 opacity-70">
-      <div
-        className="rounded-md px-2 py-1 text-[10px] font-black italic"
-        style={{
-          background: "rgba(0,0,0,0.5)",
-          color: "#ffffff",
-          textShadow: "0 1px 3px rgba(0,0,0,.7)",
-          border: "1px solid rgba(139,92,246,0.35)",
-        }}
-      >
-        {t("site.features.captions.decoration")}
-      </div>
-    </div>
-  );
-}
-
 function FaceFrameDecoration() {
   return (
     <div
@@ -664,40 +654,10 @@ function FaceFrameDecoration() {
   );
 }
 
-function FormatStackDecoration() {
-  return (
-    <div className="absolute -bottom-2 -right-2 flex items-end gap-1 opacity-70">
-      <div
-        className="rounded-sm"
-        style={{
-          width: 14,
-          height: 24,
-          border: "1.5px solid var(--brand)",
-        }}
-      />
-      <div
-        className="rounded-sm"
-        style={{
-          width: 20,
-          height: 20,
-          border: "1.5px solid var(--brand-hover)",
-        }}
-      />
-      <div
-        className="rounded-sm"
-        style={{
-          width: 30,
-          height: 18,
-          border: "1.5px solid var(--accent)",
-        }}
-      />
-    </div>
-  );
-}
-
 function HookClipStrip() {
+  // Only where the card is wide enough: on phones it covered the text.
   return (
-    <div className="absolute inset-y-0 right-0 flex items-center overflow-hidden opacity-60">
+    <div className="absolute inset-y-0 right-0 hidden items-center overflow-hidden opacity-60 lg:flex">
       <div
         className="flex gap-1"
         style={{ transform: "translateX(20%)" }}
@@ -776,7 +736,7 @@ function Step({
         <div
           className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full font-mono text-[10px] font-bold"
           style={{
-            background: "var(--brand)",
+            background: "var(--brand-solid)",
             color: "white",
             border: "2px solid var(--surface-0)",
           }}

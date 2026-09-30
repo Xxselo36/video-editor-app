@@ -278,6 +278,7 @@ def clean_state(monkeypatch):
             monkeypatch.setenv(k, v)
         monkeypatch.setenv("CLEO_MEDIA_BACKEND", "r2")
     store._truncate_gc_for_tests()
+    store._truncate_events_for_tests()
     shutil.rmtree(M._WORK_ROOT / "media", ignore_errors=True)
     shutil.rmtree(M._TMP_ROOT / "proxy-cache", ignore_errors=True)
     auth._jwks = None

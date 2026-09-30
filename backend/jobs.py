@@ -67,6 +67,12 @@ class Job:
     output_path: str | None = None
     outputs: dict[str, str] = field(default_factory=dict)
     error: str | None = None
+    # Machine-readable cause of `error` for the client ("no_speech",
+    # "render_failed", "quota_exceeded", …; None = none known), and
+    # whether the job's minutes were credited back for it (None: nothing
+    # was charged or it isn't known). `error` keeps the raw text.
+    error_code: str | None = None
+    refunded: bool | None = None
     settings: dict[str, Any] = field(default_factory=dict)
     # Set after analyze; consumed by render. Each subtitle is
     # {start, end, text, original_start, original_end}.
@@ -226,6 +232,8 @@ class Job:
             "message": self.message,
             "progress": self.progress,
             "error": self.error,
+            "error_code": self.error_code,
+            "refunded": self.refunded,
             "has_output": self._has_output(),
             "has_proxy": self._has_proxy(),
             "outputs": list((self.output_keys or self.outputs).keys()),
@@ -288,8 +296,8 @@ def tune_connection(conn: sqlite3.Connection) -> None:
 # Scalar fields of GET /jobs/status rows (JobStore.status_many).
 # output_keys only so has_output can be told without touching the disk.
 _STATUS_FIELDS = ("id", "status", "message", "progress", "queue_position",
-                  "error", "output_path", "updated_at", "preview_version",
-                  "owner_id", "output_keys")
+                  "error", "error_code", "refunded", "output_path",
+                  "updated_at", "preview_version", "owner_id", "output_keys")
 
 
 # Durable queue of media prefixes / keys to delete (backend/main.py
@@ -308,6 +316,32 @@ _MEDIA_GC_DDL = (
 # are taken oldest not_before first).
 GC_BACKOFF_BASE_S = 300.0
 GC_BACKOFF_MAX_S = 6 * 3600.0
+
+
+# Job lifecycle events (analysis / render outcomes, backend/main.py
+# _record_event) for the reliability numbers of GET /admin/metrics. A
+# log of their own, so the numbers survive the jobs' deletion; pruned
+# after EVENTS_KEEP_DAYS. Not part of backups or the Postgres cutover
+# (backend/pg.py TABLES): statistics only, rebuilt by new events.
+_EVENTS_DDL = (
+    "CREATE TABLE IF NOT EXISTS job_events ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, "
+    "kind TEXT NOT NULL, job_id TEXT, data TEXT NOT NULL DEFAULT '{}')",
+    "CREATE INDEX IF NOT EXISTS job_events_kind_at ON job_events(kind, at)",
+)
+EVENTS_KEEP_DAYS = 90.0
+
+
+def event_row(at: float, kind: str, job_id: str | None,
+              data: Any) -> dict[str, Any]:
+    """An events() row: {at, kind, job_id, data} with data a dict."""
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+    return {"at": float(at), "kind": kind, "job_id": job_id,
+            "data": data if isinstance(data, dict) else {}}
 
 
 def gc_backoff_s(attempts: int) -> float:
@@ -438,6 +472,8 @@ class JobStore:
             )
             self._gc_migrate()
             self._conn.execute(_MEDIA_GC_DDL)
+            for ddl in _EVENTS_DDL:
+                self._conn.execute(ddl)
             self._conn.commit()
 
     def _serialize(self, job: Job) -> str:
@@ -772,6 +808,54 @@ class JobStore:
             self._conn.execute("DELETE FROM media_gc")
             self._conn.commit()
 
+    # ── job_events: the reliability log (GET /admin/metrics) ──
+
+    def record_event(self, kind: str, job_id: str | None,
+                     data: dict[str, Any] | None = None,
+                     at: float | None = None) -> None:
+        """Append one event (see _EVENTS_DDL)."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT INTO job_events (at, kind, job_id, data) "
+                    "VALUES (?, ?, ?, ?)",
+                    (time.time() if at is None else float(at), kind, job_id,
+                     json.dumps(data or {}, default=str)))
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+    def events(self, since: float, kinds: Iterable[str] | None = None,
+               limit: int = 200_000) -> list[dict[str, Any]]:
+        """Events at or after `since` (of `kinds`), oldest first, as
+        {at, kind, job_id, data}."""
+        kinds = list(kinds or ())
+        sql = "SELECT at, kind, job_id, data FROM job_events WHERE at >= ?"
+        args: list[Any] = [float(since)]
+        if kinds:
+            sql += f" AND kind IN ({','.join('?' for _ in kinds)})"
+            args += kinds
+        sql += " ORDER BY at, id LIMIT ?"
+        args.append(int(limit))
+        with self._lock:
+            rows = self._conn.execute(sql, args).fetchall()
+        return [event_row(r["at"], r["kind"], r["job_id"], r["data"])
+                for r in rows]
+
+    def prune_events(self, before: float) -> int:
+        """Delete events older than `before`; returns how many."""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM job_events WHERE at < ?",
+                                     (float(before),))
+            self._conn.commit()
+            return cur.rowcount
+
+    def _truncate_events_for_tests(self) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM job_events")
+            self._conn.commit()
+
     def list_all(self) -> list[Job]:
         """Return every job in the store (unfiltered)."""
         with self._lock:
@@ -848,6 +932,7 @@ class JobStore:
                     # to review so the user can re-render.
                     self.update(job.id, status="awaiting_review", progress=100.0,
                                 message="render_failed", error="container_restart",
+                                error_code="render_failed",
                                 queue_position=None)
                 else:
                     self.update(job.id, status="error", message=message,

@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import pytest
 
 import backend.main as M
-from backend import accounts, auth, storage
+from backend import accounts, auth, pipeline, storage
 from backend.jobs import store
 from conftest import R2_ENDPOINT, add_sub, analysis_result
 
@@ -58,10 +58,10 @@ def upload(r2, monkeypatch):
 
     def probe(url):
         probes.append((url, threading.current_thread().name))
-        return probe.seconds
+        return probe.seconds, None
     probe.seconds = 60.0
     probe.calls = probes
-    monkeypatch.setattr(M, "_probe_remote_duration", probe)
+    monkeypatch.setattr(M, "_probe_remote", probe)
     return probe
 
 
@@ -256,7 +256,9 @@ def test_worker_stores_keys_and_commits_once(r2, monkeypatch):
 
 @pytest.mark.parametrize("exc,refunded", [
     (OSError(28, "No space left on device"), True),
-    (RuntimeError("No speech detected in the video."), False),
+    # No speech at all: refunded since UX3 (less than 10 s of speech).
+    (RuntimeError("No speech detected in the video."), True),
+    (pipeline.NoSpeechError(speech_seconds=30.0), False),
 ])
 def test_worker_failure_queues_media_for_gc(r2, auth_on, monkeypatch, exc,
                                             refunded):

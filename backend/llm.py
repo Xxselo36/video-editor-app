@@ -38,15 +38,24 @@ _MAX_TOKENS_CLEANUP = 4000
 _MAX_TOKENS_COMMAND_FIX = 800
 _MAX_TOKENS_SOCIAL = 800
 
+# Every call here is a soft step (the pipeline goes on without it), and
+# they run inside analysis / render slots: the SDK defaults (10 min
+# timeout, 2 retries → up to ~30 min) let one slow API episode stall
+# every slot. 30 s per attempt and one retry: at most ~1 min per call.
+_TIMEOUT_S = 30.0
+_MAX_RETRIES = 1
+
 
 def _client():
-    """Lazy-create the Anthropic client. Returns None if no key set."""
+    """Lazy-create the Anthropic client (_TIMEOUT_S, _MAX_RETRIES).
+    Returns None if no key set."""
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         return None
     try:
         import anthropic
-        return anthropic.Anthropic(api_key=key)
+        return anthropic.Anthropic(api_key=key, timeout=_TIMEOUT_S,
+                                   max_retries=_MAX_RETRIES)
     except Exception as e:
         print(f"[llm] anthropic init failed: {e}", flush=True)
         return None

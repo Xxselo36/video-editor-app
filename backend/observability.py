@@ -48,7 +48,9 @@ Env:
   SENTRY_TRACES_SAMPLE_RATE   0..1, default 0 = no performance tracing
   SENTRY_ENVIRONMENT          else RAILWAY_ENVIRONMENT_NAME, else the
                               SDK's default ("production")
-  RAILWAY_GIT_COMMIT_SHA      release (set by Railway on every deploy)
+  SENTRY_RELEASE              release (git SHA); else RAILWAY_GIT_COMMIT_SHA
+                              (set by Railway on every deploy),
+                              GIT_COMMIT_SHA, SOURCE_COMMIT, GITHUB_SHA
 """
 from __future__ import annotations
 
@@ -274,6 +276,24 @@ def enabled() -> bool:
     return _enabled
 
 
+# Where the running code's git commit comes from, first set wins:
+# SENTRY_RELEASE (explicit), RAILWAY_GIT_COMMIT_SHA (Railway sets it on
+# every deploy from GitHub), GIT_COMMIT_SHA / SOURCE_COMMIT (a Docker
+# build arg or another host), GITHUB_SHA (Actions).
+_RELEASE_ENV = ("SENTRY_RELEASE", "RAILWAY_GIT_COMMIT_SHA", "GIT_COMMIT_SHA",
+                "SOURCE_COMMIT", "GITHUB_SHA")
+
+
+def release() -> str | None:
+    """The release events are tagged with: the deployed git SHA (the web
+    app uses the same one, NEXT_PUBLIC_RELEASE), None when unknown."""
+    for name in _RELEASE_ENV:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value[:200]
+    return None
+
+
 def init_sentry(**overrides: Any) -> bool:
     """Start Sentry if SENTRY_DSN is set. Returns whether it is on.
 
@@ -308,11 +328,11 @@ def init_sentry(**overrides: Any) -> bool:
     environment = (os.environ.get("SENTRY_ENVIRONMENT", "").strip()
                    or os.environ.get("RAILWAY_ENVIRONMENT_NAME", "").strip()
                    or None)
-    release = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "").strip() or None
+    version = release()
     options: dict[str, Any] = dict(
         dsn=dsn,
         environment=environment,
-        release=release,
+        release=version,
         traces_sample_rate=_traces_sample_rate(),
         send_default_pii=False,
         max_request_body_size="never",
@@ -345,7 +365,7 @@ def init_sentry(**overrides: Any) -> bool:
     ignore_logger("uvicorn.access")
     _enabled = True
     print(f"[sentry] on — environment={environment or 'production'}, "
-          f"release={(release or 'auto')[:12]}, "
+          f"release={(version or 'auto')[:12]}, "
           f"traces={options['traces_sample_rate'] or 0}", flush=True)
     return True
 

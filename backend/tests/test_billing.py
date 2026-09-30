@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import backend.main as M
-from backend import accounts, billing
+from backend import accounts, billing, pipeline
 from backend.jobs import DEFAULT_PLAN, store
 from conftest import add_sub, analysis_result
 
@@ -260,17 +260,20 @@ def test_normalize_respects_the_cap(tmp_path):
 
 
 def test_failed_analysis_is_trued_up(auth_on, monkeypatch):
-    """'No speech detected' comes after the transcription was paid for:
-    charge what the normalized file really holds, no refund."""
+    """A content failure comes after the transcription was paid for:
+    charge what the normalized file really holds — no refund while enough
+    speech was found (NO_SPEECH_REFUND_S; below it: test_no_speech.py)."""
     job = _analyzed_job(seconds=1)
 
     def no_speech(input_path, output_dir, settings, progress_cb):
         Path(output_dir, "normalized.mp4").write_bytes(b"x")
-        raise RuntimeError("No speech detected in the video.")
+        raise pipeline.NoSpeechError(speech_seconds=25.0)
     monkeypatch.setattr(M, "analyze_only", no_speech)
     monkeypatch.setattr(M, "_probe_duration", lambda p: 250.0)
     M._run_analyze_inner(job.id)
-    assert store.get(job.id).status == "error"
+    got = store.get(job.id)
+    assert (got.status, got.error_code, got.refunded) == (
+        "error", "no_speech", None)
     usage = accounts.get_usage(job.id)
     assert usage["seconds_billed"] == 250 and usage["refunded"] == 0
 
@@ -322,7 +325,11 @@ def test_true_up(auth_on, monkeypatch, actual, billed):
     (OSError(28, "No space left on device"), True),
     (RuntimeError("ffmpeg orientation-normalize failed (hdr=False):\n..."), True),
     (FileNotFoundError("ffprobe"), True),
-    (RuntimeError("No speech detected in the video."), False),
+    # Content failures: charged — except (almost) no speech at all.
+    (RuntimeError("No speech detected in the video."), True),
+    (pipeline.NoSpeechError(), True),
+    (pipeline.NoSpeechError(speech_seconds=12.0), False),
+    (ValueError("Video has no audio track"), True),
     (ValueError("nothing to apply"), False),
 ])
 def test_refund_only_for_infrastructure_failures(auth_on, monkeypatch, exc,

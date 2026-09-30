@@ -147,6 +147,7 @@ def _smartcam_reframe(
     resolution: str,
     progress_cb: Callable[[str, float], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    same_aspect_zoom: float | None = None,
 ) -> str | None:
     """Face-track-reframe the source for a target aspect (portrait/landscape).
 
@@ -160,11 +161,18 @@ def _smartcam_reframe(
     is the same for every web job ("normalized") that starts SmartCam
     in the same second, so two concurrent jobs could write — and hand
     out — each other's video.
+
+    `same_aspect_zoom`: the plugin's zoom for a source already in the
+    target aspect (None = its 1.3 "Speaker Focus"; the web passes 1.0,
+    see analyze_only).
     """
     def _sc_cb(msg: str) -> None:
         if progress_cb:
             progress_cb(msg, -1)
 
+    extra: dict[str, Any] = {}
+    if same_aspect_zoom is not None:
+        extra["same_aspect_zoom"] = same_aspect_zoom
     return _run_smartcam_preprocess(
         video_path=input_path,
         smartcam_format=smartcam_format,
@@ -173,7 +181,44 @@ def _smartcam_reframe(
         cancel_check=cancel_check,
         output_path=output_path,
         threads=_ffmpeg_threads() or None,
+        **extra,
     )
+
+
+def _display_size(path: str) -> tuple[int, int] | None:
+    """(width, height) of the first video stream as it is shown — a
+    90°/270° rotation (tag or display matrix, phone videos) swaps them —
+    or None if ffprobe can't tell."""
+    try:
+        r = subprocess.run(
+            [get_ffprobe_path(), "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height:stream_tags=rotate"
+             ":stream_side_data=rotation", "-of", "json", path],
+            capture_output=True, text=True, timeout=15)
+        stream = (json.loads(r.stdout or "{}").get("streams") or [{}])[0]
+        w, h = int(stream["width"]), int(stream["height"])
+    except Exception:
+        return None
+    rotation = 0.0
+    try:
+        rotation = float((stream.get("tags") or {}).get("rotate") or 0)
+        for sd in stream.get("side_data_list") or []:
+            if "rotation" in sd:
+                rotation = float(sd["rotation"])
+                break
+    except (TypeError, ValueError):
+        pass
+    if int(abs(rotation)) % 180 == 90:
+        w, h = h, w
+    return (w, h) if w > 0 and h > 0 else None
+
+
+def is_vertical_9x16(size: tuple[int, int] | None) -> bool:
+    """A portrait frame of (about) 9:16 — what phones record vertically."""
+    if not size:
+        return False
+    w, h = size
+    return h > w and abs(w / h - 9 / 16) <= 0.02
 
 
 def _extract_hook_clip(
@@ -1134,6 +1179,20 @@ def analyze_only(
     print(f"[render] resolution setting='{_res_str}' → "
           f"longest-side max={_max_side}", flush=True)
     smartcam = bool(settings.get("smartcam_enabled"))
+    sc_format = settings.get("smartcam_format", "portrait")
+    sc_zoom: float | None = None
+    if smartcam and sc_format == "portrait":
+        # No hidden "Speaker Focus" zoom on videos that are already
+        # vertical (owner decision 2026-09-30; the plugin zooms 1.3). A
+        # 9:16 recording stays exactly as recorded — no face tracking, no
+        # reframe, no extra encode; another portrait frame (3:4, a tall
+        # screen recording) is only reframed to 9:16, never zoomed.
+        # Landscape → 9:16 is unchanged (face-tracked reframe, zoom 1.1).
+        sc_zoom = 1.0
+        if is_vertical_9x16(_display_size(input_path)):
+            smartcam = False
+            print("[smartcam] source is already vertical 9:16 — kept as "
+                  "recorded (no reframe, no zoom)", flush=True)
     proxy_path = str(Path(output_dir) / PROXY_NAME)
     # A stale proxy (a re-run in the same folder) must never outlive the
     # file it was made from.
@@ -1160,7 +1219,6 @@ def analyze_only(
     # user selected. Other multi-format outputs derive from the rendered
     # primary via simple letterbox-pad in the render step.
     if smartcam:
-        sc_format = settings.get("smartcam_format", "portrait")
         sc_resolution = settings.get("resolution", "1080")
         _stage(f"SmartCam tracking faces ({sc_format})…", 6)
         # Written straight into this job's folder (job-scoped name; the
@@ -1168,7 +1226,7 @@ def analyze_only(
         sc_dest = str(Path(output_dir) / "normalized_smartcam.mp4")
         sc_out = _smartcam_reframe(
             normalized_path, sc_dest, sc_format, sc_resolution,
-            progress_cb=progress_cb,
+            progress_cb=progress_cb, same_aspect_zoom=sc_zoom,
         )
         if sc_out and Path(sc_out).exists():
             if os.path.abspath(sc_out) != os.path.abspath(sc_dest):
@@ -1200,7 +1258,9 @@ def analyze_only(
     subtitles = result.subtitles if isinstance(result.subtitles, list) else []
 
     if not segments:
-        raise RuntimeError("No speech detected in the video.")
+        # Nothing but silence: 0 s of speech (see NoSpeechError).
+        raise NoSpeechError("No speech detected in the video.",
+                            speech_seconds=0.0)
 
     duration = result.duration
 
@@ -1401,6 +1461,22 @@ def _apply_segment_effects(
         raise RuntimeError(
             f"ffmpeg segment-effects failed: {result.stderr[-800:]}"
         )
+
+
+class NoSpeechError(RuntimeError):
+    """The analysis found no speech to cut and caption (music only,
+    silence, a screen recording without a mic). A content failure with
+    a user-facing code: the web backend stores `code` as the job's
+    error_code, and credits the minutes back when less than
+    NO_SPEECH_REFUND_S of speech was detected (`speech_seconds`). The
+    message stays the English sentence old clients match on."""
+
+    code = "no_speech"
+
+    def __init__(self, message: str = "No speech detected in the video.",
+                 speech_seconds: float = 0.0) -> None:
+        super().__init__(message)
+        self.speech_seconds = float(speech_seconds or 0.0)
 
 
 class RenderUnavailableError(RuntimeError):

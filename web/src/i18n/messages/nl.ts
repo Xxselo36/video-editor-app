@@ -264,7 +264,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.review.updatingPreview": "Voorbeeld wordt bijgewerkt…",
   "app.review.captionSampleAlt": "Voorbeeld van {style}-ondertitels",
   "app.review.captionsLookLike": "Zo zien de ondertitels eruit",
-  "app.review.tabTimeline": "Timeline",
+  "app.review.tabTimeline": "Tijdlijn",
   "app.review.tabTranscript": "Transcript",
   "app.review.tabCaptions": "Ondertitels",
   "app.review.preparing": "Wordt voorbereid…",
@@ -286,7 +286,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.captions.disabled": "Ondertitels zijn uitgeschakeld voor dit rendering.",
 
   // ── Timeline editor ─────────────────────────────────────────────────
-  "app.timeline.title": "Timeline",
+  "app.timeline.title": "Tijdlijn",
   "app.timeline.clipsOne": "{count} clip · {dur}",
   "app.timeline.clipsOther": "{count} clips · {dur}",
   "app.timeline.saving": "opslaan",
@@ -372,7 +372,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "site.hero.titleLead": "Monteer terwijl je",
   "site.hero.titleAccent": "opneemt.",
   "site.hero.sub":
-    "Zeg {cut} als je een fout maakt. Zeg {finish} als je klaar bent. Klaar om te posten in minuten, met ondertitels, montage en meerdere formaten erbij.",
+    "Zeg {cut} als je een fout maakt. Zeg {finish} als je klaar bent. Binnen een paar minuten klaar om te posten, met ondertitels en montage.",
   "site.hero.cta": "Probeer CleoCuts",
 
   "site.showcase.listening": "CleoCuts luistert",
@@ -387,17 +387,15 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "site.features.voice.title": "Spraakcommando's",
   "site.features.voice.body": "Zeg {cut} midden in je take. CleoCuts verwijdert de mislukte poging.",
   "site.features.cleanup.title": "AI-opschoning",
-  "site.features.cleanup.body": "Corrigeert typefouten, merknamen en klankgelijke woorden.",
-  "site.features.captions.title": "{count} ondertitelstijlen",
-  "site.features.captions.body": "Van Clean tot Clipper. Echte lettertypes.",
-  "site.features.captions.decoration": "ECHTE LETTERTYPES",
+  "site.features.cleanup.body":
+    "Corrigeert verkeerd verstane woorden en merknamen in je ondertitels.",
+  "site.features.captions.title": "Geanimeerde ondertitels",
+  "site.features.captions.body": "Verschillende stijlen, van Clean tot Clipper.",
   "site.features.vertical.title": "Automatisch verticaal",
   "site.features.vertical.body": "Landschap → 9:16 met gezichtsdetectie.",
-  "site.features.multiformat.title": "Multi-formaat",
-  "site.features.multiformat.body": "{formats} in één render.",
-  "site.features.hooks.title": "Hook-clip selectie",
+  "site.features.hooks.title": "De beste momenten als clips",
   "site.features.hooks.body":
-    "CleoCuts vindt de {count} beste momenten in je langere video en knipt ze tot losse reels.",
+    "Bij video's van 90 seconden of langer vindt CleoCuts tot {count} van de beste momenten en maakt van elk een eigen korte clip.",
 
   "site.steps.title": "Drie stappen.",
   "site.steps.sub": "Opnemen. Praat met CleoCuts. Posten.",
@@ -408,7 +406,7 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "site.steps.upload.body": "Sleep je video erin. Kies een workflow. De AI doet de rest.",
   "site.steps.upload.hint": "Een paar minuten, afhankelijk van de lengte",
   "site.steps.post.title": "Posten",
-  "site.steps.post.body": "Krijg {formats} klaar voor TikTok, Instagram en YouTube.",
+  "site.steps.post.body": "Download je afgewerkte video, klaar voor TikTok, Instagram en YouTube.",
   "site.steps.post.hint": "Downloaden zodra het klaar is",
 
   "site.footer.editor": "Editor",
@@ -429,7 +427,6 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "site.pricing.retention": "Projecten worden {days} dagen bewaard",
   "site.pricing.featureWorkflows": "Alle workflows en ondertitelstijlen",
   "site.pricing.featureVoice": "Spraakcommando's en AI-opschoning",
-  "site.pricing.featureFormats": "Exporteren in {formats}",
   "site.pricing.choose": "Kies {plan}",
   "site.pricing.current": "Je huidige abonnement",
   "site.pricing.manage": "Abonnement beheren",
@@ -489,4 +486,20 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "common.auth.signIn": "Inloggen",
   "common.auth.account": "Account",
   "common.auth.pricing": "Prijzen",
+  "common.language": "Taal",
+  "common.footer.legalAria": "Juridisch",
+  "legal.onlyDeEn":
+    "Deze pagina is alleen beschikbaar in het Duits en het Engels. Je leest de Engelse versie.",
+  "common.backHome": "Terug naar de startpagina",
+  "common.notFound.title": "Pagina niet gevonden",
+  "common.notFound.body": "Deze pagina bestaat niet of is verplaatst.",
+  "common.error.title": "Er ging iets mis",
+  "common.error.body": "Deze pagina kon niet worden weergegeven. Probeer het opnieuw.",
+  "common.error.retry": "Opnieuw proberen",
+  "common.error.ref": "Foutreferentie: {id}",
+  "app.crash.saving": "Je laatste wijzigingen worden opgeslagen…",
+  "app.crash.saved": "Je laatste wijzigingen zijn opgeslagen.",
+  "app.crash.unsaved": "Je laatste wijzigingen zijn mogelijk niet opgeslagen.",
+  "app.crash.body": "Laad de pagina opnieuw om verder te gaan waar je gebleven was.",
+  "app.crash.reload": "Pagina opnieuw laden",
 };

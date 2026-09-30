@@ -13,6 +13,7 @@ import {
   useMe,
   type Me,
 } from "@/lib/account";
+import { track } from "@/lib/analytics";
 import { SubpageHeader } from "./SubpageHeader";
 
 /** Subscription status → one line (and whether it needs attention). */
@@ -69,6 +70,8 @@ export function AccountView() {
     if (url.searchParams.get("billing") !== "success") return;
     url.searchParams.delete("billing");
     window.history.replaceState(window.history.state, "", url);
+    // Lemon Squeezy sends buyers here only after a completed payment.
+    track("checkout_done");
     setBanner("pending");
     let stopped = false;
     let tries = 0;
@@ -238,7 +241,7 @@ export function AccountView() {
                   onClick={() => void manage()}
                   disabled={portalBusy}
                   className="rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-60"
-                  style={{ background: "var(--brand)", color: "white" }}
+                  style={{ background: "var(--brand-solid)", color: "white" }}
                 >
                   {t("app.account.manage")}
                 </button>
@@ -253,7 +256,7 @@ export function AccountView() {
                         color: "var(--text-strong)",
                         border: "1px solid var(--border-hover)",
                       }
-                    : { background: "var(--brand)", color: "white" }
+                    : { background: "var(--brand-solid)", color: "white" }
                 }
               >
                 {me.plan ? t("app.account.changePlan") : t("app.account.choosePlan")}

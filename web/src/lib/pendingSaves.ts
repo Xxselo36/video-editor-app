@@ -30,3 +30,20 @@ export async function waitForSaves(jobId: string, timeoutMs = 20_000): Promise<v
     new Promise((r) => setTimeout(r, timeoutMs)),
   ]);
 }
+
+/** Any save still running, for any job? */
+export function hasPendingSaves(): boolean {
+  return pending.size > 0;
+}
+
+/** waitForSaves for every job — the editor's error boundary
+ *  (app/app/error.tsx) lets the last edits reach the server before it
+ *  offers a reload. Resolves true when all settled in time. */
+export async function waitForAllSaves(timeoutMs = 20_000): Promise<boolean> {
+  const all = [...pending.values()].flatMap((set) => [...set]);
+  if (all.length === 0) return true;
+  return Promise.race([
+    Promise.allSettled(all).then(() => true),
+    new Promise<boolean>((r) => setTimeout(() => r(false), timeoutMs)),
+  ]);
+}

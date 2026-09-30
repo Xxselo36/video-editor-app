@@ -146,6 +146,30 @@ def dir_bytes(path: Path) -> int:
 
 
 @contextmanager
+def collecting(bucket: dict[str, float]):
+    """Record this thread's usage into `bucket` (a helper thread of a
+    tracked stage, e.g. the post caption next to the render); the owner
+    of the stage adds it to its own with merge(). Restores the thread's
+    previous bucket afterwards."""
+    previous = _current()
+    _local.bucket = bucket
+    try:
+        yield bucket
+    finally:
+        _local.bucket = previous
+
+
+def merge(usage: dict[str, float] | None) -> None:
+    """Add usage collected elsewhere (collecting) to this thread's
+    bucket; nothing outside a tracked stage."""
+    bucket = _current()
+    if bucket is None or not usage:
+        return
+    for key, value in usage.items():
+        _add(bucket, key, value)
+
+
+@contextmanager
 def tracking(job_id: str, stage: str):
     """Collect this thread's usage for `stage` and save it on the job.
 

@@ -2638,9 +2638,26 @@ def _detect_orientation(video_path):
         return "landscape"
 
 
+def _smartcam_zoom(orient, smartcam_format, same_aspect_zoom=None):
+    """SmartCam zoom for an `orient` source reframed to `smartcam_format`:
+    same aspect (Hoch→Hoch, Quer→Quer, quadratisch→Quer) 1.3 "Speaker
+    Focus", cross aspect (Quer→Hoch) 1.1. `same_aspect_zoom` replaces
+    the 1.3 (the web app passes 1.0: no hidden zoom on videos that are
+    already vertical); None keeps the plugin's own behaviour."""
+    same_aspect = (
+        (orient == "landscape" and smartcam_format == "landscape")
+        or (orient == "portrait" and smartcam_format == "portrait")
+        or (orient == "square" and smartcam_format == "landscape")
+    )
+    if not same_aspect:
+        return 1.1
+    return 1.3 if same_aspect_zoom is None else float(same_aspect_zoom)
+
+
 def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
                              progress_cb=None, cancel_check=None,
-                             output_path=None, threads=None):
+                             output_path=None, threads=None,
+                             same_aspect_zoom=None):
     """Reframe `video_path` with face-tracking before the main /analyze
     pipeline. Returns the path to the reframed video on success, or None
     on failure (caller falls back to the original).
@@ -2651,6 +2668,7 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
     whose input is always "normalized.mp4", so it passes a job-scoped
     path. `threads`: cap for ffmpeg (-threads) and OpenCV
     (cv2.setNumThreads) on a shared server; None = library defaults.
+    `same_aspect_zoom`: see _smartcam_zoom (None = 1.3, as always).
     Intermediates live in a private temp dir that is always removed.
 
     Mirrors the standalone GUI's `_smartcam_preprocess` flow:
@@ -2690,11 +2708,11 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
             or (orient == "square" and smartcam_format == "landscape")
         )
         # Same-aspect (Hoch→Hoch, Quer→Quer): zoom 1.3 als klassischer
-        # "Speaker Focus".
+        # "Speaker Focus" (unless the caller passes same_aspect_zoom).
         # Cross-aspect (Quer→Hoch): zoom 1.1 — der 9:16-Streifen aus
         # 16:9 ist eh schon eng, ein leichter zusätzlicher Zoom (10%)
         # hilft trotzdem gegen Hintergrund-Bereiche neben dem Sprecher.
-        zoom_factor = 1.3 if same_aspect else 1.1
+        zoom_factor = _smartcam_zoom(orient, smartcam_format, same_aspect_zoom)
         print(f"[SmartCam/plugin] input={orient} out={smartcam_format} "
               f"zoom={zoom_factor} target={target_size}", flush=True)
 

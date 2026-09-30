@@ -5,6 +5,10 @@
  * (pops on dark), rose for energy on CTAs. No cold zinc/gray.
  */
 :root {
+  /* Dark UI only: native controls (select dropdowns, scrollbars, date
+   * pickers) render dark too, also on Windows. */
+  color-scheme: dark;
+
   /* Surfaces — subtly cool near-black, works with violet accent
    * without warm/cool clash. Still not pure grey — has a slight
    * blue-violet undertone that unifies with the accent.
@@ -14,11 +18,14 @@
   --surface-2: #1b1a22;      /* elevated */
   --surface-tint: #24222d;   /* subtle wash */
 
-  /* Text — off-white with a tiny cool cast */
+  /* Text — off-white with a tiny cool cast. Every text token reaches
+   * WCAG AA (4.5:1) on surface-0/1/2: muted 5.6/5.3/4.9, faint
+   * 5.2/4.9/4.6 (it used to be #4a4756 at 2.2:1 — fine for a divider,
+   * not for the hints and timestamps it is used for). */
   --text-strong: #f5f3fa;
   --text-body: #c4c0d0;
   --text-muted: #8b869a;
-  --text-faint: #4a4756;
+  --text-faint: #85809a;
 
   /* Borders */
   --border: #23222b;
@@ -26,7 +33,12 @@
   --border-strong: #545267;
 
   /* Brand — Deep Violet, the AI-creator standard */
-  --brand: #8b5cf6;             /* violet-500 */
+  --brand: #8b5cf6;             /* violet-500: accents, brand-coloured text */
+  /* Filled buttons with white text: #8b5cf6 gives only 4.23:1, violet-600
+   * 5.7:1 (AA). Use --brand-solid as the background of every filled
+   * brand button, --brand-solid-hover (7.1:1) for its hover. */
+  --brand-solid: #7c3aed;       /* violet-600 */
+  --brand-solid-hover: #6d28d9; /* violet-700 */
   --brand-hover: #a78bfa;       /* violet-400 */
   --brand-tint: rgba(139, 92, 246, 0.12);
   --brand-strong: #ddd6fe;      /* violet-200 for text on tint */
@@ -92,8 +104,14 @@ body::before {
   }
 }
 
+/* fill-mode backwards, not both: a finished "both" animation keeps its
+ * last keyframe applied — transform: none still makes the element a
+ * containing block for position: fixed descendants, so every dialog
+ * inside a .phase-fade screen was positioned relative to that column
+ * instead of the viewport (audit T1). With backwards the element has no
+ * transform at all once the fade is over. */
 .phase-fade {
-  animation: phase-fade-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: phase-fade-in 280ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
 @keyframes soft-pulse {
@@ -124,4 +142,13 @@ body::before {
 
 @media (prefers-reduced-motion: reduce) {
   .phase-fade, .skeleton, .pulse-dot { animation: none; }
+}
+
+/* Legal pages carry the German and the English text; <html lang> —
+ * set before the first paint by the inline script in app/layout.tsx and
+ * by the language switcher — shows one of them. German for "de", English
+ * for every other language (components/legal). */
+html[lang="de"] [data-legal-lang="en"],
+html:not([lang="de"]) [data-legal-lang="de"] {
+  display: none;
 }

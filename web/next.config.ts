@@ -1,4 +1,24 @@
 import type { NextConfig } from "next";
+import { execSync } from "node:child_process";
+
+// ── Release (git SHA) ────────────────────────────────────────────────
+// Tags Sentry events (lib/sentryInit) with the deployed commit — the
+// backend uses the same SHA (backend/observability.py release()). Vercel
+// builds know it (VERCEL_GIT_COMMIT_SHA); elsewhere the local checkout.
+function gitSha(): string {
+  const fromEnv =
+    process.env.NEXT_PUBLIC_RELEASE ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    process.env.GITHUB_SHA ||
+    process.env.SOURCE_COMMIT;
+  if (fromEnv) return fromEnv.trim();
+  try {
+    return execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  } catch {
+    return "";
+  }
+}
+const release = gitSha();
 
 // ── Security headers ─────────────────────────────────────────────────
 // Evaluated at BUILD time (Vercel bakes headers into the deployment),
@@ -77,6 +97,13 @@ const clerkFrames = clerk ? ["https://challenges.cloudflare.com", "https://*.pro
 // Browser error reports (components/ErrorReporting), only with a DSN.
 const sentryIngest = originOf(process.env.NEXT_PUBLIC_SENTRY_DSN);
 
+// Cookieless analytics (lib/analytics), only with a provider. Vercel Web
+// Analytics serves its script and takes its events on our own origin
+// (/_vercel/insights/*, 'self'); outside Vercel deployments it loads the
+// debug script from va.vercel-scripts.com.
+const analyticsProvider = (process.env.NEXT_PUBLIC_ANALYTICS_PROVIDER ?? "").trim().toLowerCase();
+const analyticsScripts = analyticsProvider === "vercel" ? ["https://va.vercel-scripts.com"] : [];
+
 // Checkout / customer portal (Lemon Squeezy) are top-level navigations
 // (window.location.assign in lib/account.ts): no script, frame or form
 // of theirs runs on our pages, so no CSP entry is needed. An overlay
@@ -86,11 +113,11 @@ const enforcedCsp = ["frame-ancestors 'none'", "object-src 'none'", "base-uri 's
 
 const reportOnlyCsp = [
   "default-src 'self'",
-  `script-src ${uniq(["'self'", "'unsafe-inline'", isDev && "'unsafe-eval'", ...clerkScripts])}`,
+  `script-src ${uniq(["'self'", "'unsafe-inline'", isDev && "'unsafe-eval'", ...clerkScripts, ...analyticsScripts])}`,
   "style-src 'self' 'unsafe-inline'",
   `img-src ${uniq(["'self'", "data:", "blob:", ...api, ...media, clerk && "https://img.clerk.com"])}`,
   `media-src ${uniq(["'self'", "blob:", ...api, ...media])}`,
-  `connect-src ${uniq(["'self'", ...api, ...media, ...clerkConnect, sentryIngest])}`,
+  `connect-src ${uniq(["'self'", ...api, ...media, ...clerkConnect, sentryIngest, ...analyticsScripts])}`,
   "font-src 'self' data:",
   `frame-src ${clerkFrames.length ? uniq(clerkFrames) : "'none'"}`,
   "worker-src 'self' blob:",
@@ -138,6 +165,8 @@ const nextConfig: NextConfig = {
     "localhost",
   ],
   poweredByHeader: false,
+  // The build's git SHA for the browser (Sentry release).
+  env: { NEXT_PUBLIC_RELEASE: release },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

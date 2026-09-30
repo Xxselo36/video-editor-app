@@ -18,7 +18,7 @@ export const enSite = {
   "site.hero.titleLead": "Edit while you",
   "site.hero.titleAccent": "record.",
   "site.hero.sub":
-    "Say {cut} when you mess up. Say {finish} when you're done. Ready to post in minutes, with captions, cuts and multiple formats included.",
+    "Say {cut} when you mess up. Say {finish} when you're done. Ready to post in minutes, with captions and cuts included.",
   "site.hero.cta": "Try CleoCuts",
 
   /* ── Landing: caption showcase ── */
@@ -35,17 +35,14 @@ export const enSite = {
   "site.features.voice.title": "Voice triggers",
   "site.features.voice.body": "Say {cut} mid-take. CleoCuts removes the failed attempt.",
   "site.features.cleanup.title": "AI cleanup",
-  "site.features.cleanup.body": "Fixes typos, brand names and homophones.",
-  "site.features.captions.title": "{count} caption styles",
-  "site.features.captions.body": "From Clean to Clipper. Real fonts.",
-  "site.features.captions.decoration": "REAL FONTS",
+  "site.features.cleanup.body": "Fixes misheard words and brand names in your captions.",
+  "site.features.captions.title": "Animated captions",
+  "site.features.captions.body": "Several styles, from Clean to Clipper.",
   "site.features.vertical.title": "Auto vertical",
   "site.features.vertical.body": "Landscape → 9:16 with face tracking.",
-  "site.features.multiformat.title": "Multi-format",
-  "site.features.multiformat.body": "{formats} in one render.",
-  "site.features.hooks.title": "Hook clip picker",
+  "site.features.hooks.title": "Best moments as clips",
   "site.features.hooks.body":
-    "CleoCuts finds the {count} best moments in your long-form video and cuts them into standalone reels.",
+    "For videos of 90 seconds or more, CleoCuts finds up to {count} of the best moments and cuts each into its own short clip.",
 
   /* ── Landing: how it works ── */
   "site.steps.title": "Three steps.",
@@ -57,7 +54,7 @@ export const enSite = {
   "site.steps.upload.body": "Drop in your video. Pick a workflow. AI does the rest.",
   "site.steps.upload.hint": "A few minutes, depending on length",
   "site.steps.post.title": "Post",
-  "site.steps.post.body": "Get {formats} ready for TikTok, Instagram and YouTube.",
+  "site.steps.post.body": "Download your finished video, ready for TikTok, Instagram and YouTube.",
   "site.steps.post.hint": "Download when it's ready",
 
   /* ── Landing: footer ── */
@@ -79,7 +76,6 @@ export const enSite = {
   "site.pricing.retention": "Projects kept for {days} days",
   "site.pricing.featureWorkflows": "All workflows and caption styles",
   "site.pricing.featureVoice": "Voice commands and AI cleanup",
-  "site.pricing.featureFormats": "Exports in {formats}",
   "site.pricing.choose": "Choose {plan}",
   "site.pricing.current": "Your current plan",
   "site.pricing.manage": "Manage subscription",
@@ -147,4 +143,15 @@ export const enSite = {
   "common.auth.signIn": "Sign in",
   "common.auth.account": "Account",
   "common.auth.pricing": "Pricing",
+  "common.language": "Language",
+  "common.footer.legalAria": "Legal",
+  "legal.onlyDeEn":
+    "This page is available in German and English only. You are reading the English version.",
+  "common.backHome": "Back to home",
+  "common.notFound.title": "Page not found",
+  "common.notFound.body": "This page doesn't exist or has moved.",
+  "common.error.title": "Something went wrong",
+  "common.error.body": "This page couldn't be shown. Please try again.",
+  "common.error.retry": "Try again",
+  "common.error.ref": "Error reference: {id}",
 };

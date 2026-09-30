@@ -40,7 +40,7 @@ export function AppGate({ children }: { children: React.ReactNode }) {
           <button
             onClick={() => window.location.reload()}
             className="rounded-full px-5 py-2 text-sm font-semibold"
-            style={{ background: "var(--brand)", color: "white" }}
+            style={{ background: "var(--brand-solid)", color: "white" }}
           >
             {t("app.errors.tryAgain")}
           </button>
@@ -53,7 +53,7 @@ export function AppGate({ children }: { children: React.ReactNode }) {
           <Link
             href={signInHref()}
             className="rounded-full px-5 py-2 text-sm font-semibold"
-            style={{ background: "var(--brand)", color: "white" }}
+            style={{ background: "var(--brand-solid)", color: "white" }}
           >
             {t("common.auth.signIn")}
           </Link>

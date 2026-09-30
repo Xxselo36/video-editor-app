@@ -19,9 +19,8 @@ import {
   type BillingPlan,
   type PlanId,
 } from "@/lib/account";
+import { SiteFooter } from "@/components/site/SiteFooter";
 import { SubpageHeader } from "./SubpageHeader";
-
-const FORMATS = "9:16, 1:1, 16:9";
 
 /**
  * /pricing — plans and prices come from GET /billing/config (never
@@ -92,10 +91,10 @@ export function PricingView() {
     : [];
 
   return (
-    <main className="relative flex min-h-screen flex-col" style={{ color: "var(--text-strong)" }}>
+    <div className="relative flex min-h-screen flex-col" style={{ color: "var(--text-strong)" }}>
       <SubpageHeader homeHref="/" title={t("common.auth.pricing")} />
 
-      <div className="phase-fade relative z-10 mx-auto w-full max-w-5xl flex-1 px-5 py-12">
+      <main className="phase-fade relative z-10 mx-auto w-full max-w-5xl flex-1 px-5 py-12">
         <h1 className="mb-3 text-4xl font-bold tracking-tight sm:text-5xl">{t("site.pricing.title")}</h1>
         <p className="mb-10 max-w-xl text-base" style={{ color: "var(--text-body)" }}>
           {t("site.pricing.subtitle")}
@@ -110,7 +109,7 @@ export function PricingView() {
               <button
                 onClick={() => void loadBillingConfig()}
                 className="rounded-full px-5 py-2 text-sm font-semibold"
-                style={{ background: "var(--brand)", color: "white" }}
+                style={{ background: "var(--brand-solid)", color: "white" }}
               >
                 {t("app.errors.tryAgain")}
               </button>
@@ -134,7 +133,7 @@ export function PricingView() {
             <Link
               href="/app"
               className="inline-flex rounded-full px-5 py-2 text-sm font-semibold"
-              style={{ background: "var(--brand)", color: "white" }}
+              style={{ background: "var(--brand-solid)", color: "white" }}
             >
               {t("site.header.openEditor")}
             </Link>
@@ -175,17 +174,10 @@ export function PricingView() {
             </div>
           </>
         )}
-      </div>
+      </main>
 
-      <footer
-        className="relative z-10 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 px-6 py-6 text-xs"
-        style={{ borderTop: "1px solid var(--border)", color: "var(--text-muted)" }}
-      >
-        <Link href="/imprint" className="hover:opacity-70">{t("site.footer.imprint")}</Link>
-        <Link href="/privacy" className="hover:opacity-70">{t("site.footer.privacy")}</Link>
-        <Link href="/terms" className="hover:opacity-70">{t("site.footer.terms")}</Link>
-      </footer>
-    </main>
+      <SiteFooter />
+    </div>
   );
 }
 
@@ -216,7 +208,6 @@ function PlanCard({
     t("site.pricing.retention", { days: plan.retention_days }),
     t("site.pricing.featureWorkflows"),
     t("site.pricing.featureVoice"),
-    t("site.pricing.featureFormats", { formats: FORMATS }),
   ];
   const label = !plan.available
     ? t("site.pricing.unavailable")
@@ -243,7 +234,7 @@ function PlanCard({
       {(current || popular) && (
         <span
           className="absolute -top-3 left-6 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-          style={{ background: "var(--brand)", color: "white" }}
+          style={{ background: "var(--brand-solid)", color: "white" }}
         >
           {current ? t("site.pricing.current") : t("site.pricing.popular")}
         </span>
@@ -279,7 +270,7 @@ function PlanCard({
         className="w-full rounded-xl px-4 py-3 text-sm font-semibold transition-transform hover:scale-[1.01] disabled:opacity-60 disabled:hover:scale-100"
         style={
           highlighted
-            ? { background: "var(--brand)", color: "white" }
+            ? { background: "var(--brand-solid)", color: "white" }
             : {
                 background: "var(--surface-2)",
                 color: "var(--text-strong)",

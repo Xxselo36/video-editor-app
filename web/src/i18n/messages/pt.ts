@@ -11,7 +11,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "site.hero.titleLead": "Edite enquanto",
   "site.hero.titleAccent": "grava.",
   "site.hero.sub":
-    "Diga {cut} quando errar. Diga {finish} quando terminar. Pronto para postar em minutos, com legendas, cortes e vários formatos incluídos.",
+    "Diga {cut} quando errar. Diga {finish} quando terminar. Pronto para postar em minutos, com legendas e cortes incluídos.",
   "site.hero.cta": "Experimentar a CleoCuts",
 
   // ── site: caption showcase ──
@@ -28,17 +28,15 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "site.features.voice.title": "Comandos de voz",
   "site.features.voice.body": "Diga {cut} no meio da tomada. A CleoCuts remove a tentativa falha.",
   "site.features.cleanup.title": "Limpeza com IA",
-  "site.features.cleanup.body": "Corrige erros de digitação, nomes de marca e homófonos.",
-  "site.features.captions.title": "{count} estilos de legenda",
-  "site.features.captions.body": "De Clean a Clipper. Fontes reais.",
-  "site.features.captions.decoration": "FONTES REAIS",
+  "site.features.cleanup.body":
+    "Corrige palavras mal reconhecidas e nomes de marca nas suas legendas.",
+  "site.features.captions.title": "Legendas animadas",
+  "site.features.captions.body": "Vários estilos, de Clean a Clipper.",
   "site.features.vertical.title": "Vertical automático",
   "site.features.vertical.body": "Paisagem → 9:16 com rastreamento de rosto.",
-  "site.features.multiformat.title": "Multiformato",
-  "site.features.multiformat.body": "{formats} em uma única renderização.",
-  "site.features.hooks.title": "Seletor de clipes de gancho",
+  "site.features.hooks.title": "Os melhores momentos em clipes",
   "site.features.hooks.body":
-    "A CleoCuts encontra os {count} melhores momentos do seu vídeo longo e os transforma em reels independentes.",
+    "Em vídeos de 90 segundos ou mais, a CleoCuts encontra até {count} dos melhores momentos e transforma cada um em um clipe curto.",
 
   // ── site: how it works ──
   "site.steps.title": "Três passos.",
@@ -50,7 +48,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "site.steps.upload.body": "Envie seu vídeo. Escolha um fluxo de trabalho. A IA faz o resto.",
   "site.steps.upload.hint": "Alguns minutos, dependendo da duração",
   "site.steps.post.title": "Poste",
-  "site.steps.post.body": "Receba {formats} prontos para TikTok, Instagram e YouTube.",
+  "site.steps.post.body": "Baixe seu vídeo finalizado, pronto para TikTok, Instagram e YouTube.",
   "site.steps.post.hint": "Baixe quando estiver pronto",
 
   // ── site: footer ──
@@ -72,7 +70,6 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "site.pricing.retention": "Projetos guardados por {days} dias",
   "site.pricing.featureWorkflows": "Todos os fluxos de trabalho e estilos de legenda",
   "site.pricing.featureVoice": "Comandos de voz e limpeza com IA",
-  "site.pricing.featureFormats": "Exportações em {formats}",
   "site.pricing.choose": "Escolher {plan}",
   "site.pricing.current": "Seu plano atual",
   "site.pricing.manage": "Gerenciar assinatura",
@@ -499,4 +496,20 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.voice.scene.type.keep": "Manter",
   "app.voice.scene.type.restart": "Cortar / Reiniciar",
   "app.voice.scene.type.finish": "Finalizar",
+  "common.language": "Idioma",
+  "common.footer.legalAria": "Informações legais",
+  "legal.onlyDeEn":
+    "Esta página só está disponível em alemão e inglês. Você está lendo a versão em inglês.",
+  "common.backHome": "Voltar ao início",
+  "common.notFound.title": "Página não encontrada",
+  "common.notFound.body": "Esta página não existe ou foi movida.",
+  "common.error.title": "Algo deu errado",
+  "common.error.body": "Não foi possível mostrar esta página. Tente novamente.",
+  "common.error.retry": "Tentar novamente",
+  "common.error.ref": "Referência do erro: {id}",
+  "app.crash.saving": "Salvando suas últimas alterações…",
+  "app.crash.saved": "Suas últimas alterações foram salvas.",
+  "app.crash.unsaved": "Suas últimas alterações podem não ter sido salvas.",
+  "app.crash.body": "Recarregue a página para continuar de onde parou.",
+  "app.crash.reload": "Recarregar a página",
 };

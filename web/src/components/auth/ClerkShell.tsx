@@ -21,6 +21,7 @@ import {
 } from "@/lib/auth";
 import { AUTH_REQUIRED_EVENT } from "@/lib/api";
 import { adoptLegacyLocalData, clearMe, refreshMe } from "@/lib/account";
+import { track } from "@/lib/analytics";
 
 // One lazily-loaded chunk per language (English = Clerk's built-in).
 const LOADERS: Partial<Record<Lang, () => Promise<LocalizationResource>>> = {
@@ -111,6 +112,26 @@ function AuthBridge() {
       email,
     });
   }, [isLoaded, isSignedIn, userId, email]);
+
+  // Funnel event "sign_up" (Clerk's <SignUp> has no completion callback):
+  // this page saw the visitor signed out, then signed in with an account
+  // created minutes ago. A reload after signing up doesn't count again,
+  // and nothing is stored in the browser for it.
+  const sawSignedOutRef = useRef(false);
+  const signUpSentRef = useRef<string | null>(null);
+  const createdAt = user?.createdAt?.getTime() ?? null;
+  const newUserId = user?.id ?? null;
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      sawSignedOutRef.current = true;
+      return;
+    }
+    if (!sawSignedOutRef.current || !newUserId || signUpSentRef.current === newUserId) return;
+    if (createdAt === null || Date.now() - createdAt > 10 * 60_000) return;
+    signUpSentRef.current = newUserId;
+    track("sign_up");
+  }, [isLoaded, isSignedIn, newUserId, createdAt]);
 
   // Keep the cached token fresh for saves sent while the page unloads
   // (tokens live ~60 s), and /me (minutes, daily media token) current.
