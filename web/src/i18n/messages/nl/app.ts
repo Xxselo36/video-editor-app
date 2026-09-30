@@ -12,8 +12,6 @@ export const nlApp: Partial<Record<AppKey, string>> = {
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Het project kon nu niet geladen worden. Probeer het straks nog eens.",
-  "app.notice.done": "Deze video is klaar — je vindt hem onder Recent en in je bibliotheek.",
-  "app.notice.processing": "Deze video wordt nog verwerkt. De kaart toont de voortgang.",
   "app.notice.alreadyExporting": "Deze video wordt al geëxporteerd. De kaart toont de voortgang.",
   "app.notice.offline": "Kan de server niet bereiken. Controleer je internetverbinding en probeer het opnieuw.",
 
@@ -25,7 +23,6 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.errors.interrupted":
     "De upload werd onderbroken (pagina herladen of app gewisseld). Upload de video opnieuw.",
   "app.errors.tooLarge": "Het bestand is te groot. Verklein de video of exporteer hem kleiner.",
-  "app.errors.noAudio": "Er is geen bruikbare audio gevonden in de video.",
   "app.errors.noSpeech": "We hebben geen spraak in deze video gevonden. CleoCuts knipt en ondertitelt video's waarin iemand praat — probeer een clip met een stem.",
   "app.errors.noSpeechRefunded": "We hebben geen spraak in deze video gevonden. CleoCuts knipt en ondertitelt video's waarin iemand praat — probeer een clip met een stem. De minuten zijn teruggeboekt.",
   "app.errors.noAudioTrack": "Deze video heeft geen audiospoor, dus er valt niets te knippen of te ondertitelen. Er is niets in rekening gebracht.",

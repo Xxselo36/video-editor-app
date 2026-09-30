@@ -12,8 +12,6 @@ export const jaApp: Partial<Record<AppKey, string>> = {
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "プロジェクトを読み込めませんでした。少し時間をおいて、もう一度お試しください。",
-  "app.notice.done": "この動画は完成しています — 「最近」とライブラリから見つけられます。",
-  "app.notice.processing": "この動画はまだ処理中です。カードに進行状況が表示されます。",
   "app.notice.alreadyExporting": "この動画はすでに書き出し中です。進行状況はカードに表示されます。",
   "app.notice.offline": "サーバーに接続できません。インターネット接続を確認して、もう一度お試しください。",
 
@@ -25,7 +23,6 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.errors.interrupted":
     "アップロードが中断されました(ページの再読み込みやアプリの切り替えが原因の可能性があります)。動画を再度アップロードしてください。",
   "app.errors.tooLarge": "ファイルが大きすぎます。動画を短くするか、サイズを小さくして書き出してください。",
-  "app.errors.noAudio": "動画内に使用できる音声が見つかりませんでした。",
   "app.errors.noSpeech": "この動画から話し声が見つかりませんでした。CleoCuts は人が話している動画をカットして字幕を付けます。声の入ったクリップでお試しください。",
   "app.errors.noSpeechRefunded": "この動画から話し声が見つかりませんでした。CleoCuts は人が話している動画をカットして字幕を付けます。声の入ったクリップでお試しください。利用時間（分）は返還しました。",
   "app.errors.noAudioTrack": "この動画には音声トラックがないため、カットや字幕付けができません。料金は発生していません。",

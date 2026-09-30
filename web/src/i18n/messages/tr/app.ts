@@ -12,8 +12,6 @@ export const trApp: Partial<Record<AppKey, string>> = {
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Proje şu an yüklenemedi. Lütfen birazdan tekrar dene.",
-  "app.notice.done": "Bu video tamamlandı — Son İşlemler'de ve Kütüphanen'de bulabilirsin.",
-  "app.notice.processing": "Bu video hâlâ işleniyor. Kart ilerlemeyi gösteriyor.",
   "app.notice.alreadyExporting": "Bu video zaten dışa aktarılıyor. İlerlemeyi kartında görebilirsin.",
   "app.notice.offline": "Sunucuya erişilemiyor. İnternetini kontrol edip tekrar dene.",
 
@@ -25,7 +23,6 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.errors.interrupted":
     "Yükleme kesildi (sayfa yenilendi veya uygulama değiştirildi). Lütfen videoyu yeniden yükle.",
   "app.errors.tooLarge": "Dosya çok büyük. Videoyu kısalt veya daha küçük dışa aktar.",
-  "app.errors.noAudio": "Videoda kullanılabilir ses bulunamadı.",
   "app.errors.noSpeech": "Bu videoda konuşma bulamadık. CleoCuts, birinin konuştuğu videoları keser ve altyazılar — sesli bir klip dene.",
   "app.errors.noSpeechRefunded": "Bu videoda konuşma bulamadık. CleoCuts, birinin konuştuğu videoları keser ve altyazılar — sesli bir klip dene. Dakikaların iade edildi.",
   "app.errors.noAudioTrack": "Bu videonun ses kanalı yok; kesilecek ya da altyazı eklenecek bir şey bulunmuyor. Hiçbir ücret alınmadı.",

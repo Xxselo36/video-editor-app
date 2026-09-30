@@ -12,8 +12,6 @@ export const plApp: Partial<Record<AppKey, string>> = {
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Nie udało się teraz wczytać projektu. Spróbuj ponownie za chwilę.",
-  "app.notice.done": "Ten film jest gotowy — znajdziesz go w Ostatnich i w swojej Bibliotece.",
-  "app.notice.processing": "Ten film wciąż jest przetwarzany. Karta pokazuje postęp.",
   "app.notice.alreadyExporting": "Ten film jest już eksportowany. Postęp widać na jego karcie.",
   "app.notice.offline": "Nie można połączyć się z serwerem. Sprawdź internet i spróbuj ponownie.",
 
@@ -25,7 +23,6 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.errors.interrupted":
     "Przesyłanie zostało przerwane (strona się odświeżyła albo zmieniono aplikację). Wgraj film ponownie.",
   "app.errors.tooLarge": "Plik jest za duży. Przytnij film albo wyeksportuj mniejszą wersję.",
-  "app.errors.noAudio": "W filmie nie znaleziono użytecznego audio.",
   "app.errors.noSpeech": "W tym filmie nie znaleźliśmy mowy. CleoCuts tnie i napisuje filmy, w których ktoś mówi — spróbuj z klipem, w którym słychać głos.",
   "app.errors.noSpeechRefunded": "W tym filmie nie znaleźliśmy mowy. CleoCuts tnie i napisuje filmy, w których ktoś mówi — spróbuj z klipem, w którym słychać głos. Minuty zostały ci zwrócone.",
   "app.errors.noAudioTrack": "Ten film nie ma ścieżki dźwiękowej, więc nie ma czego ciąć ani napisywać. Nic nie zostało pobrane.",

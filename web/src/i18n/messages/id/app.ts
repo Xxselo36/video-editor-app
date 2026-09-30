@@ -12,8 +12,6 @@ export const idApp: Partial<Record<AppKey, string>> = {
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Proyek tidak bisa dimuat sekarang. Coba lagi sebentar lagi.",
-  "app.notice.done": "Video ini sudah selesai — cek di Terbaru dan di Perpustakaanmu.",
-  "app.notice.processing": "Video ini masih diproses. Kartunya menunjukkan progresnya.",
   "app.notice.alreadyExporting": "Video ini sudah sedang diekspor. Kartunya menampilkan progresnya.",
   "app.notice.offline": "Tidak bisa terhubung ke server. Cek internetmu dan coba lagi.",
 
@@ -25,7 +23,6 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.errors.interrupted":
     "Unggahan terputus (halaman dimuat ulang atau ganti aplikasi). Silakan unggah videonya lagi.",
   "app.errors.tooLarge": "Filenya terlalu besar. Potong videonya atau ekspor dengan ukuran lebih kecil.",
-  "app.errors.noAudio": "Tidak ada audio yang bisa dipakai di video ini.",
   "app.errors.noSpeech": "Kami tidak menemukan ucapan di video ini. CleoCuts memotong dan memberi teks video yang berisi orang berbicara — coba klip yang ada suaranya.",
   "app.errors.noSpeechRefunded": "Kami tidak menemukan ucapan di video ini. CleoCuts memotong dan memberi teks video yang berisi orang berbicara — coba klip yang ada suaranya. Menitnya sudah dikembalikan.",
   "app.errors.noAudioTrack": "Video ini tidak punya trek audio, jadi tidak ada yang bisa dipotong atau diberi teks. Tidak ada biaya yang dikenakan.",

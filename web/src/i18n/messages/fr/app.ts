@@ -12,8 +12,6 @@ export const frApp: Partial<Record<AppKey, string>> = {
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Impossible de charger le projet pour le moment. Réessaie dans un instant.",
-  "app.notice.done": "Cette vidéo est terminée — retrouve-la dans Récents et dans ta bibliothèque.",
-  "app.notice.processing": "Cette vidéo est encore en traitement. La carte affiche sa progression.",
   "app.notice.alreadyExporting": "Cette vidéo est déjà en cours d'export. Sa carte affiche la progression.",
   "app.notice.offline": "Impossible de joindre le serveur. Vérifie ta connexion et réessaie.",
 
@@ -25,7 +23,6 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.errors.interrupted":
     "L'envoi a été interrompu (page rechargée ou changement d'appli). Merci de réenvoyer la vidéo.",
   "app.errors.tooLarge": "Le fichier est trop volumineux. Rogne la vidéo ou exporte-la en plus petit.",
-  "app.errors.noAudio": "Aucun son exploitable n'a été trouvé dans la vidéo.",
   "app.errors.noSpeech": "Nous n'avons trouvé aucune parole dans cette vidéo. CleoCuts coupe et sous-titre les vidéos où quelqu'un parle — essaie avec un clip où l'on entend une voix.",
   "app.errors.noSpeechRefunded": "Nous n'avons trouvé aucune parole dans cette vidéo. CleoCuts coupe et sous-titre les vidéos où quelqu'un parle — essaie avec un clip où l'on entend une voix. Les minutes t'ont été recréditées.",
   "app.errors.noAudioTrack": "Cette vidéo n'a pas de piste audio : il n'y a rien à couper ni à sous-titrer. Rien n'a été facturé.",

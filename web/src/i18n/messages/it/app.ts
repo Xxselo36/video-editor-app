@@ -12,8 +12,6 @@ export const itApp: Partial<Record<AppKey, string>> = {
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Non riusciamo a caricare il progetto ora. Riprova in un momento.",
-  "app.notice.done": "Questo video è pronto — lo trovi in Recenti e nella tua Libreria.",
-  "app.notice.processing": "Questo video è ancora in elaborazione. La card mostra i progressi.",
   "app.notice.alreadyExporting": "Questo video è già in esportazione. La sua scheda mostra l'avanzamento.",
   "app.notice.offline": "Impossibile raggiungere il server. Controlla la connessione e riprova.",
 
@@ -25,7 +23,6 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.errors.interrupted":
     "L'upload è stato interrotto (pagina ricaricata o app cambiata). Carica di nuovo il video.",
   "app.errors.tooLarge": "Il file è troppo grande. Taglia il video o esportalo più leggero.",
-  "app.errors.noAudio": "Non è stato trovato audio utilizzabile nel video.",
   "app.errors.noSpeech": "In questo video non abbiamo trovato parlato. CleoCuts taglia e sottotitola video in cui qualcuno parla: prova con una clip con una voce.",
   "app.errors.noSpeechRefunded": "In questo video non abbiamo trovato parlato. CleoCuts taglia e sottotitola video in cui qualcuno parla: prova con una clip con una voce. I minuti ti sono stati riaccreditati.",
   "app.errors.noAudioTrack": "Questo video non ha una traccia audio, quindi non c'è niente da tagliare o sottotitolare. Non ti è stato addebitato nulla.",

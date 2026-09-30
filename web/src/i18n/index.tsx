@@ -60,7 +60,7 @@ export function loadLang(lang: Lang): Promise<boolean> {
         DICTS[lang] = dict;
         // For tests and debugging: <html data-i18n="en de"> lists the
         // languages whose messages are here.
-        document.documentElement.dataset.i18n = Object.keys(DICTS).join(" ");
+        if (typeof document !== "undefined") document.documentElement.dataset.i18n = Object.keys(DICTS).join(" ");
         dictListeners.forEach((f) => f());
         return true;
       })

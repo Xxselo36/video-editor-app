@@ -16,8 +16,6 @@ export const enApp = {
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Couldn't load the project right now. Please try again in a moment.",
-  "app.notice.done": "This video is done — find it under Recent and in your Library.",
-  "app.notice.processing": "This video is still processing. The card shows its progress.",
   "app.notice.alreadyExporting": "This video is already being exported. Its card shows the progress.",
   "app.notice.offline": "Can't reach the server. Check your internet and try again.",
 
@@ -29,7 +27,6 @@ export const enApp = {
   "app.errors.interrupted":
     "The upload was interrupted (page reloaded or app switched). Please upload the video again.",
   "app.errors.tooLarge": "The file is too large. Please trim the video or export it smaller.",
-  "app.errors.noAudio": "No usable audio was found in the video.",
   "app.errors.noSpeech": "We couldn't find any speech in this video. CleoCuts cuts and captions videos where someone talks — try a clip with a voice.",
   "app.errors.noSpeechRefunded": "We couldn't find any speech in this video. CleoCuts cuts and captions videos where someone talks — try a clip with a voice. The minutes were credited back.",
   "app.errors.noAudioTrack": "This video has no sound track, so there's nothing to cut or caption. Nothing was charged.",
