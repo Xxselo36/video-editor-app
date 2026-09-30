@@ -198,10 +198,14 @@ _KEY_FIELDS = ("source_key", "mezz_key", "proxy_key", "preview_key",
 
 
 def _keys_of(job: Job) -> tuple:
-    """The job's keys (compare-and-set of the commit)."""
+    """The job's keys (compare-and-set of the commit) — all of them
+    (media._job_keys: also peaks.bin and the CJK font subsets), so a
+    font refresh during the move makes the commit fail and the move
+    retry, instead of flipping the job to R2 with a subset left behind."""
     return (tuple(getattr(job, f) for f in _KEY_FIELDS),
             tuple((job.output_keys or {}).items()),
-            job.preview_version)
+            job.preview_version,
+            tuple(media._job_keys(job)))
 
 
 _CTYPES = {".jpg": "image/jpeg", ".bin": "application/octet-stream",

@@ -265,6 +265,33 @@ def test_backfill_commit_is_compare_and_set(r2, analyse, monkeypatch):
     assert store.get(job.id).media_store == "local"
 
 
+def test_backfill_move_fails_when_a_font_subset_changes(r2, analyse, monkeypatch):
+    """A CJK font refresh (UT3) during the move: the compare-and-set sees
+    the new subset keys, nothing is committed, the next run moves them."""
+    monkeypatch.delenv("CLEO_MEDIA_BACKEND", raising=False)
+    job = _analysed_job(r2)
+    sub = {"family": "cc-noto-sans-jp-800-0123abcd", "rev": "0123abcd", "chars": "",
+           "missing": "", **{k: f"jobs/{job.id}/fonts/noto-sans-jp-800.0123abcd.{k}"
+                             for k in ("woff2", "ttf", "json")}}
+    for k in ("woff2", "ttf", "json"):
+        media.put_file(__file__, sub[k], content_type="font/ttf", store="local")
+    store.update(job.id, font_subsets={"noto-sans-jp-800": sub})
+    job = store.get(job.id)
+    assert sub["woff2"] in [it["key"] for it in r2_backfill.move_plan(job)]
+    real_put = media.put_file
+
+    def put(path, key, **kw):
+        if key == job.mezz_key:   # refresh lands: subset B replaces A
+            b = {**sub, **{k: sub[k].replace("0123abcd", "89abcdef") for k in
+                           ("woff2", "ttf", "json")}}
+            store.update(job.id, font_subsets={"noto-sans-jp-800": b})
+        return real_put(path, key, **kw)
+    monkeypatch.setattr(media, "put_file", put)
+    res = r2_backfill.backfill_job(store.get(job.id))
+    assert res["status"] == "skipped"
+    assert store.get(job.id).media_store == "local"
+
+
 def test_rebuild_refuses_to_commit_into_a_moved_job(r2, analyse,
                                                     monkeypatch):
     monkeypatch.delenv("CLEO_MEDIA_BACKEND", raising=False)
