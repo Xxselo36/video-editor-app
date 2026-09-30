@@ -42,7 +42,11 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install the Modal client
-        run: pip install -q "modal>=1.0,<2"
+        # botocore: render_r2's healthy answer is botocore's 404 for the
+        # probe's missing mezz; without the module the client can't
+        # deserialize that remote exception and the probe reads it as a
+        # failure. Pinned like backend/requirements.txt.
+        run: pip install -q "modal>=1.0,<2" "botocore>=1.43,<1.44"
       - name: Probe
         # The function the API uses: the repo variable CLEO_MODAL_RENDER_FN
         # mirrors Railway's (unset = render_burn_concat).

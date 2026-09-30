@@ -57,7 +57,9 @@ jobs:
         if: steps.creds.outputs.ok == 'true' && inputs.diagnose
         # Public log: only the render app's state and error lines.
         run: |
-          pip install -q "modal>=1.0"
+          # botocore: render_r2's healthy probe answer is botocore's 404
+          # (see ops-watch.yml).
+          pip install -q "modal>=1.0" "botocore>=1.43,<1.44"
           modal app list 2>&1 | head -20
           modal container list 2>&1 | head -20
           timeout 40 modal app logs cleocuts-render 2>&1 \
