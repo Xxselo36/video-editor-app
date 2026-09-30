@@ -490,4 +490,8 @@ export const id: Partial<Record<MessageKey, string>> = {
   "common.auth.signIn": "Masuk",
   "common.auth.account": "Akun",
   "common.auth.pricing": "Harga",
+  "common.language": "Bahasa",
+  "common.footer.legalAria": "Informasi hukum",
+  "legal.onlyDeEn":
+    "Halaman ini hanya tersedia dalam bahasa Jerman dan Inggris. Kamu sedang membaca versi bahasa Inggris.",
 };

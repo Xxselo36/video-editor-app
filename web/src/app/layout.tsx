@@ -6,6 +6,7 @@ import { ERROR_REPORTING_ENABLED } from "@/lib/errorReporting";
 import { ErrorReporting } from "@/components/ErrorReporting";
 import { ANALYTICS_ENABLED } from "@/lib/analytics";
 import { AnalyticsMount } from "@/components/AnalyticsMount";
+import { LANG_INIT_SCRIPT } from "@/i18n/langs";
 
 // No web fonts: the UI uses the system font stack (globals.css), the
 // Geist fonts were preloaded on every page without being used.
@@ -40,7 +41,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
+    // lang is set before the first paint by LANG_INIT_SCRIPT (the stored
+    // or the browser's language) — hence suppressHydrationWarning.
+    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: LANG_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">
         {/* Accounts (Clerk) only when configured — otherwise no provider
             and no Clerk code at all, exactly like the anonymous beta. */}

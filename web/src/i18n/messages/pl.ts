@@ -489,4 +489,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "common.auth.signIn": "Zaloguj się",
   "common.auth.account": "Konto",
   "common.auth.pricing": "Cennik",
+  "common.language": "Język",
+  "common.footer.legalAria": "Informacje prawne",
+  "legal.onlyDeEn":
+    "Ta strona jest dostępna tylko po niemiecku i angielsku. Czytasz wersję angielską.",
 };

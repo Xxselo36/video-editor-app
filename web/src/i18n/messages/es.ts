@@ -504,4 +504,8 @@ export const es: Partial<Record<MessageKey, string>> = {
   "common.auth.signIn": "Iniciar sesión",
   "common.auth.account": "Cuenta",
   "common.auth.pricing": "Precios",
+  "common.language": "Idioma",
+  "common.footer.legalAria": "Información legal",
+  "legal.onlyDeEn":
+    "Esta página solo está disponible en alemán e inglés. Estás leyendo la versión en inglés.",
 };

@@ -19,9 +19,8 @@ import {
   type BillingPlan,
   type PlanId,
 } from "@/lib/account";
+import { SiteFooter } from "@/components/site/SiteFooter";
 import { SubpageHeader } from "./SubpageHeader";
-
-const FORMATS = "9:16, 1:1, 16:9";
 
 /**
  * /pricing — plans and prices come from GET /billing/config (never
@@ -92,10 +91,10 @@ export function PricingView() {
     : [];
 
   return (
-    <main className="relative flex min-h-screen flex-col" style={{ color: "var(--text-strong)" }}>
+    <div className="relative flex min-h-screen flex-col" style={{ color: "var(--text-strong)" }}>
       <SubpageHeader homeHref="/" title={t("common.auth.pricing")} />
 
-      <div className="phase-fade relative z-10 mx-auto w-full max-w-5xl flex-1 px-5 py-12">
+      <main className="phase-fade relative z-10 mx-auto w-full max-w-5xl flex-1 px-5 py-12">
         <h1 className="mb-3 text-4xl font-bold tracking-tight sm:text-5xl">{t("site.pricing.title")}</h1>
         <p className="mb-10 max-w-xl text-base" style={{ color: "var(--text-body)" }}>
           {t("site.pricing.subtitle")}
@@ -175,17 +174,10 @@ export function PricingView() {
             </div>
           </>
         )}
-      </div>
+      </main>
 
-      <footer
-        className="relative z-10 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 px-6 py-6 text-xs"
-        style={{ borderTop: "1px solid var(--border)", color: "var(--text-muted)" }}
-      >
-        <Link href="/imprint" className="hover:opacity-70">{t("site.footer.imprint")}</Link>
-        <Link href="/privacy" className="hover:opacity-70">{t("site.footer.privacy")}</Link>
-        <Link href="/terms" className="hover:opacity-70">{t("site.footer.terms")}</Link>
-      </footer>
-    </main>
+      <SiteFooter />
+    </div>
   );
 }
 
@@ -216,7 +208,6 @@ function PlanCard({
     t("site.pricing.retention", { days: plan.retention_days }),
     t("site.pricing.featureWorkflows"),
     t("site.pricing.featureVoice"),
-    t("site.pricing.featureFormats", { formats: FORMATS }),
   ];
   const label = !plan.available
     ? t("site.pricing.unavailable")

@@ -484,4 +484,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "common.auth.signIn": "サインイン",
   "common.auth.account": "アカウント",
   "common.auth.pricing": "料金",
+  "common.language": "言語",
+  "common.footer.legalAria": "法的情報",
+  "legal.onlyDeEn": "このページはドイツ語と英語でのみ提供しています。英語版を表示しています。",
 };

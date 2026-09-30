@@ -490,4 +490,8 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "common.auth.signIn": "Giriş yap",
   "common.auth.account": "Hesap",
   "common.auth.pricing": "Fiyatlandırma",
+  "common.language": "Dil",
+  "common.footer.legalAria": "Yasal bilgiler",
+  "legal.onlyDeEn":
+    "Bu sayfa yalnızca Almanca ve İngilizce olarak mevcut. İngilizce sürümünü okuyorsun.",
 };

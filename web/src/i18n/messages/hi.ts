@@ -488,4 +488,8 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "common.auth.signIn": "साइन इन करें",
   "common.auth.account": "अकाउंट",
   "common.auth.pricing": "प्राइसिंग",
+  "common.language": "भाषा",
+  "common.footer.legalAria": "कानूनी जानकारी",
+  "legal.onlyDeEn":
+    "यह पेज सिर्फ़ जर्मन और अंग्रेज़ी में उपलब्ध है। आप अंग्रेज़ी संस्करण पढ़ रहे हैं।",
 };

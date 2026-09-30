@@ -1,37 +1,111 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { OPERATOR } from "@/lib/legal";
+import { H, LegalPage, LegalTitle, Mail } from "@/components/legal/LegalPage";
+import { LEGAL_DRAFT, OPERATOR } from "@/lib/legal";
 
-export const metadata: Metadata = { title: "Imprint – CleoCuts" };
+export const metadata: Metadata = {
+  title: "Imprint – Impressum",
+  description: "Legal notice (Impressum) of CleoCuts: operator, address and contact.",
+};
+
+// The operator data lives in lib/legal.ts (one place to fill in).
+function Address({ lang }: { lang: "de" | "en" }) {
+  const o = OPERATOR;
+  return (
+    <p>
+      {o.name}
+      {o.representative && (
+        <>
+          <br />
+          {lang === "de" ? "Vertreten durch" : "Represented by"}: {o.representative}
+        </>
+      )}
+      <br />
+      {o.street}
+      <br />
+      {o.postcode} {o.city}
+      <br />
+      {o.country[lang]}
+    </p>
+  );
+}
+
+function Contact({ lang }: { lang: "de" | "en" }) {
+  return (
+    <p>
+      {lang === "de" ? "E-Mail" : "E-mail"}: <Mail address={OPERATOR.email} />
+      {OPERATOR.phone && (
+        <>
+          <br />
+          {lang === "de" ? "Telefon" : "Phone"}: {OPERATOR.phone}
+        </>
+      )}
+    </p>
+  );
+}
+
+const German = (
+  <>
+    <LegalTitle lang="de" title="Impressum" subtitle="Angaben gemäß § 5 DDG" draft={LEGAL_DRAFT.imprint} />
+    <H>Anbieter</H>
+    <Address lang="de" />
+    <H>Kontakt</H>
+    <Contact lang="de" />
+    {OPERATOR.register && (
+      <>
+        <H>Registereintrag</H>
+        <p>{OPERATOR.register}</p>
+      </>
+    )}
+    {OPERATOR.vatId && (
+      <>
+        <H>Umsatzsteuer-Identifikationsnummer</H>
+        <p>USt-IdNr. gemäß § 27a Umsatzsteuergesetz: {OPERATOR.vatId}</p>
+      </>
+    )}
+    <H>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</H>
+    <p>{OPERATOR.name}, Anschrift wie oben.</p>
+    <H>Verbraucherstreitbeilegung</H>
+    <p>
+      Wir sind nicht bereit und nicht verpflichtet, an Streitbeilegungsverfahren vor einer
+      Verbraucherschlichtungsstelle teilzunehmen.
+    </p>
+  </>
+);
+
+const English = (
+  <>
+    <LegalTitle
+      lang="en"
+      title="Imprint"
+      subtitle="Legal notice (Impressum) under § 5 of the German Digital Services Act (DDG)"
+      draft={LEGAL_DRAFT.imprint}
+    />
+    <H>Operator</H>
+    <Address lang="en" />
+    <H>Contact</H>
+    <Contact lang="en" />
+    {OPERATOR.register && (
+      <>
+        <H>Commercial register</H>
+        <p>{OPERATOR.register}</p>
+      </>
+    )}
+    {OPERATOR.vatId && (
+      <>
+        <H>VAT ID</H>
+        <p>VAT identification number under § 27a of the German VAT Act: {OPERATOR.vatId}</p>
+      </>
+    )}
+    <H>Responsible for the content under § 18(2) MStV</H>
+    <p>{OPERATOR.name}, address as above.</p>
+    <H>Consumer dispute resolution</H>
+    <p>
+      We are neither willing nor obliged to take part in dispute resolution proceedings before a consumer
+      arbitration board.
+    </p>
+  </>
+);
 
 export default function ImprintPage() {
-  return (
-    <main className="relative z-10 mx-auto w-full max-w-2xl px-5 py-12 text-sm leading-relaxed" style={{ color: "var(--text-body)" }}>
-      <Link href="/" className="text-xs" style={{ color: "var(--text-muted)" }}>← CleoCuts</Link>
-      <h1 className="mb-6 mt-4 text-3xl font-bold" style={{ color: "var(--text-strong)" }}>Imprint</h1>
-      <p className="mb-6" style={{ color: "var(--text-muted)" }}>Impressum · Information according to § 5 DDG</p>
-      <section className="mb-6">
-        <h2 className="mb-2 font-semibold" style={{ color: "var(--text-strong)" }}>Operator</h2>
-        <p>{OPERATOR.name}<br />{OPERATOR.street}<br />{OPERATOR.city}<br />{OPERATOR.country}</p>
-      </section>
-      <section className="mb-6">
-        <h2 className="mb-2 font-semibold" style={{ color: "var(--text-strong)" }}>Contact</h2>
-        <p>Email: {OPERATOR.email}{OPERATOR.phone && <><br />Phone: {OPERATOR.phone}</>}</p>
-      </section>
-      {OPERATOR.vatId && (
-        <section className="mb-6">
-          <h2 className="mb-2 font-semibold" style={{ color: "var(--text-strong)" }}>VAT ID</h2>
-          <p>{OPERATOR.vatId}</p>
-        </section>
-      )}
-      <section className="mb-6">
-        <h2 className="mb-2 font-semibold" style={{ color: "var(--text-strong)" }}>Responsible for content</h2>
-        <p>{OPERATOR.name}, address as above.</p>
-      </section>
-      <section>
-        <h2 className="mb-2 font-semibold" style={{ color: "var(--text-strong)" }}>EU dispute resolution</h2>
-        <p>We are neither willing nor obliged to take part in dispute resolution proceedings before a consumer arbitration board.</p>
-      </section>
-    </main>
-  );
+  return <LegalPage de={German} en={English} />;
 }

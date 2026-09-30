@@ -147,4 +147,8 @@ export const enSite = {
   "common.auth.signIn": "Sign in",
   "common.auth.account": "Account",
   "common.auth.pricing": "Pricing",
+  "common.language": "Language",
+  "common.footer.legalAria": "Legal",
+  "legal.onlyDeEn":
+    "This page is available in German and English only. You are reading the English version.",
 };

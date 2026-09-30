@@ -499,4 +499,8 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.voice.scene.type.keep": "Manter",
   "app.voice.scene.type.restart": "Cortar / Reiniciar",
   "app.voice.scene.type.finish": "Finalizar",
+  "common.language": "Idioma",
+  "common.footer.legalAria": "Informações legais",
+  "legal.onlyDeEn":
+    "Esta página só está disponível em alemão e inglês. Você está lendo a versão em inglês.",
 };

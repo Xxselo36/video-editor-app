@@ -143,3 +143,12 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   .phase-fade, .skeleton, .pulse-dot { animation: none; }
 }
+
+/* Legal pages carry the German and the English text; <html lang> —
+ * set before the first paint by the inline script in app/layout.tsx and
+ * by the language switcher — shows one of them. German for "de", English
+ * for every other language (components/legal). */
+html[lang="de"] [data-legal-lang="en"],
+html:not([lang="de"]) [data-legal-lang="de"] {
+  display: none;
+}

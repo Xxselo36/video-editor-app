@@ -484,4 +484,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "common.auth.signIn": "로그인",
   "common.auth.account": "계정",
   "common.auth.pricing": "요금제",
+  "common.language": "언어",
+  "common.footer.legalAria": "법적 고지",
+  "legal.onlyDeEn": "이 페이지는 독일어와 영어로만 제공돼요. 지금은 영어 버전을 보고 있어요.",
 };
