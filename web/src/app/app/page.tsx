@@ -1,12 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { LogoMark } from "@/components/Logo";
-import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
+import { AppHeader } from "@/components/AppHeader";
 import { PaywallDialog } from "@/components/billing/PaywallDialog";
-import { LanguageSwitcher, useT } from "@/i18n";
-import { planName, useBillingConfig, useMe, type Paywall } from "@/lib/account";
+import { useT } from "@/i18n";
+import type { Paywall } from "@/lib/account";
 import { dropLegacyActiveJob, updateActiveJob as updateActiveJobV2 } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
 import { apiFetch, whenMediaReady } from "@/lib/api";
@@ -301,66 +299,12 @@ export default function Home() {
   };
   resetRef.current = reset;
 
-  // Accounts + billing (all null / off with auth off).
-  const { me } = useMe();
-  const billing = useBillingConfig();
-  const planBadge = billing?.enabled && me?.plan ? planName(me.plan, billing) : null;
-
   return (
     <main
       className="flex min-h-screen flex-col"
       style={{ color: "var(--text-strong)" }}
     >
-      <header
-        className="flex flex-wrap items-center justify-between gap-y-2 px-6 py-4"
-        style={{ borderBottom: "1px solid var(--border)" }}
-      >
-        <div className="flex min-w-0 items-center gap-3">
-          <Link
-            href="/"
-            className="flex items-center gap-2 transition-opacity hover:opacity-80"
-            aria-label={t("app.header.homeAria")}
-          >
-            <LogoMark size={24} />
-            <span className="text-xl font-bold tracking-tight">CleoCuts</span>
-          </Link>
-        </div>
-        <div className="flex items-center gap-3 sm:gap-4">
-          <PricingLink className="hidden sm:inline" />
-          <Link
-            href="/app/library"
-            className="text-xs transition-colors hover:opacity-70"
-            style={{ color: "var(--text-body)" }}
-          >
-            {t("app.header.library")}
-          </Link>
-          <LanguageSwitcher />
-          {planBadge ? (
-            // Paid plans live: the "Beta" badge becomes the plan badge.
-            <Link
-              href="/app/account"
-              className="hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest sm:inline-block"
-              style={{
-                background: "var(--brand-tint)",
-                color: "var(--brand-strong)",
-              }}
-            >
-              {planBadge}
-            </Link>
-          ) : (
-            <span
-              className="hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest sm:inline-block"
-              style={{
-                background: "var(--brand-tint)",
-                color: "var(--brand-strong)",
-              }}
-            >
-              {t("app.header.beta")}
-            </span>
-          )}
-          <AccountMenu />
-        </div>
-      </header>
+      <AppHeader />
 
       <div
         key={phase}
