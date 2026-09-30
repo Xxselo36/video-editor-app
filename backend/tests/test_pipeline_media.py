@@ -125,7 +125,9 @@ def test_reordered_preview_memory_is_bounded(clip60, tmp_path, monkeypatch):
     pipeline._ffmpeg_cuts_preview(str(clip60), moved, str(out))
     print(f"reordered preview: {len(run.calls)} ffmpeg calls, "
           f"peak child RSS {run.peak_mb:.0f} MB")
-    assert run.peak_mb < 600
+    # The old single-pass build peaked at 4.6 GB. x264 frame threads grow
+    # with the core count: ~450 MB here, ~650 MB on a 4-vCPU CI runner.
+    assert run.peak_mb < 1000
     # One pass through the concat demuxer (+ the start-time probe).
     assert [Path(c[0]).name.startswith("ffprobe") for c, _ in run.calls] \
         == [True, False]

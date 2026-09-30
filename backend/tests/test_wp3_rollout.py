@@ -193,7 +193,10 @@ def test_r2_job_stays_in_r2_after_switching_to_local(client, r2, analyse,
     assert not media.local_path(got.output_keys["primary"]).exists()
     r = client.get(f"/jobs/{job.id}/watch", follow_redirects=False)
     assert r.status_code == 307
-    # Delete: the GC deletes in R2 (the job's store), not locally.
+    # Delete: the GC deletes in R2 (the job's store), not locally. The
+    # render thread records its event after "done" and only then lets go
+    # of the job (DELETE answers 409 while it holds it).
+    assert _wait_for(lambda: job.id not in M._active_jobs)
     assert client.delete(f"/jobs/{job.id}").status_code == 200
     assert _r2_keys(f"jobs/{job.id}/") == [] and store.gc_all() == []
 
