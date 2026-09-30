@@ -30,6 +30,7 @@ import { notifyIfHidden, requestNotificationPermission } from "@/lib/notify";
 import { trackSave, waitForSaves } from "@/lib/pendingSaves";
 import { buildPlan, EditPlayer, probeProxy } from "@/lib/editPlayback";
 import { sameTimeline, saveOutcome, type SaveOutcome, type TimelineSeg } from "@/lib/editSave";
+import { phrasesToUnits } from "@/features/editor/legacy/phraseUnits";
 import {
   MAX_MINUTES,
   MAX_UPLOAD_GB,
@@ -547,6 +548,9 @@ export default function Home() {
   const [uploadPct, setUploadPct] = useState(0);
   const [job, setJob] = useState<JobStatus | null>(null);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
+  // The job's word units (GET /subtitles): what the render gets, matched to
+  // the edited sentences by phrasesToUnits (UX2).
+  const unitsRef = useRef<Subtitle[]>([]);
   // Opening a job from the dashboard (may wait for a last save).
   const [resuming, setResuming] = useState(false);
   // Short info toast (e.g. "this video is still rendering").
@@ -1041,6 +1045,7 @@ export default function Home() {
           const subRes = await apiFetch(`/jobs/${job.id}/subtitles`);
           if (subRes.ok) {
             const data = await subRes.json();
+            unitsRef.current = data.subtitles ?? [];
             setPhrases(phrasesFromSubtitlesResponse(data));
             setPhase("reviewing");
             updateActiveJob({ phase: "reviewing" });
@@ -1107,17 +1112,9 @@ export default function Home() {
   const onApplyRender = async () => {
     if (!job) return;
     flushPhraseSave();
-    // Flatten phrases back to the subtitle shape the renderer expects.
-    // One subtitle per phrase, spanning its original time range.
-    const subtitles: Subtitle[] = phrases
-      .filter((p) => p.text.trim().length > 0)
-      .map((p) => ({
-        start: p.start,
-        end: p.end,
-        text: p.text.trim(),
-        original_start: p.original_start,
-        original_end: p.original_end,
-      }));
+    // Word units with their source times, not one subtitle per sentence:
+    // the burn highlights each word at its own time (UX2).
+    const subtitles: Subtitle[] = phrasesToUnits(phrases, unitsRef.current);
     try {
       const r = await apiFetch(`/jobs/${job.id}/render`, {
         method: "POST",
@@ -1227,6 +1224,7 @@ export default function Home() {
         const subsRes = await apiFetch(`/jobs/${jobId}/subtitles`);
         if (subsRes.ok) {
           const sd = await subsRes.json();
+          unitsRef.current = sd.subtitles ?? [];
           setPhrases(phrasesFromSubtitlesResponse(sd));
         }
         // Show the caption style this job renders with, not

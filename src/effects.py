@@ -2582,13 +2582,22 @@ def create_elegant_phrase_subtitle(words: list, active_index: int, duration: flo
     return clip
 
 
+# Highlight font styles already reported as unresolvable (logged once).
+_MISSING_HIGHLIGHT_FONTS: set = set()
+
+
 def create_highlight_phrase_subtitle(words: list, active_index: int, duration: float,
                                       video_size: tuple, subtitle_config: dict = None,
-                                      word_times: list = None) -> ImageClip:
+                                      word_times: list = None,
+                                      bounce_anchor: str = "frame") -> ImageClip:
     """
     Clipper-style subtitle: all words visible in one line, active word highlighted.
     Bangers font (comic/display), thick black outline, bounce-in animation.
     word_times: list of (start, end) tuples relative to clip start for each word.
+    bounce_anchor: what the bounce-in scales around. "frame" (desktop /
+    Premiere) scales the whole overlay around the frame centre, so a caption
+    at y=0.75 slides ~3 % of the height down and back on every new phrase;
+    "caption" (web) scales it around the caption's own box.
     """
     import math
 
@@ -2618,6 +2627,15 @@ def create_highlight_phrase_subtitle(words: list, active_index: int, duration: f
             ("/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf", 0),
             ("/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf", 0),
             ("C:/Windows/Fonts/arialbi.ttf", 0),
+            # Linux servers (Modal / Railway images): fonts-dejavu-core has
+            # no BoldOblique, so Flash had no font there. fonts-liberation2
+            # installs to liberation2/ on Debian bookworm; on trixie /
+            # Ubuntu 24.04 it is a transitional package and the file is in
+            # liberation/ (Pillow would also find it there by file name, but
+            # only under the default XDG_DATA_DIRS). Same pair as
+            # src/caption_preview.py.
+            ("/usr/share/fonts/truetype/liberation2/LiberationSans-BoldItalic.ttf", 0),
+            ("/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf", 0),
         ]
     elif font_style == "impact":
         # Impact / kondensiert — für den Highlight-Style mit roter Box
@@ -2648,6 +2666,16 @@ def create_highlight_phrase_subtitle(words: list, active_index: int, duration: f
             continue
 
     if font_path is None:
+        # Used to return silently: the whole video came out without
+        # captions and nothing said why (Flash on Linux, captions.md C5).
+        # Once per style and process — every phrase would hit it.
+        if font_style not in _MISSING_HIGHLIGHT_FONTS:
+            _MISSING_HIGHLIGHT_FONTS.add(font_style)
+            import logging
+            logging.getLogger(__name__).error(
+                "[caption] no font for highlight style %r (tried %s): its "
+                "phrases are rendered WITHOUT captions", font_style,
+                ", ".join(fp for fp, _ in font_candidates))
         return None
 
     font = ImageFont.truetype(font_path, base_fontsize, index=font_index)
@@ -2758,6 +2786,30 @@ def create_highlight_phrase_subtitle(words: list, active_index: int, duration: f
         p = t / bounce_dur
         return 1.0 + 0.12 * (1 - p) * math.cos(p * math.pi * 1.5)
 
+    # bounce_anchor="caption": the box around every pixel any word frame
+    # draws (outline and highlight box included) is scaled around its own
+    # centre instead of the frame centre.
+    caption_box = None
+    if bounce_anchor == "caption":
+        covered = np.zeros((h, w), dtype=bool)
+        for f in word_frames:
+            covered |= f[:, :, 3] > 0
+        rows = np.flatnonzero(covered.any(axis=1))
+        cols = np.flatnonzero(covered.any(axis=0))
+        if rows.size:
+            caption_box = (int(cols[0]), int(rows[0]),
+                           int(cols[-1]) + 1, int(rows[-1]) + 1)
+
+    def _scaled_about_caption(img, s, mode):
+        from PIL import Image as PILImage
+        x0, y0, x1, y1 = caption_box
+        new_w = max(1, int((x1 - x0) * s))
+        new_h = max(1, int((y1 - y0) * s))
+        scaled = img.crop(caption_box).resize((new_w, new_h), PILImage.LANCZOS)
+        result = PILImage.new(mode, (w, h), 0)
+        result.paste(scaled, ((x0 + x1 - new_w) // 2, (y0 + y1 - new_h) // 2))
+        return np.array(result)
+
     def make_frame(t):
         ai = get_active(t)
         frame = word_frames[min(ai, len(word_frames) - 1)]
@@ -2766,6 +2818,8 @@ def create_highlight_phrase_subtitle(words: list, active_index: int, duration: f
             return frame[:, :, :3]
         from PIL import Image as PILImage
         frame_img = PILImage.fromarray(frame)
+        if caption_box is not None:
+            return _scaled_about_caption(frame_img, s, 'RGBA')[:, :, :3]
         new_w, new_h = int(w * s), int(h * s)
         scaled = frame_img.resize((new_w, new_h), PILImage.LANCZOS)
         result = PILImage.new('RGBA', (w, h), (0, 0, 0, 0))
@@ -2781,6 +2835,8 @@ def create_highlight_phrase_subtitle(words: list, active_index: int, duration: f
             return alpha
         from PIL import Image as PILImage
         alpha_img = PILImage.fromarray(frame[:, :, 3])
+        if caption_box is not None:
+            return _scaled_about_caption(alpha_img, s, 'L') / 255.0
         new_w, new_h = int(w * s), int(h * s)
         scaled = alpha_img.resize((new_w, new_h), PILImage.LANCZOS)
         result = PILImage.new('L', (w, h), 0)

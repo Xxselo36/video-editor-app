@@ -62,6 +62,36 @@ EXPORT_FORMATS: dict[str, tuple[int, int]] = {
 }
 
 
+# ── Caption burn: the web's options (UX2) ─────────────────────────────
+# _multi_clip_burn is shared with the SmartCut desktop app's Premiere
+# plugin. The web turns these on by keyword; their defaults keep the
+# plugin's look (backend/tests/captions/test_burn_golden.py), and
+# src/styles.py's positions stay the desktop's.
+#
+# sub_pos = vertical CENTRE of the caption block as a fraction of the frame
+# height: _render_segment_with_standalone_captions passes it on as
+# subtitle_position_y, and every renderer centres its block there
+# (create_dynamic_subtitle: h*y - block/2; create_pil_text_clip: h*y -
+# image/2; highlight styles: h*y - fontsize/2). The desktop defaults put
+# Clean (0.50) on the speaker's mouth and Classic (0.85) / Subtle (0.90)
+# inside TikTok's bottom UI band (captions.md §1.5).
+WEB_SUB_POS: dict[str, float] = {"clean": 0.70, "classic": 0.72,
+                                 "subtle": 0.76}
+
+
+def web_burn_kwargs(caption_preset: str | None) -> dict[str, Any]:
+    """The keyword arguments every web render passes to _multi_clip_burn:
+    assign_by_midpoint (a caption is burned in one clip only, never twice
+    across a cut), bounce_anchor="caption" (Clipper's bounce-in no longer
+    moves the text), and the web position of Clean / Classic / Subtle."""
+    kw: dict[str, Any] = {"assign_by_midpoint": True,
+                          "bounce_anchor": "caption"}
+    pos = WEB_SUB_POS.get(caption_preset or "")
+    if pos is not None:
+        kw["sub_pos"] = pos
+    return kw
+
+
 # HDR transfer functions we tone-map to SDR. iPhone Dolby Vision is
 # smpte2084 (PQ); iPhone HDR Video (HLG mode) is arib-std-b67. Both must
 # be tone-mapped or the 4K→1080p re-encode clips highlights to pure
@@ -2210,6 +2240,46 @@ def _has_effects(effects: list[dict]) -> bool:
     )
 
 
+_SENTENCE_END = (".", "!", "?", "…")
+
+
+def _transcript_lines(subtitles: list, max_words: int = 10,
+                      max_gap: float = 1.5) -> list[dict[str, Any]]:
+    """Subtitles (the render payload: word units since UX2) grouped into
+    transcript lines the way the editor shows them (web buildPhrases: a
+    sentence end, a pause over 1.5 s or 10 words end a line). The hook
+    LLM gets lines, as it did before the payload became word-level — the
+    same prompt size, and hooks that start and end with a sentence."""
+    lines: list[dict[str, Any]] = []
+    cur: list[dict] = []
+
+    def flush() -> None:
+        if cur:
+            lines.append({"text": " ".join(s["text"] for s in cur),
+                          "start": cur[0]["start"], "end": cur[-1]["end"]})
+            cur.clear()
+
+    for s in subtitles:
+        try:
+            text = str(s.get("text") or "").strip()
+            item = {"text": text, "start": float(s.get("start") or 0.0),
+                    "end": float(s.get("end") or 0.0)}
+        except (AttributeError, TypeError, ValueError):
+            continue          # malformed (client payload): hooks stay soft
+        if not text:
+            continue
+        if cur:
+            prev = cur[-1]
+            ends = prev["text"].rstrip("\"'»)] ").endswith(_SENTENCE_END)
+            words = sum(len(c["text"].split()) for c in cur)
+            if (ends or item["start"] - prev["end"] > max_gap
+                    or words + len(text.split()) > max_words):
+                flush()
+        cur.append(item)
+    flush()
+    return lines
+
+
 def detect_hooks(
     subtitles: list,
     settings: dict[str, Any],
@@ -2220,9 +2290,10 @@ def detect_hooks(
     """Short-form hook moments (LLM) in the edited subtitles — output
     time, so independent of the encode. [] when off, too short (< 90 s,
     < 4 lines) or the LLM fails (soft)."""
+    lines = _transcript_lines(subtitles)
     if not (
         (settings or {}).get("hook_clips_enabled", True)
-        and len(subtitles) >= 4
+        and len(lines) >= 4
         and duration is not None
         and duration >= 90.0
     ):
@@ -2232,15 +2303,7 @@ def detect_hooks(
         if progress_cb:
             progress_cb("Finding hook moments…", 5)
         hooks = detect_hook_moments(
-            [
-                {
-                    "id": i,
-                    "text": s.get("text", ""),
-                    "start": s.get("start", 0.0),
-                    "end": s.get("end", 0.0),
-                }
-                for i, s in enumerate(subtitles)
-            ],
+            [{"id": i, **line} for i, line in enumerate(lines)],
             language=language,
         )
     except Exception as e:
@@ -2345,6 +2408,7 @@ def render_only(
             language=language,
             progress_cb=_stage,
             merge_gap=0.0,  # already merged above, in sync with audio/effects
+            **web_burn_kwargs(caption_preset),
         )
 
         if not clip_outputs:
@@ -2547,7 +2611,7 @@ def render_to_dir(
 
     burn_dir = out / "burn"
     burn_dir.mkdir(exist_ok=True)
-    extra: dict[str, Any] = {}
+    extra: dict[str, Any] = web_burn_kwargs(caption_preset)
     if parallelism:
         extra["parallelism"] = parallelism
     stage(f"Rendering {len(segments)} clip(s)…", 10)

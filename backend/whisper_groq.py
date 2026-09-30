@@ -56,6 +56,46 @@ REQUEST_TIMEOUT_S = 180.0
 _RETRY_STATUS = {408, 409, 429}
 
 
+def _debug_enabled() -> bool:
+    """CLEO_GROQ_DEBUG=1: log one raw verbose_json word per request."""
+    return os.environ.get("CLEO_GROQ_DEBUG", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _log_raw_sample(words: list, segments: list) -> None:
+    """One raw verbose_json word object as Groq sent it, with its text
+    redacted to its length (user speech), plus a segment's keys. Settles
+    whether Groq returns a per-word `probability` (captions.md C21): the
+    parser defaults it to 1.0, so without it the editor's low-confidence
+    flag never fires and the two-pass language merge (which compares
+    average word probabilities) always keeps the auto pass — then drop the
+    en pass or merge by segment avg_logprob instead."""
+    import json
+
+    def plain(x: Any) -> Any:
+        if isinstance(x, dict):
+            return dict(x)
+        dump = getattr(x, "model_dump", None)
+        # No repr(): it would print the word's text.
+        return dump() if callable(dump) else {"unparsed": type(x).__name__}
+
+    try:
+        word = plain(words[0]) if words else None
+        if isinstance(word, dict):
+            for k in ("word", "text"):
+                if isinstance(word.get(k), str):
+                    word[k] = f"<{len(word[k])} chars>"
+        seg = plain(segments[0]) if segments else None
+        has_p = isinstance(word, dict) and word.get("probability") is not None
+        print("[groq] debug: raw verbose_json word = "
+              f"{json.dumps(word, default=str)[:500]}; per-word probability: "
+              f"{'yes' if has_p else 'NO'}; segment keys: "
+              f"{sorted(seg) if isinstance(seg, dict) else None}", flush=True)
+    except Exception as e:  # a debug line must never cost a transcript
+        print(f"[groq] debug: could not log a raw word ({type(e).__name__})",
+              flush=True)
+
+
 class GroqTranscriptionError(ConnectionError):
     """Groq transcription failed after retries (or with an error a retry
     can't fix). A ConnectionError (an OSError) on purpose: the web
@@ -357,6 +397,8 @@ def _transcribe_single(
 
     top_words = data.get("words") or []
     segments = data.get("segments") or []
+    if _debug_enabled():
+        _log_raw_sample(top_words, segments)
 
     # Normalize word entries once
     normalized_words = [

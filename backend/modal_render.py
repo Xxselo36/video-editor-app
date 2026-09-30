@@ -83,6 +83,10 @@ image = (
     .add_local_dir("src", remote_path="/app/src")
     .add_local_dir("plugins", remote_path="/app/plugins")
     .add_local_dir("backend", remote_path="/app/backend")
+    # Bundled caption fonts (Bangers for Clipper): src/effects.py looks
+    # for them at src/../assets/fonts. Without this Clipper burned in
+    # DejaVu Sans Bold (captions.md C4).
+    .add_local_dir("assets/fonts", remote_path="/app/assets/fonts")
 )
 
 
@@ -149,6 +153,7 @@ def render_burn_concat(
             _generate_thumbnail,
             _video_size,
             EXPORT_FORMATS,
+            web_burn_kwargs,
         )
 
         burn_dir = work_dir / "burn"
@@ -170,6 +175,10 @@ def render_burn_concat(
             # render_only already merged tiny gaps (keeping per-segment
             # effects aligned); don't merge again here.
             merge_gap=0.0,
+            # The web's caption options (one clip per caption, bounce
+            # around the caption, web positions); computed here, in the
+            # container, so the spawn signature doesn't change.
+            **web_burn_kwargs(caption_preset),
         )
 
         if not clip_outputs:

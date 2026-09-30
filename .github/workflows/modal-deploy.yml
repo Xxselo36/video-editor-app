@@ -1,8 +1,8 @@
 name: Deploy Modal render
 
-# Modal bundles src/, plugins/ and backend/ into the render image at
-# deploy time, so every change there needs a redeploy. This does it on
-# each push to main (and on demand). Needs the repo secrets
+# Modal bundles src/, plugins/, backend/ and assets/fonts/ into the render
+# image at deploy time, so every change there needs a redeploy. This does
+# it on each push to main (and on demand). Needs the repo secrets
 # MODAL_TOKEN_ID and MODAL_TOKEN_SECRET (same values as on Railway).
 
 on:
@@ -12,6 +12,7 @@ on:
       - 'backend/**'
       - 'src/**'
       - 'plugins/**'
+      - 'assets/fonts/**'
       - '.github/workflows/modal-deploy.yml'
   workflow_dispatch:
     inputs:
