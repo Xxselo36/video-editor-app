@@ -6,7 +6,7 @@
  * gets a CSS pseudo-fullscreen instead (fixed, 100dvh, safe-area insets,
  * captions kept). Escape leaves the pseudo mode too.
  */
-import { useCallback, useEffect, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 type FsElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
 type FsDocument = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void };
@@ -46,9 +46,28 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
     return () => window.removeEventListener("keydown", onKey);
   }, [pseudo]);
 
+  // Focus follows the fullscreen element: into it on enter (a focused
+  // Maximize button outside it would take Space and the shortcuts),
+  // back to where it was on exit.
+  const returnTo = useRef<HTMLElement | null>(null);
+  const active = real || pseudo;
+  useEffect(() => {
+    const el = ref.current;
+    if (active) {
+      if (el && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
+    } else if (returnTo.current) {
+      const back = returnTo.current;
+      returnTo.current = null;
+      if (back.isConnected) back.focus({ preventScroll: true });
+    }
+  }, [active, ref]);
+
   const toggle = useCallback(() => {
     const el = ref.current as FsElement | null;
     if (!el) return;
+    if (!pseudo && !(document as FsDocument).fullscreenElement && !(document as FsDocument).webkitFullscreenElement) {
+      returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
     if (pseudo) {
       setPseudo(false);
       return;
@@ -73,5 +92,5 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
     }
   }, [ref, pseudo]);
 
-  return { active: real || pseudo, pseudo, toggle };
+  return { active, real, pseudo, toggle };
 }

@@ -5,6 +5,7 @@ import {
   cutTimeOfSource,
   decimalSeparator,
   fitFrame,
+  phoneFrame,
   fmtClock,
   fmtClockTenths,
   fmtSeconds,
@@ -88,5 +89,27 @@ describe("v2 model", () => {
     expect(v.x).toBeCloseTo(-194.4, 1);
     // same aspect: both fill the frame
     expect(videoBox(180, 320, 1080, 1920, "contain")).toEqual({ x: 0, y: 0, w: 180, h: 320 });
+  });
+});
+
+describe("phoneFrame", () => {
+  it("is 186×330 on a 390×844 phone, with and without a sheet", () => {
+    expect(phoneFrame(390, 844, { landscape: false, sheetOpen: false, tabH: 56 })).toEqual({ w: 186, h: 330 });
+    expect(phoneFrame(390, 844, { landscape: false, sheetOpen: true, tabH: 56 })).toEqual({ w: 186, h: 330 });
+  });
+
+  it("shrinks on a short portrait screen so the dock keeps ≥ 150 px", () => {
+    const f = phoneFrame(375, 550, { landscape: false, sheetOpen: false, tabH: 56 });
+    expect(f.h).toBeLessThan(330);
+    expect(550 - 44 - 56 - (12 + f.h + 12 + 44)).toBeGreaterThanOrEqual(150);
+    // above a 54 % sheet
+    const g = phoneFrame(375, 550, { landscape: false, sheetOpen: true, tabH: 56 });
+    expect(44 + g.h + 14).toBeLessThanOrEqual(550 * 0.46 + 0.5);
+  });
+
+  it("fills the left column in landscape", () => {
+    const f = phoneFrame(844, 390, { landscape: true, sheetOpen: false, tabH: 48 });
+    expect(f.h).toBe(390 - 44 - 48 - 64);
+    expect(f.w).toBe(Math.round((f.h * 9) / 16));
   });
 });

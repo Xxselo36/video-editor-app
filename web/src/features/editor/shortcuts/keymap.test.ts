@@ -94,6 +94,15 @@ describe("keyTargetAllowed (UX3 target filtering)", () => {
     }
   });
 
+  it("ignores keys inside a search bar, a dialog / sheet or a menu", () => {
+    for (const o of ["[role=search]", "[role=dialog]", "[role=menu]"]) {
+      const t = el("[data-editor-root]", o);
+      expect(keyTargetAllowed(k("s"), t, false)).toBe(false);
+      expect(keyTargetAllowed(k("Backspace"), t, false)).toBe(false);
+      expect(keyTargetAllowed(k("z", { metaKey: true }), t, false)).toBe(false);
+    }
+  });
+
   it("leaves focused controls their own keys unless ⌘/Ctrl is held", () => {
     for (const c of ["button", "a", "[role=tab]", "[role=button]", "[role=menuitem]", "[role=slider]", "summary"]) {
       const t = el("[data-editor-root]", c);

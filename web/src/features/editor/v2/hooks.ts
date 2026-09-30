@@ -15,8 +15,11 @@ export function useMediaQuery(query: string): boolean {
   );
 }
 
-/** Below 900 px: the phone layout (bottom tabs + sheets). */
-export const PHONE_QUERY = "(max-width: 899.98px)";
+/** Below 900 px wide or 500 px high: the phone layout (bottom tabs + sheets). */
+export const PHONE_QUERY = "(max-width: 899.98px), (max-height: 499.98px)";
+
+/** A phone held sideways (short and wide): side-by-side phone layout. */
+export const LANDSCAPE_QUERY = "(max-height: 499.98px) and (orientation: landscape)";
 
 /** navigator.onLine, following the online/offline events. */
 export function useOnline(): boolean {

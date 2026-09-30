@@ -113,7 +113,8 @@ export function actionFor(e: KeyLike): EditorAction | null {
 export type KeyTarget = { closest(selector: string): unknown } | null;
 
 const TEXT_FIELDS = "input, textarea, select, [contenteditable]:not([contenteditable=false])";
-const OWN_KEYS = "button, a, [role=tab], [role=button], [role=menuitem], [role=slider], summary";
+const OVERLAYS = "[role=search], [role=dialog], [role=menu]";
+const OWN_KEYS ="button, a, [role=tab], [role=button], [role=menuitem], [role=slider], summary";
 
 /**
  * Whether the editor may handle a key (moved from TimelineEditor, UX3 /
@@ -122,7 +123,8 @@ const OWN_KEYS = "button, a, [role=tab], [role=button], [role=menuitem], [role=s
  *   - only for keys aimed at the editor (`[data-editor-root]`) or the page
  *     itself (`onPage`: target is body / html / none) — not a dialog or
  *     other parts of the app;
- *   - never in text fields;
+ *   - never in text fields, nor inside a search bar, dialog, sheet or
+ *     menu (role search / dialog / menu), even with ⌘;
  *   - without ⌘/Ctrl, never on a focused button, tab, link, menu item or
  *     slider: those keep their own Space / Enter / Backspace / arrows.
  */
@@ -130,6 +132,9 @@ export function keyTargetAllowed(e: KeyLike, target: KeyTarget, onPage: boolean)
   if (e.defaultPrevented) return false;
   if (!onPage && !target?.closest("[data-editor-root]")) return false;
   if (target?.closest(TEXT_FIELDS)) return false;
+  // A search bar, a sheet, a popover or the tour: their keys are theirs
+  // (typing into find must never split or delete).
+  if (target?.closest(OVERLAYS)) return false;
   const meta = e.metaKey || e.ctrlKey;
   if (!meta && target?.closest(OWN_KEYS)) return false;
   return true;

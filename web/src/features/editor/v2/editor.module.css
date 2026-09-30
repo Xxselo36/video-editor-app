@@ -479,6 +479,10 @@
   align-items: center;
   justify-content: center;
 }
+/* focused programmatically on enter (keys reach the editor), no ring */
+.fsWrap:focus {
+  outline: none;
+}
 .fsWrap:fullscreen,
 .pseudoFs {
   position: fixed !important;
@@ -1242,13 +1246,12 @@
 }
 
 /* ── phone ───────────────────────────────────────────────────────── */
+/* The stage row is as tall as its preview, which PreviewStage sizes from
+ * the editor's height (≤ 186×330, smaller on short screens) so the dock
+ * keeps its minimum and the tab bar always fits. */
 .phone {
   grid-template-columns: 100%;
-  grid-template-rows: 44px 424px minmax(0, 1fr) calc(56px + env(safe-area-inset-bottom));
-  transition: grid-template-rows var(--ed-med) ease-out;
-}
-.phone.sheetOpen {
-  grid-template-rows: 44px 344px minmax(0, 1fr) calc(56px + env(safe-area-inset-bottom));
+  grid-template-rows: 44px auto minmax(0, 1fr) calc(56px + env(safe-area-inset-bottom));
 }
 .phone .top {
   grid-column: 1;
@@ -1411,6 +1414,50 @@
   line-height: 20px;
   font-weight: 600;
   color: var(--ed-text-1);
+}
+/* Landscape phones (height < 500 px): preview + player on the left, the
+ * dock on the right, the tab bar across the bottom; sheets open over the
+ * dock column so the preview stays visible. */
+.phone.landscape {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 44px minmax(0, 1fr) calc(48px + env(safe-area-inset-bottom));
+}
+.landscape .top {
+  grid-column: 1 / -1;
+}
+.landscape .stage {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 248px;
+  padding: 8px 8px 0;
+}
+.landscape .playerBar {
+  margin-top: 4px;
+}
+.landscape .dock {
+  grid-column: 2;
+  grid-row: 2;
+  border-top: 0;
+  border-left: 1px solid var(--ed-hairline);
+}
+.landscape .tabbar {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+.landscape .mtab {
+  flex-direction: row;
+  gap: 8px;
+  height: 47px;
+  font-size: 12px;
+}
+.landscape .sheet {
+  left: var(--ed-stage-w, 45%);
+  top: 44px;
+  height: auto !important;
+  border-radius: 0;
+}
+.landscape .sheetHandle {
+  display: none;
 }
 .phone .trRow {
   grid-template-columns: 36px minmax(0, 1fr) 32px;

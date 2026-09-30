@@ -16,7 +16,7 @@ import { useT } from "@/i18n";
 import { apiFetch } from "@/lib/api";
 import type { Phrase, Subtitle } from "@/features/editor/legacy/buildPhrases";
 import { useEditSession } from "@/features/editor/session/useEditSession";
-import { useEditorShortcuts } from "@/features/editor/shortcuts/useEditorShortcuts";
+import { useEditorShortcuts, type ShortcutHandlers } from "@/features/editor/shortcuts/useEditorShortcuts";
 import { createPlayheadStore, PlayheadContext } from "@/features/editor/state/playhead";
 import { useTimelineHistory } from "@/features/editor/timeline/history";
 import {
@@ -202,34 +202,37 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     setFindOpen(true);
   };
   const first = useFirstRun();
-  useEditorShortcuts(
-    {
-      playPause: session.togglePlay,
-      stepBack: () => stepBy(-0.1),
-      stepForward: () => stepBy(0.1),
-      stepBackLong: () => stepBy(-1),
-      stepForwardLong: () => stepBy(1),
-      prevLine: () => lineBy(-1),
-      nextLine: () => lineBy(1),
-      split,
-      delete: del,
-      escape: () => {
-        if (findOpen) setFindOpen(false);
-        else if (selectedLive) setSelected(null);
-        else return false;
-      },
-      undo: history.undo,
-      redo: history.redo,
-      find: openFind,
-      zoomIn: () => dockApi.current?.zoomIn(),
-      zoomOut: () => dockApi.current?.zoomOut(),
-      zoomFit: () => dockApi.current?.fit(),
-      export: exportNow,
-      mute: session.toggleMute,
-      fullscreen: () => fullscreenRef.current?.(),
+  const handlers: ShortcutHandlers = {
+    playPause: session.togglePlay,
+    stepBack: () => stepBy(-0.1),
+    stepForward: () => stepBy(0.1),
+    stepBackLong: () => stepBy(-1),
+    stepForwardLong: () => stepBy(1),
+    prevLine: () => lineBy(-1),
+    nextLine: () => lineBy(1),
+    split,
+    delete: del,
+    escape: () => {
+      if (findOpen) setFindOpen(false);
+      else if (selectedLive) setSelected(null);
+      else return false;
     },
-    first.tourStep === null && !expired,
-  );
+    undo: history.undo,
+    redo: history.redo,
+    find: openFind,
+    zoomIn: () => dockApi.current?.zoomIn(),
+    zoomOut: () => dockApi.current?.zoomOut(),
+    zoomFit: () => dockApi.current?.fit(),
+    export: exportNow,
+    mute: session.toggleMute,
+    fullscreen: () => fullscreenRef.current?.(),
+  };
+  // While the find bar is open, single keys belong to it (and to typing),
+  // wherever focus went: only ⌘ combos and Escape stay.
+  const active: ShortcutHandlers = findOpen
+    ? { escape: handlers.escape, undo: handlers.undo, redo: handlers.redo, find: handlers.find, export: handlers.export }
+    : handlers;
+  useEditorShortcuts(active, first.tourStep === null && !expired);
 
   const seekCut = (cut: number) => {
     const at = sourceAtCut(editSegs, cut);
@@ -365,7 +368,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         apiRef={dockApi}
       />
       {phone && (
-        <nav className={s.tabbar} aria-label={t("editor.panel")}>
+        <nav className={s.tabbar} aria-label={t("editor.panel")} data-testid="ed-tabbar">
           <button
             ref={textTabRef}
             type="button"

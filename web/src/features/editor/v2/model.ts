@@ -121,6 +121,37 @@ export function fitFrame(availW: number, availH: number, aspect: number): { w: n
   return { w: Math.floor(w), h: Math.floor(h) };
 }
 
+/** The phone's preview: 186×330 at most (DF round 3), smaller when the
+ *  screen is short, so the dock keeps this much height. */
+export const PHONE_FRAME_MAX = { w: 186, h: 330 };
+export const PHONE_DOCK_MIN = 150;
+
+/**
+ * Preview frame size of the phone layout from the editor's size.
+ *   portrait   top bar 44 · 12 + frame + 12 + player row 44 · dock ≥ 150 ·
+ *              tab bar; with a sheet open the frame fits above the sheet
+ *              (54 % of the height) instead, the player row hidden.
+ *   landscape  the frame and player row fill the left column between the
+ *              top bar and the tab bar.
+ */
+export function phoneFrame(
+  rootW: number,
+  rootH: number,
+  opts: { landscape: boolean; sheetOpen: boolean; tabH: number },
+): { w: number; h: number } {
+  let h: number;
+  if (opts.landscape) h = rootH - 44 - opts.tabH - 8 - 4 - 44 - 8;
+  else if (opts.sheetOpen) h = rootH * 0.46 - 44 - 14;
+  else h = rootH - 44 - opts.tabH - PHONE_DOCK_MIN - (12 + 12 + 44);
+  h = Math.max(96, Math.min(PHONE_FRAME_MAX.h, Math.floor(h)));
+  let w = Math.min(PHONE_FRAME_MAX.w, Math.round((h * 9) / 16));
+  if (!opts.landscape && w > rootW - 32) {
+    w = Math.max(54, rootW - 32);
+    h = Math.round((w * 16) / 9);
+  }
+  return { w, h };
+}
+
 /**
  * Where the video's picture sits in the output frame: "contain" pads it
  * (black bars), like the export's pad for a non-reframed video;

@@ -11,14 +11,13 @@ import { Minimize, TriangleAlert, WifiOff, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useT } from "@/i18n";
 import { usePlayhead, type PlayheadState } from "@/features/editor/state/playhead";
-import { fitFrame } from "../model";
+import { fitFrame, phoneFrame, PHONE_FRAME_MAX } from "../model";
 import { PlayerBar } from "./PlayerBar";
 import { useFullscreen } from "./useFullscreen";
 import { VideoLayer, type CaptionSlotProps } from "./VideoLayer";
 import s from "../editor.module.css";
 
 const ASPECT = 9 / 16;
-const PHONE_FRAME = { w: 186, h: 330 };
 const selPaused = (st: PlayheadState) => !st.playing;
 
 export function PreviewStage({
@@ -44,7 +43,7 @@ export function PreviewStage({
   const { session, store } = slot;
   const stageRef = useRef<HTMLElement>(null);
   const fsRef = useRef<HTMLDivElement>(null);
-  const [frame, setFrame] = useState<{ w: number; h: number }>(phone ? PHONE_FRAME : { w: 338, h: 600 });
+  const [frame, setFrame] = useState<{ w: number; h: number }>(phone ? PHONE_FRAME_MAX : { w: 338, h: 600 });
   const fs = useFullscreen(fsRef);
   const paused = usePlayhead(store, selPaused);
   const [warningsClosed, setWarningsClosed] = useState(false);
@@ -56,12 +55,19 @@ export function PreviewStage({
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
+    const root = el.closest<HTMLElement>("[data-editor-root]");
     const measure = () => {
       if (phone) {
-        // Fixed size; only a very short screen shrinks it.
-        const availH = el.clientHeight - (sheetOpen ? 14 : 12 + 12 + 44);
-        const fits = availH >= PHONE_FRAME.h && el.clientWidth - 32 >= PHONE_FRAME.w;
-        setFrame(fits ? PHONE_FRAME : fitFrame(el.clientWidth - 32, availH, ASPECT));
+        // 186×330, smaller on short screens (the stage row is as tall as
+        // the preview: the dock keeps its minimum, the tab bar fits).
+        const H = root?.clientHeight || window.innerHeight;
+        const W = root?.clientWidth || window.innerWidth;
+        const landscape = root?.dataset.layout === "landscape";
+        const tabH = root?.querySelector<HTMLElement>("[data-testid=ed-tabbar]")?.offsetHeight || (landscape ? 48 : 56);
+        const f = phoneFrame(W, H, { landscape, sheetOpen, tabH });
+        setFrame((old) => (old.w === f.w && old.h === f.h ? old : f));
+        // Landscape sheets open over the dock column, right of the stage.
+        root?.style.setProperty("--ed-stage-w", `${el.offsetWidth}px`);
         return;
       }
       // Player bar 32 + gap 16 under the frame, ≥ 20 px air around.
@@ -71,6 +77,7 @@ export function PreviewStage({
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    if (root && phone) ro.observe(root);
     return () => ro.disconnect();
   }, [phone, sheetOpen]);
 
@@ -96,7 +103,13 @@ export function PreviewStage({
           <span>{t("editor.offline")}</span>
         </div>
       )}
-      <div ref={fsRef} className={`${s.fsWrap} ${fs.pseudo ? s.pseudoFs : ""}`}>
+      <div
+        ref={fsRef}
+        tabIndex={-1}
+        className={`${s.fsWrap} ${fs.pseudo ? s.pseudoFs : ""}`}
+        data-fullscreen={fs.real ? "real" : fs.pseudo ? "pseudo" : ""}
+        data-testid="ed-fullscreen-wrap"
+      >
         <div
           className={s.frame}
           style={{ width: frame.w, height: frame.h }}

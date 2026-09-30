@@ -114,7 +114,78 @@ test.describe("editor v2 layout", TAG, () => {
   });
 });
 
+test.describe("editor v2 on short and sideways phones", TAG, () => {
+  for (const vp of [
+    { width: 375, height: 550, layout: "phone" },
+    { width: 844, height: 390, layout: "landscape" },
+    { width: 667, height: 375, layout: "landscape" },
+  ]) {
+    test(`${vp.width}×${vp.height}: tab bar in view, strip ≥ 60 px, no page scroll`, async ({ page, stub }, info) => {
+      test.skip(info.project.name !== "desktop", "viewport set per test");
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      const job = await stub.seed("review_speech");
+      await openV2(page, job.id);
+      await expect(page.getByTestId("editor-v2")).toHaveAttribute("data-layout", vp.layout);
+      for (const id of ["ed-tab-text", "ed-tab-style", "ed-tabbar"]) {
+        const b = await box(page, id);
+        expect(b.y, id).toBeGreaterThanOrEqual(0);
+        expect(b.y + b.height, id).toBeLessThanOrEqual(vp.height + 0.5);
+        expect(b.x + b.width, id).toBeLessThanOrEqual(vp.width + 0.5);
+      }
+      const strip = await box(page, "timeline-scroll");
+      expect(strip.height).toBeGreaterThanOrEqual(60);
+      expect(strip.y + strip.height).toBeLessThanOrEqual(vp.height);
+      const frame = await box(page, "ed-frame");
+      expect(frame.height).toBeGreaterThanOrEqual(96);
+      expect(frame.y + frame.height).toBeLessThanOrEqual(vp.height);
+      // a clip is still tappable
+      const clip = page.getByTestId("ed-timeline").getByTestId(/^clip-\d+$/).first();
+      await clip.click({ position: { x: 6, y: 20 } });
+      await expect(page.getByTestId("ed-split")).toBeVisible();
+      expect(await noDocumentScroll(page)).toEqual({ v: 0, h: 0 });
+    });
+  }
+});
+
 test.describe("editor v2 behaviour", TAG, () => {
+  test("phone: ⌘F opens the sheet with the find field focused; typing never edits", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "keyboard");
+    await page.setViewportSize({ width: 390, height: 844 });
+    const job = await stub.seed("review_speech");
+    await openV2(page, job.id);
+    const clips = page.getByTestId("ed-timeline").getByTestId(/^clip-\d+$/);
+    const before = await clips.count();
+    // a clip selected: s would split, Backspace would delete
+    await clips.first().click({ position: { x: 6, y: 20 } });
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("ControlOrMeta+f");
+    const input = page.getByRole("textbox", { name: "Find in text" });
+    await expect(input).toBeFocused();
+    await page.keyboard.type("sales");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type("s");
+    await expect(input).toHaveValue("sales");
+    await expect(clips).toHaveCount(before);
+  });
+
+  test("fullscreen: focus goes in, Space plays and stays in fullscreen", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "keyboard");
+    const job = await stub.seed("review_speech");
+    await openV2(page, job.id);
+    const wrap = page.getByTestId("ed-fullscreen-wrap");
+    await page.getByTestId("ed-fullscreen").click();
+    await expect(wrap).toHaveAttribute("data-fullscreen", /real|pseudo/);
+    await expect(wrap).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(page.getByTestId("ed-play")).toHaveAttribute("aria-label", "Pause");
+    await expect(wrap).toHaveAttribute("data-fullscreen", /real|pseudo/);
+    await page.keyboard.press("Space");
+    await expect(page.getByTestId("ed-play")).toHaveAttribute("aria-label", "Play");
+    await page.getByRole("button", { name: "Exit full screen" }).click();
+    await expect(wrap).toHaveAttribute("data-fullscreen", "");
+    await expect(page.getByTestId("ed-fullscreen")).toBeFocused();
+  });
+
   test("first open: 4-step tour, then the one-time hint; not again", async ({ page, stub }) => {
     const job = await stub.seed("review_speech");
     await openV2(page, job.id, {});

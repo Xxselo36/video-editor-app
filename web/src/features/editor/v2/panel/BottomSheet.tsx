@@ -41,7 +41,10 @@ export function BottomSheet({
   });
   useEffect(() => {
     const trigger = returnFocus.current;
-    ref.current?.focus({ preventScroll: true });
+    // Into the sheet — unless its content already took focus (the find
+    // field, autofocused when ⌘F opened the sheet).
+    const box = ref.current;
+    if (box && !box.contains(document.activeElement)) box.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !e.defaultPrevented) {
         e.preventDefault();
