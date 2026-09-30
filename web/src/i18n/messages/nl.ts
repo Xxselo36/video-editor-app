@@ -258,12 +258,8 @@ export const nl: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Dashboard",
-  "app.review.sentencesOne": "{count} zin",
-  "app.review.sentencesOther": "{count} zinnen",
   "app.review.audioHeadsUp": "Audio-melding",
   "app.review.updatingPreview": "Voorbeeld wordt bijgewerkt…",
-  "app.review.captionSampleAlt": "Voorbeeld van {style}-ondertitels",
-  "app.review.captionsLookLike": "Zo zien de ondertitels eruit",
   "app.review.tabTimeline": "Tijdlijn",
   "app.review.tabTranscript": "Transcript",
   "app.review.tabCaptions": "Ondertitels",
@@ -295,16 +291,13 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Je laatste wijziging is nog niet bij de server aangekomen. Opnieuw proberen…",
   "app.timeline.notSaved": "niet opgeslagen",
   "app.timeline.notSavedRetrying": "niet opgeslagen · opnieuw proberen",
-  "app.timeline.hintDesktop":
-    "Scrollen om te bewegen · Ctrl/⌘ + scrollen om te zoomen · rand slepen om te trimmen · Spatie afspelen · ⌫ verwijderen · ⌘Z ongedaan maken",
-  "app.timeline.hintMobile":
-    "Swipe om te scrollen · knijp om te zoomen · tik op een clip om te bewerken · sleep de liniaal om te scrubben",
   "app.timeline.undoTitle": "Ongedaan maken (⌘Z)",
   "app.timeline.undoAria": "Ongedaan maken",
   "app.timeline.redoTitle": "Opnieuw (⌘⇧Z)",
   "app.timeline.redoAria": "Opnieuw",
   "app.timeline.splitTitle": "Splits de clip onder de afspeelkop",
   "app.timeline.split": "⧉ Splitsen",
+  "app.timeline.splitUnavailable": "Zet de afspeelkop in een clip om die te splitsen (niet precies aan het begin of einde).",
   "app.timeline.zoomOutTitle": "Uitzoomen (meer van de video tonen)",
   "app.timeline.zoomOutAria": "Uitzoomen",
   "app.timeline.fitTitle": "Hele video passend maken",

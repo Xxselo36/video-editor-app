@@ -254,12 +254,8 @@ export const ja: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← ダッシュボード",
-  "app.review.sentencesOne": "{count} 文",
-  "app.review.sentencesOther": "{count} 文",
   "app.review.audioHeadsUp": "音声に関する注意",
   "app.review.updatingPreview": "プレビューを更新中…",
-  "app.review.captionSampleAlt": "{style}字幕サンプル",
-  "app.review.captionsLookLike": "字幕はこのように表示されます",
   "app.review.tabTimeline": "タイムライン",
   "app.review.tabTranscript": "文字起こし",
   "app.review.tabCaptions": "字幕",
@@ -291,16 +287,13 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "直前の変更がまだサーバーに届いていません。再試行しています…",
   "app.timeline.notSaved": "未保存",
   "app.timeline.notSavedRetrying": "未保存 · 再試行中",
-  "app.timeline.hintDesktop":
-    "スクロールで移動 · Ctrl/⌘ + スクロールでズーム · 端をドラッグでトリム · スペースキーで再生 · ⌫で削除 · ⌘Zで元に戻す",
-  "app.timeline.hintMobile":
-    "スワイプでスクロール · ピンチでズーム · クリップをタップして編集 · 目盛りをドラッグしてスクラブ",
   "app.timeline.undoTitle": "元に戻す (⌘Z)",
   "app.timeline.undoAria": "元に戻す",
   "app.timeline.redoTitle": "やり直す (⌘⇧Z)",
   "app.timeline.redoAria": "やり直す",
   "app.timeline.splitTitle": "再生位置のクリップを分割",
   "app.timeline.split": "⧉ 分割",
+  "app.timeline.splitUnavailable": "分割するには、再生位置をクリップの中に置いてください（先頭や末尾ちょうどは不可）。",
   "app.timeline.zoomOutTitle": "縮小(動画をより広く表示)",
   "app.timeline.zoomOutAria": "縮小",
   "app.timeline.fitTitle": "動画全体を表示",

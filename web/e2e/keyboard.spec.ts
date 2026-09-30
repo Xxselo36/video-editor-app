@@ -1,14 +1,13 @@
 /**
  * Keyboard in the editor (scratchpad audit/techtmp/keys.mjs). The
- * timeline's shortcuts listen on window and only spare inputs and text
- * areas, so Space on a focused button plays the video instead of
- * pressing the button, and Backspace deletes the selected clip while a
- * button has focus (tech.md T4). UX3 scopes the shortcuts and removes the
- * fixme marker.
+ * timeline's shortcuts used to listen on window and only spare inputs and
+ * text areas, so Space on a focused button played the video instead of
+ * pressing the button, and Backspace deleted the selected clip while a
+ * button had focus (tech.md T4). Since UX3 they leave focused controls
+ * alone and work on every editor tab.
  */
 import { expect, test } from "./support/fixtures";
 import { clips, openEditor, selectClip, videoPaused } from "./support/app";
-import { SKIP_KNOWN_BUGS } from "./support/fixme";
 
 test("Enter on a focused tab activates it", async ({ page, stub }) => {
   const job = await stub.seed("review");
@@ -19,8 +18,6 @@ test("Enter on a focused tab activates it", async ({ page, stub }) => {
 });
 
 test.describe("shortcuts don't hijack focused controls", () => {
-  test.fixme(SKIP_KNOWN_BUGS, "T4: window-level shortcuts (fixed by UX3)");
-
   test("Space on a focused tab activates the tab and doesn't play", async ({ page, stub }) => {
     const job = await stub.seed("review");
     await openEditor(page, job.id);
@@ -38,4 +35,17 @@ test.describe("shortcuts don't hijack focused controls", () => {
     await page.keyboard.press("Backspace");
     await expect(clips(page)).toHaveCount(4);
   });
+});
+
+test("Space plays and pauses on the Transcript tab too", async ({ page, stub }) => {
+  const job = await stub.seed("review");
+  await openEditor(page, job.id);
+  await page.getByTestId("editor-tab-transcript").click();
+  await expect(page.getByTestId("transcript-line").first()).toBeVisible();
+  // Focus back on the page (nothing focused), as after a click on the video area.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Space");
+  await expect.poll(() => videoPaused(page)).toBe(false);
+  await page.keyboard.press("Space");
+  await expect.poll(() => videoPaused(page)).toBe(true);
 });

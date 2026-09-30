@@ -258,12 +258,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Panel",
-  "app.review.sentencesOne": "{count} zdanie",
-  "app.review.sentencesOther": "{count} zdań",
   "app.review.audioHeadsUp": "Uwaga dot. audio",
   "app.review.updatingPreview": "Aktualizowanie podglądu…",
-  "app.review.captionSampleAlt": "Przykład napisów {style}",
-  "app.review.captionsLookLike": "Tak będą wyglądać napisy",
   "app.review.tabTimeline": "Oś czasu",
   "app.review.tabTranscript": "Transkrypt",
   "app.review.tabCaptions": "Napisy",
@@ -295,16 +291,13 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Twoja ostatnia zmiana jeszcze nie dotarła do serwera. Próbuję ponownie…",
   "app.timeline.notSaved": "niezapisane",
   "app.timeline.notSavedRetrying": "niezapisane · próba ponownie",
-  "app.timeline.hintDesktop":
-    "Przewijanie = przesuwanie · Ctrl/⌘ + przewijanie = zoom · przeciągnij krawędzie, by przyciąć · Spacja odtwarzanie · ⌫ usuń · ⌘Z wróć",
-  "app.timeline.hintMobile":
-    "Przesuń, by przewinąć · uszczypnij, by zmienić zoom · dotknij klipu, by edytować · przeciągnij linijkę, by przewijać",
   "app.timeline.undoTitle": "Wróć (⌘Z)",
   "app.timeline.undoAria": "Wróć",
   "app.timeline.redoTitle": "Powtórz (⌘⇧Z)",
   "app.timeline.redoAria": "Powtórz",
   "app.timeline.splitTitle": "Podziel klip pod głowicą odtwarzania",
   "app.timeline.split": "⧉ Podziel",
+  "app.timeline.splitUnavailable": "Ustaw głowicę odtwarzania wewnątrz klipu, żeby go podzielić (nie na samym początku ani końcu).",
   "app.timeline.zoomOutTitle": "Zmniejsz (pokaż więcej filmu)",
   "app.timeline.zoomOutAria": "Zmniejsz",
   "app.timeline.fitTitle": "Zmieść cały film",

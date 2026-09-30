@@ -393,12 +393,8 @@ export const pt: Partial<Record<MessageKey, string>> = {
 
   // ── app: review (editor) ──
   "app.review.backToDashboard": "← Painel",
-  "app.review.sentencesOne": "{count} frase",
-  "app.review.sentencesOther": "{count} frases",
   "app.review.audioHeadsUp": "Aviso de áudio",
   "app.review.updatingPreview": "Atualizando prévia…",
-  "app.review.captionSampleAlt": "Exemplo de legenda {style}",
-  "app.review.captionsLookLike": "As legendas vão parecer com isto",
   "app.review.tabTimeline": "Linha do tempo",
   "app.review.tabTranscript": "Transcrição",
   "app.review.tabCaptions": "Legendas",
@@ -430,16 +426,13 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Sua última alteração ainda não chegou ao servidor. Tentando novamente…",
   "app.timeline.notSaved": "não salvo",
   "app.timeline.notSavedRetrying": "não salvo · tentando novamente",
-  "app.timeline.hintDesktop":
-    "Role para mover · Ctrl/⌘ + rolar para zoom · arraste as bordas para cortar · Espaço para reproduzir · ⌫ excluir · ⌘Z desfazer",
-  "app.timeline.hintMobile":
-    "Deslize para rolar · pince para zoom · toque em um clipe para editar · arraste a régua para navegar",
   "app.timeline.undoTitle": "Desfazer (⌘Z)",
   "app.timeline.undoAria": "Desfazer",
   "app.timeline.redoTitle": "Refazer (⌘⇧Z)",
   "app.timeline.redoAria": "Refazer",
   "app.timeline.splitTitle": "Dividir o clipe sob o cursor",
   "app.timeline.split": "⧉ Dividir",
+  "app.timeline.splitUnavailable": "Coloque o cursor dentro de um clipe para dividi-lo (não bem no início nem no fim).",
   "app.timeline.zoomOutTitle": "Diminuir zoom (ver mais do vídeo)",
   "app.timeline.zoomOutAria": "Diminuir zoom",
   "app.timeline.fitTitle": "Ajustar o vídeo inteiro",

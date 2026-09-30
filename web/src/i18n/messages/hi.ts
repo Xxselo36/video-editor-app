@@ -258,12 +258,8 @@ export const hi: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← डैशबोर्ड",
-  "app.review.sentencesOne": "{count} वाक्य",
-  "app.review.sentencesOther": "{count} वाक्य",
   "app.review.audioHeadsUp": "ऑडियो अलर्ट",
   "app.review.updatingPreview": "प्रीव्यू अपडेट हो रहा है…",
-  "app.review.captionSampleAlt": "{style} कैप्शन सैंपल",
-  "app.review.captionsLookLike": "कैप्शन ऐसे दिखेंगे",
   "app.review.tabTimeline": "टाइमलाइन",
   "app.review.tabTranscript": "ट्रांसक्रिप्ट",
   "app.review.tabCaptions": "कैप्शन",
@@ -295,16 +291,13 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "आपका आख़िरी बदलाव अभी सर्वर तक नहीं पहुंचा है। फिर कोशिश हो रही है…",
   "app.timeline.notSaved": "सेव नहीं हुआ",
   "app.timeline.notSavedRetrying": "सेव नहीं हुआ · फिर कोशिश हो रही है",
-  "app.timeline.hintDesktop":
-    "स्क्रोल से मूव करें · Ctrl/⌘ + स्क्रोल से ज़ूम करें · किनारे खींचकर ट्रिम करें · Space से प्ले · ⌫ से डिलीट · ⌘Z अनडू",
-  "app.timeline.hintMobile":
-    "स्क्रोल के लिए स्वाइप करें · ज़ूम के लिए पिंच करें · एडिट के लिए क्लिप टैप करें · स्क्रब के लिए रूलर खींचें",
   "app.timeline.undoTitle": "अनडू (⌘Z)",
   "app.timeline.undoAria": "अनडू",
   "app.timeline.redoTitle": "रीडू (⌘⇧Z)",
   "app.timeline.redoAria": "रीडू",
   "app.timeline.splitTitle": "प्लेहेड के नीचे वाली क्लिप को स्प्लिट करें",
   "app.timeline.split": "⧉ स्प्लिट",
+  "app.timeline.splitUnavailable": "क्लिप को स्प्लिट करने के लिए प्लेहेड को उसके अंदर ले जाएँ (ठीक शुरुआत या अंत पर नहीं)।",
   "app.timeline.zoomOutTitle": "ज़ूम आउट करें (वीडियो का ज़्यादा हिस्सा दिखाएं)",
   "app.timeline.zoomOutAria": "ज़ूम आउट",
   "app.timeline.fitTitle": "पूरा वीडियो फ़िट करें",

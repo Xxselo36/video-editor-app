@@ -261,12 +261,8 @@ export const enApp = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Dashboard",
-  "app.review.sentencesOne": "{count} sentence",
-  "app.review.sentencesOther": "{count} sentences",
   "app.review.audioHeadsUp": "Audio heads-up",
   "app.review.updatingPreview": "Updating preview…",
-  "app.review.captionSampleAlt": "{style} caption sample",
-  "app.review.captionsLookLike": "Captions will look like",
   "app.review.tabTimeline": "Timeline",
   "app.review.tabTranscript": "Transcript",
   "app.review.tabCaptions": "Captions",
@@ -298,16 +294,13 @@ export const enApp = {
   "app.timeline.saveRetryingTitle": "Your last change hasn't reached the server yet. Retrying…",
   "app.timeline.notSaved": "not saved",
   "app.timeline.notSavedRetrying": "not saved · retrying",
-  "app.timeline.hintDesktop":
-    "Scroll to move · Ctrl/⌘ + scroll to zoom · drag edges to trim · Space play · ⌫ delete · ⌘Z undo",
-  "app.timeline.hintMobile":
-    "Swipe to scroll · pinch to zoom · tap a clip to edit · drag the ruler to scrub",
   "app.timeline.undoTitle": "Undo (⌘Z)",
   "app.timeline.undoAria": "Undo",
   "app.timeline.redoTitle": "Redo (⌘⇧Z)",
   "app.timeline.redoAria": "Redo",
   "app.timeline.splitTitle": "Split the clip under the playhead",
   "app.timeline.split": "⧉ Split",
+  "app.timeline.splitUnavailable": "Move the playhead into a clip to split it (not right at its start or end).",
   "app.timeline.zoomOutTitle": "Zoom out (show more of the video)",
   "app.timeline.zoomOutAria": "Zoom out",
   "app.timeline.fitTitle": "Fit the whole video",

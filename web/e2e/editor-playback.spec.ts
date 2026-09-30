@@ -167,9 +167,10 @@ test.describe("proxy playback follows the edit list", () => {
       await pause(page);
       ss = await samples(page, w0);
       expect(ss[ss.length - 1][3]).toBe(1);
-      // The native speed menu is hidden in proxy mode; a rate set from
-      // outside during the 2× clip is the master speed ("Normal" = 1×).
-      await expect(editorVideo(page)).toHaveAttribute("controlslist", "noplaybackrate");
+      // The native speed menu is hidden (UX3: download and casting too);
+      // a rate set from outside during the 2× clip is the master speed
+      // ("Normal" = 1×).
+      await expect(editorVideo(page)).toHaveAttribute("controlslist", /\bnoplaybackrate\b/);
       await seekAndPlay(page, 1.0);
       await page.waitForTimeout(300);
       await editorVideo(page).evaluate((v) => {

@@ -258,12 +258,8 @@ export const id: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Dashboard",
-  "app.review.sentencesOne": "{count} kalimat",
-  "app.review.sentencesOther": "{count} kalimat",
   "app.review.audioHeadsUp": "Info audio",
   "app.review.updatingPreview": "Memperbarui pratinjau…",
-  "app.review.captionSampleAlt": "Contoh teks {style}",
-  "app.review.captionsLookLike": "Tampilan teksnya akan seperti ini",
   "app.review.tabTimeline": "Linimasa",
   "app.review.tabTranscript": "Transkrip",
   "app.review.tabCaptions": "Teks",
@@ -295,16 +291,13 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Perubahan terakhirmu belum sampai ke server. Mencoba lagi…",
   "app.timeline.notSaved": "belum tersimpan",
   "app.timeline.notSavedRetrying": "belum tersimpan · mencoba lagi",
-  "app.timeline.hintDesktop":
-    "Scroll untuk geser · Ctrl/⌘ + scroll untuk zoom · seret tepi untuk trim · Spasi main · ⌫ hapus · ⌘Z batalkan",
-  "app.timeline.hintMobile":
-    "Swipe untuk geser · cubit untuk zoom · ketuk klip untuk edit · seret penggaris untuk scrub",
   "app.timeline.undoTitle": "Batalkan (⌘Z)",
   "app.timeline.undoAria": "Batalkan",
   "app.timeline.redoTitle": "Ulangi (⌘⇧Z)",
   "app.timeline.redoAria": "Ulangi",
   "app.timeline.splitTitle": "Pisahkan klip di posisi playhead",
   "app.timeline.split": "⧉ Pisahkan",
+  "app.timeline.splitUnavailable": "Letakkan playhead di dalam klip untuk memisahkannya (jangan tepat di awal atau akhir).",
   "app.timeline.zoomOutTitle": "Perkecil (tampilkan lebih banyak video)",
   "app.timeline.zoomOutAria": "Perkecil",
   "app.timeline.fitTitle": "Sesuaikan seluruh video",

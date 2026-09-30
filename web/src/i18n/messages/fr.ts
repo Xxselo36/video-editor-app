@@ -259,12 +259,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Tableau de bord",
-  "app.review.sentencesOne": "{count} phrase",
-  "app.review.sentencesOther": "{count} phrases",
   "app.review.audioHeadsUp": "À savoir sur l'audio",
   "app.review.updatingPreview": "Mise à jour de l'aperçu…",
-  "app.review.captionSampleAlt": "Exemple de sous-titres {style}",
-  "app.review.captionsLookLike": "À quoi ressembleront les sous-titres",
   "app.review.tabTimeline": "Chronologie",
   "app.review.tabTranscript": "Transcription",
   "app.review.tabCaptions": "Sous-titres",
@@ -296,16 +292,13 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Ta dernière modification n'a pas encore atteint le serveur. Nouvelle tentative…",
   "app.timeline.notSaved": "non enregistré",
   "app.timeline.notSavedRetrying": "non enregistré · nouvelle tentative",
-  "app.timeline.hintDesktop":
-    "Défiler pour se déplacer · Ctrl/⌘ + défiler pour zoomer · glisser les bords pour rogner · Espace pour lire · ⌫ supprimer · ⌘Z annuler",
-  "app.timeline.hintMobile":
-    "Balayer pour défiler · pincer pour zoomer · toucher un clip pour l'éditer · glisser la règle pour naviguer",
   "app.timeline.undoTitle": "Annuler (⌘Z)",
   "app.timeline.undoAria": "Annuler",
   "app.timeline.redoTitle": "Rétablir (⌘⇧Z)",
   "app.timeline.redoAria": "Rétablir",
   "app.timeline.splitTitle": "Scinder le clip sous la tête de lecture",
   "app.timeline.split": "⧉ Scinder",
+  "app.timeline.splitUnavailable": "Place la tête de lecture dans un clip pour le scinder (pas pile au début ni à la fin).",
   "app.timeline.zoomOutTitle": "Dézoomer (afficher plus de vidéo)",
   "app.timeline.zoomOutAria": "Dézoomer",
   "app.timeline.fitTitle": "Ajuster pour voir toute la vidéo",

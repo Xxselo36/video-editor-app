@@ -258,12 +258,8 @@ export const de: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Zurück",
-  "app.review.sentencesOne": "{count} Satz",
-  "app.review.sentencesOther": "{count} Sätze",
   "app.review.audioHeadsUp": "Audio-Hinweis",
   "app.review.updatingPreview": "Vorschau wird aktualisiert…",
-  "app.review.captionSampleAlt": "{style}-Untertitel-Beispiel",
-  "app.review.captionsLookLike": "So sehen die Untertitel aus",
   "app.review.tabTimeline": "Zeitleiste",
   "app.review.tabTranscript": "Transkript",
   "app.review.tabCaptions": "Untertitel",
@@ -295,16 +291,13 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Deine letzte Änderung ist noch nicht beim Server angekommen. Erneuter Versuch…",
   "app.timeline.notSaved": "nicht gespeichert",
   "app.timeline.notSavedRetrying": "nicht gespeichert · erneuter Versuch",
-  "app.timeline.hintDesktop":
-    "Scrollen zum Verschieben · Strg/⌘ + Scrollen zum Zoomen · Ränder ziehen zum Trimmen · Leertaste Wiedergabe · ⌫ Löschen · ⌘Z Rückgängig",
-  "app.timeline.hintMobile":
-    "Wischen zum Scrollen · Zwei-Finger-Zoom · Clip antippen zum Bearbeiten · Lineal ziehen zum Scrubben",
   "app.timeline.undoTitle": "Rückgängig (⌘Z)",
   "app.timeline.undoAria": "Rückgängig",
   "app.timeline.redoTitle": "Wiederholen (⌘⇧Z)",
   "app.timeline.redoAria": "Wiederholen",
   "app.timeline.splitTitle": "Clip an der Abspielposition schneiden",
   "app.timeline.split": "⧉ Schneiden",
+  "app.timeline.splitUnavailable": "Setz die Abspielposition in einen Clip, um ihn zu schneiden – nicht direkt an seinen Anfang oder sein Ende.",
   "app.timeline.zoomOutTitle": "Verkleinern (mehr vom Video zeigen)",
   "app.timeline.zoomOutAria": "Verkleinern",
   "app.timeline.fitTitle": "Ganzes Video einpassen",

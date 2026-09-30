@@ -1254,7 +1254,6 @@ export default function Home() {
   };
   resetRef.current = reset;
 
-  const currentPreset = selectedPreset ? PRESETS[selectedPreset] : null;
   // Accounts + billing (all null / off with auth off).
   const { me } = useMe();
   const billing = useBillingConfig();
@@ -1278,22 +1277,6 @@ export default function Home() {
             <LogoMark size={24} />
             <span className="text-xl font-bold tracking-tight">CleoCuts</span>
           </Link>
-          {currentPreset && phase !== "picker" && (
-            <>
-              <span style={{ color: "var(--text-faint)" }}>/</span>
-              <button
-                onClick={reset}
-                className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors"
-                style={{
-                  color: "var(--brand-strong)",
-                  background: "var(--brand-tint)",
-                }}
-              >
-                <span>{t(currentPreset.labelKey)}</span>
-                <span style={{ color: "var(--brand-strong)", opacity: 0.6 }}>✕</span>
-              </button>
-            </>
-          )}
         </div>
         <div className="flex items-center gap-3 sm:gap-4">
           <PricingLink className="hidden sm:inline" />
@@ -3497,6 +3480,34 @@ function ReviewScreen({
     playerRef.current?.setPlan(buildPlan(editSegs, duration));
   }, [editSegs, duration]);
 
+  // The chip on the video: the playhead's place in the EDIT and the
+  // edit's length (the native control bar shows the file's own time —
+  // the whole source in proxy mode). Same mapping as the timeline readout.
+  const cutClock = (() => {
+    let at: number | null = null;
+    let total = 0;
+    const find = (matchSeg: boolean) => {
+      let acc = 0;
+      for (const s of editSegs) {
+        if (s.disabled) continue;
+        const d = s.end - s.start;
+        if (
+          at === null &&
+          (!matchSeg || s.id === playingSegId) &&
+          originalTime >= s.start - 0.05 &&
+          originalTime <= s.end + 0.05
+        ) {
+          at = acc + Math.min(d, Math.max(0, originalTime - s.start));
+        }
+        acc += d;
+      }
+      total = acc;
+    };
+    if (mode === "proxy" && playingSegId) find(true);
+    if (at === null) find(false);
+    return { at: at ?? 0, total };
+  })();
+
   // The preview follows the user's edited timeline, so phrases are
   // matched on SOURCE time (original_start / original_end) against the
   // playhead mapped back through the segments of the playing preview.
@@ -3589,7 +3600,7 @@ function ReviewScreen({
 
 
   return (
-    <div className="flex flex-col gap-3" data-testid="editor">
+    <div className="flex flex-col gap-3" data-testid="editor" data-editor-root>
       <div className="flex items-center justify-between">
         <button
           onClick={onBack}
@@ -3598,12 +3609,6 @@ function ReviewScreen({
         >
           {t("app.review.backToDashboard")}
         </button>
-        <div className="text-xs text-[var(--text-body)]">
-          {t(
-            phrases.length === 1 ? "app.review.sentencesOne" : "app.review.sentencesOther",
-            { count: phrases.length },
-          )}
-        </div>
       </div>
 
       {audioWarnings.length > 0 && (
@@ -3636,10 +3641,11 @@ function ReviewScreen({
             if (modeRef.current === "proxy") setMode("preview");
           }}
           controls
-          // Proxy mode: no native speed menu — it would show the clip's
-          // effective rate, not the user's speed (EditPlayer still copes
-          // with browsers that ignore this).
-          controlsList={mode === "proxy" ? "noplaybackrate" : undefined}
+          // No download (it would be the source or a draft preview, not
+          // the export), no speed menu (in proxy mode it would show the
+          // clip's effective rate, not the user's speed; EditPlayer still
+          // copes with browsers that ignore this), no casting.
+          controlsList="nodownload noplaybackrate noremoteplayback"
           playsInline
           // metadata only: don't pull the whole preview over mobile data
           // before the user presses play.
@@ -3680,6 +3686,15 @@ function ReviewScreen({
             className="pointer-events-none absolute inset-0 bg-black opacity-0 group-hover:opacity-0!"
           />
         )}
+        {cutClock.total > 0 && (
+          <div
+            data-testid="editor-cut-time"
+            className="pointer-events-none absolute left-3 top-3 rounded-full px-2.5 py-1 font-mono text-[11px] tabular-nums"
+            style={{ background: "rgba(0,0,0,0.55)", color: "#fff" }}
+          >
+            {fmtTimecode(cutClock.at)} / {fmtTimecode(cutClock.total)}
+          </div>
+        )}
         <PlaybackDebug videoRef={videoRef} mode={mode} />
         {/* Proxy mode has no preview to update: the edit already plays. */}
         {editSaving && mode !== "proxy" && (
@@ -3700,24 +3715,9 @@ function ReviewScreen({
         )}
       </div>
 
-      {captionPreset !== "none" && (
-        <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] px-3 py-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={publicUrl(`/caption-previews/${captionPreset}.png?w=200&h=72`)}
-            alt={t("app.review.captionSampleAlt", { style: captionPreset })}
-            className="h-10 w-28 rounded-md object-cover"
-          />
-          <div className="flex-1">
-            <div className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-              {t("app.review.captionsLookLike")}
-            </div>
-            <div className="text-sm font-medium capitalize">{captionLabel(captionPreset, t)}</div>
-          </div>
-        </div>
-      )}
       {/* Tab bar — clean 3-way switch for the editor */}
       <div
+        role="tablist"
         className="flex overflow-hidden rounded-xl"
         style={{
           background: "var(--surface-1)",
@@ -3736,6 +3736,8 @@ function ReviewScreen({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              role="tab"
+              aria-selected={isActive}
               data-testid={`editor-tab-${tab.id}`}
               className="flex-1 px-3 py-2.5 text-sm font-medium transition-colors"
               style={{
@@ -5009,7 +5011,6 @@ type EditorSeg = {
   volume?: number;     // 0 – 2.5, default 1
 };
 
-const TIMELINE_DEFAULT_PPS = 40; // px per second on open
 // Trimming snaps onto a neighbouring clip's footage when it would leave
 // less than this much of the removed gap between them.
 const TRIM_SNAP_S = 0.3;
@@ -5146,14 +5147,17 @@ function TimelineEditor({
   const [selected, setSelected] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragMode, setDragMode] = useState<"start" | "end" | null>(null);
-  // Zoom as pixels per second. Starts zoomed in so the strip scrolls
-  // and the 0.5s / 0.1s ruler marks are readable; "Fit" shows it all.
-  const [pps, setPps] = useState(TIMELINE_DEFAULT_PPS);
+  // Zoom as pixels per second. 0 = "Fit" (effPps below never goes under
+  // the fit zoom): the timeline opens showing the whole edit.
+  const [pps, setPps] = useState(0);
   const [history, setHistory] = useState<EditorSeg[][]>([]);
   const [future, setFuture] = useState<EditorSeg[][]>([]);
   const stripRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragPreviewRef = useRef<EditorSeg[] | null>(null);
+  // When the last trim drag ended: the click that follows its mouseup
+  // must not seek (the trim itself places the playhead).
+  const dragEndedAtRef = useRef(0);
   const scrubbingRef = useRef(false);
   const [, forceRender] = useState({});
 
@@ -5272,6 +5276,7 @@ function TimelineEditor({
 
     const handleUp = () => {
       const final = dragPreviewRef.current;
+      dragEndedAtRef.current = performance.now();
       dragTotalRef.current = null;
       setDraggingId(null);
       setDragMode(null);
@@ -5306,12 +5311,27 @@ function TimelineEditor({
     commit(segments.filter((s) => s.id !== id));
     setSelected(null);
   };
+  // Split needs the playhead inside a clip, at least 0.1 s from its
+  // edges. When it can't split, the button says why (title + a short
+  // note on click) instead of doing nothing.
+  const [splitNote, setSplitNote] = useState<string | null>(null);
+  const splitNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (splitNoteTimer.current) clearTimeout(splitNoteTimer.current);
+  }, []);
+  const splittable = (at: number) =>
+    segments.findIndex((s) => !s.disabled && at > s.start + 0.1 && at < s.end - 0.1);
+  const canSplit = splittable(playhead) !== -1;
   const splitAtPlayhead = () => {
     const at = getVideoTime();
-    const idx = segments.findIndex(
-      (s) => !s.disabled && at > s.start + 0.1 && at < s.end - 0.1,
-    );
-    if (idx === -1) return;
+    const idx = splittable(at);
+    if (idx === -1) {
+      setSplitNote(t("app.timeline.splitUnavailable"));
+      if (splitNoteTimer.current) clearTimeout(splitNoteTimer.current);
+      splitNoteTimer.current = setTimeout(() => setSplitNote(null), 4000);
+      return;
+    }
+    setSplitNote(null);
     const cur = segments[idx];
     const first: EditorSeg = { ...cur, end: at, id: `${cur.id}-a` };
     const second: EditorSeg = {
@@ -5343,17 +5363,21 @@ function TimelineEditor({
   };
 
   // Keyboard shortcuts: Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z (redo),
-  // Delete (remove selected), Space (play/pause via callback).
+  // Delete (remove selected), Space (play/pause via callback). They work
+  // on every editor tab (Delete only while the timeline shows, where the
+  // selection is visible), but only for keys aimed at the editor or the
+  // page itself — not in a dialog or elsewhere in the app — and never
+  // for text fields. A focused button, tab or link keeps its own Space /
+  // Enter / Backspace (tech.md T4).
   useEffect(() => {
-    if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const inField =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.isContentEditable;
-      if (inField) return;
+      if (e.defaultPrevented) return;
+      const target = e.target instanceof Element ? e.target : null;
+      const onPage = !target || target === document.body || target === document.documentElement;
+      if (!onPage && !target?.closest("[data-editor-root]")) return;
+      if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])")) return;
       const meta = e.metaKey || e.ctrlKey;
+      if (!meta && target?.closest("button, a, [role=tab], [role=button], summary")) return;
       if (meta && e.key.toLowerCase() === "z" && !e.shiftKey) {
         e.preventDefault();
         undo();
@@ -5364,10 +5388,10 @@ function TimelineEditor({
       ) {
         e.preventDefault();
         redo();
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selected) {
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selected && open) {
         e.preventDefault();
         del(selected);
-      } else if (e.key === " " || e.code === "Space") {
+      } else if (!meta && (e.key === " " || e.code === "Space")) {
         e.preventDefault();
         onPlayPauseKey?.();
       }
@@ -5602,12 +5626,6 @@ function TimelineEditor({
               </span>
             )}
           </div>
-          <div className="mt-1 hidden text-[11px] text-[var(--text-faint)] sm:block">
-            {t("app.timeline.hintDesktop")}
-          </div>
-          <div className="mt-1 text-[11px] text-[var(--text-faint)] sm:hidden">
-            {t("app.timeline.hintMobile")}
-          </div>
         </div>
 
       </button>
@@ -5647,9 +5665,12 @@ function TimelineEditor({
             <button
               onClick={splitAtPlayhead}
               data-testid="timeline-split"
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors hover:border-[var(--brand)] sm:px-2.5 sm:py-1"
+              // aria-disabled, not disabled: a click still explains why.
+              aria-disabled={!canSplit}
+              aria-describedby={splitNote ? "timeline-split-note" : undefined}
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors hover:border-[var(--brand)] aria-disabled:opacity-40 sm:px-2.5 sm:py-1"
               style={{ ...toolBtn, color: "var(--text-strong)" }}
-              title={t("app.timeline.splitTitle")}
+              title={canSplit ? t("app.timeline.splitTitle") : t("app.timeline.splitUnavailable")}
             >
               {t("app.timeline.split")}
             </button>
@@ -5708,6 +5729,16 @@ function TimelineEditor({
                 </button>
               </div>
             </div>
+          </div>
+
+          <div
+            id="timeline-split-note"
+            role="status"
+            data-testid="timeline-split-note"
+            className={splitNote ? "-mt-1 mb-2 text-xs" : "sr-only"}
+            style={{ color: "var(--warn)" }}
+          >
+            {splitNote}
           </div>
 
           {/* Ruler + clip strip — width scales with zoom, in a scroll container */}
@@ -5771,9 +5802,14 @@ function TimelineEditor({
                       style={{ width: `${width}%`, minWidth: "14px" }}
                     >
                       <div
-                        onClick={() => {
+                        onClick={(e) => {
                           setSelected(s.id);
-                          onSeekOriginal(s.start, s.id);
+                          if (performance.now() - dragEndedAtRef.current < 300) return;
+                          // Seek to the clicked point of the clip (not its
+                          // start), so Split right after works there.
+                          const r = e.currentTarget.getBoundingClientRect();
+                          const f = r.width > 0 ? Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) : 0;
+                          onSeekOriginal(Math.max(s.start, Math.min(s.end - 0.05, s.start + f * (s.end - s.start))), s.id);
                         }}
                         data-testid={`clip-${i}`}
                         className="@container group relative flex h-full cursor-pointer flex-col justify-between overflow-clip rounded-md transition-[box-shadow,border-color] duration-150"

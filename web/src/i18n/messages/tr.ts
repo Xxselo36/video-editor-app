@@ -259,12 +259,8 @@ export const tr: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Panel",
-  "app.review.sentencesOne": "{count} cümle",
-  "app.review.sentencesOther": "{count} cümle",
   "app.review.audioHeadsUp": "Ses uyarısı",
   "app.review.updatingPreview": "Önizleme güncelleniyor…",
-  "app.review.captionSampleAlt": "{style} altyazı örneği",
-  "app.review.captionsLookLike": "Altyazılar şöyle görünecek",
   "app.review.tabTimeline": "Zaman Çizelgesi",
   "app.review.tabTranscript": "Transkript",
   "app.review.tabCaptions": "Altyazılar",
@@ -296,16 +292,13 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Son değişikliğin henüz sunucuya ulaşmadı. Yeniden deneniyor…",
   "app.timeline.notSaved": "kaydedilmedi",
   "app.timeline.notSavedRetrying": "kaydedilmedi · yeniden deneniyor",
-  "app.timeline.hintDesktop":
-    "Kaydırmak için scroll · Ctrl/⌘ + scroll ile yakınlaştır · kenarları sürükleyerek kırp · Boşluk oynat · ⌫ sil · ⌘Z geri al",
-  "app.timeline.hintMobile":
-    "Kaydırmak için sürükle · yakınlaştırmak için sıkıştır · düzenlemek için klibe dokun · gezinmek için cetveli sürükle",
   "app.timeline.undoTitle": "Geri al (⌘Z)",
   "app.timeline.undoAria": "Geri al",
   "app.timeline.redoTitle": "Yinele (⌘⇧Z)",
   "app.timeline.redoAria": "Yinele",
   "app.timeline.splitTitle": "Oynatma imlecinin altındaki klibi böl",
   "app.timeline.split": "⧉ Böl",
+  "app.timeline.splitUnavailable": "Bölmek için oynatma imlecini bir klibin içine getir (tam başına ya da sonuna değil).",
   "app.timeline.zoomOutTitle": "Uzaklaştır (videonun daha fazlasını göster)",
   "app.timeline.zoomOutAria": "Uzaklaştır",
   "app.timeline.fitTitle": "Videonun tamamını sığdır",

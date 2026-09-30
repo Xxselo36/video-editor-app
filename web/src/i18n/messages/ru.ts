@@ -257,12 +257,8 @@ export const ru: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Главная",
-  "app.review.sentencesOne": "{count} предложение",
-  "app.review.sentencesOther": "{count} предложений",
   "app.review.audioHeadsUp": "Важно про звук",
   "app.review.updatingPreview": "Обновляем превью…",
-  "app.review.captionSampleAlt": "Образец субтитров {style}",
-  "app.review.captionsLookLike": "Так будут выглядеть субтитры",
   "app.review.tabTimeline": "Таймлайн",
   "app.review.tabTranscript": "Транскрипт",
   "app.review.tabCaptions": "Субтитры",
@@ -294,16 +290,13 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Твоё последнее изменение пока не дошло до сервера. Повторяем попытку…",
   "app.timeline.notSaved": "не сохранено",
   "app.timeline.notSavedRetrying": "не сохранено · повтор",
-  "app.timeline.hintDesktop":
-    "Прокрутка — сдвинуть · Ctrl/⌘ + прокрутка — масштаб · тяни края — обрезка · пробел — воспроизведение · ⌫ — удалить · ⌘Z — отменить",
-  "app.timeline.hintMobile":
-    "Свайп — прокрутка · щипок — масштаб · нажми на клип — редактировать · тяни линейку — перемотка",
   "app.timeline.undoTitle": "Отменить (⌘Z)",
   "app.timeline.undoAria": "Отменить",
   "app.timeline.redoTitle": "Повторить (⌘⇧Z)",
   "app.timeline.redoAria": "Повторить",
   "app.timeline.splitTitle": "Разрезать клип под курсором",
   "app.timeline.split": "⧉ Разрезать",
+  "app.timeline.splitUnavailable": "Чтобы разрезать клип, поставь курсор внутрь него (не в самое начало и не в конец).",
   "app.timeline.zoomOutTitle": "Уменьшить (показать больше видео)",
   "app.timeline.zoomOutAria": "Уменьшить",
   "app.timeline.fitTitle": "Вписать всё видео",

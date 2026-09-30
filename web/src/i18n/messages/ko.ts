@@ -254,12 +254,8 @@ export const ko: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← 대시보드",
-  "app.review.sentencesOne": "문장 {count}개",
-  "app.review.sentencesOther": "문장 {count}개",
   "app.review.audioHeadsUp": "오디오 참고 사항",
   "app.review.updatingPreview": "미리보기를 업데이트하고 있어요…",
-  "app.review.captionSampleAlt": "{style} 자막 예시",
-  "app.review.captionsLookLike": "자막은 이런 모습이에요",
   "app.review.tabTimeline": "타임라인",
   "app.review.tabTranscript": "스크립트",
   "app.review.tabCaptions": "자막",
@@ -291,16 +287,13 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "마지막 변경 내용이 서버에 아직 전달되지 않았어요. 다시 시도하는 중…",
   "app.timeline.notSaved": "저장되지 않음",
   "app.timeline.notSavedRetrying": "저장되지 않음 · 재시도 중",
-  "app.timeline.hintDesktop":
-    "스크롤로 이동 · Ctrl/⌘ + 스크롤로 확대·축소 · 가장자리를 드래그해 트리밍 · Space 재생 · ⌫ 삭제 · ⌘Z 실행 취소",
-  "app.timeline.hintMobile":
-    "스와이프로 이동 · 핀치로 확대·축소 · 클립을 탭해 편집 · 눈금자를 드래그해 스크러빙",
   "app.timeline.undoTitle": "실행 취소 (⌘Z)",
   "app.timeline.undoAria": "실행 취소",
   "app.timeline.redoTitle": "다시 실행 (⌘⇧Z)",
   "app.timeline.redoAria": "다시 실행",
   "app.timeline.splitTitle": "재생 위치의 클립을 분할해요",
   "app.timeline.split": "⧉ 분할",
+  "app.timeline.splitUnavailable": "분할하려면 재생 위치를 클립 안으로 옮기세요(시작이나 끝 지점은 안 돼요).",
   "app.timeline.zoomOutTitle": "축소 (영상을 더 많이 보기)",
   "app.timeline.zoomOutAria": "축소",
   "app.timeline.fitTitle": "전체 영상에 맞추기",

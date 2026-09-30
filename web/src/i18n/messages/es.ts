@@ -260,12 +260,8 @@ export const es: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Panel",
-  "app.review.sentencesOne": "{count} oración",
-  "app.review.sentencesOther": "{count} oraciones",
   "app.review.audioHeadsUp": "Aviso de audio",
   "app.review.updatingPreview": "Actualizando vista previa…",
-  "app.review.captionSampleAlt": "Ejemplo de subtítulos {style}",
-  "app.review.captionsLookLike": "Los subtítulos se verán así",
   "app.review.tabTimeline": "Línea de tiempo",
   "app.review.tabTranscript": "Transcripción",
   "app.review.tabCaptions": "Subtítulos",
@@ -297,16 +293,13 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "Tu último cambio aún no llegó al servidor. Reintentando…",
   "app.timeline.notSaved": "no guardado",
   "app.timeline.notSavedRetrying": "no guardado · reintentando",
-  "app.timeline.hintDesktop":
-    "Desplaza para mover · Ctrl/⌘ + desplazar para zoom · arrastra los bordes para recortar · Espacio reproducir · ⌫ eliminar · ⌘Z deshacer",
-  "app.timeline.hintMobile":
-    "Desliza para desplazar · pellizca para zoom · toca un clip para editar · arrastra la regla para navegar",
   "app.timeline.undoTitle": "Deshacer (⌘Z)",
   "app.timeline.undoAria": "Deshacer",
   "app.timeline.redoTitle": "Rehacer (⌘⇧Z)",
   "app.timeline.redoAria": "Rehacer",
   "app.timeline.splitTitle": "Divide el clip bajo el cabezal de reproducción",
   "app.timeline.split": "⧉ Dividir",
+  "app.timeline.splitUnavailable": "Coloca el cabezal dentro de un clip para dividirlo (no justo al inicio ni al final).",
   "app.timeline.zoomOutTitle": "Alejar (mostrar más del video)",
   "app.timeline.zoomOutAria": "Alejar",
   "app.timeline.fitTitle": "Ajustar todo el video",

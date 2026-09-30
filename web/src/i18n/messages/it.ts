@@ -259,12 +259,8 @@ export const it: Partial<Record<MessageKey, string>> = {
 
   // ── Review (editor) ─────────────────────────────────────────────────
   "app.review.backToDashboard": "← Dashboard",
-  "app.review.sentencesOne": "{count} frase",
-  "app.review.sentencesOther": "{count} frasi",
   "app.review.audioHeadsUp": "Avviso audio",
   "app.review.updatingPreview": "Aggiornamento anteprima…",
-  "app.review.captionSampleAlt": "Esempio sottotitoli {style}",
-  "app.review.captionsLookLike": "I sottotitoli avranno questo aspetto",
   "app.review.tabTimeline": "Timeline",
   "app.review.tabTranscript": "Trascrizione",
   "app.review.tabCaptions": "Sottotitoli",
@@ -296,16 +292,13 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.timeline.saveRetryingTitle": "L'ultima modifica non è ancora arrivata al server. Nuovo tentativo…",
   "app.timeline.notSaved": "non salvato",
   "app.timeline.notSavedRetrying": "non salvato · nuovo tentativo",
-  "app.timeline.hintDesktop":
-    "Scorri per muoverti · Ctrl/⌘ + scorri per zoomare · trascina i bordi per tagliare · Spazio play · ⌫ elimina · ⌘Z annulla",
-  "app.timeline.hintMobile":
-    "Scorri con il dito · pizzica per zoomare · tocca una clip per modificarla · trascina il righello per scorrere",
   "app.timeline.undoTitle": "Annulla (⌘Z)",
   "app.timeline.undoAria": "Annulla",
   "app.timeline.redoTitle": "Ripeti (⌘⇧Z)",
   "app.timeline.redoAria": "Ripeti",
   "app.timeline.splitTitle": "Dividi la clip sotto il cursore",
   "app.timeline.split": "⧉ Dividi",
+  "app.timeline.splitUnavailable": "Porta il cursore dentro una clip per dividerla (non proprio all'inizio o alla fine).",
   "app.timeline.zoomOutTitle": "Rimpicciolisci (mostra più video)",
   "app.timeline.zoomOutAria": "Rimpicciolisci",
   "app.timeline.fitTitle": "Adatta l'intero video",
