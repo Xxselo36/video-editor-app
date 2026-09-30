@@ -8,6 +8,7 @@ every web render path passes them — while the desktop defaults stay.
   the desktop's "frame" scales around the frame centre (captions.md C12).
 - render_only (local), render_to_dir (render_r2) and Modal's
   render_burn_concat all pass pipeline.web_burn_kwargs.
+- The hook LLM still gets transcript lines, not word units.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import ast
 import numpy as np
 import pytest
 
+import sync_sim as sim
 from backend import pipeline
 from conftest import REPO
 
@@ -154,3 +156,38 @@ def test_modal_volume_path_passes_the_web_options():
               and getattr(n.func, "id", None) == "_multi_clip_burn"]
     spread = [ast.unparse(k.value) for k in call.keywords if k.arg is None]
     assert spread == ["web_burn_kwargs(caption_preset)"]
+
+
+# ── hook detection keeps getting transcript lines ────────────────────
+
+V = sim.load_vectors()
+
+
+def test_word_units_are_regrouped_into_the_editors_lines():
+    lines = pipeline._transcript_lines(V["units_payload"])
+    assert [ln["text"] for ln in lines] == [p["text"] for p in V["phrases"]]
+    assert [(ln["start"], ln["end"]) for ln in lines] == [
+        (p["start"], p["end"]) for p in V["phrases"]]
+    # The payload before UX2 (sentences) gives the same lines.
+    legacy = pipeline._transcript_lines(sim.legacy_payload(V["phrases"]))
+    assert [ln["text"] for ln in legacy] == [p["text"] for p in V["phrases"]]
+    # Malformed client entries are skipped, not raised (hooks are soft).
+    junk = ["x", {"text": "a", "start": "soon"}, {"text": None}]
+    assert pipeline._transcript_lines(junk + V["units_payload"][:2]) == [
+        {"text": "Hey, so today", "start": 0.15, "end": 0.891}]
+
+
+def test_hook_llm_gets_lines(monkeypatch):
+    import backend.llm as llm
+    seen = []
+
+    def detect(items, language=None):
+        seen.append(items)
+        return [{"start": 1.0, "end": 25.0, "title": "t", "reason": "r"}]
+    monkeypatch.setattr(llm, "detect_hook_moments", detect)
+    hooks = pipeline.detect_hooks(V["units_payload"], {}, 120.0, "en")
+    assert len(hooks) == 1
+    [items] = seen
+    assert len(items) == len(V["phrases"]) == 12      # not 63 units
+    assert items[5] == {"id": 5, "text": "Mistake number two, is dead air.",
+                        "start": 11.364, "end": 13.414}

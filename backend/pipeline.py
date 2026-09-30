@@ -2240,6 +2240,46 @@ def _has_effects(effects: list[dict]) -> bool:
     )
 
 
+_SENTENCE_END = (".", "!", "?", "…")
+
+
+def _transcript_lines(subtitles: list, max_words: int = 10,
+                      max_gap: float = 1.5) -> list[dict[str, Any]]:
+    """Subtitles (the render payload: word units since UX2) grouped into
+    transcript lines the way the editor shows them (web buildPhrases: a
+    sentence end, a pause over 1.5 s or 10 words end a line). The hook
+    LLM gets lines, as it did before the payload became word-level — the
+    same prompt size, and hooks that start and end with a sentence."""
+    lines: list[dict[str, Any]] = []
+    cur: list[dict] = []
+
+    def flush() -> None:
+        if cur:
+            lines.append({"text": " ".join(s["text"] for s in cur),
+                          "start": cur[0]["start"], "end": cur[-1]["end"]})
+            cur.clear()
+
+    for s in subtitles:
+        try:
+            text = str(s.get("text") or "").strip()
+            item = {"text": text, "start": float(s.get("start") or 0.0),
+                    "end": float(s.get("end") or 0.0)}
+        except (AttributeError, TypeError, ValueError):
+            continue          # malformed (client payload): hooks stay soft
+        if not text:
+            continue
+        if cur:
+            prev = cur[-1]
+            ends = prev["text"].rstrip("\"'»)] ").endswith(_SENTENCE_END)
+            words = sum(len(c["text"].split()) for c in cur)
+            if (ends or item["start"] - prev["end"] > max_gap
+                    or words + len(text.split()) > max_words):
+                flush()
+        cur.append(item)
+    flush()
+    return lines
+
+
 def detect_hooks(
     subtitles: list,
     settings: dict[str, Any],
@@ -2250,9 +2290,10 @@ def detect_hooks(
     """Short-form hook moments (LLM) in the edited subtitles — output
     time, so independent of the encode. [] when off, too short (< 90 s,
     < 4 lines) or the LLM fails (soft)."""
+    lines = _transcript_lines(subtitles)
     if not (
         (settings or {}).get("hook_clips_enabled", True)
-        and len(subtitles) >= 4
+        and len(lines) >= 4
         and duration is not None
         and duration >= 90.0
     ):
@@ -2262,15 +2303,7 @@ def detect_hooks(
         if progress_cb:
             progress_cb("Finding hook moments…", 5)
         hooks = detect_hook_moments(
-            [
-                {
-                    "id": i,
-                    "text": s.get("text", ""),
-                    "start": s.get("start", 0.0),
-                    "end": s.get("end", 0.0),
-                }
-                for i, s in enumerate(subtitles)
-            ],
+            [{"id": i, **line} for i, line in enumerate(lines)],
             language=language,
         )
     except Exception as e:
