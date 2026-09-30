@@ -125,7 +125,8 @@ const enforcedCsp = ["frame-ancestors 'none'", "object-src 'none'", "base-uri 's
 
 const reportOnlyCsp = [
   "default-src 'self'",
-  `script-src ${uniq(["'self'", "'unsafe-inline'", isDev && "'unsafe-eval'", ...clerkScripts, ...analyticsScripts])}`,
+  // 'wasm-unsafe-eval': HarfBuzz (WASM) shapes Hindi captions (lib/captions/shape-hb.ts).
+  `script-src ${uniq(["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", isDev && "'unsafe-eval'", ...clerkScripts, ...analyticsScripts])}`,
   "style-src 'self' 'unsafe-inline'",
   `img-src ${uniq(["'self'", "data:", "blob:", ...api, ...media, clerk && "https://img.clerk.com"])}`,
   `media-src ${uniq(["'self'", "blob:", ...api, ...media])}`,
@@ -179,6 +180,14 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // The build's git SHA for the browser (Sentry release).
   env: { NEXT_PUBLIC_RELEASE: release },
+  // Caption engine (lib/captions/shape-hb.ts) loads harfbuzzjs lazily. Its
+  // Emscripten loader imports Node's "module" only under Node; in the
+  // browser bundle that import resolves to a stub, and on the server the
+  // package is left to Node.
+  turbopack: {
+    resolveAlias: { module: { browser: "./src/lib/captions/empty-module.ts" } },
+  },
+  serverExternalPackages: ["harfbuzzjs"],
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

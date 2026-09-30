@@ -1,0 +1,35 @@
+{
+  "comment": "Script support per preset (PLAN_TECH UT2 table). native = the preset's own font; fallback = a same-weight fallback keeps the look (tile badge 'fallback font'); unavailable = tile greyed, never picked for that script. Read by scripts.ts and verified against the real font coverage by scripts/font-coverage.py.",
+  "languages": {
+    "en": "latin", "de": "latin", "es": "latin", "fr": "latin", "pt": "latin", "it": "latin", "tr": "latin",
+    "pl": "latin", "nl": "latin", "id": "latin", "ms": "latin", "sv": "latin", "da": "latin", "no": "latin",
+    "nb": "latin", "fi": "latin", "cs": "latin", "sk": "latin", "hu": "latin", "ro": "latin", "hr": "latin",
+    "sl": "latin", "ca": "latin", "tl": "latin", "sw": "latin", "af": "latin", "et": "latin", "lv": "latin",
+    "lt": "latin", "sq": "latin", "eu": "latin", "gl": "latin", "cy": "latin", "is": "latin",
+    "ru": "cyrillic", "uk": "cyrillic", "bg": "cyrillic", "be": "cyrillic", "sr": "cyrillic", "mk": "cyrillic",
+    "hi": "devanagari", "mr": "devanagari", "ne": "devanagari", "sa": "devanagari",
+    "ja": "cjk", "ko": "cjk", "zh": "cjk", "yue": "cjk",
+    "ar": "rtl", "he": "rtl", "fa": "rtl", "ur": "rtl", "yi": "rtl", "ps": "rtl"
+  },
+  "cjk": { "ja": "noto-sans-jp-800", "ko": "noto-sans-kr-800", "zh": "noto-sans-sc-800", "yue": "noto-sans-sc-800" },
+  "fallbacks": {
+    "poppins-800": { "cyrillic": "montserrat-800" },
+    "poppins-900": { "cyrillic": "montserrat-900" },
+    "inter-display-700": { "devanagari": "poppins-800" }
+  },
+  "lastResort": { "latin": "inter-display-700", "cyrillic": "inter-display-700", "devanagari": "poppins-800" },
+  "presets": {
+    "power":    { "font": "montserrat-900",        "latin": "native", "cyrillic": "native",      "devanagari": "unavailable", "cjk": "fallback" },
+    "mega":     { "font": "luckiest-guy-400",      "latin": "native", "cyrillic": "unavailable", "devanagari": "unavailable", "cjk": "unavailable" },
+    "clipper":  { "font": "bangers-400",           "latin": "native", "cyrillic": "unavailable", "devanagari": "unavailable", "cjk": "unavailable" },
+    "karaoke":  { "font": "poppins-800",           "latin": "native", "cyrillic": "fallback",    "devanagari": "native",      "cjk": "fallback" },
+    "boxed":    { "font": "montserrat-800",        "latin": "native", "cyrillic": "native",      "devanagari": "unavailable", "cjk": "fallback" },
+    "punch":    { "font": "anton-400",             "latin": "native", "cyrillic": "unavailable", "devanagari": "unavailable", "cjk": "unavailable" },
+    "reveal":   { "font": "poppins-800",           "latin": "native", "cyrillic": "fallback",    "devanagari": "native",      "cjk": "fallback" },
+    "neon":     { "font": "rubik-800",             "latin": "native", "cyrillic": "native",      "devanagari": "unavailable", "cjk": "fallback" },
+    "gradient": { "font": "poppins-900",           "latin": "native", "cyrillic": "fallback",    "devanagari": "native",      "cjk": "fallback" },
+    "elegant":  { "font": "playfair-display-800i", "latin": "native", "cyrillic": "native",      "devanagari": "unavailable", "cjk": "unavailable" },
+    "subtitle": { "font": "inter-display-700",     "latin": "native", "cyrillic": "native",      "devanagari": "fallback",    "cjk": "fallback" },
+    "minimal":  { "font": "inter-display-700",     "latin": "native", "cyrillic": "native",      "devanagari": "fallback",    "cjk": "fallback" }
+  }
+}
