@@ -217,6 +217,18 @@ def test_worker_stores_keys_and_commits_once(r2, monkeypatch):
         writes.append({**kw, "_expect": expect})
         return impl_update_if(job_id, expect, **kw)
     monkeypatch.setattr(store, "update_if", update_if)
+    impl_modify = store.modify
+
+    def modify(job_id, fn):
+        # the analysis commit (backend.doc.commit_change): record what it
+        # wrote and the status it found
+        def spy(cur):
+            out = fn(cur)
+            if out is not None:
+                writes.append({**out, "_expect": cur.status})
+            return out
+        return impl_modify(job_id, spy)
+    monkeypatch.setattr(store, "modify", modify)
     deleted_at = []
     real_delete = M.media.delete
 
