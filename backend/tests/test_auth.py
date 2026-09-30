@@ -326,8 +326,8 @@ def fake_r2(monkeypatch, r2):
     r2.put_object(Bucket=storage.bucket(), Key="uploads/user_a/abc.mp4",
                   Body=b"video")
     probed = []
-    monkeypatch.setattr(M, "_probe_remote_duration",
-                        lambda url: probed.append(url) or 60.0)
+    monkeypatch.setattr(M, "_probe_remote",
+                        lambda url: (probed.append(url) or 60.0, None))
     downloaded = []
     real_get = M.media.get_file
     monkeypatch.setattr(M.media, "get_file", lambda key, path, **kw: (

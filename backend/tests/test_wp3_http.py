@@ -155,13 +155,15 @@ def test_streamed_webm_falls_back_to_the_client_duration(
     h = bearer()
     data = _video(tmp_path / "rec.webm", 3, webm_stream=True).read_bytes()
     url_probe = []
-    real = M._probe_remote_duration
+    real = M._probe_remote
 
     def probe(url):
-        url_probe.append(real(url))
-        return url_probe[-1]
+        seconds, has_audio = real(url)
+        url_probe.append(seconds)
+        assert has_audio is True     # the header lists the sound track
+        return seconds, has_audio
     mp = pytest.MonkeyPatch()
-    mp.setattr(M, "_probe_remote_duration", probe)
+    mp.setattr(M, "_probe_remote", probe)
     try:
         key = _upload(client, h, data, "rec.webm")
         r = client.post("/jobs", headers=h, data={

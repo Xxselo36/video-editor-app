@@ -98,8 +98,8 @@ from backend.auth import (
     User, current_user, get_owned_job, media_user, require_user,
 )
 from backend.jobs import (
-    DEFAULT_PLAN, PLAN_RETENTION_DAYS, RUNNING_STATUSES, DuplicateKey, Job,
-    new_job_id, retention_days, store,
+    DEFAULT_PLAN, EVENTS_KEEP_DAYS, PLAN_RETENTION_DAYS, RUNNING_STATUSES,
+    DuplicateKey, Job, new_job_id, retention_days, store,
 )
 from backend.pipeline import EXPORT_FORMATS, analyze_only
 from backend.security_headers import SecurityHeadersMiddleware
@@ -1285,6 +1285,10 @@ def _hourly() -> None:
         _backfill_tick()
     except Exception as e:
         print(f"[backfill] failed: {e}", flush=True)
+    try:
+        store.prune_events(time.time() - EVENTS_KEEP_DAYS * 86400)
+    except Exception as e:
+        print(f"[events] pruning failed: {e}", flush=True)
 
 
 def _retention_loop() -> None:
@@ -1352,16 +1356,103 @@ def _probe_duration(path: str) -> float | None:
 
 def _is_infra_failure(exc: BaseException, msg: str) -> bool:
     """Analysis failures that are our fault (full disk, IO, ffmpeg,
-    restart) give the minutes back. Content problems ("No speech
-    detected") don't — they already cost Groq/Claude time, and a refund
-    would let the same file be retried for free forever. The database
-    staying down (a finished analysis that couldn't be saved) is ours
-    too."""
+    restart) give the minutes back. Content problems don't — they
+    already cost Groq/Claude time, and a refund would let the same file
+    be retried for free forever — except a video with (almost) no
+    speech at all (_refund_content_failure). The database staying down
+    (a finished analysis that couldn't be saved) is ours too."""
     if msg in ("server_storage_full", "container_restart"):
         return True
     if isinstance(exc, (OSError, MemoryError)) or db.is_transient(exc):
         return True
     return msg.lower().startswith("ffmpeg")
+
+
+# A "no speech" failure with less detected speech than this gets its
+# minutes back (owner decision, PLAN 6.1 #10): the user uploaded music
+# or a silent screen recording by mistake — nothing was worth charging.
+NO_SPEECH_REFUND_S = _env_float("CLEO_NO_SPEECH_REFUND_S", 10.0)
+
+# The English sentence pipelines from before NoSpeechError raise.
+_NO_SPEECH_TEXT = "No speech detected in the video."
+# How the transcription step says the video has no sound track at all
+# (src/audio.py: "Video has no audio track") — an upload POST /jobs
+# couldn't probe (no_audio is normally refused there, before the charge).
+_NO_AUDIO_TEXTS = ("no audio track", "no audio stream", "has no audio")
+
+
+def _analysis_error_code(exc: BaseException, msg: str) -> str | None:
+    """The client-facing code of a failed analysis (job.error_code), or
+    None when there is no specific one (the client shows a generic
+    message). The full catalogue comes with backend/errors.py (UX5)."""
+    if isinstance(exc, pipeline.NoSpeechError) or msg.strip() == _NO_SPEECH_TEXT:
+        return "no_speech"
+    if any(t in msg.lower() for t in _NO_AUDIO_TEXTS):
+        return "no_audio"
+    if msg == "server_storage_full":
+        return "server_storage_full"
+    return None
+
+
+def _refund_content_failure(exc: BaseException, code: str | None) -> bool:
+    """A content failure whose minutes still go back: no sound track at
+    all (never charged), or no speech with less than NO_SPEECH_REFUND_S
+    of it detected."""
+    if code == "no_audio":
+        return True
+    if code != "no_speech":
+        return False
+    speech = getattr(exc, "speech_seconds", 0.0) or 0.0
+    return float(speech) < NO_SPEECH_REFUND_S
+
+
+def _render_error_code(exc: BaseException) -> str:
+    """job.error_code of a failed render: render_timeout / render_unavailable
+    when the render worker gave up (RenderUnavailableError), else
+    render_failed."""
+    if isinstance(exc, pipeline.RenderUnavailableError):
+        return ("render_timeout" if exc.code == "render_timeout"
+                else "render_unavailable")
+    return "render_failed"
+
+
+# ── Job events (reliability numbers, GET /admin/metrics) ─────────────
+# analysis_done / analysis_failed / analysis_refused, render_done /
+# render_failed: one row each in the store's job_events log (kept
+# EVENTS_KEEP_DAYS, outlives the jobs). Only codes, durations and flags —
+# no content, no user data.
+
+
+def _since(t: float | None) -> float | None:
+    return round(time.time() - t, 3) if t else None
+
+
+def _record_event(kind: str, job_id: str | None, **data: Any) -> None:
+    """Append one job event. Never raises: statistics must not fail a
+    job. `test` (a cost-test job, settings._cost_test) is looked up when
+    the caller doesn't pass it."""
+    try:
+        if "test" not in data and job_id:
+            job = store.get(job_id)
+            data["test"] = bool(job and (job.settings or {}).get("_cost_test"))
+        clean = {k: v for k, v in data.items()
+                 if v is None or isinstance(v, (str, int, float, bool))}
+        store.record_event(kind, job_id, clean)
+    except Exception as e:
+        print(f"[events] {kind} for {job_id} not recorded: {e}", flush=True)
+
+
+def _output_seconds(job: Job) -> float:
+    """Length of the video a render of `job` makes: its saved timeline,
+    each segment at its speed."""
+    total = 0.0
+    for seg in job.edit_segments():
+        try:
+            speed = max(0.05, float(seg.get("speed") or 1.0))
+            total += max(0.0, float(seg["end"]) - float(seg["start"])) / speed
+        except (TypeError, ValueError, KeyError):
+            continue
+    return total
 
 
 def _true_up(job_id: str, duration: float) -> None:
@@ -1556,6 +1647,7 @@ def _sweep_orphaned_jobs(now: float | None = None) -> int:
             if store.update_if(job.id, job.status, status="awaiting_review",
                                progress=100.0, message="render_failed",
                                error="container_restart",
+                               error_code="render_failed",
                                queue_position=None):
                 settled += 1
             continue
@@ -1971,6 +2063,7 @@ def _analysis_failed(job_id: str, job_dir: Path, exc: Exception,
     msg = str(exc)
     if "No space left on device" in msg:
         msg = "server_storage_full"
+    code = _analysis_error_code(exc, msg)
     if not db.is_transient(exc):
         # A content failure ("No speech detected") comes after the
         # transcription was paid for: charge what was really processed
@@ -1978,18 +2071,23 @@ def _analysis_failed(job_id: str, job_dir: Path, exc: Exception,
         _true_up_from_file(job_id, job_dir)
     infra = (_is_infra_failure(exc, msg)
              or isinstance(exc, MediaTransferError))
-    if infra and auth.auth_enabled():
+    refunded: bool | None = None
+    if (infra or _refund_content_failure(exc, code)) and auth.auth_enabled():
         # Before the error state: once that is stored nothing refunds
         # the job any more (the boot and the sweep only settle running
         # jobs), so a refund that fails — or the process dying while the
         # upload is dropped below — would charge the user for our
         # failure for good. accounts.refund is idempotent.
-        if _db_retry(job_id, "refunding", accounts.refund, job_id, msg):
-            print(f"[job {job_id}] minutes refunded ({msg[:60]})",
+        if _db_retry(job_id, "refunding", accounts.refund, job_id,
+                     code or msg):
+            print(f"[job {job_id}] minutes refunded ({(code or msg)[:60]})",
                   flush=True)
+            refunded = True
     _db_retry(job_id, "saving the failure", store.update, job_id,
               status="error", message=msg[:300], error=msg[:2000],
-              input_path=None)
+              error_code=code, refunded=refunded, input_path=None)
+    _record_event("analysis_failed", job_id, code=code or "unknown",
+                  infra=bool(infra), refunded=bool(refunded))
     # Nothing of a failed analysis can be reused (the user uploads
     # again), so free the upload + partial files right away — a failed
     # 10 min job used to leave ~1.5 GB on the volume.
@@ -2078,11 +2176,15 @@ def _analysis_refused(job_id: str, job_dir: Path, exc: AnalysisRefused,
     transcribed; like a refused POST /jobs). Raises like
     _analysis_failed when the database won't take it."""
     print(f"[job {job_id}] refused before analysis: {exc.text}", flush=True)
+    refunded: bool | None = None
     if auth.auth_enabled():
-        _db_retry(job_id, "refunding", accounts.refund, job_id, exc.code)
+        if _db_retry(job_id, "refunding", accounts.refund, job_id, exc.code):
+            refunded = True
     _db_retry(job_id, "saving the refusal", store.update, job_id,
               status="error", message=exc.text[:300], error=exc.text[:2000],
+              error_code=exc.code, refunded=refunded,
               progress=0.0, input_path=None)
+    _record_event("analysis_refused", job_id, code=exc.code)
     drop_upload()
     shutil.rmtree(job_dir, ignore_errors=True)
     if source_key:
@@ -2093,18 +2195,24 @@ def _analysis_refused(job_id: str, job_dir: Path, exc: AnalysisRefused,
                   store_=where)
 
 
-def _render_failed(job_id: str, exc: Exception) -> None:
+def _render_failed(job_id: str, exc: Exception, gen: int | None = None,
+                   started_at: float | None = None) -> None:
     """A render failed (or its result couldn't be saved): back to review
     instead of a dead 'error' — the user's edits and the source are
     still on disk, so they can open the editor and render again without
     re-uploading. Raises when that can't be written (the sweep settles
-    the job later)."""
+    the job later). `gen` / `started_at` (time.time() of the request)
+    only go into the render_failed event."""
     tb = traceback.format_exc()
     print(f"[job {job_id}] RENDER FAILED: {exc}\n{tb}", flush=True)
     observability.capture(exc, job_id=job_id, phase="render")
+    code = _render_error_code(exc)
     _db_retry(job_id, "saving the failure", store.update, job_id,
               status="awaiting_review", progress=100.0,
-              message="render_failed", error=str(exc)[:500])
+              message="render_failed", error=str(exc)[:500],
+              error_code=code)
+    _record_event("render_failed", job_id, code=code, gen=gen,
+                  wall_s=_since(started_at))
 
 
 def _run_analyze(job_id: str) -> None:
@@ -2168,6 +2276,7 @@ def _run_analyze_inner(job_id: str) -> None:
     _register_active(job_id)
     progress: _ProgressWriter | None = None
     ws = _workspace(job_id)
+    work_started = time.time()
     try:
         job = _db_retry(job_id, "reading the job", store.get, job_id)
         source_key = job.source_ref() if job is not None else None
@@ -2300,6 +2409,9 @@ def _run_analyze_inner(job_id: str) -> None:
                 _gc_later([media.job_prefix(job_id)], store_=where)
             return
         _true_up(job_id, res.get("duration", 0.0))
+        _record_event("analysis_done", job_id, work_s=_since(work_started),
+                      duration_s=round(float(res.get("duration") or 0.0), 3),
+                      test=bool((job.settings or {}).get("_cost_test")))
         _drop_upload()  # if the pipeline didn't already
         if source_key:
             # Committed: the upload object isn't needed any more.
@@ -2317,6 +2429,7 @@ def _run_render(
     disabled_cuts: list[int] | None = None,
 ) -> None:
     """Worker thread: wait in line for a render slot, then render."""
+    requested_at = time.time()  # the thread starts with POST /render
     try:
         if not _RENDER_SLOTS.acquire(
                 job_id, on_wait=_queued_writer(job_id, ("processing",)),
@@ -2325,21 +2438,73 @@ def _run_render(
             return
         try:
             with costs.tracking(job_id, "render"):
-                _run_render_inner(job_id, edited_subtitles, disabled_cuts)
+                _run_render_inner(job_id, edited_subtitles, disabled_cuts,
+                                  requested_at=requested_at)
         finally:
             _RENDER_SLOTS.release(job_id)
     finally:
         _INFLIGHT.release(job_id)
 
 
+# The post caption + hashtags (one LLM call: up to its timeout × (1 +
+# retries), backend/llm.py) are written while the video renders instead
+# of after it, so a slow LLM never holds a render slot. They only need
+# the edited transcript.
+_SOCIAL_POOL = ThreadPoolExecutor(
+    max_workers=max(1, _env_int("CLEO_SOCIAL_WORKERS", 4)),
+    thread_name_prefix="social")
+# How long a finished render waits for its caption before saving
+# without one (past the LLM client's own limit: 2 × 30 s).
+_SOCIAL_WAIT_S = 75.0
+_NO_SOCIAL: dict = {"caption": "", "hashtags": []}
+
+
+def _social_caption(subtitles: list, language: str | None
+                    ) -> tuple[dict, dict[str, float]]:
+    """_SOCIAL_POOL worker: the post caption for the (possibly edited)
+    transcript, and the LLM usage it recorded (the render thread adds it
+    to the render's costs). Soft-fails to no caption (no API key, API
+    error)."""
+    usage: dict[str, float] = {}
+    social: dict = dict(_NO_SOCIAL)
+    with costs.collecting(usage):
+        try:
+            from backend import llm
+            full = " ".join(
+                (s.get("text") or "").strip()
+                for s in subtitles
+                if isinstance(s, dict) and (s.get("text") or "").strip())
+            social = llm.generate_social_caption(full, language=language)
+        except Exception as e:
+            print(f"[social] caption skipped: {e}", flush=True)
+    return social, usage
+
+
+def _social_result(job_id: str, future) -> dict:
+    """The caption of `future` (_social_caption), its usage merged into
+    this thread's costs — or none if it isn't there in _SOCIAL_WAIT_S."""
+    try:
+        social, usage = future.result(timeout=_SOCIAL_WAIT_S)
+    except Exception as e:
+        print(f"[job {job_id}] social-caption skipped: "
+              f"{type(e).__name__}: {e}", flush=True)
+        return dict(_NO_SOCIAL)
+    costs.merge(usage)
+    return social if isinstance(social, dict) else dict(_NO_SOCIAL)
+
+
 def _run_render_inner(
     job_id: str,
     edited_subtitles: list,
     disabled_cuts: list[int] | None = None,
+    requested_at: float | None = None,
 ) -> None:
     """Worker: render + concat into final MP4. Its state writes ride out
     a short database outage (_db_retry); if they still fail the thread
-    ends, and _sweep_orphaned_jobs sends the job back to review later."""
+    ends, and _sweep_orphaned_jobs sends the job back to review later.
+    `requested_at` (time.time() of POST /render, else now) is where the
+    render events measure the wait from."""
+    requested_at = requested_at or time.time()
     _register_active(job_id)
     progress: _ProgressWriter | None = None
     ws = _workspace(job_id, "render")
@@ -2355,10 +2520,13 @@ def _run_render_inner(
         gen = max(1, int(job.render_gen or 0))
         out_prefix = f"{media.job_prefix(job_id)}r{gen}/"
         where = media.store_of(job)
+        work_started = time.time()
         _make_workspace(ws)
         try:
             if not job.has_mezz():
                 raise FileNotFoundError("the render source is gone")
+            social_future = _SOCIAL_POOL.submit(
+                _social_caption, edited_subtitles, job.language)
             mezz_key = job.mezz_key or _backfill_mezz(job, progress, where)
             result = pipeline.render_to_keys(
                 job_id=job_id, gen=gen, mezz_key=mezz_key,
@@ -2374,28 +2542,17 @@ def _run_render_inner(
                 workspace=str(ws),
                 progress_cb=progress,
             )
-            # Social caption / hashtags from the (possibly edited)
-            # transcript. Soft-fails if no ANTHROPIC_API_KEY is set.
-            social = {"caption": "", "hashtags": []}
-            try:
-                from backend.llm import generate_social_caption
-                full = " ".join(
-                    (s.get("text") or "").strip()
-                    for s in edited_subtitles
-                    if (s.get("text") or "").strip()
-                )
-                social = generate_social_caption(full, language=job.language)
-            except Exception as e:
-                print(f"[job {job_id}] social-caption skipped: {e}",
-                      flush=True)
         except Exception as e:
             progress.close()
             # Partial outputs of this generation — not before a Modal
             # call that wasn't really stopped (_cancel_modal_call doesn't
             # kill its container) can't write there any more.
             _gc_later([out_prefix], _render_gc_delay_s(), store_=where)
-            _render_failed(job_id, e)
+            _render_failed(job_id, e, gen, requested_at)
             return
+        # Social caption / hashtags from the (possibly edited)
+        # transcript, written meanwhile. Soft-fails to none.
+        social = _social_result(job_id, social_future)
         progress.close()
         try:
             # Nothing else writes these fields while the job renders
@@ -2409,8 +2566,13 @@ def _run_render_inner(
                       **done)
         except Exception as e:
             _gc_later([out_prefix], _render_gc_delay_s(), store_=where)
-            _render_failed(job_id, e)
+            _render_failed(job_id, e, gen, requested_at)
             return
+        _record_event("render_done", job_id, gen=gen,
+                      wall_s=_since(requested_at),
+                      work_s=_since(work_started),
+                      output_s=round(_output_seconds(cur), 3),
+                      test=bool((cur.settings or {}).get("_cost_test")))
         # The previous render stays a day: someone may still stream it.
         _gc_later(superseded, _SUPERSEDED_KEEP_S, store_=where)
     finally:
@@ -2904,9 +3066,10 @@ async def create_job(
     upload deleted, nothing charged) or charges it then. Every analysis
     stops at CLEO_MAX_MINUTES (settings._max_seconds).
 
-    Refusals (see presign): 413 file_too_large / video_too_long, 429
-    too_many_active_jobs, 503 server_busy + Retry-After, 507
-    server_storage_full. The upload is thrown away only when retrying
+    Refusals (see presign): 413 file_too_large / video_too_long, 400
+    no_audio (the probe read the streams and none is audio — before any
+    charge), 429 too_many_active_jobs, 503 server_busy + Retry-After,
+    507 server_storage_full. The upload is thrown away only when retrying
     can't help (402, 400, 413). When the analysis has to wait for a
     slot the job comes back as status "processing", message "queued"
     with its queue_position.
@@ -3072,7 +3235,7 @@ async def _accept_upload(
                 raise _file_too_large()
             # The analysis downloads + normalizes it in its workspace.
             await run_in_threadpool(_INFLIGHT.reserve_disk, token, size, None)
-            seconds = await _probe_upload(storage_key)
+            seconds, has_audio = await _probe_upload(storage_key)
             if seconds is None and client_duration:
                 seconds = client_duration
         else:
@@ -3093,11 +3256,19 @@ async def _accept_upload(
                                     input_path)
             await run_in_threadpool(_copy_upload, file, input_path)
             seconds = await run_in_threadpool(_probe_duration, input_path)
+            has_audio = await run_in_threadpool(_probe_audio, input_path)
 
         if _too_long(seconds):
             await run_in_threadpool(_discard_upload, input_path, storage_key)
             input_path = None
             raise _video_too_long()
+        if has_audio is False:
+            # Nothing to transcribe, so nothing to cut or caption: refused
+            # before the claim and the charge — 0 minutes, and the upload
+            # goes (a retry can't help).
+            await run_in_threadpool(_discard_upload, input_path, storage_key)
+            input_path = None
+            raise ApiRefusal(400, "no_audio")
 
         plan = DEFAULT_PLAN
         # Charged in the analysis worker instead of here (see
@@ -3252,37 +3423,79 @@ _PROBE_POOL = ThreadPoolExecutor(
     thread_name_prefix="probe")
 
 
-def _probe_remote_duration(url: str) -> float | None:
-    """format=duration of a remote file from its container header: a few
-    ranged GETs (moov at the end of an MP4 included), no packet scan —
-    that would read the whole object. None if it doesn't say (streamed
-    WebM) or can't be read within 20 s."""
+def _audio_verdict(streams: Any) -> bool | None:
+    """From ffprobe's stream list: True = there is a sound track, False =
+    streams were read and none is audio (a screen recording without a
+    mic, a video exported without sound), None = unknown (nothing could
+    be read) — only a clear False refuses an upload (no_audio)."""
+    if not isinstance(streams, list) or not streams:
+        return None
+    kinds = {s.get("codec_type") for s in streams if isinstance(s, dict)}
+    return "audio" in kinds
+
+
+def _probe_audio(path: str) -> bool | None:
+    """Does a local upload have a sound track? (_audio_verdict)"""
+    from src.ffmpeg_utils import get_ffprobe_path
+    try:
+        r = subprocess.run(
+            [get_ffprobe_path(), "-v", "error", "-show_entries",
+             "stream=codec_type", "-of", "json", path],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        return _audio_verdict(json.loads(r.stdout or "{}").get("streams"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _probe_remote(url: str) -> tuple[float | None, bool | None]:
+    """(length, has a sound track) of a remote file from its container
+    header, in one ffprobe run: a few ranged GETs (moov at the end of an
+    MP4 included), no packet scan — that would read the whole object.
+    The length is None if the header doesn't say (streamed WebM), the
+    sound verdict as _audio_verdict; (None, None) if nothing can be read
+    within 20 s."""
     from src.ffmpeg_utils import get_ffprobe_path
     try:
         r = subprocess.run(
             [get_ffprobe_path(), "-v", "error", "-rw_timeout", "15000000",
-             "-show_entries", "format=duration", "-of",
-             "default=nw=1:nk=1", url],
+             "-show_entries", "format=duration:stream=codec_type",
+             "-of", "json", url],
             capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.TimeoutExpired):
-        return None
-    dur = _to_float(r.stdout.strip()) if r.returncode == 0 else 0.0
-    return dur if dur > 0 else None
+        return None, None
+    if r.returncode != 0:
+        return None, None
+    try:
+        data = json.loads(r.stdout or "{}")
+    except ValueError:
+        return None, None
+    if not isinstance(data, dict):
+        return None, None
+    fmt = data.get("format") if isinstance(data.get("format"), dict) else {}
+    dur = _to_float(str(fmt.get("duration") or 0))
+    return (dur if dur > 0 else None), _audio_verdict(data.get("streams"))
 
 
-async def _probe_upload(key: str) -> float | None:
+async def _probe_upload(key: str) -> tuple[float | None, bool | None]:
+    """_probe_remote of an upload in R2 (over a presigned GET)."""
     try:
         url = media.presign_get(key)
     except Exception as e:
         print(f"[jobs] presign for the probe of {key} failed: {e}", flush=True)
-        return None
+        return None, None
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_PROBE_POOL, _probe_remote_duration, url)
+    return await loop.run_in_executor(_PROBE_POOL, _probe_remote, url)
 
 
 # Fields of GET /jobs rows (the Library's server-side list).
 _LIST_FIELDS = (
-    "id", "status", "message", "progress", "error", "filename", "preset_id",
+    "id", "status", "message", "progress", "error", "error_code", "refunded",
+    "filename", "preset_id",
     "preset_label", "created_at", "updated_at", "expires_at", "has_output",
     "outputs", "hook_clips", "social_caption", "social_hashtags", "duration",
     "queue_position",
@@ -3364,6 +3577,8 @@ def _status_rows(ids: list[str], user: User | None) -> dict:
             "progress": row["progress"],
             "queue_position": row["queue_position"],
             "error": row["error"],
+            "error_code": row.get("error_code"),
+            "refunded": row.get("refunded"),
             "has_output": has_output,
             "updated_at": row["updated_at"] or None,
             "preview_version": row["preview_version"],
@@ -3386,7 +3601,8 @@ async def jobs_status(request: Request, ids: str = "",
                       user: User | None = Depends(current_user)):
     """Status of several jobs in one request, for the dashboard poll:
     `?ids=a,b,c` (at most 50) → {"jobs": [{id, status, message, progress,
-    queue_position, error, has_output, updated_at, preview_version}],
+    queue_position, error, error_code, refunded, has_output, updated_at,
+    preview_version}],
     "missing": [ids that don't exist or aren't the caller's]}. With a
     weak ETag: send it back as If-None-Match and an unchanged answer is
     an empty 304."""
@@ -3519,6 +3735,16 @@ async def billing_webhook(request: Request):
     return {"ok": True, **result}
 
 
+def _require_admin(x_admin_token: str) -> None:
+    """The /admin/* routes: CLEO_ADMIN_TOKEN sent as X-Admin-Token; 404
+    while that env var is unset, 401 for a wrong token."""
+    token = os.environ.get("CLEO_ADMIN_TOKEN", "")
+    if not token:
+        raise HTTPException(404, "not found")
+    if not hmac.compare_digest(x_admin_token, token):
+        raise HTTPException(401, "bad admin token")
+
+
 @app.get("/admin/costs")
 def admin_costs(x_admin_token: str = Header(default=""),
                 exclude_tests: bool = False):
@@ -3532,11 +3758,7 @@ def admin_costs(x_admin_token: str = Header(default=""),
     uploads of the analysis results (mezz / proxy / previews) and legacy
     local files served from here are Railway egress.
     """
-    token = os.environ.get("CLEO_ADMIN_TOKEN", "")
-    if not token:
-        raise HTTPException(404, "not found")
-    if not hmac.compare_digest(x_admin_token, token):
-        raise HTTPException(401, "bad admin token")
+    _require_admin(x_admin_token)
     rows = []
     for job in store.list_all():
         c = dict(job.costs or {})
@@ -3616,6 +3838,150 @@ def admin_costs(x_admin_token: str = Header(default=""),
         } if minutes else {},
         "rows": sorted(rows, key=lambda r: -r["usd_all_in"]),
     }
+
+
+# ── Reliability metrics (the launch gates, PLAN_TECH §1.8) ────────────
+# Analysis failures the video caused, not we: left out of the analysis
+# success rate (they still show under by_code).
+USER_CAUSED_CODES = frozenset({"no_speech", "no_audio", "no_video",
+                               "video_too_short"})
+# Launch gates over the window (UX18): analysis ≥ 97 %, render ≥ 98 %,
+# p50 of render wall time / video length ≤ 1.
+METRIC_GATES = {"analysis_success": 0.97, "render_success": 0.98,
+                "render_p50_ratio": 1.0}
+_METRIC_EVENTS = ("analysis_done", "analysis_failed", "render_done",
+                  "render_failed")
+
+
+def _percentile(values: list[float], pct: float) -> float | None:
+    """Nearest-rank percentile (None for no values)."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    k = max(0, min(len(ordered) - 1, math.ceil(pct / 100 * len(ordered)) - 1))
+    return ordered[k]
+
+
+def _rate(ok: int, total: int) -> float | None:
+    return round(ok / total, 4) if total else None
+
+
+def metrics_summary(events: list[dict[str, Any]], *, days: float,
+                    since: float, until: float) -> dict[str, Any]:
+    """GET /admin/metrics from job_events rows ({kind, data, …})."""
+    by_kind: dict[str, list[dict[str, Any]]] = {k: [] for k in _METRIC_EVENTS}
+    for ev in events:
+        if ev.get("kind") in by_kind:
+            by_kind[ev["kind"]].append(ev.get("data") or {})
+
+    def codes(rows: list[dict[str, Any]]) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for d in rows:
+            code = str(d.get("code") or "unknown")
+            out[code] = out.get(code, 0) + 1
+        return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+    a_ok = len(by_kind["analysis_done"])
+    a_failed = by_kind["analysis_failed"]
+    a_user = [d for d in a_failed if d.get("code") in USER_CAUSED_CODES]
+    a_counted = len(a_failed) - len(a_user)
+    r_ok = by_kind["render_done"]
+    r_failed = by_kind["render_failed"]
+
+    def num(d: dict[str, Any], key: str) -> float | None:
+        v = d.get(key)
+        return float(v) if isinstance(v, (int, float)) and v == v else None
+
+    ratios, work_ratios, walls = [], [], []
+    for d in r_ok:
+        wall, work, out = num(d, "wall_s"), num(d, "work_s"), num(d, "output_s")
+        if wall is not None:
+            walls.append(wall)
+        if out and out > 0:
+            if wall is not None:
+                ratios.append(wall / out)
+            if work is not None:
+                work_ratios.append(work / out)
+
+    def rounded(v: float | None, n: int = 3) -> float | None:
+        return round(v, n) if v is not None else None
+
+    analysis_rate = _rate(a_ok, a_ok + a_counted)
+    render_rate = _rate(len(r_ok), len(r_ok) + len(r_failed))
+    p50_ratio = rounded(_percentile(ratios, 50))
+
+    def gate(name: str, value: float | None, higher_is_better: bool) -> dict:
+        target = METRIC_GATES[name]
+        ok = None if value is None else (
+            value >= target if higher_is_better else value <= target)
+        return {"target": target, "value": value, "ok": ok}
+
+    return {
+        "days": days,
+        "since": since,
+        "until": until,
+        "analysis": {
+            "done": a_ok,
+            "failed": a_counted,
+            "user_caused": len(a_user),
+            "success_rate": analysis_rate,
+            "by_code": codes(a_failed),
+        },
+        "render": {
+            "done": len(r_ok),
+            "failed": len(r_failed),
+            "success_rate": render_rate,
+            "by_code": codes(r_failed),
+            # Wall time from POST /render (queue included) per second of
+            # rendered video; work = from the render slot on.
+            "p50_ratio": p50_ratio,
+            "p90_ratio": rounded(_percentile(ratios, 90)),
+            "p50_work_ratio": rounded(_percentile(work_ratios, 50)),
+            "p50_wall_s": rounded(_percentile(walls, 50), 1),
+            "p90_wall_s": rounded(_percentile(walls, 90), 1),
+            "samples": len(ratios),
+        },
+        # Lost-edit reports come with the feedback table (UX11/UX20).
+        "lost_edit_reports": None,
+        "gates": {
+            "analysis_success": gate("analysis_success", analysis_rate, True),
+            "render_success": gate("render_success", render_rate, True),
+            "render_p50_ratio": gate("render_p50_ratio", p50_ratio, False),
+        },
+    }
+
+
+@app.get("/admin/metrics")
+def admin_metrics(days: float = 14, include_tests: bool = False,
+                  x_admin_token: str = Header(default="")):
+    """Reliability over the last `days` (default 14, at most
+    EVENTS_KEEP_DAYS): analysis and render success rates, render wall
+    time per video second (p50 / p90) and the launch gates. From the
+    job_events log, so deleted jobs still count; cost-test jobs are left
+    out unless include_tests. Admin only (see /admin/costs)."""
+    _require_admin(x_admin_token)
+    if not days == days or days <= 0:  # NaN / zero / negative
+        raise HTTPException(400, "days must be positive")
+    days = min(float(days), EVENTS_KEEP_DAYS)
+    until = time.time()
+    since = until - days * 86400
+    events = store.events(since, kinds=_METRIC_EVENTS)
+    if not include_tests:
+        events = [e for e in events if not (e.get("data") or {}).get("test")]
+    return metrics_summary(events, days=days, since=since, until=until)
+
+
+@app.post("/admin/sentry-test")
+def admin_sentry_test(x_admin_token: str = Header(default="")):
+    """Send a test error to Sentry — the check that error reports arrive
+    after SENTRY_DSN was set. {"sentry": false} while it is off."""
+    _require_admin(x_admin_token)
+    on = observability.enabled()
+    if on:
+        observability.capture(
+            RuntimeError("CleoCuts test error (POST /admin/sentry-test)"),
+            phase="sentry_test")
+    return {"sentry": on, "release": observability.release()}
 
 
 @app.delete("/jobs/{job_id}")
@@ -4276,7 +4642,7 @@ def post_render(job_id: str, payload: dict,
         if cur.status != "awaiting_review":
             return None
         return dict(status="processing", message="Rendering…", progress=1.0,
-                    error=None, queue_position=None,
+                    error=None, error_code=None, queue_position=None,
                     render_gen=int(cur.render_gen or 0) + 1)
     if not store.modify(job_id, _start):
         cur = store.get(job_id)

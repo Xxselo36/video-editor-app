@@ -1200,7 +1200,9 @@ def analyze_only(
     subtitles = result.subtitles if isinstance(result.subtitles, list) else []
 
     if not segments:
-        raise RuntimeError("No speech detected in the video.")
+        # Nothing but silence: 0 s of speech (see NoSpeechError).
+        raise NoSpeechError("No speech detected in the video.",
+                            speech_seconds=0.0)
 
     duration = result.duration
 
@@ -1401,6 +1403,22 @@ def _apply_segment_effects(
         raise RuntimeError(
             f"ffmpeg segment-effects failed: {result.stderr[-800:]}"
         )
+
+
+class NoSpeechError(RuntimeError):
+    """The analysis found no speech to cut and caption (music only,
+    silence, a screen recording without a mic). A content failure with
+    a user-facing code: the web backend stores `code` as the job's
+    error_code, and credits the minutes back when less than
+    NO_SPEECH_REFUND_S of speech was detected (`speech_seconds`). The
+    message stays the English sentence old clients match on."""
+
+    code = "no_speech"
+
+    def __init__(self, message: str = "No speech detected in the video.",
+                 speech_seconds: float = 0.0) -> None:
+        super().__init__(message)
+        self.speech_seconds = float(speech_seconds or 0.0)
 
 
 class RenderUnavailableError(RuntimeError):

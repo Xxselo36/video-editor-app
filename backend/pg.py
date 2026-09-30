@@ -180,10 +180,26 @@ ALTER TABLE media_gc DROP CONSTRAINT IF EXISTS media_gc_pkey;
 ALTER TABLE media_gc ADD PRIMARY KEY (prefix, store);
 """
 
+# UX3: job lifecycle events for GET /admin/metrics (backend/jobs.py
+# _EVENTS_DDL). Deliberately NOT in TABLES: statistics, not state — a
+# backup / cutover doesn't carry them (the SQLite side of a cutover may
+# not even have the table yet).
+_SCHEMA_V4 = """
+CREATE TABLE IF NOT EXISTS job_events (
+    id bigserial PRIMARY KEY,
+    at timestamptz NOT NULL,
+    kind text COLLATE "C" NOT NULL,
+    job_id text COLLATE "C",
+    data jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS job_events_kind_at ON job_events (kind, at);
+"""
+
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _SCHEMA_V1),
     (2, _SCHEMA_V2),
     (3, _SCHEMA_V3),
+    (4, _SCHEMA_V4),
 ]
 
 _SCHEMA_MIGRATIONS_DDL = (
@@ -806,6 +822,45 @@ class PgJobStore:
         with self._db.connection() as conn:
             conn.execute("TRUNCATE media_gc")
 
+    # ── job_events (backend.jobs.JobStore has the same methods) ──
+
+    def record_event(self, kind: str, job_id: str | None,
+                     data: dict[str, Any] | None = None,
+                     at: float | None = None) -> None:
+        with self._db.connection() as conn:
+            conn.execute(
+                "INSERT INTO job_events (at, kind, job_id, data) "
+                "VALUES (%s, %s, %s, %s::jsonb)",
+                (_dt(time.time() if at is None else at), clean_text(kind),
+                 clean_text(job_id) if job_id else None,
+                 to_json(data or {})))
+
+    def events(self, since: float, kinds: Iterable[str] | None = None,
+               limit: int = 200_000) -> list[dict[str, Any]]:
+        from backend.jobs import event_row
+        kinds = list(kinds or ())
+        sql = ("SELECT extract(epoch FROM at), kind, job_id, data "
+               "FROM job_events WHERE at >= %s")
+        args: list[Any] = [_dt(since)
+                           or datetime.fromtimestamp(0, tz=timezone.utc)]
+        if kinds:
+            sql += " AND kind = ANY(%s)"
+            args.append(kinds)
+        sql += " ORDER BY at, id LIMIT %s"
+        args.append(int(limit))
+        with self._db.connection() as conn:
+            rows = conn.execute(sql, args).fetchall()
+        return [event_row(float(r[0]), r[1], r[2], r[3]) for r in rows]
+
+    def prune_events(self, before: float) -> int:
+        with self._db.connection() as conn:
+            return conn.execute("DELETE FROM job_events WHERE at < %s",
+                                (_dt(before),)).rowcount
+
+    def _truncate_events_for_tests(self) -> None:
+        with self._db.connection() as conn:
+            conn.execute("TRUNCATE job_events")
+
     def list_all(self) -> list[Job]:
         return self._jobs("SELECT id, data FROM jobs")
 
@@ -876,6 +931,7 @@ class PgJobStore:
                 fields_ = dict(status="awaiting_review", progress=100.0,
                                message="render_failed",
                                error="container_restart",
+                               error_code="render_failed",
                                queue_position=None)
             else:
                 fields_ = dict(status="error", message=message,

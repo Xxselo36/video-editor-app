@@ -79,8 +79,8 @@ def probe(monkeypatch):
         if state is not None:
             state["probes"].append(url)
             time.sleep(state["delay"])
-        return seconds["value"]
-    monkeypatch.setattr(M, "_probe_remote_duration", remote)
+        return seconds["value"], None
+    monkeypatch.setattr(M, "_probe_remote", remote)
     return seconds
 
 
@@ -454,7 +454,8 @@ def test_batch_status_with_etag(client):
     assert body["missing"] == ["nope"]
     assert set(body["jobs"][0]) == {
         "id", "status", "message", "progress", "queue_position", "error",
-        "has_output", "updated_at", "preview_version"}
+        "error_code", "refunded", "has_output", "updated_at",
+        "preview_version"}
     assert body["jobs"][1]["queue_position"] == 3
     etag = r.headers["etag"]
     assert etag.startswith('W/"')
