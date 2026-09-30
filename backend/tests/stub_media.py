@@ -351,6 +351,13 @@ def speech(orientation: str = "portrait") -> dict[str, Path]:
     return out
 
 
+def speech_words() -> list[dict[str, Any]]:
+    """The speech clip's words as a transcription gives them (SOURCE
+    times, fillers included): what the edit document is built from."""
+    words = json.loads((media_dir() / "speech" / "words.json").read_text())
+    return [{"text": w["text"], "start": w["start"], "end": w["end"]} for w in words]
+
+
 def speech_data() -> dict[str, Any]:
     """Analysis result of the speech clip: automatic cuts around the
     speech (fillers and pauses removed) and Whisper-like word subtitles

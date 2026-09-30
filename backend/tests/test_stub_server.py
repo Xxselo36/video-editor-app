@@ -178,3 +178,27 @@ def test_upload_runs_the_fake_analysis(stub):
     assert review["filename"] == name
     assert len(review["preview_segments"]) == 4          # the grid clip's analysis
     assert stub.json("GET", f"/_test/job/{job['id']}")["stub"]["clip"] == "grid"
+    # new jobs carry the edit document (UT3)
+    assert review["has_doc"] is True
+    assert stub.json("GET", f"/jobs/{job['id']}/doc")["doc"]["words"][0]["text"] == "Satz"
+
+
+def test_doc_get_and_patch(stub):
+    job = stub.json("POST", "/_test/seed/review", {})
+    got = stub.json("GET", f"/jobs/{job['id']}/doc")
+    doc = got["doc"]
+    assert (got["rev"], got["read_only"], doc["v"], doc["clips"]) == (0, False, 2, None)
+    assert doc["style"] == {"presetId": "power", "overrides": {}}
+    assert [w["text"] for w in doc["words"][:3]] == ["Satz", "1", "hier."]
+    w = dict(doc["words"][0], text="Szene")
+    assert stub.json("PATCH", f"/jobs/{job['id']}/doc", {
+        "base_rev": 0, "rev": 7, "words": {"upsert": [w]},
+        "style": {"presetId": "clipper", "overrides": {"y": 0.6}}}) == {"rev": 7}
+    status, _, raw = stub.call("PATCH", f"/jobs/{job['id']}/doc",
+                               {"base_rev": 0, "rev": 8, "format": {"aspect": "16:9"}})
+    assert status == 409 and json.loads(raw) == {"detail": "stale_rev", "rev": 7}
+    again = stub.json("GET", f"/jobs/{job['id']}/doc")
+    assert again["rev"] == 7 and again["doc"]["words"][0]["text"] == "Szene"
+    old = stub.json("POST", "/_test/seed/review", {"doc": False})
+    assert stub.call("GET", f"/jobs/{old['id']}/doc")[0] == 404
+    assert stub.json("GET", f"/jobs/{old['id']}")["has_doc"] is False

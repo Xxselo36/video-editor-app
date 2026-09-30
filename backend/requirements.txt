@@ -51,6 +51,12 @@ opencv-python-headless>=4.8.0
 # No torch / torchvision / ultralytics: nothing on the web path imports
 # them (only the desktop app's src/intelligence.py + src/image_gen.py do).
 
+# ── Caption fonts: per-job CJK subsets (backend/font_subset.py) ──
+# Same pins as scripts/requirements-caption-fonts.txt: the subset bytes
+# (and the metric tables) depend on the fontTools and Brotli versions.
+fonttools==4.66.0
+brotli==1.2.0
+
 # Process utils.
 psutil>=5.9.0
 

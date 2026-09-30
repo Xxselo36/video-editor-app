@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from backend import costs, db, jobs, llm, media, taskq
+from backend import doc as edit_doc
 from backend import uploads as upl
 
 WORKER_PROTOCOL = taskq.WORKER_PROTOCOL
@@ -110,6 +111,11 @@ def bind(**resolvers: Callable[[], Any]) -> None:
 
 def _get(name: str) -> Any:
     return _resolvers[name]()
+
+
+def _pipeline() -> Any:
+    from backend import pipeline
+    return pipeline
 
 
 # ── small helpers (the WP1 path has its own in backend/main.py) ──────
@@ -587,6 +593,18 @@ def _store_analysis(ctx: Attempt, job_id: str, res: dict,
                 f"storing {key} failed: {type(e).__name__}: {e}") from e
         fields[field_name] = key
         fields["media_bytes"][key] = size
+
+    def put(path: str, key: str, ctype: str) -> int:
+        if not ctx.fence_ok():
+            raise InterruptedError("fenced out before storing results")
+        try:
+            return media.put_file(path, key, content_type=ctype, store=where)
+        except Exception as e:
+            raise MediaTransferError(
+                f"storing {key} failed: {type(e).__name__}: {e}") from e
+    extra, sizes = _pipeline().store_analysis_extras(res, job_id, put)
+    fields.update(extra)
+    fields["media_bytes"].update(sizes)
     return fields
 
 
@@ -789,6 +807,7 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
                 audio_warnings=res.get("audio_warnings", []),
                 audio_levels=res.get("audio_levels", {}),
                 scene_events=res.get("scene_events", []),
+                **_pipeline().analysis_fields(res),
                 **stored,
             )
             warnings = obs.warnings()
@@ -800,7 +819,10 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
                       "test": bool((job.settings or {}).get("_cost_test")),
                       "worker": ctx.call_id, "warnings": warnings,
                       "llm_ok": not obs.failed and not degraded}
-            outcome = ctx.commit(result, ("processing",), fields)
+            # The doc's style is settled against the job as stored at the
+            # commit (backend.doc.commit_change), in the same transaction.
+            outcome = ctx.commit(result, ("processing",), edit_doc.commit_change(
+                fields, res, prefs=edit_doc.load_prefs(job.owner_id)))
         if outcome == "ok":
             return {"committed": True}
         if outcome == "job_changed":

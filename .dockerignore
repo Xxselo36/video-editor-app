@@ -12,6 +12,8 @@ gui.build
 gui.dist
 node_modules
 web
+# ...except the caption script table the backend reads (backend/doc.py)
+!web/src/lib/captions/script-support.json
 output
 input
 .next

@@ -41,6 +41,11 @@ COPY backend /app/backend
 # Bundled caption fonts (Bangers for Clipper; src/effects.py and the
 # /caption-previews tiles look for them at src/../assets/fonts).
 COPY assets/fonts /app/assets/fonts
+# Noto Sans JP/KR/SC 800 (22.6 MB), subset per job for CJK transcripts
+# (backend/font_subset.py), and the caption engine's script table, which
+# the edit document's style choice reads (backend/doc.py).
+COPY assets/caption-fonts/cjk /app/assets/caption-fonts/cjk
+COPY web/src/lib/captions/script-support.json /app/web/src/lib/captions/script-support.json
 
 # Storage layout. CLEO_CACHE_DIR is for SmartCam intermediate files
 # (mounted as a persistent volume in prod). /tmp for short-lived job

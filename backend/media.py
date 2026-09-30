@@ -99,6 +99,10 @@ def _job_keys(job: Any) -> list[str]:
     keys = [getattr(job, k, None) for k in (
         "source_key", "mezz_key", "proxy_key", "preview_key", "thumb_key")]
     keys += list((getattr(job, "output_keys", None) or {}).values())
+    keys.append(getattr(job, "peaks_key", None))
+    for sub in (getattr(job, "font_subsets", None) or {}).values():
+        if isinstance(sub, dict):
+            keys += [sub.get(k) for k in ("woff2", "ttf", "json")]
     return [k for k in keys if isinstance(k, str) and k
             and not k.startswith("uploads/")]
 
@@ -287,9 +291,11 @@ def delete_prefix(prefix: str, *, store: str | None = None) -> int:
 #   jobs/<id>/r<g>/            one render generation
 #   jobs/<id>/preview/v<n>.mp4 one preview version
 #   jobs/<id>/source.<ext>     a body upload
+#   jobs/<id>/fonts/<font>.<rev>.<ext>   a replaced CJK font subset
 #   uploads/[<user>/]<uuid32>.<ext>   a browser upload
 _GC_JOB = re.compile(
-    r"^jobs/[0-9a-f]{12}/((r[0-9]+/)|preview/v[0-9]+\.mp4|source\.[a-z0-9]+)?$")
+    r"^jobs/[0-9a-f]{12}/((r[0-9]+/)|preview/v[0-9]+\.mp4|source\.[a-z0-9]+"
+    r"|fonts/[a-z0-9-]+\.[0-9a-f]{8}\.(woff2|ttf|json))?$")
 _GC_UPLOAD = re.compile(
     r"^uploads/([A-Za-z0-9_-]+/)?[0-9a-f]{32}\.[a-z0-9]+$")
 
