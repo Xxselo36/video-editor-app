@@ -459,8 +459,9 @@ def _normalize_orientation(
     max_side: int = 1920,
     max_seconds: float | None = None,
     proxy_path: str | None = None,
+    cfr_rate: str | None = None,
 ) -> bool:
-    """Re-encode upload with rotation baked in, audio cleaned + LUFS-normalized.
+    """Re-encode the upload with rotation baked in; audio copied as is.
 
     `max_seconds` cuts the output there (everything downstream works on
     this file); see _max_seconds in analyze_only.
@@ -471,16 +472,18 @@ def _normalize_orientation(
     the combined call fails, the plain normalize runs again on its own
     (returns False), so a proxy problem can never fail an analysis.
 
-    Three passes folded into one ffmpeg call:
-      1) Re-encode video without -noautorotate so rotation metadata
-         (iPhone/most mobile cams) is baked into pixels. MoviePy ignores
-         the rotation tag, which is why portrait phone uploads used to
-         come out landscape.
-      2) `afftdn` light noise reduction — removes hiss / room tone /
-         fan noise without artifacting the speech.
-      3) `loudnorm` to -14 LUFS / -1.5 dBTP / 11 LU range — the modern
-         streaming-platform standard (YouTube, TikTok, Spotify all
-         target -14 LUFS).
+    `cfr_rate` (web jobs, UT3 / review C8): also make the video
+    constant frame rate at that rate (an ffmpeg rate like "30000/1001",
+    see cfr_rate_of) — phone recordings are often VFR, and the v2 render
+    snaps cuts to the mezz's frame grid. The proxy gets the same frames.
+    None (the default) keeps the source's timing as before.
+
+    Video is re-encoded without -noautorotate so rotation metadata
+    (iPhone/most mobile cams) is baked into pixels. MoviePy ignores the
+    rotation tag, which is why portrait phone uploads used to come out
+    landscape. No audio filter runs here (no afftdn, no loudnorm): the
+    audio stream is copied; the loudness is only measured
+    (backend/audio_analysis.py) for the v2 render.
 
     Uses libx264 because bundled imageio_ffmpeg's videotoolbox is broken.
     """
@@ -507,6 +510,7 @@ def _normalize_orientation(
         f"{_HDR_TONEMAP_CHAIN},{scale_filter}" if is_hdr else scale_filter
     )
     cut = ["-t", f"{max_seconds:.3f}"] if max_seconds else []
+    cfr = ["-fps_mode", "cfr", "-r", cfr_rate] if cfr_rate else []
 
     head = [get_ffmpeg_path(), "-y", *_threads(), "-i", input_path]
     main_out = [
@@ -528,6 +532,7 @@ def _normalize_orientation(
         "-color_primaries", "bt709",
         "-color_trc", "bt709",
         "-colorspace", "bt709",
+        *cfr,
         # Bit-perfect audio passthrough — copies the source AAC stream
         # unchanged. No re-encode, no filter, no quality loss.
         "-c:a", "copy",
@@ -559,6 +564,7 @@ def _normalize_orientation(
                 "-map", "[proxy]",
                 *(["-map", f"0:{a_idx}"] if a_idx is not None else []),
                 *_proxy_video_args(),
+                *cfr,
                 "-c:a", "copy",
                 *cut,
                 "-movflags", "+faststart",
@@ -585,6 +591,58 @@ def _normalize_orientation(
             f"ffmpeg orientation-normalize failed (hdr={is_hdr}):\n{tail}"
         )
     return False
+
+
+# Frame rates a web mezz is made constant at (review C8): the probed rate
+# snaps to the nearest.
+CFR_RATES: list[tuple[str, float]] = [
+    ("24000/1001", 24000 / 1001), ("24", 24.0), ("25", 25.0),
+    ("30000/1001", 30000 / 1001), ("30", 30.0), ("50", 50.0),
+    ("60000/1001", 60000 / 1001), ("60", 60.0),
+]
+
+
+def _rate(value: Any) -> float | None:
+    """"30000/1001" → 29.97; None for 0/0, junk."""
+    try:
+        num, _, den = str(value or "").partition("/")
+        r = float(num) / float(den or 1)
+    except (ValueError, ZeroDivisionError):
+        return None
+    return r if math.isfinite(r) and r > 0 else None
+
+
+def _video_rates(path: str) -> tuple[float | None, float | None]:
+    """(avg_frame_rate, r_frame_rate) of the video stream ffmpeg picks
+    (cover art excluded); (None, None) when ffprobe can't tell."""
+    try:
+        r = subprocess.run(
+            [get_ffprobe_path(), "-v", "error", "-select_streams", "V",
+             "-show_entries", "stream=avg_frame_rate,r_frame_rate",
+             "-of", "json", path],
+            capture_output=True, text=True, timeout=30)
+        streams = json.loads(r.stdout or "{}").get("streams") or []
+    except Exception:
+        return None, None
+    if not streams:
+        return None, None
+    return _rate(streams[0].get("avg_frame_rate")), _rate(streams[0].get("r_frame_rate"))
+
+
+def cfr_rate_of(path: str) -> tuple[str, float]:
+    """The constant rate a web mezz of `path` gets: its average frame
+    rate snapped to 23.976/24/25/29.97/30/50/59.94/60 (ffmpeg rate text,
+    fps). Unknown → 30."""
+    avg, real = _video_rates(path)
+    fps = avg or real or 30.0
+    return min(CFR_RATES, key=lambda r: abs(r[1] - fps))
+
+
+def _is_cfr(path: str, fps: float) -> bool:
+    """Is `path` constant `fps`? (average and real rate agree with it)"""
+    avg, real = _video_rates(path)
+    return bool(avg and real and abs(avg - fps) / fps < 0.005
+                and abs(real - fps) / fps < 0.005)
 
 
 def _make_proxy(source_path: str, proxy_path: str) -> bool:
@@ -1126,6 +1184,14 @@ def analyze_only(
       - segments: list of (start, end) speech segments after cuts
       - subtitles: list of {start, end, text, original_start, original_end}
       - language: ISO code from Whisper
+      - doc: the edit document (backend/doc.py; None if it couldn't be
+        built — the job then opens like a job from before UT3)
+      - mezz_fps, mezz_cfr: the mezz's frame rate, and whether it is
+        constant (the normalize makes it so: review C8)
+      - audio_loudness: {I, TP, LRA, thresh, offset} (or None)
+      - peaks_path: peaks.bin in output_dir (or None); font_files: CJK
+        font subsets made for the doc ({} for other scripts) — both
+        stored by store_analysis_extras
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -1200,10 +1266,14 @@ def analyze_only(
     # SmartCam replaces normalized.mp4 with a reframed video, so its
     # proxy is made from that output below; otherwise it comes out of
     # the normalize pass itself.
+    # The web mezz is constant frame rate (review C8): the v2 render
+    # snaps cuts to its frame grid, and a VFR phone clip drifts.
+    cfr_rate, cfr_fps = cfr_rate_of(input_path)
     has_proxy = _normalize_orientation(
         input_path, normalized_path, max_side=_max_side,
         max_seconds=max_seconds,
         proxy_path=None if smartcam else proxy_path,
+        cfr_rate=cfr_rate,
     )
     if not smartcam and not has_proxy:
         _make_proxy(normalized_path, proxy_path)
@@ -1241,6 +1311,37 @@ def analyze_only(
         _stage("Preparing preview…", 9)
         _make_proxy(normalized_path, proxy_path)
 
+    mezz_fps: float | None = cfr_fps
+    mezz_cfr = True
+    if Path(normalized_path).name != "normalized.mp4" and not _is_cfr(
+            normalized_path, cfr_fps):
+        # SmartCam's own encode (CFR by construction, but check)
+        avg, real = _video_rates(normalized_path)
+        mezz_fps = avg or real
+        mezz_cfr = bool(avg and real and abs(avg - real) / real < 0.005)
+
+    # Loudness + peaks of the mezz audio (one decode), next to the
+    # transcription: it only reads the finished mezz.
+    audio: dict[str, Any] = {"loudness": None, "peaks": False}
+    peaks_path = str(Path(output_dir) / "peaks.bin")
+
+    def _measure_audio() -> None:
+        t0 = time.time()
+        try:
+            from backend import audio_analysis
+            audio["loudness"], audio["peaks"] = audio_analysis.write_peaks(
+                normalized_path, peaks_path)
+        except Exception as e:
+            print(f"[audio] measurement skipped: {type(e).__name__}: {e}",
+                  flush=True)
+        print(f"[audio] loudness {audio['loudness']}, peaks "
+              f"{'written' if audio['peaks'] else 'none'} "
+              f"({time.time() - t0:.1f}s)", flush=True)
+
+    audio_thread = threading.Thread(target=_measure_audio,
+                                    name="audio-measure", daemon=True)
+    audio_thread.start()
+
     _stage("Analyzing audio…", 10)
     result = analyze_video(
         video_path=normalized_path,
@@ -1252,6 +1353,7 @@ def analyze_only(
         continue_keywords=continue_keywords,
         progress_callback=_analyze_cb,
         cancel_check=cancel_check,
+        include_words=True,
     )
 
     segments = result.segments
@@ -1268,6 +1370,7 @@ def analyze_only(
     # is set; soft-fails to no-op otherwise so dev works without a key.
     _stage("Polishing transcript…", 85)
     has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    cleaned: dict[int, str] = {}
     print(f"[llm] cleanup starting — API key present: {has_key}, "
           f"{len(subtitles)} subtitles to process", flush=True)
     try:
@@ -1302,10 +1405,23 @@ def analyze_only(
     # cuts on the timeline. Includes the LLM bad-takes from above.
     cut_ranges = _invert_segments(segments, duration)
 
+    doc = _analysis_doc(result, subtitles, cleaned, settings, segments)
+    fonts: dict[str, Any] = {}
+
+    def _subset_fonts() -> None:
+        from backend import font_subset
+        fonts.update(font_subset.for_doc(doc, Path(output_dir) / "fonts"))
+
+    font_thread = threading.Thread(target=_subset_fonts, name="font-subset",
+                                   daemon=True)
+    font_thread.start()
+
     _stage("Building preview…", 95)
     preview_path = str(Path(output_dir) / "preview.mp4")
     _ffmpeg_cuts_preview(preview_source(normalized_path), segments,
                          preview_path)
+    font_thread.join()
+    audio_thread.join()
 
     return {
         "normalized_path": normalized_path,
@@ -1321,7 +1437,68 @@ def analyze_only(
             "mean_db": audio_precheck.get("mean_db"),
             "max_db": audio_precheck.get("max_db"),
         },
+        "doc": doc,
+        "mezz_fps": round(mezz_fps, 4) if mezz_fps else None,
+        "mezz_cfr": mezz_cfr,
+        "audio_loudness": audio["loudness"],
+        "peaks_path": peaks_path if audio["peaks"] else None,
+        "font_files": fonts,
     }
+
+
+def _analysis_doc(result: Any, subtitles: list, cleaned: dict[int, str],
+                  settings: dict, segments: list) -> dict | None:
+    """The edit document of the analysis (backend/doc.py): the words
+    before the caption-unit gluing with the LLM cleanup applied as a
+    token diff, or — from an analysis without word timings — the units'
+    words. None when it can't be built (logged): the job then opens
+    like one from before the doc."""
+    try:
+        from backend import doc as edit_doc
+        raw = getattr(result, "words", None)
+        if raw:
+            words = edit_doc.words_from_transcript(
+                raw, getattr(result, "fillers", None))
+            words = edit_doc.apply_cleanup(words, subtitles, cleaned)
+        else:
+            words = edit_doc.words_from_units(subtitles)
+        return edit_doc.build_doc(words, getattr(result, "language", None),
+                                  settings, segments=segments)
+    except Exception as e:
+        print(f"[doc] not built: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
+# Job fields of an analysis result besides the ones every release wrote
+# (UT3); the doc is committed through backend.doc.commit_change.
+_ANALYSIS_FIELDS = ("mezz_fps", "mezz_cfr", "audio_loudness")
+
+
+def analysis_fields(res: dict[str, Any]) -> dict[str, Any]:
+    return {k: res[k] for k in _ANALYSIS_FIELDS if k in res}
+
+
+def store_analysis_extras(
+    res: dict[str, Any], job_id: str,
+    put: Callable[[str, str, str], int],
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """Store what the analysis made besides the videos — peaks.bin and
+    the CJK font subsets — with put(path, key, content_type) -> size (the
+    caller's store and error handling). Returns (job fields, {key: size})."""
+    from backend import font_subset, media
+    prefix = media.job_prefix(job_id)
+    fields: dict[str, Any] = {}
+    sizes: dict[str, int] = {}
+    peaks = res.get("peaks_path")
+    if peaks and Path(peaks).is_file():
+        key = prefix + "peaks.bin"
+        sizes[key] = put(peaks, key, "application/octet-stream")
+        fields["peaks_key"] = key
+    if res.get("font_files"):
+        subsets, more = font_subset.store(res["font_files"], prefix, put)
+        fields["font_subsets"] = subsets
+        sizes.update(more)
+    return fields, sizes
 
 
 def _apply_segment_effects(

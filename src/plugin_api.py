@@ -26,6 +26,10 @@ class AnalysisResult:
     language: str = None  # Whisper-detected ISO-Code (e.g. "de", "en")
     scene_events: list = None  # [{"type", "start", "end", "source"}, ...]
     all_words: list = None  # Whisper words for user "add missing command"
+    # Every transcribed word before the caption-unit gluing, fillers
+    # included ({text, start, end, probability}); only with
+    # analyze_video(include_words=True) — the web edit document.
+    words: list = None
 
     def to_dict(self):
         d = {
@@ -64,6 +68,7 @@ def analyze_video(
     voice_triggers: bool = False,
     cut_keywords: list[str] | None = None,
     continue_keywords: list[str] | None = None,
+    include_words: bool = False,
 ) -> AnalysisResult:
     """
     Analyze a video and return structured data for NLE plugins.
@@ -84,6 +89,8 @@ def analyze_video(
         remove_fillers: Whether to detect and remove filler words (default from style).
         smart_cut: Whether to use smart cut optimization (default from style).
         filler_sensitivity: Filler detection sensitivity: "low", "medium", "high" (default from style).
+        include_words: Also return every transcribed word (AnalysisResult.words)
+            before short words are glued into caption units (web backend only).
 
     Returns:
         AnalysisResult with segments, subtitles, and optional filler data.
@@ -785,7 +792,32 @@ def analyze_video(
         fillers=filler_data,
         language=_detected_lang,
         scene_events=scene_events_out,
+        words=(_transcript_words(analyzer._transcription, speech_segments)
+               if include_words else None),
     )
+
+
+def _transcript_words(transcription, speech_segments) -> list[dict]:
+    """Every word of the (cleaned-up) transcription with its own timing —
+    before src/audio.py glues words of <= 3 characters into caption units
+    — fillers included. Words entirely outside the speech regions are
+    dropped, like their subtitles above (Whisper hallucinations in
+    silence)."""
+    speech = [(s.start, s.end) for s in (speech_segments or [])
+              if s.has_speech]
+    out: list[dict] = []
+    for seg in (transcription or {}).get("segments") or []:
+        for w in seg.get("words") or []:
+            try:
+                start, end = float(w["start"]), float(w["end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if speech and not any(start < se and end > ss for ss, se in speech):
+                continue
+            out.append({"text": (w.get("word") or "").strip(),
+                        "start": start, "end": end,
+                        "probability": w.get("probability")})
+    return out
 
 
 def _map_subtitles_to_segments(
