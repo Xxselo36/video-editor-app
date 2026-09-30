@@ -8,9 +8,6 @@ export const ja: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — 動画の準備ができました",
-  "app.notify.clickToView": "クリックして見る",
-  "app.notify.reviewTitle": "CleoCuts — 確認の準備ができました",
-  "app.notify.reviewBody": "カットと字幕が完了しました。タップして確認しましょう。",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "プロジェクトを読み込めませんでした。少し時間をおいて、もう一度お試しください。",
@@ -168,7 +165,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "新しい動画",
   "app.dashboard.inProgress": "処理中",
   "app.dashboard.recentProjects": "最近のプロジェクト",
-  "app.dashboard.viewAll": "すべて見る →",
+  "app.dashboard.viewAll": "すべて見る",
   "app.dashboard.startFirst": "最初の動画を始めましょう",
   "app.dashboard.startFirstSub": "ワークフローを選ぶだけ — 字幕、フォーマット、クリーンアップはCleoCutsにお任せ",
   "app.dashboard.voiceTeaser": "録画中に「Cleo」と言うだけ — 編集の手間を大幅に削減",
@@ -185,20 +182,18 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "字幕、カット、フォーマットをすべて自分で選択",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← 戻る",
+  "app.upload.back": "戻る",
   "app.upload.title": "動画を選択",
   "app.upload.hint":
     "スマホやパソコンからMP4またはMOVを選んでください。アップロードが完了するまでこのページを開いたままにしてください。",
   "app.upload.tapToChoose": "タップして選択",
   "app.upload.orDrag": "またはドラッグして追加",
   "app.upload.privacyLink": "動画の取り扱いについて",
-  "app.upload.keepTabOpen":
-    "アップロードが完了するまでこのタブを開いたままにしてください。アプリを切り替えたりスマホをロックしたりすると、アップロードが中断されます。",
   "app.upload.resuming":
     "中断したところからアップロードを再開しています — このページを開いたままにしてください。",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← 戻る",
+  "app.configure.back": "戻る",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "字幕スタイル",
   "app.configure.captionPreviewAlt": "{style}字幕プレビュー",
@@ -219,18 +214,6 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "メインの書き出しはSmartCamのフォーマット(または元のアスペクト比)になります。他のプラットフォーム用にレターボックス付きの追加バージョンを選べます。",
   "app.configure.process": "動画を処理",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "アップロード中",
-  "app.progress.rendering": "レンダリング中",
-  "app.progress.processing": "処理中",
-  "app.progress.stage.prep": "動画を準備しています",
-  "app.progress.stage.listen": "声を聞き取っています",
-  "app.progress.stage.polish": "良いテイクを探しています",
-  "app.progress.stage.preview": "もう少しで完了です",
-  "app.progress.stage.burn": "編集内容を適用しています",
-  "app.progress.stage.stitch": "動画をつなぎ合わせています",
-  "app.progress.stage.finish": "最終仕上げ中",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "投稿準備完了",
@@ -257,12 +240,12 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.card.queued.title": "順番待ち(#{n})",
   "app.card.queued.titleNoPos": "順番待ち",
   "app.card.queued.sub": "現在たくさんの動画が処理待ちです — 順番が来たら自動的に始まります。このページを離れても大丈夫です。",
-  "app.card.open": "開く →",
-  "app.card.remove": "✕ 削除",
+  "app.card.open": "開く",
+  "app.card.remove": "削除",
   "app.card.renderFailedNote": "レンダリングに失敗しました — 編集内容は保存されています。開いて再度レンダリングしてください。",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← ダッシュボード",
+  "app.review.backToDashboard": "ダッシュボード",
   "app.review.audioHeadsUp": "音声に関する注意",
   "app.review.updatingPreview": "プレビューを更新中…",
   "app.review.captionPreviewChip": "プレビュー",
@@ -275,7 +258,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "行を削除しました",
-  "app.transcript.undo": "↶ 元に戻す",
+  "app.transcript.undo": "元に戻す",
   "app.transcript.headingOne": "文字起こし · {count} 行",
   "app.transcript.headingOther": "文字起こし · {count} 行",
   "app.transcript.hint": "誤字を修正、✕で行を削除、カードをタップしてその場面にジャンプできます。",
@@ -303,7 +286,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "やり直す (⌘⇧Z)",
   "app.timeline.redoAria": "やり直す",
   "app.timeline.splitTitle": "再生位置のクリップを分割",
-  "app.timeline.split": "⧉ 分割",
+  "app.timeline.split": "分割",
   "app.timeline.splitUnavailable": "分割するには、再生位置をクリップの中に置いてください（先頭や末尾ちょうどは不可）。",
   "app.timeline.zoomOutTitle": "縮小(動画をより広く表示)",
   "app.timeline.zoomOutAria": "縮小",
@@ -315,7 +298,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "クリップを左に移動",
   "app.timeline.moveRight": "クリップを右に移動",
   "app.timeline.deleteTitle": "クリップを削除 (⌫)",
-  "app.timeline.delete": "✕ 削除",
+  "app.timeline.delete": "削除",
   "app.timeline.speed": "速度",
   "app.timeline.speedNormal": "1倍(標準)",
   "app.timeline.volume": "音量",
@@ -323,15 +306,8 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "フェードイン",
   "app.timeline.fadeOut": "フェードアウト",
   "app.timeline.resetEffects": "エフェクトをリセット",
-  // Legacy cut strip
-  "app.timeline.cuts": "カット",
-  "app.timeline.cutsRemoved": "{sec}秒削除",
-  "app.timeline.cutsRestored": " · {count} 件復元",
-  "app.timeline.cutTitleRestore": "カット {from}–{to}(タップで復元)",
-  "app.timeline.cutTitleRemoveAgain": "カット {from}–{to}(タップで再度削除)",
-  "app.timeline.cutsLegend": "赤 = 削除済み · タップで復元。緑の点線 = 残す部分。",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "声をテスト",
   "app.voice.subtitle": "コマンドを話して、Cleoが聞き取れるか確認しましょう。",
   "app.voice.close": "閉じる",
@@ -350,18 +326,6 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "動画を終了、これ以降をすべてカット",
   "app.voice.cmd.stop": "失敗した一文をスキップ(「go」とセットで使用)",
   "app.voice.cmd.go": "「stop」の後に再開",
-  "app.voice.scene.heading": "音声コマンド · {count} 件有効",
-  "app.voice.scene.hint": "誤検出はチェックを外し、見つからないものは追加してください。カットは自動的に更新されます。",
-  "app.voice.scene.add": "+ 追加",
-  "app.voice.scene.addAt": "現在の再生位置にコマンドを追加",
-  "app.voice.scene.none": "音声コマンドは検出されませんでした。",
-  "app.voice.scene.disable": "無効化",
-  "app.voice.scene.enable": "有効化",
-  "app.voice.scene.heard": "認識: 「{text}」",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / Restart",
-  "app.voice.scene.type.finish": "Finish",
 
   // ── site.* (Landing) ─────────────────────────────────────────────────
   "site.header.homeAria": "CleoCuts ホーム",

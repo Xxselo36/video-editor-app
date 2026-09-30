@@ -8,9 +8,6 @@ export const ru: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — твоё видео готово",
-  "app.notify.clickToView": "Нажми, чтобы посмотреть",
-  "app.notify.reviewTitle": "CleoCuts — готово к проверке",
-  "app.notify.reviewBody": "Монтаж и транскрипт готовы. Нажми, чтобы проверить.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Не удалось загрузить проект. Попробуй ещё раз через минуту.",
@@ -170,7 +167,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "Новое видео",
   "app.dashboard.inProgress": "В обработке",
   "app.dashboard.recentProjects": "Недавние проекты",
-  "app.dashboard.viewAll": "Смотреть все →",
+  "app.dashboard.viewAll": "Смотреть все",
   "app.dashboard.startFirst": "Начни своё первое видео",
   "app.dashboard.startFirstSub": "Выбери workflow — CleoCuts сам разберётся с субтитрами, форматом и чисткой",
   "app.dashboard.voiceTeaser": "Скажи «Cleo» во время записи — сэкономишь часы на монтаже",
@@ -187,20 +184,18 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "Выбираешь каждый параметр сам — субтитры, монтаж, форматы",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← Назад",
+  "app.upload.back": "Назад",
   "app.upload.title": "Выбери видео",
   "app.upload.hint":
     "MP4 или MOV с телефона или компьютера. Держи эту страницу открытой, пока загрузка не завершится.",
   "app.upload.tapToChoose": "Нажми, чтобы выбрать",
   "app.upload.orDrag": "или перетащи файл",
   "app.upload.privacyLink": "Как мы обращаемся с твоими видео",
-  "app.upload.keepTabOpen":
-    "Не закрывай эту вкладку, пока загрузка не завершится. Переключение на другое приложение или блокировка телефона прервёт загрузку.",
   "app.upload.resuming":
     "Продолжаем загрузку с того места, где она прервалась — держи эту страницу открытой.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← назад",
+  "app.configure.back": "назад",
   "app.configure.fileInfo": "{name} · {size} МБ",
   "app.configure.captionStyle": "Стиль субтитров",
   "app.configure.captionPreviewAlt": "Пример субтитров {style}",
@@ -221,18 +216,6 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "Основной экспорт идёт в формате SmartCam (или в исходном соотношении сторон). Выбери дополнительные версии с рамками для других платформ.",
   "app.configure.process": "Обработать видео",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Загрузка",
-  "app.progress.rendering": "Рендер",
-  "app.progress.processing": "Обработка",
-  "app.progress.stage.prep": "Подготавливаем видео",
-  "app.progress.stage.listen": "Слушаем твой голос",
-  "app.progress.stage.polish": "Ищем удачные дубли",
-  "app.progress.stage.preview": "Почти готово",
-  "app.progress.stage.burn": "Применяем твои изменения",
-  "app.progress.stage.stitch": "Собираем всё вместе",
-  "app.progress.stage.finish": "Финальные штрихи",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Готово к публикации",
@@ -260,12 +243,12 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.card.queued.titleNoPos": "В очереди",
   "app.card.queued.sub":
     "Сейчас много видео — твоё запустится автоматически. Можешь уйти с этой страницы.",
-  "app.card.open": "Открыть →",
-  "app.card.remove": "✕ Удалить",
+  "app.card.open": "Открыть",
+  "app.card.remove": "Удалить",
   "app.card.renderFailedNote": "Рендер не удался — твои изменения сохранены. Открой и запусти рендер снова.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← Главная",
+  "app.review.backToDashboard": "Главная",
   "app.review.audioHeadsUp": "Важно про звук",
   "app.review.updatingPreview": "Обновляем превью…",
   "app.review.captionPreviewChip": "Превью",
@@ -278,7 +261,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Строка удалена",
-  "app.transcript.undo": "↶ Отменить",
+  "app.transcript.undo": "Отменить",
   "app.transcript.headingOne": "Транскрипт · {count} строка",
   "app.transcript.headingOther": "Транскрипт · {count} строк",
   "app.transcript.hint": "Исправь опечатки, убери строку кнопкой ✕, нажми на карточку, чтобы перейти к этому моменту.",
@@ -306,7 +289,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "Повторить (⌘⇧Z)",
   "app.timeline.redoAria": "Повторить",
   "app.timeline.splitTitle": "Разрезать клип под курсором",
-  "app.timeline.split": "⧉ Разрезать",
+  "app.timeline.split": "Разрезать",
   "app.timeline.splitUnavailable": "Чтобы разрезать клип, поставь курсор внутрь него (не в самое начало и не в конец).",
   "app.timeline.zoomOutTitle": "Уменьшить (показать больше видео)",
   "app.timeline.zoomOutAria": "Уменьшить",
@@ -318,7 +301,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "Сдвинуть клип влево",
   "app.timeline.moveRight": "Сдвинуть клип вправо",
   "app.timeline.deleteTitle": "Удалить клип (⌫)",
-  "app.timeline.delete": "✕ Удалить",
+  "app.timeline.delete": "Удалить",
   "app.timeline.speed": "Скорость",
   "app.timeline.speedNormal": "1× (обычная)",
   "app.timeline.volume": "Громкость",
@@ -326,15 +309,8 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "Появление",
   "app.timeline.fadeOut": "Затухание",
   "app.timeline.resetEffects": "Сбросить эффекты",
-  // Legacy cut strip
-  "app.timeline.cuts": "Вырезки",
-  "app.timeline.cutsRemoved": "{sec} сек удалено",
-  "app.timeline.cutsRestored": " · {count} восстановлено",
-  "app.timeline.cutTitleRestore": "Вырезка {from}–{to} (нажми, чтобы восстановить)",
-  "app.timeline.cutTitleRemoveAgain": "Вырезка {from}–{to} (нажми, чтобы вырезать снова)",
-  "app.timeline.cutsLegend": "Красный = удалено · нажми, чтобы восстановить. Зелёные штрихи = оставлено.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Проверь свой голос",
   "app.voice.subtitle": "Произнеси команды — посмотрим, слышит ли тебя Cleo.",
   "app.voice.close": "Закрыть",
@@ -353,18 +329,6 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Закончить видео, вырезать всё после",
   "app.voice.cmd.stop": "Пропустить одно неудачное предложение (используется с «go»)",
   "app.voice.cmd.go": "Продолжить после «stop»",
-  "app.voice.scene.heading": "Голосовые команды · {count} активно",
-  "app.voice.scene.hint": "Сними отметку с ложных срабатываний, добавь пропущенные. Монтаж обновится автоматически.",
-  "app.voice.scene.add": "+ Добавить",
-  "app.voice.scene.addAt": "Добавить команду в текущий момент видео",
-  "app.voice.scene.none": "Голосовые команды не найдены.",
-  "app.voice.scene.disable": "Отключить",
-  "app.voice.scene.enable": "Включить",
-  "app.voice.scene.heard": "слышно: «{text}»",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / Заново",
-  "app.voice.scene.type.finish": "Finish",
 
   // ── site.* (Landing) ─────────────────────────────────────────────────
   "site.header.homeAria": "CleoCuts — на главную",

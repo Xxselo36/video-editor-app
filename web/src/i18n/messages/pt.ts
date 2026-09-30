@@ -145,9 +145,6 @@ export const pt: Partial<Record<MessageKey, string>> = {
 
   // ── app: browser notifications ──
   "app.notify.readyTitle": "CleoCuts — seu vídeo está pronto",
-  "app.notify.clickToView": "Clique para ver",
-  "app.notify.reviewTitle": "CleoCuts — pronto para sua revisão",
-  "app.notify.reviewBody": "Cortes + transcrição concluídos. Toque para revisar.",
 
   // ── app: toasts / notices ──
   "app.notice.loadFailed": "Não foi possível carregar o projeto agora. Tente novamente em um instante.",
@@ -306,7 +303,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "Novo vídeo",
   "app.dashboard.inProgress": "Em andamento",
   "app.dashboard.recentProjects": "Projetos recentes",
-  "app.dashboard.viewAll": "Ver todos →",
+  "app.dashboard.viewAll": "Ver todos",
   "app.dashboard.startFirst": "Comece seu primeiro vídeo",
   "app.dashboard.startFirstSub": "Escolha um fluxo de trabalho — a CleoCuts cuida das legendas, do formato e da limpeza",
   "app.dashboard.voiceTeaser": "Diga “Cleo” enquanto grava — economize horas de edição",
@@ -323,20 +320,18 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "Escolha cada detalhe você mesmo — legendas, cortes, formatos",
 
   // ── app: upload (choose a file) ──
-  "app.upload.back": "← Voltar",
+  "app.upload.back": "Voltar",
   "app.upload.title": "Escolha um vídeo",
   "app.upload.hint":
     "MP4 ou MOV do seu celular ou computador. Mantenha esta página aberta até o envio terminar.",
   "app.upload.tapToChoose": "Toque para escolher",
   "app.upload.orDrag": "ou arraste um arquivo aqui",
   "app.upload.privacyLink": "Como tratamos seus vídeos",
-  "app.upload.keepTabOpen":
-    "Mantenha esta aba aberta até o envio terminar. Trocar de app ou bloquear o celular vai cancelar o envio.",
   "app.upload.resuming":
     "Retomando o envio de onde parou — mantenha esta página aberta.",
 
   // ── app: configure (custom settings) ──
-  "app.configure.back": "← voltar",
+  "app.configure.back": "voltar",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "Estilo de legenda",
   "app.configure.captionPreviewAlt": "Prévia da legenda {style}",
@@ -357,18 +352,6 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "A exportação principal usa seu formato SmartCam (ou o formato original). Escolha versões extras com tarjas pretas para outras plataformas.",
   "app.configure.process": "Processar vídeo",
-
-  // ── app: progress screen ──
-  "app.progress.uploading": "Enviando",
-  "app.progress.rendering": "Renderizando",
-  "app.progress.processing": "Processando",
-  "app.progress.stage.prep": "Preparando seu vídeo",
-  "app.progress.stage.listen": "Ouvindo sua voz",
-  "app.progress.stage.polish": "Encontrando as melhores tomadas",
-  "app.progress.stage.preview": "Quase pronto",
-  "app.progress.stage.burn": "Aplicando suas edições",
-  "app.progress.stage.stitch": "Montando tudo",
-  "app.progress.stage.finish": "Últimos ajustes",
 
   // ── app: done screen ──
   "app.done.readyToPost": "Pronto para postar",
@@ -396,12 +379,12 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.card.queued.titleNoPos": "Na fila",
   "app.card.queued.sub":
     "Muitos vídeos no momento — o seu começa automaticamente. Você pode sair desta página.",
-  "app.card.open": "Abrir →",
-  "app.card.remove": "✕ Remover",
+  "app.card.open": "Abrir",
+  "app.card.remove": "Remover",
   "app.card.renderFailedNote": "A renderização falhou — suas edições foram salvas. Abra e renderize novamente.",
 
   // ── app: review (editor) ──
-  "app.review.backToDashboard": "← Painel",
+  "app.review.backToDashboard": "Painel",
   "app.review.audioHeadsUp": "Aviso de áudio",
   "app.review.updatingPreview": "Atualizando prévia…",
   "app.review.captionPreviewChip": "Prévia",
@@ -414,7 +397,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
 
   // ── app: transcript tab ──
   "app.transcript.lineDeleted": "Linha excluída",
-  "app.transcript.undo": "↶ Desfazer",
+  "app.transcript.undo": "Desfazer",
   "app.transcript.headingOne": "Transcrição · {count} linha",
   "app.transcript.headingOther": "Transcrição · {count} linhas",
   "app.transcript.hint": "Corrija erros de digitação, remova uma linha com ✕, toque em um card para ir até aquele momento.",
@@ -442,7 +425,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "Refazer (⌘⇧Z)",
   "app.timeline.redoAria": "Refazer",
   "app.timeline.splitTitle": "Dividir o clipe sob o cursor",
-  "app.timeline.split": "⧉ Dividir",
+  "app.timeline.split": "Dividir",
   "app.timeline.splitUnavailable": "Coloque o cursor dentro de um clipe para dividi-lo (não bem no início nem no fim).",
   "app.timeline.zoomOutTitle": "Diminuir zoom (ver mais do vídeo)",
   "app.timeline.zoomOutAria": "Diminuir zoom",
@@ -454,7 +437,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "Mover clipe para a esquerda",
   "app.timeline.moveRight": "Mover clipe para a direita",
   "app.timeline.deleteTitle": "Excluir clipe (⌫)",
-  "app.timeline.delete": "✕ Excluir",
+  "app.timeline.delete": "Excluir",
   "app.timeline.speed": "Velocidade",
   "app.timeline.speedNormal": "1× (normal)",
   "app.timeline.volume": "Volume",
@@ -462,15 +445,8 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "Fade in",
   "app.timeline.fadeOut": "Fade out",
   "app.timeline.resetEffects": "Redefinir efeitos",
-  // Legacy cut strip
-  "app.timeline.cuts": "Cortes",
-  "app.timeline.cutsRemoved": "{sec}s removidos",
-  "app.timeline.cutsRestored": " · {count} restaurados",
-  "app.timeline.cutTitleRestore": "Corte {from}–{to} (toque para restaurar)",
-  "app.timeline.cutTitleRemoveAgain": "Corte {from}–{to} (toque para remover de novo)",
-  "app.timeline.cutsLegend": "Vermelho = removido · toque para restaurar. Tracejado verde = mantido.",
 
-  // ── app: voice commands (test modal + scene panel) ──
+  // ── app: voice test (dialog) ──
   "app.voice.title": "Teste sua voz",
   "app.voice.subtitle": "Diga os comandos — veja se a Cleo te escuta.",
   "app.voice.close": "Fechar",
@@ -489,18 +465,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Termina o vídeo, corta tudo depois",
   "app.voice.cmd.stop": "Pula uma frase ruim (use com 'go')",
   "app.voice.cmd.go": "Retoma depois do 'stop'",
-  "app.voice.scene.heading": "Comandos de voz · {count} ativos",
-  "app.voice.scene.hint": "Desmarque detecções falsas, adicione as que faltam. Os cortes são atualizados automaticamente.",
-  "app.voice.scene.add": "+ Adicionar",
-  "app.voice.scene.addAt": "Adicionar comando no momento atual do vídeo",
-  "app.voice.scene.none": "Nenhum comando de voz detectado.",
-  "app.voice.scene.disable": "Desativar",
-  "app.voice.scene.enable": "Ativar",
-  "app.voice.scene.heard": "ouvi: “{text}”",
-  "app.voice.scene.type.start": "Início",
-  "app.voice.scene.type.keep": "Manter",
-  "app.voice.scene.type.restart": "Cortar / Reiniciar",
-  "app.voice.scene.type.finish": "Finalizar",
+
   "common.language": "Idioma",
   "common.footer.legalAria": "Informações legais",
   "legal.onlyDeEn":

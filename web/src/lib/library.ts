@@ -76,10 +76,6 @@ export function deleteEntry(jobId: string): void {
   writeAll(readAll().filter((e) => e.jobId !== jobId));
 }
 
-export function clearAll(): void {
-  writeAll([]);
-}
-
 export function formatRelativeTime(ts: number): string {
   const diff = Date.now() - ts;
   const s = Math.floor(diff / 1000);

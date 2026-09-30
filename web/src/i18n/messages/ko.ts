@@ -8,9 +8,6 @@ export const ko: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — 영상이 준비됐어요",
-  "app.notify.clickToView": "클릭해서 보기",
-  "app.notify.reviewTitle": "CleoCuts — 검토할 준비가 됐어요",
-  "app.notify.reviewBody": "컷과 스크립트가 완료됐어요. 탭해서 확인해 보세요.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "지금은 프로젝트를 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
@@ -168,7 +165,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "새 영상",
   "app.dashboard.inProgress": "처리 중",
   "app.dashboard.recentProjects": "최근 프로젝트",
-  "app.dashboard.viewAll": "전체 보기 →",
+  "app.dashboard.viewAll": "전체 보기",
   "app.dashboard.startFirst": "첫 영상을 시작해 보세요",
   "app.dashboard.startFirstSub": "워크플로우를 선택하면 CleoCuts가 자막, 포맷, 정리를 처리해요",
   "app.dashboard.voiceTeaser": "녹화하면서 “Cleo”라고 말해 보세요 — 편집 시간을 몇 시간 아낄 수 있어요",
@@ -185,20 +182,18 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "자막, 컷, 포맷을 하나하나 직접 선택해요",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← 뒤로",
+  "app.upload.back": "뒤로",
   "app.upload.title": "영상 선택",
   "app.upload.hint":
     "휴대폰이나 컴퓨터에 있는 MP4 또는 MOV 파일. 업로드가 끝날 때까지 이 페이지를 열어 두세요.",
   "app.upload.tapToChoose": "탭해서 선택",
   "app.upload.orDrag": "또는 파일을 끌어다 놓기",
   "app.upload.privacyLink": "영상 처리 방식 안내",
-  "app.upload.keepTabOpen":
-    "업로드가 끝날 때까지 이 탭을 열어 두세요. 앱을 전환하거나 휴대폰을 잠그면 업로드가 취소돼요.",
   "app.upload.resuming":
     "중단된 곳부터 업로드를 이어서 하고 있어요 — 이 페이지를 열어 두세요.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← 뒤로",
+  "app.configure.back": "뒤로",
   "app.configure.fileInfo": "{name} · {size}MB",
   "app.configure.captionStyle": "자막 스타일",
   "app.configure.captionPreviewAlt": "{style} 자막 미리보기",
@@ -219,18 +214,6 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "기본 출력은 SmartCam 포맷(또는 원본 화면비)이에요. 다른 플랫폼용으로 레터박스가 적용된 추가 버전을 선택할 수 있어요.",
   "app.configure.process": "영상 처리하기",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "업로드 중",
-  "app.progress.rendering": "렌더링 중",
-  "app.progress.processing": "처리 중",
-  "app.progress.stage.prep": "영상을 준비하고 있어요",
-  "app.progress.stage.listen": "목소리를 듣고 있어요",
-  "app.progress.stage.polish": "좋은 촬영분을 찾고 있어요",
-  "app.progress.stage.preview": "거의 다 됐어요",
-  "app.progress.stage.burn": "편집 내용을 적용하고 있어요",
-  "app.progress.stage.stitch": "영상을 이어붙이고 있어요",
-  "app.progress.stage.finish": "마지막 손질 중이에요",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "게시할 준비 완료",
@@ -257,12 +240,12 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.card.queued.title": "대기 중 (#{n})",
   "app.card.queued.titleNoPos": "대기 중",
   "app.card.queued.sub": "지금 영상이 많아요 — 순서가 되면 자동으로 시작돼요. 이 페이지를 나가도 괜찮아요.",
-  "app.card.open": "열기 →",
-  "app.card.remove": "✕ 삭제",
+  "app.card.open": "열기",
+  "app.card.remove": "삭제",
   "app.card.renderFailedNote": "렌더링에 실패했어요 — 편집 내용은 저장돼 있어요. 열어서 다시 렌더링해 주세요.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← 대시보드",
+  "app.review.backToDashboard": "대시보드",
   "app.review.audioHeadsUp": "오디오 참고 사항",
   "app.review.updatingPreview": "미리보기를 업데이트하고 있어요…",
   "app.review.captionPreviewChip": "미리보기",
@@ -275,7 +258,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "줄이 삭제됐어요",
-  "app.transcript.undo": "↶ 실행 취소",
+  "app.transcript.undo": "실행 취소",
   "app.transcript.headingOne": "스크립트 · {count}줄",
   "app.transcript.headingOther": "스크립트 · {count}줄",
   "app.transcript.hint": "오타를 고치고, ✕로 줄을 지우고, 카드를 탭해 해당 순간으로 이동해 보세요.",
@@ -303,7 +286,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "다시 실행 (⌘⇧Z)",
   "app.timeline.redoAria": "다시 실행",
   "app.timeline.splitTitle": "재생 위치의 클립을 분할해요",
-  "app.timeline.split": "⧉ 분할",
+  "app.timeline.split": "분할",
   "app.timeline.splitUnavailable": "분할하려면 재생 위치를 클립 안으로 옮기세요(시작이나 끝 지점은 안 돼요).",
   "app.timeline.zoomOutTitle": "축소 (영상을 더 많이 보기)",
   "app.timeline.zoomOutAria": "축소",
@@ -315,7 +298,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "클립을 왼쪽으로 이동",
   "app.timeline.moveRight": "클립을 오른쪽으로 이동",
   "app.timeline.deleteTitle": "클립 삭제 (⌫)",
-  "app.timeline.delete": "✕ 삭제",
+  "app.timeline.delete": "삭제",
   "app.timeline.speed": "속도",
   "app.timeline.speedNormal": "1× (기본)",
   "app.timeline.volume": "볼륨",
@@ -323,15 +306,8 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "페이드 인",
   "app.timeline.fadeOut": "페이드 아웃",
   "app.timeline.resetEffects": "효과 초기화",
-  // Legacy cut strip
-  "app.timeline.cuts": "컷",
-  "app.timeline.cutsRemoved": "{sec}초 제거됨",
-  "app.timeline.cutsRestored": " · {count}개 복원됨",
-  "app.timeline.cutTitleRestore": "컷 {from}–{to} (탭해서 복원)",
-  "app.timeline.cutTitleRemoveAgain": "컷 {from}–{to} (탭해서 다시 제거)",
-  "app.timeline.cutsLegend": "빨강 = 제거됨 · 탭해서 복원. 초록 점선 = 유지됨.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "목소리 테스트",
   "app.voice.subtitle": "명령어를 말해 보세요 — Cleo가 알아듣는지 확인해요.",
   "app.voice.close": "닫기",
@@ -350,18 +326,6 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "영상 종료, 이후 전체 잘라내기",
   "app.voice.cmd.stop": "잘못된 문장 한 개 건너뛰기 ('go'와 함께 사용)",
   "app.voice.cmd.go": "'stop' 이후 다시 시작",
-  "app.voice.scene.heading": "음성 명령 · {count}개 활성",
-  "app.voice.scene.hint": "잘못 감지된 항목은 해제하고, 빠진 항목은 추가하세요. 컷은 자동으로 업데이트돼요.",
-  "app.voice.scene.add": "+ 추가",
-  "app.voice.scene.addAt": "현재 영상 위치에 명령 추가",
-  "app.voice.scene.none": "감지된 음성 명령이 없어요.",
-  "app.voice.scene.disable": "비활성화",
-  "app.voice.scene.enable": "활성화",
-  "app.voice.scene.heard": "들은 말: “{text}”",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / 재시작",
-  "app.voice.scene.type.finish": "Finish",
 
   // ── site.* (Landing) ─────────────────────────────────────────────────
   "site.header.homeAria": "CleoCuts 홈",

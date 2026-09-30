@@ -35,10 +35,8 @@ export function mergeStored(...raws: (string | null)[]): Stored[] {
   return [...byId.values()].sort((a, b) => stamp(b) - stamp(a));
 }
 
-/** Merged entries in the shape the key stores: a list, or (`single`)
- *  just the newest entry. */
-export function storedValue(list: Stored[], single: boolean): string | null {
-  if (single) return list.length ? JSON.stringify(list[0]) : null;
+/** Merged entries in the shape the keys store them: a list. */
+export function storedValue(list: Stored[]): string {
   return JSON.stringify(list);
 }
 
@@ -52,7 +50,7 @@ const folded = new Set<string>();
  * project on the device is listed, as in the anonymous beta. No-op with
  * accounts on, and when there are no per-user keys.
  */
-export function foldScopedKeys(base: string, single = false): void {
+export function foldScopedKeys(base: string): void {
   if (AUTH_ENABLED || typeof window === "undefined" || folded.has(base)) return;
   folded.add(base);
   try {
@@ -66,9 +64,7 @@ export function foldScopedKeys(base: string, single = false): void {
       localStorage.getItem(base),
       ...scoped.map((k) => localStorage.getItem(k)),
     );
-    const value = storedValue(merged, single);
-    if (value === null) localStorage.removeItem(base);
-    else localStorage.setItem(base, value);
+    localStorage.setItem(base, storedValue(merged));
     for (const k of scoped) localStorage.removeItem(k);
   } catch {
     /* storage blocked */

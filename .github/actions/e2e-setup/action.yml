@@ -43,9 +43,7 @@ runs:
 
     - name: ffmpeg + espeak-ng (stub media)
       shell: bash
-      run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq --no-install-recommends ffmpeg espeak-ng
+      run: .github/scripts/apt-install.sh ffmpeg espeak-ng
     - name: Cache the stub media
       uses: actions/cache@v4
       with:

@@ -8,9 +8,6 @@ export const hi: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — आपका वीडियो तैयार है",
-  "app.notify.clickToView": "देखने के लिए क्लिक करें",
-  "app.notify.reviewTitle": "CleoCuts — रिव्यू के लिए तैयार",
-  "app.notify.reviewBody": "कट्स + ट्रांसक्रिप्ट तैयार हैं। रिव्यू करने के लिए टैप करें।",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "प्रोजेक्ट अभी लोड नहीं हो पाया। कृपया थोड़ी देर में फिर कोशिश करें।",
@@ -171,7 +168,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.dashboard.newVideo": "नया वीडियो",
   "app.dashboard.inProgress": "प्रोसेस हो रहा है",
   "app.dashboard.recentProjects": "हाल के प्रोजेक्ट्स",
-  "app.dashboard.viewAll": "सभी देखें →",
+  "app.dashboard.viewAll": "सभी देखें",
   "app.dashboard.startFirst": "अपना पहला वीडियो शुरू करें",
   "app.dashboard.startFirstSub": "एक वर्कफ़्लो चुनें — CleoCuts कैप्शन, फॉर्मेट और क्लीनअप खुद संभालेगा",
   "app.dashboard.voiceTeaser": "रिकॉर्डिंग के दौरान “Cleo” बोलें — एडिटिंग के घंटों बचाएं",
@@ -188,20 +185,18 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.picker.customSub": "हर चीज़ खुद चुनें — कैप्शन, कट्स, फॉर्मेट",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← वापस",
+  "app.upload.back": "वापस",
   "app.upload.title": "वीडियो चुनें",
   "app.upload.hint":
     "अपने फ़ोन या कंप्यूटर से MP4 या MOV। अपलोड पूरा होने तक इस पेज को खुला रखें।",
   "app.upload.tapToChoose": "चुनने के लिए टैप करें",
   "app.upload.orDrag": "या एक को यहां खींचकर लाएं",
   "app.upload.privacyLink": "हम आपके वीडियो कैसे संभालते हैं",
-  "app.upload.keepTabOpen":
-    "अपलोड पूरा होने तक इस टैब को खुला रखें। ऐप बदलने या फ़ोन लॉक करने से अपलोड कैंसिल हो जाएगा।",
   "app.upload.resuming":
     "अपलोड वहीं से फिर शुरू हो रहा है जहाँ रुका था — इस पेज को खुला रखें।",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← वापस",
+  "app.configure.back": "वापस",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "कैप्शन स्टाइल",
   "app.configure.captionPreviewAlt": "{style} कैप्शन प्रीव्यू",
@@ -222,18 +217,6 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "प्राइमरी एक्सपोर्ट आपका SmartCam फॉर्मेट है (या ओरिजिनल आस्पेक्ट)। दूसरे प्लेटफ़ॉर्म के लिए अतिरिक्त लेटरबॉक्स-पैडेड वर्शन चुनें।",
   "app.configure.process": "वीडियो प्रोसेस करें",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "अपलोड हो रहा है",
-  "app.progress.rendering": "रेंडर हो रहा है",
-  "app.progress.processing": "प्रोसेस हो रहा है",
-  "app.progress.stage.prep": "आपका वीडियो तैयार हो रहा है",
-  "app.progress.stage.listen": "आपकी आवाज़ सुनी जा रही है",
-  "app.progress.stage.polish": "अच्छे टेक्स ढूंढे जा रहे हैं",
-  "app.progress.stage.preview": "बस थोड़ा और",
-  "app.progress.stage.burn": "आपके एडिट्स लगाए जा रहे हैं",
-  "app.progress.stage.stitch": "सब कुछ जोड़ा जा रहा है",
-  "app.progress.stage.finish": "आख़िरी टच",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "पोस्ट करने के लिए तैयार",
@@ -261,12 +244,12 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.card.queued.titleNoPos": "कतार में",
   "app.card.queued.sub":
     "अभी बहुत सारे वीडियो हैं — आपका वीडियो अपने-आप शुरू हो जाएगा। आप यह पेज छोड़ सकते हैं।",
-  "app.card.open": "खोलें →",
-  "app.card.remove": "✕ हटाएं",
+  "app.card.open": "खोलें",
+  "app.card.remove": "हटाएं",
   "app.card.renderFailedNote": "रेंडर नाकाम रहा — आपके एडिट्स सेव हैं। इसे खोलकर फिर से रेंडर करें।",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← डैशबोर्ड",
+  "app.review.backToDashboard": "डैशबोर्ड",
   "app.review.audioHeadsUp": "ऑडियो अलर्ट",
   "app.review.updatingPreview": "प्रीव्यू अपडेट हो रहा है…",
   "app.review.captionPreviewChip": "प्रीव्यू",
@@ -279,7 +262,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "लाइन डिलीट हुई",
-  "app.transcript.undo": "↶ अनडू",
+  "app.transcript.undo": "अनडू",
   "app.transcript.headingOne": "ट्रांसक्रिप्ट · {count} लाइन",
   "app.transcript.headingOther": "ट्रांसक्रिप्ट · {count} लाइनें",
   "app.transcript.hint": "टाइपो ठीक करें, ✕ से लाइन हटाएं, उस पल पर जाने के लिए कार्ड टैप करें।",
@@ -307,7 +290,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.timeline.redoTitle": "रीडू (⌘⇧Z)",
   "app.timeline.redoAria": "रीडू",
   "app.timeline.splitTitle": "प्लेहेड के नीचे वाली क्लिप को स्प्लिट करें",
-  "app.timeline.split": "⧉ स्प्लिट",
+  "app.timeline.split": "स्प्लिट",
   "app.timeline.splitUnavailable": "क्लिप को स्प्लिट करने के लिए प्लेहेड को उसके अंदर ले जाएँ (ठीक शुरुआत या अंत पर नहीं)।",
   "app.timeline.zoomOutTitle": "ज़ूम आउट करें (वीडियो का ज़्यादा हिस्सा दिखाएं)",
   "app.timeline.zoomOutAria": "ज़ूम आउट",
@@ -319,7 +302,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.timeline.moveLeft": "क्लिप को बाईं ओर मूव करें",
   "app.timeline.moveRight": "क्लिप को दाईं ओर मूव करें",
   "app.timeline.deleteTitle": "क्लिप डिलीट करें (⌫)",
-  "app.timeline.delete": "✕ डिलीट",
+  "app.timeline.delete": "डिलीट",
   "app.timeline.speed": "स्पीड",
   "app.timeline.speedNormal": "1× (नॉर्मल)",
   "app.timeline.volume": "वॉल्यूम",
@@ -327,15 +310,8 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "फ़ेड इन",
   "app.timeline.fadeOut": "फ़ेड आउट",
   "app.timeline.resetEffects": "इफ़ेक्ट्स रीसेट करें",
-  // Legacy cut strip
-  "app.timeline.cuts": "कट्स",
-  "app.timeline.cutsRemoved": "{sec}सेकंड हटाए गए",
-  "app.timeline.cutsRestored": " · {count} रीस्टोर किए गए",
-  "app.timeline.cutTitleRestore": "कट {from}–{to} (रीस्टोर करने के लिए टैप करें)",
-  "app.timeline.cutTitleRemoveAgain": "कट {from}–{to} (फिर से हटाने के लिए टैप करें)",
-  "app.timeline.cutsLegend": "लाल = हटाया गया · रीस्टोर करने के लिए टैप करें। हरी डैश = रखा गया।",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "अपनी आवाज़ टेस्ट करें",
   "app.voice.subtitle": "कमांड्स बोलें — देखें कि Cleo आपको सुन रहा है या नहीं।",
   "app.voice.close": "बंद करें",
@@ -354,18 +330,6 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "वीडियो खत्म करें, बाद का सब कुछ काटें",
   "app.voice.cmd.stop": "एक ख़राब वाक्य स्किप करें (‘go’ के साथ इस्तेमाल करें)",
   "app.voice.cmd.go": "‘stop’ के बाद फिर से शुरू करें",
-  "app.voice.scene.heading": "वॉइस कमांड्स · {count} एक्टिव",
-  "app.voice.scene.hint": "गलत डिटेक्शन अनचेक करें, छूटे हुए जोड़ें। कट्स अपने-आप अपडेट हो जाते हैं।",
-  "app.voice.scene.add": "+ जोड़ें",
-  "app.voice.scene.addAt": "वीडियो के मौजूदा समय पर कमांड जोड़ें",
-  "app.voice.scene.none": "कोई वॉइस कमांड डिटेक्ट नहीं हुआ।",
-  "app.voice.scene.disable": "बंद करें",
-  "app.voice.scene.enable": "चालू करें",
-  "app.voice.scene.heard": "सुना: “{text}”",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / रीस्टार्ट",
-  "app.voice.scene.type.finish": "Finish",
 
   // ── site.* (Landing) ─────────────────────────────────────────────────
   "site.header.homeAria": "CleoCuts होम",

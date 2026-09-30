@@ -1,5 +1,5 @@
 /**
- * English strings for the /app editor flow (web/src/app/app/page.tsx).
+ * English strings for the /app screens (web/src/app/app, web/src/features).
  * Flat keys, grouped by screen. "{name}" = placeholder filled at runtime.
  * Plurals use separate …One / …Other keys.
  */
@@ -12,9 +12,6 @@ export const enApp = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — your video is ready",
-  "app.notify.clickToView": "Click to view",
-  "app.notify.reviewTitle": "CleoCuts — ready for your review",
-  "app.notify.reviewBody": "Cuts + transcript are done. Tap to review.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Couldn't load the project right now. Please try again in a moment.",
@@ -175,7 +172,7 @@ export const enApp = {
   "app.dashboard.newVideo": "New video",
   "app.dashboard.inProgress": "In progress",
   "app.dashboard.recentProjects": "Recent projects",
-  "app.dashboard.viewAll": "View all →",
+  "app.dashboard.viewAll": "View all",
   "app.dashboard.startFirst": "Start your first video",
   "app.dashboard.startFirstSub": "Pick a workflow — CleoCuts handles captions, format, cleanup",
   "app.dashboard.voiceTeaser": "Say “Cleo” while recording — save hours of editing",
@@ -192,20 +189,18 @@ export const enApp = {
   "app.picker.customSub": "Pick every knob yourself — captions, cuts, formats",
 
   // ── Upload (choose a file) ──────────────────────────────────────────
-  "app.upload.back": "← Back",
+  "app.upload.back": "Back",
   "app.upload.title": "Choose a video",
   "app.upload.hint":
     "MP4 or MOV from your phone or computer. Keep this page open until the upload has finished.",
   "app.upload.tapToChoose": "Tap to choose",
   "app.upload.orDrag": "or drag one in",
   "app.upload.privacyLink": "How we handle your videos",
-  "app.upload.keepTabOpen":
-    "Keep this tab open until the upload finishes. Switching apps or locking your phone will cancel the upload.",
   "app.upload.resuming":
     "Resuming the upload where it stopped — keep this page open.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
-  "app.configure.back": "← back",
+  "app.configure.back": "back",
   "app.configure.fileInfo": "{name} · {size} MB",
   "app.configure.captionStyle": "Caption style",
   "app.configure.captionPreviewAlt": "{style} caption preview",
@@ -226,18 +221,6 @@ export const enApp = {
   "app.configure.extraFormatsHint":
     "Primary export is your SmartCam format (or original aspect). Pick extra letterbox-padded versions for other platforms.",
   "app.configure.process": "Process video",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Uploading",
-  "app.progress.rendering": "Rendering",
-  "app.progress.processing": "Processing",
-  "app.progress.stage.prep": "Preparing your video",
-  "app.progress.stage.listen": "Listening to your voice",
-  "app.progress.stage.polish": "Finding the good takes",
-  "app.progress.stage.preview": "Almost ready",
-  "app.progress.stage.burn": "Applying your edits",
-  "app.progress.stage.stitch": "Stitching it together",
-  "app.progress.stage.finish": "Final touches",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Ready to post",
@@ -264,12 +247,12 @@ export const enApp = {
   "app.card.queued.title": "Waiting in line (#{n})",
   "app.card.queued.titleNoPos": "Waiting in line",
   "app.card.queued.sub": "Lots of videos right now — yours starts automatically. You can leave this page.",
-  "app.card.open": "Open →",
-  "app.card.remove": "✕ Remove",
+  "app.card.open": "Open",
+  "app.card.remove": "Remove",
   "app.card.renderFailedNote": "Render failed — your edits are saved. Open it and render again.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← Dashboard",
+  "app.review.backToDashboard": "Dashboard",
   "app.review.audioHeadsUp": "Audio heads-up",
   "app.review.updatingPreview": "Updating preview…",
   "app.review.captionPreviewChip": "Preview",
@@ -282,7 +265,7 @@ export const enApp = {
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Line deleted",
-  "app.transcript.undo": "↶ Undo",
+  "app.transcript.undo": "Undo",
   "app.transcript.headingOne": "Transcript · {count} line",
   "app.transcript.headingOther": "Transcript · {count} lines",
   "app.transcript.hint": "Fix typos, drop a line with ✕, tap a card to jump to that moment.",
@@ -310,7 +293,7 @@ export const enApp = {
   "app.timeline.redoTitle": "Redo (⌘⇧Z)",
   "app.timeline.redoAria": "Redo",
   "app.timeline.splitTitle": "Split the clip under the playhead",
-  "app.timeline.split": "⧉ Split",
+  "app.timeline.split": "Split",
   "app.timeline.splitUnavailable": "Move the playhead into a clip to split it (not right at its start or end).",
   "app.timeline.zoomOutTitle": "Zoom out (show more of the video)",
   "app.timeline.zoomOutAria": "Zoom out",
@@ -322,7 +305,7 @@ export const enApp = {
   "app.timeline.moveLeft": "Move clip left",
   "app.timeline.moveRight": "Move clip right",
   "app.timeline.deleteTitle": "Delete clip (⌫)",
-  "app.timeline.delete": "✕ Delete",
+  "app.timeline.delete": "Delete",
   "app.timeline.speed": "Speed",
   "app.timeline.speedNormal": "1× (normal)",
   "app.timeline.volume": "Volume",
@@ -330,15 +313,8 @@ export const enApp = {
   "app.timeline.fadeIn": "Fade in",
   "app.timeline.fadeOut": "Fade out",
   "app.timeline.resetEffects": "Reset effects",
-  // Legacy cut strip
-  "app.timeline.cuts": "Cuts",
-  "app.timeline.cutsRemoved": "{sec}s removed",
-  "app.timeline.cutsRestored": " · {count} restored",
-  "app.timeline.cutTitleRestore": "Cut {from}–{to} (tap to restore)",
-  "app.timeline.cutTitleRemoveAgain": "Cut {from}–{to} (tap to remove again)",
-  "app.timeline.cutsLegend": "Red = removed · tap to restore. Green dashes = kept.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Test your voice",
   "app.voice.subtitle": "Say the commands — see if Cleo hears you.",
   "app.voice.close": "Close",
@@ -357,18 +333,6 @@ export const enApp = {
   "app.voice.cmd.finish": "End video, cut everything after",
   "app.voice.cmd.stop": "Skip one bad sentence (pair with 'go')",
   "app.voice.cmd.go": "Resume after 'stop'",
-  "app.voice.scene.heading": "Voice commands · {count} active",
-  "app.voice.scene.hint": "Uncheck false detections, add missing ones. Cuts update automatically.",
-  "app.voice.scene.add": "+ Add",
-  "app.voice.scene.addAt": "Add command at current video time",
-  "app.voice.scene.none": "No voice commands detected.",
-  "app.voice.scene.disable": "Disable",
-  "app.voice.scene.enable": "Enable",
-  "app.voice.scene.heard": "heard: “{text}”",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / Restart",
-  "app.voice.scene.type.finish": "Finish",
   "app.crash.saving": "Saving your latest changes…",
   "app.crash.saved": "Your latest changes are saved.",
   "app.crash.unsaved": "Your latest changes may not have been saved.",

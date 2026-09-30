@@ -19,7 +19,6 @@ import {
 import { apiError, apiFetch, backendUrl, detailCode, setMediaAccess } from "@/lib/api";
 import { LIBRARY_KEY, type LibraryEntry, type LibraryHookClip } from "@/lib/library";
 import { ACTIVE_JOBS_KEY } from "@/lib/activeJobs";
-import { ACTIVE_JOB_KEY } from "@/lib/activeJob";
 import { mergeStored, storedValue } from "@/lib/scopedStorage";
 import { track } from "@/lib/analytics";
 
@@ -349,13 +348,12 @@ export function adoptLegacyLocalData(userId: string): void {
   adoptedFor = userId;
   const ids = new Set<string>();
   try {
-    for (const base of [LIBRARY_KEY, ACTIVE_JOBS_KEY, ACTIVE_JOB_KEY]) {
+    for (const base of [LIBRARY_KEY, ACTIVE_JOBS_KEY]) {
       const legacy = localStorage.getItem(base);
       if (legacy === null) continue;
       const mine = `${base}:${userId}`;
       const merged = mergeStored(localStorage.getItem(mine), legacy);
-      const value = storedValue(merged, base === ACTIVE_JOB_KEY);
-      if (value !== null) localStorage.setItem(mine, value);
+      localStorage.setItem(mine, storedValue(merged));
       localStorage.removeItem(base);
       try {
         const parsed = JSON.parse(legacy) as unknown;

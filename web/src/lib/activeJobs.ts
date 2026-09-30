@@ -3,9 +3,6 @@
  * → keep browsing / upload another video / open review for another
  * job — all concurrently. Backend already handles parallel jobs; this
  * lets the frontend catch up.
- *
- * Coexists with the older single-job activeJob.ts for backward compat;
- * new code should use this list-based API.
  */
 
 import { storageScope } from "@/lib/auth";
@@ -138,4 +135,27 @@ export function markStaleUploads(idleMs = 20_000): void {
 
 export function getActiveJob(jobId: string): ActiveJobV2 | null {
   return getActiveJobs().find((j) => j.jobId === jobId) ?? null;
+}
+
+// The single-job "v1" store (lib/activeJob, removed in UX4): older builds
+// wrote it, nothing ever read it.
+const LEGACY_ACTIVE_JOB_KEY = "cleocuts.activeJob.v1";
+
+/**
+ * Drops what older builds left of the v1 store, under the plain key and
+ * the per-user keys (`<key>:<user id>`). Its jobs are on the cards or in
+ * the library as well. One release after UX4 this goes too.
+ */
+export function dropLegacyActiveJob(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k === LEGACY_ACTIVE_JOB_KEY || k.startsWith(`${LEGACY_ACTIVE_JOB_KEY}:`))) keys.push(k);
+    }
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    /* storage blocked */
+  }
 }

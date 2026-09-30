@@ -1,8 +1,8 @@
 /**
  * Render payload for the v1 caption burn: word units, not sentences (UX2).
  *
- * The editor shows and edits the transcript as sentences (buildPhrases in
- * app/app/page.tsx). The render used to get one subtitle per sentence and
+ * The editor shows and edits the transcript as sentences (buildPhrases.ts
+ * next to this file). The render used to get one subtitle per sentence and
  * spread its words evenly over the sentence's duration, so the highlighted
  * word drifted, and a sentence crossing a cut was burned in both clips
  * (audit clip: 74 of 86 words highlighted right, 2 groups burned twice).
