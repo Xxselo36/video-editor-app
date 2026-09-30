@@ -162,3 +162,16 @@ export async function pause(page: Page) {
 /** No horizontal page overflow (px beyond the viewport). */
 export const horizontalOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+
+/**
+ * Text of the caption shown over the editor video: the interim engine
+ * overlay's test hook (UT1, NEXT_PUBLIC_CAPTIONS_INTERIM=1 builds) or the
+ * plain text overlay. "" when none is shown.
+ */
+export async function captionText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const hook = (window as unknown as { __captionsInterim?: { page: string | null } }).__captionsInterim;
+    if (hook) return hook.page ?? "";
+    return document.querySelector('[data-testid="caption-overlay"]')?.textContent ?? "";
+  });
+}

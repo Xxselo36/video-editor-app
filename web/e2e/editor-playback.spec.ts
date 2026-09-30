@@ -10,6 +10,7 @@
 import { expect, test } from "./support/fixtures";
 import {
   ACTIVE_JOBS,
+  captionText,
   card,
   clip,
   clips,
@@ -113,7 +114,7 @@ test.describe("proxy playback follows the edit list", () => {
 
     await test.step("the caption preview follows source time", async () => {
       await seekAndPlay(page, 8.0);
-      await expect(page.getByTestId("caption-overlay")).toContainText("Satz 2 hier.");
+      await expect.poll(() => captionText(page)).toContain("Satz 2 hier.");
       await pause(page);
     });
 

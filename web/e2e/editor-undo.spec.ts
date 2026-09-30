@@ -5,7 +5,7 @@
  * preview shows the line under the playhead.
  */
 import { expect, test } from "./support/fixtures";
-import { clips, deleteClip, editorVideo, openEditor, SAVED, selectClip } from "./support/app";
+import { captionText, clips, deleteClip, editorVideo, openEditor, SAVED, selectClip } from "./support/app";
 
 test.describe("editor undo", () => {
   test("timeline undo survives a tab switch; a slider drag is one undo step", async ({ page, stub }) => {
@@ -52,9 +52,10 @@ test.describe("editor undo", () => {
       const v = el as HTMLVideoElement;
       v.muted = true;
       if (v.readyState < 1) await new Promise((r) => v.addEventListener("loadedmetadata", r, { once: true }));
+      // Paused: the engine overlay (UT1) draws once its fonts are in,
+      // which may take longer than the 1.5 s the line is spoken.
       v.currentTime = 1.0;
-      await v.play();
     });
-    await expect(page.getByTestId("caption-overlay")).toContainText("Satz 1 hier.");
+    await expect.poll(() => captionText(page)).toContain("Satz 1 hier.");
   });
 });
