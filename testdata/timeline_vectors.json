@@ -1,0 +1,85 @@
+{
+  "comment": "Source -> output caption timing (web/src/lib/captions/timeline.ts mapToOutput; backend/timeline_map.py mirrors it, UT3/UT4). Times in seconds; clips in output order; expected words are [id, start, end] in output time, in output order.",
+  "vectors": [
+    {
+      "name": "single clip at speed 1 shifts by the clip start",
+      "clips": [{ "start": 1.0, "end": 5.0 }],
+      "words": [
+        { "id": "w1", "text": "hello", "start": 1.2, "end": 1.5 },
+        { "id": "w2", "text": "world", "start": 1.6, "end": 2.0 },
+        { "id": "w0", "text": "before", "start": 0.2, "end": 0.6 }
+      ],
+      "expected": { "words": [["w1", 0.2, 0.5], ["w2", 0.6, 1.0]], "breaks": [], "duration": 4.0 }
+    },
+    {
+      "name": "a cut drops the removed words and becomes a break",
+      "clips": [{ "start": 0, "end": 2 }, { "start": 3, "end": 5 }],
+      "words": [
+        { "id": "a", "text": "one", "start": 1.0, "end": 1.5 },
+        { "id": "b", "text": "gone", "start": 2.5, "end": 2.8 },
+        { "id": "c", "text": "two", "start": 3.2, "end": 3.6 }
+      ],
+      "expected": { "words": [["a", 1.0, 1.5], ["c", 2.2, 2.6]], "breaks": [2.0], "duration": 4.0 }
+    },
+    {
+      "name": "speed scales times inside the clip",
+      "clips": [{ "start": 0, "end": 2 }, { "start": 3, "end": 5, "speed": 2 }],
+      "words": [{ "id": "a", "text": "fast", "start": 4.0, "end": 4.4 }],
+      "expected": { "words": [["a", 2.5, 2.7]], "breaks": [2.0], "duration": 3.0 }
+    },
+    {
+      "name": "a word straddling a cut belongs to the side holding most of it",
+      "clips": [{ "start": 0, "end": 2 }, { "start": 2.5, "end": 4 }],
+      "words": [
+        { "id": "x", "text": "edge", "start": 1.8, "end": 2.6 },
+        { "id": "y", "text": "next", "start": 2.45, "end": 2.9 }
+      ],
+      "expected": { "words": [["x", 1.8, 2.0], ["y", 2.0, 2.4]], "breaks": [2.0], "duration": 3.5 }
+    },
+    {
+      "name": "source-contiguous clips (a split, a speed change) are one run: no break",
+      "clips": [{ "start": 0, "end": 2 }, { "start": 2, "end": 4, "speed": 2 }],
+      "words": [{ "id": "s", "text": "split", "start": 1.8, "end": 2.4 }],
+      "expected": { "words": [["s", 1.8, 2.2]], "breaks": [], "duration": 3.0 }
+    },
+    {
+      "name": "offsetMs shifts after mapping and stays inside the word's run",
+      "clips": [{ "start": 0, "end": 2 }, { "start": 3, "end": 5 }],
+      "offsetMs": 200,
+      "words": [
+        { "id": "a", "text": "early", "start": 0.5, "end": 0.8 },
+        { "id": "b", "text": "last", "start": 1.9, "end": 2.0 },
+        { "id": "c", "text": "after", "start": 3.0, "end": 3.3 }
+      ],
+      "expected": { "words": [["a", 0.7, 1.0], ["b", 2.0, 2.0], ["c", 2.2, 2.5]], "breaks": [2.0], "duration": 4.0 }
+    },
+    {
+      "name": "negative offset and the clamp at the run start",
+      "clips": [{ "start": 0, "end": 2 }, { "start": 3, "end": 5 }],
+      "offsetMs": -300,
+      "words": [
+        { "id": "a", "text": "start", "start": 0.1, "end": 0.5 },
+        { "id": "c", "text": "after", "start": 3.1, "end": 3.5 }
+      ],
+      "expected": { "words": [["a", 0.0, 0.2], ["c", 2.0, 2.2]], "breaks": [2.0], "duration": 4.0 }
+    },
+    {
+      "name": "hidden words are not captioned",
+      "clips": [{ "start": 0, "end": 3 }],
+      "words": [
+        { "id": "a", "text": "um", "start": 0.2, "end": 0.4, "hidden": true },
+        { "id": "b", "text": "yes", "start": 0.5, "end": 0.8 }
+      ],
+      "expected": { "words": [["b", 0.5, 0.8]], "breaks": [], "duration": 3.0 }
+    },
+    {
+      "name": "reordered clips: output order follows the clips",
+      "clips": [{ "start": 3, "end": 5 }, { "start": 0, "end": 2 }],
+      "words": [
+        { "id": "a", "text": "first", "start": 0.5, "end": 1.0 },
+        { "id": "b", "text": "second", "start": 3.5, "end": 4.0 }
+      ],
+      "expected": { "words": [["b", 0.5, 1.0], ["a", 2.5, 3.0]], "breaks": [2.0], "duration": 4.0 }
+    }
+  ]
+}
