@@ -78,13 +78,42 @@ def test_default_normalize_is_unchanged(tmp_path, monkeypatch):
     assert calls[-1].count("-fps_mode") == 1 and calls[-1][calls[-1].index("-r") + 1] == "25"
 
 
-@pytest.mark.parametrize("fps,rate", [(29.97, "30000/1001"), (25.0, "25"), (59.94, "60000/1001"),
-                                      (23.976, "24000/1001"), (120.0, "60"), (15.0, "24000/1001")])
-def test_rate_snapping(monkeypatch, fps, rate):
-    monkeypatch.setattr(pipeline, "_video_rates", lambda p: (fps, fps))
+@pytest.mark.parametrize("avg,real,rate", [
+    # phone footage: the average wobbles around the nominal rate → today's snap
+    (29.97, 29.97, "30000/1001"), (29.8, 30.0, "30000/1001"), (30.0, 30.0, "30"), (29.97, 600.0, "30000/1001"),
+    (25.0, 25.0, "25"), (59.94, 59.94, "60000/1001"), (23.976, 24.0, "24000/1001"),
+    (120.0, 120.0, "60"), (None, 30.0, "30"),
+])
+def test_rate_snapping(monkeypatch, avg, real, rate):
+    monkeypatch.setattr(pipeline, "_video_rates", lambda p: (avg, real))
     assert pipeline.cfr_rate_of("x")[0] == rate
 
 
-def test_unknown_rate_defaults_to_30(monkeypatch):
-    monkeypatch.setattr(pipeline, "_video_rates", lambda p: (None, None))
-    assert pipeline.cfr_rate_of("x") == ("30", 30.0)
+@pytest.mark.parametrize("avg,real", [
+    (1.0, 1.0),      # a still-image podcast
+    (10.0, 10.0),    # a screen capture
+    (15.0, 15.0),
+    (25.0, 60.0),    # a bursty VFR screen recording
+    (None, None),    # unknown
+    (None, 600.0),   # only a timebase artefact
+])
+def test_untrusted_or_low_rates_keep_the_source_timing(monkeypatch, avg, real):
+    monkeypatch.setattr(pipeline, "_video_rates", lambda p: (avg, real))
+    assert pipeline.cfr_rate_of("x") is None
+
+
+def test_low_fps_upload_is_not_raised_to_24(tmp_path, monkeypatch):
+    """analyze_only on a 2 fps clip: normalized without -fps_mode, still
+    2 fps, reported as such."""
+    from types import SimpleNamespace
+    src = tmp_path / "slides.mp4"
+    subprocess.run([FF, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=s=320x240:r=2:d=4",
+                    "-f", "lavfi", "-i", "sine=f=440:d=4", "-c:v", "libx264", "-preset",
+                    "ultrafast", "-c:a", "aac", "-shortest", str(src)], check=True)
+    monkeypatch.setattr(pipeline, "analyze_video", lambda video_path, **kw: SimpleNamespace(
+        segments=[(0.0, 4.0)], subtitles=[], duration=4.0, language="en", scene_events=[]))
+    import backend.llm as llm
+    monkeypatch.setattr(llm, "cleanup_transcript", lambda subs, language=None: {})
+    res = pipeline.analyze_only(str(src), str(tmp_path / "job"), {})
+    assert res["mezz_fps"] == pytest.approx(2.0, abs=0.05)
+    assert len(_deltas(Path(res["normalized_path"]))) < 12

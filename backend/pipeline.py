@@ -629,12 +629,32 @@ def _video_rates(path: str) -> tuple[float | None, float | None]:
     return _rate(streams[0].get("avg_frame_rate")), _rate(streams[0].get("r_frame_rate"))
 
 
-def cfr_rate_of(path: str) -> tuple[str, float]:
+# Below this a source (a still-image podcast, a screen capture) keeps its
+# own timing: forcing it up to 24 fps would only multiply its frames.
+CFR_MIN_FPS = 20.0
+# r_frame_rate above this is a timebase artefact (phones report 600 or
+# 90000), not a frame rate.
+_MAX_REAL_FPS = 120.0
+# Average and real rate further apart than this: bursty VFR (a screen
+# recording at r=60 averaging 25) — not snapped, it would look choppy.
+_RATE_SPREAD = 0.2
+
+
+def cfr_rate_of(path: str) -> tuple[str, float] | None:
     """The constant rate a web mezz of `path` gets: its average frame
     rate snapped to 23.976/24/25/29.97/30/50/59.94/60 (ffmpeg rate text,
-    fps). Unknown → 30."""
+    fps) — phone video, whose rate wobbles around a nominal one. None
+    (keep the source's timing, as before UT3) when the rate can't be
+    trusted: unknown, below CFR_MIN_FPS, or an average far from the real
+    rate."""
     avg, real = _video_rates(path)
-    fps = avg or real or 30.0
+    if real is not None and real > _MAX_REAL_FPS:
+        real = None
+    if avg and real and abs(avg - real) / real > _RATE_SPREAD:
+        return None
+    fps = avg or real
+    if not fps or fps < CFR_MIN_FPS:
+        return None
     return min(CFR_RATES, key=lambda r: abs(r[1] - fps))
 
 
@@ -1268,7 +1288,8 @@ def analyze_only(
     # the normalize pass itself.
     # The web mezz is constant frame rate (review C8): the v2 render
     # snaps cuts to its frame grid, and a VFR phone clip drifts.
-    cfr_rate, cfr_fps = cfr_rate_of(input_path)
+    cfr = cfr_rate_of(input_path)
+    cfr_rate, cfr_fps = cfr if cfr else (None, None)
     has_proxy = _normalize_orientation(
         input_path, normalized_path, max_side=_max_side,
         max_seconds=max_seconds,
@@ -1312,10 +1333,10 @@ def analyze_only(
         _make_proxy(normalized_path, proxy_path)
 
     mezz_fps: float | None = cfr_fps
-    mezz_cfr = True
-    if Path(normalized_path).name != "normalized.mp4" and not _is_cfr(
-            normalized_path, cfr_fps):
-        # SmartCam's own encode (CFR by construction, but check)
+    mezz_cfr = cfr_fps is not None
+    if cfr_fps is None or (Path(normalized_path).name != "normalized.mp4"
+                           and not _is_cfr(normalized_path, cfr_fps)):
+        # the source's own timing, or SmartCam's encode: as it came out
         avg, real = _video_rates(normalized_path)
         mezz_fps = avg or real
         mezz_cfr = bool(avg and real and abs(avg - real) / real < 0.005)
