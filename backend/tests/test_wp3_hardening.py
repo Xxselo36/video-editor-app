@@ -267,22 +267,22 @@ def test_analysis_commit_of_a_deleted_job_writes_nothing(r2, monkeypatch):
 
 
 def test_analysis_commit_that_landed_before_a_retry_counts(r2, monkeypatch):
-    """The write landed but its answer was lost: the retry's update_if
-    finds 'awaiting_review' — the worker sees its own commit and goes on
+    """The write landed but its answer was lost: the commit (store.modify)
+    answers no, the re-read finds 'awaiting_review' — the worker sees its own commit and goes on
     (source consumed, nothing GC'd)."""
     job = _uploaded(r2)
     monkeypatch.setattr(M, "analyze_only", lambda input_path, output_dir,
                         **kw: analysis_result(output_dir))
-    real = store.update_if
+    real = store.modify
     calls = []
 
-    def update_if(job_id, expect, **kw):
-        calls.append(kw.get("status"))
-        ok = real(job_id, expect, **kw)
-        if kw.get("status") == "awaiting_review" and len(calls) == 2:
-            return False              # "lost answer": applied, says no
-        return ok
-    monkeypatch.setattr(store, "update_if", update_if)
+    def modify(job_id, fn):
+        calls.append(job_id)
+        out = real(job_id, fn)
+        if len(calls) == 1:
+            return None               # "lost answer": applied, says no
+        return out
+    monkeypatch.setattr(store, "modify", modify)
     M._run_analyze_inner(job.id)
     got = store.get(job.id)
     assert got.status == "awaiting_review" and got.mezz_key

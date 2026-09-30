@@ -2446,12 +2446,13 @@ def _run_analyze_inner(job_id: str) -> None:
                 scene_events=res.get("scene_events", []),
                 **pipeline.analysis_fields(res),
                 **stored,
-            ), res, prefs=edit_doc.load_prefs(job.owner_id), expect=None)
-            fields = change(_db_retry(job_id, "reading the job", store.get,
-                                      job_id) or job)
+            ), res, prefs=edit_doc.load_prefs(job.owner_id))
+            # One read-check-write (store.modify): the style is resolved
+            # and the doc written under the same lock, so a PATCH /jobs
+            # caption_style can't land between the two and be lost.
             committed = _db_retry(
-                job_id, "saving the analysis", store.update_if,
-                job_id, "processing", **fields)
+                job_id, "saving the analysis", store.modify,
+                job_id, change) is not None
             cur = None
             if not committed:
                 # A retry after a write that did land (the connection
