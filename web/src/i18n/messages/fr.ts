@@ -8,9 +8,6 @@ export const fr: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — ta vidéo est prête",
-  "app.notify.clickToView": "Clique pour voir",
-  "app.notify.reviewTitle": "CleoCuts — prêt pour ta relecture",
-  "app.notify.reviewBody": "Coupes + transcription terminées. Touche pour relire.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Impossible de charger le projet pour le moment. Réessaie dans un instant.",
@@ -196,8 +193,6 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.upload.tapToChoose": "Touche pour choisir",
   "app.upload.orDrag": "ou dépose-la ici",
   "app.upload.privacyLink": "Comment nous traitons tes vidéos",
-  "app.upload.keepTabOpen":
-    "Garde cet onglet ouvert jusqu'à la fin de l'envoi. Changer d'appli ou verrouiller ton téléphone annulera l'envoi.",
   "app.upload.resuming":
     "Reprise de l'envoi là où il s'était arrêté — garde cette page ouverte.",
 
@@ -223,18 +218,6 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "L'export principal est ton format SmartCam (ou le format d'origine). Choisis des versions supplémentaires avec bandes noires pour d'autres plateformes.",
   "app.configure.process": "Traiter la vidéo",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Envoi en cours",
-  "app.progress.rendering": "Rendu en cours",
-  "app.progress.processing": "Traitement en cours",
-  "app.progress.stage.prep": "Préparation de ta vidéo",
-  "app.progress.stage.listen": "Écoute de ta voix",
-  "app.progress.stage.polish": "Recherche des bonnes prises",
-  "app.progress.stage.preview": "Presque prêt",
-  "app.progress.stage.burn": "Application de tes modifications",
-  "app.progress.stage.stitch": "Assemblage en cours",
-  "app.progress.stage.finish": "Touches finales",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Prêt à publier",
@@ -328,15 +311,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "Fondu d'entrée",
   "app.timeline.fadeOut": "Fondu de sortie",
   "app.timeline.resetEffects": "Réinitialiser les effets",
-  // Legacy cut strip
-  "app.timeline.cuts": "Coupes",
-  "app.timeline.cutsRemoved": "{sec}s supprimées",
-  "app.timeline.cutsRestored": " · {count} restaurée(s)",
-  "app.timeline.cutTitleRestore": "Coupe {from}–{to} (toucher pour restaurer)",
-  "app.timeline.cutTitleRemoveAgain": "Coupe {from}–{to} (toucher pour supprimer à nouveau)",
-  "app.timeline.cutsLegend": "Rouge = supprimé · toucher pour restaurer. Tirets verts = conservé.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Teste ta voix",
   "app.voice.subtitle": "Dis les commandes — vérifie si Cleo t'entend.",
   "app.voice.close": "Fermer",
@@ -355,18 +331,6 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Termine la vidéo, coupe tout ce qui suit",
   "app.voice.cmd.stop": "Ignore une mauvaise phrase (à combiner avec « go »)",
   "app.voice.cmd.go": "Reprend après « stop »",
-  "app.voice.scene.heading": "Commandes vocales · {count} active(s)",
-  "app.voice.scene.hint": "Décoche les fausses détections, ajoute celles qui manquent. Les coupes se mettent à jour automatiquement.",
-  "app.voice.scene.add": "+ Ajouter",
-  "app.voice.scene.addAt": "Ajouter une commande au moment actuel de la vidéo",
-  "app.voice.scene.none": "Aucune commande vocale détectée.",
-  "app.voice.scene.disable": "Désactiver",
-  "app.voice.scene.enable": "Activer",
-  "app.voice.scene.heard": "entendu : « {text} »",
-  "app.voice.scene.type.start": "Début",
-  "app.voice.scene.type.keep": "Garder",
-  "app.voice.scene.type.restart": "Couper / Recommencer",
-  "app.voice.scene.type.finish": "Terminer",
 
   // ── Landing: header ── //
   "site.header.homeAria": "Accueil CleoCuts",

@@ -8,9 +8,6 @@ export const ru: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — твоё видео готово",
-  "app.notify.clickToView": "Нажми, чтобы посмотреть",
-  "app.notify.reviewTitle": "CleoCuts — готово к проверке",
-  "app.notify.reviewBody": "Монтаж и транскрипт готовы. Нажми, чтобы проверить.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Не удалось загрузить проект. Попробуй ещё раз через минуту.",
@@ -194,8 +191,6 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.upload.tapToChoose": "Нажми, чтобы выбрать",
   "app.upload.orDrag": "или перетащи файл",
   "app.upload.privacyLink": "Как мы обращаемся с твоими видео",
-  "app.upload.keepTabOpen":
-    "Не закрывай эту вкладку, пока загрузка не завершится. Переключение на другое приложение или блокировка телефона прервёт загрузку.",
   "app.upload.resuming":
     "Продолжаем загрузку с того места, где она прервалась — держи эту страницу открытой.",
 
@@ -221,18 +216,6 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "Основной экспорт идёт в формате SmartCam (или в исходном соотношении сторон). Выбери дополнительные версии с рамками для других платформ.",
   "app.configure.process": "Обработать видео",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Загрузка",
-  "app.progress.rendering": "Рендер",
-  "app.progress.processing": "Обработка",
-  "app.progress.stage.prep": "Подготавливаем видео",
-  "app.progress.stage.listen": "Слушаем твой голос",
-  "app.progress.stage.polish": "Ищем удачные дубли",
-  "app.progress.stage.preview": "Почти готово",
-  "app.progress.stage.burn": "Применяем твои изменения",
-  "app.progress.stage.stitch": "Собираем всё вместе",
-  "app.progress.stage.finish": "Финальные штрихи",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Готово к публикации",
@@ -326,15 +309,8 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "Появление",
   "app.timeline.fadeOut": "Затухание",
   "app.timeline.resetEffects": "Сбросить эффекты",
-  // Legacy cut strip
-  "app.timeline.cuts": "Вырезки",
-  "app.timeline.cutsRemoved": "{sec} сек удалено",
-  "app.timeline.cutsRestored": " · {count} восстановлено",
-  "app.timeline.cutTitleRestore": "Вырезка {from}–{to} (нажми, чтобы восстановить)",
-  "app.timeline.cutTitleRemoveAgain": "Вырезка {from}–{to} (нажми, чтобы вырезать снова)",
-  "app.timeline.cutsLegend": "Красный = удалено · нажми, чтобы восстановить. Зелёные штрихи = оставлено.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Проверь свой голос",
   "app.voice.subtitle": "Произнеси команды — посмотрим, слышит ли тебя Cleo.",
   "app.voice.close": "Закрыть",
@@ -353,18 +329,6 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Закончить видео, вырезать всё после",
   "app.voice.cmd.stop": "Пропустить одно неудачное предложение (используется с «go»)",
   "app.voice.cmd.go": "Продолжить после «stop»",
-  "app.voice.scene.heading": "Голосовые команды · {count} активно",
-  "app.voice.scene.hint": "Сними отметку с ложных срабатываний, добавь пропущенные. Монтаж обновится автоматически.",
-  "app.voice.scene.add": "+ Добавить",
-  "app.voice.scene.addAt": "Добавить команду в текущий момент видео",
-  "app.voice.scene.none": "Голосовые команды не найдены.",
-  "app.voice.scene.disable": "Отключить",
-  "app.voice.scene.enable": "Включить",
-  "app.voice.scene.heard": "слышно: «{text}»",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / Заново",
-  "app.voice.scene.type.finish": "Finish",
 
   // ── site.* (Landing) ─────────────────────────────────────────────────
   "site.header.homeAria": "CleoCuts — на главную",

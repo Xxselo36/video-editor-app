@@ -9,9 +9,6 @@ export const it: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — il tuo video è pronto",
-  "app.notify.clickToView": "Clicca per vederlo",
-  "app.notify.reviewTitle": "CleoCuts — pronto per la revisione",
-  "app.notify.reviewBody": "Tagli + trascrizione pronti. Tocca per rivedere.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Non riusciamo a caricare il progetto ora. Riprova in un momento.",
@@ -196,8 +193,6 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.upload.tapToChoose": "Tocca per scegliere",
   "app.upload.orDrag": "oppure trascinane uno qui",
   "app.upload.privacyLink": "Come trattiamo i tuoi video",
-  "app.upload.keepTabOpen":
-    "Tieni questa scheda aperta finché l'upload non termina. Cambiare app o bloccare il telefono annullerà l'upload.",
   "app.upload.resuming":
     "Il caricamento riprende da dove si era interrotto — tieni questa pagina aperta.",
 
@@ -223,18 +218,6 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "L'export principale usa il tuo formato SmartCam (o le proporzioni originali). Scegli versioni extra con bordi neri per altre piattaforme.",
   "app.configure.process": "Elabora il video",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Caricamento",
-  "app.progress.rendering": "Rendering",
-  "app.progress.processing": "Elaborazione",
-  "app.progress.stage.prep": "Preparazione del video",
-  "app.progress.stage.listen": "Ascolto della tua voce",
-  "app.progress.stage.polish": "Ricerca delle riprese migliori",
-  "app.progress.stage.preview": "Quasi pronto",
-  "app.progress.stage.burn": "Applicazione delle modifiche",
-  "app.progress.stage.stitch": "Montaggio in corso",
-  "app.progress.stage.finish": "Ultimi ritocchi",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Pronto per la pubblicazione",
@@ -328,15 +311,8 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "Dissolvenza in entrata",
   "app.timeline.fadeOut": "Dissolvenza in uscita",
   "app.timeline.resetEffects": "Azzera effetti",
-  // Legacy cut strip
-  "app.timeline.cuts": "Tagli",
-  "app.timeline.cutsRemoved": "{sec}s rimossi",
-  "app.timeline.cutsRestored": " · {count} ripristinati",
-  "app.timeline.cutTitleRestore": "Tagliato {from}–{to} (tocca per ripristinare)",
-  "app.timeline.cutTitleRemoveAgain": "Tagliato {from}–{to} (tocca per rimuovere di nuovo)",
-  "app.timeline.cutsLegend": "Rosso = rimosso · tocca per ripristinare. Trattini verdi = mantenuto.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Testa la tua voce",
   "app.voice.subtitle": "Pronuncia i comandi — verifica se Cleo ti sente.",
   "app.voice.close": "Chiudi",
@@ -355,18 +331,6 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Termina il video, taglia tutto ciò che segue",
   "app.voice.cmd.stop": "Salta una frase sbagliata (usalo insieme a 'go')",
   "app.voice.cmd.go": "Riprendi dopo 'stop'",
-  "app.voice.scene.heading": "Comandi vocali · {count} attivi",
-  "app.voice.scene.hint": "Deseleziona i falsi rilevamenti, aggiungi quelli mancanti. I tagli si aggiornano automaticamente.",
-  "app.voice.scene.add": "+ Aggiungi",
-  "app.voice.scene.addAt": "Aggiungi comando al momento attuale del video",
-  "app.voice.scene.none": "Nessun comando vocale rilevato.",
-  "app.voice.scene.disable": "Disattiva",
-  "app.voice.scene.enable": "Attiva",
-  "app.voice.scene.heard": "sentito: “{text}”",
-  "app.voice.scene.type.start": "Inizio",
-  "app.voice.scene.type.keep": "Mantieni",
-  "app.voice.scene.type.restart": "Taglia / Ricomincia",
-  "app.voice.scene.type.finish": "Fine",
 
   // ── Landing: header ── */
   "site.header.homeAria": "Home di CleoCuts",

@@ -8,9 +8,6 @@ export const id: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — videomu sudah siap",
-  "app.notify.clickToView": "Klik untuk melihat",
-  "app.notify.reviewTitle": "CleoCuts — siap untuk kamu tinjau",
-  "app.notify.reviewBody": "Potongan + transkrip sudah selesai. Ketuk untuk meninjau.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Proyek tidak bisa dimuat sekarang. Coba lagi sebentar lagi.",
@@ -195,8 +192,6 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.upload.tapToChoose": "Ketuk untuk memilih",
   "app.upload.orDrag": "atau seret satu ke sini",
   "app.upload.privacyLink": "Cara kami menangani videomu",
-  "app.upload.keepTabOpen":
-    "Biarkan tab ini terbuka sampai unggahan selesai. Berpindah aplikasi atau mengunci HP akan membatalkan unggahan.",
   "app.upload.resuming":
     "Melanjutkan unggahan dari titik terakhirnya — biarkan halaman ini terbuka.",
 
@@ -222,18 +217,6 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "Ekspor utama memakai format SmartCam-mu (atau aspek aslinya). Pilih versi letterbox tambahan untuk platform lain.",
   "app.configure.process": "Proses video",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Mengunggah",
-  "app.progress.rendering": "Merender",
-  "app.progress.processing": "Memproses",
-  "app.progress.stage.prep": "Menyiapkan videomu",
-  "app.progress.stage.listen": "Mendengarkan suaramu",
-  "app.progress.stage.polish": "Mencari take yang bagus",
-  "app.progress.stage.preview": "Hampir siap",
-  "app.progress.stage.burn": "Menerapkan editanmu",
-  "app.progress.stage.stitch": "Menggabungkan semuanya",
-  "app.progress.stage.finish": "Sentuhan akhir",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Siap diposting",
@@ -327,15 +310,8 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "Fade in",
   "app.timeline.fadeOut": "Fade out",
   "app.timeline.resetEffects": "Reset efek",
-  // Legacy cut strip
-  "app.timeline.cuts": "Potongan",
-  "app.timeline.cutsRemoved": "{sec}dtk dihapus",
-  "app.timeline.cutsRestored": " · {count} dipulihkan",
-  "app.timeline.cutTitleRestore": "Potongan {from}–{to} (ketuk untuk memulihkan)",
-  "app.timeline.cutTitleRemoveAgain": "Potongan {from}–{to} (ketuk untuk menghapus lagi)",
-  "app.timeline.cutsLegend": "Merah = dihapus · ketuk untuk memulihkan. Garis hijau = disimpan.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Tes suaramu",
   "app.voice.subtitle": "Ucapkan perintahnya — lihat apakah Cleo mendengarmu.",
   "app.voice.close": "Tutup",
@@ -354,18 +330,6 @@ export const id: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Akhiri video, potong semua setelah ini",
   "app.voice.cmd.stop": "Lewati satu kalimat yang salah (dipasangkan dengan 'go')",
   "app.voice.cmd.go": "Lanjutkan setelah 'stop'",
-  "app.voice.scene.heading": "Perintah suara · {count} aktif",
-  "app.voice.scene.hint": "Hilangkan tanda pada deteksi yang salah, tambahkan yang belum terdeteksi. Potongan diperbarui otomatis.",
-  "app.voice.scene.add": "+ Tambah",
-  "app.voice.scene.addAt": "Tambah perintah di waktu video saat ini",
-  "app.voice.scene.none": "Tidak ada perintah suara yang terdeteksi.",
-  "app.voice.scene.disable": "Nonaktifkan",
-  "app.voice.scene.enable": "Aktifkan",
-  "app.voice.scene.heard": "terdengar: “{text}”",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / Ulang",
-  "app.voice.scene.type.finish": "Finish",
 
   // ── site.* (Landing) ─────────────────────────────────────────────────
   "site.header.homeAria": "Beranda CleoCuts",

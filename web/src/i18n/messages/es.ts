@@ -9,9 +9,6 @@ export const es: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — tu video está listo",
-  "app.notify.clickToView": "Haz clic para verlo",
-  "app.notify.reviewTitle": "CleoCuts — listo para tu revisión",
-  "app.notify.reviewBody": "Los cortes y la transcripción están listos. Toca para revisar.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "No pudimos cargar el proyecto en este momento. Inténtalo de nuevo en un momento.",
@@ -197,8 +194,6 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.upload.tapToChoose": "Toca para elegir",
   "app.upload.orDrag": "o arrastra uno aquí",
   "app.upload.privacyLink": "Cómo tratamos tus videos",
-  "app.upload.keepTabOpen":
-    "Mantén esta pestaña abierta hasta que termine la subida. Cambiar de app o bloquear tu teléfono cancelará la subida.",
   "app.upload.resuming":
     "Reanudando la subida donde se quedó — mantén esta página abierta.",
 
@@ -224,18 +219,6 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "La exportación principal usa tu formato SmartCam (o el formato original). Elige versiones adicionales con barras negras para otras plataformas.",
   "app.configure.process": "Procesar video",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Subiendo",
-  "app.progress.rendering": "Renderizando",
-  "app.progress.processing": "Procesando",
-  "app.progress.stage.prep": "Preparando tu video",
-  "app.progress.stage.listen": "Escuchando tu voz",
-  "app.progress.stage.polish": "Buscando las mejores tomas",
-  "app.progress.stage.preview": "Casi listo",
-  "app.progress.stage.burn": "Aplicando tus ediciones",
-  "app.progress.stage.stitch": "Uniéndolo todo",
-  "app.progress.stage.finish": "Últimos detalles",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Listo para publicar",
@@ -329,15 +312,8 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "Aparición gradual",
   "app.timeline.fadeOut": "Desaparición gradual",
   "app.timeline.resetEffects": "Restablecer efectos",
-  // Legacy cut strip
-  "app.timeline.cuts": "Cortes",
-  "app.timeline.cutsRemoved": "{sec}s eliminados",
-  "app.timeline.cutsRestored": " · {count} restaurados",
-  "app.timeline.cutTitleRestore": "Corte {from}–{to} (toca para restaurar)",
-  "app.timeline.cutTitleRemoveAgain": "Corte {from}–{to} (toca para eliminar de nuevo)",
-  "app.timeline.cutsLegend": "Rojo = eliminado · toca para restaurar. Líneas verdes = conservado.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Prueba tu voz",
   "app.voice.subtitle": "Di los comandos — comprueba si Cleo te escucha.",
   "app.voice.close": "Cerrar",
@@ -356,18 +332,6 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Termina el video, corta todo lo que sigue",
   "app.voice.cmd.stop": "Salta una oración mala (combínalo con 'go')",
   "app.voice.cmd.go": "Reanuda después de 'stop'",
-  "app.voice.scene.heading": "Comandos de voz · {count} activos",
-  "app.voice.scene.hint": "Desmarca detecciones falsas, agrega las que falten. Los cortes se actualizan automáticamente.",
-  "app.voice.scene.add": "+ Agregar",
-  "app.voice.scene.addAt": "Agregar comando en el momento actual del video",
-  "app.voice.scene.none": "No se detectaron comandos de voz.",
-  "app.voice.scene.disable": "Desactivar",
-  "app.voice.scene.enable": "Activar",
-  "app.voice.scene.heard": "escuché: “{text}”",
-  "app.voice.scene.type.start": "Inicio",
-  "app.voice.scene.type.keep": "Conservar",
-  "app.voice.scene.type.restart": "Cortar / Reiniciar",
-  "app.voice.scene.type.finish": "Finalizar",
 
   /* ── Landing: header ── */
   "site.header.homeAria": "Inicio de CleoCuts",

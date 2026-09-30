@@ -12,9 +12,6 @@ export const enApp = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — your video is ready",
-  "app.notify.clickToView": "Click to view",
-  "app.notify.reviewTitle": "CleoCuts — ready for your review",
-  "app.notify.reviewBody": "Cuts + transcript are done. Tap to review.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Couldn't load the project right now. Please try again in a moment.",
@@ -199,8 +196,6 @@ export const enApp = {
   "app.upload.tapToChoose": "Tap to choose",
   "app.upload.orDrag": "or drag one in",
   "app.upload.privacyLink": "How we handle your videos",
-  "app.upload.keepTabOpen":
-    "Keep this tab open until the upload finishes. Switching apps or locking your phone will cancel the upload.",
   "app.upload.resuming":
     "Resuming the upload where it stopped — keep this page open.",
 
@@ -226,18 +221,6 @@ export const enApp = {
   "app.configure.extraFormatsHint":
     "Primary export is your SmartCam format (or original aspect). Pick extra letterbox-padded versions for other platforms.",
   "app.configure.process": "Process video",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Uploading",
-  "app.progress.rendering": "Rendering",
-  "app.progress.processing": "Processing",
-  "app.progress.stage.prep": "Preparing your video",
-  "app.progress.stage.listen": "Listening to your voice",
-  "app.progress.stage.polish": "Finding the good takes",
-  "app.progress.stage.preview": "Almost ready",
-  "app.progress.stage.burn": "Applying your edits",
-  "app.progress.stage.stitch": "Stitching it together",
-  "app.progress.stage.finish": "Final touches",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Ready to post",
@@ -330,15 +313,8 @@ export const enApp = {
   "app.timeline.fadeIn": "Fade in",
   "app.timeline.fadeOut": "Fade out",
   "app.timeline.resetEffects": "Reset effects",
-  // Legacy cut strip
-  "app.timeline.cuts": "Cuts",
-  "app.timeline.cutsRemoved": "{sec}s removed",
-  "app.timeline.cutsRestored": " · {count} restored",
-  "app.timeline.cutTitleRestore": "Cut {from}–{to} (tap to restore)",
-  "app.timeline.cutTitleRemoveAgain": "Cut {from}–{to} (tap to remove again)",
-  "app.timeline.cutsLegend": "Red = removed · tap to restore. Green dashes = kept.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Test your voice",
   "app.voice.subtitle": "Say the commands — see if Cleo hears you.",
   "app.voice.close": "Close",
@@ -357,18 +333,6 @@ export const enApp = {
   "app.voice.cmd.finish": "End video, cut everything after",
   "app.voice.cmd.stop": "Skip one bad sentence (pair with 'go')",
   "app.voice.cmd.go": "Resume after 'stop'",
-  "app.voice.scene.heading": "Voice commands · {count} active",
-  "app.voice.scene.hint": "Uncheck false detections, add missing ones. Cuts update automatically.",
-  "app.voice.scene.add": "+ Add",
-  "app.voice.scene.addAt": "Add command at current video time",
-  "app.voice.scene.none": "No voice commands detected.",
-  "app.voice.scene.disable": "Disable",
-  "app.voice.scene.enable": "Enable",
-  "app.voice.scene.heard": "heard: “{text}”",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / Restart",
-  "app.voice.scene.type.finish": "Finish",
   "app.crash.saving": "Saving your latest changes…",
   "app.crash.saved": "Your latest changes are saved.",
   "app.crash.unsaved": "Your latest changes may not have been saved.",

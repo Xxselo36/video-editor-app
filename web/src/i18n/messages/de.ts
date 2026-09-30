@@ -8,9 +8,6 @@ export const de: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — dein Video ist fertig",
-  "app.notify.clickToView": "Klicken, um es anzusehen",
-  "app.notify.reviewTitle": "CleoCuts — bereit zur Prüfung",
-  "app.notify.reviewBody": "Schnitte + Transkript sind fertig. Tippe, um zu prüfen.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Das Projekt konnte gerade nicht geladen werden. Bitte versuch's gleich noch mal.",
@@ -195,8 +192,6 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.upload.tapToChoose": "Tippen, um auszuwählen",
   "app.upload.orDrag": "oder eins hineinziehen",
   "app.upload.privacyLink": "So gehen wir mit deinen Videos um",
-  "app.upload.keepTabOpen":
-    "Lass diesen Tab geöffnet, bis der Upload fertig ist. Ein App-Wechsel oder gesperrtes Handy bricht den Upload ab.",
   "app.upload.resuming":
     "Der Upload geht dort weiter, wo er unterbrochen wurde — lass diese Seite offen.",
 
@@ -222,18 +217,6 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "Der Haupt-Export nutzt dein SmartCam-Format (oder das Originalformat). Wähle zusätzliche Versionen mit Letterbox für andere Plattformen.",
   "app.configure.process": "Video verarbeiten",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Wird hochgeladen",
-  "app.progress.rendering": "Wird gerendert",
-  "app.progress.processing": "Wird verarbeitet",
-  "app.progress.stage.prep": "Video wird vorbereitet",
-  "app.progress.stage.listen": "Deine Stimme wird angehört",
-  "app.progress.stage.polish": "Die guten Takes werden gesucht",
-  "app.progress.stage.preview": "Fast fertig",
-  "app.progress.stage.burn": "Deine Bearbeitungen werden angewendet",
-  "app.progress.stage.stitch": "Alles wird zusammengefügt",
-  "app.progress.stage.finish": "Letzter Feinschliff",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Bereit zum Posten",
@@ -327,15 +310,8 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "Einblenden",
   "app.timeline.fadeOut": "Ausblenden",
   "app.timeline.resetEffects": "Effekte zurücksetzen",
-  // Legacy cut strip
-  "app.timeline.cuts": "Schnitte",
-  "app.timeline.cutsRemoved": "{sec}s entfernt",
-  "app.timeline.cutsRestored": " · {count} wiederhergestellt",
-  "app.timeline.cutTitleRestore": "Schnitt {from}–{to} (tippen zum Wiederherstellen)",
-  "app.timeline.cutTitleRemoveAgain": "Schnitt {from}–{to} (tippen zum erneuten Entfernen)",
-  "app.timeline.cutsLegend": "Rot = entfernt · tippen zum Wiederherstellen. Grüne Striche = behalten.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Teste deine Stimme",
   "app.voice.subtitle": "Sag die Befehle — schau, ob Cleo dich hört.",
   "app.voice.close": "Schließen",
@@ -354,18 +330,6 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Video beenden, alles danach schneiden",
   "app.voice.cmd.stop": "Einen schlechten Satz überspringen (zusammen mit „go“)",
   "app.voice.cmd.go": "Weiter nach „stop“",
-  "app.voice.scene.heading": "Sprachbefehle · {count} aktiv",
-  "app.voice.scene.hint": "Falsche Erkennungen abwählen, fehlende hinzufügen. Schnitte aktualisieren sich automatisch.",
-  "app.voice.scene.add": "+ Hinzufügen",
-  "app.voice.scene.addAt": "Befehl an der aktuellen Videoposition hinzufügen",
-  "app.voice.scene.none": "Keine Sprachbefehle erkannt.",
-  "app.voice.scene.disable": "Deaktivieren",
-  "app.voice.scene.enable": "Aktivieren",
-  "app.voice.scene.heard": "gehört: „{text}“",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / Neustart",
-  "app.voice.scene.type.finish": "Finish",
 
   // ── site.* (Landing) ─────────────────────────────────────────────────
   "site.header.homeAria": "CleoCuts Startseite",

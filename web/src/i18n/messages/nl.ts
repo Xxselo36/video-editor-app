@@ -8,9 +8,6 @@ export const nl: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — je video is klaar",
-  "app.notify.clickToView": "Klik om te bekijken",
-  "app.notify.reviewTitle": "CleoCuts — klaar om te bekijken",
-  "app.notify.reviewBody": "Montage + transcript zijn klaar. Tik om te bekijken.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Het project kon nu niet geladen worden. Probeer het straks nog eens.",
@@ -195,8 +192,6 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.upload.tapToChoose": "Tik om te kiezen",
   "app.upload.orDrag": "of sleep er een naartoe",
   "app.upload.privacyLink": "Zo gaan we met je video's om",
-  "app.upload.keepTabOpen":
-    "Houd dit tabblad open tot de upload klaar is. Wisselen van app of je telefoon vergrendelen annuleert de upload.",
   "app.upload.resuming":
     "De upload gaat verder waar hij gestopt was — houd deze pagina open.",
 
@@ -222,18 +217,6 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "De primaire export gebruikt je SmartCam-formaat (of de originele beeldverhouding). Kies extra versies met letterbox voor andere platforms.",
   "app.configure.process": "Video verwerken",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Uploaden",
-  "app.progress.rendering": "Renderen",
-  "app.progress.processing": "Verwerken",
-  "app.progress.stage.prep": "Je video wordt voorbereid",
-  "app.progress.stage.listen": "Er wordt naar je stem geluisterd",
-  "app.progress.stage.polish": "De goede takes worden gezocht",
-  "app.progress.stage.preview": "Bijna klaar",
-  "app.progress.stage.burn": "Je bewerkingen worden toegepast",
-  "app.progress.stage.stitch": "Alles wordt aan elkaar gezet",
-  "app.progress.stage.finish": "Laatste puntjes op de i",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Klaar om te posten",
@@ -327,15 +310,8 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "Infaden",
   "app.timeline.fadeOut": "Uitfaden",
   "app.timeline.resetEffects": "Effecten resetten",
-  // Legacy cut strip
-  "app.timeline.cuts": "Sneden",
-  "app.timeline.cutsRemoved": "{sec}s verwijderd",
-  "app.timeline.cutsRestored": " · {count} herstel",
-  "app.timeline.cutTitleRestore": "Snede {from}–{to} (tik om te herstellen)",
-  "app.timeline.cutTitleRemoveAgain": "Snede {from}–{to} (tik om opnieuw te verwijderen)",
-  "app.timeline.cutsLegend": "Rood = verwijderd · tik om te herstellen. Groene streepjes = behouden.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Test je stem",
   "app.voice.subtitle": "Zeg de commando's — kijk of Cleo je hoort.",
   "app.voice.close": "Sluiten",
@@ -354,18 +330,6 @@ export const nl: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Video beëindigen, alles daarna wegknippen",
   "app.voice.cmd.stop": "Sla één slechte zin over (samen met 'go')",
   "app.voice.cmd.go": "Verder na 'stop'",
-  "app.voice.scene.heading": "Spraakcommando's · {count} actief",
-  "app.voice.scene.hint": "Vink foute detecties uit, voeg ontbrekende toe. Montage wordt automatisch bijgewerkt.",
-  "app.voice.scene.add": "+ Toevoegen",
-  "app.voice.scene.addAt": "Commando toevoegen op huidige videotijd",
-  "app.voice.scene.none": "Geen spraakcommando's gedetecteerd.",
-  "app.voice.scene.disable": "Uitschakelen",
-  "app.voice.scene.enable": "Inschakelen",
-  "app.voice.scene.heard": "gehoord: “{text}”",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / Herstart",
-  "app.voice.scene.type.finish": "Finish",
 
   // ── site.* (Landing) ─────────────────────────────────────────────────
   "site.header.homeAria": "CleoCuts home",

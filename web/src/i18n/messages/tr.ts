@@ -8,9 +8,6 @@ export const tr: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — videon hazır",
-  "app.notify.clickToView": "Görüntülemek için tıkla",
-  "app.notify.reviewTitle": "CleoCuts — incelemeye hazır",
-  "app.notify.reviewBody": "Kesimler + transkript hazır. İncelemek için dokun.",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "Proje şu an yüklenemedi. Lütfen birazdan tekrar dene.",
@@ -196,8 +193,6 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.upload.tapToChoose": "Seçmek için dokun",
   "app.upload.orDrag": "veya birini sürükle",
   "app.upload.privacyLink": "Videolarını nasıl işliyoruz",
-  "app.upload.keepTabOpen":
-    "Yükleme bitene kadar bu sekmeyi açık tut. Uygulama değiştirmek veya telefonunu kilitlemek yüklemeyi iptal eder.",
   "app.upload.resuming":
     "Yükleme kaldığı yerden devam ediyor — bu sayfayı açık tut.",
 
@@ -223,18 +218,6 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "Birincil çıkış SmartCam formatını (veya orijinal en-boy oranını) kullanır. Diğer platformlar için ek letterbox'lı sürümler seç.",
   "app.configure.process": "Videoyu işle",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "Yükleniyor",
-  "app.progress.rendering": "Render ediliyor",
-  "app.progress.processing": "İşleniyor",
-  "app.progress.stage.prep": "Videon hazırlanıyor",
-  "app.progress.stage.listen": "Sesin dinleniyor",
-  "app.progress.stage.polish": "İyi çekimler bulunuyor",
-  "app.progress.stage.preview": "Neredeyse hazır",
-  "app.progress.stage.burn": "Düzenlemeler uygulanıyor",
-  "app.progress.stage.stitch": "Her şey birleştiriliyor",
-  "app.progress.stage.finish": "Son dokunuşlar",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "Paylaşıma hazır",
@@ -328,15 +311,8 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "İçeri geçiş",
   "app.timeline.fadeOut": "Dışarı geçiş",
   "app.timeline.resetEffects": "Efektleri sıfırla",
-  // Legacy cut strip
-  "app.timeline.cuts": "Kesimler",
-  "app.timeline.cutsRemoved": "{sec}sn kaldırıldı",
-  "app.timeline.cutsRestored": " · {count} geri yüklendi",
-  "app.timeline.cutTitleRestore": "Kesim {from}–{to} (geri yüklemek için dokun)",
-  "app.timeline.cutTitleRemoveAgain": "Kesim {from}–{to} (yeniden kaldırmak için dokun)",
-  "app.timeline.cutsLegend": "Kırmızı = kaldırıldı · geri yüklemek için dokun. Yeşil çizgiler = tutulan.",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "Sesini test et",
   "app.voice.subtitle": "Komutları söyle — Cleo'nun seni duyup duymadığına bak.",
   "app.voice.close": "Kapat",
@@ -355,18 +331,6 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Videoyu bitir, sonrasındaki her şeyi kes",
   "app.voice.cmd.stop": "Kötü bir cümleyi atla ('go' ile birlikte kullan)",
   "app.voice.cmd.go": "'stop' sonrası devam et",
-  "app.voice.scene.heading": "Sesli komutlar · {count} aktif",
-  "app.voice.scene.hint": "Yanlış tespitleri kaldır, eksik olanları ekle. Kesimler otomatik güncellenir.",
-  "app.voice.scene.add": "+ Ekle",
-  "app.voice.scene.addAt": "Mevcut video anına komut ekle",
-  "app.voice.scene.none": "Sesli komut tespit edilmedi.",
-  "app.voice.scene.disable": "Devre dışı bırak",
-  "app.voice.scene.enable": "Etkinleştir",
-  "app.voice.scene.heard": "duyulan: “{text}”",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / Yeniden başlat",
-  "app.voice.scene.type.finish": "Finish",
 
   // ── site.* (Landing) ─────────────────────────────────────────────────
   "site.header.homeAria": "CleoCuts ana sayfa",

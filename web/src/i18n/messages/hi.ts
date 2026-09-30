@@ -8,9 +8,6 @@ export const hi: Partial<Record<MessageKey, string>> = {
 
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — आपका वीडियो तैयार है",
-  "app.notify.clickToView": "देखने के लिए क्लिक करें",
-  "app.notify.reviewTitle": "CleoCuts — रिव्यू के लिए तैयार",
-  "app.notify.reviewBody": "कट्स + ट्रांसक्रिप्ट तैयार हैं। रिव्यू करने के लिए टैप करें।",
 
   // ── Toasts / notices ────────────────────────────────────────────────
   "app.notice.loadFailed": "प्रोजेक्ट अभी लोड नहीं हो पाया। कृपया थोड़ी देर में फिर कोशिश करें।",
@@ -195,8 +192,6 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.upload.tapToChoose": "चुनने के लिए टैप करें",
   "app.upload.orDrag": "या एक को यहां खींचकर लाएं",
   "app.upload.privacyLink": "हम आपके वीडियो कैसे संभालते हैं",
-  "app.upload.keepTabOpen":
-    "अपलोड पूरा होने तक इस टैब को खुला रखें। ऐप बदलने या फ़ोन लॉक करने से अपलोड कैंसिल हो जाएगा।",
   "app.upload.resuming":
     "अपलोड वहीं से फिर शुरू हो रहा है जहाँ रुका था — इस पेज को खुला रखें।",
 
@@ -222,18 +217,6 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "प्राइमरी एक्सपोर्ट आपका SmartCam फॉर्मेट है (या ओरिजिनल आस्पेक्ट)। दूसरे प्लेटफ़ॉर्म के लिए अतिरिक्त लेटरबॉक्स-पैडेड वर्शन चुनें।",
   "app.configure.process": "वीडियो प्रोसेस करें",
-
-  // ── Progress screen ─────────────────────────────────────────────────
-  "app.progress.uploading": "अपलोड हो रहा है",
-  "app.progress.rendering": "रेंडर हो रहा है",
-  "app.progress.processing": "प्रोसेस हो रहा है",
-  "app.progress.stage.prep": "आपका वीडियो तैयार हो रहा है",
-  "app.progress.stage.listen": "आपकी आवाज़ सुनी जा रही है",
-  "app.progress.stage.polish": "अच्छे टेक्स ढूंढे जा रहे हैं",
-  "app.progress.stage.preview": "बस थोड़ा और",
-  "app.progress.stage.burn": "आपके एडिट्स लगाए जा रहे हैं",
-  "app.progress.stage.stitch": "सब कुछ जोड़ा जा रहा है",
-  "app.progress.stage.finish": "आख़िरी टच",
 
   // ── Done screen ─────────────────────────────────────────────────────
   "app.done.readyToPost": "पोस्ट करने के लिए तैयार",
@@ -327,15 +310,8 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "फ़ेड इन",
   "app.timeline.fadeOut": "फ़ेड आउट",
   "app.timeline.resetEffects": "इफ़ेक्ट्स रीसेट करें",
-  // Legacy cut strip
-  "app.timeline.cuts": "कट्स",
-  "app.timeline.cutsRemoved": "{sec}सेकंड हटाए गए",
-  "app.timeline.cutsRestored": " · {count} रीस्टोर किए गए",
-  "app.timeline.cutTitleRestore": "कट {from}–{to} (रीस्टोर करने के लिए टैप करें)",
-  "app.timeline.cutTitleRemoveAgain": "कट {from}–{to} (फिर से हटाने के लिए टैप करें)",
-  "app.timeline.cutsLegend": "लाल = हटाया गया · रीस्टोर करने के लिए टैप करें। हरी डैश = रखा गया।",
 
-  // ── Voice commands (test modal + scene panel) ───────────────────────
+  // ── Voice test (dialog) ─────────────────────────────────────────────
   "app.voice.title": "अपनी आवाज़ टेस्ट करें",
   "app.voice.subtitle": "कमांड्स बोलें — देखें कि Cleo आपको सुन रहा है या नहीं।",
   "app.voice.close": "बंद करें",
@@ -354,18 +330,6 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "वीडियो खत्म करें, बाद का सब कुछ काटें",
   "app.voice.cmd.stop": "एक ख़राब वाक्य स्किप करें (‘go’ के साथ इस्तेमाल करें)",
   "app.voice.cmd.go": "‘stop’ के बाद फिर से शुरू करें",
-  "app.voice.scene.heading": "वॉइस कमांड्स · {count} एक्टिव",
-  "app.voice.scene.hint": "गलत डिटेक्शन अनचेक करें, छूटे हुए जोड़ें। कट्स अपने-आप अपडेट हो जाते हैं।",
-  "app.voice.scene.add": "+ जोड़ें",
-  "app.voice.scene.addAt": "वीडियो के मौजूदा समय पर कमांड जोड़ें",
-  "app.voice.scene.none": "कोई वॉइस कमांड डिटेक्ट नहीं हुआ।",
-  "app.voice.scene.disable": "बंद करें",
-  "app.voice.scene.enable": "चालू करें",
-  "app.voice.scene.heard": "सुना: “{text}”",
-  "app.voice.scene.type.start": "Start",
-  "app.voice.scene.type.keep": "Keep",
-  "app.voice.scene.type.restart": "Cut / रीस्टार्ट",
-  "app.voice.scene.type.finish": "Finish",
 
   // ── site.* (Landing) ─────────────────────────────────────────────────
   "site.header.homeAria": "CleoCuts होम",

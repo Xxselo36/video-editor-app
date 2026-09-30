@@ -145,9 +145,6 @@ export const pt: Partial<Record<MessageKey, string>> = {
 
   // ── app: browser notifications ──
   "app.notify.readyTitle": "CleoCuts — seu vídeo está pronto",
-  "app.notify.clickToView": "Clique para ver",
-  "app.notify.reviewTitle": "CleoCuts — pronto para sua revisão",
-  "app.notify.reviewBody": "Cortes + transcrição concluídos. Toque para revisar.",
 
   // ── app: toasts / notices ──
   "app.notice.loadFailed": "Não foi possível carregar o projeto agora. Tente novamente em um instante.",
@@ -330,8 +327,6 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.upload.tapToChoose": "Toque para escolher",
   "app.upload.orDrag": "ou arraste um arquivo aqui",
   "app.upload.privacyLink": "Como tratamos seus vídeos",
-  "app.upload.keepTabOpen":
-    "Mantenha esta aba aberta até o envio terminar. Trocar de app ou bloquear o celular vai cancelar o envio.",
   "app.upload.resuming":
     "Retomando o envio de onde parou — mantenha esta página aberta.",
 
@@ -357,18 +352,6 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.configure.extraFormatsHint":
     "A exportação principal usa seu formato SmartCam (ou o formato original). Escolha versões extras com tarjas pretas para outras plataformas.",
   "app.configure.process": "Processar vídeo",
-
-  // ── app: progress screen ──
-  "app.progress.uploading": "Enviando",
-  "app.progress.rendering": "Renderizando",
-  "app.progress.processing": "Processando",
-  "app.progress.stage.prep": "Preparando seu vídeo",
-  "app.progress.stage.listen": "Ouvindo sua voz",
-  "app.progress.stage.polish": "Encontrando as melhores tomadas",
-  "app.progress.stage.preview": "Quase pronto",
-  "app.progress.stage.burn": "Aplicando suas edições",
-  "app.progress.stage.stitch": "Montando tudo",
-  "app.progress.stage.finish": "Últimos ajustes",
 
   // ── app: done screen ──
   "app.done.readyToPost": "Pronto para postar",
@@ -462,15 +445,8 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.timeline.fadeIn": "Fade in",
   "app.timeline.fadeOut": "Fade out",
   "app.timeline.resetEffects": "Redefinir efeitos",
-  // Legacy cut strip
-  "app.timeline.cuts": "Cortes",
-  "app.timeline.cutsRemoved": "{sec}s removidos",
-  "app.timeline.cutsRestored": " · {count} restaurados",
-  "app.timeline.cutTitleRestore": "Corte {from}–{to} (toque para restaurar)",
-  "app.timeline.cutTitleRemoveAgain": "Corte {from}–{to} (toque para remover de novo)",
-  "app.timeline.cutsLegend": "Vermelho = removido · toque para restaurar. Tracejado verde = mantido.",
 
-  // ── app: voice commands (test modal + scene panel) ──
+  // ── app: voice test (dialog) ──
   "app.voice.title": "Teste sua voz",
   "app.voice.subtitle": "Diga os comandos — veja se a Cleo te escuta.",
   "app.voice.close": "Fechar",
@@ -489,18 +465,7 @@ export const pt: Partial<Record<MessageKey, string>> = {
   "app.voice.cmd.finish": "Termina o vídeo, corta tudo depois",
   "app.voice.cmd.stop": "Pula uma frase ruim (use com 'go')",
   "app.voice.cmd.go": "Retoma depois do 'stop'",
-  "app.voice.scene.heading": "Comandos de voz · {count} ativos",
-  "app.voice.scene.hint": "Desmarque detecções falsas, adicione as que faltam. Os cortes são atualizados automaticamente.",
-  "app.voice.scene.add": "+ Adicionar",
-  "app.voice.scene.addAt": "Adicionar comando no momento atual do vídeo",
-  "app.voice.scene.none": "Nenhum comando de voz detectado.",
-  "app.voice.scene.disable": "Desativar",
-  "app.voice.scene.enable": "Ativar",
-  "app.voice.scene.heard": "ouvi: “{text}”",
-  "app.voice.scene.type.start": "Início",
-  "app.voice.scene.type.keep": "Manter",
-  "app.voice.scene.type.restart": "Cortar / Reiniciar",
-  "app.voice.scene.type.finish": "Finalizar",
+
   "common.language": "Idioma",
   "common.footer.legalAria": "Informações legais",
   "legal.onlyDeEn":
