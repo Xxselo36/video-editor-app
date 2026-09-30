@@ -32,6 +32,11 @@ export default defineConfig([
       "prefer-const": "warn",
     },
   },
+  {
+    // Playwright fixtures call their callback `use` — not a React hook.
+    files: ["e2e/**"],
+    rules: { "react-hooks/rules-of-hooks": "off" },
+  },
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
