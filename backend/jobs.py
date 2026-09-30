@@ -20,11 +20,12 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Callable, Iterable, Literal
+from typing import Any, Callable, Iterable, Iterator, Literal
 
-from backend import db
+from backend import db, taskq
 
 # Subscription plans and how long an idle project is kept (days after
 # the last change). No free tier. Override per plan with e.g.
@@ -148,6 +149,11 @@ class Job:
     media_bytes: dict[str, int] = field(default_factory=dict)
     # Where the job's keys live ("r2" / "local"); None = not recorded.
     media_store: str | None = None
+    # Steps the task queue's worker had to leave out (WP4, e.g.
+    # "llm_skipped:cleanup" while Anthropic is down or its spend limit is
+    # reached). None = none recorded — then it isn't stored at all, so a
+    # job written without the queue looks exactly as before.
+    processing_warnings: list[str] | None = None
     # Keys of the stored row this code doesn't know (a later release's
     # fields): kept as stored and written back on every write, so this
     # release can't drop them. Never part of the API.
@@ -264,6 +270,9 @@ class Job:
             "created_at": self.created_at or None,
             "updated_at": self.updated_at or None,
             "queue_position": self.queue_position,
+            # Only once the task queue's worker recorded any (WP4).
+            **({"processing_warnings": list(self.processing_warnings)}
+               if self.processing_warnings is not None else {}),
         }
 
 
@@ -330,6 +339,48 @@ _EVENTS_DDL = (
     "CREATE INDEX IF NOT EXISTS job_events_kind_at ON job_events(kind, at)",
 )
 EVENTS_KEEP_DAYS = 90.0
+
+# WP4 task queue (backend/taskq.py): the same tables as Postgres
+# (backend/pg.py _SCHEMA_V5), in this connection, so a job write and its
+# task commit together. Times are Unix floats. Created whatever
+# CLEO_TASK_QUEUE says (empty and unused while it is off). Not part of
+# backups or the Postgres cutover (backend/pg.py TABLES): after a
+# restore or a cutover the leader re-enqueues what was running.
+_TASKS_DDL = (
+    "CREATE TABLE IF NOT EXISTS tasks ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, "
+    "kind TEXT NOT NULL CHECK (kind IN ('ingest', 'render', 'preview')), "
+    "state TEXT NOT NULL CHECK (state IN ('queued', 'dispatching', "
+    "'running', 'succeeded', 'failed', 'dead', 'cancelled')), "
+    "owner_id TEXT, plan TEXT, payload TEXT NOT NULL DEFAULT '{}', "
+    "sort_at REAL NOT NULL, run_after REAL NOT NULL, "
+    "attempts INTEGER NOT NULL DEFAULT 0, "
+    "max_attempts INTEGER NOT NULL DEFAULT 3, "
+    "provider_waits INTEGER NOT NULL DEFAULT 0, first_wait_at REAL, "
+    "executor TEXT, locked_by TEXT, locked_until REAL, heartbeat_at REAL, "
+    "modal_call_id TEXT, started_at REAL, finished_at REAL, result TEXT, "
+    "error_code TEXT, last_error TEXT, retryable INTEGER, finalized_at REAL, "
+    "created_at REAL NOT NULL, updated_at REAL NOT NULL)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_active ON tasks "
+    "(job_id, kind) WHERE state IN ('queued', 'dispatching', 'running')",
+    "CREATE INDEX IF NOT EXISTS tasks_queue ON tasks (kind, sort_at, id) "
+    "WHERE state = 'queued'",
+    "CREATE INDEX IF NOT EXISTS tasks_leases ON tasks (locked_until) "
+    "WHERE state IN ('dispatching', 'running')",
+    "CREATE INDEX IF NOT EXISTS tasks_unfinalized ON tasks (finished_at) "
+    "WHERE finalized_at IS NULL AND state IN ('succeeded', 'failed', "
+    "'dead', 'cancelled')",
+    "CREATE INDEX IF NOT EXISTS tasks_started ON tasks (kind, started_at) "
+    "WHERE started_at IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS tasks_job ON tasks (job_id)",
+    "CREATE TABLE IF NOT EXISTS provider_state ("
+    "provider TEXT PRIMARY KEY, open_until REAL, reason TEXT, "
+    "failures INTEGER NOT NULL DEFAULT 0, window_start REAL, "
+    "opens INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS queue_positions ("
+    "job_id TEXT PRIMARY KEY, kind TEXT, pos INTEGER, hint TEXT, "
+    "updated_at REAL)",
+)
 
 
 def event_row(at: float, kind: str, job_id: str | None,
@@ -422,6 +473,10 @@ def job_to_dict(job: Job) -> dict[str, Any]:
     this code rewriting the row."""
     d = asdict(job)
     extras = d.pop(_EXTRAS, None) or {}
+    # Stored only once set: rows written without the task queue keep
+    # exactly the keys they had before WP4.
+    if d.get("processing_warnings") is None:
+        d.pop("processing_warnings", None)
     for k, v in extras.items():
         d.setdefault(k, v)
     return d
@@ -450,6 +505,7 @@ class JobStore:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._tasks: SqliteTaskStore | None = None
         db_path = _db_path()
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False,
@@ -474,7 +530,16 @@ class JobStore:
             self._conn.execute(_MEDIA_GC_DDL)
             for ddl in _EVENTS_DDL:
                 self._conn.execute(ddl)
+            for ddl in _TASKS_DDL:
+                self._conn.execute(ddl)
             self._conn.commit()
+
+    @property
+    def tasks(self) -> "SqliteTaskStore":
+        """The task store of this database (same connection and lock)."""
+        if self._tasks is None:
+            self._tasks = SqliteTaskStore(self)
+        return self._tasks
 
     def _serialize(self, job: Job) -> str:
         d = job_to_dict(job)
@@ -538,9 +603,10 @@ class JobStore:
         if row is None:
             return None
         try:
-            return self._deserialize(row["data"])
+            job = self._deserialize(row["data"])
         except Exception:
             return None
+        return self._with_position(job)
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -550,11 +616,31 @@ class JobStore:
         if row is None:
             return None
         try:
-            return self._deserialize(row["data"])
+            job = self._deserialize(row["data"])
         except Exception as e:
             print(f"[jobstore] deserialize failed for {job_id}: {e}",
                   flush=True)
             return None
+        return self._with_position(job)
+
+    def _positions(self, job_ids: list[str]) -> dict[str, int]:
+        """queue_position of queued jobs, from the task queue's
+        queue_positions table (the leader keeps it current; the job rows
+        don't carry it with the queue on). {} while the queue is off."""
+        if not job_ids or not taskq.enabled():
+            return {}
+        marks = ",".join("?" for _ in job_ids)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT job_id, pos FROM queue_positions WHERE job_id IN "
+                f"({marks}) AND pos IS NOT NULL", list(job_ids)).fetchall()
+        return {r["job_id"]: int(r["pos"]) for r in rows}
+
+    def _with_position(self, job: Job) -> Job:
+        pos = self._positions([job.id]).get(job.id)
+        if pos is not None:
+            job.queue_position = pos
+        return job
 
     def update(self, job_id: str, **fields_to_update: Any) -> None:
         self._write(job_id, None, fields_to_update)
@@ -591,36 +677,56 @@ class JobStore:
                ) -> dict[str, Any] | None:
         """update / update_if / modify: the fields written, or None."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT data FROM jobs WHERE id = ?", (job_id,)
-            ).fetchone()
-            if row is None:
-                return None
-            try:
-                job = self._deserialize(row["data"])
-            except Exception:
-                return None
-            if expect is not None and job.status not in expect:
-                return None
-            fields_to_update = change(job) if callable(change) else change
-            if fields_to_update is None:
-                return None
-            for k, v in fields_to_update.items():
-                setattr(job, k, v)
-            if "updated_at" not in fields_to_update:
-                job.updated_at = time.time()
-            try:
-                self._conn.execute(
-                    "UPDATE jobs SET data = ? WHERE id = ?",
-                    (self._serialize(job), job_id),
-                )
-                self._conn.commit()
-            except BaseException:
-                # e.g. disk full: don't leave the shared connection in an
-                # open transaction that the next write would join.
-                self._conn.rollback()
-                raise
+            return self._apply(job_id, expect, change, commit=True)
+
+    def _apply(self, job_id: str, expect: tuple[str, ...] | None,
+               change: dict[str, Any] | Callable[[Job], Any],
+               commit: bool) -> dict[str, Any] | None:
+        """_write's read-check-write, the store lock held. commit=False:
+        part of a larger transaction (the task store's), which commits
+        or rolls back itself."""
+        row = self._conn.execute(
+            "SELECT data FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            job = self._deserialize(row["data"])
+        except Exception:
+            return None
+        if expect is not None and job.status not in expect:
+            return None
+        fields_to_update = change(job) if callable(change) else change
+        if fields_to_update is None:
+            return None
+        for k, v in fields_to_update.items():
+            setattr(job, k, v)
+        if "updated_at" not in fields_to_update:
+            job.updated_at = time.time()
+        if not commit:
+            self._conn.execute("UPDATE jobs SET data = ? WHERE id = ?",
+                               (self._serialize(job), job_id))
             return fields_to_update
+        try:
+            self._conn.execute(
+                "UPDATE jobs SET data = ? WHERE id = ?",
+                (self._serialize(job), job_id),
+            )
+            self._conn.commit()
+        except BaseException:
+            # e.g. disk full: don't leave the shared connection in an
+            # open transaction that the next write would join.
+            self._conn.rollback()
+            raise
+        return fields_to_update
+
+    def patch_status(self, job_id: str, expect: str | tuple[str, ...],
+                     **fields_to_update: Any) -> bool:
+        """A progress write (message / progress) while the job's status
+        is `expect` — never after a terminal one. SQLite has one process
+        and one lock, so this is update_if (Postgres merges the fields
+        into the row instead of rewriting it)."""
+        return self.update_if(job_id, expect, **fields_to_update)
 
     def status_many(self, job_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Scalar status fields (_STATUS_FIELDS) of several jobs in one
@@ -646,6 +752,8 @@ class JobStore:
                 continue
             out[r["id"]] = {k: d.get(k, defaults.get(k)) for k in _STATUS_FIELDS}
             out[r["id"]]["id"] = r["id"]
+        for job_id, pos in self._positions(list(out)).items():
+            out[job_id]["queue_position"] = pos
         return out
 
     def ping(self) -> None:
@@ -689,6 +797,13 @@ class JobStore:
                 self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
                 self._conn.execute("DELETE FROM job_keys WHERE job_id = ?",
                                    (job_id,))
+                # Its tasks go with it (Postgres: ON DELETE CASCADE): a
+                # worker still running one is fenced out on its next
+                # heartbeat and commits nothing.
+                self._conn.execute("DELETE FROM tasks WHERE job_id = ?",
+                                   (job_id,))
+                self._conn.execute(
+                    "DELETE FROM queue_positions WHERE job_id = ?", (job_id,))
                 self._gc_insert(entries, time.time() if not_before is None
                                 else not_before, gc_store)
                 self._conn.commit()
@@ -879,6 +994,9 @@ class JobStore:
         `summary` lets a store leave out the big editor fields (Postgres
         does; SQLite returns whole jobs anyway)."""
         rows = [j for j in self.list_all() if j.owner_id == owner_id]
+        for job in rows:
+            if job.status in RUNNING_STATUSES:
+                self._with_position(job)
         if limit is None and before is None:
             return rows
         rows.sort(key=_list_key, reverse=True)
@@ -949,6 +1067,608 @@ class JobStore:
                                     "Please upload the video again.")
                 marked += 1
         return marked
+
+
+class _Rollback(Exception):
+    """Internal: undo the task store transaction, answer normally."""
+
+
+# The per-user limit counts jobs, not the claims of POST /jobs requests
+# still being accepted (pending + settings._accepting): those are
+# admitted one after the other (the store lock / the user's advisory
+# lock) and stop being claims when admitted — counting them would let a
+# burst of one account's uploads refuse each other, all of them.
+_NOT_A_CLAIM_SQLITE = (
+    "AND coalesce(json_extract(json_extract(data, '$.settings'), "
+    "'$._accepting'), 0) IS NOT 1")
+
+
+class SqliteTaskStore:
+    """The WP4 task queue on SQLite (backend/taskq.py): the tasks,
+    provider_state and queue_positions tables of the job DB, on the job
+    store's connection and under its lock — so a job write and its task
+    commit together, and the one process serializes every claim (the
+    Postgres store, backend/pg_tasks.py, uses row locks and SKIP LOCKED
+    instead). Same methods as PgTaskStore. Times are Unix floats."""
+
+    def __init__(self, jobs_store: JobStore) -> None:
+        self._s = jobs_store
+
+    # ── plumbing ─────────────────────────────────────────────────────
+
+    @contextmanager
+    def _tx(self) -> Iterator[sqlite3.Connection]:
+        """One transaction on the job store's connection."""
+        with self._s._lock:
+            conn = self._s._conn
+            try:
+                yield conn
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+
+    def _tasks(self, sql: str, args: Iterable[Any] = ()) -> list[taskq.Task]:
+        with self._s._lock:
+            rows = self._s._conn.execute(sql, list(args)).fetchall()
+        return [taskq.task_from_row(dict(r)) for r in rows]
+
+    def _one(self, sql: str, args: Iterable[Any] = ()) -> Any:
+        with self._s._lock:
+            row = self._s._conn.execute(sql, list(args)).fetchone()
+        return row[0] if row is not None else None
+
+    @staticmethod
+    def _insert(conn: sqlite3.Connection, job_id: str, kind: str,
+                payload: dict[str, Any], owner_id: str | None,
+                plan: str | None, sort_offset_s: float, max_attempts: int,
+                now: float) -> int:
+        try:
+            cur = conn.execute(
+                "INSERT INTO tasks (job_id, kind, state, owner_id, plan, "
+                "payload, sort_at, run_after, max_attempts, created_at, "
+                "updated_at) VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)",
+                (job_id, kind, owner_id, plan, json.dumps(payload),
+                 now + float(sort_offset_s), now, int(max_attempts), now,
+                 now))
+        except sqlite3.IntegrityError as e:
+            raise taskq.TaskActive(f"job {job_id} has an active {kind} "
+                                   "task") from e
+        return int(cur.lastrowid)
+
+    def notify(self, kind: str) -> None:
+        """Wake the dispatcher (one process: in-process only)."""
+        taskq.wake(kind)
+
+    def schema_version(self) -> int:
+        return taskq.REQUIRED_SCHEMA
+
+    # ── enqueue (with the job write, in one transaction) ─────────────
+
+    def enqueue(self, job_id: str, kind: str,
+                payload: dict[str, Any] | Callable[[dict | None], dict], *,
+                owner_id: str | None = None, plan: str | None = None,
+                sort_offset_s: float = 0.0, max_attempts: int = 3,
+                job_expect: str | tuple[str, ...] | None = None,
+                job_change: dict[str, Any] | Callable[[Job], Any] | None = None
+                ) -> tuple[int | None, dict[str, Any] | None]:
+        """Insert a queued task. With job_change: only if that job write
+        applies (update_if(job_expect) / modify), in the same
+        transaction. `payload` may be a callable of the job fields
+        written. Returns (task id, the job fields written) — (None,
+        None) when the job write didn't apply. Raises taskq.TaskActive
+        (nothing written) when the job already has an active task of
+        this kind."""
+        expect = ((job_expect,) if isinstance(job_expect, str)
+                  else job_expect)
+        now = time.time()
+        with self._tx() as conn:
+            written = None
+            if job_change is not None:
+                written = self._s._apply(job_id, expect, job_change,
+                                         commit=False)
+                if written is None:
+                    return None, None
+            if callable(payload):
+                payload = payload(written)
+            task_id = self._insert(conn, job_id, kind, payload, owner_id,
+                                   plan, sort_offset_s, max_attempts, now)
+        self.notify(kind)
+        return task_id, written
+
+    def admit_ingest(self, job_id: str, *, owner_id: str | None,
+                     count_user: bool, user_limit: int, queue_cap: int,
+                     running_limit: int, payload: dict[str, Any],
+                     plan: str | None, sort_offset_s: float,
+                     max_attempts: int, job_fields: dict[str, Any]) -> str:
+        """POST /jobs, after the charge: the binding admission checks and
+        the enqueue in one transaction — the owner's other running jobs
+        (count_user; < user_limit, else "too_many_active_jobs"), the
+        analyses waiting beyond the running ones (≤ queue_cap, else
+        "server_busy"), then the claim row becomes the job (update_if
+        pending → job_fields) and its ingest task is inserted. Returns
+        "ok", one of those codes, or "gone" (the claim row vanished)."""
+        now = time.time()
+        with self._tx() as conn:
+            if count_user and owner_id and user_limit > 0:
+                n = conn.execute(
+                    "SELECT count(*) FROM jobs WHERE id <> ? AND "
+                    "json_extract(data, '$.owner_id') = ? AND "
+                    "json_extract(data, '$.status') IN ('pending', "
+                    "'processing') " + _NOT_A_CLAIM_SQLITE,
+                    (job_id, owner_id)).fetchone()[0]
+                if n >= user_limit:
+                    return "too_many_active_jobs"
+            queued, active = conn.execute(
+                "SELECT count(*) FILTER (WHERE state = 'queued'), "
+                "count(*) FILTER (WHERE state IN ('dispatching', 'running')) "
+                "FROM tasks WHERE kind = 'ingest' AND state IN ('queued', "
+                "'dispatching', 'running')").fetchone()
+            if queued + active + 1 - running_limit > queue_cap:
+                return "server_busy"
+            if self._s._apply(job_id, ("pending",), job_fields,
+                              commit=False) is None:
+                return "gone"
+            self._insert(conn, job_id, "ingest", payload, owner_id, plan,
+                         sort_offset_s, max_attempts, now)
+        self.notify("ingest")
+        return "ok"
+
+    def admission_counts(self, owner_id: str | None) -> tuple[int, int, int]:
+        """(the owner's running jobs, queued ingest tasks, dispatched or
+        running ingest tasks) — the soft checks of presign / multipart
+        init and POST /jobs before any bytes move (no lock)."""
+        with self._s._lock:
+            user = 0
+            if owner_id:
+                user = self._s._conn.execute(
+                    "SELECT count(*) FROM jobs WHERE "
+                    "json_extract(data, '$.owner_id') = ? AND "
+                    "json_extract(data, '$.status') IN ('pending', "
+                    "'processing') " + _NOT_A_CLAIM_SQLITE,
+                    (owner_id,)).fetchone()[0]
+            queued, active = self._s._conn.execute(
+                "SELECT count(*) FILTER (WHERE state = 'queued'), "
+                "count(*) FILTER (WHERE state IN ('dispatching', 'running')) "
+                "FROM tasks WHERE kind = 'ingest' AND state IN ('queued', "
+                "'dispatching', 'running')").fetchone()
+        return int(user), int(queued or 0), int(active or 0)
+
+    # ── dispatcher ───────────────────────────────────────────────────
+
+    def counts(self, kind: str) -> tuple[int, int]:
+        """(queued, dispatched or running) tasks of `kind`."""
+        with self._s._lock:
+            queued, active = self._s._conn.execute(
+                "SELECT count(*) FILTER (WHERE state = 'queued'), "
+                "count(*) FILTER (WHERE state IN ('dispatching', 'running')) "
+                "FROM tasks WHERE kind = ? AND state IN ('queued', "
+                "'dispatching', 'running')", (kind,)).fetchone()
+        return int(queued or 0), int(active or 0)
+
+    def active_count(self, kind: str) -> int:
+        return self.counts(kind)[1]
+
+    def queued(self, kind: str | None = None, limit: int | None = None
+               ) -> list[taskq.Task]:
+        """Queued tasks in dispatch order (per kind: sort_at, id)."""
+        sql = "SELECT * FROM tasks WHERE state = 'queued'"
+        args: list[Any] = []
+        if kind is not None:
+            sql += " AND kind = ?"
+            args.append(kind)
+        sql += " ORDER BY kind, sort_at, id"
+        if limit is not None:
+            sql += " LIMIT ?"
+            args.append(int(limit))
+        return self._tasks(sql, args)
+
+    def claim_for_dispatch(self, kind: str, limit: int, leader_id: str,
+                           lease_s: float, executor: str, *,
+                           created_before: float | None = None
+                           ) -> list[taskq.Task]:
+        """Take up to `limit` queued tasks of `kind` that are due, in
+        order: state dispatching, attempts + 1 (the fencing token), a
+        start lease of lease_s; ingest tasks count against the Groq
+        window from now (started_at)."""
+        if limit <= 0:
+            return []
+        now = time.time()
+        with self._tx() as conn:
+            sql = ("SELECT id FROM tasks WHERE state = 'queued' AND "
+                   "kind = ? AND run_after <= ?")
+            args: list[Any] = [kind, now]
+            if created_before is not None:
+                sql += " AND created_at <= ?"
+                args.append(created_before)
+            sql += " ORDER BY sort_at, id LIMIT ?"
+            args.append(int(limit))
+            ids = [r[0] for r in conn.execute(sql, args).fetchall()]
+            for task_id in ids:
+                conn.execute(
+                    "UPDATE tasks SET state = 'dispatching', "
+                    "attempts = attempts + 1, locked_by = ?, "
+                    "locked_until = ?, executor = ?, updated_at = ?, "
+                    "started_at = CASE WHEN kind = 'ingest' THEN ? "
+                    "ELSE started_at END WHERE id = ? AND state = 'queued'",
+                    (leader_id, now + lease_s, executor, now, now, task_id))
+            if not ids:
+                return []
+            marks = ",".join("?" for _ in ids)
+            rows = conn.execute(
+                f"SELECT * FROM tasks WHERE id IN ({marks}) "
+                "ORDER BY sort_at, id", ids).fetchall()
+        return [taskq.task_from_row(dict(r)) for r in rows]
+
+    def mark_spawned(self, task_id: int, attempt: int, call_id: str) -> bool:
+        with self._tx() as conn:
+            return conn.execute(
+                "UPDATE tasks SET modal_call_id = ?, updated_at = ? "
+                "WHERE id = ? AND attempts = ?",
+                (call_id, time.time(), task_id, attempt)).rowcount == 1
+
+    def groq_window_s(self, since: float) -> float:
+        """Estimated Groq audio-seconds of the ingest tasks started after
+        `since` (the budget gate)."""
+        value = self._one(
+            "SELECT sum(CAST(json_extract(payload, '$.est_audio_s') AS REAL)) "
+            "FROM tasks WHERE kind = 'ingest' AND started_at > ?", (since,))
+        return float(value or 0.0)
+
+    # ── worker (fenced by attempts) ──────────────────────────────────
+
+    def worker_claim(self, task_id: int, attempt: int, call_id: str,
+                     lease_s: float) -> taskq.Task | None:
+        """running, leased to `call_id` — only while attempts == attempt
+        (dispatching, or running: a rerun of the same attempt). None:
+        fenced out."""
+        now = time.time()
+        with self._tx() as conn:
+            cur = conn.execute(
+                "UPDATE tasks SET state = 'running', "
+                "modal_call_id = coalesce(modal_call_id, ?), locked_by = ?, "
+                "locked_until = ?, heartbeat_at = ?, "
+                "started_at = coalesce(started_at, ?), updated_at = ? "
+                "WHERE id = ? AND attempts = ? AND state IN ('dispatching', "
+                "'running')",
+                (call_id, call_id, now + lease_s, now, now, now, task_id,
+                 attempt))
+            if cur.rowcount != 1:
+                return None
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?",
+                               (task_id,)).fetchone()
+        return taskq.task_from_row(dict(row))
+
+    def heartbeat(self, task_id: int, attempt: int, lease_s: float) -> bool:
+        """Renew the lease; False = fenced out (requeued, re-claimed,
+        its job deleted): stop, commit nothing."""
+        now = time.time()
+        with self._tx() as conn:
+            return conn.execute(
+                "UPDATE tasks SET locked_until = ?, heartbeat_at = ?, "
+                "updated_at = ? WHERE id = ? AND attempts = ? AND "
+                "state = 'running'",
+                (now + lease_s, now, now, task_id, attempt)).rowcount == 1
+
+    def commit_success(self, task_id: int, attempt: int,
+                       result: dict[str, Any] | Callable[[], dict[str, Any]],
+                       job_id: str, job_expect: str | tuple[str, ...] | None,
+                       job_change: dict[str, Any] | Callable[[Job], Any]
+                       ) -> str:
+        """The attempt's result and the job's new state, in one
+        transaction: the task succeeds only while this attempt still
+        holds it, the job write only with it. `result` may be a callable
+        (called after the job write); its "gc" entry ([entries,
+        not_before, store]) is queued in media_gc in the same
+        transaction (the render a new one supersedes). Returns "ok",
+        "fenced" (nothing written) or "job_changed" (the job isn't in
+        job_expect any more / gone: nothing written)."""
+        expect = ((job_expect,) if isinstance(job_expect, str)
+                  else job_expect)
+        now = time.time()
+        try:
+            with self._tx() as conn:
+                if conn.execute(
+                        "UPDATE tasks SET state = 'succeeded', "
+                        "finished_at = ?, locked_until = NULL, "
+                        "error_code = NULL, retryable = NULL, "
+                        "updated_at = ? WHERE id = ? AND attempts = ? AND "
+                        "state = 'running'",
+                        (now, now, task_id, attempt)).rowcount != 1:
+                    return "fenced"
+                if self._s._apply(job_id, expect, job_change,
+                                  commit=False) is None:
+                    raise _Rollback()
+                value = dict((result() if callable(result) else result) or {})
+                gc = value.pop("gc", None)
+                if gc and gc[0]:
+                    self._s._gc_insert(gc_clean_entries(gc[0]),
+                                       float(gc[1]), gc[2])
+                conn.execute("UPDATE tasks SET result = ? WHERE id = ?",
+                             (json.dumps(value), task_id))
+        except _Rollback:
+            return "job_changed"
+        taskq.wake_finalizer()
+        return "ok"
+
+    def report_failure(self, task_id: int, attempt: int, error_code: str,
+                       message: str, retryable: bool,
+                       result: dict[str, Any] | None = None) -> bool:
+        """The attempt failed (the finalizer decides what happens next);
+        only while it still holds the task. False: fenced out."""
+        now = time.time()
+        with self._tx() as conn:
+            ok = conn.execute(
+                "UPDATE tasks SET state = 'failed', finished_at = ?, "
+                "error_code = ?, last_error = ?, retryable = ?, result = ?, "
+                "locked_until = NULL, updated_at = ? WHERE id = ? AND "
+                "attempts = ? AND state = 'running'",
+                (now, error_code, (message or "")[:2000], int(bool(retryable)),
+                 json.dumps(result or {}), now, task_id,
+                 attempt)).rowcount == 1
+        if ok:
+            taskq.wake_finalizer()
+        return ok
+
+    # ── reaper / finalizer ───────────────────────────────────────────
+
+    def expired(self, now: float | None = None) -> list[taskq.Task]:
+        """Dispatched or running tasks whose lease ran out."""
+        now = time.time() if now is None else now
+        return self._tasks(
+            "SELECT * FROM tasks WHERE state IN ('dispatching', 'running') "
+            "AND locked_until < ? ORDER BY locked_until", (now,))
+
+    def requeue(self, task_id: int, *, expect_states: tuple[str, ...],
+                attempts: int, delay_s: float = 0.0, free: bool = False,
+                provider_wait: bool = False, error_code: str | None = None,
+                last_error: str | None = None,
+                expired_before: float | None = None,
+                dead: bool = False) -> str | None:
+        """Take a task back (reaper: a lost lease; finalizer: a retryable
+        failure). Only while it is still in `expect_states` with this
+        `attempts` (and, with expired_before, its lease ran out before
+        then). queued again after delay_s — or dead
+        (attempts_exhausted) once a counted attempt was the last, or
+        with dead=True (error_code / last_error as given). `free`: the
+        attempt doesn't count (max_attempts + 1: a provider wait, a
+        spawn that never ran, a shutdown); `provider_wait` also counts
+        the wait. Never lowers attempts (the fencing token). Returns
+        "queued", "dead" or None (changed meanwhile)."""
+        now = time.time()
+        with self._tx() as conn:
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?",
+                               (task_id,)).fetchone()
+            if row is None:
+                return None
+            t = taskq.task_from_row(dict(row))
+            if (t.state not in expect_states or t.attempts != attempts
+                    or t.finalized_at is not None
+                    or (expired_before is not None
+                        and not (t.locked_until is not None
+                                 and t.locked_until < expired_before))):
+                return None
+            code = error_code or t.error_code
+            text = last_error if last_error is not None else t.last_error
+            if dead or (not free and t.attempts >= t.max_attempts):
+                conn.execute(
+                    "UPDATE tasks SET state = 'dead', finished_at = ?, "
+                    "locked_by = NULL, locked_until = NULL, "
+                    "error_code = ?, last_error = ?, retryable = 0, "
+                    "updated_at = ? WHERE id = ?",
+                    (now, code if dead else taskq.ATTEMPTS_EXHAUSTED,
+                     ((text or "") if dead else
+                      (f"{code}: {text}" if code else (text or "")))[:2000],
+                     now, task_id))
+                new_state = "dead"
+            else:
+                conn.execute(
+                    "UPDATE tasks SET state = 'queued', run_after = ?, "
+                    "max_attempts = max_attempts + ?, "
+                    "provider_waits = provider_waits + ?, "
+                    "first_wait_at = CASE WHEN ? THEN coalesce("
+                    "first_wait_at, ?) ELSE first_wait_at END, "
+                    "locked_by = NULL, locked_until = NULL, "
+                    "heartbeat_at = NULL, modal_call_id = NULL, "
+                    "finished_at = NULL, result = NULL, error_code = ?, "
+                    "last_error = ?, retryable = NULL, updated_at = ? "
+                    "WHERE id = ?",
+                    (now + max(0.0, delay_s), 1 if free else 0,
+                     1 if provider_wait else 0, 1 if provider_wait else 0,
+                     now, code, (text or "")[:2000] or None, now, task_id))
+                new_state = "queued"
+        if new_state == "queued":
+            self.notify(t.kind)
+        else:
+            taskq.wake_finalizer()
+        return new_state
+
+    def expire_held(self, kind: str, older_than: float, error_code: str,
+                    message: str) -> list[taskq.Task]:
+        """Queued tasks of `kind` waiting since before `older_than`
+        (their first provider wait, else their creation) → dead."""
+        now = time.time()
+        with self._tx() as conn:
+            rows = conn.execute(
+                "SELECT id FROM tasks WHERE state = 'queued' AND kind = ? "
+                "AND coalesce(first_wait_at, created_at) < ?",
+                (kind, older_than)).fetchall()
+            ids = [r[0] for r in rows]
+            for task_id in ids:
+                conn.execute(
+                    "UPDATE tasks SET state = 'dead', finished_at = ?, "
+                    "error_code = ?, last_error = ?, retryable = 0, "
+                    "updated_at = ? WHERE id = ? AND state = 'queued'",
+                    (now, error_code, message[:2000], now, task_id))
+            if not ids:
+                return []
+            marks = ",".join("?" for _ in ids)
+            out = conn.execute(f"SELECT * FROM tasks WHERE id IN ({marks})",
+                               ids).fetchall()
+        taskq.wake_finalizer()
+        return [taskq.task_from_row(dict(r)) for r in out]
+
+    def unfinalized(self, limit: int = 50) -> list[taskq.Task]:
+        """Terminal tasks the finalizer hasn't settled, oldest first."""
+        return self._tasks(
+            "SELECT * FROM tasks WHERE finalized_at IS NULL AND state IN "
+            "('succeeded', 'failed', 'dead', 'cancelled') "
+            "ORDER BY finished_at, id LIMIT ?", (int(limit),))
+
+    def mark_finalized(self, task_id: int,
+                       event: tuple[str, str | None, dict[str, Any]] | None
+                       = None) -> bool:
+        """Settled — with its job event (kind, job_id, data) in the same
+        transaction, so the event is recorded exactly once. False: it
+        was settled already (or isn't terminal)."""
+        now = time.time()
+        with self._tx() as conn:
+            if conn.execute(
+                    "UPDATE tasks SET finalized_at = ?, updated_at = ? "
+                    "WHERE id = ? AND finalized_at IS NULL AND state IN "
+                    "('succeeded', 'failed', 'dead', 'cancelled')",
+                    (now, now, task_id)).rowcount != 1:
+                return False
+            if event is not None:
+                kind, job_id, data = event
+                conn.execute(
+                    "INSERT INTO job_events (at, kind, job_id, data) "
+                    "VALUES (?, ?, ?, ?)",
+                    (now, kind, job_id, json.dumps(data or {}, default=str)))
+        return True
+
+    # ── queue positions ──────────────────────────────────────────────
+
+    def write_positions(self, rows: list[tuple[str, str, int, str | None]]
+                        ) -> None:
+        """Replace queue_positions with (job_id, kind, pos, hint) rows."""
+        now = time.time()
+        with self._tx() as conn:
+            conn.execute("DELETE FROM queue_positions")
+            conn.executemany(
+                "INSERT OR REPLACE INTO queue_positions (job_id, kind, pos, "
+                "hint, updated_at) VALUES (?, ?, ?, ?, ?)",
+                [(j, k, p, h, now) for j, k, p, h in rows])
+
+    def position(self, job_id: str) -> tuple[int | None, str | None]:
+        with self._s._lock:
+            row = self._s._conn.execute(
+                "SELECT pos, hint FROM queue_positions WHERE job_id = ?",
+                (job_id,)).fetchone()
+        return (int(row["pos"]), row["hint"]) if row else (None, None)
+
+    def rank(self, task_id: int) -> int | None:
+        """1-based place of a queued task among the queued tasks of its
+        kind (dispatch order); None if it isn't queued."""
+        with self._s._lock:
+            row = self._s._conn.execute(
+                "SELECT kind, sort_at FROM tasks WHERE id = ? AND "
+                "state = 'queued'", (task_id,)).fetchone()
+            if row is None:
+                return None
+            n = self._s._conn.execute(
+                "SELECT count(*) FROM tasks WHERE state = 'queued' AND "
+                "kind = ? AND (sort_at < ? OR (sort_at = ? AND id <= ?))",
+                (row["kind"], row["sort_at"], row["sort_at"],
+                 task_id)).fetchone()[0]
+        return int(n)
+
+    # ── lookups ──────────────────────────────────────────────────────
+
+    def get(self, task_id: int) -> taskq.Task | None:
+        rows = self._tasks("SELECT * FROM tasks WHERE id = ?", (task_id,))
+        return rows[0] if rows else None
+
+    def for_job(self, job_id: str) -> list[taskq.Task]:
+        return self._tasks("SELECT * FROM tasks WHERE job_id = ? ORDER BY id",
+                           (job_id,))
+
+    def active_task(self, job_id: str, kind: str | None = None
+                    ) -> taskq.Task | None:
+        sql = ("SELECT * FROM tasks WHERE job_id = ? AND state IN "
+               "('queued', 'dispatching', 'running')")
+        args: list[Any] = [job_id]
+        if kind is not None:
+            sql += " AND kind = ?"
+            args.append(kind)
+        rows = self._tasks(sql + " ORDER BY id", args)
+        return rows[0] if rows else None
+
+    def job_ids(self, kind: str) -> list[str]:
+        """The jobs that got a task of `kind`, in the order the tasks
+        were created (one entry per task)."""
+        with self._s._lock:
+            rows = self._s._conn.execute(
+                "SELECT job_id FROM tasks WHERE kind = ? ORDER BY id",
+                (kind,)).fetchall()
+        return [r[0] for r in rows]
+
+    def unsettled_job_ids(self) -> set[str]:
+        """Jobs with a task that is active or not finalized yet."""
+        with self._s._lock:
+            rows = self._s._conn.execute(
+                "SELECT DISTINCT job_id FROM tasks WHERE state IN "
+                "('queued', 'dispatching', 'running') OR finalized_at IS "
+                "NULL").fetchall()
+        return {r[0] for r in rows}
+
+    def running_jobs_without_tasks(self) -> list[str]:
+        """Jobs pending / processing with no active and no unfinalized
+        task: left behind by the WP1 path, a rollback or a restore (the
+        leader's migration re-enqueues or settles them)."""
+        with self._s._lock:
+            rows = self._s._conn.execute(
+                "SELECT id FROM jobs WHERE json_extract(data, '$.status') "
+                "IN ('pending', 'processing') AND NOT EXISTS (SELECT 1 FROM "
+                "tasks t WHERE t.job_id = jobs.id AND (t.state IN "
+                "('queued', 'dispatching', 'running') OR "
+                "t.finalized_at IS NULL))").fetchall()
+        return [r[0] for r in rows]
+
+    # ── provider breakers ────────────────────────────────────────────
+
+    def breaker(self, provider: str) -> taskq.Breaker:
+        with self._s._lock:
+            row = self._s._conn.execute(
+                "SELECT * FROM provider_state WHERE provider = ?",
+                (provider,)).fetchone()
+        return taskq.breaker_from_row(provider, dict(row) if row else None)
+
+    def update_breaker(self, provider: str,
+                       fn: Callable[[taskq.Breaker], taskq.Breaker | None]
+                       ) -> taskq.Breaker:
+        """Read-modify-write one provider_state row atomically."""
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM provider_state WHERE provider = ?",
+                (provider,)).fetchone()
+            cur = taskq.breaker_from_row(provider, dict(row) if row else None)
+            new = fn(cur)
+            if new is None:
+                return cur
+            conn.execute(
+                "INSERT INTO provider_state (provider, open_until, reason, "
+                "failures, window_start, opens, updated_at) VALUES "
+                "(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(provider) DO UPDATE SET "
+                "open_until = excluded.open_until, reason = excluded.reason, "
+                "failures = excluded.failures, "
+                "window_start = excluded.window_start, "
+                "opens = excluded.opens, updated_at = excluded.updated_at",
+                (provider, new.open_until, new.reason, new.failures,
+                 new.window_start, new.opens, new.updated_at or time.time()))
+        return new
+
+    def _truncate_for_tests(self) -> None:
+        with self._tx() as conn:
+            for table in ("tasks", "provider_state", "queue_positions"):
+                conn.execute(f"DELETE FROM {table}")
+
+
+def task_store() -> Any:
+    """The task store of the active database (SqliteTaskStore, or
+    backend.pg_tasks.PgTaskStore with Postgres) — the job store's own,
+    so it follows whatever store is active."""
+    return _open_store().tasks
 
 
 def new_job_id() -> str:

@@ -195,11 +195,88 @@ CREATE TABLE IF NOT EXISTS job_events (
 CREATE INDEX IF NOT EXISTS job_events_kind_at ON job_events (kind, at);
 """
 
+# WP4: the durable task queue (backend/taskq.py, backend/pg_tasks.py) —
+# tasks with leases and a fencing token (attempts), the provider circuit
+# breakers, and the queue positions the leader recomputes (UNLOGGED:
+# rebuilt every dispatcher tick, never worth a WAL write). Not in TABLES
+# (backups, the cutover): after a restore the leader re-enqueues what was
+# running. Created whatever CLEO_TASK_QUEUE says (empty while it is off).
+# The DO block grants the Modal worker role (WP4 §6.1) its table rights,
+# if an operator created it.
+_SCHEMA_V5 = """
+CREATE TABLE IF NOT EXISTS tasks (
+    id bigserial PRIMARY KEY,
+    job_id text COLLATE "C" NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    kind text NOT NULL CHECK (kind IN ('ingest', 'render', 'preview')),
+    state text NOT NULL CHECK (state IN ('queued', 'dispatching', 'running',
+        'succeeded', 'failed', 'dead', 'cancelled')),
+    owner_id text,
+    plan text,
+    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    sort_at timestamptz NOT NULL DEFAULT now(),
+    run_after timestamptz NOT NULL DEFAULT now(),
+    attempts integer NOT NULL DEFAULT 0,
+    max_attempts integer NOT NULL DEFAULT 3,
+    provider_waits integer NOT NULL DEFAULT 0,
+    first_wait_at timestamptz,
+    executor text,
+    locked_by text,
+    locked_until timestamptz,
+    heartbeat_at timestamptz,
+    modal_call_id text,
+    started_at timestamptz,
+    finished_at timestamptz,
+    result jsonb,
+    error_code text,
+    last_error text,
+    retryable boolean,
+    finalized_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_active ON tasks (job_id, kind)
+    WHERE state IN ('queued', 'dispatching', 'running');
+CREATE INDEX IF NOT EXISTS tasks_queue ON tasks (kind, sort_at, id)
+    WHERE state = 'queued';
+CREATE INDEX IF NOT EXISTS tasks_leases ON tasks (locked_until)
+    WHERE state IN ('dispatching', 'running');
+CREATE INDEX IF NOT EXISTS tasks_unfinalized ON tasks (finished_at)
+    WHERE finalized_at IS NULL
+      AND state IN ('succeeded', 'failed', 'dead', 'cancelled');
+CREATE INDEX IF NOT EXISTS tasks_started ON tasks (kind, started_at)
+    WHERE started_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS tasks_job ON tasks (job_id);
+CREATE TABLE IF NOT EXISTS provider_state (
+    provider text COLLATE "C" PRIMARY KEY,
+    open_until timestamptz,
+    reason text,
+    failures integer NOT NULL DEFAULT 0,
+    window_start timestamptz,
+    opens integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNLOGGED TABLE IF NOT EXISTS queue_positions (
+    job_id text COLLATE "C" PRIMARY KEY,
+    kind text,
+    pos integer,
+    hint text,
+    updated_at timestamptz
+);
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cleo_worker') THEN
+    GRANT SELECT, UPDATE ON jobs, tasks TO cleo_worker;
+    GRANT SELECT, INSERT, UPDATE ON provider_state TO cleo_worker;
+    GRANT SELECT ON schema_migrations TO cleo_worker;
+  END IF;
+END $$;
+"""
+
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _SCHEMA_V1),
     (2, _SCHEMA_V2),
     (3, _SCHEMA_V3),
     (4, _SCHEMA_V4),
+    (5, _SCHEMA_V5),
 ]
 
 _SCHEMA_MIGRATIONS_DDL = (
@@ -550,9 +627,43 @@ class PgJobStore:
 
     def __init__(self, database: Database) -> None:
         self._db = database
+        self._tasks: Any = None
 
     def __repr__(self) -> str:
         return f"<PgJobStore {db.redacted(self._db.url)}>"
+
+    @property
+    def tasks(self) -> Any:
+        """The task store of this database (backend/pg_tasks.py)."""
+        if self._tasks is None:
+            from backend import pg_tasks
+            self._tasks = pg_tasks.PgTaskStore(self)
+        return self._tasks
+
+    def _positions(self, conn: psycopg.Connection | None,
+                   job_ids: list[str]) -> dict[str, int]:
+        """queue_position of queued jobs from queue_positions (the task
+        queue's leader keeps it; the job rows don't carry it with the
+        queue on). {} while the queue is off."""
+        from backend import taskq
+        ids = [i for i in job_ids if _is_id(i)]
+        if not ids or not taskq.enabled():
+            return {}
+        sql = ("SELECT job_id, pos FROM queue_positions WHERE job_id = "
+               "ANY(%s) AND pos IS NOT NULL")
+        if conn is None:
+            with self._db.connection() as c:
+                rows = c.execute(sql, (ids,)).fetchall()
+        else:
+            rows = conn.execute(sql, (ids,)).fetchall()
+        return {r[0]: int(r[1]) for r in rows}
+
+    def _with_position(self, job: Job | None) -> Job | None:
+        if job is not None:
+            pos = self._positions(None, [job.id]).get(job.id)
+            if pos is not None:
+                job.queue_position = pos
+        return job
 
     def _load(self, job_id: str, text: str) -> Job | None:
         try:
@@ -615,7 +726,7 @@ class PgJobStore:
         if row is None:
             return None
         try:
-            return load_job(row[1])
+            return self._with_position(load_job(row[1]))
         except Exception:
             return None
 
@@ -627,7 +738,7 @@ class PgJobStore:
                                (job_id,)).fetchone()
         if row is None:
             return None
-        return self._load(job_id, row[0])
+        return self._with_position(self._load(job_id, row[0]))
 
     def update(self, job_id: str, **fields_to_update: Any) -> None:
         self._write(job_id, None, fields_to_update)
@@ -653,32 +764,62 @@ class PgJobStore:
         if not _is_id(job_id):
             return None
         with self._db.connection() as conn:
-            if expect is None:
-                row = conn.execute(
-                    "SELECT data FROM jobs WHERE id = %s FOR UPDATE",
-                    (job_id,)).fetchone()
-            else:
-                row = conn.execute(
-                    "SELECT data FROM jobs WHERE id = %s "
-                    "AND status = ANY(%s) FOR UPDATE",
-                    (job_id, list(expect))).fetchone()
-            if row is None:
-                return None
-            try:
-                job = load_job(row[0])
-            except Exception:
-                return None
-            if expect is not None and job.status not in expect:
-                return None
-            fields_to_update = change(job) if callable(change) else change
-            if fields_to_update is None:
-                return None
-            for k, v in fields_to_update.items():
-                setattr(job, k, v)
-            if "updated_at" not in fields_to_update:
-                job.updated_at = time.time()
-            conn.execute(_UPDATE_SQL, (dump_job(job), *_hot(job), job_id))
+            return self._write_on(conn, job_id, expect, change)
+
+    def _write_on(self, conn: psycopg.Connection, job_id: str,
+                  expect: tuple[str, ...] | None,
+                  change: dict[str, Any] | Callable[[Job], Any]
+                  ) -> dict[str, Any] | None:
+        """_write inside the caller's transaction `conn` (the task store
+        writes a job and its task in one)."""
+        if not _is_id(job_id):
+            return None
+        if expect is None:
+            row = conn.execute(
+                "SELECT data FROM jobs WHERE id = %s FOR UPDATE",
+                (job_id,)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT data FROM jobs WHERE id = %s "
+                "AND status = ANY(%s) FOR UPDATE",
+                (job_id, list(expect))).fetchone()
+        if row is None:
+            return None
+        try:
+            job = load_job(row[0])
+        except Exception:
+            return None
+        if expect is not None and job.status not in expect:
+            return None
+        fields_to_update = change(job) if callable(change) else change
+        if fields_to_update is None:
+            return None
+        for k, v in fields_to_update.items():
+            setattr(job, k, v)
+        if "updated_at" not in fields_to_update:
+            job.updated_at = time.time()
+        conn.execute(_UPDATE_SQL, (dump_job(job), *_hot(job), job_id))
         return fields_to_update
+
+    def patch_status(self, job_id: str, expect: str | tuple[str, ...],
+                     **fields_to_update: Any) -> bool:
+        """A progress write: the scalar fields (message, progress, …)
+        merged into the row (data || patch) while its status is
+        `expect` — no read-modify-write of the whole job, so it can't
+        undo another process's write, and never after a terminal
+        status."""
+        if not _is_id(job_id):
+            return False
+        if isinstance(expect, str):
+            expect = (expect,)
+        now = time.time()
+        patch = {**fields_to_update, "updated_at": now}
+        with self._db.connection() as conn:
+            cur = conn.execute(
+                "UPDATE jobs SET data = data || %s::jsonb, updated_at = %s "
+                "WHERE id = %s AND status = ANY(%s)",
+                (to_json(patch), _dt(now), job_id, list(expect)))
+            return cur.rowcount == 1
 
     def status_many(self, job_ids: list[str]) -> dict[str, dict[str, Any]]:
         ids = list(dict.fromkeys(i for i in job_ids if i and _is_id(i)))
@@ -702,6 +843,8 @@ class PgJobStore:
                 continue
             out[job_id] = {k: d.get(k, defaults.get(k)) for k in _STATUS_FIELDS}
             out[job_id]["id"] = job_id
+        for job_id, pos in self._positions(None, list(out)).items():
+            out[job_id]["queue_position"] = pos
         return out
 
     def ping(self) -> None:
@@ -731,7 +874,11 @@ class PgJobStore:
         entries = gc_clean_entries(gc)
         with self._db.connection() as conn:
             if _is_id(job_id):
+                # Its tasks go with it (ON DELETE CASCADE): a worker still
+                # running one is fenced out on its next heartbeat.
                 conn.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
+                conn.execute("DELETE FROM queue_positions WHERE job_id = %s",
+                             (job_id,))
             self._gc_insert(conn, entries, not_before, gc_store)
 
     def exists(self, job_id: str) -> bool:
@@ -888,7 +1035,14 @@ class PgJobStore:
         if limit is not None:
             sql += " LIMIT %s"
             args.append(int(limit))
-        return self._jobs(sql, tuple(args))
+        rows = self._jobs(sql, tuple(args))
+        running = [j.id for j in rows if j.status in RUNNING_STATUSES]
+        if running:
+            positions = self._positions(None, running)
+            for job in rows:
+                if job.id in positions:
+                    job.queue_position = positions[job.id]
+        return rows
 
     def list_by_status(self, *statuses: str,
                        error: str | None = None) -> list[Job]:
@@ -962,7 +1116,8 @@ class PgJobStore:
 
     def _truncate_for_tests(self) -> None:
         with self._db.connection() as conn:
-            conn.execute("TRUNCATE jobs")
+            conn.execute("TRUNCATE jobs, tasks, provider_state, "
+                         "queue_positions")
 
 
 # ── accounts adapter ─────────────────────────────────────────────────
