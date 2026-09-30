@@ -232,9 +232,11 @@ def shown_at(events: list[dict], t: float):
     return ev, ai
 
 
-def score(events: list[dict], truth: list[dict]) -> dict:
+def score(events: list[dict], truth: list[dict], norm=None) -> dict:
     """How many spoken words are the highlighted word at their midpoint,
-    and which caption groups are burned in more than one clip."""
+    and which caption groups are burned in more than one clip. `norm`
+    makes a word comparable (default: upper case, outer punctuation off)."""
+    norm = norm or _norm
     ok, missing, rows = 0, 0, []
     for w in truth:
         mid = (w["t0"] + w["t1"]) / 2
@@ -245,7 +247,7 @@ def score(events: list[dict], truth: list[dict]) -> dict:
             continue
         ev, ai = r
         hl = ev["words"][ai]
-        ok += _norm(w["text"]) in [_norm(p) for p in hl.split()]
+        ok += norm(w["text"]) in [norm(p) for p in hl.split()]
         rows.append((w["text"], hl, " ".join(ev["words"])))
     segs_of: dict[str, set] = {}
     for ev in events:
