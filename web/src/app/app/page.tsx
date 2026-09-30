@@ -28,7 +28,7 @@ import { uploadJob } from "@/features/upload/uploadJob";
 
 type Phase = "picker" | "idle" | "configuring" | "reviewing" | "error";
 
-// UX7: the v2 editor shell (NEXT_PUBLIC_EDITOR_V2=1 only; its own chunk,
+// UX7: the v2 editor shell (NEXT_PUBLIC_EDITOR_V2=1, or "optin" + ?editor=v2; its own chunk,
 // never loaded with the flag off). Dark placeholder while the chunk loads.
 const EditorV2 = dynamic(() => import("@/features/editor/v2/EditorV2"), {
   ssr: false,
