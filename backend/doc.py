@@ -748,18 +748,18 @@ def load_prefs(owner_id: str | None) -> dict | None:
 
 def commit_change(fields: dict[str, Any], res: dict[str, Any],
                   prefs: dict | None = None,
-                  expect: tuple[str, ...] = ("processing",)
+                  expect: tuple[str, ...] | None = ("processing",)
                   ) -> Callable[[Any], dict[str, Any] | None]:
     """The job change that saves a finished analysis (the WP1 thread and
     the task queue's worker both commit through it): `fields`, plus the
     doc of `res` with its style resolved against the job AS STORED at
     the commit — a style picked while the analysis ran (PATCH /jobs/{id}
     caption_style) lands in the doc. None (no write) once the job left
-    `expect`."""
+    `expect` (None: no status check)."""
     base = res.get("doc")
 
     def change(cur: Any) -> dict[str, Any] | None:
-        if getattr(cur, "status", None) not in expect:
+        if expect is not None and getattr(cur, "status", None) not in expect:
             return None
         out = dict(fields)
         if isinstance(base, dict):

@@ -204,6 +204,15 @@ def _keys_of(job: Job) -> tuple:
             job.preview_version)
 
 
+_CTYPES = {".jpg": "image/jpeg", ".bin": "application/octet-stream",
+           ".woff2": "font/woff2", ".ttf": "font/ttf",
+           ".json": "application/json"}
+
+
+def _ctype(key: str) -> str:
+    return _CTYPES.get(os.path.splitext(key)[1], "video/mp4")
+
+
 def move_plan(job: Job) -> list[dict[str, Any]]:
     """A keyed-local job's keys (media_store "local"): each one to copy
     from the local media root to the same key in R2. Browser uploads
@@ -215,8 +224,7 @@ def move_plan(job: Job) -> list[dict[str, Any]]:
         path = media.local_path(key)
         items.append({"field": "move", "key": key,
                       "path": path if path.is_file() else None,
-                      "ctype": ("image/jpeg" if key.endswith(".jpg")
-                                else "video/mp4")})
+                      "ctype": _ctype(key)})
     return items
 
 

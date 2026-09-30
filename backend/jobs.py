@@ -154,6 +154,24 @@ class Job:
     # reached). None = none recorded — then it isn't stored at all, so a
     # job written without the queue looks exactly as before.
     processing_warnings: list[str] | None = None
+    # ── UT3: the edit document and media analysis (new jobs only; a job
+    # analysed before keeps None / defaults and opens as before) ──
+    # EditDoc v2 (backend/doc.py): words, style, format, clips (null
+    # until UX10). GET/PATCH /jobs/{id}/doc.
+    doc: dict[str, Any] | None = None
+    # Last accepted client revision of the doc (PATCH base_rev / rev).
+    doc_rev: float = 0
+    # Frame rate of the mezz, and whether it is constant (the web
+    # normalize makes it so; review C8). UT4 snaps cuts to that grid.
+    mezz_fps: float | None = None
+    mezz_cfr: bool = False
+    # loudnorm measurement of the mezz audio {I, TP, LRA, thresh, offset}.
+    audio_loudness: dict[str, Any] | None = None
+    # jobs/{id}/peaks.bin: 100 Hz int8 RMS envelope (audio_analysis.py).
+    peaks_key: str | None = None
+    # CJK caption font subsets {font: {family, rev, chars, missing, json,
+    # woff2, ttf (keys)}} (backend/font_subset.py).
+    font_subsets: dict[str, Any] = field(default_factory=dict)
     # Keys of the stored row this code doesn't know (a later release's
     # fields): kept as stored and written back on every write, so this
     # release can't drop them. Never part of the API.
@@ -270,10 +288,20 @@ class Job:
             "created_at": self.created_at or None,
             "updated_at": self.updated_at or None,
             "queue_position": self.queue_position,
+            # The edit document (UT3): fetched with GET /jobs/{id}/doc.
+            "has_doc": self.doc is not None,
+            "font_subsets": _public_fonts(self.font_subsets),
+            "peaks": ({"rate": 100, "floor_db": -96} if self.peaks_key
+                      else None),
             # Only once the task queue's worker recorded any (WP4).
             **({"processing_warnings": list(self.processing_warnings)}
                if self.processing_warnings is not None else {}),
         }
+
+
+def _public_fonts(font_subsets: dict | None) -> dict:
+    from backend import font_subset
+    return font_subset.public(font_subsets)
 
 
 def _db_path() -> str:

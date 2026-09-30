@@ -92,6 +92,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import backend.pipeline as pipeline
 from backend import accounts, auth, billing, costs, db, media, observability
+from backend import doc as edit_doc  # noqa: E402
+from backend import font_subset  # noqa: E402
 from backend import storage
 from backend import taskq  # noqa: E402
 from backend import leader as task_leader  # noqa: E402
@@ -1782,10 +1784,12 @@ def _clean_settings(parsed: dict, user: User | None) -> dict:
     and formats. _cost_test (cost_test.py tagging) stays for the service
     user, and while auth is off."""
     out: dict[str, Any] = {}
-    for key in ("caption_preset", "style"):
+    for key in ("caption_preset", "style", "caption_style_hint"):
         value = parsed.get(key)
         if isinstance(value, str) and value.strip():
             out[key] = value.strip()[:64]
+    if parsed.get("target_aspect") in edit_doc.ASPECTS:
+        out["target_aspect"] = parsed["target_aspect"]
     for key in ("voice_triggers", "remove_fillers", "smartcam_enabled"):
         if isinstance(parsed.get(key), bool):
             out[key] = parsed[key]
@@ -2312,6 +2316,16 @@ def _store_analysis(job_id: str, res: dict,
                 f"storing {key} failed: {type(e).__name__}: {e}") from e
         fields[field_name] = key
         fields["media_bytes"][key] = size
+
+    def put(path: str, key: str, ctype: str) -> int:
+        try:
+            return media.put_file(path, key, content_type=ctype, store=where)
+        except Exception as e:
+            raise MediaTransferError(
+                f"storing {key} failed: {type(e).__name__}: {e}") from e
+    extra, sizes = pipeline.store_analysis_extras(res, job_id, put)
+    fields.update(extra)
+    fields["media_bytes"].update(sizes)
     return fields
 
 
@@ -2412,9 +2426,11 @@ def _run_analyze_inner(job_id: str) -> None:
             # a job another process settled meanwhile (error
             # container_restart, its media GC'd) or deleted must not come
             # back with keys pointing at deleted objects.
-            committed = _db_retry(
-                job_id, "saving the analysis", store.update_if,
-                job_id, "processing",
+            # The doc's style is settled against the job as stored now
+            # (a style picked while this ran: settings.caption_style;
+            # one picked after the commit goes into the doc itself,
+            # PATCH /jobs/{id}).
+            change = edit_doc.commit_change(dict(
                 status="awaiting_review",
                 message="Review subtitles",
                 progress=100.0,
@@ -2428,8 +2444,14 @@ def _run_analyze_inner(job_id: str) -> None:
                 audio_warnings=res.get("audio_warnings", []),
                 audio_levels=res.get("audio_levels", {}),
                 scene_events=res.get("scene_events", []),
+                **pipeline.analysis_fields(res),
                 **stored,
-            )
+            ), res, prefs=edit_doc.load_prefs(job.owner_id), expect=None)
+            fields = change(_db_retry(job_id, "reading the job", store.get,
+                                      job_id) or job)
+            committed = _db_retry(
+                job_id, "saving the analysis", store.update_if,
+                job_id, "processing", **fields)
             cur = None
             if not committed:
                 # A retry after a write that did land (the connection
@@ -4157,6 +4179,187 @@ async def jobs_status(request: Request, ids: str = "",
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str, user: User | None = Depends(current_user)):
     return get_owned_job(job_id, user).to_dict()
+
+
+# ── Edit document (UT3) ──────────────────────────────────────────────
+# job.doc (backend/doc.py) is built at analysis end for new jobs. GET it
+# in review (editable) or later (read-only); PATCH it in review with the
+# client's revision rule: base_rev must be the stored rev (409 stale_rev:
+# another tab or device saved meanwhile), rev must be newer.
+
+
+def _doc_refusal(e: edit_doc.DocError) -> ApiRefusal:
+    return ApiRefusal(e.status, e.code, **e.extra)
+
+
+def _no_doc(job: Job) -> ApiRefusal:
+    if job.status in ("pending", "processing"):
+        return ApiRefusal(409, "doc_not_ready")
+    return ApiRefusal(404, "no_doc")
+
+
+@app.get("/jobs/{job_id}/doc")
+def get_doc(job_id: str, user: User | None = Depends(current_user)):
+    """{doc, rev, read_only}. 409 doc_not_ready while the analysis runs,
+    404 no_doc for a job analysed before the doc existed."""
+    job = get_owned_job(job_id, user)
+    if job.doc is None:
+        raise _no_doc(job)
+    return {"doc": job.doc, "rev": job.doc_rev,
+            "read_only": job.status != "awaiting_review"}
+
+
+def _doc_state_refusal(job: Job) -> ApiRefusal | None:
+    if job.doc is None:
+        return _no_doc(job)
+    if job.status != "awaiting_review":
+        return ApiRefusal(409, "doc_read_only", job_status=job.status)
+    return None
+
+
+@app.patch("/jobs/{job_id}/doc")
+async def patch_doc(job_id: str, request: Request,
+                    user: User | None = Depends(current_user)):
+    """{base_rev, rev, style?, format?, words?: {upsert: [Word], delete:
+    [id]}} → {rev}. Small by design (the debounced autosave and the
+    unload flush): bodies over 64 KB are refused (413 doc_patch_too_large).
+    Validation (backend/doc.py apply_patch): ≤ 50 000 words, starts in
+    order, a known live preset or v1 alias, overrides in range."""
+    raw = await request.body()
+    if len(raw) > edit_doc.MAX_PATCH_BYTES:
+        raise ApiRefusal(413, "doc_patch_too_large",
+                         max_bytes=edit_doc.MAX_PATCH_BYTES)
+    try:
+        payload = json.loads(raw or b"null")
+    except (ValueError, UnicodeDecodeError):
+        raise ApiRefusal(400, "invalid_json")
+    return await run_in_threadpool(_patch_doc, job_id, payload, user)
+
+
+def _patch_doc(job_id: str, payload: Any, user: User | None) -> dict:
+    job = get_owned_job(job_id, user)
+    refusal = _doc_state_refusal(job)
+    if refusal is not None:
+        raise refusal
+    live = edit_doc.live_presets()
+    outcome: dict[str, Any] = {}
+
+    def change(cur: Job) -> dict | None:
+        if _doc_state_refusal(cur) is not None:
+            outcome["refusal"] = _doc_state_refusal(cur)
+            return None
+        try:
+            doc, rev = edit_doc.apply_patch(cur.doc, cur.doc_rev, payload,
+                                            duration=cur.duration, live=live)
+        except edit_doc.DocError as e:
+            outcome["refusal"] = _doc_refusal(e)
+            return None
+        outcome["rev"] = rev
+        return {"doc": doc, "doc_rev": rev}
+    store.modify(job_id, change)
+    if "refusal" in outcome:
+        raise outcome["refusal"]
+    if "rev" not in outcome:  # deleted meanwhile
+        raise HTTPException(404, "job not found")
+    return {"rev": outcome["rev"]}
+
+
+@app.patch("/jobs/{job_id}")
+def patch_job(job_id: str, payload: dict,
+              user: User | None = Depends(current_user)):
+    """{caption_style}: a preset id (or v1 alias) or {presetId,
+    overrides}. Accepted while the job waits or is analysed (the doc
+    build at analysis end reads it: settings.caption_style) and in review
+    (for a doc no editor saved yet, the doc's style too). Returns the
+    job."""
+    job = get_owned_job(job_id, user)
+    if set(payload) - {"caption_style"} or "caption_style" not in payload:
+        raise ApiRefusal(400, "unknown_field",
+                         field=sorted(set(payload) - {"caption_style"}
+                                      or {"caption_style"})[0])
+    try:
+        style = edit_doc.validate_style(payload["caption_style"])
+    except edit_doc.DocError as e:
+        raise _doc_refusal(e)
+    editable = ("pending", "processing", "awaiting_review")
+    if job.status not in editable:
+        raise ApiRefusal(409, "not_editable", job_status=job.status)
+    refused: list[str] = []
+
+    def change(cur: Job) -> dict | None:
+        if cur.status not in editable:
+            refused.append(cur.status)
+            return None
+        out: dict[str, Any] = {
+            "settings": {**(cur.settings or {}), "caption_style": style}}
+        if (cur.status == "awaiting_review" and cur.doc is not None
+                and not cur.doc_rev):
+            out["doc"] = {**cur.doc, "style": style}
+        return out
+    store.modify(job_id, change)
+    if refused:
+        raise ApiRefusal(409, "not_editable", job_status=refused[0])
+    return get_owned_job(job_id, user).to_dict()
+
+
+@app.post("/jobs/{job_id}/fonts/refresh")
+def refresh_fonts(job_id: str, user: User | None = Depends(current_user)):
+    """Re-subset the job's CJK caption font when the doc's text holds
+    characters the current subset lacks (an edit added them; the client
+    debounces). → {font_subsets} (as in GET /jobs/{id})."""
+    job = get_owned_job(job_id, user)
+    if job.doc is None:
+        raise _no_doc(job)
+    font_id = font_subset.font_for(job.doc.get("language"))
+    text = font_subset.text_of(job.doc.get("words"))
+    current = dict(job.font_subsets or {})
+    if not font_id or font_subset.covers(current.get(font_id), text):
+        return {"font_subsets": font_subset.public(current)}
+    where = media.store_of(job)
+    ws = _workspace(job_id, "fonts")
+    try:
+        made = font_subset.make(font_id, text, ws)
+        subsets, sizes = font_subset.store(
+            {font_id: made}, media.job_prefix(job_id),
+            lambda path, key, ctype: media.put_file(path, key, content_type=ctype,
+                                                    store=where))
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
+    old = current.get(font_id) or {}
+    stale = [old.get(k) for k in ("woff2", "ttf", "json")
+             if old.get(k) and old.get(k) != subsets[font_id].get(k)]
+
+    def change(cur: Job) -> dict:
+        return {"font_subsets": {**(cur.font_subsets or {}), **subsets},
+                "media_bytes": {**{k: v for k, v in (cur.media_bytes or {}).items()
+                                   if k not in stale}, **sizes}}
+    store.modify(job_id, change)
+    _gc_later(stale, store_=where)
+    cur = store.get(job_id)
+    return {"font_subsets": font_subset.public(cur.font_subsets if cur else subsets)}
+
+
+@app.get("/jobs/{job_id}/fonts/{name}")
+def job_font(job_id: str, name: str, user: User | None = Depends(media_user)):
+    """A file of the job's CJK caption font subset (woff2, ttf, metrics
+    json) by the name font_subsets / the metrics name it."""
+    job = get_owned_job(job_id, user)
+    hit = font_subset.key_of(job.font_subsets, name)
+    if hit is None:
+        raise HTTPException(404, "font_not_found")
+    return _media(job, hit[0], hit[1], "font_not_found",
+                  cache="private, max-age=604800, immutable")
+
+
+@app.get("/jobs/{job_id}/peaks")
+def job_peaks(job_id: str, user: User | None = Depends(media_user)):
+    """peaks.bin: the mezz audio's 100 Hz RMS envelope, one int8 per 10 ms
+    (0 = −96 dBFS … 127 = full scale; `peaks` in GET /jobs/{id})."""
+    job = get_owned_job(job_id, user)
+    if not job.peaks_key:
+        raise HTTPException(404, "peaks_not_ready")
+    return _media(job, job.peaks_key, "application/octet-stream",
+                  "peaks_not_ready", cache="private, max-age=604800, immutable")
 
 
 @app.get("/me")

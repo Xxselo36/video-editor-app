@@ -607,7 +607,8 @@ _KEYED_SQL = [
 # Left out of list_by_owner(summary=True): the editor's big fields.
 _SUMMARY_DROP = ["settings", "subtitles", "segments", "cut_ranges",
                  "scene_events", "preview_segments", "edited_phrases",
-                 "audio_levels", "audio_warnings", "costs"]
+                 "audio_levels", "audio_warnings", "costs", "doc",
+                 "audio_loudness"]
 
 _UPDATE_SQL = (
     "UPDATE jobs SET data = %s::jsonb, owner_id = %s, status = %s, "
