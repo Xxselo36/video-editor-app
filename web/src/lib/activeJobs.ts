@@ -55,11 +55,17 @@ export type ActiveJobV2 = {
   // The upload continues an interrupted one of the same file (resume
   // state in IndexedDB, lib/chunkedUpload): the card says so.
   resuming?: boolean;
-  // Populated when the upload or a later phase fails. Card renders a
-  // retry button instead of the normal progress bar when set.
+  // Set when the upload or a later phase fails: its error code
+  // (lib/errors.ts; backend/errors.py or a browser-side code such as
+  // connection_lost), worded when the card renders. Cards stored before
+  // UX5 hold an English sentence here instead (shown as stored). The
+  // card renders a retry button instead of the progress bar when set.
   error?: string;
-  // Non-fatal hint on a card that still works (e.g. render failed →
-  // back in review, edits kept).
+  errorParams?: Record<string, string | number | boolean | null>;
+  // The job's minutes were credited back for the failure.
+  refunded?: boolean | null;
+  // Non-fatal hint on a card that still works: "render_failed" (back in
+  // review, edits kept). Older cards: an English sentence.
   note?: string;
 };
 
@@ -124,11 +130,7 @@ export function markStaleUploads(idleMs = 20_000): void {
     if (j.phase !== "uploading" || j.error || liveUploads.has(j.jobId)) return j;
     if (now - (j.lastProgressAt ?? j.timestamp) < idleMs) return j;
     changed = true;
-    return {
-      ...j,
-      error:
-        "Upload was interrupted (page reloaded or connection lost). Please upload the video again.",
-    };
+    return { ...j, error: "upload_interrupted" };
   });
   if (changed) saveActiveJobs(next);
 }

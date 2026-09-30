@@ -4,37 +4,48 @@ import {
   doneBytes,
   fingerprint,
   knownKey,
-  MAX_MINUTES,
-  MAX_UPLOAD_GB,
   partLength,
   recordGone,
   uploadLimitHit,
 } from "@/lib/chunkedUpload";
+import { DEFAULT_LIMITS } from "@/lib/config";
 
 const MIB = 1024 * 1024;
+const L = DEFAULT_LIMITS;
 
 describe("uploadLimitHit", () => {
-  it("uses the default caps (4 GB, 30 min)", () => {
-    expect(MAX_UPLOAD_GB).toBe(4);
-    expect(MAX_MINUTES).toBe(30);
+  it("uses the backend's defaults until GET /config answers (4 GB, 30 min, 3 s)", () => {
+    expect(L).toEqual({ max_upload_bytes: 4e9, max_seconds: 1800, min_seconds: 3 });
   });
 
   it("counts decimal gigabytes like the backend", () => {
-    expect(uploadLimitHit(4e9, 60)).toBeNull();
-    expect(uploadLimitHit(4e9 + 1, 60)).toEqual({ code: "file_too_large", max: 4 });
+    expect(uploadLimitHit(4e9, 60, L)).toBeNull();
+    expect(uploadLimitHit(4e9 + 1, 60, L)).toEqual({ code: "file_too_large", params: { max_gb: 4 } });
   });
 
   it("allows one second of slack on the length", () => {
-    expect(uploadLimitHit(1000, 30 * 60 + 1)).toBeNull();
-    expect(uploadLimitHit(1000, 30 * 60 + 1.5)).toEqual({ code: "video_too_long", max: 30 });
+    expect(uploadLimitHit(1000, 30 * 60 + 1, L)).toBeNull();
+    expect(uploadLimitHit(1000, 30 * 60 + 1.5, L)).toEqual({ code: "video_too_long", params: { max_minutes: 30 } });
+  });
+
+  it("refuses a clip under the minimum (0.1 s of slack)", () => {
+    expect(uploadLimitHit(1000, 2.95, L)).toBeNull();
+    expect(uploadLimitHit(1000, 1.5, L)).toEqual({ code: "video_too_short", params: { min_seconds: 3 } });
+  });
+
+  it("follows the deployment's limits", () => {
+    const custom = { max_upload_bytes: 5e8, max_seconds: null, min_seconds: 0 };
+    expect(uploadLimitHit(6e8, 10, custom)).toEqual({ code: "file_too_large", params: { max_gb: 0.5 } });
+    expect(uploadLimitHit(1000, 99 * 3600, custom)).toBeNull();
+    expect(uploadLimitHit(1000, 0.5, custom)).toBeNull();
   });
 
   it("leaves an unreadable length to the server", () => {
-    expect(uploadLimitHit(1000, null)).toBeNull();
+    expect(uploadLimitHit(1000, null, L)).toBeNull();
   });
 
   it("reports the size first", () => {
-    expect(uploadLimitHit(5e9, 99 * 60)?.code).toBe("file_too_large");
+    expect(uploadLimitHit(5e9, 99 * 60, L)?.code).toBe("file_too_large");
   });
 });
 

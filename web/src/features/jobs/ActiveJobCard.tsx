@@ -5,8 +5,9 @@ import { Icon } from "@/components/ui/Icon";
 import { Progress } from "@/components/ui/Progress";
 import { useT } from "@/i18n";
 import type { ActiveJobV2 } from "@/lib/activeJobs";
-import { friendlyError, jobErrorText, localizeKnown } from "@/lib/errors.legacy";
+import { cardErrorText, cardNoteText, jobErrorText } from "@/lib/errors";
 import { presetLabelFor } from "@/features/start/presets.legacy";
+import { useLiveUpload } from "@/features/upload/uploadManager";
 import type { CardStatus } from "./types";
 
 // Compact card for an in-progress job. The copy is deliberately warm
@@ -26,6 +27,8 @@ export function ActiveJobCard({
   onRetry?: () => void;
 }) {
   const t = useT();
+  // This page's own upload: its live progress (uploadManager, memory).
+  const liveUpload = useLiveUpload(job.jobId);
   const isError = status?.status === "error" || Boolean(job.error);
   // Waiting for a free analysis / render slot (backend admission queue).
   const queued =
@@ -63,10 +66,10 @@ export function ActiveJobCard({
     rendering: "#B979FF",
   };
   const pct =
-    job.phase === "uploading" ? job.uploadPct ?? 0 : status?.progress ?? 0;
+    job.phase === "uploading" ? liveUpload?.pct ?? job.uploadPct ?? 0 : status?.progress ?? 0;
   const canOpen = job.phase === "reviewing" && !isError;
   const copy =
-    job.phase === "uploading" && job.resuming
+    job.phase === "uploading" && (liveUpload ? liveUpload.resuming : job.resuming)
       ? { ...phaseCopy.uploading, sub: t("app.upload.resuming") }
       : phaseCopy[job.phase];
   const accent = phaseAccent[job.phase];
@@ -144,7 +147,7 @@ export function ActiveJobCard({
           className="relative z-10 mb-3 text-xs"
           style={{ color: "#F26E6E" }}
         >
-          {job.error || !status ? friendlyError(job.error, t) : jobErrorText(status, t)}
+          {job.error || !status ? cardErrorText(job, t) : jobErrorText(status, t)}
         </div>
       ) : (
         <div
@@ -152,7 +155,7 @@ export function ActiveJobCard({
           className="relative z-10 mb-3 text-xs leading-relaxed"
           style={{ color: job.note ? "var(--warn)" : "var(--text-body)" }}
         >
-          {job.note ? localizeKnown(job.note, t) : queued ? t("app.card.queued.sub") : copy.sub}
+          {job.note ? cardNoteText(job.note, t) : queued ? t("app.card.queued.sub") : copy.sub}
         </div>
       )}
 

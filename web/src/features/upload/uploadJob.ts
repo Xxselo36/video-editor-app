@@ -17,7 +17,8 @@ import {
   UPLOAD_STALL_MS,
   UPLOAD_STALLED_MSG,
 } from "@/lib/chunkedUpload";
-import { REFUSAL_CODES, refusalMessage, tEn } from "@/lib/errors.legacy";
+import { getConfig } from "@/lib/config";
+import { cardError, REFUSAL_CODES, tEn } from "@/lib/errors";
 import { getLibrary } from "@/lib/library";
 import { requestNotificationPermission } from "@/lib/notify";
 import type { JobStatus } from "@/features/jobs/types";
@@ -39,6 +40,10 @@ export type UploadSettings = {
 // error or a 5xx that isn't a refusal — about 75 s in all, so a backend
 // restart (every deploy) or a 502 / 503 from the edge doesn't turn a
 // finished multi-GB upload into an error.
+/** How often a running upload refreshes its stored card (lastProgressAt:
+ *  markStaleUploads tells a live upload from a dead one by it). */
+export const UPLOAD_HEARTBEAT_MS = 10_000;
+
 const POST_JOBS_RETRY_MS = [2_000, 4_000, 8_000, 15_000, 15_000, 15_000, 15_000];
 
 /**
@@ -67,11 +72,15 @@ export async function uploadJob(
   targetFile: File,
   settings: UploadSettings,
   selectedPreset: PresetId | null,
-  { onPaywall, onCreated }: {
+  { onPaywall, onCreated, onProgress, onEnd }: {
     /** Billing refused the upload (402): the dialog with a way to a plan. */
     onPaywall: (pw: Paywall) => void;
     /** The job exists (its card replaced the upload's). */
-    onCreated: () => void;
+    onCreated: (jobId: string) => void;
+    /** Live progress of the upload card (memory only: uploadManager). */
+    onProgress?: (tempId: string, pct: number, resuming: boolean) => void;
+    /** The upload is over (job created or failed). */
+    onEnd?: (tempId: string) => void;
   },
 ): Promise<void> {
   // Add a placeholder dashboard card while the upload is in flight.
@@ -96,10 +105,11 @@ export async function uploadJob(
   });
   liveUploads.add(tempId);
 
-  // Throttle uploadPct updates to ~5/sec. On big files (multi-GB) we
-  // get thousands of progress ticks; every one used to write to
-  // localStorage + fire a re-render across the dashboard.
+  // Progress ticks (thousands on a multi-GB file) only go to the live
+  // state (uploadManager, ~5/s); the stored card gets a heartbeat every
+  // UPLOAD_HEARTBEAT_MS and every state change, never a tick.
   let lastUiUpdate = 0;
+  let lastBeat = Date.now();
   // Set while the card says "resuming" (an interrupted upload of this
   // file continues); cleared if it starts over after all.
   let resumingFrom: number | null = null;
@@ -109,13 +119,18 @@ export async function uploadJob(
       lastUiUpdate = now;
       const startedOver = resumingFrom !== null && pct + 1 < resumingFrom;
       if (startedOver) resumingFrom = null;
-      updateActiveJobV2(tempId, {
-        uploadPct: pct,
-        lastProgressAt: now,
-        ...(startedOver ? { resuming: false } : {}),
-      });
+      onProgress?.(tempId, pct, resumingFrom !== null);
+      if (startedOver || now - lastBeat >= UPLOAD_HEARTBEAT_MS) {
+        lastBeat = now;
+        updateActiveJobV2(tempId, {
+          uploadPct: pct,
+          lastProgressAt: now,
+          ...(startedOver ? { resuming: false } : {}),
+        });
+      }
     }
   };
+  onProgress?.(tempId, 0, false);
 
   // Acquire a Wake Lock so the OS doesn't put the tab to sleep
   // mid-upload. iOS 16.4+ / Android Chrome 84+ / desktop most.
@@ -151,18 +166,28 @@ export async function uploadJob(
     const resumedPct = await resumableProgress(targetFile);
     if (resumedPct !== null) {
       resumingFrom = resumedPct;
+      onProgress?.(tempId, resumedPct, true);
       updateActiveJobV2(tempId, { uploadPct: resumedPct, resuming: true, lastProgressAt: Date.now() });
     }
 
-    // Over the size / length caps: say so now instead of after the
-    // upload (the server would answer 413). The length is read from
-    // the file's metadata; when the browser can't, the server probes.
+    // An audio file: refused now, not after the upload (the server
+    // answers 400 no_video once it probed it).
+    if (targetFile.type.startsWith("audio/")) {
+      throw new ApiError(400, "no_video", { detail: "no_video", code: "no_video", params: {} });
+    }
+    // Over the size / length limits (the deployment's, GET /config): say
+    // so now instead of after the upload (the server would refuse it).
+    // The length is read from the file's metadata; when the browser
+    // can't, the server probes.
     const duration = await readVideoDuration(targetFile);
-    const limit = uploadLimitHit(targetFile.size, duration);
+    const { limits } = await getConfig();
+    const limit = uploadLimitHit(targetFile.size, duration, limits);
     if (limit) {
-      throw new ApiError(413, limit.code, {
+      throw new ApiError(limit.code === "video_too_short" ? 400 : 413, limit.code, {
         detail: limit.code,
-        [limit.code === "file_too_large" ? "max_gb" : "max_minutes"]: limit.max,
+        ...limit.params,
+        code: limit.code,
+        params: limit.params,
       });
     }
     // Stored with the job so the server-side project list has names.
@@ -352,33 +377,30 @@ export async function uploadJob(
 
     // The job now lives as a card on the dashboard; the backend keeps
     // processing regardless of where the user goes next.
-    onCreated();
+    onCreated(initial.id);
   } catch (err) {
     // Upload failed — mark the temp card with an error message so
     // the user can hit Retry from the dashboard. No fullscreen error
     // takeover, no scary redirect.
-    let msg = err instanceof Error ? err.message : String(err);
+    // The card stores the code (lib/errors.ts words it): the backend's
+    // (too big / too long / no sound / too many jobs / busy …) or the
+    // browser's own (connection_lost, …).
+    let failure = cardError(err);
     if (err instanceof ApiError && err.status === 401) {
       notifyAuthRequired();
-      msg = tEn("app.errors.signInRequired");
+      failure = { error: "auth_required", errorParams: {}, refunded: null };
     } else if (err instanceof ApiError) {
       // No plan / not enough minutes: explain it with a way out.
       const pw = paywallFrom(err.status, err.detail);
       if (pw) {
         onPaywall(pw);
-        msg = tEn(
-          pw.code === "quota_exceeded"
-            ? "app.errors.quotaExceeded"
-            : "app.errors.subscriptionRequired",
-        );
-      } else {
-        // Too big / too long / too many jobs / servers busy.
-        msg = refusalMessage(err) ?? msg;
+        failure = { error: pw.code, errorParams: {}, refunded: null };
       }
     }
-    updateActiveJobV2(tempId, { error: msg });
+    updateActiveJobV2(tempId, failure);
   } finally {
     liveUploads.delete(tempId);
+    onEnd?.(tempId);
     // Release wake lock when upload path exits (success OR error).
     try {
       await _wakeLock?.release();

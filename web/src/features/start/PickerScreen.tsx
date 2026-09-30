@@ -1,136 +1,33 @@
 "use client";
-// The /app home (moved from app/app/page.tsx in UX4): the
-// dashboard for returning users, else the workflow picker. It owns the
-// job cards, the recent projects and their status poll.
+// The workflow picker of /app/new (moved from app/app/page.tsx in UX4;
+// the dashboard it used to switch to in the same URL is /app since UX5,
+// features/jobs/DashboardPage).
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { IconArrowRight, IconSliders } from "@/components/Icons";
 import { Icon } from "@/components/ui/Icon";
-import { VideoModal } from "@/components/VideoModal";
 import { useT } from "@/i18n";
-import { fetchServerJobs, serverJobToLibraryEntry } from "@/lib/account";
-import {
-  addActiveJob,
-  getActiveJobs,
-  markStaleUploads,
-  removeActiveJob,
-  subscribeActiveJobs,
-  type ActiveJobV2,
-} from "@/lib/activeJobs";
-import { AUTH_ENABLED } from "@/lib/auth";
-import { tEn } from "@/lib/errors.legacy";
-import { getLibrary, type LibraryEntry } from "@/lib/library";
-import { Dashboard } from "@/features/jobs/Dashboard";
-import { useJobStatusPoller } from "@/features/jobs/JobStatusPoller";
+import { getActiveJobs } from "@/lib/activeJobs";
+import { getLibrary } from "@/lib/library";
 import { VoiceTeaser } from "@/features/voice-test/VoiceTeaser";
 import { VoiceTestDialog } from "@/features/voice-test/VoiceTestDialog";
 import { getPresetChips, PRESET_ACCENTS, PRESET_ICONS, PRESETS, type PresetId } from "./presets.legacy";
 import { useBillingHint } from "./useBillingHint";
 
-export function PickerScreen({
-  onPick,
-  onResumeJob,
-}: {
-  onPick: (id: PresetId) => void;
-  onResumeJob?: (jobId: string) => void;
-}) {
+export function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
   const t = useT();
   const billingHint = useBillingHint();
   const featured: PresetId[] = ["tiktok", "podcast", "vlog", "captions"];
-  const [recent, setRecent] = useState<LibraryEntry[] | null>(null);
-  const [playingJobId, setPlayingJobId] = useState<string | null>(null);
   const [showVoiceOnboarding, setShowVoiceOnboarding] = useState(false);
-  const [activeJobs, setActiveJobs] = useState<ActiveJobV2[]>([]);
-  // Dashboard (jobs + recent) is the home for returning users. The
-  // workflow picker is its own screen — reached via "+ New video" and
-  // returned from via ← Back. First-time users skip the empty
-  // dashboard and land straight on the picker.
-  const [view, setView] = useState<"dashboard" | "picker">("picker");
-
+  // "← Dashboard" only when there is a dashboard to go back to (cards or
+  // projects on this device); first-time users land here from /app.
+  const [hasDashboard, setHasDashboard] = useState(false);
   useEffect(() => {
-    const rec = getLibrary().slice(0, 3);
-    const jobs = getActiveJobs();
-    setRecent(rec);
-    setActiveJobs(jobs);
-    if (jobs.length > 0 || rec.length > 0) setView("dashboard");
-    // The voice test (camera + mic) is NOT opened automatically any
-    // more — it scared off people who only want to upload a video.
-    // It's one tap away via the "Cleo" hint chip.
+    // Read once after mount: the server render has no storage.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHasDashboard(getActiveJobs().length > 0 || getLibrary().length > 0);
   }, []);
-
-  // Accounts on: the server knows this user's projects from every
-  // device. Finished ones join "Recent", unfinished ones get a card
-  // (the poll below keeps it current).
-  useEffect(() => {
-    if (!AUTH_ENABLED) return;
-    let cancelled = false;
-    void fetchServerJobs().then((list) => {
-      if (cancelled || !list) return;
-      const known = new Set(getActiveJobs().map((j) => j.jobId));
-      // Oldest first: addActiveJob puts each new card on top.
-      for (const s of [...list].reverse()) {
-        if (known.has(s.id)) continue;
-        if (!["pending", "processing", "awaiting_review"].includes(s.status)) continue;
-        addActiveJob({
-          jobId: s.id,
-          phase:
-            s.status === "awaiting_review"
-              ? "reviewing"
-              : s.message?.toLowerCase().includes("render")
-                ? "rendering"
-                : "analyzing",
-          timestamp: (s.created_at ?? Date.now() / 1000) * 1000,
-          filename: s.filename || tEn("app.library.untitled"),
-          presetId: s.preset_id ?? null,
-          presetLabel: s.preset_label ?? null,
-          presetIcon: null,
-          captionPreset: "clean",
-        });
-      }
-      const done = list.filter((s) => s.has_output).map(serverJobToLibraryEntry);
-      if (done.length > 0) {
-        const ids = new Set(done.map((e) => e.jobId));
-        setRecent(
-          [...done, ...getLibrary().filter((e) => !ids.has(e.jobId))]
-            .sort((a, b) => b.timestamp - a.timestamp)
-            .slice(0, 3),
-        );
-        setView("dashboard");
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // React to add/update/remove from anywhere in the app (uploads
-  // starting, progress ticks, jobs finishing). Bumps to dashboard only
-  // when a job is ADDED so the user sees their upload land — progress
-  // ticks used to bump too, which threw the user out of the workflow
-  // picker ("+ New video") while another job was running. Counting
-  // (not ids) because an upload card swaps its temp id for the real one.
-  const jobCountRef = useRef(0);
-  useEffect(() => {
-    jobCountRef.current = getActiveJobs().length;
-    const refresh = () => {
-      const jobs = getActiveJobs();
-      setActiveJobs(jobs);
-      if (jobs.length > jobCountRef.current) setView("dashboard");
-      jobCountRef.current = jobs.length;
-    };
-    return subscribeActiveJobs(refresh);
-  }, []);
-
-  // Upload cards left over from a reload / closed tab never finish —
-  // flip them to error cards so the user can clear them and retry.
-  useEffect(() => {
-    markStaleUploads();
-    const id = setInterval(() => markStaleUploads(), 10_000);
-    return () => clearInterval(id);
-  }, []);
-
-  const jobStatuses = useJobStatusPoller(setRecent);
 
   const dismissVoiceOnboarding = () => {
     setShowVoiceOnboarding(false);
@@ -141,49 +38,13 @@ export function PickerScreen({
     }
   };
 
-  const modals = (
-    <>
-      {playingJobId && (
-        <VideoModal
-          jobId={playingJobId}
-          onClose={() => setPlayingJobId(null)}
-        />
-      )}
-      {showVoiceOnboarding && (
-        <VoiceTestDialog onClose={dismissVoiceOnboarding} />
-      )}
-    </>
-  );
-
-  // The dialogs sit OUTSIDE the view switch, at one stable place in the
-  // tree: an upload finishing flips the view to the dashboard, and a
-  // dialog inside either view's root would be unmounted with it (an open
-  // voice test would restart). They render through a portal, so where
-  // they sit in the tree doesn't change the page.
   return (
     <>
-      {view === "dashboard" ? renderDashboard() : renderPicker()}
-      {modals}
+      {renderPicker()}
+      {/* Through a portal: where it sits in the tree doesn't change the page. */}
+      {showVoiceOnboarding && <VoiceTestDialog onClose={dismissVoiceOnboarding} />}
     </>
   );
-
-  function renderDashboard() {
-    return (
-      <Dashboard
-        activeJobs={activeJobs}
-        jobStatuses={jobStatuses}
-        recent={recent}
-        onNewVideo={() => setView("picker")}
-        onOpenJob={(jobId) => onResumeJob?.(jobId)}
-        onRemoveJob={(jobId) => {
-          removeActiveJob(jobId);
-          setActiveJobs(getActiveJobs());
-        }}
-        onPlay={setPlayingJobId}
-        onVoiceTest={() => setShowVoiceOnboarding(true)}
-      />
-    );
-  }
 
   function renderPicker() {
     return (
@@ -191,16 +52,16 @@ export function PickerScreen({
       {/* Back to dashboard — only rendered when there's a dashboard to
           go back to (existing jobs or library entries). Fresh users
           land here directly and don't see the back button. */}
-      {(activeJobs.length > 0 || (recent && recent.length > 0)) && (
-        <button
-          onClick={() => setView("dashboard")}
+      {hasDashboard && (
+        <Link
+          href="/app"
           data-testid="picker-back"
           className="mb-6 inline-flex w-fit items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
           style={{ color: "var(--text-muted)" }}
         >
           <Icon icon={ArrowLeft} className="text-base" />
           {t("app.picker.backToDashboard")}
-        </button>
+        </Link>
       )}
 
       {/* Hero */}

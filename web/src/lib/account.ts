@@ -278,6 +278,8 @@ export type ServerJob = {
   id: string;
   status: string;
   message?: string;
+  /** Where a running job is (backend/errors.py STAGES), UX5. */
+  stage?: string | null;
   progress?: number;
   filename?: string | null;
   preset_id?: string | null;

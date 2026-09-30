@@ -8,7 +8,6 @@ import {
   type ActiveJobV2,
 } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
-import { FRIENDLY_EXPIRED_KEY, jobErrorText, tEn } from "@/lib/errors.legacy";
 import { fetchFullJob, JobStatusPoller, type StatusPollResult } from "@/lib/jobStatus";
 import { getLibrary, saveEntry, type LibraryEntry, type LibraryHookClip } from "@/lib/library";
 import { notifyIfHidden } from "@/lib/notify";
@@ -58,7 +57,7 @@ export function useJobStatusPoller(setRecent: (recent: LibraryEntry[]) => void):
       for (const j of cards) {
         if (missing.has(j.jobId)) {
           // Server no longer knows the job (redeploy / expired).
-          updateActiveJobV2(j.jobId, { error: tEn(FRIENDLY_EXPIRED_KEY) });
+          updateActiveJobV2(j.jobId, { error: "media_expired" });
           continue;
         }
         const s = rows.get(j.jobId);
@@ -68,18 +67,21 @@ export function useJobStatusPoller(setRecent: (recent: LibraryEntry[]) => void):
           message: s.message,
           status: s.status,
           queuePosition: s.queue_position,
+          error_code: s.error_code,
+          error_params: s.error_params,
+          refunded: s.refunded,
+          stage: s.stage,
+          stage_params: s.stage_params,
         };
         if (s.status === "awaiting_review" && (j.phase !== "reviewing" || (s.error && !j.note))) {
           updateActiveJobV2(j.jobId, {
             phase: "reviewing",
-            note: s.error
-              ? tEn("app.card.renderFailedNote")
-              : undefined,
+            note: s.error ? "render_failed" : undefined,
           });
         } else if (
           s.status === "processing" &&
           (j.phase === "reviewing" ||
-            (j.phase === "analyzing" && s.message.toLowerCase().includes("render")))
+            (j.phase === "analyzing" && (s.stage?.startsWith("render.") || s.message.toLowerCase().includes("render"))))
         ) {
           // Rendering (a review card: started on another device / tab).
           updateActiveJobV2(j.jobId, { phase: "rendering" });
@@ -126,7 +128,9 @@ export function useJobStatusPoller(setRecent: (recent: LibraryEntry[]) => void):
           setRecent(getLibrary().slice(0, 3));
         } else if (s.status === "error") {
           updateActiveJobV2(j.jobId, {
-            error: jobErrorText(s, tEn),
+            error: s.error_code ?? "processing_failed",
+            errorParams: s.error_params ?? {},
+            refunded: s.refunded ?? null,
           });
         }
       }
