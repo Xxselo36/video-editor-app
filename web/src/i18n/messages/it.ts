@@ -104,7 +104,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.preset.tiktok.label": "TikTok / Reels",
   "app.preset.tiktok.tagline": "Verticale, short-form",
   "app.preset.tiktok.desc": "Comandi vocali, sottotitoli Clipper, crop verticale automatico",
-  "app.preset.tiktok.bullet1": "Comandi vocali attivi: dì “Cleo cut” per rifare",
+  "app.preset.tiktok.bullet1": "Comandi vocali attivi: di' “Cleo cut” per rifare",
   "app.preset.tiktok.bullet2": "Sottotitoli in grassetto stile Clipper",
   "app.preset.tiktok.bullet3": "Verticale 9:16 automatico con face tracking",
   "app.preset.podcast.label": "Podcast Long-Form",
@@ -167,7 +167,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   "app.dashboard.viewAll": "Vedi tutti →",
   "app.dashboard.startFirst": "Inizia il tuo primo video",
   "app.dashboard.startFirstSub": "Scegli un workflow — CleoCuts gestisce sottotitoli, formato e pulizia",
-  "app.dashboard.voiceTeaser": "Dì “Cleo” mentre registri — risparmia ore di editing",
+  "app.dashboard.voiceTeaser": "Di' “Cleo” mentre registri — risparmia ore di editing",
 
   // ── Workflow picker ─────────────────────────────────────────────────
   "app.picker.backToDashboard": "Torna alla dashboard",
@@ -375,7 +375,7 @@ export const it: Partial<Record<MessageKey, string>> = {
   "site.hero.titleLead": "Monta mentre",
   "site.hero.titleAccent": "registri.",
   "site.hero.sub":
-    "Dì {cut} quando sbagli. Dì {finish} quando hai finito. Pronto per la pubblicazione in pochi minuti, con sottotitoli, tagli e più formati inclusi.",
+    "Di' {cut} quando sbagli. Di' {finish} quando hai finito. Pronto da pubblicare in pochi minuti, con sottotitoli e tagli inclusi.",
   "site.hero.cta": "Prova CleoCuts",
 
   // ── Landing: caption showcase ── */
@@ -383,38 +383,37 @@ export const it: Partial<Record<MessageKey, string>> = {
   "site.showcase.captionStyle": "stile sottotitoli",
   "site.showcase.clipper": "IL PARLATO È L'EDITOR",
   "site.showcase.highlight": "PRONTO PER LA PUBBLICAZIONE",
-  "site.showcase.flash": "DÌ CUT",
+  "site.showcase.flash": "DI' CUT",
   "site.showcase.punch": "PERFETTO",
   "site.showcase.elegant": "Ascolta e basta.",
 
   // ── Landing: features ── */
   "site.features.title": "Cosa fa CleoCuts.",
   "site.features.voice.title": "Comandi vocali",
-  "site.features.voice.body": "Dì {cut} durante la ripresa. CleoCuts rimuove il tentativo fallito.",
+  "site.features.voice.body":
+    "Di' {cut} durante la ripresa. CleoCuts rimuove il tentativo fallito.",
   "site.features.cleanup.title": "Pulizia AI",
-  "site.features.cleanup.body": "Corregge errori, nomi di marchi e omofoni.",
-  "site.features.captions.title": "{count} stili di sottotitoli",
-  "site.features.captions.body": "Da Clean a Clipper. Font veri.",
-  "site.features.captions.decoration": "FONT VERI",
+  "site.features.cleanup.body":
+    "Corregge le parole riconosciute male e i nomi dei marchi nei tuoi sottotitoli.",
+  "site.features.captions.title": "Sottotitoli animati",
+  "site.features.captions.body": "Diversi stili, da Pulito a Clipper.",
   "site.features.vertical.title": "Verticale automatico",
   "site.features.vertical.body": "Orizzontale → 9:16 con face tracking.",
-  "site.features.multiformat.title": "Multi-formato",
-  "site.features.multiformat.body": "{formats} in un solo rendering.",
-  "site.features.hooks.title": "Selettore di clip hook",
+  "site.features.hooks.title": "I momenti migliori come clip",
   "site.features.hooks.body":
-    "CleoCuts trova i {count} momenti migliori nel tuo video long-form e li trasforma in reel autonomi.",
+    "Nei video da 90 secondi in su, CleoCuts trova fino a {count} dei momenti migliori e ricava da ognuno una clip breve.",
 
   // ── Landing: how it works ── */
   "site.steps.title": "Tre passi.",
   "site.steps.sub": "Registra. Parla con CleoCuts. Pubblica.",
   "site.steps.record.title": "Registra",
-  "site.steps.record.body": "Dì {cut} quando sbagli. Niente riprese ripetute.",
+  "site.steps.record.body": "Di' {cut} quando sbagli. Niente riprese ripetute.",
   "site.steps.record.hint": "Riprese di qualsiasi durata",
   "site.steps.upload.title": "Carica",
   "site.steps.upload.body": "Carica il tuo video. Scegli un workflow. L'AI fa il resto.",
   "site.steps.upload.hint": "Pochi minuti, in base alla durata",
   "site.steps.post.title": "Pubblica",
-  "site.steps.post.body": "Ottieni {formats} pronti per TikTok, Instagram e YouTube.",
+  "site.steps.post.body": "Scarica il tuo video finito, pronto per TikTok, Instagram e YouTube.",
   "site.steps.post.hint": "Scarica quando è pronto",
 
   // ── Landing: footer ── */
@@ -436,7 +435,6 @@ export const it: Partial<Record<MessageKey, string>> = {
   "site.pricing.retention": "Progetti conservati per {days} giorni",
   "site.pricing.featureWorkflows": "Tutti i workflow e gli stili di sottotitoli",
   "site.pricing.featureVoice": "Comandi vocali e pulizia AI",
-  "site.pricing.featureFormats": "Esportazioni in {formats}",
   "site.pricing.choose": "Scegli {plan}",
   "site.pricing.current": "Il tuo piano attuale",
   "site.pricing.manage": "Gestisci abbonamento",

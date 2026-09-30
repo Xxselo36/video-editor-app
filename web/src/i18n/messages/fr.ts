@@ -374,7 +374,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "site.hero.titleLead": "Monte en",
   "site.hero.titleAccent": "filmant.",
   "site.hero.sub":
-    "Dis {cut} quand tu te trompes. Dis {finish} quand tu as fini. Prêt à publier en quelques minutes, sous-titres, coupes et plusieurs formats inclus.",
+    "Dis {cut} quand tu te trompes. Dis {finish} quand tu as fini. Prêt à publier en quelques minutes, sous-titres et coupes inclus.",
   "site.hero.cta": "Essayer CleoCuts",
 
   // ── Landing: caption showcase ── //
@@ -391,17 +391,15 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "site.features.voice.title": "Déclencheurs vocaux",
   "site.features.voice.body": "Dis {cut} en pleine prise. CleoCuts supprime la tentative ratée.",
   "site.features.cleanup.title": "Nettoyage IA",
-  "site.features.cleanup.body": "Corrige les fautes, les noms de marque et les homophones.",
-  "site.features.captions.title": "{count} styles de sous-titres",
-  "site.features.captions.body": "De Épuré à Clipper. De vraies polices.",
-  "site.features.captions.decoration": "VRAIES POLICES",
+  "site.features.cleanup.body":
+    "Corrige les mots mal reconnus et les noms de marque dans tes sous-titres.",
+  "site.features.captions.title": "Sous-titres animés",
+  "site.features.captions.body": "Plusieurs styles, d'Épuré à Clipper.",
   "site.features.vertical.title": "Vertical automatique",
   "site.features.vertical.body": "Paysage → 9:16 avec suivi du visage.",
-  "site.features.multiformat.title": "Multi-format",
-  "site.features.multiformat.body": "{formats} en un seul rendu.",
-  "site.features.hooks.title": "Sélecteur d'extraits accrocheurs",
+  "site.features.hooks.title": "Les meilleurs moments en clips",
   "site.features.hooks.body":
-    "CleoCuts trouve les {count} meilleurs moments de ta vidéo longue et les transforme en reels autonomes.",
+    "Pour les vidéos de 90 secondes ou plus, CleoCuts trouve jusqu'à {count} des meilleurs moments et fait de chacun un clip court.",
 
   // ── Landing: how it works ── //
   "site.steps.title": "Trois étapes.",
@@ -409,11 +407,11 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "site.steps.record.title": "Filmer",
   "site.steps.record.body": "Dis {cut} quand tu te trompes. Pas besoin de refaire.",
   "site.steps.record.hint": "Prises de n'importe quelle durée",
-  "site.steps.upload.title": "Envoyer",
+  "site.steps.upload.title": "Importer",
   "site.steps.upload.body": "Dépose ta vidéo. Choisis un workflow. L'IA fait le reste.",
   "site.steps.upload.hint": "Quelques minutes, selon la durée",
   "site.steps.post.title": "Publier",
-  "site.steps.post.body": "Obtiens {formats} prêts pour TikTok, Instagram et YouTube.",
+  "site.steps.post.body": "Télécharge ta vidéo finie, prête pour TikTok, Instagram et YouTube.",
   "site.steps.post.hint": "Télécharge une fois prêt",
 
   // ── Landing: footer ── //
@@ -435,7 +433,6 @@ export const fr: Partial<Record<MessageKey, string>> = {
   "site.pricing.retention": "Projets conservés {days} jours",
   "site.pricing.featureWorkflows": "Tous les workflows et styles de sous-titres",
   "site.pricing.featureVoice": "Commandes vocales et nettoyage IA",
-  "site.pricing.featureFormats": "Exports en {formats}",
   "site.pricing.choose": "Choisir {plan}",
   "site.pricing.current": "Ton offre actuelle",
   "site.pricing.manage": "Gérer l'abonnement",

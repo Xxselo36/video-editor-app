@@ -373,7 +373,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "site.hero.titleLead": "Kayıt yaparken",
   "site.hero.titleAccent": "düzenle.",
   "site.hero.sub":
-    "Hata yaptığında {cut} de. Bittiğinde {finish} de. Altyazı, kesim ve birden fazla format dahil, dakikalar içinde paylaşıma hazır.",
+    "Hata yaptığında {cut} de. Bittiğinde {finish} de. Altyazı ve kesimler dahil, dakikalar içinde paylaşıma hazır.",
   "site.hero.cta": "CleoCuts'ı dene",
 
   "site.showcase.listening": "CleoCuts dinliyor",
@@ -388,17 +388,15 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "site.features.voice.title": "Sesli komutlar",
   "site.features.voice.body": "Çekim ortasında {cut} de. CleoCuts başarısız denemeyi kaldırır.",
   "site.features.cleanup.title": "AI temizliği",
-  "site.features.cleanup.body": "Yazım hatalarını, marka isimlerini ve eş seslileri düzeltir.",
-  "site.features.captions.title": "{count} altyazı stili",
-  "site.features.captions.body": "Clean'den Clipper'a. Gerçek fontlar.",
-  "site.features.captions.decoration": "GERÇEK FONTLAR",
+  "site.features.cleanup.body":
+    "Altyazılarındaki yanlış anlaşılan kelimeleri ve marka adlarını düzeltir.",
+  "site.features.captions.title": "Animasyonlu altyazılar",
+  "site.features.captions.body": "Clean'den Clipper'a birçok stil.",
   "site.features.vertical.title": "Otomatik dikey",
   "site.features.vertical.body": "Yatay → yüz takibiyle 9:16.",
-  "site.features.multiformat.title": "Çoklu format",
-  "site.features.multiformat.body": "Tek render'da {formats}.",
-  "site.features.hooks.title": "Hook klip seçici",
+  "site.features.hooks.title": "En iyi anlar, ayrı klipler olarak",
   "site.features.hooks.body":
-    "CleoCuts uzun videonda en iyi {count} anı bulur ve bunları bağımsız reels'lere keser.",
+    "90 saniye veya daha uzun videolarda CleoCuts en iyi anlardan {count} taneye kadarını bulur ve her birini ayrı bir kısa klip yapar.",
 
   "site.steps.title": "Üç adım.",
   "site.steps.sub": "Kaydet. CleoCuts'la konuş. Paylaş.",
@@ -409,7 +407,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "site.steps.upload.body": "Videonu bırak. Bir iş akışı seç. Gerisini AI yapar.",
   "site.steps.upload.hint": "Uzunluğa göre birkaç dakika",
   "site.steps.post.title": "Paylaş",
-  "site.steps.post.body": "TikTok, Instagram ve YouTube için {formats} hazır.",
+  "site.steps.post.body": "Bitmiş videonu indir; TikTok, Instagram ve YouTube için hazır.",
   "site.steps.post.hint": "Hazır olduğunda indir",
 
   "site.footer.editor": "Editör",
@@ -430,7 +428,6 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "site.pricing.retention": "Projeler {days} gün saklanır",
   "site.pricing.featureWorkflows": "Tüm iş akışları ve altyazı stilleri",
   "site.pricing.featureVoice": "Sesli komutlar ve AI temizliği",
-  "site.pricing.featureFormats": "{formats} formatlarında dışa aktarma",
   "site.pricing.choose": "{plan} seç",
   "site.pricing.current": "Mevcut planın",
   "site.pricing.manage": "Aboneliği yönet",

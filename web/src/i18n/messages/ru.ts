@@ -371,7 +371,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "site.hero.titleLead": "Монтируй прямо во время",
   "site.hero.titleAccent": "записи.",
   "site.hero.sub":
-    "Скажи {cut}, если ошибся. Скажи {finish}, когда закончишь. Готово к публикации за пару минут — с субтитрами, монтажом и несколькими форматами в комплекте.",
+    "Скажи {cut}, если ошибся. Скажи {finish}, когда закончишь. Готово к публикации за пару минут — с субтитрами и монтажом.",
   "site.hero.cta": "Попробовать CleoCuts",
 
   "site.showcase.listening": "CleoCuts слушает",
@@ -386,17 +386,15 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "site.features.voice.title": "Голосовые команды",
   "site.features.voice.body": "Скажи {cut} прямо во время дубля. CleoCuts удалит неудачную попытку.",
   "site.features.cleanup.title": "ИИ-чистка",
-  "site.features.cleanup.body": "Исправляет опечатки, названия брендов и омофоны.",
-  "site.features.captions.title": "{count} стилей субтитров",
-  "site.features.captions.body": "От Clean до Clipper. Настоящие шрифты.",
-  "site.features.captions.decoration": "НАСТОЯЩИЕ ШРИФТЫ",
+  "site.features.cleanup.body":
+    "Исправляет неверно распознанные слова и названия брендов в субтитрах.",
+  "site.features.captions.title": "Анимированные субтитры",
+  "site.features.captions.body": "Несколько стилей — от Clean до Clipper.",
   "site.features.vertical.title": "Автовертикаль",
   "site.features.vertical.body": "Горизонтальное → 9:16 с трекингом лица.",
-  "site.features.multiformat.title": "Мультиформат",
-  "site.features.multiformat.body": "{formats} за один рендер.",
-  "site.features.hooks.title": "Подбор хук-клипов",
+  "site.features.hooks.title": "Лучшие моменты — отдельными клипами",
   "site.features.hooks.body":
-    "CleoCuts находит {count} лучших моментов в твоём длинном видео и превращает их в самостоятельные ролики.",
+    "В видео от 90 секунд CleoCuts находит до {count} лучших моментов и делает из каждого отдельный короткий клип.",
 
   "site.steps.title": "Три шага.",
   "site.steps.sub": "Записывай. Говори с CleoCuts. Публикуй.",
@@ -407,7 +405,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "site.steps.upload.body": "Загрузи видео. Выбери workflow. Остальное сделает ИИ.",
   "site.steps.upload.hint": "Пара минут — в зависимости от длины",
   "site.steps.post.title": "Публикуй",
-  "site.steps.post.body": "Получи {formats}, готовые для TikTok, Instagram и YouTube.",
+  "site.steps.post.body": "Скачай готовое видео — оно подходит для TikTok, Instagram и YouTube.",
   "site.steps.post.hint": "Скачай, когда будет готово",
 
   "site.footer.editor": "Редактор",
@@ -428,7 +426,6 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "site.pricing.retention": "Проекты хранятся {days} дн.",
   "site.pricing.featureWorkflows": "Все workflow и стили субтитров",
   "site.pricing.featureVoice": "Голосовые команды и ИИ-чистка",
-  "site.pricing.featureFormats": "Экспорт в {formats}",
   "site.pricing.choose": "Выбрать {plan}",
   "site.pricing.current": "Твой текущий тариф",
   "site.pricing.manage": "Управление подпиской",

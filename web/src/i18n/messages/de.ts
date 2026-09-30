@@ -169,7 +169,7 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.dashboard.voiceTeaser": "Sag „Cleo“ während der Aufnahme — spare Stunden beim Schneiden",
 
   // ── Workflow picker ─────────────────────────────────────────────────
-  "app.picker.backToDashboard": "Zurück zum Dashboard",
+  "app.picker.backToDashboard": "Zurück zur Übersicht",
   "app.picker.freeDuringBeta": "Kostenlos während der Beta",
   "app.picker.title": "Was postest du?",
   "app.picker.subtitle":
@@ -257,14 +257,14 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.card.renderFailedNote": "Rendern fehlgeschlagen — deine Bearbeitungen sind gespeichert. Öffne es und rendere erneut.",
 
   // ── Review (editor) ─────────────────────────────────────────────────
-  "app.review.backToDashboard": "← Dashboard",
+  "app.review.backToDashboard": "← Zurück",
   "app.review.sentencesOne": "{count} Satz",
   "app.review.sentencesOther": "{count} Sätze",
   "app.review.audioHeadsUp": "Audio-Hinweis",
   "app.review.updatingPreview": "Vorschau wird aktualisiert…",
   "app.review.captionSampleAlt": "{style}-Untertitel-Beispiel",
   "app.review.captionsLookLike": "So sehen die Untertitel aus",
-  "app.review.tabTimeline": "Timeline",
+  "app.review.tabTimeline": "Zeitleiste",
   "app.review.tabTranscript": "Transkript",
   "app.review.tabCaptions": "Untertitel",
   "app.review.preparing": "Wird vorbereitet…",
@@ -286,7 +286,7 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.captions.disabled": "Untertitel für dieses Rendering deaktiviert.",
 
   // ── Timeline editor ─────────────────────────────────────────────────
-  "app.timeline.title": "Timeline",
+  "app.timeline.title": "Zeitleiste",
   "app.timeline.clipsOne": "{count} Clip · {dur}",
   "app.timeline.clipsOther": "{count} Clips · {dur}",
   "app.timeline.saving": "wird gespeichert",
@@ -303,8 +303,8 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.timeline.undoAria": "Rückgängig",
   "app.timeline.redoTitle": "Wiederholen (⌘⇧Z)",
   "app.timeline.redoAria": "Wiederholen",
-  "app.timeline.splitTitle": "Clip an der Abspielposition teilen",
-  "app.timeline.split": "⧉ Teilen",
+  "app.timeline.splitTitle": "Clip an der Abspielposition schneiden",
+  "app.timeline.split": "⧉ Schneiden",
   "app.timeline.zoomOutTitle": "Verkleinern (mehr vom Video zeigen)",
   "app.timeline.zoomOutAria": "Verkleinern",
   "app.timeline.fitTitle": "Ganzes Video einpassen",
@@ -369,15 +369,15 @@ export const de: Partial<Record<MessageKey, string>> = {
 
   "site.hero.badge": "Offene Beta · kostenlos",
   "site.hero.badgePricing": "Tarife & Preise ansehen",
-  "site.hero.titleLead": "Schneiden während du",
+  "site.hero.titleLead": "Schneiden, während du",
   "site.hero.titleAccent": "aufnimmst.",
   "site.hero.sub":
-    "Sag {cut}, wenn dir ein Fehler passiert. Sag {finish}, wenn du fertig bist. Bereit zum Posten in Minuten, inklusive Untertitel, Schnitte und mehrere Formate.",
+    "Sag {cut}, wenn dir ein Fehler passiert. Sag {finish}, wenn du fertig bist. In wenigen Minuten postbereit – mit Untertiteln und Schnitten.",
   "site.hero.cta": "CleoCuts testen",
 
   "site.showcase.listening": "CleoCuts hört zu",
   "site.showcase.captionStyle": "Untertitel-Stil",
-  "site.showcase.clipper": "SPRACHE IST DER EDITOR",
+  "site.showcase.clipper": "DEINE STIMME SCHNEIDET",
   "site.showcase.highlight": "BEREIT ZUM POSTEN",
   "site.showcase.flash": "SAG CUT",
   "site.showcase.punch": "PERFEKT",
@@ -387,28 +387,27 @@ export const de: Partial<Record<MessageKey, string>> = {
   "site.features.voice.title": "Sprachbefehle",
   "site.features.voice.body": "Sag {cut} mitten im Take. CleoCuts entfernt den misslungenen Versuch.",
   "site.features.cleanup.title": "KI-Bereinigung",
-  "site.features.cleanup.body": "Korrigiert Tippfehler, Markennamen und Homophone.",
-  "site.features.captions.title": "{count} Untertitel-Stile",
-  "site.features.captions.body": "Von Clean bis Clipper. Echte Schriftarten.",
-  "site.features.captions.decoration": "ECHTE SCHRIFTARTEN",
+  "site.features.cleanup.body":
+    "Korrigiert falsch erkannte Wörter und Markennamen in deinen Untertiteln.",
+  "site.features.captions.title": "Animierte Untertitel",
+  "site.features.captions.body": "Mehrere Stile, von Clean bis Clipper.",
   "site.features.vertical.title": "Automatisch vertikal",
   "site.features.vertical.body": "Querformat → 9:16 mit Gesichtserkennung.",
-  "site.features.multiformat.title": "Multi-Format",
-  "site.features.multiformat.body": "{formats} in einem Rendering.",
-  "site.features.hooks.title": "Hook-Clip-Auswahl",
+  "site.features.hooks.title": "Die besten Momente als Clips",
   "site.features.hooks.body":
-    "CleoCuts findet die {count} besten Momente in deinem Langform-Video und schneidet sie zu eigenständigen Reels.",
+    "Bei Videos ab 90 Sekunden findet CleoCuts bis zu {count} der besten Momente und schneidet jeden zu einem eigenen kurzen Clip.",
 
   "site.steps.title": "Drei Schritte.",
   "site.steps.sub": "Aufnehmen. Mit CleoCuts sprechen. Posten.",
   "site.steps.record.title": "Aufnehmen",
-  "site.steps.record.body": "Sag {cut}, wenn dir ein Fehler passiert. Keine Wiederholungen.",
+  "site.steps.record.body": "Sag {cut}, wenn dir ein Fehler passiert. Kein zweiter Take nötig.",
   "site.steps.record.hint": "Takes jeder Länge",
   "site.steps.upload.title": "Hochladen",
-  "site.steps.upload.body": "Video hineinziehen. Workflow wählen. Der Rest macht die KI.",
+  "site.steps.upload.body": "Video hineinziehen. Workflow wählen. Den Rest macht die KI.",
   "site.steps.upload.hint": "Ein paar Minuten, je nach Länge",
   "site.steps.post.title": "Posten",
-  "site.steps.post.body": "{formats} für TikTok, Instagram und YouTube — fertig.",
+  "site.steps.post.body":
+    "Lade dein fertiges Video herunter – bereit für TikTok, Instagram und YouTube.",
   "site.steps.post.hint": "Herunterladen, wenn es fertig ist",
 
   "site.footer.editor": "Editor",
@@ -429,7 +428,6 @@ export const de: Partial<Record<MessageKey, string>> = {
   "site.pricing.retention": "Projekte werden {days} Tage gespeichert",
   "site.pricing.featureWorkflows": "Alle Workflows und Untertitel-Stile",
   "site.pricing.featureVoice": "Sprachbefehle und KI-Bereinigung",
-  "site.pricing.featureFormats": "Exporte in {formats}",
   "site.pricing.choose": "{plan} wählen",
   "site.pricing.current": "Dein aktueller Tarif",
   "site.pricing.manage": "Abo verwalten",

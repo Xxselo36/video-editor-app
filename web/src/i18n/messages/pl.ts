@@ -264,7 +264,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.review.updatingPreview": "Aktualizowanie podglądu…",
   "app.review.captionSampleAlt": "Przykład napisów {style}",
   "app.review.captionsLookLike": "Tak będą wyglądać napisy",
-  "app.review.tabTimeline": "Timeline",
+  "app.review.tabTimeline": "Oś czasu",
   "app.review.tabTranscript": "Transkrypt",
   "app.review.tabCaptions": "Napisy",
   "app.review.preparing": "Przygotowywanie…",
@@ -286,7 +286,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "app.captions.disabled": "Napisy wyłączone dla tego renderu.",
 
   // ── Timeline editor ─────────────────────────────────────────────────
-  "app.timeline.title": "Timeline",
+  "app.timeline.title": "Oś czasu",
   "app.timeline.clipsOne": "{count} klip · {dur}",
   "app.timeline.clipsOther": "{count} klipów · {dur}",
   "app.timeline.saving": "zapisywanie",
@@ -372,7 +372,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "site.hero.titleLead": "Montuj, kiedy",
   "site.hero.titleAccent": "nagrywasz.",
   "site.hero.sub":
-    "Powiedz {cut}, kiedy się pomylisz. Powiedz {finish}, kiedy skończysz. Gotowe do publikacji w kilka minut — z napisami, cięciami i wieloma formatami w cenie.",
+    "Powiedz {cut}, kiedy się pomylisz. Powiedz {finish}, kiedy skończysz. Gotowe do publikacji w kilka minut — z napisami i cięciami.",
   "site.hero.cta": "Wypróbuj CleoCuts",
 
   "site.showcase.listening": "CleoCuts słucha",
@@ -387,17 +387,14 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "site.features.voice.title": "Komendy głosowe",
   "site.features.voice.body": "Powiedz {cut} w środku ujęcia. CleoCuts usuwa nieudaną próbę.",
   "site.features.cleanup.title": "Czyszczenie przez AI",
-  "site.features.cleanup.body": "Poprawia literówki, nazwy marek i homofony.",
-  "site.features.captions.title": "{count} stylów napisów",
-  "site.features.captions.body": "Od Clean do Clipper. Prawdziwe fonty.",
-  "site.features.captions.decoration": "PRAWDZIWE FONTY",
+  "site.features.cleanup.body": "Poprawia źle rozpoznane słowa i nazwy marek w twoich napisach.",
+  "site.features.captions.title": "Animowane napisy",
+  "site.features.captions.body": "Kilka stylów, od Clean do Clipper.",
   "site.features.vertical.title": "Automatyczny format wertykalny",
   "site.features.vertical.body": "Pejzaż → 9:16 ze śledzeniem twarzy.",
-  "site.features.multiformat.title": "Wiele formatów",
-  "site.features.multiformat.body": "{formats} w jednym renderze.",
-  "site.features.hooks.title": "Wybór klipów hookowych",
+  "site.features.hooks.title": "Najlepsze momenty jako klipy",
   "site.features.hooks.body":
-    "CleoCuts znajduje {count} najlepszych momentów w twoim długim filmie i wycina z nich samodzielne rolki.",
+    "W filmach od 90 sekund CleoCuts znajduje do {count} najlepszych momentów i robi z każdego osobny krótki klip.",
 
   "site.steps.title": "Trzy kroki.",
   "site.steps.sub": "Nagraj. Rozmawiaj z CleoCuts. Opublikuj.",
@@ -408,7 +405,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "site.steps.upload.body": "Wgraj swój film. Wybierz workflow. Resztę robi AI.",
   "site.steps.upload.hint": "Kilka minut, w zależności od długości",
   "site.steps.post.title": "Opublikuj",
-  "site.steps.post.body": "Otrzymaj {formats}, gotowe na TikToka, Instagrama i YouTube.",
+  "site.steps.post.body": "Pobierz gotowy film — przygotowany na TikToka, Instagrama i YouTube.",
   "site.steps.post.hint": "Pobierz, kiedy będzie gotowe",
 
   "site.footer.editor": "Edytor",
@@ -428,7 +425,6 @@ export const pl: Partial<Record<MessageKey, string>> = {
   "site.pricing.retention": "Projekty przechowywane przez {days} dni",
   "site.pricing.featureWorkflows": "Wszystkie workflowy i style napisów",
   "site.pricing.featureVoice": "Komendy głosowe i czyszczenie przez AI",
-  "site.pricing.featureFormats": "Eksport w formatach {formats}",
   "site.pricing.choose": "Wybierz {plan}",
   "site.pricing.current": "Twój obecny plan",
   "site.pricing.manage": "Zarządzaj subskrypcją",
