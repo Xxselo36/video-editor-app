@@ -155,7 +155,19 @@ export function PickerScreen({
     </>
   );
 
-  if (view === "dashboard") {
+  // The dialogs sit OUTSIDE the view switch, at one stable place in the
+  // tree: an upload finishing flips the view to the dashboard, and a
+  // dialog inside either view's root would be unmounted with it (an open
+  // voice test would restart). They render through a portal, so where
+  // they sit in the tree doesn't change the page.
+  return (
+    <>
+      {view === "dashboard" ? renderDashboard() : renderPicker()}
+      {modals}
+    </>
+  );
+
+  function renderDashboard() {
     return (
       <Dashboard
         activeJobs={activeJobs}
@@ -169,13 +181,12 @@ export function PickerScreen({
         }}
         onPlay={setPlayingJobId}
         onVoiceTest={() => setShowVoiceOnboarding(true)}
-      >
-        {modals}
-      </Dashboard>
+      />
     );
   }
 
-  return (
+  function renderPicker() {
+    return (
     <div className="relative z-10 flex flex-col" data-testid="picker">
       {/* Back to dashboard — only rendered when there's a dashboard to
           go back to (existing jobs or library entries). Fresh users
@@ -362,8 +373,7 @@ export function PickerScreen({
       >
         {t("app.upload.privacyLink")}
       </Link>
-
-      {modals}
     </div>
-  );
+    );
+  }
 }
