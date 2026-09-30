@@ -2582,6 +2582,10 @@ def create_elegant_phrase_subtitle(words: list, active_index: int, duration: flo
     return clip
 
 
+# Highlight font styles already reported as unresolvable (logged once).
+_MISSING_HIGHLIGHT_FONTS: set = set()
+
+
 def create_highlight_phrase_subtitle(words: list, active_index: int, duration: float,
                                       video_size: tuple, subtitle_config: dict = None,
                                       word_times: list = None) -> ImageClip:
@@ -2618,6 +2622,15 @@ def create_highlight_phrase_subtitle(words: list, active_index: int, duration: f
             ("/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf", 0),
             ("/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf", 0),
             ("C:/Windows/Fonts/arialbi.ttf", 0),
+            # Linux servers (Modal / Railway images): fonts-dejavu-core has
+            # no BoldOblique, so Flash had no font there. fonts-liberation2
+            # installs to liberation2/ on Debian bookworm; on trixie /
+            # Ubuntu 24.04 it is a transitional package and the file is in
+            # liberation/ (Pillow would also find it there by file name, but
+            # only under the default XDG_DATA_DIRS). Same pair as
+            # src/caption_preview.py.
+            ("/usr/share/fonts/truetype/liberation2/LiberationSans-BoldItalic.ttf", 0),
+            ("/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf", 0),
         ]
     elif font_style == "impact":
         # Impact / kondensiert — für den Highlight-Style mit roter Box
@@ -2648,6 +2661,16 @@ def create_highlight_phrase_subtitle(words: list, active_index: int, duration: f
             continue
 
     if font_path is None:
+        # Used to return silently: the whole video came out without
+        # captions and nothing said why (Flash on Linux, captions.md C5).
+        # Once per style and process — every phrase would hit it.
+        if font_style not in _MISSING_HIGHLIGHT_FONTS:
+            _MISSING_HIGHLIGHT_FONTS.add(font_style)
+            import logging
+            logging.getLogger(__name__).error(
+                "[caption] no font for highlight style %r (tried %s): its "
+                "phrases are rendered WITHOUT captions", font_style,
+                ", ".join(fp for fp, _ in font_candidates))
         return None
 
     font = ImageFont.truetype(font_path, base_fontsize, index=font_index)

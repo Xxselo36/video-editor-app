@@ -95,7 +95,10 @@ def render(out_dir: Path) -> dict:
 
     def spy(font=None, size=10, index=0, *a, **k):
         f = orig_truetype(font, size, index, *a, **k)
-        opened.append((os.path.basename(str(font)), int(index)))
+        # f.path: the file really loaded (Pillow searches the font dirs by
+        # file name when a path is missing).
+        path = getattr(f, "path", None) or font
+        opened.append((os.path.basename(str(path)), int(index)))
         return f
 
     ImageFont.truetype = spy

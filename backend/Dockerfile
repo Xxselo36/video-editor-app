@@ -38,6 +38,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 COPY src /app/src
 COPY plugins /app/plugins
 COPY backend /app/backend
+# Bundled caption fonts (Bangers for Clipper; src/effects.py and the
+# /caption-previews tiles look for them at src/../assets/fonts).
+COPY assets/fonts /app/assets/fonts
 
 # Storage layout. CLEO_CACHE_DIR is for SmartCam intermediate files
 # (mounted as a persistent volume in prod). /tmp for short-lived job

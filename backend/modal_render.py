@@ -83,6 +83,10 @@ image = (
     .add_local_dir("src", remote_path="/app/src")
     .add_local_dir("plugins", remote_path="/app/plugins")
     .add_local_dir("backend", remote_path="/app/backend")
+    # Bundled caption fonts (Bangers for Clipper): src/effects.py looks
+    # for them at src/../assets/fonts. Without this Clipper burned in
+    # DejaVu Sans Bold (captions.md C4).
+    .add_local_dir("assets/fonts", remote_path="/app/assets/fonts")
 )
 
 
