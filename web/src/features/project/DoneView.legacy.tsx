@@ -1,6 +1,6 @@
 "use client";
 /**
- * The v1 "done" screen, kept aside (moved verbatim from app/app/page.tsx
+ * The v1 "done" screen, kept aside (moved from app/app/page.tsx
  * in UX4). Nothing renders it since the dashboard cards took over;
  * UX11 revives it as the project's Done view.
  */

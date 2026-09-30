@@ -1,5 +1,5 @@
 /**
- * Error text of the /app screens (moved verbatim from app/app/page.tsx in
+ * Error text of the /app screens (moved from app/app/page.tsx in
  * UX4): friendly messages for raw server and network errors, and the
  * English messages stored with job cards, mapped back to the viewer's
  * language. Error handling by string matching: UX5 replaces it with the

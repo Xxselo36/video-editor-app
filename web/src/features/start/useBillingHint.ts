@@ -1,4 +1,4 @@
-// Moved verbatim from app/app/page.tsx (UX4).
+// Moved from app/app/page.tsx (UX4).
 import { useLang, useT } from "@/i18n";
 import { fmtMinutes, useBillingConfig, useMe } from "@/lib/account";
 

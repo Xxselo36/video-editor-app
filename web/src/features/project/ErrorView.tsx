@@ -1,5 +1,5 @@
 "use client";
-// Moved verbatim from app/app/page.tsx (UX4).
+// Moved from app/app/page.tsx (UX4).
 import { TriangleAlert } from "lucide-react";
 import { useT } from "@/i18n";
 

@@ -1,5 +1,5 @@
 "use client";
-// The voice-command test (moved verbatim from app/app/page.tsx in UX4).
+// The voice-command test (moved from app/app/page.tsx in UX4).
 import { useEffect, useRef, useState } from "react";
 import { Check, Circle, X } from "lucide-react";
 import { IconMic } from "@/components/Icons";

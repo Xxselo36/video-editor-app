@@ -31,7 +31,7 @@ const POLL_BACKOFF_AFTER_MS = 60_000;
  *
  * Runs for the caller's lifetime and returns the cards' statuses; a
  * finished job moves to the library and `setRecent` shows it at once.
- * (Moved verbatim from PickerScreen in app/app/page.tsx, UX4.)
+ * (Moved from PickerScreen in app/app/page.tsx, UX4.)
  */
 export function useJobStatusPoller(setRecent: (recent: LibraryEntry[]) => void): Record<string, CardStatus> {
   const t = useT();

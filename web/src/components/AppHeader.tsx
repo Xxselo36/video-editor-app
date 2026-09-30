@@ -1,5 +1,5 @@
 "use client";
-// The /app header (moved verbatim from app/app/page.tsx in UX4).
+// The /app header (moved from app/app/page.tsx in UX4).
 import Link from "next/link";
 import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { LogoMark } from "@/components/Logo";

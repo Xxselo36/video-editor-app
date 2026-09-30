@@ -1,5 +1,5 @@
 "use client";
-// The v1 editor (moved verbatim from app/app/page.tsx in UX4): player in
+// The v1 editor (moved from app/app/page.tsx in UX4): player in
 // proxy or preview mode, timeline, transcript and captions tabs, the
 // autosave with flush-on-leave, and Apply & render.
 import dynamic from "next/dynamic";

@@ -1,5 +1,5 @@
 "use client";
-// The dashboard: job cards and recent projects (moved verbatim from
+// The dashboard: job cards and recent projects (moved from
 // app/app/page.tsx in UX4, where PickerScreen rendered it; it still owns
 // the state and passes it in).
 import Link from "next/link";

@@ -1,5 +1,5 @@
 /**
- * The editor's transcript sentences (moved verbatim from app/app/page.tsx
+ * The editor's transcript sentences (moved from app/app/page.tsx
  * in UX4): Whisper's fragments grouped into readable phrases, or the
  * user's saved edits from GET /subtitles.
  */

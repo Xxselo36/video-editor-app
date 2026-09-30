@@ -1,5 +1,5 @@
 "use client";
-// Moved verbatim from app/app/page.tsx (UX4).
+// Moved from app/app/page.tsx (UX4).
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Minus, Plus, Redo2, SquareSplitHorizontal, Undo2, X } from "lucide-react";
 import { Card, SectionLabel } from "@/components/ui/Card";

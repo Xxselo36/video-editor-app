@@ -1,4 +1,4 @@
-// Time labels of the editor (moved verbatim from app/app/page.tsx in UX4).
+// Time labels of the editor (moved from app/app/page.tsx in UX4).
 
 export function fmtTime(s: number): string {
   const m = Math.floor(s / 60);

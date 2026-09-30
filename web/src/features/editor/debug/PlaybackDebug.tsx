@@ -1,5 +1,5 @@
 "use client";
-// Moved verbatim from app/app/page.tsx (UX4).
+// Moved from app/app/page.tsx (UX4).
 import { useEffect, useRef, useState } from "react";
 
 // Temporary playback diagnostics, shown only with ?debug=1 in the URL.

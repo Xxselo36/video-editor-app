@@ -1,5 +1,5 @@
 "use client";
-// The /app home (moved verbatim from app/app/page.tsx in UX4): the
+// The /app home (moved from app/app/page.tsx in UX4): the
 // dashboard for returning users, else the workflow picker. It owns the
 // job cards, the recent projects and their status poll.
 import Link from "next/link";

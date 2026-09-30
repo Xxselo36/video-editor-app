@@ -1,6 +1,6 @@
 /**
  * The workflow presets of the /app start screens, and the caption-style,
- * cut-style and export-format options (moved verbatim from
+ * cut-style and export-format options (moved from
  * app/app/page.tsx in UX4). Legacy: one workflow replaces the presets
  * (flows.md §2.6).
  */

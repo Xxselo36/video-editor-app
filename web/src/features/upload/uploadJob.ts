@@ -1,5 +1,5 @@
 /**
- * Upload a video and create its job, in the background (moved verbatim
+ * Upload a video and create its job, in the background (moved
  * from Home's onProcess in app/app/page.tsx, UX4). A dashboard card shows
  * the upload and then the job; a failed upload leaves the card with its
  * error. Never throws.

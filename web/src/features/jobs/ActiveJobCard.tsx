@@ -1,5 +1,5 @@
 "use client";
-// Moved verbatim from app/app/page.tsx (UX4).
+// Moved from app/app/page.tsx (UX4).
 import { ArrowRight, ArrowUp, CircleAlert, Play, Sparkle, X, type LucideIcon } from "lucide-react";
 import { Icon } from "@/components/ui/Icon";
 import { Progress } from "@/components/ui/Progress";

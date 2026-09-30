@@ -1,5 +1,5 @@
 "use client";
-// Moved verbatim from app/app/page.tsx (UX4).
+// Moved from app/app/page.tsx (UX4).
 import { useState } from "react";
 import { useT } from "@/i18n";
 import { useMediaUrl } from "@/lib/api";

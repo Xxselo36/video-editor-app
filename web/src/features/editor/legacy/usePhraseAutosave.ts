@@ -1,4 +1,4 @@
-// Moved verbatim from Home in app/app/page.tsx (UX4).
+// Moved from Home in app/app/page.tsx (UX4).
 import { useEffect, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { trackSave } from "@/lib/pendingSaves";

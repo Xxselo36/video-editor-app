@@ -1,5 +1,5 @@
 /**
- * Job shapes of the /app screens (moved verbatim from app/app/page.tsx in
+ * Job shapes of the /app screens (moved from app/app/page.tsx in
  * UX4): GET /jobs/{id} and what a dashboard card shows of GET /jobs/status.
  */
 
