@@ -84,7 +84,7 @@ jobs:
         run: python -m unittest discover -s loadtest/tests -t .
       - name: Install ffmpeg + espeak-ng
         if: inputs.scenario == 'burst' || inputs.scenario == 'abuse'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
+        run: .github/scripts/apt-install.sh ffmpeg espeak-ng
       - name: Run
         timeout-minutes: 200
         env:
