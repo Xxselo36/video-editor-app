@@ -65,6 +65,10 @@ export type InterimHook = {
   fontsOk: boolean;
   preset: string;
   draws: number;
+  /** Time spent in drawFrame (ms, total and worst) and bitmaps rendered. */
+  drawMs: number;
+  maxDrawMs: number;
+  renders: number;
   /** Source time of the last drawn frame. */
   t: number | null;
   /** Text of the drawn page, null when no caption is shown. */
@@ -123,7 +127,7 @@ function InterimOverlay({ videoRef, phrases, units, captionPreset, mode, segment
     if (!ctx) return;
     const L = live.current;
     const hook: InterimHook | null = TEST_HOOK
-      ? { fontsReady: false, fontsOk: false, preset: presetRef.current, draws: 0, t: null, page: null, active: null, activeIndex: -1, W: 0, H: 0 }
+      ? { fontsReady: false, fontsOk: false, preset: presetRef.current, draws: 0, drawMs: 0, maxDrawMs: 0, renders: 0, t: null, page: null, active: null, activeIndex: -1, W: 0, H: 0 }
       : null;
     if (hook) window.__captionsInterim = hook;
 
@@ -135,8 +139,13 @@ function InterimOverlay({ videoRef, phrases, units, captionPreset, mode, segment
       const force = L.dirty;
       L.dirty = false;
       L.lastT = src;
+      const t0 = hook ? performance.now() : 0;
       const { changed, state } = r.drawFrame(ctx, src, { force });
       if (hook) {
+        const ms = performance.now() - t0;
+        hook.drawMs += ms;
+        hook.maxDrawMs = Math.max(hook.maxDrawMs, ms);
+        hook.renders = r.stats.renders;
         const page = state ? r.pages[state.page] : null;
         if (changed) hook.draws++;
         hook.t = src;
@@ -145,8 +154,32 @@ function InterimOverlay({ videoRef, phrases, units, captionPreset, mode, segment
         hook.activeIndex = state ? state.active : -1;
         hook.active = page && state && state.active >= 0 ? page.words[state.active].source : null;
       }
+      if (changed) schedulePrefetch(r, state ? r.pages[state.page].end : src);
     };
     L.draw = () => draw();
+
+    // The next page's page-in bitmaps are rendered while the browser is
+    // idle, so a page change during playback is a blit, not a render
+    // (a render costs a few ms: strokes, shadows).
+    const idle = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    let idleHandle = 0;
+    let prefetchedFor = NaN;
+    const cancelPrefetch = () => {
+      if (idle.cancelIdleCallback) idle.cancelIdleCallback(idleHandle);
+      else clearTimeout(idleHandle);
+    };
+    function schedulePrefetch(r: CaptionRenderer, from: number) {
+      if (from === prefetchedFor) return;
+      prefetchedFor = from;
+      cancelPrefetch();
+      const run = () => {
+        if (L.renderer === r) r.prefetch(from);
+      };
+      idleHandle = idle.requestIdleCallback ? idle.requestIdleCallback(run, { timeout: 1000 }) : window.setTimeout(run, 100);
+    }
 
     // Style (per frame size), fonts, renderer: whenever words, preset or size change.
     const prepare = () => {
@@ -173,6 +206,7 @@ function InterimOverlay({ videoRef, phrases, units, captionPreset, mode, segment
           else L.renderer = new CaptionRenderer(input);
           L.ready = true;
           L.dirty = true;
+          prefetchedFor = NaN;
           if (hook) {
             hook.fontsReady = true;
             hook.fontsOk = ok;
@@ -230,6 +264,7 @@ function InterimOverlay({ videoRef, phrases, units, captionPreset, mode, segment
     return () => {
       if (rvfc) v.cancelVideoFrameCallback?.(frameHandle);
       cancelAnimationFrame(rafHandle);
+      cancelPrefetch();
       ro?.disconnect();
       v.removeEventListener("loadedmetadata", layout);
       v.removeEventListener("resize", layout);
