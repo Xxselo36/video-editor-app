@@ -133,7 +133,7 @@ class SubscriptionRequired(Exception):
 @dataclass
 class Entitlement:
     plan: str
-    source: str  # "comp" | "subscription"
+    source: str  # "comp" | "subscription" | "test"
     subscription: dict[str, Any] | None = None
 
 
@@ -526,9 +526,28 @@ def grants_access(sub: dict[str, Any], now: float | None = None) -> bool:
     return False
 
 
+# Test auth (backend/auth.py, CLEO_AUTH_TEST): the plan the last
+# `X-Test-User: <id>;plan=<plan>` header named, per user id — "none" for
+# no plan; a header without a plan removes the override. Only filled
+# while test auth is on.
+_TEST_PLANS: dict[str, str] = {}
+
+
+def set_test_plan(user_id: str, plan: str | None) -> None:
+    if plan:
+        _TEST_PLANS[user_id] = plan
+    else:
+        _TEST_PLANS.pop(user_id, None)
+
+
 def entitlement(user_id: str, email: str | None = None,
                 now: float | None = None) -> Entitlement | None:
     """Best plan the user currently has, or None."""
+    test_plan = _TEST_PLANS.get(user_id)
+    if test_plan is not None:
+        if test_plan in PLAN_ORDER:
+            return Entitlement(plan=test_plan, source="test")
+        return None
     if is_comp(user_id, email):
         return Entitlement(plan="studio", source="comp")
     mode = test_mode()

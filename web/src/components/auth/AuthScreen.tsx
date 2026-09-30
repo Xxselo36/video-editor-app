@@ -5,11 +5,16 @@ import { LogoWord } from "@/components/Logo";
 import { LanguageSwitcher, useT } from "@/i18n";
 import { useAuthState } from "@/lib/account";
 import { SiteFooter } from "@/components/site/SiteFooter";
+import { AUTH_TEST } from "@/lib/auth";
 
 const ClerkAuthForm = dynamic(() => import("./ClerkAuthForm"), {
   ssr: false,
   loading: () => <div className="skeleton h-[420px] w-full max-w-[400px] rounded-2xl" />,
 });
+// Test auth (NEXT_PUBLIC_AUTH_TEST=1): a test-user picker instead of Clerk.
+const MockSignIn = AUTH_TEST
+  ? dynamic(() => import("./MockAuthProvider").then((m) => m.MockSignIn), { ssr: false })
+  : null;
 
 /** Page shell around Clerk's <SignIn>/<SignUp> (sign-in / sign-up routes),
  *  with the legal footer (imprint, privacy and terms before signing up). */
@@ -32,6 +37,8 @@ export function AuthScreen({ mode }: { mode: "sign-in" | "sign-up" }) {
           <p className="max-w-sm text-center text-sm" style={{ color: "var(--text-body)" }}>
             {t("app.auth.loadFailed")}
           </p>
+        ) : MockSignIn ? (
+          <MockSignIn mode={mode} />
         ) : (
           <ClerkAuthForm mode={mode} />
         )}

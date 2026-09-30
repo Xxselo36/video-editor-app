@@ -231,6 +231,8 @@ WEBHOOK_SECRET = "whsec_test"
 _FEATURE_ENV = (
     "CLERK_ISSUER", "CLERK_JWT_KEY", "CLERK_AUTHORIZED_PARTIES",
     "CLERK_SECRET_KEY", "CLEO_ADMIN_TOKEN", "CLEO_MEDIA_SECRET",
+    "CLEO_AUTH_TEST", "CLEO_ENV", "RAILWAY_ENVIRONMENT_NAME",
+    "RAILWAY_ENVIRONMENT",
     "CLEO_BILLING_ENFORCE", "CLEO_COMP_USERS", "CLEO_BILLING_TESTERS",
     "CLEO_APP_URL",
     "LEMONSQUEEZY_API_KEY", "LEMONSQUEEZY_STORE_ID",
@@ -282,6 +284,7 @@ def clean_state(monkeypatch):
     shutil.rmtree(M._WORK_ROOT / "media", ignore_errors=True)
     shutil.rmtree(M._TMP_ROOT / "proxy-cache", ignore_errors=True)
     auth._jwks = None
+    accounts._TEST_PLANS.clear()
     billing._price_cache.clear()
     billing._refresh_tried.clear()
     with M._INIT_RATE._lock:

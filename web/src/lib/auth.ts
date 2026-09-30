@@ -12,8 +12,17 @@
  * together on Vercel and redeploy — NEXT_PUBLIC_* is frozen at build.
  */
 
+/**
+ * Test auth (e2e suites, staging): NEXT_PUBLIC_AUTH_TEST=1 turns accounts
+ * on without Clerk — components/auth/MockAuthProvider signs a test user
+ * in, and API calls carry `X-Test-User` instead of a Clerk token (the
+ * backend needs CLEO_AUTH_TEST=1). next.config.ts refuses it in a
+ * production build.
+ */
+export const AUTH_TEST = process.env.NEXT_PUBLIC_AUTH_TEST === "1";
+
 // Literal reference: only `process.env.NEXT_PUBLIC_X` gets inlined.
-export const AUTH_ENABLED = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+export const AUTH_ENABLED = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) || AUTH_TEST;
 
 /** Paid plans are advertised (landing copy, legal texts). Copy only —
  *  whether billing is on is decided by the backend (GET /billing/config).
@@ -101,6 +110,12 @@ export async function getAuthToken(opts?: { skipCache?: boolean }): Promise<stri
     /* offline — keep the last one, the backend decides */
   }
   return lastToken;
+}
+
+/** The request header that carries a token from getAuthToken(): Clerk's
+ *  session JWT as a bearer token, or the test user (test auth). */
+export function authHeader(token: string): [name: string, value: string] {
+  return AUTH_TEST ? ["X-Test-User", token] : ["Authorization", `Bearer ${token}`];
 }
 
 /** Last token seen: for saves sent while the page unloads, where

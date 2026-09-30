@@ -8,7 +8,7 @@
  * headers, so they carry the per-user media token from GET /me (?t=).
  */
 import { useState, useSyncExternalStore } from "react";
-import { AUTH_ENABLED, cachedAuthToken, getAuthToken } from "@/lib/auth";
+import { AUTH_ENABLED, authHeader, cachedAuthToken, getAuthToken } from "@/lib/auth";
 
 // Backend host: explicit env wins, else the page's hostname on port
 // 8000 — so a phone on the LAN (192.168.x.y:3000) hits 192.168.x.y:8000,
@@ -49,7 +49,7 @@ export async function apiFetch(path: string, init: ApiInit = {}): Promise<Respon
   // die before the request is even sent.
   const token = unloading || rest.keepalive ? cachedAuthToken() : await getAuthToken();
   const headers = new Headers(rest.headers);
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (token) headers.set(...authHeader(token));
   const r = await fetch(url, { ...rest, headers });
   if (r.status === 401) notifyAuthRequired();
   return r;
@@ -58,7 +58,9 @@ export async function apiFetch(path: string, init: ApiInit = {}): Promise<Respon
 /** Headers for the XHR uploads (they need progress events, so no fetch). */
 export async function authHeaders(): Promise<Record<string, string>> {
   const token = await getAuthToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  if (!token) return {};
+  const [name, value] = authHeader(token);
+  return { [name]: value };
 }
 
 /** A non-2xx backend answer, with FastAPI's `detail` parsed. */
