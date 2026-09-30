@@ -15,8 +15,6 @@
   "dependencies": {
     "@clerk/localizations": "^4.20.0",
     "@clerk/nextjs": "^7.9.7",
-    "@ffmpeg/ffmpeg": "^0.12.15",
-    "@ffmpeg/util": "^0.12.2",
     "@sentry/browser": "11.1.0",
     "@vercel/analytics": "^2.0.1",
     "harfbuzzjs": "1.6.2",
