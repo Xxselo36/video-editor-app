@@ -576,6 +576,11 @@ export function useEditSession({
     else v.pause();
   };
 
+  const toggleMute = () => {
+    const v = videoRef.current;
+    if (v) v.muted = !v.muted;
+  };
+
   /** The proxy can't be played after all (gone, codec): fall back to the
    *  server-built preview. */
   const onVideoError = () => {
@@ -672,6 +677,7 @@ export function useEditSession({
     seekToPhrase,
     seekOriginal,
     togglePlay,
+    toggleMute,
   };
 }
 

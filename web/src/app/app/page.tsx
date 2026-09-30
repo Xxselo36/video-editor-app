@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { Toast } from "@/components/ui/Toast";
@@ -16,6 +17,7 @@ import { applyRender, applyRenderErrorText } from "@/features/editor/legacy/appl
 import { phrasesFromSubtitlesResponse, type Phrase, type Subtitle } from "@/features/editor/legacy/buildPhrases";
 import { ReviewScreen } from "@/features/editor/legacy/ReviewScreen";
 import { usePhraseAutosave } from "@/features/editor/legacy/usePhraseAutosave";
+import { useEditorV2 } from "@/features/editor/v2/flag";
 import type { JobStatus } from "@/features/jobs/types";
 import { ErrorView } from "@/features/project/ErrorView";
 import { ConfigureScreen } from "@/features/start/ConfigureScreen";
@@ -25,6 +27,13 @@ import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import { uploadJob } from "@/features/upload/uploadJob";
 
 type Phase = "picker" | "idle" | "configuring" | "reviewing" | "error";
+
+// UX7: the v2 editor shell (NEXT_PUBLIC_EDITOR_V2=1 only; its own chunk,
+// never loaded with the flag off). Dark placeholder while the chunk loads.
+const EditorV2 = dynamic(() => import("@/features/editor/v2/EditorV2"), {
+  ssr: false,
+  loading: () => <div style={{ position: "fixed", inset: 0, zIndex: 40, background: "#0d0d10" }} />,
+});
 
 export default function Home() {
   const t = useT();
@@ -299,6 +308,37 @@ export default function Home() {
     setPhase("picker");
   };
   resetRef.current = reset;
+
+  // UX7: with the v2 flag, the review phase is the full-screen v2 shell
+  // (same job data and callbacks as ReviewScreen); its skeleton shows
+  // while a job opens. Flag off: useEditorV2() is false, nothing changes.
+  const editorV2 = useEditorV2();
+  if (editorV2 && phase === "reviewing" && job) {
+    return (
+      <EditorV2
+        key={job.id}
+        jobId={job.id}
+        filename={job.filename}
+        savedSegments={job.edit_segments ?? []}
+        previewSegments={job.preview_segments ?? []}
+        previewVersion={job.preview_version ?? 0}
+        hasProxy={job.has_proxy}
+        phrases={phrases}
+        units={unitsRef}
+        captionPreset={captionPreset}
+        audioWarnings={job.audio_warnings ?? []}
+        cutRanges={job.cut_ranges ?? []}
+        duration={job.duration ?? 0}
+        onChange={(next) => {
+          setPhrases(next);
+          schedulePhraseSave(job.id, next);
+        }}
+        onApply={onApplyRender}
+        onBack={reset}
+      />
+    );
+  }
+  if (editorV2 && resuming) return <EditorV2 loading />;
 
   return (
     <main

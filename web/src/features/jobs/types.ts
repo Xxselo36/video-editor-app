@@ -41,6 +41,8 @@ export type JobStatus = {
   // the edit itself (lib/editPlayback). Missing = unknown, probed.
   has_proxy?: boolean;
   caption_preset?: string | null;
+  /** The uploaded file's name (the v2 editor's default title). */
+  filename?: string | null;
 };
 
 export type SavedSeg = {
