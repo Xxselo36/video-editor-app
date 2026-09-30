@@ -1,0 +1,19 @@
+{
+  "comment": "Sample caption lines in the 14 UI languages: the test page (/__test__/captions), the layout snapshots and scripts/font-coverage.py (0 missing glyphs per supported preset). Each line uses the language's special letters and a number.",
+  "samples": {
+    "en": "Nobody waits ten seconds for you to get to the point, so show the result first. It's 100% worth it!",
+    "de": "Niemand wartet zehn Sekunden, bis du zur Sache kommst – zeig zuerst das Ergebnis. Größe, Straße, Übung: 3 Tipps für 100 % mehr Reichweite.",
+    "es": "Nadie espera diez segundos a que vayas al grano: muestra primero el resultado. ¿Cómo? ¡Así! Añade 3 ideas más.",
+    "fr": "Personne n'attend dix secondes que tu en viennes au fait : montre d'abord le résultat. Ça marche à 100 % — l'été, où, être, Noël, cœur.",
+    "pt": "Ninguém espera dez segundos para você chegar ao ponto: mostre primeiro o resultado. Ação, coração, três vezes, pão.",
+    "it": "Nessuno aspetta dieci secondi che tu arrivi al punto: mostra prima il risultato. Perché è così? Più città, tre volte.",
+    "tr": "Kimse sadede gelmeni on saniye beklemez: önce sonucu göster. Işık, ağaç, şimdi, İstanbul, güçlü, 5 ipucu.",
+    "pl": "Nikt nie czeka dziesięciu sekund, aż przejdziesz do rzeczy: najpierw pokaż wynik. Zażółć gęślą jaźń, 3 porady.",
+    "nl": "Niemand wacht tien seconden tot je ter zake komt: laat eerst het resultaat zien. Één idee, twee keer, café, geïnteresseerd.",
+    "ru": "Никто не ждёт десять секунд, пока ты перейдёшь к делу: сначала покажи результат. Съешь же ещё этих мягких французских булок.",
+    "ja": "誰もあなたが本題に入るまで十秒も待ってくれません。まず結果を見せましょう！",
+    "ko": "아무도 당신이 본론에 들어갈 때까지 10초를 기다려 주지 않습니다. 먼저 결과를 보여 주세요!",
+    "id": "Tidak ada yang menunggu sepuluh detik sampai kamu ke inti: tunjukkan hasilnya dulu. Tiga tips untuk 100% lebih baik.",
+    "hi": "कोई भी दस सेकंड इंतज़ार नहीं करता कि आप मुद्दे पर आएँ: पहले नतीजा दिखाइए। क्षत्रिय, श्री, प्रधानमंत्री, ३ सुझाव।"
+  }
+}
