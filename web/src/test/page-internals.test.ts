@@ -1,7 +1,7 @@
 // buildPhrases and friendlyError still live in app/app/page.tsx; vitest
 // re-exports them as virtual:page-internals (see vitest.config.ts).
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildPhrases, friendlyError, matchTemplate, type Subtitle } from "virtual:page-internals";
+import { buildPhrases, friendlyError, jobErrorText, matchTemplate, type Subtitle } from "virtual:page-internals";
 import { translate, type TFn } from "@/i18n";
 
 const tEn: TFn = (key, vars) => translate("en", key, vars);
@@ -137,7 +137,43 @@ describe("friendlyError", () => {
     expect(friendlyError('{"detail":"video_too_long"}', tEn)).toBe(tEn("app.errors.videoTooLong", { max: 30 }));
   });
 
-  it("today: 'No speech detected' falls through to the generic text (UX3 maps no_speech)", () => {
-    expect(friendlyError("No speech detected in the video.", tEn)).toBe(tEn("app.errors.generic"));
+  it("maps the no-speech and no-audio texts of backends without error_code", () => {
+    expect(friendlyError("No speech detected in the video.", tEn)).toBe(tEn("app.errors.noSpeech"));
+    expect(friendlyError('400: {"detail":"no_audio"}', tDe)).toBe(tDe("app.errors.noAudioTrack"));
+    expect(friendlyError("Video has no audio track", tEn)).toBe(tEn("app.errors.noAudioTrack"));
+  });
+
+  it("shows the stored no-speech messages in the viewer's language", () => {
+    expect(friendlyError(tEn("app.errors.noSpeech"), tEn)).toBe(tEn("app.errors.noSpeech"));
+    expect(friendlyError(tEn("app.errors.noAudioTrack"), tEn)).toBe(tEn("app.errors.noAudioTrack"));
+    expect(friendlyError(tEn("app.errors.noSpeech"), tDe)).toBe(tDe("app.errors.noSpeech"));
+    expect(friendlyError(tEn("app.errors.noSpeechRefunded"), tDe)).toBe(tDe("app.errors.noSpeechRefunded"));
+    expect(friendlyError(tEn("app.errors.noAudioTrack"), tDe)).toBe(tDe("app.errors.noAudioTrack"));
+  });
+});
+
+describe("jobErrorText", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  it("uses the job's error_code before its text", () => {
+    const failed = { error: "No speech detected in the video.", message: "", error_code: "no_speech" };
+    expect(jobErrorText(failed, tDe)).toBe(tDe("app.errors.noSpeech"));
+    expect(jobErrorText({ ...failed, refunded: true }, tDe)).toBe(tDe("app.errors.noSpeechRefunded"));
+    expect(jobErrorText({ ...failed, refunded: false }, tEn)).toBe(tEn("app.errors.noSpeech"));
+    expect(jobErrorText({ error: "Video has no audio track", error_code: "no_audio", refunded: true }, tEn)).toBe(
+      tEn("app.errors.noAudioTrack"),
+    );
+  });
+
+  it("says the minutes came back only when the job says so", () => {
+    expect(tEn("app.errors.noSpeech")).not.toMatch(/credited/);
+    expect(tEn("app.errors.noSpeechRefunded")).toMatch(/credited back/);
+  });
+
+  it("falls back to the text without a known code", () => {
+    expect(jobErrorText({ error: '{"detail":"server_busy"}', error_code: null }, tEn)).toBe(tEn("app.errors.serverBusy"));
+    expect(jobErrorText({ error: null, message: "", error_code: "something_new" }, tEn)).toBe(tEn("app.errors.generic"));
   });
 });

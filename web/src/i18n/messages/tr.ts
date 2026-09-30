@@ -16,6 +16,7 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Proje şu an yüklenemedi. Lütfen birazdan tekrar dene.",
   "app.notice.done": "Bu video tamamlandı — Son İşlemler'de ve Kütüphanen'de bulabilirsin.",
   "app.notice.processing": "Bu video hâlâ işleniyor. Kart ilerlemeyi gösteriyor.",
+  "app.notice.alreadyExporting": "Bu video zaten dışa aktarılıyor. İlerlemeyi kartında görebilirsin.",
   "app.notice.offline": "Sunucuya erişilemiyor. İnternetini kontrol edip tekrar dene.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const tr: Partial<Record<MessageKey, string>> = {
     "Yükleme kesildi (sayfa yenilendi veya uygulama değiştirildi). Lütfen videoyu yeniden yükle.",
   "app.errors.tooLarge": "Dosya çok büyük. Videoyu kısalt veya daha küçük dışa aktar.",
   "app.errors.noAudio": "Videoda kullanılabilir ses bulunamadı.",
+  "app.errors.noSpeech": "Bu videoda konuşma bulamadık. CleoCuts, birinin konuştuğu videoları keser ve altyazılar — sesli bir klip dene.",
+  "app.errors.noSpeechRefunded": "Bu videoda konuşma bulamadık. CleoCuts, birinin konuştuğu videoları keser ve altyazılar — sesli bir klip dene. Dakikaların iade edildi.",
+  "app.errors.noAudioTrack": "Bu videonun ses kanalı yok; kesilecek ya da altyazı eklenecek bir şey bulunmuyor. Hiçbir ücret alınmadı.",
   "app.errors.renderFailed":
     "Render başarısız oldu. Düzenlemelerin kaydedildi — projeyi aç ve yeniden render et.",
   "app.errors.serverNoResponse": "Sunucu yanıt vermedi. Lütfen tekrar dene.",
@@ -160,6 +164,10 @@ export const tr: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Çalışma alanın",
   "app.dashboard.inProgressCountOne": "{count} video işleniyor",
   "app.dashboard.inProgressCountOther": "{count} video işleniyor",
+  "app.dashboard.readyCountOne": "{count} video incelemeye hazır",
+  "app.dashboard.readyCountOther": "{count} video incelemeye hazır",
+  "app.dashboard.failedCountOne": "{count} video başarısız",
+  "app.dashboard.failedCountOther": "{count} video başarısız",
   "app.dashboard.readyWhenYouAre": "Sen hazır olduğunda hazır",
   "app.dashboard.newVideo": "Yeni video",
   "app.dashboard.inProgress": "İşleniyor",

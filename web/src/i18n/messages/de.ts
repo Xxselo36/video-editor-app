@@ -16,6 +16,7 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Das Projekt konnte gerade nicht geladen werden. Bitte versuch's gleich noch mal.",
   "app.notice.done": "Dieses Video ist fertig — du findest es unter Zuletzt und in deiner Bibliothek.",
   "app.notice.processing": "Dieses Video wird noch verarbeitet. Die Karte zeigt den Fortschritt.",
+  "app.notice.alreadyExporting": "Dieses Video wird schon exportiert. Den Fortschritt siehst du auf seiner Karte.",
   "app.notice.offline": "Der Server ist nicht erreichbar. Prüfe deine Internetverbindung und versuch's erneut.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const de: Partial<Record<MessageKey, string>> = {
     "Der Upload wurde unterbrochen (Seite neu geladen oder App gewechselt). Lade das Video bitte erneut hoch.",
   "app.errors.tooLarge": "Die Datei ist zu groß. Kürze das Video oder exportiere es kleiner.",
   "app.errors.noAudio": "Im Video wurde kein brauchbares Audio gefunden.",
+  "app.errors.noSpeech": "In diesem Video haben wir keine Sprache gefunden. CleoCuts schneidet und untertitelt Videos, in denen jemand spricht – probier's mit einem Clip, in dem geredet wird.",
+  "app.errors.noSpeechRefunded": "In diesem Video haben wir keine Sprache gefunden. CleoCuts schneidet und untertitelt Videos, in denen jemand spricht – probier's mit einem Clip, in dem geredet wird. Die Minuten haben wir dir wieder gutgeschrieben.",
+  "app.errors.noAudioTrack": "Dieses Video hat keine Tonspur – da gibt es nichts zu schneiden oder zu untertiteln. Es wurde nichts berechnet.",
   "app.errors.renderFailed":
     "Rendern fehlgeschlagen. Deine Bearbeitungen sind gespeichert — öffne das Projekt und rendere erneut.",
   "app.errors.serverNoResponse": "Der Server hat nicht geantwortet. Bitte versuch's erneut.",
@@ -159,6 +163,10 @@ export const de: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Dein Arbeitsbereich",
   "app.dashboard.inProgressCountOne": "{count} Video in Bearbeitung",
   "app.dashboard.inProgressCountOther": "{count} Videos in Bearbeitung",
+  "app.dashboard.readyCountOne": "{count} Video bereit zum Prüfen",
+  "app.dashboard.readyCountOther": "{count} Videos bereit zum Prüfen",
+  "app.dashboard.failedCountOne": "{count} Video fehlgeschlagen",
+  "app.dashboard.failedCountOther": "{count} Videos fehlgeschlagen",
   "app.dashboard.readyWhenYouAre": "Bereit, wenn du bereit bist",
   "app.dashboard.newVideo": "Neues Video",
   "app.dashboard.inProgress": "In Bearbeitung",

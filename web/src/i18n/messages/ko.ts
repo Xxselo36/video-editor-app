@@ -16,6 +16,7 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "지금은 프로젝트를 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
   "app.notice.done": "이 영상은 완료됐어요 — 최근 항목과 라이브러리에서 확인할 수 있어요.",
   "app.notice.processing": "이 영상은 아직 처리 중이에요. 카드에 진행 상황이 표시돼요.",
+  "app.notice.alreadyExporting": "이 영상은 이미 내보내는 중이에요. 진행 상황은 카드에서 볼 수 있어요.",
   "app.notice.offline": "서버에 연결할 수 없어요. 인터넷 연결을 확인하고 다시 시도해 주세요.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const ko: Partial<Record<MessageKey, string>> = {
     "업로드가 중단됐어요(페이지 새로고침 또는 앱 전환). 영상을 다시 업로드해 주세요.",
   "app.errors.tooLarge": "파일이 너무 커요. 영상을 잘라내거나 더 작게 내보내 주세요.",
   "app.errors.noAudio": "영상에서 사용할 수 있는 오디오를 찾지 못했어요.",
+  "app.errors.noSpeech": "이 영상에서 말소리를 찾지 못했어요. CleoCuts는 누군가 말하는 영상을 컷 편집하고 자막을 달아요. 목소리가 담긴 클립으로 다시 해 보세요.",
+  "app.errors.noSpeechRefunded": "이 영상에서 말소리를 찾지 못했어요. CleoCuts는 누군가 말하는 영상을 컷 편집하고 자막을 달아요. 목소리가 담긴 클립으로 다시 해 보세요. 이용 시간(분)은 돌려드렸어요.",
+  "app.errors.noAudioTrack": "이 영상에는 오디오 트랙이 없어서 편집하거나 자막을 달 내용이 없어요. 요금은 청구되지 않았어요.",
   "app.errors.renderFailed":
     "렌더링에 실패했어요. 편집 내용은 저장돼 있어요 — 프로젝트를 열고 다시 렌더링해 주세요.",
   "app.errors.serverNoResponse": "서버가 응답하지 않았어요. 다시 시도해 주세요.",
@@ -156,6 +160,10 @@ export const ko: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "내 작업 공간",
   "app.dashboard.inProgressCountOne": "{count}개 영상 처리 중",
   "app.dashboard.inProgressCountOther": "{count}개 영상 처리 중",
+  "app.dashboard.readyCountOne": "{count}개 영상 검토 준비 완료",
+  "app.dashboard.readyCountOther": "{count}개 영상 검토 준비 완료",
+  "app.dashboard.failedCountOne": "{count}개 영상 실패",
+  "app.dashboard.failedCountOther": "{count}개 영상 실패",
   "app.dashboard.readyWhenYouAre": "준비되면 시작해요",
   "app.dashboard.newVideo": "새 영상",
   "app.dashboard.inProgress": "처리 중",

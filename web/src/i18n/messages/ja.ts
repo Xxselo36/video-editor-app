@@ -16,6 +16,7 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "プロジェクトを読み込めませんでした。少し時間をおいて、もう一度お試しください。",
   "app.notice.done": "この動画は完成しています — 「最近」とライブラリから見つけられます。",
   "app.notice.processing": "この動画はまだ処理中です。カードに進行状況が表示されます。",
+  "app.notice.alreadyExporting": "この動画はすでに書き出し中です。進行状況はカードに表示されます。",
   "app.notice.offline": "サーバーに接続できません。インターネット接続を確認して、もう一度お試しください。",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const ja: Partial<Record<MessageKey, string>> = {
     "アップロードが中断されました(ページの再読み込みやアプリの切り替えが原因の可能性があります)。動画を再度アップロードしてください。",
   "app.errors.tooLarge": "ファイルが大きすぎます。動画を短くするか、サイズを小さくして書き出してください。",
   "app.errors.noAudio": "動画内に使用できる音声が見つかりませんでした。",
+  "app.errors.noSpeech": "この動画から話し声が見つかりませんでした。CleoCuts は人が話している動画をカットして字幕を付けます。声の入ったクリップでお試しください。",
+  "app.errors.noSpeechRefunded": "この動画から話し声が見つかりませんでした。CleoCuts は人が話している動画をカットして字幕を付けます。声の入ったクリップでお試しください。利用時間（分）は返還しました。",
+  "app.errors.noAudioTrack": "この動画には音声トラックがないため、カットや字幕付けができません。料金は発生していません。",
   "app.errors.renderFailed":
     "レンダリングに失敗しました。編集内容は保存されています — プロジェクトを開いて再度レンダリングしてください。",
   "app.errors.serverNoResponse": "サーバーからの応答がありません。もう一度お試しください。",
@@ -156,6 +160,10 @@ export const ja: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "あなたのワークスペース",
   "app.dashboard.inProgressCountOne": "{count} 件の動画が処理中",
   "app.dashboard.inProgressCountOther": "{count} 件の動画が処理中",
+  "app.dashboard.readyCountOne": "{count} 件の動画を確認できます",
+  "app.dashboard.readyCountOther": "{count} 件の動画を確認できます",
+  "app.dashboard.failedCountOne": "{count} 件の動画でエラー",
+  "app.dashboard.failedCountOther": "{count} 件の動画でエラー",
   "app.dashboard.readyWhenYouAre": "準備ができたらどうぞ",
   "app.dashboard.newVideo": "新しい動画",
   "app.dashboard.inProgress": "処理中",

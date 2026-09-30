@@ -16,6 +16,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "Не удалось загрузить проект. Попробуй ещё раз через минуту.",
   "app.notice.done": "Это видео готово — найдёшь его в разделе «Недавние» и в библиотеке.",
   "app.notice.processing": "Это видео ещё обрабатывается. Прогресс показан на карточке.",
+  "app.notice.alreadyExporting": "Это видео уже экспортируется. Прогресс видно на его карточке.",
   "app.notice.offline": "Не получается связаться с сервером. Проверь интернет и попробуй снова.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const ru: Partial<Record<MessageKey, string>> = {
     "Загрузка была прервана (страница перезагрузилась или приложение переключилось). Загрузи видео заново.",
   "app.errors.tooLarge": "Файл слишком большой. Обрежь видео или экспортируй его в меньшем размере.",
   "app.errors.noAudio": "В видео не найдено пригодной для обработки аудиодорожки.",
+  "app.errors.noSpeech": "Мы не нашли в этом видео речи. CleoCuts режет и субтитрует видео, где кто-то говорит, — попробуй клип с голосом.",
+  "app.errors.noSpeechRefunded": "Мы не нашли в этом видео речи. CleoCuts режет и субтитрует видео, где кто-то говорит, — попробуй клип с голосом. Минуты возвращены на твой счёт.",
+  "app.errors.noAudioTrack": "В этом видео нет звуковой дорожки — резать и субтитровать нечего. Ничего не списано.",
   "app.errors.renderFailed":
     "Рендер не удался. Твои изменения сохранены — открой проект и запусти рендер снова.",
   "app.errors.serverNoResponse": "Сервер не отвечает. Попробуй ещё раз.",
@@ -158,6 +162,10 @@ export const ru: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Твоё рабочее пространство",
   "app.dashboard.inProgressCountOne": "{count} видео в обработке",
   "app.dashboard.inProgressCountOther": "{count} видео в обработке",
+  "app.dashboard.readyCountOne": "{count} видео готово к проверке",
+  "app.dashboard.readyCountOther": "Готово к проверке: {count} видео",
+  "app.dashboard.failedCountOne": "{count} видео с ошибкой",
+  "app.dashboard.failedCountOther": "Видео с ошибкой: {count}",
   "app.dashboard.readyWhenYouAre": "Готовы, когда скажешь",
   "app.dashboard.newVideo": "Новое видео",
   "app.dashboard.inProgress": "В обработке",

@@ -23,6 +23,10 @@ declare module "virtual:page-internals" {
 
   export function buildPhrases(subs: Subtitle[]): Phrase[];
   export function friendlyError(raw: unknown, t: TFn): string;
+  export function jobErrorText(
+    s: { error?: string | null; message?: string | null; error_code?: string | null; refunded?: boolean | null },
+    t: TFn,
+  ): string;
   export function localizeKnown(text: string, t: TFn): string;
   export function matchTemplate(tpl: string, text: string): Record<string, string> | null;
 }

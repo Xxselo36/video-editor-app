@@ -19,6 +19,10 @@ export type JobStatusRow = {
   /** 1-based place in line while the job waits (message "queued"). */
   queue_position: number | null;
   error: string | null;
+  /** Machine-readable cause of a failure ("no_speech", "no_audio", …). */
+  error_code?: string | null;
+  /** The failed job's minutes were credited back. */
+  refunded?: boolean | null;
   has_output?: boolean;
   updated_at?: number | null;
   preview_version?: number | null;
@@ -52,6 +56,8 @@ function toRow(id: string, raw: Record<string, unknown>): JobStatusRow {
     progress: num(raw.progress, 0),
     queue_position: typeof qp === "number" && qp > 0 ? qp : null,
     error: typeof raw.error === "string" ? raw.error : null,
+    error_code: typeof raw.error_code === "string" ? raw.error_code : null,
+    refunded: typeof raw.refunded === "boolean" ? raw.refunded : null,
     has_output: Boolean(raw.has_output),
     updated_at: typeof raw.updated_at === "number" ? raw.updated_at : null,
     preview_version: typeof raw.preview_version === "number" ? raw.preview_version : null,
@@ -61,7 +67,7 @@ function toRow(id: string, raw: Record<string, unknown>): JobStatusRow {
 /** What a card shows; the change signal for the backoff. */
 function signature(rows: JobStatusRow[], missing: string[]): string {
   return JSON.stringify([
-    rows.map((r) => [r.id, r.status, r.message, r.progress, r.queue_position, r.error]),
+    rows.map((r) => [r.id, r.status, r.message, r.progress, r.queue_position, r.error, r.error_code, r.refunded]),
     missing,
   ]);
 }

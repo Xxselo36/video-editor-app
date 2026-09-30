@@ -57,6 +57,7 @@ import type { MessageKey } from "@/i18n/messages/en";
 import { AUTH_ENABLED } from "@/lib/auth";
 import {
   ApiError,
+  apiError,
   apiErrorFromText,
   apiFetch,
   authHeaders,
@@ -110,6 +111,9 @@ const STORED_MESSAGE_KEYS: MessageKey[] = [
   "app.errors.fileTooLarge",
   "app.errors.videoTooLong",
   "app.errors.tooManyJobs",
+  "app.errors.noSpeech",
+  "app.errors.noSpeechRefunded",
+  "app.errors.noAudioTrack",
   "app.card.renderFailedNote",
 ];
 function localizeKnown(text: string, t: TFn): string {
@@ -148,6 +152,7 @@ const REFUSAL_CODES = new Set([
   "too_many_uploads",
   "file_too_large",
   "video_too_long",
+  "no_audio",
 ]);
 // POST /jobs after an upload to R2: waits between tries on a network
 // error or a 5xx that isn't a refusal — about 75 s in all, so a backend
@@ -166,8 +171,27 @@ function refusalMessage(err: ApiError): string | null {
       return tEn("app.errors.fileTooLarge", { max: err.num("max_gb") ?? MAX_UPLOAD_GB });
     case "video_too_long":
       return tEn("app.errors.videoTooLong", { max: err.num("max_minutes") ?? MAX_MINUTES });
+    // 400 before the charge: the file has no sound track.
+    case "no_audio":
+      return tEn("app.errors.noAudioTrack");
     default:
       return null;
+  }
+}
+
+// A failed job's message: its error_code first (the interim codes; the
+// full catalogue comes with backend/errors.py in UX5), else the text.
+function jobErrorText(
+  s: { error?: string | null; message?: string | null; error_code?: string | null; refunded?: boolean | null },
+  t: TFn,
+): string {
+  switch (s.error_code) {
+    case "no_speech":
+      return t(s.refunded ? "app.errors.noSpeechRefunded" : "app.errors.noSpeech");
+    case "no_audio":
+      return t("app.errors.noAudioTrack");
+    default:
+      return friendlyError(s.error ?? s.message, t);
   }
 }
 
@@ -179,8 +203,9 @@ function friendlyError(raw: unknown, t: TFn): string {
   const l = txt.toLowerCase();
   if (!txt) return t("app.errors.generic");
   // One of our own (stored in English) → current language.
+  // (Unchanged when the viewer reads English: still one of ours.)
   const known = localizeKnown(txt, t);
-  if (known !== txt) return known;
+  if (known !== txt || STORED_MESSAGE_KEYS.some((k) => matchTemplate(translate("en", k), txt))) return known;
   // Already a user-facing message (ours or the backend's).
   if (txt.endsWith(".") && /\b(Please|please)\b/.test(txt)) return txt;
   // transcription_unavailable: the speech service failed even after
@@ -199,6 +224,11 @@ function friendlyError(raw: unknown, t: TFn): string {
   }
   if (l.includes("unreadable_video"))
     return t("app.errors.unreadableVideo");
+  // Backends / stored errors without an error_code (see jobErrorText).
+  if (l.includes("no_audio") || l.includes("no audio track") || l.includes("has no audio"))
+    return t("app.errors.noAudioTrack");
+  if (l.includes("no_speech") || l.includes("no speech detected"))
+    return t("app.errors.noSpeech");
   // Accounts / billing (backend codes; only sent when switched on)
   if (l.includes("auth_required"))
     return t("app.errors.signInRequired");
@@ -399,6 +429,8 @@ type JobStatus = {
   message: string;
   progress: number;
   error: string | null;
+  error_code?: string | null;
+  refunded?: boolean | null;
   has_output: boolean;
   audio_warnings?: string[];
   audio_levels?: { mean_db?: number | null; max_db?: number | null };
@@ -1039,7 +1071,7 @@ export default function Home() {
           }
         }
         else if (s.status === "error") {
-          setErrorMsg(s.error ?? s.message);
+          setErrorMsg(jobErrorText(s, t));
           setPhase("error");
           clearActiveJob();
         } else if (s.status === "awaiting_review" && phase === "analyzing") {
@@ -1125,7 +1157,11 @@ export default function Home() {
           disabled_cuts: disabledCuts,
         }),
       });
-      if (!r.ok) throw new Error(await r.text());
+      // 409: the job isn't in review any more — already exporting (a
+      // double click, another tab) or finished. Its dashboard card shows
+      // which; go there instead of an error screen.
+      if (r.status === 409) showNotice(t("app.notice.alreadyExporting"));
+      else if (!r.ok) throw await apiError(r);
       // Send user back to the dashboard — the card takes over from
       // here. No fullscreen "rendering" screen anymore.
       updateActiveJob({ phase: "rendering" });
@@ -1138,7 +1174,10 @@ export default function Home() {
       setSelectedPreset(null);
       setPhase("picker");
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      // Mapped, never the raw answer (tech.md T3). A 401 has opened the
+      // sign-in already (apiFetch).
+      const raw = err instanceof ApiError ? (err.code ?? err.message) : err instanceof Error ? err.message : String(err);
+      setErrorMsg(err instanceof ApiError && err.status === 401 ? t("app.errors.signInRequired") : friendlyError(raw, t));
       setPhase("error");
     }
   };
@@ -1211,7 +1250,7 @@ export default function Home() {
           s.status === "done"
             ? t("app.notice.done")
             : s.status === "error"
-              ? friendlyError(s.error ?? s.message, t)
+              ? jobErrorText(s, t)
               : t("app.notice.processing"),
         );
         return;
@@ -1767,7 +1806,7 @@ function PickerScreen({
           setRecent(getLibrary().slice(0, 3));
         } else if (s.status === "error") {
           updateActiveJobV2(j.jobId, {
-            error: friendlyError(s.error ?? s.message, tEn),
+            error: jobErrorText(s, tEn),
           });
         }
       }
@@ -1857,6 +1896,25 @@ function PickerScreen({
     }
   };
 
+  // Headline counts (T7): working (uploading / analyzing / exporting),
+  // ready for review and failed are counted apart — a failed or waiting
+  // card is not "in progress". Same failure test as ActiveJobCard.
+  const counts = { working: 0, ready: 0, failed: 0 };
+  for (const j of activeJobs) {
+    if (jobStatuses[j.jobId]?.status === "error" || j.error) counts.failed++;
+    else if (j.phase === "reviewing") counts.ready++;
+    else counts.working++;
+  }
+  const headline = (
+    [
+      [counts.working, "app.dashboard.inProgressCountOne", "app.dashboard.inProgressCountOther"],
+      [counts.ready, "app.dashboard.readyCountOne", "app.dashboard.readyCountOther"],
+      [counts.failed, "app.dashboard.failedCountOne", "app.dashboard.failedCountOther"],
+    ] as const
+  )
+    .filter(([n]) => n > 0)
+    .map(([n, one, other]) => t(n === 1 ? one : other, { count: n }));
+
   if (view === "dashboard") {
     return (
       <div className="relative z-10 flex flex-col" data-testid="dashboard">
@@ -1875,15 +1933,17 @@ function PickerScreen({
               className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl"
               style={{ color: "var(--text-strong)" }}
             >
-              {activeJobs.length > 0
-                ? t(
-                    activeJobs.length === 1
-                      ? "app.dashboard.inProgressCountOne"
-                      : "app.dashboard.inProgressCountOther",
-                    { count: activeJobs.length },
-                  )
-                : t("app.dashboard.readyWhenYouAre")}
+              {headline[0] ?? t("app.dashboard.readyWhenYouAre")}
             </h1>
+            {headline.length > 1 && (
+              <div
+                data-testid="dashboard-counts"
+                className="mt-1 text-sm"
+                style={{ color: "var(--text-body)" }}
+              >
+                {headline.slice(1).join(" · ")}
+              </div>
+            )}
           </div>
           <button
             onClick={() => setView("picker")}
@@ -4928,7 +4988,7 @@ function ActiveJobCard({
           className="relative z-10 mb-3 text-xs"
           style={{ color: "#F26E6E" }}
         >
-          {friendlyError(job.error ?? status?.message, t)}
+          {job.error || !status ? friendlyError(job.error, t) : jobErrorText(status, t)}
         </div>
       ) : (
         <div

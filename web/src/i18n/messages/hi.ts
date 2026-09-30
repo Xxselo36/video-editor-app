@@ -16,6 +16,7 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "प्रोजेक्ट अभी लोड नहीं हो पाया। कृपया थोड़ी देर में फिर कोशिश करें।",
   "app.notice.done": "यह वीडियो तैयार है — इसे Recent में और अपनी लाइब्रेरी में देखें।",
   "app.notice.processing": "यह वीडियो अभी प्रोसेस हो रहा है। कार्ड पर प्रोग्रेस दिख रहा है।",
+  "app.notice.alreadyExporting": "यह वीडियो पहले से एक्सपोर्ट हो रहा है। प्रगति उसके कार्ड पर दिखती है।",
   "app.notice.offline": "सर्वर से कनेक्ट नहीं हो पा रहा। अपना इंटरनेट चेक करके फिर कोशिश करें।",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ export const hi: Partial<Record<MessageKey, string>> = {
     "अपलोड बीच में रुक गया (पेज रीलोड हुआ या ऐप बदला गया)। कृपया वीडियो फिर से अपलोड करें।",
   "app.errors.tooLarge": "फ़ाइल बहुत बड़ी है। कृपया वीडियो को ट्रिम करें या छोटे साइज़ में एक्सपोर्ट करें।",
   "app.errors.noAudio": "वीडियो में कोई भी काम का ऑडियो नहीं मिला।",
+  "app.errors.noSpeech": "इस वीडियो में हमें कोई बोली गई बात नहीं मिली। CleoCuts ऐसे वीडियो काटता है और उनमें कैप्शन लगाता है जिनमें कोई बोल रहा हो — किसी आवाज़ वाली क्लिप के साथ आज़माएँ।",
+  "app.errors.noSpeechRefunded": "इस वीडियो में हमें कोई बोली गई बात नहीं मिली। CleoCuts ऐसे वीडियो काटता है और उनमें कैप्शन लगाता है जिनमें कोई बोल रहा हो — किसी आवाज़ वाली क्लिप के साथ आज़माएँ। मिनट वापस जोड़ दिए गए हैं।",
+  "app.errors.noAudioTrack": "इस वीडियो में कोई ऑडियो ट्रैक नहीं है, इसलिए काटने या कैप्शन लगाने के लिए कुछ नहीं है। कोई शुल्क नहीं लिया गया।",
   "app.errors.renderFailed":
     "रेंडर करना नाकाम रहा। आपके एडिट्स सेव हैं — प्रोजेक्ट खोलकर फिर से रेंडर करें।",
   "app.errors.serverNoResponse": "सर्वर से जवाब नहीं मिला। कृपया फिर कोशिश करें।",
@@ -159,6 +163,10 @@ export const hi: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "आपका वर्कस्पेस",
   "app.dashboard.inProgressCountOne": "{count} वीडियो प्रोसेस हो रहा है",
   "app.dashboard.inProgressCountOther": "{count} वीडियो प्रोसेस हो रहे हैं",
+  "app.dashboard.readyCountOne": "{count} वीडियो रिव्यू के लिए तैयार",
+  "app.dashboard.readyCountOther": "{count} वीडियो रिव्यू के लिए तैयार",
+  "app.dashboard.failedCountOne": "{count} वीडियो फ़ेल हुआ",
+  "app.dashboard.failedCountOther": "{count} वीडियो फ़ेल हुए",
   "app.dashboard.readyWhenYouAre": "जब आप तैयार हों",
   "app.dashboard.newVideo": "नया वीडियो",
   "app.dashboard.inProgress": "प्रोसेस हो रहा है",

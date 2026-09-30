@@ -17,6 +17,7 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.notice.loadFailed": "No pudimos cargar el proyecto en este momento. Inténtalo de nuevo en un momento.",
   "app.notice.done": "Este video está listo — lo encontrarás en Recientes y en tu Biblioteca.",
   "app.notice.processing": "Este video todavía se está procesando. La tarjeta muestra su progreso.",
+  "app.notice.alreadyExporting": "Este video ya se está exportando. Su tarjeta muestra el progreso.",
   "app.notice.offline": "No podemos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
 
   // ── Errors ──────────────────────────────────────────────────────────
@@ -28,6 +29,9 @@ export const es: Partial<Record<MessageKey, string>> = {
     "La subida se interrumpió (recargaste la página o cambiaste de app). Vuelve a subir el video.",
   "app.errors.tooLarge": "El archivo es demasiado grande. Recorta el video o expórtalo en un tamaño menor.",
   "app.errors.noAudio": "No se encontró audio utilizable en el video.",
+  "app.errors.noSpeech": "No encontramos voz en este video. CleoCuts corta y subtitula videos en los que alguien habla: prueba con un clip con voz.",
+  "app.errors.noSpeechRefunded": "No encontramos voz en este video. CleoCuts corta y subtitula videos en los que alguien habla: prueba con un clip con voz. Te devolvimos los minutos.",
+  "app.errors.noAudioTrack": "Este video no tiene pista de audio, así que no hay nada que cortar ni subtitular. No se cobró nada.",
   "app.errors.renderFailed":
     "El renderizado falló. Tus ediciones están guardadas — abre el proyecto y vuelve a renderizar.",
   "app.errors.serverNoResponse": "El servidor no respondió. Inténtalo de nuevo.",
@@ -161,6 +165,10 @@ export const es: Partial<Record<MessageKey, string>> = {
   "app.dashboard.workspace": "Tu espacio de trabajo",
   "app.dashboard.inProgressCountOne": "{count} video en progreso",
   "app.dashboard.inProgressCountOther": "{count} videos en progreso",
+  "app.dashboard.readyCountOne": "{count} video listo para revisar",
+  "app.dashboard.readyCountOther": "{count} videos listos para revisar",
+  "app.dashboard.failedCountOne": "{count} video con error",
+  "app.dashboard.failedCountOther": "{count} videos con error",
   "app.dashboard.readyWhenYouAre": "Listo cuando quieras",
   "app.dashboard.newVideo": "Nuevo video",
   "app.dashboard.inProgress": "En progreso",
