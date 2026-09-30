@@ -77,6 +77,14 @@ export const jobCard = (page: Page, filename: string): Locator =>
 
 // ── editor ───────────────────────────────────────────────────────────
 
+/**
+ * How long to wait for the server to see an edit (expect.poll options).
+ * A save queues behind the preview rebuild in flight (POST /edit-segments
+ * answers after it), and a rebuild is real ffmpeg work (cut + VP8) — slow
+ * on a busy machine. A poll ends as soon as its condition holds.
+ */
+export const SAVED = { timeout: 60_000 };
+
 export const clips = (page: Page): Locator => page.getByTestId(/^clip-\d+$/);
 export const clip = (page: Page, i: number): Locator => page.getByTestId(`clip-${i}`);
 export const editorVideo = (page: Page): Locator => page.getByTestId("editor-video");

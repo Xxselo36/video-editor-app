@@ -5,9 +5,7 @@
  * preview shows the line under the playhead.
  */
 import { expect, test } from "./support/fixtures";
-import { clips, deleteClip, editorVideo, openEditor, selectClip } from "./support/app";
-
-const SAVED = { timeout: 20_000 };
+import { clips, deleteClip, editorVideo, openEditor, SAVED, selectClip } from "./support/app";
 
 test.describe("editor undo", () => {
   test("timeline undo survives a tab switch; a slider drag is one undo step", async ({ page, stub }) => {

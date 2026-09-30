@@ -23,6 +23,7 @@ import {
   pause,
   play,
   playbackMode,
+  SAVED,
   selectClip,
   setRange,
   userSeek,
@@ -119,7 +120,7 @@ test.describe("proxy playback follows the edit list", () => {
     await test.step("reorder: clip 1 moved right plays after [7,14]", async () => {
       await selectClip(page, 0);
       await page.getByTestId("clip-move-right").click();
-      await expect.poll(() => stub.timeline(job.id), { timeout: 20_000 }).toEqual([
+      await expect.poll(() => stub.timeline(job.id), SAVED).toEqual([
         [7, 14],
         [0, 6],
         [15, 22],
@@ -306,7 +307,7 @@ test.describe("proxy playback follows the edit list", () => {
       await page.mouse.up();
       await page.waitForTimeout(500);
       const t = await videoTime(page);
-      await expect.poll(async () => (await stub.timeline(job.id))[2]?.[0], { timeout: 20_000 }).toBeGreaterThan(15.3);
+      await expect.poll(async () => (await stub.timeline(job.id))[2]?.[0], SAVED).toBeGreaterThan(15.3);
       const start = (await stub.timeline(job.id))[2][0];
       expect(Math.abs(t - start)).toBeLessThan(0.05);
     });
@@ -328,7 +329,7 @@ test.describe("proxy playback follows the edit list", () => {
       const before = await stub.timeline(job.id);
       await page.getByTestId("timeline-undo").click();
       await expect(clips(page)).toHaveCount(n);
-      await expect.poll(() => stub.timeline(job.id), { timeout: 20_000 }).not.toEqual(before);
+      await expect.poll(() => stub.timeline(job.id), SAVED).not.toEqual(before);
     });
   });
 });
@@ -425,8 +426,7 @@ test.describe("how the editor picks proxy or preview", () => {
   async function expectRebuildSwapsIn(page: Page, stub: import("./support/fixtures").Stub, jobId: string) {
     const v0 = (await stub.job(jobId))!.preview_version;
     await deleteClip(page, 1);
-    // A preview rebuild is real ffmpeg work (cut + VP8): slow on a busy machine.
-    await expect.poll(async () => (await stub.job(jobId))!.preview_version, { timeout: 60_000 }).toBeGreaterThan(v0);
+    await expect.poll(async () => (await stub.job(jobId))!.preview_version, SAVED).toBeGreaterThan(v0);
     const { preview_version } = (await stub.job(jobId))!;
     await expect(editorVideo(page)).toHaveAttribute("src", new RegExp(`\\?v=${preview_version}$`), {
       timeout: 15_000,
@@ -476,7 +476,7 @@ test.describe("proxy mode never waits for the preview rebuild", () => {
     await expect.poll(renderAt, { timeout: 15_000 }).toBeGreaterThan(0);
     expect(renderAt() - t1, "render waited for the rebuild").toBeLessThan(2000);
     expect(saves.length, "Apply sent a duplicate save").toBe(before);
-    await expect.poll(() => stub.timeline(job.id), { timeout: 20_000 }).toEqual([
+    await expect.poll(() => stub.timeline(job.id), SAVED).toEqual([
       [15, 22],
       [23, 30],
     ]);
@@ -491,7 +491,7 @@ test.describe("proxy mode never waits for the preview rebuild", () => {
     await expect.poll(renderAt, { timeout: 15_000 }).toBeGreaterThan(0);
     expect(renderAt() - t1).toBeLessThan(2000);
     expect(saves).toHaveLength(1);
-    await expect.poll(() => stub.timeline(job.id), { timeout: 20_000 }).toEqual([
+    await expect.poll(() => stub.timeline(job.id), SAVED).toEqual([
       [0, 6],
       [15, 22],
       [23, 30],

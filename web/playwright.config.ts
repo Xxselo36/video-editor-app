@@ -94,6 +94,9 @@ const config: PlaywrightTestConfig = {
       reuseExistingServer: !CI,
       timeout: 240_000,
       stdout: "pipe",
+      // SIGTERM, not the default SIGKILL: the stub then stops moto and
+      // deletes its throwaway database and media.
+      gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
     },
     {
       command: webCommand,

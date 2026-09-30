@@ -62,10 +62,12 @@ Needs the backend requirements (+ moto for --r2), ffmpeg and espeak-ng.
 from __future__ import annotations
 
 import argparse
+import atexit
 import hashlib
 import json
 import os
 import shutil
+import signal
 import sys
 import tempfile
 import threading
@@ -183,11 +185,17 @@ def _stub_heavy_modules() -> None:
 def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
     args = _parse_args()
     tmp = Path(tempfile.mkdtemp(prefix="cleo-stub-"))
+    atexit.register(shutil.rmtree, tmp, ignore_errors=True)
+    # Playwright stops the stub with SIGTERM, which uvicorn re-raises after
+    # its graceful shutdown: leave through SystemExit, so the atexit
+    # cleanup (moto, the throwaway database and media) runs.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     _prepare_env(args, tmp)
     web_origins = sorted({args.web_origin, args.web_origin.replace("://localhost", "://127.0.0.1")})
     moto = r2_endpoint = s3 = None
     if args.r2:
         moto, r2_endpoint, s3 = _start_moto(web_origins)
+        atexit.register(moto.stop)
     _stub_heavy_modules()
 
     import backend.main as M
@@ -551,12 +559,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
           f"r2={r2_endpoint or 'off'}, cors={os.environ['CLEO_ALLOWED_ORIGINS']}, tmp={tmp})",
           flush=True)
     import uvicorn
-    try:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
-    finally:
-        if moto is not None:
-            moto.stop()
-        shutil.rmtree(tmp, ignore_errors=True)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

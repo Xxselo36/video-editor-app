@@ -20,13 +20,10 @@ import {
   openFromDashboard,
   openWithStorage,
   playbackMode,
+  SAVED,
   selectClip,
 } from "./support/app";
 import type { Page } from "@playwright/test";
-
-const SAVED = { timeout: 20_000 };
-// A preview rebuild is real ffmpeg work (cut + VP8): slow on a busy machine.
-const REBUILT = { timeout: 60_000 };
 
 async function leave(page: Page) {
   await page.getByTestId("editor-back").click();
@@ -35,6 +32,7 @@ async function leave(page: Page) {
 
 test.describe("editor autosave", () => {
   test("edits are saved while editing, on re-entry and on a quick leave (preview mode)", async ({ page, stub }) => {
+    test.slow(); // five server-side preview rebuilds in a row
     const job = await stub.seed("review", { proxy: "off" });
     const server = async () => (await stub.job(job.id))!;
     await openWithStorage(page, "/app", { [ACTIVE_JOBS]: [card(job.id, "reviewing", "test.mp4")] });
@@ -61,7 +59,7 @@ test.describe("editor autosave", () => {
           const j = await server();
           const edit = j.edit_segments.map((s) => [s.start, s.end]);
           return j.preview_version >= 2 && JSON.stringify(j.preview_segments) === JSON.stringify(edit);
-        }, REBUILT)
+        }, SAVED)
         .toBe(true);
     });
 

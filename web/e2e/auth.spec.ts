@@ -7,7 +7,7 @@
  */
 import { expect, signedIn, test } from "./support/fixtures";
 import { API } from "./support/env";
-import { clips, deleteClip, editorVideo, jobCard, openFromDashboard, waitForMetadata } from "./support/app";
+import { clips, deleteClip, editorVideo, jobCard, openFromDashboard, SAVED, waitForMetadata } from "./support/app";
 
 test.describe("accounts on (test auth)", { tag: "@auth" }, () => {
   test("signed out, /app asks to sign in and comes back after it", async ({ page }) => {
@@ -39,7 +39,7 @@ test.describe("accounts on (test auth)", { tag: "@auth" }, () => {
     await expect(clips(page)).toHaveCount(4);
 
     await deleteClip(page, 1);
-    await expect.poll(() => stub.timeline(job.id), { timeout: 20_000 }).toEqual([
+    await expect.poll(() => stub.timeline(job.id), SAVED).toEqual([
       [0, 6],
       [15, 22],
       [23, 30],
