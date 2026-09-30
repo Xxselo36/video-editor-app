@@ -90,171 +90,26 @@ import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { PaywallDialog } from "@/components/billing/PaywallDialog";
 import { Dialog } from "@/components/ui/Dialog";
 import { track } from "@/lib/analytics";
+import {
+  FRIENDLY_EXPIRED_KEY,
+  friendlyError,
+  jobErrorText,
+  localizeKnown,
+  REFUSAL_CODES,
+  refusalMessage,
+  tEn,
+} from "@/lib/errors.legacy";
+import {
+  phrasesFromSubtitlesResponse,
+  type Phrase,
+  type Subtitle,
+} from "@/features/editor/legacy/buildPhrases";
 
-// English translator for text that gets PERSISTED (localStorage job
-// cards / library entries). Stored text stays English and is mapped
-// back to the viewer's language at render time (see localizeKnown).
-const tEn: TFn = (key, vars) => translate("en", key, vars);
-
-const FRIENDLY_EXPIRED_KEY = "app.errors.expired" as const;
-
-// Messages we may have stored in English; shown translated on render.
-const STORED_MESSAGE_KEYS: MessageKey[] = [
-  "app.errors.expired",
-  "app.errors.generic",
-  "app.errors.connection",
-  "app.errors.interrupted",
-  "app.errors.tooLarge",
-  "app.errors.noAudio",
-  "app.errors.renderFailed",
-  "app.errors.serverNoResponse",
-  "app.errors.serverBusy",
-  "app.errors.signInRequired",
-  "app.errors.subscriptionRequired",
-  "app.errors.quotaExceeded",
-  "app.errors.unreadableVideo",
-  "app.errors.fileTooLarge",
-  "app.errors.videoTooLong",
-  "app.errors.tooManyJobs",
-  "app.errors.noSpeech",
-  "app.errors.noSpeechRefunded",
-  "app.errors.noAudioTrack",
-  "app.card.renderFailedNote",
-];
-function localizeKnown(text: string, t: TFn): string {
-  for (const key of STORED_MESSAGE_KEYS) {
-    const vars = matchTemplate(translate("en", key), text);
-    if (vars) return t(key, vars);
-  }
-  return text;
-}
-
-// The placeholder values when `text` is the English template `tpl`
-// filled in ("…larger than {max} GB…" ↔ "…larger than 4 GB…"), else null.
-function matchTemplate(tpl: string, text: string): Record<string, string> | null {
-  if (!tpl.includes("{")) return tpl === text ? {} : null;
-  const names: string[] = [];
-  const src = tpl
-    .split(/\{(\w+)\}/)
-    .map((part, i) => {
-      if (i % 2) {
-        names.push(part);
-        return "(.+?)";
-      }
-      return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    })
-    .join("");
-  const m = new RegExp(`^${src}$`).exec(text);
-  return m ? Object.fromEntries(names.map((n, i) => [n, m[i + 1]])) : null;
-}
-
-// Upload refusals the backend answers with a code (+ the limit), as the
-// English text a card stores. Null for anything else.
-const REFUSAL_CODES = new Set([
-  "server_busy",
-  "server_storage_full",
-  "too_many_active_jobs",
-  "too_many_uploads",
-  "file_too_large",
-  "video_too_long",
-  "no_audio",
-]);
 // POST /jobs after an upload to R2: waits between tries on a network
 // error or a 5xx that isn't a refusal — about 75 s in all, so a backend
 // restart (every deploy) or a 502 / 503 from the edge doesn't turn a
 // finished multi-GB upload into an error.
 const POST_JOBS_RETRY_MS = [2_000, 4_000, 8_000, 15_000, 15_000, 15_000, 15_000];
-function refusalMessage(err: ApiError): string | null {
-  switch (err.code) {
-    case "server_busy":
-    case "server_storage_full":
-    case "too_many_uploads":
-      return tEn("app.errors.serverBusy");
-    case "too_many_active_jobs":
-      return tEn("app.errors.tooManyJobs");
-    case "file_too_large":
-      return tEn("app.errors.fileTooLarge", { max: err.num("max_gb") ?? MAX_UPLOAD_GB });
-    case "video_too_long":
-      return tEn("app.errors.videoTooLong", { max: err.num("max_minutes") ?? MAX_MINUTES });
-    // 400 before the charge: the file has no sound track.
-    case "no_audio":
-      return tEn("app.errors.noAudioTrack");
-    default:
-      return null;
-  }
-}
-
-// A failed job's message: its error_code first (the interim codes; the
-// full catalogue comes with backend/errors.py in UX5), else the text.
-function jobErrorText(
-  s: { error?: string | null; message?: string | null; error_code?: string | null; refunded?: boolean | null },
-  t: TFn,
-): string {
-  switch (s.error_code) {
-    case "no_speech":
-      return t(s.refunded ? "app.errors.noSpeechRefunded" : "app.errors.noSpeech");
-    case "no_audio":
-      return t("app.errors.noAudioTrack");
-    default:
-      return friendlyError(s.error ?? s.message, t);
-  }
-}
-
-// Turn raw server/network errors into something a creator can act on.
-// The technical text still goes to the console for debugging.
-function friendlyError(raw: unknown, t: TFn): string {
-  const txt = String(raw ?? "").trim();
-  if (txt) console.warn("[cleocuts] error detail:", txt.slice(0, 500));
-  const l = txt.toLowerCase();
-  if (!txt) return t("app.errors.generic");
-  // One of our own (stored in English) → current language.
-  // (Unchanged when the viewer reads English: still one of ours.)
-  const known = localizeKnown(txt, t);
-  if (known !== txt || STORED_MESSAGE_KEYS.some((k) => matchTemplate(translate("en", k), txt))) return known;
-  // Already a user-facing message (ours or the backend's).
-  if (txt.endsWith(".") && /\b(Please|please)\b/.test(txt)) return txt;
-  // transcription_unavailable: the speech service failed even after
-  // retries (the minutes were refunded) — a "try again later" case too.
-  if (l.includes("server_storage_full") || l.includes("507") || l.includes("server_busy")
-      || l.includes("transcription_unavailable"))
-    return t("app.errors.serverBusy");
-  if (l.includes("too_many_active_jobs"))
-    return t("app.errors.tooManyJobs");
-  if (l.includes("file_too_large") || l.includes("video_too_long")) {
-    // Raw answer text, e.g. `{"detail":"file_too_large","max_gb":4}`.
-    const lim = (f: string) => Number(new RegExp(`"${f}"\\s*:\\s*([\\d.]+)`).exec(txt)?.[1]) || null;
-    return l.includes("file_too_large")
-      ? t("app.errors.fileTooLarge", { max: lim("max_gb") ?? MAX_UPLOAD_GB })
-      : t("app.errors.videoTooLong", { max: lim("max_minutes") ?? MAX_MINUTES });
-  }
-  if (l.includes("unreadable_video"))
-    return t("app.errors.unreadableVideo");
-  // Backends / stored errors without an error_code (see jobErrorText).
-  if (l.includes("no_audio") || l.includes("no audio track") || l.includes("has no audio"))
-    return t("app.errors.noAudioTrack");
-  if (l.includes("no_speech") || l.includes("no speech detected"))
-    return t("app.errors.noSpeech");
-  // Accounts / billing (backend codes; only sent when switched on)
-  if (l.includes("auth_required"))
-    return t("app.errors.signInRequired");
-  if (l.includes("subscription_required"))
-    return t("app.errors.subscriptionRequired");
-  if (l.includes("quota_exceeded"))
-    return t("app.errors.quotaExceeded");
-  if (l.includes("stalled") || l.includes("network") || l.includes("failed to fetch"))
-    return t("app.errors.connection");
-  if (l.includes("interrupted"))
-    return t("app.errors.interrupted");
-  if (l.includes("not found") || l.includes("404") || l.includes("no longer"))
-    return t(FRIENDLY_EXPIRED_KEY);
-  if (l.includes("413") || l.includes("too large"))
-    return t("app.errors.tooLarge");
-  if (l.includes("no audio") || l.includes("audio"))
-    return t("app.errors.noAudio");
-  if (l.includes("render"))
-    return t("app.errors.renderFailed");
-  return t("app.errors.generic");
-}
 
 const CAPTION_PRESETS: { id: string; labelKey: MessageKey }[] = [
   { id: "clean", labelKey: "app.captions.clean" },
@@ -463,40 +318,12 @@ type SavedSeg = {
   volume?: number;
 };
 
-// Transcript as returned by GET /subtitles: the user's saved edits when
-// present, otherwise sentences grouped from Whisper's fragments.
-function phrasesFromSubtitlesResponse(data: {
-  subtitles?: Subtitle[];
-  phrases?: Phrase[] | null;
-}): Phrase[] {
-  if (Array.isArray(data.phrases)) return data.phrases;
-  return buildPhrases(data.subtitles ?? []);
-}
-
 type SceneEvent = {
   type: "start" | "restart" | "keep" | "finish";
   start: number;
   end: number;
   raw_text?: string;
   source?: "exact" | "phonetic" | "llm" | "user";
-};
-
-type Subtitle = {
-  start: number;
-  end: number;
-  text: string;
-  original_start?: number;
-  original_end?: number;
-  confidence?: number;
-};
-
-type Phrase = {
-  start: number;
-  end: number;
-  original_start: number;
-  original_end: number;
-  text: string;
-  confidence: number;
 };
 
 type CutRange = {
@@ -512,67 +339,6 @@ type HookClip = {
   start: number;
   end: number;
 };
-
-// Group Whisper's short fragments (1-3 words each) into readable
-// sentences. Mirrors plugins/premiere/panel/index.html:buildPhrases.
-const SENTENCE_END = /[.!?…]["'»)\]]*\s*$/;
-const MAX_WORDS_PER_PHRASE = 10;
-const MAX_GAP_SECONDS = 1.5;
-
-function buildPhrases(subs: Subtitle[]): Phrase[] {
-  const phrases: Phrase[] = [];
-  let curIndices: number[] = [];
-
-  const wordCount = (text: string) =>
-    (text || "").trim().split(/\s+/).filter(Boolean).length;
-
-  const flush = () => {
-    if (curIndices.length === 0) return;
-    const first = subs[curIndices[0]];
-    const last = subs[curIndices[curIndices.length - 1]];
-    const confSum = curIndices.reduce(
-      (acc, i) => acc + (subs[i].confidence ?? 1),
-      0,
-    );
-    phrases.push({
-      start: first.start,
-      end: last.end,
-      original_start: first.original_start ?? first.start,
-      original_end: last.original_end ?? last.end,
-      confidence: confSum / curIndices.length,
-      text: curIndices
-        .map((i) => (subs[i].text || "").trim())
-        .join(" "),
-    });
-    curIndices = [];
-  };
-
-  for (let i = 0; i < subs.length; i++) {
-    const s = subs[i];
-    if (!s.text || !s.text.trim()) continue;
-    if (curIndices.length === 0) {
-      curIndices.push(i);
-      continue;
-    }
-    const prev = subs[curIndices[curIndices.length - 1]];
-    const gap = s.start - prev.end;
-    const endsSentence = SENTENCE_END.test((prev.text || "").trim());
-    const wordsSoFar = curIndices.reduce(
-      (n, idx) => n + wordCount(subs[idx].text),
-      0,
-    );
-    if (
-      endsSentence ||
-      gap > MAX_GAP_SECONDS ||
-      wordsSoFar + wordCount(s.text) > MAX_WORDS_PER_PHRASE
-    ) {
-      flush();
-    }
-    curIndices.push(i);
-  }
-  flush();
-  return phrases;
-}
 
 export default function Home() {
   const t = useT();
