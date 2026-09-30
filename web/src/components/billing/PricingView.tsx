@@ -110,7 +110,7 @@ export function PricingView() {
               <button
                 onClick={() => void loadBillingConfig()}
                 className="rounded-full px-5 py-2 text-sm font-semibold"
-                style={{ background: "var(--brand)", color: "white" }}
+                style={{ background: "var(--brand-solid)", color: "white" }}
               >
                 {t("app.errors.tryAgain")}
               </button>
@@ -134,7 +134,7 @@ export function PricingView() {
             <Link
               href="/app"
               className="inline-flex rounded-full px-5 py-2 text-sm font-semibold"
-              style={{ background: "var(--brand)", color: "white" }}
+              style={{ background: "var(--brand-solid)", color: "white" }}
             >
               {t("site.header.openEditor")}
             </Link>
@@ -243,7 +243,7 @@ function PlanCard({
       {(current || popular) && (
         <span
           className="absolute -top-3 left-6 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-          style={{ background: "var(--brand)", color: "white" }}
+          style={{ background: "var(--brand-solid)", color: "white" }}
         >
           {current ? t("site.pricing.current") : t("site.pricing.popular")}
         </span>
@@ -279,7 +279,7 @@ function PlanCard({
         className="w-full rounded-xl px-4 py-3 text-sm font-semibold transition-transform hover:scale-[1.01] disabled:opacity-60 disabled:hover:scale-100"
         style={
           highlighted
-            ? { background: "var(--brand)", color: "white" }
+            ? { background: "var(--brand-solid)", color: "white" }
             : {
                 background: "var(--surface-2)",
                 color: "var(--text-strong)",

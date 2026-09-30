@@ -129,7 +129,7 @@ export default function Library() {
             href="/app"
             className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-xs font-medium transition-transform hover:scale-105 sm:px-4"
             style={{
-              background: "var(--brand)",
+              background: "var(--brand-solid)",
               color: "white",
               boxShadow: "var(--shadow-md)",
             }}
@@ -233,7 +233,7 @@ function EmptyState() {
         href="/app"
         className="inline-flex items-center gap-1.5 rounded-full px-6 py-3 text-sm font-semibold transition-transform hover:scale-105"
         style={{
-          background: "var(--brand)",
+          background: "var(--brand-solid)",
           color: "white",
           boxShadow: "var(--shadow-lg)",
         }}
@@ -435,7 +435,7 @@ function LibraryCard({
             style={
               f === "primary"
                 ? {
-                    background: "var(--brand)",
+                    background: "var(--brand-solid)",
                     color: "white",
                     boxShadow: "var(--shadow-sm)",
                   }

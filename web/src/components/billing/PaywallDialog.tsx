@@ -62,7 +62,7 @@ export function PaywallDialog({ paywall, onClose }: { paywall: Paywall; onClose:
           <Link
             href="/pricing"
             className="flex-1 rounded-xl px-4 py-3 text-center text-sm font-semibold"
-            style={{ background: "var(--brand)", color: "white" }}
+            style={{ background: "var(--brand-solid)", color: "white" }}
           >
             {t(quota ? "app.paywall.upgrade" : "app.paywall.seePlans")}
           </Link>
