@@ -139,7 +139,7 @@ const reportOnlyCsp = [
 ];
 
 const permissionsPolicy = [
-  // The voice/camera test (app/app/page.tsx) runs on our own origin.
+  // The voice test (features/voice-test) runs on our own origin.
   "camera=(self)",
   "microphone=(self)",
   "geolocation=()",

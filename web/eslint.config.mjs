@@ -8,8 +8,8 @@ import nextTs from "eslint-config-next/typescript";
 
 // Findings that existed when linting was introduced (UX1, 2026-09-30).
 // They are warnings in these files only — fixing them needs refactors
-// (UX4 splits app/app/page.tsx; the billing views follow UX14). New
-// files get the rules as errors. Remove an entry once its file is clean.
+// (the editor's in UX7, the billing views' in UX14). New files get the
+// rules as errors. Remove an entry once its file is clean.
 const LEGACY_FILES = [
   "src/app/app/page.tsx",
   // Moved verbatim out of page.tsx by UX4 (same findings).

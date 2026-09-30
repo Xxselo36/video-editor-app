@@ -16,7 +16,7 @@ Profiles (PROFILES below):
   phone4k      4K 30p H.264 High 45 Mbit/s, stored landscape + rotation flag
   iphone1080hdr 1080p 30p HEVC 10-bit HLG ~10 Mbit/s, rotated (iPhone default)
   iphone4khdr  4K 30p HEVC 10-bit HLG ~45 Mbit/s, rotated (iPhone 4K HDR)
-Presets mirror web/src/app/app/page.tsx PRESETS (default: tiktok).
+Presets mirror web/src/features/start/presets.legacy.ts PRESETS (default: tiktok).
 A bare number means "synthetic". Files over 90 MB go straight to R2
 like in the web app. Jobs are tagged _cost_test so /admin/costs can
 exclude them (?exclude_tests=true).
@@ -72,7 +72,8 @@ PROFILES: dict[str, dict] = {
                     "audio": _PHONE_AUDIO},
 }
 
-# web/src/app/app/page.tsx PRESETS[*].settings, as sent by onProcess.
+# web/src/features/start/presets.legacy.ts PRESETS[*].settings, as sent by
+# the upload (features/upload/uploadJob.ts).
 PRESETS: dict[str, dict] = {
     "tiktok": {"caption_preset": "clipper", "style": "tight",
                "voice_triggers": True, "remove_fillers": True,
@@ -313,7 +314,7 @@ SENTENCE_END = re.compile(r"[.!?…][\"'»)\]]*\s*$")
 
 
 def build_phrases(subs: list[dict]) -> list[dict]:
-    """Port of page.tsx buildPhrases + the onApplyRender flattening."""
+    """Port of the web's buildPhrases + the onApplyRender flattening."""
     phrases, cur = [], []
 
     def words(t: str) -> int:

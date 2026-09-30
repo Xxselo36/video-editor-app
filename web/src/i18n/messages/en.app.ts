@@ -1,5 +1,5 @@
 /**
- * English strings for the /app editor flow (web/src/app/app/page.tsx).
+ * English strings for the /app screens (web/src/app/app, web/src/features).
  * Flat keys, grouped by screen. "{name}" = placeholder filled at runtime.
  * Plurals use separate …One / …Other keys.
  */
