@@ -118,6 +118,16 @@ def classify(exc: BaseException, timeout: float,
                     or ("404" in low and "not found" in low)
                     or "nosuchkey" in low):
         return True, "Modal OK", "the container started and answered"
+    # The container answered, but with an exception whose module isn't
+    # installed here, so its type can't be told (render_r2's 404 is a
+    # botocore ClientError). Not a Modal outage: say what's missing.
+    if spawned and "could not deserialize remote exception" in low:
+        missing = "botocore" if "botocore" in low else "a module"
+        return False, "Probe can't read Modal's answer", (
+            f"The container ran, but its answer needs {missing} on the "
+            f"machine running the probe: pip install {missing} next to "
+            f"modal (the workflows pin botocore like "
+            f"backend/requirements.txt).{detail}")
     # Only before the spawn is an ImportError ours; after it, it's the
     # container's (bad deploy) and ends up as "Modal probe failed".
     if not spawned and isinstance(exc, ImportError):

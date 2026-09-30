@@ -82,3 +82,28 @@ def test_render_r2_is_only_in_a_deploy_with_the_secret():
                              capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out.stderr[-500:]
         assert out.stdout.strip().splitlines()[-1] == repr(want)
+
+
+def test_probe_names_a_missing_module_instead_of_a_modal_outage():
+    """render_r2 answers the probe with botocore's 404; a runner without
+    botocore gets Modal's deserialization error. That must not read as
+    "Modal probe failed" (crashing container), and never as healthy."""
+    probe = _probe_module()
+
+    class ExecutionError(Exception):
+        pass
+
+    exc = ExecutionError(
+        "Could not deserialize remote exception due to local error: "
+        "Deserialization failed because the 'botocore' module is not "
+        "available in the local environment.")
+    healthy, title, fix = probe.classify(exc, 5)
+    assert healthy is False
+    assert title == "Probe can't read Modal's answer"
+    assert "pip install botocore" in fix
+
+
+def test_probe_workflows_install_botocore():
+    for wf in ("ops-watch.yml", "modal-deploy.yml"):
+        text = (REPO / ".github" / "workflows" / wf).read_text()
+        assert '"botocore>=1.43,<1.44"' in text, wf
