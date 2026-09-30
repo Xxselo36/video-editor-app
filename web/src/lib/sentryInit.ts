@@ -4,12 +4,17 @@
  * downloaded only when NEXT_PUBLIC_SENTRY_DSN is set. Named imports keep
  * replay/feedback/etc. tree-shaken out of that chunk.
  *
- * Errors only: no session replay, no sessions, no user data, traces off
+ * Errors, plus release health: one anonymous session per page load
+ * (started / crashed or not, the release, the browser — no user, no
+ * URL), so Sentry can show the crash-free rate of each release (the
+ * launch gate). No session replay, no user data, traces off
  * (NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE to sample some; they never add
  * headers to our requests, so backend/R2 CORS is unaffected). Every
  * event and breadcrumb goes through lib/errorReporting's scrubbing.
+ * Events are tagged with the deployed git SHA (NEXT_PUBLIC_RELEASE,
+ * next.config.ts) — the same release as the backend's.
  */
-import { browserTracingIntegration, init } from "@sentry/browser";
+import { browserTracingIntegration, captureException, init } from "@sentry/browser";
 import {
   SENTRY_DSN,
   scrubBreadcrumb,
@@ -18,12 +23,16 @@ import {
   tracesSampleRate,
 } from "@/lib/errorReporting";
 
+let initialized = false;
+
 export function initSentry(): void {
+  if (initialized) return;
+  initialized = true;
   const rate = tracesSampleRate();
   init({
     dsn: SENTRY_DSN,
     environment: process.env.NEXT_PUBLIC_VERCEL_ENV || process.env.NODE_ENV,
-    release: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || undefined,
+    release: process.env.NEXT_PUBLIC_RELEASE || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || undefined,
     // sendDefaultPii: false — SDK v11 spells it out per category.
     dataCollection: {
       userInfo: false, // no IP / user inference
@@ -38,9 +47,10 @@ export function initSentry(): void {
       stackFrameVariables: false,
     },
     tracesSampleRate: rate,
-    // Default integrations minus the per-page-load session ping.
+    // Default integrations, including BrowserSession (release health:
+    // one session per page load).
     integrations: (defaults) => [
-      ...defaults.filter((i) => i.name !== "BrowserSession"),
+      ...defaults,
       ...(rate > 0 ? [browserTracingIntegration({ linkPreviousTrace: "off" })] : []),
     ],
     // Never add sentry-trace/baggage headers (R2 presigned PUTs and the
@@ -57,4 +67,18 @@ export function initSentry(): void {
     // Traces (if sampled) are streamed as spans in v11.
     beforeSendSpan: (span) => scrubDeep(span),
   });
+}
+
+/** The check that browser reports arrive: open any page with
+ *  #sentry-test (components/ErrorReporting). */
+export function sendTestError(): void {
+  captureException(new Error("CleoCuts test error (#sentry-test)"));
+}
+
+/** A handled error (error boundaries): reported like an uncaught one.
+ *  Initializes first — a boundary can catch before ErrorReporting's
+ *  effect ran (an error in the first render). */
+export function report(error: unknown): void {
+  initSentry();
+  captureException(error);
 }

@@ -4,6 +4,8 @@ import { AUTH_ENABLED } from "@/lib/auth";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { ERROR_REPORTING_ENABLED } from "@/lib/errorReporting";
 import { ErrorReporting } from "@/components/ErrorReporting";
+import { ANALYTICS_ENABLED } from "@/lib/analytics";
+import { AnalyticsMount } from "@/components/AnalyticsMount";
 
 // No web fonts: the UI uses the system font stack (globals.css), the
 // Geist fonts were preloaded on every page without being used.
@@ -45,6 +47,8 @@ export default function RootLayout({
         {AUTH_ENABLED ? <AuthProvider>{children}</AuthProvider> : children}
         {/* Browser error reports only with NEXT_PUBLIC_SENTRY_DSN. */}
         {ERROR_REPORTING_ENABLED && <ErrorReporting />}
+        {/* Cookieless analytics only with NEXT_PUBLIC_ANALYTICS_PROVIDER. */}
+        {ANALYTICS_ENABLED && <AnalyticsMount />}
       </body>
     </html>
   );

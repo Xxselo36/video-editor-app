@@ -13,6 +13,7 @@ import {
   useMe,
   type Me,
 } from "@/lib/account";
+import { track } from "@/lib/analytics";
 import { SubpageHeader } from "./SubpageHeader";
 
 /** Subscription status → one line (and whether it needs attention). */
@@ -69,6 +70,8 @@ export function AccountView() {
     if (url.searchParams.get("billing") !== "success") return;
     url.searchParams.delete("billing");
     window.history.replaceState(window.history.state, "", url);
+    // Lemon Squeezy sends buyers here only after a completed payment.
+    track("checkout_done");
     setBanner("pending");
     let stopped = false;
     let tries = 0;

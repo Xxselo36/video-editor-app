@@ -21,11 +21,10 @@ import { LIBRARY_KEY, type LibraryEntry, type LibraryHookClip } from "@/lib/libr
 import { ACTIVE_JOBS_KEY } from "@/lib/activeJobs";
 import { ACTIVE_JOB_KEY } from "@/lib/activeJob";
 import { mergeStored, storedValue } from "@/lib/scopedStorage";
+import { track } from "@/lib/analytics";
 
 /** Landing-page copy only ("Open beta · free" → pricing CTA). */
-export const BILLING_COPY =
-  AUTH_ENABLED &&
-  ["1", "true"].includes((process.env.NEXT_PUBLIC_BILLING_ENABLED ?? "").toLowerCase());
+export { BILLING_COPY } from "@/lib/auth";
 
 export function useAuthState(): AuthState {
   return useSyncExternalStore(subscribeAuth, getAuthState, () => INITIAL_AUTH_STATE);
@@ -220,6 +219,7 @@ export function useBillingEnabled(): boolean {
 /** Lemon Squeezy checkout. Already subscribed (409) → the customer
  *  portal, where plans are switched. Navigates away on success. */
 export async function startCheckout(plan: PlanId, email?: string | null): Promise<void> {
+  track("checkout_started", { plan });
   const r = await apiFetch("/billing/checkout", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
