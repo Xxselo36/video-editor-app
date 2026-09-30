@@ -16,6 +16,8 @@ const LEGACY_FILES = [
   "src/features/editor/debug/PlaybackDebug.tsx",
   "src/features/editor/legacy/ReviewScreen.tsx",
   "src/features/editor/timeline/TimelineEditor.tsx",
+  // Moved verbatim out of ReviewScreen by UX7 (same findings).
+  "src/features/editor/session/useEditSession.ts",
   "src/features/jobs/JobStatusPoller.ts",
   "src/features/start/PickerScreen.tsx",
   "src/features/voice-test/VoiceTestDialog.tsx",
