@@ -99,6 +99,24 @@ def test_v2_only_for_docs_with_a_live_supported_style(monkeypatch, fields, why):
     assert store.get(job.id).caption_engine == "v1"
 
 
+@pytest.mark.parametrize("fields", [
+    {"output_keys": {"primary": "jobs/x/r1/primary.mp4"}},
+    {"render_gen": 2},                                   # this is its 2nd render
+    {"outputs": {"primary": "/data/old/cleo_output.mp4"}},   # legacy local job
+    {"output_path": "/data/old/cleo_output.mp4"},
+])
+def test_projects_exported_before_ut4_stay_v1(monkeypatch, fields):
+    """Exported with v1 before engines were pinned (caption_engine None):
+    the switch must not change their look (DEPLOY.md §12)."""
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    job = _job(**fields)
+    assert C.prepare_render(store, job.id, job, UNITS) is None
+    assert store.get(job.id).caption_engine == "v1"
+    # its first render after POST /render bumped render_gen to 1: v2
+    fresh = _job(render_gen=1)
+    assert C.prepare_render(store, fresh.id, fresh, UNITS)["engine"] == "v2"
+
+
 def test_live_list_opens_more_presets(monkeypatch):
     monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
     monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "all")

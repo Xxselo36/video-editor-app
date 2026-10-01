@@ -149,11 +149,22 @@ def style_for(job: Any) -> dict[str, Any]:
     return doc_style or {"presetId": edit_doc.DEFAULT_PRESET, "overrides": {}}
 
 
+def exported_before(job: Any) -> bool:
+    """Was this job exported before UT4 pinned engines (no
+    caption_engine yet)? Then it was v1 and stays v1 (review F11,
+    DEPLOY.md §12). Its outputs are there, or this render isn't its first
+    generation (POST /render already bumped render_gen for this one)."""
+    return bool(job.output_keys or job.outputs or job.output_path
+                or job.hook_clips or int(job.render_gen or 0) > 1)
+
+
 def choose_engine(job: Any, style: dict[str, Any] | None = None) -> str:
     """The job's pinned engine, or the one its first render pins."""
     if job.caption_engine in ENGINES:
         return job.caption_engine
     if engine_default() != "v2" or not isinstance(job.doc, dict):
+        return "v1"
+    if exported_before(job):
         return "v1"
     style = style or style_for(job)
     pid = style["presetId"]
