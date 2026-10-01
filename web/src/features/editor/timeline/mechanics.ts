@@ -191,3 +191,129 @@ export function rulerMarks(
   }
   return { marks, labelStep };
 }
+
+// ── UX10 (v2 dock): precise trims, the frame grid, reordering ─────────
+
+/** Trim edges sit on a 0.01 s grid (what the readout shows). */
+export const TRIM_STEP_S = 0.01;
+/** Minor ruler marks (0.1 s, 0.5 s) show from this far apart. */
+export const MINOR_TICK_MIN_PX = 6;
+
+/** t on the TRIM_STEP_S grid (2 decimals, no float tail). */
+export const roundToStep = (t: number) => Math.round(t / TRIM_STEP_S) / Math.round(1 / TRIM_STEP_S);
+
+/**
+ * trimTo with the moved edge on the TRIM_STEP_S grid (the handle while
+ * dragging). An edge snapped onto a neighbour's footage (or held at a
+ * bound) stays exactly there. On release snapTrimToFrame puts the edge
+ * on the frame both exports cut at; the frame grid the dock draws while
+ * zoomed in shows where those are.
+ */
+export function trimToStep(
+  startSegs: EditorSeg[],
+  id: string,
+  mode: "start" | "end",
+  seconds: number,
+  bounds: TrimBounds,
+): EditorSeg[] {
+  return trimTo(startSegs, id, mode, seconds, bounds).map((s) => {
+    if (s.id !== id) return s;
+    if (mode === "start") {
+      if (s.start === bounds.prev) return s;
+      const v = Math.max(bounds.prev, Math.min(s.end - 0.1, roundToStep(s.start)));
+      return v === s.start ? s : { ...s, start: v };
+    }
+    if (s.end === bounds.next) return s;
+    const v = Math.min(bounds.next, Math.max(s.start + 0.1, roundToStep(s.end)));
+    return v === s.end ? s : { ...s, end: v };
+  });
+}
+
+/**
+ * How far before frame k's start an edge is stored (frameEdge). Both
+ * renders then use frame k: v1 (the per-clip ffmpeg burn) starts a clip
+ * at the first frame at or after its start and ends it before the first
+ * frame at or after its end; v2 rounds each edge to the nearest frame
+ * (captions_v2.clip_plan) — round(k − 0.015) = k. Without the margin a
+ * printed k / fps could land a hair after the frame and v1 skip it.
+ */
+export const FRAME_EPS_S = 0.0005;
+
+/**
+ * The edge the export uses for `t`: the nearest frame boundary (k / fps,
+ * stored FRAME_EPS_S before it). The handle moves on the 0.01 s grid
+ * while dragging; on release the edge moves to this (≤ half a frame) and
+ * the readout shows it, so the value shown is the one both export paths
+ * cut at. `t` unchanged without a known frame rate.
+ */
+export function frameEdge(t: number, fps: number | null | undefined): number {
+  if (!(fps && fps > 0) || !Number.isFinite(t)) return t;
+  const k = Math.round(t * fps);
+  return k <= 0 ? 0 : k / fps - FRAME_EPS_S;
+}
+
+/** The trimmed edge of clip `id` moved to its frameEdge (a bound or a
+ *  snapped neighbour's edge stays exact). Same array without a frame rate. */
+export function snapTrimToFrame(
+  segs: EditorSeg[],
+  id: string,
+  mode: "start" | "end",
+  bounds: TrimBounds,
+  fps: number | null | undefined,
+): EditorSeg[] {
+  if (!(fps && fps > 0)) return segs;
+  return segs.map((s) => {
+    if (s.id !== id) return s;
+    if (mode === "start") {
+      if (s.start === bounds.prev) return s;
+      const v = Math.max(bounds.prev, Math.min(s.end - 0.1, frameEdge(s.start, fps)));
+      return v === s.start ? s : { ...s, start: v };
+    }
+    if (s.end === bounds.next) return s;
+    const v = Math.min(bounds.next, Math.max(s.start + 0.1, frameEdge(s.end, fps)));
+    return v === s.end ? s : { ...s, end: v };
+  });
+}
+
+/** Video frame boundaries (k / fps) inside [a, b], at most `max` of them. */
+export function frameTimes(a: number, b: number, fps: number, max = 1000): number[] {
+  if (!(fps > 0) || !(b > a)) return [];
+  const out: number[] = [];
+  for (let k = Math.ceil(a * fps - 1e-9); k / fps <= b + 1e-9 && out.length < max; k++) out.push(k / fps);
+  return out;
+}
+
+/** Whether a ruler mark of this kind is drawn at `pps` px per second. */
+export function tickShown(kind: RulerMark["kind"], pps: number): boolean {
+  if (kind === "tenth") return 0.1 * pps >= MINOR_TICK_MIN_PX;
+  if (kind === "half") return 0.5 * pps >= MINOR_TICK_MIN_PX;
+  return true;
+}
+
+/** Clip `id` moved to `index` of the list without it (same array if it stays). */
+export function moveSeg(segs: EditorSeg[], id: string, index: number): EditorSeg[] {
+  const from = segs.findIndex((s) => s.id === id);
+  if (from < 0) return segs;
+  const rest = segs.filter((s) => s.id !== id);
+  const to = Math.max(0, Math.min(rest.length, index));
+  if (to === from) return segs;
+  return [...rest.slice(0, to), segs[from], ...rest.slice(to)];
+}
+
+/**
+ * Where clip `id` drops when dragged so its centre is at cut time
+ * `center`: before the first other clip whose middle lies right of it
+ * (the others laid end to end without it). An index for moveSeg.
+ */
+export function dropIndex(segs: EditorSeg[], id: string, center: number): number {
+  const rest = segs.filter((s) => s.id !== id);
+  let acc = 0;
+  for (let i = 0; i < rest.length; i++) {
+    const s = rest[i];
+    if (s.disabled) continue;
+    const d = s.end - s.start;
+    if (center < acc + d / 2) return i;
+    acc += d;
+  }
+  return rest.length;
+}

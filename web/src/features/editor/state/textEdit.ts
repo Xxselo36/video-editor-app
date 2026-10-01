@@ -30,6 +30,10 @@ export type EditWord = {
   filler?: boolean;
   hidden?: boolean;
   breakBefore?: boolean;
+  /** UX10: why the analysis cut it (backend/cut_kinds.py; informational). */
+  cut?: string;
+  /** UX10: outside every speech region at analysis (shown once its footage plays). */
+  nospeech?: boolean;
 };
 
 // JavaScript's \s — the backend tokenizes with exactly this set.

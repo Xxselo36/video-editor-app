@@ -202,13 +202,22 @@ type GluedUnit = CaptionUnit & { n: number; breakBefore: boolean };
  * neighbour in the segment (a word squeezed by a split), so the burn
  * never drops it. For an unedited doc this gives v1's units
  * (testdata/caption_units_vectors.json).
+ *
+ * `cut` (UX10): words cut from the video are left out too, and no unit
+ * glues across them (the clips either side are rendered apart).
  */
-export function captionUnits(words: readonly DocWord[]): GluedUnit[] {
+export function captionUnits(words: readonly DocWord[], cut?: (w: DocWord) => boolean): GluedUnit[] {
   const segs: DocWord[][] = [];
   let seg: DocWord[] = [];
   let forced = false;
   const breaks = new Set<DocWord>();
   for (const w of words) {
+    if (cut?.(w)) {
+      forced ||= !!w.breakBefore;
+      if (seg.length) segs.push(seg);
+      seg = [];
+      continue;
+    }
     if (!captioned(w)) {
       forced ||= !!w.breakBefore;
       continue;
@@ -274,10 +283,14 @@ const PHRASE_END = /[.!?…]["'»)\]]*\s*$/;
  * render payload get from the doc: the glued units of captionUnits
  * (source times) and the editor sentences over them, built like v1's
  * buildPhrases (sentence end, a pause over 1.5 s, at most 10 words) plus
- * a forced break. Hidden words are in neither.
+ * a forced break. Hidden words are in neither, nor (UX10) words `cut`
+ * from the video.
  */
-export function captionSource(words: readonly DocWord[]): { phrases: CaptionPhrase[]; units: CaptionUnit[] } {
-  const glued = captionUnits(words);
+export function captionSource(
+  words: readonly DocWord[],
+  cut?: (w: DocWord) => boolean,
+): { phrases: CaptionPhrase[]; units: CaptionUnit[] } {
+  const glued = captionUnits(words, cut);
   const phrases: CaptionPhrase[] = [];
   let cur: GluedUnit[] = [];
   let n = 0;
