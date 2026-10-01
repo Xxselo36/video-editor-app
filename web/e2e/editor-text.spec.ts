@@ -149,6 +149,30 @@ test.describe("editor v2: word-level Text tab", TAG, () => {
     await expect(word(page, "ten")).toHaveAttribute("data-hidden", "true");
   });
 
+  test("a closed Text tab doesn't act on its old selection (H, Escape)", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "keyboard");
+    const job = await stub.seed("review_speech");
+    await openText(page, job.id);
+    const target = (await savedWords(stub, job.id)).find((w) => w.text === "seconds")!;
+    await word(page, "seconds").click();
+    await page.getByTestId("ed-tab-style").click();
+    await expect(page.getByTestId("ed-word")).toHaveCount(0);
+    // focus on the page, not a control
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("h");
+    // Escape still reaches the timeline: select a clip, Escape deselects it
+    const clip = page.getByTestId("ed-timeline").getByTestId(/^clip-\d+$/).first();
+    await clip.click();
+    await expect(page.getByTestId("ed-split")).toBeVisible();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("ed-split")).toHaveCount(0);
+    await page.waitForTimeout(1200);
+    expect((await savedWords(stub, job.id)).find((w) => w.id === target.id)?.hidden).toBeFalsy();
+    await page.getByTestId("ed-tab-text").click();
+    await expect(word(page, "seconds")).not.toHaveAttribute("data-hidden", "true");
+  });
+
   test("a job from before the edit document: the sentence transcript", async ({ page, stub }) => {
     const job = await stub.seed("review_speech", { doc: false });
     await openWithStorage(page, `/app/edit/${job.id}`, TOUR_DONE);

@@ -296,7 +296,15 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     }
   });
 
-  // the editor's global shortcuts (focus outside the list)
+  // the editor's global shortcuts (focus outside the list); gone with the
+  // tab: a closed Text tab must not hide, edit or swallow Escape.
+  const apiRef = p.apiRef;
+  useEffect(
+    () => () => {
+      apiRef.current = null;
+    },
+    [apiRef],
+  );
   useEffect(() => {
     p.apiRef.current = {
       edit: () => startEdit(),
