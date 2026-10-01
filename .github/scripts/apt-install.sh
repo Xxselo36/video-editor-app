@@ -15,8 +15,9 @@ opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=20
       -o Acquire::https::Timeout=20 -o Dpkg::Use-Pty=0)
 
 # The runner's own mirror (azure.archive.ubuntu.com) was down for good
-# on 2026-10-01: attempt 3 switches every apt source to the main Ubuntu
-# archive (archive.ubuntu.com / security.ubuntu.com).
+# on 2026-10-01: attempt 2 switches every apt source to the main Ubuntu
+# archive (archive.ubuntu.com). Each attempt is capped at 4 minutes, so a
+# dead mirror costs at most that before the fallback.
 use_main_archive() {
   local f
   for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
@@ -26,13 +27,13 @@ use_main_archive() {
   done
 }
 
-for attempt in 1 2 3; do
-  if [ "$attempt" = 3 ]; then
+for attempt in 1 2; do
+  if [ "$attempt" = 2 ]; then
     echo "::warning title=apt-get::switching to archive.ubuntu.com"
     use_main_archive
   fi
-  if timeout 120 sudo apt-get "${opts[@]}" update -qq \
-     && timeout 240 sudo apt-get "${opts[@]}" install -y -qq \
+  if timeout 60 sudo apt-get "${opts[@]}" update -qq \
+     && timeout 180 sudo apt-get "${opts[@]}" install -y -qq \
           --no-install-recommends "$@"; then
     exit 0
   fi
@@ -40,5 +41,5 @@ for attempt in 1 2 3; do
   sudo dpkg --configure -a || true
   sleep 5
 done
-echo "::error title=apt-get::installing $* failed three times (mirror down?)"
+echo "::error title=apt-get::installing $* failed on both mirrors"
 exit 1
