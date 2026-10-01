@@ -203,6 +203,46 @@ test.describe("editor v2: word-level Text tab", TAG, () => {
     await expect.poll(() => savedText(stub, job.id), { timeout: 10_000 }).toContain("waits 十 seconds");
   });
 
+  test("v1 transcript edits (/phrases) survive opening v2: applied to the doc, never overwritten", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    const words = await savedWords(stub, job.id);
+    // v1's sentences: fix "ten" -> "10", delete "Follow for part two."
+    const sentences: { original_start: number; original_end: number; text: string }[] = [];
+    let cur: typeof words = [];
+    for (const w of words.filter((x) => !x.hidden)) {
+      cur.push(w);
+      if (/[.!?]$/.test(w.text)) {
+        sentences.push({ original_start: cur[0].start, original_end: cur[cur.length - 1].end, text: cur.map((x) => x.text).join(" ") });
+        cur = [];
+      }
+    }
+    const v1 = sentences
+      .filter((p) => !p.text.startsWith("Follow"))
+      .map((p) => ({ ...p, start: p.original_start, end: p.original_end, text: p.text.replace("waits ten", "waits 10") }));
+    const r = await stub.api.post(`/jobs/${job.id}/phrases`, { data: { phrases: v1, rev: Date.now() } });
+    expect(r.ok()).toBeTruthy();
+    await openText(page, job.id);
+    await expect(word(page, "10")).toHaveCount(1);
+    await expect(word(page, "Follow")).toHaveAttribute("data-hidden", "true");
+    // the doc now has them (saved by the autosave) …
+    await expect.poll(() => savedText(stub, job.id), { timeout: 10_000 }).toContain("waits 10 seconds");
+    expect((await savedWords(stub, job.id)).find((w) => w.text === "Follow")?.hidden).toBe(true);
+    // … and /phrases is untouched until an edit in v2
+    const subs = await (await stub.api.get(`/jobs/${job.id}/subtitles`)).json();
+    expect(subs.phrases.map((p: { text: string }) => p.text)).toEqual(v1.map((p) => p.text));
+    // a reload doesn't apply them twice; a v2 edit then writes /phrases with both
+    await page.reload();
+    await expect(page.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
+    if (await isPhone(page)) await page.getByTestId("ed-tab-text").click();
+    await expect(word(page, "10")).toHaveCount(1, { timeout: 30_000 });
+    await fixWord(page, "seconds", "secs");
+    await expect
+      .poll(async () => ((await (await stub.api.get(`/jobs/${job.id}/subtitles`)).json()).phrases ?? []).map((p: { text: string }) => p.text).join(" "), {
+        timeout: 10_000,
+      })
+      .toContain("waits 10 secs");
+  });
+
   test("a job from before the edit document: the sentence transcript", async ({ page, stub }) => {
     const job = await stub.seed("review_speech", { doc: false });
     await openWithStorage(page, `/app/edit/${job.id}`, TOUR_DONE);

@@ -4888,6 +4888,10 @@ def get_subtitles(job_id: str, user: User | None = Depends(current_user)):
         "language": job.language,
         # Transcript as edited in review, if the user changed anything.
         "phrases": job.edited_phrases,
+        # Its revision (the client's ms timestamp of that save, 0 = none):
+        # the v2 editor compares it with the edit doc's rev to tell a
+        # newer v1 edit from an older one (UX8, web state/reconcile.ts).
+        "phrases_rev": job.edited_phrases_rev or 0,
     }
 
 

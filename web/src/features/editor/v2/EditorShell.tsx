@@ -19,6 +19,7 @@ import { useEditSession } from "@/features/editor/session/useEditSession";
 import { useEditorShortcuts, type ShortcutHandlers } from "@/features/editor/shortcuts/useEditorShortcuts";
 import { createPlayheadStore, PlayheadContext } from "@/features/editor/state/playhead";
 import type { EditDoc } from "@/features/editor/state/doc";
+import type { V1Edits } from "@/features/editor/state/reconcile";
 import { createDocStore, useDocStore, type DocState } from "@/features/editor/state/store";
 import { useTimelineHistory, type TimelineHistory } from "@/features/editor/timeline/history";
 import {
@@ -62,6 +63,9 @@ export type EditorShellProps = {
   /** UX8: the caption source of the edit document (preview, render
    *  payload and — after an edit — the legacy /phrases save). */
   onCaptionSource?: CaptionSourceHandler;
+  /** v1 sentence edits (/phrases) and their save time: applied to the
+   *  doc when newer than it (state/reconcile.ts). */
+  v1Edits?: V1Edits;
   onApply: () => void;
   onBack: () => void;
 };
@@ -125,7 +129,12 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     setToast({ msg, action, key: Date.now() });
   }, []);
   const tlHistory = useTimelineHistory(editSegs, session.commitEditSegs);
-  const doc = useDocSession(props.jobId, props.onCaptionSource, (word) => showToast(t("editor.save.wordFixed", { word })));
+  const doc = useDocSession(
+    props.jobId,
+    props.onCaptionSource,
+    (word) => showToast(t("editor.save.wordFixed", { word })),
+    props.v1Edits ?? null,
+  );
   const docStore = doc.status === "ready" ? doc.store : null;
 
   // ── one undo for text and timeline (until UX10 merges the stacks):

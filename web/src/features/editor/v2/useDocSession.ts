@@ -27,6 +27,7 @@ import {
   type IdPool,
 } from "@/features/editor/state/doc";
 import { DocSaver, type DocSaveState } from "@/features/editor/state/docSave";
+import { reconcileV1, type V1Edits } from "@/features/editor/state/reconcile";
 import { createDocStore, type DocStore } from "@/features/editor/state/store";
 
 export type CaptionSourceHandler = (phrases: CaptionPhrase[], units: CaptionUnit[], edited: boolean) => void;
@@ -63,11 +64,14 @@ export function useDocSession(
   jobId: string,
   onCaptionSource?: CaptionSourceHandler,
   onWordFixed?: WordFixedHandler,
+  v1Edits: V1Edits = null,
 ): DocSession {
   const [loaded, setLoaded] = useState<Loaded | "none" | null>(null);
   const [saveState, setSaveState] = useState<DocSaveState>("saved");
   const captionRef = useRef(onCaptionSource);
   const fixedRef = useRef(onWordFixed);
+  // read once, when the doc arrives
+  const v1Ref = useRef(v1Edits);
   useEffect(() => {
     captionRef.current = onCaptionSource;
     fixedRef.current = onWordFixed;
@@ -84,8 +88,11 @@ export function useDocSession(
           setLoaded("none");
           return;
         }
-        const store = createDocStore(res.doc);
         const pool: IdPool = new Set(res.doc.words.map((w) => w.id));
+        // Newer v1 sentence edits go into the doc (saved below), so
+        // opening v2 never reverts or overwrites them (state/reconcile.ts).
+        const start = reconcileV1(res.doc, res.rev, v1Ref.current, pool);
+        const store = createDocStore(start);
         const saver = new DocSaver(res.doc, res.rev, {
           jobId,
           fetch: apiFetch,
@@ -108,7 +115,8 @@ export function useDocSession(
           const src = captionSource(doc.words);
           captionRef.current?.(src.phrases, src.units, true);
         };
-        const src = captionSource(res.doc.words);
+        if (start !== res.doc) saver.schedule(start);
+        const src = captionSource(start.words);
         captionRef.current?.(src.phrases, src.units, false);
         made = { store, saver, pool, readOnly: res.read_only };
         setLoaded(made);

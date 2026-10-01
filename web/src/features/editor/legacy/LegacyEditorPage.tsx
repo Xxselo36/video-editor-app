@@ -25,6 +25,7 @@ import { waitForSaves } from "@/lib/pendingSaves";
 import type { JobStatus } from "@/features/jobs/types";
 import { ErrorView } from "@/features/project/ErrorView";
 import { applyRender } from "./applyRender";
+import type { V1Edits } from "@/features/editor/state/reconcile";
 import { phrasesFromSubtitlesResponse, type Phrase, type Subtitle } from "./buildPhrases";
 import { ReviewScreen } from "./ReviewScreen";
 import { usePhraseAutosave } from "./usePhraseAutosave";
@@ -52,6 +53,9 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
   // The job's word units (GET /subtitles): what the render gets, matched
   // to the edited sentences by phrasesToUnits (UX2).
   const unitsRef = useRef<Subtitle[]>([]);
+  // v1 transcript edits as saved (/phrases) and when: the v2 editor
+  // applies them to the edit doc when they are newer (UX8 reconcile).
+  const [v1Edits, setV1Edits] = useState<V1Edits>(null);
   const { flushPhraseSave, schedulePhraseSave } = usePhraseAutosave();
   const flushRef = useRef(flushPhraseSave);
   useEffect(() => {
@@ -97,6 +101,12 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         if (subsRes.ok) {
           const sd = await subsRes.json();
           unitsRef.current = sd.subtitles ?? [];
+          if (!cancelled)
+            setV1Edits(
+              Array.isArray(sd.phrases)
+                ? { phrases: sd.phrases, rev: typeof sd.phrases_rev === "number" ? sd.phrases_rev : 0 }
+                : null,
+            );
           lines = phrasesFromSubtitlesResponse(sd);
           if (!cancelled) setPhrases(lines);
         }
@@ -188,6 +198,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         // UX8: with an edit document the captions come from its words:
         // the preview and the render payload at once, the legacy
         // /phrases save (v1, social caption) after an edit.
+        v1Edits={v1Edits}
         onCaptionSource={(next, units, edited) => {
           unitsRef.current = units;
           setPhrases(next);
