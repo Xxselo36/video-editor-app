@@ -29,44 +29,64 @@ import re
 from typing import Any, Mapping
 
 # ── job errors (job.error_code) ──────────────────────────────────────
-# code → the English text a job's `message` gets for it (old clients
-# show `message`; new ones translate the code). {name}: error_params.
+# code → the English text a job's `message` and (for everyone but
+# admins) `error` get for it. New web builds translate the code; builds
+# from before UX5 show this text: their friendlyError passes a sentence
+# with "Please" through as it is and maps the others by keywords
+# ("no speech detected", "no audio track", "render"), so every text here
+# either asks something with "Please" or carries the keyword of its old
+# mapping. {name}: error_params.
 
 JOB_ERRORS: dict[str, str] = {
     # The video's fault (content), refused or failed.
     "no_speech": "No speech detected in the video.",
-    "no_audio": "This video has no sound track.",
-    "no_video": "This file has no video track.",
-    "video_too_short": "The video is shorter than {min_seconds} seconds.",
-    "video_too_long": "The video is longer than {max_minutes} minutes.",
-    "file_too_large": "The file is larger than {max_gb} GB.",
+    "no_audio": "This video has no audio track.",
+    "no_video": "This is an audio file. Please upload a video.",
+    "video_too_short": "The video is shorter than {min_seconds} seconds. "
+                       "Please upload a longer one.",
+    "video_too_long": "The video is longer than {max_minutes} minutes. "
+                      "Please upload a shorter one.",
+    "file_too_large": "The file is larger than {max_gb} GB. "
+                      "Please export it smaller.",
     "audio_silent": "The audio is silent.",
-    "unreadable_video": "The video could not be read.",
+    "unreadable_video": "The video could not be read. "
+                        "Please export it again as MP4 and upload that.",
     # Ours / a provider's.
-    "transcription_unavailable": "Transcription is unavailable right now.",
-    "server_storage_full": "The server is out of storage.",
-    "server_busy": "The servers are busy.",
+    "transcription_unavailable": "Transcription is unavailable right now. "
+                                 "Please try again in a few minutes.",
+    "server_storage_full": "Our servers are busy. "
+                           "Please try again in a few minutes.",
+    "server_busy": "Our servers are busy. Please try again in a few minutes.",
     "processing_interrupted":
         "Processing was interrupted. Please upload the video again.",
-    "processing_failed": "Processing failed.",
+    "processing_failed": "Processing failed. Please try again.",
     # Renders (the job goes back to review with these).
-    "render_failed": "The export failed.",
-    "render_unavailable": "The export service is unavailable.",
-    "render_timeout": "The export took too long.",
+    "render_failed": "Render failed. Your edits are saved — please open "
+                     "the project and export again.",
+    "render_unavailable": "The render service is unavailable. "
+                          "Please try again later.",
+    "render_timeout": "The render took too long. Please try again.",
     # Media and billing.
-    "media_expired": "The project's files were deleted.",
-    "media_unavailable": "The original video is no longer available.",
-    "quota_exceeded": "Not enough minutes left.",
-    "subscription_required": "A plan is required.",
+    "media_expired": "This project's files have expired. "
+                     "Please upload the video again.",
+    "media_unavailable": "The original video is no longer available. "
+                         "Please upload it again.",
+    "quota_exceeded": "Not enough minutes left. Please choose a plan.",
+    "subscription_required": "A plan is required. Please choose one.",
     # Refusals of the editor / export API (HTTP only today).
-    "too_many_active_jobs": "Too many videos in progress.",
-    "too_many_renders": "Too many exports in progress.",
-    "render_limit": "The export limit for this video is reached.",
-    "stale_rev": "Changed in another tab.",
-    "doc_not_ready": "The project isn't ready yet.",
-    "already_rendering": "This video is already being exported.",
-    "not_in_review": "The project isn't in the editor any more.",
-    "auth_required": "Sign-in required.",
+    "too_many_active_jobs": "Too many videos in progress. "
+                            "Please wait until one is done.",
+    "too_many_renders": "Too many exports in progress. "
+                        "Please wait until one is done.",
+    "render_limit": "This video reached its export limit for today. "
+                    "Please try again tomorrow.",
+    "stale_rev": "Changed in another tab. Please reload.",
+    "doc_not_ready": "The project isn't ready yet. Please try again shortly.",
+    "already_rendering": "This video is already being exported. "
+                         "Please wait for it.",
+    "not_in_review": "This video is already being exported. "
+                     "Please wait for it.",
+    "auth_required": "Please sign in again.",
 }
 
 # Non-fatal notes on a job that still works (job.format_warning, UX6;
@@ -91,6 +111,20 @@ AUDIO_WARNINGS: dict[str, str] = {
 # still work." note is gone: nothing to do about it.
 _LEGACY_AUDIO: dict[str, str] = {
     text: code for code, text in AUDIO_WARNINGS.items()}
+_QUIET_SIDE = "Audio is on the quiet side but should still work."
+
+
+def audio_warning_texts(values: Any) -> list[str]:
+    """job.audio_warnings as the English sentences clients from before
+    UX5 show as they are: codes worded, stored sentences kept (also the
+    old "quiet side" note), anything else dropped; each once."""
+    out: list[str] = []
+    for v in values or ():
+        text = AUDIO_WARNINGS.get(v) or (str(v) if v in _LEGACY_AUDIO
+                                         or v == _QUIET_SIDE else None)
+        if text and text not in out:
+            out.append(text)
+    return out
 
 
 def audio_warning_codes(values: Any) -> list[str]:
@@ -362,13 +396,22 @@ def no_error() -> dict[str, Any]:
     return {"error": None, "error_code": None, "error_params": {}}
 
 
-def public_error(error: str | None, code: str | None) -> str | None:
-    """What a non-admin sees of job.error: the code (the raw text may
-    hold paths, provider answers or transcript words). Clients from
-    before UX5 map it like the text ("render_failed" → export failed)."""
+def public_text(code: str | None, params: Mapping[str, Any] | None = None) -> str:
+    """The catalogue's English text of a failure ("Processing failed."
+    without a known code)."""
+    tmpl = JOB_ERRORS.get(code or "", JOB_ERRORS["processing_failed"])
+    return _fill(tmpl, params or {})
+
+
+def public_error(error: str | None, code: str | None,
+                 params: Mapping[str, Any] | None = None) -> str | None:
+    """What a non-admin sees of job.error: the catalogue's English text
+    for its code (public_text), never the raw text — that may hold
+    paths, provider answers or transcript words. Old clients word it as
+    they always did (JOB_ERRORS); new ones read error_code."""
     if not error:
         return None
-    return code or "processing_failed"
+    return public_text(code, params)
 
 
 # ── export for the web app ───────────────────────────────────────────

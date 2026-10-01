@@ -4245,17 +4245,21 @@ def _status_rows(ids: list[str], user: User | None) -> dict:
         has_output = (bool(keys.get("primary")) if isinstance(keys, dict)
                       and keys else bool(out) and Path(out).exists())
         code = row.get("error_code")
+        params = _as_dict(row.get("error_params"))
+        message = row["message"]
+        if row["status"] == "error" and not _is_admin(user):
+            message = errors.public_text(code, params)
         jobs.append({
             "id": job_id,
             "status": row["status"],
-            "message": row["message"],
+            "message": message,
             "progress": row["progress"],
             "queue_position": row["queue_position"],
             # The raw text only for admins (Job.to_dict).
             "error": (row["error"] if _is_admin(user)
-                      else errors.public_error(row["error"], code)),
+                      else errors.public_error(row["error"], code, params)),
             "error_code": code,
-            "error_params": _as_dict(row.get("error_params")),
+            "error_params": params,
             "refunded": row.get("refunded"),
             "stage": row.get("stage"),
             "stage_params": _as_dict(row.get("stage_params")),

@@ -40,8 +40,10 @@ export type JobStatus = {
   stage?: string | null;
   stage_params?: ErrorParams | null;
   has_output: boolean;
-  /** Codes (lib/errors.ts audioWarningText); older backends: sentences. */
+  /** English sentences (what builds before UX5 show). */
   audio_warnings?: string[];
+  /** The same as codes (lib/errors.ts audioWarningText), UX5. */
+  audio_warning_codes?: string[];
   audio_levels?: { mean_db?: number | null; max_db?: number | null };
   duration?: number;
   cut_ranges?: CutRange[];

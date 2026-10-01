@@ -22,6 +22,7 @@ from backend.jobs import store
 REPO = Path(__file__).resolve().parents[2]
 CODES_JSON = REPO / "web" / "src" / "lib" / "errorCodes.json"
 ADMIN = {"X-Admin-Token": "s3cret"}
+UNREADABLE = errors.JOB_ERRORS["unreadable_video"]
 
 
 # ── the catalogue ────────────────────────────────────────────────────
@@ -118,7 +119,8 @@ JOB_KEYS = sorted([
     "id", "status", "plan", "expires_at", "message", "progress", "error",
     "error_code", "error_params", "refunded", "stage", "stage_params",
     "has_output", "has_proxy", "outputs", "social_caption",
-    "social_hashtags", "hook_clips", "audio_warnings", "audio_levels",
+    "social_hashtags", "hook_clips", "audio_warnings", "audio_warning_codes",
+    "audio_levels",
     "duration", "cut_ranges", "scene_events", "edit_segments",
     "preview_segments", "preview_version", "caption_preset", "filename",
     "preset_id", "preset_label", "created_at", "updated_at",
@@ -140,9 +142,10 @@ def test_to_dict_snapshot_and_no_raw_error(client):
     assert sorted(body) == JOB_KEYS
     assert {k: body[k] for k in ("status", "message", "error", "error_code",
                                  "error_params", "refunded", "stage")} == {
-        "status": "error", "message": "The video could not be read.",
-        # The code, never the raw text (paths, provider answers).
-        "error": "unreadable_video", "error_code": "unreadable_video",
+        "status": "error", "message": UNREADABLE,
+        # The catalogue's text (what old clients show), never the raw
+        # text (paths, provider answers); the code next to it.
+        "error": UNREADABLE, "error_code": "unreadable_video",
         "error_params": {}, "refunded": True, "stage": None}
     assert "/data/" not in json.dumps(body)
 
@@ -152,11 +155,12 @@ def test_raw_error_only_for_admins(client, auth_on, bearer, monkeypatch):
     job = _failed_job()
     store.update(job.id, owner_id="user_a")
     assert client.get(f"/jobs/{job.id}", headers=bearer()).json()["error"] == \
-        "unreadable_video"
+        UNREADABLE
     admin = client.get(f"/jobs/{job.id}", headers=ADMIN).json()
     assert admin["error"].startswith("ffmpeg -i /data/jobs/")
     rows = client.get(f"/jobs/status?ids={job.id}", headers=bearer()).json()
-    assert rows["jobs"][0]["error"] == "unreadable_video"
+    assert rows["jobs"][0]["error"] == UNREADABLE
+    assert admin["message"] == UNREADABLE   # (the stored message)
 
 
 def test_status_rows_snapshot(client):
@@ -174,8 +178,11 @@ def test_status_rows_snapshot(client):
     assert (rows[job.id]["stage"], rows[job.id]["stage_params"],
             rows[job.id]["message"]) == ("analyze.transcribe", {},
                                          "Transcribing (35%)…")
-    assert (rows[failed.id]["error"], rows[failed.id]["error_params"]) == (
-        "unreadable_video", {"x": 1})
+    assert (rows[failed.id]["error"], rows[failed.id]["message"],
+            rows[failed.id]["error_params"]) == (UNREADABLE, UNREADABLE, {"x": 1})
+
+
+QUIET = "Audio is very quiet — speak closer to the microphone for best results."
 
 
 def test_rows_written_before_ux5_read_fine(client):
@@ -183,11 +190,54 @@ def test_rows_written_before_ux5_read_fine(client):
     job = store.create(None, {}, filename="old.mp4")
     store.update(job.id, status="error", error="No speech detected in the video.",
                  message="No speech detected in the video.", error_code="no_speech",
-                 audio_warnings=["Audio is very quiet — speak closer to the "
-                                 "microphone for best results."])
+                 audio_warnings=[QUIET])
     body = client.get(f"/jobs/{job.id}").json()
     assert (body["error"], body["error_params"], body["stage"],
-            body["audio_warnings"]) == ("no_speech", {}, None, ["audio_quiet"])
+            body["audio_warnings"], body["audio_warning_codes"]) == (
+        "No speech detected in the video.", {}, None, [QUIET], ["audio_quiet"])
+
+
+def test_old_clients_get_english_never_codes_or_internals(client):
+    """Web builds from before UX5 show audio_warnings and error/message as
+    they come: English sentences, never codes, never raw exception text
+    (review findings 5, 9, 10, 12)."""
+    job = store.create(None, {}, filename="new.mp4")
+    store.update(job.id, status="awaiting_review",
+                 audio_warnings=["audio_quiet", "audio_clipping"])
+    body = client.get(f"/jobs/{job.id}").json()
+    assert body["audio_warnings"] == [QUIET, errors.AUDIO_WARNINGS["audio_clipping"]]
+    assert body["audio_warning_codes"] == ["audio_quiet", "audio_clipping"]
+    # A job that failed before UX5: raw text in message and error.
+    old = store.create(None, {}, filename="old.mp4")
+    store.update(old.id, status="error",
+                 message="Groq 500: /tmp/cleo/jobs/x/audio.flac transcript 'hallo'",
+                 error="Groq 500: /tmp/cleo/jobs/x/audio.flac transcript 'hallo'")
+    body = client.get(f"/jobs/{old.id}").json()
+    assert body["message"] == body["error"] == errors.JOB_ERRORS["processing_failed"]
+    assert "/tmp/" not in json.dumps(body)
+    rows = client.get(f"/jobs/status?ids={old.id}").json()["jobs"]
+    assert rows[0]["message"] == errors.JOB_ERRORS["processing_failed"]
+    # A failed render (back in review) keeps the message old clients match.
+    rf = store.create(None, {}, filename="rf.mp4")
+    store.update(rf.id, status="awaiting_review", message="render_failed",
+                 error="Render worker unavailable (modal 500 at /x)",
+                 error_code="render_unavailable")
+    body = client.get(f"/jobs/{rf.id}").json()
+    assert body["message"] == "render_failed"
+    assert body["error"] == errors.JOB_ERRORS["render_unavailable"]
+
+
+@pytest.mark.parametrize("code", sorted(errors.JOB_ERRORS))
+def test_catalogue_texts_word_well_in_old_clients(code):
+    """The pre-UX5 friendlyError shows a sentence with "Please" as it is
+    and maps the others by keyword: every catalogue text must be one of
+    the two, so an old client never shows a generic or odd text."""
+    text = errors.public_text(code, {"min_seconds": 3, "max_minutes": 30,
+                                     "max_gb": 4})
+    assert "{" not in text
+    keywords = ("no speech detected", "no audio track", "audio", "render")
+    assert ("please" in text.lower() and text.endswith(".")) or any(
+        k in text.lower() for k in keywords), text
 
 
 # ── HTTP error bodies ────────────────────────────────────────────────

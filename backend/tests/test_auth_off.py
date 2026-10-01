@@ -8,7 +8,7 @@ import pytest
 
 import backend.main as M
 from conftest import NEW_JOB_STATUS
-from backend import accounts
+from backend import accounts, errors
 from backend.jobs import DEFAULT_PLAN, store
 
 
@@ -129,5 +129,5 @@ def test_analysis_hooks_are_noops(no_accounts_db, monkeypatch):
     M._run_analyze_inner(job.id)
     # UX5: the code for clients, the catalogue text as the message.
     assert store.get(job.id).error_code == "server_storage_full"
-    assert store.get(job.id).message == "The server is out of storage."
+    assert store.get(job.id).message == errors.JOB_ERRORS["server_storage_full"]
     M._refund_interrupted()

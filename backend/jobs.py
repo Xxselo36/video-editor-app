@@ -256,19 +256,23 @@ class Job:
             Path(self.normalized_path).with_name(LEGACY_PROXY_NAME).is_file())
 
     def to_dict(self, *, admin: bool = False) -> dict[str, Any]:
-        """The job as the API serves it. `error` — the raw failure text
-        (paths, provider answers, transcript words) — only to admins;
-        everyone else gets its code there (backend/errors.py
-        public_error), which clients from before UX5 map like the text."""
+        """The job as the API serves it. The raw failure text (paths,
+        provider answers, transcript words) only to admins: everyone else
+        gets the catalogue's English text for error_code in `error` and,
+        for a failed job, in `message` (jobs failed before UX5 stored the
+        raw text there too) — what clients from before UX5 show."""
         return {
             "id": self.id,
             "status": self.status,
             "plan": self.plan,
             "expires_at": self.expires_at(),
-            "message": self.message,
+            "message": (self.message if admin or self.status != "error"
+                        else errors.public_text(self.error_code,
+                                                self.error_params)),
             "progress": self.progress,
             "error": (self.error if admin
-                      else errors.public_error(self.error, self.error_code)),
+                      else errors.public_error(self.error, self.error_code,
+                                               self.error_params)),
             "error_code": self.error_code,
             "error_params": dict(self.error_params or {}),
             "refunded": self.refunded,
@@ -284,9 +288,11 @@ class Job:
                 {k: v for k, v in c.items() if k not in ("path", "object_key")}
                 for c in self.hook_clips
             ],
-            # Codes (backend/errors.py AUDIO_WARNINGS); older jobs stored
-            # English sentences, mapped here.
-            "audio_warnings": errors.audio_warning_codes(self.audio_warnings),
+            # English sentences, as clients from before UX5 show them;
+            # the codes (backend/errors.py AUDIO_WARNINGS) next to them.
+            "audio_warnings": errors.audio_warning_texts(self.audio_warnings),
+            "audio_warning_codes": errors.audio_warning_codes(
+                self.audio_warnings),
             "audio_levels": self.audio_levels,
             "duration": self.duration,
             "cut_ranges": self.cut_ranges,

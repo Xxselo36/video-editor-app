@@ -20,7 +20,7 @@ import { updateActiveJob } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
 import { apiFetch, whenMediaReady } from "@/lib/api";
 import { AUTH_ENABLED } from "@/lib/auth";
-import { describeError } from "@/lib/errors";
+import { audioWarningText, describeError } from "@/lib/errors";
 import { waitForSaves } from "@/lib/pendingSaves";
 import type { JobStatus } from "@/features/jobs/types";
 import { ErrorView } from "@/features/project/ErrorView";
@@ -178,7 +178,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         phrases={phrases}
         units={unitsRef}
         captionPreset={captionPreset}
-        audioWarnings={job.audio_warnings ?? []}
+        audioWarnings={(job.audio_warning_codes ?? job.audio_warnings ?? []).map((w) => audioWarningText(w, t))}
         cutRanges={job.cut_ranges ?? []}
         duration={job.duration ?? 0}
         onChange={(next) => {
@@ -202,7 +202,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         phrases={phrases}
         units={unitsRef}
         captionPreset={captionPreset}
-        audioWarnings={job.audio_warnings ?? []}
+        audioWarnings={job.audio_warning_codes ?? job.audio_warnings ?? []}
         cutRanges={job.cut_ranges ?? []}
         duration={job.duration ?? 0}
         onChange={(next) => {
