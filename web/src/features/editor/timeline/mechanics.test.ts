@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canDelete,
   dropIndex,
+  exactFps,
   frameEdge,
   frameTimes,
   moveSeg,
@@ -141,25 +142,29 @@ describe("UX10: 0.1 s ruler marks, precise trims, the frame grid, reordering", (
     expect(trimToStep(clips, "b", "end", 50, trimBounds(clips, "b", 7.234))[1].end).toBe(7.234);
   });
 
-  it("puts a released edge on the frame both exports cut at", () => {
-    for (const fps of [24, 25, 30000 / 1001, 30, 60]) {
+  it("puts a released edge exactly on frame k / fps, the one both exports cut at (review 13)", () => {
+    for (const stored of [24, 25, 29.97, 30, 59.94, 60]) {
+      const fps = exactFps(stored);
       for (let k = 0; k < 400; k++) {
         const t = roundToStep(k * 0.0137 + 0.004);
-        const e = frameEdge(t, fps);
+        const e = frameEdge(t, stored);
         const frame = Math.round(t * fps);
+        // exactly k / fps, through JSON as well (the server keeps it)
+        expect(e).toBe(frame / fps);
+        expect(JSON.parse(JSON.stringify(e))).toBe(e);
         // v2 (captions_v2.clip_plan): the nearest frame
         expect(Math.round(e * fps)).toBe(frame);
-        // v1 (ffmpeg per clip): the first frame at or after a start, the
-        // frames before an end — the same frame boundary
-        expect(Math.ceil(e * fps - 1e-9) || 0).toBe(frame);
-        // never more than half a frame (+ the margin) from what was shown
-        expect(Math.abs(e - t)).toBeLessThanOrEqual(0.5 / fps + 0.0005 + 1e-9);
-        // the server keeps ms (/edit-segments rounds to 3 decimals): still that frame
-        const ms = Math.round(e * 1000) / 1000;
-        expect(Math.round(ms * fps)).toBe(frame);
-        expect(Math.ceil(ms * fps - 1e-9) || 0).toBe(frame);
+        // v1, MoviePy read frame by frame: int(fps * t + 1e-5)
+        expect(Math.floor(e * fps + 1e-5)).toBe(frame);
+        // never more than half a frame from what was shown
+        expect(Math.abs(e - t)).toBeLessThanOrEqual(0.5 / fps + 1e-9);
       }
     }
+    expect(exactFps(29.97)).toBe(30000 / 1001);
+    expect(exactFps(23.976)).toBe(24000 / 1001);
+    expect(exactFps(59.94)).toBe(60000 / 1001);
+    expect(exactFps(30.0004)).toBe(30);
+    expect(exactFps(12.5)).toBe(12.5);
     expect(frameEdge(3.47, null)).toBe(3.47);
     expect(frameEdge(0.01, 30)).toBe(0);
     const clips: EditorSeg[] = [
@@ -167,8 +172,8 @@ describe("UX10: 0.1 s ruler marks, precise trims, the frame grid, reordering", (
       { id: "b", start: 3.47, end: 6.11 },
     ];
     const b = trimBounds(clips, "b", 10);
-    expect(snapTrimToFrame(clips, "b", "start", b, 30)[1].start).toBeCloseTo(104 / 30 - 0.0005, 9);
-    expect(snapTrimToFrame(clips, "b", "end", b, 30)[1].end).toBeCloseTo(183 / 30 - 0.0005, 9);
+    expect(snapTrimToFrame(clips, "b", "start", b, 30)[1].start).toBe(104 / 30);
+    expect(snapTrimToFrame(clips, "b", "end", b, 30)[1].end).toBe(183 / 30);
     expect(snapTrimToFrame(clips, "b", "start", b, null)).toBe(clips);
     // an edge on the neighbour's footage stays exact
     const joined: EditorSeg[] = [clips[0], { id: "b", start: 2, end: 6.11 }];

@@ -230,26 +230,43 @@ export function trimToStep(
 }
 
 /**
- * How far before frame k's start an edge is stored (frameEdge). Both
- * renders then use frame k: v1 (the per-clip ffmpeg burn) starts a clip
- * at the first frame at or after its start and ends it before the first
- * frame at or after its end; v2 rounds each edge to the nearest frame
- * (captions_v2.clip_plan) — round(k − 0.015) = k. Without the margin a
- * printed k / fps could land a hair after the frame and v1 skip it.
+ * The exact frame rate of a stored one (GET /jobs/{id} fps is rounded to
+ * 4 decimals): 29.97 → 30000/1001, 23.976 → 24000/1001, 59.94 →
+ * 60000/1001; 30.0002 → 30. Frame k starts at exactly k / exactFps — the
+ * backend's /edit-segments uses the same rule (main._exact_fps).
  */
-export const FRAME_EPS_S = 0.0005;
+export function exactFps(fps: number): number {
+  const ntsc = Math.round(fps * 1.001);
+  if ([24, 30, 48, 60, 120].includes(ntsc) && Math.abs(fps * 1.001 - ntsc) < 0.002 && Math.abs(fps - ntsc) > 0.01) {
+    return (ntsc * 1000) / 1001;
+  }
+  const whole = Math.round(fps);
+  return Math.abs(fps - whole) < 0.002 ? whole : fps;
+}
 
 /**
- * The edge the export uses for `t`: the nearest frame boundary (k / fps,
- * stored FRAME_EPS_S before it). The handle moves on the 0.01 s grid
- * while dragging; on release the edge moves to this (≤ half a frame) and
- * the readout shows it, so the value shown is the one both export paths
- * cut at. `t` unchanged without a known frame rate.
+ * The edge the export uses for `t`: the nearest frame boundary, exactly
+ * k / fps (review 13). The handle moves on the 0.01 s grid while
+ * dragging; on release the edge moves to this (≤ half a frame) and the
+ * readout shows it, so the value shown is the one both export paths cut
+ * at. `t` unchanged without a known frame rate.
+ *
+ * Why exactly k / fps (measured, backend/tests/captions/
+ * test_frame_edges.py renders both): v2 rounds each edge to the nearest
+ * frame (captions_v2.clip_plan). The v1 burn (MoviePy per clip) reads a
+ * start near the beginning frame by frame — int(fps·t + 1e-5), frame k
+ * only from t ≥ (k − 1e-5) / fps — and further in by an ffmpeg seek that
+ * keeps frames at or after t — frame k only up to t ≤ k / fps. The
+ * window between is under a microsecond: only k / fps itself is frame k
+ * on both. So /edit-segments keeps such an edge as sent (other edges it
+ * rounds to ms), where k / fps − 0.5 ms (the old rule) gave v1 frame
+ * k − 1 near a clip's start, and ms rounding either neighbour.
  */
 export function frameEdge(t: number, fps: number | null | undefined): number {
   if (!(fps && fps > 0) || !Number.isFinite(t)) return t;
-  const k = Math.round(t * fps);
-  return k <= 0 ? 0 : k / fps - FRAME_EPS_S;
+  const f = exactFps(fps);
+  const k = Math.round(t * f);
+  return k <= 0 ? 0 : k / f;
 }
 
 /** The trimmed edge of clip `id` moved to its frameEdge (a bound or a

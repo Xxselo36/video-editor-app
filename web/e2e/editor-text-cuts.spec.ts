@@ -573,13 +573,14 @@ test.describe("editor v2: the timeline (owner's iPhone items)", TAG, () => {
     await release();
     await expect(strip).not.toHaveAttribute("data-magnified", "true", { timeout: 3_000 });
     await expect.poll(() => strip.evaluate((el) => el.scrollWidth), { timeout: 3_000 }).toBeLessThan(width0 * 1.5);
-    // stored on a frame boundary (30 fps, a hair before it: both exports
-    // cut there), and that is the value the readout showed
+    // stored exactly on a frame boundary k / 30 (the server keeps such an
+    // edge as sent: both exports start / cut on frame k, review 13), and
+    // that is the value the readout showed
     await expect.poll(async () => Math.abs((await timeline(stub, job.id))[1][1] - 13.656) > 0.001, SAVED).toBe(true);
-    const e = (await timeline(stub, job.id))[1][1]; // the server keeps ms
-    const f = e * 30;
-    expect(Math.abs(f - Math.round(f))).toBeLessThan(0.05);
-    expect(Math.ceil(f - 1e-9)).toBe(Math.round(f)); // v1 and v2 pick the same frame
+    const e = (await timeline(stub, job.id))[1][1];
+    const k = Math.round(e * 30);
+    expect(e).toBe(k / 30);
+    expect(Math.floor(e * 30 + 1e-5)).toBe(k); // v1 (MoviePy) reads frame k
     expect(e.toFixed(2)).toBe(shown.toFixed(2));
   });
 

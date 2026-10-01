@@ -32,6 +32,7 @@ import type { TimelineHistory } from "@/features/editor/timeline/history";
 import {
   canDelete,
   dropIndex,
+  exactFps,
   frameEdge,
   trimFrameGrid,
   moveSeg,
@@ -699,7 +700,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   const { marks, labelStep } = rulerMarks(scrollX, contentW, totalDur, viewW, p.phone ? 48 : 64);
 
   // the frame grid: while trimming, around the visible part of the trimmed clip
-  const fps = p.fps && p.fps > 0 ? p.fps : 0;
+  const fps = p.fps && p.fps > 0 ? exactFps(p.fps) : 0;
   const frameLines = useMemo(() => {
     if (!trimming || !fps || pps / fps < FRAME_GRID_PX) return [];
     const c = clips.find((x) => x.seg.id === trimming.id);
