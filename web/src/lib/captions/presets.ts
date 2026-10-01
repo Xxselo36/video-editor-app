@@ -13,7 +13,7 @@
  * GET /config after UX5): only live presets are offered in the Style panel
  * and accepted by the v2 render; the rest are "preview" (test page only).
  */
-import type { CaptionStyle, PresetId, StyleOverrides } from "./types";
+import type { CaptionAdjust, CaptionStyle, PresetId, StyleOverrides } from "./types";
 
 export const DEFAULT_PRESET: PresetId = "power";
 
@@ -277,6 +277,25 @@ export function defaultY(presetY: number, W: number, H: number): number {
 }
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** Per-caption adjustments, clamped like the style's own y / sizeScale; null when there are none. */
+export function captionAdjusts(value: unknown): Record<string, CaptionAdjust> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out: Record<string, CaptionAdjust> = {};
+  let n = 0;
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!raw || typeof raw !== "object") continue;
+    const a = raw as Record<string, unknown>;
+    const adj: CaptionAdjust = {};
+    if (finite(a.y)) adj.y = clamp(a.y, 0.05, 0.95);
+    if (finite(a.sizeScale)) adj.sizeScale = clamp(a.sizeScale, 0.6, 1.6);
+    if (adj.y === undefined && adj.sizeScale === undefined) continue;
+    out[id] = adj;
+    n++;
+  }
+  return n ? out : null;
+}
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 /**
@@ -294,7 +313,12 @@ export function resolveStyle(
   if (!s) return null;
   const o = overrides ?? {};
   s.layout.y = typeof o.y === "number" && Number.isFinite(o.y) ? clamp(o.y, 0.05, 0.95) : defaultY(s.layout.y, frame.W, frame.H);
-  if (typeof o.sizeScale === "number" && Number.isFinite(o.sizeScale)) s.font.size *= clamp(o.sizeScale, 0.6, 1.6);
+  if (typeof o.sizeScale === "number" && Number.isFinite(o.sizeScale)) {
+    s.sizeScale = clamp(o.sizeScale, 0.6, 1.6);
+    s.font.size *= s.sizeScale;
+  }
+  const captions = captionAdjusts(o.captions);
+  if (captions) s.captions = captions;
   if (o.wordsPerPage === 1 || o.wordsPerPage === 2 || o.wordsPerPage === 3) {
     s.layout.maxWords = o.wordsPerPage;
     if (o.wordsPerPage === 1) {

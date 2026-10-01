@@ -305,9 +305,30 @@ export function buildPages(words: readonly CaptionWord[], style: CaptionStyle, o
     const next = pages[i + 1];
     const cut = sortedBreaks.find((b) => b > start + 1e-3);
     const end = Math.min(lastEnd + hold, next ? next.words[0].start : Infinity, cut ?? Infinity);
-    return { index: i, words: p.words, start, end: Math.max(end, start + 1e-3), oversized: p.oversized };
+    const page: Page = { index: i, words: p.words, start, end: Math.max(end, start + 1e-3), oversized: p.oversized };
+    const adjust = pageAdjust(p.words, style);
+    if (adjust) page.adjust = adjust;
+    return page;
   });
 }
+
+/**
+ * A page's own position / size (UT5): the adjustment of the first word on
+ * it that has one (style.captions is keyed by the id of a caption's first
+ * word; after a re-paging the word may sit further into a page).
+ */
+function pageAdjust(words: readonly PageWord[], style: CaptionStyle): Page["adjust"] | null {
+  const map = style.captions;
+  if (!map) return null;
+  for (const w of words) {
+    const a = w.id !== undefined && Object.prototype.hasOwnProperty.call(map, w.id) ? map[w.id] : undefined;
+    if (a) return { id: w.id!, ...a };
+  }
+  return null;
+}
+
+/** Widest share of the frame width a caption may grow to (per-caption size). */
+export const ADJUST_MAX_WIDTH = 0.96;
 
 // ---------------------------------------------------------------- layout
 
@@ -340,11 +361,29 @@ export function layoutPage(page: Page, style: CaptionStyle, opts: { W: number; H
     px *= Math.min(1, geo.maxEm / widest);
   }
   const counts = breakLines(page.words, L.wordsPerLine, (L.maxWidth * W) / px);
+  // A caption's own size scales the page as broken at the style's size
+  // (same lines), never wider than ADJUST_MAX_WIDTH of the frame.
+  const adj = page.adjust;
+  if (adj?.sizeScale !== undefined) {
+    let f = adj.sizeScale / (style.sizeScale ?? 1);
+    if (f > 1) {
+      let widest = 0;
+      let k0 = 0;
+      for (const count of counts) {
+        let em = 0;
+        for (let j = 0; j < count; j++) em += page.words[k0 + j].em + (j ? page.words[k0 + j - 1].spaceAfterEm : 0);
+        widest = Math.max(widest, em * px);
+        k0 += count;
+      }
+      if (widest > 0) f = Math.min(f, Math.max(1, (ADJUST_MAX_WIDTH * W) / widest));
+    }
+    px *= f;
+  }
   const lineH = px * style.font.lineHeight;
   const capH = (font.capHeight / font.upm) * px;
   const blockH = lineH * counts.length;
   const cx = L.x * W;
-  let top = L.y * H - blockH / 2;
+  let top = (adj?.y ?? L.y) * H - blockH / 2;
   top = Math.min(Math.max(top, H * 0.02), H * 0.98 - blockH);
   const lines: LineBox[] = [];
   let k = 0;
