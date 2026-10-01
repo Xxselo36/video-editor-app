@@ -66,7 +66,7 @@ export type EditorShellProps = {
   hasPoster?: boolean;
   cutRanges: CutRange[];
   duration: number;
-  /** The mezz's frame rate (GET /jobs/{id} mezz_fps): the trim frame grid. */
+  /** The frame rate of the video (GET /jobs/{id} fps): the trim frame grid. */
   fps?: number | null;
   /** UX10: hands over the render payload's builder (the page calls it on export). */
   onExportSource?: (build: ExportSource | null) => void;
