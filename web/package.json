@@ -17,6 +17,7 @@
     "@clerk/localizations": "^4.20.0",
     "@clerk/nextjs": "^7.9.7",
     "@sentry/browser": "11.1.0",
+    "@tanstack/react-virtual": "^3.14.13",
     "@vercel/analytics": "^2.0.1",
     "harfbuzzjs": "1.6.2",
     "lucide-react": "^1.49.0",
