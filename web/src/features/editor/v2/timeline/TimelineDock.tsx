@@ -1044,11 +1044,13 @@ function ClipView({
             film={film}
             start={seg.start}
             end={seg.end}
-            left={left}
+            // the window relative to the clip, clamped to it: a clip that
+            // an edit only shifts (inside the window) keeps its tiles as is
+            left={0}
             width={width}
             h={filmH}
-            lo={filmLo}
-            hi={filmHi}
+            lo={Math.max(0, filmLo - left)}
+            hi={Math.min(width, filmHi - left)}
           />
         )}
         {fi > 0 && (
