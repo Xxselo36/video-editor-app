@@ -202,7 +202,10 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         onCaptionSource={(next, units, edited) => {
           unitsRef.current = units;
           setPhrases(next);
-          if (edited) schedulePhraseSave(job.id, next);
+          // the doc's keepalive PATCH carries the edit on unload: this
+          // copy doesn't take its keepalive budget (an older /phrases is
+          // never applied over a newer doc, state/reconcile.ts)
+          if (edited) schedulePhraseSave(job.id, next, { keepalive: false });
         }}
         onApply={onApply}
         onBack={leave}
