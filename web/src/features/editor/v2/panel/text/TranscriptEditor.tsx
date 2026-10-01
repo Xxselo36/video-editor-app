@@ -42,7 +42,7 @@ import { cutTimeOfSource, fmtClock, removedRanges } from "../../model";
 import { CutsHeader } from "../CutsHeader";
 import { FindReplace } from "./FindReplace";
 import { SelectionBar } from "./SelectionBar";
-import { WordRow, type EditKeys } from "./WordSpan";
+import { composing, WordRow, type EditKeys } from "./WordSpan";
 import s from "../../editor.module.css";
 
 /** What the editor's global shortcuts (Enter, H, Esc outside the list) can do here. */
@@ -612,6 +612,11 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
             enterKeyHint="done"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
+              // Enter that confirms an IME conversion must not submit
+              if (composing(e) && e.key === "Enter") {
+                e.preventDefault();
+                return;
+              }
               if (e.key === "Escape") {
                 e.preventDefault();
                 editKeys.cancel();

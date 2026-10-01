@@ -19,6 +19,14 @@ import s from "../../editor.module.css";
 
 export const LOW_CONF = 0.6;
 
+/**
+ * A key press that belongs to an IME composition (Japanese, Korean,
+ * Chinese input): Enter confirms the conversion, Tab picks a candidate —
+ * never a commit, a move or a replace. Safari reports keyCode 229 just
+ * after compositionend.
+ */
+export const composing = (e: React.KeyboardEvent) => e.nativeEvent.isComposing || e.keyCode === 229;
+
 export type InlineEdit = {
   /** Word indices being edited (one input for the range). */
   first: number;
@@ -153,6 +161,7 @@ function WordInput({ text, keys }: { text: string; keys: EditKeys }) {
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
         e.stopPropagation();
+        if (composing(e)) return;
         if (e.key === "Enter") {
           e.preventDefault();
           const el = e.currentTarget;

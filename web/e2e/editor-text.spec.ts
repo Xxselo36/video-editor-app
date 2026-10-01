@@ -173,6 +173,36 @@ test.describe("editor v2: word-level Text tab", TAG, () => {
     await expect(word(page, "seconds")).not.toHaveAttribute("data-hidden", "true");
   });
 
+  test("IME: Enter / Tab that confirm a composition don't commit, move or replace", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    await openText(page, job.id);
+    const ime = (testId: string, key: string) =>
+      page.getByTestId(testId).evaluate((el, k) => {
+        for (const type of ["keydown", "keyup"])
+          el.dispatchEvent(new KeyboardEvent(type, { key: k, keyCode: 229, isComposing: true, bubbles: true, cancelable: true }));
+      }, key);
+    if (await isPhone(page)) {
+      await word(page, "ten").click();
+      await page.getByTestId("ed-word-edit").click();
+    } else await word(page, "ten").dblclick();
+    await page.getByTestId("ed-word-input").fill("じゅう");
+    await ime("ed-word-input", "Enter");
+    await ime("ed-word-input", "Tab");
+    await expect(page.getByTestId("ed-word-input")).toHaveValue("じゅう");
+    await page.getByTestId("ed-word-input").fill("十");
+    await page.getByTestId("ed-word-input").press("Enter");
+    if (await isPhone(page)) await expect(page.getByTestId("ed-word-input")).toHaveCount(0);
+    await expect(word(page, "十")).toHaveCount(1);
+    // the replace field: composing Enter doesn't replace
+    await page.getByTestId("ed-search").click();
+    await page.getByTestId("ed-find-input").fill("seconds");
+    await page.getByTestId("ed-replace-input").fill("びょう");
+    await ime("ed-replace-input", "Enter");
+    await ime("ed-find-input", "Enter");
+    await expect(page.getByTestId("ed-find-count")).toHaveText("1/1");
+    await expect.poll(() => savedText(stub, job.id), { timeout: 10_000 }).toContain("waits 十 seconds");
+  });
+
   test("a job from before the edit document: the sentence transcript", async ({ page, stub }) => {
     const job = await stub.seed("review_speech", { doc: false });
     await openWithStorage(page, `/app/edit/${job.id}`, TOUR_DONE);

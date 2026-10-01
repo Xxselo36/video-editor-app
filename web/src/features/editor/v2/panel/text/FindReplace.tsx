@@ -8,6 +8,7 @@
  */
 import { ChevronDown, ChevronUp, Replace, Search, X } from "lucide-react";
 import { useT } from "@/i18n";
+import { composing } from "./WordSpan";
 import s from "../../editor.module.css";
 
 export type FindReplaceProps = {
@@ -29,6 +30,7 @@ export function FindReplace(p: FindReplaceProps) {
   const t = useT();
   const q = p.query.trim();
   const keys = (e: React.KeyboardEvent, enter: () => void) => {
+    if (composing(e)) return;
     if (e.key === "Enter") {
       e.preventDefault();
       enter();
