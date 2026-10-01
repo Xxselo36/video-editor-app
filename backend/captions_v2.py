@@ -221,14 +221,22 @@ def editor_engine(job: Any) -> str:
     """What the editor previews captions for (GET /jobs/{id}/doc, UT5):
     "v2" / "v1" for a job whose engine is pinned or whose server mode
     decides it, "optin" when the browser's opt-in decides (?captions=v2).
-    A job without a doc or exported before UT4 stays v1. The style and
-    script checks of decide() are the Style panel's (only live presets
-    the transcript's script supports are offered)."""
+    A job without a doc or exported before UT4 stays v1, and so does one
+    whose style an export would draw now (style_for) isn't live or can't
+    caption the transcript's script — decide()'s checks, so the editor
+    never previews v2 captions for an export drawn by v1 (review 12)."""
     if job.caption_engine in ENGINES:
         return job.caption_engine
     if not isinstance(job.doc, dict) or exported_before(job):
         return "v1"
-    return engine_default()
+    mode = engine_default()
+    if mode == "v1":
+        return "v1"
+    pid = style_for(job)["presetId"]
+    lang = job.doc.get("language") or job.language
+    if pid not in edit_doc.live_presets() or edit_doc.support_level(pid, lang) == "unavailable":
+        return "v1"
+    return mode
 
 
 def choose_engine(job: Any, style: dict[str, Any] | None = None) -> str:

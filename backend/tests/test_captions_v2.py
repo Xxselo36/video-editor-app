@@ -175,6 +175,23 @@ def test_editor_engine(monkeypatch):
     assert C.editor_engine(_job(caption_engine="v2")) == "v2"
 
 
+@pytest.mark.parametrize("mode", ["v2", None])
+def test_editor_engine_says_v1_where_decide_would(monkeypatch, mode):
+    """Review 12: the editor previews what the export draws — a style that
+    isn't live, or can't caption the script, exports with v1."""
+    if mode:
+        monkeypatch.setenv("CLEO_CAPTION_ENGINE", mode)
+    ru = _job(language="ru", doc=_doc(lang="ru"))            # clipper can't do Cyrillic
+    assert C.editor_engine(ru) == "v1"
+    assert C.decide(ru)[0] == "v1"
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "power,karaoke")
+    narrowed = _job()                                        # clipper not live
+    assert C.editor_engine(narrowed) == "v1"
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "clipper,power")
+    ok = _job()
+    assert C.editor_engine(ok) == (mode or "optin")
+
+
 def test_a_broken_setup_renders_v1(monkeypatch):
     monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
     job = _job()
