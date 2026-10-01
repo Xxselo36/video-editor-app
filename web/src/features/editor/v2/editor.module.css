@@ -1987,8 +1987,8 @@
 }
 /* phone: a 44 px trim target that reaches only 8 px outside the clip (the
    gap to the neighbour, which stays tappable: review 5) and up to 36 px
-   in (--hin, set per clip: a narrow clip keeps a body to tap and hold);
-   the white bar stays on the edge */
+   in (--hin, set per clip: never past the clip); a tap that doesn't trim
+   reaches what is below; the white bar stays on the edge */
 .phone .handle {
   width: calc(var(--hin, 36px) + 8px);
   top: -2px;

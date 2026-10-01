@@ -174,6 +174,8 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     /** Moved past TRIM_SLOP_PX (or magnified): a trim, not a tap. */
     started: boolean;
     slop: number;
+    /** Removes the trim's window listener. */
+    off: () => void;
   } | null>(null);
   const [trimming, setTrimming] = useState<{ id: string; mode: "start" | "end" } | null>(null);
   const [boost, setBoost] = useState<number | undefined>(undefined);
@@ -260,8 +262,17 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     e.stopPropagation();
     e.preventDefault();
     const el = stripRef.current;
-    if (!el) return;
+    // a second finger (a pinch) never trims (review 7)
+    if (!el || !e.isPrimary || dragRef.current) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    // another finger going down during the trim (a pinch starting) ends
+    // it with nothing committed
+    const pid = e.pointerId;
+    const onOther = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) endTrim({ type: "pointercancel", clientX: ev.clientX, clientY: ev.clientY, timeStamp: ev.timeStamp });
+    };
+    window.addEventListener("pointerdown", onOther, true);
+    const off = () => window.removeEventListener("pointerdown", onOther, true);
     const startSegs = p.segments.map((x) => ({ ...x }));
     const rect = el.getBoundingClientRect();
     const edgeX = rect.left + (edgeAt(startSegs, id, mode) * rect.width) / totalDur;
@@ -281,6 +292,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
       y0: e.clientY,
       started: false,
       slop: e.pointerType === "mouse" ? TRIM_SLOP_PX.mouse : TRIM_SLOP_PX.touch,
+      off,
     };
     dragRef.current = d;
     armMagnify(d);
@@ -309,10 +321,11 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
       armMagnify(d);
     }
   };
-  const endTrim = (e: React.PointerEvent) => {
+  const endTrim = (e: { type: string; clientX: number; clientY: number; timeStamp: number }) => {
     const d = dragRef.current;
     if (!d) return;
     dragRef.current = null;
+    d.off();
     if (d.timer) clearTimeout(d.timer);
     setDragSegs(null);
     setDragTotal(null);
@@ -341,6 +354,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
       cancelAnimationFrame(zoomAnim.current);
       cancelAnimationFrame(scrollRaf.current);
       if (dragRef.current?.timer) clearTimeout(dragRef.current.timer);
+      dragRef.current?.off();
       if (holdRef.current) clearTimeout(holdRef.current.timer);
       pressOff.current?.();
     },
@@ -981,9 +995,10 @@ function ClipView({
       data-testid={`clip-${index}`}
       data-seg={seg.id}
       title={title}
-      // --hin: how far a phone trim handle reaches into the clip — at most
-      // 36 px, always leaving a 12 px body to tap / long-press (review 5)
-      style={{ left, width, ["--hin" as string]: `${Math.max(4, Math.min(36, (width - 12) / 2))}px` }}
+      // --hin: how far a phone trim handle reaches into the clip: 36 px (the
+      // 44 px target with the 8 px outside), never past the clip itself; a
+      // tap on it that doesn't trim reaches the clip below (review 5)
+      style={{ left, width, ["--hin" as string]: `${Math.max(4, Math.min(36, width))}px` }}
       onPointerDown={(e) => onPress(e, seg)}
       onContextMenu={(e) => e.preventDefault()}
       onClick={(e) => {
