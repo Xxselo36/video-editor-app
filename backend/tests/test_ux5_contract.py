@@ -125,6 +125,7 @@ JOB_KEYS = sorted([
     "preview_segments", "preview_version", "caption_preset", "filename",
     "preset_id", "preset_label", "created_at", "updated_at",
     "queue_position", "has_doc", "font_subsets", "peaks",
+    "caption_engine",   # UT4: v1 / v2 / None, no content
 ])
 
 

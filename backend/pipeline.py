@@ -3149,7 +3149,9 @@ def render_to_keys(
     # the outputs pass through this machine.
     if captions:
         from backend import captions_v2
-        why = ("the volume render path has no caption layer" if use_modal
+        fn = os.environ.get("CLEO_MODAL_RENDER_FN", "").strip() or "unset"
+        why = (f"the volume render path has no caption layer (media store "
+               f"{where}, CLEO_MODAL_RENDER_FN={fn})" if use_modal
                else None if captions_v2.layer_available()
                else "no caption layer on this machine")
         if why:
@@ -3270,8 +3272,13 @@ def _try_modal_render_r2(
             if not isinstance(result, dict) or not (
                     result.get("outputs") or {}).get("primary"):
                 raise RuntimeError(f"render_r2 returned no primary: {result!r}"[:300])
+            timings = result.get("timings") or {}
+            # Which captions Modal drew: v2 times its caption plan and the
+            # single encode, v1 its burn and concat (UT4).
+            drawn = "v2" if "captions_plan" in timings else "v1"
             print(f"[modal] render_r2 complete for job {job_id} r{gen} "
-                  f"(attempt {attempt}/{attempts}) {result.get('timings')}",
+                  f"(attempt {attempt}/{attempts}) captions={drawn} "
+                  f"(asked {'v2' if captions else 'v1'}) {timings}",
                   flush=True)
             return result
         except InterruptedError:
