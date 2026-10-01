@@ -101,7 +101,9 @@ const PresetTile = memo(function PresetTile({ info, selected, videoRef, sample, 
     if (!canvas || !info.available) return;
     let alive = true;
     let drawnWithFrame = false;
+    let started = false;
     const draw = async () => {
+      started = true;
       const v = videoRef.current;
       const vw = v?.videoWidth || 9;
       const vh = v?.videoHeight || 16;
@@ -172,7 +174,7 @@ const PresetTile = memo(function PresetTile({ info, selected, videoRef, sample, 
     // the video's frame arrives later: draw once more with it
     const v = videoRef.current;
     const again = () => {
-      if (!drawnWithFrame && state !== "idle") void draw();
+      if (started && !drawnWithFrame) void draw();
     };
     v?.addEventListener("loadeddata", again);
     v?.addEventListener("seeked", again);
@@ -182,8 +184,6 @@ const PresetTile = memo(function PresetTile({ info, selected, videoRef, sample, 
       v?.removeEventListener("loadeddata", again);
       v?.removeEventListener("seeked", again);
     };
-    // state is read for the re-draw only
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [info.id, info.available, sample, lang, videoRef]);
   return (
     <li>
