@@ -179,7 +179,16 @@ export function whenMediaReady(timeoutMs = 10_000): Promise<boolean> {
 // proxy-video: the full normalized source at ≤720p (seconds = source
 // seconds), which the editor plays and cuts client-side (lib/editPlayback).
 // peaks: the audio envelope the v2 editor snaps text cuts to (UX10).
-export type MediaRoute = "preview-video" | "proxy-video" | "watch" | "download" | "thumbnail" | "poster" | "peaks";
+// filmstrip: the v2 timeline's thumbnail sprite (UX7b).
+export type MediaRoute =
+  | "preview-video"
+  | "proxy-video"
+  | "watch"
+  | "download"
+  | "thumbnail"
+  | "poster"
+  | "peaks"
+  | "filmstrip";
 
 export function mediaUrl(
   jobId: string,
