@@ -5504,7 +5504,7 @@ def post_render(job_id: str, payload: dict,
     disabled_cuts = payload.get("disabled_cuts") or []
     if not isinstance(disabled_cuts, list):
         raise HTTPException(400, "payload.disabled_cuts must be a list")
-    # UT4 opt-in (CLEO_CAPTION_ENGINE=optin): this request's
+    # UT4 opt-in (CLEO_CAPTION_ENGINE unset or optin): this request's
     # "caption_engine": "v2" asks for the v2 captions at the job's first
     # render. Kept on the job before the render starts; ignored in the
     # other modes and once the job's engine is pinned.

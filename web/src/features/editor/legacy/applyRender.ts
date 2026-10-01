@@ -33,7 +33,8 @@ export async function applyRender(
       subtitles,
       disabled_cuts: [],
       // This browser opted in to the v2 export captions (?captions=v2,
-      // captions-ui/flag.ts); the backend honours it in optin mode only.
+      // captions-ui/flag.ts); the backend honours it unless
+      // CLEO_CAPTION_ENGINE is v1/off (v2: everyone gets v2 anyway).
       ...(opts.captionsV2 ? { caption_engine: "v2" } : {}),
     }),
   });

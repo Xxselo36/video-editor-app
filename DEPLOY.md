@@ -1301,7 +1301,7 @@ Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
 
 | Variable (Railway) | Default | Eingeschaltet | Zurück |
 |---|---|---|---|
-| `CLEO_CAPTION_ENGINE` | `v1`: alter Burn wie bisher | `optin`: nur Projekte, deren erster Export aus einem Browser mit `?captions=v2` kommt (unten); `v2`: der **erste** Export eines Projekts mit Edit-Dokument (UT3) läuft mit v2, wenn sein Stil in `CLEO_CAPTION_PRESETS_LIVE` steht und die Sprache kann | Variable löschen: neue Projekte wieder v1 |
+| `CLEO_CAPTION_ENGINE` | nicht gesetzt = Opt-in: alle bekommen v1, nur ein Browser, der einmal mit `?captions=v2` geöffnet wurde, bekommt v2 (unten) | `v2`: der **erste** Export jedes Projekts mit Edit-Dokument (UT3) läuft mit v2, wenn sein Stil in `CLEO_CAPTION_PRESETS_LIVE` steht und die Sprache kann | `v1` oder `off`: niemand bekommt v2, auch nicht per `?captions=v2` |
 | `CLEO_LOUDNORM` | aus: Lautstärke wie aufgenommen | `1`: v2-Exporte auf −14 LUFS (Messung aus der Analyse) | Variable löschen |
 
 - **Ein Projekt behält seine Technik:** Beim ersten Export wird `v1`
@@ -1314,18 +1314,19 @@ Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
   alten Volume-Weg (`render_burn_concat`) und beim lokalen Notfall-Render
   ohne Node wird auch ein v2-Projekt mit v1 exportiert (Log-Zeile
   `[captions] … rendering v1 captions`).
-- **Nur für dich testen (`CLEO_CAPTION_ENGINE=optin`):** alle Kunden
-  bleiben bei v1. Öffne einmal
-  `cleocuts.com/app?editor=v2&captions=v2` (oder nur `?captions=v2`) —
-  dein Browser merkt sich das, im Export-Bereich des Editors steht dann
-  klein „Neue Untertitel (Test)“. Jeder **erste** Export eines Projekts
-  aus diesem Browser fragt v2 an (sonst gelten dieselben Regeln: Edit-
-  Dokument, Stil live, Sprache passt; danach bleibt das Projekt dabei).
-  `?captions=v1` schaltet deinen Browser zurück. In den Modi `v1`/`v2`
-  wird die Anfrage ignoriert.
-- **Reihenfolge:** erst deployen, dann `CLEO_CAPTION_ENGINE=optin`,
-  selbst ein neues Projekt exportieren und ansehen (Log:
-  `[captions] v2 primary: … frames`), dann `v2` für alle.
+- **Nur für dich testen (ohne Railway, wie der Editor-Schalter #44):**
+  solange `CLEO_CAPTION_ENGINE` nicht gesetzt ist, bleiben alle Kunden
+  bei v1. Öffne einmal `cleocuts.com/app?editor=v2&captions=v2` (oder
+  nur `?captions=v2`) — dein Browser merkt sich das, im Export-Bereich
+  des Editors steht dann klein „Neue Untertitel (Test)“. Jeder **erste**
+  Export eines Projekts aus diesem Browser fragt v2 an (sonst gelten
+  dieselben Regeln: Edit-Dokument, Stil live, Sprache passt; danach
+  bleibt das Projekt dabei). `?captions=v1` schaltet deinen Browser
+  zurück. Mit `v1`/`off` wird die Anfrage ignoriert, mit `v2` ist sie
+  unnötig.
+- **Reihenfolge:** selbst ein neues Projekt mit `?captions=v2`
+  exportieren und ansehen (Log: `[captions] v2 primary: … frames`),
+  dann `CLEO_CAPTION_ENGINE=v2` für alle. Notbremse: `off`.
 - **Mehr Stile:** `CLEO_CAPTION_PRESETS_LIVE` (Default `clipper,power`)
   erst erweitern, wenn du den Stil im Abnahmeblatt abgehakt hast.
 - **Emoji:** Emoji und Symbole, die keine Untertitel-Schrift hat, lässt

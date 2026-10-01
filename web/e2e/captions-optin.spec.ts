@@ -1,6 +1,6 @@
 /**
  * The owner's opt-in to the v2 export captions (UT4,
- * CLEO_CAPTION_ENGINE=optin): `/app?captions=v2` once switches this
+ * CLEO_CAPTION_ENGINE unset): `/app?captions=v2` once switches this
  * browser on — the editor shows a small "New captions (test)" note by the
  * export, and the export asks for the v2 captions in its request body.
  * `?captions=v1` switches it off again.
