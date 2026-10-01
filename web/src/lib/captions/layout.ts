@@ -44,7 +44,51 @@ type Unit = {
   start: number;
   end: number;
   breakBefore?: boolean;
+  /** Position in the start-sorted units (the PagesMemo's chunk key). */
+  pos?: number;
+  /** SENTENCE_END.test(source), once per unit. */
+  sentEnd?: boolean;
 };
+
+type ChunkPages = { words: PageWord[]; oversized: boolean }[];
+
+/**
+ * What buildPages keeps between calls that differ only in `breaks` (the
+ * editor's preview: a trim, split, cut or reorder moves a cut, the words
+ * stay): the units of the same words array and the pages of every chunk
+ * that is still the same run of units. The output is exactly that of a
+ * call without it (layout.test.ts); it is only used while the words
+ * array, the style object, the size and the language are the same ones.
+ * One memo per caller (CaptionRenderer).
+ */
+export type PagesMemo = {
+  words?: readonly CaptionWord[];
+  style?: CaptionStyle;
+  W?: number;
+  H?: number;
+  lang?: string;
+  units?: Unit[];
+  chunks: Map<string, ChunkPages>;
+  /** The Page made for each chunk page last time (reused when unchanged). */
+  pages?: Map<object, Page>;
+};
+
+export const pagesMemo = (): PagesMemo => ({ chunks: new Map() });
+
+/** Sorted finite breaks and the first one above x (binary search). */
+function breakIndex(breaks: readonly number[]): (x: number) => number | undefined {
+  const sorted = breaks.filter((b) => !Number.isNaN(b)).sort((a, b) => a - b);
+  return (x) => {
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid] > x) hi = mid;
+      else lo = mid + 1;
+    }
+    return sorted[lo];
+  };
+}
 
 export function caseText(text: string, mode: CaptionStyle["font"]["case"], lang?: string): string {
   if (mode !== "upper") return text;
@@ -63,12 +107,16 @@ function clean(text: string): string {
 function chunk(units: Unit[], maxGapSec: number, breaks: readonly number[]): Unit[][] {
   const chunks: Unit[][] = [];
   let cur: Unit[] = [];
+  // the first break after prev.start (one search per unit, not a scan of every break)
+  const above = breakIndex(breaks);
   for (const u of units) {
     const prev = cur[cur.length - 1];
     if (prev) {
       const gap = u.start - prev.end;
-      const cut = breaks.some((b) => b > prev.start + 1e-3 && b <= u.start + 1e-3);
-      if (u.breakBefore || cut || gap > maxGapSec + 1e-9 || SENTENCE_END.test(prev.source)) {
+      const next = above(prev.start + 1e-3);
+      const cut = next !== undefined && next <= u.start + 1e-3;
+      const sentEnd = prev.sentEnd ?? (prev.sentEnd = SENTENCE_END.test(prev.source));
+      if (u.breakBefore || cut || gap > maxGapSec + 1e-9 || sentEnd) {
         chunks.push(cur);
         cur = [];
       }
@@ -269,22 +317,43 @@ function fits(words: readonly PageWord[], style: CaptionStyle, maxEm: number): b
 }
 
 /** Rules 1–5: words (output time) → pages. */
-export function buildPages(words: readonly CaptionWord[], style: CaptionStyle, opts: LayoutOptions): Page[] {
+export function buildPages(
+  words: readonly CaptionWord[],
+  style: CaptionStyle,
+  opts: LayoutOptions,
+  memo?: PagesMemo,
+): Page[] {
   const { W, H, lang, breaks = [] } = opts;
   const geo = geometry(style, W, H, lang);
   const L = style.layout;
-  const units: Unit[] = [];
-  words.forEach((w, index) => {
-    const source = clean(stripUndrawable(w.text, style.font.id, lang).text);
-    if (!source) return;
-    units.push({ index, ...(w.id ? { id: w.id } : {}), source, start: w.start, end: w.end, breakBefore: w.breakBefore });
-  });
-  units.sort((a, b) => a.start - b.start || a.index - b.index);
+  const same = !!memo?.units && memo.words === words && memo.style === style && memo.W === W && memo.H === H && memo.lang === lang;
+  let units: Unit[];
+  if (same) units = memo!.units!;
+  else {
+    units = [];
+    words.forEach((w, index) => {
+      const source = clean(stripUndrawable(w.text, style.font.id, lang).text);
+      if (!source) return;
+      units.push({ index, ...(w.id ? { id: w.id } : {}), source, start: w.start, end: w.end, breakBefore: w.breakBefore });
+    });
+    units.sort((a, b) => a.start - b.start || a.index - b.index);
+    units.forEach((u, pos) => (u.pos = pos));
+    if (memo) Object.assign(memo, { words, style, W, H, lang, units, chunks: new Map(), pages: undefined });
+  }
+  const used = memo ? new Map<string, ChunkPages>() : null;
   const segment = segmentsWithoutSpaces(lang);
   const capacity = L.maxWords ?? L.wordsPerLine * L.maxLines;
   const halfFull = Math.max(2, Math.ceil(capacity / 2));
   const pages: { words: PageWord[]; oversized: boolean }[] = [];
   for (const raw of chunk(units, L.maxGapSec, breaks)) {
+    // the same run of units as last time: its pages as they were
+    const key = memo ? `${raw[0].pos}:${raw.length}` : "";
+    const known = memo?.chunks.get(key);
+    if (known) {
+      used!.set(key, known);
+      pages.push(...known);
+      continue;
+    }
     const ws = toPageWords(segment ? segmentChunk(raw, lang ?? "ja") : gluePunctuation(raw), style, geo, lang);
     const out: { words: PageWord[]; oversized: boolean }[] = [];
     let pg: PageWord[] = [];
@@ -318,21 +387,37 @@ export function buildPages(words: readonly CaptionWord[], style: CaptionStyle, o
         }
       }
     }
+    used?.set(key, out);
     pages.push(...out);
   }
+  if (memo && used) memo.chunks = used;
   const hold = style.timing.holdSec;
-  const sortedBreaks = [...breaks].sort((a, b) => a - b);
-  return pages.map((p, i): Page => {
+  const above = breakIndex(breaks);
+  // with a memo, an unchanged page is the same object as last time
+  const before = memo?.pages;
+  const after = memo ? new Map<object, Page>() : null;
+  const out = pages.map((p, i): Page => {
     const start = p.words[0].start;
-    const lastEnd = Math.max(...p.words.map((w) => w.end));
+    let lastEnd = -Infinity;
+    for (const w of p.words) lastEnd = Math.max(lastEnd, w.end);
     const next = pages[i + 1];
-    const cut = sortedBreaks.find((b) => b > start + 1e-3);
-    const end = Math.min(lastEnd + hold, next ? next.words[0].start : Infinity, cut ?? Infinity);
-    const page: Page = { index: i, words: p.words, start, end: Math.max(end, start + 1e-3), oversized: p.oversized };
-    const adjust = pageAdjust(p.words, style);
-    if (adjust) page.adjust = adjust;
+    const cut = above(start + 1e-3);
+    const end = Math.max(Math.min(lastEnd + hold, next ? next.words[0].start : Infinity, cut ?? Infinity), start + 1e-3);
+    // the memo only lives while the style object is the same, so a kept
+    // page's adjust (UT5, from style.captions) is still right
+    const old = before?.get(p);
+    let page: Page;
+    if (old && old.index === i && old.end === end) page = old;
+    else {
+      page = { index: i, words: p.words, start, end, oversized: p.oversized };
+      const adjust = pageAdjust(p.words, style);
+      if (adjust) page.adjust = adjust;
+    }
+    after?.set(p, page);
     return page;
   });
+  if (memo && after) memo.pages = after;
+  return out;
 }
 
 /**
