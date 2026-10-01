@@ -21,8 +21,13 @@ afterEach(() => {
 });
 
 describe("editor v2 flag", () => {
-  it("off: v1, and ?editor=v2 does nothing", async () => {
-    expect(await choice(undefined, "?editor=v2")).toEqual({ on: false, stored: null });
+  it('"off": v1, and ?editor=v2 does nothing', async () => {
+    expect(await choice("off", "?editor=v2")).toEqual({ on: false, stored: null });
+  });
+
+  it("unset: like optin, v1 unless this browser opted in", async () => {
+    expect((await choice(undefined, "")).on).toBe(false);
+    expect(await choice(undefined, "?editor=v2")).toEqual({ on: true, stored: "v2" });
   });
 
   it('"1": v2 unless this browser chose v1', async () => {
