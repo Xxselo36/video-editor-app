@@ -75,6 +75,7 @@ export const nlEditor: Partial<Record<EditorKey, string>> = {
   "editor.export": "Exporteren",
   "editor.exporting": "Voorbereiden…",
   "editor.exportOffline": "Je bent offline – exporteren kan zodra je weer online bent.",
+  "editor.exportUnsaved": "Je laatste wijzigingen zijn nog niet opgeslagen – controleer je verbinding en exporteer opnieuw.",
   "editor.preview": "Voorbeeld",
   "editor.play": "Afspelen",
   "editor.pause": "Pauzeren",

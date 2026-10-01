@@ -75,6 +75,7 @@ export const jaEditor: Partial<Record<EditorKey, string>> = {
   "editor.export": "書き出し",
   "editor.exporting": "準備中…",
   "editor.exportOffline": "オフラインです。オンラインに戻ると書き出しできます。",
+  "editor.exportUnsaved": "最後の変更がまだ保存されていません。接続を確認して、もう一度書き出してください。",
   "editor.preview": "プレビュー",
   "editor.play": "再生",
   "editor.pause": "一時停止",

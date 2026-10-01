@@ -75,6 +75,7 @@ export const idEditor: Partial<Record<EditorKey, string>> = {
   "editor.export": "Ekspor",
   "editor.exporting": "Menyiapkan…",
   "editor.exportOffline": "Kamu sedang offline – ekspor bisa dilakukan setelah online lagi.",
+  "editor.exportUnsaved": "Perubahan terakhirmu belum tersimpan – periksa koneksimu dan ekspor lagi.",
   "editor.preview": "Pratinjau",
   "editor.play": "Putar",
   "editor.pause": "Jeda",

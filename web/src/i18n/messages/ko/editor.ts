@@ -75,6 +75,7 @@ export const koEditor: Partial<Record<EditorKey, string>> = {
   "editor.export": "내보내기",
   "editor.exporting": "준비 중…",
   "editor.exportOffline": "오프라인 상태입니다. 다시 연결되면 내보낼 수 있어요.",
+  "editor.exportUnsaved": "마지막 변경 사항이 아직 저장되지 않았어요. 연결을 확인하고 다시 내보내세요.",
   "editor.preview": "미리보기",
   "editor.play": "재생",
   "editor.pause": "일시정지",

@@ -75,6 +75,7 @@ export const hiEditor: Partial<Record<EditorKey, string>> = {
   "editor.export": "एक्सपोर्ट",
   "editor.exporting": "तैयार हो रहा है…",
   "editor.exportOffline": "आप ऑफ़लाइन हैं – ऑनलाइन आते ही एक्सपोर्ट कर सकते हैं।",
+  "editor.exportUnsaved": "आपके आखिरी बदलाव अभी सेव नहीं हुए हैं – अपना कनेक्शन जाँचें और फिर से एक्सपोर्ट करें।",
   "editor.preview": "प्रीव्यू",
   "editor.play": "चलाएँ",
   "editor.pause": "रोकें",

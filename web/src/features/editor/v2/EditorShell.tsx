@@ -313,9 +313,16 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   };
   const exportNow = () => {
     if (!online || session.applying) return;
-    // the render reads the doc's style (UT4/UT5): what is pending goes first
-    if (doc.status === "ready") void doc.flush().finally(() => void session.apply());
-    else void session.apply();
+    // the render reads the doc's style (UT4/UT5): what is pending goes
+    // first, and an export never starts without it (review 14)
+    if (doc.status !== "ready") {
+      void session.apply();
+      return;
+    }
+    void doc.flush().then(
+      (saved) => (saved ? void session.apply() : showToast(t("editor.exportUnsaved"))),
+      () => showToast(t("editor.exportUnsaved")),
+    );
   };
   const openFind = () => {
     if (phone) setSheet("text");

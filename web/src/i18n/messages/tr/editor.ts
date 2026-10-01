@@ -75,6 +75,7 @@ export const trEditor: Partial<Record<EditorKey, string>> = {
   "editor.export": "Dışa aktar",
   "editor.exporting": "Hazırlanıyor…",
   "editor.exportOffline": "Çevrimdışısın – tekrar bağlanınca dışa aktarabilirsin.",
+  "editor.exportUnsaved": "Son değişikliklerin henüz kaydedilmedi – bağlantını kontrol et ve tekrar dışa aktar.",
   "editor.preview": "Önizleme",
   "editor.play": "Oynat",
   "editor.pause": "Duraklat",

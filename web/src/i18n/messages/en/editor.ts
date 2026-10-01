@@ -78,6 +78,7 @@ export const enEditor = {
   "editor.export": "Export",
   "editor.exporting": "Preparing…",
   "editor.exportOffline": "You're offline – you can export once you're back online.",
+  "editor.exportUnsaved": "Your latest changes aren't saved yet – check your connection and export again.",
 
   // ── Preview and player ──────────────────────────────────────────────
   "editor.preview": "Preview",

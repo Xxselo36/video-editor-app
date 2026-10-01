@@ -251,6 +251,20 @@ export class DocSaver {
   }
 
   /**
+   * Send what's pending and say whether the server has all of it now
+   * (an export reads the doc: UT5 review 14). A transient failure gets
+   * `tries - 1` more immediate tries; a conflict or a refusal is false.
+   */
+  async settle(tries = 2): Promise<boolean> {
+    for (let i = 0; i < tries; i++) {
+      await this.flush();
+      if (this.state === "saved" && !this.dirty) return true;
+      if (this.state === "conflict" || this.stopped) return false;
+    }
+    return this.state === "saved" && !this.dirty;
+  }
+
+  /**
    * The page is going away: the pending change in ONE keepalive request
    * (on top of a request still in flight). True when something was sent.
    */

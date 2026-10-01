@@ -75,6 +75,7 @@ export const ruEditor: Partial<Record<EditorKey, string>> = {
   "editor.export": "Экспорт",
   "editor.exporting": "Подготовка…",
   "editor.exportOffline": "Нет сети – экспортировать можно, когда подключение вернётся.",
+  "editor.exportUnsaved": "Последние изменения ещё не сохранены – проверьте подключение и экспортируйте снова.",
   "editor.preview": "Превью",
   "editor.play": "Воспроизвести",
   "editor.pause": "Пауза",

@@ -46,7 +46,7 @@ export type DocSession =
       /** Load the server's doc (after a conflict); local changes are dropped. */
       reload: () => Promise<void>;
       /** Send what's pending now (before an export: the render reads the doc's style). */
-      flush: () => Promise<void>;
+      flush: () => Promise<boolean>;
       /** UT5: what the caption layer and the Style panel need (GET /jobs/{id}/doc). */
       captions: DocCaptions;
     };
@@ -214,8 +214,10 @@ export function useDocSession(
     captionRef.current?.(src.phrases, src.units, false);
   }, [jobId, loaded]);
 
+  /** True when the server has every change (DocSaver.settle). */
   const flush = useCallback(async () => {
-    if (loaded && loaded !== "none") await loaded.saver.flush();
+    if (!loaded || loaded === "none") return true;
+    return loaded.saver.settle();
   }, [loaded]);
 
   if (loaded === null) return { status: "loading" };

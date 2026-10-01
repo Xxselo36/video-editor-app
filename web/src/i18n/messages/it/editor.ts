@@ -75,6 +75,7 @@ export const itEditor: Partial<Record<EditorKey, string>> = {
   "editor.export": "Esporta",
   "editor.exporting": "Preparazione…",
   "editor.exportOffline": "Sei offline: potrai esportare appena torni online.",
+  "editor.exportUnsaved": "Le ultime modifiche non sono ancora salvate: controlla la connessione ed esporta di nuovo.",
   "editor.preview": "Anteprima",
   "editor.play": "Riproduci",
   "editor.pause": "Pausa",
