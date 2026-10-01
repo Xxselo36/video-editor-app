@@ -179,7 +179,14 @@ export function segmentChunk(units: Unit[], lang: string): Unit[] {
 
 /** Everything paging and layout need about the style at this frame size. */
 export type Geometry = {
+  /** Font size in px as drawn: on the PX_STEP grid. */
   px: number;
+  /**
+   * The exact font size (style size × short side). Paging and line breaks
+   * use it (through maxEm), never the snapped px: they must not depend on
+   * the canvas size, so the editor's preview pages like the export.
+   */
+  pxExact: number;
   maxEm: number;
   spaceEm: number;
   langScript: Script;
@@ -202,12 +209,13 @@ export function snapPx(px: number, down = false): number {
 
 export function geometry(style: CaptionStyle, W: number, H: number, lang?: string): Geometry {
   const font = requireFont(style.font.id);
-  const px = snapPx(style.font.size * Math.min(W, H));
-  const maxEm = (style.layout.maxWidth * W) / px;
+  const pxExact = style.font.size * Math.min(W, H);
+  const px = snapPx(pxExact);
+  const maxEm = (style.layout.maxWidth * W) / pxExact;
   const space = (font.advance(0x20) ?? font.upm * 0.26) / font.upm;
   // a scaled active word needs room so it never touches its neighbours
   const grow = style.highlight.mode === "scale" ? ((style.highlight.scale ?? 1.12) - 1) * 2.2 : 0;
-  return { px, maxEm, spaceEm: space * style.layout.wordSpacing + grow, langScript: scriptOfLang(lang) };
+  return { px, pxExact, maxEm, spaceEm: space * style.layout.wordSpacing + grow, langScript: scriptOfLang(lang) };
 }
 
 function toPageWords(units: Unit[], style: CaptionStyle, geo: Geometry, lang?: string): PageWord[] {
@@ -370,12 +378,15 @@ export function layoutPage(page: Page, style: CaptionStyle, opts: { W: number; H
   const L = style.layout;
   const font = requireFont(style.font.id);
   const geo = geometry(style, W, H, opts.lang);
-  let px = geo.px;
+  // Decisions in em (size-independent); only the drawn px is snapped.
+  let exact = geo.pxExact;
+  let down = false;
   if (page.oversized) {
     const widest = Math.max(...page.words.map((w) => w.em));
-    px = snapPx(px * Math.min(1, geo.maxEm / widest), true);
+    exact *= Math.min(1, geo.maxEm / widest);
+    down = true;
   }
-  const counts = breakLines(page.words, L.wordsPerLine, (L.maxWidth * W) / px);
+  const counts = breakLines(page.words, L.wordsPerLine, page.oversized ? Infinity : geo.maxEm);
   // A caption's own size scales the page as broken at the style's size
   // (same lines), never wider than ADJUST_MAX_WIDTH of the frame.
   const adj = page.adjust;
@@ -387,13 +398,15 @@ export function layoutPage(page: Page, style: CaptionStyle, opts: { W: number; H
       for (const count of counts) {
         let em = 0;
         for (let j = 0; j < count; j++) em += page.words[k0 + j].em + (j ? page.words[k0 + j - 1].spaceAfterEm : 0);
-        widest = Math.max(widest, em * px);
+        widest = Math.max(widest, em * exact);
         k0 += count;
       }
       if (widest > 0) f = Math.min(f, Math.max(1, (ADJUST_MAX_WIDTH * W) / widest));
     }
-    px = snapPx(px * f, f > 1);
+    exact *= f;
+    down ||= f > 1;
   }
+  const px = snapPx(exact, down);
   const lineH = px * style.font.lineHeight;
   const capH = (font.capHeight / font.upm) * px;
   const blockH = lineH * counts.length;
