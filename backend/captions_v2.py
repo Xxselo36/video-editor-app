@@ -192,28 +192,34 @@ def exported_before(job: Any) -> bool:
                 or job.hook_clips or int(job.render_gen or 0) > 1)
 
 
-def choose_engine(job: Any, style: dict[str, Any] | None = None) -> str:
-    """The job's pinned engine, or the one its first render pins."""
+def decide(job: Any, style: dict[str, Any] | None = None) -> tuple[str, str]:
+    """(engine, reason): the job's pinned engine, or the one its first
+    render pins, and why — for the render log line."""
     if job.caption_engine in ENGINES:
-        return job.caption_engine
+        return job.caption_engine, "pinned"
     mode = engine_default()
     if mode == "optin":
         if (job.settings or {}).get(OPTIN_KEY) != "v2":
-            return "v1"
+            return "v1", "no_optin"
     elif mode != "v2":
-        return "v1"
+        return "v1", "mode_v1"
     if not isinstance(job.doc, dict):
-        return "v1"
+        return "v1", "no_doc"
     if exported_before(job):
-        return "v1"
+        return "v1", "exported_before"
     style = style or style_for(job)
     pid = style["presetId"]
     if pid not in edit_doc.live_presets():
-        return "v1"
+        return "v1", f"preset_not_live:{pid}"
     lang = job.doc.get("language") or job.language
     if edit_doc.support_level(pid, lang) == "unavailable":
-        return "v1"
-    return "v2"
+        return "v1", f"script_unsupported:{pid}/{edit_doc.norm_lang(lang)}"
+    return "v2", f"{mode}:{pid}"
+
+
+def choose_engine(job: Any, style: dict[str, Any] | None = None) -> str:
+    """The job's pinned engine, or the one its first render pins."""
+    return decide(job, style)[0]
 
 
 def _unit_span(u: dict) -> tuple[float, float] | None:
@@ -408,6 +414,12 @@ def _without_subset(job: Any, font_id: str) -> Any:
     return types.SimpleNamespace(**{**vars(job), "font_subsets": subsets})
 
 
+def _log_engine(job_id: str, job: Any, engine: str, reason: str) -> None:
+    """One line per render: which caption engine and why (no content)."""
+    print(f"[captions] job {job_id} r{int(job.render_gen or 0)}: engine={engine} "
+          f"reason={reason} mode={engine_default()}", flush=True)
+
+
 def prepare_render(store: Any, job_id: str, job: Any,
                    subtitles: list | None) -> dict[str, Any] | None:
     """Pin the job's caption engine at its first render and return the
@@ -418,15 +430,19 @@ def prepare_render(store: Any, job_id: str, job: Any,
     pinned = job.caption_engine if job.caption_engine in ENGINES else None
     spec = None
     style: dict[str, Any] = {}
+    reason = "?"
     try:
         style = style_for(job)
-        if choose_engine(job, style) == "v2":
+        engine, reason = decide(job, style)
+        if engine == "v2":
             spec = ensure_cjk_font(store, job_id, job, build_spec(job, subtitles, style))
     except Exception as e:
         if pinned == "v2":
+            _log_engine(job_id, job, "v2", f"pinned, setup failed: {type(e).__name__}")
             raise
         print(f"[captions] job {job_id}: v2 setup failed, rendering v1: "
               f"{type(e).__name__}: {e}", flush=True)
+        reason = f"setup_failed:{type(e).__name__}"
         spec = None
     if pinned is None:
         engine = "v2" if spec else "v1"
@@ -441,6 +457,8 @@ def prepare_render(store: Any, job_id: str, job: Any,
                 spec = None
             elif cur is not None and cur.caption_engine == "v2" and spec is None:
                 raise CaptionLayerError("pinned to v2 meanwhile, v2 setup failed")
+            reason = "pinned_meanwhile"
+    _log_engine(job_id, job, "v2" if spec else "v1", reason)
     if spec is None:
         return None
     snapshot = {"v": 2, "gen": int(job.render_gen or 0),

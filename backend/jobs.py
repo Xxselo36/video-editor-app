@@ -324,6 +324,9 @@ class Job:
             "queue_position": self.queue_position,
             # The edit document (UT3): fetched with GET /jobs/{id}/doc.
             "has_doc": self.doc is not None,
+            # UT4: the caption engine pinned at the first render ("v1" /
+            # "v2"; None before it). No content.
+            "caption_engine": self.caption_engine,
             "font_subsets": _public_fonts(self.font_subsets),
             "peaks": ({"rate": 100, "floor_db": -96} if self.peaks_key
                       else None),

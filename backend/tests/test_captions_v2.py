@@ -434,7 +434,10 @@ class _FakeModal:
             def get(self, timeout=None):
                 p = self.kw["out_prefix"]
                 return {"outputs": {"primary": {"key": p + "primary.mp4", "size": 7}},
-                        "thumb": None, "hooks": [], "timings": {}}
+                        "thumb": None, "hooks": [],
+                        # like render_to_dir: v2 times its plan + encode
+                        "timings": ({"captions_plan": 0.3, "encode": 12.0} if self.kw.get("captions")
+                                    else {"burn": 40.0, "concat": 9.0})}
 
             def cancel(self):
                 pass
@@ -505,6 +508,39 @@ def test_render_r2_gets_captions_only_for_v2(client, modal_r2, monkeypatch, engi
     got = store.get(job.id)
     assert got.caption_engine == engine
     assert got.output_keys["primary"].endswith("r1/primary.mp4")
+
+
+@pytest.mark.parametrize("field, engine, reason", [
+    ("v2", "v2", "reason=optin:clipper"),
+    (None, "v1", "reason=no_optin"),
+])
+def test_the_engine_is_observable(client, modal_r2, capsys, field, engine, reason):
+    """The live check couldn't tell which captions an export got: the job
+    says (GET /jobs/{id} caption_engine), the render logs engine and
+    reason, and the render_r2 line says what Modal drew."""
+    job = _job(media_store="r2")
+    assert client.get(f"/jobs/{job.id}").json()["caption_engine"] is None
+    body = {"subtitles": UNITS, **({"caption_engine": field} if field else {})}
+    client.post(f"/jobs/{job.id}/render", json=body)
+    assert _done(job.id)
+    assert client.get(f"/jobs/{job.id}").json()["caption_engine"] == engine
+    out = capsys.readouterr().out
+    assert f"[captions] job {job.id} r1: engine={engine} {reason} mode=optin" in out
+    assert f"captions={engine} (asked {engine})" in out
+    assert "Nobody" not in out   # no caption text in the log
+
+
+def test_decide_reasons(monkeypatch):
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    assert C.decide(_job()) == ("v2", "v2:clipper")
+    assert C.decide(_job(doc=None)) == ("v1", "no_doc")
+    assert C.decide(_job(render_gen=2)) == ("v1", "exported_before")
+    assert C.decide(_job(settings={"caption_preset": "clean"})) == ("v1", "preset_not_live:minimal")
+    assert C.decide(_job(language="ru", doc=_doc(lang="ru"))) == (
+        "v1", "script_unsupported:clipper/ru")
+    assert C.decide(_job(caption_engine="v1")) == ("v1", "pinned")
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "off")
+    assert C.decide(_job()) == ("v1", "mode_v1")
 
 
 @pytest.mark.parametrize("mode, field, want", [
