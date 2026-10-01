@@ -293,6 +293,27 @@ export class DocSaver {
     this.clear();
   }
 
+  /**
+   * The editor closes (in-app navigation): send what's pending, retry a
+   * transient failure up to `tries` more times (1 s apart), then stop for good — no
+   * orphaned background retries racing the next session on the job.
+   * Track the returned promise (pendingSaves), so re-entry waits for it.
+   */
+  async close(tries = 5): Promise<void> {
+    await this.flush();
+    for (let i = 0; i < tries && this.state === "retrying" && !this.stopped; i++) {
+      this.clear();
+      await new Promise<void>((resolve) => {
+        this.timer = this.d.setTimer(() => {
+          this.timer = null;
+          resolve();
+        }, 1000);
+      });
+      await this.flush();
+    }
+    this.stop();
+  }
+
   private clear() {
     if (this.timer !== null) this.d.clearTimer(this.timer);
     this.timer = null;

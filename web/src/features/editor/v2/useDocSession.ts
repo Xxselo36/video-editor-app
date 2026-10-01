@@ -115,10 +115,12 @@ export function useDocSession(
       });
     return () => {
       live = false;
-      // Leaving the editor (back, a link): the last edit goes now.
+      // Leaving the editor (back, a link): the last edit goes now, with
+      // a few retries, then this saver stops; re-entering the job waits
+      // for it (pendingSaves), so no stale saver races the next session.
       if (made) {
-        void made.saver.flush();
         made.store.onEdit = null;
+        trackSave(jobId, made.saver.close());
       }
     };
   }, [jobId]);

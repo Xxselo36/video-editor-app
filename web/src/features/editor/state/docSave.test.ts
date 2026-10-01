@@ -234,6 +234,33 @@ describe("DocSaver", () => {
     expect(saver.status).toBe("failed");
   });
 
+  it("close(): retries a transient failure, then stops — no orphaned retries afterwards", async () => {
+    const t = setup();
+    t.srv.fail = 500;
+    t.edit((d) => editWord(d, "w0002", "two"));
+    let closed = false;
+    const done = t.saver.close(2).then(() => (closed = true));
+    for (let i = 0; i < 10 && !closed; i++) await t.tm.tick();
+    await done;
+    expect(t.saver.status).toBe("retrying"); // never got through
+    const sent = t.srv.bodies.length;
+    expect(sent).toBeGreaterThanOrEqual(2);
+    expect(t.tm.pending).toEqual([]);
+    // later edits and timers do nothing
+    t.srv.fail = null;
+    t.edit((d) => editWord(d, "w0003", "three"));
+    await t.tm.tick();
+    expect(t.srv.bodies.length).toBe(sent);
+  });
+
+  it("close(): a successful flush stops at once", async () => {
+    const t = setup();
+    t.edit((d) => editWord(d, "w0002", "two"));
+    await t.saver.close();
+    expect(t.srv.rev).toBe(1);
+    expect(t.tm.pending).toEqual([]);
+  });
+
   it("network error: retrying with backoff, then saved", async () => {
     const t = setup();
     t.srv.fail = "net";
