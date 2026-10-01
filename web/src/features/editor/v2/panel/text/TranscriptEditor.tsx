@@ -18,7 +18,7 @@
  * are marked through the DOM from the playhead store, so playing never
  * re-renders the list; while playing, the list follows the playhead.
  */
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import { Lightbulb, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useT } from "@/i18n";
@@ -158,7 +158,23 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // The row with the inline edit stays mounted when it scrolls out of
+  // view: unmounting the focused input would drop the typed text (no
+  // blur fires while React commits).
+  const keepRow = editRange_ ? rowOf[editRange_[0]] : -1;
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const r = defaultRangeExtractor(range);
+      if (keepRow >= 0 && keepRow < range.count && !r.includes(keepRow)) {
+        r.push(keepRow);
+        r.sort((a, b) => a - b);
+      }
+      return r;
+    },
+    [keepRow],
+  );
   const v = useVirtualizer({
+    rangeExtractor,
     count: rows.length,
     scrollMargin: notesH,
     getScrollElement: () => scrollRef.current,

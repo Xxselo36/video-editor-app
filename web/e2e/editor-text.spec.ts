@@ -267,6 +267,26 @@ test.describe("editor v2: word-level Text tab", TAG, () => {
     for (const r of patches) expect(r.postDataBuffer()?.length ?? 0).toBeLessThan(64 * 1024);
   });
 
+  test("an inline edit survives scrolling its row far out of view", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "inline edit is desktop");
+    const job = await stub.seed("review_long", { words: 3000 });
+    await openText(page, job.id);
+    const first = page.getByTestId("ed-word").first();
+    const id = (await savedWords(stub, job.id))[0].id;
+    await first.dblclick();
+    await page.getByTestId("ed-word-input").fill("Scrolled");
+    const list = page.getByTestId("ed-transcript");
+    await list.evaluate((el) => (el.scrollTop = el.scrollHeight));
+    await page.waitForTimeout(300);
+    await expect(page.getByTestId("ed-word-input")).toHaveValue("Scrolled");
+    await list.evaluate((el) => (el.scrollTop = 0));
+    await page.waitForTimeout(300);
+    await expect(page.getByTestId("ed-word-input")).toHaveValue("Scrolled");
+    await expect(page.getByTestId("ed-word-input")).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect.poll(async () => (await savedWords(stub, job.id)).find((w) => w.id === id)?.text, { timeout: 10_000 }).toBe("Scrolled");
+  });
+
   test("replacing in thousands of words saves in several bodies under 64 KB", async ({ page, stub }, info) => {
     test.skip(info.project.name !== "desktop", "one size check is enough");
     const job = await stub.seed("review_long");
