@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mapToOutput } from "@/lib/captions";
+import { mapToOutput, resolveStyle } from "@/lib/captions";
 import type { DocWord } from "@/features/editor/state/doc";
 import { adjustedWordIds } from "./adjusted";
-import { clipsOf, nextLine, nextSize, outputTime, shownWords, snapLines, snapY, tileOrder } from "./live";
+import { clipsOf, frameOf, nextLine, nextSize, outputTime, shownWords, snapLines, snapY, tileOrder } from "./live";
 
 const W = (id: string, text: string, start: number, end: number, extra: Partial<DocWord> = {}): DocWord => ({
   id,
@@ -93,5 +93,17 @@ describe("Text tab marker and Style panel", () => {
     // only live presets
     const narrow = tileOrder(["power", "clipper", "none"], [], "en");
     expect([...narrow.recommended, ...narrow.rest].map((t) => t.id)).toEqual(["power", "clipper"]);
+  });
+});
+
+describe("the style's frame (review 5)", () => {
+  it("is the video's own size, so a 4:5 video gets the export's position", () => {
+    // 337×421 canvas (desktop frame at DPR 1) over a 1080×1350 (4:5) video
+    const L = { W: 337, H: 421, vw: 1080, vh: 1350 };
+    const preview = resolveStyle("power", {}, frameOf(L))!;
+    const exported = resolveStyle("power", {}, { W: 1080, H: 1350 })!;
+    expect(preview.layout.y).toBe(exported.layout.y);
+    expect(resolveStyle("power", {}, { W: 337, H: 421 })!.layout.y).not.toBe(exported.layout.y); // the old bug
+    expect(frameOf({ W: 337, H: 421, vw: 0, vh: 0 })).toEqual({ W: 337, H: 421 });
   });
 });

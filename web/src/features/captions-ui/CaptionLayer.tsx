@@ -51,7 +51,7 @@ import { setStyle, type EditDoc } from "@/features/editor/state/doc";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { canvasPixels, contentBox, pageText } from "./interim";
-import { clipsOf, nextLine, nextSize, outputTime, shownWords, snapLines, snapY } from "./live";
+import { clipsOf, frameOf, nextLine, nextSize, outputTime, shownWords, snapLines, snapY } from "./live";
 import c from "./captions.module.css";
 
 export type CaptionLayerProps = {
@@ -187,6 +187,9 @@ function CaptionLayer(props: CaptionLayerProps) {
     style: null as CaptionStyle | null,
     W: 0,
     H: 0,
+    /** The video's own size: the style is resolved on its true aspect (review 5). */
+    vw: 0,
+    vh: 0,
     scale: 1,
     renderer: null as CaptionRenderer | null,
     ready: false,
@@ -284,6 +287,7 @@ function CaptionLayer(props: CaptionLayerProps) {
           hook.pageId = null;
         }
         setFontLoading(false);
+        L.refreshSel(); // no caption: no selection
         return;
       }
       const t0 = performance.now();
@@ -338,14 +342,18 @@ function CaptionLayer(props: CaptionLayerProps) {
       setCssH(b.h);
       const { W, H, scale } = canvasPixels(b, window.devicePixelRatio);
       L.scale = b.w > 0 ? W / b.w : scale;
-      if (W === L.W && H === L.H) {
+      if (W === L.W && H === L.H && v.videoWidth === L.vw && v.videoHeight === L.vh) {
         L.refreshSel();
         return;
       }
-      L.W = W;
-      L.H = H;
-      canvas.width = W; // clears the canvas
-      canvas.height = H;
+      L.vw = v.videoWidth;
+      L.vh = v.videoHeight;
+      if (W !== L.W || H !== L.H) {
+        L.W = W;
+        L.H = H;
+        canvas.width = W; // clears the canvas
+        canvas.height = H;
+      }
       L.dirty = true;
       L.style = resolveFromDoc();
       prepare();
@@ -353,7 +361,7 @@ function CaptionLayer(props: CaptionLayerProps) {
     // the style for this canvas size (resolveStyle depends on the frame shape)
     const resolveFromDoc = () => {
       const st = doc.getState().present.style;
-      return resolveStyle(st.presetId, (st.overrides ?? {}) as StyleOverrides, { W: L.W, H: L.H });
+      return resolveStyle(st.presetId, (st.overrides ?? {}) as StyleOverrides, frameOf(L));
     };
     layout();
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(layout) : null;
@@ -408,7 +416,7 @@ function CaptionLayer(props: CaptionLayerProps) {
     const L = live.current;
     L.clips = clips;
     L.timeline = timeline;
-    L.style = L.W && L.H ? resolveStyle(style.presetId, overrides, { W: L.W, H: L.H }) : null;
+    L.style = L.W && L.H ? resolveStyle(style.presetId, overrides, frameOf(L)) : null;
     L.prepare();
     // overrides is part of style
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -571,7 +579,7 @@ function CaptionLayer(props: CaptionLayerProps) {
           else o.y = before.y;
           if (before.sizeScale === undefined) delete o.sizeScale;
           else o.sizeScale = before.sizeScale;
-          const restored = resolveStyle(d.style.presetId, o, { W: L.W, H: L.H });
+          const restored = resolveStyle(d.style.presetId, o, frameOf(L));
           const no = setCaptionAdjust(o, cur.page, restored ? ownOf(cur.eff, restored) : null);
           return setStyle(d, { presetId: d.style.presetId, overrides: no as Record<string, unknown> });
         });

@@ -113,3 +113,13 @@ export function tileOrder(live: readonly string[] | null, recommended: readonly 
   const rest = all.filter((t) => !rec.includes(t));
   return { recommended: rec, rest };
 }
+
+/**
+ * The frame the style is resolved on: the video's own size (its aspect
+ * picks the default position, presets.ts defaultY), as the export does —
+ * not the rounded canvas size, which can land on the other side of an
+ * aspect threshold (4:5 → 0.8001). The canvas until the metadata is in.
+ */
+export function frameOf(L: { W: number; H: number; vw: number; vh: number }): { W: number; H: number } {
+  return L.vw > 0 && L.vh > 0 ? { W: L.vw, H: L.vh } : { W: L.W, H: L.H };
+}
