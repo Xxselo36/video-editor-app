@@ -301,19 +301,44 @@ export function findMatches(words: readonly DocWord[], query: string, limit = 50
 
 /**
  * Replace the given hits (from findMatches on this doc's words) by
- * `replacement`. Each hit is a text edit of its words (applyTextEdit
- * rules); later hits first, so earlier indices stay valid.
+ * `replacement`. Hits that share a word (two in "banana", or a phrase
+ * hit ending where the next starts) are one text edit of their joined
+ * words, replaced right to left; each edit follows the applyTextEdit
+ * rules. Later groups first, so earlier indices stay valid. Every hit
+ * is replaced.
  */
 export function replaceMatches(doc: EditDoc, matches: readonly Match[], replacement: string, pool?: IdPool): EditDoc {
-  const sorted = [...matches].sort((a, b) => b.first - a.first || b.from - a.from);
-  let out = doc;
-  let guard = Infinity;
+  const sorted = [...matches].sort((a, b) => a.first - b.first || a.from - b.from);
+  const groups: { first: number; last: number; hits: Match[] }[] = [];
   for (const m of sorted) {
-    if (m.last >= guard) continue; // overlapping word spans: one edit per word
-    const span = out.words.slice(m.first, m.last + 1).map((w) => w.text).join(" ");
-    const text = span.slice(0, m.from) + replacement + span.slice(m.to);
-    out = editRange(out, m.first, m.last, text, pool);
-    guard = m.first;
+    const g = groups[groups.length - 1];
+    if (g && m.first <= g.last) {
+      g.last = Math.max(g.last, m.last);
+      g.hits.push(m);
+    } else groups.push({ first: m.first, last: m.last, hits: [m] });
+  }
+  let out = doc;
+  for (let gi = groups.length - 1; gi >= 0; gi--) {
+    const g = groups[gi];
+    const texts = out.words.slice(g.first, g.last + 1).map((w) => w.text);
+    // offset of each word inside the joined span
+    const offs: number[] = [];
+    let pos = 0;
+    for (const t of texts) {
+      offs.push(pos);
+      pos += t.length + 1;
+    }
+    let text = texts.join(" ");
+    const hits = g.hits
+      .map((h) => ({ from: offs[h.first - g.first] + h.from, to: offs[h.first - g.first] + h.to }))
+      .sort((a, b) => b.from - a.from);
+    let limit = Infinity;
+    for (const h of hits) {
+      if (h.to > limit) continue; // overlapping hits (can't come from findMatches)
+      text = text.slice(0, h.from) + replacement + text.slice(h.to);
+      limit = h.from;
+    }
+    out = editRange(out, g.first, g.last, text, pool);
   }
   return out;
 }

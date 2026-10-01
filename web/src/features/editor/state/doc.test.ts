@@ -257,6 +257,24 @@ describe("find & replace", () => {
     expect(findMatches(n.words, "mistake")).toEqual([]);
   });
 
+  it("replaces every hit inside one word and hits sharing a word", () => {
+    const b = docOf([W("a", "banana", 0, 1), W("b", "split", 1, 2)]);
+    const hits = findMatches(b.words, "an");
+    expect(hits).toHaveLength(2);
+    const n = replaceMatches(b, hits, "X");
+    expect(n.words.map((w) => w.text)).toEqual(["bXXa", "split"]);
+    expect(findMatches(n.words, "an")).toEqual([]);
+    expect(n.words[0]).toMatchObject({ id: "a", start: 0, end: 1 });
+    // "re-re-do": hits next to each other in one word
+    const r = docOf([W("a", "re-re-do", 0, 1)]);
+    expect(replaceMatches(r, findMatches(r.words, "-"), "").words[0].text).toBe("reredo");
+    // a phrase hit ending on the word the next hit starts in
+    const p = docOf([W("a", "ab", 0, 1), W("b", "ab", 1, 2), W("c", "ab", 2, 3)]);
+    const ph = findMatches(p.words, "b a");
+    expect(ph).toHaveLength(2);
+    expect(replaceMatches(p, ph, "-").words.map((w) => w.text).join(" ")).toBe("a--b");
+  });
+
   it("replaces a phrase across words and with nothing", () => {
     const two = replaceMatches(d, findMatches(d.words, "mistake number"), "Fehler");
     expect(two.words.map((w) => w.text)).toEqual(["Fehler", "one:", "mistake", "MISTAKE.", "Number"]);
