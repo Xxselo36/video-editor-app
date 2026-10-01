@@ -459,12 +459,19 @@ def modal_r2(r2, monkeypatch):
     return fake
 
 
-def _done(job_id: str, timeout=10.0) -> bool:
+def _done(job_id: str, timeout=30.0) -> bool:
+    """The render settled — a final status AND its thread let go of the
+    job (like test_wp3_render._settled) — and it succeeded. The thread
+    writes `done` first and leaves _active_jobs only after recording its
+    event and queueing media GC: returning at the first `done` raced with
+    that on a slow runner."""
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         j = store.get(job_id)
-        if j.status in ("done", "error") or (j.status == "awaiting_review" and j.error_code):
-            return j.status == "done" and job_id not in M._active_jobs
+        final = j.status in ("done", "error") or (
+            j.status == "awaiting_review" and j.error_code)
+        if final and job_id not in M._active_jobs:
+            return j.status == "done"
         time.sleep(0.02)
     return False
 
