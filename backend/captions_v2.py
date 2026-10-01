@@ -258,37 +258,96 @@ def build_spec(job: Any, subtitles: list | None, style: dict[str, Any]) -> dict[
     return spec
 
 
+class CaptionFontError(CaptionLayerError):
+    """The job's CJK font subset can't cover the captions of this render
+    (and couldn't be re-made): the layer would draw tofu."""
+
+
+def ensure_cjk_font(store: Any, job_id: str, job: Any,
+                    spec: dict[str, Any]) -> dict[str, Any]:
+    """For a CJK transcript: make sure the job's font subset holds every
+    character the render draws — the words actually sent, which may carry
+    edits the subset (made from the doc's words) never saw. A missing or
+    short subset is re-made (font_subset.refresh, as POST /fonts/refresh)
+    from the doc's and the render's text. Raises CaptionFontError when
+    that fails."""
+    from backend import font_subset
+    font_id = font_subset.font_for(spec.get("language"))
+    if not font_id:
+        return spec
+    text = font_subset.text_of(spec.get("words"))
+    entry = (job.font_subsets or {}).get(font_id)
+    if not (isinstance(entry, dict) and entry.get("json") and entry.get("ttf")
+            and font_subset.covers(entry, text)):
+        try:
+            # covers() of an incomplete entry: re-make even if "chars" hold.
+            base = entry if isinstance(entry, dict) and entry.get("ttf") else None
+            j = job if base is not None else _without_subset(job, font_id)
+            subsets = font_subset.refresh(
+                store, job_id, j,
+                font_subset.text_of((job.doc or {}).get("words")) + text,
+                tempfile.mkdtemp(prefix="cleo_fonts_"))
+        except Exception as e:
+            raise CaptionFontError(
+                f"CJK caption font for {font_id} unavailable: "
+                f"{type(e).__name__}: {e}") from e
+        entry = subsets.get(font_id)
+        if not (isinstance(entry, dict) and entry.get("json") and entry.get("ttf")
+                and font_subset.covers(entry, text)):
+            raise CaptionFontError(f"CJK caption font for {font_id} doesn't cover the captions")
+    out = dict(spec)
+    out["fonts"] = [{"id": font_id, "json": entry["json"], "ttf": entry["ttf"]}]
+    return out
+
+
+def _without_subset(job: Any, font_id: str) -> Any:
+    """A view of `job` without its (unusable) subset entry, so refresh()
+    makes a new one."""
+    import types
+    subsets = {k: v for k, v in (job.font_subsets or {}).items() if k != font_id}
+    return types.SimpleNamespace(**{**vars(job), "font_subsets": subsets})
+
+
 def prepare_render(store: Any, job_id: str, job: Any,
                    subtitles: list | None) -> dict[str, Any] | None:
     """Pin the job's caption engine at its first render and return the
-    v2 captions spec, or None for a v1 render. Never raises: a failure
-    here renders v1 (logged) — unless the job is already pinned to v2."""
+    v2 captions spec, or None for a v1 render. A v2 setup that fails
+    (e.g. no usable CJK font subset) renders — and pins — v1 instead
+    (logged); a job already pinned to v2 fails the render then
+    (CaptionLayerError → render_failed) rather than change its look."""
+    pinned = job.caption_engine if job.caption_engine in ENGINES else None
+    spec = None
+    style: dict[str, Any] = {}
     try:
         style = style_for(job)
-        engine = choose_engine(job, style)
-        if job.caption_engine is None:
-            def pin(cur: Any) -> dict | None:
-                if cur.caption_engine is not None:
-                    return None
-                return {"caption_engine": engine}
-            if store.modify(job_id, pin) is None:
-                cur = store.get(job_id)
-                engine = (cur.caption_engine if cur is not None
-                          and cur.caption_engine in ENGINES else engine)
-        if engine != "v2":
-            return None
-        spec = build_spec(job, subtitles, style)
-        snapshot = {"v": 2, "gen": int(job.render_gen or 0),
-                    "source": "units", "style": copy.deepcopy(style),
-                    "language": spec["language"], "words": spec["words"]}
-        store.modify(job_id, lambda cur: {"render_doc": snapshot})
-        return spec
+        if choose_engine(job, style) == "v2":
+            spec = ensure_cjk_font(store, job_id, job, build_spec(job, subtitles, style))
     except Exception as e:
-        if getattr(job, "caption_engine", None) == "v2":
+        if pinned == "v2":
             raise
         print(f"[captions] job {job_id}: v2 setup failed, rendering v1: "
               f"{type(e).__name__}: {e}", flush=True)
+        spec = None
+    if pinned is None:
+        engine = "v2" if spec else "v1"
+
+        def pin(cur: Any) -> dict | None:
+            if cur.caption_engine is not None:
+                return None
+            return {"caption_engine": engine}
+        if store.modify(job_id, pin) is None:
+            cur = store.get(job_id)   # pinned meanwhile (another render)
+            if cur is not None and cur.caption_engine == "v1":
+                spec = None
+            elif cur is not None and cur.caption_engine == "v2" and spec is None:
+                raise CaptionLayerError("pinned to v2 meanwhile, v2 setup failed")
+    if spec is None:
         return None
+    snapshot = {"v": 2, "gen": int(job.render_gen or 0),
+                "source": "units", "style": copy.deepcopy(style),
+                "language": spec["language"], "words": spec["words"]}
+    store.modify(job_id, lambda cur: {"render_doc": snapshot})
+    return spec
 
 
 # ── worker side: clips, words, filter graph ─────────────────────────
@@ -557,19 +616,22 @@ def layer_plan(layer_in: dict[str, Any], timeout: float = 120) -> dict[str, Any]
     r = subprocess.run(_node_cmd("plan"), input=json.dumps(layer_in).encode(),
                        capture_output=True, timeout=timeout)
     if r.returncode != 0:
-        raise CaptionLayerError(
-            f"caption layer plan failed (exit {r.returncode}): "
-            f"{r.stderr.decode(errors='replace')[-600:]}")
+        # 3: a font file failed to load; 4: characters no font covers.
+        cls = CaptionFontError if r.returncode in (3, 4) else CaptionLayerError
+        raise cls(f"caption layer plan failed (exit {r.returncode}): "
+                  f"{r.stderr.decode(errors='replace')[-600:]}")
     return json.loads(r.stdout.decode())
 
 
 def _fetch_fonts(spec: dict[str, Any], work: Path,
                  fetch: Callable[[str, str], Any] | None) -> list[dict]:
+    """The job's font subsets on local disk. A subset that can't be
+    fetched fails the render: the image has no CJK system font, the
+    captions would be tofu."""
     out = []
     for f in spec.get("fonts") or []:
         if fetch is None:
-            print(f"[captions] no fetch for {f.get('id')}: system fallback font", flush=True)
-            continue
+            raise CaptionFontError(f"no way to fetch caption font {f.get('id')}")
         d = work / "fonts"
         d.mkdir(parents=True, exist_ok=True)
         jp = d / os.path.basename(f["json"])
@@ -577,9 +639,9 @@ def _fetch_fonts(spec: dict[str, Any], work: Path,
         try:
             fetch(f["json"], str(jp))
             fetch(f["ttf"], str(tp))
-        except Exception as e:  # the browser had its own CJK font then too
-            print(f"[captions] font {f.get('id')} unavailable: {e}", flush=True)
-            continue
+        except Exception as e:
+            raise CaptionFontError(f"caption font {f.get('id')} unavailable: "
+                                   f"{type(e).__name__}: {e}") from e
         out.append({"id": f["id"], "json": str(jp), "file": str(tp)})
     return out
 

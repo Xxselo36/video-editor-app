@@ -87,6 +87,18 @@ export type Prepared = {
 
 const YIELD_EVERY = 16;
 
+/**
+ * What the layer can't draw with its own fonts: characters no face
+ * covers, or a CJK font that isn't registered (the job's subset is
+ * missing). "" when everything is covered. The CLI exits 4 on it.
+ */
+export function missingGlyphs(fonts: FontStatus | null): string {
+  if (!fonts) return "";
+  const parts = [...fonts.uncovered];
+  for (const id of fonts.deferred) parts.push(`(font ${id} not loaded)`);
+  return parts.join(" ");
+}
+
 const even = (v: number, up: boolean) => (up ? Math.ceil(v / 2) * 2 : Math.floor(v / 2) * 2);
 
 /** Loads tables and fonts, builds the pages and the band. */

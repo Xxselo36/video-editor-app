@@ -4453,28 +4453,9 @@ def refresh_fonts(job_id: str, user: User | None = Depends(current_user)):
     current = dict(job.font_subsets or {})
     if not font_id or font_subset.covers(current.get(font_id), text):
         return {"font_subsets": font_subset.public(current)}
-    where = media.store_of(job)
-    ws = _workspace(job_id, "fonts")
-    try:
-        made = font_subset.make(font_id, text, ws)
-        subsets, sizes = font_subset.store(
-            {font_id: made}, media.job_prefix(job_id),
-            lambda path, key, ctype: media.put_file(path, key, content_type=ctype,
-                                                    store=where))
-    finally:
-        shutil.rmtree(ws, ignore_errors=True)
-    old = current.get(font_id) or {}
-    stale = [old.get(k) for k in ("woff2", "ttf", "json")
-             if old.get(k) and old.get(k) != subsets[font_id].get(k)]
-
-    def change(cur: Job) -> dict:
-        return {"font_subsets": {**(cur.font_subsets or {}), **subsets},
-                "media_bytes": {**{k: v for k, v in (cur.media_bytes or {}).items()
-                                   if k not in stale}, **sizes}}
-    store.modify(job_id, change)
-    _gc_later(stale, store_=where)
-    cur = store.get(job_id)
-    return {"font_subsets": font_subset.public(cur.font_subsets if cur else subsets)}
+    subsets = font_subset.refresh(store, job_id, job, text,
+                                  _workspace(job_id, "fonts"))
+    return {"font_subsets": font_subset.public(subsets)}
 
 
 @app.get("/jobs/{job_id}/fonts/{name}")

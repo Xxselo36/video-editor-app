@@ -176,6 +176,78 @@ def test_cjk_spec_carries_the_job_font_subset(monkeypatch):
                               "ttf": "jobs/x/fonts/a.ttf"}]
 
 
+JA_WORDS = [{"id": "w0001", "text": "結果", "start": 0.0, "end": 0.5},
+            {"id": "w0002", "text": "です", "start": 0.6, "end": 1.0}]
+# Edited in the v1 editor: "結果" → "成果" (成 isn't in the analysis subset).
+JA_UNITS = [{"text": "成果", "original_start": 0.0, "original_end": 0.5},
+            {"text": "です", "original_start": 0.6, "original_end": 1.0}]
+
+
+def _ja_job(**fields):
+    return _job(language="ja", doc=_doc(lang="ja", words=JA_WORDS),
+                settings={"caption_preset": "classic"}, **fields)
+
+
+def test_cjk_subset_is_remade_for_edited_text(monkeypatch):
+    """The subset was made from the doc's words; an edit in the v1 editor
+    adds a character: the render re-subsets (as /fonts/refresh) instead of
+    drawing tofu."""
+    pytest.importorskip("fontTools")
+    from backend import font_subset
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    job = _ja_job()
+    import tempfile
+    made = font_subset.make("noto-sans-jp-800", "結果です", tempfile.mkdtemp())
+    subsets, _ = font_subset.store({"noto-sans-jp-800": made}, f"jobs/{job.id}/",
+                                   lambda p, k, ct: media.put_file(p, k, content_type=ct))
+    store.update(job.id, font_subsets=subsets)
+    job = store.get(job.id)
+    assert not font_subset.covers(subsets["noto-sans-jp-800"], "成果です")
+    spec = C.prepare_render(store, job.id, job, JA_UNITS)
+    got = store.get(job.id)
+    entry = got.font_subsets["noto-sans-jp-800"]
+    assert "成" in entry["chars"] and "結" in entry["chars"]   # doc text kept too
+    assert spec["fonts"] == [{"id": "noto-sans-jp-800", "json": entry["json"],
+                              "ttf": entry["ttf"]}]
+    assert entry["ttf"] != subsets["noto-sans-jp-800"]["ttf"]
+    assert got.caption_engine == "v2"
+    # the old files are queued for deletion, their bytes no longer counted
+    assert subsets["noto-sans-jp-800"]["ttf"] not in (got.media_bytes or {})
+
+
+def test_cjk_without_any_subset_makes_one(monkeypatch):
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    calls = []
+
+    def refresh(st, job_id, job, text, ws):
+        calls.append((job.font_subsets, text))
+        return {"noto-sans-jp-800": {"chars": "成果結です", "json": "a.json", "ttf": "a.ttf"}}
+    from backend import font_subset
+    monkeypatch.setattr(font_subset, "refresh", refresh)
+    job = _ja_job()
+    spec = C.prepare_render(store, job.id, job, JA_UNITS)
+    assert spec["fonts"] == [{"id": "noto-sans-jp-800", "json": "a.json", "ttf": "a.ttf"}]
+    assert calls and "成" in calls[0][1] and "結" in calls[0][1]
+
+
+def test_cjk_font_failure_renders_v1_or_fails_a_pinned_job(monkeypatch):
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    from backend import errors, font_subset
+
+    def broken(*a, **k):
+        raise OSError("R2 down")
+    monkeypatch.setattr(font_subset, "refresh", broken)
+    job = _ja_job()
+    # never exported: this render (and the project) stays v1
+    assert C.prepare_render(store, job.id, job, JA_UNITS) is None
+    assert store.get(job.id).caption_engine == "v1"
+    # pinned to v2: no silent change of look, no tofu — the render fails
+    pinned = _ja_job(caption_engine="v2")
+    with pytest.raises(C.CaptionFontError) as e:
+        C.prepare_render(store, pinned.id, pinned, JA_UNITS)
+    assert errors.render_error_code(e.value) == "render_failed"
+
+
 def test_loudness_rides_along_only_when_switched_on(monkeypatch):
     monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
     loud = {"I": -20.1, "TP": -3.0, "LRA": 5.0, "thresh": -30.4, "offset": 0.2}

@@ -392,3 +392,23 @@ def test_a_font_that_fails_to_load_fails_the_render(tone_src, tmp_path, monkeypa
         C.render_primary(str(tone_src), str(tmp_path / "x.mp4"), TONE_SEGS[:1], None,
                          _spec(WORDS), tmp_path / "w")
     assert errors.render_error_code(e.value) == "render_failed"
+
+
+def test_characters_without_a_font_fail_instead_of_tofu(tone_src, tmp_path):
+    """A ja render without the job's subset (or with characters it lacks):
+    the layer exits 4, never a "successful" export with tofu."""
+    words = [{"id": "j0", "text": "成果", "start": 0.2, "end": 0.8}]
+    with pytest.raises(C.CaptionFontError, match="exit 4"):
+        C.render_primary(str(tone_src), str(tmp_path / "x.mp4"), [(0.0, 2.0)], None,
+                         _spec(words, lang="ja"), tmp_path / "w")
+
+
+def test_a_subset_that_cant_be_fetched_fails_the_render(tone_src, tmp_path):
+    def fetch(key, path):
+        raise FileNotFoundError(key)
+    spec = _spec([{"id": "j0", "text": "成果", "start": 0.2, "end": 0.8}], lang="ja",
+                 fonts=[{"id": "noto-sans-jp-800", "json": "jobs/x/fonts/a.json",
+                         "ttf": "jobs/x/fonts/a.ttf"}])
+    with pytest.raises(C.CaptionFontError, match="unavailable"):
+        C.render_primary(str(tone_src), str(tmp_path / "x.mp4"), [(0.0, 2.0)], None,
+                         spec, tmp_path / "w", fetch=fetch)

@@ -14,7 +14,7 @@
  */
 import { readFileSync, writeSync } from "node:fs";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
-import { prepare, renderFrames, type LayerDeps, type LayerInput } from "./layer";
+import { missingGlyphs, prepare, renderFrames, type LayerDeps, type LayerInput } from "./layer";
 
 const deps = { createCanvas, GlobalFonts } as unknown as LayerDeps;
 
@@ -49,6 +49,14 @@ async function main(): Promise<number> {
   if (prep.plan.fonts && !prep.plan.fonts.ok) {
     process.stderr.write(`fonts failed: ${JSON.stringify(prep.plan.fonts.failed)}\n`);
     return 3;
+  }
+  // No shipped face (or the job's CJK subset) has these characters: the
+  // render worker has no system fallback for them, an export would show
+  // tofu. Never report success then.
+  const missing = missingGlyphs(prep.plan.fonts);
+  if (missing) {
+    process.stderr.write(`uncovered characters: ${missing}\n`);
+    return 4;
   }
   if (mode === "plan") {
     writeAll(1, Buffer.from(JSON.stringify(prep.plan)));

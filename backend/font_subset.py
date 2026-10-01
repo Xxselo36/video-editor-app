@@ -186,3 +186,48 @@ def key_of(font_subsets: dict | None, name: str) -> tuple[str, str] | None:
             if key and os.path.basename(key) == name:
                 return key, CONTENT_TYPES[kind]
     return None
+
+
+def refresh(job_store: Any, job_id: str, job: Any, text: str,
+            workspace: str | Path) -> dict[str, dict]:
+    """Re-subset the job's CJK font to the characters of `text` when the
+    stored subset doesn't hold them all, store the files next to the
+    job's media and record them (job.font_subsets, media_bytes); the
+    replaced files are queued for deletion. Returns the job's
+    font_subsets. Raises when the subset can't be made or stored. Used by
+    POST /jobs/{id}/fonts/refresh and before a v2 render (UT4)."""
+    import shutil
+    import time
+
+    from backend import media
+
+    font_id = font_for((job.doc or {}).get("language") or job.language)
+    current = dict(job.font_subsets or {})
+    if not font_id or covers(current.get(font_id), text):
+        return current
+    where = media.store_of(job)
+    ws = Path(workspace)
+    try:
+        made = make(font_id, text, ws)
+        subsets, sizes = store(
+            {font_id: made}, media.job_prefix(job_id),
+            lambda path, key, ctype: media.put_file(path, key, content_type=ctype,
+                                                    store=where))
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
+    old = current.get(font_id) or {}
+    stale = [old.get(k) for k in ("woff2", "ttf", "json")
+             if old.get(k) and old.get(k) != subsets[font_id].get(k)]
+
+    def change(cur: Any) -> dict:
+        return {"font_subsets": {**(cur.font_subsets or {}), **subsets},
+                "media_bytes": {**{k: v for k, v in (cur.media_bytes or {}).items()
+                                   if k not in stale}, **sizes}}
+    job_store.modify(job_id, change)
+    if stale:
+        try:
+            job_store.gc_add(stale, time.time(), store=where)
+        except Exception as e:  # best effort, like main._gc_later
+            print(f"[fonts] could not queue {stale} for deletion: {e}", flush=True)
+    cur = job_store.get(job_id)
+    return dict(cur.font_subsets if cur else {**current, **subsets})

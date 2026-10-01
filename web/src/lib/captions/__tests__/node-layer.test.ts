@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { describe, expect, it } from "vitest";
-import { bandAt, prepare, renderFrames, type LayerDeps, type LayerInput } from "../node/layer";
+import { bandAt, missingGlyphs, prepare, renderFrames, type LayerDeps, type LayerInput } from "../node/layer";
 import { AUDIT_WORDS, FONTS_DIR } from "./helpers";
 
 const deps = { createCanvas, GlobalFonts } as unknown as LayerDeps;
@@ -81,6 +81,14 @@ describe("caption layer (node/layer.ts)", () => {
       });
       expect(stats.frames).toBe(0);
     }
+  });
+
+  it("reports characters it has no font for (the CLI exits 4)", async () => {
+    const latin = await prepare(base(), deps);
+    expect(missingGlyphs(latin.plan.fonts)).toBe("");
+    // ja without the job's CJK subset: deferred font + uncovered kanji
+    const ja = await prepare(base({ lang: "ja", words: [{ id: "j", text: "成果", start: 0, end: 1 }] }), deps);
+    expect(missingGlyphs(ja.plan.fonts)).toMatch(/成|noto-sans-jp-800/);
   });
 
   it("honours the band it is given (render mode)", async () => {
