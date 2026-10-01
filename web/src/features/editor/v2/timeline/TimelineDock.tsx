@@ -322,7 +322,8 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     p.setSelected(r.id);
   };
   const clipPointerDown = (e: React.PointerEvent, seg: EditorSeg) => {
-    if (e.button !== 0 || reorderRef.current) return;
+    // a second finger (a pinch) never arms a hold of its own (review 7)
+    if (e.button !== 0 || reorderRef.current || !e.isPrimary) return;
     cancelHold();
     pressOff.current?.();
     const el = e.currentTarget as HTMLElement;
@@ -342,15 +343,25 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
       off();
       dropReorder(ev.timeStamp, ev.type === "pointercancel");
     };
+    // Another finger down anywhere (a pinch-zoom starting): no hold, no
+    // lift; a lifted clip goes back, nothing is committed (review 7).
+    const onOther = (ev: PointerEvent) => {
+      if (ev.pointerId === pointerId) return;
+      cancelHold();
+      off();
+      if (reorderRef.current) dropReorder(ev.timeStamp, true);
+    };
     const off = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onEnd);
       window.removeEventListener("pointercancel", onEnd);
+      window.removeEventListener("pointerdown", onOther, true);
       if (pressOff.current === off) pressOff.current = null;
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onEnd);
     window.addEventListener("pointercancel", onEnd);
+    window.addEventListener("pointerdown", onOther, true);
     pressOff.current = off;
     const timer = setTimeout(() => {
       holdRef.current = null;

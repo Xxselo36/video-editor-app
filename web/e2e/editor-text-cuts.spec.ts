@@ -431,6 +431,46 @@ test.describe("editor v2: the timeline (owner's iPhone items)", TAG, () => {
     expect((await timeline(stub, job.id))[0]).toEqual(before[1]);
   });
 
+  test("a second finger cancels the long-press reorder: nothing lifted, nothing stored (review 7)", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "pixel7", "multi-touch");
+    const job = await stub.seed("review_speech");
+    await open(page, job.id, false);
+    const before = await timeline(stub, job.id);
+    const c0 = (await clipsOf(page).nth(0).boundingBox())!;
+    const c1 = (await clipsOf(page).nth(1).boundingBox())!;
+    const y = c0.y + c0.height / 2;
+    const p1 = { x: c0.x + c0.width / 2, y, id: 1 };
+    const cdp = await page.context().newCDPSession(page);
+    // case 1: lifted, then a second finger lands (a pinch starts)
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [p1] });
+    await page.waitForTimeout(650);
+    await expect(page.locator('[data-lifted="true"]')).toHaveCount(1);
+    const p2 = { x: c1.x + c1.width / 2, y, id: 2 };
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [p1, p2] });
+    await expect(page.locator('[data-lifted="true"]')).toHaveCount(0);
+    for (let i = 1; i <= 6; i++) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [
+          { ...p1, x: p1.x + 10 * i },
+          { ...p2, x: p2.x + 20 * i },
+        ],
+      });
+      await page.waitForTimeout(30);
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    // case 2: a still second finger (the pivot of a pinch) never lifts its clip
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...p2, x: c1.x + 40 }] });
+    await page.waitForTimeout(100);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...p2, x: c1.x + 40 }, { ...p1, id: 3 }] });
+    await page.waitForTimeout(650);
+    await expect(page.locator('[data-lifted="true"]')).toHaveCount(0);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await cdp.detach();
+    await page.waitForTimeout(800);
+    expect(await timeline(stub, job.id)).toEqual(before);
+  });
+
   test("holding a trim handle still zooms in; the edge reads 2 decimals; release zooms back", async ({ page, stub }) => {
     const job = await stub.seed("review_speech");
     await open(page, job.id, false);
