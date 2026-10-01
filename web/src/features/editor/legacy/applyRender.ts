@@ -35,7 +35,7 @@ export async function applyRender(
   });
   if (r.status !== 409 && !r.ok) throw await apiError(r);
   if (r.ok) track("export_started", { caption_style: captionPreset, lines: phrases.length });
-  updateActiveJobV2(jobId, { phase: "rendering", note: undefined });
+  updateActiveJobV2(jobId, { phase: "rendering", note: undefined, noteCode: undefined });
   return r.status === 409 ? "not_in_review" : "started";
 }
 

@@ -8,6 +8,7 @@ import {
   type ActiveJobV2,
 } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
+import { cardError, renderFailedNote } from "@/lib/errors";
 import { fetchFullJob, JobStatusPoller, type StatusPollResult } from "@/lib/jobStatus";
 import { getLibrary, saveEntry, type LibraryEntry, type LibraryHookClip } from "@/lib/library";
 import { notifyIfHidden } from "@/lib/notify";
@@ -57,7 +58,7 @@ export function useJobStatusPoller(setRecent: (recent: LibraryEntry[]) => void):
       for (const j of cards) {
         if (missing.has(j.jobId)) {
           // Server no longer knows the job (redeploy / expired).
-          updateActiveJobV2(j.jobId, { error: "media_expired" });
+          updateActiveJobV2(j.jobId, cardError({ code: "media_expired" }));
           continue;
         }
         const s = rows.get(j.jobId);
@@ -76,7 +77,7 @@ export function useJobStatusPoller(setRecent: (recent: LibraryEntry[]) => void):
         if (s.status === "awaiting_review" && (j.phase !== "reviewing" || (s.error && !j.note))) {
           updateActiveJobV2(j.jobId, {
             phase: "reviewing",
-            note: s.error ? "render_failed" : undefined,
+            ...(s.error ? renderFailedNote() : { note: undefined, noteCode: undefined }),
           });
         } else if (
           s.status === "processing" &&
@@ -128,9 +129,11 @@ export function useJobStatusPoller(setRecent: (recent: LibraryEntry[]) => void):
           setRecent(getLibrary().slice(0, 3));
         } else if (s.status === "error") {
           updateActiveJobV2(j.jobId, {
-            error: s.error_code ?? "processing_failed",
-            errorParams: s.error_params ?? {},
-            refunded: s.refunded ?? null,
+            ...cardError({
+              code: s.error_code ?? "processing_failed",
+              params: s.error_params ?? {},
+              refunded: s.refunded ?? null,
+            }),
           });
         }
       }

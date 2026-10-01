@@ -115,27 +115,116 @@ export function jobErrorText(
 
 const CODE_RE = /^[a-z][a-z0-9_]*$/;
 
-/** A job card's stored error (lib/activeJobs: a code since UX5; an
- *  English sentence on older cards, shown as stored). */
-export function cardErrorText(
-  card: { error?: string; errorParams?: ErrorParams | null; refunded?: boolean | null },
-  t: TFn,
-): string {
-  const e = card.error ?? "";
-  if (!e) return t("app.errors.generic");
-  if (!CODE_RE.test(e)) return e;
-  return describeError({ code: e, params: card.errorParams, refunded: card.refunded }, t);
+// ── job cards (lib/activeJobs) ───────────────────────────────────────
+// A card stores its failure twice: `errorCode` (+ errorParams, refunded),
+// which this build words in the viewer's language, and `error`, the
+// English sentence — what a tab still on a build from before UX5 shows
+// (it shares localStorage). The same for the note: `noteCode` + `note`.
+// Cards stored before UX5 have only the English `error` / `note`;
+// legacyCardCode maps those back to a code.
+
+type CardFailure = { error?: string; errorCode?: string | null; errorParams?: ErrorParams | null; refunded?: boolean | null };
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** An English message template as a regex ("{max}" → a group). */
+function templateRe(tmpl: string): { re: RegExp; names: string[] } {
+  const names: string[] = [];
+  const src = tmpl
+    .split(/\{(\w+)\}/)
+    .map((part, i) => {
+      if (i % 2) {
+        names.push(part);
+        return "(.+?)";
+      }
+      return escapeRe(part);
+    })
+    .join("");
+  return { re: new RegExp(`^${src}$`), names };
 }
 
-/** A job card's note ("render_failed"; older cards: a sentence). */
-export function cardNoteText(note: string, t: TFn): string {
-  return note === "render_failed" ? t("app.card.renderFailedNote") : note;
+// The sentences cards stored before UX5 (tEn of these keys) → code.
+const LEGACY_CARD_TEXTS: [MessageKey, string, Partial<CodedError>?][] = [
+  ...Object.entries(ERROR_KEYS).map(([code, key]) => [key, code] as [MessageKey, string]),
+  ...Object.entries(CLIENT_ERROR_KEYS).map(([code, key]) => [key, code] as [MessageKey, string]),
+  ["app.errors.noSpeechRefunded", "no_speech", { refunded: true }],
+  ["app.errors.connection", "connection_lost"],
+  ["app.errors.generic", "processing_failed"],
+];
+const PARAM_NAME: Record<string, string> = { file_too_large: "max_gb", video_too_long: "max_minutes", video_too_short: "min_seconds" };
+
+/** The code of a card's stored English text (cards from before UX5).
+ *  Unknown text — a raw server answer, an HTML page, a browser message —
+ *  is a generic failure: it is never shown as it is. */
+export function legacyCardCode(text: string): CodedError {
+  const s = text.trim();
+  if (CODE_RE.test(s)) return { code: s };
+  for (const [key, code, extra] of LEGACY_CARD_TEXTS) {
+    const { re, names } = templateRe(translate("en", key));
+    const m = re.exec(s);
+    if (!m) continue;
+    const params: ErrorParams = {};
+    names.forEach((n, i) => {
+      const v = Number(m[i + 1]);
+      params[n === "max" || n === "min" ? (PARAM_NAME[code] ?? n) : n] = isFinite(v) ? v : m[i + 1];
+    });
+    return { code, params, ...extra };
+  }
+  // What the upload code stored as it was: "Upload failed: <answer>".
+  const answer = /^Upload failed:\s*(\{[\s\S]*\})\s*$/.exec(s);
+  if (answer) {
+    try {
+      const body = JSON.parse(answer[1]) as { detail?: unknown; code?: unknown };
+      const c = typeof body.code === "string" ? body.code : typeof body.detail === "string" ? body.detail : null;
+      if (c && CODE_RE.test(c)) return { code: c };
+    } catch {
+      /* not JSON */
+    }
+  }
+  const l = s.toLowerCase();
+  if (l.includes("interrupted")) return { code: "upload_interrupted" };
+  if (/network|failed to fetch|stalled|aborted|connection/.test(l)) return { code: "connection_lost" };
+  return { code: "processing_failed" };
 }
 
-/** The fields a job card stores for a failure. */
-export function cardError(e: unknown): { error: string; errorParams: ErrorParams; refunded: boolean | null } {
+/** A job card's failure in the viewer's language — never raw text. */
+export function cardErrorText(card: CardFailure, t: TFn): string {
+  if (card.errorCode) {
+    return describeError({ code: card.errorCode, params: card.errorParams, refunded: card.refunded }, t);
+  }
+  if (!card.error) return t("app.errors.generic");
+  const legacy = legacyCardCode(card.error);
+  return describeError({ ...legacy, refunded: legacy.refunded ?? card.refunded }, t);
+}
+
+/** A job card's note, translated (the render-failed note is the only
+ *  kind: `noteCode` "render_failed", or its English sentence). */
+export function cardNoteText(card: { note?: string; noteCode?: string | null }, t: TFn): string {
+  void card;
+  return t("app.card.renderFailedNote");
+}
+
+/** The note fields of a card whose render failed. */
+export function renderFailedNote(): { note: string; noteCode: string } {
+  return { note: tEn("app.card.renderFailedNote"), noteCode: "render_failed" };
+}
+
+/** The fields a job card stores for a failure: the code for this build,
+ *  the English sentence for older ones. */
+export function cardError(e: unknown): {
+  error: string;
+  errorCode: string;
+  errorParams: ErrorParams;
+  refunded: boolean | null;
+} {
   const c = toCoded(e);
-  return { error: c.code ?? "processing_failed", errorParams: c.params ?? {}, refunded: c.refunded ?? null };
+  const code = c.code ?? "processing_failed";
+  return {
+    error: describeError({ ...c, code }, tEn),
+    errorCode: code,
+    errorParams: c.params ?? {},
+    refunded: c.refunded ?? null,
+  };
 }
 
 /** The words of an audio warning code (job.audio_warnings); text from a

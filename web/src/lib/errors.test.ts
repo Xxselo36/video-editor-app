@@ -6,9 +6,12 @@ import {
   audioWarningText,
   cardError,
   cardErrorText,
+  cardNoteText,
   describeError,
   errorFromApi,
   jobErrorText,
+  legacyCardCode,
+  renderFailedNote,
   stageText,
 } from "@/lib/errors";
 import { plural, pluralCategory } from "@/lib/i18n/plural";
@@ -70,15 +73,47 @@ describe("describeError", () => {
 });
 
 describe("job cards", () => {
-  it("store codes and word them when they render", () => {
+  it("store the code (worded per viewer) and the English sentence (older tabs)", () => {
     const stored = cardError(new ApiError(429, "too_many_active_jobs", { code: "too_many_active_jobs", params: {} }));
-    expect(stored).toEqual({ error: "too_many_active_jobs", errorParams: {}, refunded: null });
+    expect(stored).toEqual({
+      error: tEn("app.errors.tooManyJobs"),
+      errorCode: "too_many_active_jobs",
+      errorParams: {},
+      refunded: null,
+    });
     expect(cardErrorText(stored, tDe)).toBe(tDe("app.errors.tooManyJobs"));
   });
 
-  it("show a sentence stored before UX5 as it is", () => {
-    const old = "This project no longer exists on the server (expired or server update). Please upload the video again.";
-    expect(cardErrorText({ error: old }, tDe)).toBe(old);
+  it("translate the English sentences cards stored before UX5 (findings 8, 11)", () => {
+    expect(cardErrorText({ error: tEn("app.errors.expired") }, tDe)).toBe(tDe("app.errors.expired"));
+    // Filled-in templates keep their numbers.
+    expect(cardErrorText({ error: tEn("app.errors.fileTooLarge", { max: 4 }) }, tDe)).toBe(
+      tDe("app.errors.fileTooLarge", { max: 4 }),
+    );
+    expect(cardErrorText({ error: tEn("app.errors.noSpeechRefunded") }, tDe)).toBe(tDe("app.errors.noSpeechRefunded"));
+    expect(legacyCardCode(tEn("app.errors.videoTooLong", { max: 30 }))).toEqual({
+      code: "video_too_long",
+      params: { max_minutes: 30 },
+    });
+  });
+
+  it("never show raw stored text: answers, HTML, browser messages", () => {
+    expect(cardErrorText({ error: 'Upload failed: {"detail":"storage_unavailable"}' }, tDe)).toBe(
+      tDe("app.errors.serverBusy"),
+    );
+    expect(cardErrorText({ error: "Upload failed: <html><body>502 Bad Gateway</body></html>" }, tDe)).toBe(
+      tDe("app.errors.generic"),
+    );
+    expect(cardErrorText({ error: "Network error" }, tDe)).toBe(tDe("app.errors.connection"));
+    expect(
+      cardErrorText({ error: "Upload was interrupted (page reloaded or connection lost). Please upload the video again." }, tDe),
+    ).toBe(tDe("app.errors.interrupted"));
+  });
+
+  it("translate the render-failed note, old or new (finding 13)", () => {
+    expect(renderFailedNote()).toEqual({ note: tEn("app.card.renderFailedNote"), noteCode: "render_failed" });
+    expect(cardNoteText({ note: tEn("app.card.renderFailedNote") }, tDe)).toBe(tDe("app.card.renderFailedNote"));
+    expect(cardNoteText(renderFailedNote(), tDe)).toBe(tDe("app.card.renderFailedNote"));
   });
 });
 

@@ -155,7 +155,7 @@ export function ActiveJobCard({
           className="relative z-10 mb-3 text-xs leading-relaxed"
           style={{ color: job.note ? "var(--warn)" : "var(--text-body)" }}
         >
-          {job.note ? cardNoteText(job.note, t) : queued ? t("app.card.queued.sub") : copy.sub}
+          {job.note || job.noteCode ? cardNoteText(job, t) : queued ? t("app.card.queued.sub") : copy.sub}
         </div>
       )}
 

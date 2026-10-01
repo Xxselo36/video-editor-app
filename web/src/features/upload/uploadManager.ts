@@ -18,7 +18,7 @@
 import { useSyncExternalStore } from "react";
 import type { Paywall } from "@/lib/account";
 import { addActiveJob, liveUploads, updateActiveJob } from "@/lib/activeJobs";
-import { tEn } from "@/lib/errors";
+import { cardError, tEn } from "@/lib/errors";
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import type { UploadSettings } from "./uploadJob";
 
@@ -133,7 +133,7 @@ export async function startUpload(
     // The chunk didn't load (offline): the card says so.
     liveUploads.delete(tempId);
     live.delete(tempId);
-    updateActiveJob(tempId, { error: "connection_lost" });
+    updateActiveJob(tempId, cardError({ code: "connection_lost" }));
     emit();
     return;
   }

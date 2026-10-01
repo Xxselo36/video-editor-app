@@ -20,7 +20,7 @@ import { updateActiveJob } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
 import { apiFetch, whenMediaReady } from "@/lib/api";
 import { AUTH_ENABLED } from "@/lib/auth";
-import { audioWarningText, describeError } from "@/lib/errors";
+import { audioWarningText, cardError, describeError } from "@/lib/errors";
 import { waitForSaves } from "@/lib/pendingSaves";
 import type { JobStatus } from "@/features/jobs/types";
 import { ErrorView } from "@/features/project/ErrorView";
@@ -69,7 +69,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         const r = await apiFetch(`/jobs/${jobId}`);
         if (cancelled) return;
         if (r.status === 404) {
-          updateActiveJob(jobId, { error: "media_expired" });
+          updateActiveJob(jobId, cardError({ code: "media_expired" }));
           setLoad({ state: "error", message: t("app.errors.expired"), gone: true });
           return;
         }

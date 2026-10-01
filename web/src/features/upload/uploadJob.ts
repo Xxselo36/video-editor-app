@@ -378,13 +378,13 @@ export async function uploadJob(
     let failure = cardError(err);
     if (err instanceof ApiError && err.status === 401) {
       notifyAuthRequired();
-      failure = { error: "auth_required", errorParams: {}, refunded: null };
+      failure = cardError({ code: "auth_required" });
     } else if (err instanceof ApiError) {
       // No plan / not enough minutes: explain it with a way out.
       const pw = paywallFrom(err.status, err.detail);
       if (pw) {
         onPaywall(pw);
-        failure = { error: pw.code, errorParams: {}, refunded: null };
+        failure = cardError({ code: pw.code });
       }
     }
     updateActiveJobV2(tempId, failure);
