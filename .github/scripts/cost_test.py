@@ -468,15 +468,22 @@ def main() -> int:
                     row["status"] = f"analyze error: {j.get('message')}"
                 else:
                     subs = http("GET", f"/jobs/{row['job']}/subtitles")
+                    body = {"subtitles": build_phrases(subs["subtitles"]),
+                            "disabled_cuts": []}
+                    engine = os.environ.get("CAPTION_ENGINE", "").strip()
+                    if engine:  # the per-browser opt-in (?captions=v2)
+                        body["caption_engine"] = engine
                     http("POST", f"/jobs/{row['job']}/render",
-                         json.dumps({"subtitles": build_phrases(subs["subtitles"]),
-                                     "disabled_cuts": []}).encode(),
+                         json.dumps(body).encode(),
                          {"Content-Type": "application/json"})
                     t1 = time.time()
                     j = wait(row["job"], "done", 3600)
                     row["re"] = time.time() - t1
                     row["status"] = "done" if j["status"] == "done" else \
                         f"render failed: {j.get('error') or j.get('message')}"
+                    if j.get("caption_engine"):
+                        print(f"   caption engine: {j['caption_engine']}",
+                              flush=True)
             except Exception as e:  # keep going with the next run
                 row["status"] = f"failed: {redact(e)}"[:300]
             finally:
