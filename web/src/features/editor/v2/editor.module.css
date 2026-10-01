@@ -1183,33 +1183,36 @@
   background: #fff;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
+/* a seam's hit area: left / width inline (TimelineDock seamReach: up to
+   16 px each side, less next to a short clip); --sl = where the cut is */
 .seam {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 32px;
-  margin-left: -16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 1;
   cursor: pointer;
 }
 .seamLine {
   position: absolute;
-  left: 15.5px;
+  left: calc(var(--sl, 16px) - 0.5px);
   top: 0;
   bottom: 0;
   width: 1px;
   background: rgba(240, 96, 90, 0.35);
+  pointer-events: none;
 }
 .seamGlyph {
-  position: relative;
+  position: absolute;
+  left: var(--sl, 16px);
+  top: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   padding: 1px;
   border-radius: 2px;
   background: var(--ed-panel);
   color: var(--ed-removed);
+  pointer-events: none;
 }
 .playhead {
   position: absolute;

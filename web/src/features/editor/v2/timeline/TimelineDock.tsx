@@ -88,6 +88,17 @@ const TRIM_SLOP_PX = { mouse: 3, touch: 6 };
  *  (the 6 px gap to the neighbour + 2 px; review 5). */
 export const PHONE_HANDLE_OUT_PX = 8;
 
+/**
+ * How far a seam's hit area reaches to one side (px): the 3 px of the gap
+ * plus at most 13 px into the clip there — only as far as the clip keeps
+ * a 24 px body between its two seams (review 6: on the phone at fit zoom
+ * a short clip was all seam, it could not be tapped or held). 16 + 16 =
+ * the full 32 px target next to clips of 50 px and more.
+ */
+export function seamReach(clipPx: number): number {
+  return 3 + Math.min(13, Math.max(0, (clipPx - 24) / 2));
+}
+
 /** Strip seconds of clip `id`'s start or end edge. */
 function edgeAt(segs: EditorSeg[], id: string, mode: "start" | "end"): number {
   let acc = 0;
@@ -637,6 +648,8 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     });
     return { clips: out, seamViews: sv };
   }, [segs]);
+  // drawn width of every clip (px): how far a seam's hit area may reach into it
+  const clipPx = useMemo(() => new Map(clips.map((c) => [c.seg.id, c.width * pps - c.padL - c.padR])), [clips, pps]);
   const pieces = p.cuts.pieces;
   const seamKinds = useMemo(
     // a seam that jumps across a clip playing elsewhere (a reorder) is a
@@ -788,6 +801,10 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
               const label = t("editor.seam.label", { kind: t(KIND_NAME[kind]), len });
               // next to a selected clip its trim handles win
               const nearSel = p.selected === v.prev || p.selected === v.next;
+              // the hit area reaches into a clip only as far as it leaves
+              // that clip a body to tap and hold (review 6)
+              const extL = seamReach(clipPx.get(v.prev) ?? 0);
+              const extR = seamReach(clipPx.get(v.next) ?? 0);
               return (
                 <button
                   // by the clips it joins: a restored seam's button goes
@@ -798,7 +815,12 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
                   data-seam={kind}
                   data-testid="ed-seam"
                   tabIndex={-1}
-                  style={{ left: v.x * pps, pointerEvents: nearSel ? "none" : undefined }}
+                  style={{
+                    left: v.x * pps - extL,
+                    width: extL + extR,
+                    pointerEvents: nearSel ? "none" : undefined,
+                    ["--sl" as string]: `${extL}px`,
+                  }}
                   title={label}
                   aria-label={label}
                   aria-haspopup="dialog"

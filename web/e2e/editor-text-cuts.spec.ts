@@ -329,7 +329,9 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
     // the "uh," cut between "two," and "is" (16.56–17.063): a filler word
     const filler = page.locator('[data-testid="ed-seam"][data-seam="filler"]').first();
     const box = (await filler.boundingBox())!;
-    expect(box.width).toBeGreaterThanOrEqual(32);
+    // 32 px next to wide clips; next to a short clip (the phone at fit
+    // zoom) only what leaves that clip a body (review 6)
+    expect(box.width).toBeGreaterThanOrEqual((await isPhone(page)) ? 6 : 32);
     await filler.click();
     const pop = page.getByTestId("ed-seam-popover");
     await expect(pop).toBeVisible();
@@ -429,6 +431,36 @@ test.describe("editor v2: the timeline (owner's iPhone items)", TAG, () => {
     expect(body.subtitles.length).toBeGreaterThan(0);
     await expect.poll(async () => (await stub.job(job.id))!.status, { timeout: 30_000 }).not.toBe("awaiting_review");
     expect((await timeline(stub, job.id))[0]).toEqual(before[1]);
+  });
+
+  test("seams never cover a clip: every clip's middle is the clip; the shortest one selects and lifts (review 6)", async ({
+    page,
+    stub,
+  }) => {
+    const job = await stub.seed("review_speech");
+    await open(page, job.id, false);
+    const n = await clipsOf(page).count();
+    let shortest = 0;
+    let minW = Infinity;
+    for (let i = 0; i < n; i++) {
+      const b = (await clipsOf(page).nth(i).boundingBox())!;
+      if (b.width < minW) [minW, shortest] = [b.width, i];
+      const hit = await page.evaluate(
+        ([x, y]) => (document.elementFromPoint(x, y) as HTMLElement | null)?.closest("[data-seg]")?.getAttribute("data-testid") ?? null,
+        [b.x + b.width / 2, b.y + b.height / 2],
+      );
+      expect(hit, `clip ${i} (${b.width.toFixed(1)} px)`).toBe(`clip-${i}`);
+    }
+    // the shortest clip: a tap selects it, a hold lifts it
+    const c = clipsOf(page).nth(shortest);
+    const b = (await c.boundingBox())!;
+    if (await isPhone(page)) await c.tap({ position: { x: b.width / 2, y: b.height / 2 } });
+    else await c.click({ position: { x: b.width / 2, y: b.height / 2 } });
+    await expect(c).toHaveAttribute("data-selected", "true");
+    await page.locator("body").press("Escape");
+    const release = await holdAndDrag(page, b.x + b.width / 2, b.y + b.height / 2, b.x + b.width / 2 + 2, b.y + b.height / 2);
+    await expect(page.locator('[data-lifted="true"]')).toHaveCount(1);
+    await release();
   });
 
   test("phone: taps and swipes next to a selected clip's handle select / scroll, never trim (review 5)", async ({ page, stub }, info) => {
