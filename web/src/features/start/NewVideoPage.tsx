@@ -81,10 +81,18 @@ export function NewVideoPage() {
     if (f) onFileChange(f);
   };
 
+  // Set once the upload started: the route change to /app takes a moment,
+  // and a double click (or tap) meanwhile must not start a second upload
+  // — a second job, charged twice.
+  const startedRef = useRef(false);
+  const [starting, setStarting] = useState(false);
+
   const onProcess = (fileOverride?: File) => {
     // Guard: a click event must never be treated as the file.
     const targetFile = fileOverride instanceof File ? fileOverride : file;
-    if (!targetFile) return;
+    if (!targetFile || startedRef.current) return;
+    startedRef.current = true;
+    setStarting(true);
     // Resolve settings from the preset on the skip-configure path (state
     // may not have flushed when pickPreset + onFileChange ran together).
     const p = selectedPreset ? PRESETS[selectedPreset] : null;
@@ -136,6 +144,7 @@ export function NewVideoPage() {
           setOutputFormats={setOutputFormats}
           onProcess={onProcess}
           onBack={reset}
+          starting={starting}
         />
       )}
       <input

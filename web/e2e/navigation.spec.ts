@@ -209,3 +209,20 @@ test("the project view rides out 5xx answers (a deploy) and keeps polling", asyn
   await expect(page).toHaveURL(`${WEB}/app/edit/${job.id}`, { timeout: 30_000 });
   expect(n).toBeGreaterThanOrEqual(5);
 });
+
+test("a double click on Process starts one upload, not two", async ({ page, stub }) => {
+  await openWithStorage(page, "/app/new");
+  const inits: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && /\/(uploads\/multipart\/init|uploads\/presign|jobs)$/.test(r.url())) inits.push(r.url());
+  });
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("picker-card-custom").click()]);
+  await chooser.setFiles({ name: "doppelt.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
+  await page.getByTestId("configure-process").dblclick();
+  await expect(page).toHaveURL(`${WEB}/app`);
+  await expect(jobCard(page, "doppelt.mp4")).toHaveCount(1);
+  await expect.poll(() => inits.filter((u) => u.endsWith("/jobs")).length, { timeout: 30_000 }).toBe(1);
+  await page.waitForTimeout(1500);
+  await expect(jobCard(page, "doppelt.mp4")).toHaveCount(1);
+  expect(inits.filter((u) => !u.endsWith("/jobs")).length).toBeLessThanOrEqual(1);
+});
