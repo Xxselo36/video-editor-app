@@ -5504,6 +5504,14 @@ def post_render(job_id: str, payload: dict,
     disabled_cuts = payload.get("disabled_cuts") or []
     if not isinstance(disabled_cuts, list):
         raise HTTPException(400, "payload.disabled_cuts must be a list")
+    # UT4 opt-in (CLEO_CAPTION_ENGINE=optin): this request's
+    # "caption_engine": "v2" asks for the v2 captions at the job's first
+    # render. Kept on the job before the render starts; ignored in the
+    # other modes and once the job's engine is pinned.
+    if captions_v2.engine_default() == "optin":
+        requested = payload.get("caption_engine")
+        store.modify(job_id, lambda cur: captions_v2.optin_fields(cur, requested)
+                     if cur.status == "awaiting_review" else None)
 
     if taskq.enabled():
         # The compare-and-set and the render task in one transaction

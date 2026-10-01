@@ -105,11 +105,39 @@ class CaptionLayerError(RuntimeError):
 # ── switches ────────────────────────────────────────────────────────
 
 
+MODES = ("v1", "v2", "optin")
+# job.settings key a render request's opt-in is kept under (optin mode).
+OPTIN_KEY = "caption_engine_optin"
+
+
 def engine_default() -> str:
-    """CLEO_CAPTION_ENGINE: the engine a job's first render pins
-    ("v1" unless set to "v2")."""
+    """CLEO_CAPTION_ENGINE: which jobs' first render pins v2.
+      v1 (unset)  nobody
+      v2          every eligible job
+      optin       only eligible jobs whose first render request asked for
+                  it ({"caption_engine": "v2"} in POST /jobs/{id}/render:
+                  the owner's browser with ?captions=v2), to test on
+                  production before switching everyone"""
     v = (os.environ.get("CLEO_CAPTION_ENGINE") or "v1").strip().lower()
-    return v if v in ENGINES else "v1"
+    return v if v in MODES else "v1"
+
+
+def optin_fields(cur: Any, requested: Any) -> dict[str, Any] | None:
+    """The job change POST /render makes for a render request's
+    `caption_engine` field: in optin mode, for a job not pinned yet, the
+    request's choice (v2 or not) goes into settings[OPTIN_KEY]; every
+    other case ignores the field (None: no change)."""
+    if engine_default() != "optin" or cur.caption_engine is not None:
+        return None
+    settings = dict(cur.settings or {})
+    want = requested == "v2"
+    if bool(settings.get(OPTIN_KEY) == "v2") == want:
+        return None
+    if want:
+        settings[OPTIN_KEY] = "v2"
+    else:
+        settings.pop(OPTIN_KEY, None)
+    return {"settings": settings}
 
 
 def loudnorm_enabled() -> bool:
@@ -162,7 +190,13 @@ def choose_engine(job: Any, style: dict[str, Any] | None = None) -> str:
     """The job's pinned engine, or the one its first render pins."""
     if job.caption_engine in ENGINES:
         return job.caption_engine
-    if engine_default() != "v2" or not isinstance(job.doc, dict):
+    mode = engine_default()
+    if mode == "optin":
+        if (job.settings or {}).get(OPTIN_KEY) != "v2":
+            return "v1"
+    elif mode != "v2":
+        return "v1"
+    if not isinstance(job.doc, dict):
         return "v1"
     if exported_before(job):
         return "v1"

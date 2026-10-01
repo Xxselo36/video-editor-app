@@ -497,6 +497,43 @@ def test_render_r2_gets_captions_only_for_v2(client, modal_r2, monkeypatch, engi
     assert got.output_keys["primary"].endswith("r1/primary.mp4")
 
 
+@pytest.mark.parametrize("mode, field, want", [
+    (None, None, "v1"), (None, "v2", "v1"),          # unset: nobody
+    ("v2", None, "v2"), ("v2", "v2", "v2"),          # everyone (the field is moot)
+    ("optin", None, "v1"), ("optin", "v2", "v2"),    # only who asks
+    ("optin", "v1", "v1"),
+])
+def test_engine_modes_and_the_render_requests_opt_in(client, modal_r2, monkeypatch,
+                                                      mode, field, want):
+    """CLEO_CAPTION_ENGINE=optin: only a first render whose request says
+    {"caption_engine": "v2"} (the owner's browser, ?captions=v2) pins v2;
+    the field means nothing in the other modes."""
+    if mode:
+        monkeypatch.setenv("CLEO_CAPTION_ENGINE", mode)
+    job = _job(media_store="r2")
+    body = {"subtitles": UNITS, **({"caption_engine": field} if field else {})}
+    assert client.post(f"/jobs/{job.id}/render", json=body).status_code == 200
+    assert _done(job.id)
+    [kw] = modal_r2.spawns
+    assert ("captions" in kw) is (want == "v2")
+    got = store.get(job.id)
+    assert got.caption_engine == want
+    assert (got.settings.get(C.OPTIN_KEY) == "v2") is (mode == "optin" and field == "v2")
+
+
+def test_optin_still_needs_an_eligible_job_and_keeps_the_pin(client, modal_r2, monkeypatch):
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "optin")
+    # not eligible (no edit document): v1 despite the opt-in
+    old = _job(media_store="r2", doc=None)
+    client.post(f"/jobs/{old.id}/render", json={"subtitles": UNITS, "caption_engine": "v2"})
+    assert _done(old.id) and store.get(old.id).caption_engine == "v1"
+    # pinned v1: a later opt-in changes nothing
+    store.update(old.id, status="awaiting_review", doc=_doc())
+    client.post(f"/jobs/{old.id}/render", json={"subtitles": UNITS, "caption_engine": "v2"})
+    assert _done(old.id) and store.get(old.id).caption_engine == "v1"
+    assert all("captions" not in kw for kw in modal_r2.spawns)
+
+
 def test_local_render_draws_v2_with_render_to_dir(tmp_path, monkeypatch):
     calls = {}
     monkeypatch.setattr(pipeline, "_modal_configured", lambda: False)

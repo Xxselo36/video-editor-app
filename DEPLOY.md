@@ -1301,7 +1301,7 @@ Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
 
 | Variable (Railway) | Default | Eingeschaltet | Zurück |
 |---|---|---|---|
-| `CLEO_CAPTION_ENGINE` | `v1`: alter Burn wie bisher | `v2`: der **erste** Export eines Projekts mit Edit-Dokument (UT3) läuft mit v2, wenn sein Stil in `CLEO_CAPTION_PRESETS_LIVE` steht und die Sprache kann | Variable löschen: neue Projekte wieder v1 |
+| `CLEO_CAPTION_ENGINE` | `v1`: alter Burn wie bisher | `optin`: nur Projekte, deren erster Export aus einem Browser mit `?captions=v2` kommt (unten); `v2`: der **erste** Export eines Projekts mit Edit-Dokument (UT3) läuft mit v2, wenn sein Stil in `CLEO_CAPTION_PRESETS_LIVE` steht und die Sprache kann | Variable löschen: neue Projekte wieder v1 |
 | `CLEO_LOUDNORM` | aus: Lautstärke wie aufgenommen | `1`: v2-Exporte auf −14 LUFS (Messung aus der Analyse) | Variable löschen |
 
 - **Ein Projekt behält seine Technik:** Beim ersten Export wird `v1`
@@ -1314,9 +1314,18 @@ Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
   alten Volume-Weg (`render_burn_concat`) und beim lokalen Notfall-Render
   ohne Node wird auch ein v2-Projekt mit v1 exportiert (Log-Zeile
   `[captions] … rendering v1 captions`).
-- **Reihenfolge:** erst deployen, dann auf Staging bzw. mit einem
-  eigenen Testprojekt `CLEO_CAPTION_ENGINE=v2` setzen, exportieren,
-  Video ansehen (Log: `[captions] v2 primary: … frames`), dann für alle.
+- **Nur für dich testen (`CLEO_CAPTION_ENGINE=optin`):** alle Kunden
+  bleiben bei v1. Öffne einmal
+  `cleocuts.com/app?editor=v2&captions=v2` (oder nur `?captions=v2`) —
+  dein Browser merkt sich das, im Export-Bereich des Editors steht dann
+  klein „Neue Untertitel (Test)“. Jeder **erste** Export eines Projekts
+  aus diesem Browser fragt v2 an (sonst gelten dieselben Regeln: Edit-
+  Dokument, Stil live, Sprache passt; danach bleibt das Projekt dabei).
+  `?captions=v1` schaltet deinen Browser zurück. In den Modi `v1`/`v2`
+  wird die Anfrage ignoriert.
+- **Reihenfolge:** erst deployen, dann `CLEO_CAPTION_ENGINE=optin`,
+  selbst ein neues Projekt exportieren und ansehen (Log:
+  `[captions] v2 primary: … frames`), dann `v2` für alle.
 - **Mehr Stile:** `CLEO_CAPTION_PRESETS_LIVE` (Default `clipper,power`)
   erst erweitern, wenn du den Stil im Abnahmeblatt abgehakt hast.
 - **Emoji:** Emoji und Symbole, die keine Untertitel-Schrift hat, lässt
