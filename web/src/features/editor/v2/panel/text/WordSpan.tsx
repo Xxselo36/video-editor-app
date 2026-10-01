@@ -61,6 +61,8 @@ export type RowProps = {
   editKeys: EditKeys;
   start: number;
   measure: (el: HTMLElement | null) => void;
+  /** UT5: a caption in this row has its own size / position (a dot by the time). */
+  adjusted?: boolean;
 };
 
 export const WordRow = memo(function WordRow({ measure, ...p }: RowProps) {
@@ -130,6 +132,9 @@ export const WordRow = memo(function WordRow({ measure, ...p }: RowProps) {
         tabIndex={-1}
         aria-label={t("editor.transcript.seek", { time: p.time })}
       >
+        {p.adjusted && (
+          <span className={s.rdot} title={t("editor.caption.ownTip")} aria-label={t("editor.caption.ownTip")} data-testid="ed-row-adjusted" />
+        )}
         {p.time}
       </button>
       <div className={s.trw}>{out}</div>

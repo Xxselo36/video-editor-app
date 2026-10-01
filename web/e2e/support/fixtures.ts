@@ -48,6 +48,8 @@ export type SeedOptions = {
   words?: number;
   /** false: a job from before the edit document (404 no_doc). */
   doc?: boolean;
+  /** false: no first-frame poster (an analysis from before UT5). */
+  poster?: boolean;
 };
 
 export type Seeded = { id: string; seed: SeedName; filename: string; status: string };

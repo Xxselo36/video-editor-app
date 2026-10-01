@@ -1858,3 +1858,17 @@
     transition-duration: 1ms !important;
   }
 }
+
+/* UT5: a caption of this row has its own size / position (DF mock .rdot). */
+.trr .trTs {
+  position: relative;
+}
+.rdot {
+  position: absolute;
+  left: -9px;
+  top: 11px;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ed-text-1);
+}

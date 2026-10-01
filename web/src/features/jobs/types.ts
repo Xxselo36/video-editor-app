@@ -56,6 +56,8 @@ export type JobStatus = {
   // GET /jobs/{id}/proxy-video exists: the editor plays it and applies
   // the edit itself (lib/editPlayback). Missing = unknown, probed.
   has_proxy?: boolean;
+  /** UT5: GET /jobs/{id}/poster (the first kept frame) answers. */
+  has_poster?: boolean;
   caption_preset?: string | null;
   // The finished job (done): what the Done view shows.
   outputs?: string[];

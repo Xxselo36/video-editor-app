@@ -70,6 +70,8 @@ export type TranscriptEditorProps = {
   apiRef: RefObject<TextApi | null>;
   headerExtra?: React.ReactNode;
   toast: (msg: string) => void;
+  /** UT5: ids of words whose caption has its own size / position (a dot on their row). */
+  adjusted?: ReadonlySet<string>;
 };
 
 const selWords = (st: DocState) => st.present.words;
@@ -605,6 +607,7 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
                   editKeys={editKeys}
                   start={it.start - notesH}
                   measure={v.measureElement}
+                  adjusted={!!p.adjusted?.size && words.slice(r.first, r.last + 1).some((w) => p.adjusted!.has(w.id))}
                 />
               );
             })}

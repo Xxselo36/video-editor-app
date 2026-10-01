@@ -8,15 +8,16 @@
  * the picture plays / pauses (editor.md §4.4).
  */
 import dynamic from "next/dynamic";
-import { memo, useMemo } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { useT } from "@/i18n";
 import type { Phrase, Subtitle } from "@/features/editor/legacy/buildPhrases";
 import type { EditSession } from "@/features/editor/session/useEditSession";
 import { activeIndexAt, usePlayhead, type PlayheadState, type PlayheadStore } from "@/features/editor/state/playhead";
+import { firstFrameTime, useFirstFrame } from "./useFirstFrame";
 import s from "../editor.module.css";
 
-// UT1: engine captions over the video (flag; its own chunk). UT5's
-// CaptionLayer replaces it in this slot.
+// UT1: engine captions over the video (flag; its own chunk). With live
+// captions (UT5) the shell puts its CaptionLayer into this slot instead.
 const CAPTIONS_INTERIM = process.env.NEXT_PUBLIC_CAPTIONS_INTERIM === "1";
 const InterimOverlay = dynamic(() => import("@/features/captions-ui/InterimOverlay"), { ssr: false });
 
@@ -30,11 +31,11 @@ export type CaptionSlotProps = {
   captionPreset: string;
   duration: number;
   /**
-   * TODO(UT5): the caption layer reports a click on a caption here
-   * (select → size/position adjust, "Nur hier | Überall"). Unused until
-   * CaptionLayer lands.
+   * UT5: the live caption layer (features/captions-ui CaptionLayer: the
+   * export's captions, select / move / resize) — replaces the interim
+   * preview when the export draws v2 captions.
    */
-  onCaptionSelect?: (pageIndex: number) => void;
+  captionLayer?: ReactNode;
 };
 
 /** Plain text of the line under the playhead (flag off: no engine). */
@@ -74,7 +75,7 @@ function PlainCaption({ store, phrases, toSource }: { store: PlayheadStore; phra
   );
 }
 
-function CaptionSlotImpl({ session, store, phrases, units, captionPreset, duration }: CaptionSlotProps) {
+function CaptionSlotImpl({ session, store, phrases, units, captionPreset, duration, captionLayer }: CaptionSlotProps) {
   const { mode, editSegs, videoSegments, keptSegments, videoRef, toSource } = session;
   const segments = useMemo(
     () =>
@@ -85,6 +86,13 @@ function CaptionSlotImpl({ session, store, phrases, units, captionPreset, durati
           : keptSegments,
     [mode, editSegs, videoSegments, keptSegments],
   );
+  if (captionLayer) {
+    return (
+      <div data-testid="ed-caption-slot" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1 }}>
+        {captionLayer}
+      </div>
+    );
+  }
   if (captionPreset === "none") return null;
   return (
     <div data-testid="ed-caption-slot" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1 }}>
@@ -113,13 +121,21 @@ export function VideoLayer({
   units,
   captionPreset,
   duration,
-  onCaptionSelect,
+  captionLayer,
   tapToPlay,
   paused,
-}: CaptionSlotProps & { tapToPlay?: boolean; paused?: boolean }) {
+  poster,
+}: CaptionSlotProps & {
+  tapToPlay?: boolean;
+  paused?: boolean;
+  /** The analysis' first-frame JPEG (UT5), until the video has a frame. */
+  poster?: string | null;
+}) {
   const t = useT();
   const { videoRef, fadeRef, videoSrc, mode, onVideoError, togglePlay, editSaving } = session;
   const buffering = usePlayhead(store, selBuffering);
+  // the first frame of the cut, not black, before playback (owner, iPhone)
+  const still = useFirstFrame(videoRef, firstFrameTime(mode, session.editSegs), poster);
   return (
     <>
       <video
@@ -133,9 +149,11 @@ export function VideoLayer({
         onError={onVideoError}
         onClick={togglePlay}
         playsInline
-        // metadata only: don't pull the whole preview over mobile data
-        // before the user presses play.
-        preload="metadata"
+        poster={still.poster}
+        // With a poster, metadata only: don't pull the whole preview over
+        // mobile data before the user presses play. Without one the frame
+        // must come from the video itself (iOS decodes none on metadata).
+        preload={still.preload}
         aria-label={t("editor.preview")}
       />
       <CaptionSlot
@@ -145,7 +163,7 @@ export function VideoLayer({
         units={units}
         captionPreset={captionPreset}
         duration={duration}
-        onCaptionSelect={onCaptionSelect}
+        captionLayer={captionLayer}
       />
       {/* Clip fades (proxy mode), driven by EditPlayer. Over the captions,
           as the render fades burned-in subtitles too. */}

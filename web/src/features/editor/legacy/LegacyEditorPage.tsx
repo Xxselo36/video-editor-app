@@ -192,6 +192,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         units={unitsRef}
         captionPreset={captionPreset}
         audioWarnings={(job.audio_warning_codes ?? job.audio_warnings ?? []).map((w) => audioWarningText(w, t))}
+        hasPoster={job.has_poster === true}
         cutRanges={job.cut_ranges ?? []}
         duration={job.duration ?? 0}
         onChange={(next) => {
