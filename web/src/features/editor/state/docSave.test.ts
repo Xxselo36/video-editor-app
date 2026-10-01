@@ -26,10 +26,16 @@ function fakeServer(doc: EditDoc) {
     rev: 0,
     bodies: [] as PatchBody[],
     fail: null as null | "net" | 500 | 409 | 400 | "lost",
+    /** The next request never answers (and never reaches the server). */
+    hold: false,
     inits: [] as RequestInit[],
   };
   const fetch = async (_path: string, init: RequestInit & { unloading?: boolean }) => {
     srv.inits.push(init);
+    if (srv.hold) {
+      srv.hold = false;
+      return new Promise<Response>(() => undefined);
+    }
     const body = JSON.parse(String(init.body)) as PatchBody;
     srv.bodies.push(body);
     if (srv.fail === "net") throw new TypeError("offline");
@@ -191,23 +197,24 @@ describe("DocSaver", () => {
     expect(t.saver.status).toBe("saved");
   });
 
-  it("unload: one keepalive PATCH under 64 KB, on top of the request in flight", async () => {
+  it("unload: one keepalive PATCH under 64 KB carrying everything the server is known not to have", async () => {
     const t = setup();
+    t.srv.hold = true; // the debounced PATCH never leaves the page (aborted on unload)
     t.edit((d) => editWord(d, "w0002", "two"));
-    void t.tm.tick(); // in flight (not awaited)
+    void t.tm.tick();
     for (let i = 0; i < 5; i++) await Promise.resolve();
     t.edit((d) => editWord(d, "w0004", "four"));
     expect(t.saver.flushUnload()).toBe(true);
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 10));
     const last = t.srv.inits[t.srv.inits.length - 1];
     expect(last.keepalive).toBe(true);
     expect(new TextEncoder().encode(String(last.body)).length).toBeLessThan(64 * 1024);
     const body = t.srv.bodies[t.srv.bodies.length - 1];
-    expect(body).toMatchObject({ base_rev: 1, rev: 2 });
-    expect(body.words!.upsert.map((w) => w.id)).toEqual(["w0004"]);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(t.srv.rev).toBe(2);
-    expect(t.srv.bodies).toHaveLength(2);
+    expect(body).toMatchObject({ base_rev: 0, rev: 1 });
+    expect(body.words!.upsert.map((w) => w.id)).toEqual(["w0002", "w0004"]);
+    // both edits reached the server although the in-flight one never did
+    expect(t.srv.rev).toBe(1);
+    expect(t.srv.words.map((w) => w.text)).toEqual(t.present.words.map((w) => w.text));
   });
 
   it("unload right after the debounce fired: no double send", async () => {

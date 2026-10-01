@@ -12,9 +12,10 @@
  *   format when they changed). A body stays under PATCH_LIMIT: a bigger
  *   change (a replace-all over a long transcript) goes as several
  *   PATCHes in a row, each a valid doc on its own.
- * - Unload (pagehide): the pending change goes at once with keepalive
- *   (the browser's keepalive budget is 64 KB; review D4), based on the
- *   rev of a request still in flight.
+ * - Unload (pagehide): everything the server is not known to have goes
+ *   at once with keepalive (the browser's keepalive budget is 64 KB;
+ *   review D4), on the last acknowledged rev — never on the assumed
+ *   result of a request still in flight.
  * - 409 stale_rev (another tab or device saved): state "conflict", the
  *   autosave stops and the local doc stays as it is until the editor
  *   reloads it (review F3) — nothing is overwritten silently.
@@ -248,7 +249,12 @@ export class DocSaver {
     this.clear();
     if (this.state === "conflict" || this.stopped) return false;
     const prev = this.inflight;
-    const base = prev ? after(this.saved, prev.body) : this.saved;
+    // Built on what the server is KNOWN to have, so it carries the
+    // in-flight change too: that ordinary fetch may never leave the page
+    // (aborted on unload, still waiting for an auth token). If it did
+    // commit first, this request gets a 409 and only the last edit is
+    // lost — not both.
+    const base = this.saved;
     this.normalize(base);
     const bodies = patchBodies(base, this.latest);
     if (!bodies.length) return false;
