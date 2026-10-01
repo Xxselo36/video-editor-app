@@ -23,7 +23,11 @@ def _ja_transcript() -> str:
     """~10 minutes of Japanese: the app's own Japanese UI copy (natural
     text, ~5 000 characters, ~420 distinct ones — a monologue of that
     length uses about as many)."""
-    text = (REPO / "web/src/i18n/messages/ja.ts").read_text(encoding="utf-8")
+    # The catalogue is split by area since UX5 (messages/ja/{site,app,…}.ts).
+    text = "".join(
+        f.read_text(encoding="utf-8")
+        for f in sorted((REPO / "web/src/i18n/messages/ja").glob("*.ts"))
+    )
     return "".join(re.findall(r"[\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef\u3002\u3001]", text))
 
 
