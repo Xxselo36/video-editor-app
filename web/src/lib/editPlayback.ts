@@ -274,8 +274,13 @@ export class EditPlayer {
       const s = plan[j];
       if (t < s.start - EDGE) this.enter(j, s.start); // trimmed past the playhead
       else if (t < s.end || this.atEnd) this.enter(j, null); // effects changed
-      else if (j + 1 < plan.length) this.enter(j + 1, plan[j + 1].start);
-      else this.parkAtEnd();
+      else if (j + 1 < plan.length) {
+        // The clip now ends before the playhead. Cut further back in it
+        // (UX10: words cut in the text) the rest of it is the next clip,
+        // which still shows this frame: stay, don't jump to its start.
+        const nx = plan[j + 1];
+        this.enter(j + 1, t >= nx.start - EDGE && t < nx.end ? null : nx.start);
+      } else this.parkAtEnd();
       return;
     }
     // The clip is gone (deleted or split): the clip now showing this
