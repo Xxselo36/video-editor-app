@@ -4560,6 +4560,129 @@ def job_poster(job_id: str, user: User | None = Depends(media_user)):
                   "poster_not_ready", cache="private, max-age=604800, immutable")
 
 
+# ── Filmstrip (UX7b) ─────────────────────────────────────────────────
+# The analysis makes it (pipeline.make_filmstrip, stored by
+# store_analysis_extras). A job from before gets it on the first GET:
+# made from its stored proxy (else mezz, via the proxy cache) in
+# _FILMSTRIP_POOL, one at a time, best effort — 202 filmstrip_pending
+# meanwhile, 404 filmstrip_unavailable when it can't be made (no stored
+# source, or it failed here within the last _FILMSTRIP_RETRY_S).
+_FILMSTRIP_POOL = ThreadPoolExecutor(max_workers=1,
+                                     thread_name_prefix="filmstrip")
+_FILMSTRIP_GUARD = threading.Lock()
+_FILMSTRIP_BUSY: set[str] = set()
+_FILMSTRIP_FAILED: dict[str, float] = {}
+_FILMSTRIP_RETRY_S = 3600.0
+# More waiting than this: answered pending without queueing (the
+# client's next poll queues it).
+_FILMSTRIP_MAX_QUEUE = 8
+
+
+def _filmstrip_lazy(job_id: str) -> bool:
+    """Make, store and commit the filmstrip of a job without one. True
+    once the job has one. Raises on failure (the caller logs it). The
+    commit is a compare-and-set: only while the job has none, its media
+    is still in the store the sprite went to; a sprite the job didn't
+    take is queued for deletion."""
+    job = store.get(job_id)
+    if job is None:
+        return False
+    if job.filmstrip_key:
+        return True
+    if not (job.proxy_key or job.mezz_key):
+        raise FileNotFoundError(f"job {job_id} has no stored video")
+    source = _cached_proxy(job)
+    ws = _make_workspace(_workspace(job_id,
+                                    f"filmstrip-{uuid.uuid4().hex[:8]}"))
+    try:
+        out = ws / pipeline.FILMSTRIP_NAME
+        meta = pipeline.make_filmstrip(source, str(out), job.duration or None)
+        if not meta:
+            raise RuntimeError("the sprite could not be made")
+        where = media.store_of(job)
+        key = media.job_prefix(job_id) + pipeline.FILMSTRIP_NAME
+        size = media.put_file(out, key, content_type="image/jpeg",
+                              store=where)
+    finally:
+        _drop_workspace(ws)
+
+    def _set(cur: Job) -> dict | None:
+        if cur.filmstrip_key or media.store_of(cur) != where:
+            return None
+        return {"filmstrip_key": key, "filmstrip_meta": meta,
+                "media_bytes": {**(cur.media_bytes or {}), key: size},
+                # not a use of the project
+                "updated_at": cur.updated_at}
+    if store.modify(job_id, _set) is not None:
+        return True
+    cur = store.get(job_id)
+    if cur is not None and cur.filmstrip_key == key \
+            and media.store_of(cur) == where:
+        return True     # another process stored the same key meanwhile
+    _gc_later([key], store_=where)
+    return False
+
+
+def _filmstrip_run(job_id: str) -> None:
+    try:
+        if not _filmstrip_lazy(job_id):
+            raise RuntimeError("not committed")
+    except Exception as e:
+        print(f"[filmstrip] {job_id}: lazy filmstrip failed: "
+              f"{type(e).__name__}: {e}", flush=True)
+        with _FILMSTRIP_GUARD:
+            _FILMSTRIP_FAILED[job_id] = time.monotonic()
+    finally:
+        with _FILMSTRIP_GUARD:
+            _FILMSTRIP_BUSY.discard(job_id)
+
+
+def _filmstrip_start(job: Job) -> bool:
+    """Queue the lazy filmstrip of `job` (at most once at a time). False
+    when it can't be made (no stored video, failed recently)."""
+    if not (job.proxy_key or job.mezz_key):
+        return False
+    with _FILMSTRIP_GUARD:
+        failed = _FILMSTRIP_FAILED.get(job.id)
+        if failed is not None:
+            if time.monotonic() - failed < _FILMSTRIP_RETRY_S:
+                return False
+            _FILMSTRIP_FAILED.pop(job.id, None)
+        if job.id in _FILMSTRIP_BUSY or \
+                len(_FILMSTRIP_BUSY) >= _FILMSTRIP_MAX_QUEUE:
+            return True
+        _FILMSTRIP_BUSY.add(job.id)
+    try:
+        _FILMSTRIP_POOL.submit(_filmstrip_run, job.id)
+    except Exception:
+        with _FILMSTRIP_GUARD:
+            _FILMSTRIP_BUSY.discard(job.id)
+        raise
+    return True
+
+
+@app.get("/jobs/{job_id}/filmstrip")
+def job_filmstrip(job_id: str, meta: int = 0,
+                  user: User | None = Depends(media_user)):
+    """The timeline's thumbnail sprite (JPEG, `filmstrip` in GET
+    /jobs/{id}: n tiles of tileW x tileH px side by side, tile i the
+    frame at i * interval s). `?meta=1`: that meta as JSON instead.
+    A job without one (from before UX7b) gets it made now: 202
+    filmstrip_pending (Retry-After) until it is there; 404
+    filmstrip_unavailable when it can't be made."""
+    job = get_owned_job(job_id, user)
+    if job.filmstrip_key and job.filmstrip_meta:
+        if meta:
+            return JSONResponse(dict(job.filmstrip_meta),
+                                headers={"Cache-Control": "private, no-cache"})
+        return _media(job, job.filmstrip_key, "image/jpeg",
+                      "filmstrip_unavailable",
+                      cache="private, max-age=604800, immutable")
+    if not _filmstrip_start(job):
+        raise HTTPException(404, "filmstrip_unavailable")
+    raise ApiRefusal(202, "filmstrip_pending", headers={"Retry-After": "3"})
+
+
 @app.get("/me")
 def me(user: User | None = Depends(current_user)):
     """Who is signed in, their plan and minutes, and the media token for

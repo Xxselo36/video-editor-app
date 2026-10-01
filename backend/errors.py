@@ -230,6 +230,8 @@ PROTOCOL_CODES: frozenset[str] = frozenset({
     "clips_not_supported", "duplicate_word_id", "preset_not_live",
     "too_many_words", "unknown_field", "unknown_preset",
     "word_out_of_range", "words_not_monotonic",
+    # the timeline filmstrip (UX7b)
+    "filmstrip_pending", "filmstrip_unavailable",
     # billing / admin
     "billing_disabled", "unknown_plan", "test_mode_testers_only",
     "already_subscribed", "checkout_failed", "no_subscription",

@@ -199,9 +199,10 @@ _KEY_FIELDS = ("source_key", "mezz_key", "proxy_key", "preview_key",
 
 def _keys_of(job: Job) -> tuple:
     """The job's keys (compare-and-set of the commit) — all of them
-    (media._job_keys: also peaks.bin and the CJK font subsets), so a
-    font refresh during the move makes the commit fail and the move
-    retry, instead of flipping the job to R2 with a subset left behind."""
+    (media._job_keys: also peaks.bin, the CJK font subsets and the
+    filmstrip), so a font refresh or a lazily made filmstrip during the
+    move makes the commit fail and the move retry, instead of flipping
+    the job to R2 with a key left behind."""
     return (tuple(getattr(job, f) for f in _KEY_FIELDS),
             tuple((job.output_keys or {}).items()),
             job.preview_version,

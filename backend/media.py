@@ -101,6 +101,7 @@ def _job_keys(job: Any) -> list[str]:
     keys += list((getattr(job, "output_keys", None) or {}).values())
     keys.append(getattr(job, "peaks_key", None))
     keys.append(getattr(job, "poster_key", None))  # UT5
+    keys.append(getattr(job, "filmstrip_key", None))
     for sub in (getattr(job, "font_subsets", None) or {}).values():
         if isinstance(sub, dict):
             keys += [sub.get(k) for k in ("woff2", "ttf", "json")]
@@ -293,10 +294,11 @@ def delete_prefix(prefix: str, *, store: str | None = None) -> int:
 #   jobs/<id>/preview/v<n>.mp4 one preview version
 #   jobs/<id>/source.<ext>     a body upload
 #   jobs/<id>/fonts/<font>.<rev>.<ext>   a replaced CJK font subset
+#   jobs/<id>/filmstrip.jpg    a lazily made filmstrip its job didn't take
 #   uploads/[<user>/]<uuid32>.<ext>   a browser upload
 _GC_JOB = re.compile(
     r"^jobs/[0-9a-f]{12}/((r[0-9]+/)|preview/v[0-9]+\.mp4|source\.[a-z0-9]+"
-    r"|fonts/[a-z0-9-]+\.[0-9a-f]{8}\.(woff2|ttf|json))?$")
+    r"|fonts/[a-z0-9-]+\.[0-9a-f]{8}\.(woff2|ttf|json)|filmstrip\.jpg)?$")
 _GC_UPLOAD = re.compile(
     r"^uploads/([A-Za-z0-9_-]+/)?[0-9a-f]{32}\.[a-z0-9]+$")
 

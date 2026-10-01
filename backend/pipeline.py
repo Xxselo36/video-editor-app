@@ -710,6 +710,106 @@ def _make_proxy(source_path: str, proxy_path: str) -> bool:
     return False
 
 
+# ── Filmstrip (UX7b): the timeline's thumbnails ─────────────────────
+# One JPEG sprite of n tiles side by side (tile=n x 1), each FILMSTRIP_
+# TILE_H px high, tile i showing the frame at i * interval s of the
+# source (seconds = mezz seconds). n <= FILMSTRIP_MAX_TILES: a longer
+# video gets a longer interval. Stored as jobs/{id}/filmstrip.jpg with
+# Job.filmstrip_meta {n, interval, tileW, tileH}; GET /jobs/{id}/filmstrip.
+FILMSTRIP_NAME = "filmstrip.jpg"
+FILMSTRIP_MAX_TILES = 200
+FILMSTRIP_TILE_H = 90
+# One tile a second at most (the proxy's keyframe spacing: only
+# keyframes are decoded, see make_filmstrip).
+FILMSTRIP_MIN_INTERVAL_S = 1.0
+# Wider frames are cropped to this (n x tileW stays under JPEG's 65535).
+_FILMSTRIP_MAX_TILE_W = 320
+_FILMSTRIP_TIMEOUT_S = 300
+
+
+def filmstrip_plan(duration: float) -> tuple[int, float]:
+    """(n tiles, interval s) for a video of `duration` s: one tile per
+    FILMSTRIP_MIN_INTERVAL_S, the interval stretched (to the next 0.01 s)
+    so that n <= FILMSTRIP_MAX_TILES."""
+    d = max(float(duration or 0.0), 0.0)
+    interval = max(FILMSTRIP_MIN_INTERVAL_S,
+                   math.ceil(d / FILMSTRIP_MAX_TILES * 100 - 1e-9) / 100)
+    n = max(1, min(FILMSTRIP_MAX_TILES, math.ceil(d / interval - 1e-6)))
+    return n, interval
+
+
+def _media_duration(path: str) -> float:
+    r = subprocess.run(
+        [get_ffprobe_path(), "-v", "error", "-show_entries",
+         "format=duration", "-of", "default=nw=1:nk=1", path],
+        capture_output=True, text=True, timeout=30)
+    try:
+        return float((r.stdout or "").strip())
+    except ValueError:
+        return 0.0
+
+
+def _image_size(path: str) -> tuple[int, int]:
+    r = subprocess.run(
+        [get_ffprobe_path(), "-v", "error", "-show_entries",
+         "stream=width,height", "-of", "csv=p=0:s=x", path],
+        capture_output=True, text=True, timeout=30)
+    w, _, h = (r.stdout or "").strip().partition("x")
+    return int(w), int(h)
+
+
+def make_filmstrip(source_path: str, out_path: str,
+                   duration: float | None = None) -> dict[str, Any] | None:
+    """Write the filmstrip sprite of `source_path` (the 720p proxy, else
+    the mezz) to `out_path` — `ffmpeg -vf fps=1/N,scale=-2:90,tile=Kx1` —
+    and return its meta {n, interval, tileW, tileH}. Best effort: None
+    (and no file left) on any failure, never raises — nothing depends on
+    the filmstrip.
+
+    Only keyframes are decoded (-skip_frame nokey): the proxy and the
+    mezz have a keyframe every second (or more often), so tile i shows a
+    frame within a second of i * interval, for a fraction of the decode
+    (every frame is decoded when that gives no picture)."""
+    out = Path(out_path)
+    tmp = out.with_name(out.stem + ".tmp" + out.suffix)
+    try:
+        d = float(duration or 0.0) or _media_duration(source_path)
+        if d <= 0:
+            raise ValueError("unknown duration")
+        n, interval = filmstrip_plan(d)
+        vf = (f"fps=fps=1/{interval:g},"
+              f"scale=-2:{FILMSTRIP_TILE_H},"
+              f"crop=w='min(iw,{_FILMSTRIP_MAX_TILE_W})':h=ih,setsar=1,"
+              f"tile={n}x1")
+        for skip in (["-skip_frame", "nokey"], []):
+            # keyframes only; every frame when that gave no picture (a
+            # source with almost no keyframes: not ours)
+            tmp.unlink(missing_ok=True)
+            cmd = [get_ffmpeg_path(), "-v", "error", "-y", *_threads(),
+                   *skip, "-i", source_path,
+                   "-map", "0:V:0", "-an", "-sn", "-dn",
+                   "-vf", vf, "-frames:v", "1", "-q:v", "5",
+                   "-f", "image2", "-update", "1", str(tmp)]
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=_FILMSTRIP_TIMEOUT_S)
+            if r.returncode == 0 and tmp.is_file() and tmp.stat().st_size:
+                break
+        else:
+            raise RuntimeError(f"ffmpeg exited {r.returncode}: "
+                               f"{(r.stderr or '')[-300:]}")
+        w, h = _image_size(str(tmp))
+        tile_w = w // n
+        if tile_w <= 0 or h <= 0:
+            raise RuntimeError(f"unexpected sprite size {w}x{h} for {n}")
+        os.replace(tmp, out)
+        return {"n": n, "interval": interval, "tileW": tile_w, "tileH": h}
+    except Exception as e:
+        tmp.unlink(missing_ok=True)
+        out.unlink(missing_ok=True)
+        print(f"[filmstrip] not made: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
 # A segment may start this much before its predecessor ends (float
 # noise in editor values) and still count as "in order": the single-
 # pass build then holds at most that stretch of decoded frames.
@@ -1309,8 +1409,9 @@ def analyze_only(
         constant (the normalize makes it so: review C8)
       - audio_loudness: {I, TP, LRA, thresh, offset} (or None)
       - peaks_path: peaks.bin in output_dir (or None); font_files: CJK
-        font subsets made for the doc ({} for other scripts) — both
-        stored by store_analysis_extras
+        font subsets made for the doc ({} for other scripts);
+        filmstrip_path / filmstrip_meta: the timeline's thumbnail sprite
+        (or None: best effort) — all stored by store_analysis_extras
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -1595,6 +1696,21 @@ def analyze_only(
                                    daemon=True)
     font_thread.start()
 
+    # The timeline's filmstrip (UX7b) from the proxy, next to the cut
+    # preview; best effort (make_filmstrip never raises).
+    filmstrip_path = str(Path(output_dir) / FILMSTRIP_NAME)
+    filmstrip: dict[str, Any] = {}
+
+    def _filmstrip() -> None:
+        meta = make_filmstrip(preview_source(normalized_path),
+                              filmstrip_path, duration)
+        if meta:
+            filmstrip["meta"] = meta
+
+    filmstrip_thread = threading.Thread(target=_filmstrip, name="filmstrip",
+                                        daemon=True)
+    filmstrip_thread.start()
+
     _stage("analyze.cuts", 95)
     preview_path = str(Path(output_dir) / "preview.mp4")
     _ffmpeg_cuts_preview(preview_source(normalized_path), segments,
@@ -1605,6 +1721,7 @@ def analyze_only(
                             poster_path)
     font_thread.join()
     audio_thread.join()
+    filmstrip_thread.join()
 
     return {
         "normalized_path": normalized_path,
@@ -1628,6 +1745,8 @@ def analyze_only(
         "poster_path": poster_path if poster_ok else None,
         "font_files": fonts,
         "format_warning": format_warning,
+        "filmstrip_path": filmstrip_path if filmstrip else None,
+        "filmstrip_meta": filmstrip.get("meta"),
     }
 
 
@@ -1669,8 +1788,9 @@ def store_analysis_extras(
     put: Callable[[str, str, str], int],
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """Store what the analysis made besides the videos — peaks.bin, the
-    poster (UT5) and the CJK font subsets — with put(path, key,
-    content_type) -> size (the caller's store and error handling).
+    poster (UT5), the CJK font subsets and the filmstrip (best effort)
+    — with put(path, key, content_type) -> size (the caller's store
+    and error handling).
     Returns (job fields, {key: size})."""
     from backend import font_subset, media
     prefix = media.job_prefix(job_id)
@@ -1696,6 +1816,21 @@ def store_analysis_extras(
         subsets, more = font_subset.store(res["font_files"], prefix, put)
         fields["font_subsets"] = subsets
         sizes.update(more)
+    sprite, meta = res.get("filmstrip_path"), res.get("filmstrip_meta")
+    if sprite and meta and Path(sprite).is_file():
+        # Best effort: a failed upload leaves the job without thumbnails
+        # (GET /jobs/{id}/filmstrip makes them later), never fails the
+        # analysis. A fence (InterruptedError) still ends the attempt.
+        key = prefix + FILMSTRIP_NAME
+        try:
+            sizes[key] = put(sprite, key, "image/jpeg")
+            fields["filmstrip_key"] = key
+            fields["filmstrip_meta"] = dict(meta)
+        except InterruptedError:
+            raise
+        except Exception as e:
+            print(f"[filmstrip] not stored: {type(e).__name__}: {e}",
+                  flush=True)
     return fields, sizes
 
 
