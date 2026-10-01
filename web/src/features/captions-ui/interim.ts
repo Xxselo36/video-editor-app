@@ -4,7 +4,7 @@
  * and which words the engine gets. InterimOverlay.tsx wires them to the
  * DOM; the tests (interim.test.ts) cover them without one.
  */
-import { migratePresetId, type CaptionWord, type StyleRef } from "@/lib/captions";
+import { migratePresetId, type CaptionStyle, type CaptionWord, type StyleRef } from "@/lib/captions";
 import { phrasesToUnits, type TimedText } from "@/features/editor/legacy/phraseUnits";
 
 export type Box = { x: number; y: number; w: number; h: number };
@@ -107,6 +107,23 @@ export function interimStyleRef(v1Preset: string | null | undefined): StyleRef {
   const y = WEB_SUB_POS[(v1Preset ?? "").trim().toLowerCase()];
   if (y !== undefined) ref.overrides = { ...ref.overrides, y };
   return ref;
+}
+
+/**
+ * The engine geometry a v1 preset's interim preview keeps although its v2
+ * preset changed since (UT5 grew Power to the approved mock size). The
+ * customer's export is still the v1 burn, so their preview must not grow
+ * with it.
+ */
+const V1_GEOMETRY: Readonly<Record<string, { size: number; maxWidth: number }>> = {
+  classic: { size: 0.09, maxWidth: 0.8 },
+};
+
+/** `style` with the font size / line width the v1 preset's preview had. */
+export function pinV1Geometry<T extends CaptionStyle | null>(style: T, v1Preset: string | null | undefined): T {
+  const g = V1_GEOMETRY[(v1Preset ?? "").trim().toLowerCase()];
+  if (!style || !g) return style;
+  return { ...style, font: { ...style.font, size: g.size }, layout: { ...style.layout, maxWidth: g.maxWidth } };
 }
 
 /** Text of a drawn page (test hook, change detection). */
