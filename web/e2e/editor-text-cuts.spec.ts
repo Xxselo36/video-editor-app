@@ -144,6 +144,45 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
     expect(said).toMatch(/\bfor\b/);
   });
 
+  test("peaks come from the API itself and snap a text cut; a redirecting /peaks leaves the edges raw, no CORS error", async ({
+    page,
+    stub,
+  }) => {
+    const errors: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "error") errors.push(m.text());
+    });
+    // the gap the cut of "ten seconds" (11.195–11.812) leaves: its start
+    const gapStart = async (id: string) => {
+      await expect.poll(async () => covered(await timeline(stub, id), 11.5), SAVED).toBe(false);
+      return (await timeline(stub, id)).map((x) => x[1]).find((e) => e > 10.9 && e < 11.5)!;
+    };
+    const job = await stub.seed("review_speech");
+    const peaks = page.waitForResponse((r) => /\/jobs\/[^/]+\/peaks/.test(r.url()));
+    await open(page, job.id);
+    const res = await peaks;
+    expect(res.status()).toBe(200);
+    expect((await res.body()).length).toBeGreaterThan(1000);
+    await page.waitForTimeout(300);
+    await selectWords(page, "ten", "seconds");
+    await page.getByTestId("ed-word-cut").click();
+    const snapped = await gapStart(job.id);
+    expect(Math.abs(snapped - 11.195)).toBeLessThanOrEqual(0.121);
+    // (i + 0.5) / 100: the centre of a peaks frame
+    expect(Math.abs(snapped * 100 - 0.5 - Math.round(snapped * 100 - 0.5))).toBeLessThan(0.01);
+
+    // the R2 redirect the editor's fetch used to follow: not followed now
+    const job2 = await stub.seed("review_speech", { peaks: "redirect" });
+    const red = page.waitForResponse((r) => /\/jobs\/[^/]+\/peaks/.test(r.url()) && r.url().includes(job2.id));
+    await open(page, job2.id);
+    await red;
+    await page.waitForTimeout(300);
+    await selectWords(page, "ten", "seconds");
+    await page.getByTestId("ed-word-cut").click();
+    expect(await gapStart(job2.id)).toBeCloseTo(11.195, 3);
+    expect(errors.filter((e) => /CORS|peaks|Access-Control/i.test(e))).toEqual([]);
+  });
+
   test("Cleo cut: a take chip with its line; the chip restores it; ⌘Z cuts it again", async ({ page, stub }) => {
     const job = await stub.seed("review_speech", { ai_cuts: [[10.45, 13.7, "voice_cmd"]] });
     await open(page, job.id);

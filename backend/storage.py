@@ -251,6 +251,21 @@ def delete(key: str) -> None:
     _client().delete_object(Bucket=bucket(), Key=key)
 
 
+def get_bytes(key: str, max_bytes: int) -> bytes | None:
+    """A small object's bytes (at most `max_bytes`: ValueError when it is
+    larger); None when missing."""
+    try:
+        body = _client().get_object(Bucket=bucket(), Key=key)["Body"]
+    except Exception as e:
+        if is_not_found(e):
+            return None
+        raise
+    data = body.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError(f"object {key} is larger than {max_bytes} bytes")
+    return data
+
+
 def get_text(key: str) -> str | None:
     """A small text object (e.g. jobs/.owner); None when missing."""
     try:

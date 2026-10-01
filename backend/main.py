@@ -4517,8 +4517,25 @@ def job_peaks(job_id: str, user: User | None = Depends(media_user)):
     job = get_owned_job(job_id, user)
     if not job.peaks_key:
         raise HTTPException(404, "peaks_not_ready")
-    return _media(job, job.peaks_key, "application/octet-stream",
-                  "peaks_not_ready", cache="private, max-age=604800, immutable")
+    # The body itself, also for R2 jobs (UX10): the editor fetch()es it
+    # from the web origin, and a fetch that follows the 307 to R2 is
+    # refused by the bucket's CORS (Origin: null). 100 bytes a second:
+    # PEAKS_MAX_BYTES covers far more than the longest upload.
+    where = media.store_of(job)
+    if where == "r2" and not storage.r2_available():
+        raise ApiRefusal(503, "storage_unavailable", headers={"Retry-After": "60"})
+    try:
+        return media.small_response(job.peaks_key, media_type="application/octet-stream",
+                                    max_bytes=PEAKS_MAX_BYTES, store=where,
+                                    cache="private, max-age=604800, immutable")
+    except FileNotFoundError:
+        raise HTTPException(409, "peaks_not_ready")
+    except ValueError:
+        raise HTTPException(404, "peaks_not_ready")
+
+
+# peaks.bin is 100 bytes per second of audio: 8 MB ≈ 22 hours.
+PEAKS_MAX_BYTES = 8 * 1024 * 1024
 
 
 @app.get("/jobs/{job_id}/poster")

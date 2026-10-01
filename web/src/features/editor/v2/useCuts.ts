@@ -6,7 +6,8 @@
  * and timeline (EditOrder). The export reads the same clip list
  * (/edit-segments), so what the preview skips is what the export cuts.
  *
- * Peaks (GET /jobs/{id}/peaks, ≈ 6 KB a minute) load with the editor for
+ * Peaks (GET /jobs/{id}/peaks, ≈ 6 KB a minute, the body from the API
+ * itself) load with the editor for
  * clean cut edges; without them (an old job, an error) edges aren't
  * snapped.
  */
@@ -58,8 +59,11 @@ function usePeaks(jobId: string): Uint8Array | null {
   useEffect(() => {
     if (!ready) return;
     let live = true;
-    void fetch(mediaUrl(jobId, "peaks"))
-      .then((r) => (r.ok ? r.arrayBuffer() : null))
+    // The API sends the body itself (also for R2 jobs). A redirect is not
+    // followed: a cross-origin fetch that follows one to R2 is refused by
+    // the bucket's CORS (Origin: null) — no peaks then, never a CORS error.
+    void fetch(mediaUrl(jobId, "peaks"), { redirect: "manual" })
+      .then((r) => (r.ok && r.type !== "opaqueredirect" ? r.arrayBuffer() : null))
       .then((buf) => {
         if (live && buf && buf.byteLength) setPeaks({ job: jobId, data: peaksFromBytes(buf) });
       })

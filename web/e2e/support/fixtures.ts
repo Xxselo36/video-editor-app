@@ -55,6 +55,9 @@ export type SeedOptions = {
   ai_cuts?: [number, number, "voice_cmd" | "filler" | "silence"][];
   /** review_speech (UX10): more transcribed words (nospeech: outside the speech regions). */
   extra_words?: { text: string; start: number; end: number; nospeech?: boolean }[];
+  /** "redirect": /peaks answers a 307 to another origin (an R2 redirect
+   *  the editor can't follow); default: the clip's peaks.bin. */
+  peaks?: "redirect";
 };
 
 export type Seeded = { id: string; seed: SeedName; filename: string; status: string };

@@ -57,6 +57,9 @@ Test API (only this script registers it; never part of the backend):
                              proxy-video plays
                      "probe-none"  not reported, proxy-video 404
                      "real"  the backend's own answer (R2 mode: 307)
+              peaks: "redirect"  /peaks answers a 307 to another origin
+                             (the R2 redirect the editor's fetch can't
+                             follow); default: peaks.bin of the clip
               render: "ok" | "fail"; render_seconds; slow_rebuild (s
               every /edit-segments waits before its rebuild)
   POST /_test/config        {"analysis_seconds": s, "by_filename":
@@ -233,8 +236,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
     from backend import jobs as J
     from backend.auth import get_owned_job, media_user
     from backend.jobs import store
-    from fastapi import Body, Depends, HTTPException
-    from fastapi.responses import FileResponse
+    from fastapi import Body, Depends, HTTPException, Request
+    from fastapi.responses import FileResponse, RedirectResponse
     from fastapi.routing import APIRoute
 
     stub_media.grid()  # the editor suites need it at once
@@ -319,6 +322,27 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         return edit_doc.build_doc(words, data["language"], settings or {},
                                   segments=data["segments"])
 
+    peaks_cache: dict[str, bytes | None] = {}
+
+    def clip_peaks(src: Path | str, out_dir: Path) -> str | None:
+        """peaks.bin of a stub clip (the real audio_analysis, once per
+        clip file), so the editor snaps text-cut edges as in production."""
+        from backend import audio_analysis
+        key = str(src)
+        if key not in peaks_cache:
+            try:
+                peaks_cache[key] = audio_analysis.compute_peaks(key, timeout=60)
+            except Exception as e:  # noqa: BLE001 — the stub runs without peaks then
+                print(f"[stub] no peaks for {key}: {e}", flush=True)
+                peaks_cache[key] = None
+        blob = peaks_cache[key]
+        if not blob:
+            return None
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / "peaks.bin"
+        path.write_bytes(blob)
+        return str(path)
+
     def analysis_result(clip: str, orientation: str, out_dir: Path,
                         audio_warnings: list[str] | None = None,
                         settings: dict | None = None,
@@ -360,6 +384,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         poster_ok = pipeline.make_poster(str(files["proxy"]), float(segs[0][0]) if segs else 0.0,
                                          str(poster))
         doc = clip_doc(clip, data, settings, extra_words, fillers)
+        peaks = clip_peaks(files["src"], out_dir)
         cuts = cut_kinds.label(data["cut_ranges"], log=log, words=doc["words"])
         cut_kinds.mark_words(doc["words"], cuts)
         return {"normalized_path": str(norm), "preview_path": str(preview),
@@ -369,7 +394,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                 "cut_ranges": cuts,
                 "language": data["language"], "audio_warnings": audio_warnings or [],
                 "audio_levels": {}, "scene_events": [],
-                "doc": doc}
+                "doc": doc, "peaks_path": peaks}
 
     def review_fields(res: dict[str, Any]) -> dict[str, Any]:
         """The job fields _run_analyze_inner commits for a finished analysis."""
@@ -469,6 +494,23 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
     # First, so it wins over the backend's own route.
     M.app.router.routes.insert(0, APIRoute("/jobs/{job_id}/proxy-video", proxy_video,
                                            methods=["GET"]))
+    real_peaks = M.job_peaks
+
+    def job_peaks(job_id: str, request: Request, user=Depends(media_user)):
+        """peaks "redirect": what the route did for R2 jobs before UX10's
+        fix: a 307 to another origin (localhost / 127.0.0.1 swapped here,
+        the presigned R2 URL there), which a cross-origin fetch can't read."""
+        if cfg(job_id).get("peaks") == "redirect":
+            get_owned_job(job_id, user)
+            u = request.url
+            host = "127.0.0.1" if u.hostname == "localhost" else "localhost"
+            return RedirectResponse(str(u.replace(hostname=host)), status_code=307)
+        return real_peaks(job_id, user)
+
+    # real classes (this module's annotations are strings, Request is local)
+    job_peaks.__annotations__ = {"job_id": str, "request": Request}
+
+    M.app.router.routes.insert(0, APIRoute("/jobs/{job_id}/peaks", job_peaks, methods=["GET"]))
 
     # ── seeds ─────────────────────────────────────────────────────────
     def create(opts: dict[str, Any], settings: dict, filename: str,
@@ -623,6 +665,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         if opts.get("age_s"):
             store.update(job.id, created_at=time.time() - float(opts["age_s"]))
         set_cfg(job.id, proxy=opts.get("proxy") or proxy, render=opts.get("render") or "ok",
+                peaks=opts.get("peaks"),
                 render_seconds=opts.get("render_seconds"), slow_rebuild=opts.get("slow_rebuild"),
                 clip=clip or "grid", orientation=orientation)
         j = store.get(job.id)
