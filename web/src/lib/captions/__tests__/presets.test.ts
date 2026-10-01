@@ -100,7 +100,7 @@ describe("resolveStyle", () => {
       wordsPerPage: 2,
     })!;
     expect(s.layout.y).toBe(0.5);
-    expect(s.font.size).toBeCloseTo(0.09 * 1.6, 9); // clamped to 1.6
+    expect(s.font.size).toBeCloseTo(0.128 * 1.6, 9); // clamped to 1.6
     expect(s.font.case).toBe("none");
     expect(s.fill).toEqual({ color: "#00FF00" });
     expect(s.highlight.color).toBe("#FF0000");
@@ -123,7 +123,7 @@ describe("resolveStyle", () => {
     const s = resolveStyle("power", { textColor: "red; x", y: Number.NaN, sizeScale: Number.POSITIVE_INFINITY })!;
     expect(s.fill.color).toBe("#FFFFFF");
     expect(s.layout.y).toBe(0.68);
-    expect(s.font.size).toBe(0.09);
+    expect(s.font.size).toBe(0.128); // the approved DF size: 7.2 % of a 9:16 frame's height
   });
 });
 

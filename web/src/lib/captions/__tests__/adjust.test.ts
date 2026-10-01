@@ -52,14 +52,18 @@ describe("per-caption overrides in the engine", () => {
     const big = style({ captions: { w0: { sizeScale: 1.2 } } });
     const l = layoutPage(pagesOf(big)[0], big, { W, H });
     const l0 = layoutPage(p0, s0, { W, H });
-    expect(l.px / l0.px).toBeCloseTo(1.2, 6);
+    // up to 1.2 × on the whole-pixel grid (layout.ts snapPx; a grown page
+    // never rounds up, nor grows past 96 % of the frame width)
+    expect(l.px).toBeGreaterThan(l0.px);
+    expect(l.px).toBeLessThanOrEqual(Math.floor(l0.px * 1.2));
     expect(l.lines.map((x) => x.words.length)).toEqual(l0.lines.map((x) => x.words.length));
     // with the style at 80 %, this caption's 120 % is still 1.2 × the preset
     // (short words: the grown page stays inside the frame)
     const short = timed("Hi. Yes. Go.");
     const both = style({ sizeScale: 0.8, captions: { w0: { sizeScale: 1.2 } } });
     const preset = layoutPage(buildPages(short, s0, { W, H })[0], s0, { W, H });
-    expect(layoutPage(buildPages(short, both, { W, H })[0], both, { W, H }).px / preset.px).toBeCloseTo(1.2, 6);
+    const grown = layoutPage(buildPages(short, both, { W, H })[0], both, { W, H }).px;
+    expect(Math.abs(grown - 1.2 * preset.px)).toBeLessThanOrEqual(1);
     expect(effectiveAdjust(both, pagesOf(both)[0])).toEqual({ y: both.layout.y, sizeScale: 1.2, own: true });
     expect(effectiveAdjust(both, pagesOf(both)[1])).toEqual({ y: both.layout.y, sizeScale: 0.8, own: false });
   });

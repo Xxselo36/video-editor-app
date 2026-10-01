@@ -65,8 +65,10 @@ const HOLD = { holdSec: 0.35 };
 
 const PRESETS: Record<Exclude<PresetId, "none">, PresetDef> = {
   // Bold upper case, thick black outline, the spoken word yellow, numbers green.
+  // Size as in the approved DF mock (owner, UT5): 7.2 % of a 9:16 frame's
+  // height = 0.128 × its width; lines up to 84 % of the width.
   power: {
-    font: { id: "montserrat-900", size: 0.09, case: "upper", lineHeight: 1.08 },
+    font: { id: "montserrat-900", size: 0.128, case: "upper", lineHeight: 1.08 },
     fill: { color: "#FFFFFF" },
     stroke: { color: "#000000", width: 0.11 },
     shadow: { color: "#000000", opacity: 0.8, dx: 0, dy: 0.05, blur: 0 },
@@ -74,7 +76,7 @@ const PRESETS: Record<Exclude<PresetId, "none">, PresetDef> = {
     reveal: "page",
     emphasis: { color: "#22E55B" },
     animation: anim({ pageIn: "pop", pageInSec: 0.12 }),
-    layout: layout({ wordsPerLine: 3, maxLines: 2, wordSpacing: 1.25 }),
+    layout: layout({ wordsPerLine: 3, maxLines: 2, wordSpacing: 1.25, maxWidth: 0.84 }),
     timing: HOLD,
   },
   // Loud comic capitals, slightly slanted, hard shadow; the active word jumps bigger.

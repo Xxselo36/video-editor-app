@@ -185,9 +185,24 @@ export type Geometry = {
   langScript: Script;
 };
 
+/**
+ * Font sizes are whole multiples of PX_STEP device pixels (UT5 parity):
+ * Chromium and Skia in Node (the render worker) rasterise a fractional
+ * size differently enough to show in the caption crop's SSIM; on the same
+ * whole size they agree. 0 turns it off.
+ */
+export const PX_STEP = 1;
+
+/** `px` on the PX_STEP grid (down: never larger, for sizes that must still fit). */
+export function snapPx(px: number, down = false): number {
+  if (!(PX_STEP > 0) || !(px > 0)) return px;
+  const v = (down ? Math.floor(px / PX_STEP + 1e-9) : Math.round(px / PX_STEP)) * PX_STEP;
+  return Math.max(PX_STEP, v);
+}
+
 export function geometry(style: CaptionStyle, W: number, H: number, lang?: string): Geometry {
   const font = requireFont(style.font.id);
-  const px = style.font.size * Math.min(W, H);
+  const px = snapPx(style.font.size * Math.min(W, H));
   const maxEm = (style.layout.maxWidth * W) / px;
   const space = (font.advance(0x20) ?? font.upm * 0.26) / font.upm;
   // a scaled active word needs room so it never touches its neighbours
@@ -358,7 +373,7 @@ export function layoutPage(page: Page, style: CaptionStyle, opts: { W: number; H
   let px = geo.px;
   if (page.oversized) {
     const widest = Math.max(...page.words.map((w) => w.em));
-    px *= Math.min(1, geo.maxEm / widest);
+    px = snapPx(px * Math.min(1, geo.maxEm / widest), true);
   }
   const counts = breakLines(page.words, L.wordsPerLine, (L.maxWidth * W) / px);
   // A caption's own size scales the page as broken at the style's size
@@ -377,7 +392,7 @@ export function layoutPage(page: Page, style: CaptionStyle, opts: { W: number; H
       }
       if (widest > 0) f = Math.min(f, Math.max(1, (ADJUST_MAX_WIDTH * W) / widest));
     }
-    px *= f;
+    px = snapPx(px * f, f > 1);
   }
   const lineH = px * style.font.lineHeight;
   const capH = (font.capHeight / font.upm) * px;

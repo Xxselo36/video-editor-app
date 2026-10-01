@@ -462,7 +462,10 @@ def test_per_caption_position_and_size_reach_the_export(tone_src, tmp_path):
     centre = lambda p: (min(ys(p)) + max(ys(p))) / 2            # noqa: E731
     assert abs(centre(first) - 0.3 * H) < 0.06 * H
     assert all(abs(centre(p) - 0.75 * H) < 0.06 * H for p in rest)
-    assert all(abs(first["px"] / p["px"] - 1.3) < 0.01 for p in rest if len(p["lines"]) == 1)
+    # bigger than the style's size, up to 1.3 × (whole pixels; a grown
+    # caption stays inside 96 % of the frame width)
+    normal = max(p["px"] for p in rest)
+    assert normal < first["px"] <= 1.3 * normal + 1
     band = res["band"]
     assert band["top"] < 0.3 * H - first["px"] and band["top"] + band["height"] > 0.75 * H
     # In the encoded frame the caption is up there, not at the style's y:
