@@ -23,7 +23,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { CaptionRenderer } from "../cache";
 import { pageBounds } from "../draw";
 import { frameState } from "../engine";
-import { ensureFonts, registerCaptionFont, setDefaultFontLoader, type FontStatus } from "../fonts";
+import { ensureFonts, registerCaptionFont, setDefaultFontLoader, stripUndrawable, type FontStatus } from "../fonts";
 import { layoutJSON } from "../layout";
 import { setFontTables, type FontJson, type FontTables } from "../metrics";
 import { resolveStyle } from "../presets";
@@ -65,6 +65,8 @@ export type LayerPlan = {
   presetId: string | null;
   fonts: FontStatus | null;
   approximate: boolean;
+  /** Emoji / symbols no caption font has, stripped from the drawn text (fonts.ts stripUndrawable). */
+  stripped: number;
   layout: ReturnType<typeof layoutJSON>[];
 };
 
@@ -122,10 +124,12 @@ export async function prepare(input: LayerInput, deps: LayerDeps): Promise<Prepa
     presetId: style?.presetId ?? null,
     fonts: null,
     approximate: false,
+    stripped: 0,
     layout: [],
   };
   if (!style || !input.words.length) return { input, style, renderer: null, plan: empty };
   const fonts = await ensureFonts(style, { lang, text: input.words.map((w) => w.text), loader });
+  const stripped = input.words.reduce((n, w) => n + stripUndrawable(w.text, style.font.id, lang).removed, 0);
   const surface = (w: number, h: number): Surface => {
     const canvas = deps.createCanvas(w, h);
     return { canvas, ctx: canvas.getContext("2d") as Ctx2D };
@@ -153,7 +157,7 @@ export async function prepare(input: LayerInput, deps: LayerDeps): Promise<Prepa
     input,
     style,
     renderer,
-    plan: { ...empty, band, pages: renderer.pages.length, fonts, approximate, layout },
+    plan: { ...empty, band, pages: renderer.pages.length, fonts, approximate, layout, stripped },
   };
 }
 

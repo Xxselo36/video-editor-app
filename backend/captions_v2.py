@@ -305,6 +305,24 @@ class CaptionFontError(CaptionLayerError):
     (and couldn't be re-made): the layer would draw tofu."""
 
 
+def drawable_text(text: str) -> str:
+    """`text` without emoji / symbols / private use and their joiners:
+    the caption engine leaves those out when no font has them
+    (web/src/lib/captions/fonts.ts stripUndrawable), so they never call
+    for a font subset."""
+    import unicodedata
+    out = []
+    for ch in text:
+        cp = ord(ch)
+        if (unicodedata.category(ch) in ("So", "Co", "Cf")
+                or 0xFE00 <= cp <= 0xFE0F or 0x1F3FB <= cp <= 0x1F3FF
+                or 0x1F1E6 <= cp <= 0x1F1FF or cp == 0x20E3
+                or 0xE0000 <= cp <= 0xE01EF):
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
 def ensure_cjk_font(store: Any, job_id: str, job: Any,
                     spec: dict[str, Any]) -> dict[str, Any]:
     """For a CJK transcript: make sure the job's font subset holds every
@@ -317,7 +335,7 @@ def ensure_cjk_font(store: Any, job_id: str, job: Any,
     font_id = font_subset.font_for(spec.get("language"))
     if not font_id:
         return spec
-    text = font_subset.text_of(spec.get("words"))
+    text = drawable_text(font_subset.text_of(spec.get("words")))
     entry = (job.font_subsets or {}).get(font_id)
     if not (isinstance(entry, dict) and entry.get("json") and entry.get("ttf")
             and font_subset.covers(entry, text)):
@@ -327,7 +345,7 @@ def ensure_cjk_font(store: Any, job_id: str, job: Any,
             j = job if base is not None else _without_subset(job, font_id)
             subsets = font_subset.refresh(
                 store, job_id, j,
-                font_subset.text_of((job.doc or {}).get("words")) + text,
+                drawable_text(font_subset.text_of((job.doc or {}).get("words"))) + text,
                 tempfile.mkdtemp(prefix="cleo_fonts_"))
         except Exception as e:
             raise CaptionFontError(
@@ -778,6 +796,10 @@ def render_primary(
         layer_in = _layer_input(spec, mapped, src, frames, fonts, trace=trace)
         plan = layer_plan(layer_in)
         band = plan.get("band")
+        if plan.get("stripped"):
+            # a count only: caption text is the user's content
+            print(f"[captions] warning: {plan['stripped']} emoji/symbol character(s) "
+                  "without a caption font left out (as in the preview)", flush=True)
         if band:
             layer_in["band"] = band
         else:
@@ -848,7 +870,7 @@ def render_primary(
                 print(line[-1], flush=True)
     timings["encode"] = round(time.monotonic() - t, 3)
     return {"frames": frames, "band": band, "path": "segments" if seg else "select",
-            "clips": len(clips), "plan": {k: plan.get(k) for k in ("pages", "presetId", "approximate", "fonts")}}
+            "clips": len(clips), "plan": {k: plan.get(k) for k in ("pages", "presetId", "approximate", "fonts", "stripped")}}
 
 
 def _feed(node: subprocess.Popen, layer_in: dict[str, Any]) -> None:

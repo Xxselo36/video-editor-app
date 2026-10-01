@@ -1319,3 +1319,16 @@ Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
   Video ansehen (Log: `[captions] v2 primary: … frames`), dann für alle.
 - **Mehr Stile:** `CLEO_CAPTION_PRESETS_LIVE` (Default `clipper,power`)
   erst erweitern, wenn du den Stil im Abnahmeblatt abgehakt hast.
+- **Emoji:** Emoji und Symbole, die keine Untertitel-Schrift hat, lässt
+  die Engine weg — in der Vorschau und im Export gleich, der Export
+  scheitert nie daran (Log: `[captions] warning: N emoji/symbol
+  character(s) … left out`, nur die Anzahl). Eine Farb-Emoji-Schrift im
+  Render-Image (Noto Color Emoji, 10,8 MB; @napi-rs/canvas könnte sie
+  zeichnen) ist bewusst nicht drin: die Vorschau bräuchte dieselbe
+  Schrift (10,8 MB im Browser), sonst sähen Emoji und Zeilenumbrüche
+  anders aus als im Export.
+- **Japanisch/Koreanisch/Chinesisch:** Fehlt der Teil-Schriftsatz des
+  Projekts ein Zeichen (z. B. nach einer Korrektur), wird er vor dem
+  Export neu erzeugt. Klappt das nicht, läuft ein noch nie exportiertes
+  Projekt mit v1; ein v2-Projekt bekommt „Render failed“ (nie Kästchen
+  statt Zeichen).

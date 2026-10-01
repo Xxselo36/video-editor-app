@@ -254,6 +254,30 @@ def test_cjk_subset_is_remade_for_edited_text(monkeypatch):
     assert subsets["noto-sans-jp-800"]["ttf"] not in (got.media_bytes or {})
 
 
+def test_emoji_dont_need_a_font_but_an_uncovered_kanji_does(monkeypatch):
+    """Emoji are left out of the drawn text (fonts.ts stripUndrawable):
+    they never trigger a re-subset; a kanji the subset lacks still does."""
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    from backend import font_subset
+    calls = []
+
+    def refresh(st, job_id, job, text, ws):
+        calls.append(text)
+        return {"noto-sans-jp-800": {"chars": "成果結です", "json": "b.json", "ttf": "b.ttf"}}
+    monkeypatch.setattr(font_subset, "refresh", refresh)
+    covered = {"noto-sans-jp-800": {"chars": "結果です", "json": "a.json", "ttf": "a.ttf"}}
+    emoji_units = [{"text": "結果🎉", "original_start": 0.0, "original_end": 0.5},
+                   {"text": "です👍🏽", "original_start": 0.6, "original_end": 1.0}]
+    job = _ja_job(font_subsets=covered)
+    spec = C.prepare_render(store, job.id, job, emoji_units)
+    assert calls == [] and spec["fonts"][0]["ttf"] == "a.ttf"
+    job2 = _ja_job(font_subsets=covered)
+    spec2 = C.prepare_render(store, job2.id, job2, [{**emoji_units[0], "text": "成果🎉"}])
+    assert len(calls) == 1 and "成" in calls[0] and "🎉" not in calls[0]
+    assert spec2["fonts"][0]["ttf"] == "b.ttf"
+    assert C.drawable_text("ok👨‍👩‍👧1️⃣🇩🇪") == "ok1"
+
+
 def test_cjk_without_any_subset_makes_one(monkeypatch):
     monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
     calls = []

@@ -413,6 +413,23 @@ def test_render_to_dir_v2(tone_src, tmp_path):
     assert "burn" not in timings and not (tmp_path / "out" / "captions").exists()
 
 
+def test_emoji_never_fail_an_export(tone_src, tmp_path, capsys):
+    """Emoji typed in the editor (or a symbol from Whisper): left out of
+    the drawn text, like in the preview, with a count in the log."""
+    words = [{"id": "e0", "text": "fire🔥", "start": 0.2, "end": 0.6},
+             {"id": "e1", "text": "🎉", "start": 0.7, "end": 1.0},
+             {"id": "e2", "text": "now👍🏽", "start": 1.1, "end": 1.5}]
+    trace = tmp_path / "t.json"
+    res = C.render_primary(str(tone_src), str(tmp_path / "e.mp4"), [(0.0, 2.0)], None,
+                           _spec(words), tmp_path / "w", trace=str(trace))
+    assert res["plan"]["stripped"] == 4 and res["plan"]["fonts"]["uncovered"] == []
+    drawn = [w["text"] for p in json.loads(trace.read_text())["plan"]["layout"]
+             for ln in p["lines"] for w in ln]
+    assert drawn == ["FIRE", "NOW"]
+    log = capsys.readouterr().out
+    assert "4 emoji/symbol character(s)" in log and "🔥" not in log
+
+
 def test_ux8_forced_breaks_start_caption_pages(tone_src, tmp_path):
     """A forced break in the v2 editor starts a new caption page in the
     export, as in the preview."""
