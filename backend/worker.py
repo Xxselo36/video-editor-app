@@ -1005,6 +1005,13 @@ def _render(ctx: Attempt) -> dict[str, Any]:
                 extra: dict[str, Any] = {}
                 if _accepts(render_fn, "cancel_check"):
                     extra["cancel_check"] = ctx.cancelled
+                # UT4: pins the job's caption engine at its first render;
+                # a v2 spec only with CLEO_CAPTION_ENGINE=v2.
+                from backend import captions_v2
+                captions = captions_v2.prepare_render(store, job_id, job,
+                                                      subtitles)
+                if captions and _accepts(render_fn, "captions"):
+                    extra["captions"] = captions
                 with llm.observing(obs):
                     result = render_fn(
                         job_id=job_id, gen=gen, mezz_key=mezz_key,

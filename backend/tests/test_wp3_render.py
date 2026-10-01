@@ -425,7 +425,8 @@ def test_modal_function_definition():
     args = [a.arg for a in fns["render_r2"].args.args]
     assert args == ["job_id", "gen", "mezz_key", "out_prefix", "segments",
                     "subtitles", "caption_preset", "cut_style", "language",
-                    "output_formats", "segment_effects", "hooks", "bucket"]
+                    "output_formats", "segment_effects", "hooks", "bucket",
+                    "captions"]
     assert '"boto3' in src
     assert pipeline._MODAL_FUNCTION_TIMEOUT_S == 3600.0
 

@@ -95,6 +95,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import backend.pipeline as pipeline
 from backend import accounts, auth, billing, costs, db, media, observability
 from backend import doc as edit_doc  # noqa: E402
+from backend import captions_v2  # noqa: E402
 from backend import font_subset  # noqa: E402
 from backend import errors  # noqa: E402
 from backend import storage
@@ -2644,6 +2645,10 @@ def _run_render_inner(
             social_future = _SOCIAL_POOL.submit(
                 _social_caption, edited_subtitles, job.language)
             mezz_key = job.mezz_key or _backfill_mezz(job, progress, where)
+            # UT4: pins the job's caption engine at its first render;
+            # a v2 spec only with CLEO_CAPTION_ENGINE=v2.
+            captions = captions_v2.prepare_render(store, job_id, job,
+                                                  edited_subtitles)
             result = pipeline.render_to_keys(
                 job_id=job_id, gen=gen, mezz_key=mezz_key,
                 out_prefix=out_prefix, store=where,
@@ -2657,6 +2662,7 @@ def _run_render_inner(
                 duration=job.duration,
                 workspace=str(ws),
                 progress_cb=progress,
+                **({"captions": captions} if captions else {}),
             )
         except Exception as e:
             progress.close()
@@ -4447,28 +4453,9 @@ def refresh_fonts(job_id: str, user: User | None = Depends(current_user)):
     current = dict(job.font_subsets or {})
     if not font_id or font_subset.covers(current.get(font_id), text):
         return {"font_subsets": font_subset.public(current)}
-    where = media.store_of(job)
-    ws = _workspace(job_id, "fonts")
-    try:
-        made = font_subset.make(font_id, text, ws)
-        subsets, sizes = font_subset.store(
-            {font_id: made}, media.job_prefix(job_id),
-            lambda path, key, ctype: media.put_file(path, key, content_type=ctype,
-                                                    store=where))
-    finally:
-        shutil.rmtree(ws, ignore_errors=True)
-    old = current.get(font_id) or {}
-    stale = [old.get(k) for k in ("woff2", "ttf", "json")
-             if old.get(k) and old.get(k) != subsets[font_id].get(k)]
-
-    def change(cur: Job) -> dict:
-        return {"font_subsets": {**(cur.font_subsets or {}), **subsets},
-                "media_bytes": {**{k: v for k, v in (cur.media_bytes or {}).items()
-                                   if k not in stale}, **sizes}}
-    store.modify(job_id, change)
-    _gc_later(stale, store_=where)
-    cur = store.get(job_id)
-    return {"font_subsets": font_subset.public(cur.font_subsets if cur else subsets)}
+    subsets = font_subset.refresh(store, job_id, job, text,
+                                  _workspace(job_id, "fonts"))
+    return {"font_subsets": font_subset.public(subsets)}
 
 
 @app.get("/jobs/{job_id}/fonts/{name}")

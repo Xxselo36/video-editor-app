@@ -52,6 +52,11 @@ render_volume = modal.Volume.from_name(
 )
 VOLUME_MOUNT = "/vol"
 
+# Node for the UT4 caption layer (the version the tests run on).
+NODE_VERSION = "22.22.2"
+NODE_SHA256 = "88fd1ce767091fd8d4a99fdb2356e98c819f93f3b1f8663853a2dee9b438068a"
+CAPTIONS_ROOT = "/opt/cleo-captions"
+
 image = (
     modal.Image.debian_slim(python_version="3.13")
     # Fonts: caption burn-in looks for DejaVu/Liberation on Linux; without
@@ -77,12 +82,49 @@ image = (
         "boto3>=1.43,<1.44",
         "botocore>=1.43,<1.44",
     )
+    # UT4 caption layer (backend/captions_v2.py): Node 22 (official
+    # build, checksum pinned) + backend/captions (npm ci: @napi-rs/canvas
+    # prebuilt linux-x64-gnu, harfbuzzjs, esbuild) bundling the editor's
+    # caption engine (web/src/lib/captions) at image build time. Built
+    # in /opt/cleo-captions: the backend/ mount below would hide a build
+    # inside /app/backend. Copied (copy=True), so these layers rebuild
+    # only when those files change.
+    .apt_install("ca-certificates", "curl", "xz-utils")
+    .run_commands(
+        f"curl -fsSL -o /tmp/node.tar.xz https://nodejs.org/dist/v{NODE_VERSION}/"
+        f"node-v{NODE_VERSION}-linux-x64.tar.xz",
+        f"echo '{NODE_SHA256}  /tmp/node.tar.xz' | sha256sum -c -",
+        "tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 "
+        "--exclude='*/include' --exclude='*/share' && rm /tmp/node.tar.xz",
+        "node --version",
+    )
+    .add_local_file("backend/captions/package.json",
+                    f"{CAPTIONS_ROOT}/backend/captions/package.json", copy=True)
+    .add_local_file("backend/captions/package-lock.json",
+                    f"{CAPTIONS_ROOT}/backend/captions/package-lock.json", copy=True)
+    .run_commands(f"cd {CAPTIONS_ROOT}/backend/captions && npm ci --no-audit --no-fund")
+    .add_local_file("backend/captions/build.mjs",
+                    f"{CAPTIONS_ROOT}/backend/captions/build.mjs", copy=True)
+    .add_local_dir("web/src/lib/captions",
+                   f"{CAPTIONS_ROOT}/web/src/lib/captions", copy=True,
+                   ignore=["__tests__"])
+    .run_commands(
+        f"cd {CAPTIONS_ROOT}/backend/captions && node build.mjs "
+        "&& npm prune --omit=dev --no-audit --no-fund")
+    .env({"CLEO_CAPTION_LAYER_DIR": f"{CAPTIONS_ROOT}/backend/captions"})
     # Bundle the SmartCut source so _multi_clip_burn + _ffmpeg_concat
     # + _export_format can all run inside the Modal container without
     # network round-trips per segment.
     .add_local_dir("src", remote_path="/app/src")
     .add_local_dir("plugins", remote_path="/app/plugins")
-    .add_local_dir("backend", remote_path="/app/backend")
+    .add_local_dir("backend", remote_path="/app/backend",
+                   ignore=["captions/node_modules", "**/__pycache__"])
+    # The caption faces the editor loads (same files: woff2 / Devanagari
+    # .ttf) and the script table backend/doc.py reads.
+    .add_local_dir("web/public/fonts/captions",
+                   remote_path="/app/web/public/fonts/captions")
+    .add_local_file("web/src/lib/captions/script-support.json",
+                    "/app/web/src/lib/captions/script-support.json")
     # Bundled caption fonts (Bangers for Clipper): src/effects.py looks
     # for them at src/../assets/fonts. Without this Clipper burned in
     # DejaVu Sans Bold (captions.md C4).
@@ -247,6 +289,7 @@ if WITH_R2:
         segment_effects: list[dict],
         hooks: list[dict],
         bucket: str | None = None,
+        captions: dict | None = None,
     ) -> dict:
         """One render, R2 in and out: get the mezz to local SSD, then burn →
         concat → effects → thumbnail → formats → hook cuts, and put every
@@ -254,7 +297,11 @@ if WITH_R2:
         alias the primary's key. Returns {outputs: {fmt: {key, size}},
         thumb: {key, size} | None, hooks: [{k, key, size, title, reason,
         start, end}], timings}. Outputs are written locally and uploaded —
-        never through a CloudBucketMount (faststart needs seek)."""
+        never through a CloudBucketMount (faststart needs seek).
+
+        `captions` (UT4, backend/captions_v2.py): a v2 render — the
+        editor's caption engine (Node, /app/backend/captions) draws the
+        captions into one cut + overlay + encode pass. None: v1."""
         import os
         import shutil
         import sys
@@ -289,7 +336,8 @@ if WITH_R2:
                 [(float(s), float(e)) for s, e in segments],
                 segment_effects or [], subtitles, caption_preset, cut_style,
                 language, output_formats or [], hooks or [],
-                parallelism=8, timings=timings)
+                parallelism=8, timings=timings, captions=captions,
+                fetch=storage.get_file)
             t = time.monotonic()
             result = store_render_files(files, out_prefix, storage.put_file)
             timings["put"] = round(time.monotonic() - t, 3)

@@ -54,6 +54,10 @@ web/.next/
 web/out/
 web/.turbo/
 
+# UT4 caption layer: npm ci + node build.mjs (backend/captions)
+backend/captions/node_modules/
+backend/captions/render_layer.mjs
+
 # Local env
 .env
 .env.local

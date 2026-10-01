@@ -28,6 +28,9 @@ on:
       - 'backend/tests/stub_server.py'
       - 'backend/tests/stub_media.py'
       - 'backend/errors.py'
+      # the job CJK subset the caption parity suite makes (UT4)
+      - 'backend/font_subset.py'
+      - 'backend/font_metrics.py'
       - 'docs/i18n-glossary.md'
       - '.github/workflows/web.yml'
   pull_request:
@@ -36,6 +39,9 @@ on:
       - 'backend/tests/stub_server.py'
       - 'backend/tests/stub_media.py'
       - 'backend/errors.py'
+      # the job CJK subset the caption parity suite makes (UT4)
+      - 'backend/font_subset.py'
+      - 'backend/font_metrics.py'
       - 'docs/i18n-glossary.md'
       - '.github/workflows/web.yml'
   schedule:
@@ -75,7 +81,7 @@ jobs:
     name: typecheck · lint · unit · i18n
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -84,6 +90,18 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      # UT4 caption parity (src/lib/captions/__tests__/parity.test.ts):
+      # Chromium for the preview side, and the backend's fontTools for the
+      # ja cells' job font subset (backend/font_subset.py). With CI set the
+      # suite fails instead of skipping when either is missing.
+      - name: Playwright Chromium (caption parity)
+        run: npx playwright install --with-deps chromium
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: fontTools (caption parity, ja subset)
+        working-directory: .
+        run: python -m pip install "$(grep -E '^fonttools==' backend/requirements.txt)" "$(grep -iE '^brotli==' backend/requirements.txt || echo brotli)"
       - name: Typecheck
         run: npm run typecheck
       - name: Lint

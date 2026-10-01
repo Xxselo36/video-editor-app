@@ -20,7 +20,7 @@
  * characters inside a token), and no space is put between two CJK words.
  */
 import { isEmphasis } from "./emphasis";
-import { faceChain } from "./fonts";
+import { faceChain, stripUndrawable } from "./fonts";
 import { measureText, requireFont } from "./metrics";
 import { joinsWithoutSpace, scriptOfLang, segmentsWithoutSpaces, wordScript } from "./scripts";
 import type { CaptionStyle, CaptionWord, LineBox, Page, PageLayout, PageWord, Script, WordBox } from "./types";
@@ -252,7 +252,7 @@ export function buildPages(words: readonly CaptionWord[], style: CaptionStyle, o
   const L = style.layout;
   const units: Unit[] = [];
   words.forEach((w, index) => {
-    const source = clean(w.text);
+    const source = clean(stripUndrawable(w.text, style.font.id, lang).text);
     if (!source) return;
     units.push({ index, ...(w.id ? { id: w.id } : {}), source, start: w.start, end: w.end, breakBefore: w.breakBefore });
   });

@@ -4,6 +4,10 @@ name: Deploy Modal render
 # image at deploy time, so every change there needs a redeploy. This does
 # it on each push to main (and on demand). Needs the repo secrets
 # MODAL_TOKEN_ID and MODAL_TOKEN_SECRET (same values as on Railway).
+# Since UT4 the image also builds the caption layer (Node 22 + the web's
+# caption engine, web/src/lib/captions, bundled by backend/captions) and
+# ships the caption fonts (web/public/fonts/captions): Modal runs those
+# build steps itself, nothing extra is needed here.
 
 on:
   push:
@@ -13,6 +17,8 @@ on:
       - 'src/**'
       - 'plugins/**'
       - 'assets/fonts/**'
+      - 'web/src/lib/captions/**'
+      - 'web/public/fonts/captions/**'
       - '.github/workflows/modal-deploy.yml'
   workflow_dispatch:
     inputs:

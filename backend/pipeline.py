@@ -2879,12 +2879,20 @@ def render_to_dir(
     progress_cb: Callable[[str, float], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
     timings: dict[str, float] | None = None,
+    captions: dict[str, Any] | None = None,
+    fetch: Callable[[str, str], Any] | None = None,
 ) -> dict[str, Any]:
     """burn → concat → effects → thumbnail → formats → hook cuts, all in
     `out_dir` (render_r2 on Modal). `segments` / `effects` come from
     _prepare_render. Returns {"primary": path, "thumb": path | None,
     "formats": {fmt: path} (a format with the primary's size IS the
-    primary's path), "hooks": [{k, path, title, reason, start, end}]}."""
+    primary's path), "hooks": [{k, path, title, reason, start, end}]}.
+
+    `captions` (UT4, backend/captions_v2.py build_spec): a v2 render —
+    cut, caption layer, audio and encode in one pass
+    (captions_v2.render_primary) instead of burn → concat → effects;
+    `fetch(key, path)` gets the job's CJK font subset. None: v1, as
+    before."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     stage = progress_cb or (lambda msg, pct: None)
@@ -2897,6 +2905,33 @@ def render_to_dir(
         timings[name] = round(now - t, 3)
         t = now
 
+    primary = out / "primary.mp4"
+    if captions and captions.get("engine") == "v2":
+        from backend import captions_v2
+        stage(errors.stage_message("render.encode", "Rendering…"), 10)
+        info = captions_v2.render_primary(
+            str(mezz_path), str(primary), segments, effects, captions,
+            out / "captions", fetch=fetch, timings=timings,
+            cancel_check=cancel_check)
+        shutil.rmtree(out / "captions", ignore_errors=True)
+        print(f"[captions] v2 primary: {info['frames']} frames, "
+              f"{info['clips']} clip(s), {info['path']} path, band "
+              f"{info['band']}", flush=True)
+        t = time.monotonic()
+    else:
+        _render_v1_primary(mezz_path, primary, segments, effects, subtitles,
+                           caption_preset, cut_style, language, parallelism,
+                           source_audio, stage, cancel_check, lap)
+    return _finish_render(out, primary, output_formats, hooks, stage, lap)
+
+
+def _render_v1_primary(mezz_path, primary: Path, segments, effects,
+                       subtitles, caption_preset, cut_style, language,
+                       parallelism, source_audio, stage, cancel_check,
+                       lap) -> None:
+    """render_to_dir's v1 primary: MoviePy burn per clip → concat →
+    effects pass."""
+    out = primary.parent
     burn_dir = out / "burn"
     burn_dir.mkdir(exist_ok=True)
     extra: dict[str, Any] = web_burn_kwargs(caption_preset)
@@ -2911,7 +2946,6 @@ def render_to_dir(
     if not clips:
         raise RuntimeError("Render produced no output clips.")
     lap("burn")
-    primary = out / "primary.mp4"
     stage(errors.stage_message("render.encode", "Stitching clips…"), 70)
     try:
         if source_audio:
@@ -2935,6 +2969,11 @@ def render_to_dir(
                   flush=True)
             fx.unlink(missing_ok=True)
         lap("effects")
+
+
+def _finish_render(out: Path, primary: Path, output_formats, hooks, stage,
+                   lap) -> dict[str, Any]:
+    """render_to_dir after the primary: thumbnail → formats → hooks."""
     thumb = out / "thumb.jpg"
     _generate_thumbnail(str(primary), str(thumb))
     lap("thumbnail")
@@ -3058,12 +3097,18 @@ def render_to_keys(
     cancel_check: Callable[[], bool] | None = None,
     store: str | None = None,
     mezz_bytes: int | None = None,
+    captions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Render job `job_id` (generation `gen`) from its mezz object into
     keys under `out_prefix`, both in `store` (the job's, media.store_of).
     Hook moments are found first (LLM, output time). Returns
     store_render_files' shape (+ "timings"). Raises
-    RenderUnavailableError like render_only."""
+    RenderUnavailableError like render_only.
+
+    `captions` (UT4, captions_v2.prepare_render): a v2 render. It runs
+    on render_r2 or locally (render_to_dir); the volume path
+    (render_burn_concat) and a machine without the caption layer render
+    v1 instead (logged)."""
     import functools
     from backend import media
 
@@ -3089,7 +3134,8 @@ def render_to_keys(
                 language=language,
                 output_formats=settings.get("output_formats") or [],
                 hooks=hooks, _stage=_stage, cancel_check=cancel_check,
-                mezz_bytes=mezz_bytes)
+                mezz_bytes=mezz_bytes,
+                **({"captions": captions} if captions else {}))
         except _RenderR2Missing as e:
             print(f"[modal] render_r2 is not deployed ({e}) — rendering "
                   "on the volume path (render_burn_concat)", flush=True)
@@ -3101,12 +3147,38 @@ def render_to_keys(
             use_modal = False
     # Volume path (render_burn_concat) or a local render: the mezz and
     # the outputs pass through this machine.
+    if captions:
+        from backend import captions_v2
+        why = ("the volume render path has no caption layer" if use_modal
+               else None if captions_v2.layer_available()
+               else "no caption layer on this machine")
+        if why:
+            print(f"[captions] job {job_id}: {why} — rendering v1 captions",
+                  flush=True)
+            captions = None
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
     mezz = ws / "mezz.mp4"
     _stage(errors.stage_message("render.prepare"), 2)
     media.get_file(mezz_key, mezz, store=where)
     out_dir = ws / "out"
+    if captions:
+        clips, effects = _prepare_render(segments, settings, cut_ranges,
+                                         disabled_cuts, duration)
+        timings: dict[str, float] = {}
+        files = render_to_dir(
+            str(mezz), str(out_dir), clips, effects, subtitles,
+            settings.get("caption_preset", "clean"),
+            settings.get("style", "balanced"), language,
+            settings.get("output_formats") or [], hooks,
+            progress_cb=progress_cb, cancel_check=cancel_check,
+            timings=timings, captions=captions,
+            fetch=functools.partial(media.get_file, store=where))
+        _stage(errors.stage_message("render.finish"), 99)
+        result = store_render_files(
+            files, out_prefix, functools.partial(media.put_file, store=where))
+        result["timings"] = timings
+        return result
     res = render_only(
         normalized_path=str(mezz), output_dir=str(out_dir),
         segments=segments, subtitles=subtitles, settings=settings,
@@ -3136,6 +3208,7 @@ def _try_modal_render_r2(
     _stage,
     cancel_check: Callable[[], bool] | None = None,
     mezz_bytes: int | None = None,
+    captions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """render_r2 on Modal: reads the mezz from R2, writes every output
     under `out_prefix`, returns their keys and sizes. Same policy as
@@ -3177,7 +3250,11 @@ def _try_modal_render_r2(
                     cut_style=cut_style, language=language,
                     output_formats=list(output_formats),
                     segment_effects=list(effects), hooks=list(hooks),
-                    bucket=storage.bucket())
+                    bucket=storage.bucket(),
+                    # Only for v2 renders: a render_r2 deployed before
+                    # UT4 doesn't take the argument (CLEO_CAPTION_ENGINE
+                    # stays v1 until the deploy).
+                    **({"captions": captions} if captions else {}))
                 result = _await_modal_call(fn, call, t0, deadline_s,
                                            len(segments), _stage,
                                            cancel_check)

@@ -79,6 +79,45 @@ export function faceChain(fontId: string, lang: string | undefined, script: Scri
   return out;
 }
 
+// Emoji, pictographs, dingbats and other symbols, private use, keycaps,
+// regional indicators and tags: characters no caption font is expected
+// to have.
+const SYMBOL = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\p{So}\p{Co}⃣\u{E0020}-\u{E007F}]/u;
+// What glues an emoji sequence together (ZWJ, variation selectors): it
+// goes with the symbol it belongs to, and only then (ZWJ also shapes
+// Indic text).
+const EMOJI_GLUE = /[‍︎️\u{E0100}-\u{E01EF}\u{1F3FB}-\u{1F3FF}]/u;
+
+/**
+ * `text` without the symbols no face of the caption's chain can draw
+ * (emoji, pictographs, dingbats, private use …) and the joiners and
+ * variation selectors around them. The editor preview and the render
+ * worker (UT4) both lay out and draw only what this returns, so neither
+ * shows tofu or a system emoji the other doesn't have. Letters of any
+ * script are never stripped: missing ones are a font problem (the job's
+ * CJK subset), reported by ensureFonts as `uncovered`.
+ */
+export function stripUndrawable(text: string, fontId: string, lang?: string): { text: string; removed: number } {
+  if (!SYMBOL.test(text) && !EMOJI_GLUE.test(text)) return { text, removed: 0 };
+  const chars = [...text];
+  const faces = faceChain(fontId, lang, wordScript(text, scriptOfLang(lang)));
+  const drop = chars.map((ch) => SYMBOL.test(ch) && !faces.some((f) => f.cps.has(ch.codePointAt(0)!)));
+  // glue next to a dropped symbol (or next to glue that goes) goes too
+  for (let changed = true; changed; ) {
+    changed = false;
+    chars.forEach((ch, i) => {
+      if (drop[i] || !EMOJI_GLUE.test(ch)) return;
+      if (drop[i - 1] || drop[i + 1]) {
+        drop[i] = true;
+        changed = true;
+      }
+    });
+  }
+  const removed = drop.filter(Boolean).length;
+  if (!removed) return { text, removed: 0 };
+  return { text: chars.filter((_, i) => !drop[i]).join(""), removed };
+}
+
 /** CSS font shorthand for ctx.font. */
 export function cssFont(faces: readonly Face[], px: number): string {
   const families = faces.map((f) => `"${f.family}"`).join(", ");
@@ -174,7 +213,10 @@ export async function ensureFonts(
   let devanagari = false;
   for (const raw of texts) {
     const text = upper ? safeUpper(raw, lang) : raw;
-    for (const word of text.normalize("NFC").split(/\s+/)) {
+    for (const full of text.normalize("NFC").split(/\s+/)) {
+      // what the layout will draw: emoji and symbols no face has are
+      // stripped there (stripUndrawable), so they're not "uncovered"
+      const word = stripUndrawable(full, style.font.id, lang).text;
       if (!word) continue;
       const faces = faceChain(style.font.id, lang, wordScript(word, langScript));
       for (const ch of word) {

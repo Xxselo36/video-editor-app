@@ -39,7 +39,7 @@ beforeAll(() => {
   setDefaultFontLoader(nodeFontLoader(GlobalFonts, { fontsDir: FONTS_DIR }));
 });
 
-describe("node smoke (@napi-rs/canvas)", () => {
+describe("node smoke (@napi-rs/canvas)", { timeout: 30_000 }, () => {
   it.each(LAUNCH_PRESETS)("%s draws a page", async (id) => {
     const style = resolveStyle(id, {}, { W, H }) as CaptionStyle;
     const status = await ensureFonts(style, { lang: "en", text: AUDIT_WORDS.map((w) => w.text) });

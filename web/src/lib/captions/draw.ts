@@ -136,6 +136,22 @@ export function fitScale(drawn: number, box: number, tolerance = 0.25): number {
   return box / drawn;
 }
 
+/**
+ * The baseline `y` moved so that it lands on a whole DEVICE pixel. Both
+ * Chromium and Skia in Node (the render worker, UT4) snap an axis-aligned
+ * glyph run's baseline to the pixel grid, but round differently (40.3 →
+ * 40 in Chromium, 41 in @napi-rs/canvas), which moved text a pixel
+ * between preview and export. Under a scale (pop, active word) the snap
+ * happens in device space, so it is done there; skewed text (no snap in
+ * either) keeps its y. x keeps sub-pixel positioning (both agree).
+ */
+function pixelBaseline(ctx: Ctx2D, y: number): number {
+  const m = typeof ctx.getTransform === "function" ? ctx.getTransform() : null;
+  if (!m) return Math.round(y);
+  if (m.b !== 0 || m.c !== 0 || !(m.d !== 0)) return y;
+  return (Math.round(m.d * y + m.f) - m.f) / m.d;
+}
+
 /** fillText / strokeText of a word at its layout box, compressed to fit it if needed. */
 function drawWordText(c: Ctx, r: WordBox, op: "fill" | "stroke", text = r.text) {
   const { ctx } = c;
@@ -149,16 +165,17 @@ function drawWordText(c: Ctx, r: WordBox, op: "fill" | "stroke", text = r.text) 
     }
     fit = f;
   }
+  const y = pixelBaseline(ctx, r.baseline);
   if (fit === 1) {
-    if (op === "fill") ctx.fillText(text, r.x, r.baseline);
-    else ctx.strokeText(text, r.x, r.baseline);
+    if (op === "fill") ctx.fillText(text, r.x, y);
+    else ctx.strokeText(text, r.x, y);
     return;
   }
   ctx.save();
   ctx.translate(r.x, 0);
   ctx.scale(fit, 1);
-  if (op === "fill") ctx.fillText(text, 0, r.baseline);
-  else ctx.strokeText(text, 0, r.baseline);
+  if (op === "fill") ctx.fillText(text, 0, y);
+  else ctx.strokeText(text, 0, y);
   ctx.restore();
 }
 
