@@ -1,0 +1,20 @@
+{
+  "about": "UX8 v2-editor doc for the UT4 render: short words glued into units, a hidden filler, a forced break on a shown word (w0008) and one on a hidden word (w0011, carried to w0012), an edited word (w0005 'tenn' -> 'ten'). The render payload the editor sends from it (captionSource + phrasesToUnits) is ux8_payload.json, kept in sync by web/src/features/editor/state/ux8Payload.test.ts; backend/tests/test_captions_v2.py renders from both.",
+  "words": [
+    {"id": "w0001", "text": "So", "start": 0.0, "end": 0.18},
+    {"id": "w0002", "text": "nobody", "start": 0.2, "end": 0.55},
+    {"id": "w0003", "text": "waits", "start": 0.58, "end": 0.9},
+    {"id": "w0004", "text": "äh", "start": 0.95, "end": 1.2, "filler": true, "hidden": true},
+    {"id": "w0005", "text": "ten", "start": 1.25, "end": 1.45},
+    {"id": "w0006", "text": "seconds", "start": 1.5, "end": 1.95},
+    {"id": "w0007", "text": "for", "start": 2.0, "end": 2.15},
+    {"id": "w0008", "text": "you", "start": 2.2, "end": 2.4, "breakBefore": true},
+    {"id": "w0009", "text": "to", "start": 2.42, "end": 2.55},
+    {"id": "w0010", "text": "start.", "start": 2.6, "end": 3.0},
+    {"id": "w0011", "text": "um", "start": 3.1, "end": 3.3, "filler": true, "hidden": true, "breakBefore": true},
+    {"id": "w0012", "text": "Show", "start": 3.4, "end": 3.7},
+    {"id": "w0013", "text": "the", "start": 3.72, "end": 3.85},
+    {"id": "w0014", "text": "result", "start": 3.9, "end": 4.3},
+    {"id": "w0015", "text": "first.", "start": 4.35, "end": 4.8}
+  ]
+}

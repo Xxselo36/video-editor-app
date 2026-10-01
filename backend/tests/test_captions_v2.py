@@ -177,6 +177,27 @@ def test_source_words_from_units_and_doc():
     assert C.source_words([], DOC_WORDS) == []
 
 
+def test_ux8_payload_maps_onto_the_doc_words_with_forced_breaks():
+    """The v2 editor's payload (UX8 captionSource → phrasesToUnits, made
+    by the web code: testdata/captions/ux8_payload.json): glued units,
+    hidden fillers dropped, forced breaks — on the doc's own words."""
+    import json
+    from conftest import REPO
+    doc = json.loads((REPO / "testdata/captions/ux8_doc.json").read_text())
+    payload = json.loads((REPO / "testdata/captions/ux8_payload.json").read_text())
+    words = C.source_words(payload["subtitles"], doc["words"])
+    shown = [w for w in doc["words"] if not w.get("hidden")]
+    assert [w["id"] for w in words] == [w["id"] for w in shown]
+    assert [(w["start"], w["end"]) for w in words] == [(w["start"], w["end"]) for w in shown]
+    # the break on "you" and the hidden "um"'s break carried to "Show"
+    assert [w["id"] for w in words if w.get("breakBefore")] == ["w0008", "w0012"]
+    # a unit flagged breakBefore by the client does the same
+    units = [dict(u) for u in payload["subtitles"]]
+    units[2]["breakBefore"] = True                       # "ten seconds"
+    flagged = C.source_words(units, doc["words"])
+    assert next(w for w in flagged if w["id"] == "w0005").get("breakBefore")
+
+
 def test_cjk_spec_carries_the_job_font_subset(monkeypatch):
     monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
     words = [{"id": "w0001", "text": "結果", "start": 0.0, "end": 0.5}]

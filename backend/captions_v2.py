@@ -188,26 +188,52 @@ def _unit_span(u: dict) -> tuple[float, float] | None:
     return (s, e) if e >= s else (e, s)
 
 
+def _visible_words(doc_words: Iterable[dict] | None) -> list[dict]:
+    """The doc's captioned words (not hidden, not empty) in doc order, a
+    forced break of a hidden word carried to the next shown one (as the
+    editor's captionUnits does, UX8)."""
+    out: list[dict] = []
+    carry = False
+    for w in doc_words or ():
+        if not isinstance(w, dict):
+            continue
+        if w.get("hidden") or not str(w.get("text") or "").strip():
+            carry = carry or bool(w.get("breakBefore"))
+            continue
+        if carry and not w.get("breakBefore"):
+            w = {**w, "breakBefore": True}
+        carry = False
+        out.append(w)
+    return out
+
+
 def source_words(subtitles: Iterable[dict] | None,
                  doc_words: Iterable[dict] | None) -> list[dict]:
     """The payload's caption units as SOURCE-time words (module doc).
-    Each unit is taken once (by its source span), in source order."""
-    units: dict[tuple[float, float], str] = {}
+    Each unit is taken once (by its source span), in source order.
+
+    Units come from the v1 editor (phrasesToUnits over the analysis'
+    units) or from the v2 editor (UX8 captionSource: the doc's shown
+    words glued like v1, hidden words dropped, a forced break starting a
+    new unit). A unit whose tokens are the doc's words in its span takes
+    those words with their ids, timings and forced breaks (breakBefore →
+    a new caption page, as in the preview); a unit flagged breakBefore
+    itself does the same for its first word."""
+    units: dict[tuple[float, float], dict] = {}
     for u in subtitles or ():
         if not isinstance(u, dict):
             continue
         span = _unit_span(u)
         if span is None or span in units:
             continue
-        units[span] = str(u.get("text") or "")
-    words = sorted((w for w in doc_words or () if isinstance(w, dict)
-                    and not w.get("hidden") and str(w.get("text") or "").strip()),
+        units[span] = {"text": str(u.get("text") or ""), "brk": bool(u.get("breakBefore"))}
+    words = sorted(_visible_words(doc_words),
                    key=lambda w: (float(w["start"]), float(w["end"])))
     starts = [float(w["start"]) for w in words]
     out: list[dict] = []
-    for ui, (span, text) in enumerate(sorted(units.items())):
+    for ui, (span, unit) in enumerate(sorted(units.items())):
         s, e = span
-        tokens = edit_doc.tokenize(text)
+        tokens = edit_doc.tokenize(unit["text"])
         if not tokens:
             continue
         i = bisect_left(starts, s - _SPAN_EPS)
@@ -216,6 +242,7 @@ def source_words(subtitles: Iterable[dict] | None,
             if float(words[i]["end"]) <= e + _SPAN_EPS:
                 inside.append(words[i])
             i += 1
+        first = len(out)
         if [str(w["text"]) for w in inside] == tokens:
             for w in inside:
                 word = {"id": str(w.get("id") or f"u{ui}"), "text": str(w["text"]),
@@ -223,18 +250,22 @@ def source_words(subtitles: Iterable[dict] | None,
                 if w.get("breakBefore"):
                     word["breakBefore"] = True
                 out.append(word)
-            continue
-        # Edited unit: its time over its tokens by length (interim.ts
-        # interimWords).
-        total = sum(len(t) for t in tokens) or 1
-        at = 0
-        for wi, tok in enumerate(tokens):
-            ws = s + (e - s) * at / total
-            at += len(tok)
-            we = e if wi == len(tokens) - 1 else s + (e - s) * at / total
-            out.append({"id": f"u{ui}w{wi}", "text": tok,
-                        "start": edit_doc.round_ms(ws),
-                        "end": edit_doc.round_ms(max(ws, we))})
+        else:
+            # Edited unit: its time over its tokens by length (interim.ts
+            # interimWords).
+            total = sum(len(t) for t in tokens) or 1
+            at = 0
+            for wi, tok in enumerate(tokens):
+                ws = s + (e - s) * at / total
+                at += len(tok)
+                we = e if wi == len(tokens) - 1 else s + (e - s) * at / total
+                out.append({"id": f"u{ui}w{wi}", "text": tok,
+                            "start": edit_doc.round_ms(ws),
+                            "end": edit_doc.round_ms(max(ws, we))})
+            if inside and inside[0].get("breakBefore"):
+                out[first]["breakBefore"] = True
+        if unit["brk"] and len(out) > first:
+            out[first]["breakBefore"] = True
     out.sort(key=lambda w: (w["start"], w["end"]))
     return out
 

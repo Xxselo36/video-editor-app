@@ -413,6 +413,21 @@ def test_render_to_dir_v2(tone_src, tmp_path):
     assert "burn" not in timings and not (tmp_path / "out" / "captions").exists()
 
 
+def test_ux8_forced_breaks_start_caption_pages(tone_src, tmp_path):
+    """A forced break in the v2 editor starts a new caption page in the
+    export, as in the preview."""
+    doc = json.loads((sim.REPO / "testdata/captions/ux8_doc.json").read_text())
+    payload = json.loads((sim.REPO / "testdata/captions/ux8_payload.json").read_text())
+    spec = _spec(C.source_words(payload["subtitles"], doc["words"]), preset="power")
+    trace = tmp_path / "trace.json"
+    C.render_primary(str(tone_src), str(tmp_path / "x.mp4"), [(0.0, 5.0)], None, spec,
+                     tmp_path / "w", trace=str(trace))
+    pages = json.loads(trace.read_text())["plan"]["layout"]
+    firsts = [p["lines"][0][0]["id"] for p in pages]
+    assert "w0008" in firsts and "w0012" in firsts, firsts
+    assert all(w["id"] not in ("w0004", "w0011") for p in pages for ln in p["lines"] for w in ln)
+
+
 def test_a_font_that_fails_to_load_fails_the_render(tone_src, tmp_path, monkeypatch):
     """No silent fallback font in an export: the layer exits 3, the job
     gets render_failed (and goes back to the editor)."""
