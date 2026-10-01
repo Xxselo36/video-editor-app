@@ -375,12 +375,48 @@ export function cutBy(ranges: readonly Range[]): ((w: DocWord) => boolean) | und
  * starts. The preview doesn't need it: its overlay never plays cut time
  * and breaks pages at every cut (sourceBreaks), so a timeline change
  * never re-lays out every caption (the owner's "brief hang").
+ *
+ * With `segs`, no unit glues across a reorder boundary either (review
+ * 15): footage that continues in the source but not in the play order
+ * (reorderBreaks) gets a forced break, so a unit never carries a word to
+ * the other place in the video.
  */
 export function exportCaptionSource(
   words: readonly DocWord[],
   removed: readonly Range[],
+  segs?: readonly EditorSeg[],
 ): { phrases: CaptionPhrase[]; units: CaptionUnit[] } {
-  return captionSource(words, cutBy(removed));
+  const breaks = segs ? reorderBreaks(segs) : [];
+  if (!breaks.length) return captionSource(words, cutBy(removed));
+  const marked = words.slice();
+  let k = 0;
+  for (const b of breaks) {
+    // the first word that plays from b on (by its middle)
+    while (k < marked.length && (marked[k].start + marked[k].end) / 2 < b) k++;
+    if (k < marked.length && !marked[k].breakBefore) marked[k] = { ...marked[k], breakBefore: true };
+  }
+  return captionSource(marked, cutBy(removed));
+}
+
+/**
+ * Source times where footage continues in the source but not in the
+ * play order (a reordered clip list): the start of each clip whose
+ * source predecessor (the clip ending right before it, in the source) is
+ * not the clip playing right before it. Sorted. None for a list in
+ * source order (cuts only), so exports without a reorder are unchanged.
+ */
+export function reorderBreaks(segs: readonly EditorSeg[]): number[] {
+  const act = segs.filter(active);
+  const playNext = new Map<EditorSeg, EditorSeg | undefined>();
+  act.forEach((s, i) => playNext.set(s, act[i + 1]));
+  const bySource = act.slice().sort((a, b) => a.start - b.start);
+  const out: number[] = [];
+  for (let i = 1; i < bySource.length; i++) {
+    const p = bySource[i - 1];
+    const q = bySource[i];
+    if (playNext.get(p) !== q) out.push(q.start);
+  }
+  return out;
 }
 
 // ── the Text tab's marks ────────────────────────────────────────────

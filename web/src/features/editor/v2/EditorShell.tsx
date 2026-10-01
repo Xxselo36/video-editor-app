@@ -188,9 +188,9 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   const { onExportSource } = props;
   useEffect(() => {
     if (!onExportSource) return;
-    onExportSource(docStore ? () => exportCaptionSource(docStore.getState().present.words, removed) : null);
+    onExportSource(docStore ? () => exportCaptionSource(docStore.getState().present.words, removed, editSegs) : null);
     return () => onExportSource(null);
-  }, [onExportSource, docStore, removed]);
+  }, [onExportSource, docStore, removed, editSegs]);
 
   // ── one undo for text and timeline: ⌘Z undoes the latest edit of
   // either, in the order they were made. UX10's cuts in the text are

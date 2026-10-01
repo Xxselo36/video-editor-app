@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { removedRanges } from "@/features/editor/v2/model";
 import { EditOrder, type Area } from "@/features/editor/v2/editOrder";
-import { aiCutsOf, cutWords, labelRemoved, restoreKind, restoreWord } from "./cuts";
+import { aiCutsOf, cutWords, exportCaptionSource, labelRemoved, reorderBreaks, restoreKind, restoreWord } from "./cuts";
 import { captionSource, captionUnits, editWord, hideWords, type DocWord, type EditDoc } from "./doc";
 import { commit, initHistory, redo, undo, type History } from "./history";
 import { createDocStore } from "./store";
@@ -84,6 +84,42 @@ describe("captions follow the clips", () => {
     const all = restoreKind(analysis, pieces, "ai", D);
     expect(removedRanges(all, D)).toEqual([]);
     expect(unitText(words, all)).toContain("really");
+  });
+});
+
+describe("no caption unit glued across a reorder boundary (review 15)", () => {
+  // "is" (4.70–4.90) glues "big" (5.00–5.30): split at 5.0, B played first
+  const ws: DocWord[] = [
+    W("x1", "This", 4.2, 4.6),
+    W("x2", "is", 4.7, 4.9),
+    W("x3", "big", 5.0, 5.3),
+    W("x4", "news.", 5.4, 5.9),
+  ];
+  const A: EditorSeg = { id: "A", start: 0, end: 5 };
+  const B: EditorSeg = { id: "B", start: 5, end: 10 };
+  const texts = (segs: EditorSeg[]) => exportCaptionSource(ws, removedRanges(segs, 10), segs).units.map((u) => u.text);
+
+  it("source order: glued as before; reordered: split at the boundary", () => {
+    expect(reorderBreaks([A, B])).toEqual([]);
+    expect(texts([A, B])).toEqual(["This", "is big", "news."]);
+    expect(exportCaptionSource(ws, [], [A, B])).toEqual(captionSource(ws));
+    expect(reorderBreaks([B, A])).toEqual([5]);
+    const out = texts([B, A]);
+    expect(out).not.toContain("is big");
+    expect(out).toEqual(["This", "is", "big news."]);
+  });
+
+  it("cuts only (a list in source order) never adds a break", () => {
+    const cut = [
+      { id: "a", start: 0, end: 4.65 },
+      { id: "b", start: 4.95, end: 10 },
+    ];
+    expect(reorderBreaks(cut)).toEqual([]);
+    // a split moved to the end of three pieces: breaks where the play order jumps
+    const P = { id: "p", start: 0, end: 3 };
+    const Q = { id: "q", start: 3, end: 6 };
+    const R = { id: "r", start: 6, end: 9 };
+    expect(reorderBreaks([P, R, Q])).toEqual([3, 6]);
   });
 });
 
