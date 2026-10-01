@@ -1,0 +1,17 @@
+{
+  "name": "cleocuts-caption-layer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "UT4: the render worker's caption layer (web/src/lib/captions bundled by esbuild). See backend/captions/build.mjs.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "1.0.9",
+    "harfbuzzjs": "1.6.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

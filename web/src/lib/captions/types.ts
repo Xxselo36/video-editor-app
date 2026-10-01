@@ -206,6 +206,8 @@ export interface Ctx2D {
    * word the rasterizer draws wider than its layout box (fitScale).
    */
   measureText?(text: string): { width: number };
+  /** Optional: draw.ts snaps text baselines to device pixels with it. */
+  getTransform?(): { a: number; b: number; c: number; d: number; e: number; f: number };
   createLinearGradient(x0: number, y0: number, x1: number, y1: number): GradientLike;
   // drawImage is typed loosely: every backend has its own image types.
   drawImage(image: never, dx: number, dy: number): void;
