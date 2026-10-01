@@ -203,3 +203,15 @@ def test_doc_get_and_patch(stub):
     old = stub.json("POST", "/_test/seed/review", {"doc": False})
     assert stub.call("GET", f"/jobs/{old['id']}/doc")[0] == 404
     assert stub.json("GET", f"/jobs/{old['id']}")["has_doc"] is False
+
+
+def test_cut_kinds_and_a_cleo_cut_take(stub):
+    """UX10: seeded cuts carry their reason; voice_cut adds a take."""
+    job = stub.json("POST", "/_test/seed/review_speech", {"voice_cut": [10.45, 13.55]})
+    cuts = stub.json("GET", f"/jobs/{job['id']}")["cut_ranges"]
+    assert {"silence", "filler", "voice_cmd"} <= {c["kind"] for c in cuts}
+    take = next(c for c in cuts if c["kind"] == "voice_cmd")
+    assert take["start"] <= 10.45 and take["end"] >= 13.55
+    # the grid clip has no fillers: pauses only
+    grid = stub.json("POST", "/_test/seed/review", {})
+    assert {c["kind"] for c in stub.json("GET", f"/jobs/{grid['id']}")["cut_ranges"]} == {"silence"}

@@ -43,6 +43,8 @@ Test API (only this script registers it; never part of the backend):
               orientation ("portrait" | "landscape"), settings (dict),
               caption_preset, doc (false: no edit document),
               poster (false: no first-frame poster, as before UT5),
+              voice_cut ([start, end] source seconds, review_speech:
+                         also cut as a "Cleo cut" take, kind voice_cmd),
               proxy: "off"   has_proxy false, proxy-video 404 (today's
                              production default: CLEO_PROXY_VIDEO unset)
                      "on"    has_proxy true, proxy-video plays
@@ -298,6 +300,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
 
     pipeline._ffmpeg_cuts_preview = chromium_cuts_preview
 
+    from backend import cut_kinds
     from backend import doc as edit_doc
 
     def clip_doc(clip: str, data: dict[str, Any], settings: dict | None) -> dict[str, Any]:
@@ -311,11 +314,30 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
 
     def analysis_result(clip: str, orientation: str, out_dir: Path,
                         audio_warnings: list[str] | None = None,
-                        settings: dict | None = None) -> dict[str, Any]:
+                        settings: dict | None = None,
+                        voice_cut: list | None = None) -> dict[str, Any]:
         """What pipeline.analyze_only returns, for a stub clip, with its
-        files (normalized, proxy, first preview) in `out_dir`."""
+        files (normalized, proxy, first preview) in `out_dir`. Every cut
+        range gets its kind (backend/cut_kinds.py, UX10) from the doc's
+        filler words; `voice_cut` [start, end] also cuts that range as a
+        "Cleo cut" take (kind voice_cmd)."""
         files = clip_files(clip, orientation)
-        data = clip_data(clip)
+        data = dict(clip_data(clip))
+        log: list = []
+        if voice_cut:
+            vs, ve = float(voice_cut[0]), float(voice_cut[1])
+            kept = []
+            for s0, e0 in data["segments"]:
+                if e0 <= vs or s0 >= ve:
+                    kept.append([s0, e0])
+                    continue
+                if s0 < vs:
+                    kept.append([s0, vs])
+                if e0 > ve:
+                    kept.append([ve, e0])
+            data["segments"] = kept
+            data["cut_ranges"] = pipeline._invert_segments([tuple(x) for x in kept], data["duration"])
+            log.append(("voice_cmd", vs, ve))
         out_dir.mkdir(parents=True, exist_ok=True)
         norm = out_dir / "normalized.mp4"
         media._link_or_copy(files["src"], norm)
@@ -326,13 +348,15 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         segs = data["segments"]
         poster_ok = pipeline.make_poster(str(files["proxy"]), float(segs[0][0]) if segs else 0.0,
                                          str(poster))
+        doc = clip_doc(clip, data, settings)
         return {"normalized_path": str(norm), "preview_path": str(preview),
                 "poster_path": str(poster) if poster_ok else None,
                 "segments": [tuple(s) for s in data["segments"]], "subtitles": data["subtitles"],
-                "duration": data["duration"], "cut_ranges": data["cut_ranges"],
+                "duration": data["duration"],
+                "cut_ranges": cut_kinds.label(data["cut_ranges"], log=log, words=doc["words"]),
                 "language": data["language"], "audio_warnings": audio_warnings or [],
                 "audio_levels": {}, "scene_events": [],
-                "doc": clip_doc(clip, data, settings)}
+                "doc": doc}
 
     def review_fields(res: dict[str, Any]) -> dict[str, Any]:
         """The job fields _run_analyze_inner commits for a finished analysis."""
@@ -444,11 +468,13 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         return job
 
     def seed_review(job, clip: str, orientation: str, warnings: list[str] | None = None,
-                    with_doc: bool = True, with_poster: bool = True) -> None:
+                    with_doc: bool = True, with_poster: bool = True,
+                    voice_cut: list | None = None) -> None:
         where = media.backend()
         ws = M._workspace(job.id, "seed")
         try:
-            res = analysis_result(clip, orientation, ws, warnings, settings=job.settings)
+            res = analysis_result(clip, orientation, ws, warnings, settings=job.settings,
+                                  voice_cut=voice_cut)
             if not with_doc:
                 res["doc"] = None
             if not with_poster:
@@ -515,7 +541,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             job = create(opts, TIKTOK, "tiktok_3_mistakes.mp4" if name == "review_speech"
                          else "interview_cut_final.mp4", tiktok)
             seed_review(job, clip, orientation, with_doc=opts.get("doc", True) is not False,
-                        with_poster=opts.get("poster", True) is not False)
+                        with_poster=opts.get("poster", True) is not False,
+                        voice_cut=opts.get("voice_cut"))
             if name == "render_failed":
                 store.update(job.id, message="render_failed",
                              error="Render worker unavailable (modal_unavailable)",

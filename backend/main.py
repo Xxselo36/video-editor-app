@@ -5508,6 +5508,8 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
             new_cut_range_dicts.append({
                 "id": next_id, "start": float(rs), "end": float(re_),
                 "source": "user_edit",
+                # a scene command's cut (UX10 cut_kinds)
+                "kind": "voice_cmd",
             })
             next_id += 1
         out = {"segments": new_segments,

@@ -52,6 +52,18 @@ class AnalysisResult:
         return json.dumps(self.to_dict(), indent=indent)
 
 
+def _log_cuts(log: list | None, kind: str, ranges) -> None:
+    """Append (kind, start, end) per range to `log` (analyze_video's
+    cut_kinds); nothing without a log."""
+    if log is None:
+        return
+    for r in ranges or ():
+        try:
+            log.append((kind, float(r[0]), float(r[1])))
+        except (IndexError, TypeError, ValueError):
+            continue
+
+
 def analyze_video(
     video_path: str,
     whisper_model: str = "medium",
@@ -69,6 +81,7 @@ def analyze_video(
     cut_keywords: list[str] | None = None,
     continue_keywords: list[str] | None = None,
     include_words: bool = False,
+    cut_kinds: list | None = None,
 ) -> AnalysisResult:
     """
     Analyze a video and return structured data for NLE plugins.
@@ -91,6 +104,10 @@ def analyze_video(
         filler_sensitivity: Filler detection sensitivity: "low", "medium", "high" (default from style).
         include_words: Also return every transcribed word (AnalysisResult.words)
             before short words are glued into caption units (web backend only).
+        cut_kinds: A list to log every detector's cut ranges into, as
+            (kind, start, end) with kind "filler" or "voice_cmd" (web
+            backend only: the editor names each cut). None: no log; the
+            analysis itself is the same either way.
 
     Returns:
         AnalysisResult with segments, subtitles, and optional filler data.
@@ -316,6 +333,7 @@ def analyze_video(
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, filler_segments)
             _intentional_cuts.extend(filler_segments)
+            _log_cuts(cut_kinds, "filler", filler_segments)
             total_after = sum(e - s for s, e in segments)
             print(f"[filler] segments {segments_before}→{len(segments)}, "
                   f"time {total_before:.1f}s→{total_after:.1f}s "
@@ -347,6 +365,7 @@ def analyze_video(
             _tb = sum(e - s for s, e in segments)
             segments = _det.filter_segments(segments, _hes_cuts)
             _intentional_cuts.extend(_hes_cuts)
+            _log_cuts(cut_kinds, "filler", _hes_cuts)
             _ta = sum(e - s for s, e in segments)
             print(f"[hesitation] {len(_hes_cuts)} punctuation-only "
                   f"marker(s) cut: {_hes_cuts}", flush=True)
@@ -373,6 +392,7 @@ def analyze_video(
             _tb = sum(e - s for s, e in segments)
             segments = _det.filter_segments(segments, _gap_ranges)
             _intentional_cuts.extend(_gap_ranges)
+            _log_cuts(cut_kinds, "filler", _gap_ranges)
             _ta = sum(e - s for s, e in segments)
             for (s, e, g) in _gap_cuts_raw:
                 print(f"[word-gap] cut {s:.2f}-{e:.2f}s "
@@ -444,6 +464,7 @@ def analyze_video(
                 _sb = len(segments)
                 _tb = sum(e - s for s, e in segments)
                 segments = _det.filter_segments(segments, _safe)
+                _log_cuts(cut_kinds, "filler", _safe)
                 # Not added to _intentional_cuts: these are acoustic
                 # guesses that may clip a word edge, and smart cut's
                 # word-integrity expansion should be allowed to win.
@@ -483,6 +504,7 @@ def analyze_video(
                 _tb = sum(e - s for s, e in segments)
                 segments = FillerDetector().filter_segments(segments, _svd_cuts)
                 _intentional_cuts.extend(_svd_cuts)
+                _log_cuts(cut_kinds, "filler", _svd_cuts)
                 _ta = sum(e - s for s, e in segments)
                 print(f"[sustained-vowel] removed {_tb - _ta:.2f}s", flush=True)
         except Exception as _e:
@@ -503,6 +525,7 @@ def analyze_video(
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, stutter_ranges)
             _intentional_cuts.extend(stutter_ranges)
+            _log_cuts(cut_kinds, "filler", stutter_ranges)
             total_after = sum(e - s for s, e in segments)
             print(f"[stutter] {len(stutter_ranges)} n-gram repeat(s) "
                   f"cut: {stutter_ranges}", flush=True)
@@ -527,6 +550,7 @@ def analyze_video(
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, mumble_ranges)
             _intentional_cuts.extend(mumble_ranges)
+            _log_cuts(cut_kinds, "filler", mumble_ranges)
             total_after = sum(e - s for s, e in segments)
             for (s, e, c, t) in mumble_data:
                 print(f"[mumble] cut {s:.2f}-{e:.2f}s "
@@ -616,6 +640,7 @@ def analyze_video(
                 segments_before = len(segments)
                 total_before = sum(e - s for s, e in segments)
                 segments = _det.filter_segments(segments, scene_cuts)
+                _log_cuts(cut_kinds, "voice_cmd", scene_cuts)
                 total_after = sum(e - s for s, e in segments)
                 print(f"[scene-triggers] {len(scene_cuts)} cut range(s) "
                       f"applied: {scene_cuts}", flush=True)
@@ -684,6 +709,9 @@ def analyze_video(
                 segments = apply_voice_triggers_to_segments(
                     segments, detected_trigger_pairs,
                 )
+                _log_cuts(cut_kinds, "voice_cmd",
+                          [(p.cut_start, p.continue_end)
+                           for p in detected_trigger_pairs])
                 print(f"[voice-triggers] segments AFTER apply: "
                       f"{len(segments)} kept, "
                       f"total={sum(e - s for s, e in segments):.2f}s",
