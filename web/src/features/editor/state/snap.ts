@@ -19,18 +19,28 @@ export type Peaks = ArrayLike<number>;
  * frame closest to t, then to the earlier one. t unchanged when no frame
  * centre is in reach (no peaks, t outside the audio).
  */
-export function snapEdge(t: number, peaks: Peaks | null | undefined, window = SNAP_WINDOW_S, rate = PEAKS_RATE): number {
+export function snapEdge(
+  t: number,
+  peaks: Peaks | null | undefined,
+  window = SNAP_WINDOW_S,
+  rate = PEAKS_RATE,
+  /** Only frame centres inside [min, max] (UX10: the gap between the cut
+   *  and its neighbouring words). Unset: ±window only, as the backend. */
+  bounds?: { min: number; max: number },
+): number {
   const n = peaks?.length ?? 0;
   if (!peaks || n === 0 || !Number.isFinite(t) || rate <= 0) return t;
   const lo = Math.max(0, Math.floor((t - window) * rate - 0.5));
   const hi = Math.min(n - 1, Math.ceil((t + window) * rate - 0.5));
+  const bMin = bounds?.min ?? -Infinity;
+  const bMax = bounds?.max ?? Infinity;
   let best = -1;
   let bestPeak = 0;
   let bestD = 0;
   for (let i = lo; i <= hi; i++) {
     const c = (i + 0.5) / rate;
     const d = Math.abs(c - t);
-    if (d > window + 1e-9) continue;
+    if (d > window + 1e-9 || c < bMin - 1e-9 || c > bMax + 1e-9) continue;
     const p = peaks[i];
     // (peak, distance, index): lexicographic, like the Python tuple key
     if (best < 0 || p < bestPeak || (p === bestPeak && d < bestD)) {

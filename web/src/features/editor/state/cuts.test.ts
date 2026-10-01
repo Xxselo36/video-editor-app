@@ -6,6 +6,8 @@ import { removedRanges } from "@/features/editor/v2/model";
 import {
   aiCutsOf,
   countKinds,
+  cutBy,
+  cutEdges,
   cutRange,
   cutWords,
   gapKind,
@@ -221,6 +223,66 @@ describe("cut and restore", () => {
       [0, 1.5],
       [2, 4],
     ]);
+  });
+
+  it("a snapped edge stays in the gap to the neighbouring word (review 14)", () => {
+    // joined speech: "it's really good" with 20 ms joins
+    const words: DocWord[] = [
+      { id: "w1", text: "it's", start: 1.0, end: 1.18 },
+      { id: "w2", text: "really", start: 1.2, end: 1.6 },
+      { id: "w3", text: "good", start: 1.62, end: 2.0 },
+    ];
+    const peaks = new Array(400).fill(80);
+    peaks[110] = 1; // 1.105 s: a stop closure inside "it's"
+    peaks[119] = 20; // 1.195 s: the join (louder than the closure)
+    peaks[165] = 1; // 1.655 s: inside "good"
+    peaks[155] = 5; // 1.555 s: inside "really" (its own tail)
+    peaks[161] = 30; // 1.615 s: the join after it
+    const [a, b] = cutEdges(words, 1, 1, peaks);
+    expect(a).toBeCloseTo(1.195, 9);
+    expect(b).toBeCloseTo(1.615, 9);
+    const out = cutWords([seg("x", 0, 4)], words, 1, 1, 4, peaks);
+    expect(spans(out)).toEqual([
+      [0, 1.195],
+      [1.615, 4],
+    ]);
+    // the neighbours stay (their middles are kept), so they are neither struck nor dropped
+    const removed = [{ start: 1.195, end: 1.615 }];
+    const cut = cutBy(removed)!;
+    expect(words.map(cut)).toEqual([false, true, false]);
+    // no gap at all (words touch): the edge stays at the word's own time
+    const touching: DocWord[] = [
+      { id: "a", text: "a", start: 1.0, end: 1.2 },
+      { id: "b", text: "b", start: 1.2, end: 1.6 },
+      { id: "c", text: "c", start: 1.6, end: 2.0 },
+    ];
+    expect(cutEdges(touching, 1, 1, peaks)).toEqual([1.2, 1.6]);
+    // the first word: no neighbour before it, so 120 ms back (all equal: the nearest frame)
+    expect(cutEdges(words, 0, 0, peaks)[0]).toBeCloseTo(0.995, 9); // (an edge only moves outward)
+  });
+
+  it("random words and peaks: an edge never enters a neighbouring word or the cut words", () => {
+    let seed = 7;
+    const r = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    for (let n = 0; n < 200; n++) {
+      const words: DocWord[] = [];
+      let t = 0.2;
+      for (let i = 0; i < 8; i++) {
+        const s0 = t + r() * 0.08;
+        const e0 = s0 + 0.08 + r() * 0.4;
+        words.push({ id: `w${i}`, text: "w", start: +s0.toFixed(3), end: +e0.toFixed(3) });
+        t = e0;
+      }
+      const peaks = Array.from({ length: Math.ceil(t * 100) + 20 }, () => Math.floor(r() * 100));
+      const first = 1 + Math.floor(r() * 5);
+      const last = first + Math.floor(r() * (6 - first));
+      const [a, b] = cutEdges(words, first, last, peaks);
+      expect(a).toBeGreaterThanOrEqual(words[first - 1].end - 1e-9);
+      expect(a).toBeLessThanOrEqual(words[first].start + 1e-9);
+      expect(b).toBeGreaterThanOrEqual(words[last].end - 1e-9);
+      expect(b).toBeLessThanOrEqual(words[last + 1].start + 1e-9);
+      expect(Math.abs(a - words[first].start)).toBeLessThanOrEqual(0.12 + 1e-9);
+    }
   });
 });
 

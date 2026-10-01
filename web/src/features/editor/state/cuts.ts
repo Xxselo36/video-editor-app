@@ -173,15 +173,29 @@ export function cutWords(
   peaks?: Peaks | null,
 ): EditorSeg[] {
   if (first < 0 || last >= words.length || first > last) return segs;
+  const [sa, sb] = cutEdges(words, first, last, peaks);
+  return sb > sa ? cutRange(segs, Math.max(0, sa), Math.min(duration, sb), duration) : segs;
+}
+
+/**
+ * The source range cutting words first..last removes: each edge snapped
+ * to the quietest moment within ±120 ms (review C10), but only inside
+ * the gap to the neighbouring word — never into the word before or
+ * after (its sound would be clipped, and a short one struck), never
+ * back into the cut words (their tail would stay audible).
+ */
+export function cutEdges(words: readonly DocWord[], first: number, last: number, peaks?: Peaks | null): [number, number] {
   let a = Infinity;
   let b = -Infinity;
   for (let i = first; i <= last; i++) {
     a = Math.min(a, words[i].start);
     b = Math.max(b, words[i].end);
   }
-  const sa = snapEdge(a, peaks);
-  const sb = snapEdge(b, peaks);
-  return sb > sa ? cutRange(segs, Math.max(0, sa), Math.min(duration, sb), duration) : segs;
+  const prevEnd = first > 0 ? Math.min(a, words[first - 1].end) : -Infinity;
+  const nextStart = last + 1 < words.length ? Math.max(b, words[last + 1].start) : Infinity;
+  const sa = snapEdge(a, peaks, undefined, undefined, { min: prevEnd, max: a });
+  const sb = snapEdge(b, peaks, undefined, undefined, { min: b, max: nextStart });
+  return [sa, sb];
 }
 
 /** Bring source [a, b] back: clips grow into it, neighbours merge. */

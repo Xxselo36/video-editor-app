@@ -168,6 +168,11 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
     await page.getByTestId("ed-word-cut").click();
     const snapped = await gapStart(job.id);
     expect(Math.abs(snapped - 11.195)).toBeLessThanOrEqual(0.121);
+    // only in the gap after the word before "ten" (review 14)
+    const ws = (await stub.doc(job.id)).doc.words;
+    const iTen = ws.findIndex((w) => w.text === "ten");
+    expect(snapped).toBeGreaterThanOrEqual(ws[iTen - 1].end - 0.0011);
+    expect(snapped).toBeLessThanOrEqual(11.195 + 0.0011);
     // (i + 0.5) / 100: the centre of a peaks frame
     expect(Math.abs(snapped * 100 - 0.5 - Math.round(snapped * 100 - 0.5))).toBeLessThan(0.01);
 
