@@ -86,6 +86,8 @@ export type TranscriptEditorProps = {
 };
 
 const selWords = (st: DocState) => st.present.words;
+/** A click on a struck word waits this long for a second click (double-click: edit, not restore). */
+const RESTORE_CLICK_MS = 300;
 const selPreset = (st: DocState) => st.present.style?.presetId ?? null;
 
 type Sel = { a: string; f: string };
@@ -426,6 +428,17 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     const el = (target as HTMLElement).closest<HTMLElement>("[data-wi]");
     return el ? Number(el.dataset.wi) : -1;
   };
+  // a click on a struck word restores it once no second click came (review 11)
+  const restoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cutsRef = useRef(p.cuts);
+  useEffect(() => {
+    cutsRef.current = p.cuts;
+  });
+  const cancelRestore = () => {
+    if (restoreTimer.current) clearTimeout(restoreTimer.current);
+    restoreTimer.current = null;
+  };
+  useEffect(() => cancelRestore, []);
   const onClick = (e: React.MouseEvent) => {
     const el = e.target as HTMLElement;
     const brk = el.closest<HTMLElement>("[data-brk]");
@@ -452,14 +465,23 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
       if (!edit && el.closest("[data-testid=ed-word-input]") === null) setSel(null);
       return;
     }
-    // a struck word: back into the video (⇧-click still selects)
+    // a struck word: back into the video (⇧-click still selects) — after
+    // the double-click time, so a double-click (edit its text) doesn't
+    // bring its footage back first (review 11)
     if (removed[i] === 1 && !e.shiftKey) {
-      if (p.cuts.restoreWord(words[i])) setSel({ a: words[i].id, f: words[i].id });
+      cancelRestore();
+      if (e.detail > 1) return;
+      const w = words[i];
+      restoreTimer.current = setTimeout(() => {
+        restoreTimer.current = null;
+        if (cutsRef.current.restoreWord(w)) setSel({ a: w.id, f: w.id });
+      }, RESTORE_CLICK_MS);
       return;
     }
     selectWord(i, e.shiftKey);
   };
   const onDoubleClick = (e: React.MouseEvent) => {
+    cancelRestore();
     const i = wordOf(e.target);
     if (i >= 0) startEdit([i, i]);
   };

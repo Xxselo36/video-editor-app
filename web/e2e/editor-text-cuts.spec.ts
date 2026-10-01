@@ -345,6 +345,27 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
   });
 });
 
+test.describe("editor v2: a struck word's double-click (review 11)", TAG, () => {
+  test("double-click edits a struck word's text and leaves it cut; a single click restores it", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "double-click is the desktop's edit gesture");
+    const job = await stub.seed("review_speech");
+    await open(page, job.id);
+    await selectWords(page, "ten", "seconds");
+    await page.getByTestId("ed-word-cut").click();
+    await expect.poll(async () => covered(await timeline(stub, job.id), 11.5), SAVED).toBe(false);
+    await page.keyboard.press("Escape");
+    await word(page, "ten").dblclick();
+    await expect(page.getByTestId("ed-word-input")).toBeVisible();
+    await page.waitForTimeout(700);
+    await expect(word(page, "seconds")).toHaveAttribute("data-rm", "true");
+    expect(covered(await timeline(stub, job.id), 11.5)).toBe(false);
+    await page.keyboard.press("Escape");
+    await word(page, "seconds").click();
+    await expect(word(page, "seconds")).not.toHaveAttribute("data-rm", "true");
+    await expect.poll(async () => covered(await timeline(stub, job.id), 11.7), SAVED).toBe(true);
+  });
+});
+
 test.describe("editor v2: focus after a seam's Restore (review 9)", TAG, () => {
   test("Restore on a seam that isn't the last: focus is on no seam, Space plays, no other popover", async ({ page, stub }, info) => {
     test.skip(info.project.name !== "desktop", "keyboard");
