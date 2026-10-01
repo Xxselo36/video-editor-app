@@ -128,10 +128,10 @@ def test_single_mode_refuses_init_parts_and_sign(client, r2, monkeypatch):
                        ("sign", {"ticket": "x", "part_numbers": [1]})):
         r = client.post(f"/uploads/multipart/{path}", json=body)
         assert (r.status_code, r.json()) == (
-            409, {"detail": "use_single_put"}), path
+            409, {"detail": "use_single_put", "code": "use_single_put", "params": {}}), path
     monkeypatch.setenv("CLEO_UPLOAD_MODE", "multipart")
     r = client.post("/uploads/multipart/parts", json={"ticket": "x"})
-    assert r.json() != {"detail": "use_single_put"}
+    assert r.json() != {"detail": "use_single_put", "code": "use_single_put", "params": {}}
     assert client.post("/uploads/multipart/init", json={
         "size": 1000, "filename": "a.mp4"}).status_code == 200
 
@@ -146,7 +146,7 @@ def test_proxy_video_is_opt_in(client, monkeypatch, tmp_path):
                  normalized_path=str(d / "normalized.mp4"))
     monkeypatch.delenv("CLEO_PROXY_VIDEO", raising=False)
     r = client.get(f"/jobs/{job.id}/proxy-video")
-    assert (r.status_code, r.json()) == (404, {"detail": "proxy_not_ready"})
+    assert (r.status_code, r.json()) == (404, {"detail": "proxy_not_ready", "code": "proxy_not_ready", "params": {}})
     assert client.get(f"/jobs/{job.id}").json()["has_proxy"] is False
     monkeypatch.setenv("CLEO_PROXY_VIDEO", "1")
     assert client.get(f"/jobs/{job.id}/proxy-video").status_code == 200
@@ -680,4 +680,4 @@ def test_r2_job_without_r2_config_is_503_not_local(client, no_r2):
                  preview_key=f"jobs/{job.id}/preview/v1.mp4")
     r = client.get(f"/jobs/{job.id}/preview-video")
     assert (r.status_code, r.json()) == (
-        503, {"detail": "storage_unavailable"})
+        503, {"detail": "storage_unavailable", "code": "storage_unavailable", "params": {}})

@@ -51,8 +51,9 @@ test.describe("accounts on (test auth)", { tag: "@auth" }, () => {
   test("another user's project stays hidden", async ({ page, stub }) => {
     await signedIn(page);
     const theirs = await stub.seed("review", { owner: "someone_else", filename: "theirs.mp4" });
-    await page.goto(`/app?job=${theirs.id}`);
-    await expect(page.getByTestId("picker").or(page.getByTestId("dashboard"))).toBeVisible({ timeout: 30_000 });
+    await page.goto(`/app/edit/${theirs.id}`);
+    // Not theirs to see: the same answer as a project that doesn't exist.
+    await expect(page.getByTestId("error-screen")).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1500);
     await expect(page.getByTestId("editor")).toHaveCount(0);
     await expect(jobCard(page, "theirs.mp4")).toHaveCount(0);

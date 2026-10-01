@@ -242,12 +242,12 @@ def test_edit_save_limits(client, tmp_path, monkeypatch):
     many = [{"start": i * 0.5, "end": i * 0.5 + 0.2} for i in range(51)]
     r = client.post(f"/jobs/{job.id}/edit-segments", json={"segments": many})
     assert r.status_code == 400
-    assert r.json() == {"detail": "too_many_segments", "max_segments": 50}
+    assert r.json() == {"detail": "too_many_segments", "max_segments": 50, "code": "too_many_segments", "params": {"max_segments": 50}}
     # Clips may repeat the source, but at most twice its length (+ 1 min).
     whole = [{"start": 0, "end": 60}] * 4
     r = client.post(f"/jobs/{job.id}/edit-segments", json={"segments": whole})
     assert r.status_code == 400
-    assert r.json() == {"detail": "timeline_too_long", "max_seconds": 180}
+    assert r.json() == {"detail": "timeline_too_long", "max_seconds": 180, "code": "timeline_too_long", "params": {"max_seconds": 180}}
     assert store.get(job.id).segments == [(0.0, 5.0)]      # nothing stored
     ok = many[:48] + [{"start": 0, "end": 60}] * 2
     r = client.post(f"/jobs/{job.id}/edit-segments", json={"segments": ok})

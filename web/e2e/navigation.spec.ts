@@ -1,31 +1,38 @@
 /**
- * Navigation inside /app (scratchpad bt/p2nav.mjs): the editor has its
- * own URL (/app?job=…), a reload reopens it, the back gesture returns to
- * the dashboard (not the landing page), and back from the file screen
- * stays in the app. UX5 replaces ?job= with routes; rewrite then.
+ * Routes of /app (UX5, PLAN_TECH §1.1): every route survives a reload,
+ * the back button walks the routes, a deep link works in a fresh browser
+ * context, the pre-UX5 editor link (/app?job=…) redirects, the first
+ * paint of /app is never the picker for a returning user, and an upload
+ * keeps going while the user moves between routes (uploadManager).
  */
 import { expect, test } from "./support/fixtures";
-import { ACTIVE_JOBS, card, jobCard, openFromDashboard, openWithStorage } from "./support/app";
+import { ACTIVE_JOBS, LIBRARY, card, jobCard, libEntry, openFromDashboard, openWithStorage } from "./support/app";
+import { WEB } from "./support/env";
 
-test("editor URL, reload, back to the dashboard, back from the file screen", async ({ page, stub }) => {
+const path = (url: string) => new URL(url).pathname;
+
+test("dashboard → editor → reload → back → new video → back", async ({ page, stub }) => {
   const job = await stub.seed("review");
-  await page.goto("/");
   await openWithStorage(page, "/app", { [ACTIVE_JOBS]: [card(job.id, "reviewing", "echt.mp4")] });
+  await expect(page.getByTestId("dashboard")).toBeVisible();
 
   await openFromDashboard(page, "echt.mp4");
-  expect(new URL(page.url()).searchParams.get("job")).toBe(job.id);
+  expect(path(page.url())).toBe(`/app/edit/${job.id}`);
 
   await page.reload();
   await expect(page.getByTestId("apply-render")).toBeVisible({ timeout: 45_000 });
 
   await page.goBack();
   await expect(page.getByTestId("dashboard")).toBeVisible();
-  expect(new URL(page.url()).pathname).toBe("/app");
-  expect(new URL(page.url()).searchParams.has("job")).toBe(false);
+  expect(path(page.url())).toBe("/app");
   await expect(jobCard(page, "echt.mp4")).toBeVisible();
 
-  // New video → workflow card → the file chooser (cancelled) → the file screen.
+  // New video → /app/new; a workflow card opens the file chooser (cancelled) → the file screen.
   await page.getByTestId("dashboard-new-video").click();
+  await expect(page.getByTestId("picker")).toBeVisible();
+  expect(path(page.url())).toBe("/app/new");
+  await page.reload();
+  await expect(page.getByTestId("picker")).toBeVisible();
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser", { timeout: 5000 }),
     page.getByTestId("picker-card-tiktok").click(),
@@ -33,7 +40,212 @@ test("editor URL, reload, back to the dashboard, back from the file screen", asy
   expect(chooser).toBeTruthy();
   await expect(page.getByTestId("upload-dropzone")).toBeVisible();
 
+  expect(new URL(page.url()).search).toBe("?step=file");
+
+  // Back leaves the file screen for the picker, then for the dashboard.
   await page.goBack();
   await expect(page.getByTestId("upload-dropzone")).toHaveCount(0);
-  expect(new URL(page.url()).pathname).toBe("/app");
+  await expect(page.getByTestId("picker")).toBeVisible();
+  expect(page.url()).toBe(`${WEB}/app/new`);
+  await page.goBack();
+  await expect(page.getByTestId("dashboard")).toBeVisible();
+  expect(path(page.url())).toBe("/app");
+});
+
+test("every route survives a reload", async ({ page, stub }) => {
+  const review = await stub.seed("review");
+  const done = await stub.seed("done");
+  const failed = await stub.seed("err_no_speech");
+  const running = await stub.seed("analyzing");
+  await openWithStorage(page, "/app", { [LIBRARY]: [libEntry(done.id, "fertig.mp4")] });
+  const routes: [string, string][] = [
+    ["/app", "dashboard"],
+    ["/app/new", "picker"],
+    [`/app/edit/${review.id}`, "editor"],
+    [`/app/p/${done.id}`, "project"],
+    [`/app/p/${failed.id}`, "project"],
+    [`/app/p/${running.id}`, "project"],
+    ["/app/library", "library-card"],
+  ];
+  for (const [route, testId] of routes) {
+    await page.goto(route);
+    await expect(page.getByTestId(testId).first(), route).toBeVisible({ timeout: 45_000 });
+    await page.reload();
+    await expect(page.getByTestId(testId).first(), `${route} after a reload`).toBeVisible({ timeout: 45_000 });
+    expect(path(page.url())).toBe(route);
+  }
+});
+
+test("the project view switches by status", async ({ page, stub }) => {
+  const done = await stub.seed("done");
+  const failed = await stub.seed("err_no_speech");
+  const running = await stub.seed("rendering");
+  const review = await stub.seed("review");
+  await openWithStorage(page, `/app/p/${done.id}`);
+  await expect(page.getByTestId("project")).toHaveAttribute("data-status", "done");
+  await expect(page.getByRole("link", { name: /download/i }).first()).toBeVisible();
+
+  await page.goto(`/app/p/${failed.id}`);
+  const project = page.getByTestId("project");
+  await expect(project).toHaveAttribute("data-status", "error");
+  await expect(page.getByTestId("error-message")).toContainText("couldn't find any speech");
+  await expect(page.getByTestId("error-message")).toContainText("credited");
+  await page.getByRole("button", { name: "Try another video" }).click();
+  await expect(page).toHaveURL(`${WEB}/app/new`);
+
+  await page.goto(`/app/p/${running.id}`);
+  await expect(page.getByTestId("project")).toHaveAttribute("data-status", "processing");
+  await expect(page.getByTestId("job-card")).toBeVisible();
+  await expect(page.getByTestId("project-stage")).toHaveText("Exporting");
+
+  // In review: the editor.
+  await page.goto(`/app/p/${review.id}`);
+  await expect(page).toHaveURL(`${WEB}/app/edit/${review.id}`);
+  await expect(page.getByTestId("apply-render")).toBeVisible({ timeout: 45_000 });
+
+  // A project the server doesn't know.
+  await page.goto("/app/p/doesnotexist1");
+  await expect(page.getByTestId("error-message")).toContainText("no longer exists");
+});
+
+test("a deep link works in a new browser context", async ({ browser, stub }) => {
+  const job = await stub.seed("review");
+  const ctx = await browser.newContext({ baseURL: WEB });
+  const page = await ctx.newPage();
+  await page.goto(`/app/edit/${job.id}`);
+  await expect(page.getByTestId("apply-render")).toBeVisible({ timeout: 45_000 });
+  // Back from a deep link stays in the app: the dashboard, which — with
+  // nothing on this device yet — goes on to the picker.
+  await page.getByTestId("editor-back").click();
+  await expect(page).toHaveURL(`${WEB}/app/new`);
+  await expect(page.getByTestId("picker")).toBeVisible();
+  await ctx.close();
+});
+
+test("the pre-UX5 editor link /app?job=… redirects to the editor", async ({ page, stub }) => {
+  const job = await stub.seed("review");
+  await openWithStorage(page, `/app?job=${job.id}`);
+  await expect(page).toHaveURL(`${WEB}/app/edit/${job.id}`);
+  await expect(page.getByTestId("apply-render")).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByTestId("picker")).toHaveCount(0);
+});
+
+test("a finished or running job's editor link shows its project", async ({ page, stub }) => {
+  const done = await stub.seed("done");
+  await openWithStorage(page, `/app/edit/${done.id}`);
+  await expect(page).toHaveURL(`${WEB}/app/p/${done.id}`);
+  await expect(page.getByTestId("project")).toHaveAttribute("data-status", "done");
+});
+
+test("/app never paints the picker for a returning user", async ({ page, stub }) => {
+  const job = await stub.seed("analyzing");
+  await page.goto("/imprint");
+  await page.evaluate(
+    ([k, v]) => {
+      localStorage.clear();
+      localStorage.setItem(k, v);
+    },
+    [ACTIVE_JOBS, JSON.stringify([card(job.id, "analyzing", "läuft.mp4")])] as const,
+  );
+  // What the page shows at DOMContentLoaded, before any effect ran.
+  await page.goto("/app", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("picker")).toHaveCount(0);
+  const first = await page.evaluate(() =>
+    Boolean(document.querySelector('[data-testid="dashboard-skeleton"], [data-testid="dashboard"]')),
+  );
+  expect(first).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("app-first-paint.png") });
+  await expect(page.getByTestId("dashboard")).toBeVisible();
+  await expect(page.getByTestId("picker")).toHaveCount(0);
+});
+
+test("a first visit goes from /app to the picker; back from its steps stays in the app", async ({ page, stub }) => {
+  await openWithStorage(page, "/app");
+  await expect(page).toHaveURL(`${WEB}/app/new`);
+  await expect(page.getByTestId("picker")).toBeVisible();
+  await expect(page.getByTestId("picker-back")).toHaveCount(0);
+  // Custom: file chosen → the settings; back → the file screen → the picker.
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("picker-card-custom").click()]);
+  await chooser.setFiles({ name: "erst.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
+  await expect(page.getByTestId("configure-process")).toBeVisible();
+  expect(new URL(page.url()).search).toBe("?step=settings");
+  await page.goBack();
+  await expect(page.getByTestId("upload-dropzone")).toBeVisible();
+  await page.goBack();
+  await expect(page.getByTestId("picker")).toBeVisible();
+  expect(page.url()).toBe(`${WEB}/app/new`);
+  // A reload on a step starts at the picker.
+  const [again] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("picker-card-tiktok").click()]);
+  expect(again).toBeTruthy();
+  await page.reload();
+  await expect(page.getByTestId("picker")).toBeVisible();
+  expect(page.url()).toBe(`${WEB}/app/new`);
+});
+
+test("an upload keeps going while the user changes routes", async ({ page, stub }) => {
+  const review = await stub.seed("review");
+  await stub.config({ by_filename: { "wandert.mp4": { analysis_seconds: 60 } } });
+  await openWithStorage(page, "/app/new", { [ACTIVE_JOBS]: [card(review.id, "reviewing", "andere.mp4")] });
+  // A slow upload: every request of the upload API waits a little.
+  await page.route("**/uploads/**", async (r) => {
+    await new Promise((res) => setTimeout(res, 400));
+    await r.continue();
+  });
+  const media = await stub.media("grid.mp4");
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByTestId("picker-card-tiktok").click(),
+  ]);
+  await chooser.setFiles({ name: "wandert.mp4", mimeType: "video/mp4", buffer: media });
+  await expect(page).toHaveURL(`${WEB}/app`);
+  const upload = jobCard(page, "wandert.mp4");
+  await expect(upload).toBeVisible();
+  // Into another project's editor and back while it uploads.
+  await openFromDashboard(page, "andere.mp4");
+  await page.goBack();
+  await expect(page.getByTestId("dashboard")).toBeVisible();
+  // The same upload finished: its card is the job's now (analyzing), no error.
+  await expect(upload).toHaveAttribute("data-phase", "analyzing", { timeout: 60_000 });
+  await expect(upload.getByTestId("job-card-remove")).toHaveCount(0);
+});
+
+test("the project view rides out 5xx answers (a deploy) and keeps polling", async ({ page, stub }) => {
+  const job = await stub.seed("review");
+  // First load: two 503s. Then the job "processing", a 502 mid-poll, and
+  // finally the real answer (in review) → on to the editor.
+  let n = 0;
+  await page.route(`**/jobs/${job.id}`, async (r) => {
+    n++;
+    if (n <= 2) return r.fulfill({ status: 503, body: "busy" });
+    const res = await r.fetch();
+    if (n === 3) {
+      const body = { ...(await res.json()), status: "processing", stage: "analyze.transcribe", progress: 40 };
+      return r.fulfill({ response: res, body: JSON.stringify(body) });
+    }
+    if (n === 4) return r.fulfill({ status: 502, body: "<html>Bad Gateway</html>" });
+    return r.fulfill({ response: res });
+  });
+  await openWithStorage(page, `/app/p/${job.id}`);
+  await expect(page.getByTestId("project")).toHaveAttribute("data-status", "processing", { timeout: 20_000 });
+  await expect(page).toHaveURL(`${WEB}/app/edit/${job.id}`, { timeout: 30_000 });
+  expect(n).toBeGreaterThanOrEqual(5);
+});
+
+test("a double click on Process starts one upload, not two", async ({ page, stub }) => {
+  await openWithStorage(page, "/app/new");
+  const inits: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && /\/(uploads\/multipart\/init|uploads\/presign|jobs)$/.test(r.url())) inits.push(r.url());
+  });
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("picker-card-custom").click()]);
+  await chooser.setFiles({ name: "doppelt.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
+  await page.getByTestId("configure-process").dblclick();
+  await expect(page).toHaveURL(`${WEB}/app`);
+  await expect(jobCard(page, "doppelt.mp4")).toHaveCount(1);
+  await expect.poll(() => inits.filter((u) => u.endsWith("/jobs")).length, { timeout: 30_000 }).toBe(1);
+  await page.waitForTimeout(1500);
+  await expect(jobCard(page, "doppelt.mp4")).toHaveCount(1);
+  // One upload: a multipart init, and (the stub runs single PUTs) one presign.
+  expect(inits.filter((u) => u.endsWith("/uploads/multipart/init")).length).toBeLessThanOrEqual(1);
+  expect(inits.filter((u) => u.endsWith("/uploads/presign")).length).toBeLessThanOrEqual(1);
 });

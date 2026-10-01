@@ -6,8 +6,8 @@
 import type { TFn } from "@/i18n";
 import { updateActiveJob as updateActiveJobV2 } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
-import { ApiError, apiError, apiFetch } from "@/lib/api";
-import { friendlyError } from "@/lib/errors.legacy";
+import { apiError, apiFetch } from "@/lib/api";
+import { describeError } from "@/lib/errors";
 import type { Phrase, Subtitle } from "./buildPhrases";
 import { phrasesToUnits } from "./phraseUnits";
 
@@ -35,7 +35,7 @@ export async function applyRender(
   });
   if (r.status !== 409 && !r.ok) throw await apiError(r);
   if (r.ok) track("export_started", { caption_style: captionPreset, lines: phrases.length });
-  updateActiveJobV2(jobId, { phase: "rendering", note: undefined });
+  updateActiveJobV2(jobId, { phase: "rendering", note: undefined, noteCode: undefined });
   return r.status === 409 ? "not_in_review" : "started";
 }
 
@@ -43,6 +43,5 @@ export async function applyRender(
  *  the raw answer (tech.md T3). A 401 has opened the sign-in already
  *  (apiFetch). */
 export function applyRenderErrorText(err: unknown, t: TFn): string {
-  const raw = err instanceof ApiError ? (err.code ?? err.message) : err instanceof Error ? err.message : String(err);
-  return err instanceof ApiError && err.status === 401 ? t("app.errors.signInRequired") : friendlyError(raw, t);
+  return describeError(err, t);
 }

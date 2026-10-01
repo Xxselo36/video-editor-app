@@ -309,10 +309,10 @@ def test_queue_cap_is_503_with_retry_after(client, monkeypatch):
     assert _body_upload(client).status_code == 200   # waits (1 in line)
     r = _body_upload(client)
     assert r.status_code == 503 and r.headers["retry-after"] == "120"
-    assert r.json() == {"detail": "server_busy"}
+    assert r.json() == {"detail": "server_busy", "code": "server_busy", "params": {}}
     assert len(store.list_all()) == 2                 # the claim is gone
     assert client.post("/uploads/presign", json={}).json() == {
-        "detail": "server_busy"}
+        "detail": "server_busy", "code": "server_busy", "params": {}}
 
 
 def test_ten_concurrent_uploads_of_one_user(client, enforce, bearer,
@@ -321,7 +321,7 @@ def test_ten_concurrent_uploads_of_one_user(client, enforce, bearer,
     and have no charge left in the ledger."""
     add_sub(plan="pro", period_start=time.time() - 60)
     monkeypatch.setattr(M, "_probe_duration", lambda p: 60.0)
-    monkeypatch.setattr(M, "_probe_audio", lambda p: True)
+    monkeypatch.setattr(M, "_probe_streams", lambda p: (True, True))
     # Past the soft check at once (it has no lock): the binding check in
     # the enqueue transaction decides.
     monkeypatch.setattr(M, "_queue_soft_check", lambda user: None)
@@ -374,7 +374,7 @@ def test_presign_per_user_limit_from_the_database(client, auth_on, bearer,
     _upload_job(owner="user_a")
     r = client.post("/uploads/presign", headers=bearer("user_a"), json={})
     assert (r.status_code, r.json()) == (429,
-                                         {"detail": "too_many_active_jobs"})
+                                         {"detail": "too_many_active_jobs", "code": "too_many_active_jobs", "params": {}})
     assert client.post("/uploads/presign", headers=bearer("user_b"),
                        json={}).status_code == 200
 

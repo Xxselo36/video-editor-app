@@ -55,12 +55,23 @@ export type ActiveJobV2 = {
   // The upload continues an interrupted one of the same file (resume
   // state in IndexedDB, lib/chunkedUpload): the card says so.
   resuming?: boolean;
-  // Populated when the upload or a later phase fails. Card renders a
-  // retry button instead of the normal progress bar when set.
+  // Set when the upload or a later phase fails: an English sentence —
+  // what a tab still on a build from before UX5 shows (they share this
+  // store). The card renders a retry button instead of the progress bar
+  // when set.
   error?: string;
-  // Non-fatal hint on a card that still works (e.g. render failed →
-  // back in review, edits kept).
+  // The same failure as a code (lib/errors.ts; backend/errors.py or a
+  // browser-side code such as connection_lost), worded in the viewer's
+  // language when the card renders (UX5). Older cards: none
+  // (lib/errors.ts legacyCardCode maps their sentence).
+  errorCode?: string | null;
+  errorParams?: Record<string, string | number | boolean | null>;
+  // The job's minutes were credited back for the failure.
+  refunded?: boolean | null;
+  // Non-fatal hint on a card that still works (render failed → back in
+  // review, edits kept): the English sentence, and its code.
   note?: string;
+  noteCode?: string | null;
 };
 
 export function getActiveJobs(): ActiveJobV2[] {
@@ -124,14 +135,14 @@ export function markStaleUploads(idleMs = 20_000): void {
     if (j.phase !== "uploading" || j.error || liveUploads.has(j.jobId)) return j;
     if (now - (j.lastProgressAt ?? j.timestamp) < idleMs) return j;
     changed = true;
-    return {
-      ...j,
-      error:
-        "Upload was interrupted (page reloaded or connection lost). Please upload the video again.",
-    };
+    return { ...j, error: INTERRUPTED_TEXT, errorCode: "upload_interrupted" };
   });
   if (changed) saveActiveJobs(next);
 }
+
+/** The English sentence of an interrupted upload (older tabs show it). */
+const INTERRUPTED_TEXT =
+  "Upload was interrupted (page reloaded or connection lost). Please upload the video again.";
 
 export function getActiveJob(jobId: string): ActiveJobV2 | null {
   return getActiveJobs().find((j) => j.jobId === jobId) ?? null;

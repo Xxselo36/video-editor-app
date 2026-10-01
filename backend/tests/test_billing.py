@@ -147,7 +147,8 @@ def test_parallel_charges_never_overspend(monkeypatch):
 def test_enforced_upload_needs_subscription(client, enforce, bearer, probe):
     r = _upload(client, bearer())
     assert r.status_code == 402
-    assert r.json() == {"detail": {"code": "subscription_required"}}
+    assert r.json() == {"detail": {"code": "subscription_required"},
+                        "code": "subscription_required", "params": {}}
     assert _uploads_dir_files() == []  # upload thrown away
     assert store.list_all() == []
 
@@ -221,15 +222,15 @@ def test_enforced_upload_caps_the_analysis(client, enforce, bearer, probe,
     """The charge trusts the container's duration header: analysis must
     not process more than was charged (+ tolerance)."""
     add_sub(plan="starter", period_start=time.time() - 60)
-    probe["seconds"] = 0.5  # a header claiming half a second
+    probe["seconds"] = 3.5  # a header claiming 3.5 s (the minimum is 3, UX5)
     r = _upload(client, bearer())
     assert r.status_code == 200
     job = store.get(r.json()["job_id"])
-    assert accounts.get_usage(job.id)["seconds_billed"] == 1
-    assert job.settings["_max_seconds"] == 1 + accounts.TRUE_UP_TOLERANCE_S
+    assert accounts.get_usage(job.id)["seconds_billed"] == 4
+    assert job.settings["_max_seconds"] == 4 + accounts.TRUE_UP_TOLERANCE_S
     # Clients can't set it themselves.
     r = _upload(client, bearer(), settings='{"_max_seconds": 99999}')
-    assert store.get(r.json()["job_id"]).settings["_max_seconds"] == 6
+    assert store.get(r.json()["job_id"]).settings["_max_seconds"] == 4 + accounts.TRUE_UP_TOLERANCE_S
     # Not enforced: nobody is blocked; capped at CLEO_MAX_MINUTES only
     # (the client's value is dropped).
     monkeypatch.delenv("CLEO_BILLING_ENFORCE")
@@ -237,6 +238,7 @@ def test_enforced_upload_caps_the_analysis(client, enforce, bearer, probe,
     assert store.get(r.json()["job_id"]).settings["_max_seconds"] == 1801
     monkeypatch.setenv("CLEO_MAX_MINUTES", "0")    # cap off
     r = _upload(client, bearer(), settings='{"_max_seconds": 3}')
+    assert r.status_code == 200, r.text
     assert "_max_seconds" not in store.get(r.json()["job_id"]).settings
 
 

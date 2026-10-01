@@ -21,8 +21,13 @@ export type JobStatusRow = {
   error: string | null;
   /** Machine-readable cause of a failure ("no_speech", "no_audio", …). */
   error_code?: string | null;
+  /** Its numbers ({"max_minutes": 30}), UX5. */
+  error_params?: Record<string, string | number | boolean | null> | null;
   /** The failed job's minutes were credited back. */
   refunded?: boolean | null;
+  /** Where a running job is (backend/errors.py STAGES), UX5. */
+  stage?: string | null;
+  stage_params?: Record<string, string | number | boolean | null> | null;
   has_output?: boolean;
   updated_at?: number | null;
   preview_version?: number | null;
@@ -47,6 +52,9 @@ let batchSupported = true;
 
 const num = (v: unknown, dflt: number) => (typeof v === "number" && isFinite(v) ? v : dflt);
 
+const obj = (v: unknown) =>
+  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, string | number | boolean | null>) : null;
+
 function toRow(id: string, raw: Record<string, unknown>): JobStatusRow {
   const qp = raw.queue_position;
   return {
@@ -57,7 +65,10 @@ function toRow(id: string, raw: Record<string, unknown>): JobStatusRow {
     queue_position: typeof qp === "number" && qp > 0 ? qp : null,
     error: typeof raw.error === "string" ? raw.error : null,
     error_code: typeof raw.error_code === "string" ? raw.error_code : null,
+    error_params: obj(raw.error_params),
     refunded: typeof raw.refunded === "boolean" ? raw.refunded : null,
+    stage: typeof raw.stage === "string" ? raw.stage : null,
+    stage_params: obj(raw.stage_params),
     has_output: Boolean(raw.has_output),
     updated_at: typeof raw.updated_at === "number" ? raw.updated_at : null,
     preview_version: typeof raw.preview_version === "number" ? raw.preview_version : null,
@@ -67,7 +78,7 @@ function toRow(id: string, raw: Record<string, unknown>): JobStatusRow {
 /** What a card shows; the change signal for the backoff. */
 function signature(rows: JobStatusRow[], missing: string[]): string {
   return JSON.stringify([
-    rows.map((r) => [r.id, r.status, r.message, r.progress, r.queue_position, r.error, r.error_code, r.refunded]),
+    rows.map((r) => [r.id, r.status, r.message, r.progress, r.queue_position, r.error, r.error_code, r.refunded, r.stage]),
     missing,
   ]);
 }

@@ -26,6 +26,8 @@ export function ConfigureScreen(props: {
   setOutputFormats: (f: string[]) => void;
   onProcess: () => void;
   onBack: () => void;
+  /** The upload started: the button stays off (no second job). */
+  starting?: boolean;
 }) {
   const t = useT();
   const sizeMB = (props.file.size / 1024 / 1024).toFixed(1);
@@ -172,6 +174,7 @@ export function ConfigureScreen(props: {
       <Button
         size="lg"
         onClick={() => props.onProcess()}
+        disabled={props.starting}
         data-testid="configure-process"
         // Sticky on phones: the options list is ~2 screens tall.
         className="sticky bottom-3 z-20 mt-2 w-full shadow-lg"

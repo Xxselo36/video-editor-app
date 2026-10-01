@@ -414,6 +414,37 @@ def long_video() -> Path:
     return out
 
 
+# Uploads POST /jobs refuses before any charge (§1.7 rows 2–4): name →
+# (ffmpeg inputs and codecs, what the refusal is).
+REFUSED_MEDIA: dict[str, list[str]] = {
+    # An audio file: no picture → 400 no_video.
+    "audio.m4a": ["-f", "lavfi", "-i", "sine=frequency=440:duration=6",
+                  "-c:a", "aac"],
+    # A screen recording without a mic: no sound track → 400 no_audio.
+    "silent.mp4": ["-f", "lavfi", "-i", "testsrc=size=160x90:rate=10:duration=6",
+                   "-c:v", "libx264", "-pix_fmt", "yuv420p"],
+    # Under the 3-second minimum → 400 video_too_short.
+    "short.mp4": ["-f", "lavfi", "-i", "testsrc=size=160x90:rate=10:duration=1.5",
+                  "-f", "lavfi", "-i", "sine=frequency=440:duration=1.5",
+                  "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"],
+}
+
+
+def refused_media(name: str) -> Path:
+    """One of REFUSED_MEDIA (a few KB, built once)."""
+    out = media_dir() / "refused" / name
+    if out.exists():
+        return out
+    with _locked("refused"):
+        if out.exists():
+            return out
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_name(f".tmp.{name}")
+        _run([ffmpeg(), "-y", "-loglevel", "error", *REFUSED_MEDIA[name], str(tmp)])
+        os.replace(tmp, out)
+    return out
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
     if what in ("grid", "all"):

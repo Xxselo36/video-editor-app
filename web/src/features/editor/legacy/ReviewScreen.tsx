@@ -13,9 +13,11 @@ import { Card, SectionLabel } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { Tabs } from "@/components/ui/Tabs";
-import { useT } from "@/i18n";
+import { useLang, useT } from "@/i18n";
 import { track } from "@/lib/analytics";
 import { publicUrl } from "@/lib/api";
+import { audioWarningText } from "@/lib/errors";
+import { plural } from "@/lib/i18n/plural";
 import { PlaybackDebug } from "@/features/editor/debug/PlaybackDebug";
 import { fmtTime, fmtTimecode } from "@/features/editor/format";
 import { cutClockOf, sourceTimeOf, useEditSession } from "@/features/editor/session/useEditSession";
@@ -61,6 +63,7 @@ export function ReviewScreen({
   onBack: () => void;
 }) {
   const t = useT();
+  const lang = useLang();
   const {
     videoRef,
     fadeRef,
@@ -205,7 +208,7 @@ export function ReviewScreen({
           </div>
           <ul className="list-disc pl-4 space-y-0.5">
             {audioWarnings.map((w, i) => (
-              <li key={i}>{w}</li>
+              <li key={i}>{audioWarningText(w, t)}</li>
             ))}
           </ul>
         </div>
@@ -369,7 +372,7 @@ export function ReviewScreen({
           >
             <SectionLabel>
               {t(
-                phrases.length === 1 ? "app.transcript.headingOne" : "app.transcript.headingOther",
+                plural(lang, phrases.length, { one: "app.transcript.headingOne", other: "app.transcript.headingOther" }),
                 { count: phrases.length },
               )}
             </SectionLabel>

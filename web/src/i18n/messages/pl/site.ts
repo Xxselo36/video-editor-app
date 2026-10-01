@@ -1,0 +1,138 @@
+import type { SiteKey } from "../en";
+
+export const plSite: Partial<Record<SiteKey, string>> = {
+  // ── site.* (Landing) ─────────────────────────────────────────────────
+  "site.header.homeAria": "Strona główna CleoCuts",
+  "site.header.openEditor": "Otwórz edytor",
+
+  "site.hero.badge": "Otwarta beta · bezpłatnie",
+  "site.hero.badgePricing": "Zobacz plany i cennik",
+  "site.hero.titleLead": "Montuj, kiedy",
+  "site.hero.titleAccent": "nagrywasz.",
+  "site.hero.sub":
+    "Powiedz {cut}, kiedy się pomylisz. Powiedz {finish}, kiedy skończysz. Gotowe do publikacji w kilka minut — z napisami i cięciami.",
+  "site.hero.cta": "Wypróbuj CleoCuts",
+
+  "site.showcase.listening": "CleoCuts słucha",
+  "site.showcase.captionStyle": "styl napisów",
+  "site.showcase.clipper": "MOWA JEST EDYTOREM",
+  "site.showcase.highlight": "GOTOWE DO PUBLIKACJI",
+  "site.showcase.flash": "POWIEDZ CUT",
+  "site.showcase.punch": "MISTRZOSTWO",
+  "site.showcase.elegant": "Po prostu słucha.",
+
+  "site.features.title": "Co robi CleoCuts.",
+  "site.features.voice.title": "Komendy głosowe",
+  "site.features.voice.body": "Powiedz {cut} w środku ujęcia. CleoCuts usuwa nieudaną próbę.",
+  "site.features.cleanup.title": "Czyszczenie przez AI",
+  "site.features.cleanup.body": "Poprawia źle rozpoznane słowa i nazwy marek w twoich napisach.",
+  "site.features.captions.title": "Animowane napisy",
+  "site.features.captions.body": "Kilka stylów, od Clean do Clipper.",
+  "site.features.vertical.title": "Automatyczny format wertykalny",
+  "site.features.vertical.body": "Pejzaż → 9:16 ze śledzeniem twarzy.",
+  "site.features.hooks.title": "Najlepsze momenty jako klipy",
+  "site.features.hooks.body":
+    "W filmach od 90 sekund CleoCuts znajduje do {count} najlepszych momentów i robi z każdego osobny krótki klip.",
+
+  "site.steps.title": "Trzy kroki.",
+  "site.steps.sub": "Nagraj. Rozmawiaj z CleoCuts. Opublikuj.",
+  "site.steps.record.title": "Nagrywaj",
+  "site.steps.record.body": "Powiedz {cut}, kiedy się pomylisz. Bez powtórek.",
+  "site.steps.record.hint": "Ujęcia każdej długości",
+  "site.steps.upload.title": "Wgraj",
+  "site.steps.upload.body": "Wgraj swój film. Wybierz workflow. Resztę robi AI.",
+  "site.steps.upload.hint": "Kilka minut, w zależności od długości",
+  "site.steps.post.title": "Opublikuj",
+  "site.steps.post.body": "Pobierz gotowy film — przygotowany na TikToka, Instagrama i YouTube.",
+  "site.steps.post.hint": "Pobierz, kiedy będzie gotowe",
+
+  "site.footer.editor": "Edytor",
+  "site.footer.library": "Biblioteka",
+  "site.footer.imprint": "Nota prawna",
+  "site.footer.privacy": "Prywatność",
+  "site.footer.terms": "Regulamin",
+  "site.footer.pricing": "Cennik",
+
+  "site.pricing.title": "Prosty cennik",
+  "site.pricing.subtitle": "Płać co miesiąc za minuty wgrywanych filmów. Możesz zrezygnować w każdej chwili.",
+  "site.pricing.perMonth": "/ mies.",
+  "site.pricing.perYear": "/ rok",
+  "site.pricing.priceAtCheckout": "Cena widoczna przy płatności",
+  "site.pricing.popular": "Najpopularniejszy",
+  "site.pricing.minutes": "{minutes} min wideo miesięcznie",
+  "site.pricing.retention": "Projekty przechowywane przez {days} dni",
+  "site.pricing.featureWorkflows": "Wszystkie workflowy i style napisów",
+  "site.pricing.featureVoice": "Komendy głosowe i czyszczenie przez AI",
+  "site.pricing.choose": "Wybierz {plan}",
+  "site.pricing.current": "Twój obecny plan",
+  "site.pricing.manage": "Zarządzaj subskrypcją",
+  "site.pricing.switch": "Przejdź na {plan}",
+  "site.pricing.unavailable": "Jeszcze niedostępny",
+  "site.pricing.redirecting": "Otwieranie płatności…",
+  "site.pricing.checkoutFailed": "Nie udało się otworzyć płatności. Spróbuj ponownie za chwilę.",
+  "site.pricing.loadFailed": "Nie udało się wczytać planów. Spróbuj ponownie za chwilę.",
+  "site.pricing.minutesHint":
+    "Minuty to łączna długość wgrywanych filmów. Niewykorzystane minuty nie przechodzą na kolejny miesiąc.",
+  "site.pricing.vatNote":
+    "Ceny zawierają VAT. Płatności obsługuje Lemon Squeezy, nasz Merchant of Record — pobiera opłaty i wysyła ci faktury.",
+  "site.pricing.testMode": "Tryb testowy — bez prawdziwych płatności",
+  "site.pricing.testersOnly": "Planów nie można jeszcze kupić — płatność działa w trybie testowym, tylko dla zaproszonych testerów.",
+  "site.pricing.betaTitle": "Bezpłatnie w czasie otwartej bety",
+  "site.pricing.betaBody":
+    "W czasie bety korzystasz z CleoCuts bezpłatnie. Płatne plany z większą liczbą minut pojawią się wkrótce.",
+
+  "library.header.homeAria": "Edytor CleoCuts",
+  "library.header.title": "Biblioteka",
+  "library.header.newProject": "Nowy projekt",
+
+  "library.count.one": "{count} projekt",
+  "library.count.other": "{count} projektów",
+  "library.confirmDelete": "Usunąć ten projekt na stałe? Film i wszystkie zmiany zostaną usunięte z naszych serwerów.",
+  "library.deleteFailed": "Nie udało się teraz usunąć — jeśli film jest jeszcze przetwarzany, spróbuj za chwilę.",
+
+  "library.empty.title": "Twoja biblioteka jest pusta",
+  "library.empty.body":
+    "Każdy zakończony film pojawia się tutaj. Możesz go pobrać ponownie, zgrać napisy i udostępnić klipy hookowe w każdej chwili.",
+  "library.empty.cta": "Zacznij swój pierwszy projekt",
+
+  "library.card.playAria": "Odtwórz podgląd {name}",
+  "library.card.noPreview": "brak podglądu",
+  "library.card.customPreset": "Własne",
+  "library.card.deleteAria": "Usuń projekt",
+  "library.card.expiresDays": "Automatyczne usunięcie za {n} dni",
+  "library.card.expiresSoon": "Usunięcie w ciągu 24 godzin",
+  "library.card.expired": "Wygasło — pliki zostały usunięte",
+  "library.card.hooks.one": "{count} hook",
+  "library.card.hooks.other": "{count} hooków",
+  "library.card.hookSeconds": "{seconds}s",
+  "library.card.caption": "Opis",
+  "library.card.copy": "kopiuj",
+  "library.card.copied": "skopiowano",
+
+  "library.format.primary": "Główny montaż",
+  "library.format.hook": "Klip hookowy {n}",
+
+  "library.time.justNow": "przed chwilą",
+  "library.time.minutesAgo": "{n} min temu",
+  "library.time.hoursAgo": "{n} godz. temu",
+  "library.time.daysAgo": "{n} dni temu",
+
+  "common.videoModal.closeAria": "Zamknij podgląd",
+  "common.videoModal.close": "Zamknij",
+  "common.videoModal.dialogLabel": "Podgląd filmu",
+
+  "common.auth.signIn": "Zaloguj się",
+  "common.auth.account": "Konto",
+  "common.auth.pricing": "Cennik",
+  "common.language": "Język",
+  "common.footer.legalAria": "Informacje prawne",
+  "legal.onlyDeEn":
+    "Ta strona jest dostępna tylko po niemiecku i angielsku. Czytasz wersję angielską.",
+  "common.backHome": "Wróć na stronę główną",
+  "common.notFound.title": "Nie znaleziono strony",
+  "common.notFound.body": "Ta strona nie istnieje albo została przeniesiona.",
+  "common.error.title": "Coś poszło nie tak",
+  "common.error.body": "Nie udało się wyświetlić tej strony. Spróbuj ponownie.",
+  "common.error.retry": "Spróbuj ponownie",
+  "common.error.ref": "Identyfikator błędu: {id}",
+};

@@ -30,8 +30,11 @@ Test API (only this script registers it; never part of the backend):
   POST /_test/seed/{seed}   body: options (all optional) → {"id", …}
        seeds: review (grid clip — the editor suites' timings),
               review_speech, review_land, render_failed, analyzing,
-              queued, rendering, error, done, done_land (the §1.7
-              state matrix grows here: later packages add seeds)
+              queued, rendering, error, err_no_speech (refunded),
+              err_unreadable, done, done_land (the §1.7 state matrix
+              grows here: later packages add seeds; the upload
+              refusals no_video / no_audio / video_too_short are the
+              real backend's answers to the media below)
        options: filename, owner (a user id: the job's owner_id),
               age_s (created that long ago), clip ("grid" | "speech"),
               orientation ("portrait" | "landscape"), settings (dict),
@@ -51,7 +54,10 @@ Test API (only this script registers it; never part of the backend):
                             result, default speech — grid without espeak-ng)
   GET  /_test/job/{id}      the job with internals (keys, owner, sizes)
   GET  /_test/media/{name}  a stub clip for uploads: grid.mp4,
-                            speech.mp4, speech_land.mp4, long.webm (31 min)
+                            speech.mp4, speech_land.mp4, long.webm (31 min),
+                            and ones POST /jobs refuses: audio.m4a
+                            (no_video), silent.mp4 (no_audio), short.mp4
+                            (video_too_short)
   GET  /_test/info          mode, R2 endpoint, seeds
   GET  /_test/uploads       (R2 mode) open multipart uploads + objects
 
@@ -90,7 +96,8 @@ for p in (str(REPO), str(HERE)):
 import stub_media  # noqa: E402
 
 SEED_NAMES = ("review", "review_speech", "review_land", "render_failed", "analyzing",
-              "queued", "rendering", "error", "done", "done_land")
+              "queued", "rendering", "error", "err_no_speech", "err_unreadable", "done",
+              "done_land")
 
 TIKTOK = {"caption_preset": "clipper", "style": "tight", "voice_triggers": True,
           "remove_fillers": True, "smartcam_enabled": True, "smartcam_format": "portrait",
@@ -106,11 +113,17 @@ HOOKS = [{"key": "hook_1", "title": "Nobody waits ten seconds",
          {"key": "hook_2", "title": "No captions? They're gone.",
           "reason": "Clear takeaway with a punchline; high share and save potential.",
           "start": 19.2, "end": 28.3}]
-# Real stage messages of the analysis, with their share of its time.
-STAGES = [("Checking audio…", 1, 1.5), ("Preparing video…", 3, 3), ("Preparing preview…", 9, 2),
-          ("Analyzing audio…", 10, 2), ("Transcribing (35%)…", 35, 4),
-          ("Transcribing (62%)…", 62, 4), ("Transcribing (88%)…", 78, 3),
-          ("Polishing transcript…", 85, 3), ("Building preview…", 95, 3)]
+# Real stages of the analysis (backend/errors.py STAGES) with their
+# messages and share of its time.
+STAGES = [("analyze.normalize", "Checking audio…", 1, 1.5),
+          ("analyze.normalize", "Preparing video…", 3, 3),
+          ("analyze.smartcam", "Preparing preview…", 9, 2),
+          ("analyze.transcribe", "Analyzing audio…", 10, 2),
+          ("analyze.transcribe", "Transcribing (35%)…", 35, 4),
+          ("analyze.transcribe", "Transcribing (62%)…", 62, 4),
+          ("analyze.transcribe", "Transcribing (88%)…", 78, 3),
+          ("analyze.cleanup", "Polishing transcript…", 85, 3),
+          ("analyze.cuts", "Building preview…", 95, 3)]
 
 
 def _parse_args() -> argparse.Namespace:
@@ -205,8 +218,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
 
     import backend.main as M
     import backend.pipeline as pipeline
+    from backend import errors, llm, media
     from backend import jobs as J
-    from backend import llm, media
     from backend.auth import get_owned_job, media_user
     from backend.jobs import store
     from fastapi import Body, Depends, HTTPException
@@ -328,9 +341,9 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         job = store.get(job_id)
         per_file = dict(CONFIG["by_filename"].get(job.filename if job else "", {}))
         total = float(per_file.pop("analysis_seconds", CONFIG["analysis_seconds"]))
-        weight = sum(dt for _, _, dt in STAGES)
-        for msg, pct, dt in STAGES:
-            progress_cb(msg, float(pct))
+        weight = sum(dt for *_, dt in STAGES)
+        for code, msg, pct, dt in STAGES:
+            progress_cb(errors.stage_message(code, msg), float(pct))
             time.sleep(total * dt / weight)
         if on_normalized is not None:
             on_normalized()
@@ -351,7 +364,9 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         n = max(1, len(segments or []))
         for pct in (10, 40, 70, 90):
             if progress_cb:
-                progress_cb(f"Rendering {n} clip(s)…" if pct < 90 else "Finishing…", float(pct))
+                progress_cb(errors.stage_message("render.encode", f"Rendering {n} clip(s)…", n=n)
+                            if pct < 90 else errors.stage_message("render.finish", "Finishing…"),
+                            float(pct))
             time.sleep(secs / 4)
         if c.get("render") == "fail":
             raise RuntimeError("Render worker unavailable (modal_unavailable)")
@@ -383,8 +398,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
 
     real_to_dict = J.Job.to_dict
 
-    def to_dict(self) -> dict[str, Any]:
-        d = real_to_dict(self)
+    def to_dict(self, **kw: Any) -> dict[str, Any]:
+        d = real_to_dict(self, **kw)
         mode = cfg(self.id).get("proxy")
         if mode == "on":
             d["has_proxy"] = True
@@ -475,26 +490,42 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             seed_review(job, clip, orientation, with_doc=opts.get("doc", True) is not False)
             if name == "render_failed":
                 store.update(job.id, message="render_failed",
-                             error="Render worker unavailable (modal_unavailable)")
+                             error="Render worker unavailable (modal_unavailable)",
+                             error_code="render_unavailable")
             proxy = "on"
         elif name == "review_land":
             clip, orientation = clip or "speech", "landscape"
             job = create(opts, PODCAST, "podcast_ep12_clip.mp4", ("podcast", "Podcast"))
-            seed_review(job, clip, orientation,
-                        ["Audio is on the quiet side but should still work."])
+            seed_review(job, clip, orientation, ["audio_quiet"])
             proxy = "on"
-        elif name in ("analyzing", "queued", "rendering", "error"):
+        elif name in ("analyzing", "queued", "rendering", "error", "err_no_speech",
+                      "err_unreadable"):
             clip = clip or "speech"
             fields = {
-                "analyzing": dict(status="processing", message="Transcribing (62%)…", progress=62.0),
-                "queued": dict(status="processing", message="queued", progress=0.0, queue_position=3),
-                "rendering": dict(status="processing", message="Rendering 6 clip(s) on Modal…",
-                                  progress=58.0, segments=[[0.0, 5.0]]),
-                "error": dict(status="error", message="Failed", progress=0.0,
-                              error="No speech detected in the video."),
+                "analyzing": dict(status="processing", progress=62.0, **errors.stage(
+                    "analyze.transcribe") | {"message": "Transcribing (62%)…"}),
+                "queued": dict(status="processing", progress=0.0, queue_position=3,
+                               **errors.stage("queued")),
+                "rendering": dict(status="processing", progress=58.0, segments=[[0.0, 5.0]],
+                                  **errors.stage("render.encode", n=6)
+                                  | {"message": "Rendering 6 clip(s) on Modal…"}),
+                "error": dict(status="error", progress=0.0,
+                              error="No speech detected in the video.",
+                              **errors.job_error("no_speech")),
+                # §1.7 row 1: music only, minutes back.
+                "err_no_speech": dict(status="error", progress=0.0, refunded=True,
+                                      error="No speech detected in the video.",
+                                      **errors.job_error("no_speech")),
+                # §1.7 row 5: ffmpeg couldn't decode the upload.
+                "err_unreadable": dict(status="error", progress=0.0, refunded=True,
+                                       error="ffmpeg normalize failed: Invalid data found "
+                                             "when processing input (/tmp/x/source.mov)",
+                                       **errors.job_error("unreadable_video")),
             }[name]
             names = {"analyzing": "day_in_berlin_vlog.mp4", "queued": "q_and_a_livestream.mp4",
-                     "rendering": "product_demo_v2.mp4", "error": "screen_recording_no_mic.mov"}
+                     "rendering": "product_demo_v2.mp4", "error": "screen_recording_no_mic.mov",
+                     "err_no_speech": "lofi_beats_no_voice.mp4",
+                     "err_unreadable": "prores_4444_master.mov"}
             job = create(opts, PODCAST if name == "queued" else TIKTOK, names[name],
                          ("podcast", "Podcast") if name == "queued" else tiktok)
             store.update(job.id, **fields)
@@ -561,6 +592,9 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             return FileResponse(files["src"], media_type="video/mp4")
         if name == "long.webm":
             return FileResponse(stub_media.long_video(), media_type="video/webm")
+        if name in stub_media.REFUSED_MEDIA:
+            return FileResponse(stub_media.refused_media(name),
+                                media_type="audio/mp4" if name.endswith(".m4a") else "video/mp4")
         raise HTTPException(404, "unknown media")
 
     @app.get("/_test/info")

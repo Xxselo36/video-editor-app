@@ -158,10 +158,10 @@ def test_streamed_webm_falls_back_to_the_client_duration(
     real = M._probe_remote
 
     def probe(url):
-        seconds, has_audio = real(url)
+        seconds, has_audio, has_video = real(url)
         url_probe.append(seconds)
         assert has_audio is True     # the header lists the sound track
-        return seconds, has_audio
+        return seconds, has_audio, has_video
     mp = pytest.MonkeyPatch()
     mp.setattr(M, "_probe_remote", probe)
     try:

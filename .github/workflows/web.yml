@@ -2,7 +2,7 @@ name: Web
 
 # Checks of the web app (web/) on every change to it (UX1, PLAN_TECH §3):
 #   checks  npm ci → typecheck → lint → vitest → i18n check
-#   e2e     next build → Playwright against the stub backend
+#   e2e     next build → bundle budget (desktop) → Playwright against the stub backend
 #           (backend/tests/stub_server.py), in parallel:
 #             desktop  Chromium 1440×900, anonymous beta
 #             pixel7   mobile emulation, anonymous beta
@@ -27,6 +27,7 @@ on:
       - 'web/**'
       - 'backend/tests/stub_server.py'
       - 'backend/tests/stub_media.py'
+      - 'backend/errors.py'
       - 'docs/i18n-glossary.md'
       - '.github/workflows/web.yml'
   pull_request:
@@ -34,6 +35,7 @@ on:
       - 'web/**'
       - 'backend/tests/stub_server.py'
       - 'backend/tests/stub_media.py'
+      - 'backend/errors.py'
       - 'docs/i18n-glossary.md'
       - '.github/workflows/web.yml'
   schedule:
@@ -132,6 +134,11 @@ jobs:
           browsers: chromium
       - name: Build (next build)
         run: npm run build
+      # First-load JS per route, gzipped (scripts/bundle-budget.mjs; /app
+      # ≤ 200 KB). Once per run: every matrix entry builds the same app.
+      - name: Bundle budget
+        if: matrix.name == 'desktop'
+        run: npm run bundle:budget
       - name: Playwright
         run: npx playwright test ${{ matrix.projects }}
       - name: Keep the report

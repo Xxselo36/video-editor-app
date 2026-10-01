@@ -196,7 +196,8 @@ def test_doc_get_and_patch(stub):
         "style": {"presetId": "clipper", "overrides": {"y": 0.6}}}) == {"rev": 7}
     status, _, raw = stub.call("PATCH", f"/jobs/{job['id']}/doc",
                                {"base_rev": 0, "rev": 8, "format": {"aspect": "16:9"}})
-    assert status == 409 and json.loads(raw) == {"detail": "stale_rev", "rev": 7}
+    assert status == 409 and json.loads(raw) == {"detail": "stale_rev", "rev": 7,
+                                            "code": "stale_rev", "params": {"rev": 7}}
     again = stub.json("GET", f"/jobs/{job['id']}/doc")
     assert again["rev"] == 7 and again["doc"]["words"][0]["text"] == "Szene"
     old = stub.json("POST", "/_test/seed/review", {"doc": False})

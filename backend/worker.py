@@ -50,7 +50,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
-from backend import costs, db, jobs, llm, media, taskq
+from backend import costs, db, errors, jobs, llm, media, taskq
 from backend import doc as edit_doc
 from backend import uploads as upl
 
@@ -145,7 +145,9 @@ def _max_minutes() -> float:
 
 
 def _too_long(seconds: float | None) -> bool:
-    return seconds is not None and seconds > _max_minutes() * 60 + 1
+    """backend/main.py _too_long: CLEO_MAX_MINUTES <= 0 means no cap."""
+    return (seconds is not None and _max_minutes() > 0
+            and seconds > _max_minutes() * 60 + 1)
 
 
 def _cap_settings(settings: dict) -> dict:
@@ -221,6 +223,7 @@ class AnalysisRefused(Exception):
     def __init__(self, code: str, **extra: Any) -> None:
         super().__init__(code)
         self.code = code
+        self.params = extra   # the job's error_params
         self.text = (json.dumps({"detail": code, **extra},
                                 separators=(",", ":"))
                      if extra else code)
@@ -278,7 +281,8 @@ class ProgressWriter:
             msg, pct = self._pending
             self._pending = None
             self._last = time.monotonic()
-            fields: dict[str, Any] = {"message": msg}
+            # message, plus stage / stage_params for a StageMessage.
+            fields: dict[str, Any] = errors.stage_fields(msg)
             if pct is not None and pct >= 0:
                 fields["progress"] = pct
             try:
@@ -524,7 +528,8 @@ def _length_gate(ctx: Attempt, job: Any, input_path: str,
     charge = settings.pop("_charge", None)
     changed: dict[str, Any] = {}
     if measure:
-        progress("Checking the video…", 1)
+        progress(errors.stage_message("analyze.normalize",
+                                      "Checking the video…"), 1)
         seconds = _get("probe_duration")(input_path)
         if _too_long(seconds):
             raise AnalysisRefused("video_too_long",
@@ -582,7 +587,7 @@ def _store_analysis(ctx: Attempt, job_id: str, res: dict,
                       "preview_key"))
     fields: dict[str, Any] = {"media_bytes": {}, "media_store": where}
     for i, (path, key, field_name) in enumerate(items):
-        progress("Saving…", 96 + i)
+        progress(errors.stage_message("analyze.cuts", "Saving…"), 96 + i)
         if not ctx.fence_ok():
             raise InterruptedError("fenced out before storing results")
         try:
@@ -608,38 +613,16 @@ def _store_analysis(ctx: Attempt, job_id: str, res: dict,
     return fields
 
 
-_NO_SPEECH_TEXT = "No speech detected in the video."
-_NO_AUDIO_TEXTS = ("no audio track", "no audio stream", "has no audio")
-
-
-def _analysis_error_code(exc: BaseException, msg: str) -> str | None:
-    """backend/main.py _analysis_error_code."""
-    if getattr(exc, "code", None) == "no_speech" or msg.strip() == _NO_SPEECH_TEXT:
-        return "no_speech"
-    if any(t in msg.lower() for t in _NO_AUDIO_TEXTS):
-        return "no_audio"
-    if msg == "server_storage_full":
-        return "server_storage_full"
-    return None
-
-
-def _is_infra_failure(exc: BaseException, msg: str) -> bool:
-    """backend/main.py _is_infra_failure."""
-    if msg in ("server_storage_full", "container_restart"):
-        return True
-    if isinstance(exc, (OSError, MemoryError)) or db.is_transient(exc):
-        return True
-    return msg.lower().startswith("ffmpeg")
+# Failure classification: the one catalogue in backend/errors.py (the
+# WP1 path in backend/main.py uses the same functions).
+_analysis_error_code = errors.analysis_error_code
+_is_infra_failure = errors.is_infra_failure
 
 
 def _refund_content_failure(exc: BaseException, code: str | None) -> bool:
-    """backend/main.py _refund_content_failure."""
-    if code == "no_audio":
-        return True
-    if code != "no_speech":
-        return False
-    speech = getattr(exc, "speech_seconds", 0.0) or 0.0
-    return float(speech) < _env_float("CLEO_NO_SPEECH_REFUND_S", 10.0)
+    """errors.refund_content_failure with CLEO_NO_SPEECH_REFUND_S."""
+    return errors.refund_content_failure(
+        exc, code, _env_float("CLEO_NO_SPEECH_REFUND_S", 10.0))
 
 
 def _processed_s(ws: Path) -> float | None:
@@ -669,7 +652,8 @@ def _ingest_failure(ctx: Attempt, exc: BaseException,
     if isinstance(exc, AnalysisRefused):
         _log(f"[job {job_id}] refused before analysis: {exc.text}")
         return ctx.fail(f"{taskq.REFUSED}:{exc.code}", exc.text, False,
-                        {"refused": exc.code, "text": exc.text})
+                        {"refused": exc.code, "text": exc.text,
+                         "params": exc.params})
     tb = "".join(traceback.format_exception(type(exc), exc,
                                             exc.__traceback__))
     _log(f"[job {job_id}] ANALYZE FAILED (task {t.id}, attempt "
@@ -731,13 +715,15 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
     if not input_path and not source_key:
         return ctx.fail(taskq.INFRA, "the upload is gone", False,
                         {"refund": True, "infra": True,
+                         "job_code": "processing_interrupted",
                          "message": "Processing was interrupted. "
                                     "Please upload the video again.",
                          "error": "upload_missing"})
     where = media.store_of(job)
     _db_retry(job_id, "starting", store.update_if, job_id,
               ("pending", "processing"), status="processing",
-              message="Starting…", progress=1.0)
+              **errors.stage_fields(errors.stage_message(
+                  "analyze.normalize", "Starting…")), progress=1.0)
     ws = _fresh(workspace(job_id, f"a{t.attempts}"))
     progress = ProgressWriter(job_id)
     degraded = llm_degraded(ctx)
@@ -761,7 +747,8 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
             try:
                 _fault_groq()
                 if not input_path:
-                    progress("Fetching upload…", 1)
+                    progress(errors.stage_message("analyze.normalize",
+                                                  "Fetching upload…"), 1)
                     copy = ws / ("source" + upl.upload_ext(source_key))
                     local_copy.append(copy)
                     try:
@@ -795,7 +782,7 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
             progress.close()
             fields = dict(
                 status="awaiting_review",
-                message="Review subtitles",
+                **errors.stage("analyze.done"),
                 progress=100.0,
                 segments=res["segments"],
                 preview_segments=[list(s) for s in res["segments"]],
@@ -912,7 +899,7 @@ def render_commit(cur: Any, result: dict, out_prefix: str,
     media_bytes.update(sizes)
     return dict(
         status="done",
-        message="Done",
+        **errors.stage_fields(errors.stage_message("render.finish", "Done")),
         progress=100.0,
         output_keys=output_keys,
         thumb_key=thumb["key"] if thumb else None,
@@ -928,7 +915,7 @@ def _backfill_mezz(ctx: Attempt, job: Any,
                    where: str) -> str:
     """backend/main.py _backfill_mezz (a legacy job's first render)."""
     key = media.job_prefix(job.id) + "mezz.mp4"
-    progress("Preparing render…", 2)
+    progress(errors.stage_message("render.prepare"), 2)
     if not ctx.fence_ok():
         raise InterruptedError("fenced out before storing the mezz")
     size = media.put_file(job.normalized_path, key, content_type="video/mp4",
@@ -947,13 +934,7 @@ def _backfill_mezz(ctx: Attempt, job: Any,
     return key
 
 
-def _render_error_code(exc: BaseException) -> str:
-    """backend/main.py _render_error_code."""
-    code = getattr(exc, "code", None)
-    if type(exc).__name__ == "RenderUnavailableError":
-        return ("render_timeout" if code == "render_timeout"
-                else "render_unavailable")
-    return "render_failed"
+_render_error_code = errors.render_error_code
 
 
 def _render_failure(ctx: Attempt, exc: BaseException, gen: int,
@@ -1005,7 +986,8 @@ def _render(ctx: Attempt) -> dict[str, Any]:
     where = media.store_of(job)
     progress = ProgressWriter(job_id)
     _db_retry(job_id, "starting the render", store.patch_status, job_id,
-              ("processing",), message="Rendering…", progress=1.0)
+              ("processing",), **errors.stage_fields(errors.stage_message(
+                  "render.prepare", "Rendering…")), progress=1.0)
     ws = _fresh(workspace(job_id, f"render-a{t.attempts}"))
     degraded = llm_degraded(ctx, render=True)
     obs = llm.Observer(skip=degraded)

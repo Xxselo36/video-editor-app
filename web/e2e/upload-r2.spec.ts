@@ -90,7 +90,7 @@ test.describe("R2 uploads and media", { tag: ["@r2", "@nightly"] }, () => {
     page.on("response", (r) => responses.push({ url: r.url(), status: r.status(), type: r.request().resourceType() }));
 
     expect((await stub.job(review.id))?.has_proxy).toBe(true);
-    await openWithStorage(page, `/app?job=${review.id}`);
+    await openWithStorage(page, `/app/edit/${review.id}`);
     await expect(page.getByTestId("apply-render")).toBeVisible({ timeout: 60_000 });
     await expect.poll(() => playbackMode(page), { timeout: 15_000 }).toBe("proxy");
     await expect(editorVideo(page)).toHaveAttribute("src", new RegExp(`/jobs/${review.id}/proxy-video`));

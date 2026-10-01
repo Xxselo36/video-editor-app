@@ -1,0 +1,309 @@
+import type { AppKey } from "../en";
+
+export const nlApp: Partial<Record<AppKey, string>> = {
+  // ── Header ──────────────────────────────────────────────────────────
+  "app.header.homeAria": "CleoCuts home",
+  "app.header.library": "Bibliotheek",
+  "app.header.beta": "Beta",
+  "app.header.opening": "Wordt geopend…",
+
+  // ── Browser notifications ───────────────────────────────────────────
+  "app.notify.readyTitle": "CleoCuts — je video is klaar",
+
+  // ── Toasts / notices ────────────────────────────────────────────────
+  "app.notice.loadFailed": "Het project kon nu niet geladen worden. Probeer het straks nog eens.",
+  "app.notice.alreadyExporting": "Deze video wordt al geëxporteerd. De kaart toont de voortgang.",
+  "app.notice.offline": "Kan de server niet bereiken. Controleer je internetverbinding en probeer het opnieuw.",
+
+  // ── Errors ──────────────────────────────────────────────────────────
+  "app.errors.expired":
+    "Dit project bestaat niet meer op de server (verlopen of server-update). Upload de video opnieuw.",
+  "app.errors.generic": "Er ging iets mis. Probeer het opnieuw.",
+  "app.errors.connection": "De verbinding is verbroken. Controleer je internetverbinding en probeer het opnieuw.",
+  "app.errors.interrupted":
+    "De upload werd onderbroken (pagina herladen of app gewisseld). Upload de video opnieuw.",
+  "app.errors.tooLarge": "Het bestand is te groot. Verklein de video of exporteer hem kleiner.",
+  "app.errors.noSpeech": "We hebben geen spraak in deze video gevonden. CleoCuts knipt en ondertitelt video's waarin iemand praat — probeer een clip met een stem.",
+  "app.errors.noSpeechRefunded": "We hebben geen spraak in deze video gevonden. CleoCuts knipt en ondertitelt video's waarin iemand praat — probeer een clip met een stem. De minuten zijn teruggeboekt.",
+  "app.errors.noAudioTrack": "Deze video heeft geen audiospoor, dus er valt niets te knippen of te ondertitelen. Er is niets in rekening gebracht.",
+  "app.errors.renderFailed":
+    "Renderen is mislukt. Je bewerkingen zijn opgeslagen — open het project en render opnieuw.",
+  "app.errors.serverNoResponse": "De server reageerde niet. Probeer het opnieuw.",
+  "app.errors.serverBusy": "Onze servers zijn nu druk bezet. Probeer het over een paar minuten opnieuw.",
+  "app.errors.saveEditsFailed": "Je bewerkingen konden niet worden opgeslagen — controleer je verbinding en probeer het opnieuw.",
+  "app.errors.title": "Er ging iets mis",
+  "app.errors.tryAgain": "Opnieuw proberen",
+  // Accounts + billing (alleen bereikbaar als die zijn ingeschakeld)
+  "app.errors.signInRequired": "Je sessie is verlopen. Log opnieuw in en probeer het nog eens.",
+  "app.errors.subscriptionRequired": "Voor uploaden heb je een abonnement nodig. Kies er een op de prijzenpagina.",
+  "app.errors.quotaExceeded":
+    "Je hebt deze periode niet genoeg minuten meer voor deze video. Upgrade je abonnement of wacht tot je minuten weer worden aangevuld.",
+  "app.errors.unreadableVideo":
+    "We konden dit videobestand niet lezen. Exporteer het opnieuw als MP4 of MOV en upload het nog een keer.",
+  // Upload limits (413 / 429 from the backend, also checked before uploading)
+  "app.errors.fileTooLarge":
+    "Dit bestand is groter dan {max} GB. Verklein de video of exporteer hem kleiner.",
+  "app.errors.videoTooLong":
+    "Deze video is langer dan {max} minuten. Kort hem in of splits hem op in delen.",
+  "app.errors.tooManyJobs":
+    "Je hebt al het maximale aantal video's in verwerking. Wacht tot er een klaar is en probeer het dan opnieuw.",
+
+  // ── Accounts ────────────────────────────────────────────────────────
+  "app.auth.signInToContinue": "Log in om je projecten te openen.",
+  "app.auth.loadFailed":
+    "Inloggen kon niet worden geladen. Controleer je verbinding (of sta deze site toe in je contentblocker) en probeer het opnieuw.",
+
+  // ── Billing: upload geblokkeerd (402) + resterende minuten ──────────
+  "app.paywall.subscriptionTitle": "Kies een abonnement om te uploaden",
+  "app.paywall.subscriptionBody":
+    "Voor uploads heb je een actief abonnement nodig. Kies er een — dat duurt maar een minuutje, en je kunt altijd opzeggen.",
+  "app.paywall.quotaTitle": "Niet genoeg minuten over",
+  "app.paywall.quotaBody": "Je hebt deze periode nog {left} min over — deze video heeft {needed} min nodig.",
+  "app.paywall.quotaBodyUnknown": "Deze video is langer dan het aantal minuten dat je deze periode nog over hebt.",
+  "app.paywall.seePlans": "Abonnementen bekijken",
+  "app.paywall.upgrade": "Abonnement upgraden",
+  "app.paywall.close": "Niet nu",
+  "app.billing.minutesLeft": "Nog {n} min over deze periode",
+  "app.billing.choosePlan": "Kies een abonnement om te uploaden",
+
+  // ── Accountpagina (/app/account) ─────────────────────────────────────
+  "app.account.title": "Account",
+  "app.account.signedInAs": "Ingelogd als {email}",
+  "app.account.plan": "Abonnement",
+  "app.account.noPlan": "Nog geen abonnement",
+  "app.account.freeBeta": "CleoCuts is gratis tijdens de open beta — je hebt geen abonnement nodig.",
+  "app.account.status.active": "Actief · wordt verlengd op {date}",
+  "app.account.status.activeNoDate": "Actief",
+  "app.account.status.trial": "Proefperiode · eerste betaling op {date}",
+  "app.account.status.cancelled": "Stopt op {date}",
+  "app.account.status.pastDue": "Betaling achterstallig — werk je betaalmethode bij.",
+  "app.account.status.paused": "Gepauzeerd",
+  "app.account.status.expired": "Verlopen",
+  "app.account.status.comp": "Gratis aangeboden",
+  "app.account.usage": "Minuten deze periode",
+  "app.account.usageOf": "{used} van {limit} min gebruikt",
+  "app.account.resetsOn": "Wordt aangevuld op {date}",
+  "app.account.manage": "Abonnement beheren",
+  "app.account.manageHint": "Facturen, betaalmethode en opzeggen regel je in het klantenportaal van Lemon Squeezy.",
+  "app.account.changePlan": "Abonnement wijzigen",
+  "app.account.choosePlan": "Kies een abonnement",
+  "app.account.portalFailed": "Het betaalportaal kon niet worden geopend. Probeer het straks nog eens.",
+  "app.account.loadFailed": "Je account kon nu niet geladen worden. Probeer het straks nog eens.",
+  "app.account.testMode": "Testmodus",
+  "app.account.successPending": "Bedankt! Je betaling is gelukt — je abonnement wordt geactiveerd…",
+  "app.account.successDone": "Je {plan}-abonnement is actief. Veel montageplezier!",
+  "app.account.successSlow":
+    "Dit duurt langer dan normaal. Je abonnement verschijnt hier binnen een paar minuten — herlaad de pagina om het te controleren.",
+
+  // ── Library fallbacks ───────────────────────────────────────────────
+  "app.library.untitled": "Naamloos",
+
+  // ── Workflow presets ────────────────────────────────────────────────
+  "app.preset.tiktok.label": "TikTok / Reels",
+  "app.preset.tiktok.tagline": "Verticaal, kort formaat",
+  "app.preset.tiktok.desc": "Spraakcommando's, Clipper-ondertitels, automatisch verticaal bijsnijden",
+  "app.preset.tiktok.bullet1": "Spraakcommando's aan: zeg “Cleo cut” om opnieuw te doen",
+  "app.preset.tiktok.bullet2": "Vetgedrukte Clipper-ondertitels",
+  "app.preset.tiktok.bullet3": "Automatisch verticaal 9:16 met gezichtsdetectie",
+  "app.preset.podcast.label": "Podcast Langformaat",
+  "app.preset.podcast.tagline": "Volledige aflevering + clips",
+  "app.preset.podcast.desc": "AI-opschoning, hook-detectie, export in meerdere formaten",
+  "app.preset.podcast.bullet1": "AI-opschoning van je transcript",
+  "app.preset.podcast.bullet2": "3 hook-clips automatisch gekozen",
+  "app.preset.podcast.bullet3": "Volledige aflevering + 9:16-clips geëxporteerd",
+  "app.preset.vlog.label": "Vlog opschonen",
+  "app.preset.vlog.tagline": "Solo talking-head",
+  "app.preset.vlog.desc": "Stopwoordjes verwijderen, subtiele ondertitels, beeldverhouding blijft behouden",
+  "app.preset.vlog.bullet1": "Verwijdert “ehm”, “uh”, lange stiltes",
+  "app.preset.vlog.bullet2": "Subtiele ondertitels die niet afleiden",
+  "app.preset.vlog.bullet3": "Behoudt je originele beeldverhouding",
+  "app.preset.captions.label": "Alleen ondertitels",
+  "app.preset.captions.tagline": "Alleen ondertitels toevoegen",
+  "app.preset.captions.desc": "Brandt ondertitels in je video — geen montage, geen opschoning",
+  "app.preset.captions.bullet1": "Brandt ondertitels in de gekozen stijl in",
+  "app.preset.captions.bullet2": "Geen montage, geen opschoning",
+  "app.preset.captions.bullet3": "Snelst — alleen ondertitels",
+  "app.preset.custom.label": "Aangepast",
+  "app.preset.custom.tagline": "Alles zelf instellen",
+  "app.preset.custom.desc": "Alle instellingen — kies elke knop zelf",
+  "app.preset.custom.bullet1": "Elke instelling beschikbaar",
+  "app.preset.custom.bullet2": "Kies ondertitels, montage en formaat zelf",
+  "app.preset.custom.bullet3": "Voor als je precies weet wat je wilt",
+
+  // ── Caption styles ──────────────────────────────────────────────────
+  "app.captions.clean": "Clean",
+  "app.captions.classic": "Classic",
+  "app.captions.clipper": "Clipper",
+  "app.captions.highlight": "Highlight",
+  "app.captions.flash": "Flash",
+  "app.captions.punch": "Punch",
+  "app.captions.elegant": "Elegant",
+  "app.captions.subtle": "Subtle",
+  "app.captions.none": "Geen ondertitels",
+
+  // ── Cut styles ──────────────────────────────────────────────────────
+  "app.cutStyle.tight.label": "Strak",
+  "app.cutStyle.tight.desc": "Agressief",
+  "app.cutStyle.balanced.label": "Gebalanceerd",
+  "app.cutStyle.balanced.desc": "Standaard",
+  "app.cutStyle.smooth.label": "Soepel",
+  "app.cutStyle.smooth.desc": "Stiltes behouden",
+
+  // ── Export formats ──────────────────────────────────────────────────
+  "app.format.9x16.desc": "TikTok / Reels / Shorts",
+  "app.format.1x1.desc": "Instagram-feed",
+  "app.format.16x9.desc": "YouTube / desktop",
+
+  // ── Dashboard ───────────────────────────────────────────────────────
+  "app.dashboard.workspace": "Jouw werkruimte",
+  "app.dashboard.inProgressCountOne": "{count} video bezig",
+  "app.dashboard.inProgressCountOther": "{count} video's bezig",
+  "app.dashboard.readyCountOne": "{count} video klaar om te bekijken",
+  "app.dashboard.readyCountOther": "{count} video's klaar om te bekijken",
+  "app.dashboard.failedCountOne": "{count} video mislukt",
+  "app.dashboard.failedCountOther": "{count} video's mislukt",
+  "app.dashboard.readyWhenYouAre": "Klaar wanneer jij het bent",
+  "app.dashboard.newVideo": "Nieuwe video",
+  "app.dashboard.inProgress": "Bezig",
+  "app.dashboard.recentProjects": "Recente projecten",
+  "app.dashboard.viewAll": "Alles bekijken",
+  "app.dashboard.startFirst": "Start je eerste video",
+  "app.dashboard.startFirstSub": "Kies een workflow — CleoCuts regelt ondertitels, formaat en opschoning",
+  "app.dashboard.voiceTeaser": "Zeg “Cleo” tijdens het opnemen — bespaar uren aan monteren",
+
+  // ── Workflow picker ─────────────────────────────────────────────────
+  "app.picker.backToDashboard": "Terug naar dashboard",
+  "app.picker.freeDuringBeta": "Gratis tijdens de beta",
+  "app.picker.title": "Wat ga je posten?",
+  "app.picker.subtitle":
+    "Kies een workflow — CleoCuts stelt ondertitels, formaat en opschoning vooraf in voor het platform.",
+  "app.picker.chipCaptions": "{style}-ondertitels",
+  "app.picker.chipVoice": "“Cleo cut” aan",
+  "app.picker.customTitle": "Aangepaste setup",
+  "app.picker.customSub": "Kies elke knop zelf — ondertitels, montage, formaten",
+
+  // ── Upload (choose a file) ──────────────────────────────────────────
+  "app.upload.back": "Terug",
+  "app.upload.title": "Kies een video",
+  "app.upload.hint":
+    "MP4 of MOV vanaf je telefoon of computer. Houd deze pagina open tot de upload klaar is.",
+  "app.upload.tapToChoose": "Tik om te kiezen",
+  "app.upload.orDrag": "of sleep er een naartoe",
+  "app.upload.privacyLink": "Zo gaan we met je video's om",
+  "app.upload.resuming":
+    "De upload gaat verder waar hij gestopt was — houd deze pagina open.",
+
+  // ── Configure (custom settings) ─────────────────────────────────────
+  "app.configure.back": "terug",
+  "app.configure.fileInfo": "{name} · {size} MB",
+  "app.configure.captionStyle": "Ondertitelstijl",
+  "app.configure.captionPreviewAlt": "Voorbeeld van {style}-ondertitels",
+  "app.configure.cutStyle": "Montagestijl",
+  "app.configure.cleanup": "Opschoning",
+  "app.configure.voiceTriggers": "Luisteren naar \"Cleo cut\" / \"Cleo go\"",
+  "app.configure.voiceTriggersDesc": "Verwijdert mislukte takes automatisch",
+  "app.configure.removeFillers": "Stopwoordjes verwijderen",
+  "app.configure.removeFillersDesc": "Knipt \"ehm\", \"uh\", \"zoals\" eruit…",
+  "app.configure.smartReframe": "Smart reframe",
+  "app.configure.smartcam": "SmartCam gezichtsdetectie",
+  "app.configure.smartcamDesc": "Past het beeld automatisch aan voor verticale/horizontale uitvoer",
+  "app.configure.portrait": "portret",
+  "app.configure.landscape": "landschap",
+  "app.configure.portraitDesc": "Verticaal 9:16",
+  "app.configure.landscapeDesc": "Horizontaal 16:9",
+  "app.configure.extraFormats": "Extra uitvoerformaten",
+  "app.configure.extraFormatsHint":
+    "De primaire export gebruikt je SmartCam-formaat (of de originele beeldverhouding). Kies extra versies met letterbox voor andere platforms.",
+  "app.configure.process": "Video verwerken",
+
+  // ── Done screen ─────────────────────────────────────────────────────
+  "app.done.readyToPost": "Klaar om te posten",
+  "app.done.captionSuggestion": "Suggestie voor bijschrift",
+  "app.done.copy": "kopiëren",
+  "app.done.downloadPrimary": "Download hoofdversie",
+  "app.done.downloadFormat": "Download {format}",
+  "app.done.mainEdit": "Hoofdmontage",
+  "app.done.bonusClips": "Bonusclips",
+  "app.done.aiPicked": "AI-gekozen",
+  "app.done.processAnother": "Nog een video verwerken",
+
+  // ── Dashboard job cards ─────────────────────────────────────────────
+  "app.card.noPreview": "geen voorbeeld",
+  "app.card.uploading.title": "Uploaden",
+  "app.card.uploading.sub": "Wordt geüpload — houd deze pagina open en vergrendel je telefoon niet.",
+  "app.card.analyzing.title": "Analyseren",
+  "app.card.analyzing.sub": "Transcribeert en knipt stiltes en stopwoordjes weg.",
+  "app.card.reviewing.title": "Klaar om te bewerken",
+  "app.card.reviewing.sub": "Tik om de editor te openen en de montage te verfijnen.",
+  "app.card.rendering.title": "Renderen",
+  "app.card.rendering.sub": "Je definitieve video wordt samengesteld.",
+  // Waiting for a free server slot (status "processing", message "queued")
+  "app.card.queued.title": "In de wachtrij (#{n})",
+  "app.card.queued.titleNoPos": "In de wachtrij",
+  "app.card.queued.sub":
+    "Er zijn nu veel video's — die van jou start automatisch. Je kunt deze pagina verlaten.",
+  "app.card.open": "Openen",
+  "app.card.remove": "Verwijderen",
+  "app.card.renderFailedNote": "Renderen mislukt — je bewerkingen zijn opgeslagen. Open het project en render opnieuw.",
+
+  // ── Captions tab ────────────────────────────────────────────────────
+  "app.captions.styleHeading": "Ondertitelstijl · {style}",
+  "app.captions.appliedToOutput": "Toegepast op de uitvoer",
+  "app.captions.disabled": "Ondertitels zijn uitgeschakeld voor dit rendering.",
+
+  // ── Voice test (dialog) ─────────────────────────────────────────────
+  "app.voice.title": "Test je stem",
+  "app.voice.subtitle": "Zeg de commando's — kijk of Cleo je hoort.",
+  "app.voice.close": "Sluiten",
+  "app.voice.heardYou": "Je gehoord!",
+  "app.voice.listening": "Luistert…",
+  "app.voice.heardPrefix": "gehoord: ",
+  "app.voice.permissionHint": "Gebruikt je microfoon. Je browser zet je spraak om in tekst: Chrome stuurt die daarvoor naar Google, Safari naar Apple. Er gaat niets naar CleoCuts.",
+  "app.voice.requesting": "Aanvragen…",
+  "app.voice.start": "Start",
+  "app.voice.denied": "Toegang geweigerd. Schakel in bij browserinstellingen + herlaad de pagina.",
+  "app.voice.unsupported": "Niet ondersteund in deze browser. Probeer Safari of Chrome.",
+  "app.voice.done": "Klaar",
+  "app.voice.cmd.start": "Begin je take",
+  "app.voice.cmd.cut": "Opnieuw doen, huidige take weggooien",
+  "app.voice.cmd.keep": "Take bevestigen, volgende scène",
+  "app.voice.cmd.finish": "Video beëindigen, alles daarna wegknippen",
+  "app.voice.cmd.stop": "Sla één slechte zin over (samen met 'go')",
+  "app.voice.cmd.go": "Verder na 'stop'",
+  "app.crash.saving": "Je laatste wijzigingen worden opgeslagen…",
+  "app.crash.saved": "Je laatste wijzigingen zijn opgeslagen.",
+  "app.crash.unsaved": "Je laatste wijzigingen zijn mogelijk niet opgeslagen.",
+  "app.crash.body": "Laad de pagina opnieuw om verder te gaan waar je gebleven was.",
+  "app.crash.reload": "Pagina opnieuw laden",
+
+  // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
+  "app.errors.noVideoTrack": "Dit is een audiobestand. CleoCuts heeft een video met geluid nodig — kies een videobestand. Er is niets in rekening gebracht.",
+  "app.errors.videoTooShort": "Deze video is korter dan {min} seconden — te kort om te knippen. Er is niets in rekening gebracht.",
+  "app.errors.processingInterrupted": "De verwerking is onderbroken. Upload de video opnieuw.",
+  "app.errors.mediaUnavailable": "De originele video is niet meer beschikbaar, dus dit project kan niet opnieuw bewerkt worden.",
+  "app.errors.tooManyRenders": "Er lopen te veel exports. Wacht tot er een klaar is.",
+  "app.errors.renderLimit": "Deze video heeft de exportlimiet voor vandaag bereikt. Probeer het morgen opnieuw.",
+  "app.errors.staleRev": "Dit project is in een ander tabblad gewijzigd. Herlaad om de nieuwste versie te zien.",
+  "app.errors.docNotReady": "Dit project is nog niet klaar. Probeer het zo meteen opnieuw.",
+  "app.errors.refunded": "De minuten zijn teruggestort.",
+  "app.errors.tryAnotherVideo": "Probeer een andere video",
+  "app.errors.appUpdated": "CleoCuts is net bijgewerkt. Herlaad de pagina en upload de video opnieuw.",
+  "app.warnings.scriptUnsupported": "Ondertitels zijn nog niet beschikbaar voor het schrift van deze taal.",
+  "app.warnings.smartcamFailed": "Het volgen van de spreker werkte niet voor deze video, dus is hij in het midden bijgesneden.",
+  "app.audio.silent": "Het geluid lijkt stil — controleer of je microfoon aan staat en niet gedempt is.",
+  "app.audio.quiet": "Het geluid is erg zacht — spreek de volgende keer dichter bij de microfoon.",
+  "app.audio.clipping": "Het geluid vervormt op pieken — de opname is te hard, vervorming is waarschijnlijk.",
+  "app.stage.queued": "Wacht op een vrije plek",
+  "app.stage.analyze.normalize": "Je video voorbereiden",
+  "app.stage.analyze.smartcam": "Spreker volgen",
+  "app.stage.analyze.transcribe": "Transcriberen",
+  "app.stage.analyze.cleanup": "Transcript bijwerken",
+  "app.stage.analyze.cuts": "Knippunten zoeken",
+  "app.stage.analyze.captions": "Ondertitels voorbereiden",
+  "app.stage.analyze.done": "Klaar om te controleren",
+  "app.stage.render.prepare": "Export voorbereiden",
+  "app.stage.render.captions": "Ondertitels toevoegen ({i}/{n})",
+  "app.stage.render.encode": "Exporteren",
+  "app.stage.render.hooks": "Hoogtepunten knippen",
+  "app.stage.render.finish": "Afronden",
+};

@@ -25,6 +25,7 @@
  * falls back to the legacy upload through POST /jobs).
  */
 import { ApiError, apiError, apiFetch } from "@/lib/api";
+import type { Limits } from "@/lib/config";
 
 // No upload progress for this long → treat the upload as dead.
 export const UPLOAD_STALL_MS = 60_000;
@@ -33,29 +34,31 @@ export const UPLOAD_STALLED_MSG =
 export const UPLOAD_NETWORK_MSG =
   "Upload failed — network error. Check your connection and try again.";
 
-// Upload caps: the backend's CLEO_MAX_UPLOAD_GB / CLEO_MAX_MINUTES
-// defaults, checked here before any bytes are sent. The server checks
-// again (init / presign + POST /jobs) and its 413 names its own limit;
-// set these when the backend's differ. Literal references: only
-// `process.env.NEXT_PUBLIC_X` gets inlined at build time.
-const envNum = (v: string | undefined, dflt: number) => {
-  const n = Number(v);
-  return v && isFinite(n) && n > 0 ? n : dflt;
+// Upload caps: the backend's (GET /config, lib/config.ts), checked here
+// before any bytes are sent. The server checks again (init / presign +
+// POST /jobs) and its refusal names its own limit.
+
+export type UploadLimitHit = {
+  code: "file_too_large" | "video_too_long" | "video_too_short";
+  /** The refusal's params, as the backend sends them. */
+  params: Record<string, number>;
 };
-export const MAX_UPLOAD_GB = envNum(process.env.NEXT_PUBLIC_MAX_UPLOAD_GB, 4);
-export const MAX_MINUTES = envNum(process.env.NEXT_PUBLIC_MAX_MINUTES, 30);
 
-export type UploadLimitHit =
-  | { code: "file_too_large"; max: number }
-  | { code: "video_too_long"; max: number };
+const plain = (n: number) => Math.round(n * 100) / 100;
 
-/** Which cap a file breaks, if any (same rules as the backend: decimal
- *  GB; one second of slack for how containers round their length).
- *  `duration` null = the browser couldn't read it; the server probes. */
-export function uploadLimitHit(size: number, duration: number | null): UploadLimitHit | null {
-  if (size > MAX_UPLOAD_GB * 1e9) return { code: "file_too_large", max: MAX_UPLOAD_GB };
-  if (duration !== null && duration > MAX_MINUTES * 60 + 1) {
-    return { code: "video_too_long", max: MAX_MINUTES };
+/** Which limit a file breaks, if any (same rules as the backend: decimal
+ *  GB; one second of slack for how containers round a length, 0.1 s
+ *  under the minimum). `duration` null = the browser couldn't read it;
+ *  the server probes. */
+export function uploadLimitHit(size: number, duration: number | null, limits: Limits): UploadLimitHit | null {
+  if (size > limits.max_upload_bytes) {
+    return { code: "file_too_large", params: { max_gb: plain(limits.max_upload_bytes / 1e9) } };
+  }
+  if (duration !== null && limits.max_seconds !== null && duration > limits.max_seconds + 1) {
+    return { code: "video_too_long", params: { max_minutes: plain(limits.max_seconds / 60) } };
+  }
+  if (duration !== null && limits.min_seconds > 0 && duration < limits.min_seconds - 0.1) {
+    return { code: "video_too_short", params: { min_seconds: limits.min_seconds } };
   }
   return null;
 }
