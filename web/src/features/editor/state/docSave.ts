@@ -25,6 +25,7 @@
  * Framework-free (fetch and timers injected) so it is unit-tested; the
  * editor's useDocSession wires it to the store.
  */
+import { renameCaptionKeys } from "@/features/captions-ui/adjusted";
 import { diffWords, mergeWords, type DocFormat, type DocStyle, type DocWord, type EditDoc } from "./doc";
 
 /** Bytes per PATCH body: under the server's 64 KB and the keepalive budget. */
@@ -323,7 +324,11 @@ export class DocSaver {
   private normalize(base: Saved) {
     const map = serverIds(base.words, this.latest.words, this.d.pool);
     if (!map.size) return;
-    this.latest = { ...this.latest, words: renameWords(this.latest.words, map) };
+    this.latest = {
+      ...this.latest,
+      words: renameWords(this.latest.words, map),
+      style: renameCaptionKeys(this.latest.style, map), // UT5: overrides.captions keys
+    };
     this.d.onRename?.(map);
   }
 

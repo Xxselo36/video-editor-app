@@ -6,6 +6,7 @@
  * useDocStore(store, selector); the autosave subscribes to it.
  */
 import { useCallback, useSyncExternalStore } from "react";
+import { renameCaptionKeys } from "@/features/captions-ui/adjusted";
 import type { EditDoc } from "./doc";
 import { commit, initHistory, redo, reset, undo, type History } from "./history";
 
@@ -59,7 +60,9 @@ export function createDocStore(doc: EditDoc): DocStore {
     rename: (map) => {
       if (!map.size) return;
       const words = state.present.words.map((w) => (map.has(w.id) ? { ...w, id: map.get(w.id)! } : w));
-      set({ ...state, present: { ...state.present, words } }, false);
+      // a caption's own position / size follows its first word's new id (UT5)
+      const style = renameCaptionKeys(state.present.style, map);
+      set({ ...state, present: { ...state.present, words, style } }, false);
       for (const l of [...renameListeners]) l(map);
     },
     onRenamed: (fn) => {

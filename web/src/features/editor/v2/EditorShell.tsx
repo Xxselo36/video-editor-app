@@ -15,7 +15,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/i18n";
 import { apiFetch, useMediaUrl } from "@/lib/api";
-import { adjustedWordIds } from "@/features/captions-ui/adjusted";
+import { adjustedWordIds, followCaptionKeys } from "@/features/captions-ui/adjusted";
 import { useCaptionsV2 } from "@/features/captions-ui/flag";
 import type { Phrase, Subtitle } from "@/features/editor/legacy/buildPhrases";
 import { useEditSession } from "@/features/editor/session/useEditSession";
@@ -194,7 +194,13 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   };
   const applyDoc = useCallback(
     (op: (d: EditDoc) => EditDoc) => {
-      if (!docStore?.apply(op)) return false;
+      // a caption's own position / size stays with the caption when its
+      // first word is hidden, deleted or merged (UT5)
+      const withKeys = (d: EditDoc) => {
+        const n = op(d);
+        return n === d ? d : followCaptionKeys(d, n);
+      };
+      if (!docStore?.apply(withKeys)) return false;
       order.record("doc");
       return true;
     },
