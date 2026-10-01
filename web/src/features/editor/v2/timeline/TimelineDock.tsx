@@ -81,6 +81,23 @@ export type TimelineDockProps = {
 export const HOLD_MS = 350;
 /** Movement that turns a press into a scroll / tap instead (px). */
 const HOLD_SLOP_PX = 8;
+/** A trim moves the edge only once the pointer moved this far: a tap or
+ *  jitter on a handle is no trim (review 5). */
+const TRIM_SLOP_PX = { mouse: 3, touch: 6 };
+/** Phone: how far a trim handle's hit area reaches outside its clip
+ *  (the 6 px gap to the neighbour + 2 px; review 5). */
+export const PHONE_HANDLE_OUT_PX = 8;
+
+/** Strip seconds of clip `id`'s start or end edge. */
+function edgeAt(segs: EditorSeg[], id: string, mode: "start" | "end"): number {
+  let acc = 0;
+  for (const s of segs) {
+    if (s.disabled) continue;
+    if (s.id === id) return mode === "start" ? acc : acc + (s.end - s.start);
+    acc += s.end - s.start;
+  }
+  return acc;
+}
 /** Holding a trim handle still this long zooms in (ms). */
 export const MAGNIFY_MS = 500;
 /** Zoom of the trim magnifier: 0.01 s = 10 px. */
@@ -138,6 +155,13 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     timer: ReturnType<typeof setTimeout> | null;
     /** The zoom before the magnifier (0 = fit), while magnified. */
     prevPps: number | null;
+    /** Pointer x minus the edge's x at the press: the edge never jumps to the finger. */
+    grabPx: number;
+    x0: number;
+    y0: number;
+    /** Moved past TRIM_SLOP_PX (or magnified): a trim, not a tap. */
+    started: boolean;
+    slop: number;
   } | null>(null);
   const [trimming, setTrimming] = useState<{ id: string; mode: "start" | "end" } | null>(null);
   const [boost, setBoost] = useState<number | undefined>(undefined);
@@ -227,6 +251,8 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     if (!el) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const startSegs = p.segments.map((x) => ({ ...x }));
+    const rect = el.getBoundingClientRect();
+    const edgeX = rect.left + (edgeAt(startSegs, id, mode) * rect.width) / totalDur;
     const d = {
       id,
       mode,
@@ -238,6 +264,11 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
       clientX: e.clientX,
       timer: null,
       prevPps: null,
+      grabPx: e.clientX - edgeX,
+      x0: e.clientX,
+      y0: e.clientY,
+      started: false,
+      slop: e.pointerType === "mouse" ? TRIM_SLOP_PX.mouse : TRIM_SLOP_PX.touch,
     };
     dragRef.current = d;
     armMagnify(d);
@@ -249,9 +280,15 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     const d = dragRef.current;
     const el = stripRef.current;
     if (!d || !el) return;
-    // from the strip as laid out now: the magnifier changes the zoom mid-drag
+    if (!d.started) {
+      // magnified (held still): every move counts, it is a precise trim
+      if (d.prevPps === null && Math.abs(e.clientX - d.x0) < d.slop) return;
+      d.started = true;
+    }
+    // from the strip as laid out now: the magnifier changes the zoom mid-drag;
+    // the edge keeps its distance to the finger (no jump on the first move)
     const rect = el.getBoundingClientRect();
-    const seconds = (e.clientX - rect.left) / (rect.width / d.total);
+    const seconds = (e.clientX - d.grabPx - rect.left) / (rect.width / d.total);
     d.last = trimToStep(d.startSegs, d.id, d.mode, seconds, d.bounds);
     d.clientX = e.clientX;
     setDragSegs(d.last);
@@ -265,12 +302,22 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     if (!d) return;
     dragRef.current = null;
     if (d.timer) clearTimeout(d.timer);
-    dragEndedAt.current = e.timeStamp;
     setDragSegs(null);
     setDragTotal(null);
     setTrimming(null);
-    // on release the edge moves to the frame both exports cut at (≤ half a frame)
-    p.history.commit(snapTrimToFrame(d.last, d.id, d.mode, d.bounds, p.fps));
+    const tap = !d.started && d.prevPps === null;
+    if (tap) {
+      // no trim: no undo step; a tap on the part of the handle outside
+      // the clip is a tap on what is there (the neighbour) (review 5)
+      if (e.type === "pointerup") tapThrough(e.clientX, e.clientY, e.timeStamp);
+    } else {
+      dragEndedAt.current = e.timeStamp;
+      // the system took the gesture (a scroll): nothing is committed
+      if (e.type !== "pointercancel") {
+        // on release the edge moves to the frame both exports cut at (≤ half a frame)
+        p.history.commit(snapTrimToFrame(d.last, d.id, d.mode, d.bounds, p.fps));
+      }
+    }
     if (d.prevPps !== null) {
       // back to the zoom before the magnifier, around the handle
       const prev = d.prevPps;
@@ -397,6 +444,27 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     if (timeStamp - dragEndedAt.current < 300) return;
     const d = seg.end - seg.start;
     p.seekOriginal(Math.max(seg.start, Math.min(seg.end - 0.05, seg.start + fraction * d)), seg.id);
+  };
+
+  /** A tap on a trim handle that didn't trim: what lies under the point
+   *  besides the handle gets it — the selected clip (a seek there), the
+   *  neighbour clip (select + seek) or a seam (review 5). */
+  const tapThrough = (x: number, y: number, timeStamp: number) => {
+    for (const el of document.elementsFromPoint(x, y)) {
+      if (el.closest("[data-testid^='clip-trim-']")) continue;
+      const seam = el.closest<HTMLElement>("[data-testid=ed-seam]");
+      if (seam) {
+        seam.click();
+        return;
+      }
+      const clipEl = el.closest<HTMLElement>("[data-seg]");
+      if (!clipEl) continue;
+      const seg = p.segments.find((s) => s.id === clipEl.dataset.seg);
+      if (!seg) return;
+      const r = clipEl.getBoundingClientRect();
+      onClip(seg, r.width > 0 ? Math.min(1, Math.max(0, (x - r.left) / r.width)) : 0, timeStamp);
+      return;
+    }
   };
 
   // ── seeking ─────────────────────────────────────────────────────────
@@ -890,7 +958,9 @@ function ClipView({
       data-testid={`clip-${index}`}
       data-seg={seg.id}
       title={title}
-      style={{ left, width }}
+      // --hin: how far a phone trim handle reaches into the clip — at most
+      // 36 px, always leaving a 12 px body to tap / long-press (review 5)
+      style={{ left, width, ["--hin" as string]: `${Math.max(4, Math.min(36, (width - 12) / 2))}px` }}
       onPointerDown={(e) => onPress(e, seg)}
       onContextMenu={(e) => e.preventDefault()}
       onClick={(e) => {

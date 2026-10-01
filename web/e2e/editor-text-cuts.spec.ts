@@ -431,6 +431,53 @@ test.describe("editor v2: the timeline (owner's iPhone items)", TAG, () => {
     expect((await timeline(stub, job.id))[0]).toEqual(before[1]);
   });
 
+  test("phone: taps and swipes next to a selected clip's handle select / scroll, never trim (review 5)", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "pixel7", "touch");
+    const job = await stub.seed("review_speech");
+    await open(page, job.id, false);
+    const before = await timeline(stub, job.id);
+    const c0 = clipsOf(page).nth(0);
+    const c1 = clipsOf(page).nth(1);
+    await c0.tap();
+    await expect(c0).toHaveAttribute("data-selected", "true");
+    const b0 = (await c0.boundingBox())!;
+    const h = (await c0.getByTestId("clip-trim-end").boundingBox())!;
+    // the handle's 44 px target reaches only 8 px outside the clip
+    expect(h.width).toBeGreaterThanOrEqual(43.5);
+    expect(h.x + h.width - (b0.x + b0.width)).toBeLessThanOrEqual(8.5);
+    const b1 = (await c1.boundingBox())!;
+    const y = b1.y + b1.height / 2;
+    const cdp = await page.context().newCDPSession(page);
+    const touch = async (pts: { x: number; y: number }[], holdMs = 40) => {
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [pts[0]] });
+      for (const q of pts.slice(1)) {
+        await page.waitForTimeout(holdMs / Math.max(1, pts.length - 1));
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [q] });
+      }
+      await page.waitForTimeout(20);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await page.waitForTimeout(400);
+    };
+    // a jittery tap on the handle itself: no trim, no undo step
+    const hx = h.x + h.width - 10;
+    await touch([{ x: hx, y }, { x: hx + 2, y }, { x: hx + 1, y }]);
+    expect(await timeline(stub, job.id)).toEqual(before);
+    // a tap on the neighbour 4 px in from its left edge selects it
+    await touch([{ x: b1.x + 4, y }]);
+    await expect(c1).toHaveAttribute("data-selected", "true");
+    expect(await timeline(stub, job.id)).toEqual(before);
+    // back to clip 0; a quick swipe starting at the neighbour scrolls, trims nothing
+    await c0.tap();
+    await expect(c0).toHaveAttribute("data-selected", "true");
+    await touch(
+      Array.from({ length: 8 }, (_, i) => ({ x: b1.x + 4 - i * 12, y })),
+      120,
+    );
+    await page.waitForTimeout(600);
+    expect(await timeline(stub, job.id)).toEqual(before);
+    await cdp.detach();
+  });
+
   test("a second finger cancels the long-press reorder: nothing lifted, nothing stored (review 7)", async ({ page, stub }, info) => {
     test.skip(info.project.name !== "pixel7", "multi-touch");
     const job = await stub.seed("review_speech");

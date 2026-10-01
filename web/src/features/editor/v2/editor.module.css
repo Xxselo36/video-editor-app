@@ -1982,17 +1982,24 @@
   box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.45);
   border-radius: 4px;
 }
-/* phone: trim handles keep a 44 px target beyond the visual edge */
+/* phone: a 44 px trim target that reaches only 8 px outside the clip (the
+   gap to the neighbour, which stays tappable: review 5) and up to 36 px
+   in (--hin, set per clip: a narrow clip keeps a body to tap and hold);
+   the white bar stays on the edge */
 .phone .handle {
-  width: 44px;
+  width: calc(var(--hin, 36px) + 8px);
   top: -2px;
   bottom: -2px;
 }
 .phone .handle[data-testid="clip-trim-start"] {
-  left: -22px !important;
+  left: -8px !important;
+  justify-content: flex-start;
+  padding-left: 6.5px;
 }
 .phone .handle[data-testid="clip-trim-end"] {
-  right: -22px !important;
+  right: -8px !important;
+  justify-content: flex-end;
+  padding-right: 6.5px;
 }
 
 @media (prefers-reduced-motion: reduce) {
