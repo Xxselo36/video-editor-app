@@ -715,6 +715,7 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
     if not input_path and not source_key:
         return ctx.fail(taskq.INFRA, "the upload is gone", False,
                         {"refund": True, "infra": True,
+                         "job_code": "processing_interrupted",
                          "message": "Processing was interrupted. "
                                     "Please upload the video again.",
                          "error": "upload_missing"})

@@ -285,3 +285,23 @@ def test_length_cap_is_the_same_in_api_and_worker(monkeypatch, minutes,
     monkeypatch.setenv("CLEO_MAX_MINUTES", minutes)
     assert M._too_long(seconds) is too_long
     assert worker._too_long(seconds) is too_long
+
+
+def test_queue_upload_gone_keeps_its_code_and_message():
+    """The worker found no upload (a non-retryable INFRA failure, task
+    state 'failed'): the job gets processing_interrupted and its
+    message, not a code-less "Processing failed."."""
+    from backend import taskq
+    job = store.create(None, {}, filename="gone.mp4")
+    store.update(job.id, status="processing")
+    t = taskq.Task(id=1, job_id=job.id, kind="ingest", state="failed",
+                   error_code=taskq.INFRA, last_error="the upload is gone",
+                   result={"refund": True, "infra": True,
+                           "job_code": "processing_interrupted",
+                           "message": "Processing was interrupted. "
+                                      "Please upload the video again.",
+                           "error": "upload_missing"})
+    M._QueueOps(periodic=False)._ingest_ended(t)
+    cur = store.get(job.id)
+    assert (cur.status, cur.error_code) == ("error", "processing_interrupted")
+    assert cur.message == errors.JOB_ERRORS["processing_interrupted"]
