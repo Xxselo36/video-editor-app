@@ -187,3 +187,25 @@ test("an upload keeps going while the user changes routes", async ({ page, stub 
   await expect(upload).toHaveAttribute("data-phase", "analyzing", { timeout: 60_000 });
   await expect(upload.getByTestId("job-card-remove")).toHaveCount(0);
 });
+
+test("the project view rides out 5xx answers (a deploy) and keeps polling", async ({ page, stub }) => {
+  const job = await stub.seed("review");
+  // First load: two 503s. Then the job "processing", a 502 mid-poll, and
+  // finally the real answer (in review) → on to the editor.
+  let n = 0;
+  await page.route(`**/jobs/${job.id}`, async (r) => {
+    n++;
+    if (n <= 2) return r.fulfill({ status: 503, body: "busy" });
+    const res = await r.fetch();
+    if (n === 3) {
+      const body = { ...(await res.json()), status: "processing", stage: "analyze.transcribe", progress: 40 };
+      return r.fulfill({ response: res, body: JSON.stringify(body) });
+    }
+    if (n === 4) return r.fulfill({ status: 502, body: "<html>Bad Gateway</html>" });
+    return r.fulfill({ response: res });
+  });
+  await openWithStorage(page, `/app/p/${job.id}`);
+  await expect(page.getByTestId("project")).toHaveAttribute("data-status", "processing", { timeout: 20_000 });
+  await expect(page).toHaveURL(`${WEB}/app/edit/${job.id}`, { timeout: 30_000 });
+  expect(n).toBeGreaterThanOrEqual(5);
+});

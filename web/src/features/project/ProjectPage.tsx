@@ -29,6 +29,14 @@ import { DoneView } from "./DoneView.legacy";
 import { ErrorView } from "./ErrorView";
 
 const POLL_MS = 2000;
+// After an answer that isn't a job (a 502 / 503 while the backend
+// restarts on a deploy, offline): again after 2 s, doubling to 30 s.
+const RETRY_MAX_MS = 30_000;
+
+/** The wait before the next try after `failures` failed ones in a row. */
+export function retryDelay(failures: number): number {
+  return Math.min(POLL_MS * 2 ** Math.max(0, failures - 1), RETRY_MAX_MS);
+}
 
 type Load =
   | { state: "loading" }
@@ -60,6 +68,7 @@ export function ProjectPage({ jobId }: { jobId: string }) {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
     const tick = async () => {
       clearTimeout(timer);
       if (cancelled) return;
@@ -68,8 +77,15 @@ export function ProjectPage({ jobId }: { jobId: string }) {
         const r = await apiFetch(`/jobs/${jobId}`);
         if (cancelled) return;
         if (r.status === 404) setLoad({ state: "gone" });
-        else if (!r.ok) setLoad((cur) => (cur.state === "job" ? cur : { state: "failed", status: r.status }));
-        else {
+        else if (r.status === 401 || r.status === 403) {
+          // Sign-in opens (apiFetch); nothing to poll meanwhile.
+          setLoad((cur) => (cur.state === "job" ? cur : { state: "failed", status: r.status }));
+        } else if (!r.ok) {
+          // A hiccup (5xx, 429): keep what is shown, try again later.
+          failures++;
+          running = true;
+        } else {
+          failures = 0;
           const job: JobStatus = await r.json();
           if (cancelled) return;
           if (job.status === "awaiting_review") {
@@ -80,9 +96,12 @@ export function ProjectPage({ jobId }: { jobId: string }) {
           running = job.status === "pending" || job.status === "processing";
         }
       } catch {
+        failures++;
         running = true; // offline: try again
       }
-      if (running && !cancelled && !document.hidden) timer = setTimeout(() => void tick(), POLL_MS);
+      if (running && !cancelled && !document.hidden) {
+        timer = setTimeout(() => void tick(), failures ? retryDelay(failures) : POLL_MS);
+      }
     };
     const onVisible = () => {
       if (!document.hidden) void tick();
