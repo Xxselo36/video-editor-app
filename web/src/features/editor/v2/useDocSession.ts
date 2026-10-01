@@ -1,0 +1,132 @@
+"use client";
+/**
+ * The v2 editor's edit document (UX8): GET /jobs/{id}/doc, the store
+ * with its undo history, and the autosave (state/docSave.ts).
+ *
+ *   loading   the request runs (the Text tab shows a skeleton)
+ *   none      no doc: a job analysed before UT3 (404 no_doc) or the
+ *             request failed — the Text tab falls back to the sentence
+ *             transcript of UX7 (v1 semantics, /phrases autosave)
+ *   ready     store + autosave; `conflict` after a 409 stale_rev
+ *
+ * Every doc change hands the caption source (state/doc.ts
+ * captionSource: units and sentences without hidden words) to the
+ * editor page, which feeds the preview and — until UT4 renders from the
+ * doc — the render payload and the legacy /phrases save.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiFetch } from "@/lib/api";
+import { trackSave } from "@/lib/pendingSaves";
+import { captionSource, type CaptionPhrase, type CaptionUnit, type EditDoc, type IdPool } from "@/features/editor/state/doc";
+import { DocSaver, type DocSaveState } from "@/features/editor/state/docSave";
+import { createDocStore, type DocStore } from "@/features/editor/state/store";
+
+export type CaptionSourceHandler = (phrases: CaptionPhrase[], units: CaptionUnit[], edited: boolean) => void;
+
+export type DocSession =
+  | { status: "loading" }
+  | { status: "none" }
+  | {
+      status: "ready";
+      store: DocStore;
+      pool: IdPool;
+      saveState: DocSaveState;
+      readOnly: boolean;
+      /** Retry a failed save now. */
+      retry: () => void;
+      /** Load the server's doc (after a conflict); local changes are dropped. */
+      reload: () => Promise<void>;
+    };
+
+type Loaded = { store: DocStore; saver: DocSaver; pool: IdPool; readOnly: boolean };
+
+async function fetchDoc(jobId: string): Promise<{ doc: EditDoc; rev: number; read_only: boolean } | null> {
+  const r = await apiFetch(`/jobs/${jobId}/doc`);
+  if (!r.ok) return null;
+  const j = await r.json();
+  if (!j || !j.doc || !Array.isArray(j.doc.words)) return null;
+  return { doc: j.doc as EditDoc, rev: typeof j.rev === "number" ? j.rev : 0, read_only: !!j.read_only };
+}
+
+export function useDocSession(jobId: string, onCaptionSource?: CaptionSourceHandler): DocSession {
+  const [loaded, setLoaded] = useState<Loaded | "none" | null>(null);
+  const [saveState, setSaveState] = useState<DocSaveState>("saved");
+  const captionRef = useRef(onCaptionSource);
+  useEffect(() => {
+    captionRef.current = onCaptionSource;
+  });
+
+  useEffect(() => {
+    let live = true;
+    let made: Loaded | null = null;
+    void fetchDoc(jobId)
+      .catch(() => null)
+      .then((res) => {
+        if (!live) return;
+        if (!res) {
+          setLoaded("none");
+          return;
+        }
+        const store = createDocStore(res.doc);
+        const pool: IdPool = new Set(res.doc.words.map((w) => w.id));
+        const saver = new DocSaver(res.doc, res.rev, {
+          jobId,
+          fetch: apiFetch,
+          pool,
+          onState: setSaveState,
+          onRename: (map) => store.rename(map),
+          track: (p) => trackSave(jobId, p),
+        });
+        store.onEdit = (doc) => {
+          saver.schedule(doc);
+          const src = captionSource(doc.words);
+          captionRef.current?.(src.phrases, src.units, true);
+        };
+        const src = captionSource(res.doc.words);
+        captionRef.current?.(src.phrases, src.units, false);
+        made = { store, saver, pool, readOnly: res.read_only };
+        setLoaded(made);
+      });
+    return () => {
+      live = false;
+      // Leaving the editor (back, a link): the last edit goes now.
+      if (made) {
+        void made.saver.flush();
+        made.store.onEdit = null;
+      }
+    };
+  }, [jobId]);
+
+  // The page goes away: one keepalive PATCH. Back online: send now.
+  useEffect(() => {
+    if (!loaded || loaded === "none") return;
+    const { saver } = loaded;
+    const onHide = () => saver.flushUnload();
+    const onOnline = () => void saver.flush();
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("online", onOnline);
+    };
+  }, [loaded]);
+
+  const retry = useCallback(() => {
+    if (loaded && loaded !== "none") void loaded.saver.flush();
+  }, [loaded]);
+
+  const reload = useCallback(async () => {
+    if (!loaded || loaded === "none") return;
+    const res = await fetchDoc(jobId).catch(() => null);
+    if (!res) return;
+    loaded.store.reset(res.doc);
+    loaded.saver.reset(res.doc, res.rev);
+    for (const w of res.doc.words) loaded.pool.add(w.id);
+    const src = captionSource(res.doc.words);
+    captionRef.current?.(src.phrases, src.units, false);
+  }, [jobId, loaded]);
+
+  if (loaded === null) return { status: "loading" };
+  if (loaded === "none") return { status: "none" };
+  return { status: "ready", store: loaded.store, pool: loaded.pool, saveState, readOnly: loaded.readOnly, retry, reload };
+}

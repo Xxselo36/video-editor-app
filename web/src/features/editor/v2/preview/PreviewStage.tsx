@@ -27,6 +27,7 @@ export function PreviewStage({
   warnings = [],
   phoneExtra,
   fullscreenRef,
+  notice,
   ...slot
 }: CaptionSlotProps & {
   phone: boolean;
@@ -38,6 +39,8 @@ export function PreviewStage({
   phoneExtra?: ReactNode;
   /** Receives the fullscreen toggle (for the F shortcut). */
   fullscreenRef?: { current: (() => void) | null };
+  /** A banner that matters more than the others (UX8: changed in another tab). */
+  notice?: ReactNode;
 }) {
   const t = useT();
   const { session, store } = slot;
@@ -83,7 +86,8 @@ export function PreviewStage({
 
   return (
     <section ref={stageRef} className={s.stage} aria-label={t("editor.preview")} data-testid="ed-stage">
-      {!offline && !warningsClosed && warnings.length > 0 && (
+      {notice}
+      {!notice && !offline && !warningsClosed && warnings.length > 0 && (
         <div className={s.banner} role="status" data-testid="ed-audio-warning">
           <TriangleAlert size={16} strokeWidth={1.75} className={s.bannerIcon} aria-hidden />
           <span style={{ flex: 1 }}>{warnings.join(" ")}</span>
@@ -97,7 +101,7 @@ export function PreviewStage({
           </button>
         </div>
       )}
-      {offline && (
+      {!notice && offline && (
         <div className={s.banner} role="status" data-testid="ed-offline">
           <WifiOff size={16} strokeWidth={1.75} className={s.bannerIcon} aria-hidden />
           <span>{t("editor.offline")}</span>

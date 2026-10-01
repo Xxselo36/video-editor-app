@@ -29,7 +29,10 @@ Test API (only this script registers it; never part of the backend):
 
   POST /_test/seed/{seed}   body: options (all optional) → {"id", …}
        seeds: review (grid clip — the editor suites' timings),
-              review_speech, review_land, render_failed, analyzing,
+              review_speech, review_land, review_long (the speech clip
+              with a ~30-minute podcast's 10 000 words in its doc: the
+              Text tab's long-transcript state, §1.7 row 21),
+              render_failed, analyzing,
               queued, rendering, error, err_no_speech (refunded),
               err_unreadable, done, done_land (the §1.7 state matrix
               grows here: later packages add seeds; the upload
@@ -95,7 +98,7 @@ for p in (str(REPO), str(HERE)):
 
 import stub_media  # noqa: E402
 
-SEED_NAMES = ("review", "review_speech", "review_land", "render_failed", "analyzing",
+SEED_NAMES = ("review", "review_speech", "review_land", "review_long", "render_failed", "analyzing",
               "queued", "rendering", "error", "err_no_speech", "err_unreadable", "done",
               "done_land")
 
@@ -474,6 +477,22 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                      social_caption=SOCIAL["caption"] if hooks else "",
                      social_hashtags=list(SOCIAL["hashtags"]) if hooks else [])
 
+    def long_words(n: int, duration: float) -> list[dict[str, Any]]:
+        """n doc words over the clip (a 30-minute podcast's word count
+        squeezed into the stub clip, so PATCH accepts their times):
+        the speech script's words in a loop, 12-word sentences."""
+        vocab = [w["text"].strip(".,:") for w in stub_media.speech_words()] or ["word"]
+        step = max(duration - 0.5, 1.0) / n
+        out = []
+        for i in range(n):
+            text = vocab[i % len(vocab)]
+            if i % 12 == 11:
+                text += "."
+            t0 = round(i * step, 3)
+            out.append({"id": f"w{i + 1:05d}", "text": text, "start": t0,
+                        "end": round(t0 + step * 0.9, 3)})
+        return out
+
     def seed(name: str, opts: dict[str, Any]) -> dict[str, Any]:
         clip = opts.get("clip")
         orientation = opts.get("orientation") or "portrait"
@@ -492,6 +511,14 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                 store.update(job.id, message="render_failed",
                              error="Render worker unavailable (modal_unavailable)",
                              error_code="render_unavailable")
+            proxy = "on"
+        elif name == "review_long":
+            clip = clip or "speech"
+            job = create(opts, TIKTOK, "podcast_ep30_full.mp4", tiktok)
+            seed_review(job, clip, orientation)
+            cur = store.get(job.id)
+            words = long_words(int(opts.get("words") or 10_000), float(cur.duration or 30.0))
+            store.update(job.id, doc={**cur.doc, "words": words}, doc_rev=0)
             proxy = "on"
         elif name == "review_land":
             clip, orientation = clip or "speech", "landscape"

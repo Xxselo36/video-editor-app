@@ -15,6 +15,7 @@ export type SeedName =
   | "review"
   | "review_speech"
   | "review_land"
+  | "review_long"
   | "render_failed"
   | "analyzing"
   | "queued"
@@ -43,6 +44,10 @@ export type SeedOptions = {
   render_seconds?: number;
   /** Seconds every /edit-segments waits before its preview rebuild. */
   slow_rebuild?: number;
+  /** review_long: words in the doc (default 10 000). */
+  words?: number;
+  /** false: a job from before the edit document (404 no_doc). */
+  doc?: boolean;
 };
 
 export type Seeded = { id: string; seed: SeedName; filename: string; status: string };
@@ -76,6 +81,21 @@ export type StubJob = {
   media_store: string;
 };
 
+export type StubWord = {
+  id: string;
+  text: string;
+  start: number;
+  end: number;
+  hidden?: boolean;
+  filler?: boolean;
+  breakBefore?: boolean;
+};
+export type StubDoc = {
+  doc: { words: StubWord[]; style: { presetId: string }; rev: number };
+  rev: number;
+  read_only: boolean;
+};
+
 export class Stub {
   constructor(readonly api: APIRequestContext) {}
 
@@ -97,6 +117,13 @@ export class Stub {
   async timeline(id: string): Promise<number[][]> {
     const j = await this.job(id);
     return (j?.edit_segments ?? []).map((s) => [s.start, s.end]);
+  }
+
+  /** GET /jobs/{id}/doc (UT3): the stored edit document and its rev. */
+  async doc(id: string): Promise<StubDoc> {
+    const r = await this.api.get(`/jobs/${id}/doc`);
+    expect(r.ok(), `doc ${id}: ${r.status()}`).toBeTruthy();
+    return r.json();
   }
 
   async config(values: {

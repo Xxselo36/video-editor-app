@@ -132,8 +132,9 @@ export function rowsOf(words: readonly DocWord[], maxWords = 24, maxGap = 1.5): 
   return rows;
 }
 
-/** Shown in the captions: not hidden (fillers are hidden by the analysis). */
-export const captioned = (w: DocWord) => !w.hidden && !w.filler;
+/** Shown in the captions: not hidden (the analysis hides fillers; a
+ *  filler the user shows again is captioned). */
+export const captioned = (w: DocWord) => !w.hidden;
 
 export type CaptionPhrase = {
   start: number;

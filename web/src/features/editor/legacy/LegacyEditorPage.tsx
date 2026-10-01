@@ -185,6 +185,14 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
           setPhrases(next);
           schedulePhraseSave(job.id, next);
         }}
+        // UX8: with an edit document the captions come from its words:
+        // the preview and the render payload at once, the legacy
+        // /phrases save (v1, social caption) after an edit.
+        onCaptionSource={(next, units, edited) => {
+          unitsRef.current = units;
+          setPhrases(next);
+          if (edited) schedulePhraseSave(job.id, next);
+        }}
         onApply={onApply}
         onBack={leave}
       />
