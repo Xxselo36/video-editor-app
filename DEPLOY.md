@@ -1327,8 +1327,17 @@ Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
 - **Reihenfolge:** selbst ein neues Projekt mit `?captions=v2`
   exportieren und ansehen (Log: `[captions] v2 primary: … frames`),
   dann `CLEO_CAPTION_ENGINE=v2` für alle. Notbremse: `off`.
-- **Mehr Stile:** `CLEO_CAPTION_PRESETS_LIVE` (Default `clipper,power`)
-  erst erweitern, wenn du den Stil im Abnahmeblatt abgehakt hast.
+- **Stile:** Seit UT5 sind alle 12 Stile live (Default von
+  `CLEO_CAPTION_PRESETS_LIVE`; jeder steht in der Paritätsprüfung
+  Vorschau ↔ Export). Ein Stil, den du im Abnahmeblatt **nicht**
+  abhakst, fliegt raus, indem du die Liste setzt, z. B.
+  `CLEO_CAPTION_PRESETS_LIVE=power,clipper,karaoke` — der Stil-Tab
+  bietet dann nur diese an.
+- **Editor (UT5):** Mit v2 (oder deinem `?captions=v2`-Browser) zeigt
+  der neue Editor die Untertitel so, wie der Export sie zeichnet: Stil
+  wählen im Tab „Stil“, einen Untertitel in der Vorschau ziehen
+  (Position) oder an der Ecke ziehen (Größe), dann „Nur hier“ oder
+  „Überall“. Ohne v2 bleibt der Editor wie bisher.
 - **Emoji:** Emoji und Symbole, die keine Untertitel-Schrift hat, lässt
   die Engine weg — in der Vorschau und im Export gleich, der Export
   scheitert nie daran (Log: `[captions] warning: N emoji/symbol

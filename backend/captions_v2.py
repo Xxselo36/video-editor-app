@@ -217,6 +217,20 @@ def decide(job: Any, style: dict[str, Any] | None = None) -> tuple[str, str]:
     return "v2", f"{mode}:{pid}"
 
 
+def editor_engine(job: Any) -> str:
+    """What the editor previews captions for (GET /jobs/{id}/doc, UT5):
+    "v2" / "v1" for a job whose engine is pinned or whose server mode
+    decides it, "optin" when the browser's opt-in decides (?captions=v2).
+    A job without a doc or exported before UT4 stays v1. The style and
+    script checks of decide() are the Style panel's (only live presets
+    the transcript's script supports are offered)."""
+    if job.caption_engine in ENGINES:
+        return job.caption_engine
+    if not isinstance(job.doc, dict) or exported_before(job):
+        return "v1"
+    return engine_default()
+
+
 def choose_engine(job: Any, style: dict[str, Any] | None = None) -> str:
     """The job's pinned engine, or the one its first render pins."""
     return decide(job, style)[0]
@@ -725,9 +739,11 @@ def _layer_input(spec: dict[str, Any], mapped: dict[str, Any], src: dict[str, An
         "words": [{k: w[k] for k in ("id", "text", "start", "end", "breakBefore") if k in w}
                   for w in mapped["words"]],
         "breaks": mapped["breaks"],
+        # Every override, the per-caption position / size (UT5,
+        # overrides.captions keyed by the caption's first word id) included:
+        # the layer draws them as the editor's preview does.
         "style": {"presetId": style.get("presetId") or "none",
-                  "overrides": {k: v for k, v in (style.get("overrides") or {}).items()
-                                if k != "captions"}},
+                  "overrides": dict(style.get("overrides") or {})},
         "lang": spec.get("language") or "en",
         "W": src["W"], "H": src["H"], "fps": src["fps"], "frames": frames,
         "fontsDir": str(Path(os.environ.get("CLEO_CAPTION_FONTS_DIR") or FONTS_DIR)),

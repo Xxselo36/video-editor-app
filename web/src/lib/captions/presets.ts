@@ -35,8 +35,12 @@ export const LAUNCH_PRESETS = [
 
 export const PRESET_IDS: readonly PresetId[] = [...LAUNCH_PRESETS, "none"];
 
-/** Live list until the owner signs each style's rubric (UT4). */
-export const DEFAULT_LIVE_PRESETS = "clipper,power";
+/**
+ * Live by default: all twelve (UT5 — every preset is in the parity suite,
+ * __tests__/parity.test.ts). CLEO_CAPTION_PRESETS_LIVE narrows it on the
+ * server; the editor gets the server's list with the doc.
+ */
+export const DEFAULT_LIVE_PRESETS = "power,mega,clipper,karaoke,boxed,punch,reveal,neon,gradient,elegant,subtitle,minimal";
 
 type PresetDef = Omit<CaptionStyle, "presetId">;
 

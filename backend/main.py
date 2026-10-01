@@ -4341,7 +4341,33 @@ def get_doc(job_id: str, user: User | None = Depends(current_user)):
     if job.doc is None:
         raise _no_doc(job)
     return {"doc": job.doc, "rev": job.doc_rev,
-            "read_only": job.status != "awaiting_review"}
+            "read_only": job.status != "awaiting_review",
+            **_doc_captions(job)}
+
+
+def _doc_captions(job: Job) -> dict[str, Any]:
+    """What the editor's caption layer and Style panel need (UT5):
+    caption_engine — "v2" / "v1" (pinned or the server's mode) or
+    "optin" (the browser's ?captions=v2 decides); render_style — the
+    style an export draws right now (captions_v2.style_for: before the
+    first editor save a v1 caption_preset still decides the look);
+    presets_live — the presets the Style panel offers and PATCH accepts;
+    recommended — the top three for this transcript (doc.recommended)."""
+    doc = job.doc or {}
+    lang = doc.get("language") or job.language
+    aspect = (doc.get("format") or {}).get("aspect")
+    try:
+        wps = edit_doc.words_per_second(doc.get("words") or [], job.segments)
+    except Exception:
+        wps = None
+    style = captions_v2.style_for(job)
+    return {
+        "caption_engine": captions_v2.editor_engine(job),
+        "render_style": style,
+        "presets_live": edit_doc.live_presets(),
+        "recommended": [p for p in edit_doc.recommended(lang, aspect, wps, style["presetId"])
+                        if p != "none"][:3],
+    }
 
 
 def _doc_state_refusal(job: Job) -> ApiRefusal | None:

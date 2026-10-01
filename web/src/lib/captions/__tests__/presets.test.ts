@@ -5,6 +5,7 @@ import fontsJson from "../fonts.json";
 import { V1_PRESETS, migratePresetId } from "../migrate";
 import { PRESET_NAMES } from "../presetNames";
 import {
+  DEFAULT_LIVE_PRESETS,
   DEFAULT_PRESET,
   LAUNCH_PRESETS,
   PRESET_IDS,
@@ -66,8 +67,9 @@ describe("launch presets", () => {
 });
 
 describe("live list", () => {
-  it("defaults to clipper + power; 'all' opens every preset", () => {
-    expect(parseLiveList(undefined).sort()).toEqual(["clipper", "none", "power"]);
+  it("defaults to all twelve (UT5); 'all' opens every preset", () => {
+    expect(parseLiveList(undefined)).toEqual([...LAUNCH_PRESETS, "none"]);
+    expect(DEFAULT_LIVE_PRESETS).toBe(LAUNCH_PRESETS.join(","));
     expect(parseLiveList("all")).toEqual([...PRESET_IDS]);
     expect(parseLiveList(" power, neon ,bogus")).toEqual(["power", "neon", "none"]);
     const live = parseLiveList("clipper,power");
