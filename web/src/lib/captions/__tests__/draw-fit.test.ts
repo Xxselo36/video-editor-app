@@ -3,13 +3,17 @@
  * rounds glyph advances up) are compressed into their layout box, so ink
  * never crosses into the space; layout (positions, breaks) is unchanged.
  */
-import { createCanvas } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { beforeAll, describe, expect, it } from "vitest";
 import { drawPage, fitScale } from "../draw";
 import { buildPages, layoutPage } from "../layout";
 import { resolveStyle } from "../presets";
 import type { CaptionStyle, Ctx2D } from "../types";
-import { loadRealFonts, timed } from "./helpers";
+import { ensureFonts } from "../fonts";
+import { nodeFontLoader } from "../node/fonts";
+import { FONTS_DIR, loadRealFonts, timed } from "./helpers";
+
+const TEXT = "Hey, so today I want to show you the three mistakes that";
 
 describe("fitScale", () => {
   it("is 1 when the drawn text fits its box (or within sub-pixel noise)", () => {
@@ -29,14 +33,26 @@ describe("fitScale", () => {
 });
 
 describe("drawPage keeps every word inside its layout box", () => {
-  beforeAll(() => loadRealFonts());
+  // The caption faces themselves, registered with @napi-rs/canvas: without
+  // them ctx.font fell back to whatever system font the machine (or an
+  // earlier test file in the same worker) had, and on CI one word's 1.08×
+  // width landed within fitScale's 0.25 px sub-pixel tolerance of its box,
+  // so it wasn't compressed (0.23 px over). With the real faces every
+  // widened word is ≥ 0.48 px over and is fitted exactly.
+  beforeAll(async () => {
+    loadRealFonts();
+    const style = resolveStyle("minimal", {}, { W, H }) as CaptionStyle;
+    const loader = nodeFontLoader(GlobalFonts, { fontsDir: FONTS_DIR });
+    const st = await ensureFonts(style, { lang: "en", text: TEXT.split(" "), loader });
+    expect(st.ok).toBe(true);
+  }, 30_000);
 
   const W = 728;
   const H = 410;
 
   function run(widen: number) {
     const style = resolveStyle("minimal", { y: 0.7 }, { W, H }) as CaptionStyle;
-    const words = timed("Hey, so today I want to show you the three mistakes that");
+    const words = timed(TEXT);
     const page = buildPages(words, style, { W, H })[0];
     const layout = layoutPage(page, style, { W, H });
     const ctx = createCanvas(W, H).getContext("2d");

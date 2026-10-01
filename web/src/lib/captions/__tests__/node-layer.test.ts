@@ -24,7 +24,9 @@ const base = (over: Partial<LayerInput> = {}): LayerInput => ({
   ...over,
 });
 
-describe("caption layer (node/layer.ts)", () => {
+// Cold font registration + the first prepare take ~6 s on a CI runner
+// (vitest default: 5 s).
+describe("caption layer (node/layer.ts)", { timeout: 30_000 }, () => {
   it("plans an even band that holds every page", async () => {
     const prep = await prepare(base(), deps);
     const band = prep.plan.band!;
