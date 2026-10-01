@@ -29,6 +29,7 @@ kind — the editor falls back to the same word rule (state/cuts.ts).
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from typing import Any, Iterable
 
 KINDS = ("silence", "filler", "voice_cmd", "bad_take")
@@ -110,6 +111,32 @@ def kind_of(start: float, end: float,
     return DEFAULT_KIND
 
 
+def mark_words(words: list[dict] | None, cut_ranges: Iterable[dict] | None) -> None:
+    """Give each doc word inside a labelled cut range (by its middle) that
+    range's kind as `cut` (in place; a word's own `cut` — a filler range
+    of the analysis — is kept). Filler sounds are left alone: they are
+    `filler` + `hidden` already."""
+    spans = []
+    for c in cut_ranges or ():
+        span = _span(c) if isinstance(c, dict) and c.get("kind") in KINDS else None
+        if span:
+            spans.append((span[0], span[1], c["kind"]))
+    spans.sort()
+    if not spans or not words:
+        return
+    starts = [x[0] for x in spans]
+    for w in words:
+        if not isinstance(w, dict) or w.get("cut") or w.get("filler"):
+            continue
+        try:
+            m = (float(w["start"]) + float(w["end"])) / 2
+        except (KeyError, TypeError, ValueError):
+            continue
+        j = bisect_right(starts, m) - 1
+        if j >= 0 and spans[j][0] <= m <= spans[j][1]:
+            w["cut"] = spans[j][2]
+
+
 def label(cut_ranges: Iterable[dict] | None, *,
           log: Iterable[Any] | None = None,
           words: Iterable[dict] | None = None) -> list[dict]:
@@ -119,7 +146,8 @@ def label(cut_ranges: Iterable[dict] | None, *,
     mids = sorted(
         (float(w["start"]) + float(w["end"])) / 2
         for w in (words or ())
-        if isinstance(w, dict) and w.get("filler") and _span(w) is not None
+        if isinstance(w, dict) and (w.get("filler") or w.get("cut") == "filler")
+        and _span(w) is not None
     )
     out: list[dict] = []
     for c in cut_ranges or ():

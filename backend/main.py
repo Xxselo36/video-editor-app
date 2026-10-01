@@ -4340,7 +4340,21 @@ def get_doc(job_id: str, user: User | None = Depends(current_user)):
     job = get_owned_job(job_id, user)
     if job.doc is None:
         raise _no_doc(job)
-    return {"doc": job.doc, "rev": job.doc_rev,
+    doc = job.doc
+    # UX10: a doc from before hid the words of every filler range; they
+    # become cut: "filler" words (captioned once a clip plays them) — on
+    # the first read, stored under the row lock while in review.
+    words, changed = edit_doc.migrate_cut_words(list(doc.get("words") or []))
+    if changed:
+        doc = {**doc, "words": words}
+        if job.status == "awaiting_review":
+            def _migrate(cur: Job) -> dict | None:
+                if cur.doc is None or cur.status != "awaiting_review":
+                    return None
+                ws, ch = edit_doc.migrate_cut_words(list(cur.doc.get("words") or []))
+                return {"doc": {**cur.doc, "words": ws}} if ch else None
+            store.modify(job_id, _migrate)
+    return {"doc": doc, "rev": job.doc_rev,
             "read_only": job.status != "awaiting_review",
             **_doc_captions(job)}
 

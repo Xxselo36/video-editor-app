@@ -136,6 +136,84 @@ def test_job_hands_kinds_to_the_editor_and_old_jobs_still_work(client, tmp_path,
     assert [tuple(s) for s in segs] == [(0.2, 6.0)]
 
 
+# ── why a word was cut is not whether it is captioned ────────────────
+
+
+def test_doc_words_separate_cut_from_hidden():
+    from backend import doc as D
+    raw = [{"text": "I", "start": 0.0, "end": 0.2},
+           {"text": "I", "start": 0.3, "end": 0.5},          # a repeat, in a filler range
+           {"text": "äh", "start": 0.6, "end": 0.9},          # a filler sound
+           {"text": "...", "start": 1.0, "end": 1.1},         # a hesitation mark
+           {"text": "think", "start": 1.2, "end": 1.5},
+           {"text": "really", "start": 3.0, "end": 3.3, "nospeech": True},
+           {"text": "Thank", "start": 9.0, "end": 9.2, "nospeech": True},
+           {"text": "you", "start": 9.2, "end": 9.4, "nospeech": True},
+           {"text": "for", "start": 9.4, "end": 9.6, "nospeech": True},
+           {"text": "watching.", "start": 9.6, "end": 9.9, "nospeech": True}]
+    words = D.words_from_transcript(raw, [{"start": 0.3, "end": 0.5, "word": "I"},
+                                          {"start": 0.6, "end": 0.9, "word": "äh"}])
+    by = [(w["text"], {k: w[k] for k in ("filler", "hidden", "cut", "nospeech") if k in w}) for w in words]
+    assert by == [
+        ("I", {}),
+        ("I", {"cut": "filler"}),
+        ("äh", {"filler": True, "hidden": True}),
+        ("...", {"filler": True, "hidden": True}),
+        ("think", {}),
+        ("really", {"nospeech": True}),
+        # a known silence hallucination stays hidden
+        ("Thank", {"nospeech": True, "hidden": True}),
+        ("you", {"nospeech": True, "hidden": True}),
+        ("for", {"nospeech": True, "hidden": True}),
+        ("watching.", {"nospeech": True, "hidden": True}),
+    ]
+    # the flags pass the PATCH validation; a bad kind doesn't
+    assert D.validate_word(words[1])["cut"] == "filler"
+    assert D.validate_word(words[5])["nospeech"] is True
+    with pytest.raises(D.DocError):
+        D.validate_word({**words[1], "cut": "nope"})
+
+
+def test_cut_words_get_the_range_kind():
+    words = [{"id": "w1", "text": "a", "start": 0.0, "end": 0.2},
+             {"id": "w2", "text": "b", "start": 2.1, "end": 2.3},
+             {"id": "w3", "text": "um", "start": 2.4, "end": 2.6, "filler": True, "hidden": True},
+             {"id": "w4", "text": "c", "start": 5.5, "end": 5.6, "cut": "filler"}]
+    cuts = [{"id": 0, "start": 2.0, "end": 3.0, "kind": "voice_cmd"},
+            {"id": 1, "start": 5.0, "end": 6.0, "kind": "silence"}]
+    K.mark_words(words, cuts)
+    assert [w.get("cut") for w in words] == [None, "voice_cmd", None, "filler"]
+
+
+def test_old_docs_unhide_range_words(client):
+    from backend import doc as D
+    old = [{"id": "w0001", "text": "I", "start": 0.0, "end": 0.2},
+           {"id": "w0002", "text": "I", "start": 0.3, "end": 0.5, "filler": True, "hidden": True},
+           {"id": "w0003", "text": "äh", "start": 0.6, "end": 0.9, "filler": True, "hidden": True},
+           {"id": "w0004", "text": "think", "start": 1.2, "end": 1.5, "hidden": True}]
+    words, changed = D.migrate_cut_words(old)
+    assert changed
+    assert words[1] == {"id": "w0002", "text": "I", "start": 0.3, "end": 0.5, "cut": "filler"}
+    assert words[0] is old[0] and words[2] is old[2] and words[3] is old[3]   # vocal / user-hidden stay
+    assert D.migrate_cut_words(words) == (words, False)
+    # GET /doc hands the fixed words over and stores them (once)
+    job = _job(doc=_doc(words=old), duration=3.0)
+    got = client.get(f"/jobs/{job.id}/doc").json()
+    assert got["doc"]["words"][1].get("cut") == "filler" and "hidden" not in got["doc"]["words"][1]
+    assert store.get(job.id).doc["words"][1] == words[1]
+    assert got["rev"] == store.get(job.id).doc_rev
+
+
+def test_words_outside_speech_stay_in_the_web_doc_only():
+    from src import plugin_api
+    seg = SimpleNamespace
+    speech = [seg(start=0.0, end=2.0, has_speech=True), seg(start=2.0, end=5.0, has_speech=False)]
+    tr = {"segments": [{"words": [{"word": " hi", "start": 0.5, "end": 0.8, "probability": 0.9},
+                                  {"word": " there", "start": 3.0, "end": 3.4, "probability": 0.5}]}]}
+    out = plugin_api._transcript_words(tr, speech)
+    assert [(w["text"], w.get("nospeech")) for w in out] == [("hi", None), ("there", True)]
+
+
 # ── text cuts reach the export (both engines) ────────────────────────
 
 # "ten" (0.95–1.10) cut in the text: the editor saves the clip gap and

@@ -206,12 +206,21 @@ def test_doc_get_and_patch(stub):
 
 
 def test_cut_kinds_and_a_cleo_cut_take(stub):
-    """UX10: seeded cuts carry their reason; voice_cut adds a take."""
-    job = stub.json("POST", "/_test/seed/review_speech", {"voice_cut": [10.45, 13.55]})
+    """UX10: seeded cuts carry their reason; ai_cuts add a Cleo-cut take
+    and a repeat (its words cut: "filler", not hidden); extra_words a
+    word in a pause (nospeech)."""
+    job = stub.json("POST", "/_test/seed/review_speech", {
+        "ai_cuts": [[10.45, 13.55, "voice_cmd"], [24.6, 25.6, "filler"]],
+        "extra_words": [{"text": "really", "start": 14.2, "end": 14.5, "nospeech": True}]})
     cuts = stub.json("GET", f"/jobs/{job['id']}")["cut_ranges"]
     assert {"silence", "filler", "voice_cmd"} <= {c["kind"] for c in cuts}
     take = next(c for c in cuts if c["kind"] == "voice_cmd")
     assert take["start"] <= 10.45 and take["end"] >= 13.55
+    words = {w["text"]: w for w in stub.json("GET", f"/jobs/{job['id']}/doc")["doc"]["words"]}
+    assert words["Most"]["cut"] == "filler" and "hidden" not in words["Most"]
+    assert words["really"]["nospeech"] is True and "hidden" not in words["really"]
+    assert words["Nobody"]["cut"] == "voice_cmd"
+    assert words["uh,"]["filler"] and words["uh,"]["hidden"] and "cut" not in words["uh,"]
     # the grid clip has no fillers: pauses only
     grid = stub.json("POST", "/_test/seed/review", {})
     assert {c["kind"] for c in stub.json("GET", f"/jobs/{grid['id']}")["cut_ranges"]} == {"silence"}

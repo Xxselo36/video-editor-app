@@ -828,9 +828,12 @@ def analyze_video(
 def _transcript_words(transcription, speech_segments) -> list[dict]:
     """Every word of the (cleaned-up) transcription with its own timing —
     before src/audio.py glues words of <= 3 characters into caption units
-    — fillers included. Words entirely outside the speech regions are
-    dropped, like their subtitles above (Whisper hallucinations in
-    silence)."""
+    — fillers included. Only analyze_video(include_words=True) (the web
+    doc) calls this. A word entirely outside the speech regions (its
+    subtitle above is dropped: maybe a Whisper hallucination in silence)
+    is kept with nospeech: True — the web editor shows it only once the
+    user brings its footage back (UX10); the doc hides known silence
+    hallucinations."""
     speech = [(s.start, s.end) for s in (speech_segments or [])
               if s.has_speech]
     out: list[dict] = []
@@ -840,11 +843,12 @@ def _transcript_words(transcription, speech_segments) -> list[dict]:
                 start, end = float(w["start"]), float(w["end"])
             except (KeyError, TypeError, ValueError):
                 continue
+            word = {"text": (w.get("word") or "").strip(),
+                    "start": start, "end": end,
+                    "probability": w.get("probability")}
             if speech and not any(start < se and end > ss for ss, se in speech):
-                continue
-            out.append({"text": (w.get("word") or "").strip(),
-                        "start": start, "end": end,
-                        "probability": w.get("probability")})
+                word["nospeech"] = True
+            out.append(word)
     return out
 
 

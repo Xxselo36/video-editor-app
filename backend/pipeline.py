@@ -1456,6 +1456,8 @@ def analyze_only(
         from backend import cut_kinds
         cut_ranges = cut_kinds.label(cut_ranges, log=cut_log,
                                      words=(doc or {}).get("words"))
+        # and each cut word why (informational: clips decide what plays)
+        cut_kinds.mark_words((doc or {}).get("words"), cut_ranges)
     except Exception as e:
         print(f"[cuts] kinds not labelled: {type(e).__name__}: {e}",
               flush=True)

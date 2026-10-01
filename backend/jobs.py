@@ -335,6 +335,9 @@ class Job:
                       else None),
             # UT5: GET /jobs/{id}/poster answers (the analysis made one).
             "has_poster": bool(self.poster_key),
+            # UX10: the editor's trim frame grid (the v2 render snaps
+            # clip edges to it).
+            "mezz_fps": self.mezz_fps,
             # Only once the task queue's worker recorded any (WP4).
             **({"processing_warnings": list(self.processing_warnings)}
                if self.processing_warnings is not None else {}),
