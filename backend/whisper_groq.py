@@ -489,6 +489,43 @@ def _transcribe_single(
     }
 
 
+def _norm_word(text: str) -> str:
+    return "".join(ch for ch in (text or "").lower() if ch.isalnum())
+
+
+def _drop_boundary_duplicates(
+        picked: list[tuple[str, dict]]) -> tuple[list[dict], int]:
+    """Words of the two passes, sorted by start, minus the duplicates a
+    pass switch makes at a bucket boundary.
+
+    Buckets go by word START, so a word spoken across a boundary can sit
+    in bucket n of one pass (start 9.98) and bucket n+1 of the other
+    (start 10.01). When the buckets pick different passes, that word was
+    kept twice ("…funktioniert. funktioniert."). Within one pass Whisper's
+    words never overlap, so a word from the OTHER pass that overlaps the
+    previous kept word by more than half of the shorter one — or repeats
+    its text right at it — is the same speech: the earlier one stays.
+    Returns (words, how many were dropped)."""
+    picked = sorted(picked, key=lambda p: (p[1]["start"], p[1]["end"]))
+    out: list[dict] = []
+    last_src: str | None = None
+    dropped = 0
+    for src, w in picked:
+        if out and src != last_src:
+            prev = out[-1]
+            overlap = min(prev["end"], w["end"]) - max(prev["start"], w["start"])
+            shorter = min(prev["end"] - prev["start"], w["end"] - w["start"])
+            same = (_norm_word(prev["word"]) != ""
+                    and _norm_word(prev["word"]) == _norm_word(w["word"]))
+            if ((shorter > 0 and overlap > 0.5 * shorter)
+                    or (same and w["start"] < prev["end"] + 0.15)):
+                dropped += 1
+                continue
+        out.append(w)
+        last_src = src
+    return out, dropped
+
+
 def transcribe_via_groq_multilang(
     audio_path: str,
     initial_prompt: str | None = None,
@@ -577,7 +614,7 @@ def transcribe_via_groq_multilang(
     stats_auto = _bucket_stats(words_auto)
     stats_en = _bucket_stats(words_en)
 
-    merged_words: list[dict] = []
+    picked: list[tuple[str, dict]] = []
     en_buckets = 0
     for bi in range(n_buckets):
         a = stats_auto[bi]
@@ -587,17 +624,19 @@ def transcribe_via_groq_multilang(
         # Pick the pass with the higher avg prob for this bucket.
         # Tie-break: prefer auto to avoid over-anglicising DE speech.
         if e["n"] > 0 and e_avg > a_avg + 0.02:
-            merged_words.extend(e["words"])
+            picked.extend(("en", w) for w in e["words"])
             en_buckets += 1
         else:
-            merged_words.extend(a["words"])
+            picked.extend(("auto", w) for w in a["words"])
 
+    merged_words, dropped = _drop_boundary_duplicates(picked)
     print(f"[groq] multi-lang merge: {en_buckets}/{n_buckets} buckets "
-          f"picked English pass", flush=True)
+          f"picked English pass"
+          + (f", {dropped} boundary duplicate(s) dropped" if dropped else ""),
+          flush=True)
 
     # Rebuild segments by grouping merged words into sentences based on
     # natural pauses (>0.6s gap → new segment).
-    merged_words.sort(key=lambda w: w["start"])
     segments: list[dict[str, Any]] = []
     cur: list[dict] = []
     GAP_NEW_SEGMENT = 0.6
