@@ -245,5 +245,7 @@ test("a double click on Process starts one upload, not two", async ({ page, stub
   await expect.poll(() => inits.filter((u) => u.endsWith("/jobs")).length, { timeout: 30_000 }).toBe(1);
   await page.waitForTimeout(1500);
   await expect(jobCard(page, "doppelt.mp4")).toHaveCount(1);
-  expect(inits.filter((u) => !u.endsWith("/jobs")).length).toBeLessThanOrEqual(1);
+  // One upload: a multipart init, and (the stub runs single PUTs) one presign.
+  expect(inits.filter((u) => u.endsWith("/uploads/multipart/init")).length).toBeLessThanOrEqual(1);
+  expect(inits.filter((u) => u.endsWith("/uploads/presign")).length).toBeLessThanOrEqual(1);
 });
