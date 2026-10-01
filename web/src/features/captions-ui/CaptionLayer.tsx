@@ -164,6 +164,7 @@ function CaptionLayer(props: CaptionLayerProps) {
   const hitRef = useRef<HTMLButtonElement>(null);
   const selBoxRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  const moveRef = useRef<HTMLButtonElement>(null);
   // where the adjust bar goes: the stage's fullscreen wrapper (not clipped by the frame)
   const [barHost, setBarHost] = useState<HTMLElement | null>(null);
   const toSourceRef = useRef(props.toSource);
@@ -220,7 +221,7 @@ function CaptionLayer(props: CaptionLayerProps) {
       const hit = hitRef.current;
       const r = L.renderer;
       if (!hit) return;
-      if (!r || pageIndex < 0 || !L.style) {
+      if (!r || pageIndex < 0) {
         hit.hidden = true;
         return;
       }
@@ -256,7 +257,8 @@ function CaptionLayer(props: CaptionLayerProps) {
         hook.t = out;
         hook.page = page ? pageText(page.words.map((w) => ({ text: w.source }))) : null;
         hook.pageId = page ? captionIdOf(page) : null;
-        hook.adjust = page && L.style ? effectiveAdjust(L.style, page) : null;
+        // the renderer's own style: the pages were built with it
+        hook.adjust = page ? effectiveAdjust(r.style, page) : null;
         hook.pages = r.pages.length;
       }
     };
@@ -449,7 +451,7 @@ function CaptionLayer(props: CaptionLayerProps) {
       return;
     }
     const hit = pageOf(cur.id);
-    if (!hit || !L.renderer || !L.style) {
+    if (!hit || !L.renderer) {
       // the caption is gone (an edit, another style's paging)
       selRef.current = null;
       setSel(null);
@@ -466,8 +468,8 @@ function CaptionLayer(props: CaptionLayerProps) {
       height: (b.bottom - b.top) / s + 2 * pad,
       cx: (b.left + b.right) / 2 / s,
       cy: (b.top + b.bottom) / 2 / s,
-      eff: effectiveAdjust(L.style, hit.page),
-      styleY: L.style.layout.y,
+      eff: effectiveAdjust(L.renderer.style, hit.page),
+      styleY: L.renderer.style.layout.y,
     });
   }, [pageOf, setSel]);
   useEffect(() => {
@@ -498,6 +500,8 @@ function CaptionLayer(props: CaptionLayerProps) {
     if (!id) return;
     setSel({ id, scope: "here", before: null });
     refreshSel();
+    // keyboard users go on with the move handle (arrows nudge)
+    requestAnimationFrame(() => moveRef.current?.focus({ preventScroll: true }));
   };
   const deselect = useCallback(() => {
     setSel(null);
@@ -518,10 +522,11 @@ function CaptionLayer(props: CaptionLayerProps) {
 
   const current = () => {
     const L = live.current;
-    if (!sel || !L.style) return null;
+    if (!sel || !L.renderer) return null;
     const hit = pageOf(sel.id);
     if (!hit) return null;
-    return { page: hit.page, eff: effectiveAdjust(L.style, hit.page), style: L.style };
+    const style = L.renderer.style;
+    return { page: hit.page, eff: effectiveAdjust(style, hit.page), style };
   };
 
   /** Writes a new position / size for the selected caption in its scope (one undo step). */
@@ -762,6 +767,7 @@ function CaptionLayer(props: CaptionLayerProps) {
             className={`${c.hdl} ${c.hmove}`}
             aria-label={t("editor.caption.move")}
             title={t("editor.caption.moveTip")}
+            ref={moveRef}
             data-handle="move"
             onPointerDown={(e) => begin("move", e)}
             onPointerMove={move}

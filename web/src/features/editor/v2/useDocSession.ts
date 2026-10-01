@@ -85,16 +85,26 @@ async function fetchDoc(jobId: string): Promise<Fetched | null> {
   if (!r.ok) return null;
   const j = await r.json();
   if (!j || !j.doc || !Array.isArray(j.doc.words)) return null;
+  const captions = docCaptions(j);
+  // Only a live style: the first save sends it, and PATCH refuses others.
+  const renderStyle =
+    isStyle(j.render_style) && (!captions.presetsLive || captions.presetsLive.includes(j.render_style.presetId))
+      ? j.render_style
+      : null;
   return {
     doc: j.doc as EditDoc,
     rev: typeof j.rev === "number" ? j.rev : 0,
     read_only: !!j.read_only,
-    captions: docCaptions(j),
-    renderStyle: isStyle(j.render_style) ? j.render_style : null,
+    captions,
+    renderStyle,
   };
 }
 
-/** The doc as the editor shows it: with the style an export draws now (UT5). */
+/**
+ * The doc as the editor shows it (UT5): with the style an export draws now
+ * — before the first editor save that can be a v1 caption preset's look,
+ * not yet the doc's own style. Saved with the next edit.
+ */
 function withRenderStyle(doc: EditDoc, style: EditDoc["style"] | null): EditDoc {
   return style && JSON.stringify(style) !== JSON.stringify(doc.style) ? { ...doc, style } : doc;
 }
