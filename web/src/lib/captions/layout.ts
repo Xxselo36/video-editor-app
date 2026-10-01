@@ -222,7 +222,7 @@ function toPageWords(units: Unit[], style: CaptionStyle, geo: Geometry, lang?: s
       text,
       start: u.start,
       end: Math.max(u.start, u.end),
-      emphasis: isEmphasis(u.source, lang),
+      emphasis: isEmphasis(u.source),
       script,
       em: m.em,
       spaceAfterEm: geo.spaceEm,
