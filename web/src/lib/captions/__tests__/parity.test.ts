@@ -189,9 +189,22 @@ function savePng(file: string, rgba: Uint8ClampedArray, width: number, height: n
 const cells: [string, string][] = [];
 for (const lang of LANGS) for (const p of PRESETS) if (presetSupport(p, lang).level !== "unavailable") cells.push([p, lang]);
 
+// In CI (web.yml `checks` installs Chromium, Python and fontTools) the
+// suite must run in full: a missing browser or CJK subset fails it.
+const REQUIRED = Boolean(process.env.CI);
+
+describe.runIf(REQUIRED && !HAVE_CHROMIUM)("caption parity prerequisites", () => {
+  it("has Playwright's Chromium (npx playwright install chromium)", () => {
+    expect(chromiumPath(), "Chromium missing: the parity suite would be skipped").not.toBeNull();
+  });
+});
+
 describe.skipIf(!HAVE_CHROMIUM)("caption parity: Chromium preview ↔ render layer", () => {
   it.each(cells)("%s · %s", async (preset, lang) => {
-    if (lang === "ja" && !cjk) return;
+    if (lang === "ja" && !cjk) {
+      expect(REQUIRED, "no CJK subset (python3 + fontTools) — ja parity not checked").toBe(false);
+      return;
+    }
     const words = wordsFor(lang);
     const fonts = lang === "ja" && cjk ? [{ id: cjk.id, json: cjk.jsonPath, file: cjk.ttf }] : [];
     const prep = await prepare(
