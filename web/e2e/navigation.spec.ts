@@ -40,9 +40,14 @@ test("dashboard → editor → reload → back → new video → back", async ({
   expect(chooser).toBeTruthy();
   await expect(page.getByTestId("upload-dropzone")).toBeVisible();
 
-  // Back leaves the file screen and stays in the app.
+  expect(new URL(page.url()).search).toBe("?step=file");
+
+  // Back leaves the file screen for the picker, then for the dashboard.
   await page.goBack();
   await expect(page.getByTestId("upload-dropzone")).toHaveCount(0);
+  await expect(page.getByTestId("picker")).toBeVisible();
+  expect(page.url()).toBe(`${WEB}/app/new`);
+  await page.goBack();
   await expect(page.getByTestId("dashboard")).toBeVisible();
   expect(path(page.url())).toBe("/app");
 });
@@ -154,11 +159,27 @@ test("/app never paints the picker for a returning user", async ({ page, stub })
   await expect(page.getByTestId("picker")).toHaveCount(0);
 });
 
-test("a first visit goes from /app to the picker", async ({ page }) => {
+test("a first visit goes from /app to the picker; back from its steps stays in the app", async ({ page, stub }) => {
   await openWithStorage(page, "/app");
   await expect(page).toHaveURL(`${WEB}/app/new`);
   await expect(page.getByTestId("picker")).toBeVisible();
   await expect(page.getByTestId("picker-back")).toHaveCount(0);
+  // Custom: file chosen → the settings; back → the file screen → the picker.
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("picker-card-custom").click()]);
+  await chooser.setFiles({ name: "erst.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
+  await expect(page.getByTestId("configure-process")).toBeVisible();
+  expect(new URL(page.url()).search).toBe("?step=settings");
+  await page.goBack();
+  await expect(page.getByTestId("upload-dropzone")).toBeVisible();
+  await page.goBack();
+  await expect(page.getByTestId("picker")).toBeVisible();
+  expect(page.url()).toBe(`${WEB}/app/new`);
+  // A reload on a step starts at the picker.
+  const [again] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("picker-card-tiktok").click()]);
+  expect(again).toBeTruthy();
+  await page.reload();
+  await expect(page.getByTestId("picker")).toBeVisible();
+  expect(page.url()).toBe(`${WEB}/app/new`);
 });
 
 test("an upload keeps going while the user changes routes", async ({ page, stub }) => {

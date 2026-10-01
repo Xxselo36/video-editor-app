@@ -5,11 +5,14 @@
  * they were phases of one URL). Choosing a file starts the upload
  * (uploadManager: it goes on whatever route is shown) and returns to the
  * dashboard, where its card shows the progress. The file screen and the
- * settings are steps of this route, not routes of their own: a File
- * can't survive a reload.
+ * settings are steps of this route, not routes of their own (a File
+ * can't survive a reload), but each gets a history entry
+ * (/app/new?step=file, ?step=settings): back returns to the step before —
+ * to the picker, never out of the app. A reload on a step shows the
+ * picker.
  */
 import { useRouter } from "next/navigation";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppPage } from "@/components/AppPage";
 import { track } from "@/lib/analytics";
 import { startUpload } from "@/features/upload/uploadManager";
@@ -19,6 +22,13 @@ import { PickerScreen } from "./PickerScreen";
 import { PRESETS, type PresetId } from "./presets.legacy";
 
 type Step = "picker" | "idle" | "configuring";
+
+// The ?step= of each step's history entry.
+const STEP_PARAM: Record<Exclude<Step, "picker">, string> = { idle: "file", configuring: "settings" };
+
+function urlStep(): string | null {
+  return new URLSearchParams(window.location.search).get("step");
+}
 
 export function NewVideoPage() {
   const router = useRouter();
@@ -45,7 +55,7 @@ export function NewVideoPage() {
     setSmartcamEnabled(p.settings.smartcamEnabled);
     setSmartcamFormat(p.settings.smartcamFormat);
     setOutputFormats(p.settings.outputFormats);
-    setStep("idle");
+    goStep("idle");
     // Open the file picker right after the idle screen mounted (still
     // within the tap's user activation, so the browser allows it). The
     // idle screen stays as the fallback if the picker is cancelled.
@@ -72,7 +82,7 @@ export function NewVideoPage() {
     // A workflow preset has its settings: straight to the upload. Custom
     // shows the settings first.
     if (selectedPreset && PRESETS[selectedPreset].skipConfigure) onProcess(f);
-    else setStep("configuring");
+    else goStep("configuring");
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -113,7 +123,39 @@ export function NewVideoPage() {
     router.push("/app");
   };
 
+  // A step's own history entry: back (the browser's, or the screen's
+  // back button) returns to the step before.
+  const goStep = (next: Exclude<Step, "picker">) => {
+    window.history.pushState(null, "", `?step=${STEP_PARAM[next]}`);
+    setStep(next);
+  };
+  const stateRef = useRef({ file, selectedPreset });
+  useEffect(() => {
+    stateRef.current = { file, selectedPreset };
+  });
+  useEffect(() => {
+    // A reload on a step: its file is gone — start at the picker.
+    if (urlStep()) window.history.replaceState(null, "", window.location.pathname);
+    const onPop = () => {
+      const want = urlStep();
+      const { file: f, selectedPreset: p } = stateRef.current;
+      if (want === "settings" && f) setStep("configuring");
+      else if (want === "file" && p) setStep("idle");
+      else {
+        setFile(null);
+        setSelectedPreset(null);
+        setStep("picker");
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   const reset = () => {
+    if (urlStep()) {
+      window.history.back(); // popstate shows the step before
+      return;
+    }
     setFile(null);
     setSelectedPreset(null);
     setStep("picker");
