@@ -58,9 +58,9 @@ def _job(**fields):
 # ── switch and pinning ───────────────────────────────────────────────
 
 
-def test_v1_by_default_and_pinned_at_the_first_render(monkeypatch):
+def test_v1_without_an_opt_in_and_pinned_at_the_first_render(monkeypatch):
     job = _job()
-    assert C.engine_default() == "v1"
+    assert C.engine_default() == "optin"      # unset: who asks gets v2
     assert C.prepare_render(store, job.id, job, UNITS) is None
     assert store.get(job.id).caption_engine == "v1"
     # The switch flips later: this project keeps v1 (review F11).
@@ -115,6 +115,16 @@ def test_projects_exported_before_ut4_stay_v1(monkeypatch, fields):
     # its first render after POST /render bumped render_gen to 1: v2
     fresh = _job(render_gen=1)
     assert C.prepare_render(store, fresh.id, fresh, UNITS)["engine"] == "v2"
+
+
+@pytest.mark.parametrize("value, mode", [
+    (None, "optin"), ("", "optin"), (" ", "optin"), ("optin", "optin"), ("OPTIN", "optin"),
+    ("v1", "v1"), ("off", "v1"), ("Off", "v1"), ("v2", "v2"), ("bogus", "v1"),
+])
+def test_engine_mode_values(monkeypatch, value, mode):
+    if value is not None:
+        monkeypatch.setenv("CLEO_CAPTION_ENGINE", value)
+    assert C.engine_default() == mode
 
 
 def test_live_list_opens_more_presets(monkeypatch):
@@ -495,6 +505,45 @@ def test_render_r2_gets_captions_only_for_v2(client, modal_r2, monkeypatch, engi
     got = store.get(job.id)
     assert got.caption_engine == engine
     assert got.output_keys["primary"].endswith("r1/primary.mp4")
+
+
+@pytest.mark.parametrize("mode, field, want", [
+    (None, None, "v1"), (None, "v2", "v2"),          # unset = optin: who asks
+    ("optin", None, "v1"), ("optin", "v2", "v2"),
+    ("optin", "v1", "v1"),
+    ("v1", None, "v1"), ("v1", "v2", "v1"),          # v1 / off: nobody
+    ("off", "v2", "v1"),
+    ("v2", None, "v2"), ("v2", "v2", "v2"),          # everyone (the field is moot)
+])
+def test_engine_modes_and_the_render_requests_opt_in(client, modal_r2, monkeypatch,
+                                                      mode, field, want):
+    """CLEO_CAPTION_ENGINE unset or optin: only a first render whose
+    request says {"caption_engine": "v2"} (the owner's browser,
+    ?captions=v2) pins v2; v1/off ignore the field, v2 doesn't need it."""
+    if mode:
+        monkeypatch.setenv("CLEO_CAPTION_ENGINE", mode)
+    job = _job(media_store="r2")
+    body = {"subtitles": UNITS, **({"caption_engine": field} if field else {})}
+    assert client.post(f"/jobs/{job.id}/render", json=body).status_code == 200
+    assert _done(job.id)
+    [kw] = modal_r2.spawns
+    assert ("captions" in kw) is (want == "v2")
+    got = store.get(job.id)
+    assert got.caption_engine == want
+    assert (got.settings.get(C.OPTIN_KEY) == "v2") is (mode in (None, "optin") and field == "v2")
+
+
+def test_optin_still_needs_an_eligible_job_and_keeps_the_pin(client, modal_r2, monkeypatch):
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "optin")
+    # not eligible (no edit document): v1 despite the opt-in
+    old = _job(media_store="r2", doc=None)
+    client.post(f"/jobs/{old.id}/render", json={"subtitles": UNITS, "caption_engine": "v2"})
+    assert _done(old.id) and store.get(old.id).caption_engine == "v1"
+    # pinned v1: a later opt-in changes nothing
+    store.update(old.id, status="awaiting_review", doc=_doc())
+    client.post(f"/jobs/{old.id}/render", json={"subtitles": UNITS, "caption_engine": "v2"})
+    assert _done(old.id) and store.get(old.id).caption_engine == "v1"
+    assert all("captions" not in kw for kw in modal_r2.spawns)
 
 
 def test_local_render_draws_v2_with_render_to_dir(tmp_path, monkeypatch):

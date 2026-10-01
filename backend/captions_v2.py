@@ -13,8 +13,10 @@ pipeline.render_to_keys):
 
     spec = prepare_render(store, job_id, job, subtitles)   # None → v1
 
-- Engine choice (review F11): CLEO_CAPTION_ENGINE=v2 (default v1) makes
-  new renders v2 — only for jobs with an edit document (UT3) whose
+- Engine choice (review F11): CLEO_CAPTION_ENGINE=v2 makes new renders
+  v2; unset (= optin) only those whose render request asks for it (a
+  browser opened with ?captions=v2); v1 / off nobody (engine_default).
+  Either way only for jobs with an edit document (UT3) whose
   style's preset is live (CLEO_CAPTION_PRESETS_LIVE) and supports the
   transcript's script. The engine is pinned on the job at its FIRST
   render (job.caption_engine) and never changes, so a project keeps the
@@ -105,11 +107,43 @@ class CaptionLayerError(RuntimeError):
 # ── switches ────────────────────────────────────────────────────────
 
 
+MODES = ("v1", "v2", "optin")
+# job.settings key a render request's opt-in is kept under (optin mode).
+OPTIN_KEY = "caption_engine_optin"
+
+
 def engine_default() -> str:
-    """CLEO_CAPTION_ENGINE: the engine a job's first render pins
-    ("v1" unless set to "v2")."""
-    v = (os.environ.get("CLEO_CAPTION_ENGINE") or "v1").strip().lower()
-    return v if v in ENGINES else "v1"
+    """CLEO_CAPTION_ENGINE: which jobs' first render pins v2.
+      unset / optin  only eligible jobs whose first render request asks
+                     for it ({"caption_engine": "v2"} in POST
+                     /jobs/{id}/render: a browser opened once with
+                     ?captions=v2) — the owner tests on production without
+                     a Railway variable, like the editor flag (#44)
+      v1 / off       nobody; the request field is ignored
+      v2             every eligible job
+    Anything else counts as v1 (nobody)."""
+    v = (os.environ.get("CLEO_CAPTION_ENGINE") or "").strip().lower() or "optin"
+    if v == "off":
+        return "v1"
+    return v if v in MODES else "v1"
+
+
+def optin_fields(cur: Any, requested: Any) -> dict[str, Any] | None:
+    """The job change POST /render makes for a render request's
+    `caption_engine` field: in optin mode, for a job not pinned yet, the
+    request's choice (v2 or not) goes into settings[OPTIN_KEY]; every
+    other case ignores the field (None: no change)."""
+    if engine_default() != "optin" or cur.caption_engine is not None:
+        return None
+    settings = dict(cur.settings or {})
+    want = requested == "v2"
+    if bool(settings.get(OPTIN_KEY) == "v2") == want:
+        return None
+    if want:
+        settings[OPTIN_KEY] = "v2"
+    else:
+        settings.pop(OPTIN_KEY, None)
+    return {"settings": settings}
 
 
 def loudnorm_enabled() -> bool:
@@ -162,7 +196,13 @@ def choose_engine(job: Any, style: dict[str, Any] | None = None) -> str:
     """The job's pinned engine, or the one its first render pins."""
     if job.caption_engine in ENGINES:
         return job.caption_engine
-    if engine_default() != "v2" or not isinstance(job.doc, dict):
+    mode = engine_default()
+    if mode == "optin":
+        if (job.settings or {}).get(OPTIN_KEY) != "v2":
+            return "v1"
+    elif mode != "v2":
+        return "v1"
+    if not isinstance(job.doc, dict):
         return "v1"
     if exported_before(job):
         return "v1"

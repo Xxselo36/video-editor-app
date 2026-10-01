@@ -12,6 +12,7 @@ export const trEditor: Partial<Record<EditorKey, string>> = {
   "app.review.tabCaptions": "Altyazılar",
   "app.review.preparing": "Hazırlanıyor…",
   "app.review.applyRender": "Uygula & render et",
+  "editor.captionsV2Test": "Yeni altyazılar (test)",
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Satır silindi",

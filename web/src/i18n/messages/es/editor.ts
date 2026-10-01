@@ -12,6 +12,7 @@ export const esEditor: Partial<Record<EditorKey, string>> = {
   "app.review.tabCaptions": "Subtítulos",
   "app.review.preparing": "Preparando…",
   "app.review.applyRender": "Aplicar y renderizar",
+  "editor.captionsV2Test": "Subtítulos nuevos (prueba)",
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Línea eliminada",

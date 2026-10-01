@@ -21,6 +21,7 @@ export async function applyRender(
   phrases: Phrase[],
   units: Subtitle[],
   captionPreset: string,
+  opts: { captionsV2?: boolean } = {},
 ): Promise<"started" | "not_in_review"> {
   // Word units with their source times, not one subtitle per sentence:
   // the burn highlights each word at its own time (UX2).
@@ -31,6 +32,10 @@ export async function applyRender(
     body: JSON.stringify({
       subtitles,
       disabled_cuts: [],
+      // This browser opted in to the v2 export captions (?captions=v2,
+      // captions-ui/flag.ts); the backend honours it unless
+      // CLEO_CAPTION_ENGINE is v1/off (v2: everyone gets v2 anyway).
+      ...(opts.captionsV2 ? { caption_engine: "v2" } : {}),
     }),
   });
   if (r.status !== 409 && !r.ok) throw await apiError(r);

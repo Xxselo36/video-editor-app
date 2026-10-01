@@ -12,6 +12,7 @@ export const jaEditor: Partial<Record<EditorKey, string>> = {
   "app.review.tabCaptions": "字幕",
   "app.review.preparing": "準備中…",
   "app.review.applyRender": "適用してレンダリング",
+  "editor.captionsV2Test": "新しい字幕（テスト）",
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "行を削除しました",

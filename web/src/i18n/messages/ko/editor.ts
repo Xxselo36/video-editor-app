@@ -12,6 +12,7 @@ export const koEditor: Partial<Record<EditorKey, string>> = {
   "app.review.tabCaptions": "자막",
   "app.review.preparing": "준비 중…",
   "app.review.applyRender": "적용하고 렌더링",
+  "editor.captionsV2Test": "새 자막 (테스트)",
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "줄이 삭제됐어요",

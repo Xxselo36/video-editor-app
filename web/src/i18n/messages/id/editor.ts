@@ -12,6 +12,7 @@ export const idEditor: Partial<Record<EditorKey, string>> = {
   "app.review.tabCaptions": "Teks",
   "app.review.preparing": "Menyiapkan…",
   "app.review.applyRender": "Terapkan & render",
+  "editor.captionsV2Test": "Teks baru (uji coba)",
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Baris dihapus",

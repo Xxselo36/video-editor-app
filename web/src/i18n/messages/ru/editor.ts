@@ -12,6 +12,7 @@ export const ruEditor: Partial<Record<EditorKey, string>> = {
   "app.review.tabCaptions": "Субтитры",
   "app.review.preparing": "Подготовка…",
   "app.review.applyRender": "Применить и рендерить",
+  "editor.captionsV2Test": "Новые субтитры (тест)",
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Строка удалена",
