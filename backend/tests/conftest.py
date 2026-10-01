@@ -65,7 +65,9 @@ os.environ["CLEO_MIN_FREE_GB"] = "0"
 _OPT_IN_ENV = ("CLEO_MEDIA_BACKEND", "CLEO_UPLOAD_MODE", "CLEO_MODAL_RENDER_FN",
                "CLEO_PROXY_VIDEO", "CLEO_MEDIA_ORPHAN_SWEEP",
                "CLEO_MEDIA_ORPHAN_MAX", "CLEO_MEDIA_PRESIGN",
-               "R2_BACKUP_BUCKET", "CLEO_MODAL_R2")
+               "R2_BACKUP_BUCKET", "CLEO_MODAL_R2",
+               # UT4: v1 captions unless a test switches v2 on.
+               "CLEO_CAPTION_ENGINE", "CLEO_LOUDNORM")
 for _k in (*_OPT_IN_ENV, "CLEO_MEDIA_ROOT", "CLEO_BACKFILL",
            "R2_ENDPOINT_URL"):
     os.environ.pop(_k, None)

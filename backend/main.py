@@ -95,6 +95,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import backend.pipeline as pipeline
 from backend import accounts, auth, billing, costs, db, media, observability
 from backend import doc as edit_doc  # noqa: E402
+from backend import captions_v2  # noqa: E402
 from backend import font_subset  # noqa: E402
 from backend import errors  # noqa: E402
 from backend import storage
@@ -2644,6 +2645,10 @@ def _run_render_inner(
             social_future = _SOCIAL_POOL.submit(
                 _social_caption, edited_subtitles, job.language)
             mezz_key = job.mezz_key or _backfill_mezz(job, progress, where)
+            # UT4: pins the job's caption engine at its first render;
+            # a v2 spec only with CLEO_CAPTION_ENGINE=v2.
+            captions = captions_v2.prepare_render(store, job_id, job,
+                                                  edited_subtitles)
             result = pipeline.render_to_keys(
                 job_id=job_id, gen=gen, mezz_key=mezz_key,
                 out_prefix=out_prefix, store=where,
@@ -2657,6 +2662,7 @@ def _run_render_inner(
                 duration=job.duration,
                 workspace=str(ws),
                 progress_cb=progress,
+                **({"captions": captions} if captions else {}),
             )
         except Exception as e:
             progress.close()

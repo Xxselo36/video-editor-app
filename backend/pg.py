@@ -607,7 +607,7 @@ _KEYED_SQL = [
 _SUMMARY_DROP = ["settings", "subtitles", "segments", "cut_ranges",
                  "scene_events", "preview_segments", "edited_phrases",
                  "audio_levels", "audio_warnings", "costs", "doc",
-                 "audio_loudness"]
+                 "audio_loudness", "render_doc"]
 
 _UPDATE_SQL = (
     "UPDATE jobs SET data = %s::jsonb, owner_id = %s, status = %s, "

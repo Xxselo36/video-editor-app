@@ -1290,3 +1290,32 @@ Nach drei Tagen ohne hängende Tasks und mit grünen Metriken ist P0 durch.
   so einen Task sofort ohne Arbeit, weil sein Job nicht mehr läuft.
 - **Code-Rollback** auf eine Version vor WP4: genauso (die neuen
   Tabellen stören alte Versionen nicht; die Migration bleibt).
+
+## 12. Untertitel v2 im Export (UT4)
+
+Der Export zeichnet die Untertitel mit derselben Engine wie die Vorschau
+im Editor (`web/src/lib/captions`, auf dem Render-Server per Node), in
+**einem** ffmpeg-Durchgang statt Brennen pro Clip + Zusammenfügen.
+Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
+`web/src/lib/captions/node/`.
+
+| Variable (Railway) | Default | Eingeschaltet | Zurück |
+|---|---|---|---|
+| `CLEO_CAPTION_ENGINE` | `v1`: alter Burn wie bisher | `v2`: der **erste** Export eines Projekts mit Edit-Dokument (UT3) läuft mit v2, wenn sein Stil in `CLEO_CAPTION_PRESETS_LIVE` steht und die Sprache kann | Variable löschen: neue Projekte wieder v1 |
+| `CLEO_LOUDNORM` | aus: Lautstärke wie aufgenommen | `1`: v2-Exporte auf −14 LUFS (Messung aus der Analyse) | Variable löschen |
+
+- **Ein Projekt behält seine Technik:** Beim ersten Export wird `v1`
+  oder `v2` am Job gespeichert (`caption_engine`) und nie mehr geändert.
+  Umschalten wirkt also nur auf Projekte, die noch nie exportiert wurden.
+- **Voraussetzung:** Modal ist neu deployt (GitHub-Action "Deploy Modal
+  render" läuft bei jedem Push auf main von selbst; das Image baut
+  dann Node 22 und den Untertitel-Layer, der erste Build dauert einige
+  Minuten länger) **und** `CLEO_MODAL_RENDER_FN=render_r2`. Auf dem
+  alten Volume-Weg (`render_burn_concat`) und beim lokalen Notfall-Render
+  ohne Node wird auch ein v2-Projekt mit v1 exportiert (Log-Zeile
+  `[captions] … rendering v1 captions`).
+- **Reihenfolge:** erst deployen, dann auf Staging bzw. mit einem
+  eigenen Testprojekt `CLEO_CAPTION_ENGINE=v2` setzen, exportieren,
+  Video ansehen (Log: `[captions] v2 primary: … frames`), dann für alle.
+- **Mehr Stile:** `CLEO_CAPTION_PRESETS_LIVE` (Default `clipper,power`)
+  erst erweitern, wenn du den Stil im Abnahmeblatt abgehakt hast.

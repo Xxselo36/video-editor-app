@@ -180,6 +180,16 @@ class Job:
     # CJK caption font subsets {font: {family, rev, chars, missing, json,
     # woff2, ttf (keys)}} (backend/font_subset.py).
     font_subsets: dict[str, Any] = field(default_factory=dict)
+    # ── UT4: caption engine of the export (backend/captions_v2.py) ──
+    # "v1" (the MoviePy burn) or "v2" (the editor's caption engine on the
+    # render worker), set at the job's FIRST render from
+    # CLEO_CAPTION_ENGINE and never changed (review F11): a project keeps
+    # the look of its first export. None = never rendered since UT4.
+    caption_engine: str | None = None
+    # What the latest v2 render drew: {v, gen, source, style, language,
+    # words} (source words, the legacy payload units mapped onto the doc's
+    # words). None for v1 renders.
+    render_doc: dict[str, Any] | None = None
     # Keys of the stored row this code doesn't know (a later release's
     # fields): kept as stored and written back on every write, so this
     # release can't drop them. Never part of the API.
