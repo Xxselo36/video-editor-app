@@ -51,7 +51,7 @@ import { setStyle, type EditDoc } from "@/features/editor/state/doc";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { canvasPixels, contentBox, pageText } from "./interim";
-import { changedOf, clipsOf, frameOf, nextLine, nextSize, outputTime, shownWords, snapLines, snapY } from "./live";
+import { changedOf, clipsOf, frameOf, ownsEscape, nextLine, nextSize, outputTime, shownWords, snapLines, snapY } from "./live";
 import c from "./captions.module.css";
 
 export type CaptionLayerProps = {
@@ -178,7 +178,12 @@ function CaptionLayer(props: CaptionLayerProps) {
     setSelState(next);
   }, []);
   const [geo, setGeo] = useState<Geo | null>(null);
-  const [drag, setDrag] = useState<Drag | null>(null);
+  const [drag, setDragState] = useState<Drag | null>(null);
+  const dragRef = useRef<Drag | null>(null);
+  const setDrag = useCallback((d: Drag | null) => {
+    dragRef.current = d;
+    setDragState(d);
+  }, []);
   const [cssH, setCssH] = useState(0);
   // Everything the frame loop reads; the effects below keep it current.
   const live = useRef({
@@ -487,17 +492,26 @@ function CaptionLayer(props: CaptionLayerProps) {
     if (TEST_HOOK && window.__captionLayer) window.__captionLayer.selected = sel?.id ?? null;
   }, [sel]);
 
-  // playing again ends the selection
+  /** Ends the selection and any drag in progress: no preview transform stays behind (review 9). */
+  const deselect = useCallback(() => {
+    setSel(null);
+    setGeo(null);
+    setDrag(null);
+    if (canvasRef.current) canvasRef.current.style.transform = "";
+  }, [setSel, setDrag]);
+
+  // Playing or seeking ends the selection: it belongs to the caption on
+  // screen, never to one the playhead left (review 7).
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    const onPlay = () => {
-      setSel(null);
-      setGeo(null);
+    v.addEventListener("play", deselect);
+    v.addEventListener("seeking", deselect);
+    return () => {
+      v.removeEventListener("play", deselect);
+      v.removeEventListener("seeking", deselect);
     };
-    v.addEventListener("play", onPlay);
-    return () => v.removeEventListener("play", onPlay);
-  }, [videoRef, setSel]);
+  }, [videoRef, deselect]);
 
   const select = () => {
     const L = live.current;
@@ -511,18 +525,15 @@ function CaptionLayer(props: CaptionLayerProps) {
     // keyboard users go on with the move handle (arrows nudge)
     requestAnimationFrame(() => moveRef.current?.focus({ preventScroll: true }));
   };
-  const deselect = useCallback(() => {
-    setSel(null);
-    setGeo(null);
-  }, [setSel]);
   const selected = sel !== null;
   useEffect(() => {
     if (!selected) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        deselect();
-      }
+      if (e.key !== "Escape") return;
+      // only an Escape that is the layer's: a drag, or focus on its handles / bar (review 8)
+      if (!ownsEscape(dragRef.current !== null, document.activeElement, boxRef.current, barRef.current)) return;
+      e.stopPropagation();
+      deselect();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -533,6 +544,8 @@ function CaptionLayer(props: CaptionLayerProps) {
     if (!sel || !L.renderer) return null;
     const hit = pageOf(sel.id);
     if (!hit) return null;
+    // only the caption on screen can be changed (review 7)
+    if (hit.index !== L.page) return null;
     const style = L.renderer.style;
     return { page: hit.page, eff: effectiveAdjust(style, hit.page), style };
   };

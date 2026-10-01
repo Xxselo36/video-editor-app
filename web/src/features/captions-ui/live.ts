@@ -138,3 +138,19 @@ export function changedOf(
   if (next.sizeScale !== undefined && Math.abs(next.sizeScale - now.sizeScale) >= 5e-3) out.sizeScale = next.sizeScale;
   return out;
 }
+
+/**
+ * Does Escape belong to the caption layer (review 8)? Only while a drag
+ * runs, or when focus is inside the layer (its handles, its bar): an
+ * Escape in the Text tab, the title or a menu is theirs.
+ */
+export function ownsEscape(
+  dragging: boolean,
+  active: unknown,
+  layer: { contains(node: never): boolean } | null,
+  bar: { contains(node: never): boolean } | null = null,
+): boolean {
+  if (dragging) return true;
+  if (!active) return false;
+  return !!(layer?.contains(active as never) || bar?.contains(active as never));
+}

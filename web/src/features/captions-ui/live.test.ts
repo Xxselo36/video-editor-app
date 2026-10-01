@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mapToOutput, resolveStyle } from "@/lib/captions";
 import type { DocWord } from "@/features/editor/state/doc";
 import { adjustedWordIds } from "./adjusted";
-import { changedOf, clipsOf, frameOf, nextLine, nextSize, outputTime, shownWords, snapLines, snapY, tileOrder } from "./live";
+import { changedOf, clipsOf, frameOf, ownsEscape, nextLine, nextSize, outputTime, shownWords, snapLines, snapY, tileOrder } from "./live";
 
 const W = (id: string, text: string, start: number, end: number, extra: Partial<DocWord> = {}): DocWord => ({
   id,
@@ -125,5 +125,17 @@ describe("Überall writes only what changed (review 6/11)", () => {
     const o = setStyleAdjust({}, page, changedOf({ y: power.layout.y, sizeScale: 1.15 }, { y: power.layout.y, sizeScale: 1 }));
     expect(o).toEqual({ sizeScale: 1.15 });
     expect(resolveStyle("minimal", o, { W: 1080, H: 1920 })!.layout.y).toBe(resolveStyle("minimal", {}, { W: 1080, H: 1920 })!.layout.y);
+  });
+});
+
+describe("Escape (review 8)", () => {
+  const inside = { contains: (n: never) => (n as unknown) === "handle" };
+  const bar = { contains: (n: never) => (n as unknown) === "bar-button" };
+  it("is the layer's only during a drag or with focus on its handles or bar", () => {
+    expect(ownsEscape(true, "word-input", inside, bar)).toBe(true);
+    expect(ownsEscape(false, "handle", inside, bar)).toBe(true);
+    expect(ownsEscape(false, "bar-button", inside, bar)).toBe(true);
+    expect(ownsEscape(false, "word-input", inside, bar)).toBe(false);
+    expect(ownsEscape(false, null, inside, bar)).toBe(false);
   });
 });

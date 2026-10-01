@@ -185,6 +185,66 @@ test.describe("editor v2: live captions and the Style tab", TAG, () => {
   });
 });
 
+test.describe("editor v2: a selected caption (review 7/8/9)", TAG, () => {
+  test("a seek ends the selection; a drag never changes a caption that isn't on screen", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    await openLive(page, job.id);
+    await showCaption(page);
+    const first = (await hook(page))!.pageId!;
+    await page.getByTestId("caption-hit").click();
+    await expect(page.getByTestId("caption-box")).toBeVisible();
+    // the playhead moves (a word in the Text tab, the timeline, a key): selection gone
+    await page.getByTestId("editor-video").evaluate((v) => {
+      (v as HTMLVideoElement).currentTime = 11.5;
+    });
+    await expect(page.getByTestId("caption-box")).toHaveCount(0);
+    await expect.poll(async () => (await hook(page))?.pageId ?? null, { timeout: 15_000 }).not.toBe(first);
+    // selecting now takes the caption on screen
+    await page.getByTestId("caption-hit").click();
+    const now = (await hook(page))!.pageId!;
+    expect((await hook(page))!.selected).toBe(now);
+    const frameH = (await page.getByTestId("caption-layer").boundingBox())!.height;
+    await drag(page, "caption-box", 0, -0.2 * frameH);
+    await expect.poll(async () => Object.keys((await savedStyle(stub, job.id)).overrides.captions ?? {}), { timeout: 10_000 }).toEqual([now]);
+  });
+
+  test("Escape mid-drag cancels it: nothing saved, no shifted preview", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    await openLive(page, job.id);
+    await showCaption(page);
+    await page.getByTestId("caption-hit").click();
+    const box = (await page.getByTestId("caption-box").boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y - 120, { steps: 6 });
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await expect(page.getByTestId("caption-box")).toHaveCount(0);
+    expect(await page.getByTestId("caption-canvas").evaluate((c) => (c as HTMLCanvasElement).style.transform)).toBe("");
+    await page.waitForTimeout(1200); // the debounced autosave would have run
+    expect((await savedStyle(stub, job.id)).overrides.captions).toBeUndefined();
+    // a new one-finger drag works again (no stale pointers)
+    await page.getByTestId("caption-hit").click();
+    const frameH = (await page.getByTestId("caption-layer").boundingBox())!.height;
+    await drag(page, "caption-box", 0, -0.2 * frameH);
+    await expect.poll(async () => Object.keys((await savedStyle(stub, job.id)).overrides.captions ?? {}).length, { timeout: 10_000 }).toBe(1);
+  });
+
+  test("Escape elsewhere is not the caption's: renaming the title can still be cancelled", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "keyboard");
+    const job = await stub.seed("review_speech");
+    await openLive(page, job.id);
+    await showCaption(page);
+    await page.getByTestId("caption-hit").click();
+    const before = await page.getByTestId("ed-title").innerText();
+    await page.getByTestId("ed-title").click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("Changed title");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("ed-title")).toHaveText(before);
+  });
+});
+
 test.describe("editor v2: the first frame before playback", TAG, () => {
   /** The video has a decoded frame of its own (not only the poster), and where. */
   const frameState = (page: Page) =>
