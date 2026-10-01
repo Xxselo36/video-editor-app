@@ -299,7 +299,8 @@ def test_graph_select_path():
     assert "asplit=3[as0][as1][as2]" in graph
     # 15 ms fades only at the cut (2.0 → 3.0), not at the split at 1.0
     assert graph.count("afade=t=in") == 1 and graph.count("afade=t=out") == 1
-    assert "[as2]atrim=start=3:end=4,asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.015[a2]" in graph
+    assert ("[as2]atrim=start=3:end=4,asetpts=PTS-STARTPTS,apad=whole_dur=1,atrim=duration=1,"
+            "afade=t=in:st=0:d=0.015[a2]") in graph
     assert "concat=n=3:v=0:a=1[aout]" in graph
     assert "[vcat][1:v]overlay=0:1200:alpha=premultiplied:eof_action=pass" in graph
     assert "loudnorm" not in graph
@@ -312,7 +313,10 @@ def test_graph_segment_path_with_effects_and_loudnorm():
     inputs, graph, _ = C.build_graph(clips, {**SRC, "rate": "30000/1001", "fps": 29.97},
                                      layer=None, loudness=loud)
     assert inputs == [["-ss", "0", "-t", "2"], ["-ss", "3", "-t", "2"]]
-    assert "[0:v]setpts=PTS-STARTPTS,setpts=PTS/1.500000,fps=30000/1001,fade=t=in:st=0:d=0.5[v0]" in graph
+    # 2 s at 1.5x = 39.96 frames at 29.97 → 40, video and audio alike
+    assert ("[0:v]setpts=PTS-STARTPTS,setpts=PTS/1.500000,fps=30000/1001,"
+            "tpad=stop_mode=clone:stop=1,trim=end_frame=40,fade=t=in:st=0:d=0.5[v0]") in graph
+    assert "apad=whole_dur=1.334667,atrim=duration=1.334667" in graph   # 40 / 29.97
     assert "concat=n=2:v=1:a=0[vcat]" in graph
     assert "atempo=1.500000" in graph and "atempo=2.0,atempo=1.500000" in graph
     assert "volume=0.5000" in graph

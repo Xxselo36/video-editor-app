@@ -450,11 +450,18 @@ def needs_segment_inputs(clips: list[dict], cfr: bool) -> bool:
     return False
 
 
+def clip_frames(c: dict, fps: float) -> int:
+    """Output frames of a clip: its sped-up length rounded to whole
+    frames. Video, audio and captions all use this length, so a speed
+    that leaves half a frame per clip can't add up to drift."""
+    # from whole source frames (start / end sit on the grid), so float
+    # noise can't turn 3.5 into 3.4999 for one clip and 4 for the next
+    src_frames = round((c["end"] - c["start"]) * fps)
+    return max(1, int(math.floor(src_frames / c["speed"] + 0.5 + 1e-9)))
+
+
 def output_frames(clips: list[dict], fps: float) -> int:
-    total = 0
-    for c in clips:
-        total += max(1, int(math.floor((c["end"] - c["start"]) / c["speed"] * fps + 0.5)))
-    return total
+    return sum(clip_frames(c, fps) for c in clips)
 
 
 def _atempo(speed: float) -> list[str]:
@@ -512,7 +519,9 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
             if abs(c["speed"] - 1.0) > 1e-3:
                 v.append(f"setpts=PTS/{c['speed']:.6f}")
             v.append(f"fps={rate.numerator}/{rate.denominator}")
-            d = (c["end"] - c["start"]) / c["speed"]
+            # exactly clip_frames(): one cloned frame of headroom, then cut
+            v.append(f"tpad=stop_mode=clone:stop=1,trim=end_frame={clip_frames(c, fps)}")
+            d = clip_frames(c, fps) / fps
             if c["fadeIn"] > 0:
                 v.append(f"fade=t=in:st=0:d={_f(min(c['fadeIn'], d / 2))}")
             if c["fadeOut"] > 0:
@@ -530,9 +539,11 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
                 a = [f"[as{i}]atrim=start={_f(c['start'])}:end={_f(c['end'])}",
                      "asetpts=PTS-STARTPTS"]
             a += _atempo(c["speed"])
+            # the clip's audio is exactly as long as its video frames
+            d = clip_frames(c, fps) / fps
+            a.append(f"apad=whole_dur={_f(d)},atrim=duration={_f(d)}")
             if abs(c["volume"] - 1.0) > 1e-3:
                 a.append(f"volume={c['volume']:.4f}")
-            d = (c["end"] - c["start"]) / c["speed"]
             fi = min(c["fadeIn"], d / 2) if c["fadeIn"] > 0 else 0.0
             fo = min(c["fadeOut"], d / 2) if c["fadeOut"] > 0 else 0.0
             if fi > 0:
@@ -568,13 +579,21 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
     return inputs, ";".join(parts), audio
 
 
-def output_words(spec: dict[str, Any], clips: list[dict]) -> dict[str, Any]:
+def output_words(spec: dict[str, Any], clips: list[dict],
+                 fps: float | None = None) -> dict[str, Any]:
     """timeline_map.map_to_output of the spec's words on the snapped
-    clips, with the style's sync offset."""
+    clips, with the style's sync offset. With `fps`, every clip lasts its
+    whole output frames (clip_frames) — the timeline the video and audio
+    really have."""
     over = (spec.get("style") or {}).get("overrides") or {}
+    timeline = []
+    for c in clips:
+        speed = c["speed"]
+        if fps:
+            speed = (c["end"] - c["start"]) / (clip_frames(c, fps) / fps)
+        timeline.append({"start": c["start"], "end": c["end"], "speed": speed})
     return timeline_map.map_to_output(
-        [{"start": c["start"], "end": c["end"], "speed": c["speed"]} for c in clips],
-        spec.get("words") or [], offset_ms=float(over.get("offsetMs") or 0.0))
+        timeline, spec.get("words") or [], offset_ms=float(over.get("offsetMs") or 0.0))
 
 
 # ── worker side: running it ─────────────────────────────────────────
@@ -707,7 +726,7 @@ def render_primary(
         raise CaptionLayerError("nothing to render: no clip is a frame long")
     seg = needs_segment_inputs(clips, src["cfr"])
     frames = output_frames(clips, src["fps"])
-    mapped = output_words(spec, clips)
+    mapped = output_words(spec, clips, src["fps"])
     style = spec.get("style") or {}
     band = None
     plan: dict[str, Any] = {}

@@ -138,7 +138,7 @@ def test_every_output_frame_comes_from_its_grid_frame(audit):
 def test_every_spoken_word_is_active_at_its_midpoint(audit):
     V, trace = audit["V"], audit["trace"]
     clips = C.clip_plan(audit["segs"], None, FPS)
-    mapped = C.output_words(audit["spec"], clips)
+    mapped = C.output_words(audit["spec"], clips, FPS)
     by_id = {w["id"]: w for w in mapped["words"]}
     rows = trace["frames"]
 
@@ -164,7 +164,7 @@ def test_every_spoken_word_is_active_at_its_midpoint(audit):
 
 
 def test_no_page_spans_a_cut(audit):
-    breaks = C.output_words(audit["spec"], C.clip_plan(audit["segs"], None, FPS))["breaks"]
+    breaks = C.output_words(audit["spec"], C.clip_plan(audit["segs"], None, FPS), FPS)["breaks"]
     pages = audit["trace"]["plan"]["layout"]
     assert len(pages) > 10
     for p in pages:
@@ -189,7 +189,7 @@ def test_output_pixels_are_the_layer_over_the_source(audit):
     source frame (luma SSIM on the caption band, after yuv420p + x264)."""
     src_info = C.probe(str(audit["src"]))
     clips = C.clip_plan(audit["segs"], None, FPS)
-    mapped = C.output_words(audit["spec"], clips)
+    mapped = C.output_words(audit["spec"], clips, FPS)
     band = audit["res"]["band"]
     def luma(x):
         return 0.2126 * x[..., 0] + 0.7152 * x[..., 1] + 0.0722 * x[..., 2]
@@ -256,6 +256,36 @@ def test_per_clip_path_speed_and_fades_keep_av_in_sync(tone_src, tmp_path):
     assert abs(v - want) <= 1.5 / 30, (v, want)
     assert abs(v - a) <= 1 / 30, (v, a)
     assert abs(cm.probe_frames(out) - C.output_frames(clips, 30)) <= len(clips)
+
+
+def test_200_sped_up_clips_with_odd_frame_counts_dont_drift(tmp_path):
+    """2x on 7-frame clips is 3.5 output frames each: video rounds to 4,
+    and audio and captions must take the same 4 frames — else 200 such
+    clips drift 100 frames (3.3 s) apart."""
+    src = tmp_path / "small.mp4"
+    subprocess.run([cm.ffmpeg(), "-y", "-v", "error",
+                    "-f", "lavfi", "-i", "testsrc2=s=160x288:r=30:d=62",
+                    "-f", "lavfi", "-i", "aevalsrc=0.3*sin(2*PI*220*t):s=48000:d=62",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-g", "30",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(src)],
+                   check=True, timeout=120)
+    segs = [(i * 0.3, i * 0.3 + 7 / 30) for i in range(200)]   # 7 frames, gaps between
+    fx = [{"speed": 2.0}] * 200
+    words = [{"id": f"w{i}", "text": f"w{i}", "start": i * 0.3 + 0.01, "end": i * 0.3 + 0.2}
+             for i in range(200)]
+    out = tmp_path / "fast.mp4"
+    res = C.render_primary(str(src), str(out), segs, fx, _spec(words), tmp_path / "w")
+    clips = C.clip_plan(segs, fx, 30)
+    assert res["path"] == "segments" and res["frames"] == 200 * 4
+    assert cm.probe_frames(out) == 800
+    v, a = _durations(out)
+    assert abs(v - 800 / 30) <= 1 / 30, v
+    assert abs(v - a) <= 1 / 30, (v, a)
+    # captions on the same frame grid: clip k starts at frame 4k
+    mapped = C.output_words(_spec(words), clips, 30)
+    assert mapped["duration"] == pytest.approx(800 / 30)
+    # (inside a clip time runs at its effective speed: 7 source frames in 4)
+    assert mapped["words"][199]["start"] == pytest.approx(199 * 4 / 30 + 0.01 / 1.75, abs=1e-6)
 
 
 def test_vfr_source_takes_the_per_clip_path_and_comes_out_cfr(tone_src, tmp_path, monkeypatch):
