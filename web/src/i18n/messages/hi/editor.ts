@@ -67,6 +67,7 @@ export const hiEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "ऑफ़लाइन – फिर से कोशिश",
   "editor.save.failed": "सेव नहीं हुआ",
   "editor.save.retry": "फिर से कोशिश करें",
+  "editor.save.wordFixed": "“{word}” इस रूप में सेव नहीं हो सका, इसलिए बदला गया",
   "editor.undo": "पहले जैसा करें",
   "editor.redo": "दोबारा करें",
   "editor.formatTip": "फ़ॉर्मैट अपलोड के समय तय होता है",

@@ -17,7 +17,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { trackSave } from "@/lib/pendingSaves";
-import { captionSource, type CaptionPhrase, type CaptionUnit, type EditDoc, type IdPool } from "@/features/editor/state/doc";
+import {
+  captionSource,
+  editWord,
+  wordTokens,
+  type CaptionPhrase,
+  type CaptionUnit,
+  type EditDoc,
+  type IdPool,
+} from "@/features/editor/state/doc";
 import { DocSaver, type DocSaveState } from "@/features/editor/state/docSave";
 import { createDocStore, type DocStore } from "@/features/editor/state/store";
 
@@ -48,12 +56,21 @@ async function fetchDoc(jobId: string): Promise<{ doc: EditDoc; rev: number; rea
   return { doc: j.doc as EditDoc, rev: typeof j.rev === "number" ? j.rev : 0, read_only: !!j.read_only };
 }
 
-export function useDocSession(jobId: string, onCaptionSource?: CaptionSourceHandler): DocSession {
+/** A word the server refused was adjusted (its old text). */
+export type WordFixedHandler = (text: string) => void;
+
+export function useDocSession(
+  jobId: string,
+  onCaptionSource?: CaptionSourceHandler,
+  onWordFixed?: WordFixedHandler,
+): DocSession {
   const [loaded, setLoaded] = useState<Loaded | "none" | null>(null);
   const [saveState, setSaveState] = useState<DocSaveState>("saved");
   const captionRef = useRef(onCaptionSource);
+  const fixedRef = useRef(onWordFixed);
   useEffect(() => {
     captionRef.current = onCaptionSource;
+    fixedRef.current = onWordFixed;
   });
 
   useEffect(() => {
@@ -75,6 +92,15 @@ export function useDocSession(jobId: string, onCaptionSource?: CaptionSourceHand
           pool,
           onState: setSaveState,
           onRename: (map) => store.rename(map),
+          // The server refused a word: cut it to what it accepts (or drop
+          // it when it already looks valid) and tell the user.
+          onRejected: (id) => {
+            const w = store.getState().present.words.find((x) => x.id === id);
+            if (!w) return;
+            const fixed = wordTokens(w.text).join(" ");
+            store.apply((d) => editWord(d, id, fixed === w.text ? "" : fixed, pool));
+            fixedRef.current?.(w.text.length > 40 ? `${[...w.text].slice(0, 40).join("")}…` : w.text);
+          },
           track: (p) => trackSave(jobId, p),
         });
         store.onEdit = (doc) => {

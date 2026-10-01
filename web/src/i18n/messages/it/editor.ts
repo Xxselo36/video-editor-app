@@ -67,6 +67,7 @@ export const itEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "Offline – nuovo tentativo",
   "editor.save.failed": "Non salvato",
   "editor.save.retry": "Riprova",
+  "editor.save.wordFixed": "«{word}» non si poteva salvare così ed è stato adattato",
   "editor.undo": "Annulla",
   "editor.redo": "Ripeti",
   "editor.formatTip": "Il formato si sceglie al caricamento",

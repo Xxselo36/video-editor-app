@@ -67,6 +67,7 @@ export const deEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "Offline – neuer Versuch",
   "editor.save.failed": "Nicht gespeichert",
   "editor.save.retry": "Erneut versuchen",
+  "editor.save.wordFixed": "„{word}“ ließ sich so nicht speichern und wurde angepasst",
   "editor.undo": "Rückgängig",
   "editor.redo": "Wiederholen",
   "editor.formatTip": "Das Format wird beim Hochladen festgelegt",

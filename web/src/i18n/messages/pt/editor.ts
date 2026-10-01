@@ -67,6 +67,7 @@ export const ptEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "Offline – tentando de novo",
   "editor.save.failed": "Não salvo",
   "editor.save.retry": "Tentar de novo",
+  "editor.save.wordFixed": "“{word}” não pôde ser salvo assim e foi ajustado",
   "editor.undo": "Desfazer",
   "editor.redo": "Refazer",
   "editor.formatTip": "O formato é definido no envio",

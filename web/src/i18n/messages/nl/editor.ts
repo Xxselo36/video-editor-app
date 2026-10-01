@@ -67,6 +67,7 @@ export const nlEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "Offline – opnieuw proberen",
   "editor.save.failed": "Niet opgeslagen",
   "editor.save.retry": "Opnieuw proberen",
+  "editor.save.wordFixed": "‘{word}’ kon zo niet worden opgeslagen en is aangepast",
   "editor.undo": "Ongedaan maken",
   "editor.redo": "Opnieuw",
   "editor.formatTip": "Het formaat kies je bij het uploaden",

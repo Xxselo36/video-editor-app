@@ -67,6 +67,7 @@ export const trEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "Çevrimdışı – yeniden deneniyor",
   "editor.save.failed": "Kaydedilmedi",
   "editor.save.retry": "Tekrar dene",
+  "editor.save.wordFixed": "“{word}” bu hâliyle kaydedilemedi ve düzeltildi",
   "editor.undo": "Geri al",
   "editor.redo": "Yinele",
   "editor.formatTip": "Format yüklerken belirlenir",

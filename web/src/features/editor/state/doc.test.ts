@@ -14,7 +14,10 @@ import {
   setBreak,
   setFormat,
   setStyle,
+  validWordText,
   wordAt,
+  wordTokens,
+  MAX_WORD_TEXT,
   type DocWord,
   type EditDoc,
 } from "./doc";
@@ -125,6 +128,33 @@ describe("editWord", () => {
       else expect(n.words, v.name).toEqual(direct);
       expect(direct.map((w) => w.id), v.name).toEqual(v.expected.map((w) => w.id));
     }
+  });
+});
+
+describe("server limits (backend/doc.py validate_word)", () => {
+  it("a run over 200 code points becomes words of at most 200", () => {
+    const long = "日本語".repeat(150); // 450 code points, no spaces
+    expect(wordTokens(long).map((t) => [...t].length)).toEqual([200, 200, 50]);
+    const n = editWord(base(), "w0003", long);
+    for (const w of n.words) {
+      expect([...w.text].length).toBeLessThanOrEqual(MAX_WORD_TEXT);
+      expect(validWordText(w.text)).toBe(true);
+    }
+    expect(n.words.map((w) => w.text).join("")).toContain(long.slice(0, 300));
+  });
+
+  it("whitespace only Python sees (U+0085, U+001C) splits like a space, never makes an empty word", () => {
+    expect(wordTokens("a\u0085b \u001c")).toEqual(["a", "b"]);
+    const n = editWord(base(), "w0003", "\u0085");
+    expect(n.words.map((w) => w.id)).not.toContain("w0003");
+    expect(validWordText("ten")).toBe(true);
+    expect(validWordText("x\u001cy")).toBe(false);
+  });
+
+  it("an existing invalid word is repaired even when its text is retyped as it is", () => {
+    const bad = docOf([W("a", "x".repeat(250), 0, 1)]);
+    const n = editWord(bad, "a", "x".repeat(250));
+    expect(n.words.map((w) => w.text.length)).toEqual([200, 50]);
   });
 });
 

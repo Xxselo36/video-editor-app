@@ -67,6 +67,7 @@ export const idEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "Offline – mencoba lagi",
   "editor.save.failed": "Tidak tersimpan",
   "editor.save.retry": "Coba lagi",
+  "editor.save.wordFixed": "“{word}” tidak bisa disimpan apa adanya dan sudah disesuaikan",
   "editor.undo": "Urungkan",
   "editor.redo": "Ulangi",
   "editor.formatTip": "Format ditentukan saat unggah",

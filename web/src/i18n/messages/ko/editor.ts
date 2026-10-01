@@ -67,6 +67,7 @@ export const koEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "오프라인 – 다시 시도 중",
   "editor.save.failed": "저장되지 않음",
   "editor.save.retry": "다시 시도",
+  "editor.save.wordFixed": "“{word}”을(를) 그대로 저장할 수 없어 조정했어요",
   "editor.undo": "실행 취소",
   "editor.redo": "다시 실행",
   "editor.formatTip": "형식은 업로드할 때 정해집니다",

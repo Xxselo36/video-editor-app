@@ -119,7 +119,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   }, [store, videoRef]);
 
   const tlHistory = useTimelineHistory(editSegs, session.commitEditSegs);
-  const doc = useDocSession(props.jobId, props.onCaptionSource);
+  const doc = useDocSession(props.jobId, props.onCaptionSource, (word) => showToast(t("editor.save.wordFixed", { word })));
   const docStore = doc.status === "ready" ? doc.store : null;
 
   // ── one undo for text and timeline (until UX10 merges the stacks):

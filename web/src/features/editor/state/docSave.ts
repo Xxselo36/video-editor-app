@@ -53,6 +53,12 @@ export type DocSaverDeps = {
   track?: (p: Promise<unknown>) => void;
   /** New ids were given to unsaved words (serverIds): rename them in the editor. */
   onRename?: (map: Map<string, string>) => void;
+  /**
+   * The server refused a word (400 bad_word, e.g. a limit the client
+   * missed): repair it in the editor (an edit, which schedules a save).
+   * Each word gets one repair; a second refusal of it is "failed".
+   */
+  onRejected?: (wordId: string) => void;
   /** Every word id the editor made (doc.ts IdPool). */
   pool?: Set<string>;
   /** The rev for a PATCH on `base` (default uniqueRev). */
@@ -188,8 +194,10 @@ export class DocSaver {
   private chain: Promise<void> = Promise.resolve();
   /** A body whose answer never came: resent as it is (same rev). */
   private retryBody: PatchBody | null = null;
-  private readonly d: Required<Omit<DocSaverDeps, "onState" | "track" | "onRename" | "pool">> &
-    Pick<DocSaverDeps, "onState" | "track" | "onRename" | "pool">;
+  /** Words the server refused once (onRejected). */
+  private rejected = new Set<string>();
+  private readonly d: Required<Omit<DocSaverDeps, "onState" | "track" | "onRename" | "pool" | "onRejected">> &
+    Pick<DocSaverDeps, "onState" | "track" | "onRename" | "pool" | "onRejected">;
 
   constructor(doc: EditDoc, rev: number, deps: DocSaverDeps) {
     this.saved = { words: doc.words, style: doc.style, format: doc.format, rev };
@@ -368,10 +376,12 @@ export class DocSaver {
     }
     let code: string | null = null;
     let serverRev: number | null = null;
+    let wordId: string | null = null;
     try {
-      const j = (await r.json()) as { detail?: unknown; rev?: unknown };
+      const j = (await r.json()) as { detail?: unknown; rev?: unknown; id?: unknown };
       code = typeof j.detail === "string" ? j.detail : null;
       serverRev = typeof j.rev === "number" ? j.rev : null;
+      wordId = typeof j.id === "string" ? j.id : null;
     } catch {
       /* no body */
     }
@@ -392,6 +402,12 @@ export class DocSaver {
       return;
     }
     if (this.retryBody === body) this.retryBody = null;
+    if (r.status === 400 && code === "bad_word" && wordId && this.d.onRejected && !this.rejected.has(wordId)) {
+      // Don't wedge the autosave on one word: repair it and carry on.
+      this.rejected.add(wordId);
+      this.d.onRejected(wordId);
+      return;
+    }
     this.clear();
     this.set("failed");
   }

@@ -67,6 +67,7 @@ export const frEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "Hors ligne – nouvel essai",
   "editor.save.failed": "Non enregistré",
   "editor.save.retry": "Réessayer",
+  "editor.save.wordFixed": "« {word} » ne pouvait pas être enregistré tel quel et a été ajusté",
   "editor.undo": "Annuler",
   "editor.redo": "Rétablir",
   "editor.formatTip": "Le format est choisi à l’import",

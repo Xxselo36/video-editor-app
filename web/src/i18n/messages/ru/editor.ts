@@ -67,6 +67,7 @@ export const ruEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "Нет сети – повторяем",
   "editor.save.failed": "Не сохранено",
   "editor.save.retry": "Повторить",
+  "editor.save.wordFixed": "«{word}» нельзя было сохранить в таком виде, текст исправлен",
   "editor.undo": "Отменить",
   "editor.redo": "Повторить действие",
   "editor.formatTip": "Формат задаётся при загрузке",

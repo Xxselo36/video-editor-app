@@ -28,6 +28,8 @@ function fakeServer(doc: EditDoc) {
     fail: null as null | "net" | 500 | 409 | 400 | "lost",
     /** The next request never answers (and never reaches the server). */
     hold: false,
+    /** Refuse an upsert of this word id (400 bad_word), like validate_word. */
+    rejectId: null as string | null,
     inits: [] as RequestInit[],
   };
   const fetch = async (_path: string, init: RequestInit & { unloading?: boolean }) => {
@@ -46,6 +48,11 @@ function fakeServer(doc: EditDoc) {
     if (body.words) srv.words = mergeWords(srv.words, body.words.upsert, body.words.delete);
     for (let i = 1; i < srv.words.length; i++) if (srv.words[i].start < srv.words[i - 1].start) throw new Error("words_not_monotonic");
     srv.rev = body.rev;
+    if (srv.rejectId && body.words?.upsert.some((w) => w.id === srv.rejectId)) {
+      // (checked before the merge: a refused patch changes nothing)
+      srv.rev = body.base_rev;
+      return new Response(JSON.stringify({ detail: "bad_word", id: srv.rejectId, field: "text" }), { status: 400 });
+    }
     if (srv.fail === "lost") {
       // committed, but the answer never arrives (a drop, a proxy 502)
       srv.fail = null;
@@ -169,6 +176,62 @@ describe("DocSaver", () => {
     t.edit((d) => editWord(d, "w0002", "two"));
     await t.tm.tick();
     expect(t.saver.status).toBe("conflict");
+  });
+
+  it("a word the server refuses is repaired once, the autosave carries on", async () => {
+    const { srv, fetch } = fakeServer(docOf(6));
+    const tm = timers();
+    let present = docOf(6);
+    const rejected: string[] = [];
+    const saver: DocSaver = new DocSaver(present, 0, {
+      jobId: "j1",
+      fetch,
+      setTimer: tm.setTimer,
+      clearTimer: tm.clearTimer,
+      nextRev: (b) => b + 1,
+      onRejected: (id) => {
+        rejected.push(id);
+        present = editWord(present, id, ""); // the session's repair: an edit
+        srv.rejectId = null;
+        saver.schedule(present);
+      },
+    });
+    srv.rejectId = "w0002";
+    present = editWord(editWord(present, "w0002", "two"), "w0004", "four");
+    saver.schedule(present);
+    await tm.tick(); // refused
+    expect(rejected).toEqual(["w0002"]);
+    expect(saver.status).not.toBe("failed");
+    await tm.tick(); // the repaired doc
+    expect(saver.status).toBe("saved");
+    expect(srv.words.map((w) => w.text)).toEqual(present.words.map((w) => w.text));
+    expect(srv.words.map((w) => w.text)).toContain("four");
+  });
+
+  it("a word refused again after its repair: failed, no endless loop", async () => {
+    const { srv, fetch } = fakeServer(docOf(4));
+    const tm = timers();
+    let present = docOf(4);
+    let calls = 0;
+    const saver: DocSaver = new DocSaver(present, 0, {
+      jobId: "j1",
+      fetch,
+      setTimer: tm.setTimer,
+      clearTimer: tm.clearTimer,
+      nextRev: (b) => b + 1,
+      onRejected: () => {
+        calls++;
+        saver.schedule(present); // a "repair" the server still refuses
+      },
+    });
+    srv.rejectId = "w0002";
+    present = editWord(present, "w0002", "two");
+    saver.schedule(present);
+    await tm.tick();
+    await tm.tick();
+    await tm.tick();
+    expect(calls).toBe(1);
+    expect(saver.status).toBe("failed");
   });
 
   it("network error: retrying with backoff, then saved", async () => {

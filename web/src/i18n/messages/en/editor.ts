@@ -70,6 +70,7 @@ export const enEditor = {
   "editor.save.retrying": "Offline – retrying",
   "editor.save.failed": "Not saved",
   "editor.save.retry": "Retry",
+  "editor.save.wordFixed": "“{word}” couldn't be saved as it was and was adjusted",
   "editor.undo": "Undo",
   "editor.redo": "Redo",
   "editor.formatTip": "The format is set at upload",

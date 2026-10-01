@@ -67,6 +67,7 @@ export const esEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "Sin conexión – reintentando",
   "editor.save.failed": "No guardado",
   "editor.save.retry": "Reintentar",
+  "editor.save.wordFixed": "«{word}» no se pudo guardar así y se ajustó",
   "editor.undo": "Deshacer",
   "editor.redo": "Rehacer",
   "editor.formatTip": "El formato se elige al subir el video",

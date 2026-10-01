@@ -67,6 +67,7 @@ export const jaEditor: Partial<Record<EditorKey, string>> = {
   "editor.save.retrying": "オフライン – 再試行中",
   "editor.save.failed": "保存されていません",
   "editor.save.retry": "再試行",
+  "editor.save.wordFixed": "「{word}」はそのまま保存できなかったため調整しました",
   "editor.undo": "元に戻す",
   "editor.redo": "やり直す",
   "editor.formatTip": "フォーマットはアップロード時に決まります",

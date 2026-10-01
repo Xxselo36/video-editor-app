@@ -43,16 +43,49 @@ function indexOfId(words: readonly DocWord[], id: string): number {
  * by the edit hands its time to the word before it (else the one after
  * it) instead of losing it (captions.md §4.2).
  */
+// ── what the server accepts (backend/doc.py validate_word) ─────────
+
+/** backend/doc.py MAX_WORD_TEXT (code points, as Python's len). */
+export const MAX_WORD_TEXT = 200;
+
+/**
+ * Characters Python's str.strip() / str.isspace() treat as whitespace
+ * but JavaScript's \s doesn't: a token made of them is "empty" to the
+ * server (400 bad_word). They become spaces here.
+ */
+const PY_ONLY_SPACE = /[\u001c-\u001f\u0085]/g;
+
+/**
+ * Tokens of typed text the server accepts as words: Python-only
+ * whitespace splits like a space, and a token over MAX_WORD_TEXT code
+ * points (a long CJK run without spaces) is cut into pieces of that size.
+ */
+export function wordTokens(text: string): string[] {
+  const out: string[] = [];
+  for (const tok of tokenize(text.replace(PY_ONLY_SPACE, " "))) {
+    const cps = [...tok];
+    for (let i = 0; i < cps.length; i += MAX_WORD_TEXT) out.push(cps.slice(i, i + MAX_WORD_TEXT).join(""));
+  }
+  return out;
+}
+
+/** A word's text the server accepts as it is. */
+export const validWordText = (text: string) => {
+  const t = wordTokens(text);
+  return t.length === 1 && t[0] === text;
+};
+
 export function editRange(doc: EditDoc, first: number, last: number, text: string, pool?: IdPool): EditDoc {
   const words = doc.words;
   if (first < 0 || last >= words.length || first > last) return doc;
   const old = words.slice(first, last + 1);
-  if (old.map((w) => w.text).join(" ") === tokenize(text).join(" ")) return doc;
+  const toks = wordTokens(text);
+  if (old.map((w) => w.text).join(" ") === toks.join(" ") && old.every((w) => validWordText(w.text))) return doc;
   const a = first > 0 ? first - 1 : first;
   const b = last < words.length - 1 ? last + 1 : last;
   const before = a < first ? [words[a].text] : [];
   const after = b > last ? [words[b].text] : [];
-  const next = [...before, ...tokenize(text), ...after].join(" ");
+  const next = [...before, ...toks, ...after].join(" ");
   const taken = pool ?? new Set(words.map((w) => w.id));
   for (const w of words) taken.add(w.id);
   const edited = applyTextEdit(words.slice(a, b + 1), next, taken);
