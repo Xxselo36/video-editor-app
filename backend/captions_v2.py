@@ -663,7 +663,9 @@ def render_primary(
     t = time.monotonic()
     inputs, graph, audio = build_graph(
         clips, src, layer=band if layer_in else None,
-        loudness=spec.get("loudness") if loudnorm_enabled() else None,
+        # Decided on the API side (build_spec): the worker (Modal) has no
+        # CLEO_LOUDNORM of its own, so a loudness in the spec is applied.
+        loudness=spec.get("loudness"),
         segment_inputs=seg)
     from src.ffmpeg_utils import get_ffmpeg_path
     cmd = [get_ffmpeg_path(), "-y", "-v", "error"]

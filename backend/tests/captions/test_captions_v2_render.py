@@ -312,7 +312,10 @@ def test_loudnorm_to_minus_14(tone_src, tmp_path, monkeypatch):
     from backend import audio_analysis
     loud = audio_analysis.measure_loudness(str(tone_src))
     assert loud and loud["I"] > -10   # the tone is loud: −14 means turning it down
-    monkeypatch.setenv("CLEO_LOUDNORM", "1")
+    # The switch lives on the API (build_spec puts the measurement in the
+    # spec); the render worker on Modal doesn't have CLEO_LOUDNORM and must
+    # still apply it.
+    monkeypatch.delenv("CLEO_LOUDNORM", raising=False)
     out = tmp_path / "loud.mp4"
     C.render_primary(str(tone_src), str(out), TONE_SEGS, None,
                      _spec(WORDS, loudness=loud), tmp_path / "w")
