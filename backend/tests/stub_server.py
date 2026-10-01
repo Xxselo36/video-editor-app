@@ -378,7 +378,9 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                     preview_version=1, subtitles=res["subtitles"], duration=res["duration"],
                     cut_ranges=res["cut_ranges"], language=res["language"],
                     audio_warnings=res["audio_warnings"], audio_levels=res["audio_levels"],
-                    scene_events=res["scene_events"], doc=res.get("doc"), doc_rev=0)
+                    scene_events=res["scene_events"], doc=res.get("doc"), doc_rev=0,
+                    # both stub clips are 30 fps CFR, like a new job's mezz (UT3)
+                    mezz_fps=30.0, mezz_cfr=True)
 
     # ── fake analysis (the real worker around it) ─────────────────────
     def fake_analyze_only(input_path: str, output_dir: str, settings: dict,

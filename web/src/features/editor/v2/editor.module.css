@@ -40,7 +40,7 @@
   z-index: 40;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--ed-panel-w);
-  grid-template-rows: 52px minmax(0, 1fr) 150px;
+  grid-template-rows: 52px minmax(0, 1fr) 140px;
   height: 100dvh;
   overflow: hidden;
   background: var(--ed-bg);
@@ -1109,7 +1109,7 @@
   left: 0;
   right: 0;
   top: 26px;
-  height: 64px;
+  height: 52px;
 }
 .clip {
   position: absolute;
@@ -1187,16 +1187,17 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 10px;
-  margin-left: -5px;
+  width: 32px;
+  margin-left: -16px;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1;
+  cursor: pointer;
 }
 .seamLine {
   position: absolute;
-  left: 4.5px;
+  left: 15.5px;
   top: 0;
   bottom: 0;
   width: 1px;
@@ -1215,7 +1216,7 @@
   left: 0;
   top: 0;
   width: 0;
-  height: 92px;
+  height: 80px;
   z-index: 3;
   pointer-events: none;
   will-change: transform;
@@ -1279,7 +1280,7 @@
 }
 .phone .clips {
   top: 24px;
-  height: 96px;
+  height: 80px;
 }
 .phone .ruler {
   height: 20px;
@@ -1291,10 +1292,10 @@
 .phone .strip {
   margin: 0 16px;
   flex: none;
-  height: 124px;
+  height: 108px;
 }
 .phone .playhead {
-  height: 122px;
+  height: 106px;
 }
 .phoneCtx {
   display: flex;
@@ -1308,7 +1309,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 14px 16px 0;
+  margin: 18px 16px 0;
   flex-shrink: 0;
 }
 @container (max-height: 239px) {
@@ -1322,13 +1323,13 @@
 }
 @container (max-height: 180px) {
   .phone .strip {
-    height: 84px;
+    height: 76px;
   }
   .phone .clips {
-    height: 56px;
+    height: 48px;
   }
   .phone .playhead {
-    height: 82px;
+    height: 74px;
   }
 }
 .tabbar {
@@ -1847,6 +1848,151 @@
 }
 .phone .findInput {
   font-size: 16px;
+}
+
+/* ── UX10: cuts in the text (DF chips), seams, reorder, precise trims ── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  margin: 4px 3px;
+  padding: 0 7px 0 6px;
+  border-radius: 4px;
+  background: var(--ed-raised);
+  box-shadow: inset 0 0 0 1px var(--ed-hairline);
+  font-size: 11px;
+  line-height: 20px;
+  color: var(--ed-text-2);
+  white-space: nowrap;
+  transition:
+    background-color var(--ed-fast) ease-out,
+    box-shadow var(--ed-fast) ease-out;
+}
+.chip:hover,
+.chip:focus-visible {
+  background: var(--ed-hover);
+  color: var(--ed-text-1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
+.chipRs {
+  opacity: 0.55;
+  flex-shrink: 0;
+  transition: opacity var(--ed-fast) ease-out;
+}
+.chip:hover .chipRs {
+  opacity: 1;
+}
+.phone .chip {
+  height: 24px;
+  margin: 4px 3px;
+}
+.w[data-rm="true"] {
+  cursor: pointer;
+}
+.w[data-rm="true"]:hover {
+  color: var(--ed-text-1);
+  background: rgba(240, 96, 90, 0.12);
+}
+.miNote {
+  padding: 4px 10px 6px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ed-text-3);
+  white-space: normal;
+}
+.seamMoved {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  margin-left: -0.5px;
+  background: rgba(255, 255, 255, 0.28);
+  pointer-events: none;
+}
+.seamPop {
+  padding: 6px 4px 2px;
+}
+.seamPopHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  font-weight: 600;
+  color: var(--ed-text-1);
+}
+.seamPopText {
+  padding: 2px 10px 6px 26px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ed-text-2);
+}
+/* reorder: the lifted clip follows the pointer, the others make room */
+.clip {
+  -webkit-touch-callout: none;
+}
+.clips[data-reordering="true"] .clip {
+  transition: left var(--ed-med) var(--ed-ease);
+}
+.clips[data-reordering="true"] .clip[data-lifted="true"] {
+  transition:
+    transform var(--ed-fast) ease-out,
+    box-shadow var(--ed-fast) ease-out;
+}
+.clip[data-lifted="true"] {
+  z-index: 5;
+  transform: translateY(-4px) scale(1.04);
+  box-shadow:
+    0 0 0 2px var(--ed-brand),
+    0 10px 24px rgba(0, 0, 0, 0.55);
+  cursor: grabbing;
+  animation: edLift var(--ed-fast) ease-out both;
+}
+@keyframes edLift {
+  from {
+    transform: none;
+  }
+}
+/* precise trims: the readout and the frame grid */
+.trimReadout {
+  position: absolute;
+  top: -22px;
+  transform: translateX(-50%);
+  z-index: 6;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--ed-raised);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--ed-text-1);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.frameLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+  z-index: 2;
+}
+.strip[data-magnified="true"] {
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.45);
+  border-radius: 4px;
+}
+/* phone: trim handles keep a 44 px target beyond the visual edge */
+.phone .handle {
+  width: 44px;
+  top: -2px;
+  bottom: -2px;
+}
+.phone .handle[data-testid="clip-trim-start"] {
+  left: -22px !important;
+}
+.phone .handle[data-testid="clip-trim-end"] {
+  right: -22px !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

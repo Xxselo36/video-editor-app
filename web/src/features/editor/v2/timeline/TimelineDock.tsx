@@ -7,29 +7,51 @@
  * playhead drawn from the playhead store (no React render per frame).
  * No caption track, no waveform (review G3). Filmstrip thumbnails come
  * with 7b (GET /jobs/{id}/filmstrip).
+ *
+ * UX10 (+ the owner's iPhone feedback):
+ *   - cut seams name their reason (pause, filler word, Cleo cut, the
+ *     user's own) by colour; a tap (32 px target) opens what was removed,
+ *     how long, and Restore — one undo step, shown in the text too;
+ *   - the ruler draws 0.1 s / 0.5 s marks once they are ≥ 6 px apart;
+ *   - press and hold a clip (350 ms; mouse or touch), then drag: it lifts,
+ *     the others make room, release drops it (one undo step). A tap still
+ *     selects; a swipe that moves before the hold still scrolls;
+ *   - trims move the edge on a 0.01 s grid with a readout ("3,47 s");
+ *     holding still for 0.5 s while trimming zooms in around the handle
+ *     (back on release), and from 4 px per frame the frame grid shows
+ *     (the v2 export puts edges on the nearest frame).
  */
-import { Ellipsis, Minus, Plus, Scissors, Trash2, X } from "lucide-react";
+import { Ellipsis, Minus, Plus, RotateCcw, Scissors, Trash2, X } from "lucide-react";
 import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type RefObject } from "react";
 import { useLang, useT } from "@/i18n";
+import type { MessageKey } from "@/i18n/messages/en";
 import type { PlaybackMode } from "@/features/editor/session/useEditSession";
+import { gapKind, type PieceKind } from "@/features/editor/state/cuts";
 import { usePlayhead, usePlayheadEffect, type PlayheadState, type PlayheadStore } from "@/features/editor/state/playhead";
 import type { TimelineHistory } from "@/features/editor/timeline/history";
 import {
   canDelete,
+  dropIndex,
+  frameEdge,
+  frameTimes,
+  moveSeg,
   patchSeg,
   playheadCutOf,
   rulerMarks,
+  snapTrimToFrame,
   sourceAtCut,
   splittableIndex,
   stripDuration,
+  tickShown,
   trimBounds,
-  trimTo,
+  trimToStep,
   type EditorSeg,
 } from "@/features/editor/timeline/mechanics";
 import { useTimelineZoom } from "@/features/editor/timeline/useTimelineZoom";
 import { kbd } from "../hooks";
-import { cutDuration, decimalSeparator, fmtClock, fmtSeconds, seams } from "../model";
+import { cutDuration, decimalSeparator, fmtClock, fmtSeconds } from "../model";
 import { Popover } from "../Popover";
+import type { CutsApi } from "../useCuts";
 import s from "../editor.module.css";
 
 export type DockApi = { zoomIn: () => void; zoomOut: () => void; fit: () => void };
@@ -38,6 +60,10 @@ export type TimelineDockProps = {
   phone: boolean;
   store: PlayheadStore;
   segments: EditorSeg[];
+  /** UX10: what each seam removed, and its restore. */
+  cuts: CutsApi;
+  /** The mezz's frame rate (the frame grid; 30 when unknown). */
+  fps?: number | null;
   duration: number;
   history: TimelineHistory;
   selected: string | null;
@@ -51,6 +77,32 @@ export type TimelineDockProps = {
   apiRef: RefObject<DockApi | null>;
 };
 
+/** Press-and-hold before a clip lifts for reordering (ms). */
+export const HOLD_MS = 350;
+/** Movement that turns a press into a scroll / tap instead (px). */
+const HOLD_SLOP_PX = 8;
+/** Holding a trim handle still this long zooms in (ms). */
+export const MAGNIFY_MS = 500;
+/** Zoom of the trim magnifier: 0.01 s = 10 px. */
+const MAGNIFY_PPS = 1000;
+/** The frame grid shows from this many px per frame. */
+const FRAME_GRID_PX = 4;
+
+const KIND_COLOR: Record<PieceKind, string> = {
+  silence: "var(--ed-removed)",
+  filler: "var(--ed-filler)",
+  voice_cmd: "var(--ed-cleo)",
+  bad_take: "var(--ed-cleo)",
+  user: "var(--ed-text-3)",
+};
+export const KIND_NAME: Record<PieceKind, MessageKey> = {
+  silence: "editor.cutKind.silence",
+  filler: "editor.cutKind.filler",
+  voice_cmd: "editor.cutKind.voice_cmd",
+  bad_take: "editor.cutKind.bad_take",
+  user: "editor.cutKind.user",
+};
+
 function Cross({ color }: { color: string }) {
   return (
     <svg viewBox="0 0 8 8" width="8" height="8" aria-hidden style={{ display: "block", color }}>
@@ -58,6 +110,10 @@ function Cross({ color }: { color: string }) {
     </svg>
   );
 }
+
+/** A boundary between two clips that aren't contiguous footage: x in
+ *  cut seconds, a–b the source gap, the clips either side. */
+type SeamView = { k: number; x: number; a: number; b: number; prev: string; next: string };
 
 export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   const t = useT();
@@ -73,16 +129,47 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     id: string;
     mode: "start" | "end";
     startSegs: EditorSeg[];
-    rect: DOMRect;
-    pxPerSec: number;
+    total: number;
     bounds: ReturnType<typeof trimBounds>;
     last: EditorSeg[];
+    /** Pointer x of the last move that counted (hold-still detection). */
+    holdX: number;
+    clientX: number;
+    timer: ReturnType<typeof setTimeout> | null;
+    /** The zoom before the magnifier (0 = fit), while magnified. */
+    prevPps: number | null;
   } | null>(null);
+  const [trimming, setTrimming] = useState<{ id: string; mode: "start" | "end" } | null>(null);
+  const [boost, setBoost] = useState<number | undefined>(undefined);
   const dragEndedAt = useRef(0);
-  const segs = dragSegs ?? p.segments;
-  const totalDur = dragTotal ?? stripDuration(segs);
 
-  const zoom = useTimelineZoom(scrollRef, totalDur, p.phone, p.phone ? 358 : 1400);
+  // ── reorder: press and hold, then drag ──────────────────────────────
+  // The press is followed on the window (the pointer leaves the clip
+  // while it moves): a move over HOLD_SLOP_PX before HOLD_MS is a tap
+  // that slid or a swipe (the strip scrolls natively), never a drag.
+  const holdRef = useRef<{ pointerId: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  /** Removes the window listeners of the press / drag in progress. */
+  const pressOff = useRef<(() => void) | null>(null);
+  const [reorder, setReorder] = useState<{
+    id: string;
+    startSegs: EditorSeg[];
+    /** Pointer x minus the clip's left edge, px. */
+    grab: number;
+    /** The dragged clip's left edge, px in the strip. */
+    left: number;
+    order: EditorSeg[];
+  } | null>(null);
+  const reorderRef = useRef(reorder);
+  // the handlers read the latest without waiting for a render
+  const putReorder = (r: typeof reorder) => {
+    reorderRef.current = r;
+    setReorder(r);
+  };
+
+  const segs = reorder?.order ?? dragSegs ?? p.segments;
+  const totalDur = dragTotal ?? stripDuration(reorder ? reorder.startSegs : segs);
+
+  const zoom = useTimelineZoom(scrollRef, totalDur, p.phone, p.phone ? 358 : 1400, boost);
   const { contentW, viewW, effPps, fitPps, maxPps, zoomTo, canZoomOut, lastUserScrollRef } = zoom;
   const pps = contentW / totalDur;
 
@@ -92,42 +179,205 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     fit: () => zoomTo(fitPps, 0),
   }));
 
+  // the visible part of the strip (ruler marks and the frame grid are drawn there only)
+  const [scrollX, setScrollX] = useState(0);
+  const scrollRaf = useRef(0);
+
+  // ── the trim magnifier ──────────────────────────────────────────────
+  const zoomAnim = useRef(0);
+  const animateZoom = useCallback(
+    (to: number, anchorClientX: number, done?: () => void) => {
+      cancelAnimationFrame(zoomAnim.current);
+      const sc = scrollRef.current;
+      const from = Math.max(1e-6, (sc?.scrollWidth ?? contentW) / totalDur);
+      const target = Math.max(1e-6, to);
+      const t0 = performance.now();
+      const step = () => {
+        const k = Math.min(1, (performance.now() - t0) / 180);
+        const e = 1 - (1 - k) * (1 - k);
+        const rect = scrollRef.current?.getBoundingClientRect();
+        zoomTo(from * Math.pow(target / from, e), anchorClientX - (rect?.left ?? 0));
+        if (k < 1) zoomAnim.current = requestAnimationFrame(step);
+        else done?.();
+      };
+      zoomAnim.current = requestAnimationFrame(step);
+    },
+    [contentW, totalDur, zoomTo],
+  );
+  const magnify = () => {
+    const d = dragRef.current;
+    if (!d || d.prevPps !== null) return;
+    d.prevPps = zoom.pps;
+    setBoost(MAGNIFY_PPS);
+    // the next frame has the raised cap
+    requestAnimationFrame(() => {
+      const cur = dragRef.current;
+      if (cur === d) animateZoom(Math.max(effPps, MAGNIFY_PPS), d.clientX);
+    });
+  };
+  const armMagnify = (d: NonNullable<typeof dragRef.current>) => {
+    if (d.timer) clearTimeout(d.timer);
+    d.timer = d.prevPps === null ? setTimeout(magnify, MAGNIFY_MS) : null;
+  };
+
   const startTrim = (e: React.PointerEvent, id: string, mode: "start" | "end") => {
     e.stopPropagation();
     e.preventDefault();
     const el = stripRef.current;
     if (!el) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    const rect = el.getBoundingClientRect();
     const startSegs = p.segments.map((x) => ({ ...x }));
-    dragRef.current = {
+    const d = {
       id,
       mode,
       startSegs,
-      rect,
-      pxPerSec: rect.width / totalDur,
+      total: totalDur,
       bounds: trimBounds(startSegs, id, p.duration),
       last: startSegs,
+      holdX: e.clientX,
+      clientX: e.clientX,
+      timer: null,
+      prevPps: null,
     };
+    dragRef.current = d;
+    armMagnify(d);
     setDragTotal(totalDur);
     setDragSegs(startSegs);
+    setTrimming({ id, mode });
   };
   const moveTrim = (e: React.PointerEvent) => {
     const d = dragRef.current;
-    if (!d) return;
-    const seconds = (e.clientX - d.rect.left) / d.pxPerSec;
-    d.last = trimTo(d.startSegs, d.id, d.mode, seconds, d.bounds);
+    const el = stripRef.current;
+    if (!d || !el) return;
+    // from the strip as laid out now: the magnifier changes the zoom mid-drag
+    const rect = el.getBoundingClientRect();
+    const seconds = (e.clientX - rect.left) / (rect.width / d.total);
+    d.last = trimToStep(d.startSegs, d.id, d.mode, seconds, d.bounds);
+    d.clientX = e.clientX;
     setDragSegs(d.last);
+    if (Math.abs(e.clientX - d.holdX) > 3) {
+      d.holdX = e.clientX;
+      armMagnify(d);
+    }
   };
   const endTrim = (e: React.PointerEvent) => {
     const d = dragRef.current;
     if (!d) return;
     dragRef.current = null;
+    if (d.timer) clearTimeout(d.timer);
     dragEndedAt.current = e.timeStamp;
     setDragSegs(null);
     setDragTotal(null);
-    p.history.commit(d.last);
+    setTrimming(null);
+    // on release the edge moves to the frame both exports cut at (≤ half a frame)
+    p.history.commit(snapTrimToFrame(d.last, d.id, d.mode, d.bounds, p.fps));
+    if (d.prevPps !== null) {
+      // back to the zoom before the magnifier, around the handle
+      const prev = d.prevPps;
+      animateZoom(prev > 0 ? prev : fitPps, e.clientX, () => setBoost(undefined));
+    }
   };
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(zoomAnim.current);
+      cancelAnimationFrame(scrollRaf.current);
+      if (dragRef.current?.timer) clearTimeout(dragRef.current.timer);
+      if (holdRef.current) clearTimeout(holdRef.current.timer);
+      pressOff.current?.();
+    },
+    [],
+  );
+
+  // ── reorder handlers ────────────────────────────────────────────────
+  const cancelHold = () => {
+    const h = holdRef.current;
+    if (h) clearTimeout(h.timer);
+    holdRef.current = null;
+  };
+  const moveReorder = (clientX: number) => {
+    const r = reorderRef.current;
+    const strip = stripRef.current;
+    const sc = scrollRef.current;
+    if (!r || !strip || !sc) return;
+    // near an edge of the view: scroll along
+    const vr = sc.getBoundingClientRect();
+    if (clientX < vr.left + 24) sc.scrollLeft -= 8;
+    else if (clientX > vr.right - 24) sc.scrollLeft += 8;
+    const rect = strip.getBoundingClientRect();
+    const left = clientX - rect.left - r.grab;
+    const pxs = rect.width / totalDur;
+    const seg = r.startSegs.find((x) => x.id === r.id);
+    if (!seg) return;
+    const center = (left + ((seg.end - seg.start) * pxs) / 2) / pxs;
+    const order = moveSeg(r.startSegs, r.id, dropIndex(r.startSegs, r.id, center));
+    putReorder({ ...r, left, order: order === r.startSegs ? r.startSegs : order });
+  };
+  const dropReorder = (timeStamp: number, cancelled: boolean) => {
+    const r = reorderRef.current;
+    if (!r) return;
+    putReorder(null);
+    dragEndedAt.current = timeStamp;
+    // one undo step; a cancelled gesture (the system took it) drops nothing
+    if (!cancelled && r.order !== r.startSegs) p.history.commit(r.order);
+    p.setSelected(r.id);
+  };
+  const clipPointerDown = (e: React.PointerEvent, seg: EditorSeg) => {
+    if (e.button !== 0 || reorderRef.current) return;
+    cancelHold();
+    pressOff.current?.();
+    const el = e.currentTarget as HTMLElement;
+    const { pointerId, clientX: x0, clientY: y0 } = e;
+    const touch = e.pointerType !== "mouse";
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      if (reorderRef.current) moveReorder(ev.clientX);
+      else if (holdRef.current && Math.hypot(ev.clientX - x0, ev.clientY - y0) > HOLD_SLOP_PX) {
+        cancelHold();
+        off();
+      }
+    };
+    const onEnd = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      cancelHold();
+      off();
+      dropReorder(ev.timeStamp, ev.type === "pointercancel");
+    };
+    const off = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onEnd);
+      window.removeEventListener("pointercancel", onEnd);
+      if (pressOff.current === off) pressOff.current = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onEnd);
+    window.addEventListener("pointercancel", onEnd);
+    pressOff.current = off;
+    const timer = setTimeout(() => {
+      holdRef.current = null;
+      const strip = stripRef.current;
+      if (!strip || !el.isConnected) {
+        off();
+        return;
+      }
+      const rect = strip.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      if (touch) navigator.vibrate?.(10);
+      putReorder({ id: seg.id, startSegs: p.segments, grab: x0 - box.left, left: box.left - rect.left, order: p.segments });
+    }, HOLD_MS);
+    holdRef.current = { pointerId, timer };
+  };
+  // While a clip is lifted, a touch move drags it instead of scrolling.
+  // Registered for good (not when the lift starts): a touch sequence
+  // only stays cancelable if a blocking listener was there at its start.
+  useEffect(() => {
+    const sc = scrollRef.current;
+    if (!sc) return;
+    const stop = (ev: TouchEvent) => {
+      if (reorderRef.current && ev.cancelable) ev.preventDefault();
+    };
+    sc.addEventListener("touchmove", stop, { passive: false });
+    return () => sc.removeEventListener("touchmove", stop);
+  }, []);
 
   /** A click on a clip selects it and seeks to the clicked point (not its
    *  start), so Split right after works there — not right after a trim. */
@@ -170,7 +420,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   const playheadRef = useRef<HTMLDivElement>(null);
   const layout = useRef({ segs, pps, contentW, canZoomOut, dragging: false });
   useEffect(() => {
-    layout.current = { segs, pps, contentW, canZoomOut, dragging: dragSegs !== null };
+    layout.current = { segs, pps, contentW, canZoomOut, dragging: dragSegs !== null || reorder !== null };
   });
   const { toSource, segments: committed } = p;
   const segId = p.mode === "proxy" ? p.playingSegId : null;
@@ -274,65 +524,130 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     </>
   ) : null;
 
-  const legend = (
-    <div className={s.legend}>
-      <span className={s.legendItem}>
-        <Cross color="var(--ed-removed)" />
-        {t("editor.legend.cut")}
-      </span>
-    </div>
-  );
-
   // zoom slider: log scale between fit and max
   const zoomRange = Math.log(Math.max(maxPps / fitPps, 1.0001));
   const zoomVal = Math.round((Math.log(effPps / fitPps) / zoomRange) * 100) || 0;
 
-  const clips = useMemo(() => {
+  const { clips, seamViews } = useMemo(() => {
     const out: { seg: EditorSeg; i: number; left: number; width: number; padL: number; padR: number }[] = [];
-    const sm = seams(segs);
+    const sv: SeamView[] = [];
+    const act = segs.filter((x) => !x.disabled);
     let acc = 0;
     let k = 0;
     segs.forEach((seg, i) => {
       if (seg.disabled) return;
       const d = seg.end - seg.start;
-      const before = k > 0 ? sm[k - 1] : null;
-      const after = sm[k] ?? null;
+      const prev = k > 0 ? act[k - 1] : null;
+      const next = act[k + 1] ?? null;
+      const cutBefore = !!prev && Math.abs(seg.start - prev.end) > 0.02;
+      const cutAfter = !!next && Math.abs(next.start - seg.end) > 0.02;
       out.push({
         seg,
         i,
         left: acc,
         width: d,
-        padL: before ? (before.cut ? 3 : 1) : 0,
-        padR: after ? (after.cut ? 3 : 1) : 0,
+        padL: prev ? (cutBefore ? 3 : 1) : 0,
+        padR: next ? (cutAfter ? 3 : 1) : 0,
       });
       acc += d;
+      if (next && cutAfter) {
+        // a ≥ b: a reordered pair (no footage removed between them)
+        sv.push({ k: sv.length, x: acc, a: seg.end, b: next.start, prev: seg.id, next: next.id });
+      }
       k++;
     });
-    return out;
+    return { clips: out, seamViews: sv };
   }, [segs]);
-  const cutSeams = useMemo(() => seams(segs).filter((x) => x.cut), [segs]);
-  const { marks, labelStep } = rulerMarks(0, contentW, totalDur, contentW, p.phone ? 48 : 64);
+  const pieces = p.cuts.pieces;
+  const seamKinds = useMemo(
+    () => seamViews.map((v) => (v.b > v.a ? gapKind(pieces, v.a, v.b) : null)),
+    [seamViews, pieces],
+  );
+  const legendKinds = useMemo(() => {
+    const present = new Set<PieceKind>();
+    for (const k of seamKinds) if (k) present.add(k === "bad_take" ? "voice_cmd" : k);
+    return (["silence", "filler", "voice_cmd", "user"] as PieceKind[]).filter((k) => present.has(k));
+  }, [seamKinds]);
+  const legend = (
+    <div className={s.legend} data-testid="ed-legend">
+      {(legendKinds.length ? legendKinds : (["silence"] as PieceKind[])).map((k) => (
+        <span key={k} className={s.legendItem}>
+          <Cross color={KIND_COLOR[k]} />
+          {legendKinds.length ? t(KIND_NAME[k]) : t("editor.legend.cut")}
+        </span>
+      ))}
+    </div>
+  );
+
+  // ── seam popover: what was removed, and Restore ─────────────────────
+  const [seamOpen, setSeamOpen] = useState<{ a: number; b: number; kind: PieceKind } | null>(null);
+  const seamAnchor = useRef<HTMLElement | null>(null);
+  const restoreSeam = () => {
+    if (!seamOpen) return;
+    p.cuts.restore([{ start: seamOpen.a, end: seamOpen.b }]);
+    setSeamOpen(null);
+  };
+
+  const { marks, labelStep } = rulerMarks(scrollX, contentW, totalDur, viewW, p.phone ? 48 : 64);
+
+  // the frame grid: while trimming, around the visible part of the trimmed clip
+  const fps = p.fps && p.fps > 0 ? p.fps : 0;
+  const frameLines = useMemo(() => {
+    if (!trimming || !fps || pps / fps < FRAME_GRID_PX) return [];
+    const c = clips.find((x) => x.seg.id === trimming.id);
+    if (!c) return [];
+    const lo = (scrollX - 40) / pps;
+    const hi = (scrollX + viewW + 40) / pps;
+    // the clip's own footage plus what a trim can grow into on the moving side
+    const a = c.seg.start - (trimming.mode === "start" ? 2 : 0);
+    const b = c.seg.end + (trimming.mode === "end" ? 2 : 0);
+    return frameTimes(a, b, fps, 600)
+      .map((ft) => c.left + (ft - c.seg.start))
+      .filter((x) => x >= lo && x <= hi)
+      .map((x) => x * pps);
+  }, [trimming, pps, fps, clips, scrollX, viewW]);
+  const readout = (() => {
+    if (!trimming) return null;
+    const c = clips.find((x) => x.seg.id === trimming.id);
+    if (!c) return null;
+    const edge = trimming.mode === "start" ? c.seg.start : c.seg.end;
+    const x = (trimming.mode === "start" ? c.left : c.left + c.width) * pps;
+    // the value the export uses: the edge's frame (the handle itself moves in 0.01 s)
+    const used = frameEdge(edge, fps);
+    return { x, text: `${used.toFixed(2).replace(".", dec)} s` };
+  })();
+  const magnified = boost !== undefined;
 
   const strip = (
     <div
       ref={scrollRef}
       className={s.strip}
       data-testid="timeline-scroll"
-      onScroll={() => {
+      data-magnified={magnified || undefined}
+      onScroll={(e) => {
         if (!scrubbing.current) lastUserScrollRef.current = Date.now();
+        const x = e.currentTarget.scrollLeft;
+        cancelAnimationFrame(scrollRaf.current);
+        scrollRaf.current = requestAnimationFrame(() => setScrollX(x));
       }}
     >
       <div className={s.stripInner} style={{ width: contentW }}>
         <div className={s.ruler} data-testid="timeline-ruler" {...scrubHandlers}>
           {marks.map((m) =>
-            m.kind === "tenth" || m.kind === "half" ? null : (
+            !tickShown(m.kind, pps) ? null : (
               <span
                 key={m.t}
                 className={s.tick}
+                data-kind={m.kind}
                 style={{
                   left: m.x,
-                  height: m.kind === "major" ? 7 : 4,
-                  background: m.kind === "major" ? "rgba(255,255,255,.26)" : "rgba(255,255,255,.12)",
+                  height: m.kind === "major" ? 7 : m.kind === "second" ? 4 : m.kind === "half" ? 3 : 2,
+                  background:
+                    m.kind === "major"
+                      ? "rgba(255,255,255,.26)"
+                      : m.kind === "second"
+                        ? "rgba(255,255,255,.12)"
+                        : "rgba(255,255,255,.09)",
                 }}
               />
             ),
@@ -345,36 +660,70 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
               </span>
             ))}
         </div>
-        <div ref={stripRef} className={s.clips}>
-          {clips.map(({ seg, i, left, width, padL, padR }) => (
-            <ClipView
-              key={seg.id}
-              seg={seg}
-              index={i}
-              selected={seg.id === p.selected}
-              left={left * pps + padL}
-              width={Math.max(2, width * pps - padL - padR)}
-              title={t("editor.clipTitle", { n: i + 1, len: fmtSeconds(seg.end - seg.start, dec) })}
-              onClip={onClip}
-              onTrimStart={startTrim}
-              onTrimMove={moveTrim}
-              onTrimEnd={endTrim}
-            />
+        <div ref={stripRef} className={s.clips} data-reordering={reorder ? true : undefined}>
+          {clips.map(({ seg, i, left, width, padL, padR }) => {
+            const lifted = reorder?.id === seg.id;
+            return (
+              <ClipView
+                key={seg.id}
+                seg={seg}
+                index={i}
+                selected={seg.id === p.selected}
+                lifted={lifted}
+                left={lifted ? reorder.left : left * pps + padL}
+                width={Math.max(2, width * pps - padL - padR)}
+                title={`${t("editor.clipTitle", { n: i + 1, len: fmtSeconds(seg.end - seg.start, dec) })} · ${t("editor.clip.moveHint")}`}
+                onClip={onClip}
+                onPress={clipPointerDown}
+                onTrimStart={startTrim}
+                onTrimMove={moveTrim}
+                onTrimEnd={endTrim}
+              />
+            );
+          })}
+          {frameLines.map((x) => (
+            <span key={x} className={s.frameLine} style={{ left: x }} aria-hidden />
           ))}
-          {cutSeams.map((x, k) => (
-            <div
-              key={k}
-              className={s.seam}
-              style={{ left: x.at * pps }}
-              title={t("editor.seamTip", { len: fmtSeconds(x.gap, dec) })}
-              aria-hidden
-            >
-              <span className={s.seamLine} />
-              <span className={s.seamGlyph}>
-                <Cross color="var(--ed-removed)" />
-              </span>
-            </div>
-          ))}
+          {!reorder &&
+            seamViews.map((v) => {
+              const kind = seamKinds[v.k];
+              if (!kind) {
+                // a reordered boundary: no footage removed here
+                return <span key={`m${v.k}`} className={s.seamMoved} style={{ left: v.x * pps }} aria-hidden />;
+              }
+              const len = fmtSeconds(v.b - v.a, dec);
+              const label = t("editor.seam.label", { kind: t(KIND_NAME[kind]), len });
+              // next to a selected clip its trim handles win
+              const nearSel = p.selected === v.prev || p.selected === v.next;
+              return (
+                <button
+                  key={v.k}
+                  type="button"
+                  className={s.seam}
+                  data-seam={kind}
+                  data-testid="ed-seam"
+                  tabIndex={-1}
+                  style={{ left: v.x * pps, pointerEvents: nearSel ? "none" : undefined }}
+                  title={label}
+                  aria-label={label}
+                  aria-haspopup="dialog"
+                  onClick={(e) => {
+                    seamAnchor.current = e.currentTarget;
+                    setSeamOpen({ a: v.a, b: v.b, kind });
+                  }}
+                >
+                  <span className={s.seamLine} style={{ background: KIND_COLOR[kind], opacity: 0.35 }} />
+                  <span className={s.seamGlyph}>
+                    <Cross color={KIND_COLOR[kind]} />
+                  </span>
+                </button>
+              );
+            })}
+          {readout && (
+            <span className={`${s.mono} ${s.trimReadout}`} style={{ left: readout.x }} data-testid="ed-trim-readout">
+              {readout.text}
+            </span>
+          )}
         </div>
         <div ref={playheadRef} className={s.playhead} aria-hidden data-testid="ed-playhead">
           <div className={s.playheadLine} />
@@ -390,6 +739,30 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
           </div>
         </div>
       </div>
+      {seamOpen && (
+        <Popover
+          anchor={seamAnchor}
+          onClose={() => setSeamOpen(null)}
+          label={t(KIND_NAME[seamOpen.kind])}
+          placement="above"
+          width={260}
+          testId="ed-seam-popover"
+        >
+          <div className={s.seamPop}>
+            <div className={s.seamPopHead}>
+              <Cross color={KIND_COLOR[seamOpen.kind]} />
+              <span>{t(KIND_NAME[seamOpen.kind])}</span>
+            </div>
+            <div className={s.seamPopText}>
+              {t("editor.seam.removed", { len: fmtSeconds(seamOpen.b - seamOpen.a, dec) })}
+            </div>
+            <button type="button" className={s.mi} onClick={restoreSeam} data-testid="ed-seam-restore">
+              <RotateCcw size={14} strokeWidth={1.75} aria-hidden />
+              <span>{t("editor.seam.restore")}</span>
+            </button>
+          </div>
+        </Popover>
+      )}
     </div>
   );
 
@@ -451,10 +824,12 @@ function ClipView({
   seg,
   index,
   selected,
+  lifted,
   left,
   width,
   title,
   onClip,
+  onPress,
   onTrimStart,
   onTrimMove,
   onTrimEnd,
@@ -462,10 +837,12 @@ function ClipView({
   seg: EditorSeg;
   index: number;
   selected: boolean;
+  lifted: boolean;
   left: number;
   width: number;
   title: string;
   onClip: (seg: EditorSeg, fraction: number, timeStamp: number) => void;
+  onPress: (e: React.PointerEvent, seg: EditorSeg) => void;
   onTrimStart: (e: React.PointerEvent, id: string, mode: "start" | "end") => void;
   onTrimMove: (e: React.PointerEvent) => void;
   onTrimEnd: (e: React.PointerEvent) => void;
@@ -479,9 +856,13 @@ function ClipView({
     <div
       className={s.clip}
       data-selected={selected}
+      data-lifted={lifted || undefined}
       data-testid={`clip-${index}`}
+      data-seg={seg.id}
       title={title}
       style={{ left, width }}
+      onPointerDown={(e) => onPress(e, seg)}
+      onContextMenu={(e) => e.preventDefault()}
       onClick={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
         onClip(seg, r.width > 0 ? Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) : 0, e.timeStamp);

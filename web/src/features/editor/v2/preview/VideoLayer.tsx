@@ -8,7 +8,7 @@
  * the picture plays / pauses (editor.md §4.4).
  */
 import dynamic from "next/dynamic";
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useDeferredValue, useMemo, type ReactNode } from "react";
 import { useT } from "@/i18n";
 import type { Phrase, Subtitle } from "@/features/editor/legacy/buildPhrases";
 import type { EditSession } from "@/features/editor/session/useEditSession";
@@ -86,6 +86,10 @@ function CaptionSlotImpl({ session, store, phrases, units, captionPreset, durati
           : keptSegments,
     [mode, editSegs, videoSegments, keptSegments],
   );
+  // A timeline edit moves the cuts the captions page-break at: the overlay
+  // re-pages in a render of its own, after the edit is on screen (UX10,
+  // the owner's "brief hang" after a trim).
+  const deferredSegments = useDeferredValue(segments);
   if (captionLayer) {
     return (
       <div data-testid="ed-caption-slot" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1 }}>
@@ -103,7 +107,7 @@ function CaptionSlotImpl({ session, store, phrases, units, captionPreset, durati
           units={units}
           captionPreset={captionPreset}
           mode={mode}
-          segments={segments}
+          segments={deferredSegments}
           duration={duration}
         />
       ) : (

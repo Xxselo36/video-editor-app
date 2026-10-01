@@ -49,7 +49,7 @@ export function EditorSkeleton({ phone, onBack }: { phone: boolean; onBack?: () 
       <section className={s.dock}>
         <div style={{ display: "flex", gap: 6, padding: phone ? "84px 16px 0" : "66px 20px 0" }}>
           {[14, 22, 12, 18, 26, 8].map((w, i) => (
-            <div key={i} className={s.skel} style={{ flex: w, height: phone ? 96 : 64, borderRadius: 4 }} />
+            <div key={i} className={s.skel} style={{ flex: w, height: phone ? 80 : 52, borderRadius: 4 }} />
           ))}
         </div>
       </section>

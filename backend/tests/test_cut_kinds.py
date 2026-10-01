@@ -243,3 +243,32 @@ def test_a_text_cut_reaches_the_render(client, modal_r2, monkeypatch, engine):  
     if engine == "v2":
         texts = [w["text"] for w in kw["captions"]["words"]]
         assert "ten" not in texts and texts[:3] == ["Nobody", "waits", "seconds."]
+
+
+@pytest.mark.parametrize("engine", ["v1", "v2"])
+def test_a_reordered_timeline_reaches_the_render_in_its_order(client, modal_r2, monkeypatch, engine):  # noqa: F811
+    """The owner's long-press reorder: the clip order the editor saves is
+    the order both renders get (segments in the Modal call, the v2
+    captions laid out on that order)."""
+    import backend.main as M
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", engine)
+    monkeypatch.setattr(M, "_rebuild_preview", lambda *a, **k: None)
+    job = _job(media_store="r2", doc=_doc())
+    order = [{"start": 2.0, "end": 3.0}, {"start": 0.0, "end": 1.5}]   # "Really never." first
+    assert client.post(f"/jobs/{job.id}/edit-segments", json={"segments": order}).status_code == 200
+    units = [
+        {"start": 0.0, "end": 0.66, "text": "Nobody waits", "original_start": 0.0, "original_end": 0.66},
+        {"start": 0.7, "end": 1.5, "text": "ten seconds.", "original_start": 0.95, "original_end": 1.5},
+        {"start": 1.6, "end": 2.5, "text": "Really never.", "original_start": 2.0, "original_end": 2.9},
+    ]
+    assert client.post(f"/jobs/{job.id}/render", json={"subtitles": units, "disabled_cuts": []}).status_code == 200
+    assert _done(job.id)
+    [kw] = modal_r2.spawns
+    assert kw["segments"] == [[2.0, 3.0], [0.0, 1.5]]
+    if engine == "v2":
+        from backend import captions_v2 as C
+        clips = C.clip_plan(kw["segments"], None, 30.0)
+        out = C.output_words(kw["captions"], clips)
+        by_start = [w["text"] for w in sorted(out["words"], key=lambda w: w["start"])]
+        assert by_start[:2] == ["Really", "never."]          # the moved clip plays first
+        assert by_start[2] == "Nobody"

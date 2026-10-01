@@ -5,12 +5,13 @@
  * full labels don't fit side by side in the 380 px panel), the phone a
  * row of four actions at the bottom of the Text sheet.
  *
- *   Cut from video     disabled until UX10 (cuts in text)
+ *   Cut from video     the words out of the video (⌫, UX10); when every
+ *                      selected word is already cut: Restore
  *   Hide / Show        hidden words stay in the text, not in the captions (H)
  *   Edit               fix the text (Enter)
  *   New caption line   a forced caption break before the first word
  */
-import { CaseSensitive, CornerDownRight, Eye, EyeOff, Pencil, Scissors } from "lucide-react";
+import { CaseSensitive, CornerDownRight, Eye, EyeOff, Pencil, RotateCcw, Scissors } from "lucide-react";
 import type { RefObject } from "react";
 import { useT } from "@/i18n";
 import s from "../../editor.module.css";
@@ -22,6 +23,9 @@ export type SelectionBarProps = {
   /** The first selected word starts a caption line (forced break). */
   broken: boolean;
   editing: boolean;
+  /** Every selected word is cut from the video: the action restores them. */
+  removed: boolean;
+  onCut: () => void;
   onHide: () => void;
   onEdit: () => void;
   onBreak: () => void;
@@ -32,15 +36,17 @@ export function SelectionBar({ barRef, ...p }: SelectionBarProps) {
   const t = useT();
   const hideLabel = p.hidden ? t("editor.word.show") : t("editor.word.hide");
   const breakLabel = p.broken ? t("editor.word.unbreak") : t("editor.word.break");
+  const cutLabel = p.removed ? t("editor.word.restore") : t("editor.word.cut");
+  const CutIcon = p.removed ? RotateCcw : Scissors;
   // Keep the words' focus: a mouse press on an action doesn't blur the
   // inline input before its click (the input commits on blur).
   const keep = (e: React.MouseEvent) => e.preventDefault();
   if (p.phone) {
     return (
       <div role="toolbar" aria-label={t("editor.word.actions")} className={s.mbar} data-testid="ed-wordbar">
-        <button type="button" className={s.mact} aria-disabled title={t("editor.word.cutSoon")} onMouseDown={keep}>
-          <Scissors size={18} strokeWidth={1.75} aria-hidden />
-          <span>{t("editor.word.cutShort")}</span>
+        <button type="button" className={s.mact} title={cutLabel} onMouseDown={keep} onClick={p.onCut} data-testid="ed-word-cut">
+          <CutIcon size={18} strokeWidth={1.75} aria-hidden />
+          <span>{p.removed ? t("editor.word.restoreShort") : t("editor.word.cutShort")}</span>
         </button>
         <button type="button" className={s.mact} onMouseDown={keep} onClick={p.onHide} data-testid="ed-word-hide">
           {p.hidden ? <Eye size={18} strokeWidth={1.75} aria-hidden /> : <EyeOff size={18} strokeWidth={1.75} aria-hidden />}
@@ -81,9 +87,19 @@ export function SelectionBar({ barRef, ...p }: SelectionBarProps) {
       style={{ visibility: "hidden" }}
       data-testid="ed-wordbar"
     >
-      <button type="button" className={s.mi} aria-disabled title={t("editor.word.cutSoon")} onMouseDown={keep}>
-        <Scissors size={16} strokeWidth={1.75} aria-hidden />
-        <span>{t("editor.word.cut")}</span>
+      <button
+        type="button"
+        className={s.mi}
+        title={`${cutLabel} · ⌫`}
+        onMouseDown={keep}
+        onClick={p.onCut}
+        data-testid="ed-word-cut"
+      >
+        <CutIcon size={16} strokeWidth={1.75} aria-hidden />
+        <span>{cutLabel}</span>
+        <span className={s.miKey} aria-hidden>
+          ⌫
+        </span>
       </button>
       <button type="button" className={s.mi} title={`${hideLabel} · H`} onMouseDown={keep} onClick={p.onHide} data-testid="ed-word-hide">
         {p.hidden ? <Eye size={16} strokeWidth={1.75} aria-hidden /> : <EyeOff size={16} strokeWidth={1.75} aria-hidden />}

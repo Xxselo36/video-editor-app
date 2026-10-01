@@ -22,14 +22,16 @@ async function openV2(page: Page, jobId: string, storage: Record<string, unknown
     .toBeGreaterThanOrEqual(1);
 }
 
-/** Visible interactive controls outside the transcript and the tile grid. */
+/** Visible interactive controls outside the transcript and the tile grid.
+ *  The cut seams (UX10: one tappable ✕ per cut, out of the tab order)
+ *  are content like the transcript's words and chips, not controls. */
 function countControls(page: Page) {
   return page.evaluate(() => {
     const els = Array.from(
       document.querySelectorAll<HTMLElement>('button, [role=button], [role=tab], input, [role=slider]'),
     );
     const visible = els.filter((el) => {
-      if (el.closest('[data-testid="ed-transcript"], [data-testid="ed-style"]')) return false;
+      if (el.closest('[data-testid="ed-transcript"], [data-testid="ed-style"], [data-seam]')) return false;
       const r = el.getBoundingClientRect();
       const cs = getComputedStyle(el);
       return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none";
@@ -65,6 +67,9 @@ test.describe("editor v2 layout", TAG, () => {
     expect(exp.y).toBeGreaterThanOrEqual(0);
     const side = await box(page, "ed-sidepanel");
     expect(side.width).toBeCloseTo(380, 0);
+    // clips 52 px (owner, UX10: "ganz leicht kleiner" than 64)
+    const clip = page.getByTestId("ed-timeline").getByTestId("clip-0");
+    expect((await clip.boundingBox())!.height).toBeCloseTo(52, 0);
     expect(await noDocumentScroll(page)).toEqual({ v: 0, h: 0 });
     const controls = await countControls(page);
     test.info().annotations.push({ type: "controls", description: `${controls.length}: ${controls.join(" | ")}` });
@@ -99,6 +104,15 @@ test.describe("editor v2 layout", TAG, () => {
     const controls = await countControls(page);
     test.info().annotations.push({ type: "controls", description: `${controls.length}: ${controls.join(" | ")}` });
     expect(controls.length, controls.join(" | ")).toBeLessThanOrEqual(10);
+
+    // clips 80 px (was 96); a selected clip's trim handles keep a 44 px target
+    const clip = page.getByTestId("ed-timeline").getByTestId("clip-0");
+    expect((await clip.boundingBox())!.height).toBeCloseTo(80, 0);
+    await clip.click();
+    const handle = (await clip.getByTestId("clip-trim-end").boundingBox())!;
+    expect(handle.width).toBeGreaterThanOrEqual(44);
+    expect(handle.height).toBeGreaterThanOrEqual(44);
+    await page.keyboard.press("Escape");
 
     // The Text & cuts sheet: preview keeps its size, focus goes in and back.
     await page.getByTestId("ed-tab-text").click();
