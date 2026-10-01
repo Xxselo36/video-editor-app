@@ -14,7 +14,23 @@ set -uo pipefail
 opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=20
       -o Acquire::https::Timeout=20 -o Dpkg::Use-Pty=0)
 
-for attempt in 1 2; do
+# The runner's own mirror (azure.archive.ubuntu.com) was down for good
+# on 2026-10-01: attempt 3 switches every apt source to the main Ubuntu
+# archive (archive.ubuntu.com / security.ubuntu.com).
+use_main_archive() {
+  local f
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+           /etc/apt/sources.list.d/*.sources; do
+    [ -f "$f" ] || continue
+    sudo sed -i -E 's#https?://[a-z0-9.-]*\.?azure\.archive\.ubuntu\.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' "$f"
+  done
+}
+
+for attempt in 1 2 3; do
+  if [ "$attempt" = 3 ]; then
+    echo "::warning title=apt-get::switching to archive.ubuntu.com"
+    use_main_archive
+  fi
   if timeout 120 sudo apt-get "${opts[@]}" update -qq \
      && timeout 240 sudo apt-get "${opts[@]}" install -y -qq \
           --no-install-recommends "$@"; then
@@ -24,5 +40,5 @@ for attempt in 1 2; do
   sudo dpkg --configure -a || true
   sleep 5
 done
-echo "::error title=apt-get::installing $* failed twice (mirror down?)"
+echo "::error title=apt-get::installing $* failed three times (mirror down?)"
 exit 1
