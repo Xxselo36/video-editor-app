@@ -10,8 +10,9 @@ import type { EditorSeg } from "./mechanics";
 
 export type TimelineHistory = {
   /** Commit a new clip list as one undo step; `coalesce` groups rapid
-   *  changes of the same control (a slider drag) into ONE step. */
-  commit: (next: EditorSeg[], coalesce?: string) => void;
+   *  changes of the same control (a slider drag) into ONE step. True
+   *  when this commit added an undo step (false: merged into the last). */
+  commit: (next: EditorSeg[], coalesce?: string) => boolean;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
@@ -19,6 +20,11 @@ export type TimelineHistory = {
   history: EditorSeg[][];
   future: EditorSeg[][];
 };
+
+/** Whether a commit with `key` at `now` joins the last commit's undo step. */
+export function coalesces(last: { key: string; t: number } | null, key: string | undefined, now: number): boolean {
+  return !!key && !!last && last.key === key && now - last.t < 1000;
+}
 
 export function useTimelineHistory(
   segments: EditorSeg[],
@@ -34,13 +40,14 @@ export function useTimelineHistory(
   const commit = (next: EditorSeg[], coalesce?: string) => {
     const now = Date.now();
     const last = lastCommitRef.current;
-    const merge = coalesce && last && last.key === coalesce && now - last.t < 1000;
+    const merge = coalesces(last, coalesce, now);
     lastCommitRef.current = coalesce ? { key: coalesce, t: now } : null;
     if (!merge) {
       setHistory((h) => [...h, segments].slice(-50));
     }
     setFuture([]);
     onCommit(next);
+    return !merge;
   };
   const undo = () => {
     if (history.length === 0) return;

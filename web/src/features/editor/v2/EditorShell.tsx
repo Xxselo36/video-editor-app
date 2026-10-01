@@ -30,6 +30,7 @@ import {
 } from "@/features/editor/timeline/mechanics";
 import type { CutRange, SavedSeg } from "@/features/jobs/types";
 import { useEditorRoot, useOnline } from "./hooks";
+import { EditOrder, type Area } from "./editOrder";
 import { cutDuration } from "./model";
 import { BottomSheet } from "./panel/BottomSheet";
 import { StylePanel } from "./panel/StylePanel";
@@ -118,22 +119,27 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     return store.attach(v);
   }, [store, videoRef]);
 
+  // ── toast ───────────────────────────────────────────────────────────
+  const [toast, setToast] = useState<ToastState>(null);
+  const showToast = useCallback((msg: string, action?: { label: string; run: () => void }) => {
+    setToast({ msg, action, key: Date.now() });
+  }, []);
   const tlHistory = useTimelineHistory(editSegs, session.commitEditSegs);
   const doc = useDocSession(props.jobId, props.onCaptionSource, (word) => showToast(t("editor.save.wordFixed", { word })));
   const docStore = doc.status === "ready" ? doc.store : null;
 
   // ── one undo for text and timeline (until UX10 merges the stacks):
   // ⌘Z undoes the latest edit of either, in the order they were made.
-  const undoOrder = useRef<("doc" | "tl")[]>([]);
-  const redoOrder = useRef<("doc" | "tl")[]>([]);
+  const order = useMemo(() => new EditOrder(), []);
   const docCanUndo = useDocStore(docStore ?? EMPTY_STORE, docStore ? selCanUndo : NO_DOC_STATE);
   const docCanRedo = useDocStore(docStore ?? EMPTY_STORE, docStore ? selCanRedo : NO_DOC_STATE);
   const history: TimelineHistory = {
     ...tlHistory,
     commit: (next, coalesce) => {
-      tlHistory.commit(next, coalesce);
-      undoOrder.current.push("tl");
-      redoOrder.current = [];
+      // a coalesced slider drag is one step: recorded once
+      const added = tlHistory.commit(next, coalesce);
+      if (added) order.record("tl");
+      return added;
     },
     undo: () => stepHistory("undo"),
     redo: () => stepHistory("redo"),
@@ -143,29 +149,20 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   const applyDoc = useCallback(
     (op: (d: EditDoc) => EditDoc) => {
       if (!docStore?.apply(op)) return false;
-      undoOrder.current.push("doc");
-      redoOrder.current = [];
+      order.record("doc");
       return true;
     },
-    [docStore],
+    [docStore, order],
   );
   function stepHistory(kind: "undo" | "redo") {
-    const from = kind === "undo" ? undoOrder : redoOrder;
-    const to = kind === "undo" ? redoOrder : undoOrder;
-    const can = (a: "doc" | "tl") =>
+    const can = (a: Area) =>
       a === "doc"
         ? !!docStore && (kind === "undo" ? docStore.getState().past.length : docStore.getState().future.length) > 0
         : kind === "undo"
           ? tlHistory.canUndo
           : tlHistory.canRedo;
-    let area: "doc" | "tl" | undefined;
-    while ((area = from.current.pop()) && !can(area)) {
-      /* a step the other stack already dropped */
-    }
-    // Nothing recorded (e.g. after a reload): whichever stack has a step.
-    if (!area) area = can("tl") ? "tl" : can("doc") ? "doc" : undefined;
+    const area = order.take(kind, can);
     if (!area) return;
-    to.current.push(area);
     if (area === "tl") (kind === "undo" ? tlHistory.undo : tlHistory.redo)();
     else if (kind === "undo") docStore!.undo();
     else docStore!.redo();
@@ -207,10 +204,6 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   const fullscreenRef = useRef<(() => void) | null>(null);
 
   // ── toast ───────────────────────────────────────────────────────────
-  const [toast, setToast] = useState<ToastState>(null);
-  const showToast = useCallback((msg: string, action?: { label: string; run: () => void }) => {
-    setToast({ msg, action, key: Date.now() });
-  }, []);
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(null), toast.action ? 6000 : 4000);
