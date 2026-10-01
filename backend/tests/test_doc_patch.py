@@ -277,3 +277,35 @@ def test_big_patch_merge_is_linear():
     assert time.perf_counter() - t0 < 0.5
     assert len(out) == 49_400
     D.check_words(out)
+
+
+# ── UX8: v1 phrase edits next to the doc ─────────────────────────────
+
+
+def test_subtitles_report_the_phrases_rev(client):
+    """GET /subtitles says when the v1 transcript was saved (0: never),
+    so the v2 editor can tell a newer v1 edit from an older one."""
+    job = _review_job(subtitles=[{"start": 0, "end": 1, "text": "we are"}])
+    r = client.get(f"/jobs/{job.id}/subtitles")
+    assert r.status_code == 200
+    assert r.json()["phrases"] is None and r.json()["phrases_rev"] == 0
+    phrases = [{"start": 0, "end": 1, "original_start": 0, "original_end": 1, "text": "we were"}]
+    assert client.post(f"/jobs/{job.id}/phrases",
+                       json={"phrases": phrases, "rev": 1759300000123}).status_code == 200
+    body = client.get(f"/jobs/{job.id}/subtitles").json()
+    assert body["phrases_rev"] == 1759300000123
+    assert body["phrases"][0]["text"] == "we were"
+
+
+def test_unique_client_revs_round_trip(client):
+    """The editor's revs are microsecond timestamps plus a random part
+    (web docSave uniqueRev): stored and compared exactly."""
+    job = _review_job()
+    rev = 1759300000123456 + 789
+    r = _patch(client, job.id, {"base_rev": 0, "rev": rev,
+                                "words": {"upsert": [], "delete": ["w0005"]}})
+    assert r.status_code == 200 and r.json()["rev"] == rev
+    assert client.get(f"/jobs/{job.id}/doc").json()["rev"] == rev
+    stale = _patch(client, job.id, {"base_rev": 0, "rev": rev + 1})
+    assert stale.status_code == 409 and stale.json()["rev"] == rev
+    assert _patch(client, job.id, {"base_rev": rev, "rev": rev + 1}).status_code == 200
