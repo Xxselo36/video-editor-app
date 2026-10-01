@@ -271,3 +271,17 @@ def test_progress_writer_stores_the_stage():
     cur = store.get(job.id)
     assert (cur.stage, cur.message, cur.progress) == (
         "analyze.cleanup", "a finer note", 85.0)
+
+
+@pytest.mark.parametrize("minutes,seconds,too_long", [
+    ("30", 1801.5, True), ("30", 1800.5, False), ("0", 99999.0, False),
+    ("-1", 99999.0, False), ("30", None, False),
+])
+def test_length_cap_is_the_same_in_api_and_worker(monkeypatch, minutes,
+                                                   seconds, too_long):
+    """CLEO_MAX_MINUTES <= 0 is "no cap" for POST /jobs and the queue's
+    worker alike (and GET /config says so)."""
+    from backend import worker
+    monkeypatch.setenv("CLEO_MAX_MINUTES", minutes)
+    assert M._too_long(seconds) is too_long
+    assert worker._too_long(seconds) is too_long

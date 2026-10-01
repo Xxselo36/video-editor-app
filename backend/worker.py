@@ -145,7 +145,9 @@ def _max_minutes() -> float:
 
 
 def _too_long(seconds: float | None) -> bool:
-    return seconds is not None and seconds > _max_minutes() * 60 + 1
+    """backend/main.py _too_long: CLEO_MAX_MINUTES <= 0 means no cap."""
+    return (seconds is not None and _max_minutes() > 0
+            and seconds > _max_minutes() * 60 + 1)
 
 
 def _cap_settings(settings: dict) -> dict:
