@@ -66,8 +66,12 @@ export function PreviewStage({
       if (phone) {
         // 186×330, smaller on short screens (the stage row is as tall as
         // the preview: the dock keeps its minimum, the tab bar fits).
-        const H = root?.clientHeight || window.innerHeight;
-        const W = root?.clientWidth || window.innerWidth;
+        // the root's padding is the safe area (UX7c): not room for the preview
+        const cs = root ? getComputedStyle(root) : null;
+        const padY = cs ? (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0) : 0;
+        const padX = cs ? (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) : 0;
+        const H = (root?.clientHeight || window.innerHeight) - padY;
+        const W = (root?.clientWidth || window.innerWidth) - padX;
         const landscape = root?.dataset.layout === "landscape";
         const tabH = root?.querySelector<HTMLElement>("[data-testid=ed-tabbar]")?.offsetHeight || (landscape ? 48 : 56);
         const f = phoneFrame(W, H, { landscape, sheetOpen, tabH });
@@ -123,7 +127,14 @@ export function PreviewStage({
           data-testid="ed-frame"
           data-tour="preview"
         >
-          <VideoLayer {...slot} tapToPlay={phone && sheetOpen && !fs.active} paused={paused} poster={poster} />
+          {/* iPhone pseudo-fullscreen has no player bar: a tap anywhere
+              plays / pauses, with a play glyph while paused (UX7c) */}
+          <VideoLayer
+            {...slot}
+            tapToPlay={(phone && sheetOpen && !fs.active) || fs.pseudo}
+            paused={paused}
+            poster={poster}
+          />
           <div className={s.frameRing} aria-hidden />
         </div>
         {fs.active && (
