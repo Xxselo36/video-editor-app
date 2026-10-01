@@ -186,16 +186,101 @@ export type CaptionUnit = {
   confidence?: number;
 };
 
+/** A unit this short is dropped by the burn (video_editor_premiere.py
+ *  _subs_for skips ≤ 0.05 s): it is joined to a neighbour instead. */
+export const MIN_UNIT_S = 0.05;
+
+type GluedUnit = CaptionUnit & { n: number; breakBefore: boolean };
+
 /**
- * What the preview and the v1 render payload get from the doc until UT4
- * renders from the doc itself: one unit per captioned word (its source
- * time) and sentences of them (a forced break starts a new one; ≤ 10
- * words, as buildPhrases). Hidden words are in neither.
+ * The caption units of the doc, glued like v1 (src/audio.py
+ * _build_subtitles_from_transcription): inside a segment a word of ≤ 3
+ * characters takes the next word with it. The doc has no Whisper
+ * segments; a segment ends at a sentence end, a pause over 1.5 s or a
+ * forced break. Hidden words (fillers, the user's) are left out first,
+ * as v1 drops fillers before gluing. A unit of ≤ MIN_UNIT_S joins its
+ * neighbour in the segment (a word squeezed by a split), so the burn
+ * never drops it. For an unedited doc this gives v1's units
+ * (testdata/caption_units_vectors.json).
+ */
+export function captionUnits(words: readonly DocWord[]): GluedUnit[] {
+  const segs: DocWord[][] = [];
+  let seg: DocWord[] = [];
+  let forced = false;
+  const breaks = new Set<DocWord>();
+  for (const w of words) {
+    if (!captioned(w)) {
+      forced ||= !!w.breakBefore;
+      continue;
+    }
+    const prev = seg[seg.length - 1];
+    const brk = forced || !!w.breakBefore;
+    forced = false;
+    if (prev && (brk || SENTENCE_END.test(prev.text) || w.start - prev.end > 1.5)) {
+      segs.push(seg);
+      seg = [];
+    }
+    if (brk && (prev || segs.length)) breaks.add(w);
+    seg.push(w);
+  }
+  if (seg.length) segs.push(seg);
+  const out: GluedUnit[] = [];
+  const unit = (ws: DocWord[]): GluedUnit => {
+    const a = ws[0];
+    const z = ws[ws.length - 1];
+    const u: GluedUnit = {
+      start: a.start,
+      end: z.end,
+      text: ws.map((w) => w.text.trim()).join(" "),
+      original_start: a.start,
+      original_end: z.end,
+      n: ws.length,
+      breakBefore: breaks.has(a),
+    };
+    const confs = ws.filter((w) => w.conf !== undefined).map((w) => w.conf!);
+    if (confs.length) u.confidence = Math.min(...confs);
+    return u;
+  };
+  for (const sw of segs) {
+    const groups: DocWord[][] = [];
+    for (let i = 0; i < sw.length; ) {
+      if ([...sw[i].text.trim()].length <= 3 && i + 1 < sw.length) {
+        groups.push([sw[i], sw[i + 1]]);
+        i += 2;
+      } else groups.push([sw[i++]]);
+    }
+    // no unit the burn would drop: a too-short one joins its neighbour
+    for (let k = 0; k < groups.length && groups.length > 1; ) {
+      const g = groups[k];
+      if (g[g.length - 1].end - g[0].start > MIN_UNIT_S) {
+        k++;
+        continue;
+      }
+      if (k + 1 < groups.length) groups.splice(k, 2, [...g, ...groups[k + 1]]);
+      else {
+        groups.splice(k - 1, 2, [...groups[k - 1], ...g]);
+        k--;
+      }
+    }
+    for (const g of groups) out.push(unit(g));
+  }
+  return out;
+}
+
+const PHRASE_END = /[.!?…]["'»)\]]*\s*$/;
+
+/**
+ * What the preview and — until UT4 renders from the doc itself — the v1
+ * render payload get from the doc: the glued units of captionUnits
+ * (source times) and the editor sentences over them, built like v1's
+ * buildPhrases (sentence end, a pause over 1.5 s, at most 10 words) plus
+ * a forced break. Hidden words are in neither.
  */
 export function captionSource(words: readonly DocWord[]): { phrases: CaptionPhrase[]; units: CaptionUnit[] } {
-  const units: CaptionUnit[] = [];
+  const glued = captionUnits(words);
   const phrases: CaptionPhrase[] = [];
-  let cur: DocWord[] = [];
+  let cur: GluedUnit[] = [];
+  let n = 0;
   const flush = () => {
     if (!cur.length) return;
     const a = cur[0];
@@ -203,26 +288,26 @@ export function captionSource(words: readonly DocWord[]): { phrases: CaptionPhra
     phrases.push({
       start: a.start,
       end: b.end,
-      original_start: a.start,
-      original_end: b.end,
-      text: cur.map((w) => w.text).join(" "),
-      confidence: cur.reduce((n, w) => n + (w.conf ?? 1), 0) / cur.length,
+      original_start: a.original_start,
+      original_end: b.original_end,
+      text: cur.map((u) => u.text).join(" "),
+      confidence: cur.reduce((x, u) => x + (u.confidence ?? 1), 0) / cur.length,
     });
     cur = [];
+    n = 0;
   };
-  for (const w of words) {
-    if (!captioned(w)) {
-      if (w.breakBefore) flush();
-      continue;
-    }
+  for (const u of glued) {
     const prev = cur[cur.length - 1];
-    if (prev && (w.breakBefore || SENTENCE_END.test(prev.text) || w.start - prev.end > 1.5 || cur.length >= 10)) flush();
-    cur.push(w);
-    const u: CaptionUnit = { start: w.start, end: w.end, text: w.text, original_start: w.start, original_end: w.end };
-    if (w.conf !== undefined) u.confidence = w.conf;
-    units.push(u);
+    if (prev && (u.breakBefore || PHRASE_END.test(prev.text) || u.start - prev.end > 1.5 || n + u.n > 10)) flush();
+    cur.push(u);
+    n += u.n;
   }
   flush();
+  const units = glued.map((g) => {
+    const u: CaptionUnit = { start: g.start, end: g.end, text: g.text, original_start: g.original_start, original_end: g.original_end };
+    if (g.confidence !== undefined) u.confidence = g.confidence;
+    return u;
+  });
   return { phrases, units };
 }
 

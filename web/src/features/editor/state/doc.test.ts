@@ -207,12 +207,35 @@ describe("rows and caption source", () => {
 
   it("captions skip hidden words and break at forced breaks", () => {
     let d = hideWords(base(), ["w0002"], true);
-    d = setBreak(d, "w0003", true);
+    d = setBreak(d, "w0004", true);
     const { phrases, units } = captionSource(d.words);
+    // "ten" (≤ 3 chars) is glued to the next word — but not across the break
     expect(units.map((u) => u.text)).toEqual(["Nobody", "ten", "seconds.", "Mistake", "number", "two."]);
-    expect(phrases.map((p) => p.text)).toEqual(["Nobody", "ten seconds.", "Mistake number two."]);
+    expect(phrases.map((p) => p.text)).toEqual(["Nobody ten", "seconds.", "Mistake number two."]);
     expect(units[1]).toMatchObject({ original_start: 0.8, original_end: 1.1 });
-    expect(phrases[0].original_start).toBe(0);
+    const plain = captionSource(base().words);
+    expect(plain.units.map((u) => u.text)).toEqual(["Nobody", "waits", "ten seconds.", "Mistake", "number", "two."]);
+    expect(plain.units[2]).toMatchObject({ original_start: 0.8, original_end: 1.6 });
+  });
+
+  it("an unedited doc gives v1's units (testdata/caption_units_vectors.json, from src/audio.py)", () => {
+    const vec: { vectors: { name: string; words: DocWord[]; units: { text: string; start: number; end: number }[] }[] } = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, "../../../../../testdata/caption_units_vectors.json"), "utf8"),
+    );
+    expect(vec.vectors.length).toBeGreaterThan(2);
+    for (const v of vec.vectors) {
+      const got = captionSource(v.words).units.map((u) => ({ text: u.text, start: u.original_start, end: u.original_end }));
+      expect(got, v.name).toEqual(v.units);
+    }
+  });
+
+  it("no unit the burn would drop (≤ 50 ms): it joins a neighbour", () => {
+    const d = docOf([W("a", "really", 0, 0.4), W("b", "long", 0.4, 0.42), W("c", "words", 0.42, 0.9), W("d", "here.", 0.9, 1.3)]);
+    const { units } = captionSource(d.words);
+    expect(units.map((u) => u.text)).toEqual(["really", "long words", "here."]);
+    for (const u of units) expect(u.original_end - u.original_start).toBeGreaterThan(0.05);
+    const last = docOf([W("a", "really", 0, 0.4), W("b", "end.", 0.4, 0.41)]);
+    expect(captionSource(last.words).units.map((u) => u.text)).toEqual(["really end."]);
   });
 
   it("wordAt finds the word under the playhead", () => {
