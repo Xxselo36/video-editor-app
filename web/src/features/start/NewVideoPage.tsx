@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppPage } from "@/components/AppPage";
 import { track } from "@/lib/analytics";
-import { startUpload } from "@/features/upload/uploadManager";
+import { loadUploadCode, startUpload } from "@/features/upload/uploadManager";
 import { ConfigureScreen } from "./ConfigureScreen";
 import { IdleScreen } from "./IdleScreen";
 import { PickerScreen } from "./PickerScreen";
@@ -133,6 +133,11 @@ export function NewVideoPage() {
   useEffect(() => {
     stateRef.current = { file, selectedPreset };
   });
+  // The upload code now, not when the file is picked (a deploy meanwhile
+  // would take this build's chunk away).
+  useEffect(() => {
+    loadUploadCode().catch(() => {});
+  }, []);
   useEffect(() => {
     // A reload on a step: its file is gone — start at the picker.
     if (urlStep()) window.history.replaceState(null, "", window.location.pathname);

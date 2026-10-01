@@ -287,6 +287,7 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "Proyek ini belum siap. Coba lagi sebentar lagi.",
   "app.errors.refunded": "Menitnya sudah dikembalikan.",
   "app.errors.tryAnotherVideo": "Coba video lain",
+  "app.errors.appUpdated": "CleoCuts baru saja diperbarui. Muat ulang halaman dan unggah videonya lagi.",
   "app.warnings.scriptUnsupported": "Teks untuk aksara bahasa ini belum tersedia.",
   "app.warnings.smartcamFailed": "Pelacakan pembicara tidak berhasil untuk video ini, jadi video dipotong di bagian tengah.",
   "app.audio.silent": "Audio tampak senyap — periksa apakah mikrofon menyala dan tidak dibisukan.",

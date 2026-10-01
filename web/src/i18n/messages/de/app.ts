@@ -287,6 +287,7 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "Dieses Projekt ist noch nicht bereit. Bitte versuch es gleich noch einmal.",
   "app.errors.refunded": "Die Minuten wurden dir wieder gutgeschrieben.",
   "app.errors.tryAnotherVideo": "Anderes Video probieren",
+  "app.errors.appUpdated": "CleoCuts wurde gerade aktualisiert. Lade die Seite neu und lade das Video erneut hoch.",
   "app.warnings.scriptUnsupported": "Untertitel sind für die Schrift dieser Sprache noch nicht verfügbar.",
   "app.warnings.smartcamFailed": "Die Sprecher-Verfolgung hat bei diesem Video nicht funktioniert, daher wurde es mittig zugeschnitten.",
   "app.audio.silent": "Der Ton scheint stumm zu sein – prüf, ob dein Mikrofon an und nicht stummgeschaltet ist.",

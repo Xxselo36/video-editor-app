@@ -283,6 +283,7 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "このプロジェクトはまだ準備ができていません。少し待ってからもう一度お試しください。",
   "app.errors.refunded": "利用時間（分）は払い戻されました。",
   "app.errors.tryAnotherVideo": "別の動画を試す",
+  "app.errors.appUpdated": "CleoCuts が更新されました。ページを再読み込みして、動画をもう一度アップロードしてください。",
   "app.warnings.scriptUnsupported": "この言語の文字では、字幕はまだ利用できません。",
   "app.warnings.smartcamFailed": "この動画では話者の追跡がうまくいかなかったため、中央でトリミングしました。",
   "app.audio.silent": "音声が無音のようです。マイクがオンで、ミュートになっていないか確認してください。",

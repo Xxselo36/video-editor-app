@@ -290,6 +290,7 @@ export const enApp = {
   "app.errors.docNotReady": "This project isn't ready yet. Please try again in a moment.",
   "app.errors.refunded": "The minutes were credited back.",
   "app.errors.tryAnotherVideo": "Try another video",
+  "app.errors.appUpdated": "CleoCuts was just updated. Please reload the page and upload the video again.",
   "app.warnings.scriptUnsupported": "Captions aren't available for this language's script yet.",
   "app.warnings.smartcamFailed": "Speaker tracking didn't work for this video, so it was centre-cropped.",
   "app.audio.silent": "Audio looks silent — check that your microphone is on and not muted.",

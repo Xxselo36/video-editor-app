@@ -287,6 +287,7 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "यह प्रोजेक्ट अभी तैयार नहीं है। कृपया थोड़ी देर में फिर कोशिश करें।",
   "app.errors.refunded": "मिनट वापस जमा कर दिए गए हैं।",
   "app.errors.tryAnotherVideo": "कोई दूसरा वीडियो आज़माएँ",
+  "app.errors.appUpdated": "CleoCuts अभी अपडेट हुआ है। कृपया पेज रीलोड करें और वीडियो फिर से अपलोड करें।",
   "app.warnings.scriptUnsupported": "इस भाषा की लिपि के लिए सबटाइटल अभी उपलब्ध नहीं हैं।",
   "app.warnings.smartcamFailed": "इस वीडियो में स्पीकर ट्रैकिंग काम नहीं कर पाई, इसलिए इसे बीच से क्रॉप किया गया।",
   "app.audio.silent": "ऑडियो खामोश लग रहा है — जाँचें कि माइक चालू है और म्यूट नहीं है।",

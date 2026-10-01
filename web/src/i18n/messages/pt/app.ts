@@ -285,6 +285,7 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "Este projeto ainda não está pronto. Tente novamente em instantes.",
   "app.errors.refunded": "Os minutos foram devolvidos.",
   "app.errors.tryAnotherVideo": "Tentar outro vídeo",
+  "app.errors.appUpdated": "O CleoCuts acabou de ser atualizado. Recarregue a página e envie o vídeo novamente.",
   "app.warnings.scriptUnsupported": "Ainda não há legendas para a escrita deste idioma.",
   "app.warnings.smartcamFailed": "O rastreamento de quem fala não funcionou neste vídeo, então ele foi cortado pelo centro.",
   "app.audio.silent": "O áudio parece mudo — verifique se o microfone está ligado e não silenciado.",

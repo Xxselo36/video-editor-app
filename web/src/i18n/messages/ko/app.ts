@@ -283,6 +283,7 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "이 프로젝트는 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.",
   "app.errors.refunded": "사용한 분을 돌려드렸어요.",
   "app.errors.tryAnotherVideo": "다른 동영상 시도하기",
+  "app.errors.appUpdated": "CleoCuts가 방금 업데이트되었어요. 페이지를 새로고침하고 동영상을 다시 업로드해 주세요.",
   "app.warnings.scriptUnsupported": "이 언어의 문자에는 아직 자막을 사용할 수 없어요.",
   "app.warnings.smartcamFailed": "이 동영상에서는 화자 추적이 되지 않아 가운데를 기준으로 잘랐어요.",
   "app.audio.silent": "소리가 없는 것 같아요. 마이크가 켜져 있고 음소거되지 않았는지 확인하세요.",

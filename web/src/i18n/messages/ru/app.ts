@@ -286,6 +286,7 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "Этот проект ещё не готов. Попробуй через минуту.",
   "app.errors.refunded": "Минуты вернули на твой счёт.",
   "app.errors.tryAnotherVideo": "Попробовать другое видео",
+  "app.errors.appUpdated": "CleoCuts только что обновился. Перезагрузи страницу и загрузи видео ещё раз.",
   "app.warnings.scriptUnsupported": "Субтитры для письменности этого языка пока недоступны.",
   "app.warnings.smartcamFailed": "Отслеживание говорящего не сработало для этого видео, поэтому оно обрезано по центру.",
   "app.audio.silent": "Похоже, звука нет — проверь, что микрофон включён и не отключён.",

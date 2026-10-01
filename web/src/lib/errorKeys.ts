@@ -42,6 +42,8 @@ export const ERROR_KEYS: Record<string, MessageKey> = {
 /** Codes the browser itself gives a failure (no server answer to go by). */
 export const CLIENT_ERROR_KEYS: Record<string, MessageKey> = {
   connection_lost: "app.errors.connection",
+  // The upload code (a chunk) of this build is gone: a new one is live.
+  app_updated: "app.errors.appUpdated",
   upload_interrupted: "app.errors.interrupted",
   server_no_response: "app.errors.serverNoResponse",
   // Refusals the upload protocol answers with (backend "protocol" codes).

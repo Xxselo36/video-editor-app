@@ -288,6 +288,7 @@ export const esApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "Este proyecto aún no está listo. Vuelve a intentarlo en un momento.",
   "app.errors.refunded": "Te hemos devuelto los minutos.",
   "app.errors.tryAnotherVideo": "Probar con otro vídeo",
+  "app.errors.appUpdated": "CleoCuts se acaba de actualizar. Recarga la página y vuelve a subir el vídeo.",
   "app.warnings.scriptUnsupported": "Los subtítulos aún no están disponibles para la escritura de este idioma.",
   "app.warnings.smartcamFailed": "El seguimiento del hablante no funcionó en este vídeo, así que se recortó por el centro.",
   "app.audio.silent": "El audio parece estar en silencio: comprueba que el micrófono esté encendido y no silenciado.",

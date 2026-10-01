@@ -288,6 +288,7 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "Ce projet n'est pas encore prêt. Réessaie dans un instant.",
   "app.errors.refunded": "Les minutes t'ont été recréditées.",
   "app.errors.tryAnotherVideo": "Essayer une autre vidéo",
+  "app.errors.appUpdated": "CleoCuts vient d'être mis à jour. Recharge la page et importe à nouveau la vidéo.",
   "app.warnings.scriptUnsupported": "Les sous-titres ne sont pas encore disponibles pour l'écriture de cette langue.",
   "app.warnings.smartcamFailed": "Le suivi de l'intervenant n'a pas fonctionné pour cette vidéo, elle a donc été recadrée au centre.",
   "app.audio.silent": "Le son semble muet — vérifie que ton micro est allumé et non coupé.",

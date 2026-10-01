@@ -288,6 +288,7 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "Bu proje henüz hazır değil. Lütfen birazdan tekrar dene.",
   "app.errors.refunded": "Dakikalar hesabına geri yüklendi.",
   "app.errors.tryAnotherVideo": "Başka bir video dene",
+  "app.errors.appUpdated": "CleoCuts az önce güncellendi. Sayfayı yenile ve videoyu tekrar yükle.",
   "app.warnings.scriptUnsupported": "Bu dilin yazı sistemi için altyazılar henüz kullanılamıyor.",
   "app.warnings.smartcamFailed": "Konuşmacı takibi bu videoda çalışmadı, bu yüzden video ortadan kırpıldı.",
   "app.audio.silent": "Ses sessiz görünüyor — mikrofonunun açık olduğunu ve sessize alınmadığını kontrol et.",

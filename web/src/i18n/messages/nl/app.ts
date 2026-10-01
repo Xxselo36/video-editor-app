@@ -287,6 +287,7 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.errors.docNotReady": "Dit project is nog niet klaar. Probeer het zo meteen opnieuw.",
   "app.errors.refunded": "De minuten zijn teruggestort.",
   "app.errors.tryAnotherVideo": "Probeer een andere video",
+  "app.errors.appUpdated": "CleoCuts is net bijgewerkt. Herlaad de pagina en upload de video opnieuw.",
   "app.warnings.scriptUnsupported": "Ondertitels zijn nog niet beschikbaar voor het schrift van deze taal.",
   "app.warnings.smartcamFailed": "Het volgen van de spreker werkte niet voor deze video, dus is hij in het midden bijgesneden.",
   "app.audio.silent": "Het geluid lijkt stil — controleer of je microfoon aan staat en niet gedempt is.",
