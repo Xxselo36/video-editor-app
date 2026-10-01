@@ -103,6 +103,7 @@ export const deEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.takeTip": "Cleo cut: verpatzter Take entfernt ({len}) · Klick holt ihn zurück",
   "editor.cuts.cleoOne": "Cleo cut: {count} verpatzter Take entfernt",
   "editor.cuts.cleoOther": "Cleo cut: {count} verpatzte Takes entfernt",
+  "editor.cuts.showTake": "Zeigen",
   "editor.cuts.restorePauses": "Pausen zurückholen",
   "editor.cuts.restoreFillers": "Füllwörter zurückholen",
   "editor.cuts.restoreTakes": "Takes von „Cleo cut“ zurückholen",

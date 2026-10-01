@@ -103,6 +103,7 @@ export const idEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.takeTip": "Cleo cut: take gagal dihapus ({len}) · klik untuk mengembalikan",
   "editor.cuts.cleoOne": "Cleo cut: {count} take gagal dihapus",
   "editor.cuts.cleoOther": "Cleo cut: {count} take gagal dihapus",
+  "editor.cuts.showTake": "Tampilkan",
   "editor.cuts.restorePauses": "Kembalikan jeda",
   "editor.cuts.restoreFillers": "Kembalikan kata pengisi",
   "editor.cuts.restoreTakes": "Kembalikan take Cleo cut",

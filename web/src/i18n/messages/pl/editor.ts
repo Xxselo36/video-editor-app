@@ -103,6 +103,7 @@ export const plEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.takeTip": "Cleo cut: usunięto nieudane ujęcie ({len}) · kliknij, by przywrócić",
   "editor.cuts.cleoOne": "Cleo cut: usunięte nieudane ujęcia: {count}",
   "editor.cuts.cleoOther": "Cleo cut: usunięte nieudane ujęcia: {count}",
+  "editor.cuts.showTake": "Pokaż",
   "editor.cuts.restorePauses": "Przywróć pauzy",
   "editor.cuts.restoreFillers": "Przywróć wtrącenia",
   "editor.cuts.restoreTakes": "Przywróć ujęcia Cleo cut",

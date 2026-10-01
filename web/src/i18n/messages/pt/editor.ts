@@ -103,6 +103,7 @@ export const ptEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.takeTip": "Cleo cut: tomada ruim removida ({len}) · clique para trazer de volta",
   "editor.cuts.cleoOne": "Cleo cut: {count} tomada ruim removida",
   "editor.cuts.cleoOther": "Cleo cut: {count} tomadas ruins removidas",
+  "editor.cuts.showTake": "Mostrar",
   "editor.cuts.restorePauses": "Trazer pausas de volta",
   "editor.cuts.restoreFillers": "Trazer vícios de linguagem de volta",
   "editor.cuts.restoreTakes": "Trazer tomadas do Cleo cut de volta",

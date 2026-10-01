@@ -103,6 +103,7 @@ export const trEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.takeTip": "Cleo cut: bozuk çekim kaldırıldı ({len}) · geri getirmek için tıkla",
   "editor.cuts.cleoOne": "Cleo cut: {count} bozuk çekim kaldırıldı",
   "editor.cuts.cleoOther": "Cleo cut: {count} bozuk çekim kaldırıldı",
+  "editor.cuts.showTake": "Göster",
   "editor.cuts.restorePauses": "Duraklamaları geri getir",
   "editor.cuts.restoreFillers": "Dolgu sözcüklerini geri getir",
   "editor.cuts.restoreTakes": "Cleo cut çekimlerini geri getir",

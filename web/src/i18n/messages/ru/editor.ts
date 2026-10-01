@@ -103,6 +103,7 @@ export const ruEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.takeTip": "Cleo cut: неудачный дубль вырезан ({len}) · нажмите, чтобы вернуть",
   "editor.cuts.cleoOne": "Cleo cut: вырезано неудачных дублей: {count}",
   "editor.cuts.cleoOther": "Cleo cut: вырезано неудачных дублей: {count}",
+  "editor.cuts.showTake": "Показать",
   "editor.cuts.restorePauses": "Вернуть паузы",
   "editor.cuts.restoreFillers": "Вернуть слова-паразиты",
   "editor.cuts.restoreTakes": "Вернуть дубли Cleo cut",

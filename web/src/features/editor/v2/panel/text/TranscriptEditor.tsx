@@ -16,7 +16,8 @@
  *
  * UX10: words cut from the video are struck through (a click brings one
  * back); removed pauses (≥ 0.4 s) and Cleo-cut takes are chips (a click
- * brings them back); "Cleo cut: N botched takes removed" heads the text.
+ * brings them back); "Cleo cut: N botched takes removed · Show" heads the
+ * text (Show jumps to the first one).
  * Cuts are clip edits (useCuts): timeline undo steps.
  *
  * Every change is one pure op of state/doc.ts applied through `apply`
@@ -593,6 +594,16 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
   const items = v.getVirtualItems();
   const time = (i: number) => fmtClock(cutTimeOfSource(p.editSegs, words[i].start));
   const captionsOff = preset === "none";
+  // UX10 (review E3): "Show" — the text scrolls to the first take's chip
+  // (before the first word from its start on), the playhead to its cut
+  const showTake = () => {
+    const first = takes[0];
+    if (!first || !words.length) return;
+    let at = 0;
+    while (at < words.length - 1 && (words[at].start + words[at].end) / 2 < first.start) at++;
+    showRow(rowOf[at]);
+    p.seekCut(cutTimeOfSource(p.editSegs, first.start));
+  };
   return (
     <div ref={rootRef} className={s.ted} data-testid="ed-text">
       <CutsHeader
@@ -647,6 +658,10 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
             <div className={s.note} data-testid="ed-cleo-cut">
               <Sparkles size={14} strokeWidth={1.75} aria-hidden style={{ color: "var(--ed-cleo)", flexShrink: 0 }} />
               <span>{plural(t, lang, "editor.cuts.cleoOne", "editor.cuts.cleoOther", takes.length)}</span>
+              <span aria-hidden>·</span>
+              <button type="button" className={s.linkBtn} data-testid="ed-cleo-show" onClick={showTake}>
+                {t("editor.cuts.showTake")}
+              </button>
             </div>
           )}
           {p.hint && (

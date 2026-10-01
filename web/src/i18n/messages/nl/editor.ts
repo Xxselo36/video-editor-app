@@ -103,6 +103,7 @@ export const nlEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.takeTip": "Cleo cut: mislukte take verwijderd ({len}) · klik om terug te halen",
   "editor.cuts.cleoOne": "Cleo cut: {count} mislukte take verwijderd",
   "editor.cuts.cleoOther": "Cleo cut: {count} mislukte takes verwijderd",
+  "editor.cuts.showTake": "Tonen",
   "editor.cuts.restorePauses": "Pauzes terughalen",
   "editor.cuts.restoreFillers": "Stopwoorden terughalen",
   "editor.cuts.restoreTakes": "Cleo cut-takes terughalen",

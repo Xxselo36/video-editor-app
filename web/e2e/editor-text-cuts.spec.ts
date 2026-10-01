@@ -3,7 +3,8 @@
  * tests") and the owner's timeline items from the iPhone test:
  *   - cut a word range from the text: struck in the text, a gap in the
  *     clips (stored), the preview skips it, the export body leaves it out;
- *   - a Cleo-cut take is a chip in the text; the chip brings it back;
+ *   - a Cleo-cut take is a chip in the text ("Show" jumps to it); the chip
+ *     brings it back;
  *   - pause chips; bulk restore ("Restore pauses") is one undo step;
  *   - ⌘Z / redo order across text, cuts and hide;
  *   - extending a clip over a repeat cut and over a pause with a word
@@ -149,6 +150,12 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
     await expect(page.getByTestId("ed-cleo-cut")).toContainText("1");
     const chip = page.getByTestId("ed-take-chip");
     await expect(chip).toHaveCount(1);
+    // "Show" (review E3): the playhead jumps to the take's cut (10.45 → 13.7 s), its chip in view
+    const video = page.getByTestId("editor-video");
+    const at = () => video.evaluate((v) => (v as HTMLVideoElement).currentTime);
+    await page.getByTestId("ed-cleo-show").click();
+    await expect.poll(async () => Math.min(Math.abs((await at()) - 10.45), Math.abs((await at()) - 13.7))).toBeLessThan(0.25);
+    await expect(chip).toBeInViewport();
     // the take's words collapse into the chip
     await expect(word(page, "Nobody")).toHaveCount(0);
     await chip.click();

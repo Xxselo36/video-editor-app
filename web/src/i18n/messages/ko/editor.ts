@@ -103,6 +103,7 @@ export const koEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.takeTip": "Cleo cut: 실패한 촬영분 잘라냄 ({len}) · 클릭하면 되돌려요",
   "editor.cuts.cleoOne": "Cleo cut: 실패한 촬영분 {count}개를 잘라냈어요",
   "editor.cuts.cleoOther": "Cleo cut: 실패한 촬영분 {count}개를 잘라냈어요",
+  "editor.cuts.showTake": "보기",
   "editor.cuts.restorePauses": "멈춤 구간 되돌리기",
   "editor.cuts.restoreFillers": "군말 되돌리기",
   "editor.cuts.restoreTakes": "Cleo cut 촬영분 되돌리기",

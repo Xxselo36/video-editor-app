@@ -103,6 +103,7 @@ export const itEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.takeTip": "Cleo cut: ripresa sbagliata rimossa ({len}) · clic per recuperarla",
   "editor.cuts.cleoOne": "Cleo cut: {count} ripresa sbagliata rimossa",
   "editor.cuts.cleoOther": "Cleo cut: {count} riprese sbagliate rimosse",
+  "editor.cuts.showTake": "Mostra",
   "editor.cuts.restorePauses": "Recupera le pause",
   "editor.cuts.restoreFillers": "Recupera gli intercalari",
   "editor.cuts.restoreTakes": "Recupera le riprese Cleo cut",
