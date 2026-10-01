@@ -287,6 +287,29 @@ test.describe("editor v2: word-level Text tab", TAG, () => {
     await expect.poll(async () => (await savedWords(stub, job.id)).find((w) => w.id === id)?.text, { timeout: 10_000 }).toBe("Scrolled");
   });
 
+  test("an open edit and the selection survive the autosave renaming unsaved words", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "inline edit is desktop");
+    const job = await stub.seed("review_speech");
+    await openText(page, job.id);
+    const input = page.getByTestId("ed-word-input");
+    // "ten" -> "ten whole" (new word ten.1), then at once "whole" -> "whole lot"
+    // (new word ten.1.1, which the save renames: its parent isn't saved yet)
+    await word(page, "ten").dblclick();
+    await input.fill("ten whole");
+    await input.press("Enter");
+    await word(page, "whole").dblclick();
+    await input.fill("whole lot");
+    await input.press("Enter");
+    await word(page, "lot").dblclick();
+    await input.fill("bunch");
+    // the debounced save runs (and renames) while the field is open
+    await expect(page.getByTestId("ed-save-status")).toHaveAttribute("data-state", "saved", { timeout: 10_000 });
+    await expect(input).toHaveValue("bunch");
+    await input.press("Enter");
+    await expect.poll(() => savedText(stub, job.id), { timeout: 10_000 }).toContain("ten whole bunch seconds");
+    await expect(word(page, "bunch")).toHaveAttribute("data-sel", "true");
+  });
+
   test("replacing in thousands of words saves in several bodies under 64 KB", async ({ page, stub }, info) => {
     test.skip(info.project.name !== "desktop", "one size check is enough");
     const job = await stub.seed("review_long");

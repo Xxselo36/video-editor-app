@@ -244,11 +244,37 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
       showRow(rowOf[i]);
     }
   };
+  const [draft, setDraft] = useState("");
+  const freshEdit = useRef(false);
+  const [editSerial, setEditSerial] = useState(0);
+  /** Open the edit of words lo..hi with their text as the draft. */
+  const beginEdit = (lo: number, hi: number) => {
+    setEdit({ a: words[lo].id, f: words[hi].id });
+    setDraft(words.slice(lo, hi + 1).map((w) => w.text).join(" "));
+    freshEdit.current = true;
+    setEditSerial((n) => n + 1);
+  };
+  const takeFresh = useCallback(() => {
+    const f = freshEdit.current;
+    freshEdit.current = false;
+    return f;
+  }, []);
   const startEdit = (range: [number, number] | null = selRange) => {
     if (!range) return false;
-    setEdit({ a: words[range[0]].id, f: words[range[1]].id });
+    beginEdit(range[0], range[1]);
     return true;
   };
+  // The autosave may give unsaved words new ids (serverIds): follow them,
+  // or the selection and an open edit would point at nothing.
+  useEffect(
+    () =>
+      p.doc.onRenamed((map) => {
+        const re = (x: Sel | null) => (x ? { a: map.get(x.a) ?? x.a, f: map.get(x.f) ?? x.f } : x);
+        setSel(re);
+        setEdit(re);
+      }),
+    [p.doc],
+  );
   const toggleHide = () => {
     if (!selRange) return false;
     const ids = words.slice(selRange[0], selRange[1] + 1).map((w) => w.id);
@@ -287,9 +313,11 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
       const next = opts.move === 1 ? after : opts.move === -1 ? before : null;
       if (next) {
         setSel({ a: next, f: next });
-        setEdit({ a: next, f: next });
         const ni = index.get(next);
-        if (ni !== undefined) showRow(rowOf[ni]);
+        if (ni !== undefined) {
+          beginEdit(ni, ni);
+          showRow(rowOf[ni]);
+        }
         return;
       }
       const keepId = p.doc.getState().present.words.some((w) => w.id === e.a) ? e.a : (before ?? after);
@@ -477,14 +505,6 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
   });
 
   // ── phone: the edit field at the bottom of the sheet ──────────────
-  const [draft, setDraft] = useState("");
-  const editText = editRange_ ? words.slice(editRange_[0], editRange_[1] + 1).map((w) => w.text).join(" ") : "";
-  const [draftFor, setDraftFor] = useState<string | null>(null);
-  const editKey = edit ? `${edit.a}|${edit.f}` : null;
-  if (phone && editKey !== draftFor) {
-    setDraftFor(editKey);
-    setDraft(editText);
-  }
 
   const items = v.getVirtualItems();
   const time = (i: number) => fmtClock(cutTimeOfSource(p.editSegs, words[i].start));
@@ -577,7 +597,11 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
                   focus={focusIdx >= r.first && focusIdx <= r.last ? focusIdx : sel === null && it.index === items[0]?.index ? r.first : -1}
                   hits={hits}
                   removed={removed}
-                  edit={!phone && touches(editRange_) ? { first: editRange_![0], last: editRange_![1], text: editText } : null}
+                  edit={
+                    !phone && touches(editRange_)
+                      ? { first: editRange_![0], last: editRange_![1], draft, onDraft: setDraft, takeFresh, serial: editSerial }
+                      : null
+                  }
                   editKeys={editKeys}
                   start={it.start - notesH}
                   measure={v.measureElement}

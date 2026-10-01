@@ -12,7 +12,7 @@
  *   data-lc    recognised with low confidence (< 0.6)
  */
 import { CornerDownRight } from "lucide-react";
-import { memo, useLayoutEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef } from "react";
 import { useT } from "@/i18n";
 import type { DocWord } from "@/features/editor/state/doc";
 import s from "../../editor.module.css";
@@ -31,7 +31,13 @@ export type InlineEdit = {
   /** Word indices being edited (one input for the range). */
   first: number;
   last: number;
-  text: string;
+  /** The typed text (kept by the editor, so a remount keeps it). */
+  draft: string;
+  onDraft: (text: string) => void;
+  /** Which edit this is (a new one remounts the input; a rename doesn't). */
+  serial: number;
+  /** True once per new edit: then the input selects its text. */
+  takeFresh: () => boolean;
 };
 
 export type EditKeys = {
@@ -80,7 +86,7 @@ export const WordRow = memo(function WordRow({ measure, ...p }: RowProps) {
     }
     if (p.edit && i >= p.edit.first && i <= p.edit.last) {
       // one input for the whole range, where it starts
-      if (i === p.edit.first) out.push(<WordInput key={`edit-${w.id}`} text={p.edit.text} keys={p.editKeys} />);
+      if (i === p.edit.first) out.push(<WordInput key={`edit-${p.edit.serial}`} edit={p.edit} keys={p.editKeys} />);
       continue;
     }
     const sel = p.sel !== null && i >= p.sel[0] && i <= p.sel[1];
@@ -132,17 +138,19 @@ export const WordRow = memo(function WordRow({ measure, ...p }: RowProps) {
 });
 
 /** The inline input of a word (or a selected range) being fixed. */
-function WordInput({ text, keys }: { text: string; keys: EditKeys }) {
+function WordInput({ edit, keys }: { edit: InlineEdit; keys: EditKeys }) {
   const t = useT();
-  const [draft, setDraft] = useState(text);
+  const draft = edit.draft;
   const ref = useRef<HTMLInputElement>(null);
   const done = useRef(false);
+  const takeFresh = edit.takeFresh;
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.focus({ preventScroll: true });
-    el.select();
-  }, []);
+    // select the text when the edit starts, not when the row remounts
+    if (takeFresh()) el.select();
+  }, [takeFresh]);
   const finish = (fn: () => void) => {
     if (done.current) return;
     done.current = true;
@@ -158,7 +166,7 @@ function WordInput({ text, keys }: { text: string; keys: EditKeys }) {
       spellCheck={false}
       autoComplete="off"
       data-testid="ed-word-input"
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => edit.onDraft(e.target.value)}
       onKeyDown={(e) => {
         e.stopPropagation();
         if (composing(e)) return;

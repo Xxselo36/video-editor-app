@@ -69,8 +69,12 @@ describe("doc store", () => {
     const s = createDocStore(doc);
     let edits = 0;
     s.onEdit = () => edits++;
+    const seen: string[] = [];
+    const off = s.onRenamed((m) => seen.push(...m.values()));
     s.rename(new Map([["a", "a.1"]]));
     expect(s.getState().present.words[0].id).toBe("a.1");
+    expect(seen).toEqual(["a.1"]);
+    off();
     expect(s.getState().past).toHaveLength(0);
     s.reset(doc);
     expect(s.getState().present).toBe(doc);

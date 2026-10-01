@@ -23,6 +23,8 @@ export type DocStore = {
   reset: (doc: EditDoc) => void;
   /** Give words new ids (the autosave's serverIds), without an undo step. */
   rename: (map: ReadonlyMap<string, string>) => void;
+  /** Listen to renames (selections and open edits hold word ids). */
+  onRenamed: (fn: (map: ReadonlyMap<string, string>) => void) => () => void;
   /** Called after every change that came from apply / undo / redo. */
   onEdit: ((doc: EditDoc) => void) | null;
 };
@@ -30,6 +32,7 @@ export type DocStore = {
 export function createDocStore(doc: EditDoc): DocStore {
   let state: DocState = initHistory(doc);
   const listeners = new Set<() => void>();
+  const renameListeners = new Set<(map: ReadonlyMap<string, string>) => void>();
   const set = (next: DocState, edit: boolean) => {
     if (next === state) return false;
     state = next;
@@ -57,6 +60,11 @@ export function createDocStore(doc: EditDoc): DocStore {
       if (!map.size) return;
       const words = state.present.words.map((w) => (map.has(w.id) ? { ...w, id: map.get(w.id)! } : w));
       set({ ...state, present: { ...state.present, words } }, false);
+      for (const l of [...renameListeners]) l(map);
+    },
+    onRenamed: (fn) => {
+      renameListeners.add(fn);
+      return () => renameListeners.delete(fn);
     },
     onEdit: null,
   };
