@@ -52,6 +52,8 @@ export type SeedOptions = {
   doc?: boolean;
   /** false: no first-frame poster (an analysis from before UT5). */
   poster?: boolean;
+  /** false: a job from before the filmstrip (UX7b; made on request). */
+  filmstrip?: boolean;
   /** review_speech (UX10): more analysis cuts [start, end, kind] —
    *  "voice_cmd" a Cleo-cut take, "filler" a repeat whose words get cut. */
   ai_cuts?: [number, number, "voice_cmd" | "filler" | "silence"][];
