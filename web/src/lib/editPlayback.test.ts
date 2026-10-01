@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPlan, fadeLevel, locate, nextInSource, type PlaySeg } from "@/lib/editPlayback";
+import { buildPlan, fadeLevel, locate, nextInSource, seekRampLevel, type PlaySeg } from "@/lib/editPlayback";
 
 const seg = (id: string, start: number, end: number, extra: Partial<PlaySeg> = {}): PlaySeg => ({
   id,
@@ -137,5 +137,27 @@ describe("fadeLevel", () => {
     const s = seg("x", 10, 20, { fadeIn: 1 });
     expect(fadeLevel(s, 5)).toBe(0);
     expect(fadeLevel(s, 25)).toBe(1);
+  });
+});
+
+describe("seekRampLevel (UX10, review C9)", () => {
+  it("is off without a ramp (the v1 editor)", () => {
+    expect(seekRampLevel(0, true, 0, 0)).toBe(1);
+  });
+
+  it("holds 0 while the jump is on its way, ramps up over rampMs after it landed", () => {
+    expect(seekRampLevel(15, true, null, null)).toBe(0);
+    expect(seekRampLevel(15, false, 0, null)).toBe(0);
+    expect(seekRampLevel(15, false, 7.5, null)).toBeCloseTo(0.5);
+    expect(seekRampLevel(15, false, 15, null)).toBe(1);
+    expect(seekRampLevel(15, false, null, null)).toBe(1);
+  });
+
+  it("ramps down over the last rampMs before a jump", () => {
+    expect(seekRampLevel(15, false, null, 0.1)).toBe(1);
+    expect(seekRampLevel(15, false, null, 0.0075)).toBeCloseTo(0.5);
+    expect(seekRampLevel(15, false, null, 0)).toBe(0);
+    // just landed and the next jump close: the lower one wins
+    expect(seekRampLevel(15, false, 12, 0.003)).toBeCloseTo(0.2);
   });
 });

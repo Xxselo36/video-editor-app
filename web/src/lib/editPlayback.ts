@@ -92,6 +92,22 @@ export function fadeLevel(seg: PlaySeg, t: number): number {
   return f;
 }
 
+/**
+ * The seek dip (UX10, review C9): the element's gain around a cut's jump,
+ * so the seam doesn't click. 0 while our seek is on its way; ramps up
+ * over `rampMs` after it landed (`sinceSeekMs`); ramps down over the last
+ * `rampMs` before a clip end that jumps (`toJumpSec`: output seconds left
+ * until the jump, null when the next clip continues the footage or there
+ * is none). 1 when off (rampMs 0).
+ */
+export function seekRampLevel(rampMs: number, seeking: boolean, sinceSeekMs: number | null, toJumpSec: number | null): number {
+  if (!(rampMs > 0)) return 1;
+  if (seeking) return 0;
+  const up = sinceSeekMs === null ? 1 : clamp(sinceSeekMs / rampMs, 0, 1);
+  const down = toJumpSec === null ? 1 : clamp((toJumpSec * 1000) / rampMs, 0, 1);
+  return Math.min(up, down);
+}
+
 /** The clip showing source time t: `prefer` when it contains t, else the
  *  first in timeline order. -1 when t is cut out. */
 export function locate(plan: PlaySeg[], t: number, prefer?: string | null): number {
@@ -160,6 +176,10 @@ export type EditPlayerOptions = {
   onSegment?: (id: string | null) => void;
   /** Black overlay whose opacity shows fades while playing. */
   fadeEl?: HTMLElement | null;
+  /** UX10 (v2 editor): a gain ramp of this many ms down before and up
+   *  after each jump at a cut, where the element's volume is writable
+   *  (not iOS). 0 / unset: no ramp (the v1 editor). */
+  seekRampMs?: number;
 };
 
 /**
@@ -189,11 +209,18 @@ export class EditPlayer {
   private onSegment?: (id: string | null) => void;
   private fadeEl: HTMLElement | null;
   private off: () => void;
+  private rampMs: number;
+  /** Our jump at a cut is on its way (the seek dip holds the gain at 0). */
+  private dipping = false;
+  /** When that jump landed (performance.now), while the gain ramps up. */
+  private landedAt: number | null = null;
+  private rampTimers: ReturnType<typeof setTimeout>[] = [];
 
   constructor(video: HTMLVideoElement, opts: EditPlayerOptions = {}) {
     this.v = video;
     this.onSegment = opts.onSegment;
     this.fadeEl = opts.fadeEl ?? null;
+    this.rampMs = opts.seekRampMs ?? 0;
     this.masterVolume = video.volume;
     this.userMuted = video.muted;
     this.applied = { volume: video.volume, muted: video.muted, rate: video.playbackRate };
@@ -216,6 +243,7 @@ export class EditPlayer {
   destroy(): void {
     this.off();
     this.stopLoop();
+    this.rampTimers.forEach(clearTimeout);
     this.setFade(0);
     const v = this.v;
     try {
@@ -319,6 +347,18 @@ export class EditPlayer {
     this.setRate(seg.speed * this.masterRate);
     if (seekTo !== null) {
       this.ourSeek = seekTo;
+      if (this.rampMs > 0 && !this.v.paused) {
+        this.dipping = true;
+        // never stay silent: a seek that reports no "seeked" ends the dip
+        this.rampTimers.push(
+          setTimeout(() => {
+            if (!this.dipping) return;
+            this.dipping = false;
+            const s = this.plan[this.idx];
+            if (s) this.applyGain(s, this.v.currentTime);
+          }, 400),
+        );
+      }
       try {
         this.v.currentTime = seekTo;
       } catch {
@@ -459,6 +499,18 @@ export class EditPlayer {
 
   private onSeeked = (): void => {
     this.ourSeek = null;
+    if (this.dipping) {
+      // landed: the gain comes back over rampMs (a few steps, not per frame)
+      this.dipping = false;
+      this.landedAt = performance.now();
+      this.rampTimers.forEach(clearTimeout);
+      this.rampTimers = [1, 2, 3].map((k) =>
+        setTimeout(() => {
+          const s = this.plan[this.idx];
+          if (s) this.applyGain(s, this.v.currentTime);
+        }, (this.rampMs * k) / 3),
+      );
+    }
     const seg = this.plan[this.idx];
     if (seg) this.applyGain(seg, this.v.currentTime);
   };
@@ -525,7 +577,7 @@ export class EditPlayer {
     const muted = this.userMuted || g <= 0.001;
     if (v.muted !== muted) v.muted = muted;
     if (!muted && this.volumeWritable) {
-      const want = clamp(this.masterVolume * g, 0, 1);
+      const want = clamp(this.masterVolume * g * this.rampLevel(seg, t), 0, 1);
       if (Math.abs(v.volume - want) > 0.004) {
         try {
           v.volume = want;
@@ -539,6 +591,18 @@ export class EditPlayer {
     this.applied.volume = v.volume;
     this.applied.muted = v.muted;
     this.setFade(v.paused ? 0 : 1 - fade);
+  }
+
+  /** The seek dip at this moment (seekRampLevel; 1 without a ramp). */
+  private rampLevel(seg: PlaySeg, t: number): number {
+    if (!(this.rampMs > 0)) return 1;
+    const since = this.landedAt === null ? null : performance.now() - this.landedAt;
+    if (since !== null && since >= this.rampMs) this.landedAt = null;
+    const next = this.plan[this.idx + 1];
+    const jumps = !!next && this.plan[this.idx] === seg && Math.abs(next.start - seg.end) >= EDGE && !this.v.paused;
+    // the jump comes up to a frame before the end (tick's lead)
+    const toJump = jumps ? Math.max(0, (seg.end - t) / (seg.speed || 1) - 1 / 30) : null;
+    return seekRampLevel(this.rampMs, this.dipping, this.landedAt === null ? null : since, toJump);
   }
 
   private setFade(opacity: number): void {
