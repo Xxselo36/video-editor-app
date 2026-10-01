@@ -100,6 +100,7 @@ def _job_keys(job: Any) -> list[str]:
         "source_key", "mezz_key", "proxy_key", "preview_key", "thumb_key")]
     keys += list((getattr(job, "output_keys", None) or {}).values())
     keys.append(getattr(job, "peaks_key", None))
+    keys.append(getattr(job, "poster_key", None))  # UT5
     for sub in (getattr(job, "font_subsets", None) or {}).values():
         if isinstance(sub, dict):
             keys += [sub.get(k) for k in ("woff2", "ttf", "json")]
