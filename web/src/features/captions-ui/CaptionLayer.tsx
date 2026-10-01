@@ -51,7 +51,7 @@ import { setStyle, type EditDoc } from "@/features/editor/state/doc";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { canvasPixels, contentBox, pageText } from "./interim";
-import { clipsOf, frameOf, nextLine, nextSize, outputTime, shownWords, snapLines, snapY } from "./live";
+import { changedOf, clipsOf, frameOf, nextLine, nextSize, outputTime, shownWords, snapLines, snapY } from "./live";
 import c from "./captions.module.css";
 
 export type CaptionLayerProps = {
@@ -550,7 +550,10 @@ function CaptionLayer(props: CaptionLayerProps) {
     const value = { y: next.y ?? cur.eff.y, sizeScale: next.sizeScale ?? cur.eff.sizeScale };
     apply((d) => {
       const o = (d.style.overrides ?? {}) as StyleOverrides;
-      const no = sel.scope === "here" ? setCaptionAdjust(o, cur.page, ownOf(value, cur.style)) : setStyleAdjust(o, cur.page, value);
+      const no =
+        sel.scope === "here"
+          ? setCaptionAdjust(o, cur.page, ownOf(value, cur.style))
+          : setStyleAdjust(o, cur.page, changedOf(next, cur.eff));
       return setStyle(d, { presetId: d.style.presetId, overrides: no as Record<string, unknown> });
     });
   };
@@ -562,9 +565,11 @@ function CaptionLayer(props: CaptionLayerProps) {
     if (scope === "all") {
       const before = { y: o0.y, sizeScale: o0.sizeScale };
       if (cur.eff.own) {
+        // the caption's own values become the style's — only those it has
+        const own = { y: cur.page.adjust?.y, sizeScale: cur.page.adjust?.sizeScale };
         apply((d) => {
           const o = (d.style.overrides ?? {}) as StyleOverrides;
-          return setStyle(d, { presetId: d.style.presetId, overrides: setStyleAdjust(o, cur.page, cur.eff) as Record<string, unknown> });
+          return setStyle(d, { presetId: d.style.presetId, overrides: setStyleAdjust(o, cur.page, own) as Record<string, unknown> });
         });
       }
       setSel({ ...sel, scope, before });

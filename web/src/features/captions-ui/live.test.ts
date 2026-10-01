@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mapToOutput, resolveStyle } from "@/lib/captions";
 import type { DocWord } from "@/features/editor/state/doc";
 import { adjustedWordIds } from "./adjusted";
-import { clipsOf, frameOf, nextLine, nextSize, outputTime, shownWords, snapLines, snapY, tileOrder } from "./live";
+import { changedOf, clipsOf, frameOf, nextLine, nextSize, outputTime, shownWords, snapLines, snapY, tileOrder } from "./live";
 
 const W = (id: string, text: string, start: number, end: number, extra: Partial<DocWord> = {}): DocWord => ({
   id,
@@ -105,5 +105,25 @@ describe("the style's frame (review 5)", () => {
     expect(preview.layout.y).toBe(exported.layout.y);
     expect(resolveStyle("power", {}, { W: 337, H: 421 })!.layout.y).not.toBe(exported.layout.y); // the old bug
     expect(frameOf({ W: 337, H: 421, vw: 0, vh: 0 })).toEqual({ W: 337, H: 421 });
+  });
+});
+
+describe("Überall writes only what changed (review 6/11)", () => {
+  it("a resize keeps the style's position free, a move its size", () => {
+    const now = { y: 0.68, sizeScale: 1 };
+    expect(changedOf({ y: 0.68, sizeScale: 1.15 }, now)).toEqual({ sizeScale: 1.15 });
+    expect(changedOf({ sizeScale: 1.15 }, now)).toEqual({ sizeScale: 1.15 });
+    expect(changedOf({ y: 0.4 }, now)).toEqual({ y: 0.4 });
+    expect(changedOf({ y: 0.68 }, now)).toEqual({});
+  });
+  it("then another preset keeps its own default position", async () => {
+    const { setStyleAdjust, buildPages, resolveStyle } = await import("@/lib/captions");
+    const fonts = await import("@/lib/captions/__tests__/helpers");
+    fonts.loadRealFonts();
+    const power = resolveStyle("power", {}, { W: 1080, H: 1920 })!;
+    const page = buildPages(fonts.timed("one two three."), power, { W: 1080, H: 1920 })[0];
+    const o = setStyleAdjust({}, page, changedOf({ y: power.layout.y, sizeScale: 1.15 }, { y: power.layout.y, sizeScale: 1 }));
+    expect(o).toEqual({ sizeScale: 1.15 });
+    expect(resolveStyle("minimal", o, { W: 1080, H: 1920 })!.layout.y).toBe(resolveStyle("minimal", {}, { W: 1080, H: 1920 })!.layout.y);
   });
 });

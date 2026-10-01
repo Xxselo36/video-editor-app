@@ -123,3 +123,18 @@ export function tileOrder(live: readonly string[] | null, recommended: readonly 
 export function frameOf(L: { W: number; H: number; vw: number; vh: number }): { W: number; H: number } {
   return L.vw > 0 && L.vh > 0 ? { W: L.vw, H: L.vh } : { W: L.W, H: L.H };
 }
+
+/**
+ * "Überall" writes only what the user changed (review 6/11): a resize
+ * doesn't pin the style's y (another preset keeps its own position), a
+ * move doesn't pin its size.
+ */
+export function changedOf(
+  next: { y?: number; sizeScale?: number },
+  now: { y: number; sizeScale: number },
+): { y?: number; sizeScale?: number } {
+  const out: { y?: number; sizeScale?: number } = {};
+  if (next.y !== undefined && Math.abs(next.y - now.y) >= 5e-4) out.y = next.y;
+  if (next.sizeScale !== undefined && Math.abs(next.sizeScale - now.sizeScale) >= 5e-3) out.sizeScale = next.sizeScale;
+  return out;
+}
