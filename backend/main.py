@@ -4507,6 +4507,19 @@ def job_peaks(job_id: str, user: User | None = Depends(media_user)):
                   "peaks_not_ready", cache="private, max-age=604800, immutable")
 
 
+@app.get("/jobs/{job_id}/poster")
+def job_poster(job_id: str, user: User | None = Depends(media_user)):
+    """poster.jpg: the frame at the start of the first kept clip, as the
+    analysis cut it (`has_poster` in GET /jobs/{id}). The editor shows it
+    until its video has a frame of its own (UT5); after the user changes
+    the first clip it may be stale, which the editor knows."""
+    job = get_owned_job(job_id, user)
+    if not job.poster_key:
+        raise HTTPException(404, "poster_not_ready")
+    return _media(job, job.poster_key, "image/jpeg",
+                  "poster_not_ready", cache="private, max-age=604800, immutable")
+
+
 @app.get("/me")
 def me(user: User | None = Depends(current_user)):
     """Who is signed in, their plan and minutes, and the media token for

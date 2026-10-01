@@ -225,6 +225,7 @@ PROTOCOL_CODES: frozenset[str] = frozenset({
     "unknown_caption_preset", "busy",
     # the edit document (UT3, backend/doc.py)
     "no_doc", "doc_read_only", "doc_patch_too_large", "peaks_not_ready",
+    "poster_not_ready",
     "bad_format", "bad_rev", "bad_style", "bad_word", "bad_words",
     "clips_not_supported", "duplicate_word_id", "preset_not_live",
     "too_many_words", "unknown_field", "unknown_preset",

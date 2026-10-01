@@ -394,6 +394,27 @@ def _proxy_video_args() -> list[str]:
     ]
 
 
+POSTER_NAME = "poster.jpg"
+
+
+def make_poster(source_path: str, at: float, poster_path: str,
+                width: int = 540) -> bool:
+    """A small JPEG of the frame at `at` seconds (the start of the first
+    kept clip): the editor shows it until its <video> has a frame of its
+    own (iOS Safari decodes none before playback, UT5). At most `width`
+    px wide. False (logged) when it can't be made."""
+    cmd = [get_ffmpeg_path(), "-y", "-v", "error", "-ss", f"{max(0.0, at):.3f}",
+           "-i", source_path, "-frames:v", "1",
+           "-vf", f"scale='min({int(width)},iw)':-2", "-q:v", "5", poster_path]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=60)
+    except Exception as e:
+        print(f"[poster] not made: {type(e).__name__}: {e}", flush=True)
+        return False
+    p = Path(poster_path)
+    return p.is_file() and p.stat().st_size > 0
+
+
 def preview_source(normalized_path: str) -> str:
     """The file edit previews are cut from: the 720p proxy next to
     `normalized_path` when there is one, else `normalized_path` itself
@@ -1440,6 +1461,10 @@ def analyze_only(
     preview_path = str(Path(output_dir) / "preview.mp4")
     _ffmpeg_cuts_preview(preview_source(normalized_path), segments,
                          preview_path)
+    poster_path = str(Path(output_dir) / POSTER_NAME)
+    poster_ok = make_poster(preview_source(normalized_path),
+                            float(segments[0][0]) if segments else 0.0,
+                            poster_path)
     font_thread.join()
     audio_thread.join()
 
@@ -1462,6 +1487,7 @@ def analyze_only(
         "mezz_cfr": mezz_cfr,
         "audio_loudness": audio["loudness"],
         "peaks_path": peaks_path if audio["peaks"] else None,
+        "poster_path": poster_path if poster_ok else None,
         "font_files": fonts,
     }
 
@@ -1502,9 +1528,10 @@ def store_analysis_extras(
     res: dict[str, Any], job_id: str,
     put: Callable[[str, str, str], int],
 ) -> tuple[dict[str, Any], dict[str, int]]:
-    """Store what the analysis made besides the videos — peaks.bin and
-    the CJK font subsets — with put(path, key, content_type) -> size (the
-    caller's store and error handling). Returns (job fields, {key: size})."""
+    """Store what the analysis made besides the videos — peaks.bin, the
+    poster (UT5) and the CJK font subsets — with put(path, key,
+    content_type) -> size (the caller's store and error handling).
+    Returns (job fields, {key: size})."""
     from backend import font_subset, media
     prefix = media.job_prefix(job_id)
     fields: dict[str, Any] = {}
@@ -1514,6 +1541,11 @@ def store_analysis_extras(
         key = prefix + "peaks.bin"
         sizes[key] = put(peaks, key, "application/octet-stream")
         fields["peaks_key"] = key
+    poster = res.get("poster_path")
+    if poster and Path(poster).is_file():
+        key = prefix + POSTER_NAME
+        sizes[key] = put(poster, key, "image/jpeg")
+        fields["poster_key"] = key
     if res.get("font_files"):
         subsets, more = font_subset.store(res["font_files"], prefix, put)
         fields["font_subsets"] = subsets
