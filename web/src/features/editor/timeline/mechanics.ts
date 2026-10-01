@@ -283,6 +283,28 @@ export function frameTimes(a: number, b: number, fps: number, max = 1000): numbe
   return out;
 }
 
+/**
+ * The frame grid a trim shows (strip seconds): the frames of the trimmed
+ * clip plus the 2 s it can grow into on the moving side, only inside the
+ * visible window [lo, hi] (strip seconds) — counted from the window, not
+ * from the clip's start, so the end handle of a long clip has its grid too.
+ */
+export function trimFrameGrid(
+  clip: { left: number; start: number; end: number },
+  mode: "start" | "end",
+  lo: number,
+  hi: number,
+  fps: number,
+  max = 600,
+): number[] {
+  const a = clip.start - (mode === "start" ? 2 : 0);
+  const b = clip.end + (mode === "end" ? 2 : 0);
+  // the visible window in source seconds of this clip
+  const wa = Math.max(a, clip.start + (lo - clip.left));
+  const wb = Math.min(b, clip.start + (hi - clip.left));
+  return frameTimes(wa, wb, fps, max).map((ft) => clip.left + (ft - clip.start));
+}
+
 /** Whether a ruler mark of this kind is drawn at `pps` px per second. */
 export function tickShown(kind: RulerMark["kind"], pps: number): boolean {
   if (kind === "tenth") return 0.1 * pps >= MINOR_TICK_MIN_PX;

@@ -33,7 +33,7 @@ import {
   canDelete,
   dropIndex,
   frameEdge,
-  frameTimes,
+  trimFrameGrid,
   moveSeg,
   patchSeg,
   playheadCutOf,
@@ -598,13 +598,11 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     if (!c) return [];
     const lo = (scrollX - 40) / pps;
     const hi = (scrollX + viewW + 40) / pps;
-    // the clip's own footage plus what a trim can grow into on the moving side
-    const a = c.seg.start - (trimming.mode === "start" ? 2 : 0);
-    const b = c.seg.end + (trimming.mode === "end" ? 2 : 0);
-    return frameTimes(a, b, fps, 600)
-      .map((ft) => c.left + (ft - c.seg.start))
-      .filter((x) => x >= lo && x <= hi)
-      .map((x) => x * pps);
+    // the clip's own footage plus what a trim can grow into on the moving
+    // side, counted from the visible window (mechanics.trimFrameGrid)
+    return trimFrameGrid({ left: c.left, start: c.seg.start, end: c.seg.end }, trimming.mode, lo, hi, fps).map(
+      (x) => x * pps,
+    );
   }, [trimming, pps, fps, clips, scrollX, viewW]);
   const readout = (() => {
     if (!trimming) return null;

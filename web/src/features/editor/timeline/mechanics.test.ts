@@ -10,6 +10,7 @@ import {
   rulerMarks,
   snapTrimToFrame,
   tickShown,
+  trimFrameGrid,
   trimToStep,
   sourceAtCut,
   splitAt,
@@ -184,6 +185,30 @@ describe("UX10: 0.1 s ruler marks, precise trims, the frame grid, reordering", (
       const f = Math.round(t * 30) / 30;
       expect(Math.abs(f - t)).toBeLessThanOrEqual(0.5 / 30 + 1e-9);
     }
+  });
+
+  it("the trim grid is counted from the visible window: the end handle of a long clip has it (review 3/10)", () => {
+    // a 30 s clip (10–40 s source) at strip 5 s, 30 fps, magnified around its end handle
+    const clip = { left: 5, start: 10, end: 40 };
+    const lo = 5 + 29.6;
+    const hi = 5 + 30.4;
+    const end = trimFrameGrid(clip, "end", lo, hi, 30);
+    expect(end.length).toBeGreaterThanOrEqual(23);
+    expect(Math.min(...end)).toBeGreaterThanOrEqual(lo - 1e-9);
+    expect(Math.max(...end)).toBeLessThanOrEqual(hi + 1e-9);
+    // the handle itself (strip 35 = source 40) is a grid line
+    expect(end.some((x) => Math.abs(x - 35) < 1e-9)).toBe(true);
+    // 60 fps, past the end: what a trim grows into (up to 2 s)
+    const grow = trimFrameGrid(clip, "end", 5 + 31, 5 + 31.5, 60);
+    expect(grow.length).toBe(31);
+    expect(trimFrameGrid(clip, "end", 5 + 32.5, 5 + 33, 60)).toEqual([]);
+    // the start handle: 2 s before the clip, none after the window
+    const start = trimFrameGrid(clip, "start", 4, 5.5, 30);
+    expect(Math.min(...start)).toBeCloseTo(4, 9);
+    expect(Math.max(...start)).toBeCloseTo(5.5, 9);
+    // the old cap counted from the clip start: nothing here
+    const capped = frameTimes(10, 42, 30, 600).map((f) => 5 + (f - 10)).filter((x) => x >= lo && x <= hi);
+    expect(capped).toEqual([]);
   });
 
   it("moves a clip to a drop index; the others make room", () => {
