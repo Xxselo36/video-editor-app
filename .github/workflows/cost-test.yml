@@ -17,6 +17,10 @@ on:
           (default), podcast, vlog, captions. See .github/scripts/cost_test.py
         required: false
         default: 'phone1080:2,phone1080:10,phone4k:3,iphone4khdr:3'
+      caption_engine:
+        description: Ask for this caption engine at render (e.g. v2; empty = server default)
+        required: false
+        default: ''
       keep_jobs:
         description: Keep the test jobs on the server afterwards
         type: boolean
@@ -63,4 +67,5 @@ jobs:
           CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
           RUNS: ${{ inputs.runs }}
           KEEP_JOBS: ${{ inputs.keep_jobs }}
+          CAPTION_ENGINE: ${{ inputs.caption_engine }}
         run: python .github/scripts/cost_test.py "$RUNS"
