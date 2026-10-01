@@ -1544,8 +1544,14 @@ def store_analysis_extras(
     poster = res.get("poster_path")
     if poster and Path(poster).is_file():
         key = prefix + POSTER_NAME
-        sizes[key] = put(poster, key, "image/jpeg")
-        fields["poster_key"] = key
+        # best effort: the poster is optional (the editor seeks its video
+        # instead), so a failed upload never fails the analysis
+        try:
+            sizes[key] = put(poster, key, "image/jpeg")
+        except Exception as e:
+            print(f"[poster] not stored: {type(e).__name__}: {e}", flush=True)
+        else:
+            fields["poster_key"] = key
     if res.get("font_files"):
         subsets, more = font_subset.store(res["font_files"], prefix, put)
         fields["font_subsets"] = subsets

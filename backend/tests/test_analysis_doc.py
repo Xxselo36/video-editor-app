@@ -240,3 +240,24 @@ def test_poster_route_without_a_poster(client):
     job = _new_job()
     r = client.get(f"/jobs/{job.id}/poster")
     assert r.status_code == 404 and r.json()["detail"] == "poster_not_ready"
+
+
+def test_a_failed_poster_upload_doesnt_fail_the_analysis(tmp_path, capsys):
+    """UT5 (review 15): the poster is optional — its put fails, the rest
+    is stored, no poster_key."""
+    poster = tmp_path / "poster.jpg"
+    poster.write_bytes(b"\xff\xd8x")
+    peaks = tmp_path / "peaks.bin"
+    peaks.write_bytes(b"\x01" * 10)
+    stored = []
+
+    def put(path, key, ctype):
+        if key.endswith("poster.jpg"):
+            raise OSError("R2 down")
+        stored.append(key)
+        return 10
+    fields, sizes = pipeline.store_analysis_extras(
+        {"poster_path": str(poster), "peaks_path": str(peaks)}, "0123456789ab", put)
+    assert "poster_key" not in fields and fields["peaks_key"].endswith("peaks.bin")
+    assert stored == ["jobs/0123456789ab/peaks.bin"] and list(sizes) == stored
+    assert "[poster] not stored" in capsys.readouterr().out
