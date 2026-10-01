@@ -12,6 +12,7 @@ export const hiEditor: Partial<Record<EditorKey, string>> = {
   "app.review.tabCaptions": "कैप्शन",
   "app.review.preparing": "तैयार हो रहा है…",
   "app.review.applyRender": "लागू करें और रेंडर करें",
+  "editor.captionsV2Test": "नए कैप्शन (टेस्ट)",
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "लाइन डिलीट हुई",

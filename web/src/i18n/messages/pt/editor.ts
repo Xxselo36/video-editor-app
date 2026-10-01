@@ -12,6 +12,7 @@ export const ptEditor: Partial<Record<EditorKey, string>> = {
   "app.review.tabCaptions": "Legendas",
   "app.review.preparing": "Preparando…",
   "app.review.applyRender": "Aplicar e renderizar",
+  "editor.captionsV2Test": "Novas legendas (teste)",
 
   // ── app: transcript tab ──
   "app.transcript.lineDeleted": "Linha excluída",

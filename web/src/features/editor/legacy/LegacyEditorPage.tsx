@@ -24,6 +24,7 @@ import { audioWarningText, cardError, describeError } from "@/lib/errors";
 import { waitForSaves } from "@/lib/pendingSaves";
 import type { JobStatus } from "@/features/jobs/types";
 import { ErrorView } from "@/features/project/ErrorView";
+import { useCaptionsV2 } from "@/features/captions-ui/flag";
 import { applyRender } from "./applyRender";
 import type { V1Edits } from "@/features/editor/state/reconcile";
 import { phrasesFromSubtitlesResponse, type Phrase, type Subtitle } from "./buildPhrases";
@@ -62,6 +63,8 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
     flushRef.current = flushPhraseSave;
   });
   const [attempt, setAttempt] = useState(0);
+  // UT4 opt-in: this browser asks for the v2 export captions.
+  const captionsV2 = useCaptionsV2();
 
   useEffect(() => {
     let cancelled = false;
@@ -138,7 +141,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
     if (load.state !== "ready") return;
     flushPhraseSave();
     try {
-      const started = await applyRender(jobId, phrases, unitsRef.current, captionPreset);
+      const started = await applyRender(jobId, phrases, unitsRef.current, captionPreset, { captionsV2 });
       // Already exporting or finished (409): its project view shows which.
       if (started === "not_in_review") router.replace(`/app/p/${jobId}`);
       // Back to the dashboard — the card shows the export.

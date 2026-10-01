@@ -24,6 +24,7 @@ import { cutClockOf, sourceTimeOf, useEditSession } from "@/features/editor/sess
 import { TimelineEditor } from "@/features/editor/timeline/TimelineEditor";
 import type { CutRange, SavedSeg } from "@/features/jobs/types";
 import { captionLabel } from "@/features/start/presets.legacy";
+import { CaptionsV2Marker } from "@/features/captions-ui/CaptionsV2Marker";
 import type { Phrase, Subtitle } from "./buildPhrases";
 
 // UT1: engine captions over the editor video (flag; its own chunk).
@@ -517,6 +518,7 @@ export function ReviewScreen({
       >
         {applying ? t("app.review.preparing") : t("app.review.applyRender")}
       </Button>
+      <CaptionsV2Marker style={{ textAlign: "center", color: "var(--text-muted)" }} />
       {applyError && (
         <div className="text-center text-xs" style={{ color: "var(--danger)" }} data-testid="apply-error">
           {applyError}

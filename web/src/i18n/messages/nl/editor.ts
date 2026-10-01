@@ -12,6 +12,7 @@ export const nlEditor: Partial<Record<EditorKey, string>> = {
   "app.review.tabCaptions": "Ondertitels",
   "app.review.preparing": "Wordt voorbereid…",
   "app.review.applyRender": "Toepassen & renderen",
+  "editor.captionsV2Test": "Nieuwe ondertitels (test)",
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Regel verwijderd",

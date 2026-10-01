@@ -15,6 +15,7 @@ export const enEditor = {
   "app.review.tabCaptions": "Captions",
   "app.review.preparing": "Preparing…",
   "app.review.applyRender": "Apply & render",
+  "editor.captionsV2Test": "New captions (test)",
 
   // ── Transcript tab ──────────────────────────────────────────────────
   "app.transcript.lineDeleted": "Line deleted",

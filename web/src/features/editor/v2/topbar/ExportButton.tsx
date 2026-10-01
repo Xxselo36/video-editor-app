@@ -7,6 +7,7 @@
 import { Download } from "lucide-react";
 import { forwardRef } from "react";
 import { useT } from "@/i18n";
+import { CaptionsV2Marker } from "@/features/captions-ui/CaptionsV2Marker";
 import { kbd } from "../hooks";
 import s from "../editor.module.css";
 
@@ -16,23 +17,56 @@ export const ExportButton = forwardRef<
 >(function ExportButton({ onExport, busy, offline, phone }, ref) {
   const t = useT();
   const label = busy ? t("editor.exporting") : t("editor.export");
-  const title = offline ? t("editor.exportOffline") : `${t("editor.export")} · ${kbd("⌘E")}`;
+  const title = offline
+    ? t("editor.exportOffline")
+    : `${t("editor.export")} · ${kbd("⌘E")}`;
   if (phone) {
     return (
-      <button
-        ref={ref}
-        type="button"
-        className={s.mprimary}
-        onClick={onExport}
-        disabled={busy || offline}
-        title={title}
-        data-testid="ed-export"
-        data-tour="export"
-      >
-        <span className={s.pill}>{label}</span>
-      </button>
+      <>
+        <CaptionsV2Marker
+          style={{ alignSelf: "center", marginRight: 6, fontSize: 10 }}
+        />
+        <button
+          ref={ref}
+          type="button"
+          className={s.mprimary}
+          onClick={onExport}
+          disabled={busy || offline}
+          title={title}
+          data-testid="ed-export"
+          data-tour="export"
+        >
+          <span className={s.pill}>{label}</span>
+        </button>
+      </>
     );
   }
+  return (
+    <>
+      {/* UT4 opt-in note (nothing unless this browser asked for it) */}
+      <CaptionsV2Marker style={{ alignSelf: "center", marginRight: 8 }} />
+      <ExportPrimary
+        ref={ref}
+        onExport={onExport}
+        busy={busy}
+        offline={offline}
+        label={label}
+        title={title}
+      />
+    </>
+  );
+});
+
+const ExportPrimary = forwardRef<
+  HTMLButtonElement,
+  {
+    onExport: () => void;
+    busy: boolean;
+    offline: boolean;
+    label: string;
+    title: string;
+  }
+>(function ExportPrimary({ onExport, busy, offline, label, title }, ref) {
   return (
     <button
       ref={ref}

@@ -3,6 +3,7 @@ import { AUTH_ENABLED } from "@/lib/auth";
 import { AppGate } from "@/components/auth/AppGate";
 import { SiteFooter } from "@/components/site/SiteFooter";
 import { UploadPaywall } from "@/features/upload/UploadPaywall";
+import { AppFlags } from "@/components/AppFlags";
 
 // The editor, library and account are private tools: never in search
 // results (robots.ts also keeps crawlers out of /app).
@@ -22,6 +23,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       {AUTH_ENABLED ? <AppGate>{children}</AppGate> : children}
+      {/* ?editor= / ?captions= opt-ins (per browser) from any /app URL. */}
+      <AppFlags />
       {/* An upload refused for billing (402) asks for a plan on any route. */}
       <UploadPaywall />
       <SiteFooter />
