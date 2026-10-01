@@ -278,6 +278,10 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
     await open(page, job.id, false);
     const n = await seams(page).count();
     expect(n).toBeGreaterThanOrEqual(4);
+    // one seam per cut between two clips (the stored timeline's gaps: the
+    // job's cut ranges without the head and tail)
+    const tl0 = await timeline(stub, job.id);
+    expect(n).toBe(tl0.filter((x, i) => i > 0 && x[0] - tl0[i - 1][1] > 0.02).length);
     // the "uh," cut between "two," and "is" (16.56–17.063): a filler word
     const filler = page.locator('[data-testid="ed-seam"][data-seam="filler"]').first();
     const box = (await filler.boundingBox())!;
