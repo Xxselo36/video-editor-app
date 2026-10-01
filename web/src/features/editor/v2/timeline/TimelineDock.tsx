@@ -584,10 +584,24 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   // ── seam popover: what was removed, and Restore ─────────────────────
   const [seamOpen, setSeamOpen] = useState<{ a: number; b: number; kind: PieceKind } | null>(null);
   const seamAnchor = useRef<HTMLElement | null>(null);
+  /** What had focus before a seam was pressed (focus goes back there after Restore). */
+  const seamPrevFocus = useRef<HTMLElement | null>(null);
   const restoreSeam = () => {
     if (!seamOpen) return;
     p.cuts.restore([{ start: seamOpen.a, end: seamOpen.b }]);
     setSeamOpen(null);
+    // The restored seam is gone; never leave focus on another seam button
+    // (Space would open its popover, single-key shortcuts would stop):
+    // back to what had it before, else nowhere (review 9).
+    setTimeout(() => {
+      const isSeam = (el: Element | null) => !!el?.closest?.("[data-testid=ed-seam]");
+      const ae = document.activeElement;
+      if (ae && ae !== document.body && !isSeam(ae)) return;
+      const prev = seamPrevFocus.current;
+      seamPrevFocus.current = null;
+      if (prev && prev.isConnected && prev !== document.body && !isSeam(prev)) prev.focus({ preventScroll: true });
+      else (ae as HTMLElement | null)?.blur?.();
+    }, 0);
   };
 
   const { marks, labelStep } = rulerMarks(scrollX, contentW, totalDur, viewW, p.phone ? 48 : 64);
@@ -697,7 +711,9 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
               const nearSel = p.selected === v.prev || p.selected === v.next;
               return (
                 <button
-                  key={v.k}
+                  // by the clips it joins: a restored seam's button goes
+                  // (an index key handed it to the next seam)
+                  key={`${v.prev}>${v.next}`}
                   type="button"
                   className={s.seam}
                   data-seam={kind}
@@ -707,6 +723,9 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
                   title={label}
                   aria-label={label}
                   aria-haspopup="dialog"
+                  onPointerDown={() => {
+                    seamPrevFocus.current = document.activeElement as HTMLElement | null;
+                  }}
                   onClick={(e) => {
                     seamAnchor.current = e.currentTarget;
                     setSeamOpen({ a: v.a, b: v.b, kind });

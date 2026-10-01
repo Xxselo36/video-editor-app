@@ -345,6 +345,28 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
   });
 });
 
+test.describe("editor v2: focus after a seam's Restore (review 9)", TAG, () => {
+  test("Restore on a seam that isn't the last: focus is on no seam, Space plays, no other popover", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "keyboard");
+    const job = await stub.seed("review_speech");
+    await open(page, job.id, false);
+    const n = await seams(page).count();
+    await seams(page).first().click();
+    await page.getByTestId("ed-seam-popover").getByTestId("ed-seam-restore").click();
+    await expect(seams(page)).toHaveCount(n - 1);
+    await page.waitForTimeout(100);
+    const focused = await page.evaluate(() => {
+      const a = document.activeElement as HTMLElement | null;
+      return { tag: a?.tagName ?? null, seam: !!a?.closest("[data-testid=ed-seam]") };
+    });
+    expect(focused.seam).toBe(false);
+    expect(focused.tag).not.toBe("BUTTON");
+    await page.keyboard.press("Space");
+    await expect(page.getByTestId("ed-seam-popover")).toHaveCount(0);
+    await expect.poll(() => page.getByTestId("editor-video").evaluate((v) => !(v as HTMLVideoElement).paused)).toBe(true);
+  });
+});
+
 test.describe("editor v2: the timeline (owner's iPhone items)", TAG, () => {
   test("press and hold a clip, drag it: reordered and stored; a quick swipe moves nothing", async ({ page, stub }) => {
     const job = await stub.seed("review_speech");
