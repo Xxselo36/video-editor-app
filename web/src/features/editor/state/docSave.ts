@@ -1,7 +1,12 @@
 /**
  * Autosave of the edit document (UX8): PATCH /jobs/{id}/doc, debounced
  * 800 ms, with the doc's revision rule (backend/doc.py apply_patch):
- * base_rev = the rev the server has, rev = base_rev + 1.
+ * base_rev = the rev the server has, rev = a newer one. The client picks
+ * revs that are unique to the request (microseconds since 1970 plus a
+ * random part, see uniqueRev), so a 409 stale_rev whose server rev is
+ * the rev we sent can only mean OUR write committed and its answer was
+ * lost: a retry resends the identical body, and that 409 counts as the
+ * success it is (no false "changed in another tab").
  *
  * - Only what changed is sent (diffWords: upserts + deletes, style and
  *   format when they changed). A body stays under PATCH_LIMIT: a bigger
@@ -49,10 +54,19 @@ export type DocSaverDeps = {
   onRename?: (map: Map<string, string>) => void;
   /** Every word id the editor made (doc.ts IdPool). */
   pool?: Set<string>;
+  /** The rev for a PATCH on `base` (default uniqueRev). */
+  nextRev?: (base: number) => number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (h: unknown) => void;
   debounceMs?: number;
 };
+
+/** A rev newer than `base` that no other tab or request picks: µs since
+ *  1970 plus a random part (exact in a double; also a timestamp, which
+ *  the v1 /phrases reconcile compares with, see reconcile.ts). */
+export function uniqueRev(base: number): number {
+  return Math.max(Math.floor(base) + 1, Date.now() * 1000 + Math.floor(Math.random() * 1000));
+}
 
 const sizeOf = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
 
@@ -171,6 +185,8 @@ export class DocSaver {
   private state: DocSaveState = "saved";
   private stopped = false;
   private chain: Promise<void> = Promise.resolve();
+  /** A body whose answer never came: resent as it is (same rev). */
+  private retryBody: PatchBody | null = null;
   private readonly d: Required<Omit<DocSaverDeps, "onState" | "track" | "onRename" | "pool">> &
     Pick<DocSaverDeps, "onState" | "track" | "onRename" | "pool">;
 
@@ -178,10 +194,11 @@ export class DocSaver {
     this.saved = { words: doc.words, style: doc.style, format: doc.format, rev };
     this.latest = doc;
     this.d = {
-      debounceMs: DEBOUNCE_MS,
-      setTimer: (fn, ms) => setTimeout(fn, ms),
-      clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
       ...deps,
+      debounceMs: deps.debounceMs ?? DEBOUNCE_MS,
+      nextRev: deps.nextRev ?? uniqueRev,
+      setTimer: deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms)),
+      clearTimer: deps.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>)),
     };
   }
 
@@ -235,7 +252,7 @@ export class DocSaver {
     this.normalize(base);
     const bodies = patchBodies(base, this.latest);
     if (!bodies.length) return false;
-    const body: PatchBody = { ...bodies[0], base_rev: base.rev, rev: base.rev + 1 };
+    const body: PatchBody = { ...bodies[0], base_rev: base.rev, rev: this.d.nextRev(base.rev) };
     const text = JSON.stringify(body);
     const res = this.request(text, new TextEncoder().encode(text).length < PATCH_LIMIT);
     // Its answer is applied after the one in flight (page restored from
@@ -253,6 +270,7 @@ export class DocSaver {
     this.saved = { words: doc.words, style: doc.style, format: doc.format, rev };
     this.latest = doc;
     this.attempt = 0;
+    this.retryBody = null;
     this.set("saved");
   }
 
@@ -293,14 +311,17 @@ export class DocSaver {
         if (this.inflight === out) this.inflight = null;
         continue;
       }
-      this.normalize(this.saved);
-      const bodies = patchBodies(this.saved, this.latest);
-      if (!bodies.length) {
-        this.set("saved");
-        return;
+      let body = this.retryBody;
+      if (!body) {
+        this.normalize(this.saved);
+        const bodies = patchBodies(this.saved, this.latest);
+        if (!bodies.length) {
+          this.set("saved");
+          return;
+        }
+        body = { ...bodies[0], base_rev: this.saved.rev, rev: this.d.nextRev(this.saved.rev) };
       }
       if (this.state === "saved") this.set("saving");
-      const body: PatchBody = { ...bodies[0], base_rev: this.saved.rev, rev: this.saved.rev + 1 };
       const done = this.handle(body, this.request(JSON.stringify(body), false));
       this.inflight = { body, done };
       this.d.track?.(done);
@@ -326,43 +347,52 @@ export class DocSaver {
     try {
       r = await res;
     } catch {
-      this.retryLater();
+      this.retryLater(body);
       return;
     }
-    if (r.ok) {
-      let rev = body.rev;
-      try {
-        const j = (await r.json()) as { rev?: unknown };
-        if (typeof j.rev === "number") rev = j.rev;
-      } catch {
-        /* the rev we sent */
-      }
-      this.saved = { ...after(this.saved, body), rev };
+    const ok = () => {
+      this.saved = { ...after(this.saved, body), rev: body.rev };
+      if (this.retryBody === body) this.retryBody = null;
       this.attempt = 0;
       if (this.state === "retrying") this.set("saving");
+    };
+    if (r.ok) {
+      ok();
       return;
     }
     let code: string | null = null;
+    let serverRev: number | null = null;
     try {
-      const j = (await r.json()) as { detail?: unknown };
+      const j = (await r.json()) as { detail?: unknown; rev?: unknown };
       code = typeof j.detail === "string" ? j.detail : null;
+      serverRev = typeof j.rev === "number" ? j.rev : null;
     } catch {
       /* no body */
     }
     if (r.status === 409 && code === "stale_rev") {
+      // The server is at the rev only this request could have set: our
+      // own write committed and its answer was lost.
+      if (serverRev === body.rev) {
+        ok();
+        return;
+      }
+      if (this.retryBody === body) this.retryBody = null;
       this.clear();
       this.set("conflict");
       return;
     }
     if (r.status >= 500 || r.status === 408 || r.status === 429) {
-      this.retryLater();
+      this.retryLater(body);
       return;
     }
+    if (this.retryBody === body) this.retryBody = null;
     this.clear();
     this.set("failed");
   }
 
-  private retryLater() {
+  /** The answer to `body` is unknown (it may have committed): send it again as it is. */
+  private retryLater(body: PatchBody) {
+    this.retryBody = body;
     this.set("retrying");
     const ms = BACKOFF_MS[Math.min(this.attempt, BACKOFF_MS.length - 1)];
     this.attempt++;

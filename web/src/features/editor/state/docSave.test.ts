@@ -21,7 +21,13 @@ function docOf(n: number, text = (i: number) => `word${i}`): EditDoc {
 
 /** A fake PATCH /jobs/{id}/doc with the server's revision rule and merge. */
 function fakeServer(doc: EditDoc) {
-  const srv = { words: doc.words, rev: 0, bodies: [] as PatchBody[], fail: null as null | "net" | 500 | 409 | 400, inits: [] as RequestInit[] };
+  const srv = {
+    words: doc.words,
+    rev: 0,
+    bodies: [] as PatchBody[],
+    fail: null as null | "net" | 500 | 409 | 400 | "lost",
+    inits: [] as RequestInit[],
+  };
   const fetch = async (_path: string, init: RequestInit & { unloading?: boolean }) => {
     srv.inits.push(init);
     const body = JSON.parse(String(init.body)) as PatchBody;
@@ -34,6 +40,11 @@ function fakeServer(doc: EditDoc) {
     if (body.words) srv.words = mergeWords(srv.words, body.words.upsert, body.words.delete);
     for (let i = 1; i < srv.words.length; i++) if (srv.words[i].start < srv.words[i - 1].start) throw new Error("words_not_monotonic");
     srv.rev = body.rev;
+    if (srv.fail === "lost") {
+      // committed, but the answer never arrives (a drop, a proxy 502)
+      srv.fail = null;
+      throw new TypeError("connection reset");
+    }
     return new Response(JSON.stringify({ rev: body.rev }), { status: 200 });
   };
   return { srv, fetch };
@@ -64,7 +75,8 @@ function timers() {
   };
 }
 
-function setup(doc = docOf(8)) {
+/** nextRev null: the saver's default (unique revs). */
+function setup(doc = docOf(8), nextRev: ((b: number) => number) | null = (b) => b + 1) {
   const { srv, fetch } = fakeServer(doc);
   const tm = timers();
   const states: DocSaveState[] = [];
@@ -78,6 +90,7 @@ function setup(doc = docOf(8)) {
     },
     setTimer: tm.setTimer,
     clearTimer: tm.clearTimer,
+    nextRev: nextRev ?? undefined,
   });
   const edit = (op: (d: EditDoc) => EditDoc) => {
     present = op(present);
@@ -126,6 +139,30 @@ describe("DocSaver", () => {
     t.saver.schedule(editWord(docOf(8), "w0001", "one"));
     await t.tm.tick();
     expect(t.srv.bodies[1]).toMatchObject({ base_rev: 5, rev: 6 });
+  });
+
+  it("a committed PATCH whose answer was lost: the retry's 409 is our own write, not a conflict", async () => {
+    const t = setup(docOf(8), null); // unique revs (the default)
+    t.srv.fail = "lost";
+    t.edit((d) => editWord(d, "w0002", "two"));
+    await t.tm.tick();
+    expect(t.saver.status).toBe("retrying");
+    const first = t.srv.bodies[0];
+    t.edit((d) => editWord(d, "w0004", "four")); // typed meanwhile
+    await t.tm.tick(); // the retry: same body (same rev) → 409 with that rev
+    expect(t.srv.bodies[1]).toEqual(first);
+    await t.tm.tick(); // then the rest
+    expect(t.saver.status).toBe("saved");
+    expect(t.srv.words.map((w) => w.text)).toEqual(t.present.words.map((w) => w.text));
+    expect(t.srv.bodies.map((b) => b.rev > 1e15)).toEqual(t.srv.bodies.map(() => true));
+  });
+
+  it("unique revs: another tab's save on the same base is still a conflict", async () => {
+    const t = setup(docOf(8), null);
+    t.srv.rev = 1700000000000123; // another tab, also built on rev 0
+    t.edit((d) => editWord(d, "w0002", "two"));
+    await t.tm.tick();
+    expect(t.saver.status).toBe("conflict");
   });
 
   it("network error: retrying with backoff, then saved", async () => {
