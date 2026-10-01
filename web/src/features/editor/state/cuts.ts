@@ -123,6 +123,18 @@ export function gapKind(pieces: readonly Piece[], a: number, b: number): PieceKi
   return best;
 }
 
+/**
+ * Whether the gap of a seam (source a = the clip before's end, b = the
+ * clip after's start) is removed footage: b > a and no clip plays any of
+ * it. After a reorder a seam can jump forward across a clip that still
+ * plays elsewhere — that is a move, not a cut (review 2/8): no kind, no
+ * length, no Restore.
+ */
+export function seamIsCut(segs: readonly EditorSeg[], a: number, b: number): boolean {
+  if (!(b - a > EPS)) return false;
+  return !segs.some((s) => active(s) && s.start < b - EPS && s.end > a + EPS);
+}
+
 // ── clip ops ────────────────────────────────────────────────────────
 
 const active = (s: EditorSeg) => !s.disabled && s.end - s.start > 0;

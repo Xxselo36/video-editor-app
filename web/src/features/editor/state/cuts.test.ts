@@ -17,6 +17,7 @@ import {
   restoreKind,
   restoreRange,
   restoreWord,
+  seamIsCut,
   textMarks,
   type Piece,
 } from "./cuts";
@@ -283,6 +284,43 @@ describe("cut and restore", () => {
       expect(b).toBeLessThanOrEqual(words[last + 1].start + 1e-9);
       expect(Math.abs(a - words[first].start)).toBeLessThanOrEqual(0.12 + 1e-9);
     }
+  });
+});
+
+describe("seams after a reorder (review 2/8)", () => {
+  // review_speech's first clips: c1 dragged to the front
+  const c0 = seg("c0", 0, 13.656);
+  const c1 = seg("c1", 15.156, 16.56);
+  const c2 = seg("c2", 17.063, 20);
+  it("a forward jump across a clip that still plays is a move, not a cut", () => {
+    const order = [c1, c0, c2];
+    expect(seamIsCut(order, c1.end, c0.start)).toBe(false); // backwards
+    expect(seamIsCut(order, c0.end, c2.start)).toBe(false); // across c1
+    // in source order both gaps are cuts
+    const plain = [c0, c1, c2];
+    expect(seamIsCut(plain, c0.end, c1.start)).toBe(true);
+    expect(seamIsCut(plain, c1.end, c2.start)).toBe(true);
+    // contiguous split pieces moved: [A, C, B] — no cut at either seam
+    const [A, B, C] = [seg("A", 0, 2), seg("B", 2, 4), seg("C", 4, 6)];
+    expect(seamIsCut([A, C, B], A.end, C.start)).toBe(false);
+    expect(seamIsCut([A, C, B], C.end, B.start)).toBe(false);
+  });
+
+  it("a cut seam's Restore changes only that gap's two clips", () => {
+    // c1 moved to the end: the seam c0 → c2 jumps across it (a move);
+    // a real cut seam elsewhere restores only its own gap
+    const d = seg("d", 25, 30);
+    const order = [c0, c2, d, c1];
+    expect(seamIsCut(order, c0.end, c2.start)).toBe(false);
+    expect(seamIsCut(order, c2.end, d.start)).toBe(true);
+    const out = restoreRange(order, c2.end, d.start, 40);
+    expect(out.find((s) => s.id === "c1")).toEqual(c1);
+    expect(out.find((s) => s.id === "c0")).toEqual(c0);
+    expect(spans(out)).toEqual([
+      [0, 13.656],
+      [17.063, 30],
+      [15.156, 16.56],
+    ]);
   });
 });
 

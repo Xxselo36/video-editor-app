@@ -26,7 +26,7 @@ import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, use
 import { useLang, useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
 import type { PlaybackMode } from "@/features/editor/session/useEditSession";
-import { gapKind, type PieceKind } from "@/features/editor/state/cuts";
+import { gapKind, seamIsCut, type PieceKind } from "@/features/editor/state/cuts";
 import { usePlayhead, usePlayheadEffect, type PlayheadState, type PlayheadStore } from "@/features/editor/state/playhead";
 import type { TimelineHistory } from "@/features/editor/timeline/history";
 import {
@@ -560,8 +560,10 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   }, [segs]);
   const pieces = p.cuts.pieces;
   const seamKinds = useMemo(
-    () => seamViews.map((v) => (v.b > v.a ? gapKind(pieces, v.a, v.b) : null)),
-    [seamViews, pieces],
+    // a seam that jumps across a clip playing elsewhere (a reorder) is a
+    // move, not a cut: drawn as one, no kind, no Restore (review 2/8)
+    () => seamViews.map((v) => (seamIsCut(segs, v.a, v.b) ? gapKind(pieces, v.a, v.b) : null)),
+    [seamViews, pieces, segs],
   );
   const legendKinds = useMemo(() => {
     const present = new Set<PieceKind>();

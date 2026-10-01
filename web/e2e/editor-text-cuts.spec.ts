@@ -368,6 +368,13 @@ test.describe("editor v2: the timeline (owner's iPhone items)", TAG, () => {
     const after = await timeline(stub, job.id);
     expect(after[1]).toEqual(before[0]);
     expect(after.slice(2)).toEqual(before.slice(2));
+    // seams: only real cuts (a gap no clip plays); the jumps across the
+    // moved clip are moves — no "Manual cut", no inflated length (review 2/8)
+    const realCuts = after.filter(
+      (x, i) => i > 0 && x[0] - after[i - 1][1] > 0.02 && !after.some(([s, e]) => s < x[0] - 0.001 && e > after[i - 1][1] + 0.001),
+    ).length;
+    await expect(seams(page)).toHaveCount(realCuts);
+    await expect(page.locator('[data-testid="ed-seam"][data-seam="user"]')).toHaveCount(0);
     // one undo step
     await page.locator('[data-testid="ed-undo"]:visible').first().click();
     await expect.poll(() => timeline(stub, job.id), SAVED).toEqual(before);
