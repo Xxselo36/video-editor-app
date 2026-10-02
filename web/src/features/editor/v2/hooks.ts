@@ -30,15 +30,23 @@ export const LANDSCAPE_QUERY = "(max-height: 499.98px) and (orientation: landsca
  */
 export function useViewportFitCover(): void {
   useEffect(() => {
-    const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
-    if (!meta) return;
-    const before = meta.content;
-    if (/viewport-fit\s*=/.test(before)) return;
-    meta.content = `${before}${before.trim() ? ", " : ""}viewport-fit=cover`;
+    // Counted: the loading editor and the loaded one are separate mounts
+    // whose effects interleave; only the last one out removes the token.
+    if (fitCoverUsers++ === 0) setFitCover(true);
     return () => {
-      meta.content = before;
+      if (--fitCoverUsers === 0) setFitCover(false);
     };
   }, []);
+}
+let fitCoverUsers = 0;
+const FIT_COVER = /,?\s*viewport-fit\s*=\s*cover/;
+function setFitCover(on: boolean) {
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+  if (!meta) return;
+  const c = meta.content;
+  if (on && !/viewport-fit\s*=/.test(c)) meta.content = `${c}${c.trim() ? ", " : ""}viewport-fit=cover`;
+  // our token only, from the meta as it is now (Next may have re-rendered it)
+  else if (!on && FIT_COVER.test(c)) meta.content = c.replace(FIT_COVER, "").trim();
 }
 
 /** The keyboard (or anything else) hides more than this of the screen. */

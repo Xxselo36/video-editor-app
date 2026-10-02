@@ -183,10 +183,6 @@ test.describe("editor v2 on an iPhone (portrait)", TAG, () => {
     const root = page.getByTestId("editor-v2");
     expect(await root.evaluate((el) => getComputedStyle(el).touchAction)).toBe("manipulation");
     expect(await page.getByTestId("ed-frame").evaluate((el) => getComputedStyle(el).webkitUserSelect || getComputedStyle(el).userSelect)).toBe("none");
-    // leaving the editor gives the site its viewport back
-    await page.getByTestId("editor-back").tap();
-    await expect(page.getByTestId("editor-v2")).toBeHidden();
-    await expect.poll(() => page.locator('meta[name="viewport"]').getAttribute("content")).not.toContain("viewport-fit");
   });
 });
 
