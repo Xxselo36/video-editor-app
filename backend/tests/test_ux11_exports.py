@@ -778,3 +778,53 @@ def test_a_charge_after_a_fast_failure_refunds_itself(paying, bearer):
     store.update(job.id, status="processing", render_gen=4)
     assert M._charge_render(job.id, user, 4, 5) == 15
     assert not accounts.get_usage(exports.usage_key(job.id, 4))["refunded"]
+
+
+def test_a_failed_refund_is_retried_by_its_ledger_key(paying, monkeypatch):
+    """Re-review 2: a refund the database refused is recorded as
+    refund_pending; the boot / hourly retry settles it once."""
+    job = _fairuse_job(60)
+    key = exports.usage_key(job.id, 2)
+    accounts.charge(key, "user_a", 15, enforce=False)
+    real = accounts.refund
+
+    def down(*a, **k):
+        raise RuntimeError("database down")
+    monkeypatch.setattr(accounts, "refund", down)
+    assert M._refund_render(job.id, 2) is False
+    assert not accounts.get_usage(key)["refunded"]
+    pending = store.events(0, ["refund_pending"])
+    assert [e["data"]["key"] for e in pending] == [key]
+    assert M._retry_pending_refunds() == 0           # still down: kept
+    assert not accounts.get_usage(key)["refunded"]
+    monkeypatch.setattr(accounts, "refund", real)
+    M._exports_maintenance()                         # the hourly / boot hook
+    assert accounts.get_usage(key)["refunded"]
+    assert M._retry_pending_refunds() == 0           # idempotent
+    assert M._refund_render(job.id, 2) is True
+    assert M._refund_render(job.id, 0) is True       # nothing to refund
+
+
+def test_a_speculative_render_cut_off_by_a_restart_is_settled(spec_on):
+    """Re-review 3: a spec left 'running' past the Modal timeout + margin
+    is settled: r{gen}/ queued for deletion, the pin undone, failed."""
+    job = _review_job(doc={"words": []})
+    store.update(job.id, render_gen=1, caption_engine="v2",
+                 spec={"gen": 1, "status": "running", "at": time.time(),
+                       "pinned": True})
+    assert M._settle_stale_specs() == 0              # young: still running
+    assert store.get(job.id).spec["status"] == "running"
+    old = time.time() - M._render_gc_delay_s() - 1
+    store.update(job.id, spec={**store.get(job.id).spec, "at": old})
+    M._exports_maintenance()                         # the hourly / boot hook
+    cur = store.get(job.id)
+    assert cur.spec["status"] == "failed"
+    assert (cur.render_gen, cur.caption_engine) == (1, None)
+    assert f"jobs/{job.id}/r1/" in [r["prefix"] for r in store.gc_all()]
+    assert M._settle_stale_specs() == 0              # idempotent
+    # The WP1 boot settles any running one (no thread survived).
+    other = _review_job(doc={"words": []})
+    store.update(other.id, render_gen=1,
+                 spec={"gen": 1, "status": "running", "at": time.time()})
+    assert M._settle_stale_specs(0.0) == 1
+    assert store.get(other.id).spec["status"] == "failed"

@@ -1415,7 +1415,10 @@ Exporte eines Videos sind frei; jeder weitere bucht
 nicht bei leerem Kontingent — das Kontoblatt zeigt dann die
 Überschreitung). Ein fehlgeschlagener Export bucht dieselbe Zeile zurück
 (auch nach Container-Neustart / Übernahme durch den Leader). Der
-Sofort-Export zählt nie. Ohne Abrechnung (heute in Produktion) zeigt die
+Sofort-Export zählt nie. Scheitert die Rückbuchung selbst (Datenbank
+weg), merkt sie sich der Server als Job-Event `refund_pending` und holt
+sie beim Start und stündlich nach (idempotent über den Ledger-Schlüssel;
+Log `[fair-use] pending refund … settled`). Ohne Abrechnung (heute in Produktion) zeigt die
 App nur „Kostenlos“, keinen Zähler. Kein freiwilliges Geld-zurück.
 
 **Sofort-Export** (`CLEO_SPECULATIVE_RENDER=1`): direkt nach der Analyse
@@ -1427,7 +1430,11 @@ nie über einen Kunden-Slot, und nicht, wenn mehr als die Hälfte von
 gespeicherte Änderung), ist die Fertig-Ansicht sofort da, ohne Kosten.
 Jede Änderung macht den Vorab-Render ungültig; seine Dateien werden beim
 nächsten Export gelöscht. Sinnvoll nur mit `render_r2` auf Modal (sonst
-rendert der API-Server selbst). Notbremse: Variable löschen.
+rendert der API-Server selbst). Ein Vorab-Render, den ein Neustart
+abgeschnitten hat (bleibt „running“), wird beim Start (ohne
+Warteschlange sofort, mit Warteschlange nach Modal-Timeout + 5 min) und
+stündlich als gescheitert abgeschlossen: Pinning zurück, `r{gen}/` zum
+Löschen vorgemerkt (Log `[spec] settled …`). Notbremse: Variable löschen.
 
 **Fertig-Ansicht:** Download (ein Knopf pro echter Datei,
 Dateiname `{titel}_cleocuts_9x16.mp4`, auch bei japanischen/russischen

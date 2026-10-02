@@ -702,6 +702,7 @@ async def lifespan(app_: FastAPI):
         _refund_interrupted()
         _clean_interrupted()
     _clean_workspaces()
+    _exports_maintenance(boot=True)
     if db.fell_back():
         threading.Thread(target=_cutover_watch, daemon=True).start()
     if queue:
@@ -1337,6 +1338,7 @@ def _hourly() -> None:
                   "died", flush=True)
     except Exception as e:
         print(f"[claims] sweep failed: {e}", flush=True)
+    _exports_maintenance()
     try:
         # With the task queue the reaper settles lost work (leases);
         # this sweep would fail jobs that are only waiting in line.
@@ -6059,21 +6061,103 @@ def _charge_render(job_id: str, user: User | None, gen: int,
     return seconds
 
 
-def _refund_render(job_id: str, gen: int | None) -> None:
+def _refund_render(job_id: str, gen: int | None) -> bool:
     """A failed export gives its fair-use minutes back (failed exports
-    never count). Idempotent; nothing to do without a ledger row."""
+    never count). Idempotent by its ledger key; nothing to do without a
+    ledger row. True when settled (refunded, or nothing to refund). A
+    refund that fails (the database) is recorded as a refund_pending job
+    event; _retry_pending_refunds (boot, hourly) settles it later."""
     if not auth.auth_enabled():
-        return
+        return True
+    key = None
     try:
         if gen is None:
             cur = store.get(job_id)
             gen = int(cur.render_gen or 0) if cur else 0
-        if gen and accounts.refund(exports.usage_key(job_id, gen),
-                                   "render_failed"):
+        if not gen:
+            return True
+        key = exports.usage_key(job_id, gen)
+        if accounts.refund(key, "render_failed"):
             print(f"[job {job_id}] export r{gen} failed: fair-use minutes "
                   "refunded", flush=True)
+        return True
     except Exception as e:
-        print(f"[job {job_id}] fair-use refund failed: {e}", flush=True)
+        print(f"[job {job_id}] fair-use refund failed (retried later): {e}",
+              flush=True)
+        if key:
+            _record_event("refund_pending", job_id, key=key, gen=gen)
+        return False
+
+
+def _retry_pending_refunds(since_days: float = 30.0) -> int:
+    """Settle the refunds recorded as refund_pending: by ledger key,
+    idempotent (an already refunded or missing row is done). Returns how
+    many were refunded now."""
+    if not auth.auth_enabled():
+        return 0
+    done = 0
+    seen: set[str] = set()
+    for ev in store.events(time.time() - since_days * 86400.0,
+                           ["refund_pending"]):
+        key = (ev.get("data") or {}).get("key")
+        if not isinstance(key, str) or key in seen:
+            continue
+        seen.add(key)
+        try:
+            row = accounts.get_usage(key)
+            if row is None or row.get("refunded"):
+                continue
+            if accounts.refund(key, "render_failed"):
+                done += 1
+                print(f"[fair-use] pending refund {key} settled", flush=True)
+        except Exception as e:
+            print(f"[fair-use] pending refund {key} still failing: {e}",
+                  flush=True)
+    return done
+
+
+def _settle_stale_specs(older_than_s: float | None = None) -> int:
+    """Speculative renders a restart cut off stay 'running': past the
+    Modal timeout plus a margin (_render_gc_delay_s; or every one with
+    older_than_s=0 — the WP1 boot, where no thread survived) their r{g}/
+    is queued for deletion and the claim undone like a failure
+    (_spec_failed: the pin, never the generation). Returns how many."""
+    limit = _render_gc_delay_s() if older_than_s is None else older_than_s
+    now = time.time()
+    n = 0
+    for job in store.list_by_status("awaiting_review", "done", "processing"):
+        spec = job.spec if isinstance(job.spec, dict) else None
+        if not spec or spec.get("status") != "running":
+            continue
+        age = now - float(spec.get("at") or 0)
+        if age < limit:
+            continue
+        gen = int(spec.get("gen") or 0)
+        if gen:
+            # A Modal call may still write into r{gen}/ until its timeout.
+            wait = max(0.0, _render_gc_delay_s() - age)
+            _gc_later([f"{media.job_prefix(job.id)}r{gen}/"], wait,
+                      store_=media.store_of(job))
+        _spec_failed(job.id, gen)
+        n += 1
+    return n
+
+
+def _exports_maintenance(boot: bool = False) -> None:
+    """Boot and hourly: pending fair-use refunds, cut-off speculative
+    renders. Never raises."""
+    try:
+        _retry_pending_refunds()
+    except Exception as e:
+        print(f"[fair-use] pending-refund retry failed: {e}", flush=True)
+    try:
+        # WP1 is one process: at its boot no speculative thread survived.
+        n = _settle_stale_specs(0.0 if boot and not taskq.enabled() else None)
+        if n:
+            print(f"[spec] settled {n} speculative render(s) cut off by a "
+                  "restart", flush=True)
+    except Exception as e:
+        print(f"[spec] stale speculative-render sweep failed: {e}", flush=True)
 
 
 # ── speculative render: the instant export (review E1, PLAN 2.10) ───

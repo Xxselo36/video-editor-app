@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppPage } from "@/components/AppPage";
 import { Toast } from "@/components/ui/Toast";
-import { useLang, useT } from "@/i18n";
+import { useT } from "@/i18n";
 import { updateActiveJob } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
 import { apiFetch, whenMediaReady } from "@/lib/api";
@@ -31,7 +31,6 @@ import { ErrorView } from "@/features/project/ErrorView";
 import { useCaptionsV2 } from "@/features/captions-ui/flag";
 import { applyRender, startRender } from "./applyRender";
 import { useExportFlow } from "@/features/editor/export/useExportFlow";
-import { costLine } from "@/features/project/exportsInfo";
 import type { V1Edits } from "@/features/editor/state/reconcile";
 import type { ExportSource } from "@/features/editor/v2/EditorShell";
 import { phrasesFromSubtitlesResponse, type Phrase, type Subtitle } from "./buildPhrases";
@@ -54,7 +53,6 @@ type Load =
  *  ReviewScreen — same job data and callbacks (EditorRoute decides). */
 export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: boolean }) {
   const t = useT();
-  const lang = useLang();
   const router = useRouter();
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [phrases, setPhrases] = useState<Phrase[]>([]);
@@ -269,8 +267,6 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
       />
     );
   }
-  const applyNote =
-    exportedBefore && job.fair_use?.billed ? costLine(job, t, lang).text : null;
   return (
     <AppPage width="3xl">
       {exportedBefore && (
@@ -302,7 +298,6 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         }}
         onApply={onApply}
         onBack={leave}
-        applyNote={applyNote}
       />
     </AppPage>
   );
