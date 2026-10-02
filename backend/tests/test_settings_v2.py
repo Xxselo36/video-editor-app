@@ -224,7 +224,8 @@ def test_no_cuts_analysis(tmp_path, analysis):
     # 1.4 s of silence before the first word: trimmed; the end is kept.
     assert res["segments"] == [(1.4, 4.0)]
     assert [s["start"] for s in res["subtitles"]] == [0.1, 1.3]
-    assert res["cut_ranges"] == pipeline._invert_segments([(1.4, 4.0)], 4.0)
+    assert [(c["start"], c["end"]) for c in res["cut_ranges"]] == [
+        (c["start"], c["end"]) for c in pipeline._invert_segments([(1.4, 4.0)], 4.0)]
     assert len(res["cut_ranges"]) == 1
 
 
