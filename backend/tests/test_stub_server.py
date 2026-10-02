@@ -235,11 +235,15 @@ def test_filmstrip_seeded_and_made_lazily(stub):
     assert meta["tileH"] == 90 and meta["n"] >= 1 and meta["interval"] == 1.0
     status, _, raw = stub.call("GET", f"/jobs/{job['id']}/filmstrip")
     assert status == 200 and raw[:2] == b"\xff\xd8"
-    old = stub.json("POST", "/_test/seed/review_speech", {"filmstrip": False})
+    old = stub.json("POST", "/_test/seed/review", {"filmstrip": False})   # (no espeak needed)
     assert stub.json("GET", f"/jobs/{old['id']}")["filmstrip"] is None
     assert stub.call("GET", f"/jobs/{old['id']}/filmstrip?meta=1")[0] == 202
     end = time.monotonic() + 30
     while stub.call("GET", f"/jobs/{old['id']}/filmstrip?meta=1")[0] != 200:
         assert time.monotonic() < end, "no lazy filmstrip"
         time.sleep(0.25)
-    assert stub.json("GET", f"/jobs/{old['id']}")["filmstrip"]["tileW"] == 50
+    made = stub.json("GET", f"/jobs/{old['id']}")["filmstrip"]
+    # the same grid clip's tiles (n: the job's duration vs the probed proxy's)
+    same = ("interval", "tileW", "tileH")
+    assert {k: made[k] for k in same} == {k: meta[k] for k in same}
+    assert abs(made["n"] - meta["n"]) <= 1
