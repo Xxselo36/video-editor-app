@@ -130,6 +130,7 @@ JOB_KEYS = sorted([
     "fps",              # UX10: the editor's trim frame grid (mezz_fps)
     "format_warning",   # UX6: e.g. smartcam_failed
     "filmstrip",        # UX7b: {n, interval, tileW, tileH} or None
+    "title",            # UX12: the name the user gave the project
 ])
 
 
@@ -179,7 +180,9 @@ def test_status_rows_snapshot(client):
     assert sorted(rows[job.id]) == sorted([
         "id", "status", "message", "progress", "queue_position", "error",
         "error_code", "error_params", "refunded", "stage", "stage_params",
-        "has_output", "updated_at", "preview_version"])
+        "has_output", "updated_at", "preview_version",
+        # UX12: the Projects tile
+        "title", "duration", "created_at", "expires_at"])
     assert (rows[job.id]["stage"], rows[job.id]["stage_params"],
             rows[job.id]["message"]) == ("analyze.transcribe", {},
                                          "Transcribing (35%)…")

@@ -21,7 +21,8 @@ const LEGACY_FILES = [
   "src/features/jobs/JobStatusPoller.ts",
   "src/features/start/PickerScreen.tsx",
   "src/features/voice-test/VoiceTestDialog.tsx",
-  "src/app/app/library/page.tsx",
+  // Moved verbatim out of app/app/library/page.tsx by UX12.
+  "src/features/jobs/LibraryPage.legacy.tsx",
   "src/components/billing/AccountView.tsx",
   "src/components/billing/PricingView.tsx",
 ];

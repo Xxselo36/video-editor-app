@@ -8,6 +8,10 @@
  */
 import { AUTH_ENABLED } from "@/lib/auth";
 
+/** This device's projects since UX12 (features/jobs/jobsStore): ids,
+ *  names and upload records. */
+export const JOBS_KEY = "cleocuts.jobs.v2";
+
 type Stored = { jobId?: unknown; timestamp?: unknown };
 
 function entries(raw: string | null): Stored[] {

@@ -47,6 +47,15 @@ def retention_days(plan: str | None) -> float:
                                    PLAN_RETENTION_DAYS["starter"])
 
 
+def expiry_time(plan: str | None, updated_at: float | None) -> float | None:
+    """Unix time a project of `plan` last changed at `updated_at` gets
+    deleted (Job.expires_at; the status rows, which have no Job)."""
+    days = retention_days(plan)
+    if days <= 0 or not updated_at:
+        return None
+    return float(updated_at) + days * 86400
+
+
 # The editor proxy's file name next to a legacy job's normalized file
 # (backend.pipeline.PROXY_NAME).
 LEGACY_PROXY_NAME = "proxy.mp4"
@@ -126,6 +135,9 @@ class Job:
     filename: str | None = None
     preset_id: str | None = None
     preset_label: str | None = None
+    # The project's name as the user set it (PATCH /jobs/{id} {title},
+    # UX12); None = never renamed — clients show the file name.
+    title: str | None = None
     # Unix time of the upload. 0 = legacy job.
     created_at: float = 0.0
     # 1-based place in line while the job waits for a free analysis or
@@ -235,10 +247,7 @@ class Job:
 
     def expires_at(self) -> float | None:
         """Unix time when the project gets deleted, None = never."""
-        days = retention_days(self.plan)
-        if days <= 0 or not self.updated_at:
-            return None
-        return self.updated_at + days * 86400
+        return expiry_time(self.plan, self.updated_at)
 
     def edit_segments(self) -> list[dict[str, Any]]:
         """job.segments zipped with their per-segment effects.
@@ -332,6 +341,7 @@ class Job:
             "filename": self.filename,
             "preset_id": self.preset_id,
             "preset_label": self.preset_label,
+            "title": self.title,
             "created_at": self.created_at or None,
             "updated_at": self.updated_at or None,
             "queue_position": self.queue_position,
@@ -398,7 +408,10 @@ def tune_connection(conn: sqlite3.Connection) -> None:
 _STATUS_FIELDS = ("id", "status", "message", "progress", "queue_position",
                   "error", "error_code", "error_params", "refunded",
                   "stage", "stage_params", "output_path",
-                  "updated_at", "preview_version", "owner_id", "output_keys")
+                  "updated_at", "preview_version", "owner_id", "output_keys",
+                  # UX12: what a project tile shows (the anonymous
+                  # Projects page has no GET /jobs list).
+                  "plan", "title", "duration", "created_at")
 
 
 def status_defaults() -> dict[str, Any]:

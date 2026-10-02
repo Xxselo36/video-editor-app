@@ -5,6 +5,7 @@ import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { LogoMark } from "@/components/Logo";
 import { LanguageSwitcher, useT } from "@/i18n";
 import { planName, useBillingConfig, useMe } from "@/lib/account";
+import { useProjectsV2 } from "@/features/jobs/useProjectsV2";
 
 export function AppHeader() {
   const t = useT();
@@ -12,6 +13,8 @@ export function AppHeader() {
   const { me } = useMe();
   const billing = useBillingConfig();
   const planBadge = billing?.enabled && me?.plan ? planName(me.plan, billing) : null;
+  // v2 opt-in (UX12): the Projects page replaces the library.
+  const projects = useProjectsV2() === true;
 
   return (
     <header
@@ -31,11 +34,11 @@ export function AppHeader() {
       <div className="flex items-center gap-3 sm:gap-4">
         <PricingLink className="hidden sm:inline" />
         <Link
-          href="/app/library"
+          href={projects ? "/app" : "/app/library"}
           className="text-xs transition-colors hover:opacity-70"
           style={{ color: "var(--text-body)" }}
         >
-          {t("app.header.library")}
+          {t(projects ? "app.header.projects" : "app.header.library")}
         </Link>
         <LanguageSwitcher />
         {planBadge ? (

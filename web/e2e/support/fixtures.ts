@@ -24,7 +24,9 @@ export type SeedName =
   | "err_no_speech"
   | "err_unreadable"
   | "done"
-  | "done_land";
+  | "done_land"
+  | "edited"
+  | "projects_all_expired";
 
 export type SeedOptions = {
   filename?: string;
@@ -88,6 +90,8 @@ export type StubJob = {
   outputs: string[];
   filename: string | null;
   preset_id: string | null;
+  /** The name the user gave it (UX12). */
+  title?: string | null;
   expires_at?: number;
   source_key: string | null;
   owner_id: string | null;

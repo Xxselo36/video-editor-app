@@ -14,7 +14,7 @@ import fs from "node:fs";
 import type { Page, Request } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { API, EDITOR_V2, WEB } from "./support/env";
-import { ACTIVE_JOBS, LIBRARY, chooseFile, libEntry, openWithStorage, postedSettings, readStorage } from "./support/app";
+import { ACTIVE_JOBS, chooseFile, JOBS, libEntry, LIBRARY, openWithStorage, postedSettings, readStorage } from "./support/app";
 
 const PREFS = "cleocuts.prefs.v1";
 
@@ -48,9 +48,11 @@ async function closeSettings(page: Page) {
 
 /** The id of the job POST /jobs created (the card swapped its upl- id). */
 async function createdJobId(page: Page): Promise<string> {
+  // The v2 opt-in keeps its projects in the jobs store (UX12).
   const id = async () =>
-    ((await readStorage<{ jobId: string }[]>(page, ACTIVE_JOBS)) ?? []).map((j) => j.jobId).find((j) => !j.startsWith("upl-")) ??
-    null;
+    [...((await readStorage<{ jobId: string }[]>(page, JOBS)) ?? []), ...((await readStorage<{ jobId: string }[]>(page, ACTIVE_JOBS)) ?? [])]
+      .map((j) => j.jobId)
+      .find((j) => !j.startsWith("upl-")) ?? null;
   await expect.poll(id, { timeout: 30_000 }).not.toBeNull();
   return (await id())!;
 }

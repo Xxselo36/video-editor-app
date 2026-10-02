@@ -30,6 +30,7 @@ import { getActiveJobs } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
 import { useConfig } from "@/lib/config";
 import { getLibrary } from "@/lib/library";
+import { readLocalJobs } from "@/features/jobs/localJobs";
 import { isUploading, loadUploadCode, startUpload, useLiveUpload } from "@/features/upload/uploadManager";
 import { VoiceTestDialog } from "@/features/voice-test/VoiceTestDialog";
 import {
@@ -116,8 +117,9 @@ export function StartScreen() {
   useEffect(() => {
     mounted.current = true;
     // Read once after mount: the server render has no storage.
+    // (This device's Projects list — UX12 — or the lists of before.)
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHasDashboard(getActiveJobs().length > 0 || getLibrary().length > 0);
+    setHasDashboard(readLocalJobs().length > 0 || getActiveJobs().length > 0 || getLibrary().length > 0);
     // The upload code now, not when the file is picked (a deploy
     // meanwhile would take this build's chunk away).
     loadUploadCode().catch(() => {});
@@ -155,7 +157,8 @@ export function StartScreen() {
     startedRef.current = true;
     // Projects in this browser and no saved defaults: keep Clipper
     // (review D11). Read before this upload's own card goes up.
-    const returning = !prefs.saved && (getActiveJobs().length > 0 || getLibrary().length > 0);
+    const returning =
+      !prefs.saved && (readLocalJobs().length > 0 || getActiveJobs().length > 0 || getLibrary().length > 0);
     const s = settingsRef.current;
     track("file_chosen", {
       preset: "start",
