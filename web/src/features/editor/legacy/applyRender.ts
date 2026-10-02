@@ -8,6 +8,8 @@ import { updateActiveJob as updateActiveJobV2 } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
 import { apiError, apiFetch } from "@/lib/api";
 import { describeError } from "@/lib/errors";
+import { readChoice } from "@/features/editor/v2/flag";
+import { setExportHint } from "@/features/jobs/localJobs";
 import type { Phrase, Subtitle } from "./buildPhrases";
 import { phrasesToUnits } from "./phraseUnits";
 
@@ -40,7 +42,11 @@ export async function applyRender(
   });
   if (r.status !== 409 && !r.ok) throw await apiError(r);
   if (r.ok) track("export_started", { caption_style: captionPreset, lines: phrases.length });
-  updateActiveJobV2(jobId, { phase: "rendering", note: undefined, noteCode: undefined });
+  // The Projects page (v2 opt-in, UX12) or the dashboard card.
+  if (readChoice()) {
+    setExportHint(jobId);
+    void import("@/features/jobs/jobsStore").then((m) => m.noteExporting(jobId));
+  } else updateActiveJobV2(jobId, { phase: "rendering", note: undefined, noteCode: undefined });
   return r.status === 409 ? "not_in_review" : "started";
 }
 

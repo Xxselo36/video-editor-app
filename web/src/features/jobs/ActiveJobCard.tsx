@@ -7,7 +7,7 @@ import { useT } from "@/i18n";
 import type { ActiveJobV2 } from "@/lib/activeJobs";
 import { cardErrorText, cardNoteText, jobErrorText } from "@/lib/errors";
 import { presetLabelFor } from "@/features/start/presets.legacy";
-import { useLiveUpload } from "@/features/upload/uploadManager";
+import { useLiveUpload } from "@/features/upload/uploadState";
 import type { CardStatus } from "./types";
 
 // Compact card for an in-progress job. The copy is deliberately warm

@@ -10,6 +10,8 @@ import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import { getActiveJobs } from "@/lib/activeJobs";
 import { getLibrary } from "@/lib/library";
+import { readChoice } from "@/features/editor/v2/flag";
+import { readLocalJobs } from "@/features/jobs/localJobs";
 import { VoiceTeaser } from "@/features/voice-test/VoiceTeaser";
 import { VoiceTestDialog } from "@/features/voice-test/VoiceTestDialog";
 import { getPresetChips, PRESET_ACCENTS, PRESET_ICONS, PRESETS, type PresetId } from "./presets.legacy";
@@ -26,7 +28,10 @@ export function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
   useEffect(() => {
     // Read once after mount: the server render has no storage.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHasDashboard(getActiveJobs().length > 0 || getLibrary().length > 0);
+    // (The v2 opt-in's Projects page reads the jobs store, UX12.)
+    // (On the v2 opt-in, Projects also lists the cards of before, UX12.)
+    const legacy = getActiveJobs().length > 0 || getLibrary().length > 0;
+    setHasDashboard(readChoice() ? readLocalJobs().length > 0 || legacy : legacy);
   }, []);
 
   const dismissVoiceOnboarding = () => {

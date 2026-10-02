@@ -3,7 +3,10 @@
  * /app/p/[jobId] (UX5): one project, by its status (PLAN_TECH §1.1).
  * First version from what exists (UX11/UX12 bring the real views):
  *
- *   pending / processing   its job card, enlarged, with the stage
+ *   pending / processing   its job card, enlarged, with the stage — on
+ *                          the v2 opt-in (UX12) ProcessingView: the
+ *                          analysis or the export as a checklist, time
+ *                          left; the editor opens by itself
  *   awaiting_review        → /app/edit/[jobId] (replace)
  *   done                   the Done view (DoneView.legacy)
  *   error                  ErrorView: the code's message, the refund,
@@ -24,9 +27,12 @@ import { getActiveJob, type ActiveJobV2 } from "@/lib/activeJobs";
 import { apiFetch } from "@/lib/api";
 import { jobErrorText, stageText, tEn } from "@/lib/errors";
 import { ActiveJobCard } from "@/features/jobs/ActiveJobCard";
+import { hasExportHint, readLocalJobs } from "@/features/jobs/localJobs";
+import { useProjectsV2 } from "@/features/jobs/useProjectsV2";
 import type { JobStatus } from "@/features/jobs/types";
 import { DoneView } from "./DoneView.legacy";
 import { ErrorView } from "./ErrorView";
+import { ProcessingView } from "./ProcessingView";
 
 const POLL_MS = 2000;
 // After an answer that isn't a job (a 502 / 503 while the backend
@@ -60,10 +66,21 @@ function cardFor(job: JobStatus): ActiveJobV2 {
   };
 }
 
+/** A running job is an export (not the analysis). */
+export function isExport(job: Pick<JobStatus, "stage" | "message" | "has_output">, seenInReview: boolean): boolean {
+  if (job.stage?.startsWith("render.")) return true;
+  if (job.stage?.startsWith("analyze.")) return false;
+  return seenInReview || Boolean(job.has_output) || /render/i.test(job.message ?? "");
+}
+
 export function ProjectPage({ jobId }: { jobId: string }) {
   const t = useT();
   const router = useRouter();
   const [load, setLoad] = useState<Load>({ state: "loading" });
+  // The v2 opt-in (UX12): the processing view, back to Projects.
+  const v2 = useProjectsV2() === true;
+  // In review (or exported) before: a queued run is an export.
+  const [seenInReview] = useState(() => hasExportHint(jobId));
 
   useEffect(() => {
     let cancelled = false;
@@ -123,7 +140,7 @@ export function ProjectPage({ jobId }: { jobId: string }) {
       style={{ color: "var(--text-muted)" }}
     >
       <Icon icon={ArrowLeft} className="text-base" />
-      {t("app.picker.backToDashboard")}
+      {t(v2 ? "app.projects.back" : "app.picker.backToDashboard")}
     </Link>
   );
 
@@ -177,6 +194,19 @@ export function ProjectPage({ jobId }: { jobId: string }) {
             hookClips={job.hook_clips ?? []}
             onReset={() => router.push("/app/new")}
           />
+        </div>
+      </AppPage>
+    );
+  }
+  if (v2) {
+    const local = readLocalJobs().find((j) => j.jobId === job.id);
+    const name =
+      (job as { title?: string | null }).title || local?.name || local?.filename || job.filename || t("app.library.untitled");
+    return (
+      <AppPage width="md">
+        <div data-testid="project" data-status={job.status} className="flex flex-col">
+          {back}
+          <ProcessingView job={job} exporting={isExport(job, seenInReview)} name={name} />
         </div>
       </AppPage>
     );

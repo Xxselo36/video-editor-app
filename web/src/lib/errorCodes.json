@@ -85,6 +85,7 @@
     "invalid_payload",
     "invalid_request",
     "invalid_segments",
+    "invalid_title",
     "method_not_allowed",
     "no_doc",
     "no_subscription",

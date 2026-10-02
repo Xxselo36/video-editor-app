@@ -459,7 +459,9 @@ def test_batch_status_with_etag(client):
         "id", "status", "message", "progress", "queue_position", "error",
         "error_code", "error_params", "refunded", "stage", "stage_params",
         "has_output", "updated_at",
-        "preview_version"}
+        "preview_version",
+        # UX12: the Projects tile
+        "title", "duration", "created_at", "expires_at"}
     assert body["jobs"][1]["queue_position"] == 3
     etag = r.headers["etag"]
     assert etag.startswith('W/"')

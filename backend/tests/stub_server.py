@@ -36,7 +36,10 @@ Test API (only this script registers it; never part of the backend):
               Text tab's long-transcript state, §1.7 row 21),
               render_failed, analyzing,
               queued, rendering, error, err_no_speech (refunded),
-              err_unreadable, done, done_land (the §1.7 state matrix
+              err_unreadable, done, done_land, edited (in review again
+              after an export: outputs kept), projects_all_expired (a
+              job deleted after its retention — the id answers 404,
+              §1.7 row 16) (the §1.7 state matrix
               grows here: later packages add seeds; the upload
               refusals no_video / no_audio / video_too_short are the
               real backend's answers to the media below)
@@ -119,7 +122,7 @@ import stub_media  # noqa: E402
 
 SEED_NAMES = ("review", "review_speech", "review_land", "review_long", "render_failed", "analyzing",
               "queued", "rendering", "error", "err_no_speech", "err_unreadable", "done",
-              "done_land")
+              "done_land", "edited", "projects_all_expired")
 
 TIKTOK = {"caption_preset": "clipper", "style": "tight", "voice_triggers": True,
           "remove_fillers": True, "smartcam_enabled": True, "smartcam_format": "portrait",
@@ -695,6 +698,20 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                          ("podcast", "Podcast") if land else tiktok)
             seed_done(job, clip, orientation, hooks=not land)
             proxy = "on"
+        elif name == "edited":
+            # Exported once, then back in review (UX11's reopen): Projects
+            # shows "Edited since export".
+            clip = clip or "speech"
+            job = create(opts, TIKTOK, "tiktok_3_mistakes_v2.mp4", tiktok)
+            seed_done(job, clip, orientation, hooks=False)
+            store.update(job.id, status="awaiting_review", message="Review subtitles")
+            proxy = "on"
+        elif name == "projects_all_expired":
+            # Deleted after its retention: the id is all a browser keeps.
+            job = create(opts, TIKTOK, "first_test_video.mp4", tiktok)
+            store.delete(job.id)
+            print(f"[stub] seeded {name} {job.id} (deleted)", flush=True)
+            return {"id": job.id, "seed": name, "filename": job.filename, "status": "deleted"}
         else:
             raise HTTPException(404, f"unknown seed {name!r}; seeds: {', '.join(SEED_NAMES)}")
         if opts.get("age_s"):
