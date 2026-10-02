@@ -20,6 +20,7 @@ export function BottomSheet({
   headerExtra,
   children,
   testId,
+  tall,
 }: {
   title: string;
   onClose: () => void;
@@ -27,10 +28,12 @@ export function BottomSheet({
   headerExtra?: ReactNode;
   children: ReactNode;
   testId?: string;
+  /** Opens at 90 % (short screens, UX7c), else at 54 %. */
+  tall?: boolean;
 }) {
   const t = useT();
   const ref = useRef<HTMLElement>(null);
-  const [snap, setSnap] = useState(SNAPS[0]);
+  const [snap, setSnap] = useState(tall ? SNAPS[1] : SNAPS[0]);
   const [drag, setDrag] = useState<number | null>(null);
   const start = useRef<{ y: number; h: number } | null>(null);
   const titleId = `ed-sheet-${testId ?? "x"}`;

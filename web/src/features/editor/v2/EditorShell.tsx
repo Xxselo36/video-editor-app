@@ -34,7 +34,7 @@ import {
   splittableIndex,
 } from "@/features/editor/timeline/mechanics";
 import type { CutRange, SavedSeg } from "@/features/jobs/types";
-import { useEditorRoot, useOnline } from "./hooks";
+import { useEditorRoot, useMediaQuery, useOnline } from "./hooks";
 import { EditOrder, type Area } from "./editOrder";
 import { cutDuration } from "./model";
 import { BottomSheet } from "./panel/BottomSheet";
@@ -109,6 +109,9 @@ const EMPTY_STORE = createDocStore({
   format: { aspect: "9:16" },
   rev: 0,
 });
+
+/** SE-class phones, upright (568 px in Safari); an iPhone 13 (664) and up keep 54 % so the preview stays visible while picking a style (UX7c). */
+const SHORT_PORTRAIT = "(max-height: 600px) and (orientation: portrait)";
 
 const TITLE_KEY = (id: string) => `cleocuts.editor.title.${id}`;
 
@@ -277,6 +280,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   // ── panels ──────────────────────────────────────────────────────────
   const [tab, setTab] = useState<"text" | "style">("text");
   const [sheetState, setSheetState] = useState<"text" | "style" | null>(null);
+  const shortPortrait = useMediaQuery(SHORT_PORTRAIT);
   // Sheets exist on the phone layout only (a resize to desktop drops one).
   const sheet = phone ? sheetState : null;
   const { onSheetChange } = props;
@@ -681,6 +685,9 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
           // text edits are undone from the sheet itself (UX8).
           headerExtra={sheet === "text" ? undoRedo : undefined}
           testId={`ed-sheet-${sheet}`}
+          // UX7c: on SE-class portrait phones (height <= 600) the Stil
+          // sheet at 54 % shows barely a row of tiles: it opens at 90 %.
+          tall={sheet === "style" && shortPortrait}
         >
           {sheet === "text" ? transcript : style}
         </BottomSheet>
