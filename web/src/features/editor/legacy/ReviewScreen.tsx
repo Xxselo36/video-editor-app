@@ -41,6 +41,7 @@ export function ReviewScreen({
   units,
   captionPreset,
   audioWarnings,
+  formatWarning = null,
   cutRanges,
   duration,
   onChange,
@@ -57,6 +58,9 @@ export function ReviewScreen({
   units: { readonly current: Subtitle[] };
   captionPreset: string;
   audioWarnings: string[];
+  /** job.format_warning in words (UX6: speaker tracking failed, the
+   *  video was centre-cropped), or null. */
+  formatWarning?: string | null;
   cutRanges: CutRange[];
   duration: number;
   onChange: (p: Phrase[]) => void;
@@ -65,6 +69,7 @@ export function ReviewScreen({
 }) {
   const t = useT();
   const lang = useLang();
+  const [formatWarningClosed, setFormatWarningClosed] = useState(false);
   const {
     videoRef,
     fadeRef,
@@ -201,6 +206,24 @@ export function ReviewScreen({
           <Icon icon={ArrowLeft} /> {t("app.review.backToDashboard")}
         </button>
       </div>
+
+      {formatWarning && !formatWarningClosed && (
+        <div
+          role="status"
+          data-testid="format-warning"
+          className="flex items-start justify-between gap-3 rounded-xl border border-[var(--warn)]/30 bg-[var(--warn)]/10 p-3 text-xs text-[var(--warn)]"
+        >
+          <span>{formatWarning}</span>
+          <button
+            type="button"
+            onClick={() => setFormatWarningClosed(true)}
+            aria-label={t("editor.close")}
+            className="-m-1 shrink-0 rounded p-1 hover:bg-[var(--warn)]/10"
+          >
+            <Icon icon={X} />
+          </button>
+        </div>
+      )}
 
       {audioWarnings.length > 0 && (
         <div className="rounded-xl border border-[var(--warn)]/30 bg-[var(--warn)]/10 p-3 text-xs text-[var(--warn)]">

@@ -23,18 +23,9 @@ import { getLibrary } from "@/lib/library";
 import { requestNotificationPermission } from "@/lib/notify";
 import type { JobStatus } from "@/features/jobs/types";
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
+import { readSettings, type SettingsSource } from "./settings";
 
-/** The job settings POST /jobs stores (backend _clean_settings). */
-export type UploadSettings = {
-  caption_preset: string;
-  style: string;
-  voice_triggers: boolean;
-  remove_fillers: boolean;
-  smartcam_enabled: boolean;
-  smartcam_format: "portrait" | "landscape";
-  resolution: string;
-  output_formats: string[];
-};
+export type { UploadSettings } from "./settings";
 
 // POST /jobs after an upload to R2: waits between tries on a network
 // error or a 5xx that isn't a refusal — about 75 s in all, so a backend
@@ -70,7 +61,7 @@ async function findJobCreatedFor(filename: string, sinceMs: number): Promise<str
 
 export async function uploadJob(
   targetFile: File,
-  settings: UploadSettings,
+  settings: SettingsSource,
   selectedPreset: PresetId | null,
   { tempId, onPaywall, onCreated, onProgress, onEnd }: {
     /** The upload card's temporary id (uploadCard). */
@@ -183,7 +174,9 @@ export async function uploadJob(
     // Stored with the job so the server-side project list has names.
     const appendJobFields = (form: FormData) => {
       form.append("filename", targetFile.name);
-      form.append("settings", JSON.stringify(settings));
+      // Read now — the moment the job is created (a change made during
+      // the upload counts).
+      form.append("settings", JSON.stringify(readSettings(settings)));
       if (selectedPreset) form.append("preset_id", selectedPreset);
       if (presetInfo) form.append("preset_label", tEn(presetInfo.labelKey));
     };
@@ -362,7 +355,7 @@ export async function uploadJob(
       presetId: selectedPreset,
       presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
       presetIcon: null,
-      captionPreset: settings.caption_preset,
+      captionPreset: readSettings(settings).caption_preset ?? "",
     });
 
     // The job now lives as a card on the dashboard; the backend keeps

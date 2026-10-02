@@ -22,7 +22,44 @@ from __future__ import annotations
 import os
 import random
 import time
-from typing import Any
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Iterator
+
+
+# Spoken languages a web user can pick at upload (UX6; GET /config
+# spoken_languages, after "auto"): Whisper's languages with an ISO 639-1
+# code.
+SPOKEN_LANGUAGES = (
+    "en", "de", "es", "fr", "pt", "it", "tr", "pl", "nl", "ru", "ja", "ko",
+    "id", "hi", "zh", "ar", "sv", "ca", "fi", "vi", "he", "uk", "el", "ms",
+    "cs", "ro", "da", "hu", "ta", "no", "th", "ur", "hr", "bg", "lt", "la",
+    "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn", "sr", "az", "sl", "kn",
+    "et", "mk", "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw",
+    "gl", "mr", "pa", "si", "km", "sn", "yo", "so", "af", "oc", "ka", "be",
+    "tg", "sd", "gu", "am", "yi", "lo", "uz", "fo", "ht", "ps", "tk", "nn",
+    "mt", "sa", "lb", "my", "bo", "tl", "mg", "as", "tt", "ln", "ha", "ba",
+    "su",
+)
+
+# The language the uploader picked (settings.spoken_language), for the
+# transcription of this analysis: set by backend.pipeline around
+# analyze_video (same thread), read by transcribe_via_groq_multilang.
+# The desktop code that calls it (src/audio.py) stays unchanged.
+_SPOKEN_LANGUAGE: ContextVar[str | None] = ContextVar(
+    "cleo_spoken_language", default=None)
+
+
+@contextmanager
+def spoken_language(language: str | None) -> Iterator[None]:
+    """Transcribe in `language` (ISO 639-1) inside this block; None or
+    "auto" = detect it (the two-pass default)."""
+    lang = language if language in SPOKEN_LANGUAGES else None
+    token = _SPOKEN_LANGUAGE.set(lang)
+    try:
+        yield
+    finally:
+        _SPOKEN_LANGUAGE.reset(token)
 
 
 # Model choice:
@@ -549,6 +586,24 @@ def transcribe_via_groq_multilang(
     Cost: 2× Groq bill (~$0.22/hr instead of $0.11/hr). For a 10min
     video that's ~$0.037. Trade-off for correct multi-language text.
     """
+    forced = _SPOKEN_LANGUAGE.get()
+    if forced:
+        # The uploader named the language (UX6): one pass in it, no
+        # second English pass — a wrong detection can't happen.
+        print(f"[groq] spoken language given: '{forced}' — one pass",
+              flush=True)
+        result = transcribe_via_groq(
+            audio_path,
+            initial_prompt=(initial_prompt_en or initial_prompt)
+            if forced == "en" else initial_prompt,
+            language=forced)
+        # The code the user picked, not Groq's own reading of it (it
+        # may answer with a full name, "portuguese", which the
+        # normalisation would cut to "po").
+        if result is not None:
+            result["language"] = forced
+        return result
+
     print("[groq] running multi-language two-pass transcription…",
           flush=True)
     pass_auto = transcribe_via_groq(audio_path,

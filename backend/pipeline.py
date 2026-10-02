@@ -6,6 +6,7 @@ per-segment clips into a single MP4 for the web user to download.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
@@ -1197,6 +1198,88 @@ def _ffmpeg_concat(
         )
 
 
+# ── UX6: the start screen's settings ──────────────────────────────────
+
+# "No cuts": silence longer than this at the very start or end is
+# trimmed; everything in between is kept.
+NO_CUT_EDGE_S = 1.0
+
+
+def smartcam_plan(settings: dict[str, Any]) -> tuple[bool, str]:
+    """(SmartCam on, its format) for an upload's settings. A web upload
+    from UX6 on names its target frame (settings.target_aspect) and the
+    server decides on the real video: 9:16 → reframe to portrait (a
+    source that is already 9:16 is kept as recorded, see analyze_only);
+    16:9 and original → no reframe (a portrait source asked for 16:9 is
+    treated as original — never pillarboxed). Older clients send
+    smartcam_enabled / smartcam_format themselves."""
+    aspect = settings.get("target_aspect")
+    if aspect in ("9:16", "16:9", "original"):
+        return aspect == "9:16", "portrait"
+    return (bool(settings.get("smartcam_enabled")),
+            settings.get("smartcam_format", "portrait"))
+
+
+def centre_crop(src: str, dst: str, fmt: str) -> bool:
+    """Crop the centre of `src` to 9:16 (fmt "portrait") or 16:9
+    ("landscape") into `dst` — the fallback when SmartCam can't track
+    anyone. Audio copied. False (and no `dst`) on failure."""
+    w, h = (9, 16) if fmt == "portrait" else (16, 9)
+    crop = (f"crop=trunc(min(iw\\,ih*{w}/{h})/2)*2"
+            f":trunc(min(ih\\,iw*{h}/{w})/2)*2")
+    cmd = [get_ffmpeg_path(), "-y", *_threads(), "-i", src,
+           "-map", "0:V:0", "-map", "0:a:0?", "-vf", crop,
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+           "-pix_fmt", "yuv420p", "-c:a", "copy",
+           "-movflags", "+faststart", dst]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0 and Path(dst).is_file():
+        return True
+    Path(dst).unlink(missing_ok=True)
+    tail = result.stderr[-400:] if result.stderr else "(no stderr)"
+    print(f"[smartcam] centre crop failed:\n{tail}", flush=True)
+    return False
+
+
+def no_cut_plan(segments: list, subtitles: list[dict], duration: float
+                ) -> tuple[list[tuple[float, float]], list[dict]]:
+    """The analysis of a "No cuts" upload: one segment over the whole
+    video — silence longer than NO_CUT_EDGE_S before the first or after
+    the last speech trimmed — and the captions on that timeline. The
+    subtitles' source times (original_start/end) are kept; a subtitle
+    the cut plan split over two segments appears once."""
+    first = float(segments[0][0])
+    last = float(segments[-1][1])
+    lead = first if first > NO_CUT_EDGE_S else 0.0
+    end = last if duration - last > NO_CUT_EDGE_S else float(duration)
+    seen: set[tuple] = set()
+    out: list[dict] = []
+    for sub in subtitles:
+        o_start = float(sub.get("original_start", sub["start"]))
+        o_end = float(sub.get("original_end", sub["end"]))
+        key = (round(o_start, 3), round(o_end, 3), sub.get("text"))
+        if key in seen:
+            continue
+        seen.add(key)
+        a, b = max(o_start, lead), min(o_end, end)
+        if b - a <= 0.05:
+            continue
+        out.append({**sub, "start": round(a - lead, 3),
+                    "end": round(b - lead, 3)})
+    out.sort(key=lambda x: x["start"])
+    return [(lead, end)], out
+
+
+def _spoken_language(language: Any):
+    """whisper_groq.spoken_language(...) — a no-op where that module
+    can't load."""
+    try:
+        from backend.whisper_groq import spoken_language
+    except ImportError:
+        return contextlib.nullcontext()
+    return spoken_language(language if isinstance(language, str) else None)
+
+
 def analyze_only(
     input_path: str,
     output_dir: str,
@@ -1232,10 +1315,18 @@ def analyze_only(
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     style_map = {"tight": "fast", "balanced": "smooth", "smooth": "smooth"}
-    style = style_map.get(settings.get("style", "balanced"), "smooth")
+    pace = settings.get("style", "balanced")
+    style = style_map.get(pace, "smooth")
 
     voice_triggers = settings.get("voice_triggers", True)
     remove_fillers = settings.get("remove_fillers", True)
+    # "No cuts" (UX6): the whole video, only long silence at the very
+    # start and end trimmed (no_cut_plan below). Transcription and the
+    # text cleanup still run — the captions need them.
+    no_cuts = pace == "none"
+    if no_cuts:
+        voice_triggers = False
+        remove_fillers = False
     # 'medium' catches short wake words ('Cleo cut', 'Cleo go') that
     # 'small' regularly swallows. Slower (~2x) but the voice-trigger
     # feature simply doesn't work reliably on 'small'.
@@ -1283,9 +1374,11 @@ def analyze_only(
     _max_side = _res_map.get(_res_str.lower(), 1920)
     print(f"[render] resolution setting='{_res_str}' → "
           f"longest-side max={_max_side}", flush=True)
-    smartcam = bool(settings.get("smartcam_enabled"))
-    sc_format = settings.get("smartcam_format", "portrait")
+    smartcam, sc_format = smartcam_plan(settings)
     sc_zoom: float | None = None
+    # Set when the reframe failed and the video was centre-cropped
+    # instead (job.format_warning, UX6).
+    format_warning: str | None = None
     if smartcam and sc_format == "portrait":
         # No hidden "Speaker Focus" zoom on videos that are already
         # vertical (owner decision 2026-09-30; the plugin zooms 1.3). A
@@ -1335,10 +1428,24 @@ def analyze_only(
         # Written straight into this job's folder (job-scoped name; the
         # plugin's shared-cache default collides between jobs).
         sc_dest = str(Path(output_dir) / "normalized_smartcam.mp4")
-        sc_out = _smartcam_reframe(
-            normalized_path, sc_dest, sc_format, sc_resolution,
-            progress_cb=progress_cb, same_aspect_zoom=sc_zoom,
-        )
+        # UX6 uploads (target_aspect set) never pass a failed reframe
+        # through: a note and a centre crop instead. Older payloads keep
+        # the old behaviour exactly (an exception fails the job, no file
+        # keeps the normalized source).
+        targeted = settings.get("target_aspect") in ("9:16", "16:9", "original")
+        try:
+            sc_out = _smartcam_reframe(
+                normalized_path, sc_dest, sc_format, sc_resolution,
+                progress_cb=progress_cb, same_aspect_zoom=sc_zoom,
+            )
+        except InterruptedError:
+            raise
+        except Exception as e:
+            if not targeted:
+                raise
+            print(f"[smartcam] reframe failed: {type(e).__name__}: {e}",
+                  flush=True)
+            sc_out = None
         if sc_out and Path(sc_out).exists():
             if os.path.abspath(sc_out) != os.path.abspath(sc_dest):
                 shutil.move(sc_out, sc_dest)
@@ -1347,8 +1454,22 @@ def analyze_only(
             normalized_path = sc_dest
         else:
             Path(sc_dest).unlink(missing_ok=True)  # partial output
-            print("[smartcam] reframe returned no file — falling back to source",
-                  flush=True)
+            if not targeted:
+                print("[smartcam] reframe returned no file — falling back to source",
+                      flush=True)
+            else:
+                # Say so (the editor shows a note) and centre-crop to the
+                # target frame instead of passing the source through (a
+                # landscape video would end up letterboxed).
+                format_warning = "smartcam_failed"
+                if centre_crop(normalized_path, sc_dest, sc_format):
+                    Path(normalized_path).unlink(missing_ok=True)
+                    normalized_path = sc_dest
+                    print("[smartcam] reframe failed — centre-cropped to "
+                          f"{sc_format}", flush=True)
+                else:
+                    print("[smartcam] reframe and centre crop failed — "
+                          "falling back to source", flush=True)
         _stage("analyze.smartcam", 9, "Preparing preview…")
         _make_proxy(normalized_path, proxy_path)
 
@@ -1387,19 +1508,20 @@ def analyze_only(
     # What each analysis pass cut, so every cut range gets its reason
     # (backend/cut_kinds.py, UX10).
     cut_log: list = []
-    result = analyze_video(
-        video_path=normalized_path,
-        whisper_model=whisper_model,
-        style=style,
-        remove_fillers=remove_fillers,
-        voice_triggers=voice_triggers,
-        cut_keywords=cut_keywords,
-        continue_keywords=continue_keywords,
-        progress_callback=_analyze_cb,
-        cancel_check=cancel_check,
-        include_words=True,
-        cut_kinds=cut_log,
-    )
+    with _spoken_language(settings.get("spoken_language")):
+        result = analyze_video(
+            video_path=normalized_path,
+            whisper_model=whisper_model,
+            style=style,
+            remove_fillers=remove_fillers,
+            voice_triggers=voice_triggers,
+            cut_keywords=cut_keywords,
+            continue_keywords=continue_keywords,
+            progress_callback=_analyze_cb,
+            cancel_check=cancel_check,
+            include_words=True,
+            cut_kinds=cut_log,
+        )
 
     segments = result.segments
     subtitles = result.subtitles if isinstance(result.subtitles, list) else []
@@ -1410,6 +1532,8 @@ def analyze_only(
                             speech_seconds=0.0)
 
     duration = result.duration
+    if no_cuts:
+        segments, subtitles = no_cut_plan(segments, subtitles, duration)
 
     # LLM cleanup + bad-take detection. Runs only if ANTHROPIC_API_KEY
     # is set; soft-fails to no-op otherwise so dev works without a key.
@@ -1503,6 +1627,7 @@ def analyze_only(
         "peaks_path": peaks_path if audio["peaks"] else None,
         "poster_path": poster_path if poster_ok else None,
         "font_files": fonts,
+        "format_warning": format_warning,
     }
 
 
@@ -1531,7 +1656,8 @@ def _analysis_doc(result: Any, subtitles: list, cleaned: dict[int, str],
 
 # Job fields of an analysis result besides the ones every release wrote
 # (UT3); the doc is committed through backend.doc.commit_change.
-_ANALYSIS_FIELDS = ("mezz_fps", "mezz_cfr", "audio_loudness")
+_ANALYSIS_FIELDS = ("mezz_fps", "mezz_cfr", "audio_loudness",
+                    "format_warning")
 
 
 def analysis_fields(res: dict[str, Any]) -> dict[str, Any]:

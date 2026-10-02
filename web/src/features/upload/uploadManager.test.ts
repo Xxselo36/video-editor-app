@@ -4,16 +4,25 @@ import { describe, expect, it, vi } from "vitest";
 const calls: string[] = [];
 const pending: (() => void)[] = [];
 const finish = () => pending.splice(0).forEach((f) => f());
+const sources: unknown[] = [];
 vi.mock("./uploadJob", () => ({
-  uploadJob: vi.fn(async (file: File, _s: unknown, _p: unknown, cb: { tempId: string; onEnd?: (id: string) => void }) => {
-    calls.push(file.name);
-    await new Promise<void>((resolve) => pending.push(resolve));
-    cb.onEnd?.(cb.tempId);
-  }),
+  uploadJob: vi.fn(
+    async (
+      file: File,
+      s: unknown,
+      _p: unknown,
+      cb: { tempId: string; onCreated: (id: string) => void; onEnd?: (id: string) => void },
+    ) => {
+      calls.push(file.name);
+      sources.push(s);
+      await new Promise<void>((resolve) => pending.push(resolve));
+      if (file.name.startsWith("ok-")) cb.onCreated(`job-${file.name}`);
+      cb.onEnd?.(cb.tempId);
+    },
+  ),
 }));
 
 const settings = {
-  caption_preset: "clean",
   style: "smooth",
   voice_triggers: true,
   remove_fillers: true,
@@ -52,5 +61,33 @@ describe("startUpload", () => {
     void startUpload(file, settings, null);
     await vi.waitFor(() => expect(calls).toEqual(["again.mp4", "again.mp4"]));
     finish();
+  });
+
+  it("tells the start screen its card, and how the upload ended (UX6)", async () => {
+    calls.length = 0;
+    const { startUpload } = await import("./uploadManager");
+    const events: string[] = [];
+    const getter = () => settings;
+    const ok = new File([new Uint8Array(13)], "ok-a.mp4", { type: "video/mp4", lastModified: 3 });
+    const run = startUpload(ok, getter, null, {
+      onCard: (id) => events.push(id.startsWith("upl-") ? "card" : id),
+      onCreated: (id) => events.push(`created ${id}`),
+      onEnd: (id) => events.push(`end ${id}`),
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["ok-a.mp4"]));
+    expect(events).toEqual(["card"]);
+    // The settings go to the upload as given: read when POST /jobs goes out.
+    expect(sources.at(-1)).toBe(getter);
+    finish();
+    await run;
+    expect(events).toEqual(["card", "created job-ok-a.mp4", "end job-ok-a.mp4"]);
+
+    const failed: (string | null)[] = [];
+    const bad = new File([new Uint8Array(14)], "bad.mp4", { type: "video/mp4", lastModified: 4 });
+    const run2 = startUpload(bad, settings, null, { onEnd: (id) => failed.push(id) });
+    await vi.waitFor(() => expect(calls).toEqual(["ok-a.mp4", "bad.mp4"]));
+    finish();
+    await run2;
+    expect(failed).toEqual([null]);
   });
 });

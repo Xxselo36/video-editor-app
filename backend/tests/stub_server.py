@@ -50,6 +50,7 @@ Test API (only this script registers it; never part of the backend):
               extra_words ([{text, start, end, nospeech?}, …]: more
                        transcribed words, e.g. one in a pause the speech
                        detection called silence),
+              format_warning (e.g. "smartcam_failed", UX6),
               proxy: "off"   has_proxy false, proxy-video 404 (today's
                              production default: CLEO_PROXY_VIDEO unset)
                      "on"    has_proxy true, proxy-video plays
@@ -69,6 +70,8 @@ Test API (only this script registers it; never part of the backend):
   GET  /_test/job/{id}      the job with internals (keys, owner, sizes)
   GET  /_test/media/{name}  a stub clip for uploads: grid.mp4,
                             speech.mp4, speech_land.mp4, long.webm (31 min),
+                            portrait.webm / landscape.webm (4 s, VP8: the
+                            browser reads their frame),
                             and ones POST /jobs refuses: audio.m4a
                             (no_video), silent.mp4 (no_audio), short.mp4
                             (video_too_short)
@@ -420,7 +423,9 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             time.sleep(total * dt / weight)
         if on_normalized is not None:
             on_normalized()
-        landscape = (settings or {}).get("smartcam_format") == "landscape"
+        s = settings or {}
+        landscape = (s.get("target_aspect") == "16:9"
+                     or ("target_aspect" not in s and s.get("smartcam_format") == "landscape"))
         clip = per_file.pop("clip", None) or ("speech" if speech_ready(120) else "grid")
         orientation = "landscape" if landscape else "portrait"
         set_cfg(job_id, **{"proxy": "on", "render": "ok", "clip": clip,
@@ -522,6 +527,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                            preset_label=opts.get("preset_label", preset[1]))
         if opts.get("caption_preset"):
             store.update(job.id, settings={**job.settings, "caption_preset": opts["caption_preset"]})
+        if opts.get("format_warning"):
+            store.update(job.id, format_warning=opts["format_warning"])
         return job
 
     def seed_review(job, clip: str, orientation: str, warnings: list[str] | None = None,
@@ -703,6 +710,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         return {**j.to_dict(), "source_key": j.source_key, "owner_id": j.owner_id,
                 "mezz_key": j.mezz_key, "proxy_key": j.proxy_key, "preview_key": j.preview_key,
                 "output_keys": j.output_keys, "media_store": where, "size": size,
+                "settings": {k: v for k, v in (j.settings or {}).items() if not k.startswith("_")},
                 "stub": cfg(job_id)}
 
     @app.get("/_test/media/{name}")
@@ -714,6 +722,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             return FileResponse(files["src"], media_type="video/mp4")
         if name == "long.webm":
             return FileResponse(stub_media.long_video(), media_type="video/webm")
+        if name in stub_media.FRAME_MEDIA:
+            return FileResponse(stub_media.frame_media(name), media_type="video/webm")
         if name in stub_media.REFUSED_MEDIA:
             return FileResponse(stub_media.refused_media(name),
                                 media_type="audio/mp4" if name.endswith(".m4a") else "video/mp4")

@@ -70,6 +70,37 @@ export async function readStorage<T>(page: Page, key: string): Promise<T | null>
   }, key);
 }
 
+// ── start screen (/app/new, UX6) ─────────────────────────────────────
+
+export type PickedFile = { name: string; mimeType: string; buffer: Buffer };
+
+/** Choose `file` on the start screen: one click and the file chooser —
+ *  the upload starts at once. */
+export async function chooseFile(page: Page, file: PickedFile | string) {
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser", { timeout: 10_000 }),
+    page.getByTestId("upload-dropzone").click(),
+  ]);
+  await chooser.setFiles(file);
+}
+
+/** Choose `file` and go on to the dashboard while it uploads (the start
+ *  screen goes there by itself once the job exists). */
+export async function uploadFromStart(page: Page, file: PickedFile) {
+  await chooseFile(page, file);
+  const dashboard = page.getByTestId("dashboard");
+  await expect(page.getByTestId("start-upload").or(dashboard)).toBeVisible();
+  const toProjects = page.getByTestId("start-to-projects");
+  if (await toProjects.isVisible()) await toProjects.click({ timeout: 5000 }).catch(() => {});
+  await expect(dashboard).toBeVisible();
+}
+
+/** The `settings` of the POST /jobs of `request` (multipart form). */
+export function postedSettings(body: string | null): Record<string, unknown> | null {
+  const m = /name="settings"\r\n\r\n([^\r]*)\r\n/.exec(body ?? "");
+  return m ? (JSON.parse(m[1]) as Record<string, unknown>) : null;
+}
+
 // ── dashboard ────────────────────────────────────────────────────────
 
 export const jobCard = (page: Page, filename: string): Locator =>

@@ -128,6 +128,7 @@ JOB_KEYS = sorted([
     "caption_engine",   # UT4: v1 / v2 / None, no content
     "has_poster",       # UT5: GET /jobs/{id}/poster answers
     "fps",              # UX10: the editor's trim frame grid (mezz_fps)
+    "format_warning",   # UX6: e.g. smartcam_failed
 ])
 
 
