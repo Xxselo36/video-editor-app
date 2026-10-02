@@ -186,6 +186,113 @@ test.describe("editor v2 on an iPhone (portrait)", TAG, () => {
   });
 });
 
+// ── live captions (UT5 layer, ?captions=v2) on touch ────────────────────
+const LIVE = { ...TOUR_DONE, "cleocuts.captions.engine.v1": "v2" };
+type LiveHook = { ready: boolean; page: string | null; selected: string | null };
+const live = (page: Page) => page.evaluate(() => (window as unknown as { __captionLayer?: LiveHook }).__captionLayer ?? null);
+async function openLive(page: Page, jobId: string) {
+  await openWithStorage(page, `/app/edit/${jobId}?captions=v2`, LIVE);
+  await expect(page.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByTestId("caption-layer")).toBeVisible({ timeout: 30_000 });
+  await expect.poll(async () => (await live(page))?.ready, { timeout: 30_000 }).toBe(true);
+}
+/** Paused on a moment with a caption (the second sentence). */
+async function atCaption(page: Page) {
+  await page.getByTestId("editor-video").evaluate((v) => {
+    const el = v as HTMLVideoElement;
+    el.pause();
+    el.currentTime = 4.6;
+  });
+  await expect.poll(async () => (await live(page))?.page ?? null, { timeout: 15_000 }).not.toBeNull();
+}
+const paused = (page: Page) => page.getByTestId("editor-video").evaluate((v) => (v as HTMLVideoElement).paused);
+
+test.describe("editor v2 on an iPhone: captions, title, Stil sheet", TAG, () => {
+  test.use(IPHONE_13);
+  test.beforeEach(({}, info) => {
+    test.skip(info.project.name !== "pixel7", "phone emulation, one run");
+  });
+
+  test("pseudo-fullscreen: a tap on the caption selects it, anywhere else plays / pauses", async ({ page, stub }) => {
+    await noElementFullscreen(page);
+    const job = await stub.seed("review_speech");
+    await openLive(page, job.id);
+    await atCaption(page);
+    await page.getByTestId("ed-fullscreen").tap();
+    const wrap = page.getByTestId("ed-fullscreen-wrap");
+    await expect(wrap).toHaveAttribute("data-fullscreen", "pseudo");
+    // away from the caption (upper third): play, then pause
+    const vp = page.viewportSize()!;
+    await page.touchscreen.tap(vp.width / 2, vp.height * 0.3);
+    await expect.poll(() => paused(page)).toBe(false);
+    await page.touchscreen.tap(vp.width / 2, vp.height * 0.3);
+    await expect.poll(() => paused(page)).toBe(true);
+    // on the caption: selected, still paused
+    await atCaption(page);
+    await page.getByTestId("caption-hit").tap();
+    await expect.poll(async () => (await live(page))?.selected ?? null).not.toBeNull();
+    await expect(page.getByTestId("caption-box")).toBeVisible();
+    expect(await paused(page)).toBe(true);
+  });
+
+  test("phone sheet open: the caption on the small preview is selectable too", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    await openLive(page, job.id);
+    await atCaption(page);
+    await page.getByTestId("ed-tab-text").tap();
+    await expect(page.getByTestId("ed-sheet-text")).toBeVisible();
+    await page.getByTestId("caption-hit").tap();
+    await expect.poll(async () => (await live(page))?.selected ?? null).not.toBeNull();
+    expect(await paused(page)).toBe(true);
+  });
+
+  test("title field 44 px; on a short screen (≤ 700 px) the Stil sheet opens at 90 %", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    await openV2(page, job.id);
+    await page.getByTestId("ed-title").tap();
+    const input = page.getByRole("textbox", { name: "Project name" });
+    await expect(input).toBeFocused();
+    expect((await input.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await page.keyboard.press("Escape");
+    const vh = page.viewportSize()!.height;
+    expect(vh).toBeLessThanOrEqual(700);
+    await page.getByTestId("ed-tab-style").tap();
+    const sheet = page.getByTestId("ed-sheet-style");
+    await expect(sheet).toBeVisible();
+    await expect.poll(async () => Math.round((await sheet.boundingBox())!.height)).toBe(Math.round(vh * 0.9));
+    // the Text sheet keeps 54 % (the preview stays visible above it)
+    await page.getByRole("button", { name: "Close" }).first().tap();
+    await page.getByTestId("ed-tab-text").tap();
+    const text = page.getByTestId("ed-sheet-text");
+    await expect.poll(async () => Math.round((await text.boundingBox())!.height)).toBe(Math.round(vh * 0.54));
+  });
+});
+
+test.describe("editor v2 on a tablet (desktop layout, touch)", TAG, () => {
+  const { defaultBrowserType: _ipad, ...IPAD } = devices["iPad (gen 7) landscape"];
+  void _ipad;
+  test.use(IPAD);
+  test.beforeEach(({}, info) => {
+    test.skip(info.project.name !== "pixel7", "touch emulation, one run");
+  });
+
+  test("caption handles: 44 px hit areas, the knobs keep their size", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    await openLive(page, job.id);
+    await expect(page.getByTestId("editor-v2")).toHaveAttribute("data-layout", "desktop");
+    await atCaption(page);
+    await page.getByTestId("caption-hit").tap();
+    await expect(page.getByTestId("caption-box")).toBeVisible();
+    for (const id of ["caption-move", "caption-size"]) {
+      const b = (await page.getByTestId(id).boundingBox())!;
+      expect(b.width, id).toBeGreaterThanOrEqual(44);
+      expect(b.height, id).toBeGreaterThanOrEqual(44);
+    }
+    const knob = (await page.getByTestId("caption-move").locator("span").first().boundingBox())!;
+    expect(knob.width).toBeLessThan(30);
+  });
+});
+
 test.describe("editor v2 on an iPhone (landscape)", TAG, () => {
   test.use(IPHONE_13_LANDSCAPE);
   test.beforeEach(({}, info) => {
