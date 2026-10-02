@@ -148,8 +148,12 @@ def test_words_keep_every_token_and_flag_fillers():
     assert [w["text"] for w in words] == ["So", "äh,", "we", "gonna", "you", "know", "...", "win."]
     assert [w["id"] for w in words][:3] == ["w0001", "w0002", "w0003"]
     flagged = [w["text"] for w in words if w.get("filler")]
-    assert flagged == ["äh,", "you", "know", "..."]
+    assert flagged == ["äh,", "..."]
     assert all(w.get("hidden") for w in words if w.get("filler"))
+    # UX10: the words of a filler range that are no filler sound are cut
+    # (why), not hidden: a restored range gets its captions back
+    assert [(w["text"], w.get("cut"), w.get("hidden")) for w in words if w.get("cut")] == [
+        ("you", "filler", None), ("know", "filler", None)]
     assert words[0]["conf"] == 0.91 and "conf" not in words[2]   # 1.0 = no real value
 
 

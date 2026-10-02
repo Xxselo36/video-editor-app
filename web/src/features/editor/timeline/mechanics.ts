@@ -191,3 +191,168 @@ export function rulerMarks(
   }
   return { marks, labelStep };
 }
+
+// ── UX10 (v2 dock): precise trims, the frame grid, reordering ─────────
+
+/** Trim edges sit on a 0.01 s grid (what the readout shows). */
+export const TRIM_STEP_S = 0.01;
+/** Minor ruler marks (0.1 s, 0.5 s) show from this far apart. */
+export const MINOR_TICK_MIN_PX = 6;
+
+/** t on the TRIM_STEP_S grid (2 decimals, no float tail). */
+export const roundToStep = (t: number) => Math.round(t / TRIM_STEP_S) / Math.round(1 / TRIM_STEP_S);
+
+/**
+ * trimTo with the moved edge on the TRIM_STEP_S grid (the handle while
+ * dragging). An edge snapped onto a neighbour's footage (or held at a
+ * bound) stays exactly there. On release snapTrimToFrame puts the edge
+ * on the frame both exports cut at; the frame grid the dock draws while
+ * zoomed in shows where those are.
+ */
+export function trimToStep(
+  startSegs: EditorSeg[],
+  id: string,
+  mode: "start" | "end",
+  seconds: number,
+  bounds: TrimBounds,
+): EditorSeg[] {
+  return trimTo(startSegs, id, mode, seconds, bounds).map((s) => {
+    if (s.id !== id) return s;
+    if (mode === "start") {
+      if (s.start === bounds.prev) return s;
+      const v = Math.max(bounds.prev, Math.min(s.end - 0.1, roundToStep(s.start)));
+      return v === s.start ? s : { ...s, start: v };
+    }
+    if (s.end === bounds.next) return s;
+    const v = Math.min(bounds.next, Math.max(s.start + 0.1, roundToStep(s.end)));
+    return v === s.end ? s : { ...s, end: v };
+  });
+}
+
+/**
+ * The exact frame rate of a stored one (GET /jobs/{id} fps is rounded to
+ * 4 decimals): 29.97 → 30000/1001, 23.976 → 24000/1001, 59.94 →
+ * 60000/1001; 30.0002 → 30. Frame k starts at exactly k / exactFps — the
+ * backend's /edit-segments uses the same rule (main._exact_fps).
+ */
+export function exactFps(fps: number): number {
+  const ntsc = Math.round(fps * 1.001);
+  if ([24, 30, 48, 60, 120].includes(ntsc) && Math.abs(fps * 1.001 - ntsc) < 0.002 && Math.abs(fps - ntsc) > 0.01) {
+    return (ntsc * 1000) / 1001;
+  }
+  const whole = Math.round(fps);
+  return Math.abs(fps - whole) < 0.002 ? whole : fps;
+}
+
+/**
+ * The edge the export uses for `t`: the nearest frame boundary, exactly
+ * k / fps (review 13). The handle moves on the 0.01 s grid while
+ * dragging; on release the edge moves to this (≤ half a frame) and the
+ * readout shows it, so the value shown is the one both export paths cut
+ * at. `t` unchanged without a known frame rate.
+ *
+ * Why exactly k / fps (measured, backend/tests/captions/
+ * test_frame_edges.py renders both): v2 rounds each edge to the nearest
+ * frame (captions_v2.clip_plan). The v1 burn (MoviePy per clip) reads a
+ * start near the beginning frame by frame — int(fps·t + 1e-5), frame k
+ * only from t ≥ (k − 1e-5) / fps — and further in by an ffmpeg seek that
+ * keeps frames at or after t — frame k only up to t ≤ k / fps. The
+ * window between is under a microsecond: only k / fps itself is frame k
+ * on both. So /edit-segments keeps such an edge as sent (other edges it
+ * rounds to ms), where k / fps − 0.5 ms (the old rule) gave v1 frame
+ * k − 1 near a clip's start, and ms rounding either neighbour.
+ */
+export function frameEdge(t: number, fps: number | null | undefined): number {
+  if (!(fps && fps > 0) || !Number.isFinite(t)) return t;
+  const f = exactFps(fps);
+  const k = Math.round(t * f);
+  return k <= 0 ? 0 : k / f;
+}
+
+/** The trimmed edge of clip `id` moved to its frameEdge (a bound or a
+ *  snapped neighbour's edge stays exact). Same array without a frame rate. */
+export function snapTrimToFrame(
+  segs: EditorSeg[],
+  id: string,
+  mode: "start" | "end",
+  bounds: TrimBounds,
+  fps: number | null | undefined,
+): EditorSeg[] {
+  if (!(fps && fps > 0)) return segs;
+  return segs.map((s) => {
+    if (s.id !== id) return s;
+    if (mode === "start") {
+      if (s.start === bounds.prev) return s;
+      const v = Math.max(bounds.prev, Math.min(s.end - 0.1, frameEdge(s.start, fps)));
+      return v === s.start ? s : { ...s, start: v };
+    }
+    if (s.end === bounds.next) return s;
+    const v = Math.min(bounds.next, Math.max(s.start + 0.1, frameEdge(s.end, fps)));
+    return v === s.end ? s : { ...s, end: v };
+  });
+}
+
+/** Video frame boundaries (k / fps) inside [a, b], at most `max` of them. */
+export function frameTimes(a: number, b: number, fps: number, max = 1000): number[] {
+  if (!(fps > 0) || !(b > a)) return [];
+  const out: number[] = [];
+  for (let k = Math.ceil(a * fps - 1e-9); k / fps <= b + 1e-9 && out.length < max; k++) out.push(k / fps);
+  return out;
+}
+
+/**
+ * The frame grid a trim shows (strip seconds): the frames of the trimmed
+ * clip plus the 2 s it can grow into on the moving side, only inside the
+ * visible window [lo, hi] (strip seconds) — counted from the window, not
+ * from the clip's start, so the end handle of a long clip has its grid too.
+ */
+export function trimFrameGrid(
+  clip: { left: number; start: number; end: number },
+  mode: "start" | "end",
+  lo: number,
+  hi: number,
+  fps: number,
+  max = 600,
+): number[] {
+  const a = clip.start - (mode === "start" ? 2 : 0);
+  const b = clip.end + (mode === "end" ? 2 : 0);
+  // the visible window in source seconds of this clip
+  const wa = Math.max(a, clip.start + (lo - clip.left));
+  const wb = Math.min(b, clip.start + (hi - clip.left));
+  return frameTimes(wa, wb, fps, max).map((ft) => clip.left + (ft - clip.start));
+}
+
+/** Whether a ruler mark of this kind is drawn at `pps` px per second. */
+export function tickShown(kind: RulerMark["kind"], pps: number): boolean {
+  if (kind === "tenth") return 0.1 * pps >= MINOR_TICK_MIN_PX;
+  if (kind === "half") return 0.5 * pps >= MINOR_TICK_MIN_PX;
+  return true;
+}
+
+/** Clip `id` moved to `index` of the list without it (same array if it stays). */
+export function moveSeg(segs: EditorSeg[], id: string, index: number): EditorSeg[] {
+  const from = segs.findIndex((s) => s.id === id);
+  if (from < 0) return segs;
+  const rest = segs.filter((s) => s.id !== id);
+  const to = Math.max(0, Math.min(rest.length, index));
+  if (to === from) return segs;
+  return [...rest.slice(0, to), segs[from], ...rest.slice(to)];
+}
+
+/**
+ * Where clip `id` drops when dragged so its centre is at cut time
+ * `center`: before the first other clip whose middle lies right of it
+ * (the others laid end to end without it). An index for moveSeg.
+ */
+export function dropIndex(segs: EditorSeg[], id: string, center: number): number {
+  const rest = segs.filter((s) => s.id !== id);
+  let acc = 0;
+  for (let i = 0; i < rest.length; i++) {
+    const s = rest[i];
+    if (s.disabled) continue;
+    const d = s.end - s.start;
+    if (center < acc + d / 2) return i;
+    acc += d;
+  }
+  return rest.length;
+}

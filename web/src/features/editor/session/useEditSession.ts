@@ -36,6 +36,9 @@ export type EditSessionInput = {
   cutRanges: CutRange[];
   duration: number;
   onApply: () => void;
+  /** UX10 (v2): EditPlayer's gain ramp around a cut's jump, in ms
+   *  (review C9). Unset: none, as the v1 editor plays. */
+  seekRampMs?: number;
 };
 
 /**
@@ -106,6 +109,7 @@ export function useEditSession({
   cutRanges,
   duration,
   onApply,
+  seekRampMs,
 }: EditSessionInput) {
   const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -501,7 +505,7 @@ export function useEditSession({
     // Only once the element has its src (the media token may still be
     // loading): loading a src resets the element's rate and position.
     if (mode !== "proxy" || !v || !proxySrc) return;
-    const player = new EditPlayer(v, { onSegment: setPlayingSegId, fadeEl: fadeRef.current });
+    const player = new EditPlayer(v, { onSegment: setPlayingSegId, fadeEl: fadeRef.current, seekRampMs });
     player.setPlan(buildPlan(editSegs, duration));
     playerRef.current = player;
     return () => {

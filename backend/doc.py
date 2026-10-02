@@ -306,7 +306,7 @@ def validate_word(w: Any) -> dict[str, Any]:
         raise DocError(400, "bad_word")
     wid = w.get("id")
     extra = set(w) - {"id", "text", "start", "end", "conf", "filler",
-                      "hidden", "breakBefore"}
+                      "hidden", "breakBefore", "cut", "nospeech"}
     if extra or not isinstance(wid, str) or not _WORD_ID.match(wid):
         raise DocError(400, "bad_word", id=wid if isinstance(wid, str) else None)
     text = w.get("text")
@@ -321,12 +321,18 @@ def validate_word(w: Any) -> dict[str, Any]:
         if not _in(w["conf"], 0, 1):
             raise DocError(400, "bad_word", id=wid, field="conf")
         out["conf"] = w["conf"]
-    for k in ("filler", "hidden", "breakBefore"):
+    for k in ("filler", "hidden", "breakBefore", "nospeech"):
         if k in w:
             if not isinstance(w[k], bool):
                 raise DocError(400, "bad_word", id=wid, field=k)
             if w[k]:
                 out[k] = True
+    # UX10: why the analysis cut the word (informational; whether it
+    # plays is the clips' business)
+    if "cut" in w:
+        if w["cut"] not in CUT_KINDS:
+            raise DocError(400, "bad_word", id=wid, field="cut")
+        out["cut"] = w["cut"]
     return out
 
 
@@ -658,12 +664,53 @@ def _vocal(text: str) -> bool:
     return _is_vocalisation(t)
 
 
+# Why the analysis cut a word (backend/cut_kinds.py KINDS): a word's
+# `cut`. Informational — a word plays (and is captioned) exactly when its
+# time is inside a clip, so restoring a cut brings its captions back.
+CUT_KINDS = ("silence", "filler", "voice_cmd", "bad_take")
+
+# Whisper's well-known inventions in silence (credits, sign-offs): a run
+# of words outside the speech regions that reads like one stays hidden.
+_SILENCE_HALLUCINATIONS = re.compile(
+    r"untertitel(?:ung)?\b.*\b(?:zdf|ard|funk|swr|wdr|ndr|br)\b|untertitel im auftrag"
+    r"|vielen dank (?:fürs|für's|für das|für ihre) (?:zuschauen|zusehen|aufmerksamkeit)"
+    r"|thanks? (?:you )?(?:so much )?for watching|please subscribe|subtitles by"
+    r"|sous-titr|subtítulos (?:realizados|por)|amara\.org",
+    re.IGNORECASE)
+
+
+def _hide_silence_hallucinations(words: list[dict]) -> None:
+    """Runs of consecutive nospeech words (gaps ≤ 1 s) whose text matches
+    a known silence hallucination get hidden (in place)."""
+    i = 0
+    while i < len(words):
+        if not words[i].get("nospeech"):
+            i += 1
+            continue
+        j = i + 1
+        while (j < len(words) and words[j].get("nospeech")
+               and words[j]["start"] - words[j - 1]["end"] <= 1.0):
+            j += 1
+        text = " ".join(str(w["text"]) for w in words[i:j])
+        if _SILENCE_HALLUCINATIONS.search(text):
+            for w in words[i:j]:
+                w["hidden"] = True
+        i = j
+
+
 def words_from_transcript(raw: Iterable[dict],
                           fillers: Iterable[dict] | None = None) -> list[dict]:
     """Doc words (ids w0001…, SOURCE times rounded to ms, sorted by
     start) from transcription words ({word|text, start, end,
-    probability?}). filler: a filler sound, a hesitation mark
-    ("...", "…") or a detected filler range; fillers are hidden."""
+    probability?, nospeech?}).
+
+    filler + hidden: a filler sound or a hesitation mark ("...", "…") —
+    never captioned by default. A word inside a detected filler range
+    that is no filler sound (a repeat, a stutter, "like") gets
+    cut: "filler" instead (UX10): it is cut from the video, and captioned
+    again as soon as a clip covers it. nospeech: outside every speech
+    region (the analysis kept it for the web doc only); hidden when it
+    reads like one of Whisper's silence hallucinations."""
     ranges = [(float(f["start"]), float(f["end"])) for f in (fillers or ())
               if f.get("start") is not None and f.get("end") is not None]
     out: list[dict] = []
@@ -681,13 +728,38 @@ def words_from_transcript(raw: Iterable[dict],
         p = w.get("probability")
         if _num(p) and 0 <= p < 1:
             word["conf"] = round(float(p), 3)
-        if (_vocal(text) or _HESITATION.match(text)
-                or any(fs - 0.002 <= s and e <= fe + 0.002 for fs, fe in ranges)):
+        if _vocal(text) or _HESITATION.match(text):
             word["filler"] = True
             word["hidden"] = True
+        elif any(fs - 0.002 <= s and e <= fe + 0.002 for fs, fe in ranges):
+            word["cut"] = "filler"
+        if w.get("nospeech"):
+            word["nospeech"] = True
         out.append(word)
     out.sort(key=lambda x: x["start"])
+    _hide_silence_hallucinations(out)
     return number_words(out)
+
+
+def migrate_cut_words(words: list[dict]) -> tuple[list[dict], bool]:
+    """Docs built before UX10 hid every word of a detected filler range
+    (filler + hidden), so a restored repeat or stutter never got its
+    caption back. Such a word — filler + hidden but no filler sound or
+    hesitation mark — becomes a cut: "filler" word. (words, changed);
+    unchanged words are the same objects."""
+    out: list[dict] = []
+    changed = False
+    for w in words:
+        if (isinstance(w, dict) and w.get("filler") and w.get("hidden")
+                and not _vocal(str(w.get("text") or ""))
+                and not _HESITATION.match(str(w.get("text") or "").strip())):
+            nw = {k: v for k, v in w.items() if k not in ("filler", "hidden")}
+            nw.setdefault("cut", "filler")
+            out.append(nw)
+            changed = True
+        else:
+            out.append(w)
+    return out, changed
 
 
 def words_from_units(subtitles: Iterable[dict]) -> list[dict]:

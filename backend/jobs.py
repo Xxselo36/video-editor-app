@@ -335,6 +335,10 @@ class Job:
                       else None),
             # UT5: GET /jobs/{id}/poster answers (the analysis made one).
             "has_poster": bool(self.poster_key),
+            # UX10: the frame rate of the video the editor plays and the
+            # renders cut (mezz_fps): the editor's trim frame grid. Named
+            # without "mezz" — no storage name in the public JSON.
+            "fps": self.mezz_fps,
             # Only once the task queue's worker recorded any (WP4).
             **({"processing_warnings": list(self.processing_warnings)}
                if self.processing_warnings is not None else {}),

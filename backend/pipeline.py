@@ -1384,6 +1384,9 @@ def analyze_only(
     audio_thread.start()
 
     _stage("analyze.transcribe", 10)
+    # What each analysis pass cut, so every cut range gets its reason
+    # (backend/cut_kinds.py, UX10).
+    cut_log: list = []
     result = analyze_video(
         video_path=normalized_path,
         whisper_model=whisper_model,
@@ -1395,6 +1398,7 @@ def analyze_only(
         progress_callback=_analyze_cb,
         cancel_check=cancel_check,
         include_words=True,
+        cut_kinds=cut_log,
     )
 
     segments = result.segments
@@ -1447,6 +1451,16 @@ def analyze_only(
     cut_ranges = _invert_segments(segments, duration)
 
     doc = _analysis_doc(result, subtitles, cleaned, settings, segments)
+    # Each cut's reason (pause, filler, "Cleo cut"): additive `kind`.
+    try:
+        from backend import cut_kinds
+        cut_ranges = cut_kinds.label(cut_ranges, log=cut_log,
+                                     words=(doc or {}).get("words"))
+        # and each cut word why (informational: clips decide what plays)
+        cut_kinds.mark_words((doc or {}).get("words"), cut_ranges)
+    except Exception as e:
+        print(f"[cuts] kinds not labelled: {type(e).__name__}: {e}",
+              flush=True)
     fonts: dict[str, Any] = {}
 
     def _subset_fonts() -> None:

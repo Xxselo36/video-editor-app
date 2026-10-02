@@ -17,7 +17,7 @@
  */
 import { drawPage, drawSweep, pageBounds, sweepRect } from "./draw";
 import { frameState, hitTest, type FrameState } from "./engine";
-import { buildPages, layoutPage } from "./layout";
+import { buildPages, layoutPage, pagesMemo } from "./layout";
 import type { CaptionStyle, CaptionWord, Ctx2D, Page, PageLayout, Surface, SurfaceFactory } from "./types";
 
 export type RendererInput = {
@@ -37,7 +37,7 @@ export type RendererOptions = RendererInput & {
   maxPixels?: number;
 };
 
-type Entry = { surface: Surface; x: number; y: number; w: number; h: number };
+type Entry = { surface: Surface; x: number; y: number; w: number; h: number; page?: Page };
 
 type CanvasLike = { width: number; height: number; getContext(type: "2d"): unknown };
 
@@ -82,6 +82,7 @@ export class CaptionRenderer {
   private readonly cache = new Map<string, Entry>();
   private readonly bounds = new Map<number, { x: number; y: number; w: number; h: number }>();
   private pixels = 0;
+  private readonly memo = pagesMemo();
   private last: { key: string; sweep: number | null } | null = null;
   /** Counters for tests and the micro-benchmark. */
   readonly stats = { renders: 0, blits: 0, skipped: 0 };
@@ -93,20 +94,37 @@ export class CaptionRenderer {
     this.rebuild();
   }
 
-  /** New words, style, size or language: rebuild pages, drop bitmaps. */
+  /** New words, style, size or language: rebuild pages, drop bitmaps.
+   *  New breaks only: the bitmaps of pages that stayed the same are kept. */
   update(changes: Partial<RendererInput>): void {
+    const breaksOnly = Object.keys(changes).every((k) => k === "breaks");
     this.input = { ...this.input, ...changes };
-    this.rebuild();
+    this.rebuild(breaksOnly);
   }
 
   get style(): CaptionStyle {
     return this.input.style;
   }
 
-  private rebuild() {
+  private rebuild(keepSame = false) {
     const { words, style, W, H, lang, breaks } = this.input;
-    this.pages = buildPages(words, style, { W, H, lang, breaks });
-    this.clear();
+    const before = this.pages;
+    // A breaks-only update (the editor's timeline changed) re-pages only
+    // the runs of words around the moved cuts (layout.ts PagesMemo): an
+    // unchanged page is the same object, its bitmaps stay valid.
+    this.pages = buildPages(words, style, { W, H, lang, breaks }, this.memo);
+    if (!keepSame) {
+      this.clear();
+      return;
+    }
+    for (const [k, e] of this.cache) {
+      if (e.page && this.pages[e.page.index] === e.page) continue;
+      this.cache.delete(k);
+      this.pixels -= e.w * e.h;
+      release(e.surface);
+    }
+    for (const i of [...this.bounds.keys()]) if (this.pages[i] !== before[i]) this.bounds.delete(i);
+    this.last = null;
   }
 
   /** Drops every cached bitmap (keeps the pages). */
@@ -165,7 +183,7 @@ export class CaptionRenderer {
     else drawPage(surface.ctx, page, layout, this.input.style, s, this.input.lang);
     surface.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.stats.renders++;
-    const e: Entry = { surface, ...b };
+    const e: Entry = { surface, ...b, page };
     this.cache.set(key, e);
     this.pixels += b.w * b.h;
     for (const [k, old] of this.cache) {

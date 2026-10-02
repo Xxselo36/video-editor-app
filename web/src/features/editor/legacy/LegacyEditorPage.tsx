@@ -12,7 +12,7 @@
  */
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppPage } from "@/components/AppPage";
 import { Toast } from "@/components/ui/Toast";
 import { useT } from "@/i18n";
@@ -27,6 +27,7 @@ import { ErrorView } from "@/features/project/ErrorView";
 import { useCaptionsV2 } from "@/features/captions-ui/flag";
 import { applyRender } from "./applyRender";
 import type { V1Edits } from "@/features/editor/state/reconcile";
+import type { ExportSource } from "@/features/editor/v2/EditorShell";
 import { phrasesFromSubtitlesResponse, type Phrase, type Subtitle } from "./buildPhrases";
 import { ReviewScreen } from "./ReviewScreen";
 import { usePhraseAutosave } from "./usePhraseAutosave";
@@ -57,6 +58,12 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
   // v1 transcript edits as saved (/phrases) and when: the v2 editor
   // applies them to the edit doc when they are newer (UX8 reconcile).
   const [v1Edits, setV1Edits] = useState<V1Edits>(null);
+  // The v2 editor's render payload, built when the export starts (UX10:
+  // the edit doc's captions without the words cut from the video).
+  const exportSourceRef = useRef<ExportSource | null>(null);
+  const setExportSource = useCallback((build: ExportSource | null) => {
+    exportSourceRef.current = build;
+  }, []);
   const { flushPhraseSave, schedulePhraseSave } = usePhraseAutosave();
   const flushRef = useRef(flushPhraseSave);
   useEffect(() => {
@@ -141,7 +148,11 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
     if (load.state !== "ready") return;
     flushPhraseSave();
     try {
-      const started = await applyRender(jobId, phrases, unitsRef.current, captionPreset, { captionsV2 });
+      // v2 with an edit doc (UX10): the captions of the words that play
+      const src = exportSourceRef.current?.();
+      const started = await applyRender(jobId, src?.phrases ?? phrases, src?.units ?? unitsRef.current, captionPreset, {
+        captionsV2,
+      });
       // Already exporting or finished (409): its project view shows which.
       if (started === "not_in_review") router.replace(`/app/p/${jobId}`);
       // Back to the dashboard — the card shows the export.
@@ -195,6 +206,8 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         hasPoster={job.has_poster === true}
         cutRanges={job.cut_ranges ?? []}
         duration={job.duration ?? 0}
+        fps={job.fps ?? null}
+        onExportSource={setExportSource}
         onChange={(next) => {
           setPhrases(next);
           schedulePhraseSave(job.id, next);

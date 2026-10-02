@@ -11,7 +11,14 @@
  *                    Tab / ⇧Tab move on to the next / previous word
  *   ← → ↑ ↓          move through the words (⇧ extends the selection)
  *   H                hide the selection from the captions / show it
+ *   ⌫ / Delete       cut the selection from the video / bring it back (UX10)
  *   ⌘F               find & replace
+ *
+ * UX10: words cut from the video are struck through (a click brings one
+ * back); removed pauses (≥ 0.4 s) and Cleo-cut takes are chips (a click
+ * brings them back); "Cleo cut: N botched takes removed · Show" heads the
+ * text (Show jumps to the first one).
+ * Cuts are clip edits (useCuts): timeline undo steps.
  *
  * Every change is one pure op of state/doc.ts applied through `apply`
  * (one undo step, autosaved). The word under the playhead and its row
@@ -19,9 +26,9 @@
  * re-renders the list; while playing, the list follows the playhead.
  */
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import { Lightbulb, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { useT } from "@/i18n";
+import { Lightbulb, Sparkles, X } from "lucide-react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useLang, useT } from "@/i18n";
 import { track } from "@/lib/analytics";
 import {
   editRange,
@@ -38,15 +45,17 @@ import {
 import { usePlayheadEffect, type PlayheadStore } from "@/features/editor/state/playhead";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
-import { cutTimeOfSource, fmtClock, removedRanges } from "../../model";
-import { CutsHeader } from "../CutsHeader";
+import { TAKE_KINDS, textMarks, type Chip } from "@/features/editor/state/cuts";
+import { cutTimeOfSource, decimalSeparator, fmtClock } from "../../model";
+import type { CutsApi } from "../../useCuts";
+import { CutsHeader, plural } from "../CutsHeader";
 import { FindReplace } from "./FindReplace";
 import { SelectionBar } from "./SelectionBar";
-import { composing, WordRow, type EditKeys } from "./WordSpan";
+import { composing, WordRow, type EditKeys, type RowMarks } from "./WordSpan";
 import s from "../../editor.module.css";
 
-/** What the editor's global shortcuts (Enter, H, Esc outside the list) can do here. */
-export type TextApi = { edit: () => boolean; hide: () => boolean; escape: () => boolean };
+/** What the editor's global shortcuts (Enter, H, ⌫, Esc outside the list) can do here. */
+export type TextApi = { edit: () => boolean; hide: () => boolean; cut: () => boolean; escape: () => boolean };
 
 export type TranscriptEditorProps = {
   phone: boolean;
@@ -56,6 +65,8 @@ export type TranscriptEditorProps = {
   apply: (op: (d: EditDoc) => EditDoc) => boolean;
   playhead: PlayheadStore;
   editSegs: EditorSeg[];
+  /** UX10: what is cut and why; cut / restore as timeline undo steps. */
+  cuts: CutsApi;
   duration: number;
   toSource: (t: number) => number;
   /** Jump to a source range (paused). */
@@ -75,6 +86,8 @@ export type TranscriptEditorProps = {
 };
 
 const selWords = (st: DocState) => st.present.words;
+/** A click on a struck word waits this long for a second click (double-click: edit, not restore). */
+const RESTORE_CLICK_MS = 300;
 const selPreset = (st: DocState) => st.present.style?.presetId ?? null;
 
 type Sel = { a: string; f: string };
@@ -91,6 +104,8 @@ const idxOf = (words: readonly DocWord[], id: string) => words.findIndex((w) => 
 
 export function TranscriptEditor(p: TranscriptEditorProps) {
   const t = useT();
+  const lang = useLang();
+  const dec = decimalSeparator(lang);
   const words = useDocStore(p.doc, selWords);
   const preset = useDocStore(p.doc, selPreset);
   const { phone, apply, pool, seekRange } = p;
@@ -102,17 +117,39 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     return a;
   }, [rows, words.length]);
   const index = useMemo(() => new Map(words.map((w, i) => [w.id, i])), [words]);
-  const removed = useMemo(() => {
-    const mask = new Uint8Array(words.length);
-    const rr = removedRanges(p.editSegs, p.duration);
-    let j = 0;
-    for (let i = 0; i < words.length; i++) {
-      const m = (words[i].start + words[i].end) / 2;
-      while (j < rr.length && rr[j].end <= m) j++;
-      if (j < rr.length && rr[j].start <= m) mask[i] = 1;
+  // UX10: struck words, words inside a Cleo-cut take chip, pause chips
+  // (a cut's marks follow in a render of their own: an edit shows at once)
+  const pieces = useDeferredValue(p.cuts.pieces);
+  const marks = useMemo(() => textMarks(words, pieces, p.duration), [words, pieces, p.duration]);
+  const removed = marks.removed;
+  // Each row gets the same props while it stays the same (its words, its
+  // marks), so an edit re-renders only the rows it touches.
+  const rowWords = useMemo(() => rows.map((r) => words.slice(r.first, r.last + 1)), [rows, words]);
+  const [rowMarksCache] = useState(() => ({ words: null as readonly DocWord[] | null, rows: new Map<number, { sig: string; m: RowMarks }>() }));
+  const rowMarks = (ri: number): RowMarks => {
+    const c = rowMarksCache;
+    if (c.words !== words) {
+      c.words = words;
+      c.rows.clear();
     }
-    return mask;
-  }, [words, p.editSegs, p.duration]);
+    const r = rows[ri];
+    const rm = removed.subarray(r.first, r.last + 1);
+    const chips = new Map<number, Chip[]>();
+    const to = ri === rows.length - 1 ? r.last + 1 : r.last;
+    let sig = rm.join("");
+    for (let i = r.first; i <= to; i++) {
+      const cs = marks.chips.get(i);
+      if (!cs) continue;
+      chips.set(i, cs);
+      sig += `|${i}:${cs.map((x) => `${x.kind}${x.reason}${x.ranges.map((q) => `${q.start},${q.end}`).join(";")}`).join("/")}`;
+    }
+    const old = c.rows.get(ri);
+    if (old && old.sig === sig) return old.m;
+    const m = { rm, chips };
+    c.rows.set(ri, { sig, m });
+    return m;
+  };
+  const takes = useMemo(() => pieces.filter((x) => TAKE_KINDS.has(x.kind)), [pieces]);
 
   // ── selection and inline edit (word ids: stable across edits) ──────
   const [sel, setSel] = useState<Sel | null>(null);
@@ -291,6 +328,24 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     if (apply((d) => setBreak(d, id, !broken))) track("words_edited", { action: broken ? "unbreak" : "break" });
   };
 
+  // ── cuts (UX10): the selection out of the video, or back in ────────
+  const selRemoved = !!selRange && removed.subarray(selRange[0], selRange[1] + 1).every((x) => x !== 0);
+  const toggleCut = () => {
+    if (!selRange) return false;
+    const [a, b] = selRange;
+    if (selRemoved) p.cuts.restoreWord({ start: words[a].start, end: words[b].end });
+    else p.cuts.cutWords(words, a, b);
+    wantFocus.current = !phone;
+    return true;
+  };
+  const restoreChip = (chip: Chip) => p.cuts.restore(chip.ranges);
+
+  // the rows get one stable object that calls the latest handlers
+  const keysRef = useRef<EditKeys | null>(null);
+  const [stableKeys] = useState<EditKeys>(() => ({
+    commit: (text, opts) => keysRef.current?.commit(text, opts),
+    cancel: () => keysRef.current?.cancel(),
+  }));
   const editKeys: EditKeys = {
     commit: (text, opts = {}) => {
       const e = edit;
@@ -331,6 +386,9 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
       wantFocus.current = !phone;
     },
   };
+  useLayoutEffect(() => {
+    keysRef.current = editKeys;
+  });
 
   // focus the selected word after a keyboard action (it may just have mounted)
   useLayoutEffect(() => {
@@ -355,6 +413,7 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     p.apiRef.current = {
       edit: () => startEdit(),
       hide: () => toggleHide(),
+      cut: () => toggleCut(),
       escape: () => {
         if (!sel && !edit) return false;
         setEdit(null);
@@ -369,12 +428,31 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     const el = (target as HTMLElement).closest<HTMLElement>("[data-wi]");
     return el ? Number(el.dataset.wi) : -1;
   };
+  // a click on a struck word restores it once no second click came (review 11)
+  const restoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cutsRef = useRef(p.cuts);
+  useEffect(() => {
+    cutsRef.current = p.cuts;
+  });
+  const cancelRestore = () => {
+    if (restoreTimer.current) clearTimeout(restoreTimer.current);
+    restoreTimer.current = null;
+  };
+  useEffect(() => cancelRestore, []);
   const onClick = (e: React.MouseEvent) => {
     const el = e.target as HTMLElement;
     const brk = el.closest<HTMLElement>("[data-brk]");
     if (brk) {
       const w = words[Number(brk.dataset.brk)];
       if (w && apply((d) => setBreak(d, w.id, false))) track("words_edited", { action: "unbreak" });
+      return;
+    }
+    // UX10: a pause or take chip brings its footage back
+    const chipEl = el.closest<HTMLElement>("[data-chip]");
+    if (chipEl) {
+      const [at, k] = (chipEl.dataset.chip ?? "").split(":").map(Number);
+      const chip = marks.chips.get(at)?.[k];
+      if (chip) restoreChip(chip);
       return;
     }
     const ts = el.closest<HTMLElement>("[data-ts]");
@@ -387,9 +465,23 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
       if (!edit && el.closest("[data-testid=ed-word-input]") === null) setSel(null);
       return;
     }
+    // a struck word: back into the video (⇧-click still selects) — after
+    // the double-click time, so a double-click (edit its text) doesn't
+    // bring its footage back first (review 11)
+    if (removed[i] === 1 && !e.shiftKey) {
+      cancelRestore();
+      if (e.detail > 1) return;
+      const w = words[i];
+      restoreTimer.current = setTimeout(() => {
+        restoreTimer.current = null;
+        if (cutsRef.current.restoreWord(w)) setSel({ a: w.id, f: w.id });
+      }, RESTORE_CLICK_MS);
+      return;
+    }
     selectWord(i, e.shiftKey);
   };
   const onDoubleClick = (e: React.MouseEvent) => {
+    cancelRestore();
     const i = wordOf(e.target);
     if (i >= 0) startEdit([i, i]);
   };
@@ -397,13 +489,26 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     const i = wordOf(e.target);
     if (i < 0 || e.metaKey || e.ctrlKey || e.altKey) return;
     const r = rowOf[i];
-    const move = (j: number) => selectWord(Math.max(0, Math.min(words.length - 1, j)), e.shiftKey, true);
+    // words inside a take chip aren't on screen: skip them
+    const move = (j: number, dir: 1 | -1 = j >= i ? 1 : -1) => {
+      let k = Math.max(0, Math.min(words.length - 1, j));
+      while (removed[k] === 2 && k + dir >= 0 && k + dir < words.length) k += dir;
+      if (removed[k] !== 2) selectWord(k, e.shiftKey, true);
+    };
     switch (e.key) {
       case "ArrowRight":
         move(i + 1);
         break;
       case "ArrowLeft":
         move(i - 1);
+        break;
+      case "Backspace":
+      case "Delete":
+        // ⌫ cuts the selection from the video (or brings it back)
+        if (!selRange || i < selRange[0] || i > selRange[1]) setSel({ a: words[i].id, f: words[i].id });
+        if (selRange && i >= selRange[0] && i <= selRange[1]) toggleCut();
+        else if (removed[i] === 0) p.cuts.cutWords(words, i, i);
+        else p.cuts.restoreWord(words[i]);
         break;
       case "ArrowDown":
       case "ArrowUp": {
@@ -511,12 +616,23 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
   const items = v.getVirtualItems();
   const time = (i: number) => fmtClock(cutTimeOfSource(p.editSegs, words[i].start));
   const captionsOff = preset === "none";
+  // UX10 (review E3): "Show" — the text scrolls to the first take's chip
+  // (before the first word from its start on), the playhead to its cut
+  const showTake = () => {
+    const first = takes[0];
+    if (!first || !words.length) return;
+    let at = 0;
+    while (at < words.length - 1 && (words[at].start + words[at].end) / 2 < first.start) at++;
+    showRow(rowOf[at]);
+    p.seekCut(cutTimeOfSource(p.editSegs, first.start));
+  };
   return (
     <div ref={rootRef} className={s.ted} data-testid="ed-text">
       <CutsHeader
         phone={phone}
         editSegs={p.editSegs}
         duration={p.duration}
+        cuts={p.cuts}
         seekCut={p.seekCut}
         findOpen={p.findOpen}
         setFindOpen={p.setFindOpen}
@@ -559,6 +675,17 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
               </button>
             </div>
           )}
+          {takes.length > 0 && (
+            // UX10 (review E3): what Cleo cut, by name
+            <div className={s.note} data-testid="ed-cleo-cut">
+              <Sparkles size={14} strokeWidth={1.75} aria-hidden style={{ color: "var(--ed-cleo)", flexShrink: 0 }} />
+              <span>{plural(t, lang, "editor.cuts.cleoOne", "editor.cuts.cleoOther", takes.length)}</span>
+              <span aria-hidden>·</span>
+              <button type="button" className={s.linkBtn} data-testid="ed-cleo-show" onClick={showTake}>
+                {t("editor.cuts.showTake")}
+              </button>
+            </div>
+          )}
           {p.hint && (
             <div className={s.hint} data-testid="ed-hint">
               <Lightbulb size={14} strokeWidth={1.75} className={s.hintIcon} aria-hidden />
@@ -588,23 +715,26 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
             {items.map((it) => {
               const r = rows[it.index];
               const touches = (x: [number, number] | null) => (x && x[0] <= r.last && x[1] >= r.first ? x : null);
+              const selHere = touches(selRange);
               return (
                 <WordRow
                   key={it.key}
                   rowIndex={it.index}
                   first={r.first}
-                  words={words.slice(r.first, r.last + 1)}
+                  words={rowWords[it.index]}
                   time={time(r.first)}
-                  sel={touches(selRange)}
+                  selA={selHere ? selHere[0] : -1}
+                  selB={selHere ? selHere[1] : -1}
                   focus={focusIdx >= r.first && focusIdx <= r.last ? focusIdx : sel === null && it.index === items[0]?.index ? r.first : -1}
                   hits={hits}
-                  removed={removed}
+                  marks={rowMarks(it.index)}
+                  dec={dec}
                   edit={
                     !phone && touches(editRange_)
                       ? { first: editRange_![0], last: editRange_![1], draft, onDraft: setDraft, takeFresh, serial: editSerial }
                       : null
                   }
-                  editKeys={editKeys}
+                  editKeys={stableKeys}
                   start={it.start - notesH}
                   measure={v.measureElement}
                   adjusted={!!p.adjusted?.size && words.slice(r.first, r.last + 1).some((w) => p.adjusted!.has(w.id))}
@@ -620,6 +750,8 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
           hidden={words.slice(selRange[0], selRange[1] + 1).every((w) => w.hidden)}
           broken={broken}
           editing={editing}
+          removed={selRemoved}
+          onCut={toggleCut}
           onHide={toggleHide}
           onEdit={() => (editing ? undefined : startEdit())}
           onBreak={toggleBreak}
@@ -632,6 +764,8 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
           hidden={words.slice(selRange[0], selRange[1] + 1).every((w) => w.hidden)}
           broken={broken}
           editing={editing}
+          removed={selRemoved}
+          onCut={toggleCut}
           onHide={toggleHide}
           onEdit={() => (editing ? undefined : startEdit())}
           onBreak={toggleBreak}

@@ -71,7 +71,8 @@ def test_analyze_only_builds_the_doc_and_measures(tmp_path, fake_transcription):
     assert [w["text"] for w in doc["words"]] == ["So", "um", "we", "going", "to", "win."]
     assert [w["id"] for w in doc["words"]] == [f"w{i:04d}" for i in range(1, 7)]
     um = doc["words"][1]
-    assert um["filler"] and um["hidden"] and um["start"] == 0.5
+    # UX10: "um" is a word in a filler range, not a filler sound: cut, not hidden
+    assert um["cut"] == "filler" and "hidden" not in um and um["start"] == 0.5
     # cleanup: "gonna" → "going to" shares gonna's time, the rest keeps its own
     assert doc["words"][3]["start"] == 1.2 and doc["words"][4]["end"] == 1.6
     assert doc["words"][5]["start"] == 1.7

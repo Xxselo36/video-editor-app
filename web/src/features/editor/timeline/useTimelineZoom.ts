@@ -37,6 +37,8 @@ export function useTimelineZoom(
   totalDur: number,
   mountKey: unknown,
   initialViewW = 640,
+  /** A higher zoom cap while it's set (the v2 dock's trim magnifier, UX10). */
+  maxBoost?: number,
 ): TimelineZoom {
   // Zoom as pixels per second. 0 = "Fit" (effPps below never goes under
   // the fit zoom): the timeline opens showing the whole edit.
@@ -55,7 +57,9 @@ export function useTimelineZoom(
 
   // Effective zoom: never narrower than the view ("fit"), and capped
   // so very long videos don't produce absurdly wide elements.
-  const { fitPps, maxPps } = zoomLimits(viewW, totalDur);
+  const limits = zoomLimits(viewW, totalDur);
+  const fitPps = limits.fitPps;
+  const maxPps = maxBoost ? Math.max(limits.maxPps, maxBoost) : limits.maxPps;
   const effPps = Math.min(maxPps, Math.max(fitPps, pps));
   const contentW = Math.max(viewW, Math.round(totalDur * effPps));
   const canZoomOut = contentW > viewW + 1;

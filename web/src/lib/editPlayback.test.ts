@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildPlan, fadeLevel, locate, nextInSource, type PlaySeg } from "@/lib/editPlayback";
+import { cutRange } from "@/features/editor/state/cuts";
+import { buildPlan, EditPlayer, fadeLevel, locate, nextInSource, seekRampLevel, type PlaySeg } from "@/lib/editPlayback";
 
 const seg = (id: string, start: number, end: number, extra: Partial<PlaySeg> = {}): PlaySeg => ({
   id,
@@ -137,5 +138,101 @@ describe("fadeLevel", () => {
     const s = seg("x", 10, 20, { fadeIn: 1 });
     expect(fadeLevel(s, 5)).toBe(0);
     expect(fadeLevel(s, 25)).toBe(1);
+  });
+});
+
+describe("seekRampLevel (UX10, review C9)", () => {
+  it("is off without a ramp (the v1 editor)", () => {
+    expect(seekRampLevel(0, true, 0, 0)).toBe(1);
+  });
+
+  it("holds 0 while the jump is on its way, ramps up over rampMs after it landed", () => {
+    expect(seekRampLevel(15, true, null, null)).toBe(0);
+    expect(seekRampLevel(15, false, 0, null)).toBe(0);
+    expect(seekRampLevel(15, false, 7.5, null)).toBeCloseTo(0.5);
+    expect(seekRampLevel(15, false, 15, null)).toBe(1);
+    expect(seekRampLevel(15, false, null, null)).toBe(1);
+  });
+
+  it("ramps down over the last rampMs before a jump", () => {
+    expect(seekRampLevel(15, false, null, 0.1)).toBe(1);
+    expect(seekRampLevel(15, false, null, 0.0075)).toBeCloseTo(0.5);
+    expect(seekRampLevel(15, false, null, 0)).toBe(0);
+    // just landed and the next jump close: the lower one wins
+    expect(seekRampLevel(15, false, 12, 0.003)).toBeCloseTo(0.2);
+  });
+});
+
+describe("EditPlayer.setPlan keeps the playhead through a cut earlier in its clip (UX10, review 4)", () => {
+  function fakeVideo(t: number) {
+    const seeks: number[] = [];
+    let cur = t;
+    const v = {
+      paused: true,
+      ended: false,
+      volume: 1,
+      muted: false,
+      playbackRate: 1,
+      readyState: 4,
+      get currentTime() {
+        return cur;
+      },
+      set currentTime(x: number) {
+        cur = x;
+        seeks.push(x);
+      },
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    return { v: v as unknown as HTMLVideoElement, seeks };
+  }
+
+  it("cutting 'äh' (8.0–8.3) with the playhead at 9.5 in the same clip: no seek", () => {
+    const { v, seeks } = fakeVideo(0);
+    const p = new EditPlayer(v);
+    p.setPlan(buildPlan([{ id: "A", start: 0, end: 20 }], 20));
+    v.currentTime = 9.5; // played on to 9.5
+    seeks.length = 0;
+    const after = cutRange([{ id: "A", start: 0, end: 20 }], 7.95, 8.4, 20);
+    expect(after.map((s) => s.id)).toEqual(["A", "A~c"]);
+    p.setPlan(buildPlan(after, 20));
+    expect(seeks).toEqual([]);
+    expect(v.currentTime).toBe(9.5);
+    p.destroy();
+  });
+
+  it("the playhead inside the cut still moves to the cut's end; a trim past it to the next clip", () => {
+    const { v, seeks } = fakeVideo(0);
+    const p = new EditPlayer(v);
+    p.setPlan(buildPlan([{ id: "A", start: 0, end: 20 }], 20));
+    v.currentTime = 8.1;
+    seeks.length = 0;
+    p.setPlan(buildPlan(cutRange([{ id: "A", start: 0, end: 20 }], 7.95, 8.4, 20), 20));
+    expect(seeks).toEqual([8.4]);
+    p.destroy();
+    const b = fakeVideo(0);
+    const q = new EditPlayer(b.v);
+    q.setPlan(
+      buildPlan(
+        [
+          { id: "A", start: 0, end: 6 },
+          { id: "B", start: 10, end: 12 },
+        ],
+        20,
+      ),
+    );
+    b.v.currentTime = 5;
+    b.seeks.length = 0;
+    q.setPlan(
+      buildPlan(
+        [
+          { id: "A", start: 0, end: 4 },
+          { id: "B", start: 10, end: 12 },
+        ],
+        20,
+      ),
+    );
+    expect(b.seeks).toEqual([10]);
+    q.destroy();
   });
 });

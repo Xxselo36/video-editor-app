@@ -4340,7 +4340,21 @@ def get_doc(job_id: str, user: User | None = Depends(current_user)):
     job = get_owned_job(job_id, user)
     if job.doc is None:
         raise _no_doc(job)
-    return {"doc": job.doc, "rev": job.doc_rev,
+    doc = job.doc
+    # UX10: a doc from before hid the words of every filler range; they
+    # become cut: "filler" words (captioned once a clip plays them) — on
+    # the first read, stored under the row lock while in review.
+    words, changed = edit_doc.migrate_cut_words(list(doc.get("words") or []))
+    if changed:
+        doc = {**doc, "words": words}
+        if job.status == "awaiting_review":
+            def _migrate(cur: Job) -> dict | None:
+                if cur.doc is None or cur.status != "awaiting_review":
+                    return None
+                ws, ch = edit_doc.migrate_cut_words(list(cur.doc.get("words") or []))
+                return {"doc": {**cur.doc, "words": ws}} if ch else None
+            store.modify(job_id, _migrate)
+    return {"doc": doc, "rev": job.doc_rev,
             "read_only": job.status != "awaiting_review",
             **_doc_captions(job)}
 
@@ -4503,8 +4517,25 @@ def job_peaks(job_id: str, user: User | None = Depends(media_user)):
     job = get_owned_job(job_id, user)
     if not job.peaks_key:
         raise HTTPException(404, "peaks_not_ready")
-    return _media(job, job.peaks_key, "application/octet-stream",
-                  "peaks_not_ready", cache="private, max-age=604800, immutable")
+    # The body itself, also for R2 jobs (UX10): the editor fetch()es it
+    # from the web origin, and a fetch that follows the 307 to R2 is
+    # refused by the bucket's CORS (Origin: null). 100 bytes a second:
+    # PEAKS_MAX_BYTES covers far more than the longest upload.
+    where = media.store_of(job)
+    if where == "r2" and not storage.r2_available():
+        raise ApiRefusal(503, "storage_unavailable", headers={"Retry-After": "60"})
+    try:
+        return media.small_response(job.peaks_key, media_type="application/octet-stream",
+                                    max_bytes=PEAKS_MAX_BYTES, store=where,
+                                    cache="private, max-age=604800, immutable")
+    except FileNotFoundError:
+        raise HTTPException(409, "peaks_not_ready")
+    except ValueError:
+        raise HTTPException(404, "peaks_not_ready")
+
+
+# peaks.bin is 100 bytes per second of audio: 8 MB ≈ 22 hours.
+PEAKS_MAX_BYTES = 8 * 1024 * 1024
 
 
 @app.get("/jobs/{job_id}/poster")
@@ -5103,6 +5134,32 @@ async def _rebuild_in_pool(job_id: str, source: str | None, segments,
     return True, False
 
 
+def _exact_fps(fps: float) -> float:
+    """The exact rate of a stored mezz_fps (rounded to 4 decimals):
+    29.97 → 30000/1001 (also 23.976, 59.94, …), 30.0002 → 30. The twin of
+    the web's timeline/mechanics.ts exactFps."""
+    ntsc = round(fps * 1.001)
+    if (ntsc in (24, 30, 48, 60, 120) and abs(fps * 1.001 - ntsc) < 0.002
+            and abs(fps - ntsc) > 0.01):
+        return ntsc * 1000 / 1001
+    whole = round(fps)
+    return float(whole) if abs(fps - whole) < 0.002 else fps
+
+
+def _edit_edge(x: float, fps: float | None) -> float:
+    """A clip edge as stored by /edit-segments: rounded to ms, except an
+    edge exactly on a frame boundary k / fps of the job's mezz (the v2
+    editor's released trim, UX10 review 13), which is kept as sent: only
+    k / fps itself starts both the v1 burn (MoviePy) and the v2 render
+    on frame k (tests/captions/test_frame_edges.py)."""
+    if fps and fps > 0:
+        f = _exact_fps(float(fps))
+        k = round(x * f)
+        if k > 0 and abs(x - k / f) < 1e-7:
+            return k / f
+    return round(x, 3)
+
+
 def _effect(value, default: float, lo: float, hi: float) -> float:
     """Parse one effect value. Only a missing value means "default" —
     `x or default` used to turn volume 0 (mute) into 1.0."""
@@ -5317,7 +5374,7 @@ def _save_edit_segments(job_id: str, payload: dict, user: User | None
             ee = min(ee, dur)
         if ee - ss < 0.05:
             continue
-        cleaned.append((round(ss, 3), round(ee, 3)))
+        cleaned.append((_edit_edge(ss, job.mezz_fps), _edit_edge(ee, job.mezz_fps)))
         # Per-segment effects. Clamped to safe ranges — render step
         # applies these via ffmpeg atempo / fade / volume filters.
         effects.append({
@@ -5508,6 +5565,8 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
             new_cut_range_dicts.append({
                 "id": next_id, "start": float(rs), "end": float(re_),
                 "source": "user_edit",
+                # a scene command's cut (UX10 cut_kinds)
+                "kind": "voice_cmd",
             })
             next_id += 1
         out = {"segments": new_segments,

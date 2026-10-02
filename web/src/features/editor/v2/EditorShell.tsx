@@ -3,7 +3,7 @@
  * Editor shell v2 (UX7a, behind NEXT_PUBLIC_EDITOR_V2): one 100dvh
  * screen, no page scroll.
  *   desktop  top bar 52 · stage + side panel (380, 340 below 1366 px) ·
- *            timeline dock 150; no resizable panels (review G3)
+ *            timeline dock 140; no resizable panels (review G3)
  *   < 900 px top bar 44 · stage (186×330 preview + player row) · dock ·
  *            two bottom tabs opening sheets
  * Same job data and the same session code as the v1 ReviewScreen
@@ -21,7 +21,8 @@ import type { Phrase, Subtitle } from "@/features/editor/legacy/buildPhrases";
 import { useEditSession } from "@/features/editor/session/useEditSession";
 import { useEditorShortcuts, type ShortcutHandlers } from "@/features/editor/shortcuts/useEditorShortcuts";
 import { createPlayheadStore, PlayheadContext } from "@/features/editor/state/playhead";
-import type { EditDoc } from "@/features/editor/state/doc";
+import { exportCaptionSource } from "@/features/editor/state/cuts";
+import type { CaptionPhrase, CaptionUnit, EditDoc } from "@/features/editor/state/doc";
 import type { V1Edits } from "@/features/editor/state/reconcile";
 import { createDocStore, useDocStore, type DocState } from "@/features/editor/state/store";
 import { useTimelineHistory, type TimelineHistory } from "@/features/editor/timeline/history";
@@ -42,6 +43,7 @@ import { TranscriptEditor, type TextApi } from "./panel/text/TranscriptEditor";
 import { TranscriptPanel } from "./panel/TranscriptPanel";
 import { PreviewStage } from "./preview/PreviewStage";
 import { ExpiredView } from "./states";
+import { removedOf, useCuts } from "./useCuts";
 import { useDocSession, type CaptionSourceHandler } from "./useDocSession";
 import { TimelineDock, type DockApi } from "./timeline/TimelineDock";
 import { TopBar, UndoRedo } from "./topbar/TopBar";
@@ -64,6 +66,10 @@ export type EditorShellProps = {
   hasPoster?: boolean;
   cutRanges: CutRange[];
   duration: number;
+  /** The frame rate of the video (GET /jobs/{id} fps): the trim frame grid. */
+  fps?: number | null;
+  /** UX10: hands over the render payload's builder (the page calls it on export). */
+  onExportSource?: (build: ExportSource | null) => void;
   onChange: (p: Phrase[]) => void;
   /** UX8: the caption source of the edit document (preview, render
    *  payload and — after an edit — the legacy /phrases save). */
@@ -80,6 +86,10 @@ const CaptionLayer = dynamic(() => import("@/features/captions-ui/CaptionLayer")
 const LiveStylePanel = dynamic(() => import("@/features/captions-ui/StylePanel"), { ssr: false });
 const ZONES_KEY = "cleocuts.editor.zones.v1";
 
+/** The caption source of the render payload (state/cuts.ts exportCaptionSource). */
+export type ExportSource = () => { phrases: CaptionPhrase[]; units: CaptionUnit[] };
+
+const selWords = (st: DocState) => st.present.words;
 const selCanUndo = (st: DocState) => st.past.length > 0;
 const selStyleOverrides = (st: DocState) => st.present.style?.overrides ?? null;
 const selCanRedo = (st: DocState) => st.future.length > 0;
@@ -124,6 +134,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     cutRanges: props.cutRanges,
     duration: props.duration,
     onApply: props.onApply,
+    // UX10 (review C9): no click at a cut's jump (not iOS: fixed volume)
+    seekRampMs: 15,
   });
   const { editSegs, toSource, videoRef } = session;
   const posterUrl = useMediaUrl(props.jobId, "poster");
@@ -142,6 +154,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     setToast({ msg, action, key: Date.now() });
   }, []);
   const tlHistory = useTimelineHistory(editSegs, session.commitEditSegs);
+  // UX10: what the clips leave out — struck in the text, not exported.
+  const removed = useMemo(() => removedOf(editSegs, props.duration), [editSegs, props.duration]);
   const doc = useDocSession(
     props.jobId,
     props.onCaptionSource,
@@ -170,9 +184,18 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
       /* ignore */
     }
   }, []);
+  // The render payload, built when the export starts (state/cuts.ts).
+  const { onExportSource } = props;
+  useEffect(() => {
+    if (!onExportSource) return;
+    onExportSource(docStore ? () => exportCaptionSource(docStore.getState().present.words, removed, editSegs) : null);
+    return () => onExportSource(null);
+  }, [onExportSource, docStore, removed, editSegs]);
 
-  // ── one undo for text and timeline (until UX10 merges the stacks):
-  // ⌘Z undoes the latest edit of either, in the order they were made.
+  // ── one undo for text and timeline: ⌘Z undoes the latest edit of
+  // either, in the order they were made. UX10's cuts in the text are
+  // clip edits, so they are timeline steps in that same order (the two
+  // histories stay apart: the doc's is shared with the Style tab).
   const order = useMemo(() => new EditOrder(), []);
   const docCanUndo = useDocStore(docStore ?? EMPTY_STORE, docStore ? selCanUndo : NO_DOC_STATE);
   const docCanRedo = useDocStore(docStore ?? EMPTY_STORE, docStore ? selCanRedo : NO_DOC_STATE);
@@ -219,6 +242,18 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     else if (kind === "undo") docStore!.undo();
     else docStore!.redo();
   }
+  // UX10: cuts in the text and the AI's cuts — timeline commits, so one
+  // undo order with every other edit.
+  const docWords = useDocStore(docStore ?? EMPTY_STORE, selWords);
+  const cuts = useCuts({
+    jobId: props.jobId,
+    segs: editSegs,
+    duration: props.duration,
+    cutRanges: props.cutRanges,
+    words: docWords,
+    removed,
+    commit: (next) => history.commit(next),
+  });
   const [selected, setSelected] = useState<string | null>(null);
   const selectedLive = selected && editSegs.some((x) => x.id === selected) ? selected : null;
 
@@ -339,7 +374,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     prevLine: () => lineBy(-1),
     nextLine: () => lineBy(1),
     split,
-    delete: del,
+    // a selected clip goes; else the selected words are cut (UX10)
+    delete: () => (selectedLive ? del() : (textApi.current?.cut() ?? false)),
     // UX8: Enter / H act on the selected words (focus outside the list)
     edit: () => textApi.current?.edit() ?? false,
     hide: () => textApi.current?.hide() ?? false,
@@ -410,6 +446,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         apply={applyDoc}
         playhead={store}
         editSegs={editSegs}
+        cuts={cuts}
         duration={props.duration}
         toSource={toSource}
         seekRange={(start, end) => session.seekToPhrase({ original_start: start, original_end: end }, false)}
@@ -583,6 +620,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         phone={phone}
         store={store}
         segments={editSegs}
+        cuts={cuts}
+        fps={props.fps}
         duration={props.duration}
         history={history}
         selected={selectedLive}
@@ -640,12 +679,12 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         </BottomSheet>
       )}
       {session.applyError && !toast && (
-        <div className={s.toast} role="alert" data-testid="apply-error" style={phone ? { bottom: 72 } : { bottom: 166 }}>
+        <div className={s.toast} role="alert" data-testid="apply-error" style={phone ? { bottom: 72 } : { bottom: 156 }}>
           <span>{session.applyError}</span>
         </div>
       )}
       {toast && (
-        <div key={toast.key} className={s.toast} role="status" data-testid="ed-toast" style={phone ? { bottom: 72 } : { bottom: 166 }}>
+        <div key={toast.key} className={s.toast} role="status" data-testid="ed-toast" style={phone ? { bottom: 72 } : { bottom: 156 }}>
           <span>{toast.msg}</span>
           {toast.action && (
             <button

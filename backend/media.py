@@ -354,6 +354,31 @@ def presign_get(key: str, *, filename: str | None = None,
                                content_type=content_type)
 
 
+def small_response(key: str, *, media_type: str, max_bytes: int,
+                   cache: str | None = None, store: str | None = None):
+    """A small object's bytes from the API itself, from either store: no
+    redirect to R2. For bodies the web app reads with fetch() (peaks.bin):
+    a cross-origin fetch that follows the 307 to R2 is redirect-tainted
+    (Origin: null), which the bucket's CORS rules refuse. Raises
+    FileNotFoundError when the object is missing, ValueError when it is
+    over `max_bytes`."""
+    from fastapi.responses import Response
+    check_key(key)
+    if _where(key, store) == "r2":
+        data = storage.get_bytes(key, max_bytes)
+        if data is None:
+            raise FileNotFoundError(f"media object {key} not found")
+    else:
+        path = local_path(key)
+        if not path.is_file():
+            raise FileNotFoundError(f"media object {key} not found")
+        if path.stat().st_size > max_bytes:
+            raise ValueError(f"media object {key} is larger than {max_bytes} bytes")
+        data = path.read_bytes()
+    headers = {"Cache-Control": cache} if cache else {}
+    return Response(content=data, media_type=media_type, headers=headers)
+
+
 def media_response(key: str, *, media_type: str,
                    download_name: str | None = None,
                    cache: str | None = None, store: str | None = None):

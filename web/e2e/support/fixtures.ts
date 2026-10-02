@@ -50,6 +50,14 @@ export type SeedOptions = {
   doc?: boolean;
   /** false: no first-frame poster (an analysis from before UT5). */
   poster?: boolean;
+  /** review_speech (UX10): more analysis cuts [start, end, kind] —
+   *  "voice_cmd" a Cleo-cut take, "filler" a repeat whose words get cut. */
+  ai_cuts?: [number, number, "voice_cmd" | "filler" | "silence"][];
+  /** review_speech (UX10): more transcribed words (nospeech: outside the speech regions). */
+  extra_words?: { text: string; start: number; end: number; nospeech?: boolean }[];
+  /** "redirect": /peaks answers a 307 to another origin (an R2 redirect
+   *  the editor can't follow); default: the clip's peaks.bin. */
+  peaks?: "redirect";
 };
 
 export type Seeded = { id: string; seed: SeedName; filename: string; status: string };
@@ -91,6 +99,8 @@ export type StubWord = {
   hidden?: boolean;
   filler?: boolean;
   breakBefore?: boolean;
+  cut?: string;
+  nospeech?: boolean;
 };
 export type StubDoc = {
   doc: { words: StubWord[]; style: { presetId: string }; rev: number };

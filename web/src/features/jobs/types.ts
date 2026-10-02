@@ -59,6 +59,9 @@ export type JobStatus = {
   /** UT5: GET /jobs/{id}/poster (the first kept frame) answers. */
   has_poster?: boolean;
   caption_preset?: string | null;
+  // The frame rate of the video the editor plays and the renders cut
+  // (the mezz, UT3): the v2 editor's trim frame grid (UX10).
+  fps?: number | null;
   // The finished job (done): what the Done view shows.
   outputs?: string[];
   social_caption?: string;
@@ -83,4 +86,7 @@ export type CutRange = {
   id: number;
   start: number;
   end: number;
+  /** Why the analysis cut it (UX10, backend/cut_kinds.py): "silence",
+   *  "filler", "voice_cmd" or "bad_take"; missing on jobs from before. */
+  kind?: string;
 };

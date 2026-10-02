@@ -43,6 +43,13 @@ Test API (only this script registers it; never part of the backend):
               orientation ("portrait" | "landscape"), settings (dict),
               caption_preset, doc (false: no edit document),
               poster (false: no first-frame poster, as before UT5),
+              ai_cuts ([[start, end, kind], …] source seconds,
+                       review_speech: more analysis cuts — "voice_cmd" a
+                       Cleo-cut take, "filler" a repeat / stutter range
+                       whose words get cut: "filler"),
+              extra_words ([{text, start, end, nospeech?}, …]: more
+                       transcribed words, e.g. one in a pause the speech
+                       detection called silence),
               proxy: "off"   has_proxy false, proxy-video 404 (today's
                              production default: CLEO_PROXY_VIDEO unset)
                      "on"    has_proxy true, proxy-video plays
@@ -50,6 +57,9 @@ Test API (only this script registers it; never part of the backend):
                              proxy-video plays
                      "probe-none"  not reported, proxy-video 404
                      "real"  the backend's own answer (R2 mode: 307)
+              peaks: "redirect"  /peaks answers a 307 to another origin
+                             (the R2 redirect the editor's fetch can't
+                             follow); default: peaks.bin of the clip
               render: "ok" | "fail"; render_seconds; slow_rebuild (s
               every /edit-segments waits before its rebuild)
   POST /_test/config        {"analysis_seconds": s, "by_filename":
@@ -226,8 +236,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
     from backend import jobs as J
     from backend.auth import get_owned_job, media_user
     from backend.jobs import store
-    from fastapi import Body, Depends, HTTPException
-    from fastapi.responses import FileResponse
+    from fastapi import Body, Depends, HTTPException, Request
+    from fastapi.responses import FileResponse, RedirectResponse
     from fastapi.routing import APIRoute
 
     stub_media.grid()  # the editor suites need it at once
@@ -298,24 +308,71 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
 
     pipeline._ffmpeg_cuts_preview = chromium_cuts_preview
 
+    from backend import cut_kinds
     from backend import doc as edit_doc
 
-    def clip_doc(clip: str, data: dict[str, Any], settings: dict | None) -> dict[str, Any]:
+    def clip_doc(clip: str, data: dict[str, Any], settings: dict | None,
+                 extra_words: list | None = None, fillers: list | None = None) -> dict[str, Any]:
         """The edit document of a stub clip, as the analysis builds it."""
         if clip == "speech":
-            words = edit_doc.words_from_transcript(stub_media.speech_words())
+            raw = stub_media.speech_words() + [dict(w) for w in extra_words or ()]
+            words = edit_doc.words_from_transcript(raw, fillers)
         else:
             words = edit_doc.words_from_units(data["subtitles"])
         return edit_doc.build_doc(words, data["language"], settings or {},
                                   segments=data["segments"])
 
+    peaks_cache: dict[str, bytes | None] = {}
+
+    def clip_peaks(src: Path | str, out_dir: Path) -> str | None:
+        """peaks.bin of a stub clip (the real audio_analysis, once per
+        clip file), so the editor snaps text-cut edges as in production."""
+        from backend import audio_analysis
+        key = str(src)
+        if key not in peaks_cache:
+            try:
+                peaks_cache[key] = audio_analysis.compute_peaks(key, timeout=60)
+            except Exception as e:  # noqa: BLE001 — the stub runs without peaks then
+                print(f"[stub] no peaks for {key}: {e}", flush=True)
+                peaks_cache[key] = None
+        blob = peaks_cache[key]
+        if not blob:
+            return None
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / "peaks.bin"
+        path.write_bytes(blob)
+        return str(path)
+
     def analysis_result(clip: str, orientation: str, out_dir: Path,
                         audio_warnings: list[str] | None = None,
-                        settings: dict | None = None) -> dict[str, Any]:
+                        settings: dict | None = None,
+                        ai_cuts: list | None = None,
+                        extra_words: list | None = None) -> dict[str, Any]:
         """What pipeline.analyze_only returns, for a stub clip, with its
-        files (normalized, proxy, first preview) in `out_dir`."""
+        files (normalized, proxy, first preview) in `out_dir`. Every cut
+        range gets its kind (backend/cut_kinds.py, UX10) from the
+        analysis log and the doc's filler words, and the cut words theirs;
+        `ai_cuts` / `extra_words`: see the seed options."""
         files = clip_files(clip, orientation)
-        data = clip_data(clip)
+        data = dict(clip_data(clip))
+        log: list = []
+        fillers: list = []
+        for cs, ce, kind in ai_cuts or ():
+            vs, ve = float(cs), float(ce)
+            kept = []
+            for s0, e0 in data["segments"]:
+                if e0 <= vs or s0 >= ve:
+                    kept.append([s0, e0])
+                    continue
+                if s0 < vs:
+                    kept.append([s0, vs])
+                if e0 > ve:
+                    kept.append([ve, e0])
+            data["segments"] = kept
+            data["cut_ranges"] = pipeline._invert_segments([tuple(x) for x in kept], data["duration"])
+            log.append((kind, vs, ve))
+            if kind == "filler":
+                fillers.append({"start": vs, "end": ve, "word": "repeat"})
         out_dir.mkdir(parents=True, exist_ok=True)
         norm = out_dir / "normalized.mp4"
         media._link_or_copy(files["src"], norm)
@@ -326,13 +383,18 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         segs = data["segments"]
         poster_ok = pipeline.make_poster(str(files["proxy"]), float(segs[0][0]) if segs else 0.0,
                                          str(poster))
+        doc = clip_doc(clip, data, settings, extra_words, fillers)
+        peaks = clip_peaks(files["src"], out_dir)
+        cuts = cut_kinds.label(data["cut_ranges"], log=log, words=doc["words"])
+        cut_kinds.mark_words(doc["words"], cuts)
         return {"normalized_path": str(norm), "preview_path": str(preview),
                 "poster_path": str(poster) if poster_ok else None,
                 "segments": [tuple(s) for s in data["segments"]], "subtitles": data["subtitles"],
-                "duration": data["duration"], "cut_ranges": data["cut_ranges"],
+                "duration": data["duration"],
+                "cut_ranges": cuts,
                 "language": data["language"], "audio_warnings": audio_warnings or [],
                 "audio_levels": {}, "scene_events": [],
-                "doc": clip_doc(clip, data, settings)}
+                "doc": doc, "peaks_path": peaks}
 
     def review_fields(res: dict[str, Any]) -> dict[str, Any]:
         """The job fields _run_analyze_inner commits for a finished analysis."""
@@ -341,7 +403,9 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                     preview_version=1, subtitles=res["subtitles"], duration=res["duration"],
                     cut_ranges=res["cut_ranges"], language=res["language"],
                     audio_warnings=res["audio_warnings"], audio_levels=res["audio_levels"],
-                    scene_events=res["scene_events"], doc=res.get("doc"), doc_rev=0)
+                    scene_events=res["scene_events"], doc=res.get("doc"), doc_rev=0,
+                    # both stub clips are 30 fps CFR, like a new job's mezz (UT3)
+                    mezz_fps=30.0, mezz_cfr=True)
 
     # ── fake analysis (the real worker around it) ─────────────────────
     def fake_analyze_only(input_path: str, output_dir: str, settings: dict,
@@ -430,6 +494,23 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
     # First, so it wins over the backend's own route.
     M.app.router.routes.insert(0, APIRoute("/jobs/{job_id}/proxy-video", proxy_video,
                                            methods=["GET"]))
+    real_peaks = M.job_peaks
+
+    def job_peaks(job_id: str, request: Request, user=Depends(media_user)):
+        """peaks "redirect": what the route did for R2 jobs before UX10's
+        fix: a 307 to another origin (localhost / 127.0.0.1 swapped here,
+        the presigned R2 URL there), which a cross-origin fetch can't read."""
+        if cfg(job_id).get("peaks") == "redirect":
+            get_owned_job(job_id, user)
+            u = request.url
+            host = "127.0.0.1" if u.hostname == "localhost" else "localhost"
+            return RedirectResponse(str(u.replace(hostname=host)), status_code=307)
+        return real_peaks(job_id, user)
+
+    # real classes (this module's annotations are strings, Request is local)
+    job_peaks.__annotations__ = {"job_id": str, "request": Request}
+
+    M.app.router.routes.insert(0, APIRoute("/jobs/{job_id}/peaks", job_peaks, methods=["GET"]))
 
     # ── seeds ─────────────────────────────────────────────────────────
     def create(opts: dict[str, Any], settings: dict, filename: str,
@@ -444,11 +525,14 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         return job
 
     def seed_review(job, clip: str, orientation: str, warnings: list[str] | None = None,
-                    with_doc: bool = True, with_poster: bool = True) -> None:
+                    with_doc: bool = True, with_poster: bool = True,
+                    ai_cuts: list | None = None,
+                    extra_words: list | None = None) -> None:
         where = media.backend()
         ws = M._workspace(job.id, "seed")
         try:
-            res = analysis_result(clip, orientation, ws, warnings, settings=job.settings)
+            res = analysis_result(clip, orientation, ws, warnings, settings=job.settings,
+                                  ai_cuts=ai_cuts, extra_words=extra_words)
             if not with_doc:
                 res["doc"] = None
             if not with_poster:
@@ -515,7 +599,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             job = create(opts, TIKTOK, "tiktok_3_mistakes.mp4" if name == "review_speech"
                          else "interview_cut_final.mp4", tiktok)
             seed_review(job, clip, orientation, with_doc=opts.get("doc", True) is not False,
-                        with_poster=opts.get("poster", True) is not False)
+                        with_poster=opts.get("poster", True) is not False,
+                        ai_cuts=opts.get("ai_cuts"), extra_words=opts.get("extra_words"))
             if name == "render_failed":
                 store.update(job.id, message="render_failed",
                              error="Render worker unavailable (modal_unavailable)",
@@ -580,6 +665,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         if opts.get("age_s"):
             store.update(job.id, created_at=time.time() - float(opts["age_s"]))
         set_cfg(job.id, proxy=opts.get("proxy") or proxy, render=opts.get("render") or "ok",
+                peaks=opts.get("peaks"),
                 render_seconds=opts.get("render_seconds"), slow_rebuild=opts.get("slow_rebuild"),
                 clip=clip or "grid", orientation=orientation)
         j = store.get(job.id)

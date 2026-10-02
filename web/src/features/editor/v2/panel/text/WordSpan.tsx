@@ -8,13 +8,19 @@
  *
  *   data-sel   selected            data-hit  1 find hit · 2 current hit
  *   data-hidden hidden from captions (the analysis hides fillers)
- *   data-rm    in a range the edit removes (UX10 makes it restorable)
+ *   data-rm    cut from the video (struck; a click brings it back, UX10)
  *   data-lc    recognised with low confidence (< 0.6)
+ *
+ * UX10 chips (data-chip="i:k", the k-th chip before word i): ⏸ removed
+ * pauses (≥ 0.4 s) and Cleo-cut takes, whose words collapse into the
+ * chip. A click brings the footage back.
  */
-import { CornerDownRight } from "lucide-react";
+import { CornerDownRight, RotateCcw, Scissors } from "lucide-react";
 import { memo, useLayoutEffect, useRef } from "react";
 import { useT } from "@/i18n";
+import type { Chip } from "@/features/editor/state/cuts";
 import type { DocWord } from "@/features/editor/state/doc";
+import { fmtSeconds } from "../../model";
 import s from "../../editor.module.css";
 
 export const LOW_CONF = 0.6;
@@ -45,17 +51,29 @@ export type EditKeys = {
   cancel: () => void;
 };
 
+/**
+ * A row's cut marks (state/cuts.ts textMarks): `rm[k]` for its k-th word
+ * (0 plays, 1 struck, 2 inside a take chip) and the chips before word i
+ * (global index; the last row also has the ones after its last word).
+ * The editor hands a row the same object while its marks stay the same,
+ * so a timeline edit re-renders only the rows it changed (UX10).
+ */
+export type RowMarks = { rm: Uint8Array; chips: ReadonlyMap<number, Chip[]> };
+
 export type RowProps = {
   rowIndex: number;
   first: number;
   words: readonly DocWord[];
   time: string;
-  /** Selected word range (indices), when it touches this row. */
-  sel: readonly [number, number] | null;
+  /** Selected word range (indices) where it touches this row, else -1 / -1. */
+  selA: number;
+  selB: number;
   /** The word that takes Tab (roving tabindex), when in this row. */
   focus: number;
   hits: ReadonlyMap<number, 1 | 2> | null;
-  removed: Uint8Array;
+  marks: RowMarks;
+  /** Decimal separator of the UI language. */
+  dec: string;
   /** Inline edit (desktop), when it touches this row. */
   edit: InlineEdit | null;
   editKeys: EditKeys;
@@ -65,12 +83,54 @@ export type RowProps = {
   adjusted?: boolean;
 };
 
+/** A removed pause or a Cleo-cut take in the text (DF chip): a button. */
+function ChipView({ chip, at, k, dec }: { chip: Chip; at: number; k: number; dec: string }) {
+  const t = useT();
+  const len = fmtSeconds(chip.len, dec);
+  const take = chip.kind === "take";
+  const tip = take
+    ? t("editor.cuts.takeTip", { len })
+    : t(chip.reason === "filler" ? "editor.cuts.fillerTip" : chip.reason === "user" ? "editor.cuts.userTip" : "editor.cuts.pauseTip", { len });
+  const color = take ? "var(--ed-cleo)" : chip.reason === "filler" ? "var(--ed-filler)" : chip.reason === "user" ? "var(--ed-text-3)" : "var(--ed-removed)";
+  return (
+    <button
+      type="button"
+      className={s.chip}
+      data-chip={`${at}:${k}`}
+      data-kind={take ? chip.reason : "pause"}
+      tabIndex={-1}
+      title={tip}
+      aria-label={tip}
+      data-testid={take ? "ed-take-chip" : "ed-pause-chip"}
+    >
+      {take ? (
+        <Scissors size={11} strokeWidth={1.75} aria-hidden style={{ color, flexShrink: 0 }} />
+      ) : (
+        <svg viewBox="0 0 10 10" width="10" height="10" fill={color} aria-hidden style={{ display: "block", flexShrink: 0 }}>
+          <rect x="2" y="1.5" width="2.2" height="7" rx=".7" />
+          <rect x="5.8" y="1.5" width="2.2" height="7" rx=".7" />
+        </svg>
+      )}
+      {take && <span>{t("editor.cuts.take")}</span>}
+      <span className={s.mono} style={take ? { color: "var(--ed-text-3)" } : undefined}>
+        {len}
+      </span>
+      <RotateCcw size={10} strokeWidth={1.75} aria-hidden className={s.chipRs} />
+    </button>
+  );
+}
+
 export const WordRow = memo(function WordRow({ measure, ...p }: RowProps) {
   const t = useT();
   const out: React.ReactNode[] = [];
+  const chipsAt = (i: number) =>
+    p.marks.chips.get(i)?.forEach((c, k) => out.push(<ChipView key={`c${i}-${k}`} chip={c} at={i} k={k} dec={p.dec} />));
   for (let k = 0; k < p.words.length; k++) {
     const i = p.first + k;
     const w = p.words[k];
+    chipsAt(i);
+    // inside a take chip: not shown on its own
+    if (p.marks.rm[k] === 2) continue;
     if (k === 0 && w.breakBefore && i > 0) {
       out.push(
         <button
@@ -91,10 +151,10 @@ export const WordRow = memo(function WordRow({ measure, ...p }: RowProps) {
       if (i === p.edit.first) out.push(<WordInput key={`edit-${p.edit.serial}`} edit={p.edit} keys={p.editKeys} />);
       continue;
     }
-    const sel = p.sel !== null && i >= p.sel[0] && i <= p.sel[1];
+    const sel = i >= p.selA && i <= p.selB;
     const hit = p.hits?.get(i);
     const hidden = !!w.hidden;
-    const rm = p.removed[i] === 1;
+    const rm = p.marks.rm[k] === 1;
     const lc = w.conf !== undefined && w.conf < LOW_CONF;
     out.push(
       <button
@@ -115,6 +175,11 @@ export const WordRow = memo(function WordRow({ measure, ...p }: RowProps) {
         {w.text}
       </button>,
     );
+  }
+  chipsAt(p.first + p.words.length); // after the last word (last row only)
+  if (!out.length) {
+    // every word of the row is inside a take chip shown in an earlier row
+    return <div ref={measure} className={s.trr} data-index={p.rowIndex} data-row={p.rowIndex} style={{ transform: `translateY(${p.start}px)`, height: 0, padding: 0 }} />;
   }
   return (
     <div
