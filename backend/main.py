@@ -59,6 +59,7 @@ except ImportError:
     pass
 
 import asyncio
+import copy  # noqa: E402
 import functools
 import hashlib
 import hmac
@@ -98,6 +99,7 @@ from backend import doc as edit_doc  # noqa: E402
 from backend import captions_v2  # noqa: E402
 from backend import font_subset  # noqa: E402
 from backend import errors  # noqa: E402
+from backend import exports  # noqa: E402
 from backend import storage
 from backend import taskq  # noqa: E402
 from backend import leader as task_leader  # noqa: E402
@@ -396,6 +398,13 @@ class _SlotQueue:
                 return None
             return self._position(job_id)
 
+    def waiting_count(self) -> int:
+        """How many wait for a slot now (beyond the free ones)."""
+        with self._cond:
+            self._prune()
+            free = max(0, self.limit() - len(self._running))
+            return max(0, len(self._waiting) - free)
+
     def close(self) -> None:
         """Shutdown: nobody waiting starts any more (the boot after the
         restart fails / refunds those jobs, like interrupted ones)."""
@@ -686,13 +695,14 @@ async def lifespan(app_: FastAPI):
         # with the process. Surface it as a real error so the frontend
         # can show a retry button instead of polling forever, refund it
         # and free its files.
-        stuck = store.mark_stuck_as_error()
+        stuck = _mark_stuck_and_refund()
         if stuck:
             print(f"[startup] marked {stuck} stuck job(s) as error "
                   f"(container restart)", flush=True)
         _refund_interrupted()
         _clean_interrupted()
     _clean_workspaces()
+    _exports_maintenance(boot=True)
     if db.fell_back():
         threading.Thread(target=_cutover_watch, daemon=True).start()
     if queue:
@@ -1328,6 +1338,7 @@ def _hourly() -> None:
                   "died", flush=True)
     except Exception as e:
         print(f"[claims] sweep failed: {e}", flush=True)
+    _exports_maintenance()
     try:
         # With the task queue the reaper settles lost work (leases);
         # this sweep would fail jobs that are only waiting in line.
@@ -1679,6 +1690,7 @@ def _sweep_orphaned_jobs(now: float | None = None) -> int:
                                error="container_restart",
                                error_code="render_failed",
                                queue_position=None):
+                _refund_render(job.id, job.render_gen)
                 settled += 1
             continue
         if not _refund(job.id, "container_restart"):
@@ -2313,6 +2325,7 @@ def _render_failed(job_id: str, exc: Exception, gen: int | None = None,
               status="awaiting_review", progress=100.0,
               message="render_failed", error=str(exc)[:500],
               error_code=code, error_params={})
+    _refund_render(job_id, gen)
     _record_event("render_failed", job_id, code=code, gen=gen,
                   wall_s=_since(started_at))
 
@@ -2495,6 +2508,8 @@ def _run_analyze_inner(job_id: str) -> None:
                 audio_warnings=res.get("audio_warnings", []),
                 audio_levels=res.get("audio_levels", {}),
                 scene_events=res.get("scene_events", []),
+                # UX11: bonus clips only while the timeline is this one.
+                analysis_segments_hash=exports.segments_hash(res["segments"]),
                 **pipeline.analysis_fields(res),
                 **stored,
             ), res, prefs=edit_doc.load_prefs(job.owner_id))
@@ -2533,6 +2548,7 @@ def _run_analyze_inner(job_id: str) -> None:
                 _gc_later([media.job_prefix(job_id)], store_=where)
             return
         _true_up(job_id, res.get("duration", 0.0))
+        _after_analysis(job_id)
         _record_event("analysis_done", job_id, work_s=_since(work_started),
                       duration_s=round(float(res.get("duration") or 0.0), 3),
                       test=bool((job.settings or {}).get("_cost_test")))
@@ -2651,8 +2667,12 @@ def _run_render_inner(
         try:
             if not job.has_mezz():
                 raise FileNotFoundError("the render source is gone")
-            social_future = _SOCIAL_POOL.submit(
-                _social_caption, edited_subtitles, job.language)
+            # The post text, as before; a v2 export keeps one made from
+            # the same transcript and cut (exports.keep_social).
+            social_future = (None if exports.keep_social(job, edited_subtitles)
+                             else _SOCIAL_POOL.submit(_social_caption,
+                                                      edited_subtitles,
+                                                      job.language))
             mezz_key = job.mezz_key or _backfill_mezz(job, progress, where)
             # UT4: pins the job's caption engine at its first render;
             # a v2 spec only with CLEO_CAPTION_ENGINE=v2.
@@ -2664,7 +2684,7 @@ def _run_render_inner(
                 mezz_bytes=(job.media_bytes or {}).get(mezz_key),
                 segments=job.segments,
                 subtitles=edited_subtitles,
-                settings=job.settings,
+                settings=exports.settings_for_render(job, _output_seconds(job)),
                 language=job.language,
                 cut_ranges=job.cut_ranges,
                 disabled_cuts=disabled_cuts or [],
@@ -2683,7 +2703,8 @@ def _run_render_inner(
             return
         # Social caption / hashtags from the (possibly edited)
         # transcript, written meanwhile. Soft-fails to none.
-        social = _social_result(job_id, social_future)
+        social = (_social_result(job_id, social_future)
+                  if social_future is not None else None)
         progress.close()
         try:
             # Nothing else writes these fields while the job renders
@@ -2692,7 +2713,8 @@ def _run_render_inner(
             if cur is None:
                 _gc_later([out_prefix], _render_gc_delay_s(), store_=where)
                 return
-            done, superseded = _render_commit(cur, result, out_prefix, social)
+            done, superseded = _render_commit(cur, result, out_prefix, social,
+                                              edited_subtitles)
             _db_retry(job_id, "saving the render", store.update, job_id,
                       **done)
         except Exception as e:
@@ -2714,23 +2736,12 @@ def _run_render_inner(
 
 
 def _render_commit(cur: Job, result: dict, out_prefix: str,
-                   social: dict) -> tuple[dict, list[str]]:
+                   social: dict | None,
+                   subtitles: list | None = None) -> tuple[dict, list[str]]:
     """The job fields of a finished render (pipeline.render_to_keys'
-    result) and the prefixes of the render(s) it supersedes."""
-    output_keys = {fmt: ref["key"] for fmt, ref in result["outputs"].items()}
-    sizes = {ref["key"]: int(ref["size"])
-             for ref in result["outputs"].values()}
-    hook_clips = []
-    for h in result.get("hooks") or []:
-        name = f"hook_{h['k']}"
-        output_keys[name] = h["key"]
-        sizes[h["key"]] = int(h["size"])
-        hook_clips.append({"key": name, "title": h.get("title"),
-                           "reason": h.get("reason", ""),
-                           "start": h.get("start"), "end": h.get("end")})
-    thumb = result.get("thumb") or None
-    if thumb:
-        sizes[thumb["key"]] = int(thumb["size"])
+    result) and the prefixes of the render(s) it supersedes. `social`
+    None keeps the job's post text (made at analysis, UX11)."""
+    output_keys, sizes, hook_clips, thumb = _render_files(result)
     old = set((cur.output_keys or {}).values())
     if cur.thumb_key:
         old.add(cur.thumb_key)
@@ -2739,7 +2750,7 @@ def _render_commit(cur: Job, result: dict, out_prefix: str,
     media_bytes = {k: v for k, v in (cur.media_bytes or {}).items()
                    if media.key_prefix_of(k) not in superseded}
     media_bytes.update(sizes)
-    return dict(
+    done = dict(
         status="done",
         **errors.stage_fields(errors.stage_message("render.finish", "Done")),
         progress=100.0,
@@ -2747,9 +2758,18 @@ def _render_commit(cur: Job, result: dict, out_prefix: str,
         thumb_key=thumb["key"] if thumb else None,
         hook_clips=hook_clips,
         media_bytes=media_bytes,
-        social_caption=social.get("caption", ""),
-        social_hashtags=social.get("hashtags", []),
-    ), superseded
+        # UX11: a successful user export (the fair-use counter) and what
+        # its SRT / VTT files are made of.
+        renders_ok=int(cur.renders_ok or 0) + 1,
+        export_captions=exports.export_captions(
+            subtitles, cur, exports.doc_offset_ms(cur)),
+    )
+    if social is not None:
+        done.update(social_caption=social.get("caption", ""),
+                    social_hashtags=social.get("hashtags", []),
+                    social_source=exports.social_digest(subtitles,
+                                                        cur.segments))
+    return done, superseded
 
 
 def _render_gc_delay_s() -> float:
@@ -2882,16 +2902,21 @@ _RENDER_STARTED = errors.stage_fields(
 
 
 def _queue_start_render(job_id: str, edited: list, disabled_cuts: list,
-                        owner_id: str | None, plan: str | None
-                        ) -> int | None:
+                        owner_id: str | None, plan: str | None,
+                        before: dict | None = None,
+                        v2: bool = False) -> int | None:
     """POST /render: the compare-and-set to processing and the render
-    task, in one transaction. None: not in review (409)."""
+    task, in one transaction. None: not in review (409). `before` gets
+    the job as it was ("job")."""
     def _start(cur: Job) -> dict | None:
         if cur.status != "awaiting_review":
             return None
+        if before is not None:
+            before["job"] = copy.deepcopy(cur)
         return dict(status="processing", **_RENDER_STARTED, progress=1.0,
                     **errors.no_error(), queue_position=None,
-                    render_gen=int(cur.render_gen or 0) + 1)
+                    render_gen=int(cur.render_gen or 0) + 1,
+                    **_render_start_fields(cur, v2))
 
     def _payload(written: dict | None) -> dict:
         return {"v": taskq.WORKER_PROTOCOL, "job_id": job_id,
@@ -2950,6 +2975,7 @@ class _QueueOps:
                                    error="container_restart",
                                    error_code="render_failed",
                                    queue_position=None):
+                    _refund_render(job.id, job.render_gen)
                     moved += 1
                 continue
             where = media.store_of(job)
@@ -3025,6 +3051,7 @@ class _QueueOps:
             task_leader.note_provider_success(ts, "groq")
             if r.get("llm_ok"):
                 task_leader.note_provider_success(ts, "anthropic")
+            _after_analysis(t.job_id)
             return ("analysis_done", t.job_id, {
                 "work_s": r.get("work_s"),
                 "duration_s": round(float(r.get("duration") or 0.0), 3),
@@ -3140,9 +3167,11 @@ class _QueueOps:
                                   job_id=job.id, phase="render")
         else:
             code, error = r["job_code"], str(r.get("error") or t.last_error)
-        store.update_if(job.id, "processing", status="awaiting_review",
-                        progress=100.0, message="render_failed",
-                        error=error[:500], error_code=code, error_params={})
+        if store.update_if(job.id, "processing", status="awaiting_review",
+                           progress=100.0, message="render_failed",
+                           error=error[:500], error_code=code,
+                           error_params={}):
+            _refund_render(job.id, gen)
         return ("render_failed", job.id, {
             "code": code, "gen": gen, "wall_s": _wall_s(t),
             "test": bool((job.settings or {}).get("_cost_test"))})
@@ -4352,7 +4381,7 @@ async def jobs_status(request: Request, ids: str = "",
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str, user: User | None = Depends(current_user)):
-    return get_owned_job(job_id, user).to_dict(admin=_is_admin(user))
+    return _job_out(get_owned_job(job_id, user), user)
 
 
 # ── Edit document (UT3) ──────────────────────────────────────────────
@@ -5869,17 +5898,522 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
     return _job_preview_source(job), new_segments
 
 
+# ── UX11: exports after the first one (backend/exports.py) ──────────
+# Re-edit (POST /reopen), fair use, the caps, the instant export of a
+# speculative render, and what the Done view needs (post text, SRT /
+# VTT, download names). Caption engine: the job keeps the engine its
+# FIRST render pinned (UT4, review F11) through every re-edit and
+# re-export — a project exported before UT4 (no pin, outputs present:
+# captions_v2.exported_before) stays v1; one pinned to v2 renders v2
+# again. The speculative render is a job's first render and pins it.
+
+
+def _mark_stuck_and_refund() -> int:
+    """WP1 boot: store.mark_stuck_as_error, and the fair-use charge of
+    every export it sent back to review is refunded (by its ledger key,
+    idempotent) — an interrupted export never counts."""
+    renders = [(j.id, int(j.render_gen or 0))
+               for j in store.list_by_status(*RUNNING_STATUSES)
+               if j.segments and j.has_mezz()]
+    stuck = store.mark_stuck_as_error()
+    for job_id, gen in renders:
+        _refund_render(job_id, gen)
+    return stuck
+
+
+def _render_basis_seconds(job: Job) -> float:
+    """The length fair use takes its share of: what the upload was
+    charged (its ledger row, after the true-up), else the analysed
+    length. (Owner decision pending: source vs output length, PLAN 2.6.)"""
+    if auth.auth_enabled():
+        try:
+            row = accounts.get_usage(job.id)
+        except Exception:
+            row = None
+        if row and float(row.get("seconds_billed") or 0) > 0:
+            return float(row["seconds_billed"])
+    return float(math.ceil(max(0.0, float(job.duration or 0.0))))
+
+
+def _export_fields(job: Job, user: User | None) -> dict[str, Any]:
+    """The fair-use numbers of the next export for `user` — honest: with
+    billing off (or for the service user) exports cost nothing and no
+    counter is shown (free_renders_left None)."""
+    billed = _bills(user)
+    basis = _render_basis_seconds(job) if billed else float(
+        math.ceil(max(0.0, float(job.duration or 0.0))))
+    try:
+        ready = exports.spec_ready(job, captions_v2.style_for(job))
+    except Exception:
+        ready = False
+    return {
+        "fair_use": {"billed": billed, "free_total": exports.free_renders(),
+                     "pct": exports.fairuse_pct(), "basis_seconds": basis},
+        "free_renders_left": (exports.free_renders_left(job.renders_ok)
+                              if billed else None),
+        "next_render_cost_seconds": (exports.next_render_cost(
+            job.renders_ok, basis) if billed else 0),
+        "spec_ready": bool(ready and job.status == "awaiting_review"),
+        # The primary's frame ("9:16", "16:9" or "original").
+        "output_aspect": _output_aspect(job),
+        # The file name each download gets (Save / Share names the file).
+        "download_names": {
+            fmt: _download_name(job, fmt)
+            for fmt in [d["format"] for d in job._downloads()]
+            + [h.get("key") for h in job.hook_clips or []
+               if isinstance(h, dict) and h.get("key")]},
+    }
+
+
+def _job_out(job: Job, user: User | None) -> dict[str, Any]:
+    out = job.to_dict(admin=_is_admin(user))
+    out.update(_export_fields(job, user))
+    return out
+
+
+def _running_renders_of(owner_id: str, exclude: str) -> int:
+    """Exports of one account running or waiting now (jobs processing
+    with a timeline: an analysis has none yet)."""
+    return sum(1 for j in store.list_by_status("processing")
+               if j.owner_id == owner_id and j.id != exclude and j.segments)
+
+
+def _render_backlog() -> int:
+    """Exports waiting for a render slot."""
+    if taskq.enabled():
+        return _tasks().counts("render")[0]
+    return _RENDER_SLOTS.waiting_count()
+
+
+def _render_caps(job: Job, user: User | None) -> None:
+    """The abuse guards of POST /render (never a paywall): 429
+    render_limit, 429 too_many_renders, 503 server_busy."""
+    day = exports.max_renders_per_job_day()
+    if day and len(exports.recent_renders(job.render_times)) >= day:
+        raise ApiRefusal(429, "render_limit", limit=day)
+    per_user = exports.max_renders_per_user()
+    if (per_user and user is not None and not user.is_service
+            and _running_renders_of(user.id, job.id) >= per_user):
+        raise ApiRefusal(429, "too_many_renders", limit=per_user)
+    queue_cap = exports.max_render_queue()
+    if queue_cap and _render_backlog() >= queue_cap:
+        raise _server_busy()
+
+
+def _render_start_fields(cur: Job, v2: bool = False) -> dict[str, Any]:
+    """What every user export writes when it starts, besides the status:
+    which client exported (exports.is_v2), a v2 export's request time
+    (daily cap) and a speculative render it doesn't take over marked
+    stale."""
+    out: dict[str, Any] = {"export_client": "v2" if v2 else None}
+    if v2:
+        out["render_times"] = [*exports.recent_renders(cur.render_times),
+                               time.time()]
+    spec = cur.spec if isinstance(cur.spec, dict) else None
+    if spec and spec.get("status") in ("running", "done"):
+        out["spec"] = {**spec, "status": "stale"}
+    return out
+
+
+def _drop_stale_spec(before: Job) -> None:
+    """A finished speculative render nobody took: its files go (they
+    were never served)."""
+    spec = before.spec if isinstance(before.spec, dict) else None
+    if spec and spec.get("status") == "done" and spec.get("gen"):
+        _gc_later([f"{media.job_prefix(before.id)}r{int(spec['gen'])}/"],
+                  store_=media.store_of(before))
+
+
+def _charge_render(job_id: str, user: User | None, gen: int,
+                   renders_ok_before: int) -> int:
+    """Fair use (PLAN 2.6 B): after the free exports, record this one's
+    share of the video's minutes under its own key — enforce=False, so
+    it never blocks (over the quota it runs anyway; the account page
+    shows the overage). Bookkeeping never fails an export. Returns the
+    seconds recorded."""
+    if not _bills(user) or exports.free_renders_left(renders_ok_before) > 0:
+        return 0
+    job = store.get(job_id)
+    if job is None:
+        return 0
+    seconds = exports.render_cost_seconds(_render_basis_seconds(job))
+    if seconds <= 0:
+        return 0
+    key = exports.usage_key(job_id, gen)
+    try:
+        if accounts.get_usage(key) is None:
+            accounts.charge(key, user.id, seconds, email=user.email,
+                            enforce=False)
+            print(f"[job {job_id}] export r{gen}: {seconds}s of minutes "
+                  "recorded (fair use)", flush=True)
+    except Exception as e:  # never fail an export over bookkeeping
+        print(f"[job {job_id}] fair-use charge failed: {e}", flush=True)
+        return 0
+    # The render may have failed before this charge landed (its refund
+    # found no row then): refund now — whatever the order, a failed
+    # export keeps no charge (refund is idempotent per key).
+    cur = store.get(job_id)
+    if (cur is not None and int(cur.render_gen or 0) == gen
+            and cur.status != "processing"
+            and not (cur.status == "done" and cur.output_keys)):
+        _refund_render(job_id, gen)
+        return 0
+    return seconds
+
+
+def _refund_render(job_id: str, gen: int | None) -> bool:
+    """A failed export gives its fair-use minutes back (failed exports
+    never count). Idempotent by its ledger key; nothing to do without a
+    ledger row. True when settled (refunded, or nothing to refund). A
+    refund that fails (the database) is recorded as a refund_pending job
+    event; _retry_pending_refunds (boot, hourly) settles it later."""
+    if not auth.auth_enabled():
+        return True
+    key = None
+    try:
+        if gen is None:
+            cur = store.get(job_id)
+            gen = int(cur.render_gen or 0) if cur else 0
+        if not gen:
+            return True
+        key = exports.usage_key(job_id, gen)
+        if accounts.refund(key, "render_failed"):
+            print(f"[job {job_id}] export r{gen} failed: fair-use minutes "
+                  "refunded", flush=True)
+        return True
+    except Exception as e:
+        print(f"[job {job_id}] fair-use refund failed (retried later): {e}",
+              flush=True)
+        if key:
+            _record_event("refund_pending", job_id, key=key, gen=gen)
+        return False
+
+
+def _retry_pending_refunds(since_days: float = 30.0) -> int:
+    """Settle the refunds recorded as refund_pending: by ledger key,
+    idempotent (an already refunded or missing row is done). Returns how
+    many were refunded now."""
+    if not auth.auth_enabled():
+        return 0
+    done = 0
+    seen: set[str] = set()
+    for ev in store.events(time.time() - since_days * 86400.0,
+                           ["refund_pending"]):
+        key = (ev.get("data") or {}).get("key")
+        if not isinstance(key, str) or key in seen:
+            continue
+        seen.add(key)
+        try:
+            row = accounts.get_usage(key)
+            if row is None or row.get("refunded"):
+                continue
+            if accounts.refund(key, "render_failed"):
+                done += 1
+                print(f"[fair-use] pending refund {key} settled", flush=True)
+        except Exception as e:
+            print(f"[fair-use] pending refund {key} still failing: {e}",
+                  flush=True)
+    return done
+
+
+def _settle_stale_specs(older_than_s: float | None = None) -> int:
+    """Speculative renders a restart cut off stay 'running': past the
+    Modal timeout plus a margin (_render_gc_delay_s; or every one with
+    older_than_s=0 — the WP1 boot, where no thread survived) their r{g}/
+    is queued for deletion and the claim undone like a failure
+    (_spec_failed: the pin, never the generation). Returns how many."""
+    limit = _render_gc_delay_s() if older_than_s is None else older_than_s
+    now = time.time()
+    n = 0
+    for job in store.list_by_status("awaiting_review", "done", "processing"):
+        spec = job.spec if isinstance(job.spec, dict) else None
+        if not spec or spec.get("status") != "running":
+            continue
+        age = now - float(spec.get("at") or 0)
+        if age < limit:
+            continue
+        gen = int(spec.get("gen") or 0)
+        if gen:
+            # A Modal call may still write into r{gen}/ until its timeout.
+            wait = max(0.0, _render_gc_delay_s() - age)
+            _gc_later([f"{media.job_prefix(job.id)}r{gen}/"], wait,
+                      store_=media.store_of(job))
+        _spec_failed(job.id, gen)
+        n += 1
+    return n
+
+
+def _exports_maintenance(boot: bool = False) -> None:
+    """Boot and hourly: pending fair-use refunds, cut-off speculative
+    renders. Never raises."""
+    try:
+        _retry_pending_refunds()
+    except Exception as e:
+        print(f"[fair-use] pending-refund retry failed: {e}", flush=True)
+    try:
+        # WP1 is one process: at its boot no speculative thread survived.
+        n = _settle_stale_specs(0.0 if boot and not taskq.enabled() else None)
+        if n:
+            print(f"[spec] settled {n} speculative render(s) cut off by a "
+                  "restart", flush=True)
+    except Exception as e:
+        print(f"[spec] stale speculative-render sweep failed: {e}", flush=True)
+
+
+# ── speculative render: the instant export (review E1, PLAN 2.10) ───
+# CLEO_SPECULATIVE_RENDER=1: a job whose first render will be v2 is
+# rendered once, right after its analysis, as analysed — on its own
+# small pool, never holding a user's render slot, dropped when exports
+# are waiting (over half of CLEO_MAX_RENDER_QUEUE). It takes the job's
+# next render generation (jobs/{id}/r{g}/, the layout render_r2 checks)
+# and pins its caption engine (it IS the first render); the job stays in
+# review. POST /render of the same state and captions then takes its
+# files (instant, free, not counted). Any edit makes it stale; a stale
+# or unused one is deleted when the next export starts.
+
+_SPEC_POOL = ThreadPoolExecutor(
+    max_workers=max(1, _env_int("CLEO_SPEC_WORKERS", 1)),
+    thread_name_prefix="spec")
+
+
+def _spec_busy() -> bool:
+    cap = exports.max_render_queue()
+    return bool(cap) and _render_backlog() * 2 > cap
+
+
+def _spec_current(job: Job | None, gen: int) -> bool:
+    spec = job.spec if job is not None and isinstance(job.spec, dict) else None
+    return bool(spec and spec.get("gen") == gen
+                and spec.get("status") == "running")
+
+
+def _maybe_speculate(job_id: str) -> bool:
+    """Start the speculative render of a job just analysed, if it is due
+    one. True when started."""
+    if not exports.speculative_enabled():
+        return False
+    job = store.get(job_id)
+    if (job is None or job.status != "awaiting_review" or not job.mezz_key
+            or job.spec is not None or job.output_keys or job.renders_ok):
+        return False
+    try:
+        engine, _why = captions_v2.decide(job)
+    except Exception:
+        return False
+    if engine != "v2" or _spec_busy():
+        return False
+    claimed: dict[str, Any] = {}
+
+    def claim(cur: Job) -> dict | None:
+        if (cur.status != "awaiting_review" or cur.spec is not None
+                or cur.output_keys):
+            return None
+        gen = int(cur.render_gen or 0) + 1
+        units = exports.analysis_units(cur)
+        claimed.update(gen=gen, units=units)
+        out: dict[str, Any] = {"render_gen": gen, "spec": {
+            "gen": gen, "status": "running", "at": time.time(),
+            "state": exports.state_fingerprint(cur, captions_v2.style_for(cur)),
+            "units": exports.spec_unit_digests(cur, units),
+            "pinned": cur.caption_engine is None}}
+        if cur.caption_engine is None:
+            out["caption_engine"] = "v2"
+        return out
+    if store.modify(job_id, claim) is None or not claimed:
+        return False
+    _SPEC_POOL.submit(_run_spec, job_id, claimed["gen"], claimed["units"])
+    print(f"[job {job_id}] speculative render r{claimed['gen']} queued",
+          flush=True)
+    return True
+
+
+def _render_files(result: dict) -> tuple[dict, dict, list, dict | None]:
+    """(output_keys, sizes, hook_clips, thumb) of render_to_keys' result
+    — what _render_commit stores."""
+    output_keys = {fmt: ref["key"] for fmt, ref in result["outputs"].items()}
+    sizes = {ref["key"]: int(ref["size"])
+             for ref in result["outputs"].values()}
+    hook_clips = []
+    for h in result.get("hooks") or []:
+        name = f"hook_{h['k']}"
+        output_keys[name] = h["key"]
+        sizes[h["key"]] = int(h["size"])
+        hook_clips.append({"key": name, "title": h.get("title"),
+                           "reason": h.get("reason", ""),
+                           "start": h.get("start"), "end": h.get("end")})
+    thumb = result.get("thumb") or None
+    if thumb:
+        sizes[thumb["key"]] = int(thumb["size"])
+    return output_keys, sizes, hook_clips, thumb
+
+
+def _run_spec(job_id: str, gen: int, units: list[dict]) -> None:
+    """_SPEC_POOL worker: the speculative render (see above)."""
+    out_prefix = f"{media.job_prefix(job_id)}r{gen}/"
+    ws = _workspace(job_id, f"spec{gen}")
+    where: str | None = None
+    started = time.time()
+    try:
+        job = store.get(job_id)
+        if not _spec_current(job, gen) or job.status != "awaiting_review":
+            return
+        if _spec_busy():
+            raise RuntimeError("exports are waiting: dropped")
+        where = media.store_of(job)
+        _make_workspace(ws)
+        with costs.tracking(job_id, "spec_render"):
+            captions = captions_v2.prepare_render(store, job_id, job, units)
+            if not captions:
+                raise RuntimeError("not a v2 render")
+            result = pipeline.render_to_keys(
+                job_id=job_id, gen=gen, mezz_key=job.mezz_key,
+                out_prefix=out_prefix, store=where,
+                mezz_bytes=(job.media_bytes or {}).get(job.mezz_key),
+                segments=job.segments, subtitles=units,
+                settings=exports.render_settings(job, _output_seconds(job)),
+                language=job.language, cut_ranges=job.cut_ranges,
+                disabled_cuts=[], duration=job.duration,
+                workspace=str(ws), captions=captions)
+        output_keys, sizes, hook_clips, thumb = _render_files(result)
+
+        def done(cur: Job) -> dict | None:
+            if not _spec_current(cur, gen) or cur.status != "awaiting_review":
+                return None
+            return {"spec": {
+                **cur.spec, "status": "done", "done_at": time.time(),
+                "output_keys": output_keys, "media_bytes": sizes,
+                "thumb_key": thumb["key"] if thumb else None,
+                "hook_clips": hook_clips,
+                "export_captions": exports.export_captions(
+                    units, cur, exports.doc_offset_ms(cur))}}
+        if store.modify(job_id, done) is None:
+            _gc_later([out_prefix], store_=where)   # stale meanwhile
+            return
+        _record_event("spec_render_done", job_id, gen=gen,
+                      wall_s=_since(started))
+    except Exception as e:
+        print(f"[job {job_id}] speculative render r{gen} failed: "
+              f"{type(e).__name__}: {e}", flush=True)
+        if where:
+            _gc_later([out_prefix], _render_gc_delay_s(), store_=where)
+        _spec_failed(job_id, gen)
+        _record_event("spec_render_failed", job_id, gen=gen,
+                      error=type(e).__name__)
+    finally:
+        _drop_workspace(ws)
+
+
+def _spec_failed(job_id: str, gen: int) -> None:
+    """Undo the engine pin of the claim while nothing else rendered: the
+    job's first real render then decides its engine as if there had been
+    no speculative one. The generation is never handed back (its prefix
+    is queued for deletion)."""
+    def change(cur: Job) -> dict | None:
+        if not _spec_current(cur, gen):
+            return None
+        out: dict[str, Any] = {"spec": {**cur.spec, "status": "failed"}}
+        # render_gen stays: r{gen}/ is queued for deletion, so the next
+        # export must take a new generation (captions_v2.exported_before
+        # doesn't count a speculative generation).
+        untouched = (cur.status == "awaiting_review" and not cur.output_keys
+                     and int(cur.render_gen or 0) == gen)
+        if untouched and cur.spec.get("pinned"):
+            out["caption_engine"] = None
+            out["render_doc"] = None
+        return out
+    try:
+        store.modify(job_id, change)
+    except Exception as e:
+        print(f"[job {job_id}] speculative render: saving the failure "
+              f"failed: {e}", flush=True)
+
+
+def _promote_spec(job_id: str, units_digest: str) -> bool:
+    """POST /render of exactly what the finished speculative render
+    shows: its files become the job's export — instant, free, not
+    counted (renders_ok, fair use, the daily cap)."""
+    info: dict[str, Any] = {}
+
+    def change(cur: Job) -> dict | None:
+        spec = cur.spec if isinstance(cur.spec, dict) else None
+        if cur.status != "awaiting_review" or spec is None:
+            return None
+        if not exports.spec_ready(cur, captions_v2.style_for(cur)):
+            info["miss"] = "the project changed since"
+            return None
+        accepted = spec.get("units")
+        if units_digest not in (accepted if isinstance(accepted, list)
+                                else [accepted]):
+            info["miss"] = "other captions"
+            return None
+        keys = dict(spec["output_keys"])
+        prefix = media.key_prefix_of(next(iter(keys.values())))
+        old = set((cur.output_keys or {}).values())
+        if cur.thumb_key:
+            old.add(cur.thumb_key)
+        superseded = sorted({media.key_prefix_of(k) for k in old
+                             if not k.startswith(prefix)})
+        media_bytes = {k: v for k, v in (cur.media_bytes or {}).items()
+                       if media.key_prefix_of(k) not in superseded}
+        media_bytes.update(spec.get("media_bytes") or {})
+        info.update(superseded=superseded, gen=spec.get("gen"))
+        return dict(
+            status="done",
+            **errors.stage_fields(errors.stage_message("render.finish", "Done")),
+            progress=100.0, **errors.no_error(), queue_position=None,
+            output_keys=keys, thumb_key=spec.get("thumb_key"),
+            hook_clips=list(spec.get("hook_clips") or []),
+            media_bytes=media_bytes,
+            export_captions=spec.get("export_captions"),
+            spec={**spec, "status": "promoted"})
+    try:
+        if store.modify(job_id, change) is None:
+            if info.get("miss"):
+                print(f"[job {job_id}] speculative render not taken: "
+                      f"{info['miss']}", flush=True)
+            return False
+    except Exception as e:
+        print(f"[job {job_id}] instant export failed: {e}", flush=True)
+        return False
+    job = store.get(job_id)
+    if info.get("superseded"):
+        _gc_later(info["superseded"], _SUPERSEDED_KEEP_S,
+                  store_=media.store_of(job) if job else None)
+    _record_event("render_instant", job_id, gen=info.get("gen"))
+    return True
+
+
+def _after_analysis(job_id: str) -> None:
+    """A job just reached review (both paths): its speculative render.
+    Never raises."""
+    for step in (_maybe_speculate,):
+        try:
+            step(job_id)
+        except Exception as e:
+            print(f"[job {job_id}] {step.__name__} failed: {e}", flush=True)
+
+
 @app.post("/jobs/{job_id}/render")
 def post_render(job_id: str, payload: dict,
                 user: User | None = Depends(current_user)):
-    """Kick off the render with (possibly edited) subtitles. Never
-    blocked by billing: the minutes were charged at upload. Exactly one
+    """Kick off the render with (possibly edited) subtitles. Exactly one
     of several concurrent calls (double click, second tab, retry) starts
     it; the others get 409. When all render slots are taken the job
-    waits in line (message "queued", queue_position)."""
+    waits in line (message "queued", queue_position).
+
+    UX11: a finished project is exported again after POST /reopen. The
+    caps answer 429 render_limit / too_many_renders and 503 server_busy;
+    the minutes were charged at upload, and after CLEO_FREE_RENDERS
+    successful exports each one records its fair-use share (never
+    blocking). A matching speculative render is taken at once: the job
+    comes back done with "instant": true. The answer carries "gen" and
+    "cost_seconds" (minutes recorded for this export)."""
     job = get_owned_job(job_id, user)
     if job.status != "awaiting_review":
         raise HTTPException(409, f"job not in review state (status={job.status})")
+    # UX11 rules only for the v2 export sheet; without the marker the
+    # export behaves exactly as before UX11.
+    v2 = payload.get("client") == "v2"
 
     edited = payload.get("subtitles")
     if not isinstance(edited, list):
@@ -5887,6 +6421,16 @@ def post_render(job_id: str, payload: dict,
     disabled_cuts = payload.get("disabled_cuts") or []
     if not isinstance(disabled_cuts, list):
         raise HTTPException(400, "payload.disabled_cuts must be a list")
+
+    if (v2 and isinstance(job.spec, dict) and job.spec.get("status") == "done"
+            and not disabled_cuts
+            and _promote_spec(job_id, exports.units_hash(edited))):
+        out = _job_out(store.get(job_id), user)
+        out.update(instant=True, cost_seconds=0, gen=job.spec.get("gen"))
+        return out
+
+    if v2:
+        _render_caps(job, user)
     # UT4 opt-in (CLEO_CAPTION_ENGINE unset or optin): this request's
     # "caption_engine": "v2" asks for the v2 captions at the job's first
     # render. Kept on the job before the render starts; ignored in the
@@ -5895,12 +6439,13 @@ def post_render(job_id: str, payload: dict,
         requested = payload.get("caption_engine")
         store.modify(job_id, lambda cur: captions_v2.optin_fields(cur, requested)
                      if cur.status == "awaiting_review" else None)
+    before: dict[str, Job] = {}
 
     if taskq.enabled():
         # The compare-and-set and the render task in one transaction
         # (the unique active-task index guards it too, across replicas).
         task_id = _queue_start_render(job_id, edited, disabled_cuts,
-                                      job.owner_id, job.plan)
+                                      job.owner_id, job.plan, before, v2)
         if task_id is None:
             cur = store.get(job_id)
             raise HTTPException(
@@ -5912,7 +6457,7 @@ def post_render(job_id: str, payload: dict,
             if t is not None and t.state == "queued":
                 store.patch_status(job_id, "processing",
                                    **errors.stage("queued"))
-        out = store.get(job_id).to_dict(admin=_is_admin(user))
+        out = _render_started(job_id, user, before, v2)
         if pos is not None:
             out["queue_position"] = pos
         return out
@@ -5925,9 +6470,11 @@ def post_render(job_id: str, payload: dict,
     def _start(cur: Job) -> dict | None:
         if cur.status != "awaiting_review":
             return None
+        before["job"] = copy.deepcopy(cur)
         return dict(status="processing", **_RENDER_STARTED, progress=1.0,
                     **errors.no_error(), queue_position=None,
-                    render_gen=int(cur.render_gen or 0) + 1)
+                    render_gen=int(cur.render_gen or 0) + 1,
+                    **_render_start_fields(cur, v2))
     if not store.modify(job_id, _start):
         cur = store.get(job_id)
         raise HTTPException(
@@ -5948,22 +6495,155 @@ def post_render(job_id: str, payload: dict,
         _RENDER_SLOTS.cancel(job_id)
         raise
     _INFLIGHT.track(job_id, job.owner_id, "render", thread)
-    return store.get(job_id).to_dict(admin=_is_admin(user))
+    return _render_started(job_id, user, before, v2)
+
+
+def _render_started(job_id: str, user: User | None,
+                    before: dict[str, Job], v2: bool = False) -> dict[str, Any]:
+    """POST /render's answer once the export started: the job, its
+    generation and the fair-use seconds it recorded."""
+    prev = before.get("job")
+    cur = store.get(job_id)
+    gen = int(cur.render_gen or 0) if cur else 0
+    cost = 0
+    if prev is not None:
+        _drop_stale_spec(prev)
+        if v2:   # fair use: v2 exports only
+            cost = _charge_render(job_id, user, gen, int(prev.renders_ok or 0))
+    out = _job_out(store.get(job_id) or cur, user)
+    out.update(gen=gen, cost_seconds=cost, instant=False)
+    return out
+
+
+@app.post("/jobs/{job_id}/reopen")
+def reopen_job(job_id: str, user: User | None = Depends(current_user)):
+    """Edit a finished project again (flows.md §3.10): done →
+    awaiting_review as a compare-and-set. Its export (output_keys,
+    thumbnail, bonus clips, post text, SRT / VTT) stays downloadable
+    until the next export replaces it. The project's retention restarts
+    (expires_at follows updated_at). Already in review: the job as it is.
+    409 busy while it runs, 409 media_unavailable without its source,
+    410 media_expired past its retention, 409 not_editable after a
+    failed analysis."""
+    job = get_owned_job(job_id, user)
+    if job.status == "awaiting_review":
+        return _job_out(job, user)
+    if job.status in ("pending", "processing"):
+        raise ApiRefusal(409, "busy", job_status=job.status)
+    if job.status != "done":
+        raise ApiRefusal(409, "not_editable", job_status=job.status)
+    exp = job.expires_at()
+    if exp is not None and exp < time.time():
+        raise ApiRefusal(410, "media_expired")
+    if not job.has_mezz() or not job.segments:
+        raise ApiRefusal(409, "media_unavailable")
+    refused: list[str] = []
+
+    def change(cur: Job) -> dict | None:
+        if cur.status != "done":
+            refused.append(cur.status)
+            return None
+        return dict(status="awaiting_review",
+                    **errors.stage_fields(errors.stage_message(
+                        "analyze.done", "Ready for review")),
+                    progress=100.0, **errors.no_error(), queue_position=None)
+    store.modify(job_id, change)
+    if refused and refused[0] != "awaiting_review":
+        raise ApiRefusal(409, "busy", job_status=refused[0])
+    _record_event("reopened", job_id, renders_ok=int(job.renders_ok or 0))
+    return _job_out(store.get(job_id), user)
+
+
+_SOCIAL_MAX_CHARS = 5000
+
+
+@app.post("/jobs/{job_id}/social-caption")
+def save_social_caption(job_id: str, payload: dict,
+                        user: User | None = Depends(current_user)):
+    """{text}: the post text as the user edited it (saved only; there is
+    no regenerate, review G7). Empty text goes back to the generated one."""
+    job = get_owned_job(job_id, user)
+    text = payload.get("text")
+    if not isinstance(text, str):
+        raise HTTPException(400, "payload.text must be a string")
+    text = text.replace("\r\n", "\n").strip()[:_SOCIAL_MAX_CHARS]
+    store.modify(job.id, lambda cur: {"social_caption_edited": text or None,
+                                      "updated_at": cur.updated_at})
+    return {"text": text}
+
+
+def _caption_file(job_id: str, user: User | None, kind: str) -> Response:
+    job = get_owned_job(job_id, user)
+    if not job.export_captions:
+        raise HTTPException(409, "requested format not ready")
+    cues = exports.caption_cues(job.export_captions)
+    body = exports.to_srt(cues) if kind == "srt" else exports.to_vtt(cues)
+    name = exports.download_name(job.title or job.filename, "primary", None,
+                                 job.created_at)[:-4] + f".{kind}"
+    ctype = "application/x-subrip" if kind == "srt" else "text/vtt"
+    return Response(content=body.encode("utf-8"),
+                    media_type=f"{ctype}; charset=utf-8",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="{name}"',
+                             "Cache-Control": "private, no-cache"})
+
+
+@app.get("/jobs/{job_id}/captions.srt")
+def captions_srt(job_id: str, user: User | None = Depends(media_user)):
+    """The latest export's captions as SubRip, in output time."""
+    return _caption_file(job_id, user, "srt")
+
+
+@app.get("/jobs/{job_id}/captions.vtt")
+def captions_vtt(job_id: str, user: User | None = Depends(media_user)):
+    """The latest export's captions as WebVTT, in output time."""
+    return _caption_file(job_id, user, "vtt")
+
+
+_FEEDBACK_KINDS = ("post_export",)
+
+
+@app.post("/feedback", status_code=204)
+def post_feedback(payload: dict, user: User | None = Depends(current_user)):
+    """{kind, job_id?, answer?, text?}: the Done view's survey "Did you
+    have to edit this video anywhere else?" (review A5) — one job event
+    (kind feedback_{kind}), no content beyond the answer and ≤ 300
+    characters of text."""
+    kind = payload.get("kind")
+    if kind not in _FEEDBACK_KINDS:
+        raise ApiRefusal(400, "invalid_payload", field="kind")
+    answer = payload.get("answer")
+    if answer not in ("yes", "no", None):
+        raise ApiRefusal(400, "invalid_payload", field="answer")
+    text = payload.get("text")
+    text = text.strip()[:300] if isinstance(text, str) else None
+    job_id = payload.get("job_id")
+    if job_id is not None:
+        if not isinstance(job_id, str):
+            raise ApiRefusal(400, "invalid_payload", field="job_id")
+        get_owned_job(job_id, user)
+    _record_event(f"feedback_{kind}", job_id, answer=answer, text=text or None,
+                  user=user.id if user is not None else None)
+    return Response(status_code=204)
 
 
 @app.get("/jobs/{job_id}/download")
 def download_job(job_id: str, format: str = "primary",
+                 name: str | None = None,
                  user: User | None = Depends(media_user)):
-    """A rendered format as an attachment (cleo_{id}_{format}.mp4)."""
+    """A rendered format as an attachment (cleo_{id}_{format}.mp4). With
+    name=v2 (the v2 Done view, UX11 review F9) named after the project:
+    {slug}_cleocuts_{aspect}.mp4 — exports.download_name."""
     job = get_owned_job(job_id, user)
     safe = "".join(c if c.isalnum() or c in "_-" else "-"
                    for c in format.replace(":", "-"))
+    v2_name = _download_name(job, format) if name == "v2" else None
     if job.output_keys:
         key = job.output_keys.get(format)
         if not key:
             raise HTTPException(409, "requested format not ready")
         return _media(job, key, "video/mp4", "requested format not ready",
-                      download_name=f"cleo_{job_id}_{safe}.mp4")
+                      download_name=v2_name or f"cleo_{job_id}_{safe}.mp4")
     path = job.outputs.get(format) or (
         job.output_path if format == "primary" else None
     )
@@ -5973,8 +6653,19 @@ def download_job(job_id: str, format: str = "primary",
     return FileResponse(
         path=path,
         media_type="video/mp4",
-        filename=f"cleo_{job_id}_{safe}.mp4",
+        filename=v2_name or f"cleo_{job_id}_{safe}.mp4",
     )
+
+
+def _output_aspect(job: Job) -> str:
+    fmt_doc = (job.doc or {}).get("format") if isinstance(job.doc, dict) else None
+    return ((fmt_doc or {}).get("aspect") if isinstance(fmt_doc, dict)
+            else None) or edit_doc.aspect_of(job.settings)
+
+
+def _download_name(job: Job, fmt: str) -> str:
+    return exports.download_name(job.title or job.filename, fmt, _output_aspect(job),
+                                 job.created_at)
 
 
 @app.get("/jobs/{job_id}/watch")

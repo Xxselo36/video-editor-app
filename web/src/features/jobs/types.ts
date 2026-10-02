@@ -78,6 +78,35 @@ export type JobStatus = {
   filename?: string | null;
   preset_id?: string | null;
   preset_label?: string | null;
+  /** UT4: the caption engine pinned at the first export (v1 / v2). */
+  caption_engine?: string | null;
+  scene_events?: unknown[];
+} & ExportFields;
+
+/** UX11 (backend/exports.py): exports after the first one. */
+export type ExportFields = {
+  /** Successful exports (instant ones not counted). */
+  renders_ok?: number;
+  /** One per distinct rendered file (aliases of the primary left out). */
+  downloads?: { format: string; bytes: number | null }[];
+  /** The download's file name per format ({slug}_cleocuts_{aspect}.mp4). */
+  download_names?: Record<string, string>;
+  /** The primary's frame: "9:16", "16:9" or "original". */
+  output_aspect?: string | null;
+  social_caption_edited?: string | null;
+  has_captions_file?: boolean;
+  spec_status?: string | null;
+  /** A finished speculative render matches: the export is instant. */
+  spec_ready?: boolean;
+  /** billed false: exports cost nothing for this viewer (billing off). */
+  fair_use?: { billed: boolean; free_total: number; pct: number; basis_seconds: number };
+  /** null when not billed. */
+  free_renders_left?: number | null;
+  next_render_cost_seconds?: number;
+  /** POST /render's answer. */
+  instant?: boolean;
+  cost_seconds?: number;
+  gen?: number;
 };
 
 export type SavedSeg = {

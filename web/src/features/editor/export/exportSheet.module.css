@@ -1,0 +1,238 @@
+/*
+ * The export sheet (UX11): a modal on desktop, a bottom sheet on the
+ * phone — the DF mock's "Desktop-Export" / "Handy-Export" boards. Uses
+ * the editor's tokens (--ed-*, set on the editor root around it).
+ */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 8, 10, 0.68);
+  animation: fade var(--ed-med, 180ms) var(--ed-ease, ease-out);
+}
+.scrim[data-phone="true"] {
+  align-items: flex-end;
+}
+
+.dialog {
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  padding: 20px 24px 24px;
+  border-radius: var(--ed-r-pop, 10px);
+  background: var(--ed-raised, #1b1b21);
+  color: var(--ed-text-1, #f4f4f6);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 24px 80px rgba(0, 0, 0, 0.6);
+  outline: none;
+}
+.dialog[data-wide="true"] {
+  width: 520px;
+}
+.scrim[data-phone="true"] .dialog {
+  width: 100%;
+  max-width: none;
+  max-height: 90dvh;
+  padding: 0 16px calc(24px + env(safe-area-inset-bottom));
+  border-radius: 10px 10px 0 0;
+  box-shadow:
+    0 -1px 0 rgba(255, 255, 255, 0.08),
+    0 -16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.handle {
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: 8px auto 0;
+  border-radius: 2px;
+  background: rgba(122, 122, 134, 0.7);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  margin-bottom: 16px;
+}
+.scrim[data-phone="true"] .head {
+  min-height: 44px;
+  margin-bottom: 8px;
+}
+.title {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--ed-r-control, 6px);
+  color: var(--ed-text-2, #b4b4be);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.scrim[data-phone="true"] .icon {
+  width: 44px;
+  height: 44px;
+}
+.icon:hover {
+  background: var(--ed-hover, #23232b);
+  color: var(--ed-text-1, #f4f4f6);
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.line {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  margin: 0;
+}
+.cost {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ed-text-2, #b4b4be);
+}
+.muted {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ed-text-3, #8a8a95);
+  margin: 0;
+}
+.warn {
+  color: var(--ed-warn, #f5a524);
+}
+.help {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--ed-r-control, 6px);
+  background: var(--ed-bg, #0d0d10);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ed-text-2, #b4b4be);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+}
+.scrim[data-phone="true"] .actions {
+  flex-direction: column-reverse;
+}
+
+.ghost,
+.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--ed-r-control, 6px);
+  border: 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.scrim[data-phone="true"] .ghost,
+.scrim[data-phone="true"] .primary {
+  height: 44px;
+  width: 100%;
+  font-size: 15px;
+}
+.ghost {
+  background: none;
+  color: var(--ed-text-1, #f4f4f6);
+}
+.ghost:hover {
+  background: var(--ed-hover, #23232b);
+}
+.primary {
+  background: var(--ed-brand-fill, #7c3aed);
+  color: #fff;
+  font-weight: 600;
+}
+.primary:hover:not(:disabled) {
+  background: var(--ed-brand-fill-hover, #6d28d9);
+}
+.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.bar {
+  height: 6px;
+  margin: 16px 0 8px;
+  border-radius: 3px;
+  background: var(--ed-bg, #0d0d10);
+  overflow: hidden;
+}
+.barFill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ed-brand, #8b5cf6);
+  transition: width 400ms ease-out;
+}
+.barFill[data-indeterminate="true"] {
+  width: 30% !important;
+  animation: slide 1.4s ease-in-out infinite;
+}
+
+.error {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ed-text-1, #f4f4f6);
+  margin: 0;
+}
+
+.done {
+  /* The Done view uses the app's tokens; inside the editor it sits on
+     the sheet's raised surface. */
+  --surface-0: var(--ed-bg, #0d0d10);
+  --surface-1: var(--ed-panel, #141418);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scrim,
+  .barFill[data-indeterminate="true"] {
+    animation: none;
+  }
+}

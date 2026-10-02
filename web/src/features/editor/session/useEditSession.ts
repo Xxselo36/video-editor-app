@@ -660,6 +660,14 @@ export function useEditSession({
     onApply();
   };
 
+  /** The export ended without leaving the editor (UX11 export sheet: a
+   *  failed render, or a retry after one): editing and exporting work
+   *  again. */
+  const endApply = () => {
+    applyingRef.current = false;
+    setApplying(false);
+  };
+
   return {
     videoRef,
     fadeRef,
@@ -677,6 +685,7 @@ export function useEditSession({
     applying,
     applyError,
     apply,
+    endApply,
     playingSegId,
     seekToPhrase,
     seekOriginal,

@@ -215,6 +215,32 @@ class Job:
     # words} (source words, the legacy payload units mapped onto the doc's
     # words). None for v1 renders.
     render_doc: dict[str, Any] | None = None
+    # ── UX11: exports after the first one (backend/exports.py) ──
+    # Successful user exports (render_gen also counts failed ones and
+    # speculative renders): the fair-use counter.
+    renders_ok: int = 0
+    # Times of the user's export requests (the last 24 h are kept): the
+    # per-video daily cap.
+    render_times: list[float] = field(default_factory=list)
+    # The speculative render of the job as analysed: {gen, state, units,
+    # status: running | done | failed | stale | promoted, output_keys,
+    # thumb_key, hook_clips, media_bytes, export_captions, at}.
+    spec: dict[str, Any] | None = None
+    # The post text as the user edited it (POST /social-caption); the
+    # generated one stays in social_caption.
+    social_caption_edited: str | None = None
+    # exports.segments_hash of the analysis' clip plan: bonus clips only
+    # while the timeline is still that one (review G6).
+    analysis_segments_hash: str | None = None
+    # What the latest export drew, for its SRT / VTT files
+    # (exports.export_captions): {v, units, clips, offset_ms}.
+    export_captions: dict[str, Any] | None = None
+    # "v2" when the latest export came from the v2 export sheet (POST
+    # /render {"client": "v2"}); None = a v1 export, which behaves exactly
+    # as before UX11 (exports.is_v2).
+    export_client: str | None = None
+    # exports.social_digest of what social_caption was made from.
+    social_source: str | None = None
     # Keys of the stored row this code doesn't know (a later release's
     # fields): kept as stored and written back on every write, so this
     # release can't drop them. Never part of the API.
@@ -275,6 +301,27 @@ class Job:
         if self.output_keys:
             return bool(self.output_keys.get("primary"))
         return self.output_path is not None and Path(self.output_path).exists()
+
+    def _downloads(self) -> list[dict[str, Any]]:
+        """One download per distinct rendered file (UX11, flows.md §3.7
+        W3): formats that alias the primary's file are left out; hook
+        clips have their own list. [{format, bytes}] — bytes None when
+        unknown (legacy local outputs)."""
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        refs = self.output_keys or self.outputs or {}
+        names = sorted(refs, key=lambda f: (f != "primary", f))
+        for fmt in names:
+            ref = refs.get(fmt)
+            if not ref or fmt.startswith("hook_") or ref in seen:
+                continue
+            seen.add(ref)
+            size = (self.media_bytes or {}).get(ref)
+            out.append({"format": fmt,
+                        "bytes": int(size) if isinstance(size, (int, float)) else None})
+        if not out and self.output_path:
+            out.append({"format": "primary", "bytes": None})
+        return out
 
     def _has_proxy(self) -> bool:
         """GET /jobs/{id}/proxy-video has something to play: the proxy
@@ -351,6 +398,14 @@ class Job:
             # UT4: the caption engine pinned at the first render ("v1" /
             # "v2"; None before it). No content.
             "caption_engine": self.caption_engine,
+            # UX11: exports. The fair-use numbers that depend on who
+            # asks (billing) are added by the API (main._export_fields).
+            "renders_ok": int(self.renders_ok or 0),
+            "downloads": self._downloads(),
+            "social_caption_edited": self.social_caption_edited,
+            "has_captions_file": bool(self.export_captions),
+            "spec_status": ((self.spec or {}).get("status")
+                            if isinstance(self.spec, dict) else None),
             "font_subsets": _public_fonts(self.font_subsets),
             "peaks": ({"rate": 100, "floor_db": -96} if self.peaks_key
                       else None),

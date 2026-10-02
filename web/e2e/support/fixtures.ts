@@ -64,6 +64,11 @@ export type SeedOptions = {
   /** "redirect": /peaks answers a 307 to another origin (an R2 redirect
    *  the editor can't follow); default: the clip's peaks.bin. */
   peaks?: "redirect";
+  /** UX11: successful exports so far. */
+  renders_ok?: number;
+  /** UX11 (review seeds): a finished speculative render — an export
+   *  without changes is instant. */
+  spec?: "ready";
 };
 
 export type Seeded = { id: string; seed: SeedName; filename: string; status: string };
@@ -99,6 +104,12 @@ export type StubJob = {
   media_store: string;
   /** The stored upload settings (internal "_" keys left out). */
   settings: Record<string, unknown>;
+  /** UX11 */
+  renders_ok: number;
+  spec_status: string | null;
+  social_caption: string;
+  social_caption_edited: string | null;
+  output_keys: Record<string, string>;
 };
 
 export type StubWord = {
