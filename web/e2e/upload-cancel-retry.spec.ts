@@ -67,21 +67,38 @@ test("a failed upload: its reason, then Try again creates the job", { tag: "@edi
 
 test("once POST /jobs went out there is no Cancel: Starting…, then the project", { tag: "@editor-v2" }, async ({ page, stub }) => {
   const media = await stub.media("grid.mp4");
+  // The job POST /jobs will create (the stub has no bucket: the stored
+  // file and the job are stood in for).
+  const made = await stub.seed("analyzing", { filename: "startet.mp4" });
   await openWithStorage(page, "/app/new");
-  // The job is being created (a slow POST /jobs).
+  // The file goes to "the bucket" (a presigned PUT).
+  await page.route(`${API}/uploads/presign`, (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ upload_url: `${WEB}/__bucket/startet.mp4`, storage_key: "uploads/startet.mp4" }),
+    }),
+  );
+  await page.route(`${WEB}/__bucket/**`, (r) =>
+    r.fulfill({ status: 200, body: "" }),
+  );
+  // The job is being created (a slow POST /jobs with the storage key).
+  let posted: string | null = null;
   await page.route(`${API}/jobs`, async (r) => {
     if (r.request().method() !== "POST") return r.fallback();
+    posted = r.request().postData();
     await new Promise((res) => setTimeout(res, 5000));
-    await r.fallback().catch(() => {});
+    await r
+      .fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: made.id, status: "pending" }) })
+      .catch(() => {});
   });
   await pickTikTok(page, "startet.mp4", media);
   const tile = jobCard(page, "startet.mp4");
   await expect(tile.getByTestId("job-card-status")).toContainText("Starting…", { timeout: 30_000 });
   await expect(tile.getByTestId("job-card-cancel")).toHaveCount(0);
+  expect(posted).toContain("uploads/startet.mp4");
   await expect(tile).toHaveAttribute("data-phase", "analyzing", { timeout: 30_000 });
-  const id = await createdJobId(page, "startet.mp4");
-  expect(id).not.toBeNull();
-  expect((await stub.job(id!))?.filename).toBe("startet.mp4");
+  await expect.poll(() => createdJobId(page, "startet.mp4")).toBe(made.id);
 });
 
 test("after a reload, Try again asks for the same file", { tag: "@editor-v2" }, async ({ page, stub }) => {
