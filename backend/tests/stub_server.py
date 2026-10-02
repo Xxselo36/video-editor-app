@@ -70,6 +70,10 @@ Test API (only this script registers it; never part of the backend):
                              follow); default: peaks.bin of the clip
               render: "ok" | "fail"; render_seconds; slow_rebuild (s
               every /edit-segments waits before its rebuild)
+              renders_ok (UX11: successful exports so far)
+              spec: "ready"  (UX11, review seeds) a finished speculative
+                             render of the job as analysed: an export
+                             without changes is instant
   POST /_test/config        {"analysis_seconds": s, "by_filename":
                              {name: {analysis_seconds, clip, proxy, render, …}}}
                             (uploads of that file name; clip: the analysis
@@ -243,7 +247,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
 
     import backend.main as M
     import backend.pipeline as pipeline
-    from backend import errors, llm, media
+    from backend import captions_v2, errors, exports, llm, media
     from backend import jobs as J
     from backend.auth import get_owned_job, media_user
     from backend.jobs import store
@@ -575,7 +579,40 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             stored = M._store_analysis(job.id, res, lambda *_a: None, where)
         finally:
             shutil.rmtree(M._workspace(job.id), ignore_errors=True)
-        store.update(job.id, **review_fields(res), **stored)
+        store.update(job.id, **review_fields(res), **stored,
+                     analysis_segments_hash=exports.segments_hash(res["segments"]))
+
+    def put_render(job_id: str, prefix: str, clip: str, orientation: str
+                   ) -> tuple[dict[str, str], dict[str, int], str]:
+        """The stub clip stored as a render under `prefix`: (output_keys,
+        sizes, thumb key)."""
+        where = media.backend()
+        files = clip_files(clip, orientation)
+        output_keys, sizes = {}, {}
+        fmts = ["primary"] + list((store.get(job_id).settings or {}).get("output_formats") or [])
+        for fmt in fmts:
+            key = f"{prefix}{'primary' if fmt == 'primary' else fmt.replace(':', 'x')}.mp4"
+            sizes[key] = media.put_file(files["proxy"], key, content_type="video/mp4", store=where)
+            output_keys[fmt] = key
+        tkey = f"{prefix}thumb.jpg"
+        sizes[tkey] = media.put_file(files["thumb"], tkey, content_type="image/jpeg", store=where)
+        return output_keys, sizes, tkey
+
+    def seed_spec(job_id: str, clip: str, orientation: str) -> None:
+        """A finished speculative render (UX11) of the job as it is now,
+        like backend.main._run_spec leaves it (engine not pinned here:
+        the stub's renders stay v1)."""
+        cur = store.get(job_id)
+        gen = int(cur.render_gen or 0) + 1
+        keys, sizes, tkey = put_render(job_id, f"{media.job_prefix(job_id)}r{gen}/",
+                                       clip, orientation)
+        units = exports.analysis_units(cur)
+        store.update(job_id, render_gen=gen, spec={
+            "gen": gen, "status": "done", "at": time.time(), "done_at": time.time(),
+            "state": exports.state_fingerprint(cur, captions_v2.style_for(cur)),
+            "units": exports.spec_unit_digests(cur, units), "pinned": False,
+            "output_keys": keys, "media_bytes": sizes, "thumb_key": tkey,
+            "hook_clips": [], "export_captions": exports.export_captions(units, cur)})
 
     def seed_done(job, clip: str, orientation: str, hooks: bool) -> None:
         seed_review(job, clip, orientation)
@@ -600,7 +637,9 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         cur = store.get(job.id)
         store.update(job.id, status="done", message="Done", progress=100.0, render_gen=1,
                      output_keys=output_keys, thumb_key=tkey, hook_clips=hook_clips,
-                     media_bytes={**(cur.media_bytes or {}), **sizes},
+                     media_bytes={**(cur.media_bytes or {}), **sizes}, renders_ok=1,
+                     export_captions=exports.export_captions(
+                         exports.analysis_units(cur), cur),
                      social_caption=SOCIAL["caption"] if hooks else "",
                      social_hashtags=list(SOCIAL["hashtags"]) if hooks else [])
 
@@ -716,6 +755,10 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             raise HTTPException(404, f"unknown seed {name!r}; seeds: {', '.join(SEED_NAMES)}")
         if opts.get("age_s"):
             store.update(job.id, created_at=time.time() - float(opts["age_s"]))
+        if opts.get("renders_ok") is not None:
+            store.update(job.id, renders_ok=int(opts["renders_ok"]))
+        if opts.get("spec") == "ready" and store.get(job.id).status == "awaiting_review":
+            seed_spec(job.id, clip or "grid", orientation)
         set_cfg(job.id, proxy=opts.get("proxy") or proxy, render=opts.get("render") or "ok",
                 peaks=opts.get("peaks"),
                 render_seconds=opts.get("render_seconds"), slow_rebuild=opts.get("slow_rebuild"),

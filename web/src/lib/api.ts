@@ -180,6 +180,7 @@ export function whenMediaReady(timeoutMs = 10_000): Promise<boolean> {
 // seconds), which the editor plays and cuts client-side (lib/editPlayback).
 // peaks: the audio envelope the v2 editor snaps text cuts to (UX10).
 // filmstrip: the v2 timeline's thumbnail sprite (UX7b).
+// captions.srt / .vtt: the export's caption files (UX11).
 export type MediaRoute =
   | "preview-video"
   | "proxy-video"
@@ -188,7 +189,9 @@ export type MediaRoute =
   | "thumbnail"
   | "poster"
   | "peaks"
-  | "filmstrip";
+  | "filmstrip"
+  | "captions.srt"
+  | "captions.vtt";
 
 export function mediaUrl(
   jobId: string,

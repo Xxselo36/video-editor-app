@@ -46,6 +46,7 @@ export function ReviewScreen({
   duration,
   onChange,
   onApply,
+  applyNote = null,
   onBack,
 }: {
   jobId: string;
@@ -65,6 +66,8 @@ export function ReviewScreen({
   duration: number;
   onChange: (p: Phrase[]) => void;
   onApply: () => void;
+  /** UX11: what a re-export costs (billed viewers), under the button. */
+  applyNote?: string | null;
   onBack: () => void;
 }) {
   const t = useT();
@@ -542,6 +545,11 @@ export function ReviewScreen({
         {applying ? t("app.review.preparing") : t("app.review.applyRender")}
       </Button>
       <CaptionsV2Marker style={{ textAlign: "center", color: "var(--text-muted)" }} />
+      {applyNote && (
+        <div className="text-center text-xs" style={{ color: "var(--text-muted)" }} data-testid="apply-note">
+          {applyNote}
+        </div>
+      )}
       {applyError && (
         <div className="text-center text-xs" style={{ color: "var(--danger)" }} data-testid="apply-error">
           {applyError}

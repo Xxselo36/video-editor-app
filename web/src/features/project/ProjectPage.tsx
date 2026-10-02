@@ -8,7 +8,11 @@
  *                          analysis or the export as a checklist, time
  *                          left; the editor opens by itself
  *   awaiting_review        → /app/edit/[jobId] (replace)
- *   done                   the Done view (DoneView.legacy)
+ *   done                   the Done view: with the v2 editor opt-in
+ *                          (useEditorV2) the UX11 one — download, share,
+ *                          post text, SRT / VTT, "Edit again" (POST
+ *                          /reopen → the editor); else the v1 one
+ *                          (DoneView.legacy), unchanged
  *   error                  ErrorView: the code's message, the refund,
  *                          "Try another video"
  *   404                    the project is gone
@@ -25,12 +29,14 @@ import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import { getActiveJob, type ActiveJobV2 } from "@/lib/activeJobs";
 import { apiFetch } from "@/lib/api";
-import { jobErrorText, stageText, tEn } from "@/lib/errors";
+import { describeError, jobErrorText, stageText, tEn } from "@/lib/errors";
 import { ActiveJobCard } from "@/features/jobs/ActiveJobCard";
 import { hasExportHint, readLocalJobs } from "@/features/jobs/localJobs";
 import { useProjectsV2 } from "@/features/jobs/useProjectsV2";
 import type { JobStatus } from "@/features/jobs/types";
-import { DoneView } from "./DoneView.legacy";
+import { DoneView } from "./DoneView";
+import { DoneView as LegacyDoneView } from "./DoneView.legacy";
+import { reopenJob } from "./projectApi";
 import { ErrorView } from "./ErrorView";
 import { ProcessingView } from "./ProcessingView";
 
@@ -77,10 +83,24 @@ export function ProjectPage({ jobId }: { jobId: string }) {
   const t = useT();
   const router = useRouter();
   const [load, setLoad] = useState<Load>({ state: "loading" });
-  // The v2 opt-in (UX12): the processing view, back to Projects.
+  // The v2 opt-in (UX12): the processing view, back to Projects — and
+  // UX11's Done view and re-edit; v1 customers keep their export flow.
   const v2 = useProjectsV2() === true;
   // In review (or exported) before: a queued run is an export.
   const [seenInReview] = useState(() => hasExportHint(jobId));
+  const [reopening, setReopening] = useState(false);
+  const [reopenError, setReopenError] = useState<string | null>(null);
+  const editAgain = async () => {
+    setReopening(true);
+    setReopenError(null);
+    try {
+      await reopenJob(jobId, "done_view");
+      router.push(`/app/edit/${jobId}`);
+    } catch (e) {
+      setReopenError(describeError(e, t));
+      setReopening(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -186,14 +206,24 @@ export function ProjectPage({ jobId }: { jobId: string }) {
       <AppPage width="md">
         <div data-testid="project" data-status="done" className="flex flex-col">
           {back}
+          {v2 ? (
           <DoneView
-            jobId={job.id}
-            outputs={job.outputs ?? ["primary"]}
-            socialCaption={job.social_caption ?? ""}
-            socialHashtags={job.social_hashtags ?? []}
-            hookClips={job.hook_clips ?? []}
-            onReset={() => router.push("/app/new")}
+            job={job}
+            onEditAgain={() => void editAgain()}
+            editAgainBusy={reopening}
+            editAgainError={reopenError}
+            onNewVideo={() => router.push("/app/new")}
           />
+          ) : (
+            <LegacyDoneView
+              jobId={job.id}
+              outputs={job.outputs ?? ["primary"]}
+              socialCaption={job.social_caption ?? ""}
+              socialHashtags={job.social_hashtags ?? []}
+              hookClips={job.hook_clips ?? []}
+              onReset={() => router.push("/app/new")}
+            />
+          )}
         </div>
       </AppPage>
     );

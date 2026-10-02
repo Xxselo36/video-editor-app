@@ -8,14 +8,18 @@
  *   404            the project is gone: the error view, and its card
  *                  (if any) says so too
  *   not in review  /app/p/[jobId] shows where it is (replace)
- *   in review      the editor
+ *   in review      the editor; a project exported before (UX11 re-edit)
+ *                  says its export stays until the next one
+ *
+ * UX11: the v2 editor exports in its export sheet (useExportFlow) and
+ * stays on the page; the v1 editor goes to the dashboard as before.
  */
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppPage } from "@/components/AppPage";
 import { Toast } from "@/components/ui/Toast";
-import { useT } from "@/i18n";
+import { useLang, useT } from "@/i18n";
 import { updateActiveJob } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
 import { apiFetch, whenMediaReady } from "@/lib/api";
@@ -25,7 +29,9 @@ import { waitForSaves } from "@/lib/pendingSaves";
 import type { JobStatus } from "@/features/jobs/types";
 import { ErrorView } from "@/features/project/ErrorView";
 import { useCaptionsV2 } from "@/features/captions-ui/flag";
-import { applyRender } from "./applyRender";
+import { applyRender, startRender } from "./applyRender";
+import { useExportFlow } from "@/features/editor/export/useExportFlow";
+import { costLine } from "@/features/project/exportsInfo";
 import type { V1Edits } from "@/features/editor/state/reconcile";
 import type { ExportSource } from "@/features/editor/v2/EditorShell";
 import { phrasesFromSubtitlesResponse, type Phrase, type Subtitle } from "./buildPhrases";
@@ -48,6 +54,7 @@ type Load =
  *  ReviewScreen — same job data and callbacks (EditorRoute decides). */
 export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: boolean }) {
   const t = useT();
+  const lang = useLang();
   const router = useRouter();
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [phrases, setPhrases] = useState<Phrase[]>([]);
@@ -72,6 +79,23 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
   const [attempt, setAttempt] = useState(0);
   // UT4 opt-in: this browser asks for the v2 export captions.
   const captionsV2 = useCaptionsV2();
+  // UX11: the v2 editor's export sheet.
+  const exportFlow = useExportFlow({
+    jobId,
+    render: () => {
+      // v2 with an edit doc (UX10): the captions of the words that play
+      const src = exportSourceRef.current?.();
+      return startRender(jobId, src?.phrases ?? phrases, src?.units ?? unitsRef.current, captionPreset, {
+        captionsV2,
+        client: "v2",
+      });
+    },
+    onLeave: () => router.push(`/app/p/${jobId}`),
+    onReopened: () => {
+      setLoad({ state: "loading" });
+      setAttempt((n) => n + 1);
+    },
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +171,11 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
   const onApply = async () => {
     if (load.state !== "ready") return;
     flushPhraseSave();
+    if (v2) {
+      // The export sheet renders in place (the timeline is stored).
+      exportFlow.start();
+      return;
+    }
     try {
       // v2 with an edit doc (UX10): the captions of the words that play
       const src = exportSourceRef.current?.();
@@ -189,6 +218,8 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
     );
   }
   const job = load.job;
+  // UX11: an exported project opened again (POST /reopen).
+  const exportedBefore = Boolean(job.has_output);
   if (v2) {
     return (
       <EditorV2
@@ -230,11 +261,27 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         }}
         onApply={onApply}
         onBack={leave}
+        exportFlow={exportFlow}
+        // A project pinned to the v1 burn keeps that look (UT4 F11): the
+        // v2 Style tab doesn't change its export.
+        reedit={exportedBefore ? { captionsKept: job.caption_engine === "v1" } : null}
+        onNewVideo={() => router.push("/app/new")}
       />
     );
   }
+  const applyNote =
+    exportedBefore && job.fair_use?.billed ? costLine(job, t, lang).text : null;
   return (
     <AppPage width="3xl">
+      {exportedBefore && (
+        <p
+          className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-body)]"
+          role="note"
+          data-testid="reedit-banner"
+        >
+          {t("app.reedit.banner")}
+        </p>
+      )}
       <ReviewScreen
         key={job.id}
         jobId={job.id}
@@ -255,6 +302,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         }}
         onApply={onApply}
         onBack={leave}
+        applyNote={applyNote}
       />
     </AppPage>
   );

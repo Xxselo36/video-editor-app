@@ -70,6 +70,8 @@ export type Me = {
     limit: number;
     used: number;
     remaining: number;
+    /** Exact seconds (the minutes above are rounded to 0.1). */
+    remaining_seconds?: number;
     period_start?: ApiTime;
     period_end?: ApiTime;
   } | null;

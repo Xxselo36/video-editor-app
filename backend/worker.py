@@ -50,7 +50,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
-from backend import costs, db, errors, jobs, llm, media, taskq
+from backend import costs, db, errors, exports, jobs, llm, media, taskq
 from backend import doc as edit_doc
 from backend import uploads as upl
 
@@ -794,6 +794,8 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
                 audio_warnings=res.get("audio_warnings", []),
                 audio_levels=res.get("audio_levels", {}),
                 scene_events=res.get("scene_events", []),
+                # UX11: bonus clips only while the timeline is this one.
+                analysis_segments_hash=exports.segments_hash(res["segments"]),
                 **_pipeline().analysis_fields(res),
                 **stored,
             )
@@ -873,7 +875,8 @@ def output_seconds(job: Any) -> float:
 
 
 def render_commit(cur: Any, result: dict, out_prefix: str,
-                  social: dict) -> tuple[dict, list[str]]:
+                  social: dict | None,
+                  subtitles: list | None = None) -> tuple[dict, list[str]]:
     """backend/main.py _render_commit."""
     output_keys = {fmt: ref["key"] for fmt, ref in result["outputs"].items()}
     sizes = {ref["key"]: int(ref["size"])
@@ -897,7 +900,7 @@ def render_commit(cur: Any, result: dict, out_prefix: str,
     media_bytes = {k: v for k, v in (cur.media_bytes or {}).items()
                    if media.key_prefix_of(k) not in superseded}
     media_bytes.update(sizes)
-    return dict(
+    done = dict(
         status="done",
         **errors.stage_fields(errors.stage_message("render.finish", "Done")),
         progress=100.0,
@@ -905,9 +908,19 @@ def render_commit(cur: Any, result: dict, out_prefix: str,
         thumb_key=thumb["key"] if thumb else None,
         hook_clips=hook_clips,
         media_bytes=media_bytes,
-        social_caption=social.get("caption", ""),
-        social_hashtags=social.get("hashtags", []),
-    ), superseded
+        # UX11: a successful user export (the fair-use counter) and what
+        # its SRT / VTT files are made of.
+        renders_ok=int(getattr(cur, "renders_ok", 0) or 0) + 1,
+        export_captions=exports.export_captions(
+            subtitles, cur, exports.doc_offset_ms(cur)),
+    )
+    if social is not None:
+        # None: a v2 export kept the post text (exports.keep_social).
+        done.update(social_caption=social.get("caption", ""),
+                    social_hashtags=social.get("hashtags", []),
+                    social_source=exports.social_digest(subtitles,
+                                                        cur.segments))
+    return done, superseded
 
 
 def _backfill_mezz(ctx: Attempt, job: Any,
@@ -997,8 +1010,11 @@ def _render(ctx: Attempt) -> dict[str, Any]:
             try:
                 if not job.has_mezz():
                     raise _SourceGone("the render source is gone")
-                social_future = _SOCIAL_POOL.submit(
-                    _social_caption, subtitles, job.language, degraded)
+                # The post text, as before; a v2 export keeps one made
+                # from the same transcript and cut (exports.keep_social).
+                social_future = (None if exports.keep_social(job, subtitles) else
+                                 _SOCIAL_POOL.submit(_social_caption, subtitles,
+                                                     job.language, degraded))
                 mezz_key = job.mezz_key or _backfill_mezz(ctx, job, progress,
                                                           where)
                 render_fn = pipeline.render_to_keys
@@ -1019,7 +1035,8 @@ def _render(ctx: Attempt) -> dict[str, Any]:
                         mezz_bytes=(job.media_bytes or {}).get(mezz_key),
                         segments=job.segments,
                         subtitles=subtitles,
-                        settings=job.settings,
+                        settings=exports.settings_for_render(
+                            job, output_seconds(job)),
                         language=job.language,
                         cut_ranges=job.cut_ranges,
                         disabled_cuts=disabled_cuts,
@@ -1033,8 +1050,10 @@ def _render(ctx: Attempt) -> dict[str, Any]:
             except Exception as e:
                 progress.close()
                 return _render_failure(ctx, e, gen, out_prefix, where)
-            social, social_obs = _social_result(job_id, social_future)
-            obs.merge(social_obs)
+            social: dict | None = None
+            if social_future is not None:
+                social, social_obs = _social_result(job_id, social_future)
+                obs.merge(social_obs)
             progress.close()
             if obs.spend_limit:
                 # The render goes on without hooks / caption; later
@@ -1053,7 +1072,7 @@ def _render(ctx: Attempt) -> dict[str, Any]:
 
             def change(cur: Any) -> dict:
                 done, superseded = render_commit(cur, result, out_prefix,
-                                                 social)
+                                                 social, subtitles)
                 if warnings:
                     done["processing_warnings"] = list(dict.fromkeys(
                         [*(cur.processing_warnings or []), *warnings]))

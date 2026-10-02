@@ -12,6 +12,8 @@ export const ERROR_KEYS: Record<string, MessageKey> = {
   already_rendering: "app.notice.alreadyExporting",
   audio_silent: "app.audio.silent",
   auth_required: "app.errors.signInRequired",
+  // 409s of POST /jobs/{id}/reopen (UX11): running, or a failed analysis
+  busy: "app.errors.busy",
   doc_not_ready: "app.errors.docNotReady",
   file_too_large: "app.errors.fileTooLarge",
   media_expired: "app.errors.expired",
@@ -19,6 +21,7 @@ export const ERROR_KEYS: Record<string, MessageKey> = {
   no_audio: "app.errors.noAudioTrack",
   no_speech: "app.errors.noSpeech",
   no_video: "app.errors.noVideoTrack",
+  not_editable: "app.errors.notEditable",
   not_in_review: "app.notice.alreadyExporting",
   processing_failed: "app.errors.generic",
   processing_interrupted: "app.errors.processingInterrupted",

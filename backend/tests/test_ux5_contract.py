@@ -131,6 +131,10 @@ JOB_KEYS = sorted([
     "format_warning",   # UX6: e.g. smartcam_failed
     "filmstrip",        # UX7b: {n, interval, tileW, tileH} or None
     "title",            # UX12: the name the user gave the project
+    # UX11: exports (to_dict) + the fair-use numbers of the asker (API)
+    "renders_ok", "downloads", "social_caption_edited", "has_captions_file",
+    "spec_status", "fair_use", "free_renders_left",
+    "next_render_cost_seconds", "spec_ready", "download_names", "output_aspect",
 ])
 
 
