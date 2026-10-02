@@ -342,4 +342,43 @@ test.describe("editor v2 on an iPhone (landscape)", TAG, () => {
     await expect(page.getByTestId("ed-sheet-style")).toBeVisible();
     await expect(sheet).toBeHidden();
   });
+
+  test("the keyboard: the word field and the find field stay visible and ≥ 44 px", async ({ page, stub }) => {
+    await fakeVisualViewport(page);
+    const job = await stub.seed("review_speech");
+    await openV2(page, job.id);
+    const vh = page.viewportSize()!.height;
+    const kb = 200; // a landscape iPhone keyboard with its suggestion bar
+    const inView = async (testId: string) => {
+      const input = page.getByTestId(testId);
+      await expect(input).toBeFocused();
+      await setKeyboard(page, kb);
+      await expect(page.getByTestId("editor-v2")).toHaveAttribute("data-keyboard", "");
+      await expect
+        .poll(async () => {
+          const b = (await input.boundingBox())!;
+          return b.y >= 0 && b.y + b.height <= vh - kb + 0.5 && b.height >= 44;
+        })
+        .toBe(true);
+      // nothing covers it
+      const b = (await input.boundingBox())!;
+      const hit = await page.evaluate(
+        ([x, y, id]) => !!document.elementFromPoint(x as number, y as number)?.closest(`[data-testid="${id}"]`),
+        [b.x + 8, b.y + b.height / 2, testId] as const,
+      );
+      expect(hit, testId).toBe(true);
+      await setKeyboard(page, 0);
+    };
+    await page.getByTestId("ed-tab-text").tap();
+    const sheet = page.getByTestId("ed-sheet-text");
+    await expect(sheet).toBeVisible();
+    // the word field
+    await sheet.getByTestId("ed-word").nth(3).tap();
+    await page.getByTestId("ed-word-edit").tap();
+    await inView("ed-word-input");
+    await page.keyboard.press("Escape");
+    // the find field
+    await page.getByTestId("ed-search").tap();
+    await inView("ed-find-input");
+  });
 });
