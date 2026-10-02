@@ -13,9 +13,12 @@ import { chooseFile, createdJobId, jobCard, openWithStorage, storedJobs } from "
  *  uploads. */
 async function pickTikTok(page: Page, name: string, buffer: Buffer) {
   await chooseFile(page, { name, mimeType: "video/mp4", buffer });
-  const toProjects = page.getByTestId("start-to-projects");
-  await expect(toProjects.or(page.getByTestId("dashboard"))).toBeVisible({ timeout: 15_000 });
-  if (await toProjects.isVisible()) await toProjects.click().catch(() => {});
+  // The upload is on this device's list; on to Projects inside the app
+  // (the header link: the page — and the upload in it — stay).
+  await expect.poll(async () => (await storedJobs(page)).some((j) => j.filename === name), { timeout: 15_000 }).toBe(true);
+  if (!page.url().endsWith("/app")) {
+    await page.getByRole("link", { name: "Projects", exact: true }).click({ timeout: 5000 }).catch(() => {});
+  }
   await expect(page).toHaveURL(`${WEB}/app`, { timeout: 30_000 });
 }
 
