@@ -187,6 +187,12 @@ class Job:
     # CJK caption font subsets {font: {family, rev, chars, missing, json,
     # woff2, ttf (keys)}} (backend/font_subset.py).
     font_subsets: dict[str, Any] = field(default_factory=dict)
+    # ── UX7b: the timeline filmstrip (pipeline.make_filmstrip) ──
+    # jobs/{id}/filmstrip.jpg, and its {n, interval, tileW, tileH}. Made
+    # at the analysis' end; for older jobs on the first GET
+    # /jobs/{id}/filmstrip (best effort, both None until then).
+    filmstrip_key: str | None = None
+    filmstrip_meta: dict[str, Any] | None = None
     # ── UT4: caption engine of the export (backend/captions_v2.py) ──
     # "v1" (the MoviePy burn) or "v2" (the editor's caption engine on the
     # render worker), set at the job's FIRST render from
@@ -340,6 +346,12 @@ class Job:
                       else None),
             # UT5: GET /jobs/{id}/poster answers (the analysis made one).
             "has_poster": bool(self.poster_key),
+            # UX7b: the timeline's thumbnail sprite (GET /jobs/{id}/
+            # filmstrip): n tiles of tileW x tileH px side by side, tile
+            # i the frame at i * interval s. None until one is made.
+            "filmstrip": (dict(self.filmstrip_meta)
+                          if self.filmstrip_key and self.filmstrip_meta
+                          else None),
             # UX10: the frame rate of the video the editor plays and the
             # renders cut (mezz_fps): the editor's trim frame grid. Named
             # without "mezz" — no storage name in the public JSON.

@@ -46,6 +46,8 @@ import { ExpiredView } from "./states";
 import { removedOf, useCuts } from "./useCuts";
 import { useDocSession, type CaptionSourceHandler } from "./useDocSession";
 import { TimelineDock, type DockApi } from "./timeline/TimelineDock";
+import { useFilmstrip } from "./timeline/Filmstrip";
+import type { FilmstripMeta } from "./timeline/filmstrip";
 import { TopBar, UndoRedo } from "./topbar/TopBar";
 import { useFirstRun } from "./tour/firstRun";
 import { Tour } from "./tour/Tour";
@@ -68,6 +70,8 @@ export type EditorShellProps = {
   duration: number;
   /** The frame rate of the video (GET /jobs/{id} fps): the trim frame grid. */
   fps?: number | null;
+  /** UX7b: the timeline sprite's meta (GET /jobs/{id} filmstrip; null: none yet). */
+  filmstrip?: FilmstripMeta | null;
   /** UX10: hands over the render payload's builder (the page calls it on export). */
   onExportSource?: (build: ExportSource | null) => void;
   onChange: (p: Phrase[]) => void;
@@ -287,6 +291,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   const styleTabRef = useRef<HTMLButtonElement>(null);
   const exportRef = useRef<HTMLButtonElement>(null);
   const dockApi = useRef<DockApi | null>(null);
+  const film = useFilmstrip(props.jobId, props.filmstrip);
   const textApi = useRef<TextApi | null>(null);
   const fullscreenRef = useRef<(() => void) | null>(null);
 
@@ -622,6 +627,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         segments={editSegs}
         cuts={cuts}
         fps={props.fps}
+        film={film}
         duration={props.duration}
         history={history}
         selected={selectedLive}

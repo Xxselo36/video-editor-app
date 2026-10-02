@@ -225,3 +225,25 @@ def test_cut_kinds_and_a_cleo_cut_take(stub):
     # the grid clip has no fillers: pauses only
     grid = stub.json("POST", "/_test/seed/review", {})
     assert {c["kind"] for c in stub.json("GET", f"/jobs/{grid['id']}")["cut_ranges"]} == {"silence"}
+
+
+def test_filmstrip_seeded_and_made_lazily(stub):
+    """UX7b: seeded jobs have the clip's filmstrip; `filmstrip: false`
+    makes a job from before it, which gets one on the first request."""
+    job = stub.json("POST", "/_test/seed/review", {})
+    meta = stub.json("GET", f"/jobs/{job['id']}")["filmstrip"]
+    assert meta["tileH"] == 90 and meta["n"] >= 1 and meta["interval"] == 1.0
+    status, _, raw = stub.call("GET", f"/jobs/{job['id']}/filmstrip")
+    assert status == 200 and raw[:2] == b"\xff\xd8"
+    old = stub.json("POST", "/_test/seed/review", {"filmstrip": False})   # (no espeak needed)
+    assert stub.json("GET", f"/jobs/{old['id']}")["filmstrip"] is None
+    assert stub.call("GET", f"/jobs/{old['id']}/filmstrip?meta=1")[0] == 202
+    end = time.monotonic() + 30
+    while stub.call("GET", f"/jobs/{old['id']}/filmstrip?meta=1")[0] != 200:
+        assert time.monotonic() < end, "no lazy filmstrip"
+        time.sleep(0.25)
+    made = stub.json("GET", f"/jobs/{old['id']}")["filmstrip"]
+    # the same grid clip's tiles (n: the job's duration vs the probed proxy's)
+    same = ("interval", "tileW", "tileH")
+    assert {k: made[k] for k in same} == {k: meta[k] for k in same}
+    assert abs(made["n"] - meta["n"]) <= 1

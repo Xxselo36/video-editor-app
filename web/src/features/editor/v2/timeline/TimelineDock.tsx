@@ -5,8 +5,9 @@
  * history). Opens fitted; uniform clips, violet only when selected;
  * Split / Delete / ⋯ Clip only while a clip is selected; a draggable
  * playhead drawn from the playhead store (no React render per frame).
- * No caption track, no waveform (review G3). Filmstrip thumbnails come
- * with 7b (GET /jobs/{id}/filmstrip).
+ * No caption track, no waveform (review G3). Each clip shows the
+ * filmstrip frames of its own source range (UX7b, Filmstrip.tsx: GET
+ * /jobs/{id}/filmstrip), drawn for the visible window only.
  *
  * UX10 (+ the owner's iPhone feedback):
  *   - cut seams name their reason (pause, filler word, Cleo cut, the
@@ -52,6 +53,8 @@ import { useTimelineZoom } from "@/features/editor/timeline/useTimelineZoom";
 import { kbd } from "../hooks";
 import { cutDuration, decimalSeparator, fmtClock, fmtSeconds } from "../model";
 import { Popover } from "../Popover";
+import { Filmstrip, type FilmSource } from "./Filmstrip";
+import { filmWindow } from "./filmstrip";
 import type { CutsApi } from "../useCuts";
 import s from "../editor.module.css";
 
@@ -65,6 +68,8 @@ export type TimelineDockProps = {
   cuts: CutsApi;
   /** The mezz's frame rate (the frame grid; 30 when unknown). */
   fps?: number | null;
+  /** UX7b: the loaded filmstrip sprite (null: plain clips). */
+  film?: FilmSource | null;
   duration: number;
   history: TimelineHistory;
   selected: string | null;
@@ -711,6 +716,21 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     }, 0);
   };
 
+  // the filmstrip: tiles at the clips' height, for the window around the view
+  const [clipH, setClipH] = useState(p.phone ? 80 : 52);
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const h = el.clientHeight;
+      if (h > 0) setClipH(h);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const film = p.film ?? null;
+  const filmWin = filmWindow(scrollX, viewW);
+
   const { marks, labelStep } = rulerMarks(scrollX, contentW, totalDur, viewW, p.phone ? 48 : 64);
 
   // the frame grid: while trimming, around the visible part of the trimmed clip
@@ -794,6 +814,10 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
                 left={lifted ? reorder.left : left * pps + padL}
                 width={Math.max(2, width * pps - padL - padR)}
                 title={`${t("editor.clipTitle", { n: i + 1, len: fmtSeconds(seg.end - seg.start, dec) })} · ${t("editor.clip.moveHint")}`}
+                film={film}
+                filmH={clipH}
+                filmLo={filmWin.lo}
+                filmHi={filmWin.hi}
                 onClip={onClip}
                 onPress={clipPointerDown}
                 onTrimStart={startTrim}
@@ -963,6 +987,10 @@ function ClipView({
   left,
   width,
   title,
+  film,
+  filmH,
+  filmLo,
+  filmHi,
   onClip,
   onPress,
   onTrimStart,
@@ -976,6 +1004,10 @@ function ClipView({
   left: number;
   width: number;
   title: string;
+  film: FilmSource | null;
+  filmH: number;
+  filmLo: number;
+  filmHi: number;
   onClip: (seg: EditorSeg, fraction: number, timeStamp: number) => void;
   onPress: (e: React.PointerEvent, seg: EditorSeg) => void;
   onTrimStart: (e: React.PointerEvent, id: string, mode: "start" | "end") => void;
@@ -1006,7 +1038,21 @@ function ClipView({
         onClip(seg, r.width > 0 ? Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) : 0, e.timeStamp);
       }}
     >
-      <div className={s.clipBody}>
+      <div className={s.clipBody} data-film={film ? true : undefined}>
+        {film && (
+          <Filmstrip
+            film={film}
+            start={seg.start}
+            end={seg.end}
+            // the window relative to the clip, clamped to it: a clip that
+            // an edit only shifts (inside the window) keeps its tiles as is
+            left={0}
+            width={width}
+            h={filmH}
+            lo={Math.max(0, filmLo - left)}
+            hi={Math.min(width, filmHi - left)}
+          />
+        )}
         {fi > 0 && (
           <div
             className={s.fadeRamp}
