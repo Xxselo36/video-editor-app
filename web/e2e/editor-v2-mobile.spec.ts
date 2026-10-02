@@ -246,7 +246,7 @@ test.describe("editor v2 on an iPhone: captions, title, Stil sheet", TAG, () => 
     expect(await paused(page)).toBe(true);
   });
 
-  test("title field 44 px; on a short screen (≤ 700 px) the Stil sheet opens at 90 %", async ({ page, stub }) => {
+  test("title field 44 px; the Stil sheet opens at 54 %, the preview stays visible", async ({ page, stub }) => {
     const job = await stub.seed("review_speech");
     await openV2(page, job.id);
     await page.getByTestId("ed-title").tap();
@@ -255,12 +255,34 @@ test.describe("editor v2 on an iPhone: captions, title, Stil sheet", TAG, () => 
     expect((await input.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await page.keyboard.press("Escape");
     const vh = page.viewportSize()!.height;
-    expect(vh).toBeLessThanOrEqual(700);
+    expect(vh).toBeGreaterThan(600); // iPhone 13 in Safari: 664
+    await page.getByTestId("ed-tab-style").tap();
+    const sheet = page.getByTestId("ed-sheet-style");
+    await expect(sheet).toBeVisible();
+    await expect.poll(async () => Math.round((await sheet.boundingBox())!.height)).toBe(Math.round(vh * 0.54));
+    // a style tap shows its result right away: the preview is above the sheet
+    const frame = (await page.getByTestId("ed-frame").boundingBox())!;
+    expect(frame.y + frame.height).toBeLessThanOrEqual((await sheet.boundingBox())!.y + 0.5);
+  });
+});
+
+test.describe("editor v2 on an iPhone SE", TAG, () => {
+  const { defaultBrowserType: _se, ...IPHONE_SE } = devices["iPhone SE"];
+  void _se;
+  test.use(IPHONE_SE);
+  test.beforeEach(({}, info) => {
+    test.skip(info.project.name !== "pixel7", "phone emulation, one run");
+  });
+
+  test("short screen (≤ 600 px): the Stil sheet opens at 90 %, the Text sheet at 54 %", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    await openV2(page, job.id);
+    const vh = page.viewportSize()!.height;
+    expect(vh).toBeLessThanOrEqual(600); // 568
     await page.getByTestId("ed-tab-style").tap();
     const sheet = page.getByTestId("ed-sheet-style");
     await expect(sheet).toBeVisible();
     await expect.poll(async () => Math.round((await sheet.boundingBox())!.height)).toBe(Math.round(vh * 0.9));
-    // the Text sheet keeps 54 % (the preview stays visible above it)
     await page.getByRole("button", { name: "Close" }).first().tap();
     await page.getByTestId("ed-tab-text").tap();
     const text = page.getByTestId("ed-sheet-text");

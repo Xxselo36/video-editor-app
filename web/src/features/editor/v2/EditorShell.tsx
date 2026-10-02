@@ -110,8 +110,8 @@ const EMPTY_STORE = createDocStore({
   rev: 0,
 });
 
-/** iPhone SE / Safari-with-toolbars height, upright (UX7c). */
-const SHORT_PORTRAIT = "(max-height: 700px) and (orientation: portrait)";
+/** SE-class phones, upright (568 px in Safari); an iPhone 13 (664) and up keep 54 % so the preview stays visible while picking a style (UX7c). */
+const SHORT_PORTRAIT = "(max-height: 600px) and (orientation: portrait)";
 
 const TITLE_KEY = (id: string) => `cleocuts.editor.title.${id}`;
 
@@ -685,7 +685,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
           // text edits are undone from the sheet itself (UX8).
           headerExtra={sheet === "text" ? undoRedo : undefined}
           testId={`ed-sheet-${sheet}`}
-          // UX7c: on short portrait phones (SE, Safari with toolbars) the Stil
+          // UX7c: on SE-class portrait phones (height <= 600) the Stil
           // sheet at 54 % shows barely a row of tiles: it opens at 90 %.
           tall={sheet === "style" && shortPortrait}
         >
