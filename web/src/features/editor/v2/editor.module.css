@@ -453,10 +453,13 @@
     opacity: 1;
   }
 }
+/* Over the video, under the caption slot (z 1) and the fade (z 2): a tap
+ * on a caption selects it (UT5 layer: only the caption takes pointers),
+ * a tap anywhere else lands here and plays / pauses (UX7c). */
 .tapPlay {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 0;
 }
 .tapGlyph {
   position: absolute;
@@ -2017,6 +2020,140 @@
   right: -8px !important;
   justify-content: flex-end;
   padding-right: 6.5px;
+}
+
+/* ── UX7c: phones (iOS Safari, Android Chrome) ───────────────────── */
+/* No pull-to-refresh (Android) or rubber band (iOS) behind the editor:
+ * a drag down on the stage or the dock must not reload the page. */
+html:has(.root) {
+  overscroll-behavior: none;
+}
+/* Safe areas: EditorV2 sets viewport-fit=cover while the editor is open,
+ * so the notch / Dynamic Island (landscape) and the status bar of the
+ * home-screen app are padded here; the bottom inset belongs to the tab
+ * bar and the sheet. */
+.phone {
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  /* no double-tap zoom (two quick taps on play, undo or a word); pinch stays */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+/* The on-screen keyboard is open (useKeyboardInset): the editor follows
+ * the visible part of the screen, so the sheet and the word field sit
+ * above the keyboard (iOS doesn't shrink the layout viewport). */
+.phone[data-keyboard] {
+  top: var(--ed-vv-top, 0px);
+  bottom: auto;
+  height: var(--ed-vv-h, 100dvh);
+}
+.phone[data-keyboard] .sheet {
+  max-height: calc(100% - 44px - env(safe-area-inset-top));
+  padding-bottom: 0;
+}
+/* Long-press on the picture, the timeline, the bars or a word: no "Save
+ * video" callout and no text-selection loupe (iOS). Inputs keep theirs. */
+.phone .frame,
+.phone .dock,
+.phone .tabbar,
+.phone .playerBar,
+.phone .tedList {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* 44 px targets on touch: menus, the clip popover, the find bar */
+.phone .mi {
+  height: var(--ed-touch);
+}
+.phone .segBtn {
+  height: 40px;
+  min-width: 44px;
+}
+.phone .range {
+  height: var(--ed-touch);
+}
+.phone .range::-webkit-slider-thumb {
+  width: 22px;
+  height: 22px;
+  margin-top: -9px;
+  border-radius: 11px;
+}
+.phone .range::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 11px;
+}
+.phone .menu .sm,
+.phone .find .sm {
+  width: var(--ed-touch);
+  min-width: var(--ed-touch);
+  height: var(--ed-touch);
+}
+.phone .find {
+  height: 48px;
+}
+.phone .findInput,
+.phone .findBtn,
+.phone .cutsBtn {
+  height: var(--ed-touch);
+}
+/* the title field: a 44 px hit area, the 32 px field drawn inside it
+ * (transparent border; inset rings sit inside the padding box) */
+.phone .titleInput {
+  height: var(--ed-touch);
+  border: solid transparent;
+  border-width: 6px 0;
+  background-clip: padding-box;
+  box-shadow:
+    inset 0 0 0 1px var(--ed-brand),
+    inset 0 0 0 3px rgba(139, 92, 246, 0.25);
+}
+.phone .sheetHandle {
+  height: 28px;
+  padding-top: 10px;
+}
+/* Landscape: the sheet stops above the tab bar (both tabs stay
+ * reachable) and clears the notch side. */
+.landscape .sheet {
+  left: calc(var(--ed-stage-w, 45%) + env(safe-area-inset-left));
+  right: env(safe-area-inset-right);
+  top: calc(44px + env(safe-area-inset-top));
+  bottom: calc(48px + env(safe-area-inset-bottom));
+  padding-bottom: 0;
+  border-left: 1px solid var(--ed-hairline);
+}
+/* Landscape + keyboard: only ~120–150 px stay visible, so the sheet takes
+ * all of it (over the top bar, the stage and the tab bar) and drops its
+ * title row and the cuts line while typing; the field stays in view. */
+.landscape[data-keyboard] .sheet {
+  left: env(safe-area-inset-left);
+  right: env(safe-area-inset-right);
+  top: 0;
+  bottom: 0;
+  max-height: none;
+  border-left: 0;
+  border-radius: 0;
+  z-index: 7;
+}
+.landscape[data-keyboard] .sheetHead,
+.landscape[data-keyboard] .panelHead {
+  display: none;
+}
+/* iPhone pseudo-fullscreen: a big play glyph while paused (no player bar) */
+.pseudoFs .tapGlyph {
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  transform: translate(-50%, -50%);
+}
+.pseudoFs .tapGlyph svg {
+  width: 24px;
+  height: 24px;
 }
 
 @media (prefers-reduced-motion: reduce) {

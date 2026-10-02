@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { EditorShell, type EditorShellProps } from "./EditorShell";
 import { geist, geistMono } from "./fonts";
-import { EditorRootContext, LANDSCAPE_QUERY, PHONE_QUERY, useMediaQuery } from "./hooks";
+import { EditorRootContext, LANDSCAPE_QUERY, PHONE_QUERY, useKeyboardInset, useMediaQuery, useViewportFitCover } from "./hooks";
 import { EditorSkeleton } from "./states";
 import s from "./editor.module.css";
 
@@ -19,6 +19,9 @@ export default function EditorV2(props: EditorV2Props) {
   const landscape = useMediaQuery(LANDSCAPE_QUERY) && phone;
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  // UX7c: safe areas and the on-screen keyboard on phones
+  useViewportFitCover();
+  useKeyboardInset(root, phone);
   const cls = [
     s.root,
     geist.variable,

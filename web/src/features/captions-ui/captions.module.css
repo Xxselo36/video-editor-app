@@ -80,6 +80,15 @@
   width: 44px;
   height: 44px;
 }
+/* Touch on the desktop layout too (tablets, touch laptops): a 44 px hit
+ * area; the knob inside keeps its size (the button itself is invisible). */
+@media (pointer: coarse) {
+  .hmove,
+  .hsize {
+    width: 44px;
+    height: 44px;
+  }
+}
 .knob {
   display: block;
   background: #fff;
