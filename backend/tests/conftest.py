@@ -357,8 +357,9 @@ def clean_state(monkeypatch):
     accounts._TEST_PLANS.clear()
     billing._price_cache.clear()
     billing._refresh_tried.clear()
-    with M._INIT_RATE._lock:
-        M._INIT_RATE._events.clear()
+    for limiter in (M._INIT_RATE, M._CLAIM_RATE):
+        with limiter._lock:
+            limiter._events.clear()
     store.tasks._truncate_for_tests()
     if db.active() == "postgres":
         store._truncate_for_tests()

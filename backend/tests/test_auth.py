@@ -231,6 +231,10 @@ def test_upload_is_owned_and_hidden_from_others(client, auth_on, bearer):
         kw = {"json": {}} if method == "POST" else {}
         r = client.request(method, path, headers=bearer("user_b"), **kw)
         assert r.status_code == 404, (method, path, r.text)
+        if path.endswith("/thumbnail"):
+            # An <img> URL: no body at all (UX12, ERR_BLOCKED_BY_ORB).
+            assert r.content == b""
+            continue
         assert r.json() == {"detail": "job not found", "code": "not_found", "params": {}}
     assert store.get(job_id) is not None  # B's delete did nothing
 

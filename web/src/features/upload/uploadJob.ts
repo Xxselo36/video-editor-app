@@ -1,15 +1,17 @@
 /**
  * Upload a video and create its job, in the background (moved
- * from Home's onProcess in app/app/page.tsx, UX4). A dashboard card shows
- * the upload and then the job; a failed upload leaves the card with its
- * error. Never throws.
+ * from Home's onProcess in app/app/page.tsx, UX4). A dashboard card (or,
+ * on the v2 opt-in, a Projects tile — ./records.ts) shows the upload and
+ * then the job; a failed upload leaves the record with its error. A
+ * cancelled one (UX12, `signal`) aborts the multipart upload and leaves
+ * nothing. Never throws.
  */
 import { refreshMe, fetchServerJobs, paywallFrom, toMs, type Paywall } from "@/lib/account";
-import { addActiveJob, getActiveJobs, liveUploads, removeActiveJob, updateActiveJob as updateActiveJobV2 } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
-import { ApiError, apiErrorFromText, authHeaders, backendUrl, notifyAuthRequired } from "@/lib/api";
+import { ApiError, apiErrorFromText, apiFetch, authHeaders, backendUrl, notifyAuthRequired } from "@/lib/api";
 import { AUTH_ENABLED } from "@/lib/auth";
 import {
+  abortResumable,
   readVideoDuration,
   resumableProgress,
   uploadLimitHit,
@@ -18,12 +20,19 @@ import {
   UPLOAD_STALLED_MSG,
 } from "@/lib/chunkedUpload";
 import { getConfig } from "@/lib/config";
-import { cardError, REFUSAL_CODES, tEn } from "@/lib/errors";
-import { getLibrary } from "@/lib/library";
+import { REFUSAL_CODES, tEn } from "@/lib/errors";
 import { requestNotificationPermission } from "@/lib/notify";
 import type { JobStatus } from "@/features/jobs/types";
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import { readSettings, type SettingsSource } from "./settings";
+import {
+  knownJobIds,
+  liveUploads,
+  recordJobCreated,
+  recordUploadFailed,
+  removeUploadRecord,
+  uploadProgress,
+} from "./records";
 
 export type { UploadSettings } from "./settings";
 
@@ -37,6 +46,19 @@ export const UPLOAD_HEARTBEAT_MS = 10_000;
 
 const POST_JOBS_RETRY_MS = [2_000, 4_000, 8_000, 15_000, 15_000, 15_000, 15_000];
 
+/** Wait `ms` — or less, when `signal` aborts meanwhile. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(done, ms);
+    function done() {
+      clearTimeout(t);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+
 /**
  * POST /jobs (storage_key) gave no usable answer, but the server may
  * have created — and charged — the job anyway: the newest job in the
@@ -46,10 +68,7 @@ const POST_JOBS_RETRY_MS = [2_000, 4_000, 8_000, 15_000, 15_000, 15_000, 15_000]
 async function findJobCreatedFor(filename: string, sinceMs: number): Promise<string | null> {
   const jobs = await fetchServerJobs();
   if (!jobs) return null;
-  const known = new Set([
-    ...getActiveJobs().map((j) => j.jobId),
-    ...getLibrary().map((e) => e.jobId),
-  ]);
+  const known = await knownJobIds();
   const hit = jobs.find(
     (j) =>
       j.filename === filename &&
@@ -63,13 +82,17 @@ export async function uploadJob(
   targetFile: File,
   settings: SettingsSource,
   selectedPreset: PresetId | null,
-  { tempId, onPaywall, onCreated, onProgress, onEnd }: {
-    /** The upload card's temporary id (uploadCard). */
+  { tempId, signal, onPaywall, onCreated, onFailed, onProgress, onEnd }: {
+    /** The upload record's temporary id (uploadCard). */
     tempId: string;
+    /** Cancel (UX12): stops the upload and aborts it on the server. */
+    signal?: AbortSignal;
     /** Billing refused the upload (402): the dialog with a way to a plan. */
     onPaywall: (pw: Paywall) => void;
-    /** The job exists (its card replaced the upload's). */
+    /** The job exists (its project replaced the upload record). */
     onCreated: (jobId: string) => void;
+    /** The upload failed (not cancelled): its record says why. */
+    onFailed?: () => void;
     /** Live progress of the upload card (memory only: uploadManager). */
     onProgress?: (tempId: string, pct: number, resuming: boolean) => void;
     /** The upload is over (job created or failed). */
@@ -103,8 +126,8 @@ export async function uploadJob(
       onProgress?.(tempId, pct, resumingFrom !== null);
       if (startedOver || now - lastBeat >= UPLOAD_HEARTBEAT_MS) {
         lastBeat = now;
-        updateActiveJobV2(tempId, {
-          uploadPct: pct,
+        uploadProgress(tempId, {
+          pct,
           lastProgressAt: now,
           ...(startedOver ? { resuming: false } : {}),
         });
@@ -148,7 +171,7 @@ export async function uploadJob(
     if (resumedPct !== null) {
       resumingFrom = resumedPct;
       onProgress?.(tempId, resumedPct, true);
-      updateActiveJobV2(tempId, { uploadPct: resumedPct, resuming: true, lastProgressAt: Date.now() });
+      uploadProgress(tempId, { pct: resumedPct, resuming: true, lastProgressAt: Date.now() });
     }
 
     // An audio file: refused now, not after the upload (the server
@@ -192,12 +215,14 @@ export async function uploadJob(
       const up = await uploadResumable({
         file: targetFile,
         onProgress: (pct) => setPct(pct),
+        signal,
         duration,
       });
       storageKey = up.storage_key;
       releaseUpload = up.release;
       legacyApi = Boolean(up.legacyApi);
     } catch (e) {
+      if (signal?.aborted) throw e;
       // 503 without R2 here → legacy upload; 503 server_busy is a
       // full queue and means "later", not "another way".
       const noR2 = e instanceof ApiError && e.status === 503 && e.code !== "server_busy";
@@ -233,13 +258,18 @@ export async function uploadJob(
           xhr.onload = () => resolve(xhr);
           xhr.onerror = () => reject(new Error("Network error"));
           xhr.ontimeout = () => reject(new Error(tEn("app.errors.serverNoResponse")));
+          xhr.onabort = () => reject(new Error("Upload aborted"));
+          // Cancel (UX12) stops the request too.
+          signal?.addEventListener("abort", () => xhr.abort(), { once: true });
           xhr.send(form);
         });
       };
       let failure: unknown = null;
       const retryDelays = legacyApi ? [] : POST_JOBS_RETRY_MS;
       for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
-        if (attempt > 0) await new Promise((r) => setTimeout(r, retryDelays[attempt - 1]));
+        if (attempt > 0) await sleep(retryDelays[attempt - 1], signal);
+        // Cancelled meanwhile: no (further) POST.
+        if (signal?.aborted) throw new Error("Upload aborted");
         failure = null;
         try {
           res = await post();
@@ -249,11 +279,18 @@ export async function uploadJob(
             failure = new Error(`Upload failed: ${res.responseText}`);
           }
         } catch (e) {
+          if (signal?.aborted) {
+            // The request was in flight: the job may exist anyway (only
+            // an account's list can tell).
+            createdJobId = AUTH_ENABLED ? await findJobCreatedFor(targetFile.name, postedAt) : null;
+            if (!createdJobId) throw e;
+            break;
+          }
           failure = e;
         }
         if (failure === null) break;
       }
-      if (failure !== null) {
+      if (failure !== null && createdJobId === null) {
         // Still no answer: with accounts on the job may exist anyway —
         // look for it in the account's project list.
         createdJobId = AUTH_ENABLED ? await findJobCreatedFor(targetFile.name, postedAt) : null;
@@ -300,6 +337,7 @@ export async function uploadJob(
           clearTimeout(stallTimer);
           reject(new Error("Upload aborted"));
         };
+        signal?.addEventListener("abort", () => xhr.abort(), { once: true });
         armStall();
         xhr.send(form);
       });
@@ -344,43 +382,64 @@ export async function uploadJob(
     // even if the tab is in the background.
     requestNotificationPermission();
 
-    // Swap the temporary uploading card for the real backend job.
-    removeActiveJob(tempId);
-    addActiveJob({
-      jobId: initial.id,
-      phase: "analyzing",
-      timestamp: Date.now(),
-      filename: targetFile.name,
-      fileSize: targetFile.size,
-      presetId: selectedPreset,
-      presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
-      presetIcon: null,
-      captionPreset: readSettings(settings).caption_preset ?? "",
-    });
-
-    // The job now lives as a card on the dashboard; the backend keeps
-    // processing regardless of where the user goes next.
+    // Cancelled while POST /jobs ran: the job exists now. Delete it — a
+    // job that started already (409) stays: it is shown under its name,
+    // with a note that it couldn't be cancelled any more.
+    let cancelTooLate = false;
+    if (signal?.aborted) {
+      try {
+        const r = await apiFetch(`/jobs/${initial.id}`, { method: "DELETE" });
+        if (r.ok || r.status === 404) return;
+      } catch {
+        /* shown below */
+      }
+      cancelTooLate = true;
+    }
+    // The upload record becomes the project (the backend keeps
+    // processing regardless of where the user goes next).
+    recordJobCreated(
+      tempId,
+      initial.id,
+      {
+        filename: targetFile.name,
+        fileSize: targetFile.size,
+        presetId: selectedPreset,
+        presetLabel: presetInfo ? tEn(presetInfo.labelKey) : null,
+        captionPreset: readSettings(settings).caption_preset ?? "",
+      },
+      { cancelTooLate },
+    );
     onCreated(initial.id);
   } catch (err) {
-    // Upload failed — mark the temp card with an error message so
-    // the user can hit Retry from the dashboard. No fullscreen error
-    // takeover, no scary redirect.
-    // The card stores the code (lib/errors.ts words it): the backend's
-    // (too big / too long / no sound / too many jobs / busy …) or the
-    // browser's own (connection_lost, …).
-    let failure = cardError(err);
+    if (signal?.aborted) {
+      // Cancelled (UX12): the multipart upload goes too — the user gave
+      // the file up; nothing is left on the list.
+      removeUploadRecord(tempId);
+      try {
+        await abortResumable({ file: targetFile });
+      } catch {
+        /* the bucket's lifecycle rule aborts it after a day anyway */
+      }
+      return;
+    }
+    // Upload failed — the record keeps the code (lib/errors.ts words
+    // it): the backend's (too big / too long / no sound / too many jobs /
+    // busy …) or the browser's own (connection_lost, …), so the user can
+    // try again.
+    let failure: unknown = err;
     if (err instanceof ApiError && err.status === 401) {
       notifyAuthRequired();
-      failure = cardError({ code: "auth_required" });
+      failure = { code: "auth_required" };
     } else if (err instanceof ApiError) {
       // No plan / not enough minutes: explain it with a way out.
       const pw = paywallFrom(err.status, err.detail);
       if (pw) {
         onPaywall(pw);
-        failure = cardError({ code: pw.code });
+        failure = { code: pw.code };
       }
     }
-    updateActiveJobV2(tempId, failure);
+    recordUploadFailed(tempId, failure);
+    onFailed?.();
   } finally {
     liveUploads.delete(tempId);
     onEnd?.(tempId);

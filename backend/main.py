@@ -110,7 +110,7 @@ from backend.auth import (
 )
 from backend.jobs import (
     DEFAULT_PLAN, EVENTS_KEEP_DAYS, PLAN_RETENTION_DAYS, RUNNING_STATUSES,
-    DuplicateKey, Job, new_job_id, retention_days, store,
+    DuplicateKey, Job, expiry_time, new_job_id, retention_days, store,
 )
 from backend.pipeline import EXPORT_FORMATS, analyze_only
 from backend.security_headers import SecurityHeadersMiddleware
@@ -4201,22 +4201,47 @@ def _owner_jobs(owner_id: str) -> list[Job]:
         before = (page[-1].created_at, page[-1].id)
 
 
+# GET /jobs?fields=summary (UX12): what a Projects tile shows — no
+# outputs or hook clips (the tile's menu asks GET /jobs/{id} for those).
+_SUMMARY_FIELDS = (
+    "id", "status", "message", "progress", "error_code", "error_params",
+    "refunded", "stage", "stage_params", "queue_position", "filename",
+    "title", "preset_id", "preset_label", "created_at", "updated_at",
+    "expires_at", "has_output", "duration",
+)
+
+
 @app.get("/jobs")
-def list_jobs(user: User = Depends(require_user)):
-    """The caller's projects, newest first — all of them: the Library
-    shows this list as the projects of every device (404 not_available
-    while accounts are off — the frontend keeps its localStorage list
-    then). Beta jobs show up once claimed, i.e. after any /jobs/{id}
-    request."""
+def list_jobs(request: Request, fields: str = "",
+              user: User = Depends(require_user)):
+    """The caller's projects, newest first — all of them: the Projects
+    page shows this list as the projects of every device (404
+    not_available while accounts are off — the frontend keeps its
+    localStorage list then). Beta jobs show up once claimed (POST
+    /me/claim, or any /jobs/{id} request).
+
+    `?fields=summary` (UX12): the slim rows of the Projects tiles
+    (_SUMMARY_FIELDS), with a weak ETag — send it back as If-None-Match
+    and an unchanged list is an empty 304. Without it: the full rows
+    (_LIST_FIELDS) as before."""
     rows = (store.list_all() if user.is_service else
             _owner_jobs(user.id))
     rows.sort(key=lambda j: j.created_at or j.updated_at, reverse=True)
     out = []
     admin = _is_admin(user)
+    keys = _SUMMARY_FIELDS if fields == "summary" else _LIST_FIELDS
     for job in rows:
         d = job.to_dict(admin=admin)
-        out.append({k: d.get(k) for k in _LIST_FIELDS})
-    return out
+        out.append({k: d.get(k) for k in keys})
+    if fields != "summary":
+        return out
+    raw = json.dumps(out, separators=(",", ":")).encode()
+    etag = f'W/"{hashlib.sha1(raw).hexdigest()}"'
+    headers = {"ETag": etag, "Cache-Control": "private, no-cache"}
+    if _etag_matches(request.headers.get("if-none-match", ""), etag):
+        return Response(status_code=304, headers=headers)
+    return Response(content=raw, media_type="application/json",
+                    headers=headers)
 
 
 # GET /jobs/status: at most this many ids per call.
@@ -4281,6 +4306,11 @@ def _status_rows(ids: list[str], user: User | None) -> dict:
             "has_output": has_output,
             "updated_at": row["updated_at"] or None,
             "preview_version": row["preview_version"],
+            # UX12: the Projects tile (name, length, lifetime).
+            "title": row.get("title"),
+            "duration": row.get("duration") or None,
+            "created_at": row.get("created_at") or None,
+            "expires_at": expiry_time(row.get("plan"), row["updated_at"]),
         })
     return {"jobs": jobs, "missing": missing}
 
@@ -4302,7 +4332,7 @@ async def jobs_status(request: Request, ids: str = "",
     `?ids=a,b,c` (at most 50) → {"jobs": [{id, status, message, progress,
     queue_position, error (its code unless admin), error_code,
     error_params, refunded, stage, stage_params, has_output, updated_at,
-    preview_version}],
+    preview_version, title, duration, created_at, expires_at}],
     "missing": [ids that don't exist or aren't the caller's]}. With a
     weak ETag: send it back as If-None-Match and an unchanged answer is
     an empty 304."""
@@ -4451,37 +4481,78 @@ def _patch_doc(job_id: str, payload: Any, user: User | None) -> dict:
     return {"rev": outcome["rev"]}
 
 
+# A project name (PATCH /jobs/{id} {title}): at most this many characters.
+_TITLE_MAX = 120
+
+
+def _clean_title(value: Any) -> str | None:
+    """A title as stored: trimmed, control characters dropped, at most
+    _TITLE_MAX characters; "" or null = back to the file name (None)."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ApiRefusal(400, "invalid_title")
+    # Line breaks and tabs are spaces; other control and format
+    # characters go — except the joiners and the emoji variation selector
+    # that scripts and emoji need (ZWNJ U+200C, ZWJ U+200D, VS16 U+FE0F).
+    text = "".join(
+        " " if c in "\n\r\t" else c for c in value
+        if c.isprintable() or c in "\n\r\t " or c in _TITLE_KEEP)
+    text = " ".join(text.split())[:_TITLE_MAX].strip()
+    return text or None
+
+
+# Format characters (not str.isprintable) a title keeps.
+_TITLE_KEEP = frozenset("\u200c\u200d\ufe0f")
+
+
 @app.patch("/jobs/{job_id}")
 def patch_job(job_id: str, payload: dict,
               user: User | None = Depends(current_user)):
-    """{caption_style}: a preset id (or v1 alias) or {presetId,
-    overrides}. Accepted while the job waits or is analysed (the doc
-    build at analysis end reads it: settings.caption_style) and in review
-    (for a doc no editor saved yet, the doc's style too). Returns the
-    job."""
+    """{title?, caption_style?} (at least one).
+
+    title (UX12): the project's name — any status; "" or null resets it
+    to the file name. caption_style: a preset id (or v1 alias) or
+    {presetId, overrides}. Accepted while the job waits or is analysed
+    (the doc build at analysis end reads it: settings.caption_style) and
+    in review (for a doc no editor saved yet, the doc's style too).
+    Returns the job."""
     job = get_owned_job(job_id, user)
-    if set(payload) - {"caption_style"} or "caption_style" not in payload:
+    allowed = {"caption_style", "title"}
+    if set(payload) - allowed or not set(payload) & allowed:
         raise ApiRefusal(400, "unknown_field",
-                         field=sorted(set(payload) - {"caption_style"}
+                         field=sorted(set(payload) - allowed
                                       or {"caption_style"})[0])
-    try:
-        style = edit_doc.validate_style(payload["caption_style"])
-    except edit_doc.DocError as e:
-        raise _doc_refusal(e)
+    title = _clean_title(payload["title"]) if "title" in payload else None
+    style = None
+    if "caption_style" in payload:
+        try:
+            style = edit_doc.validate_style(payload["caption_style"])
+        except edit_doc.DocError as e:
+            raise _doc_refusal(e)
     editable = ("pending", "processing", "awaiting_review")
-    if job.status not in editable:
+    if style is not None and job.status not in editable:
         raise ApiRefusal(409, "not_editable", job_status=job.status)
     refused: list[str] = []
 
     def change(cur: Job) -> dict | None:
-        if cur.status not in editable:
-            refused.append(cur.status)
-            return None
-        out: dict[str, Any] = {
-            "settings": {**(cur.settings or {}), "caption_style": style}}
-        if (cur.status == "awaiting_review" and cur.doc is not None
-                and not cur.doc_rev):
-            out["doc"] = {**cur.doc, "style": style}
+        out: dict[str, Any] = {}
+        if "title" in payload:
+            out["title"] = title
+            # A rename while the job runs (the statuses the orphan sweep,
+            # _sweep_orphaned_jobs, checks) is housekeeping: updated_at
+            # stays. In any other status it counts as activity and moves
+            # the expiry later.
+            if style is None and cur.status in RUNNING_STATUSES:
+                out["updated_at"] = cur.updated_at
+        if style is not None:
+            if cur.status not in editable:
+                refused.append(cur.status)
+                return None
+            out["settings"] = {**(cur.settings or {}), "caption_style": style}
+            if (cur.status == "awaiting_review" and cur.doc is not None
+                    and not cur.doc_rev):
+                out["doc"] = {**cur.doc, "style": style}
         return out
     store.modify(job_id, change)
     if refused:
@@ -4746,6 +4817,60 @@ def put_my_prefs(payload: Any = Body(...),
         return user_prefs.put(user.id, payload)
     except user_prefs.BadPrefs as e:
         raise HTTPException(400, {"code": "bad_prefs", "field": e.field})
+
+
+# POST /me/claim (UX12): ids per call, calls per minute and user.
+_CLAIM_MAX_IDS = 200
+_CLAIM_RATE = upl.RateLimit(10, 60.0)
+
+
+def _id_like(job_id: str) -> bool:
+    """Shaped like a job id (ASCII letters, digits, _ and -; ≤ 64)."""
+    return 0 < len(job_id) <= 64 and all(
+        c.isascii() and (c.isalnum() or c in "_-") for c in job_id)
+
+
+@app.post("/me/claim")
+def claim_jobs(payload: dict, user: User = Depends(require_user)):
+    """{job_ids: [id, …]} (at most 200) → {claimed, owned_elsewhere,
+    missing}: the projects this browser made before its user signed in
+    (the anonymous beta kept them in localStorage) become the caller's.
+
+    A job without an owner is claimed (store.claim, the same step every
+    /jobs/{id} request of a signed-in user takes — the job id is the only
+    key to an anonymous job); the caller's own jobs count as claimed; a
+    job of another account is left alone and listed under
+    owned_elsewhere; unknown ids under missing. The web drops the ids of
+    the last two from its list. Idempotent; 10 calls a minute per user
+    (429 too_many_requests). 404 not_available while accounts are off."""
+    ids = payload.get("job_ids") if isinstance(payload, dict) else None
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        raise ApiRefusal(400, "invalid_payload")
+    if len(ids) > _CLAIM_MAX_IDS:
+        raise ApiRefusal(400, "too_many_ids", max=_CLAIM_MAX_IDS)
+    if user.is_service:
+        raise ApiRefusal(403, "forbidden")
+    if not _CLAIM_RATE.allow(user.id):
+        raise ApiRefusal(429, "too_many_requests",
+                         headers={"Retry-After": "60"})
+    claimed: list[str] = []
+    elsewhere: list[str] = []
+    missing: list[str] = []
+    for job_id in dict.fromkeys(i.strip() for i in ids):
+        owner = (store.claim(job_id, user.id)
+                 if _id_like(job_id) else None)
+        if owner is None:
+            missing.append(job_id)
+        elif owner == user.id:
+            claimed.append(job_id)
+        else:
+            elsewhere.append(job_id)
+    if claimed:
+        print(f"[auth] {user.id} claimed {len(claimed)} job(s) "
+              f"({len(elsewhere)} elsewhere, {len(missing)} missing)",
+              flush=True)
+    return {"claimed": claimed, "owned_elsewhere": elsewhere,
+            "missing": missing}
 
 
 def _require_billing() -> None:
@@ -5880,7 +6005,21 @@ def watch_job(job_id: str, format: str = "primary",
 def job_thumbnail(job_id: str, user: User | None = Depends(media_user)):
     """Serve the poster-frame JPG generated at render time. The file
     lives next to the primary output at a fixed filename so we can
-    derive the path without storing it on the Job."""
+    derive the path without storing it on the Job.
+
+    No thumbnail (an expired or unknown project, none rendered yet): the
+    status with an EMPTY body (UX12) — an <img> that gets a JSON error
+    body is blocked by the browser (ERR_BLOCKED_BY_ORB) and logged."""
+    try:
+        return _thumbnail(job_id, user)
+    except HTTPException as e:
+        if e.status_code in (404, 409):
+            return Response(status_code=e.status_code,
+                            headers={"Cache-Control": "no-store"})
+        raise
+
+
+def _thumbnail(job_id: str, user: User | None):
     job = get_owned_job(job_id, user)
     # Behind a per-user token once accounts are on: no shared caches.
     cache = ("private" if auth.auth_enabled() else "public") + ", max-age=86400"

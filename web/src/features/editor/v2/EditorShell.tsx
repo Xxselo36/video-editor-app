@@ -261,8 +261,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   const [selected, setSelected] = useState<string | null>(null);
   const selectedLive = selected && editSegs.some((x) => x.id === selected) ? selected : null;
 
-  // ── title (local until PATCH /jobs/{id} {title} exists) ─────────────
-  // TODO(UX7 backend): PATCH /jobs/{id} {title}; kept in localStorage per job.
+  // ── title: kept in localStorage per job, and the project's name on the
+  // server (PATCH /jobs/{id} {title}, UX12 — Projects shows it) ────────
   const [title, setTitle] = useState(() => initialTitle(props.jobId, props.filename));
   const rename = (v: string) => {
     setTitle(v);
@@ -271,6 +271,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     } catch {
       /* ignore */
     }
+    void import("@/features/jobs/jobsStore").then((m) => m.renameProject(props.jobId, v));
   };
 
   // ── panels ──────────────────────────────────────────────────────────

@@ -5,9 +5,38 @@
  */
 import { expect, type Locator, type Page } from "@playwright/test";
 
-// localStorage keys of the current app (anonymous beta).
+// localStorage keys of the current app (anonymous beta): the projects of
+// this device since UX12 (features/jobs/jobsStore) …
+export const JOBS = "cleocuts.jobs.v2";
+// … and the lists of before (dashboard cards, library), which the store
+// migrates once — the suites seed them to stand for an existing customer.
 export const ACTIVE_JOBS = "cleocuts.activeJobs.v1";
 export const LIBRARY = "cleo-library-v1";
+
+/** An entry of this device's project list (cleocuts.jobs.v2). */
+export type StoredJob = {
+  jobId: string;
+  timestamp: number;
+  filename: string;
+  name?: string | null;
+  upload?: { pct?: number; errorCode?: string | null };
+};
+
+/** A project as the jobs store keeps it. */
+export function job(jobId: string, filename: string, ageMs = 60_000, extra: Partial<StoredJob> = {}): StoredJob {
+  return { jobId, timestamp: Date.now() - ageMs, filename, ...extra };
+}
+
+/** This device's project list. */
+export async function storedJobs(page: Page): Promise<StoredJob[]> {
+  return (await readStorage<StoredJob[]>(page, JOBS)) ?? [];
+}
+
+/** The id POST /jobs gave the upload of `filename` (null: not yet). */
+export async function createdJobId(page: Page, filename?: string): Promise<string | null> {
+  const all = await storedJobs(page);
+  return all.find((j) => !j.jobId.startsWith("upl-") && (!filename || j.filename === filename))?.jobId ?? null;
+}
 export const VOICE_SEEN = "cleocuts.voiceOnboardingSeen.v1";
 export const LANG_KEY = "cleocuts.lang";
 
@@ -101,10 +130,17 @@ export function postedSettings(body: string | null): Record<string, unknown> | n
   return m ? (JSON.parse(m[1]) as Record<string, unknown>) : null;
 }
 
-// ── dashboard ────────────────────────────────────────────────────────
+// ── Projects (/app) ─────────────────────────────────────────────────
 
+/** A project tile (an <article>; its name is the file name until renamed). */
 export const jobCard = (page: Page, filename: string): Locator =>
   page.getByTestId("job-card").filter({ hasText: filename });
+
+/** Open a tile's ⋯ menu and pick an item (data-testid job-card-<item>). */
+export async function tileMenu(page: Page, tile: Locator, item: "download" | "copy" | "rename" | "delete") {
+  await tile.getByTestId("job-card-menu").click();
+  await page.getByTestId(`job-card-${item}`).click();
+}
 
 // ── editor ───────────────────────────────────────────────────────────
 

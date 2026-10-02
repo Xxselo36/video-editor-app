@@ -233,7 +233,9 @@ def test_patch_job_caption_style(client, monkeypatch):
                                            "caption_style": {"presetId": "clipper", "overrides": {}}}
     assert client.patch(f"/jobs/{busy.id}", json={"caption_style": "neon"}).json()["detail"] \
         == "preset_not_live"
-    assert client.patch(f"/jobs/{busy.id}", json={"title": "x"}).json()["detail"] == "unknown_field"
+    assert client.patch(f"/jobs/{busy.id}", json={"name": "x"}).json()["detail"] == "unknown_field"
+    # UX12: a title is a known field (the project's name).
+    assert client.patch(f"/jobs/{busy.id}", json={"title": "x"}).json()["title"] == "x"
     # in review, a doc no editor saved yet takes the style too
     job = _review_job()
     assert client.patch(f"/jobs/{job.id}", json={"caption_style": "clipper"}).status_code == 200
