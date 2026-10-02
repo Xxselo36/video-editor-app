@@ -177,6 +177,9 @@ class Job:
     audio_loudness: dict[str, Any] | None = None
     # jobs/{id}/peaks.bin: 100 Hz int8 RMS envelope (audio_analysis.py).
     peaks_key: str | None = None
+    # jobs/{id}/poster.jpg: the frame at the first kept clip's start, the
+    # editor's still before its video has a frame (UT5).
+    poster_key: str | None = None
     # CJK caption font subsets {font: {family, rev, chars, missing, json,
     # woff2, ttf (keys)}} (backend/font_subset.py).
     font_subsets: dict[str, Any] = field(default_factory=dict)
@@ -330,6 +333,8 @@ class Job:
             "font_subsets": _public_fonts(self.font_subsets),
             "peaks": ({"rate": 100, "floor_db": -96} if self.peaks_key
                       else None),
+            # UT5: GET /jobs/{id}/poster answers (the analysis made one).
+            "has_poster": bool(self.poster_key),
             # Only once the task queue's worker recorded any (WP4).
             **({"processing_warnings": list(self.processing_warnings)}
                if self.processing_warnings is not None else {}),

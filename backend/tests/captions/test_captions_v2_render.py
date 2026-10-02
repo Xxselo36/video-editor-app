@@ -445,6 +445,46 @@ def test_ux8_forced_breaks_start_caption_pages(tone_src, tmp_path):
     assert all(w["id"] not in ("w0004", "w0011") for p in pages for ln in p["lines"] for w in ln)
 
 
+def test_per_caption_position_and_size_reach_the_export(tone_src, tmp_path):
+    """UT5: a caption moved and resized "Nur hier" in the editor
+    (overrides.captions, keyed by the caption's first word id) is drawn
+    there in the export; the other captions follow the style's own y and
+    size; the band covers both."""
+    over = {"y": 0.75, "captions": {"t0": {"y": 0.3, "sizeScale": 1.3}}}
+    spec = {**_spec(WORDS, preset="power"), "style": {"presetId": "power", "overrides": over}}
+    trace = tmp_path / "trace.json"
+    res = C.render_primary(str(tone_src), str(tmp_path / "adj.mp4"), [(0.0, 6.0)], None, spec,
+                           tmp_path / "w", trace=str(trace))
+    pages = json.loads(trace.read_text())["plan"]["layout"]
+    first, rest = pages[0], pages[1:]
+    assert first["lines"][0][0]["id"] == "t0"
+    ys = lambda p: [w["y"] for ln in p["lines"] for w in ln]   # noqa: E731
+    centre = lambda p: (min(ys(p)) + max(ys(p))) / 2            # noqa: E731
+    assert abs(centre(first) - 0.3 * H) < 0.06 * H
+    assert all(abs(centre(p) - 0.75 * H) < 0.06 * H for p in rest)
+    # bigger than the style's size, up to 1.3 × (whole pixels; a grown
+    # caption stays inside 96 % of the frame width)
+    normal = max(p["px"] for p in rest)
+    assert normal < first["px"] <= 1.3 * normal + 1
+    band = res["band"]
+    assert band["top"] < 0.3 * H - first["px"] and band["top"] + band["height"] > 0.75 * H
+    # In the encoded frame the caption is up there, not at the style's y:
+    # against the same render without the caption's own values.
+    plain = {**spec, "style": {"presetId": "power", "overrides": {"y": 0.75}}}
+    C.render_primary(str(tone_src), str(tmp_path / "plain.mp4"), [(0.0, 6.0)], None, plain,
+                     tmp_path / "w2")
+    n = int(0.45 * 30)
+    a = np.asarray(cm.frame_at(tmp_path / "adj.mp4", n).convert("L"), dtype=np.int32)
+    b = np.asarray(cm.frame_at(tmp_path / "plain.mp4", n).convert("L"), dtype=np.int32)
+
+    def diff(y0: float, y1: float) -> float:
+        rows = slice(int(y0 * H), int(y1 * H))
+        return float(np.abs(a[rows] - b[rows]).mean())
+    assert diff(0.25, 0.35) > 8, diff(0.25, 0.35)      # adj draws there, plain doesn't
+    assert diff(0.70, 0.80) > 8, diff(0.70, 0.80)      # plain draws there, adj doesn't
+    assert diff(0.45, 0.55) < 1.5, diff(0.45, 0.55)    # neither
+
+
 def test_a_font_that_fails_to_load_fails_the_render(tone_src, tmp_path, monkeypatch):
     """No silent fallback font in an export: the layer exits 3, the job
     gets render_failed (and goes back to the editor)."""

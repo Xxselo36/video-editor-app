@@ -126,6 +126,7 @@ JOB_KEYS = sorted([
     "preset_id", "preset_label", "created_at", "updated_at",
     "queue_position", "has_doc", "font_subsets", "peaks",
     "caption_engine",   # UT4: v1 / v2 / None, no content
+    "has_poster",       # UT5: GET /jobs/{id}/poster answers
 ])
 
 

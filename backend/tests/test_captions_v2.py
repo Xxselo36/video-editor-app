@@ -14,6 +14,7 @@ import pytest
 
 import backend.main as M
 from backend import captions_v2 as C
+from backend import doc as edit_doc
 from backend import media, pipeline, storage
 from backend.jobs import store
 
@@ -89,11 +90,12 @@ def test_v2_pins_and_snapshots(monkeypatch):
 
 @pytest.mark.parametrize("fields, why", [
     ({"doc": None}, "no edit document (analysed before UT3)"),
-    ({"settings": {"caption_preset": "clean"}}, "minimal is not live by default"),
+    ({"settings": {"caption_preset": "clean"}}, "minimal is not in this live list"),
     ({"language": "ru", "doc": _doc(lang="ru")}, "Clipper can't caption Cyrillic"),
 ])
 def test_v2_only_for_docs_with_a_live_supported_style(monkeypatch, fields, why):
     monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "clipper,power")
     job = _job(**fields)
     assert C.prepare_render(store, job.id, job, UNITS) is None, why
     assert store.get(job.id).caption_engine == "v1"
@@ -133,6 +135,61 @@ def test_live_list_opens_more_presets(monkeypatch):
     job = _job(settings={"caption_preset": "clean"})
     spec = C.prepare_render(store, job.id, job, UNITS)
     assert spec["style"] == {"presetId": "minimal", "overrides": {"y": 0.70}}
+
+
+def test_all_twelve_presets_are_live_by_default(monkeypatch):
+    """UT5: every launch preset is in the parity suite, so all go live;
+    CLEO_CAPTION_PRESETS_LIVE still narrows the list."""
+    monkeypatch.delenv("CLEO_CAPTION_PRESETS_LIVE", raising=False)
+    assert edit_doc.live_presets() == list(edit_doc.PRESET_IDS)
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    job = _job(settings={"caption_preset": "clean"})
+    assert C.decide(job) == ("v2", "v2:minimal")
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "power")
+    assert C.decide(_job(settings={"caption_preset": "clean"})) == ("v1", "preset_not_live:minimal")
+
+
+def test_per_caption_overrides_reach_the_layer():
+    """UT5: the layer gets every override, the per-caption position and
+    size (overrides.captions) included, and the words keep the doc ids
+    the captions are keyed by."""
+    over = {"y": 0.6, "captions": {"w0004": {"y": 0.3, "sizeScale": 1.2}}}
+    spec = {"style": {"presetId": "power", "overrides": over}, "language": "en",
+            "words": C.source_words(UNITS, DOC_WORDS)}
+    mapped = C.output_words(spec, [{"start": 0.0, "end": 3.0, "speed": 1.0}])
+    inp = C._layer_input(spec, mapped, {"W": 540, "H": 960, "fps": 30.0}, 90, [])
+    assert inp["style"] == {"presetId": "power", "overrides": over}
+    assert "w0004" in [w["id"] for w in inp["words"]]
+
+
+def test_editor_engine(monkeypatch):
+    assert C.editor_engine(_job()) == "optin"
+    assert C.editor_engine(_job(caption_engine="v2")) == "v2"
+    assert C.editor_engine(_job(caption_engine="v1")) == "v1"
+    assert C.editor_engine(_job(doc=None)) == "v1"
+    assert C.editor_engine(_job(render_gen=2)) == "v1"
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    assert C.editor_engine(_job()) == "v2"
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "off")
+    assert C.editor_engine(_job()) == "v1"
+    assert C.editor_engine(_job(caption_engine="v2")) == "v2"
+
+
+@pytest.mark.parametrize("mode", ["v2", None])
+def test_editor_engine_says_v1_where_decide_would(monkeypatch, mode):
+    """Review 12: the editor previews what the export draws — a style that
+    isn't live, or can't caption the script, exports with v1."""
+    if mode:
+        monkeypatch.setenv("CLEO_CAPTION_ENGINE", mode)
+    ru = _job(language="ru", doc=_doc(lang="ru"))            # clipper can't do Cyrillic
+    assert C.editor_engine(ru) == "v1"
+    assert C.decide(ru)[0] == "v1"
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "power,karaoke")
+    narrowed = _job()                                        # clipper not live
+    assert C.editor_engine(narrowed) == "v1"
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "clipper,power")
+    ok = _job()
+    assert C.editor_engine(ok) == (mode or "optin")
 
 
 def test_a_broken_setup_renders_v1(monkeypatch):
@@ -532,6 +589,7 @@ def test_the_engine_is_observable(client, modal_r2, capsys, field, engine, reaso
 
 def test_decide_reasons(monkeypatch):
     monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "clipper,power")
     assert C.decide(_job()) == ("v2", "v2:clipper")
     assert C.decide(_job(doc=None)) == ("v1", "no_doc")
     assert C.decide(_job(render_gen=2)) == ("v1", "exported_before")

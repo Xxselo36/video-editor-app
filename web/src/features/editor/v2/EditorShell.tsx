@@ -11,9 +11,12 @@
  * playing, so the shell itself doesn't re-render per frame.
  */
 import { Captions, Palette, TriangleAlert, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/i18n";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, useMediaUrl } from "@/lib/api";
+import { adjustedWordIds, followCaptionKeys } from "@/features/captions-ui/adjusted";
+import { useCaptionsV2 } from "@/features/captions-ui/flag";
 import type { Phrase, Subtitle } from "@/features/editor/legacy/buildPhrases";
 import { useEditSession } from "@/features/editor/session/useEditSession";
 import { useEditorShortcuts, type ShortcutHandlers } from "@/features/editor/shortcuts/useEditorShortcuts";
@@ -57,6 +60,8 @@ export type EditorShellProps = {
   units: { readonly current: Subtitle[] };
   captionPreset: string;
   audioWarnings: string[];
+  /** GET /jobs/{id}/poster answers (UT5: the first frame before playback). */
+  hasPoster?: boolean;
   cutRanges: CutRange[];
   duration: number;
   onChange: (p: Phrase[]) => void;
@@ -70,9 +75,16 @@ export type EditorShellProps = {
   onBack: () => void;
 };
 
+// UT5: live captions and the Style panel (the caption engine: own chunks).
+const CaptionLayer = dynamic(() => import("@/features/captions-ui/CaptionLayer"), { ssr: false });
+const LiveStylePanel = dynamic(() => import("@/features/captions-ui/StylePanel"), { ssr: false });
+const ZONES_KEY = "cleocuts.editor.zones.v1";
+
 const selCanUndo = (st: DocState) => st.past.length > 0;
+const selStyleOverrides = (st: DocState) => st.present.style?.overrides ?? null;
 const selCanRedo = (st: DocState) => st.future.length > 0;
 const NO_DOC_STATE = (): boolean => false;
+const NO_OVERRIDES = (): null => null;
 /** Read while the doc loads (hooks can't be skipped). */
 const EMPTY_STORE = createDocStore({
   v: 2,
@@ -114,6 +126,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     onApply: props.onApply,
   });
   const { editSegs, toSource, videoRef } = session;
+  const posterUrl = useMediaUrl(props.jobId, "poster");
 
   // ── playhead store, fed by the video's presented frames ─────────────
   const store = useMemo(() => createPlayheadStore(), []);
@@ -136,12 +149,36 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     props.v1Edits ?? null,
   );
   const docStore = doc.status === "ready" ? doc.store : null;
+  // UT5: the preview shows the export's captions live (and the Style tab
+  // switches them) when the export draws v2 captions: the server's
+  // engine for this job, or this browser's ?captions=v2 opt-in.
+  const captionsOptIn = useCaptionsV2();
+  const liveCaptions =
+    doc.status === "ready" && (doc.captions.engine === "v2" || (doc.captions.engine === "optin" && captionsOptIn));
+  const [zones, setZonesState] = useState(() => {
+    try {
+      return localStorage.getItem(ZONES_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setZones = useCallback((on: boolean) => {
+    setZonesState(on);
+    try {
+      localStorage.setItem(ZONES_KEY, on ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   // ── one undo for text and timeline (until UX10 merges the stacks):
   // ⌘Z undoes the latest edit of either, in the order they were made.
   const order = useMemo(() => new EditOrder(), []);
   const docCanUndo = useDocStore(docStore ?? EMPTY_STORE, docStore ? selCanUndo : NO_DOC_STATE);
   const docCanRedo = useDocStore(docStore ?? EMPTY_STORE, docStore ? selCanRedo : NO_DOC_STATE);
+  // UT5: rows whose caption has its own size / position get a dot in the Text tab
+  const styleOverrides = useDocStore(docStore ?? EMPTY_STORE, docStore ? selStyleOverrides : NO_OVERRIDES);
+  const adjusted = useMemo(() => adjustedWordIds(styleOverrides), [styleOverrides]);
   const history: TimelineHistory = {
     ...tlHistory,
     commit: (next, coalesce) => {
@@ -157,7 +194,13 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   };
   const applyDoc = useCallback(
     (op: (d: EditDoc) => EditDoc) => {
-      if (!docStore?.apply(op)) return false;
+      // a caption's own position / size stays with the caption when its
+      // first word is hidden, deleted or merged (UT5)
+      const withKeys = (d: EditDoc) => {
+        const n = op(d);
+        return n === d ? d : followCaptionKeys(d, n);
+      };
+      if (!docStore?.apply(withKeys)) return false;
       order.record("doc");
       return true;
     },
@@ -270,7 +313,16 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   };
   const exportNow = () => {
     if (!online || session.applying) return;
-    void session.apply();
+    // the render reads the doc's style (UT4/UT5): what is pending goes
+    // first, and an export never starts without it (review 14)
+    if (doc.status !== "ready") {
+      void session.apply();
+      return;
+    }
+    void doc.flush().then(
+      (saved) => (saved ? void session.apply() : showToast(t("editor.exportUnsaved"))),
+      () => showToast(t("editor.exportUnsaved")),
+    );
   };
   const openFind = () => {
     if (phone) setSheet("text");
@@ -370,6 +422,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         onPlayPause={session.togglePlay}
         apiRef={textApi}
         toast={showToast}
+        adjusted={liveCaptions ? adjusted : undefined}
       />
     ) : doc.status === "loading" ? (
       <div className={s.empty} role="status" data-testid="ed-text-loading">
@@ -394,7 +447,36 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         toast={showToast}
       />
     );
-  const style = <StylePanel captionPreset={props.captionPreset} videoRef={videoRef} />;
+  const style =
+    liveCaptions && doc.status === "ready" ? (
+      <LiveStylePanel
+        doc={doc.store}
+        apply={applyDoc}
+        videoRef={videoRef}
+        presetsLive={doc.captions.presetsLive}
+        recommended={doc.captions.recommended}
+        phone={phone}
+        zones={zones}
+        onZones={setZones}
+        readOnly={doc.readOnly}
+      />
+    ) : (
+      <StylePanel captionPreset={props.captionPreset} videoRef={videoRef} />
+    );
+  const captionLayer =
+    liveCaptions && doc.status === "ready" ? (
+      <CaptionLayer
+        videoRef={videoRef}
+        doc={doc.store}
+        apply={applyDoc}
+        editSegs={editSegs}
+        toSource={toSource}
+        playingSegId={session.mode === "proxy" ? session.playingSegId : null}
+        phone={phone}
+        zones={zones}
+        readOnly={doc.readOnly}
+      />
+    ) : undefined;
   const undoRedo = (
     <UndoRedo
       phone={phone}
@@ -454,6 +536,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         captionPreset={props.captionPreset}
         duration={props.duration}
         notice={conflict}
+        captionLayer={captionLayer}
+        poster={props.hasPoster ? posterUrl : null}
       />
       {!phone && (
         <aside className={s.side} aria-label={t("editor.panel")} data-tour="text" data-testid="ed-sidepanel">

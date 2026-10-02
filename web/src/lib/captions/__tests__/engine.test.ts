@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { CaptionRenderer } from "../cache";
 import { ANIM_STEPS, activeIndex, frameState, hitTest, pageIndexAt } from "../engine";
 import { ensureFonts, setDefaultFontLoader } from "../fonts";
-import { buildPages, layoutPage } from "../layout";
+import { buildPages, layoutPage, snapPx } from "../layout";
 import { nodeFontLoader } from "../node/fonts";
 import { resolveStyle } from "../presets";
 import { mapToOutput, type SourceWord } from "../timeline";
@@ -118,7 +118,9 @@ describe("CaptionRenderer (bitmap cache)", () => {
     r.drawFrame(target, 1);
     r.update({ style: style("power", { sizeScale: 1.3 }) });
     expect(r.drawFrame(target, 1).changed).toBe(true);
-    expect(r.layout(r.state(1)!.page).px).toBeCloseTo(0.09 * 1.3 * W, 6);
+    // a page at the style's size (not a single word too wide for the line)
+    const i = r.pages.findIndex((p) => !p.oversized);
+    expect(r.layout(i).px).toBe(snapPx(style("power", { sizeScale: 1.3 }).font.size * W));
   });
 
   it("stays within its pixel budget", () => {
@@ -135,7 +137,7 @@ describe("CaptionRenderer (bitmap cache)", () => {
     const r = new CaptionRenderer({ words: AUDIT_WORDS, style: s, W, H, lang: "en", surface });
     const st = r.state(1.0)!;
     const l = r.layout(st.page);
-    const b = l.lines[1].words[1]; // "SECONDS"
+    const b = l.lines.flatMap((x) => x.words).find((w) => w.text === "SECONDS")!;
     const hit = r.hitTest(1.0, b.x + b.width / 2, b.baseline - l.capH / 2);
     expect(hit).toMatchObject({ text: "seconds", id: "a3" });
     expect(hitTest(r.pages[st.page], layoutPage(r.pages[st.page], s, { W, H }), s, 2, 2)).toBeNull();

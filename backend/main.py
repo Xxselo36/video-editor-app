@@ -4341,7 +4341,33 @@ def get_doc(job_id: str, user: User | None = Depends(current_user)):
     if job.doc is None:
         raise _no_doc(job)
     return {"doc": job.doc, "rev": job.doc_rev,
-            "read_only": job.status != "awaiting_review"}
+            "read_only": job.status != "awaiting_review",
+            **_doc_captions(job)}
+
+
+def _doc_captions(job: Job) -> dict[str, Any]:
+    """What the editor's caption layer and Style panel need (UT5):
+    caption_engine — "v2" / "v1" (pinned or the server's mode) or
+    "optin" (the browser's ?captions=v2 decides); render_style — the
+    style an export draws right now (captions_v2.style_for: before the
+    first editor save a v1 caption_preset still decides the look);
+    presets_live — the presets the Style panel offers and PATCH accepts;
+    recommended — the top three for this transcript (doc.recommended)."""
+    doc = job.doc or {}
+    lang = doc.get("language") or job.language
+    aspect = (doc.get("format") or {}).get("aspect")
+    try:
+        wps = edit_doc.words_per_second(doc.get("words") or [], job.segments)
+    except Exception:
+        wps = None
+    style = captions_v2.style_for(job)
+    return {
+        "caption_engine": captions_v2.editor_engine(job),
+        "render_style": style,
+        "presets_live": edit_doc.live_presets(),
+        "recommended": [p for p in edit_doc.recommended(lang, aspect, wps, style["presetId"])
+                        if p != "none"][:3],
+    }
 
 
 def _doc_state_refusal(job: Job) -> ApiRefusal | None:
@@ -4479,6 +4505,19 @@ def job_peaks(job_id: str, user: User | None = Depends(media_user)):
         raise HTTPException(404, "peaks_not_ready")
     return _media(job, job.peaks_key, "application/octet-stream",
                   "peaks_not_ready", cache="private, max-age=604800, immutable")
+
+
+@app.get("/jobs/{job_id}/poster")
+def job_poster(job_id: str, user: User | None = Depends(media_user)):
+    """poster.jpg: the frame at the start of the first kept clip, as the
+    analysis cut it (`has_poster` in GET /jobs/{id}). The editor shows it
+    until its video has a frame of its own (UT5); after the user changes
+    the first clip it may be stale, which the editor knows."""
+    job = get_owned_job(job_id, user)
+    if not job.poster_key:
+        raise HTTPException(404, "poster_not_ready")
+    return _media(job, job.poster_key, "image/jpeg",
+                  "poster_not_ready", cache="private, max-age=604800, immutable")
 
 
 @app.get("/me")

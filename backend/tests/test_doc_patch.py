@@ -77,6 +77,50 @@ def test_patch_style_format_words(client):
                                                          "w0004": {"sizeScale": 0.8}}
 
 
+def test_get_doc_tells_the_editor_about_captions(client, monkeypatch):
+    """UT5: the engine the editor previews for, the style an export draws
+    now, the live presets and the recommended ones."""
+    monkeypatch.delenv("CLEO_CAPTION_ENGINE", raising=False)
+    monkeypatch.delenv("CLEO_CAPTION_PRESETS_LIVE", raising=False)
+    job = _review_job()
+    body = client.get(f"/jobs/{job.id}/doc").json()
+    assert body["caption_engine"] == "optin"
+    assert body["render_style"] == {"presetId": "power", "overrides": {}}
+    assert body["presets_live"] == list(D.PRESET_IDS)
+    assert len(body["recommended"]) == 3 and "power" in body["recommended"]
+    # before the first editor save, a v1 caption_preset decides the export's look
+    v1 = _review_job(settings={"caption_preset": "clean"})
+    assert client.get(f"/jobs/{v1.id}/doc").json()["render_style"] == {
+        "presetId": "minimal", "overrides": {"y": 0.7}}
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "v2")
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "power,karaoke")
+    body = client.get(f"/jobs/{job.id}/doc").json()
+    assert body["caption_engine"] == "v2" and body["presets_live"] == ["power", "karaoke", "none"]
+    pinned = _review_job(caption_engine="v1")
+    assert client.get(f"/jobs/{pinned.id}/doc").json()["caption_engine"] == "v1"
+
+
+def test_per_caption_overrides_round_trip_and_old_docs_keep_working(client):
+    """overrides.captions is additive: a doc without it reads and patches
+    as before; with it, the editor's whole style comes back unchanged and
+    a later style without it drops it."""
+    job = _review_job()
+    assert "captions" not in store.get(job.id).doc["style"]["overrides"]
+    assert _patch(client, job.id, {"base_rev": 0, "rev": 1, "format": {"aspect": "9:16"}}).status_code == 200
+    style = {"presetId": "karaoke", "overrides": {
+        "y": 0.6, "captions": {"w0001": {"y": 0.31, "sizeScale": 1.25}, "w0004": {"sizeScale": 0.6}}}}
+    assert _patch(client, job.id, {"base_rev": 1, "rev": 2, "style": style}).status_code == 200
+    assert client.get(f"/jobs/{job.id}/doc").json()["doc"]["style"] == style
+    assert _patch(client, job.id, {"base_rev": 2, "rev": 3,
+                                   "style": {"presetId": "karaoke", "overrides": {"y": 0.6}}}).status_code == 200
+    assert store.get(job.id).doc["style"] == {"presetId": "karaoke", "overrides": {"y": 0.6}}
+    # the cap on entries
+    many = {f"w{i}": {"y": 0.5} for i in range(D.MAX_CAPTION_OVERRIDES + 1)}
+    r = _patch(client, job.id, {"base_rev": 3, "rev": 4,
+                                "style": {"presetId": "power", "overrides": {"captions": many}}})
+    assert r.status_code in (400, 413)
+
+
 def test_v1_alias_is_migrated(client, monkeypatch):
     job = _review_job()
     r = _patch(client, job.id, {"base_rev": 0, "rev": 1,
@@ -124,6 +168,16 @@ def test_state_guards(client):
                                          "overrides": {"captions": {"w1": {"y": 2}}}}}, "bad_style"),
     ({"base_rev": 0, "rev": 1, "style": {"presetId": "power",
                                          "overrides": {"captions": {"w1": {"x": 0.2}}}}}, "bad_style"),
+    ({"base_rev": 0, "rev": 1, "style": {"presetId": "power",
+                                         "overrides": {"captions": {"w1": {}}}}}, "bad_style"),
+    ({"base_rev": 0, "rev": 1, "style": {"presetId": "power",
+                                         "overrides": {"captions": {"w 1": {"y": 0.2}}}}}, "bad_style"),
+    ({"base_rev": 0, "rev": 1, "style": {"presetId": "power",
+                                         "overrides": {"captions": {"w1": {"sizeScale": 1.7}}}}}, "bad_style"),
+    ({"base_rev": 0, "rev": 1, "style": {"presetId": "power",
+                                         "overrides": {"captions": {"w1": {"y": True}}}}}, "bad_style"),
+    ({"base_rev": 0, "rev": 1, "style": {"presetId": "power",
+                                         "overrides": {"captions": [{"y": 0.2}]}}}, "bad_style"),
     ({"base_rev": 0, "rev": 1, "format": {"aspect": "1:1"}}, "bad_format"),
     ({"base_rev": 0, "rev": 1, "words": {"upsert": [{"id": "w0001", "text": "", "start": 0,
                                                      "end": 1}]}}, "bad_word"),
@@ -140,7 +194,8 @@ def test_state_guards(client):
                                                      "end": 9.5}]}}, "word_out_of_range"),
     ({"base_rev": 0, "rev": 1, "words": {"add": []}}, "bad_words"),
 ])
-def test_validation(client, body, code):
+def test_validation(client, monkeypatch, body, code):
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "clipper,power")
     job = _review_job()
     r = _patch(client, job.id, body)
     assert r.status_code == 400 and r.json()["detail"] == code, r.text
@@ -169,6 +224,7 @@ def test_payload_cap(client):
 
 
 def test_patch_job_caption_style(client, monkeypatch):
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "clipper,power")
     busy = store.create(None, {"caption_preset": "clipper"})
     store.update(busy.id, status="processing")
     r = client.patch(f"/jobs/{busy.id}", json={"caption_style": "clipper"})

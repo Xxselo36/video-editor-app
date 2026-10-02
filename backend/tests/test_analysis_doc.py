@@ -81,6 +81,25 @@ def test_analyze_only_builds_the_doc_and_measures(tmp_path, fake_transcription):
     assert set(res["audio_loudness"]) == {"I", "TP", "LRA", "thresh", "offset"}
     assert abs(Path(res["peaks_path"]).stat().st_size - 300) <= 3
     assert res["font_files"] == {}
+    # UT5: the first kept clip's first frame as a small JPEG (the editor's still)
+    from PIL import Image
+    with Image.open(res["poster_path"]) as im:
+        assert im.format == "JPEG" and im.size == (320, 240)
+
+
+def test_poster_is_the_first_kept_frame_and_at_most_540_wide(tmp_path):
+    src = tmp_path / "wide.mp4"
+    subprocess.run([get_ffmpeg_path(), "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=red:s=1280x720:r=25:d=1[r];color=c=blue:s=1280x720:r=25:d=2[b];"
+                    "[r][b]concat=n=2:v=1:a=0", "-pix_fmt", "yuv420p", str(src)], check=True)
+    from PIL import Image
+    out = tmp_path / "poster.jpg"
+    assert pipeline.make_poster(str(src), 1.5, str(out))
+    with Image.open(out) as im:
+        assert im.size == (540, 304)
+        r, g, b = im.convert("RGB").getpixel((270, 152))
+        assert b > 200 and r < 60          # the frame at 1.5 s: blue, not the red start
+    assert pipeline.make_poster(str(tmp_path / "missing.mp4"), 0, str(tmp_path / "x.jpg")) is False
 
 
 def test_japanese_doc_gets_a_font_subset(tmp_path, fake_transcription):
@@ -98,6 +117,8 @@ def _extras_result(output_dir, **extra):
     res = analysis_result(output_dir, 3.0)
     peaks = Path(output_dir) / "peaks.bin"
     peaks.write_bytes(bytes(range(100)) * 3)
+    poster = Path(output_dir) / "poster.jpg"
+    poster.write_bytes(b"\xff\xd8poster")
     fonts = Path(output_dir) / "fonts"
     fonts.mkdir()
     files = {}
@@ -109,7 +130,7 @@ def _extras_result(output_dir, **extra):
     res.update(doc=D.build_doc(D.words_from_transcript(WORDS), "ja", {}),
                mezz_fps=29.97, mezz_cfr=True,
                audio_loudness={"I": -20.0, "TP": -3.0, "LRA": 4.0, "thresh": -30.0, "offset": 0.1},
-               peaks_path=str(peaks),
+               peaks_path=str(peaks), poster_path=str(poster),
                font_files={"noto-sans-jp-800": {"family": "cc-noto-sans-jp-800-0123abcd",
                                                 "rev": "0123abcd", "chars": "今", "missing": "",
                                                 "files": files}})
@@ -126,6 +147,8 @@ def _assert_committed(job_id):
     assert got.audio_loudness["I"] == -20.0
     assert got.peaks_key == f"jobs/{job_id}/peaks.bin"
     assert media.size(got.peaks_key, store=media.store_of(got)) == 300
+    assert got.poster_key == f"jobs/{job_id}/poster.jpg"
+    assert got.to_dict()["has_poster"] is True
     sub = got.font_subsets["noto-sans-jp-800"]
     assert sub["woff2"] == f"jobs/{job_id}/fonts/noto-sans-jp-800.0123abcd.woff2"
     assert got.media_bytes[sub["ttf"]] == 4
@@ -162,6 +185,10 @@ def test_wp1_commit_stores_doc_and_media(client, monkeypatch):
     assert r.status_code == 200 and r.json()["rev"] == 0 and r.json()["read_only"] is False
     r = client.get(f"/jobs/{job.id}/peaks", follow_redirects=False)
     assert r.status_code in (200, 307)
+    r = client.get(f"/jobs/{job.id}/poster", follow_redirects=False)
+    assert r.status_code in (200, 307)
+    if r.status_code == 200:
+        assert r.headers["content-type"] == "image/jpeg" and r.content == b"\xff\xd8poster"
     r = client.get(f"/jobs/{job.id}/fonts/noto-sans-jp-800.0123abcd.json",
                    follow_redirects=False)
     assert r.status_code in (200, 307)
@@ -178,6 +205,8 @@ def test_analysis_without_doc_commits_as_before(monkeypatch):
     assert got.status == "awaiting_review"
     assert (got.doc, got.peaks_key, got.font_subsets, got.mezz_cfr) == (None, None, {}, False)
     assert got.to_dict()["has_doc"] is False
+    # no poster (an analysis from before UT5): the editor seeks its video instead
+    assert got.poster_key is None and got.to_dict()["has_poster"] is False
 
 
 @pytest.mark.no_task_leader
@@ -203,3 +232,32 @@ def test_worker_commit_stores_doc_and_media(client, monkeypatch):
     t.join(30)
     assert out == [{"committed": True}]
     _assert_committed(job.id)
+
+
+def test_poster_route_without_a_poster(client):
+    """A job analysed before UT5 (or whose poster failed): 404, the editor
+    seeks its video to the first clip instead."""
+    job = _new_job()
+    r = client.get(f"/jobs/{job.id}/poster")
+    assert r.status_code == 404 and r.json()["detail"] == "poster_not_ready"
+
+
+def test_a_failed_poster_upload_doesnt_fail_the_analysis(tmp_path, capsys):
+    """UT5 (review 15): the poster is optional — its put fails, the rest
+    is stored, no poster_key."""
+    poster = tmp_path / "poster.jpg"
+    poster.write_bytes(b"\xff\xd8x")
+    peaks = tmp_path / "peaks.bin"
+    peaks.write_bytes(b"\x01" * 10)
+    stored = []
+
+    def put(path, key, ctype):
+        if key.endswith("poster.jpg"):
+            raise OSError("R2 down")
+        stored.append(key)
+        return 10
+    fields, sizes = pipeline.store_analysis_extras(
+        {"poster_path": str(poster), "peaks_path": str(peaks)}, "0123456789ab", put)
+    assert "poster_key" not in fields and fields["peaks_key"].endswith("peaks.bin")
+    assert stored == ["jobs/0123456789ab/peaks.bin"] and list(sizes) == stored
+    assert "[poster] not stored" in capsys.readouterr().out

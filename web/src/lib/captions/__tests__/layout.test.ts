@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { registerCaptionFont } from "../fonts";
-import { buildPages, layoutPage } from "../layout";
+import { buildPages, layoutPage, snapPx } from "../layout";
 import type { FontJson } from "../metrics";
 import { resolveStyle } from "../presets";
 import type { CaptionStyle, CaptionWord, Page } from "../types";
@@ -143,7 +143,9 @@ describe("font size", () => {
       });
       const px = new Set(pages.filter((p) => !p.oversized).map((p) => layoutPage(p, s, { W, H, lang: "en" }).px));
       expect(px.size).toBe(1);
-      expect([...px][0]).toBeCloseTo(s.font.size * W, 9);
+      // the style's size on the whole-pixel grid (layout.ts PX_STEP)
+      expect([...px][0]).toBe(snapPx(s.font.size * W));
+      expect(Math.abs([...px][0] - s.font.size * W)).toBeLessThanOrEqual(0.5);
     }
   });
 });
@@ -222,7 +224,7 @@ describe("CJK (Intl.Segmenter, fixture metrics)", () => {
     const pages = buildPages(words, s, { W, H, lang: "ja" });
     const l = layoutPage(pages[0], s, { W, H, lang: "ja" });
     const first = l.lines[0].words;
-    const px = s.font.size * W;
+    const px = snapPx(s.font.size * W);
     expect(first[0].width).toBeCloseTo([...pages[0].words[0].text].length * px, 6);
     // words touch: no space between CJK words
     for (let i = 1; i < first.length; i++) expect(first[i].x).toBeCloseTo(first[i - 1].x + first[i - 1].width, 6);

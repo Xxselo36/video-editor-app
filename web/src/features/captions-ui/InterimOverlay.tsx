@@ -35,7 +35,7 @@ import { useT } from "@/i18n";
 import {
   canvasPixels,
   contentBox,
-  interimStyleRef,
+  interimStyleRef, pinV1Geometry,
   interimWords,
   pageText,
   sourceBreaks,
@@ -187,7 +187,7 @@ function InterimOverlay({ videoRef, phrases, units, captionPreset, mode, segment
     const prepare = () => {
       if (!L.W || !L.H) return;
       const ref = interimStyleRef(presetRef.current);
-      const style: CaptionStyle | null = resolveStyle(ref.presetId, ref.overrides, { W: L.W, H: L.H });
+      const style: CaptionStyle | null = pinV1Geometry(resolveStyle(ref.presetId, ref.overrides, { W: L.W, H: L.H }), presetRef.current);
       const gen = ++L.gen;
       if (!style || style.presetId === "none") {
         L.renderer?.dispose();

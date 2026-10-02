@@ -681,3 +681,25 @@ def test_r2_job_without_r2_config_is_503_not_local(client, no_r2):
     r = client.get(f"/jobs/{job.id}/preview-video")
     assert (r.status_code, r.json()) == (
         503, {"detail": "storage_unavailable", "code": "storage_unavailable", "params": {}})
+
+
+def test_backfill_moves_the_poster_and_compares_it(r2, analyse, monkeypatch):
+    """UT5 (review 13): poster.jpg moves with the job, and a poster that
+    changes during the move makes the commit fail (compare-and-set)."""
+    monkeypatch.delenv("CLEO_MEDIA_BACKEND", raising=False)
+    job = _analysed_job(r2)
+    key = f"jobs/{job.id}/poster.jpg"
+    media.put_file(__file__, key, content_type="image/jpeg", store="local")
+    store.update(job.id, poster_key=key)
+    job = store.get(job.id)
+    assert key in [it["key"] for it in r2_backfill.move_plan(job)]
+    real_put = media.put_file
+
+    def put(path, k, **kw):
+        if k == job.mezz_key:   # another poster lands meanwhile
+            store.update(job.id, poster_key=f"jobs/{job.id}/poster2.jpg")
+        return real_put(path, k, **kw)
+    monkeypatch.setattr(media, "put_file", put)
+    res = r2_backfill.backfill_job(store.get(job.id))
+    assert res["status"] == "skipped"
+    assert store.get(job.id).media_store == "local"

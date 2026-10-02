@@ -5,6 +5,7 @@ import fontsJson from "../fonts.json";
 import { V1_PRESETS, migratePresetId } from "../migrate";
 import { PRESET_NAMES } from "../presetNames";
 import {
+  DEFAULT_LIVE_PRESETS,
   DEFAULT_PRESET,
   LAUNCH_PRESETS,
   PRESET_IDS,
@@ -66,8 +67,9 @@ describe("launch presets", () => {
 });
 
 describe("live list", () => {
-  it("defaults to clipper + power; 'all' opens every preset", () => {
-    expect(parseLiveList(undefined).sort()).toEqual(["clipper", "none", "power"]);
+  it("defaults to all twelve (UT5); 'all' opens every preset", () => {
+    expect(parseLiveList(undefined)).toEqual([...LAUNCH_PRESETS, "none"]);
+    expect(DEFAULT_LIVE_PRESETS).toBe(LAUNCH_PRESETS.join(","));
     expect(parseLiveList("all")).toEqual([...PRESET_IDS]);
     expect(parseLiveList(" power, neon ,bogus")).toEqual(["power", "neon", "none"]);
     const live = parseLiveList("clipper,power");
@@ -98,7 +100,7 @@ describe("resolveStyle", () => {
       wordsPerPage: 2,
     })!;
     expect(s.layout.y).toBe(0.5);
-    expect(s.font.size).toBeCloseTo(0.09 * 1.6, 9); // clamped to 1.6
+    expect(s.font.size).toBeCloseTo(0.128 * 1.6, 9); // clamped to 1.6
     expect(s.font.case).toBe("none");
     expect(s.fill).toEqual({ color: "#00FF00" });
     expect(s.highlight.color).toBe("#FF0000");
@@ -121,7 +123,7 @@ describe("resolveStyle", () => {
     const s = resolveStyle("power", { textColor: "red; x", y: Number.NaN, sizeScale: Number.POSITIVE_INFINITY })!;
     expect(s.fill.color).toBe("#FFFFFF");
     expect(s.layout.y).toBe(0.68);
-    expect(s.font.size).toBe(0.09);
+    expect(s.font.size).toBe(0.128); // the approved DF size: 7.2 % of a 9:16 frame's height
   });
 });
 

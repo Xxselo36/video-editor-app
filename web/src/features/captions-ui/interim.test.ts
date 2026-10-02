@@ -161,3 +161,23 @@ describe("the engine on the interim feed", () => {
     }
   });
 });
+
+describe("pinV1Geometry", () => {
+  it("keeps the classic preview at its pre-UT5 size (the export is still the v1 burn)", async () => {
+    const { resolveStyle } = await import("@/lib/captions");
+    const { pinV1Geometry } = await import("./interim");
+    const ref = interimStyleRef("classic");
+    const style = pinV1Geometry(resolveStyle(ref.presetId, ref.overrides, { W: 1080, H: 1920 }), "classic");
+    expect(style?.font.size).toBe(0.09);
+    expect(style?.layout.maxWidth).toBe(0.8);
+    expect(style?.presetId).toBe("power");
+  });
+  it("leaves other presets and null alone", async () => {
+    const { resolveStyle } = await import("@/lib/captions");
+    const { pinV1Geometry } = await import("./interim");
+    const s = resolveStyle("power", {}, { W: 1080, H: 1920 });
+    expect(pinV1Geometry(s, "clipper")).toBe(s);
+    expect(pinV1Geometry(null, "classic")).toBeNull();
+  });
+});
+

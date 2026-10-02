@@ -42,6 +42,7 @@ Test API (only this script registers it; never part of the backend):
               age_s (created that long ago), clip ("grid" | "speech"),
               orientation ("portrait" | "landscape"), settings (dict),
               caption_preset, doc (false: no edit document),
+              poster (false: no first-frame poster, as before UT5),
               proxy: "off"   has_proxy false, proxy-video 404 (today's
                              production default: CLEO_PROXY_VIDEO unset)
                      "on"    has_proxy true, proxy-video plays
@@ -321,7 +322,12 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         media._link_or_copy(files["proxy"], out_dir / pipeline.PROXY_NAME)
         preview = out_dir / "preview.mp4"
         chromium_cuts_preview(str(files["proxy"]), data["segments"], str(preview))
+        poster = out_dir / pipeline.POSTER_NAME
+        segs = data["segments"]
+        poster_ok = pipeline.make_poster(str(files["proxy"]), float(segs[0][0]) if segs else 0.0,
+                                         str(poster))
         return {"normalized_path": str(norm), "preview_path": str(preview),
+                "poster_path": str(poster) if poster_ok else None,
                 "segments": [tuple(s) for s in data["segments"]], "subtitles": data["subtitles"],
                 "duration": data["duration"], "cut_ranges": data["cut_ranges"],
                 "language": data["language"], "audio_warnings": audio_warnings or [],
@@ -438,13 +444,15 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         return job
 
     def seed_review(job, clip: str, orientation: str, warnings: list[str] | None = None,
-                    with_doc: bool = True) -> None:
+                    with_doc: bool = True, with_poster: bool = True) -> None:
         where = media.backend()
         ws = M._workspace(job.id, "seed")
         try:
             res = analysis_result(clip, orientation, ws, warnings, settings=job.settings)
             if not with_doc:
                 res["doc"] = None
+            if not with_poster:
+                res["poster_path"] = None
             stored = M._store_analysis(job.id, res, lambda *_a: None, where)
         finally:
             shutil.rmtree(M._workspace(job.id), ignore_errors=True)
@@ -506,7 +514,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             clip = clip or "speech"
             job = create(opts, TIKTOK, "tiktok_3_mistakes.mp4" if name == "review_speech"
                          else "interview_cut_final.mp4", tiktok)
-            seed_review(job, clip, orientation, with_doc=opts.get("doc", True) is not False)
+            seed_review(job, clip, orientation, with_doc=opts.get("doc", True) is not False,
+                        with_poster=opts.get("poster", True) is not False)
             if name == "render_failed":
                 store.update(job.id, message="render_failed",
                              error="Render worker unavailable (modal_unavailable)",

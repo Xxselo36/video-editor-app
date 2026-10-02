@@ -10,11 +10,13 @@ import { ensureFonts, registerCaptionFont } from "../../fonts";
 import { layoutJSON } from "../../layout";
 import { setFontTables, type FontJson, type FontTables } from "../../metrics";
 import { resolveStyle } from "../../presets";
-import type { CaptionWord, Ctx2D } from "../../types";
+import type { CaptionWord, Ctx2D, StyleOverrides } from "../../types";
 import fontsJson from "../../fonts.json";
 
 export type CellRequest = {
   preset: string;
+  /** Style overrides (UT5: per-caption position / size). */
+  overrides?: StyleOverrides;
   lang: string;
   words: CaptionWord[];
   times: number[];
@@ -39,7 +41,7 @@ async function cell(req: CellRequest) {
     registered.add(req.cjk.id);
   }
   const { W, H, lang, band } = req;
-  const style = resolveStyle(req.preset, {}, { W, H });
+  const style = resolveStyle(req.preset, req.overrides ?? {}, { W, H });
   if (!style) throw new Error(`no style ${req.preset}`);
   const fonts = await ensureFonts(style, { lang, text: req.words.map((w) => w.text) });
   const r = new CaptionRenderer({ words: req.words, style, W, H, lang, surface: browserSurface });

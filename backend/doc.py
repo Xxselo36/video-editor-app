@@ -47,7 +47,9 @@ LAUNCH_PRESETS = ("power", "mega", "clipper", "karaoke", "boxed", "punch",
                   "reveal", "neon", "gradient", "elegant", "subtitle",
                   "minimal")
 PRESET_IDS = LAUNCH_PRESETS + ("none",)
-DEFAULT_LIVE_PRESETS = "clipper,power"
+# UT5: all twelve (each is in the parity suite, web/src/lib/captions/
+# __tests__/parity.test.ts); CLEO_CAPTION_PRESETS_LIVE narrows it.
+DEFAULT_LIVE_PRESETS = ",".join(LAUNCH_PRESETS)
 # v1 preset ids → v2 styles (web/src/lib/captions/migrate.ts V1_PRESETS).
 V1_PRESETS: dict[str, dict[str, Any]] = {
     "clean": {"presetId": "minimal", "overrides": {}},

@@ -97,7 +97,21 @@ export type CaptionStyle = {
     maxGapSec: number;
   };
   timing: { holdSec: number };
+  /** The size scale the style's own "size" override applied (1 when unset). */
+  sizeScale?: number;
+  /**
+   * Per-caption position and size (UT5), by caption id: the id of the
+   * caption page's first word. Only present when some caption has one.
+   */
+  captions?: Readonly<Record<string, CaptionAdjust>>;
 };
+
+/**
+ * One caption's own position and size (UT5, "Nur hier"): `y` is the centre
+ * of its text block (0..1 of the frame), `sizeScale` its size against the
+ * preset (0.6–1.6), replacing the style's own y / sizeScale for that caption.
+ */
+export type CaptionAdjust = { y?: number; sizeScale?: number };
 
 /** Per-video overrides (EditDoc `style.overrides`, launch set, review G3). */
 export type StyleOverrides = Partial<{
@@ -109,6 +123,8 @@ export type StyleOverrides = Partial<{
   highlightColor: string;
   animation: AnimationKind;
   offsetMs: number;
+  /** Per-caption position / size by caption id (UT5; backend/doc.py validate_overrides). */
+  captions: Record<string, CaptionAdjust>;
 }>;
 
 export type StyleRef = { presetId: string; overrides: StyleOverrides };
@@ -142,6 +158,8 @@ export type Page = {
   end: number;
   /** A single word wider than the line: this page alone gets a smaller font. */
   oversized: boolean;
+  /** The caption's own position / size (style.captions), keyed by `id`. */
+  adjust?: CaptionAdjust & { id: string };
 };
 
 export type WordBox = {

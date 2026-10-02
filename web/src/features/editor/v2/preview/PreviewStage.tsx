@@ -28,8 +28,11 @@ export function PreviewStage({
   phoneExtra,
   fullscreenRef,
   notice,
+  poster,
   ...slot
 }: CaptionSlotProps & {
+  /** The first-frame poster (GET /jobs/{id}/poster), when the job has one. */
+  poster?: string | null;
   phone: boolean;
   sheetOpen: boolean;
   offline: boolean;
@@ -120,7 +123,7 @@ export function PreviewStage({
           data-testid="ed-frame"
           data-tour="preview"
         >
-          <VideoLayer {...slot} tapToPlay={phone && sheetOpen && !fs.active} paused={paused} />
+          <VideoLayer {...slot} tapToPlay={phone && sheetOpen && !fs.active} paused={paused} poster={poster} />
           <div className={s.frameRing} aria-hidden />
         </div>
         {fs.active && (

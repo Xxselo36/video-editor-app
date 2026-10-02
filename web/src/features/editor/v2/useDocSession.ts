@@ -45,16 +45,68 @@ export type DocSession =
       retry: () => void;
       /** Load the server's doc (after a conflict); local changes are dropped. */
       reload: () => Promise<void>;
+      /** Send what's pending now (before an export: the render reads the doc's style). */
+      flush: () => Promise<boolean>;
+      /** UT5: what the caption layer and the Style panel need (GET /jobs/{id}/doc). */
+      captions: DocCaptions;
     };
 
-type Loaded = { store: DocStore; saver: DocSaver; pool: IdPool; readOnly: boolean };
+/**
+ * UT5 (GET /jobs/{id}/doc): `engine` — the export's caption engine
+ * ("optin": the browser's ?captions=v2 decides); `presetsLive` — the
+ * presets the Style panel offers; `recommended` — up to three for this
+ * transcript. The doc's style starts as the server's `render_style`
+ * (what an export draws now: before the first editor save, a v1
+ * caption preset decides).
+ */
+export type DocCaptions = { engine: "v1" | "v2" | "optin"; presetsLive: string[] | null; recommended: string[] };
 
-async function fetchDoc(jobId: string): Promise<{ doc: EditDoc; rev: number; read_only: boolean } | null> {
+const NO_CAPTIONS: DocCaptions = { engine: "v1", presetsLive: null, recommended: [] };
+
+function docCaptions(j: Record<string, unknown>): DocCaptions {
+  const e = j.caption_engine;
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : null);
+  return {
+    engine: e === "v2" || e === "optin" ? e : "v1",
+    presetsLive: strings(j.presets_live),
+    recommended: strings(j.recommended) ?? [],
+  };
+}
+
+const isStyle = (v: unknown): v is EditDoc["style"] =>
+  !!v && typeof v === "object" && typeof (v as { presetId?: unknown }).presetId === "string";
+
+type Loaded = { store: DocStore; saver: DocSaver; pool: IdPool; readOnly: boolean; captions: DocCaptions };
+
+type Fetched = { doc: EditDoc; rev: number; read_only: boolean; captions: DocCaptions; renderStyle: EditDoc["style"] | null };
+
+async function fetchDoc(jobId: string): Promise<Fetched | null> {
   const r = await apiFetch(`/jobs/${jobId}/doc`);
   if (!r.ok) return null;
   const j = await r.json();
   if (!j || !j.doc || !Array.isArray(j.doc.words)) return null;
-  return { doc: j.doc as EditDoc, rev: typeof j.rev === "number" ? j.rev : 0, read_only: !!j.read_only };
+  const captions = docCaptions(j);
+  // Only a live style: the first save sends it, and PATCH refuses others.
+  const renderStyle =
+    isStyle(j.render_style) && (!captions.presetsLive || captions.presetsLive.includes(j.render_style.presetId))
+      ? j.render_style
+      : null;
+  return {
+    doc: j.doc as EditDoc,
+    rev: typeof j.rev === "number" ? j.rev : 0,
+    read_only: !!j.read_only,
+    captions,
+    renderStyle,
+  };
+}
+
+/**
+ * The doc as the editor shows it (UT5): with the style an export draws now
+ * — before the first editor save that can be a v1 caption preset's look,
+ * not yet the doc's own style. Saved with the next edit.
+ */
+function withRenderStyle(doc: EditDoc, style: EditDoc["style"] | null): EditDoc {
+  return style && JSON.stringify(style) !== JSON.stringify(doc.style) ? { ...doc, style } : doc;
 }
 
 /** A word the server refused was adjusted (its old text). */
@@ -92,7 +144,7 @@ export function useDocSession(
         // Newer v1 sentence edits go into the doc (saved below), so
         // opening v2 never reverts or overwrites them (state/reconcile.ts).
         const start = reconcileV1(res.doc, res.rev, v1Ref.current, pool);
-        const store = createDocStore(start);
+        const store = createDocStore(withRenderStyle(start, res.renderStyle));
         const saver = new DocSaver(res.doc, res.rev, {
           jobId,
           fetch: apiFetch,
@@ -115,10 +167,10 @@ export function useDocSession(
           const src = captionSource(doc.words);
           captionRef.current?.(src.phrases, src.units, true);
         };
-        if (start !== res.doc) saver.schedule(start);
+        if (start !== res.doc) saver.schedule(store.getState().present);
         const src = captionSource(start.words);
         captionRef.current?.(src.phrases, src.units, false);
-        made = { store, saver, pool, readOnly: res.read_only };
+        made = { store, saver, pool, readOnly: res.read_only, captions: res.captions };
         setLoaded(made);
       });
     return () => {
@@ -155,14 +207,30 @@ export function useDocSession(
     if (!loaded || loaded === "none") return;
     const res = await fetchDoc(jobId).catch(() => null);
     if (!res) return;
-    loaded.store.reset(res.doc);
+    loaded.store.reset(withRenderStyle(res.doc, res.renderStyle));
     loaded.saver.reset(res.doc, res.rev);
     for (const w of res.doc.words) loaded.pool.add(w.id);
     const src = captionSource(res.doc.words);
     captionRef.current?.(src.phrases, src.units, false);
   }, [jobId, loaded]);
 
+  /** True when the server has every change (DocSaver.settle). */
+  const flush = useCallback(async () => {
+    if (!loaded || loaded === "none") return true;
+    return loaded.saver.settle();
+  }, [loaded]);
+
   if (loaded === null) return { status: "loading" };
   if (loaded === "none") return { status: "none" };
-  return { status: "ready", store: loaded.store, pool: loaded.pool, saveState, readOnly: loaded.readOnly, retry, reload };
+  return {
+    status: "ready",
+    store: loaded.store,
+    pool: loaded.pool,
+    saveState,
+    readOnly: loaded.readOnly,
+    retry,
+    reload,
+    flush,
+    captions: loaded.captions ?? NO_CAPTIONS,
+  };
 }

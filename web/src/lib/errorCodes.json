@@ -89,6 +89,7 @@
     "not_found",
     "parts_missing",
     "peaks_not_ready",
+    "poster_not_ready",
     "preset_not_live",
     "presign_failed",
     "preview_not_ready",

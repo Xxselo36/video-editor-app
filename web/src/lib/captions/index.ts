@@ -15,13 +15,15 @@
 export type * from "./types";
 export { ANIM_STEPS, activeIndex, buildPages, drawCaptions, frameState, hitTest, layoutPage, pageIndexAt } from "./engine";
 export type { DrawResult, FrameState } from "./engine";
-export { caseText, geometry, layoutJSON, segmentChunk } from "./layout";
+export { ADJUST_MAX_WIDTH, caseText, geometry, layoutJSON, segmentChunk } from "./layout";
+export { adjustedIds, captionIdOf, effectiveAdjust, normAdjust, resetAdjust, setCaptionAdjust, setStyleAdjust } from "./adjust";
 export { CaptionRenderer, browserSurface } from "./cache";
 export type { RendererInput, RendererOptions } from "./cache";
 export {
   DEFAULT_LIVE_PRESETS,
   DEFAULT_PRESET,
   LAUNCH_PRESETS,
+  captionAdjusts,
   PRESET_IDS,
   defaultY,
   getPreset,

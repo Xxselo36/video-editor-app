@@ -13,7 +13,7 @@
  * GET /config after UX5): only live presets are offered in the Style panel
  * and accepted by the v2 render; the rest are "preview" (test page only).
  */
-import type { CaptionStyle, PresetId, StyleOverrides } from "./types";
+import type { CaptionAdjust, CaptionStyle, PresetId, StyleOverrides } from "./types";
 
 export const DEFAULT_PRESET: PresetId = "power";
 
@@ -35,8 +35,12 @@ export const LAUNCH_PRESETS = [
 
 export const PRESET_IDS: readonly PresetId[] = [...LAUNCH_PRESETS, "none"];
 
-/** Live list until the owner signs each style's rubric (UT4). */
-export const DEFAULT_LIVE_PRESETS = "clipper,power";
+/**
+ * Live by default: all twelve (UT5 — every preset is in the parity suite,
+ * __tests__/parity.test.ts). CLEO_CAPTION_PRESETS_LIVE narrows it on the
+ * server; the editor gets the server's list with the doc.
+ */
+export const DEFAULT_LIVE_PRESETS = "power,mega,clipper,karaoke,boxed,punch,reveal,neon,gradient,elegant,subtitle,minimal";
 
 type PresetDef = Omit<CaptionStyle, "presetId">;
 
@@ -61,8 +65,10 @@ const HOLD = { holdSec: 0.35 };
 
 const PRESETS: Record<Exclude<PresetId, "none">, PresetDef> = {
   // Bold upper case, thick black outline, the spoken word yellow, numbers green.
+  // Size as in the approved DF mock (owner, UT5): 7.2 % of a 9:16 frame's
+  // height = 0.128 × its width; lines up to 84 % of the width.
   power: {
-    font: { id: "montserrat-900", size: 0.09, case: "upper", lineHeight: 1.08 },
+    font: { id: "montserrat-900", size: 0.128, case: "upper", lineHeight: 1.08 },
     fill: { color: "#FFFFFF" },
     stroke: { color: "#000000", width: 0.11 },
     shadow: { color: "#000000", opacity: 0.8, dx: 0, dy: 0.05, blur: 0 },
@@ -70,7 +76,7 @@ const PRESETS: Record<Exclude<PresetId, "none">, PresetDef> = {
     reveal: "page",
     emphasis: { color: "#22E55B" },
     animation: anim({ pageIn: "pop", pageInSec: 0.12 }),
-    layout: layout({ wordsPerLine: 3, maxLines: 2, wordSpacing: 1.25 }),
+    layout: layout({ wordsPerLine: 3, maxLines: 2, wordSpacing: 1.25, maxWidth: 0.84 }),
     timing: HOLD,
   },
   // Loud comic capitals, slightly slanted, hard shadow; the active word jumps bigger.
@@ -277,6 +283,25 @@ export function defaultY(presetY: number, W: number, H: number): number {
 }
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** Per-caption adjustments, clamped like the style's own y / sizeScale; null when there are none. */
+export function captionAdjusts(value: unknown): Record<string, CaptionAdjust> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out: Record<string, CaptionAdjust> = {};
+  let n = 0;
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!raw || typeof raw !== "object") continue;
+    const a = raw as Record<string, unknown>;
+    const adj: CaptionAdjust = {};
+    if (finite(a.y)) adj.y = clamp(a.y, 0.05, 0.95);
+    if (finite(a.sizeScale)) adj.sizeScale = clamp(a.sizeScale, 0.6, 1.6);
+    if (adj.y === undefined && adj.sizeScale === undefined) continue;
+    out[id] = adj;
+    n++;
+  }
+  return n ? out : null;
+}
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 /**
@@ -294,7 +319,12 @@ export function resolveStyle(
   if (!s) return null;
   const o = overrides ?? {};
   s.layout.y = typeof o.y === "number" && Number.isFinite(o.y) ? clamp(o.y, 0.05, 0.95) : defaultY(s.layout.y, frame.W, frame.H);
-  if (typeof o.sizeScale === "number" && Number.isFinite(o.sizeScale)) s.font.size *= clamp(o.sizeScale, 0.6, 1.6);
+  if (typeof o.sizeScale === "number" && Number.isFinite(o.sizeScale)) {
+    s.sizeScale = clamp(o.sizeScale, 0.6, 1.6);
+    s.font.size *= s.sizeScale;
+  }
+  const captions = captionAdjusts(o.captions);
+  if (captions) s.captions = captions;
   if (o.wordsPerPage === 1 || o.wordsPerPage === 2 || o.wordsPerPage === 3) {
     s.layout.maxWords = o.wordsPerPage;
     if (o.wordsPerPage === 1) {
