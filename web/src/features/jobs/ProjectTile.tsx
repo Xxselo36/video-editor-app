@@ -17,14 +17,8 @@ import { useMediaUrl } from "@/lib/api";
 import { describeError, stageText } from "@/lib/errors";
 import { plural } from "@/lib/i18n/plural";
 import { presetLabelFor, PRESETS, type PresetId } from "@/features/start/presets.legacy";
-import {
-  canRetryInPlace,
-  cancelUpload,
-  retryUpload,
-  retryUploadWith,
-  useLiveUpload,
-  useLocalThumb,
-} from "@/features/upload/uploadManager";
+import { canRetryInPlace, cancelUpload, retryUpload, retryUploadWith } from "@/features/upload/uploadControls";
+import { useLiveUpload, useLocalThumb } from "@/features/upload/uploadState";
 import type { UploadSettings } from "@/features/upload/uploadJob";
 import { getLocalJob, removeJob } from "./jobsStore";
 import { daysLeft, middleEllipsis, type Project, type ProjectState } from "./projects";

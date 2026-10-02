@@ -17,7 +17,8 @@ vi.mock("./uploadJob", () => {
 
 describe("a missing upload chunk", () => {
   it("asks for a reload while online, and frees the file for another try", async () => {
-    const { startUpload, isUploading, canRetryInPlace } = await import("./uploadManager");
+    const { startUpload, isUploading } = await import("./uploadManager");
+    const { canRetryInPlace } = await import("./uploadControls");
     const file = new File([new Uint8Array(3)], "x.mp4", { type: "video/mp4", lastModified: 3 });
     await startUpload(file, {
       caption_preset: "clean",

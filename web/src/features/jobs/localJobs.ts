@@ -5,15 +5,19 @@
  */
 import { storageScope } from "@/lib/auth";
 import { JOBS_KEY } from "@/lib/scopedStorage";
-import { parseLocal, type LocalJob } from "./projects";
+import type { LocalJob } from "./projects";
 
 /** sessionStorage key: an export of this job was started in this tab. */
 export const exportHintKey = (id: string) => `cleocuts.exporting.${id}`;
 
-/** This device's v2 project list as stored. */
+/** This device's v2 project list as stored (entries with an id; no
+ *  cleaning — projects.ts parseLocal does that for the store). */
 export function readLocalJobs(): LocalJob[] {
   try {
-    return parseLocal(localStorage.getItem(JOBS_KEY + storageScope()));
+    const v = JSON.parse(localStorage.getItem(JOBS_KEY + storageScope()) ?? "[]") as unknown;
+    return Array.isArray(v)
+      ? v.filter((e): e is LocalJob => Boolean(e) && typeof (e as LocalJob).jobId === "string")
+      : [];
   } catch {
     return [];
   }

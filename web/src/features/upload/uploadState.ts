@@ -6,6 +6,15 @@
  */
 import { useSyncExternalStore } from "react";
 import type { Paywall } from "@/lib/account";
+import type { PresetId } from "@/features/start/presets.legacy";
+import type { SettingsSource } from "./settings";
+
+/** What a failed upload of this page needs to go again without asking
+ *  for the file ("Try again", UX12). */
+export type Retry = { file: File; settings: SettingsSource; preset: PresetId | null };
+export const retries = new Map<string, Retry>();
+/** Cancel (UX12): the abort of each running upload of this page. */
+export const controllers = new Map<string, AbortController>();
 
 export type LiveUpload = {
   /** The upload's temporary id (upl-…). */
@@ -84,51 +93,6 @@ const thumbs = new Map<string, string>();
 
 export function useLocalThumb(id: string): string | null {
   return useSyncExternalStore(subscribe, () => thumbs.get(id) ?? null, () => null);
-}
-
-/** A frame ~0.5 s into `file` as an object URL, or null (no decoder,
- *  timeout). */
-export function grabFrame(file: File, timeoutMs = 6000): Promise<string | null> {
-  if (typeof document === "undefined" || typeof URL.createObjectURL !== "function") return Promise.resolve(null);
-  return new Promise((resolve) => {
-    const src = URL.createObjectURL(file);
-    const video = document.createElement("video");
-    let settled = false;
-    const finish = (url: string | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      video.removeAttribute("src");
-      video.load();
-      URL.revokeObjectURL(src);
-      resolve(url);
-    };
-    const timer = setTimeout(() => finish(null), timeoutMs);
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = "metadata";
-    video.onerror = () => finish(null);
-    video.onloadedmetadata = () => {
-      const d = isFinite(video.duration) ? video.duration : 1;
-      video.currentTime = Math.min(0.5, d / 2);
-    };
-    video.onseeked = () => {
-      try {
-        const w = video.videoWidth;
-        const h = video.videoHeight;
-        if (!w || !h) return finish(null);
-        const scale = Math.min(1, 360 / Math.max(w, h));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(w * scale);
-        canvas.height = Math.round(h * scale);
-        canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((b) => finish(b ? URL.createObjectURL(b) : null), "image/jpeg", 0.8);
-      } catch {
-        finish(null);
-      }
-    };
-    video.src = src;
-  });
 }
 
 export function setThumb(id: string, url: string | null): void {

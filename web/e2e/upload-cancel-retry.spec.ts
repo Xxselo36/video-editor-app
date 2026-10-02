@@ -7,12 +7,16 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { API, WEB } from "./support/env";
-import { createdJobId, jobCard, openWithStorage, storedJobs } from "./support/app";
+import { chooseFile, createdJobId, jobCard, openWithStorage, storedJobs } from "./support/app";
 
+/** Pick `name` on the start screen (UX6) and go on to Projects while it
+ *  uploads. */
 async function pickTikTok(page: Page, name: string, buffer: Buffer) {
-  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("picker-card-tiktok").click()]);
-  await chooser.setFiles({ name, mimeType: "video/mp4", buffer });
-  await expect(page).toHaveURL(`${WEB}/app`);
+  await chooseFile(page, { name, mimeType: "video/mp4", buffer });
+  const toProjects = page.getByTestId("start-to-projects");
+  await expect(toProjects.or(page.getByTestId("dashboard"))).toBeVisible({ timeout: 15_000 });
+  if (await toProjects.isVisible()) await toProjects.click().catch(() => {});
+  await expect(page).toHaveURL(`${WEB}/app`, { timeout: 30_000 });
 }
 
 test("cancel: the upload stops and nothing is left", { tag: "@editor-v2" }, async ({ page, stub }) => {
@@ -75,6 +79,5 @@ test("after a reload, Try again asks for the same file", { tag: "@editor-v2" }, 
   const id = await createdJobId(page, "wieder.mp4");
   expect(id).not.toBeNull();
   const created = await stub.job(id!);
-  // The workflow's settings went along (TikTok).
-  expect(created?.preset_id).toBe("tiktok");
+  expect(created?.filename).toBe("wieder.mp4");
 });

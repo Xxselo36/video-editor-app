@@ -25,8 +25,8 @@
 import { tEn } from "@/lib/errors";
 import { addUploadRecord, liveUploads, projectsV2, recordUploadFailed, removeUploadRecord } from "./records";
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
-import { readSettings, type SettingsSource, type UploadSettings } from "./settings";
-import { emit, grabFrame, live, moveThumb, setPaywall, setThumb } from "./uploadState";
+import { readSettings, type SettingsSource } from "./settings";
+import { controllers, emit, live, moveThumb, retries, setPaywall, setThumb } from "./uploadState";
 
 export {
   _version,
@@ -34,7 +34,6 @@ export {
   getLiveUpload,
   getLiveUploads,
   getPaywall,
-  grabFrame,
   subscribe,
   useLiveUpload,
   useLocalThumb,
@@ -44,11 +43,6 @@ export {
 
 // ── starting, cancelling, retrying ───────────────────────────────────
 
-/** What a failed upload of this page needs to go again without asking
- *  for the file. */
-type Retry = { file: File; settings: SettingsSource; preset: PresetId | null };
-const retries = new Map<string, Retry>();
-const controllers = new Map<string, AbortController>();
 
 /** Put up the record of a new upload (its temporary id until POST /jobs
  *  names the job); marked as this page's (liveUploads). */
@@ -67,7 +61,7 @@ export function uploadCard(file: File, settings: SettingsSource, preset: PresetI
   live.set(tempId, { id: tempId, pct: 0, resuming: false });
   emit();
   // The tile's local thumbnail (v2 Projects only).
-  if (projectsV2()) void grabFrame(file).then((url) => {
+  if (projectsV2()) void import("./grabFrame").then((m) => m.grabFrame(file)).then((url) => {
     // Still this upload's (or its job's) tile.
     if (url) setThumb(tempId, url);
   });
@@ -94,12 +88,6 @@ const fileKey = (f: File) => `${f.name}\u0000${f.size}\u0000${f.lastModified}`;
 
 export function isUploading(file: File): boolean {
   return running.has(fileKey(file));
-}
-
-/** This page still has the File of the failed upload `id` ("Try again"
- *  goes at once; else the file is picked again). */
-export function canRetryInPlace(id: string): boolean {
-  return retries.has(id);
 }
 
 /**
@@ -181,52 +169,4 @@ export async function startUpload(
       onEnd?.(created);
     },
   });
-}
-
-/**
- * Cancel an upload: the request stops, the multipart upload is aborted on
- * the server (abortResumable) and its record goes. A failed upload is
- * just removed (its resume record too: the user gave it up).
- */
-export async function cancelUpload(id: string): Promise<void> {
-  const ctl = controllers.get(id);
-  const retry = retries.get(id);
-  retries.delete(id);
-  setThumb(id, null);
-  removeUploadRecord(id);
-  if (ctl) {
-    // uploadJob sees the abort, aborts the multipart upload and forgets
-    // the record itself.
-    ctl.abort();
-    return;
-  }
-  if (retry) {
-    try {
-      const { abortResumable } = await import("@/lib/chunkedUpload");
-      await abortResumable({ file: retry.file });
-    } catch {
-      /* the bucket's lifecycle rule aborts it after a day anyway */
-    }
-  }
-}
-
-/** "Try again" with the File this page still has: a new upload of the
- *  same file, which resumes where the failed one stopped. False when the
- *  file isn't here any more (the caller asks for it). */
-export function retryUpload(id: string): boolean {
-  const r = retries.get(id);
-  if (!r) return false;
-  retries.delete(id);
-  removeUploadRecord(id);
-  setThumb(id, null);
-  void startUpload(r.file, r.settings, r.preset);
-  return true;
-}
-
-/** "Try again" after a reload: the user picked `file` again. */
-export function retryUploadWith(id: string, file: File, settings: SettingsSource, preset: PresetId | null): void {
-  retries.delete(id);
-  removeUploadRecord(id);
-  setThumb(id, null);
-  void startUpload(file, settings, preset);
 }
