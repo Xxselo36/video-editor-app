@@ -83,7 +83,7 @@ from contextlib import asynccontextmanager
 import time
 
 from fastapi import (
-    Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile,
+    Body, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile,
 )
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder  # noqa: E402
@@ -102,6 +102,8 @@ from backend import storage
 from backend import taskq  # noqa: E402
 from backend import leader as task_leader  # noqa: E402
 from backend import uploads as upl
+from backend import prefs as user_prefs  # noqa: E402
+from backend.whisper_groq import SPOKEN_LANGUAGES  # noqa: E402
 from backend import worker as task_worker  # noqa: E402
 from backend.auth import (
     User, current_user, get_owned_job, media_user, require_user,
@@ -1759,12 +1761,19 @@ def _clean_settings(parsed: dict, user: User | None) -> dict:
     and formats. _cost_test (cost_test.py tagging) stays for the service
     user, and while auth is off."""
     out: dict[str, Any] = {}
+    # As before UX6 (additive only): any style string is kept — the
+    # pipeline maps tight / balanced / smooth, and UX6's "none" (no cuts);
+    # anything else analyses as smooth.
     for key in ("caption_preset", "style", "caption_style_hint"):
         value = parsed.get(key)
         if isinstance(value, str) and value.strip():
             out[key] = value.strip()[:64]
     if parsed.get("target_aspect") in edit_doc.ASPECTS:
         out["target_aspect"] = parsed["target_aspect"]
+    # The spoken language (ISO 639-1); "auto" = detect it (not stored).
+    lang = parsed.get("spoken_language")
+    if isinstance(lang, str) and lang.strip().lower() in SPOKEN_LANGUAGES:
+        out["spoken_language"] = lang.strip().lower()
     for key in ("voice_triggers", "remove_fillers", "smartcam_enabled"):
         if isinstance(parsed.get(key), bool):
             out[key] = parsed[key]
@@ -1989,9 +1998,9 @@ def public_config() -> dict[str, Any]:
              "scripts": None}
             for p in CAPTION_PRESETS
         ],
-        # Transcription detects the spoken language itself today (UX6
-        # adds a choice).
-        "spoken_languages": ["auto"],
+        # What the upload may name as its spoken language (UX6); "auto"
+        # = Whisper detects it.
+        "spoken_languages": ["auto", *SPOKEN_LANGUAGES],
         # Renders are free today: no fair-use count (UX11).
         "free_renders": None,
         "billing": {"enabled": billing.enabled()},
@@ -4586,6 +4595,34 @@ def me(user: User | None = Depends(current_user)):
         out["minutes"] = accounts.minutes_summary(user.id, ent)
         out["comp"] = ent.source == "comp"
     return out
+
+
+@app.get("/me/prefs")
+def get_my_prefs(user: User | None = Depends(current_user)):
+    """The signed-in user's remembered upload defaults (backend/prefs.py;
+    {} when none are saved). 404 with accounts off: the browser keeps
+    them itself."""
+    if user is None:
+        raise HTTPException(404, "not_available")
+    if user.is_service:
+        return {}
+    return user_prefs.get(user.id) or {}
+
+
+@app.put("/me/prefs")
+def put_my_prefs(payload: Any = Body(...),
+                 user: User | None = Depends(current_user)):
+    """Merge the given keys into the user's prefs (null removes one) and
+    return them. 400 bad_prefs (with `field`) for an unknown key or a
+    bad value."""
+    if user is None:
+        raise HTTPException(404, "not_available")
+    if user.is_service:
+        raise HTTPException(403, "forbidden")
+    try:
+        return user_prefs.put(user.id, payload)
+    except user_prefs.BadPrefs as e:
+        raise HTTPException(400, {"code": "bad_prefs", "field": e.field})
 
 
 def _require_billing() -> None:

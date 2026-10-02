@@ -162,6 +162,10 @@ class Job:
     # reached). None = none recorded — then it isn't stored at all, so a
     # job written without the queue looks exactly as before.
     processing_warnings: list[str] | None = None
+    # A note on the job's format that still works (UX6, backend/errors.py
+    # WARNINGS): "smartcam_failed" — speaker tracking failed and the
+    # video was centre-cropped instead. None = nothing to say.
+    format_warning: str | None = None
     # ── UT3: the edit document and media analysis (new jobs only; a job
     # analysed before keeps None / defaults and opens as before) ──
     # EditDoc v2 (backend/doc.py): words, style, format, clips (null
@@ -327,6 +331,7 @@ class Job:
             "queue_position": self.queue_position,
             # The edit document (UT3): fetched with GET /jobs/{id}/doc.
             "has_doc": self.doc is not None,
+            "format_warning": self.format_warning,
             # UT4: the caption engine pinned at the first render ("v1" /
             # "v2"; None before it). No content.
             "caption_engine": self.caption_engine,
