@@ -20,7 +20,7 @@ import { updateActiveJob } from "@/lib/activeJobs";
 import { track } from "@/lib/analytics";
 import { apiFetch, whenMediaReady } from "@/lib/api";
 import { AUTH_ENABLED } from "@/lib/auth";
-import { audioWarningText, cardError, describeError } from "@/lib/errors";
+import { audioWarningText, cardError, describeError, warningText } from "@/lib/errors";
 import { waitForSaves } from "@/lib/pendingSaves";
 import type { JobStatus } from "@/features/jobs/types";
 import { ErrorView } from "@/features/project/ErrorView";
@@ -202,7 +202,10 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         phrases={phrases}
         units={unitsRef}
         captionPreset={captionPreset}
-        audioWarnings={(job.audio_warning_codes ?? job.audio_warnings ?? []).map((w) => audioWarningText(w, t))}
+        audioWarnings={[
+          ...(job.audio_warning_codes ?? job.audio_warnings ?? []).map((w) => audioWarningText(w, t)),
+          ...(job.format_warning ? [warningText(job.format_warning, t)].filter((w): w is string => w !== null) : []),
+        ]}
         hasPoster={job.has_poster === true}
         cutRanges={job.cut_ranges ?? []}
         duration={job.duration ?? 0}
@@ -242,6 +245,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         units={unitsRef}
         captionPreset={captionPreset}
         audioWarnings={job.audio_warning_codes ?? job.audio_warnings ?? []}
+        formatWarning={job.format_warning ? warningText(job.format_warning, t) : null}
         cutRanges={job.cut_ranges ?? []}
         duration={job.duration ?? 0}
         onChange={(next) => {

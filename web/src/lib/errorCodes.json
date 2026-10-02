@@ -59,6 +59,7 @@
     "bad_format",
     "bad_gateway",
     "bad_part_numbers",
+    "bad_prefs",
     "bad_request",
     "bad_rev",
     "bad_signature",

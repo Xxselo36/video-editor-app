@@ -414,6 +414,30 @@ def long_video() -> Path:
     return out
 
 
+# Small clips the browser can decode (VP8/Vorbis; Playwright's Chromium
+# plays no H.264): the start screen's local probe (UX6) reads their frame.
+FRAME_MEDIA: dict[str, str] = {"portrait.webm": "180x320", "landscape.webm": "320x180"}
+
+
+def frame_media(name: str) -> Path:
+    """One of FRAME_MEDIA: 4 s test picture + tone (built once)."""
+    out = media_dir() / "frame" / name
+    if out.exists():
+        return out
+    with _locked("frame"):
+        if out.exists():
+            return out
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_name(f".tmp.{name}")
+        _run([ffmpeg(), "-y", "-loglevel", "error",
+              "-f", "lavfi", "-i", f"testsrc=size={FRAME_MEDIA[name]}:rate=15:duration=4",
+              "-f", "lavfi", "-i", "sine=frequency=440:duration=4", "-shortest",
+              "-c:v", "libvpx", "-b:v", "200k", "-deadline", "realtime", "-cpu-used", "16",
+              "-c:a", "libvorbis", "-f", "webm", str(tmp)])
+        os.replace(tmp, out)
+    return out
+
+
 # Uploads POST /jobs refuses before any charge (§1.7 rows 2–4): name →
 # (ffmpeg inputs and codecs, what the refusal is).
 REFUSED_MEDIA: dict[str, list[str]] = {

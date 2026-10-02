@@ -234,6 +234,8 @@ PROTOCOL_CODES: frozenset[str] = frozenset({
     "billing_disabled", "unknown_plan", "test_mode_testers_only",
     "already_subscribed", "checkout_failed", "no_subscription",
     "bad_signature", "bad_admin_token", "webhook_failed", "presign_failed",
+    # remembered upload defaults (UX6, backend/prefs.py)
+    "bad_prefs",
 })
 
 # Codes by status, for errors raised with free text.

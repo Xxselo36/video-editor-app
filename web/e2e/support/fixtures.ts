@@ -46,6 +46,8 @@ export type SeedOptions = {
   slow_rebuild?: number;
   /** review_long: words in the doc (default 10 000). */
   words?: number;
+  /** job.format_warning (UX6), e.g. "smartcam_failed". */
+  format_warning?: string;
   /** false: a job from before the edit document (404 no_doc). */
   doc?: boolean;
   /** false: no first-frame poster (an analysis from before UT5). */
@@ -89,6 +91,8 @@ export type StubJob = {
   owner_id: string | null;
   size: number | null;
   media_store: string;
+  /** The stored upload settings (internal "_" keys left out). */
+  settings: Record<string, unknown>;
 };
 
 export type StubWord = {
@@ -147,9 +151,19 @@ export class Stub {
   }
 
   /** A stub clip to upload: grid.mp4, speech.mp4, speech_land.mp4, long.webm,
+   *  portrait.webm / landscape.webm (VP8: the browser can read their frame),
    *  and ones POST /jobs refuses (audio.m4a, silent.mp4, short.mp4). */
   async media(
-    name: "grid.mp4" | "speech.mp4" | "speech_land.mp4" | "long.webm" | "audio.m4a" | "silent.mp4" | "short.mp4",
+    name:
+      | "grid.mp4"
+      | "speech.mp4"
+      | "speech_land.mp4"
+      | "long.webm"
+      | "portrait.webm"
+      | "landscape.webm"
+      | "audio.m4a"
+      | "silent.mp4"
+      | "short.mp4",
   ): Promise<Buffer> {
     const r = await this.api.get(`/_test/media/${name}`, { timeout: 240_000 });
     expect(r.ok(), `media ${name}`).toBeTruthy();

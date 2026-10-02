@@ -44,6 +44,9 @@ export type JobStatus = {
   audio_warnings?: string[];
   /** The same as codes (lib/errors.ts audioWarningText), UX5. */
   audio_warning_codes?: string[];
+  /** A note on the format (UX6): "smartcam_failed" — speaker tracking
+   *  failed and the video was centre-cropped. */
+  format_warning?: string | null;
   audio_levels?: { mean_db?: number | null; max_db?: number | null };
   duration?: number;
   cut_ranges?: CutRange[];
