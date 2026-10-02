@@ -205,6 +205,7 @@ def test_doc_get_and_patch(stub):
     assert stub.json("GET", f"/jobs/{old['id']}")["has_doc"] is False
 
 
+@pytest.mark.skipif(not stub_media.has_espeak(), reason="the speech clip needs espeak-ng")
 def test_cut_kinds_and_a_cleo_cut_take(stub):
     """UX10: seeded cuts carry their reason; ai_cuts add a Cleo-cut take
     and a repeat (its words cut: "filler", not hidden); extra_words a
