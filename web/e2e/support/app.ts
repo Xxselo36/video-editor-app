@@ -76,7 +76,7 @@ export type PickedFile = { name: string; mimeType: string; buffer: Buffer };
 
 /** Choose `file` on the start screen: one click and the file chooser —
  *  the upload starts at once. */
-export async function chooseFile(page: Page, file: PickedFile) {
+export async function chooseFile(page: Page, file: PickedFile | string) {
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser", { timeout: 10_000 }),
     page.getByTestId("upload-dropzone").click(),

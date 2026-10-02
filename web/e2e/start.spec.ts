@@ -10,6 +10,7 @@
  * suites are @editor-v2 (E2E_EDITOR_V2=1 runs); the flag-off run checks
  * that /app/new keeps the v1 picker flow.
  */
+import fs from "node:fs";
 import type { Page, Request } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { API, EDITOR_V2, WEB } from "./support/env";
@@ -245,7 +246,10 @@ test("picking a file that is still uploading goes to its card, not a stuck 0 % @
     await gate;
     await r.continue();
   });
-  const file = { name: "laeuft.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") };
+  // A file on disk: picked twice it is the same File (name, size and
+  // lastModified) — a buffer would get a new lastModified each time.
+  const file = test.info().outputPath("laeuft.mp4");
+  fs.writeFileSync(file, await stub.media("grid.mp4"));
   await chooseFile(page, file);
   await page.getByTestId("start-to-projects").click();
   await expect(page.getByTestId("dashboard")).toBeVisible();
