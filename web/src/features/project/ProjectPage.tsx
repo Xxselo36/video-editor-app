@@ -20,6 +20,7 @@
  * Polls GET /jobs/{id} while the job runs (every 2 s, paused while the
  * tab is hidden).
  */
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -34,11 +35,17 @@ import { ActiveJobCard } from "@/features/jobs/ActiveJobCard";
 import { hasExportHint, readLocalJobs } from "@/features/jobs/localJobs";
 import { useProjectsV2 } from "@/features/jobs/useProjectsV2";
 import type { JobStatus } from "@/features/jobs/types";
-import { DoneView } from "./DoneView";
 import { DoneView as LegacyDoneView } from "./DoneView.legacy";
 import { reopenJob } from "./projectApi";
 import { ErrorView } from "./ErrorView";
 import { ProcessingView } from "./ProcessingView";
+
+// The UX11 Done view (v2 opt-in): its own chunk, loaded for a finished
+// project only (keeps /app/p within its first-load budget).
+const DoneView = dynamic(() => import("./DoneView").then((m) => m.DoneView), {
+  ssr: false,
+  loading: () => <div className="h-[60vh] animate-pulse rounded-2xl bg-[var(--surface-1)]" />,
+});
 
 const POLL_MS = 2000;
 // After an answer that isn't a job (a 502 / 503 while the backend
