@@ -117,8 +117,8 @@ export function StartScreen() {
   useEffect(() => {
     mounted.current = true;
     // Read once after mount: the server render has no storage.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     // (This device's Projects list — UX12 — or the lists of before.)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHasDashboard(readLocalJobs().length > 0 || getActiveJobs().length > 0 || getLibrary().length > 0);
     // The upload code now, not when the file is picked (a deploy
     // meanwhile would take this build's chunk away).
