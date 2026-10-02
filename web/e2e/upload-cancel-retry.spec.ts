@@ -67,11 +67,17 @@ test("after a reload, Try again asks for the same file", { tag: "@editor-v2" }, 
   await openWithStorage(page, "/app/new");
   // The connection drops on the upload itself.
   await page.route("**/uploads/presign", (r) => r.abort("internetdisconnected"));
-  await pickTikTok(page, "wieder.mp4", media);
-  const tile = jobCard(page, "wieder.mp4");
-  await expect(tile).toHaveAttribute("data-state", "upload_failed", { timeout: 30_000 });
+  await chooseFile(page, { name: "wieder.mp4", mimeType: "video/mp4", buffer: media });
+  // The failure is on this device's list (its code, the settings).
+  await expect
+    .poll(async () => (await storedJobs(page)).find((j) => j.filename === "wieder.mp4")?.upload?.errorCode ?? null, {
+      timeout: 30_000,
+    })
+    .not.toBeNull();
   await page.unroute("**/uploads/presign");
-  await page.reload();
+  // A reload: the page no longer has the file.
+  await page.goto("/app");
+  const tile = jobCard(page, "wieder.mp4");
   await expect(tile).toHaveAttribute("data-state", "upload_failed");
   const [chooser] = await Promise.all([page.waitForEvent("filechooser"), tile.getByTestId("job-card-retry").click()]);
   await chooser.setFiles({ name: "wieder.mp4", mimeType: "video/mp4", buffer: media });
