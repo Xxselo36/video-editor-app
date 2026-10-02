@@ -76,6 +76,8 @@
     "doc_read_only",
     "duplicate_word_id",
     "event_required",
+    "filmstrip_pending",
+    "filmstrip_unavailable",
     "forbidden",
     "format_not_ready",
     "gone",

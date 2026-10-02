@@ -129,6 +129,7 @@ JOB_KEYS = sorted([
     "has_poster",       # UT5: GET /jobs/{id}/poster answers
     "fps",              # UX10: the editor's trim frame grid (mezz_fps)
     "format_warning",   # UX6: e.g. smartcam_failed
+    "filmstrip",        # UX7b: {n, interval, tileW, tileH} or None
 ])
 
 

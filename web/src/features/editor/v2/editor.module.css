@@ -1127,6 +1127,20 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 60%),
     #1f1f26;
 }
+/* UX7b filmstrip: the clip's frames (Filmstrip.tsx), under fades and badges */
+.film {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.filmTile {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background-image: var(--film-src);
+  background-size: var(--film-size);
+  background-repeat: no-repeat;
+}
 .clipRing {
   position: absolute;
   inset: 0;

@@ -65,6 +65,10 @@ export type JobStatus = {
   // The frame rate of the video the editor plays and the renders cut
   // (the mezz, UT3): the v2 editor's trim frame grid (UX10).
   fps?: number | null;
+  // The v2 timeline's thumbnail sprite (GET /jobs/{id}/filmstrip): n
+  // tiles of tileW × tileH px, tile i the frame at i · interval s (UX7b).
+  // null: none yet (a job from before it gets one on request).
+  filmstrip?: { n: number; interval: number; tileW: number; tileH: number } | null;
   // The finished job (done): what the Done view shows.
   outputs?: string[];
   social_caption?: string;

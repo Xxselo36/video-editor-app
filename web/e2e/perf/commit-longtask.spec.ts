@@ -46,6 +46,8 @@ test.describe("editor v2: no long task after an edit", { tag: "@editor-v2" }, ()
     await expect
       .poll(() => page.getByTestId("editor-video").evaluate((v) => (v as HTMLVideoElement).readyState), { timeout: 30_000 })
       .toBeGreaterThanOrEqual(1);
+    // UX7b: the clips draw their filmstrip during the edits measured here
+    await expect(page.getByTestId("ed-film").first()).toBeVisible({ timeout: 30_000 });
     await installProbe(page);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });

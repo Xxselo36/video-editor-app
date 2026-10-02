@@ -210,6 +210,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         cutRanges={job.cut_ranges ?? []}
         duration={job.duration ?? 0}
         fps={job.fps ?? null}
+        filmstrip={job.filmstrip ?? null}
         onExportSource={setExportSource}
         onChange={(next) => {
           setPhrases(next);
