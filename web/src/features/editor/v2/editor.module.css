@@ -453,10 +453,13 @@
     opacity: 1;
   }
 }
+/* Over the video, under the caption slot (z 1) and the fade (z 2): a tap
+ * on a caption selects it (UT5 layer: only the caption takes pointers),
+ * a tap anywhere else lands here and plays / pauses (UX7c). */
 .tapPlay {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 0;
 }
 .tapGlyph {
   position: absolute;
@@ -2094,6 +2097,17 @@ html:has(.root) {
 .phone .findBtn,
 .phone .cutsBtn {
   height: var(--ed-touch);
+}
+/* the title field: a 44 px hit area, the 32 px field drawn inside it
+ * (transparent border; inset rings sit inside the padding box) */
+.phone .titleInput {
+  height: var(--ed-touch);
+  border: solid transparent;
+  border-width: 6px 0;
+  background-clip: padding-box;
+  box-shadow:
+    inset 0 0 0 1px var(--ed-brand),
+    inset 0 0 0 3px rgba(139, 92, 246, 0.25);
 }
 .phone .sheetHandle {
   height: 28px;
