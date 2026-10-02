@@ -76,6 +76,12 @@ export function uploadProgress(tempId: string, p: { pct: number; lastProgressAt:
   else updateActiveJob(tempId, { uploadPct: p.pct, lastProgressAt: p.lastProgressAt, ...resuming });
 }
 
+/** The file is stored and POST /jobs went out (v2 tile: "Starting…",
+ *  no cancel). */
+export function recordUploadStarting(tempId: string): void {
+  if (projectsV2()) withStore((store) => store.updateUpload(tempId, { starting: true, pct: 100, lastProgressAt: Date.now() }));
+}
+
 /** The upload failed: `e` an error, or a code ({code}). */
 export function recordUploadFailed(tempId: string, e: unknown): void {
   if (projectsV2()) withStore((store) => store.uploadFailed(tempId, toCoded(e)));

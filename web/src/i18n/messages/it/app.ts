@@ -396,6 +396,8 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "Eliminare «{name}»?",
   "app.projects.deleteBody": "Il video, le modifiche e le esportazioni vengono rimossi dai nostri server. L’operazione non si può annullare.",
   "app.projects.deleteBusy": "È ancora in elaborazione: potrai eliminarlo quando avrà finito.",
+  "app.projects.starting": "Avvio…",
+  "app.projects.loadFailed": "Impossibile caricare i tuoi progetti. Controlla la connessione e riprova.",
   "app.projects.cancelTooLate": "Già in elaborazione: non è stato più possibile annullare.",
   "app.projects.copyManual": "Seleziona il testo e copialo.",
   "app.processing.titleAnalyze": "Stiamo preparando il tuo video",

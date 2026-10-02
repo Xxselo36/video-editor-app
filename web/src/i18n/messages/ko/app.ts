@@ -392,6 +392,8 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "‘{name}’을(를) 삭제할까요?",
   "app.projects.deleteBody": "동영상과 편집 내용, 내보낸 파일이 서버에서 삭제돼요. 되돌릴 수 없어요.",
   "app.projects.deleteBusy": "아직 처리 중이에요. 끝나면 삭제할 수 있어요.",
+  "app.projects.starting": "시작하는 중…",
+  "app.projects.loadFailed": "프로젝트를 불러오지 못했어요. 연결을 확인하고 다시 시도해 주세요.",
   "app.projects.cancelTooLate": "이미 처리 중이라 더 이상 취소할 수 없었어요.",
   "app.projects.copyManual": "텍스트를 선택해서 복사하세요.",
   "app.processing.titleAnalyze": "동영상을 준비하고 있어요",

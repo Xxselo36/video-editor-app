@@ -394,6 +394,8 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "Excluir “{name}”?",
   "app.projects.deleteBody": "O vídeo, as edições e as exportações são removidos dos nossos servidores. Isso não pode ser desfeito.",
   "app.projects.deleteBusy": "Ainda está processando — você pode excluí-lo quando terminar.",
+  "app.projects.starting": "Iniciando…",
+  "app.projects.loadFailed": "Não foi possível carregar seus projetos. Verifique sua conexão e tente de novo.",
   "app.projects.cancelTooLate": "Já está sendo processado — não deu mais para cancelar.",
   "app.projects.copyManual": "Selecione o texto e copie.",
   "app.processing.titleAnalyze": "Preparando seu vídeo",

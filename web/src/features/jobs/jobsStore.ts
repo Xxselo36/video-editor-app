@@ -77,7 +77,12 @@ let refreshed = false;
 
 const subs = new Set<() => void>();
 let version = 0;
-let snapshot: { version: number; ready: boolean; projects: Project[] } = { version: -1, ready: false, projects: [] };
+let snapshot: { version: number; ready: boolean; serverLoaded: boolean; projects: Project[] } = {
+  version: -1,
+  ready: false,
+  serverLoaded: false,
+  projects: [],
+};
 
 function emit(): void {
   version++;
@@ -304,7 +309,7 @@ export function updateUpload(tempId: string, patch: Partial<UploadRecord>): void
 
 /** The upload stopped: its code (lib/errors) on the record. */
 export function uploadFailed(tempId: string, e: CodedError): void {
-  updateUpload(tempId, { errorCode: e.code ?? "processing_failed", errorParams: e.params ?? null, resuming: false });
+  updateUpload(tempId, { errorCode: e.code ?? "processing_failed", errorParams: e.params ?? null, resuming: false, starting: false });
 }
 
 /** POST /jobs created the job: the upload record becomes the project. */
@@ -626,16 +631,24 @@ function acquirePolling(): () => void {
 export type ProjectsSnapshot = {
   /** This device's list was read and the first refresh is done. */
   ready: boolean;
+  /** Accounts on: the account's list (GET /jobs) was loaded. */
+  serverLoaded: boolean;
   projects: Project[];
 };
 
-const SERVER_SNAPSHOT: ProjectsSnapshot = { ready: false, projects: [] };
+const SERVER_SNAPSHOT: ProjectsSnapshot = { ready: false, serverLoaded: false, projects: [] };
 
 function getSnapshot(): ProjectsSnapshot {
   if (snapshot.version !== version) {
-    snapshot = { version, ready: refreshed, projects: projectsNow() };
+    snapshot = { version, ready: refreshed, serverLoaded: serverIds !== null, projects: projectsNow() };
   }
   return snapshot;
+}
+
+/** Ask the server again now (the page's "Try again"). */
+export function refreshProjects(): void {
+  lastChange = Date.now();
+  void refreshAll().then(() => emit());
 }
 
 /** The projects (polled while mounted). */

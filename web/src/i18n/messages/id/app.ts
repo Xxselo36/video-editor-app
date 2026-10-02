@@ -396,6 +396,8 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "Hapus “{name}”?",
   "app.projects.deleteBody": "Video, editan, dan hasil ekspornya dihapus dari server kami. Ini tidak bisa dibatalkan.",
   "app.projects.deleteBusy": "Masih diproses — kamu bisa menghapusnya setelah selesai.",
+  "app.projects.starting": "Memulai…",
+  "app.projects.loadFailed": "Proyekmu tidak bisa dimuat. Periksa koneksi lalu coba lagi.",
   "app.projects.cancelTooLate": "Sudah diproses — tidak bisa dibatalkan lagi.",
   "app.projects.copyManual": "Pilih teksnya lalu salin.",
   "app.processing.titleAnalyze": "Menyiapkan videomu",

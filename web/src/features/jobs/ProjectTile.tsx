@@ -195,6 +195,9 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
   const uploading = p.state === "uploading";
   const pct = uploading ? (liveUpload?.pct ?? p.upload?.pct ?? 0) : p.progress;
   const resuming = uploading && (liveUpload ? liveUpload.resuming : Boolean(p.upload?.resuming));
+  // The file is stored and POST /jobs went out: the job may exist — no
+  // cancel any more.
+  const starting = uploading && Boolean(liveUpload?.starting || p.upload?.starting);
   const queued = (p.state === "processing" || p.state === "exporting") && p.stage === "queued";
   const showBar = uploading || p.state === "processing" || p.state === "exporting";
   const preset = presetLabelFor(p.presetId, p.presetLabel, t);
@@ -202,6 +205,7 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
   const status = (() => {
     switch (p.state) {
       case "uploading":
+        if (starting) return t("app.projects.starting");
         return resuming ? t("app.upload.resuming") : t(touchDevice() ? "app.projects.uploadKeepOpenPhone" : "app.projects.uploadKeepOpen");
       case "upload_failed":
       case "failed":
@@ -328,7 +332,7 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
         )}
         {(uploading || p.state === "upload_failed" || p.state === "expired") && (
           <div className="pointer-events-auto relative z-10 mt-1 flex flex-wrap gap-1.5">
-            {uploading && (
+            {uploading && !starting && (
               <button
                 type="button"
                 data-testid="job-card-cancel"

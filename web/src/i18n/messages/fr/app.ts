@@ -397,6 +397,8 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "Supprimer « {name} » ?",
   "app.projects.deleteBody": "La vidéo, ses modifications et ses exports sont supprimés de nos serveurs. C’est irréversible.",
   "app.projects.deleteBusy": "Le traitement est en cours — tu pourras le supprimer une fois terminé.",
+  "app.projects.starting": "Démarrage…",
+  "app.projects.loadFailed": "Impossible de charger tes projets. Vérifie ta connexion et réessaie.",
   "app.projects.cancelTooLate": "Déjà en cours de traitement — l’annulation n’était plus possible.",
   "app.projects.copyManual": "Sélectionne le texte et copie-le.",
   "app.processing.titleAnalyze": "Préparation de ta vidéo",

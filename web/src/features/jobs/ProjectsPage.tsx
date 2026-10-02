@@ -27,8 +27,8 @@ import { AUTH_ENABLED } from "@/lib/auth";
 import { plural } from "@/lib/i18n/plural";
 import { VoiceTeaser } from "@/features/voice-test/VoiceTeaser";
 import { VoiceTestDialog } from "@/features/voice-test/VoiceTestDialog";
-import { deleteProject, getLocalJobs, markStaleUploads, renameProject, useProjects } from "./jobsStore";
-import { matchesFilter, matchesSearch, type Filter, type Project } from "./projects";
+import { deleteProject, getLocalJobs, markStaleUploads, refreshProjects, renameProject, useProjects } from "./jobsStore";
+import { emptyListAction, matchesFilter, matchesSearch, type Filter, type Project } from "./projects";
 import { ProjectTile } from "./ProjectTile";
 
 /** /app?job=<id> (the editor's URL before UX5) → /app/edit/<id>; an
@@ -174,7 +174,8 @@ export function ProjectsPage() {
   const t = useT();
   const lang = useLang();
   const router = useRouter();
-  const { ready, projects } = useProjects();
+  const { ready, serverLoaded, projects } = useProjects();
+  const emptyAction = AUTH_ENABLED ? emptyListAction({ ready, serverLoaded, count: projects.length }) : "show";
   const [mounted, setMounted] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -201,12 +202,13 @@ export function ProjectsPage() {
   }, [router]);
 
   useEffect(() => {
-    if (AUTH_ENABLED && ready && projects.length === 0) {
+    // Only when the account's list really is empty — not on an error.
+    if (emptyAction === "redirect") {
       /* eslint-disable-next-line react-hooks/set-state-in-effect */
       setLeaving(true);
       router.replace("/app/new");
     }
-  }, [ready, projects.length, router]);
+  }, [emptyAction, router]);
 
   // Upload records left over from a reload / closed tab never finish —
   // they become failed uploads ("Try again").
@@ -338,6 +340,20 @@ export function ProjectsPage() {
             {query.trim() ? t("app.projects.noResults", { q: query.trim() }) : t("app.projects.noneInFilter")}
           </p>
         ) : (
+          emptyAction === "retry" ? (
+          <div
+            data-testid="projects-load-failed"
+            role="alert"
+            className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-[var(--border-hover)] bg-[var(--surface-1)] px-6 py-10 text-center"
+          >
+            <div className="text-base font-bold" style={{ color: "var(--text-strong)" }}>
+              {t("app.projects.loadFailed")}
+            </div>
+            <Button size="pill" onClick={() => refreshProjects()} data-testid="projects-retry" className="mt-2">
+              {t("app.projects.retry")}
+            </Button>
+          </div>
+          ) : (
           <div
             data-testid={expired.length ? "projects-all-expired" : "projects-empty"}
             className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-[var(--border-hover)] bg-[var(--surface-1)] px-6 py-10 text-center"
@@ -352,6 +368,7 @@ export function ProjectsPage() {
               {t("app.dashboard.newVideo")}
             </Button>
           </div>
+          )
         )}
 
         {expired.length > 0 && (

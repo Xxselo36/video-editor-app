@@ -65,6 +65,25 @@ test("a failed upload: its reason, then Try again creates the job", { tag: "@edi
   expect((await storedJobs(page)).filter((j) => j.filename === "nochmal.mp4")).toHaveLength(1);
 });
 
+test("once POST /jobs went out there is no Cancel: Starting…, then the project", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  const media = await stub.media("grid.mp4");
+  await openWithStorage(page, "/app/new");
+  // The job is being created (a slow POST /jobs).
+  await page.route(`${API}/jobs`, async (r) => {
+    if (r.request().method() !== "POST") return r.fallback();
+    await new Promise((res) => setTimeout(res, 5000));
+    await r.fallback().catch(() => {});
+  });
+  await pickTikTok(page, "startet.mp4", media);
+  const tile = jobCard(page, "startet.mp4");
+  await expect(tile.getByTestId("job-card-status")).toContainText("Starting…", { timeout: 30_000 });
+  await expect(tile.getByTestId("job-card-cancel")).toHaveCount(0);
+  await expect(tile).toHaveAttribute("data-phase", "analyzing", { timeout: 30_000 });
+  const id = await createdJobId(page, "startet.mp4");
+  expect(id).not.toBeNull();
+  expect((await stub.job(id!))?.filename).toBe("startet.mp4");
+});
+
 test("after a reload, Try again asks for the same file", { tag: "@editor-v2" }, async ({ page, stub }) => {
   const media = await stub.media("grid.mp4");
   await openWithStorage(page, "/app/new");

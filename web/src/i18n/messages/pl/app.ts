@@ -396,6 +396,8 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "Usunąć „{name}”?",
   "app.projects.deleteBody": "Film, jego edycje i eksporty zostaną usunięte z naszych serwerów. Tego nie da się cofnąć.",
   "app.projects.deleteBusy": "Nadal trwa przetwarzanie — usuniesz go, gdy się skończy.",
+  "app.projects.starting": "Uruchamianie…",
+  "app.projects.loadFailed": "Nie udało się wczytać projektów. Sprawdź połączenie i spróbuj ponownie.",
   "app.projects.cancelTooLate": "Już jest przetwarzany — nie dało się go już anulować.",
   "app.projects.copyManual": "Zaznacz tekst i skopiuj go.",
   "app.processing.titleAnalyze": "Przygotowujemy twój film",

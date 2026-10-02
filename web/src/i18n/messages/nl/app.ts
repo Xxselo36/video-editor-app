@@ -396,6 +396,8 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "‘{name}’ verwijderen?",
   "app.projects.deleteBody": "De video, de bewerkingen en exports worden van onze servers verwijderd. Dit kan niet ongedaan worden gemaakt.",
   "app.projects.deleteBusy": "Het wordt nog verwerkt — je kunt het verwijderen zodra het klaar is.",
+  "app.projects.starting": "Bezig met starten…",
+  "app.projects.loadFailed": "Je projecten konden niet worden geladen. Controleer je verbinding en probeer het opnieuw.",
   "app.projects.cancelTooLate": "Wordt al verwerkt — annuleren kon niet meer.",
   "app.projects.copyManual": "Selecteer de tekst en kopieer hem.",
   "app.processing.titleAnalyze": "Je video wordt klaargemaakt",

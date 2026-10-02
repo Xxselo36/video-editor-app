@@ -397,6 +397,8 @@ export const esApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "¿Eliminar «{name}»?",
   "app.projects.deleteBody": "El vídeo, sus ediciones y exportaciones se eliminan de nuestros servidores. No se puede deshacer.",
   "app.projects.deleteBusy": "Todavía se está procesando: podrás eliminarlo cuando termine.",
+  "app.projects.starting": "Iniciando…",
+  "app.projects.loadFailed": "No se pudieron cargar tus proyectos. Revisa tu conexión e inténtalo de nuevo.",
   "app.projects.cancelTooLate": "Ya se está procesando: ya no se pudo cancelar.",
   "app.projects.copyManual": "Selecciona el texto y cópialo.",
   "app.processing.titleAnalyze": "Preparando tu vídeo",

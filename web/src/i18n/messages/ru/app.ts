@@ -395,6 +395,8 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "Удалить «{name}»?",
   "app.projects.deleteBody": "Видео, его правки и экспорты будут удалены с наших серверов. Это нельзя отменить.",
   "app.projects.deleteBusy": "Проект ещё обрабатывается — удалить его можно, когда обработка закончится.",
+  "app.projects.starting": "Запуск…",
+  "app.projects.loadFailed": "Не удалось загрузить проекты. Проверь подключение и попробуй ещё раз.",
   "app.projects.cancelTooLate": "Уже обрабатывается — отменить было уже нельзя.",
   "app.projects.copyManual": "Выдели текст и скопируй его.",
   "app.processing.titleAnalyze": "Готовим твоё видео",

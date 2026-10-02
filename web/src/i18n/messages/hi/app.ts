@@ -396,6 +396,8 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "“{name}” हटाएं?",
   "app.projects.deleteBody": "वीडियो, उसके एडिट और एक्सपोर्ट हमारे सर्वर से हटा दिए जाएंगे। इसे वापस नहीं किया जा सकता।",
   "app.projects.deleteBusy": "यह अभी प्रोसेस हो रहा है — पूरा होने पर आप इसे हटा सकते हैं।",
+  "app.projects.starting": "शुरू हो रहा है…",
+  "app.projects.loadFailed": "आपके प्रोजेक्ट लोड नहीं हो सके। कनेक्शन जाँचें और फिर से कोशिश करें।",
   "app.projects.cancelTooLate": "पहले से प्रोसेस हो रहा है — अब रद्द नहीं हो सका।",
   "app.projects.copyManual": "टेक्स्ट चुनें और कॉपी करें।",
   "app.processing.titleAnalyze": "आपका वीडियो तैयार हो रहा है",

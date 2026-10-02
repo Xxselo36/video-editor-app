@@ -20,6 +20,9 @@ export type UploadRecord = {
   lastProgressAt?: number;
   /** Continues an interrupted upload of the same file. */
   resuming?: boolean;
+  /** The file is stored and POST /jobs went out: the job may exist —
+   *  no cancel any more ("Starting…"). */
+  starting?: boolean;
   /** Why it stopped (lib/errors.ts codes); none while it runs. */
   errorCode?: string | null;
   errorParams?: ErrorParams | null;
@@ -70,6 +73,8 @@ export type RemoteJob = {
   presetLabel: string | null;
   /** Back in review after a failed export (edits kept). */
   renderFailed: boolean;
+  /** ms; changes with every edit, export and rename (a revision). */
+  updatedAt: number | null;
 };
 
 /** The server doesn't know the job (deleted after its retention, or not
@@ -111,6 +116,8 @@ export type Project = {
   /** ms epoch, null = kept. */
   expiresAt: number | null;
   renderFailed: boolean;
+  /** The server's updated_at (ms): the project's revision. */
+  updatedAt: number | null;
   /** LocalJob.note. */
   note: string | null;
   upload: UploadRecord | null;
@@ -155,6 +162,7 @@ export function remoteFrom(raw: Record<string, unknown> | JobStatusRow): RemoteJ
     presetId: str(r.preset_id),
     presetLabel: str(r.preset_label),
     renderFailed: status === "awaiting_review" && Boolean(errorCode || str(r.error)),
+    updatedAt: toMsTime(r.updated_at),
   };
 }
 
@@ -227,6 +235,7 @@ export function buildProject(
     hasOutput: r?.hasOutput ?? false,
     expiresAt: r?.expiresAt ?? null,
     renderFailed: r?.renderFailed ?? false,
+    updatedAt: r?.updatedAt ?? null,
     note: local?.note ?? null,
     upload: local?.upload ?? (local && isUploadId(local.jobId) ? {} : null),
     local: Boolean(local),
@@ -399,6 +408,23 @@ export function mergeLocal(base: LocalJob[], extra: LocalJob[]): LocalJob[] {
 }
 
 // ── what the page shows ──────────────────────────────────────────────
+
+/**
+ * Accounts on and no project to show: on to the start screen only when
+ * the account's list really loaded and is empty ("redirect"); when it
+ * couldn't be loaded (offline, a 5xx) the page says so with a retry
+ * ("retry") — a transient error must not look like "no projects".
+ * "wait" until the first answer; "show" when there is something.
+ */
+export function emptyListAction(s: {
+  ready: boolean;
+  serverLoaded: boolean;
+  count: number;
+}): "wait" | "show" | "redirect" | "retry" {
+  if (s.count > 0) return "show";
+  if (!s.ready) return "wait";
+  return s.serverLoaded ? "redirect" : "retry";
+}
 
 export type Filter = "all" | "edit" | "exported";
 

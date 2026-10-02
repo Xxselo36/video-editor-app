@@ -23,6 +23,8 @@ export type LiveUpload = {
   pct: number;
   /** Continues an interrupted upload of the same file. */
   resuming: boolean;
+  /** The file is stored and POST /jobs went out: no cancel any more. */
+  starting?: boolean;
 };
 
 export const live = new Map<string, LiveUpload>();

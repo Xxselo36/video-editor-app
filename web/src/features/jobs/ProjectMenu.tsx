@@ -15,6 +15,7 @@ import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import { mediaUrl, useMediaReady } from "@/lib/api";
 import { fetchJob } from "./jobsStore";
+import { postTextEntry, postTextKey, type PostTextEntry } from "./postText";
 import type { Project } from "./projects";
 
 const ITEM =
@@ -96,21 +97,14 @@ export function ProjectMenu({ p, onAction, onOpen }: {
   // The post text is fetched when the menu opens, so the click can write
   // it to the clipboard inside its own user gesture — Safari / iOS refuse
   // a clipboard write that comes after an await.
-  const postText = useRef<{ promise: Promise<string>; text: string | null } | null>(null);
+  // Kept for the next open only if it loaded, and only for the same
+  // status / output / revision (postText.ts).
+  const postText = useRef<PostTextEntry | null>(null);
+  const textKey = postTextKey(p);
   useEffect(() => {
-    if (!open || !canCopy || postText.current) return;
-    const entry: { promise: Promise<string>; text: string | null } = {
-      text: null,
-      promise: fetchJob(p.id).then((job) => {
-        const caption = typeof job?.social_caption === "string" ? job.social_caption : "";
-        const tags = Array.isArray(job?.social_hashtags) ? (job.social_hashtags as unknown[]).filter((x) => typeof x === "string") : [];
-        const text = [caption, tags.map((h) => `#${String(h).replace(/^#/, "")}`).join(" ")].filter(Boolean).join("\n\n");
-        entry.text = text;
-        return text;
-      }),
-    };
-    postText.current = entry;
-  }, [open, canCopy, p.id]);
+    if (!open || !canCopy) return;
+    postText.current = postTextEntry(postText.current, textKey, () => fetchJob(p.id));
+  }, [open, canCopy, p.id, textKey]);
   // Last resort: the text in a dialog to select and copy by hand.
   const [manual, setManual] = useState<string | null>(null);
 

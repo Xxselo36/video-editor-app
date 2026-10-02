@@ -8,7 +8,7 @@
  */
 import { refreshMe, fetchServerJobs, paywallFrom, toMs, type Paywall } from "@/lib/account";
 import { track } from "@/lib/analytics";
-import { ApiError, apiErrorFromText, apiFetch, authHeaders, backendUrl, notifyAuthRequired } from "@/lib/api";
+import { ApiError, apiErrorFromText, authHeaders, backendUrl, notifyAuthRequired } from "@/lib/api";
 import { AUTH_ENABLED } from "@/lib/auth";
 import {
   abortResumable,
@@ -63,26 +63,36 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * POST /jobs (storage_key) gave no usable answer, but the server may
  * have created — and charged — the job anyway: the newest job in the
  * account's list with this file name, created since the request went
- * out (10 min of clock slack) and not tracked on this device yet.
+ * out (10 min of clock slack) and not tracked on this device yet. Asked
+ * a few times (`delays`, ms between tries: ~5 s in all) — a job the
+ * request created a moment ago may not be listed yet.
  */
-async function findJobCreatedFor(filename: string, sinceMs: number): Promise<string | null> {
-  const jobs = await fetchServerJobs();
-  if (!jobs) return null;
-  const known = await knownJobIds();
-  const hit = jobs.find(
-    (j) =>
-      j.filename === filename &&
-      !known.has(j.id) &&
-      (toMs(j.created_at) ?? 0) >= sinceMs - 10 * 60_000,
-  );
-  return hit?.id ?? null;
+export async function findJobCreatedFor(
+  filename: string,
+  sinceMs: number,
+  delays: number[] = [1_500, 3_500],
+): Promise<string | null> {
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    if (attempt > 0) await sleep(delays[attempt - 1]);
+    const jobs = await fetchServerJobs();
+    if (!jobs) continue;
+    const known = await knownJobIds();
+    const hit = jobs.find(
+      (j) =>
+        j.filename === filename &&
+        !known.has(j.id) &&
+        (toMs(j.created_at) ?? 0) >= sinceMs - 10 * 60_000,
+    );
+    if (hit) return hit.id;
+  }
+  return null;
 }
 
 export async function uploadJob(
   targetFile: File,
   settings: SettingsSource,
   selectedPreset: PresetId | null,
-  { tempId, signal, onPaywall, onCreated, onFailed, onProgress, onEnd }: {
+  { tempId, signal, onPaywall, onCreated, onFailed, onStarting, onProgress, onEnd }: {
     /** The upload record's temporary id (uploadCard). */
     tempId: string;
     /** Cancel (UX12): stops the upload and aborts it on the server. */
@@ -93,6 +103,10 @@ export async function uploadJob(
     onCreated: (jobId: string) => void;
     /** The upload failed (not cancelled): its record says why. */
     onFailed?: () => void;
+    /** The file is stored and POST /jobs goes out (UX12): from here on
+     *  the job may exist on the server, so Cancel is no longer offered
+     *  and `signal` is ignored. */
+    onStarting?: () => void;
     /** Live progress of the upload card (memory only: uploadManager). */
     onProgress?: (tempId: string, pct: number, resuming: boolean) => void;
     /** The upload is over (job created or failed). */
@@ -113,6 +127,8 @@ export async function uploadJob(
   // state (uploadManager, ~5/s); the stored card gets a heartbeat every
   // UPLOAD_HEARTBEAT_MS and every state change, never a tick.
   let lastUiUpdate = 0;
+  // POST /jobs went out (or the legacy body is sent): see onStarting.
+  let started = false;
   let lastBeat = Date.now();
   // Set while the card says "resuming" (an interrupted upload of this
   // file continues); cleared if it starts over after all.
@@ -247,6 +263,11 @@ export async function uploadJob(
       // header has none (streamed WebM).
       if (duration) form.append("duration", String(duration));
       const postedAt = Date.now();
+      // Cancelled as the upload finished: no POST at all.
+      if (signal?.aborted) throw new Error("Upload aborted");
+      // From here on the job may be created: no cancel any more.
+      started = true;
+      onStarting?.();
       const post = async () => {
         // Fetched per try: the token is short-lived.
         const auth = AUTH_ENABLED ? await authHeaders() : {};
@@ -258,18 +279,13 @@ export async function uploadJob(
           xhr.onload = () => resolve(xhr);
           xhr.onerror = () => reject(new Error("Network error"));
           xhr.ontimeout = () => reject(new Error(tEn("app.errors.serverNoResponse")));
-          xhr.onabort = () => reject(new Error("Upload aborted"));
-          // Cancel (UX12) stops the request too.
-          signal?.addEventListener("abort", () => xhr.abort(), { once: true });
           xhr.send(form);
         });
       };
       let failure: unknown = null;
       const retryDelays = legacyApi ? [] : POST_JOBS_RETRY_MS;
       for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
-        if (attempt > 0) await sleep(retryDelays[attempt - 1], signal);
-        // Cancelled meanwhile: no (further) POST.
-        if (signal?.aborted) throw new Error("Upload aborted");
+        if (attempt > 0) await sleep(retryDelays[attempt - 1]);
         failure = null;
         try {
           res = await post();
@@ -279,18 +295,11 @@ export async function uploadJob(
             failure = new Error(`Upload failed: ${res.responseText}`);
           }
         } catch (e) {
-          if (signal?.aborted) {
-            // The request was in flight: the job may exist anyway (only
-            // an account's list can tell).
-            createdJobId = AUTH_ENABLED ? await findJobCreatedFor(targetFile.name, postedAt) : null;
-            if (!createdJobId) throw e;
-            break;
-          }
           failure = e;
         }
         if (failure === null) break;
       }
-      if (failure !== null && createdJobId === null) {
+      if (failure !== null) {
         // Still no answer: with accounts on the job may exist anyway —
         // look for it in the account's project list.
         createdJobId = AUTH_ENABLED ? await findJobCreatedFor(targetFile.name, postedAt) : null;
@@ -324,7 +333,12 @@ export async function uploadJob(
             setPct(Math.round((ev.loaded / ev.total) * 100));
           }
         };
-        xhr.upload.onload = () => clearTimeout(stallTimer);
+        xhr.upload.onload = () => {
+          clearTimeout(stallTimer);
+          // The body is sent: the server creates the job now.
+          started = true;
+          onStarting?.();
+        };
         xhr.onload = () => {
           clearTimeout(stallTimer);
           resolve(xhr);
@@ -337,7 +351,13 @@ export async function uploadJob(
           clearTimeout(stallTimer);
           reject(new Error("Upload aborted"));
         };
-        signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+        signal?.addEventListener(
+          "abort",
+          () => {
+            if (!started) xhr.abort();
+          },
+          { once: true },
+        );
         armStall();
         xhr.send(form);
       });
@@ -382,19 +402,10 @@ export async function uploadJob(
     // even if the tab is in the background.
     requestNotificationPermission();
 
-    // Cancelled while POST /jobs ran: the job exists now. Delete it — a
-    // job that started already (409) stays: it is shown under its name,
-    // with a note that it couldn't be cancelled any more.
-    let cancelTooLate = false;
-    if (signal?.aborted) {
-      try {
-        const r = await apiFetch(`/jobs/${initial.id}`, { method: "DELETE" });
-        if (r.ok || r.status === 404) return;
-      } catch {
-        /* shown below */
-      }
-      cancelTooLate = true;
-    }
+    // A cancel that came as the job was being created (the tile still
+    // offered it): the backend can't stop a job, so it is shown under its
+    // name with a note that it couldn't be cancelled any more.
+    const cancelTooLate = Boolean(signal?.aborted);
     // The upload record becomes the project (the backend keeps
     // processing regardless of where the user goes next).
     recordJobCreated(
@@ -411,7 +422,7 @@ export async function uploadJob(
     );
     onCreated(initial.id);
   } catch (err) {
-    if (signal?.aborted) {
+    if (signal?.aborted && !started) {
       // Cancelled (UX12): the multipart upload goes too — the user gave
       // the file up; nothing is left on the list.
       removeUploadRecord(tempId);

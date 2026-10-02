@@ -396,6 +396,8 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "„{name}“ löschen?",
   "app.projects.deleteBody": "Das Video, seine Bearbeitungen und Exporte werden von unseren Servern entfernt. Das lässt sich nicht rückgängig machen.",
   "app.projects.deleteBusy": "Es wird noch verarbeitet — du kannst es löschen, sobald es fertig ist.",
+  "app.projects.starting": "Wird gestartet…",
+  "app.projects.loadFailed": "Deine Projekte konnten nicht geladen werden. Prüfe deine Verbindung und versuch es noch einmal.",
   "app.projects.cancelTooLate": "Wird schon verarbeitet — Abbrechen ging nicht mehr.",
   "app.projects.copyManual": "Markiere den Text und kopiere ihn.",
   "app.processing.titleAnalyze": "Dein Video wird vorbereitet",

@@ -23,7 +23,14 @@
  * IndexedDB continues where it stopped).
  */
 import { tEn } from "@/lib/errors";
-import { addUploadRecord, liveUploads, projectsV2, recordUploadFailed, removeUploadRecord } from "./records";
+import {
+  addUploadRecord,
+  liveUploads,
+  projectsV2,
+  recordUploadFailed,
+  recordUploadStarting,
+  removeUploadRecord,
+} from "./records";
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import { readSettings, type SettingsSource } from "./settings";
 import { controllers, emit, live, moveThumb, retries, setPaywall, setThumb } from "./uploadState";
@@ -153,13 +160,21 @@ export async function startUpload(
       moveThumb(tempId, jobId);
       onCreated?.(jobId);
     },
+    onStarting: () => {
+      // The job may be created from here on: Cancel goes (uploadControls).
+      controllers.delete(tempId);
+      const cur = live.get(tempId);
+      live.set(tempId, { id: tempId, pct: 100, resuming: false, ...cur, starting: true });
+      recordUploadStarting(tempId);
+      emit();
+    },
     onFailed: () => {
       retries.set(tempId, { file, settings, preset });
     },
     onProgress: (id, pct, resuming) => {
       const cur = live.get(id);
       if (cur && cur.pct === pct && cur.resuming === resuming) return;
-      live.set(id, { id, pct, resuming });
+      live.set(id, { ...cur, id, pct, resuming });
       emit();
     },
     onEnd: (id) => {

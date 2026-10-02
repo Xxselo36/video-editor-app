@@ -392,6 +392,8 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "「{name}」を削除しますか？",
   "app.projects.deleteBody": "動画、編集内容、書き出しファイルがサーバーから削除されます。元に戻せません。",
   "app.projects.deleteBusy": "まだ処理中です。完了後に削除できます。",
+  "app.projects.starting": "開始しています…",
+  "app.projects.loadFailed": "プロジェクトを読み込めませんでした。接続を確認してもう一度お試しください。",
   "app.projects.cancelTooLate": "すでに処理中のため、キャンセルできませんでした。",
   "app.projects.copyManual": "テキストを選択してコピーしてください。",
   "app.processing.titleAnalyze": "動画を準備しています",

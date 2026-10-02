@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { legacyCardCode } from "@/lib/errors";
 import {
   analysisEta,
+  emptyListAction,
   capLocal,
   daysLeft,
   matchesFilter,
@@ -135,6 +136,16 @@ describe("migrateLegacy", () => {
   it("survives broken or missing lists", () => {
     expect(migrateLegacy(null, null, legacyCardCode)).toEqual({ jobs: [], exporting: [] });
     expect(migrateLegacy("{", "[1,2]", legacyCardCode)).toEqual({ jobs: [], exporting: [] });
+  });
+});
+
+describe("emptyListAction", () => {
+  it("leaves for the start screen only when the account's list loaded empty", () => {
+    expect(emptyListAction({ ready: true, serverLoaded: true, count: 0 })).toBe("redirect");
+    // A transient error (offline, 5xx): say so with a retry instead.
+    expect(emptyListAction({ ready: true, serverLoaded: false, count: 0 })).toBe("retry");
+    expect(emptyListAction({ ready: false, serverLoaded: false, count: 0 })).toBe("wait");
+    expect(emptyListAction({ ready: true, serverLoaded: false, count: 2 })).toBe("show");
   });
 });
 

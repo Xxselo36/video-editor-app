@@ -6,7 +6,7 @@
 import { removeUploadRecord } from "./records";
 import type { SettingsSource } from "./settings";
 import { startUpload } from "./uploadManager";
-import { controllers, retries, setThumb } from "./uploadState";
+import { controllers, live, retries, setThumb } from "./uploadState";
 import type { PresetId } from "@/features/start/presets.legacy";
 
 /** This page still has the File of the failed upload `id` ("Try again"
@@ -21,6 +21,9 @@ export function canRetryInPlace(id: string): boolean {
  * just removed (its resume record too: the user gave it up).
  */
 export async function cancelUpload(id: string): Promise<void> {
+  // POST /jobs went out: the job may exist and can't be stopped — the
+  // record stays (the tile no longer offers Cancel).
+  if (live.get(id)?.starting) return;
   const ctl = controllers.get(id);
   const retry = retries.get(id);
   retries.delete(id);

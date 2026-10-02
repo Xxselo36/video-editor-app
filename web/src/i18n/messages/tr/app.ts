@@ -397,6 +397,8 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.projects.deleteTitle": "“{name}” silinsin mi?",
   "app.projects.deleteBody": "Video, düzenlemeleri ve dışa aktarımları sunucularımızdan kaldırılır. Bu geri alınamaz.",
   "app.projects.deleteBusy": "Hâlâ işleniyor — bittiğinde silebilirsin.",
+  "app.projects.starting": "Başlatılıyor…",
+  "app.projects.loadFailed": "Projelerin yüklenemedi. Bağlantını kontrol edip tekrar dene.",
   "app.projects.cancelTooLate": "Zaten işleniyor — artık iptal edilemedi.",
   "app.projects.copyManual": "Metni seç ve kopyala.",
   "app.processing.titleAnalyze": "Videon hazırlanıyor",

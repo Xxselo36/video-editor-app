@@ -399,6 +399,8 @@ export const enApp = {
   "app.projects.deleteTitle": "Delete “{name}”?",
   "app.projects.deleteBody": "The video, its edits and exports are removed from our servers. This can't be undone.",
   "app.projects.deleteBusy": "It's still processing — you can delete it once it's done.",
+  "app.projects.starting": "Starting…",
+  "app.projects.loadFailed": "Couldn't load your projects. Check your connection and try again.",
   "app.projects.cancelTooLate": "Already processing — it couldn't be cancelled any more.",
   "app.projects.copyManual": "Select the text and copy it.",
   "app.processing.titleAnalyze": "Getting your video ready",
