@@ -188,8 +188,13 @@ def exported_before(job: Any) -> bool:
     caption_engine yet)? Then it was v1 and stays v1 (review F11,
     DEPLOY.md §12). Its outputs are there, or this render isn't its first
     generation (POST /render already bumped render_gen for this one)."""
+    # A speculative render's generation (UX11) isn't an export: it
+    # never gave the job outputs of its own.
+    spec = getattr(job, "spec", None)
+    spec_gens = 1 if (isinstance(spec, dict) and spec.get("gen")
+                      and spec.get("status") != "promoted") else 0
     return bool(job.output_keys or job.outputs or job.output_path
-                or job.hook_clips or int(job.render_gen or 0) > 1)
+                or job.hook_clips or int(job.render_gen or 0) > 1 + spec_gens)
 
 
 def decide(job: Any, style: dict[str, Any] | None = None) -> tuple[str, str]:

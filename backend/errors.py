@@ -222,7 +222,7 @@ PROTOCOL_CODES: frozenset[str] = frozenset({
     "proxy_not_ready", "preview_not_ready", "format_not_ready",
     "thumbnail_not_ready", "timeline_too_long", "too_many_segments",
     "invalid_segments", "invalid_payload", "too_many_ids",
-    "unknown_caption_preset", "busy", "invalid_title",
+    "unknown_caption_preset", "busy", "invalid_title", "not_editable",
     # the edit document (UT3, backend/doc.py)
     "no_doc", "doc_read_only", "doc_patch_too_large", "peaks_not_ready",
     "poster_not_ready",

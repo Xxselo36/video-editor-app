@@ -10,7 +10,7 @@
  * (useEditSession); the playhead store feeds everything that moves while
  * playing, so the shell itself doesn't re-render per frame.
  */
-import { Captions, Palette, TriangleAlert, X } from "lucide-react";
+import { Captions, History, Palette, TriangleAlert, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/i18n";
@@ -19,6 +19,8 @@ import { adjustedWordIds, followCaptionKeys } from "@/features/captions-ui/adjus
 import { useCaptionsV2 } from "@/features/captions-ui/flag";
 import type { Phrase, Subtitle } from "@/features/editor/legacy/buildPhrases";
 import { useEditSession } from "@/features/editor/session/useEditSession";
+import { ExportSheet } from "@/features/editor/export/ExportSheet";
+import type { ExportFlow } from "@/features/editor/export/useExportFlow";
 import { useEditorShortcuts, type ShortcutHandlers } from "@/features/editor/shortcuts/useEditorShortcuts";
 import { createPlayheadStore, PlayheadContext } from "@/features/editor/state/playhead";
 import { exportCaptionSource } from "@/features/editor/state/cuts";
@@ -83,6 +85,11 @@ export type EditorShellProps = {
   v1Edits?: V1Edits;
   onApply: () => void;
   onBack: () => void;
+  /** UX11: Export opens the export sheet (else: apply + leave, as before). */
+  exportFlow?: ExportFlow;
+  /** UX11: this project was exported before (the re-edit note). */
+  reedit?: { captionsKept: boolean } | null;
+  onNewVideo?: () => void;
 };
 
 // UT5: live captions and the Style panel (the caption engine: own chunks).
@@ -311,6 +318,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   const online = useOnline();
   const [expired, setExpired] = useState(false);
   const [conflictClosed, setConflictClosed] = useState(false);
+  const [reeditClosed, setReeditClosed] = useState(false);
   useEffect(() => {
     if (session.saveError !== "failed") return;
     let live = true;
@@ -360,14 +368,22 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     if (!online || session.applying) return;
     // the render reads the doc's style (UT4/UT5): what is pending goes
     // first, and an export never starts without it (review 14)
-    if (doc.status !== "ready") {
-      void session.apply();
+    const save = async () => {
+      if (doc.status !== "ready") return session.apply();
+      const saved = await doc.flush().catch(() => false);
+      if (!saved) {
+        showToast(t("editor.exportUnsaved"));
+        return;
+      }
+      await session.apply();
+    };
+    // UX11: the export sheet (confirm, progress, Done) when given
+    const flow = props.exportFlow;
+    if (flow) {
+      if (flow.phase === "closed") flow.open({ save, reset: session.endApply });
       return;
     }
-    void doc.flush().then(
-      (saved) => (saved ? void session.apply() : showToast(t("editor.exportUnsaved"))),
-      () => showToast(t("editor.exportUnsaved")),
-    );
+    void save();
   };
   const openFind = () => {
     if (phone) setSheet("text");
@@ -438,6 +454,20 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
           {t("editor.conflict.reload")}
         </button>
         <button type="button" className={`${s.gb} ${s.sm}`} aria-label={t("editor.close")} onClick={() => setConflictClosed(true)}>
+          <X size={14} strokeWidth={1.75} aria-hidden />
+        </button>
+      </div>
+    ) : null;
+  // UX11: editing an exported project — its export stays until the next.
+  const reedit =
+    props.reedit && !reeditClosed ? (
+      <div className={s.banner} role="note" data-testid="ed-reedit">
+        <History size={16} strokeWidth={1.75} className={s.bannerIcon} aria-hidden />
+        <span style={{ flex: 1 }}>
+          {t("app.reedit.banner")}
+          {props.reedit.captionsKept ? ` ${t("app.reedit.captionsKept")}` : ""}
+        </span>
+        <button type="button" className={`${s.gb} ${s.sm}`} aria-label={t("editor.close")} onClick={() => setReeditClosed(true)}>
           <X size={14} strokeWidth={1.75} aria-hidden />
         </button>
       </div>
@@ -565,7 +595,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         onUndo={history.undo}
         onRedo={history.redo}
         onExport={exportNow}
-        exporting={session.applying}
+        exporting={session.applying || Boolean(props.exportFlow?.busy)}
         offline={!online}
         exportRef={exportRef}
       />
@@ -582,7 +612,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         units={props.units}
         captionPreset={props.captionPreset}
         duration={props.duration}
-        notice={conflict}
+        notice={conflict ?? reedit}
         captionLayer={captionLayer}
         poster={props.hasPoster ? posterUrl : null}
       />
@@ -716,6 +746,16 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
       )}
       {first.tourStep !== null && (
         <Tour root={root} phone={phone} step={first.tourStep} onStep={first.setTourStep} onDone={first.finishTour} />
+      )}
+      {props.exportFlow && (
+        <ExportSheet
+          flow={props.exportFlow}
+          phone={phone}
+          seconds={cutDuration(editSegs)}
+          offline={!online}
+          reexport={Boolean(props.reedit)}
+          onNewVideo={props.onNewVideo ?? props.onBack}
+        />
       )}
     </PlayheadContext.Provider>
   );

@@ -90,6 +90,7 @@
     "no_doc",
     "no_subscription",
     "not_available",
+    "not_editable",
     "not_found",
     "parts_missing",
     "peaks_not_ready",

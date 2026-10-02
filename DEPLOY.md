@@ -1351,3 +1351,102 @@ Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
   Export neu erzeugt. Klappt das nicht, läuft ein noch nie exportiertes
   Projekt mit v1; ein v2-Projekt bekommt „Render failed“ (nie Kästchen
   statt Zeichen).
+
+## 13. Nochmal bearbeiten, Fair Use, Sofort-Export (UX11)
+
+Ein fertiges Video lässt sich wieder öffnen und neu exportieren; der
+Export im neuen Editor bleibt im Editor (Export-Blatt → Fertig-Ansicht).
+**Die Oberfläche (Export-Blatt, neue Fertig-Ansicht, „Nochmal
+bearbeiten“) gehört zum Editor-v2-Opt-in** (`NEXT_PUBLIC_EDITOR_V2`,
+`?editor=v2`): v1-Kunden behalten ihren Export-Ablauf und die alte
+Fertig-Ansicht unverändert. **Auch serverseitig gilt jede UX11-Regel
+nur für Exporte aus dem v2-Export-Blatt** (`POST /render` mit
+`"client": "v2"`, am Job als `export_client` vermerkt): Schutzgrenzen,
+Fair-Use-Abbuchung, Sofort-Export, Bonus-Clips nur bei unveränderter
+Timeline, Post-Text behalten. Ein v1-Export (ohne Marker) verhält sich
+genau wie vor UX11 (inkl. Warteschlange statt 429 beim zweiten Export,
+Post-Text bei jedem Export neu, Dateiname `cleo_{id}_{format}.mp4`).
+Neue Dateinamen nur mit `GET /jobs/{id}/download?name=v2` (die
+v2-Fertig-Ansicht). Fair Use und Schutzgrenzen pro Konto nur mit Konten
+bzw. Abrechnung.
+Code: `backend/exports.py` (Regeln), `backend/main.py` (`POST
+/jobs/{id}/reopen`, `POST /jobs/{id}/render`, `_run_spec`),
+`web/src/features/editor/export/`, `web/src/features/project/DoneView.tsx`.
+
+| Variable (Railway) | Default | Wirkung |
+|---|---|---|
+| `CLEO_FREE_RENDERS` | `3` | erfolgreiche Exporte pro Video, die nichts kosten |
+| `CLEO_RENDER_FAIRUSE_PCT` | `25` | jeder weitere Export bucht so viel % der **hochgeladenen** (abgerechneten) Länge von den Minuten ab |
+| `CLEO_MAX_RENDERS_PER_USER` | `1` | gleichzeitige Exporte pro Konto (mit Konten); mehr → 429 `too_many_renders` („Bitte warte …“). `0` = aus |
+| `CLEO_MAX_RENDERS_PER_JOB_DAY` | `20` | Exporte pro Video in 24 h → 429 `render_limit`. `0` = aus |
+| `CLEO_MAX_RENDER_QUEUE` | `50` | wartende Exporte, darüber 503 `server_busy` + Retry-After. `0` = aus |
+| `CLEO_SPECULATIVE_RENDER` | aus | `1`: Sofort-Export (unten) |
+| `CLEO_SPEC_WORKERS` | `1` | gleichzeitige Vorab-Renders (eigener Pool, nie ein Kunden-Slot) |
+
+**Nochmal bearbeiten** (`POST /jobs/{id}/reopen`): fertig → „Bereit zum
+Bearbeiten“. Der bisherige Export (Video, Vorschaubild, Bonus-Clips,
+Post-Text, SRT/VTT) bleibt herunterladbar, bis ein neuer Export fertig
+ist; scheitert der neue, bleibt der alte. Antworten: 409 `busy` (läuft
+gerade), 409 `media_unavailable` (Original weg), 410 `media_expired`
+(Aufbewahrung abgelaufen), 409 `not_editable` (Analyse war
+fehlgeschlagen). Das Wiederöffnen startet die Aufbewahrungsfrist neu
+(`expires_at` folgt `updated_at`) — gehört in die FAQ.
+
+**Untertitel-Technik bei Nochmal bearbeiten (UT4-Pinning):** ein Projekt
+behält die Technik seines **ersten** Exports bei jedem weiteren Export.
+- Vor UT4 exportierte Projekte (kein `caption_engine`, aber Ausgaben
+  vorhanden) exportieren wieder mit v1 und werden dabei auf v1 gepinnt
+  (`exported_before`) — sie sehen nach dem Neu-Export aus wie vorher.
+- Ein auf v1 gepinntes Projekt im neuen Editor (`?editor=v2`): der
+  Stil-Tab ändert seinen Export nicht; der Editor sagt das im
+  Hinweis „Seine Untertitel behalten den Look des ersten Exports“.
+- Ein auf v2 gepinntes Projekt exportiert immer v2 — auch wenn
+  `CLEO_CAPTION_ENGINE` später auf `v1`/`off` gestellt wird (das wirkt
+  nur auf nie exportierte Projekte); scheitert dann der v2-Aufbau, gibt
+  es „Export fehlgeschlagen“ statt eines anderen Looks.
+- Der Vorab-Render (Sofort-Export) ist der erste Render eines Projekts
+  und pinnt v2; scheitert er, wird das Pinning zurückgenommen.
+
+**Fair Use (Owner-Entscheidung, PLAN 2.6 B):** nur mit Abrechnung an und
+für echte Konten (nicht der Service-Nutzer). Die ersten 3 erfolgreichen
+Exporte eines Videos sind frei; jeder weitere bucht
+`ceil(25 % × abgerechnete Länge)` als eigene Zeile im Minuten-Ledger
+(`usage.job_id = "{job}#r{gen}"`, `enforce=False`: blockiert nie, auch
+nicht bei leerem Kontingent — das Kontoblatt zeigt dann die
+Überschreitung). Ein fehlgeschlagener Export bucht dieselbe Zeile zurück
+(auch nach Container-Neustart / Übernahme durch den Leader). Der
+Sofort-Export zählt nie. Scheitert die Rückbuchung selbst (Datenbank
+weg), merkt sie sich der Server als Job-Event `refund_pending` und holt
+sie beim Start und stündlich nach (idempotent über den Ledger-Schlüssel;
+Log `[fair-use] pending refund … settled`). Ohne Abrechnung (heute in Produktion) zeigt die
+App nur „Kostenlos“, keinen Zähler. Kein freiwilliges Geld-zurück.
+
+**Sofort-Export** (`CLEO_SPECULATIVE_RENDER=1`): direkt nach der Analyse
+rendert der Server ein Projekt, dessen erster Export v2 wäre (also mit
+`CLEO_CAPTION_ENGINE=v2`), einmal vorab — auf einem eigenen kleinen Pool,
+nie über einen Kunden-Slot, und nicht, wenn mehr als die Hälfte von
+`CLEO_MAX_RENDER_QUEUE` wartet. Exportiert der Nutzer ohne Änderung
+(gleiche Schnitte, gleicher Stil, gleicher Text — auch keine noch nicht
+gespeicherte Änderung), ist die Fertig-Ansicht sofort da, ohne Kosten.
+Jede Änderung macht den Vorab-Render ungültig; seine Dateien werden beim
+nächsten Export gelöscht. Sinnvoll nur mit `render_r2` auf Modal (sonst
+rendert der API-Server selbst). Ein Vorab-Render, den ein Neustart
+abgeschnitten hat (bleibt „running“), wird beim Start (ohne
+Warteschlange sofort, mit Warteschlange nach Modal-Timeout + 5 min) und
+stündlich als gescheitert abgeschlossen: Pinning zurück, `r{gen}/` zum
+Löschen vorgemerkt (Log `[spec] settled …`). Notbremse: Variable löschen.
+
+**Fertig-Ansicht:** Download (ein Knopf pro echter Datei,
+Dateiname `{titel}_cleocuts_9x16.mp4`, auch bei japanischen/russischen
+Titeln), am Handy „In Fotos sichern / Teilen“ (bis 250 MB), Post-Text
+bearbeiten/kopieren (beim Export aus dem bearbeiteten Text erzeugt; ein
+v2-Neu-Export mit gleichem Text und Schnitt behält ihn, kein „Neu
+erzeugen“), SRT/VTT (`GET /jobs/{id}/captions.srt|vtt`), Bonus-Clips nur
+bei unveränderter Timeline und ≥ 90 s, „Cleo cut“-Tipp, Umfrage
+„Musstest du woanders schneiden?“ ab dem 2. Export (max. 1×/Woche,
+`POST /feedback` → Job-Event `feedback_post_export`).
+
+**Noch nicht drin (eigene Pakete):** Testimonial-Anfrage nach dem 3.
+Export (braucht die versionierte Einwilligung aus UX14), „Jetzt
+herunterladen“ in der Fertig-Mail (UX13), „Nochmal bearbeiten“ im ⋯-Menü
+der Projekt-Kacheln (UX12).

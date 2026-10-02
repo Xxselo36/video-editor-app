@@ -75,6 +75,8 @@ async function selectWords(page: Page, first: string, last: string) {
 async function exportBody(page: Page): Promise<{ subtitles: { text: string; original_start: number }[] }> {
   const req = page.waitForRequest((r: Request) => r.method() === "POST" && /\/jobs\/[^/]+\/render$/.test(r.url()), { timeout: 30_000 });
   await page.getByTestId("ed-export").click();
+  // UX11: Export opens the export sheet; the render starts on confirm.
+  await page.getByTestId("export-confirm").click();
   return (await req).postDataJSON();
 }
 

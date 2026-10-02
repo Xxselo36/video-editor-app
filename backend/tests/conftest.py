@@ -67,7 +67,11 @@ _OPT_IN_ENV = ("CLEO_MEDIA_BACKEND", "CLEO_UPLOAD_MODE", "CLEO_MODAL_RENDER_FN",
                "CLEO_MEDIA_ORPHAN_MAX", "CLEO_MEDIA_PRESIGN",
                "R2_BACKUP_BUCKET", "CLEO_MODAL_R2",
                # UT4: v1 captions unless a test switches v2 on.
-               "CLEO_CAPTION_ENGINE", "CLEO_LOUDNORM")
+               "CLEO_CAPTION_ENGINE", "CLEO_LOUDNORM",
+               # UX11: the defaults unless a test sets them.
+               "CLEO_SPECULATIVE_RENDER", "CLEO_FREE_RENDERS",
+               "CLEO_RENDER_FAIRUSE_PCT", "CLEO_MAX_RENDERS_PER_USER",
+               "CLEO_MAX_RENDER_QUEUE", "CLEO_MAX_RENDERS_PER_JOB_DAY")
 for _k in (*_OPT_IN_ENV, "CLEO_MEDIA_ROOT", "CLEO_BACKFILL",
            "R2_ENDPOINT_URL"):
     os.environ.pop(_k, None)
