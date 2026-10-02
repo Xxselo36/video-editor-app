@@ -16,7 +16,10 @@ test.describe("accounts on (test auth)", { tag: "@auth" }, () => {
     await page.goto("/app");
     await expect(page).toHaveURL(/\/sign-in\?redirect_url=/, { timeout: 30_000 });
     await page.getByTestId("mock-user-test_pro").click();
-    await expect(page).toHaveURL(/\/app$/);
+    // Back in the app: /app, or /app/new straight away — a user with no
+    // projects yet is sent on to the start screen, and that redirect can
+    // land before this assertion polls.
+    await expect(page).toHaveURL(/\/app(\/new)?$/);
     await expect(page.getByTestId("mock-user-name")).toHaveText("test_pro");
   });
 
