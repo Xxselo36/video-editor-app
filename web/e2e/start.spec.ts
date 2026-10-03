@@ -217,9 +217,34 @@ test("iOS: Preparing video… between the chooser closing and the file arriving 
   // The chooser closed (the page gets focus back), no file yet.
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(page.getByTestId("start-preparing")).toHaveText("Preparing video…");
+  await expect(page.getByTestId("start-preparing-slow")).toHaveCount(0);
+  // Still nothing after ~4 s: iOS is still at it, the page says so.
+  await expect(page.getByTestId("start-preparing-slow")).toHaveText(
+    "Your iPhone is still preparing the video — please wait, don't close this page.",
+  );
   // Cancelled after all: nothing is coming.
   await page.getByTestId("upload-input").dispatchEvent("cancel");
   await expect(page.getByTestId("start-preparing")).toHaveCount(0);
+  await expect(page.getByTestId("start-preparing-slow")).toHaveCount(0);
+});
+
+const IPHONE_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+
+test.describe("on an iPhone", () => {
+  test.use({ userAgent: IPHONE_UA });
+  test("the start screen says iOS prepares long videos first @editor-v2", async ({ page }) => {
+    await openWithStorage(page, "/app/new");
+    await expect(page.getByTestId("start-ios-hint")).toHaveText(
+      "Your iPhone prepares long videos before they upload — for a 10-minute video this can take a minute or more.",
+    );
+  });
+});
+
+test("no iOS hint on a desktop or Android browser @editor-v2", async ({ page }) => {
+  await openWithStorage(page, "/app/new");
+  await expect(page.getByTestId("start-limits")).toBeVisible();
+  await expect(page.getByTestId("start-ios-hint")).toHaveCount(0);
 });
 
 test("the settings sheet and the start screen fit a phone @editor-v2", async ({ page, isMobile }) => {

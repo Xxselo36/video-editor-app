@@ -180,6 +180,8 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.start.limits": "MP4 · MOV · WebM · 최대 {minutes}분, {gb}GB · 모든 언어",
   "app.start.limitsNoLength": "MP4 · MOV · WebM · 최대 {gb}GB · 모든 언어",
   "app.start.preparing": "동영상 준비 중…",
+  "app.start.iosHint": "iPhone은 긴 동영상을 업로드하기 전에 준비합니다. 10분짜리 동영상은 1분 이상 걸릴 수 있습니다.",
+  "app.start.preparingSlow": "iPhone이 아직 동영상을 준비 중입니다. 이 페이지를 닫지 말고 기다려 주세요.",
   "app.start.format": "형식",
   "app.start.formatVertical": "TikTok · Reels · Shorts",
   "app.start.formatWide": "YouTube",
