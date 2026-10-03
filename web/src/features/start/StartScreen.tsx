@@ -12,9 +12,13 @@
  *   decides anyway: SmartCam from the real video).
  * - iOS: after the chooser closes, "Preparing video…" until the file
  *   arrives (Photos may transcode it first).
+ * - An interrupted upload (a reload, a dead phone: lib/uploadResume) is
+ *   offered on top: picking a file with the same content — whatever its
+ *   name — continues it where R2 has it; another file starts a new
+ *   upload and leaves the interrupted one for later. "Discard" aborts it.
  * - No caption style here: the editor owns it (defaults.ts).
  */
-import { ChevronDown, Upload } from "lucide-react";
+import { ChevronDown, RotateCw, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -32,6 +36,8 @@ import { useConfig } from "@/lib/config";
 import { getLibrary } from "@/lib/library";
 import { readLocalJobs } from "@/features/jobs/localJobs";
 import { isUploading, loadUploadCode, startUpload, useLiveUpload } from "@/features/upload/uploadManager";
+import { useResumableUploads } from "@/features/upload/useResumable";
+import { discardResumable } from "@/lib/uploadResume";
 import { VoiceTestDialog } from "@/features/voice-test/VoiceTestDialog";
 import {
   ASPECTS,
@@ -133,6 +139,19 @@ export function StartScreen() {
   }, []);
 
   const live = useLiveUpload(upload?.tempId ?? "");
+  // The newest interrupted upload of this browser (none while this
+  // screen uploads).
+  const resumables = useResumableUploads();
+  const resume = upload === null ? (resumables?.[0] ?? null) : null;
+  const [discarding, setDiscarding] = useState(false);
+  const discard = async (fp: string) => {
+    setDiscarding(true);
+    try {
+      await discardResumable(fp);
+    } finally {
+      if (mounted.current) setDiscarding(false);
+    }
+  };
   const portrait = isPortrait(probe);
   // A vertical video asked for 16:9 is treated as original (the server
   // does the same): no pillarbox.
@@ -282,6 +301,40 @@ export function StartScreen() {
         )}
       </div>
 
+      {resume && (
+        <div
+          role="region"
+          aria-labelledby="start-resume-text"
+          data-testid="start-resume"
+          className="rounded-2xl border border-[var(--brand)] bg-[var(--brand-tint)] p-4"
+        >
+          <p id="start-resume-text" className="flex items-start gap-2 text-sm font-medium text-[var(--text-strong)]">
+            <Icon icon={RotateCw} className="mt-0.5 shrink-0 text-[var(--brand-strong)]" />
+            <span className="min-w-0 break-words">{t("app.start.resumeCard", { name: resume.name, pct: resume.pct })}</span>
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={choose}
+              data-testid="start-resume-choose"
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[var(--brand-solid)] px-4 text-sm font-semibold text-white hover:bg-[var(--brand-solid-hover)]"
+            >
+              <Icon icon={Upload} />
+              {t("app.start.resumeChoose")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void discard(resume.fp)}
+              disabled={discarding}
+              data-testid="start-resume-discard"
+              className="inline-flex min-h-11 items-center rounded-xl px-4 text-sm font-semibold text-[var(--text-body)] hover:bg-[var(--surface-1)] disabled:opacity-50"
+            >
+              {t("app.start.resumeDiscard")}
+            </button>
+          </div>
+        </div>
+      )}
+
       {upload === null ? (
         <div>
           <button
@@ -327,7 +380,7 @@ export function StartScreen() {
             </p>
           )}
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
-            <span>{t("app.start.keepOpen")}</span>
+            <span data-testid="start-keep-open">{t(phone ? "app.start.keepOpenPhone" : "app.start.keepOpen")}</span>
             <Link href="/app" data-testid="start-to-projects" className="font-semibold text-[var(--brand-strong)] hover:opacity-80">
               {t("app.start.toProjects")}
             </Link>

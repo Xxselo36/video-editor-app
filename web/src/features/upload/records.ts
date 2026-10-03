@@ -113,6 +113,20 @@ export function recordJobCreated(
   });
 }
 
+/** An upload that continues an interrupted one: the stopped tiles of the
+ *  same file (same byte count) go — v2 only; the v1 dashboard keeps its
+ *  cards exactly as before. */
+export function removeStoppedUploads(fileSize: number, exceptId: string): void {
+  if (!projectsV2()) return;
+  withStore((store) => {
+    for (const j of store.getLocalJobs()) {
+      if (j.jobId !== exceptId && j.jobId.startsWith("upl-") && j.upload?.errorCode && j.fileSize === fileSize) {
+        store.removeJob(j.jobId);
+      }
+    }
+  });
+}
+
 export function removeUploadRecord(tempId: string): void {
   if (projectsV2()) withStore((store) => store.removeJob(tempId));
   else removeActiveJob(tempId);

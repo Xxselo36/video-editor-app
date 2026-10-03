@@ -3,7 +3,7 @@ import { ApiError } from "@/lib/api";
 import {
   doneBytes,
   fingerprint,
-  knownKey,
+  legacyFingerprint,
   partLength,
   recordGone,
   uploadLimitHit,
@@ -67,29 +67,32 @@ describe("resume-record keys", () => {
     new File([bytes as BlobPart], name, { type: "video/mp4", lastModified });
   const bytes = (n: number, fill = 7) => new Uint8Array(n).fill(fill);
 
-  it("knownKey is size:name", () => {
-    expect(knownKey("clip.mp4", 42)).toBe("42:clip.mp4");
-  });
-
-  it("fingerprint is size + SHA-256, independent of lastModified", async () => {
+  it("fingerprint is size + SHA-256 of the content, independent of lastModified", async () => {
     const a = await fingerprint(file("a.mp4", bytes(1000), 1));
     const b = await fingerprint(file("a.mp4", bytes(1000), 999));
-    expect(a).toMatch(/^1000:[0-9a-f]{64}$/);
+    expect(a).toMatch(/^c2:1000:[0-9a-f]{64}$/);
     expect(b).toBe(a);
   });
 
-  it("changes with the name and the content", async () => {
-    const a = await fingerprint(file("a.mp4", bytes(1000)));
-    expect(await fingerprint(file("b.mp4", bytes(1000)))).not.toBe(a);
-    expect(await fingerprint(file("a.mp4", bytes(1000, 8)))).not.toBe(a);
+  it("changes with the content, not with the name (iOS renames re-picked videos)", async () => {
+    const a = await fingerprint(file("IMG_0042.MOV", bytes(1000)));
+    expect(await fingerprint(file("trim.6F1C2D3A-0B7E.MOV", bytes(1000), 5))).toBe(a);
+    expect(await fingerprint(file("IMG_0042.MOV", bytes(1000, 8)))).not.toBe(a);
+    expect(await fingerprint(file("IMG_0042.MOV", bytes(1001)))).not.toBe(a);
   });
 
-  it("samples only the first and last MiB of big files", async () => {
-    const big = bytes(3 * MIB);
+  it("the old key (records from before) still hashes the name", async () => {
+    const a = await legacyFingerprint(file("a.mp4", bytes(1000)));
+    expect(a).toMatch(/^1000:[0-9a-f]{64}$/);
+    expect(await legacyFingerprint(file("b.mp4", bytes(1000)))).not.toBe(a);
+  });
+
+  it("samples only the first and last 2 MiB of big files", async () => {
+    const big = bytes(5 * MIB);
     const middle = big.slice();
-    middle[Math.floor(1.5 * MIB)] = 1;
+    middle[Math.floor(2.5 * MIB)] = 1;
     const tail = big.slice();
-    tail[3 * MIB - 1] = 1;
+    tail[5 * MIB - 1] = 1;
     const a = await fingerprint(file("big.mp4", big));
     expect(await fingerprint(file("big.mp4", middle))).toBe(a);
     expect(await fingerprint(file("big.mp4", tail))).not.toBe(a);

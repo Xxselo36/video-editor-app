@@ -19,6 +19,8 @@ import { plural } from "@/lib/i18n/plural";
 import { presetLabelFor, PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import { canRetryInPlace, cancelUpload, retryUpload, retryUploadWith } from "@/features/upload/uploadControls";
 import { useLiveUpload, useLocalThumb } from "@/features/upload/uploadState";
+import { matchResumable, useResumableUploads } from "@/features/upload/useResumable";
+import { discardResumable } from "@/lib/uploadResume";
 import type { UploadSettings } from "@/features/upload/uploadJob";
 import { getLocalJob, removeJob } from "./jobsStore";
 import { daysLeft, middleEllipsis, type Project, type ProjectState } from "./projects";
@@ -179,6 +181,13 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
   const lang = useLang();
   const liveUpload = useLiveUpload(p.id);
   const fileRef = useRef<HTMLInputElement>(null);
+  // A stopped upload whose resume record is still here: "Continue upload"
+  // at its percent (the same bytes continue, whatever the file is called).
+  const resumables = useResumableUploads();
+  const resumable =
+    p.state === "upload_failed" && !canRetryInPlace(p.id)
+      ? matchResumable(resumables, getLocalJob(p.id)?.fileSize, p.filename)
+      : null;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000);
@@ -208,6 +217,8 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
         if (starting) return t("app.projects.starting");
         return resuming ? t("app.upload.resuming") : t(touchDevice() ? "app.projects.uploadKeepOpenPhone" : "app.projects.uploadKeepOpen");
       case "upload_failed":
+        if (resumable) return t("app.projects.resumeAt", { pct: resumable.pct });
+        return describeError({ code: p.errorCode, params: p.errorParams, refunded: p.refunded }, t);
       case "failed":
         return describeError({ code: p.errorCode, params: p.errorParams, refunded: p.refunded }, t);
       case "processing":
@@ -324,6 +335,7 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
             .filter(Boolean)
             .join(" · ")}
           {uploading && <span className="ml-1">· {Math.round(pct)}%</span>}
+          {resumable && <span className="ml-1">· {resumable.pct}%</span>}
         </div>
         {status && (
           <p data-testid="job-card-status" className="text-xs leading-relaxed" style={{ color: statusTone }}>
@@ -353,9 +365,10 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
                   className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
                   style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
                   title={canRetryInPlace(p.id) ? undefined : t("app.projects.pickAgain")}
+                  data-resume={resumable ? resumable.pct : undefined}
                 >
                   <Icon icon={RotateCw} />
-                  {t("app.projects.retry")}
+                  {t(resumable ? "app.projects.resume" : "app.projects.retry")}
                 </button>
                 <input
                   ref={fileRef}
@@ -372,7 +385,12 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
               <button
                 type="button"
                 data-testid="job-card-remove"
-                onClick={() => (p.state === "expired" ? removeJob(p.id) : void cancelUpload(p.id))}
+                onClick={() => {
+                  if (p.state === "expired") return removeJob(p.id);
+                  // Given up: the interrupted upload goes on the server too.
+                  if (resumable) void discardResumable(resumable.fp);
+                  void cancelUpload(p.id);
+                }}
                 className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
                 style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
               >

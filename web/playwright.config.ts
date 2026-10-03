@@ -46,7 +46,15 @@ const stubFlags = [
 
 // Mode tags: a run executes its own mode's suites only. A v2-editor run
 // (E2E_EDITOR_V2=1) executes the @editor-v2 suites only; other runs skip them.
-const grep = EDITOR_V2 ? /@editor-v2\b/ : MODE === "anon" ? undefined : new RegExp(`@${MODE}\\b`);
+// A v2-editor run in another mode (E2E_MODE=r2 E2E_EDITOR_V2=1: the
+// resumable-upload suite) executes the suites tagged with both.
+const grep = EDITOR_V2
+  ? MODE === "anon"
+    ? /@editor-v2\b/
+    : new RegExp(`^(?=.*@editor-v2\\b)(?=.*@${MODE}\\b)`)
+  : MODE === "anon"
+    ? undefined
+    : new RegExp(`@${MODE}\\b`);
 const grepInvert = [
   ...(MODE === "anon" ? [/@(auth|r2)\b/] : []),
   ...(NIGHTLY ? [] : [/@nightly\b/]),

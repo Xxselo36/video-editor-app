@@ -10,6 +10,8 @@ name: Web
 #                      the @auth suites on desktop + pixel7
 #             editor-v2  NEXT_PUBLIC_EDITOR_V2=1 build, the @editor-v2
 #                      suites (UX7 shell layout) on desktop + pixel7
+#             editor-v2-r2  the same build against the stub with R2 (moto):
+#                      the suites tagged @editor-v2 and @r2 (upload resume)
 # Nightly (and "Run workflow" with nightly ticked):
 #             webkit   the anonymous suites on WebKit (required for release
 #                      from UX18)
@@ -132,6 +134,12 @@ jobs:
           # UX7: a build with the v2 editor shell, its @editor-v2 suites only
           - name: editor-v2
             mode: anon
+            projects: --project=desktop --project=pixel7
+            editor_v2: '1'
+          # The v2 suites on the R2 multipart path (@editor-v2 + @r2: an
+          # interrupted upload resumes from the parts R2 lists)
+          - name: editor-v2-r2
+            mode: r2
             projects: --project=desktop --project=pixel7
             editor_v2: '1'
     env:

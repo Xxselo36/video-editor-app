@@ -32,7 +32,9 @@ def upload_state(monkeypatch):
     monkeypatch.setenv("CLEO_UPLOAD_MODE", "multipart")
     with M._INFLIGHT._lock:
         M._INFLIGHT._entries.clear()
+    M._resume_window.clear()
     yield
+    M._resume_window.clear()
     with M._INFLIGHT._lock:
         M._INFLIGHT._entries.clear()
 
@@ -93,7 +95,7 @@ def test_init_signs_the_first_parts_with_their_exact_length(client, r2,
     assert body["part_size"] == 16 * MIB and body["parts_total"] == 3
     assert body["storage_key"].startswith("uploads/")
     assert body["storage_key"].endswith(".mov")
-    assert abs(body["expires_at"] - (time.time() + 23 * 3600)) < 60
+    assert abs(body["expires_at"] - (time.time() + M._upload_ttl_s())) < 60
     assert [p["part_number"] for p in body["parts"]] == [1, 2, 3]
     assert [(n, s) for n, s, _ in signed] == [
         (1, 16 * MIB), (2, 16 * MIB), (3, 8 * MIB + 7)]
@@ -188,6 +190,93 @@ def test_ticket_unit():
     with pytest.raises(upl.TicketError) as e:
         upl.read_ticket("k1", t, "a", now=100)
     assert (e.value.status, e.value.code) == (410, "upload_expired")
+
+
+# ── how long an upload can be resumed ────────────────────────────────
+
+
+OLD_RULES = [  # the bucket rules of before (2026-10): 2 d / 1 d
+    {"ID": "uploads-expire-2d", "Status": "Enabled",
+     "Filter": {"Prefix": "uploads/"}, "Expiration": {"Days": 2}},
+    {"ID": "uploads-abort-mpu-1d", "Status": "Enabled",
+     "Filter": {"Prefix": "uploads/"},
+     "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}}]
+
+
+def test_resume_window_unit():
+    H, D = 3600, 86400
+    assert upl.resume_window_s(False, 8, 9) == 23 * H        # rules unknown
+    assert upl.resume_window_s(True, 1, 2) == 23 * H         # old rules
+    assert upl.resume_window_s(True, 8, 9) == 7 * D          # new rules
+    assert upl.resume_window_s(True, None, None) == 7 * D    # nothing aborts
+    assert upl.resume_window_s(True, 30, 3) == 2 * D         # expiry first
+    assert upl.resume_window_s(True, 3, 30) == 3 * D - H
+    assert upl.resume_window_s(True, None, 1) == H           # at least 1 h
+    from backend import r2_setup
+    assert r2_setup.uploads_retention_days(OLD_RULES) == (1, 2)
+    assert r2_setup.uploads_retention_days(
+        r2_setup.lifecycle_config()["Rules"]) == (8, 9)
+    off = [dict(r, Status="Disabled") for r in OLD_RULES]
+    assert r2_setup.uploads_retention_days(off) == (None, None)
+    # The rules this repo sets keep a resume for 7 days — and pass the
+    # check.
+    assert r2_setup.lifecycle_problems(
+        r2_setup.lifecycle_config()["Rules"]) == []
+
+
+def test_ticket_never_outlives_the_bucket_rules(client, r2, monkeypatch):
+    """The ticket — and the browser's resume record, which keeps its
+    expires_at — ends before R2 aborts the upload: 23 h with the old
+    rules or rules that can't be read, 7 days with the new ones."""
+    from backend import r2_setup
+    D = 86400
+
+    def ttl():
+        M._resume_window.clear()
+        body = _init(client, 20 * MIB).json()
+        return body["expires_at"] - time.time()
+
+    try:
+        r2.put_bucket_lifecycle_configuration(
+            Bucket=storage.bucket(),
+            LifecycleConfiguration={"Rules": OLD_RULES})
+        assert abs(ttl() - 23 * 3600) < 60
+        r2.put_bucket_lifecycle_configuration(
+            Bucket=storage.bucket(),
+            LifecycleConfiguration=r2_setup.lifecycle_config())
+        assert abs(ttl() - 7 * D) < 60
+        # A ticket of day 6 still works; R2 still has the parts.
+        t = _init(client, 20 * MIB).json()["ticket"]
+        claims = upl.read_ticket(M._ticket_secret(), t, "",
+                                 now=time.time() + 6 * D)
+        assert claims["exp"] > time.time() + 6.9 * D
+        # Read once, then cached (6 h): no lifecycle call per init.
+        calls = []
+        real = storage._client
+
+        class Spy:
+            def __init__(self, c):
+                self._c = c
+
+            def __getattr__(self, name):
+                if name == "get_bucket_lifecycle_configuration":
+                    calls.append(name)
+                return getattr(self._c, name)
+        monkeypatch.setattr(storage, "_client", lambda: Spy(real()))
+        for _ in range(3):
+            assert _init(client, 20 * MIB).status_code == 200
+        assert calls == []
+        # Rules the token may not read: 23 h, as before.
+        M._resume_window.clear()
+
+        class Denied(Spy):
+            def get_bucket_lifecycle_configuration(self, **kw):
+                raise RuntimeError("AccessDenied")
+        monkeypatch.setattr(storage, "_client", lambda: Denied(real()))
+        body = _init(client, 20 * MIB).json()
+        assert abs(body["expires_at"] - time.time() - 23 * 3600) < 60
+    finally:
+        r2.delete_bucket_lifecycle(Bucket=storage.bucket())
 
 
 # ── parts / complete / abort ─────────────────────────────────────────

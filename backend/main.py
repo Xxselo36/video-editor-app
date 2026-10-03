@@ -3365,7 +3365,7 @@ def _storage_call(what: str, fn: Callable, *args: Any) -> Any:
 
 # Multipart uploads a caller may open per hour (CLEO_UPLOAD_INITS_PER_HOUR,
 # 0 = no limit): each one is an open upload in R2 (Class-A operations,
-# parts kept until the lifecycle rule aborts it a day later) — POST
+# parts kept until the lifecycle rule aborts it, 8 days later) — POST
 # /jobs's admission doesn't see them. Per user; per client address with
 # auth off. In-process (one uvicorn process).
 def _init_limit() -> int:
@@ -3373,6 +3373,38 @@ def _init_limit() -> int:
 
 
 _INIT_RATE = upl.RateLimit(_init_limit(), 3600.0)
+
+# The ticket lifetime of new uploads (upl.resume_window_s), from the
+# bucket's lifecycle rules: read on the first init, then every 6 h (10
+# min after a failed read, meanwhile the 23 h of before). Per process.
+_RESUME_EVERY_S = 6 * 3600.0
+_RESUME_RETRY_S = 600.0
+_resume_window: dict[str, float] = {}
+
+
+def _upload_ttl_s(now: float | None = None) -> int:
+    from backend import r2_setup, storage
+    now = time.monotonic() if now is None else now
+    if now < _resume_window.get("next", float("-inf")):
+        return int(_resume_window["ttl"])
+    try:
+        rules = storage._client().get_bucket_lifecycle_configuration(
+            Bucket=storage.bucket()).get("Rules") or []
+        known = True
+    except Exception as e:
+        known = "NoSuchLifecycleConfiguration" in str(e)
+        rules = []
+    abort_days, expire_days = r2_setup.uploads_retention_days(rules)
+    ttl = upl.resume_window_s(known, abort_days, expire_days)
+    if ttl != _resume_window.get("ttl"):
+        print(f"[upload] resumable for {ttl / 3600:.0f} h "
+              + (f"(bucket: abort after {abort_days} d, expire after "
+                 f"{expire_days} d)" if known
+                 else "(the bucket's lifecycle rules can't be read)"),
+              flush=True)
+    _resume_window.update(
+        ttl=ttl, next=now + (_RESUME_EVERY_S if known else _RESUME_RETRY_S))
+    return ttl
 
 
 def _check_init_rate(user: User | None, request: Request) -> None:
@@ -3422,7 +3454,7 @@ def multipart_init(payload: dict, request: Request,
     ct = upl.upload_content_type(payload.get("content_type"))
     upload_id = _storage_call("CreateMultipartUpload", storage.mpu_create,
                               key, ct)
-    exp = int(time.time() + upl.TICKET_TTL_S)
+    exp = int(time.time() + _upload_ttl_s())
     ticket = upl.make_ticket(_ticket_secret(), {
         "u": _uid(user), "k": key, "id": upload_id, "s": size, "ps": ps,
         "n": n, "ct": ct, "exp": exp})
