@@ -58,16 +58,16 @@ def test_r2_setup_apply_sets_exactly_the_printed_config(r2, capsys):
             {"ID": "Default Multipart Abort Rule", "Status": "Enabled",
              "Filter": {"Prefix": ""},
              "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}},
-            {"ID": "uploads-expire-2d", "Status": "Enabled",
-             "Filter": {"Prefix": "uploads/"}, "Expiration": {"Days": 9}}]})
+            {"ID": "uploads-expire-9d", "Status": "Enabled",
+             "Filter": {"Prefix": "uploads/"}, "Expiration": {"Days": 2}}]})
     want_cors, want_life = _printed_config(capsys)
 
     assert r2_setup.main(["--apply"]) == 0
     out = capsys.readouterr().out
     _assert_no_secrets(out)
     assert "PASS  CORS  (set: 1 rule, 2 origin(s); had 1 rule(s))" in out
-    assert ("PASS  lifecycle  (set: 3 rules: uploads-expire-2d, "
-            "uploads-abort-mpu-1d, jobs-abort-mpu-2d; replaced: "
+    assert ("PASS  lifecycle  (set: 3 rules: uploads-expire-9d, "
+            "uploads-abort-mpu-8d, jobs-abort-mpu-2d; replaced: "
             "Default Multipart Abort Rule)") in out
     assert out.strip().splitlines()[-1] == "applied"
 

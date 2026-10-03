@@ -70,13 +70,28 @@ def cors_config(origins: list[str]) -> dict:
         "MaxAgeSeconds": 7200}]}
 
 
+# uploads/: an interrupted browser upload can be resumed for 7 days
+# (backend/uploads.py resume_window_s: the tickets follow these rules, so
+# a resume is never promised longer than the bucket keeps the parts).
+# Incomplete multipart uploads are aborted a day after that; a completed
+# upload that never became a job expires two days after it (S3 dates a
+# multipart object by its initiation: a resume completed on day 7 still
+# has a day for POST /jobs and the analysis).
+UPLOADS_ABORT_MPU_DAYS = 8
+UPLOADS_EXPIRE_DAYS = 9
+# What --check / the daily runtime check accept for uploads/.
+UPLOADS_MAX_DAYS = 10
+
+
 def lifecycle_config() -> dict:
     return {"Rules": [
-        {"ID": "uploads-expire-2d", "Status": "Enabled",
-         "Filter": {"Prefix": "uploads/"}, "Expiration": {"Days": 2}},
-        {"ID": "uploads-abort-mpu-1d", "Status": "Enabled",
+        {"ID": f"uploads-expire-{UPLOADS_EXPIRE_DAYS}d", "Status": "Enabled",
          "Filter": {"Prefix": "uploads/"},
-         "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}},
+         "Expiration": {"Days": UPLOADS_EXPIRE_DAYS}},
+        {"ID": f"uploads-abort-mpu-{UPLOADS_ABORT_MPU_DAYS}d",
+         "Status": "Enabled", "Filter": {"Prefix": "uploads/"},
+         "AbortIncompleteMultipartUpload": {
+             "DaysAfterInitiation": UPLOADS_ABORT_MPU_DAYS}},
         {"ID": "jobs-abort-mpu-2d", "Status": "Enabled",
          "Filter": {"Prefix": "jobs/"},
          "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 2}}]}
@@ -150,18 +165,34 @@ def _rule_prefix(r: dict) -> str:
             else (f.get("And") or {}).get("Prefix", r.get("Prefix", ""))) or ""
 
 
+def _uploads_rules(rules: list[dict]) -> list[dict]:
+    return [r for r in rules if r.get("Status") == "Enabled"
+            and "uploads/".startswith(_rule_prefix(r))]
+
+
+def uploads_retention_days(rules: list[dict]) -> tuple[int | None,
+                                                       int | None]:
+    """(days after which an incomplete multipart upload under uploads/ is
+    aborted, days after which an object there expires) — the shortest
+    enabled rule of each; None where no rule does it."""
+    live = _uploads_rules(rules)
+    mpu = [int((r.get("AbortIncompleteMultipartUpload") or {})
+               .get("DaysAfterInitiation") or 0) for r in live]
+    exp = [int((r.get("Expiration") or {}).get("Days") or 0) for r in live]
+    mpu = [d for d in mpu if d > 0]
+    exp = [d for d in exp if d > 0]
+    return (min(mpu) if mpu else None, min(exp) if exp else None)
+
+
 def lifecycle_problems(rules: list[dict]) -> list[str]:
     """What the bucket's lifecycle rules lack for uploads/ (abandoned or
     refused browser uploads must expire; the orphan sweep skips them)."""
-    live = [r for r in rules if r.get("Status") == "Enabled"
-            and "uploads/".startswith(_rule_prefix(r))]
+    abort_days, expire_days = uploads_retention_days(rules)
     problems = []
-    days = [int((r.get("Expiration") or {}).get("Days") or 0) for r in live]
-    if not any(0 < d <= 7 for d in days):
-        problems.append("no enabled rule expires uploads/ within 7 days")
-    mpu = [int((r.get("AbortIncompleteMultipartUpload") or {})
-               .get("DaysAfterInitiation") or 0) for r in live]
-    if not any(0 < d <= 7 for d in mpu):
+    if not (expire_days and expire_days <= UPLOADS_MAX_DAYS):
+        problems.append("no enabled rule expires uploads/ within "
+                        f"{UPLOADS_MAX_DAYS} days")
+    if not (abort_days and abort_days <= UPLOADS_MAX_DAYS):
         problems.append("no enabled rule aborts incomplete multipart "
                         "uploads under uploads/")
     return problems

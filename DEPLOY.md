@@ -414,7 +414,7 @@ In Lemon Squeezy:
   gleicht stündlich alle Abos mit der LS-API ab und beim Aufruf von
   `/me`, wenn ein Abo veraltet aussieht. Notfalls im LS-Dashboard
   → Webhooks → "Resend".
-- **R2:** Lifecycle-Regel auf `uploads/` (z.B. 2 Tage) für hochgeladene,
+- **R2:** Lifecycle-Regel auf `uploads/` (9 Tage, 10.2) für hochgeladene,
   aber nie gestartete Dateien. Keys sind jetzt `uploads/<user-id>/…`.
 - Minuten werden **einmal beim Upload** abgebucht (Länge per ffprobe,
   sekundengenau), nach der Analyse nachberechnet, wenn das Video länger
@@ -921,10 +921,16 @@ der Weg von Hand.
    file://lifecycle.json`):
    ```json
    {"Rules":[
-    {"ID":"uploads-expire-2d","Status":"Enabled","Filter":{"Prefix":"uploads/"},"Expiration":{"Days":2}},
-    {"ID":"uploads-abort-mpu-1d","Status":"Enabled","Filter":{"Prefix":"uploads/"},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}},
+    {"ID":"uploads-expire-9d","Status":"Enabled","Filter":{"Prefix":"uploads/"},"Expiration":{"Days":9}},
+    {"ID":"uploads-abort-mpu-8d","Status":"Enabled","Filter":{"Prefix":"uploads/"},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":8}},
     {"ID":"jobs-abort-mpu-2d","Status":"Enabled","Filter":{"Prefix":"jobs/"},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":2}}]}
    ```
+   Ein abgebrochener Upload lässt sich so **7 Tage** lang fortsetzen: Das
+   Backend liest diese Regeln (alle 6 h) und gibt Upload-Tickets nie
+   länger, als der Bucket die Teile behält (`[upload] resumable for … h`
+   im Log; Regeln nicht lesbar → 23 h wie bisher). Mit den alten Regeln
+   (2 d / 1 d) bleibt es bei 23 h, bis die neuen angewendet sind
+   (Workflow "R2 setup", mode=apply).
    **Keine** Alters-Regel auf `jobs/` (R2 zählt das Objektalter, die
    Aufbewahrung die Untätigkeit — aktive Projekte verlören sonst ihre
    Medien). Gelöscht wird über die Warteschlange `media_gc` (10.7).

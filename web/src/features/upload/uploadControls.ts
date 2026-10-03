@@ -40,7 +40,7 @@ export async function cancelUpload(id: string): Promise<void> {
       const { abortResumable } = await import("@/lib/chunkedUpload");
       await abortResumable({ file: retry.file });
     } catch {
-      /* the bucket's lifecycle rule aborts it after a day anyway */
+      /* the bucket's lifecycle rule aborts it anyway */
     }
   }
 }

@@ -10,9 +10,12 @@
  *   - a per-part watchdog (no progress for UPLOAD_STALL_MS → abort),
  *     not a fixed timeout (d1bcb98);
  *   - resume state in IndexedDB, never localStorage (a big setItem
- *     blocked the iOS main thread, 171ac36), keyed by a fingerprint
- *     that does NOT use lastModified (iOS makes a new one on every
- *     pick, 8b94155);
+ *     blocked the iOS main thread, 171ac36), keyed by the file's
+ *     CONTENT — neither lastModified (iOS makes a new one on every
+ *     pick, 8b94155) nor the name (iOS often renames a re-picked
+ *     video): lib/uploadResume; the record goes in before part 1;
+ *   - a resume asks the server which parts R2 has (/parts) and sends
+ *     only the others;
  *   - 2 parts in parallel on phones / slow networks, else 4 (171ac36).
  * Retries and failures are reported to POST /uploads/telemetry (the
  * iOS hangs of Sept 2026 couldn't be diagnosed without a tethered Mac).
@@ -26,6 +29,20 @@
  */
 import { ApiError, apiError, apiFetch } from "@/lib/api";
 import type { Limits } from "@/lib/config";
+import {
+  discardResumable,
+  doneBytes,
+  dropRecord,
+  findRecord,
+  fingerprint,
+  HEARTBEAT_MS,
+  markUploadActive,
+  partLength,
+  recordPct,
+  saveRecord,
+  type UploadRecord,
+} from "@/lib/uploadResume";
+export { doneBytes, fingerprint, legacyFingerprint, partLength } from "@/lib/uploadResume";
 
 // No upload progress for this long → treat the upload as dead.
 export const UPLOAD_STALL_MS = 60_000;
@@ -74,29 +91,7 @@ export type UploadOptions = {
   duration?: number | null;
 };
 
-// ── resume state (IndexedDB) ─────────────────────────────────────────
-
-const DB_NAME = "cleocuts-uploads";
-const STORE = "uploads";
-const RECORD_TTL_MS = 23 * 3600_000; // the ticket's lifetime
-const FP_SAMPLE = 1024 * 1024;
-
-type UploadRecord = {
-  v: 1;
-  fp: string;
-  name: string;
-  size: number;
-  ticket: string;
-  storage_key: string;
-  part_size: number;
-  parts_total: number;
-  done: number[];
-  created_at: number;
-  /** Completed in R2, POST /jobs not answered yet: kept (a reload, a
-   *  deploy restart or a 502 doesn't cost a second upload) until the
-   *  job exists or the server refused the upload. */
-  completed?: boolean;
-};
+// ── resume state: lib/uploadResume (IndexedDB, by content) ──────────
 
 /** A finished upload: its key, and — for a resumable one — the call
  *  that forgets its resume record once POST /jobs has settled it.
@@ -110,166 +105,21 @@ export type UploadResult = {
   legacyApi?: boolean;
 };
 
-let dbPromise: Promise<IDBDatabase | null> | null = null;
-
-/** The database, or null (no IndexedDB, private mode, blocked): the
- *  upload still works then, it just can't resume. */
-function openDb(): Promise<IDBDatabase | null> {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve) => {
-    try {
-      if (typeof indexedDB === "undefined") return resolve(null);
-      const req = indexedDB.open(DB_NAME, 1);
-      req.onupgradeneeded = () => {
-        try {
-          if (!req.result.objectStoreNames.contains(STORE)) {
-            req.result.createObjectStore(STORE, { keyPath: "fp" });
-          }
-        } catch {
-          /* resolve(null) via onerror */
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
-      req.onblocked = () => resolve(null);
-    } catch {
-      resolve(null);
-    }
-  });
-  return dbPromise;
-}
-
-async function idb<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest | null): Promise<T | null> {
-  try {
-    const db = await openDb();
-    if (!db) return null;
-    return await new Promise<T | null>((resolve) => {
-      try {
-        const tx = db.transaction(STORE, mode);
-        const req = fn(tx.objectStore(STORE));
-        if (!req) return resolve(null);
-        req.onsuccess = () => resolve((req.result as T) ?? null);
-        req.onerror = () => resolve(null);
-      } catch {
-        resolve(null);
-      }
-    });
-  } catch {
-    return null;
-  }
-}
-
-const idbGet = (fp: string) => idb<UploadRecord>("readonly", (s) => s.get(fp));
-const idbPut = (rec: UploadRecord) => idb<unknown>("readwrite", (s) => s.put(rec));
-const idbDelete = (fp: string) => idb<unknown>("readwrite", (s) => s.delete(fp));
-const idbAll = () => idb<UploadRecord[]>("readonly", (s) => s.getAll());
-
-// name:size of the stored records (knownKey), so hasResumableUpload can answer
-// synchronously (refreshed on every change).
-const known = new Set<string>();
-export const knownKey = (name: string, size: number) => `${size}:${name}`;
-
-async function refreshKnown(): Promise<void> {
-  const all = (await idbAll()) ?? [];
-  known.clear();
-  const now = Date.now();
-  for (const r of all) {
-    if (r && r.v === 1 && now - r.created_at < RECORD_TTL_MS) known.add(knownKey(r.name, r.size));
-    else if (r?.fp) void idbDelete(r.fp); // older than the ticket
-  }
-}
-if (typeof window !== "undefined") void refreshKnown();
-
-const fpCache = new WeakMap<File, Promise<string | null>>();
-
-/** size + ":" + hex(SHA-256(name ‖ first 1 MiB ‖ last 1 MiB)). Null
- *  where crypto.subtle is missing (plain-http LAN dev): no resume. */
-export function fingerprint(file: File): Promise<string | null> {
-  let p = fpCache.get(file);
-  if (!p) {
-    p = (async () => {
-      try {
-        const subtle = globalThis.crypto?.subtle;
-        if (!subtle) return null;
-        const head = await file.slice(0, FP_SAMPLE).arrayBuffer();
-        const tail = await file.slice(Math.max(0, file.size - FP_SAMPLE)).arrayBuffer();
-        const name = new TextEncoder().encode(file.name);
-        const buf = new Uint8Array(name.byteLength + head.byteLength + tail.byteLength);
-        buf.set(name, 0);
-        buf.set(new Uint8Array(head), name.byteLength);
-        buf.set(new Uint8Array(tail), name.byteLength + head.byteLength);
-        const digest = new Uint8Array(await subtle.digest("SHA-256", buf));
-        return `${file.size}:${Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("")}`;
-      } catch {
-        return null;
-      }
-    })();
-    fpCache.set(file, p);
-  }
-  return p;
-}
-
-async function loadRecord(file: File): Promise<UploadRecord | null> {
-  const fp = await fingerprint(file);
-  if (!fp) return null;
-  const rec = await idbGet(fp);
-  if (!rec || rec.v !== 1 || rec.size !== file.size) return null;
-  if (Date.now() - rec.created_at >= RECORD_TTL_MS) {
-    await dropRecord(rec.fp);
-    return null;
-  }
-  return rec;
-}
-
-async function saveRecord(rec: UploadRecord): Promise<void> {
-  await idbPut(rec);
-  known.add(knownKey(rec.name, rec.size));
-}
-
-async function dropRecord(fp: string): Promise<void> {
-  await idbDelete(fp);
-  await refreshKnown();
-}
-
-/** Might this file continue an interrupted upload? (A quick check by
- *  name and size; resumableProgress confirms by fingerprint.) */
-export function hasResumableUpload(file: File): boolean {
-  return known.has(knownKey(file.name, file.size));
-}
-
 /** 0–100 already uploaded of an interrupted upload of this file, or
  *  null when there is nothing to resume. */
 export async function resumableProgress(file: File): Promise<number | null> {
-  const rec = await loadRecord(file);
-  if (!rec) return null;
-  return Math.floor((doneBytes(rec.done, rec.part_size, file.size, rec.parts_total) / file.size) * 100);
+  const rec = await findRecord(file);
+  return rec ? recordPct(rec) : null;
 }
 
-/** Give up an interrupted upload for good: abort it on the server and
- *  forget it here. */
+/** Give up an interrupted upload of this file for good: abort it on the
+ *  server and forget it here. */
 export async function abortResumable(opts: { file: File }): Promise<void> {
-  const rec = await loadRecord(opts.file);
-  if (!rec) return;
-  try {
-    await apiFetch("/uploads/multipart/abort", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticket: rec.ticket }),
-    });
-  } catch {
-    /* the bucket's lifecycle rule aborts it after a day anyway */
-  }
-  await dropRecord(rec.fp);
+  const rec = await findRecord(opts.file);
+  if (rec) await discardResumable(rec.fp);
 }
 
 // ── helpers (the pure ones are exported for chunkedUpload.test.ts) ───
-
-export const partLength = (n: number, partSize: number, size: number, total: number) =>
-  n < total ? partSize : size - partSize * (total - 1);
-
-export function doneBytes(done: number[], partSize: number, size: number, total: number): number {
-  return done.reduce((s, n) => s + partLength(n, partSize, size, total), 0);
-}
 
 function abortError(): DOMException {
   return new DOMException("aborted", "AbortError");
@@ -420,8 +270,12 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
   const onOuterAbort = () => ctl.abort();
   outer?.addEventListener("abort", onOuterAbort, { once: true });
   const signal = ctl.signal;
+  // This page's upload of these bytes: no "interrupted" card for it.
+  const fileFp = await fingerprint(file);
+  if (fileFp) markUploadActive(fileFp, true);
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   try {
-    let rec = await loadRecord(file);
+    let rec: UploadRecord | null = await findRecord(file);
     let doneSet = new Set<number>();
     let completed = false;
     const urls = new Map<number, string>();
@@ -455,7 +309,7 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
         );
         completed = Boolean(body.completed);
         rec = { ...rec, done: [...doneSet] };
-        void saveRecord(rec);
+        await saveRecord(rec);
         telemetry(rec.ticket, "resume", { loaded: doneBytes(rec.done, rec.part_size, file.size, rec.parts_total) });
       } else {
         const e = await apiError(r);
@@ -499,13 +353,15 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
         storage_key: string;
         part_size: number;
         parts_total: number;
+        /** Unix seconds: the ticket's end (backends from before: none). */
+        expires_at?: number;
         parts: { part_number: number; url: string }[];
       };
       for (const p of init.parts) urls.set(p.part_number, p.url);
-      const fp = await fingerprint(file);
+      const now = Date.now();
       rec = {
-        v: 1,
-        fp: fp ?? "",
+        v: 2,
+        fp: fileFp ?? "",
         name: file.name,
         size: file.size,
         ticket: init.ticket,
@@ -513,12 +369,17 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
         part_size: init.part_size,
         parts_total: init.parts_total,
         done: [],
-        created_at: Date.now(),
+        created_at: now,
+        ...(typeof init.expires_at === "number" && init.expires_at > 0 ? { expires_at: init.expires_at * 1000 } : {}),
       };
-      if (fp) void saveRecord(rec);
+      // Written now — before part 1 — and committed: a tab killed during
+      // the first part still resumes.
+      await saveRecord(rec);
     }
 
     const state = rec;
+    // Running: other tabs see it by its lock, or (no Web Locks) by this.
+    if (state.fp) heartbeat = setInterval(() => void saveRecord(state), HEARTBEAT_MS);
     const total = state.parts_total;
     const size = file.size;
     let doneTotal = doneBytes([...doneSet], state.part_size, size, total);
@@ -664,6 +525,8 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
     throw e;
   } finally {
     outer?.removeEventListener("abort", onOuterAbort);
+    clearInterval(heartbeat);
+    if (fileFp) markUploadActive(fileFp, false);
   }
 }
 
