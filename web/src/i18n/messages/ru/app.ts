@@ -182,6 +182,8 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.start.limits": "MP4 · MOV · WebM · до {minutes} мин и {gb} ГБ · любой язык",
   "app.start.limitsNoLength": "MP4 · MOV · WebM · до {gb} ГБ · любой язык",
   "app.start.preparing": "Видео готовится…",
+  "app.start.iosHint": "iPhone готовит длинные видео перед загрузкой — для 10-минутного видео это может занять минуту или больше.",
+  "app.start.preparingSlow": "iPhone ещё готовит видео — подождите, не закрывайте эту страницу.",
   "app.start.format": "Формат",
   "app.start.formatVertical": "TikTok · Reels · Shorts",
   "app.start.formatWide": "YouTube",

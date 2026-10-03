@@ -187,6 +187,8 @@ export const enApp = {
   "app.start.limits": "MP4 · MOV · WebM · up to {minutes} min and {gb} GB · any language",
   "app.start.limitsNoLength": "MP4 · MOV · WebM · up to {gb} GB · any language",
   "app.start.preparing": "Preparing video…",
+  "app.start.iosHint": "Your iPhone prepares long videos before they upload — for a 10-minute video this can take a minute or more.",
+  "app.start.preparingSlow": "Your iPhone is still preparing the video — please wait, don't close this page.",
   "app.start.format": "Format",
   "app.start.formatVertical": "TikTok · Reels · Shorts",
   "app.start.formatWide": "YouTube",
