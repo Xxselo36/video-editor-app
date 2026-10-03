@@ -183,6 +183,8 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.start.limits": "MP4 · MOV · WebM · bis {minutes} Min und {gb} GB · jede Sprache",
   "app.start.limitsNoLength": "MP4 · MOV · WebM · bis {gb} GB · jede Sprache",
   "app.start.preparing": "Video wird vorbereitet…",
+  "app.start.iosHint": "Lange Videos bereitet das iPhone vor dem Hochladen kurz vor – das kann bei 10 Minuten Video eine Minute oder länger dauern.",
+  "app.start.preparingSlow": "Das iPhone bereitet das Video noch vor – bitte warten, nicht schließen.",
   "app.start.format": "Format",
   "app.start.formatVertical": "TikTok · Reels · Shorts",
   "app.start.formatWide": "YouTube",

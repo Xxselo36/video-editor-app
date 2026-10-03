@@ -184,6 +184,8 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.start.limits": "MP4 · MOV · WebM · en fazla {minutes} dk ve {gb} GB · her dil",
   "app.start.limitsNoLength": "MP4 · MOV · WebM · en fazla {gb} GB · her dil",
   "app.start.preparing": "Video hazırlanıyor…",
+  "app.start.iosHint": "iPhone uzun videoları yüklemeden önce hazırlar — 10 dakikalık bir videoda bu bir dakika veya daha uzun sürebilir.",
+  "app.start.preparingSlow": "iPhone videoyu hâlâ hazırlıyor — lütfen bekleyin, bu sayfayı kapatmayın.",
   "app.start.format": "Format",
   "app.start.formatVertical": "TikTok · Reels · Shorts",
   "app.start.formatWide": "YouTube",

@@ -47,6 +47,7 @@ import {
   type JobSettings,
   type TargetAspect,
 } from "./defaults";
+import { isIOS } from "./ios";
 import { isPortrait, probeVideo, type VideoProbe } from "./probe";
 import { languageName, SettingsPanel } from "./SettingsSheet";
 import { useBillingHint } from "./useBillingHint";
@@ -67,6 +68,13 @@ function subscribePhone(cb: () => void) {
 const usePhone = () =>
   useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_QUERY).matches, () => false);
 
+// iPhone/iPad: read after hydration (the server render says no), never changes.
+const subscribeNever = () => () => {};
+const useIOS = () => useSyncExternalStore(subscribeNever, () => isIOS(navigator), () => false);
+
+/** How long "Preparing video…" shows before it says iOS is still at it. */
+const PREPARING_SLOW_MS = 4000;
+
 /** m:ss of `seconds`. */
 function clock(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
@@ -84,6 +92,7 @@ export function StartScreen() {
   const { me } = useMe();
   const prefs = usePrefs();
   const phone = usePhone();
+  const ios = useIOS();
 
   const [settings, setSettings] = useState<JobSettings>(DEFAULT_SETTINGS);
   // The saved defaults apply once they are read — unless the user
@@ -112,6 +121,8 @@ export function StartScreen() {
   const [probe, setProbe] = useState<VideoProbe | null>(null);
   const [upload, setUpload] = useState<Upload | null>(null);
   const [preparing, setPreparing] = useState(false);
+  // "Preparing video…" for a while already (Photos still at it).
+  const [preparingSlow, setPreparingSlow] = useState(false);
   const [hasDashboard, setHasDashboard] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
@@ -208,7 +219,10 @@ export function StartScreen() {
     const onFocus = () => {
       window.removeEventListener("focus", onFocus);
       setTimeout(() => {
-        if (mounted.current && choosing.current && !startedRef.current) setPreparing(true);
+        if (mounted.current && choosing.current && !startedRef.current) {
+          setPreparingSlow(false);
+          setPreparing(true);
+        }
       }, 300);
     };
     window.addEventListener("focus", onFocus);
@@ -227,7 +241,11 @@ export function StartScreen() {
   useEffect(() => {
     if (!preparing) return;
     const timer = setTimeout(() => setPreparing(false), 90_000);
-    return () => clearTimeout(timer);
+    const slow = setTimeout(() => setPreparingSlow(true), PREPARING_SLOW_MS);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(slow);
+    };
   }, [preparing]);
 
   const onDrop = (e: React.DragEvent) => {
@@ -355,13 +373,25 @@ export function StartScreen() {
               {t("app.start.choose")}
             </span>
           </button>
+          {ios && (
+            <p className="mt-2 text-center text-xs text-[var(--text-muted)]" data-testid="start-ios-hint">
+              {t("app.start.iosHint")}
+            </p>
+          )}
           <p id="start-limits" className="mt-2 text-center text-xs text-[var(--text-muted)]" data-testid="start-limits">
             {limitsLine}
           </p>
           {preparing && (
-            <p role="status" className="mt-2 text-center text-sm font-medium text-[var(--text-body)]" data-testid="start-preparing">
-              {t("app.start.preparing")}
-            </p>
+            <div role="status" className="mt-2 text-center" data-testid="start-preparing-status">
+              <p className="text-sm font-medium text-[var(--text-body)]" data-testid="start-preparing">
+                {t("app.start.preparing")}
+              </p>
+              {preparingSlow && (
+                <p className="mt-1 text-xs text-[var(--text-muted)]" data-testid="start-preparing-slow">
+                  {t("app.start.preparingSlow")}
+                </p>
+              )}
+            </div>
           )}
         </div>
       ) : (

@@ -180,6 +180,8 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.start.limits": "MP4 · MOV · WebM · 最長{minutes}分・{gb} GBまで · どの言語でも",
   "app.start.limitsNoLength": "MP4 · MOV · WebM · {gb} GBまで · どの言語でも",
   "app.start.preparing": "動画を準備中…",
+  "app.start.iosHint": "iPhoneは長い動画をアップロード前に準備します。10分の動画では1分以上かかることがあります。",
+  "app.start.preparingSlow": "iPhoneが動画をまだ準備中です。このページを閉じずにお待ちください。",
   "app.start.format": "フォーマット",
   "app.start.formatVertical": "TikTok · Reels · Shorts",
   "app.start.formatWide": "YouTube",

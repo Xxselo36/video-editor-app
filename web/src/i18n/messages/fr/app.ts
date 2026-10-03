@@ -184,6 +184,8 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.start.limits": "MP4 · MOV · WebM · jusqu’à {minutes} min et {gb} Go · toutes les langues",
   "app.start.limitsNoLength": "MP4 · MOV · WebM · jusqu’à {gb} Go · toutes les langues",
   "app.start.preparing": "Préparation de la vidéo…",
+  "app.start.iosHint": "Votre iPhone prépare les longues vidéos avant l’envoi : pour une vidéo de 10 minutes, cela peut prendre une minute ou plus.",
+  "app.start.preparingSlow": "Votre iPhone prépare encore la vidéo — veuillez patienter, ne fermez pas cette page.",
   "app.start.format": "Format",
   "app.start.formatVertical": "TikTok · Reels · Shorts",
   "app.start.formatWide": "YouTube",

@@ -183,6 +183,8 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.start.limits": "MP4 · MOV · WebM · tot {minutes} min en {gb} GB · elke taal",
   "app.start.limitsNoLength": "MP4 · MOV · WebM · tot {gb} GB · elke taal",
   "app.start.preparing": "Video wordt voorbereid…",
+  "app.start.iosHint": "Je iPhone bereidt lange video’s voor voordat ze uploaden — bij een video van 10 minuten kan dat een minuut of langer duren.",
+  "app.start.preparingSlow": "Je iPhone bereidt de video nog voor — even wachten, sluit deze pagina niet.",
   "app.start.format": "Formaat",
   "app.start.formatVertical": "TikTok · Reels · Shorts",
   "app.start.formatWide": "YouTube",
