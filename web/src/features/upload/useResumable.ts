@@ -64,3 +64,12 @@ export function matchResumable(
   const same = items.filter((r) => r.size === size);
   return same.find((r) => r.name === name) ?? same[0] ?? null;
 }
+
+/** Does a stopped upload's tile show its reason (describeError)? Always
+ *  — a refusal (auth_required, too_many_jobs, …) must stay readable after
+ *  a reload — except the bare interruption ("upload_interrupted": "please
+ *  upload the video again"), which the resume line under it replaces. */
+export function stoppedTileShowsError(code: string | null | undefined, resumable: boolean): boolean {
+  if (!resumable) return true;
+  return Boolean(code) && code !== "upload_interrupted";
+}

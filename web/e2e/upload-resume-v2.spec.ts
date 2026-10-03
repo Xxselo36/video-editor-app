@@ -85,7 +85,7 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
   /** Start an upload of `bytes` on the start screen; parts from `holdFrom`
    *  on never answer. Once the parts before it are in R2 and in the
    *  resume record the page is reloaded mid-upload (the phone went off). */
-  async function interruptedUpload(page: Page, path: string, holdFrom: number) {
+  async function interruptedUpload(page: Page, path: string, holdFrom: number, whileRunning?: () => Promise<void>) {
     const held: Route[] = [];
     await page.route(`${moto}/**`, async (route) => {
       const n = Number(new URL(route.request().url()).searchParams.get("partNumber"));
@@ -111,6 +111,7 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
     // The ticket's expiry, as the backend gives it (7 days with the
     // bucket rules of r2_setup).
     expect(rec.expires_at! - Date.now()).toBeGreaterThan(6.9 * 86400_000);
+    await whileRunning?.();
     // Reloaded while parts are still on their way (none may slip
     // through after the page is gone).
     await page.reload();
@@ -129,7 +130,9 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
     await page.goto("/app");
     const tile = jobCard(page, "IMG_0042.mp4");
     await expect(tile).toHaveAttribute("data-state", "upload_failed", { timeout: 45_000 });
-    await expect(tile.getByTestId("job-card-status")).toContainText("Stopped at 53%");
+    await expect(tile.getByTestId("job-card-resume")).toContainText("Stopped at 53%");
+    // A bare interruption: the resume line replaces "please upload again".
+    await expect(tile.getByTestId("job-card-status")).toHaveCount(0);
     await expect(tile.getByTestId("job-card-retry")).toContainText("Continue upload");
 
     // The start screen: the card on top.
@@ -159,16 +162,28 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
     await expect(page.getByTestId("start-resume")).toHaveCount(0);
   });
 
-  test("another file starts a new upload and leaves the card; Discard aborts it", async ({ page }) => {
+  test("another file starts a new upload and leaves the card; Discard aborts it", async ({ page, context }) => {
     const first = crypto.randomBytes(40 * MIB + 1); // 3 parts
-    await interruptedUpload(page, fileOf("erstes.mp4", first), 2);
+    // A second tab while the upload still runs in the first: nothing to
+    // resume there (no card, so no Discard that could abort it).
+    const other = await context.newPage();
+    await interruptedUpload(page, fileOf("erstes.mp4", first), 2, async () => {
+      await other.goto("/app/new");
+      await expect(other.getByTestId("upload-dropzone")).toBeVisible();
+      await other.waitForTimeout(1500);
+      await expect(other.getByTestId("start-resume")).toHaveCount(0);
+    });
+    // The first tab is gone: now the second one offers it.
+    await other.reload();
+    await expect(other.getByTestId("start-resume")).toContainText("erstes.mp4");
+    await other.close();
     const card = page.getByTestId("start-resume");
     await expect(card).toContainText("Upload of erstes.mp4 stopped at 39%");
 
     // Another video (same name even): a new upload, the card's stays.
-    const other = crypto.randomBytes(17 * MIB);
+    const otherBytes = crypto.randomBytes(17 * MIB);
     const [chooser] = await Promise.all([page.waitForEvent("filechooser"), card.getByTestId("start-resume-choose").click()]);
-    await chooser.setFiles({ name: "erstes.mp4", mimeType: "video/mp4", buffer: other });
+    await chooser.setFiles({ name: "erstes.mp4", mimeType: "video/mp4", buffer: otherBytes });
     await expect(page).toHaveURL(`${WEB}/app`, { timeout: 120_000 });
     expect(await createdJobId(page, "erstes.mp4")).not.toBeNull();
     expect(api).toContain("init");

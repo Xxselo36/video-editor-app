@@ -35,6 +35,7 @@ import {
   dropRecord,
   findRecord,
   fingerprint,
+  HEARTBEAT_MS,
   markUploadActive,
   partLength,
   recordPct,
@@ -272,6 +273,7 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
   // This page's upload of these bytes: no "interrupted" card for it.
   const fileFp = await fingerprint(file);
   if (fileFp) markUploadActive(fileFp, true);
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   try {
     let rec: UploadRecord | null = await findRecord(file);
     let doneSet = new Set<number>();
@@ -376,6 +378,8 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
     }
 
     const state = rec;
+    // Running: other tabs see it by its lock, or (no Web Locks) by this.
+    if (state.fp) heartbeat = setInterval(() => void saveRecord(state), HEARTBEAT_MS);
     const total = state.parts_total;
     const size = file.size;
     let doneTotal = doneBytes([...doneSet], state.part_size, size, total);
@@ -521,6 +525,7 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
     throw e;
   } finally {
     outer?.removeEventListener("abort", onOuterAbort);
+    clearInterval(heartbeat);
     if (fileFp) markUploadActive(fileFp, false);
   }
 }

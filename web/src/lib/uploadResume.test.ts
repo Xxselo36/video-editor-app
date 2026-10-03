@@ -20,6 +20,8 @@ vi.mock("@/lib/api", async (orig) => ({
 
 import {
   _useMemoryStoreForTests,
+  ACTIVE_MS,
+  discardResumable,
   EXPIRY_MARGIN_MS,
   findRecord,
   fingerprint,
@@ -31,6 +33,7 @@ import {
   type UploadRecord,
 } from "@/lib/uploadResume";
 import { resumableProgress, uploadResumable } from "@/lib/chunkedUpload";
+import { stoppedTileShowsError } from "@/features/upload/useResumable";
 
 const MIB = 1024 * 1024;
 const json = (v: unknown, status = 200) =>
@@ -61,6 +64,8 @@ function record(fp: string, over: Partial<UploadRecord> = {}): UploadRecord {
     parts_total: 4,
     done: [1, 2],
     created_at: Date.now(),
+    // Last written 5 min ago: not running anywhere (no heartbeat).
+    updated_at: Date.now() - 5 * 60_000,
     expires_at: Date.now() + 7 * 86400_000,
     ...over,
   };
@@ -175,6 +180,94 @@ describe("record lifecycle", () => {
   it("recordPct: completed is 100", () => {
     expect(recordPct(record("a", { completed: true }))).toBe(100);
     expect(recordPct(record("a", { done: [] }))).toBe(0);
+  });
+});
+
+/** A fake Web Locks manager: `held` are the lock names of every tab. */
+function fakeLocks() {
+  const held = new Set<string>();
+  const locks = {
+    async request(name: string, opts: { ifAvailable?: boolean }, cb: (lock: unknown) => Promise<void>) {
+      if (held.has(name)) {
+        if (opts.ifAvailable) return cb(null);
+        throw new Error("would wait");
+      }
+      held.add(name);
+      try {
+        return await cb({ name });
+      } finally {
+        held.delete(name);
+      }
+    },
+    async query() {
+      return { held: [...held].map((name) => ({ name })) };
+    },
+  };
+  vi.stubGlobal("navigator", { userAgent: "test", locks });
+  return held;
+}
+
+describe("uploads running in another tab", () => {
+  it("(Web Locks) aren't listed, and Discard never aborts them", async () => {
+    const held = fakeLocks();
+    store.set("a", record("a"));
+    store.set("b", record("b"));
+    held.add("cleocuts-upload:a"); // another tab uploads "a"
+    expect((await listResumable()).map((r) => r.fp)).toEqual(["b"]);
+    expect(await discardResumable("a")).toBe(false);
+    expect(store.has("a")).toBe(true);
+    expect(calls.filter((c) => c.path === "/uploads/multipart/abort")).toEqual([]);
+    // That tab is gone (closed, reloaded, phone off): the browser drops its lock.
+    held.delete("cleocuts-upload:a");
+    expect((await listResumable()).map((r) => r.fp).sort()).toEqual(["a", "b"]);
+    answer = () => new Response(null, { status: 204 });
+    expect(await discardResumable("a")).toBe(true);
+    expect(calls.filter((c) => c.path === "/uploads/multipart/abort")).toHaveLength(1);
+    expect(store.has("a")).toBe(false);
+  });
+
+  it("(Web Locks) this page's upload holds the lock while it runs, and frees it", async () => {
+    const held = fakeLocks();
+    store.set("a", record("a"));
+    markUploadActive("a", true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(held.has("cleocuts-upload:a")).toBe(true);
+    expect(await discardResumable("a")).toBe(false);
+    markUploadActive("a", false);
+    // Cancelled here: its own (just released) lock doesn't block the abort.
+    answer = () => new Response(null, { status: 204 });
+    expect(await discardResumable("a")).toBe(true);
+    expect(held.size).toBe(0);
+  });
+
+  it("(no Web Locks) a record with a fresh heartbeat counts as running elsewhere", async () => {
+    vi.stubGlobal("navigator", { userAgent: "test" });
+    const now = Date.now();
+    store.set("fresh", record("fresh", { updated_at: now - 10_000 }));
+    store.set("old", record("old", { updated_at: now - ACTIVE_MS - 1 }));
+    expect((await listResumable(now)).map((r) => r.fp)).toEqual(["old"]);
+    expect(await discardResumable("fresh")).toBe(false);
+    expect(store.has("fresh")).toBe(true);
+  });
+});
+
+describe("completed uploads (POST /jobs owns them)", () => {
+  it("aren't offered as interrupted, but a re-pick still finds them", async () => {
+    const bytes = content(MIB + 1, 21);
+    const fp = (await fingerprint(fileOf(bytes, "a", 1)))!;
+    store.set(fp, record(fp, { size: bytes.length, completed: true, updated_at: Date.now() - 5 * 60_000 }));
+    expect(await listResumable()).toEqual([]);
+    expect((await findRecord(fileOf(bytes, "renamed", 2)))?.completed).toBe(true);
+  });
+});
+
+describe("stopped tile text", () => {
+  it("keeps the real reason after a reload; only the bare interruption gives way to the resume line", () => {
+    expect(stoppedTileShowsError("auth_required", true)).toBe(true);
+    expect(stoppedTileShowsError("too_many_jobs", true)).toBe(true);
+    expect(stoppedTileShowsError("upload_interrupted", true)).toBe(false);
+    expect(stoppedTileShowsError("upload_interrupted", false)).toBe(true);
+    expect(stoppedTileShowsError(null, false)).toBe(true);
   });
 });
 

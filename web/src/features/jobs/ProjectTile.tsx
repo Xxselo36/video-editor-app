@@ -19,7 +19,7 @@ import { plural } from "@/lib/i18n/plural";
 import { presetLabelFor, PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import { canRetryInPlace, cancelUpload, retryUpload, retryUploadWith } from "@/features/upload/uploadControls";
 import { useLiveUpload, useLocalThumb } from "@/features/upload/uploadState";
-import { matchResumable, useResumableUploads } from "@/features/upload/useResumable";
+import { matchResumable, stoppedTileShowsError, useResumableUploads } from "@/features/upload/useResumable";
 import { discardResumable } from "@/lib/uploadResume";
 import type { UploadSettings } from "@/features/upload/uploadJob";
 import { getLocalJob, removeJob } from "./jobsStore";
@@ -217,7 +217,8 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
         if (starting) return t("app.projects.starting");
         return resuming ? t("app.upload.resuming") : t(touchDevice() ? "app.projects.uploadKeepOpenPhone" : "app.projects.uploadKeepOpen");
       case "upload_failed":
-        if (resumable) return t("app.projects.resumeAt", { pct: resumable.pct });
+        // The reason first (the resume line goes under it).
+        if (!stoppedTileShowsError(p.errorCode, Boolean(resumable))) return null;
         return describeError({ code: p.errorCode, params: p.errorParams, refunded: p.refunded }, t);
       case "failed":
         return describeError({ code: p.errorCode, params: p.errorParams, refunded: p.refunded }, t);
@@ -340,6 +341,11 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
         {status && (
           <p data-testid="job-card-status" className="text-xs leading-relaxed" style={{ color: statusTone }}>
             {status}
+          </p>
+        )}
+        {resumable && (
+          <p data-testid="job-card-resume" className="text-xs leading-relaxed" style={{ color: "var(--text-body)" }}>
+            {t("app.projects.resumeAt", { pct: resumable.pct })}
           </p>
         )}
         {(uploading || p.state === "upload_failed" || p.state === "expired") && (

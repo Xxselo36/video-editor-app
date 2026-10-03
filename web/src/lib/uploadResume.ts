@@ -152,6 +152,7 @@ export function _useMemoryStoreForTests(): Map<string, UploadRecord> {
     all: async () => [...m.values()].map((r) => structuredClone(r)),
   };
   active.clear();
+  ranHere.clear();
   return m;
 }
 
@@ -174,13 +175,92 @@ export function subscribeResumable(cb: () => void): () => void {
   };
 }
 
+// ── uploads running now (this page, or another tab) ─────────────────
+//
+// A record of an upload that runs in ANOTHER tab is not "interrupted":
+// it isn't listed, and Discard never aborts it. Each running upload holds
+// a Web Lock named after its fingerprint (released by the browser when
+// the tab goes, however it goes); where Web Locks are missing it writes
+// a heartbeat (updated_at, every HEARTBEAT_MS) and a record touched in
+// the last ACTIVE_MS counts as running.
+
+export const HEARTBEAT_MS = 20_000;
+export const ACTIVE_MS = 60_000;
+const LOCK_PREFIX = "cleocuts-upload:";
+
+type LockManagerLike = {
+  request(name: string, opts: { ifAvailable?: boolean }, cb: (lock: unknown) => Promise<void>): Promise<unknown>;
+  query(): Promise<{ held?: { name?: string }[] }>;
+};
+function locks(): LockManagerLike | null {
+  try {
+    const l = (globalThis.navigator as unknown as { locks?: LockManagerLike } | undefined)?.locks;
+    return l && typeof l.request === "function" && typeof l.query === "function" ? l : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Fingerprints of the uploads running in this page: not "interrupted". */
 const active = new Map<string, number>();
+/** Uploads of this page that ran (their heartbeat is ours, not another tab's). */
+const ranHere = new Set<string>();
+const lockRelease = new Map<string, () => void>();
+const lockSettled = new Map<string, Promise<unknown>>();
+
 export function markUploadActive(fp: string, on: boolean): void {
   const n = (active.get(fp) ?? 0) + (on ? 1 : -1);
   if (n > 0) active.set(fp, n);
   else active.delete(fp);
+  ranHere.add(fp);
+  const lm = locks();
+  if (lm && on && n === 1 && !lockRelease.has(fp)) {
+    let release!: () => void;
+    const held = new Promise<void>((res) => (release = res));
+    lockRelease.set(fp, release);
+    const settled: Promise<unknown> = lm
+      // ifAvailable: another tab uploading the same bytes holds it — then
+      // it is running there anyway, and nothing here waits for it.
+      .request(LOCK_PREFIX + fp, { ifAvailable: true }, (lock) => (lock ? held : Promise.resolve()))
+      .catch(() => {})
+      .then(() => {
+        if (lockSettled.get(fp) === settled) lockSettled.delete(fp);
+      });
+    lockSettled.set(fp, settled);
+  } else if (n <= 0 && lockRelease.has(fp)) {
+    lockRelease.get(fp)!();
+    lockRelease.delete(fp);
+  }
   changed();
+}
+
+/** Fingerprints of uploads running in another tab of this browser. */
+async function activeElsewhere(recs: UploadRecord[], now: number): Promise<Set<string>> {
+  const out = new Set<string>();
+  const lm = locks();
+  if (lm) {
+    // Our own locks may be on their way out: wait until they are gone.
+    const leaving = [...lockSettled.entries()].filter(([fp]) => !active.has(fp)).map(([, p]) => p);
+    if (leaving.length) await Promise.race([Promise.all(leaving), new Promise((r) => setTimeout(r, 1000))]);
+    try {
+      const q = await lm.query();
+      for (const h of q.held ?? []) {
+        const name = h?.name ?? "";
+        if (name.startsWith(LOCK_PREFIX)) {
+          const fp = name.slice(LOCK_PREFIX.length);
+          if (!active.has(fp)) out.add(fp);
+        }
+      }
+      return out;
+    } catch {
+      /* fall back to the heartbeat */
+    }
+  }
+  for (const r of recs) {
+    if (active.has(r.fp) || ranHere.has(r.fp)) continue;
+    if (!r.completed && now - (r.updated_at ?? r.created_at) < ACTIVE_MS) out.add(r.fp);
+  }
+  return out;
 }
 
 // ── fingerprints ─────────────────────────────────────────────────────
@@ -322,16 +402,23 @@ export async function getRecord(fp: string): Promise<UploadRecord | null> {
 }
 
 /** The interrupted uploads of this browser, newest first: not expired
- *  (expired ones are deleted) and not running in this page. */
+ *  (expired ones are deleted), not running in this page or another tab,
+ *  and not completed (the file is stored: POST /jobs owns it — picking
+ *  the file again still goes straight there). */
 export async function listResumable(now = Date.now()): Promise<ResumableUpload[]> {
   const out: ResumableUpload[] = [];
+  const usable: UploadRecord[] = [];
   for (const r of await backend.all()) {
     if (!recordUsable(r, now)) {
       const fp = (r as { fp?: unknown } | null)?.fp;
       if (typeof fp === "string" && fp) await backend.delete(fp);
       continue;
     }
-    if (active.has(r.fp)) continue;
+    usable.push(r);
+  }
+  const elsewhere = await activeElsewhere(usable, now);
+  for (const r of usable) {
+    if (r.completed || active.has(r.fp) || elsewhere.has(r.fp)) continue;
     out.push({
       fp: r.fp,
       name: r.name,
@@ -345,10 +432,12 @@ export async function listResumable(now = Date.now()): Promise<ResumableUpload[]
 }
 
 /** Give up an interrupted upload for good: abort it on the server and
- *  forget it here (the start screen's "Discard", a tile's "Remove"). */
-export async function discardResumable(fp: string): Promise<void> {
+ *  forget it here (the start screen's "Discard", a tile's "Remove").
+ *  Never one that is running — here or in another tab: false then. */
+export async function discardResumable(fp: string): Promise<boolean> {
   const rec = await backend.get(fp);
-  if (!rec) return;
+  if (!rec) return true;
+  if (active.has(fp) || (await activeElsewhere([rec], Date.now())).has(fp)) return false;
   try {
     const { apiFetch } = await import("@/lib/api");
     await apiFetch("/uploads/multipart/abort", {
@@ -360,4 +449,5 @@ export async function discardResumable(fp: string): Promise<void> {
     /* the bucket's lifecycle rule aborts it anyway */
   }
   await dropRecord(fp);
+  return true;
 }
