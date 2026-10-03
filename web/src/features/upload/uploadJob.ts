@@ -30,6 +30,7 @@ import {
   liveUploads,
   recordJobCreated,
   recordUploadFailed,
+  removeStoppedUploads,
   removeUploadRecord,
   uploadProgress,
 } from "./records";
@@ -181,13 +182,15 @@ export async function uploadJob(
     const R2_THRESHOLD = 90 * 1024 * 1024; // 90MB
     let res: XMLHttpRequest | null = null;
 
-    // An interrupted upload of this very file (same name, size, first
-    // and last MiB): the card starts where it stopped.
+    // An interrupted upload of these very bytes (size + first and last
+    // 2 MiB, whatever the file is called now): the card starts where it
+    // stopped, and the stopped tile of it goes (v2).
     const resumedPct = await resumableProgress(targetFile);
     if (resumedPct !== null) {
       resumingFrom = resumedPct;
       onProgress?.(tempId, resumedPct, true);
       uploadProgress(tempId, { pct: resumedPct, resuming: true, lastProgressAt: Date.now() });
+      removeStoppedUploads(targetFile.size, tempId);
     }
 
     // An audio file: refused now, not after the upload (the server
@@ -429,7 +432,7 @@ export async function uploadJob(
       try {
         await abortResumable({ file: targetFile });
       } catch {
-        /* the bucket's lifecycle rule aborts it after a day anyway */
+        /* the bucket's lifecycle rule aborts it anyway */
       }
       return;
     }

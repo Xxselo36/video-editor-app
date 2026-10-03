@@ -8,8 +8,9 @@ The ticket is handed out by `init` and required by every later call:
 
 u = the caller (user id, "" with auth off), k = storage key, id = the R2
 UploadId, s = size, ps = part size, n = parts, ct = content type, exp =
-Unix time (23 h; the R2 lifecycle aborts incomplete uploads under
-uploads/ after 1 day). No server state: any replica can check it.
+Unix time (resume_window_s: up to 7 days, never longer than the bucket's
+lifecycle rules keep the upload). No server state: any replica can check
+it.
 
 stdlib only.
 """
@@ -30,7 +31,16 @@ MIB = 1024 * 1024
 MIN_PART = 16 * MIB
 # R2 allows 10,000 parts; stay well below so rounding never runs out.
 TARGET_PARTS = 9500
+# Ticket lifetime when the bucket's lifecycle rules aren't known (the
+# token may not read them): fits the 1-day abort rule of before.
 TICKET_TTL_S = 23 * 3600
+# How long an interrupted upload can be resumed at most.
+RESUME_MAX_S = 7 * 86400
+# A ticket ends this long before the bucket aborts the upload.
+ABORT_MARGIN_S = 3600
+# ... and this long before a completed upload expires (S3 dates a
+# multipart object by its initiation): time for POST /jobs + analysis.
+EXPIRE_MARGIN_S = 86400
 # Part URLs live at most this long (the client re-signs on a 403).
 SIGN_TTL_S = 6 * 3600
 
@@ -49,6 +59,23 @@ class TicketError(Exception):
         super().__init__(code)
         self.status = status
         self.code = code
+
+
+def resume_window_s(known: bool, abort_days: int | None,
+                    expire_days: int | None) -> int:
+    """Seconds a new upload's ticket (and so the browser's resume record,
+    which keeps the ticket's expires_at) lives: RESUME_MAX_S, but never
+    past what the bucket keeps — its incomplete parts (abort rule, minus
+    ABORT_MARGIN_S) and the completed object (expiration rule, minus
+    EXPIRE_MARGIN_S). Rules unknown → TICKET_TTL_S. At least an hour."""
+    if not known:
+        return TICKET_TTL_S
+    window = RESUME_MAX_S
+    if abort_days:
+        window = min(window, abort_days * 86400 - ABORT_MARGIN_S)
+    if expire_days:
+        window = min(window, expire_days * 86400 - EXPIRE_MARGIN_S)
+    return max(3600, int(window))
 
 
 def part_plan(size: int) -> tuple[int, int]:
