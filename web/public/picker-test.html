@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Video-Auswahl Test</title>
+<!--
+  Owner test (iPhone, 2026-10): which file-input variant hands a long video
+  over without iOS's "Preparing…" wait in the Photos picker (HEVC -> H.264
+  transcode or iCloud download). Nothing is uploaded; the page only shows
+  what the browser gave it. Not linked anywhere.
+-->
+<style>
+  :root { color-scheme: light dark; --bg: #fff; --fg: #111; --muted: #666; --card: #f2f2f4; --accent: #6d4aff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0d0d10; --fg: #f2f2f2; --muted: #9a9aa3; --card: #1b1b21; } }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 16px/1.4 -apple-system, system-ui, sans-serif; }
+  h1 { font-size: 20px; margin: 4px 0 8px; }
+  p { color: var(--muted); margin: 0 0 16px; }
+  .card { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .card b { display: block; margin-bottom: 8px; }
+  label.btn { display: inline-block; background: var(--accent); color: #fff; border-radius: 999px; padding: 12px 18px; font-weight: 600; }
+  input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .out { margin-top: 10px; font-size: 14px; white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>Video-Auswahl testen</h1>
+<p>Wähle bei jedem Knopf dasselbe lange Video (z. B. 10 Minuten). Achte darauf, ob im Fotos-Fenster der Kreis lange lädt. Es wird nichts hochgeladen.</p>
+
+<div class="card"><b>A · wie jetzt (video/*)</b>
+  <label class="btn">Video wählen<input type="file" data-v="A" accept="video/*"></label><div class="out"></div></div>
+
+<div class="card"><b>B · ohne Filter</b>
+  <label class="btn">Video wählen<input type="file" data-v="B"></label><div class="out"></div></div>
+
+<div class="card"><b>C · Originalformate (mov, mp4, hevc)</b>
+  <label class="btn">Video wählen<input type="file" data-v="C" accept="video/quicktime,video/mp4,video/hevc,.mov,.mp4,.m4v,.hevc"></label><div class="out"></div></div>
+
+<div class="card"><b>D · alle Dateien</b>
+  <label class="btn">Video wählen<input type="file" data-v="D" accept="*/*"></label><div class="out"></div></div>
+
+<script>
+  document.querySelectorAll('input[type=file]').forEach(function (inp) {
+    var opened = 0;
+    inp.addEventListener('click', function () { opened = Date.now(); });
+    inp.addEventListener('change', function () {
+      var out = inp.closest('.card').querySelector('.out');
+      var f = inp.files && inp.files[0];
+      if (!f) { out.textContent = 'Keine Datei.'; return; }
+      var secs = opened ? ((Date.now() - opened) / 1000).toFixed(0) : '?';
+      out.textContent =
+        'Name: ' + f.name + '\n' +
+        'Typ: ' + (f.type || '(leer)') + '\n' +
+        'Größe: ' + (f.size / 1048576).toFixed(1) + ' MB\n' +
+        'Zeit vom Antippen bis fertig: ' + secs + ' s';
+    });
+  });
+</script>
+</body>
+</html>
