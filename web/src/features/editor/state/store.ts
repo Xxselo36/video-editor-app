@@ -7,7 +7,7 @@
  */
 import { useCallback, useSyncExternalStore } from "react";
 import { renameCaptionKeys } from "@/features/captions-ui/adjusted";
-import type { EditDoc } from "./doc";
+import { mergeWords, type DocWord, type EditDoc } from "./doc";
 import { commit, initHistory, redo, reset, undo, type History } from "./history";
 
 export type DocState = History<EditDoc>;
@@ -24,6 +24,13 @@ export type DocStore = {
   reset: (doc: EditDoc) => void;
   /** Give words new ids (the autosave's serverIds), without an undo step. */
   rename: (map: ReadonlyMap<string, string>) => void;
+  /**
+   * Words the server added (a transcribed span, POST /jobs/{id}/
+   * transcribe-span): into every state of the history, without an undo
+   * step — an undo never takes them out (the autosave would delete them
+   * on the server). Words already there are left as they are.
+   */
+  addWords: (words: readonly DocWord[]) => void;
   /** Listen to renames (selections and open edits hold word ids). */
   onRenamed: (fn: (map: ReadonlyMap<string, string>) => void) => () => void;
   /** Called after every change that came from apply / undo / redo. */
@@ -64,6 +71,17 @@ export function createDocStore(doc: EditDoc): DocStore {
       const style = renameCaptionKeys(state.present.style, map);
       set({ ...state, present: { ...state.present, words, style } }, false);
       for (const l of [...renameListeners]) l(map);
+    },
+    addWords: (words) => {
+      if (!words.length) return;
+      const add = (d: EditDoc): EditDoc => {
+        const have = new Set(d.words.map((w) => w.id));
+        const fresh = words.filter((w) => !have.has(w.id));
+        return fresh.length ? { ...d, words: mergeWords(d.words, fresh, []) } : d;
+      };
+      const present = add(state.present);
+      if (present === state.present) return;
+      set({ ...state, past: state.past.map(add), present, future: state.future.map(add) }, false);
     },
     onRenamed: (fn) => {
       renameListeners.add(fn);

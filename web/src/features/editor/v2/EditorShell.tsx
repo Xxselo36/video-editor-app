@@ -47,6 +47,7 @@ import { PreviewStage } from "./preview/PreviewStage";
 import { ExpiredView } from "./states";
 import { removedOf, useCuts } from "./useCuts";
 import { useDocSession, type CaptionSourceHandler } from "./useDocSession";
+import { useSpanFill } from "./useSpanFill";
 import { TimelineDock, type DockApi } from "./timeline/TimelineDock";
 import { useFilmstrip } from "./timeline/Filmstrip";
 import type { FilmstripMeta } from "./timeline/filmstrip";
@@ -268,6 +269,13 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     removed,
     commit: (next) => history.commit(next),
   });
+  // Backlog #20: footage brought back without words gets its text
+  const spanFill = useSpanFill({
+    segs: editSegs,
+    words: docWords,
+    ready: doc.status === "ready" && !doc.readOnly,
+    transcribe: doc.status === "ready" ? doc.transcribeSpan : null,
+  });
   const [selected, setSelected] = useState<string | null>(null);
   const selectedLive = selected && editSegs.some((x) => x.id === selected) ? selected : null;
 
@@ -306,6 +314,23 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   const film = useFilmstrip(props.jobId, props.filmstrip);
   const textApi = useRef<TextApi | null>(null);
   const fullscreenRef = useRef<(() => void) | null>(null);
+
+  // A caption's "Show in text" (its adjust bar): the Text tab — the sheet
+  // on a phone — opens with that word selected and the playhead on it
+  // (out of fullscreen first: the text is under it).
+  const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
+  const revealN = useRef(0);
+  const showInText = useCallback(
+    (id: string) => {
+      revealN.current += 1;
+      setReveal({ id, n: revealN.current });
+      if (root?.querySelector("[data-testid=ed-fullscreen-wrap]")?.getAttribute("data-fullscreen")) fullscreenRef.current?.();
+      if (phone) setSheet("text");
+      else setTab("text");
+    },
+    [phone, root, setSheet],
+  );
+  const revealDone = useCallback(() => setReveal(null), []);
 
   // ── toast ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -500,6 +525,10 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         apiRef={textApi}
         toast={showToast}
         adjusted={liveCaptions ? adjusted : undefined}
+        reveal={reveal}
+        onRevealed={revealDone}
+        spans={spanFill.spans}
+        onSpanRetry={spanFill.retry}
       />
     ) : doc.status === "loading" ? (
       <div className={s.empty} role="status" data-testid="ed-text-loading">
@@ -552,6 +581,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         phone={phone}
         zones={zones}
         readOnly={doc.readOnly}
+        onShowInText={showInText}
       />
     ) : undefined;
   const undoRedo = (

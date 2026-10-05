@@ -26,9 +26,10 @@ import {
   type EditDoc,
   type IdPool,
 } from "@/features/editor/state/doc";
-import { DocSaver, type DocSaveState } from "@/features/editor/state/docSave";
+import { DocSaver, uniqueRev, type DocSaveState } from "@/features/editor/state/docSave";
 import { reconcileV1, type V1Edits } from "@/features/editor/state/reconcile";
 import { createDocStore, type DocStore } from "@/features/editor/state/store";
+import { takePending, type CaptionStyleDefault } from "@/features/start/captionDefault";
 
 export type CaptionSourceHandler = (phrases: CaptionPhrase[], units: CaptionUnit[], edited: boolean) => void;
 
@@ -49,7 +50,12 @@ export type DocSession =
       flush: () => Promise<boolean>;
       /** UT5: what the caption layer and the Style panel need (GET /jobs/{id}/doc). */
       captions: DocCaptions;
+      /** Backlog #20: transcribe a span the doc has no words for (useSpanFill). */
+      transcribeSpan: (start: number, end: number) => Promise<SpanResult>;
     };
+
+/** words: the span got words; empty: Whisper heard none there; error: try again later. */
+export type SpanResult = "words" | "empty" | "error";
 
 /**
  * UT5 (GET /jobs/{id}/doc): `engine` — the export's caption engine
@@ -109,6 +115,17 @@ function withRenderStyle(doc: EditDoc, style: EditDoc["style"] | null): EditDoc 
   return style && JSON.stringify(style) !== JSON.stringify(doc.style) ? { ...doc, style } : doc;
 }
 
+/**
+ * `doc` with the saved caption style (start/captionDefault.ts) of a new
+ * project: its preset and look; the captions' own positions stay.
+ */
+function withPendingStyle(doc: EditDoc, style: CaptionStyleDefault, live: string[] | null): EditDoc {
+  if (live && !live.includes(style.presetId) && style.presetId !== "none") return doc;
+  const own = (doc.style.overrides as { captions?: unknown } | undefined)?.captions;
+  const next = { presetId: style.presetId, overrides: { ...style.overrides, ...(own ? { captions: own } : {}) } };
+  return JSON.stringify(next) === JSON.stringify(doc.style) ? doc : { ...doc, style: next as EditDoc["style"] };
+}
+
 /** A word the server refused was adjusted (its old text). */
 export type WordFixedHandler = (text: string) => void;
 
@@ -143,8 +160,13 @@ export function useDocSession(
         const pool: IdPool = new Set(res.doc.words.map((w) => w.id));
         // Newer v1 sentence edits go into the doc (saved below), so
         // opening v2 never reverts or overwrites them (state/reconcile.ts).
-        const start = reconcileV1(res.doc, res.rev, v1Ref.current, pool);
-        const store = createDocStore(withRenderStyle(start, res.renderStyle));
+        const reconciled = reconcileV1(res.doc, res.rev, v1Ref.current, pool);
+        // A new project made with the saved caption style whose PATCH
+        // didn't get through: the style now, unless someone edited it.
+        const shown = withRenderStyle(reconciled, res.renderStyle);
+        const pending = takePending(jobId);
+        const start = res.rev === 0 && pending ? withPendingStyle(shown, pending, res.captions.presetsLive) : shown;
+        const store = createDocStore(start);
         const saver = new DocSaver(res.doc, res.rev, {
           jobId,
           fetch: apiFetch,
@@ -167,7 +189,7 @@ export function useDocSession(
           const src = captionSource(doc.words);
           captionRef.current?.(src.phrases, src.units, true);
         };
-        if (start !== res.doc) saver.schedule(store.getState().present);
+        if (reconciled !== res.doc || start !== shown) saver.schedule(store.getState().present);
         const src = captionSource(start.words);
         captionRef.current?.(src.phrases, src.units, false);
         made = { store, saver, pool, readOnly: res.read_only, captions: res.captions };
@@ -214,6 +236,39 @@ export function useDocSession(
     captionRef.current?.(src.phrases, src.units, false);
   }, [jobId, loaded]);
 
+  const transcribeSpan = useCallback(
+    async (start: number, end: number): Promise<SpanResult> => {
+      if (!loaded || loaded === "none" || loaded.readOnly) return "error";
+      const { saver, store, pool } = loaded;
+      const out = await saver
+        .exclusive(async (base): Promise<SpanResult> => {
+          const r = await apiFetch(`/jobs/${jobId}/transcribe-span`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ start, end, base_rev: base, rev: uniqueRev(base) }),
+          });
+          if (!r.ok) return "error";
+          const j = (await r.json()) as { words?: unknown; rev?: unknown; changed?: unknown };
+          const words = (Array.isArray(j.words) ? j.words : []).filter(
+            (w): w is EditDoc["words"][number] =>
+              !!w && typeof w === "object" && typeof (w as { id?: unknown }).id === "string",
+          );
+          const rev = j.changed === true && typeof j.rev === "number" ? j.rev : null;
+          saver.adopt(words, rev);
+          for (const w of words) pool.add(w.id);
+          store.addWords(words);
+          if (words.length) {
+            const src = captionSource(store.getState().present.words);
+            captionRef.current?.(src.phrases, src.units, true);
+          }
+          return words.length ? "words" : "empty";
+        })
+        .catch((): SpanResult => "error");
+      return out ?? "error";
+    },
+    [jobId, loaded],
+  );
+
   /** True when the server has every change (DocSaver.settle). */
   const flush = useCallback(async () => {
     if (!loaded || loaded === "none") return true;
@@ -232,5 +287,6 @@ export function useDocSession(
     reload,
     flush,
     captions: loaded.captions ?? NO_CAPTIONS,
+    transcribeSpan,
   };
 }

@@ -71,6 +71,8 @@ Test API (only this script registers it; never part of the backend):
               render: "ok" | "fail"; render_seconds; slow_rebuild (s
               every /edit-segments waits before its rebuild)
               renders_ok (UX11: successful exports so far)
+              span: {text?, fail?, seconds?} (backlog #20: what POST
+                             /jobs/{id}/transcribe-span "hears"; no Groq)
               spec: "ready"  (UX11, review seeds) a finished speculative
                              render of the job as analysed: an export
                              without changes is instant
@@ -322,6 +324,33 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         shutil.copyfile(cached, output_path)
 
     pipeline._ffmpeg_cuts_preview = chromium_cuts_preview
+
+    # ── span transcription (backlog #20): no ffmpeg cut, no Groq ──────
+    # Seed option `span`: {text: "words to find" (spread over the span;
+    # default none: Whisper heard nothing), fail: n (the first n calls
+    # fail, 502), seconds: s (each call takes that long)}.
+    import re as _re
+    from backend import span_transcribe
+    span_fails: dict[str, int] = {}
+
+    def fake_span(source: str, span: dict, language, duration):
+        m = _re.search(r"jobs/([0-9a-f]{12})/", source)
+        job_id = m.group(1) if m else ""
+        opt = cfg(job_id).get("span") or {}
+        if opt.get("seconds"):
+            time.sleep(float(opt["seconds"]))
+        with cfg_lock:
+            used = span_fails.get(job_id, 0)
+            span_fails[job_id] = used + 1
+        if used < int(opt.get("fail") or 0):
+            raise span_transcribe.SpanError(502, "transcription_unavailable")
+        toks = str(opt.get("text") or "").split()
+        a, b = float(span["start"]), float(span["end"])
+        d = (b - a) / max(1, len(toks))
+        return ([{"word": t, "start": a + i * d + 0.02, "end": a + (i + 1) * d - 0.02,
+                  "probability": 0.9} for i, t in enumerate(toks)], 0.0)
+
+    span_transcribe.transcribe = fake_span
 
     # ── filmstrips (UX7b): the real sprite of the clip's proxy, cached ─
     fs_lock = threading.Lock()
@@ -760,7 +789,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         if opts.get("spec") == "ready" and store.get(job.id).status == "awaiting_review":
             seed_spec(job.id, clip or "grid", orientation)
         set_cfg(job.id, proxy=opts.get("proxy") or proxy, render=opts.get("render") or "ok",
-                peaks=opts.get("peaks"),
+                peaks=opts.get("peaks"), span=opts.get("span"),
                 render_seconds=opts.get("render_seconds"), slow_rebuild=opts.get("slow_rebuild"),
                 clip=clip or "grid", orientation=orientation)
         j = store.get(job.id)

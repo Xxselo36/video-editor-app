@@ -293,6 +293,44 @@ export class DocSaver {
     return true;
   }
 
+  /**
+   * A request that changes the server's doc itself (POST /jobs/{id}/
+   * transcribe-span), in line with the PATCHes: it runs once everything
+   * sent before has its answer, and nothing is sent while it runs.
+   * `fn` gets the rev the server is known to have and calls `adopt`
+   * with what the server did. null without running it (a conflict, a
+   * refusal, stopped).
+   */
+  exclusive<T>(fn: (baseRev: number) => Promise<T>): Promise<T | null> {
+    const run = this.chain.then(async () => {
+      if (this.inflight) {
+        const out = this.inflight;
+        await out.done;
+        if (this.inflight === out) this.inflight = null;
+      }
+      if (this.stopped || this.state === "conflict" || this.state === "failed") return null;
+      return fn(this.saved.rev);
+    });
+    this.chain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /**
+   * Words the server merged into its doc (inside `exclusive`): the
+   * known server state gets them — and `rev`, when the change was made
+   * on that state (else the next PATCH tells: 409) — and so does the
+   * local doc (the editor's store adds them too: DocStore.addWords).
+   */
+  adopt(words: readonly DocWord[], rev: number | null): void {
+    if (rev !== null) this.saved = { ...this.saved, words: mergeWords(this.saved.words, words, []), rev };
+    const have = new Set(this.latest.words.map((w) => w.id));
+    const fresh = words.filter((w) => !have.has(w.id));
+    if (fresh.length) this.latest = { ...this.latest, words: mergeWords(this.latest.words, fresh, []) };
+  }
+
   /** A fresh doc from the server (reload after a conflict). */
   reset(doc: EditDoc, rev: number): void {
     this.clear();
