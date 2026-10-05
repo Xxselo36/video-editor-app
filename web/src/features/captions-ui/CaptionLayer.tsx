@@ -24,10 +24,15 @@
  *   through 90 / 100 / 115 %; arrows on a focused handle nudge. The bar
  *   above: "Nur hier | Überall" and "Zurücksetzen" (lib/captions
  *   adjust.ts). Every change is one doc step (undo, autosave).
+ * - "Im Text zeigen" in that bar (icon only on a phone): the caption's
+ *   word under the playhead, else its first word, is selected in the
+ *   Text tab (the sheet opens on a phone) and the playhead goes there.
+ *   A button in the bar, not a new gesture: the first tap still selects
+ *   the caption, and a tap on the move handle still steps the snap lines.
  *
  * Test hook (NEXT_PUBLIC_TEST_PAGES=1 builds): window.__captionLayer.
  */
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, TextSearch } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "@/i18n";
@@ -68,6 +73,12 @@ export type CaptionLayerProps = {
   /** Show the button-zone silhouettes all the time (Style panel toggle). */
   zones?: boolean;
   readOnly?: boolean;
+  /**
+   * "Show in text" in the selected caption's bar: the word of the caption
+   * under the playhead (else its first word) — the shell selects it in the
+   * Text tab and seeks there. Stable (the layer is memoised).
+   */
+  onShowInText?: (wordId: string) => void;
 };
 
 export type CaptionLayerHook = {
@@ -606,6 +617,20 @@ function CaptionLayer(props: CaptionLayerProps) {
     }
   };
 
+  /** The selected caption's word under the playhead, else its first word. */
+  const showInText = () => {
+    const cur = current();
+    const show = props.onShowInText;
+    if (!cur || !show) return;
+    const now = live.current.lastT;
+    const ws = cur.page.words.filter((w) => w.id);
+    const at = Number.isFinite(now) && now >= 0 ? [...ws].reverse().find((w) => w.start <= now + 1e-3) : undefined;
+    const id = (at ?? ws[0])?.id;
+    if (!id) return;
+    deselect();
+    show(id);
+  };
+
   const reset = () => {
     const cur = current();
     if (!sel || !cur) return;
@@ -743,6 +768,19 @@ function CaptionLayer(props: CaptionLayerProps) {
         <RotateCcw size={14} strokeWidth={1.75} aria-hidden />
         {t("editor.caption.reset")}
       </button>
+      {props.onShowInText && (
+        <button
+          type="button"
+          className={c.barBtn}
+          onClick={showInText}
+          aria-label={phone ? t("editor.caption.showInText") : undefined}
+          title={t("editor.caption.showInText")}
+          data-testid="caption-show-text"
+        >
+          <TextSearch size={14} strokeWidth={1.75} aria-hidden />
+          {!phone && t("editor.caption.showInText")}
+        </button>
+      )}
     </div>
   ) : null;
 
@@ -843,5 +881,6 @@ export default memo(
     a.playingSegId === b.playingSegId &&
     a.phone === b.phone &&
     a.zones === b.zones &&
-    a.readOnly === b.readOnly,
+    a.readOnly === b.readOnly &&
+    a.onShowInText === b.onShowInText,
 );
