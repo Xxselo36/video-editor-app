@@ -128,8 +128,9 @@ def test_settings_whitelist(client, probe):
         "voice_triggers": True, "remove_fillers": False,
         "smartcam_enabled": True, "smartcam_format": "portrait",
         "resolution": "1080", "output_formats": ["9:16"],
-        # set by the server, not the client's 99999: CLEO_MAX_MINUTES
-        "_max_seconds": 30 * 60 + 1}
+        # set by the server, not the client's 99999: the probed length
+        # (60 s) + the true-up tolerance (under CLEO_MAX_MINUTES)
+        "_max_seconds": 60 + 5}
 
 
 @pytest.mark.parametrize("value,kept", [

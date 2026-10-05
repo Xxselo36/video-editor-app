@@ -279,6 +279,10 @@ mit dem Secret `CLEO_ADMIN_TOKEN`; das Log zeigt nur Zahlen und Codes).
 | `QUEUE: … server_busy` | mehr als `CLEO_MAX_QUEUE` Analysen warten | `CLEO_MAX_ANALYZE` / Queue prüfen |
 | `LEAK?: …` | Upload-Plätze ohne Worker, älter als 10 min | verfallen nach `CLEO_UPLOAD_ENTRY_TTL_S` (2 h) von selbst |
 
+Eine Analyse, während der das Volume unter `CLEO_MIN_FREE_GB` fällt,
+bricht ab (ihr ffmpeg wird beendet) und endet als `server_storage_full`
+mit Rückerstattung — im Log `disk guard: … under the … GB floor`.
+
 ## Task-Warteschlange (WP4, nur mit `CLEO_TASK_QUEUE=1`)
 
 Die Warteschlange (DEPLOY.md Abschnitt 11) hat noch keinen eigenen

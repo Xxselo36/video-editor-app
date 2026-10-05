@@ -797,7 +797,13 @@ die Web-App (v2) sagt "Zu viele Uploads in kurzer Zeit"; 0 = kein Limit),
 `CLEO_DISK_MEZZ_MBPS` (40) / `CLEO_DISK_PREVIEW_MBPS` (10): die
 Platz-Reservierung einer Analyse mit bekannter Länge (Upload + Mezz bei
 1080p + Proxy/Vorschau, gemessen; nie mehr als `CLEO_DISK_FACTOR` × Upload,
-das ohne bekannte Länge gilt), `CLEO_UPLOAD_ENTRY_TTL_S` (7200: ein
+das ohne bekannte Länge gilt; die Analyse hört bei dieser Länge + 5 s
+auf, auch ohne Abrechnung), `CLEO_DISK_GUARD_S` (2: so oft prüft eine
+laufende Analyse den freien Platz; unter `CLEO_MIN_FREE_GB` bricht sie
+mit `server_storage_full` ab, Minuten zurück; 0 = aus),
+`CLEO_PROXY_RECLAIM_MIN_AGE_S` (600: ein Editor-Proxy im Cache, der
+kürzer her benutzt wurde, wird für einen Upload nicht gelöscht),
+`CLEO_UPLOAD_ENTRY_TTL_S` (7200: ein
 nicht freigegebener Upload-Platz verfällt danach). Ablehnungen der
 Upload-Routen stehen als `upload_refused` in `job_events`;
 `GET /admin/capacity` bzw. die GitHub-Action "Ops inspect" zeigt sie.
