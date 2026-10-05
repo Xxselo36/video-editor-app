@@ -1,0 +1,32 @@
+name: Ops inspect (live backend)
+
+# Manual: why does the live backend refuse uploads? Prints GET
+# /admin/capacity — the disk of CLEO_TMP_ROOT, what the jobs in flight
+# reserve, what a 10-minute upload of 0.5–4 GB needs right now, the
+# in-flight entries, the multipart-init rate, the CLEO_* limits and the
+# newest upload_refused events — and a short diagnosis
+# (.github/scripts/ops_inspect.py). Logs are public: numbers and codes
+# only, never the token, user ids or job ids.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Capacity
+        env:
+          CLEO_API: ${{ vars.CLEO_API_URL || 'https://api.cleocuts.com' }}
+          CLEO_ADMIN_TOKEN: ${{ secrets.CLEO_ADMIN_TOKEN }}
+        run: python .github/scripts/ops_inspect.py
