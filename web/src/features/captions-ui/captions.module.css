@@ -486,6 +486,14 @@
   opacity: 0.4;
   cursor: default;
 }
+.phone .reset {
+  height: 44px;
+}
+/* "Saved as default": a state, not a greyed-out action */
+.reset[data-state="saved"]:disabled {
+  opacity: 1;
+  color: var(--ed-text-3, #8a8a95);
+}
 .note {
   margin: 12px 0 0;
   font-size: 12px;

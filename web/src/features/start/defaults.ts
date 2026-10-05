@@ -74,8 +74,14 @@ export function prefsFromSettings(s: JobSettings): Record<string, string | boole
  * preset, which the v1 export engine reads). The legacy SmartCam keys
  * go along for a backend from before UX6 (target_aspect decides on a
  * current one). No extra letterbox formats any more.
+ * `captionPreset`: the preset of the caption style saved in the v2
+ * Style tab (captionDefault.ts) — the hint instead of Clipper; its
+ * overrides follow by PATCH /jobs/{id} once the job exists.
  */
-export function uploadSettings(s: JobSettings, { returning }: { returning: boolean }): UploadSettings {
+export function uploadSettings(
+  s: JobSettings,
+  { returning, captionPreset }: { returning: boolean; captionPreset?: string | null },
+): UploadSettings {
   // "No cuts" turns both off on the server too.
   const cuts = s.pace !== "none";
   return {
@@ -88,7 +94,11 @@ export function uploadSettings(s: JobSettings, { returning }: { returning: boole
     smartcam_format: "portrait",
     resolution: "1080",
     output_formats: [],
-    ...(returning ? { caption_style_hint: RETURNING_STYLE, caption_preset: RETURNING_STYLE } : {}),
+    ...(captionPreset
+      ? { caption_style_hint: captionPreset }
+      : returning
+        ? { caption_style_hint: RETURNING_STYLE, caption_preset: RETURNING_STYLE }
+        : {}),
   };
 }
 
