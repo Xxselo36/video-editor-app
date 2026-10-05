@@ -982,7 +982,8 @@ class PgJobStore:
                  to_json(data or {})))
 
     def events(self, since: float, kinds: Iterable[str] | None = None,
-               limit: int = 200_000) -> list[dict[str, Any]]:
+               limit: int = 200_000, newest: bool = False
+               ) -> list[dict[str, Any]]:
         from backend.jobs import event_row
         kinds = list(kinds or ())
         sql = ("SELECT extract(epoch FROM at), kind, job_id, data "
@@ -992,11 +993,24 @@ class PgJobStore:
         if kinds:
             sql += " AND kind = ANY(%s)"
             args.append(kinds)
-        sql += " ORDER BY at, id LIMIT %s"
+        sql += (" ORDER BY at DESC, id DESC LIMIT %s" if newest
+                else " ORDER BY at, id LIMIT %s")
         args.append(int(limit))
         with self._db.connection() as conn:
             rows = conn.execute(sql, args).fetchall()
         return [event_row(float(r[0]), r[1], r[2], r[3]) for r in rows]
+
+    def event_counts(self, since: float, kind: str,
+                     field: str) -> dict[str, int]:
+        from backend.jobs import event_field
+        with self._db.connection() as conn:
+            rows = conn.execute(
+                "SELECT data->>%s AS v, COUNT(*) FROM job_events "
+                "WHERE kind = %s AND at >= %s GROUP BY v",
+                (event_field(field), kind,
+                 _dt(since) or datetime.fromtimestamp(0, tz=timezone.utc))
+            ).fetchall()
+        return {str(r[0]): int(r[1]) for r in rows}
 
     def prune_events(self, before: float) -> int:
         with self._db.connection() as conn:

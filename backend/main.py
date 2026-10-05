@@ -462,13 +462,25 @@ def _bytes_on_disk(entry: dict) -> int:
 _RES_SIDE = {"1080": 1920, "1440": 2560, "2160": 3840, "4k": 3840}
 
 
+def _disk_factor() -> float:
+    return _env_float("CLEO_DISK_FACTOR", 3.5)
+
+
+def _disk_mezz_mbps() -> float:
+    return _env_float("CLEO_DISK_MEZZ_MBPS", 40)
+
+
+def _disk_preview_mbps() -> float:
+    return _env_float("CLEO_DISK_PREVIEW_MBPS", 10)
+
+
 def _disk_need(size: float | None, seconds: float | None = None,
                resolution: Any = None, smartcam: bool = True) -> float:
     """Bytes the analysis of an upload of `size` bytes and `seconds`
     length writes at its peak (see above); `smartcam` False (the job's
     settings ask for no reframe): no second mezz, S + M + small."""
     size = max(0.0, float(size or 0.0))
-    legacy = _env_float("CLEO_DISK_FACTOR", 3.5) * size
+    legacy = _disk_factor() * size
     try:
         secs = float(seconds or 0.0)
     except (TypeError, ValueError):
@@ -476,9 +488,9 @@ def _disk_need(size: float | None, seconds: float | None = None,
     if not (secs > 0 and math.isfinite(secs)):
         return legacy
     side = _RES_SIDE.get(str(resolution or "1080").strip().lower(), 1920)
-    mezz = (secs * _env_float("CLEO_DISK_MEZZ_MBPS", 40) * 1e6 / 8
+    mezz = (secs * _disk_mezz_mbps() * 1e6 / 8
             * (side / 1920) ** 2)
-    small = secs * _env_float("CLEO_DISK_PREVIEW_MBPS", 10) * 1e6 / 8
+    small = secs * _disk_preview_mbps() * 1e6 / 8
     peak = (max(size, mezz) + mezz) if smartcam else size + mezz
     return min(legacy, peak + small)
 
@@ -601,7 +613,13 @@ class _Inflight:
                         entry["upload"] = upload_path
                     return
             # A cache, not work: give its room to the upload when that is
-            # enough (it refills from the media store on demand).
+            # enough (it refills from the media store on demand). Only
+            # for a real reservation: a check (token None) deletes
+            # nothing — it passes when the room could be made.
+            if attempt == 1 and token is None:
+                if _proxy_cache_reclaim(short, dry_run=True) >= short:
+                    return
+                break
             if attempt == 1 and _proxy_cache_reclaim(short) >= short:
                 continue
             break
@@ -2387,9 +2405,10 @@ def _length_gate(job: Job, input_path: str,
             if ent is not None:
                 changed["plan"] = ent.plan
             if enforce:
-                settings["_max_seconds"] = (
-                    math.ceil(max(seconds or 0.0, 0.0))
-                    + accounts.TRUE_UP_TOLERANCE_S)
+                task_worker.limit_to_length(settings, seconds or 0.0)
+        if seconds:
+            # Billed or not: the analysis stops at the measured length.
+            task_worker.limit_to_length(settings, seconds)
     _cap_settings(settings)
     if measure or charge or settings != (job.settings or {}):
         changed["settings"] = settings
@@ -2522,6 +2541,9 @@ def _run_analyze_inner(job_id: str) -> None:
     _register_active(job_id)
     progress: _ProgressWriter | None = None
     ws = _workspace(job_id)
+    # Under the floor mid-analysis: this job stops (its ffmpeg killed) as
+    # server_storage_full instead of filling the volume for every job.
+    guard = task_worker.DiskGuard(job_id, ws, _TMP_ROOT, _MIN_FREE_BYTES)
     work_started = time.time()
     try:
         job = _db_retry(job_id, "reading the job", store.get, job_id)
@@ -2570,7 +2592,10 @@ def _run_analyze_inner(job_id: str) -> None:
         extra: dict[str, Any] = {}
         if _accepts(analyze_only, "on_normalized"):
             extra["on_normalized"] = _drop_upload
+        if _accepts(analyze_only, "cancel_check"):
+            extra["cancel_check"] = guard.cancel_check()
         try:
+            guard.start()
             input_path = job.input_path
             if not input_path:
                 progress(errors.stage_message("analyze.normalize",
@@ -2583,25 +2608,31 @@ def _run_analyze_inner(job_id: str) -> None:
                         f"fetching the upload failed: "
                         f"{type(e).__name__}: {e}") from e
                 input_path = str(local_copy)
+            guard.check()
             settings = _length_gate(job, input_path, progress)
             res = analyze_only(
                 input_path=input_path,
                 output_dir=str(ws),
                 settings=settings,
-                progress_cb=progress,
+                progress_cb=guard.progress(progress),
                 **extra,
             )
+            guard.check()
             stored = _store_analysis(job_id, res, progress, where)
         except AnalysisRefused as e:
+            guard.stop()
             progress.close()
             _analysis_refused(job_id, ws, e, _drop_upload, media_entries,
                               where, source_key)
             return
         except Exception as e:
+            guard.stop()
             progress.close()
-            _analysis_failed(job_id, ws, e, _drop_upload, media_entries,
-                             where)
+            # Whatever the killed step raised: the disk was full.
+            _analysis_failed(job_id, ws, guard.error(e), _drop_upload,
+                             media_entries, where)
             return
+        guard.stop()
         progress.close()
         try:
             # Pause here: status "awaiting_review" tells the UI to show the
@@ -2677,6 +2708,7 @@ def _run_analyze_inner(job_id: str) -> None:
             # Committed: the upload object isn't needed any more.
             _discard_upload(None, source_key, where)
     finally:
+        guard.stop()
         if progress is not None:
             progress.close()
         shutil.rmtree(ws, ignore_errors=True)
@@ -3003,7 +3035,11 @@ def _queue_admit(job_id: str, user: User | None, parsed: dict, plan: str,
                "source_key": source_key, "charged_s": seconds,
                "max_seconds": parsed.get("_max_seconds"),
                "est_audio_s": taskq.est_audio_s(charged),
-               "size": float(size or 0.0)}
+               "size": float(size or 0.0),
+               # What _disk_need sized the admission by (local_room
+               # dispatches by the same formula).
+               "resolution": parsed.get("resolution"),
+               "smartcam": bool(pipeline.smartcam_plan(parsed)[0])}
     fields = dict(settings=parsed, plan=plan, status="processing",
                   **errors.stage("queued"), progress=0.0, queue_position=None)
     return _tasks().admit_ingest(
@@ -3314,7 +3350,8 @@ class _QueueOps:
         n = 0
         for t in tasks:
             p = t.payload or {}
-            need = _disk_need(float(p.get("size") or 0.0), p.get("charged_s"))
+            need = _disk_need(float(p.get("size") or 0.0), p.get("charged_s"),
+                              p.get("resolution"), p.get("smartcam", True))
             if free - need < _MIN_FREE_BYTES:
                 break
             free -= need
@@ -4151,6 +4188,7 @@ async def _accept_upload(
             # The analysis downloads + normalizes it in its workspace:
             # sized by its length when known (_disk_need), so after the
             # header probe; the upload stays for a retry on 507.
+            disk_seconds = seconds
             disk = dict(seconds=seconds, resolution=parsed.get("resolution"),
                         smartcam=pipeline.smartcam_plan(parsed)[0])
             if queue:
@@ -4181,6 +4219,7 @@ async def _accept_upload(
                                         size or 0, input_path)
             await run_in_threadpool(_copy_upload, file, input_path)
             seconds = await run_in_threadpool(_probe_duration, input_path)
+            disk_seconds = seconds  # measured (packet scan): the cut too
             has_audio, has_video = await run_in_threadpool(_probe_streams,
                                                            input_path)
 
@@ -4288,8 +4327,12 @@ async def _accept_upload(
                     # controls: analyse no more than was charged (+ the
                     # true-up tolerance), or a file claiming 1 s would be
                     # transcribed in full, however long it really is.
-                    parsed["_max_seconds"] = (math.ceil(max(seconds, 0.0))
-                                              + accounts.TRUE_UP_TOLERANCE_S)
+                    task_worker.limit_to_length(parsed, seconds)
+            if disk_seconds:
+                # Billed or not: the disk was reserved for this length
+                # (_disk_need), the uploader's claim — the analysis
+                # (mezz, proxy, transcript) stops there.
+                task_worker.limit_to_length(parsed, disk_seconds)
             # Never more than CLEO_MAX_MINUTES, billed or not: the length
             # this was accepted with may be the uploader's claim.
             _cap_settings(parsed)
@@ -4986,12 +5029,14 @@ def _filmstrip_lazy(job_id: str) -> bool:
         return True
     if not (job.proxy_key or job.mezz_key):
         raise FileNotFoundError(f"job {job_id} has no stored video")
-    source = _cached_proxy(job)
     ws = _make_workspace(_workspace(job_id,
                                     f"filmstrip-{uuid.uuid4().hex[:8]}"))
     try:
         out = ws / pipeline.FILMSTRIP_NAME
-        meta = pipeline.make_filmstrip(source, str(out), job.duration or None)
+        with _proxy_in_use(job_id):
+            source = _cached_proxy(job)
+            meta = pipeline.make_filmstrip(source, str(out),
+                                           job.duration or None)
         if not meta:
             raise RuntimeError("the sprite could not be made")
         where = media.store_of(job)
@@ -5518,9 +5563,9 @@ def admin_queue(x_admin_token: str = Header(default="")):
 # The limits GET /admin/capacity shows (as in effect: the env value, else
 # the default the code uses).
 _CAPACITY_LIMITS: dict[str, Callable[[], Any]] = {
-    "CLEO_DISK_FACTOR": lambda: _env_float("CLEO_DISK_FACTOR", 3.5),
-    "CLEO_DISK_MEZZ_MBPS": lambda: _env_float("CLEO_DISK_MEZZ_MBPS", 30),
-    "CLEO_DISK_PREVIEW_MBPS": lambda: _env_float("CLEO_DISK_PREVIEW_MBPS", 10),
+    "CLEO_DISK_FACTOR": _disk_factor,
+    "CLEO_DISK_MEZZ_MBPS": _disk_mezz_mbps,
+    "CLEO_DISK_PREVIEW_MBPS": _disk_preview_mbps,
     "CLEO_MIN_FREE_GB": lambda: _MIN_FREE_BYTES / 1e9,
     "CLEO_MAX_UPLOAD_GB": _max_upload_gb,
     "CLEO_MAX_MINUTES": _max_minutes,
@@ -5562,22 +5607,16 @@ def capacity_report(now: float | None = None) -> dict[str, Any]:
              "need_gb": _gb(_disk_need(s * 1e9, 600)),
              "fits": _disk_need(s * 1e9, 600) <= room}
             for s in (0.5, 1, 2, 3, 4)]
-    # The newest upload_refused events (a short window first: the
-    # store returns the oldest first).
-    events: list[dict] = []
-    for days in (2.0, EVENTS_KEEP_DAYS):
-        events = store.events(now - days * 86400, kinds=["upload_refused"])
-        if len(events) >= 50:
-            break
-    by_code: dict[str, dict[str, int]] = {"24h": {}, "7d": {}}
-    for e in events:
-        code = str((e.get("data") or {}).get("code"))
-        for label, span in (("24h", 86400), ("7d", 7 * 86400)):
-            if e["at"] >= now - span:
-                by_code[label][code] = by_code[label].get(code, 0) + 1
+    # Counts per code over each whole window (grouped in the database),
+    # and the 50 newest refusals (newest first).
+    by_code = {label: store.event_counts(now - span, "upload_refused",
+                                         "code")
+               for label, span in (("24h", 86400), ("7d", 7 * 86400))}
+    events = store.events(now - EVENTS_KEEP_DAYS * 86400,
+                          kinds=["upload_refused"], limit=50, newest=True)
     recent = [{"at": e["at"], "age_s": round(now - e["at"]),
                **{k: (e.get("data") or {}).get(k) for k in _REFUSAL_FIELDS}}
-              for e in reversed(events[-50:])]
+              for e in events]
     return {
         "tmp_root": {"same_disk_as_work_root": same, **_disk_of(_TMP_ROOT)},
         "work_root": _disk_of(_WORK_ROOT),
@@ -5884,6 +5923,31 @@ def _effect(value, default: float, lo: float, hi: float) -> float:
 
 _PROXY_CACHE_LOCKS: dict[str, threading.Lock] = {}
 _PROXY_CACHE_GUARD = threading.Lock()
+# Job ids whose cached proxy an ffmpeg call is reading right now (count
+# of readers, under _PROXY_CACHE_GUARD): never deleted from under it.
+_PROXY_IN_USE: dict[str, int] = {}
+
+
+@contextmanager
+def _proxy_in_use(job_id: str):
+    """Around _cached_proxy + the ffmpeg call reading it: the cached file
+    stays (_proxy_cache_reclaim / _proxy_cache_trim skip it)."""
+    with _PROXY_CACHE_GUARD:
+        _PROXY_IN_USE[job_id] = _PROXY_IN_USE.get(job_id, 0) + 1
+    try:
+        yield
+    finally:
+        with _PROXY_CACHE_GUARD:
+            n = _PROXY_IN_USE.get(job_id, 0) - 1
+            if n > 0:
+                _PROXY_IN_USE[job_id] = n
+            else:
+                _PROXY_IN_USE.pop(job_id, None)
+
+
+def _proxy_busy(path: Path) -> bool:
+    with _PROXY_CACHE_GUARD:
+        return _PROXY_IN_USE.get(path.stem, 0) > 0
 
 
 def _proxy_cache_dir() -> Path:
@@ -5914,7 +5978,7 @@ def _proxy_cache_trim(keep: Path) -> None:
     for _, size, path in entries:
         if total <= limit:
             break
-        if path == keep:
+        if path == keep or _proxy_busy(path):
             continue
         path.unlink(missing_ok=True)
         total -= size
@@ -5940,24 +6004,50 @@ def _proxy_cache_bytes() -> int:
     return sum(size for _, size, _ in _proxy_cache_files())
 
 
-def _proxy_cache_reclaim(want: float) -> int:
+def _proxy_reclaim_min_age_s() -> float:
+    """A cached proxy used (fetched or read) more recently than this
+    (CLEO_PROXY_RECLAIM_MIN_AGE_S, 10 min) is an editor session going
+    on: never reclaimed for an upload."""
+    return _env_float("CLEO_PROXY_RECLAIM_MIN_AGE_S", 600)
+
+
+def _proxy_cache_reclaim(want: float, dry_run: bool = False) -> int:
     """An upload's disk reservation is `want` bytes short: delete cached
     proxies, oldest first, until that much is free — only when the cache
-    holds enough to make it fit (otherwise nothing goes). Returns the
-    bytes freed. A preview rebuild reading one of them keeps its open
-    file; the next one fetches it again."""
-    files = _proxy_cache_files()
-    if want <= 0 or sum(size for _, size, _ in files) < want:
+    holds enough to make it fit (otherwise nothing goes). Never one read
+    right now (_proxy_in_use), used in the last
+    _proxy_reclaim_min_age_s, or being fetched (its _proxy_cache_lock is
+    taken for the delete). Returns the bytes freed; `dry_run` (a check
+    without a reservation: presign / multipart init) deletes nothing
+    and returns what could be freed."""
+    if want <= 0:
         return 0
+    cutoff = time.time() - _proxy_reclaim_min_age_s()
+    files = [(m, size, p) for m, size, p in _proxy_cache_files()
+             if m < cutoff and not _proxy_busy(p)
+             and not _proxy_cache_lock(p.stem).locked()]
+    reclaimable = sum(size for _, size, _ in files)
+    if reclaimable < want:
+        return 0
+    if dry_run:
+        return reclaimable
     freed = 0
     for _, size, path in files:
         if freed >= want:
             break
+        lock = _proxy_cache_lock(path.stem)
+        if not lock.acquire(blocking=False):
+            continue   # being fetched / refreshed right now
         try:
+            # Checked again under the lock: read or refreshed meanwhile.
+            if _proxy_busy(path) or path.stat().st_mtime >= cutoff:
+                continue
             path.unlink()
             freed += size
         except OSError:
             pass
+        finally:
+            lock.release()
     print(f"[jobs] proxy cache: {freed / 1e9:.2f} GB freed for an upload",
           flush=True)
     return freed
@@ -5994,13 +6084,14 @@ def _rebuild_preview(job_id: str, source: str | None, segments) -> None:
     job = store.get(job_id)
     if job is None:
         raise FileNotFoundError(f"job {job_id} is gone")
-    if source is None:
-        source = _cached_proxy(job)
     ws = _make_workspace(_workspace(job_id,
                                     f"preview-{threading.get_ident()}"))
     try:
         out = ws / "preview.mp4"
-        _ffmpeg_cuts_preview(source, segments, str(out))
+        with _proxy_in_use(job_id):
+            if source is None:
+                source = _cached_proxy(job)
+            _ffmpeg_cuts_preview(source, segments, str(out))
         version = (job.preview_version or 0) + 1
         key = f"{media.job_prefix(job_id)}preview/v{version}.mp4"
         where = media.store_of(job)

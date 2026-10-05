@@ -153,28 +153,77 @@ def test_a_10_gb_volume_takes_the_incident_upload(monkeypatch):
     M._INFLIGHT.release(t2)
 
 
+def _cached(cache: Path, name: str, size: int, age_s: float) -> Path:
+    import os
+    p = cache / f"{name}.mp4"
+    p.write_bytes(b"x" * size)
+    t = time.time() - age_s
+    os.utime(p, (t, t))
+    return p
+
+
 def test_the_proxy_cache_gives_way_to_an_upload(monkeypatch):
     cache = M._proxy_cache_dir()
     cache.mkdir(parents=True, exist_ok=True)
     for i, n in enumerate((3000, 2000, 1000)):     # oldest first
-        p = cache / f"job{i}.mp4"
-        p.write_bytes(b"x" * n)
-        t = time.time() - 100 + i
-        import os
-        os.utime(p, (t, t))
+        _cached(cache, f"job{i}", n, 3600 - i)
     monkeypatch.setattr(M, "_MIN_FREE_BYTES", 0.0)
     disk = FakeDisk(monkeypatch, total=1e6, free=10_000)
     monkeypatch.setenv("CLEO_DISK_FACTOR", "1")
-    # 12,500 needed, 10,000 free: the oldest cached proxy (3000) is
-    # enough — only it goes.
+    # A check (presign / multipart init, no reservation) deletes
+    # nothing: it passes because the room could be made.
     M._INFLIGHT.reserve_disk(None, 12_500)
+    assert len(list(cache.glob("*.mp4"))) == 3
+    # 12,500 needed, 10,000 free: the oldest cached proxy (3000) is
+    # enough — only it goes, for a real reservation.
+    token = M._INFLIGHT.admit(None)
+    M._INFLIGHT.reserve_disk(token, 12_500)
     assert sorted(p.name for p in cache.glob("*.mp4")) == ["job1.mp4",
                                                           "job2.mp4"]
+    M._INFLIGHT.release(token)
     # More than the whole cache: nothing is deleted, 507.
     disk.free = 0
+    token = M._INFLIGHT.admit(None)
+    with pytest.raises(M.DiskRefusal):
+        M._INFLIGHT.reserve_disk(token, 100_000)
     with pytest.raises(M.DiskRefusal):
         M._INFLIGHT.reserve_disk(None, 100_000)
+    M._INFLIGHT.release(token)
     assert len(list(cache.glob("*.mp4"))) == 2
+
+
+def test_the_reclaim_spares_proxies_in_use(monkeypatch):
+    """Never deleted for an upload: a proxy used in the last 10 minutes,
+    one an ffmpeg call is reading (_proxy_in_use), one being fetched
+    (its _proxy_cache_lock held)."""
+    cache = M._proxy_cache_dir()
+    cache.mkdir(parents=True, exist_ok=True)
+    for p in cache.glob("*.mp4"):
+        p.unlink()
+    recent = _cached(cache, "recent", 5000, 60)        # an editor session
+    reading = _cached(cache, "reading", 5000, 3600)
+    fetching = _cached(cache, "fetching", 5000, 3600)
+    old = _cached(cache, "old", 1000, 7200)
+    lock = M._proxy_cache_lock("fetching")
+    with M._proxy_in_use("reading"), lock:
+        # Only `old` is reclaimable: not enough for 2000 → nothing goes.
+        assert M._proxy_cache_reclaim(2000) == 0
+        assert M._proxy_cache_reclaim(2000, dry_run=True) == 0
+        assert M._proxy_cache_reclaim(500, dry_run=True) == 1000
+        assert old.exists()
+        assert M._proxy_cache_reclaim(500) == 1000
+        assert not old.exists()
+        assert recent.exists() and reading.exists() and fetching.exists()
+        # The LRU trim skips the one being read too.
+        monkeypatch.setenv("CLEO_PROXY_CACHE_GB", "0")
+        M._proxy_cache_trim(keep=recent)
+        assert reading.exists() and not fetching.exists()
+    # Done reading, a quarter of an hour on: it goes.
+    monkeypatch.setenv("CLEO_PROXY_RECLAIM_MIN_AGE_S", "0")
+    assert M._proxy_cache_reclaim(1) == 5000
+    assert not reading.exists()
+    assert M._PROXY_IN_USE == {}
+    recent.unlink()
 
 
 @pytest.mark.wp1_only("the in-process reservation of POST /jobs")
@@ -431,3 +480,209 @@ def test_ops_inspect_prints_only_numbers_and_codes():
     assert "DISK: 1 of the last 1 refusals are server_storage_full" in text
     assert "no video length" in text
     assert "ROOM: right now a 10-min upload of 4 GB or more" in text
+
+
+def test_capacity_counts_whole_windows_and_lists_the_newest(monkeypatch):
+    """24h / 7d counts cover their whole window (not just the rows a
+    short first query returned), "recent" is the 50 newest."""
+    now = time.time()
+    for i in range(60):                  # within the last day
+        store.record_event("upload_refused", None,
+                           {"code": "server_storage_full", "n": i},
+                           at=now - 3600 + i)
+    for i in range(5):                   # 3–5 days ago
+        store.record_event("upload_refused", None, {"code": "server_busy"},
+                           at=now - (3 + i * 0.5) * 86400)
+    store.record_event("upload_refused", None, {"code": "too_many_uploads"},
+                       at=now - 10 * 86400)               # outside 7d
+    store.record_event("upload_refused", None, {}, at=now - 60)
+    rep = M.capacity_report(now)["refusals"]
+    assert rep["by_code"]["24h"] == {"server_storage_full": 60, "None": 1}
+    assert rep["by_code"]["7d"] == {"server_storage_full": 60,
+                                    "server_busy": 5, "None": 1}
+    recent = rep["recent"]
+    assert len(recent) == 50
+    ats = [e["at"] for e in recent]
+    assert ats == sorted(ats, reverse=True)
+    assert recent[0]["age_s"] == 60 and recent[0]["code"] is None
+    assert recent[1]["code"] == "server_storage_full"
+    assert recent[1]["at"] == pytest.approx(now - 3600 + 59)
+    with pytest.raises(ValueError):
+        store.event_counts(0, "upload_refused", "code') OR 1=1 --")
+
+
+def test_capacity_limits_report_the_defaults_in_use():
+    limits = {k: f() for k, f in M._CAPACITY_LIMITS.items()}
+    assert limits["CLEO_DISK_MEZZ_MBPS"] == M._disk_mezz_mbps() == 40
+    assert limits["CLEO_DISK_PREVIEW_MBPS"] == 10
+    assert limits["CLEO_DISK_FACTOR"] == 3.5
+
+
+# ── the reserved length is the analysed length ───────────────────────
+
+
+def test_post_jobs_caps_the_analysis_at_the_reserved_length(client, fake_r2,
+                                                            monkeypatch):
+    """Billing off: a header claiming 10 s reserves disk for 10 s — and
+    the analysis stops at 10 s + the true-up tolerance, however long the
+    file really is (the queue task carries the same cap)."""
+    from backend import accounts, taskq
+    FakeDisk(monkeypatch, total=10 * GB, free=9.5 * GB)
+    fake_r2["size"], fake_r2["seconds"] = 4 * GB, 10.0
+    r = client.post("/jobs", data={"settings": '{"_max_seconds": 99999}',
+                                   "storage_key": "uploads/a.mov"})
+    assert r.status_code == 200, r.text
+    job = store.get(r.json()["job_id"])
+    cap = 10 + accounts.TRUE_UP_TOLERANCE_S
+    assert job.settings["_max_seconds"] == cap
+    if taskq.enabled():
+        task = M._tasks().active_task(job.id, "ingest")
+        assert task.payload["max_seconds"] == cap
+
+
+def test_the_measured_length_caps_the_analysis_unbilled(monkeypatch):
+    """No length at POST /jobs: the worker's measurement is the cap —
+    in both length gates (WP1 and the queue worker)."""
+    from backend import accounts
+    from backend import worker as task_worker
+    job = store.create(None, {"_measure_length": True},
+                       source_key="uploads/x.mp4")
+    monkeypatch.setattr(M, "_probe_duration", lambda p: 42.4)
+    got = M._length_gate(job, "x.mp4", lambda *a: None)
+    assert got == {"_max_seconds": 43 + accounts.TRUE_UP_TOLERANCE_S}
+    job = store.create(None, {"_measure_length": True},
+                       source_key="uploads/y.mp4")
+    real_get = task_worker._get
+    monkeypatch.setattr(task_worker, "_get", lambda name: (
+        (lambda p: 42.4) if name == "probe_duration" else real_get(name)))
+    got = task_worker._length_gate(None, job, "y.mp4", lambda *a: None)
+    assert got == {"_max_seconds": 43 + accounts.TRUE_UP_TOLERANCE_S}
+
+
+def test_the_mezz_proxy_and_precheck_stop_at_the_cap(tmp_path, monkeypatch):
+    """analyze_only hands _max_seconds to every step that reads the
+    source: the audio precheck and the normalize (mezz + proxy, -t;
+    test_billing / test_pipeline_media cut real files with it)."""
+    from backend import pipeline
+    seen = {}
+
+    def precheck(path, max_seconds=None):
+        seen["precheck"] = max_seconds
+        return {}
+
+    class Stop(Exception):
+        pass
+
+    def normalize(src, dst, max_side=1920, max_seconds=None, proxy_path=None,
+                  cfr_rate=None):
+        seen["normalize"] = max_seconds
+        raise Stop
+    monkeypatch.setattr(pipeline, "_precheck_audio", precheck)
+    monkeypatch.setattr(pipeline, "_normalize_orientation", normalize)
+    monkeypatch.setattr(pipeline, "cfr_rate_of", lambda p: None)
+    with pytest.raises(Stop):
+        pipeline.analyze_only(str(tmp_path / "in.mp4"), str(tmp_path),
+                              settings={"_max_seconds": 15.0})
+    assert seen == {"precheck": 15.0, "normalize": 15.0}
+
+
+# ── the disk guard ───────────────────────────────────────────────────
+
+
+def test_the_disk_guard_kills_only_this_jobs_ffmpeg(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    from backend import worker as task_worker
+    ws = tmp_path / "jobs" / "j1" / "a1"
+    ws.mkdir(parents=True)
+    sleeper = [sys.executable, "-c", "import time; time.sleep(30)"]
+    mine = subprocess.Popen([*sleeper, str(ws / "normalized.mp4")])
+    other = subprocess.Popen([*sleeper, str(tmp_path / "jobs" / "j2")])
+    try:
+        disk = FakeDisk(monkeypatch, total=10 * GB, free=5 * GB)
+        guard = task_worker.DiskGuard("j1", ws, tmp_path, 1 * GB,
+                                      interval=0.02)
+        with guard:
+            time.sleep(0.1)
+            assert not guard.tripped and mine.poll() is None
+            guard.check()                    # nothing to raise yet
+            disk.free = 0.5 * GB
+            assert mine.wait(timeout=5) != 0           # killed
+            assert guard.tripped
+        assert other.poll() is None                     # another job's
+        err = guard.error(RuntimeError("ffmpeg orientation-normalize "
+                                       "failed: killed"))
+        assert isinstance(err, OSError)
+        assert "No space left on device" in str(err)
+        with pytest.raises(task_worker.DiskGuardTripped):
+            guard.progress(lambda m, p: None)("x", 1)
+        assert guard.cancel_check()() is True
+    finally:
+        for p in (mine, other):
+            p.kill()
+            p.wait()
+
+
+def test_a_full_disk_mid_analysis_fails_the_job_as_storage_full(
+        monkeypatch, auth_on):
+    """WP1: the volume drops under CLEO_MIN_FREE_GB while the analysis
+    runs → that job stops with server_storage_full, its minutes back."""
+    from backend import accounts
+    monkeypatch.setenv("CLEO_DISK_GUARD_S", "0.02")
+    disk = FakeDisk(monkeypatch, total=10 * GB, free=8 * GB)
+    src = Path(M._WORK_ROOT) / "uploads"
+    src.mkdir(parents=True, exist_ok=True)
+    f = src / f"in-{time.time_ns()}.mp4"
+    f.write_bytes(b"x")
+    job = store.create(str(f), {}, owner_id="user_a")
+    accounts.charge(job.id, "user_a", 60, enforce=False)
+    reached = []
+
+    def analyze(input_path, output_dir, settings, progress_cb, **kw):
+        disk.free = 0.4 * GB                    # something fills the disk
+        end = time.monotonic() + 10
+        while time.monotonic() < end:
+            progress_cb("Analyzing audio…", 20)      # raises once tripped
+            time.sleep(0.01)
+        reached.append(True)
+        raise AssertionError("the guard never stopped the analysis")
+    monkeypatch.setattr(M, "analyze_only", analyze)
+    M._run_analyze_inner(job.id)
+    got = store.get(job.id)
+    assert reached == []
+    assert got.status == "error"
+    assert got.error_code == "server_storage_full", got.error
+    assert got.refunded is True
+    assert accounts.get_usage(job.id)["refunded"]
+    [ev] = [e for e in store.events(0, kinds=["analysis_failed"])
+            if e["job_id"] == job.id]
+    assert ev["data"]["code"] == "server_storage_full"
+    assert not M._workspace(job.id).exists()
+
+
+def test_queue_dispatch_sizes_by_resolution_and_smartcam(monkeypatch):
+    """local_room uses the admission's formula: a 4K job needs a 4K mezz
+    (the 1080p ceiling would let it in), no SmartCam no second mezz."""
+    import types
+    FakeDisk(monkeypatch, total=10 * GB, free=10 * GB)
+    ops = M._QueueOps(periodic=False)
+
+    def task(**p):
+        return types.SimpleNamespace(payload={"size": 4 * GB,
+                                              "charged_s": 600, **p})
+    hd = task(resolution="1080", smartcam=True)
+    uhd = task(resolution="2160", smartcam=False)
+    assert M._disk_need(4 * GB, 600, "2160", False) > 9 * GB
+    assert ops.local_room([hd, hd]) == 1      # 7.75 + 1 floor each
+    assert ops.local_room([uhd]) == 0
+    assert ops.local_room([task()]) == 1      # old payloads: 1080p
+    # _queue_admit writes those inputs into the task.
+    job = store.create(None, {}, source_key="uploads/q.mov")
+    parsed = {"resolution": "2160", "target_aspect": "16:9",
+              "_max_seconds": 605}
+    assert M._queue_admit(job.id, None, parsed, "free", 600.0, 4 * GB,
+                          "uploads/q.mov") == "ok"
+    p = M._tasks().active_task(job.id, "ingest").payload
+    assert (p["resolution"], p["smartcam"], p["charged_s"]) == (
+        "2160", False, 600.0)
+    assert ops.local_room([types.SimpleNamespace(payload=p)]) == 0
