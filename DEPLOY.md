@@ -789,10 +789,18 @@ Proxies nicht erzeugen), `CLEO_MEDIA_ORPHAN_MAX` (200 Präfixe pro Lauf),
 `CLEO_PROXY_CACHE_GB` (5), `CLEO_PROBE_WORKERS` (4),
 `CLEO_MODAL_DEADLINE_S_PER_GB` (60, siehe 9.3), `CLEO_MEDIA_ROOT`
 (Ordner der lokalen Medien, Default `<CLEO_WORK_ROOT>/media`),
-`R2_ENDPOINT_URL` (nur Tests), `CLEO_UPLOAD_INITS_PER_HOUR` (30:
+`R2_ENDPOINT_URL` (nur Tests), `CLEO_UPLOAD_INITS_PER_HOUR` (60:
 so viele fortsetzbare Uploads darf ein Nutzer pro Stunde beginnen —
-bzw. eine Adresse, wenn Accounts aus sind; darüber 429
-`too_many_uploads`, die Web-App sagt "später nochmal"; 0 = kein Limit).
+bzw. eine Adresse, wenn Accounts aus sind; Fortsetzen und "Nochmal"
+eines gestoppten Uploads zählen nicht; darüber 429 `too_many_uploads`,
+die Web-App (v2) sagt "Zu viele Uploads in kurzer Zeit"; 0 = kein Limit),
+`CLEO_DISK_MEZZ_MBPS` (40) / `CLEO_DISK_PREVIEW_MBPS` (10): die
+Platz-Reservierung einer Analyse mit bekannter Länge (Upload + Mezz bei
+1080p + Proxy/Vorschau, gemessen; nie mehr als `CLEO_DISK_FACTOR` × Upload,
+das ohne bekannte Länge gilt), `CLEO_UPLOAD_ENTRY_TTL_S` (7200: ein
+nicht freigegebener Upload-Platz verfällt danach). Ablehnungen der
+Upload-Routen stehen als `upload_refused` in `job_events`;
+`GET /admin/capacity` bzw. die GitHub-Action "Ops inspect" zeigt sie.
 
 Außerhalb von Railway:
 - **Modal-Secret `cleocuts-r2`** (10.2 Schritt 3, am einfachsten per

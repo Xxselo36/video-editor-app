@@ -361,7 +361,7 @@ def clean_state(monkeypatch):
     accounts._TEST_PLANS.clear()
     billing._price_cache.clear()
     billing._refresh_tried.clear()
-    for limiter in (M._INIT_RATE, M._CLAIM_RATE):
+    for limiter in (M._INIT_RATE, M._CLAIM_RATE, M._REFUSAL_EVENTS):
         with limiter._lock:
             limiter._events.clear()
     store.tasks._truncate_for_tests()

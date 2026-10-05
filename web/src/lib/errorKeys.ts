@@ -56,6 +56,15 @@ export const CLIENT_ERROR_KEYS: Record<string, MessageKey> = {
   not_found: "app.errors.expired",
 };
 
+/** The v2 opt-in (Projects tiles) words these refusals on their own —
+ *  not as "servers are busy": the video doesn't fit the server's disk
+ *  right now (507), or too many uploads were started (429). The v1
+ *  dashboard keeps ERROR_KEYS / CLIENT_ERROR_KEYS' wording. */
+export const V2_ERROR_KEYS: Record<string, MessageKey> = {
+  server_storage_full: "app.errors.serverStorageFull",
+  too_many_uploads: "app.errors.tooManyUploads",
+};
+
 /** Notes on a job that still works. */
 export const WARNING_KEYS: Record<string, MessageKey> = {
   script_unsupported: "app.warnings.scriptUnsupported",

@@ -65,6 +65,47 @@ test("a failed upload: its reason, then Try again creates the job", { tag: "@edi
   expect((await storedJobs(page)).filter((j) => j.filename === "nochmal.mp4")).toHaveLength(1);
 });
 
+test("storage full and too many uploads say so — not 'busy' — with their code", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  const media = await stub.media("grid.mp4");
+  await openWithStorage(page, "/app/new");
+  // POST /jobs: the video doesn't fit the server's disk right now (507).
+  await page.route(`${API}/jobs`, (r) => {
+    if (r.request().method() !== "POST") return r.fallback();
+    return r.fulfill({
+      status: 507,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "server_storage_full", code: "server_storage_full", params: {} }),
+    });
+  });
+  await pickTikTok(page, "gross.mp4", media);
+  const tile = jobCard(page, "gross.mp4");
+  await expect(tile).toHaveAttribute("data-state", "upload_failed", { timeout: 30_000 });
+  await expect(tile.getByTestId("job-card-status")).toHaveText(
+    "This video is too large for our servers right now — try again in a few minutes or shorten it.",
+  );
+  await expect(tile.getByTestId("job-card-code")).toHaveText("Code: server_storage_full");
+  await page.unroute(`${API}/jobs`);
+
+  // The upload API: too many uploads started in a short time (429).
+  const tooMany = (r: import("@playwright/test").Route) =>
+    r.fulfill({
+      status: 429,
+      headers: { "Retry-After": "600" },
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "too_many_uploads", code: "too_many_uploads", params: {} }),
+    });
+  await page.route("**/uploads/multipart/init", tooMany);
+  await page.route("**/uploads/presign", tooMany);
+  await page.goto("/app/new");
+  await pickTikTok(page, "viele.mp4", media);
+  const second = jobCard(page, "viele.mp4");
+  await expect(second).toHaveAttribute("data-state", "upload_failed", { timeout: 30_000 });
+  await expect(second.getByTestId("job-card-status")).toHaveText("Too many uploads in a short time — wait a few minutes.");
+  await expect(second.getByTestId("job-card-code")).toHaveText("Code: too_many_uploads");
+  // The first tile keeps its own reason and code (stored as the code).
+  await expect(tile.getByTestId("job-card-code")).toHaveText("Code: server_storage_full");
+});
+
 test("once POST /jobs went out there is no Cancel: Starting…, then the project", { tag: "@editor-v2" }, async ({ page, stub }) => {
   const media = await stub.media("grid.mp4");
   // The job POST /jobs will create (the stub has no bucket: the stored

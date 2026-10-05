@@ -179,3 +179,22 @@ class RateLimit:
                 for k in [k for k, v in self._events.items() if not v]:
                     del self._events[k]
             return True
+
+    def refund(self, key: str) -> None:
+        """Take back the newest allowed event of `key` (the call it
+        allowed failed before it used anything)."""
+        with self._lock:
+            q = self._events.get(key)
+            if q:
+                q.pop()
+
+    def stats(self, now: float | None = None) -> dict[str, int]:
+        """{keys, events, max_per_key} inside the window now — counts
+        only, never the keys (GET /admin/capacity)."""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            counts = [sum(1 for t in q if t > now - self.window)
+                      for q in self._events.values()]
+        counts = [c for c in counts if c]
+        return {"keys": len(counts), "events": sum(counts),
+                "max_per_key": max(counts, default=0)}
