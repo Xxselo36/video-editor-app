@@ -209,6 +209,90 @@ def test_groq_off_and_failing(client, monkeypatch, groq):
     assert "spans" not in store.get(job.id).doc       # nothing recorded
 
 
+def test_a_hidden_hallucination_does_not_block_real_words(client, groq):
+    # the only word in the gap is a hidden "Thank you." over the pause:
+    # a real word there replaces nothing, but it is not dropped either
+    job = _review_job()
+    doc = dict(store.get(job.id).doc)
+    ghost = {"id": "w9000", "text": "Thanks.", "start": 1.9, "end": 2.6,
+             "hidden": True, "nospeech": True}
+    doc["words"] = sorted(doc["words"] + [ghost], key=lambda w: w["start"])
+    store.update(job.id, doc=doc)
+    groq.words = [{"word": " right", "start": 1.4, "end": 2.0, "probability": 0.9}]
+    body = _span(client, job.id).json()
+    assert [w["text"] for w in body["words"] if not w.get("hidden")] == ["right"]
+    assert body["changed"] is True
+
+
+def test_busy_job_is_refused_at_once(client, groq):
+    from backend import main as M
+    job = _review_job()
+    lock = M._span_lock(job.id)
+    assert lock.acquire(blocking=False)
+    try:
+        r = _span(client, job.id)
+    finally:
+        lock.release()
+    assert (r.status_code, r.json()["detail"]) == (409, "busy")
+    assert r.headers.get("retry-after") == "5"
+    assert groq.calls == []
+    assert _span(client, job.id).status_code == 200      # free again
+
+
+def test_groq_gets_one_short_attempt(client, groq, monkeypatch):
+    seen = []
+    groq_fake = whisper_groq.transcribe_via_groq
+
+    def spy(*a, **k):
+        seen.append(whisper_groq._REQUEST_POLICY.get())
+        return groq_fake(*a, **k)
+    monkeypatch.setattr(whisper_groq, "transcribe_via_groq", spy)
+    assert _span(client, _review_job().id).status_code == 200
+    assert seen == [(1, S.GROQ_TIMEOUT_S)]
+    assert whisper_groq._REQUEST_POLICY.get() is None
+
+
+SIGNED = "https://r2.example/jobs/abc/mezz.mp4?X-Amz-Signature=deadbeef&X-Amz-Credential=key"
+
+
+def test_redact():
+    assert S.redact(f"Opening '{SIGNED}' failed: 403") == "Opening '<url> failed: 403"
+    assert S.redact("no url here") == "no url here"
+
+
+@pytest.mark.parametrize("how", ["stderr", "timeout"])
+def test_presigned_url_never_logged(monkeypatch, capsys, how):
+    def fake_run(cmd, **kw):
+        assert kw["timeout"] == S.FFMPEG_TIMEOUT_S == 45
+        # over a URL a stalled read fails after RW_TIMEOUT_S, before the -i
+        i = cmd.index("-rw_timeout")
+        assert cmd[i + 1] == "15000000" and i < cmd.index("-i")
+        if how == "timeout":
+            raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+        return subprocess.CompletedProcess(cmd, 1, "", f"{SIGNED}: Server returned 403 Forbidden")
+    monkeypatch.setattr(S.subprocess, "run", fake_run)
+    with pytest.raises(S.SpanError) as ei:
+        S.transcribe(SIGNED, {"start": 1.0, "end": 2.0}, "en", 10.0)
+    assert ei.value.status == 502
+    out = capsys.readouterr()
+    logged = out.out + out.err
+    assert "[span]" in logged
+    assert "X-Amz-Signature" not in logged and "r2.example" not in logged
+
+
+def test_local_source_has_no_rw_timeout(monkeypatch, tmp_path):
+    cmds = []
+
+    def fake_run(cmd, **kw):
+        cmds.append(cmd)
+        with open(cmd[-1], "wb") as f:
+            f.write(b"audio")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(S.subprocess, "run", fake_run)
+    S.extract_audio(str(tmp_path / "mezz.mp4"), 1.0, 2.0, str(tmp_path / "o.m4a"))
+    assert "-rw_timeout" not in cmds[0]
+
+
 def test_r2_reads_a_presigned_url(client, groq, monkeypatch):
     job = _review_job(proxy_key=None)
     monkeypatch.setattr(media, "store_of", lambda j: "r2")

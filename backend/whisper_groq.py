@@ -92,6 +92,23 @@ REQUEST_TIMEOUT_S = 180.0
 # auth, 413 too large) fail the same way again.
 _RETRY_STATUS = {408, 409, 429}
 
+# A caller that answers a user who waits (POST /jobs/{id}/transcribe-span)
+# narrows the policy for its calls: (attempts, timeout seconds). The
+# client retries itself; a request thread is never held for minutes.
+_REQUEST_POLICY: ContextVar[tuple[int, float] | None] = ContextVar(
+    "groq_request_policy", default=None)
+
+
+@contextmanager
+def request_policy(attempts: int, timeout_s: float) -> Iterator[None]:
+    """Groq calls inside this block get at most `attempts` tries of at
+    most `timeout_s` seconds each."""
+    token = _REQUEST_POLICY.set((max(1, int(attempts)), float(timeout_s)))
+    try:
+        yield
+    finally:
+        _REQUEST_POLICY.reset(token)
+
 
 def _debug_enabled() -> bool:
     """CLEO_GROQ_DEBUG=1: log one raw verbose_json word per request."""
@@ -386,12 +403,13 @@ def _transcribe_single(
               flush=True)
         return None
 
+    max_attempts, timeout_s = _REQUEST_POLICY.get() or (MAX_ATTEMPTS, REQUEST_TIMEOUT_S)
     # max_retries=0: the SDK's own retries would stack on ours.
     client = OpenAI(
         api_key=key,
         base_url="https://api.groq.com/openai/v1",
         max_retries=0,
-        timeout=REQUEST_TIMEOUT_S,
+        timeout=timeout_s,
     )
 
     kwargs: dict[str, Any] = {
@@ -415,10 +433,10 @@ def _transcribe_single(
                 )
             break
         except Exception as e:
-            print(f"[groq] transcription attempt {attempt}/{MAX_ATTEMPTS} "
+            print(f"[groq] transcription attempt {attempt}/{max_attempts} "
                   f"failed: {e}", flush=True)
             asked = _retry_after(e)
-            if not _retryable(e) or attempt >= MAX_ATTEMPTS:
+            if not _retryable(e) or attempt >= max_attempts:
                 err = GroqTranscriptionError(
                     f"transcription_unavailable: Groq failed after "
                     f"{attempt} attempt(s) ({_describe(e)})"

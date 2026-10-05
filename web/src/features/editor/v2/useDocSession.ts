@@ -54,8 +54,22 @@ export type DocSession =
       transcribeSpan: (start: number, end: number) => Promise<SpanResult>;
     };
 
-/** words: the span got words; empty: Whisper heard none there; error: try again later. */
-export type SpanResult = "words" | "empty" | "error";
+/**
+ * words: the span got words; empty: Whisper heard none there; error:
+ * failed (a retry chip); { later }: not now, nothing failed — the rate
+ * limit (429, its Retry-After), another span of the job running (409
+ * busy) or a save waiting for its retry: ask again after `later` ms.
+ */
+export type SpanResult = "words" | "empty" | "error" | { later: number };
+
+/** The wait a 429 / 409 busy asks for (Retry-After, seconds), in ms. */
+export function retryAfterMs(r: Pick<Response, "headers">, fallbackS: number): number {
+  const s = Number(r.headers.get("Retry-After"));
+  return Math.round(Math.min(120, Math.max(1, Number.isFinite(s) && s > 0 ? s : fallbackS)) * 1000);
+}
+
+/** A save still waiting for its retry (DocSaver.exclusive "busy"): ask again in this long. */
+const SAVER_BUSY_MS = 3000;
 
 /**
  * UT5 (GET /jobs/{id}/doc): `engine` — the export's caption engine
@@ -247,6 +261,12 @@ export function useDocSession(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ start, end, base_rev: base, rev: uniqueRev(base) }),
           });
+          if (r.status === 429) return { later: retryAfterMs(r, 30) };
+          if (r.status === 409) {
+            const detail = ((await r.json().catch(() => null)) as { detail?: unknown } | null)?.detail;
+            if (detail === "busy") return { later: retryAfterMs(r, 5) };
+            return "error";
+          }
           if (!r.ok) return "error";
           const j = (await r.json()) as { words?: unknown; rev?: unknown; changed?: unknown };
           const words = (Array.isArray(j.words) ? j.words : []).filter(
@@ -264,6 +284,7 @@ export function useDocSession(
           return words.length ? "words" : "empty";
         })
         .catch((): SpanResult => "error");
+      if (out === "busy") return { later: SAVER_BUSY_MS };
       return out ?? "error";
     },
     [jobId, loaded],

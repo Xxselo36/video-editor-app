@@ -360,6 +360,19 @@ def test_groq_fails_after_three_attempts(groq):
     assert "audio" not in msg.lower() and "429" not in msg
 
 
+def test_groq_request_policy_narrows_attempts_and_timeout(groq):
+    # the span route's policy: one try of 30 s, no sleep (the client retries)
+    groq.plan = [_rate_limit(None), GROQ_OK]
+    with whisper_groq.request_policy(1, 30.0):
+        with pytest.raises(whisper_groq.GroqTranscriptionError):
+            whisper_groq._transcribe_single(groq.audio, None, None)
+    assert groq.calls == 1 and groq.sleeps == []
+    assert groq.clients[0]["timeout"] == 30.0
+    # outside the block: the analysis' policy again
+    assert whisper_groq._transcribe_single(groq.audio, None, None)["language"] == "en"
+    assert groq.clients[1]["timeout"] == whisper_groq.REQUEST_TIMEOUT_S
+
+
 def test_groq_non_retryable_error_fails_at_once(groq):
     groq.plan = [_bad_request()]
     with pytest.raises(whisper_groq.GroqTranscriptionError):

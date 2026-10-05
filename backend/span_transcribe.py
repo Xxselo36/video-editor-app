@@ -32,6 +32,12 @@ recorded span was written on exactly this base_rev and is the doc's
 latest change (a retry whose first answer was lost), changed is true:
 the client may take that rev as its own.
 
+Bounded so a request thread is never held long: ffmpeg gets
+FFMPEG_TIMEOUT_S overall and, over a URL, RW_TIMEOUT_S per read; Groq
+one attempt of GROQ_TIMEOUT_S (the editor retries itself); a second
+call while one runs for the job is refused at once (main.py: 409 busy).
+Nothing logged carries the presigned URL (redact()).
+
 Billing is off for this: a span transcription is never charged (no
 minutes, no credits) — its cost is a few cents of Groq per hour of
 spans, bounded by the rate limit and the span cap.
@@ -40,6 +46,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -57,7 +64,19 @@ CONTEXT_S = 0.6
 MAX_RECORDED = 200
 # Calls per minute per user (anonymous: per job).
 RATE_PER_MIN = 20
-FFMPEG_TIMEOUT_S = 120
+# ffmpeg overall, and per read over a URL (a stalled R2 read fails fast).
+FFMPEG_TIMEOUT_S = 45
+RW_TIMEOUT_S = 15
+# One Groq attempt of at most this long (the client retries).
+GROQ_TIMEOUT_S = 30.0
+
+_URL = re.compile(r"https?://\S+")
+
+
+def redact(text: Any) -> str:
+    """`text` with every http(s) URL replaced by <url> (a presigned
+    GET carries its signature in the query: never in a log)."""
+    return _URL.sub("<url>", str(text))
 
 
 class SpanError(Exception):
@@ -134,8 +153,10 @@ def covered(doc: dict, start: float, end: float) -> list[float] | bool:
 def new_words(raw: list[dict], offset: float, start: float, end: float,
               doc: dict) -> list[dict]:
     """Doc words of a span's transcription (`raw` timed from `offset`):
-    the ones whose middle is in [start, end] and not inside a word the
-    doc has; ids "t<ms>" unique in the doc."""
+    the ones whose middle is in [start, end] and not inside a speech
+    word the doc has (a hidden silence hallucination doesn't block a
+    real word: covered() doesn't count it either); ids "t<ms>" unique in
+    the doc."""
     shifted = []
     for w in raw:
         try:
@@ -145,7 +166,7 @@ def new_words(raw: list[dict], offset: float, start: float, end: float,
         shifted.append({**w, "start": max(0.0, s), "end": max(0.0, e)})
     built = edit_doc.words_from_transcript(shifted)
     old = doc.get("words") or []
-    spans = [(float(w["start"]), float(w["end"])) for w in old]
+    spans = [(float(w["start"]), float(w["end"])) for w in old if _speech(w)]
     keep = []
     for w in built:
         m = _mid(w)
@@ -192,14 +213,18 @@ def extract_audio(source: str, start: float, duration: float, out: str) -> None:
     """[start, start + duration] of `source` (a path or an http(s) URL)
     as 16 kHz mono AAC. Input seeking (-ss before -i): over a presigned
     URL ffmpeg reads byte ranges around the span, not the file."""
-    cmd = ["ffmpeg", "-nostdin", "-v", "error", "-y",
+    remote = source.startswith(("http://", "https://"))
+    # -rw_timeout (µs): a read over the URL that stalls fails, instead of
+    # holding the request until FFMPEG_TIMEOUT_S
+    net = ["-rw_timeout", str(int(RW_TIMEOUT_S * 1_000_000))] if remote else []
+    cmd = ["ffmpeg", "-nostdin", "-v", "error", "-y", *net,
            "-ss", f"{start:.3f}", "-i", source, "-t", f"{duration:.3f}",
            "-vn", "-ac", "1", "-ar", "16000", "-c:a", "aac", "-b:a", "64k",
            out]
     r = subprocess.run(cmd, capture_output=True, text=True,
                        timeout=FFMPEG_TIMEOUT_S)
     if r.returncode != 0 or not os.path.exists(out) or os.path.getsize(out) == 0:
-        raise RuntimeError(f"ffmpeg span extract failed: {r.stderr[-300:]}")
+        raise RuntimeError(f"ffmpeg span extract failed: {redact(r.stderr[-300:])}")
 
 
 def raw_words(result: dict | None) -> list[dict]:
@@ -229,14 +254,19 @@ def transcribe(source: str, span: dict[str, float], language: str | None,
         out = str(Path(tmp) / "span.m4a")
         try:
             extract_audio(source, a, max(0.05, b - a), out)
-        except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
-            print(f"[span] {e}", flush=True)
+        except subprocess.TimeoutExpired:
+            # (its message holds the command, so the URL: not logged)
+            print(f"[span] ffmpeg timed out after {FFMPEG_TIMEOUT_S} s", flush=True)
+            raise SpanError(502, "transcription_unavailable") from None
+        except (RuntimeError, OSError) as e:
+            print(f"[span] {redact(e)}", flush=True)
             raise SpanError(502, "transcription_unavailable") from None
         try:
-            with whisper_groq.spoken_language(language):
+            with whisper_groq.spoken_language(language), \
+                    whisper_groq.request_policy(1, GROQ_TIMEOUT_S):
                 result = whisper_groq.transcribe_via_groq_multilang(out)
         except whisper_groq.GroqTranscriptionError as e:
-            print(f"[span] groq failed: {e}", flush=True)
+            print(f"[span] groq failed: {redact(e)}", flush=True)
             raise SpanError(502, "transcription_unavailable") from None
     if result is None:
         raise SpanError(503, "transcription_unavailable")

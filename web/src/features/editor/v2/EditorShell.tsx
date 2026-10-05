@@ -45,7 +45,7 @@ import { TranscriptEditor, type TextApi } from "./panel/text/TranscriptEditor";
 import { TranscriptPanel } from "./panel/TranscriptPanel";
 import { PreviewStage } from "./preview/PreviewStage";
 import { ExpiredView } from "./states";
-import { removedOf, useCuts } from "./useCuts";
+import { removedOf, useCuts, type CutsApi } from "./useCuts";
 import { useDocSession, type CaptionSourceHandler } from "./useDocSession";
 import { useSpanFill } from "./useSpanFill";
 import { TimelineDock, type DockApi } from "./timeline/TimelineDock";
@@ -260,7 +260,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   // UX10: cuts in the text and the AI's cuts — timeline commits, so one
   // undo order with every other edit.
   const docWords = useDocStore(docStore ?? EMPTY_STORE, selWords);
-  const cuts = useCuts({
+  const rawCuts = useCuts({
     jobId: props.jobId,
     segs: editSegs,
     duration: props.duration,
@@ -269,13 +269,30 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     removed,
     commit: (next) => history.commit(next),
   });
-  // Backlog #20: footage brought back without words gets its text
+  // Backlog #20: footage brought back without words gets its text — after
+  // one deliberate action (a chip, a seam, a word, a trim), never after a
+  // bulk restore, an undo or a redo (useSpanFill)
   const spanFill = useSpanFill({
     segs: editSegs,
+    pieces: rawCuts.pieces,
     words: docWords,
     ready: doc.status === "ready" && !doc.readOnly,
     transcribe: doc.status === "ready" ? doc.transcribeSpan : null,
   });
+  const noteReveal = spanFill.note;
+  const cuts: CutsApi = {
+    ...rawCuts,
+    restore: (ranges) => {
+      const ok = rawCuts.restore(ranges);
+      if (ok) noteReveal();
+      return ok;
+    },
+    restoreWord: (w) => {
+      const ok = rawCuts.restoreWord(w);
+      if (ok) noteReveal();
+      return ok;
+    },
+  };
   const [selected, setSelected] = useState<string | null>(null);
   const selectedLive = selected && editSegs.some((x) => x.id === selected) ? selected : null;
 
@@ -703,6 +720,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         seekOriginal={session.seekOriginal}
         onSplit={split}
         onDelete={() => void del()}
+        onTrimmed={noteReveal}
         apiRef={dockApi}
       />
       {phone && (

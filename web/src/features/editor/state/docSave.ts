@@ -299,16 +299,27 @@ export class DocSaver {
    * sent before has its answer, and nothing is sent while it runs.
    * `fn` gets the rev the server is known to have and calls `adopt`
    * with what the server did. null without running it (a conflict, a
-   * refusal, stopped).
+   * refusal, stopped). A PATCH waiting for its retry (its answer never
+   * came: the server may already be past the known rev) is sent first;
+   * while it still doesn't get through, "busy" without running `fn` —
+   * built on the old rev it would read as a conflict (try later).
    */
-  exclusive<T>(fn: (baseRev: number) => Promise<T>): Promise<T | null> {
-    const run = this.chain.then(async () => {
+  exclusive<T>(fn: (baseRev: number) => Promise<T>): Promise<T | null | "busy"> {
+    const blocked = () => this.stopped || this.state === "conflict" || this.state === "failed";
+    const run = this.chain.then(async (): Promise<T | null | "busy"> => {
       if (this.inflight) {
         const out = this.inflight;
         await out.done;
         if (this.inflight === out) this.inflight = null;
       }
-      if (this.stopped || this.state === "conflict" || this.state === "failed") return null;
+      if (blocked()) return null;
+      if (this.retryBody) {
+        // its backoff timer goes: we hold the line, so send it now
+        this.clear();
+        await this.drain();
+        if (blocked()) return null;
+        if (this.retryBody || this.state === "retrying") return "busy";
+      }
       return fn(this.saved.rev);
     });
     this.chain = run.then(

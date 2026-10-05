@@ -4856,8 +4856,8 @@ _SPAN_LOCKS_GUARD = threading.Lock()
 
 
 def _span_lock(job_id: str) -> threading.Lock:
-    """One span transcription per job at a time (a second call for the
-    same span then finds it done)."""
+    """One span transcription per job at a time (a second call while one
+    runs is refused: 409 busy, Retry-After)."""
     with _SPAN_LOCKS_GUARD:
         lock = _SPAN_LOCKS.pop(job_id, None) or threading.Lock()
         _SPAN_LOCKS[job_id] = lock
@@ -4892,7 +4892,12 @@ def transcribe_span(job_id: str, payload: Any = Body(...),
         raise ApiRefusal(e.status, e.code, **e.extra)
     if not _SPAN_RATE.allow(_uid(user) or f"job:{job_id}"):
         raise ApiRefusal(429, "too_many_requests", headers={"Retry-After": "60"})
-    with _span_lock(job_id):
+    lock = _span_lock(job_id)
+    # never wait for another span of this job: a request thread is held
+    # for its ffmpeg + Groq time at most once (the editor retries later)
+    if not lock.acquire(blocking=False):
+        raise ApiRefusal(409, "busy", headers={"Retry-After": "5"})
+    try:
         job = get_owned_job(job_id, user)
         refusal = _doc_state_refusal(job)
         if refusal is not None:
@@ -4944,10 +4949,12 @@ def transcribe_span(job_id: str, payload: Any = Body(...),
             raise outcome["refusal"]
         if "rev" not in outcome:  # deleted meanwhile
             raise HTTPException(404, "job not found")
-        print(f"[span] {job_id}: {span['start']:.2f}-{span['end']:.2f}s "
-              f"→ {len(span_tx.words_in(outcome['doc'], span['start'], span['end']))} "
-              f"word(s)", flush=True)
-        return _span_answer(outcome["doc"], span, outcome["rev"], True)
+    finally:
+        lock.release()
+    print(f"[span] {job_id}: {span['start']:.2f}-{span['end']:.2f}s "
+          f"→ {len(span_tx.words_in(outcome['doc'], span['start'], span['end']))} "
+          f"word(s)", flush=True)
+    return _span_answer(outcome["doc"], span, outcome["rev"], True)
 
 
 # A project name (PATCH /jobs/{id} {title}): at most this many characters.
