@@ -1046,6 +1046,7 @@ def _delete_job(job) -> None:
     _remove_upload(job.input_path)
     entries = _media_of(job)
     where = None  # every store (media.gc_stores)
+    remote = _stop_remote_analysis(job.id)
     store.delete(job.id, gc=entries, gc_store=where)
     _proxy_cache_drop(job.id)
     with _EDIT_GUARD:
@@ -1053,6 +1054,33 @@ def _delete_job(job) -> None:
         _PREVIEW_LOCKS.pop(job.id, None)
     for entry in entries:
         _gc_one(entry, where)
+    if remote and media.valid_job_id(job.id):
+        # A put already under way on Modal can't be stopped: once more
+        # after Modal's function timeout.
+        _gc_later([media.job_prefix(job.id)], _ingest_gc_delay_s(),
+                  store_=where)
+
+
+def _ingest_gc_delay_s() -> float:
+    """_render_gc_delay_s for an analysis on Modal (analyze_r2's own,
+    longer function timeout)."""
+    from backend import executor_modal
+    return executor_modal.FUNCTION_TIMEOUT_S + 300.0
+
+
+def _stop_remote_analysis(job_id: str) -> bool:
+    """Before a job's tasks go with its row: their Modal analyses
+    (CLEO_EXECUTOR_INGEST=modal) cancelled and fenced
+    (executor_modal.stop_job). True if one was."""
+    if not taskq.enabled():
+        return False
+    try:
+        from backend import executor_modal
+        return executor_modal.stop_job(_tasks(), job_id)
+    except Exception as e:
+        print(f"[job {job_id}] stopping its Modal analysis failed: {e}",
+              flush=True)
+        return False
 
 
 def delete_user_media(user_id: str) -> dict[str, int]:
@@ -2928,6 +2956,22 @@ def _render_commit(cur: Job, result: dict, out_prefix: str,
     return done, superseded
 
 
+def _gc_ingest_media(t: taskq.Task, job: Job, where: str | None,
+                     upload: bool = True) -> None:
+    """A failed analysis' media (jobs/{id}/, and the upload) into the
+    GC. Analysed on Modal: jobs/{id}/ only after Modal's function
+    timeout (as a failed render's prefix, _ingest_gc_delay_s), so a put
+    of a call that is still running can't recreate files after it."""
+    entries = _media_of(job) if upload else (
+        [media.job_prefix(job.id)] if media.valid_job_id(job.id) else [])
+    if t.executor != "modal" or not media.valid_job_id(job.id):
+        _gc_later(entries, store_=where)
+        return
+    prefix = media.job_prefix(job.id)
+    _gc_later([e for e in entries if e != prefix], store_=where)
+    _gc_later([prefix], _ingest_gc_delay_s(), store_=where)
+
+
 def _render_gc_delay_s() -> float:
     """How long a failed render's r{g}/ prefix waits for the GC: past
     Modal's function timeout, so a call that kept running after we gave
@@ -3245,7 +3289,7 @@ class _QueueOps:
             # in `error` here otherwise is this finalizer's own earlier
             # pass: its steps are idempotent, the event is recorded once.)
             if job.status == "error" and media.valid_job_id(job.id):
-                _gc_later([media.job_prefix(job.id)], store_=where)
+                _gc_ingest_media(t, job, where, upload=False)
             return None
         test = bool((job.settings or {}).get("_cost_test"))
         src = job.source_ref()
@@ -3300,7 +3344,7 @@ class _QueueOps:
                         error=err[:2000], **errors.job_error(client_code),
                         refunded=refunded, input_path=None)
         _remove_upload(job.input_path)
-        _gc_later(_media_of(job), store_=where)
+        _gc_ingest_media(t, job, where)
         return ("analysis_failed", job.id, {
             "code": job_code or ("unknown" if t.state != "dead"
                                  else t.error_code or "unknown"),

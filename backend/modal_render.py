@@ -436,6 +436,7 @@ if WITH_ANALYZE:
         degraded: bool = False,
         env: dict | None = None,
         bucket: str | None = None,
+        gate: bool = False,
     ) -> dict:
         """One upload's analysis, R2 in and out (backend/modal_analyze.py
         run): the upload `source_key` → pipeline.analyze_only → mezz,
@@ -447,4 +448,5 @@ if WITH_ANALYZE:
         from backend import modal_analyze
         modal_analyze.apply_env(env)
         return modal_analyze.run(job_id, source_key, settings, token=token,
-                                 degraded=degraded, bucket=bucket)
+                                 degraded=degraded, bucket=bucket,
+                                 gate=gate)

@@ -17,6 +17,7 @@ import dataclasses
 import os
 import subprocess
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -54,6 +55,7 @@ def queue_on(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     import backend.llm
     monkeypatch.setattr(backend.llm, "_client", lambda: None)
+    monkeypatch.setattr(executor_modal, "_missing_until", 0.0)
 
 
 def ts():
@@ -164,48 +166,79 @@ class FunctionTimeoutError(Exception):
 
 
 class FakeModal:
-    """modal.Function.from_name("cleocuts-render", "analyze_r2") and the
-    modal.Dict channel. spawn() runs backend/modal_analyze.py as the real
-    analyze_r2 does (unless `plan` says otherwise: an exception get()
-    raises, "hang" = never a result, a callable(kw) = its return value)."""
+    """modal.Function.from_name("cleocuts-render", "analyze_r2"),
+    modal.FunctionCall.from_id and the modal.Dict channel. spawn() runs
+    backend/modal_analyze.py in a thread, as the real analyze_r2 runs it
+    in its container (unless `plan` says otherwise: an exception get()
+    raises, "hang" = never a result until cancelled, a callable(kw) =
+    its return value, run in the thread)."""
 
     def __init__(self):
         self.plan: list = []
         self.spawns: list[dict] = []
         self.names: list[str] = []
         self.cancelled = 0
+        self.cancelled_ids: list[str] = []
+        self.calls: dict[str, object] = {}
         self.data: dict = {}
         self.dict_names: list[str] = []
         self.progress_seen: list = []
         fake = self
 
         class _Call:
-            def __init__(self, outcome):
-                self.outcome = outcome
+            def __init__(self, outcome, n):
+                self.object_id = f"fc-fake{n}"
+                self.stop = threading.Event()
+                self.result = None
+                self.error = None
+                self.thread = None
+                if outcome == "hang" or callable(outcome) and not isinstance(
+                        outcome, BaseException):
+                    def body():
+                        try:
+                            if outcome == "hang":
+                                self.stop.wait(30)
+                                raise RuntimeError("cancelled")
+                            self.result = outcome(fake.spawns[n])
+                            if self.result == "hang":
+                                self.stop.wait(30)
+                                raise RuntimeError("cancelled")
+                        except BaseException as e:
+                            self.error = e
+                    self.thread = threading.Thread(target=body, daemon=True)
+                    self.thread.start()
+                elif isinstance(outcome, BaseException):
+                    self.error = outcome
+                else:
+                    self.result = outcome
 
             def get(self, timeout=None):
-                if self.outcome == "hang":
-                    time.sleep(timeout or 0)
-                    raise TimeoutError()
-                if isinstance(self.outcome, BaseException):
-                    raise self.outcome
-                return self.outcome
+                if self.thread is not None:
+                    self.thread.join(timeout)
+                    if self.thread.is_alive():
+                        raise TimeoutError()
+                if self.error is not None:
+                    raise self.error
+                return self.result
 
             def cancel(self):
                 fake.cancelled += 1
+                fake.cancelled_ids.append(self.object_id)
+                self.stop.set()
 
             def get_call_graph(self):
                 return []
 
         class _Fn:
             def spawn(self, **kw):
+                n = len(fake.spawns)
                 fake.spawns.append(kw)
                 out = fake.plan.pop(0) if fake.plan else "ok"
                 if out == "ok":
-                    out = fake.run(kw)
-                elif callable(out) and not isinstance(out, BaseException):
-                    out = out(kw)
-                return _Call(out)
+                    out = fake.run
+                call = _Call(out, n)
+                fake.calls[call.object_id] = call
+                return call
 
             def get_current_stats(self):
                 return types.SimpleNamespace(num_total_runners=1, backlog=0)
@@ -215,6 +248,11 @@ class FakeModal:
             def from_name(app, name):
                 fake.names.append(f"{app}/{name}")
                 return _Fn()
+
+        class _FunctionCall:
+            @staticmethod
+            def from_id(call_id):
+                return fake.calls[call_id]
 
         class _DictObj:
             def get(self, key, default=None):
@@ -235,7 +273,8 @@ class FakeModal:
                 fake.dict_names.append(name)
                 return _DictObj()
 
-        self.module = types.SimpleNamespace(Function=_Function, Dict=_Dict)
+        self.module = types.SimpleNamespace(Function=_Function, Dict=_Dict,
+                                            FunctionCall=_FunctionCall)
 
     def run(self, kw):
         """What analyze_r2 does in the container."""
@@ -243,7 +282,8 @@ class FakeModal:
         return modal_analyze.run(kw["job_id"], kw["source_key"],
                                  kw["settings"], token=kw["token"],
                                  degraded=kw.get("degraded", False),
-                                 bucket=kw.get("bucket"))
+                                 bucket=kw.get("bucket"),
+                                 gate=kw.get("gate", False))
 
 
 @pytest.fixture
@@ -388,18 +428,22 @@ def test_job_outside_r2_is_analysed_here(leader, analysis, modal_on):
 # ── retries, timeout, crash, deadline ────────────────────────────────
 
 
-def test_modal_timeout_is_retried_then_succeeds(leader, analysis, modal_on,
-                                                r2, auth_on):
+def test_modal_timeout_fails_at_once_and_refunds(leader, analysis, modal_on,
+                                                 r2, auth_on):
+    """Modal's function timeout: as the local executor's timeout — the
+    same input would hit it again: no retry, refunded."""
     job, tid = _r2_upload_job(r2, owner="user_a", seconds=40)
-    modal_on.plan = [FunctionTimeoutError("7200 s"), "ok"]
+    modal_on.plan = [FunctionTimeoutError("7200 s")]
     _settle(leader)
     t = ts().get(tid)
-    assert (t.state, t.attempts) == ("succeeded", 2)
-    assert modal_on.cancelled >= 1
-    assert [s["token"] for s in modal_on.spawns] == [f"{tid}:1", f"{tid}:2"]
-    assert store.get(job.id).status == "awaiting_review"
-    assert not accounts.get_usage(job.id)["refunded"]
-    assert [e["kind"] for e in _events()] == ["analysis_done"]
+    assert (t.state, t.attempts, t.error_code) == ("failed", 1, taskq.TIMEOUT)
+    assert "analyze_timeout" in t.last_error
+    assert len(modal_on.spawns) == 1
+    got = store.get(job.id)
+    assert got.status == "error" and got.refunded
+    assert accounts.get_usage(job.id)["refunded"]
+    [ev] = _events()
+    assert ev["kind"] == "analysis_failed" and ev["data"]["refunded"]
 
 
 def test_modal_crash_exhausted_fails_and_refunds_once(leader, analysis,
@@ -416,23 +460,47 @@ def test_modal_crash_exhausted_fails_and_refunds_once(leader, analysis,
     [ev] = _events()
     assert ev["kind"] == "analysis_failed" and ev["data"]["refunded"]
     assert analysis["calls"] == 0
-    # The upload goes with the failed job (media GC), as on the local path.
-    assert job.source_key in [r["prefix"] for r in store.gc_all()]
+    # The upload goes with the failed job now; jobs/{id}/ only after
+    # Modal's function timeout (a put of a call still running).
+    gc = {r["prefix"]: r["not_before"] for r in store.gc_all()}
+    now = time.time()
+    assert gc[job.source_key] <= now + 1
+    assert gc[media.job_prefix(job.id)] >= now + executor_modal.FUNCTION_TIMEOUT_S
 
 
-def test_no_result_within_the_deadline_cancels_and_retries(
+def test_no_result_within_the_deadline_cancels_and_fails(
         leader, analysis, modal_on, r2, monkeypatch):
     monkeypatch.setenv("CLEO_MODAL_ANALYZE_DEADLINE_S_MAX", "0.3")
     job, tid = _r2_upload_job(r2)
-    modal_on.plan = ["hang", "ok"]
+    modal_on.plan = ["hang"]
     _settle(leader)
     t = ts().get(tid)
-    assert (t.state, t.attempts) == ("succeeded", 2)
-    assert modal_on.cancelled == 1
+    assert (t.state, t.attempts, t.error_code) == ("failed", 1, taskq.TIMEOUT)
+    assert "analyze_timeout" in t.last_error
+    assert modal_on.cancelled >= 1
+    assert store.get(job.id).status == "error"
 
 
-def test_modal_unavailable_is_infra_not_content(leader, analysis, modal_on,
-                                                r2, monkeypatch):
+def test_modal_unavailable_is_infra_retried(leader, analysis, modal_on, r2,
+                                            monkeypatch):
+    class AuthError(Exception):
+        pass
+    monkeypatch.setenv("CLEO_TASK_MAX_ATTEMPTS", "1")
+    job, tid = _r2_upload_job(r2)
+    modal_on.plan = [AuthError("token rejected")]
+    _settle(leader)
+    t = ts().get(tid)
+    assert t.state == "dead" and t.error_code == taskq.ATTEMPTS_EXHAUSTED
+    assert "analyze_unavailable" in t.last_error
+    assert store.get(job.id).error_code == "processing_interrupted"
+
+
+def test_analyze_r2_not_deployed_falls_back_to_this_box(leader, analysis,
+                                                        modal_on, r2,
+                                                        monkeypatch, caplog):
+    """NotFoundError: no failure of the job — back to the queue for free,
+    analysed here (local executor), loudly; Modal again after the
+    re-check interval."""
     class NotFoundError(Exception):
         pass
     monkeypatch.setenv("CLEO_TASK_MAX_ATTEMPTS", "1")
@@ -440,9 +508,17 @@ def test_modal_unavailable_is_infra_not_content(leader, analysis, modal_on,
     modal_on.plan = [NotFoundError("App 'cleocuts-render' has no analyze_r2")]
     _settle(leader)
     t = ts().get(tid)
-    assert t.state == "dead" and t.error_code == taskq.ATTEMPTS_EXHAUSTED
-    assert "analyze_unavailable" in t.last_error
-    assert store.get(job.id).error_code == "processing_interrupted"
+    assert (t.state, t.executor, t.attempts) == ("succeeded", "local", 2)
+    assert len(modal_on.spawns) == 1 and analysis["calls"] == 1
+    assert store.get(job.id).status == "awaiting_review"
+    assert [e["kind"] for e in _events()] == ["analysis_done"]
+    assert "IS NOT DEPLOYED" in caplog.text
+    assert not executor_modal.available()
+    # After the re-check interval the next analysis goes to Modal again.
+    monkeypatch.setattr(executor_modal, "_missing_until", 0.0)
+    job2, tid2 = _r2_upload_job(r2)
+    _settle(leader)
+    assert ts().get(tid2).executor == "modal" and len(modal_on.spawns) == 2
 
 
 def test_lease_kept_while_modal_works_and_fence_cancels(leader, analysis,
@@ -456,6 +532,7 @@ def test_lease_kept_while_modal_works_and_fence_cancels(leader, analysis,
     modal_on.plan = ["hang", "ok"]
     leader.dispatch_once()
     assert _wait_for(lambda: ts().get(tid).state == "running")
+    assert _wait_for(lambda: (ts().get(tid).modal_call_id or "") == "fc-fake0")
     time.sleep(0.6)                                  # 2 leases
     assert leader.reap_once(force=True) == 0
     assert ts().get(tid).state == "running"
@@ -466,6 +543,212 @@ def test_lease_kept_while_modal_works_and_fence_cancels(leader, analysis,
     t = ts().get(tid)
     assert (t.state, t.attempts) == ("succeeded", 2)
     assert store.get(job.id).status == "awaiting_review"
+
+
+# ── orphans: calls nobody waits for ──────────────────────────────────
+
+
+def _orphan(fake, r2, attempts_left=True):
+    """A task whose worker died mid-analysis (a Railway restart): its
+    lease ran out, its Modal call (hanging) still runs."""
+    job, tid = _r2_upload_job(r2)
+    fake.plan = ["hang"]
+    call = fake.module.Function.from_name("cleocuts-render",
+                                          "analyze_r2").spawn(job_id=job.id)
+    [t] = ts().claim_for_dispatch("ingest", 1, "old-leader", 0.01, "modal")
+    assert ts().worker_claim(tid, t.attempts, "dead-worker", 0.01)
+    assert ts().mark_spawned(tid, t.attempts, call.object_id)
+    time.sleep(0.05)
+    return job, tid, call
+
+
+def test_reaper_stops_the_call_of_an_expired_lease(leader, modal_on, r2):
+    job, tid, call = _orphan(modal_on, r2)
+    assert leader.reap_once(force=True) == 1
+    assert modal_on.cancelled_ids == [call.object_id]
+    fence = modal_on.data[modal_analyze.fence_key(job.id)]
+    assert fence == f"{tid}:1:stop"
+    # The orphan (attempt 1) stops before its next put; attempt 2 runs.
+    assert modal_analyze.newer(fence, f"{tid}:1")
+    assert not modal_analyze.newer(fence, f"{tid}:2")
+    t = ts().get(tid)
+    assert t.state == "queued" and t.modal_call_id is None
+
+
+def test_settled_task_stops_its_call_and_delays_the_prefix_gc(
+        leader, modal_on, r2, monkeypatch):
+    monkeypatch.setenv("CLEO_TASK_MAX_ATTEMPTS", "1")
+    job, tid, call = _orphan(modal_on, r2)
+    assert leader.reap_once(force=True) == 1
+    assert ts().get(tid).state == "dead"
+    assert ts().get(tid).modal_call_id == call.object_id
+    leader.finalize_once()
+    assert modal_on.cancelled_ids == [call.object_id, call.object_id]
+    fence = modal_on.data[modal_analyze.fence_key(job.id)]
+    assert fence == f"{tid}:stop"
+    assert all(modal_analyze.newer(fence, f"{tid}:{a}") for a in (1, 2, 9))
+    got = store.get(job.id)
+    assert (got.status, got.error_code) == ("error", "processing_interrupted")
+    gc = {r["prefix"]: r["not_before"] for r in store.gc_all()}
+    assert gc[media.job_prefix(job.id)] > time.time() + 3600
+
+
+def test_job_delete_stops_its_call(modal_on, r2):
+    job, tid, call = _orphan(modal_on, r2)
+    M._delete_job(store.get(job.id))
+    assert store.get(job.id) is None and ts().get(tid) is None
+    assert modal_on.cancelled_ids == [call.object_id]
+    assert modal_on.data[modal_analyze.fence_key(job.id)] == "stop"
+    gc = {r["prefix"]: r["not_before"] for r in store.gc_all()}
+    assert gc[media.job_prefix(job.id)] > time.time() + 3600
+
+
+def test_boot_pass_stops_orphans(modal_on, r2, monkeypatch):
+    monkeypatch.setenv("CLEO_TASK_MAX_ATTEMPTS", "1")
+    job, tid, call = _orphan(modal_on, r2)          # lease ran out
+    job2, tid2, call2 = _orphan(modal_on, r2)
+    ts().requeue(tid2, expect_states=("running",), attempts=1, dead=True,
+                 error_code="x", last_error="settled")
+    assert task_leader._stop_orphans() == 2
+    assert sorted(modal_on.cancelled_ids) == sorted([call.object_id,
+                                                     call2.object_id])
+    assert modal_on.data[modal_analyze.fence_key(job.id)] == f"{tid}:1:stop"
+    assert modal_on.data[modal_analyze.fence_key(job2.id)] == f"{tid2}:stop"
+
+
+def test_job_without_modal_calls_is_deleted_as_before(client, r2):
+    job, _tid = _r2_upload_job(r2)
+    assert not M._stop_remote_analysis(job.id)
+    M._delete_job(store.get(job.id))
+    assert store.get(job.id) is None
+
+
+def test_container_stops_before_any_put_on_a_stop_fence(analysis, r2,
+                                                        fake_modal):
+    for fence in ("stop", "{tid}:stop", "{tid}:1:stop"):
+        job, tid = _r2_upload_job(r2)
+        fake_modal.data[modal_analyze.fence_key(job.id)] = fence.format(
+            tid=tid)
+        out = modal_analyze.run(job.id, job.source_key, {}, token=f"{tid}:1")
+        assert out["error"]["fenced"], fence
+        assert _keys(r2, job.id) == []
+
+
+# ── local fallbacks keep the local limits ────────────────────────────
+
+
+def _file_job(size=0.0):
+    src = Path(M._WORK_ROOT) / "uploads"
+    src.mkdir(parents=True, exist_ok=True)
+    f = src / f"in-{time.time_ns()}.mp4"
+    f.write_bytes(b"upload-bytes")
+    job = store.create(str(f), {})
+    tid, _ = ts().enqueue(job.id, "ingest", {"v": V, "job_id": job.id,
+                                             "est_audio_s": 10,
+                                             "size": float(size)},
+                          job_change=dict(status="processing"))
+    return job, tid
+
+
+def test_tasks_that_cant_go_to_modal_use_the_local_limit(leader, analysis,
+                                                         modal_on, r2):
+    analysis["gate"] = threading.Event()
+    local = [_file_job() for _ in range(4)]
+    remote = [_r2_upload_job(r2) for _ in range(4)]
+    try:
+        leader.dispatch_once()
+        per = ts().active_by_executor("ingest")
+        assert per == {"local": 2, "modal": 4}       # CLEO_MAX_ANALYZE 2
+        assert all(ts().get(t).executor == "modal" for _, t in remote)
+        assert sum(ts().get(t).state == "queued" for _, t in local) == 2
+    finally:
+        analysis["gate"].set()
+    _settle(leader)
+    assert all(ts().get(t).state == "succeeded" for _, t in local + remote)
+
+
+def test_tasks_that_cant_go_to_modal_get_the_disk_check(leader, analysis,
+                                                        modal_on, r2,
+                                                        monkeypatch):
+    monkeypatch.setenv("CLEO_DISK_FACTOR", "1e9")
+    _job, ltid = _file_job(size=2e9)
+    _job2, rtid = _r2_upload_job(r2, size=2e9)
+    leader.dispatch_once()
+    assert ts().get(ltid).state == "queued"           # no room here
+    assert ts().get(rtid).executor == "modal"
+    assert leader._disk_held
+    assert ts().get(rtid).state in ("dispatching", "running", "succeeded")
+
+
+# ── the length of an upload POST /jobs couldn't measure ──────────────
+
+
+def test_length_measured_in_the_container_too_long_is_refused(
+        leader, analysis, modal_on, r2, monkeypatch):
+    """Measured on the container's copy, judged here before any heavy
+    work: too long → refused, nothing analysed, nothing stored."""
+    probed = []
+    monkeypatch.setattr(modal_analyze, "measure_s",
+                        lambda p: probed.append(p) or 99999.0)
+    monkeypatch.setattr(M, "_probe_duration", lambda p: pytest.fail(
+        "probed on the API box"))
+    job, tid = _r2_upload_job(r2, settings={"_measure_length": True})
+    _settle(leader)
+    got = store.get(job.id)
+    assert (got.status, got.error_code) == ("error", "video_too_long")
+    assert probed and analysis["calls"] == 0
+    assert modal_on.spawns[0]["gate"] is True
+    assert modal_on.cancelled >= 1
+    assert _keys(r2, job.id) == []
+    assert [e["kind"] for e in _events()] == ["analysis_refused"]
+    assert _wait_for(lambda: not [k for k in list(modal_on.data)
+                                  if k.startswith(("gate:", "verdict:"))])
+
+
+def test_length_measured_in_the_container_then_analysed(
+        leader, analysis, modal_on, r2, monkeypatch, auth_on):
+    monkeypatch.setattr(modal_analyze, "measure_s", lambda p: 25.0)
+    job, tid = _r2_upload_job(r2, owner="user_a", settings={
+        "_measure_length": True, "_charge": "record"})
+    _settle(leader)
+    assert ts().get(tid).state == "succeeded"
+    got = store.get(job.id)
+    assert got.status == "awaiting_review"
+    assert "_measure_length" not in got.settings
+    # The analysis ran with the gate's settings; the charge is recorded.
+    [s] = analysis["settings"]
+    assert "_measure_length" not in s and "_charge" not in s
+    assert accounts.get_usage(job.id)["seconds_billed"] >= 25.0
+
+
+def test_slow_length_probe_is_ours_never_unreadable(leader, analysis,
+                                                    modal_on, r2,
+                                                    monkeypatch):
+    def slow(path):
+        raise modal_analyze.GateError("length probe timed out after 900 s")
+    monkeypatch.setattr(modal_analyze, "measure_s", slow)
+    monkeypatch.setenv("CLEO_TASK_MAX_ATTEMPTS", "2")
+    job, tid = _r2_upload_job(r2, settings={"_measure_length": True,
+                                            "_charge": "enforce"},
+                              owner="user_a")
+    _settle(leader)
+    t = ts().get(tid)
+    assert (t.state, t.attempts) == ("dead", 2)
+    got = store.get(job.id)
+    assert got.error_code == "processing_interrupted"
+    assert got.error_code != "unreadable_video" and analysis["calls"] == 0
+
+
+def test_measure_s_bounds_the_probe(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    def run(args, **kw):
+        if "packet=pts_time" in args:
+            raise sp.TimeoutExpired(args, kw.get("timeout"))
+        return types.SimpleNamespace(returncode=0, stdout="N/A\n")
+    monkeypatch.setattr(sp, "run", run)
+    with pytest.raises(modal_analyze.GateError, match="timed out"):
+        modal_analyze.measure_s(tmp_path / "x.webm")
 
 
 # ── the analysis' own failures: classified like the local path ───────
@@ -754,7 +1037,7 @@ def test_analyze_r2_definition():
     assert "ephemeral_disk=" in deco and "image=analyze_image" in deco
     args = [a.arg for a in fns["analyze_r2"].args.args]
     assert args == ["job_id", "source_key", "settings", "token", "degraded",
-                    "env", "bucket"]
+                    "env", "bucket", "gate"]
     # The keys come from the Modal secret, never from the API.
     assert not set(modal_analyze.FORWARD_ENV) & {
         "GROQ_API_KEY", "ANTHROPIC_API_KEY"}
@@ -841,25 +1124,3 @@ def test_analysis_image_has_what_the_api_image_has_for_an_analysis():
                 "moviepy==1.0.3"):
         assert pin in reqs and f'"{pin}"' in image, pin
     assert '"CLEO_LOCAL_WHISPER": "0"' in image
-
-
-def test_length_gate_measures_over_a_presigned_link(leader, analysis,
-                                                    modal_on, r2,
-                                                    monkeypatch):
-    """An upload POST /jobs couldn't measure is measured here (ffprobe
-    over a presigned GET) before anything goes to Modal; too long →
-    refused, nothing spawned."""
-    seen = []
-
-    def probe(target):
-        seen.append(target)
-        return 99999.0
-    monkeypatch.setattr(M, "_probe_duration", probe)
-    job, _tid = _r2_upload_job(r2, settings={"_measure_length": True})
-    _settle(leader)
-    got = store.get(job.id)
-    assert (got.status, got.error_code) == ("error", "video_too_long")
-    assert seen and seen[0].startswith("https://")
-    assert job.source_key in seen[0]
-    assert not modal_on.spawns and analysis["calls"] == 0
-    assert [e["kind"] for e in _events()] == ["analysis_refused"]

@@ -31,8 +31,19 @@ it spawns the call and reads `progress:{job}:{token}`; this side writes
 the progress (at most once a second) and checks the fence before every
 upload (and every ~15 s while analysing), so a call the API lost track
 of (Railway restarted mid-analysis, the task went to a later attempt)
-never overwrites what the newer attempt stored. A Dict that can't be reached is ridden out — progress is
-cosmetic, and the API cancels a call it fenced out itself.
+never overwrites what the newer attempt stored. A Dict that can't be
+reached is ridden out — progress is cosmetic, and the API cancels a call
+it fenced out itself. The API also writes a stop fence (stop_token) and
+cancels the call (FunctionCall.from_id, the id is on the task) when an
+attempt is settled without its thread — a lease that ran out, a task
+given up, the job deleted — so an orphaned container stops before its
+next upload.
+
+An upload POST /jobs couldn't measure (`gate`): measured here on the
+local copy (measure_s), the length handed to the API through the Dict
+(`gate:{job}:{token}`), the API's length gate (refusal / the charge,
+which need the database) answers with the settings to analyse with
+(`verdict:{job}:{token}`) — before any of the heavy work.
 
 No database, no Railway-only modules: imports backend.pipeline, media,
 storage, costs, llm, errors (all importable in the Modal image).
@@ -61,6 +72,15 @@ LOCAL_PATH_KEYS = ("normalized_path", "preview_path", "peaks_path",
                    "poster_path", "font_files", "filmstrip_path")
 _FENCE_EVERY_S = 15.0
 _PROGRESS_EVERY_S = 1.0
+# How long the container waits for the API's length-gate verdict.
+GATE_WAIT_S = 600.0
+_GATE_POLL_S = 0.5
+# The length probe of a file on the container's disk: the header, then
+# (no duration in it, e.g. a streamed WebM) the last packet timestamp —
+# a whole-file read, bounded generously (a local 4 GB file reads in
+# well under a minute).
+_PROBE_HEADER_S = 60.0
+_PROBE_SCAN_S = 900.0
 
 
 def forward_env() -> dict[str, str]:
@@ -85,12 +105,37 @@ def attempt_token(task_id: int, attempt: int) -> str:
     return f"{int(task_id)}:{int(attempt)}"
 
 
-def _token_order(token: Any) -> tuple[int, int] | None:
+_INF = float("inf")
+
+
+def stop_token(task_id: int | None = None, attempt: int | None = None
+               ) -> str:
+    """A fence that stops calls without starting a new one: `{task}:
+    {attempt}:stop` (that attempt is over; the next one's token still
+    wins), `{task}:stop` (the task is settled: every attempt of it),
+    `stop` (the job is deleted: everything)."""
+    if task_id is None:
+        return "stop"
+    if attempt is None:
+        return f"{int(task_id)}:stop"
+    return f"{int(task_id)}:{int(attempt)}:stop"
+
+
+def _token_order(token: Any) -> tuple[float, float] | None:
+    text = str(token) if token is not None else ""
+    if text == "stop":
+        return _INF, _INF
+    parts = text.split(":")
     try:
-        a, b = str(token).split(":", 1)
-        return int(a), int(b)
+        if len(parts) == 2 and parts[1] == "stop":
+            return float(int(parts[0])), _INF
+        if len(parts) == 3 and parts[2] == "stop":
+            return float(int(parts[0])), int(parts[1]) + 0.5
+        if len(parts) == 2:
+            return float(int(parts[0])), float(int(parts[1]))
     except (TypeError, ValueError):
         return None
+    return None
 
 
 def newer(current: Any, mine: str) -> bool:
@@ -109,6 +154,14 @@ def progress_key(job_id: str, token: str) -> str:
     return f"progress:{job_id}:{token}"
 
 
+def gate_key(job_id: str, token: str) -> str:
+    return f"gate:{job_id}:{token}"
+
+
+def verdict_key(job_id: str, token: str) -> str:
+    return f"verdict:{job_id}:{token}"
+
+
 class Fenced(InterruptedError):
     """A newer attempt of this job's analysis owns its keys now."""
 
@@ -116,6 +169,15 @@ class Fenced(InterruptedError):
 class TransferError(OSError):
     """Fetching the upload from / storing a result in R2 failed: ours
     (the worker's MediaTransferError — retried, refunded)."""
+
+
+class GateError(OSError):
+    """The length gate couldn't run (no channel, no verdict in time, the
+    probe timed out): ours — retried, never `unreadable_video`."""
+
+
+class Refused(InterruptedError):
+    """The API's length gate refused the upload (it settles the job)."""
 
 
 def _log(line: str) -> None:
@@ -174,6 +236,45 @@ class Channel:
                  f"replaced by {current} — stopping, storing nothing")
         return self._fenced
 
+    def ask_gate(self, seconds: float | None,
+                 wait_s: float | None = None) -> dict[str, Any]:
+        """Hand the measured length to the API, wait for its verdict:
+        {"settings": {...}} (analyse with these) — raises Refused, Fenced
+        or GateError."""
+        if self.d is None:
+            raise GateError("length gate: no channel to the API")
+        wait_s = GATE_WAIT_S if wait_s is None else wait_s
+        try:
+            self.d.put(gate_key(self.job_id, self.token),
+                       {"seconds": seconds, "t": time.time()})
+        except Exception as e:
+            raise GateError(f"length gate: {type(e).__name__}: {e}") from e
+        end = time.monotonic() + wait_s
+        while time.monotonic() < end:
+            try:
+                v = self.d.get(verdict_key(self.job_id, self.token))
+            except Exception:
+                v = None
+            if isinstance(v, dict):
+                if v.get("refused"):
+                    raise Refused("refused by the length gate")
+                if isinstance(v.get("settings"), dict):
+                    return v
+            if self.fenced(force=True):
+                raise Fenced("Cancelled")
+            time.sleep(_GATE_POLL_S)
+        raise GateError(f"length gate: no verdict within {wait_s:.0f} s")
+
+    def drop_gate(self) -> None:
+        if self.d is None:
+            return
+        for key in (gate_key(self.job_id, self.token),
+                    verdict_key(self.job_id, self.token)):
+            try:
+                self.d.pop(key, None)
+            except Exception:
+                pass
+
     def progress(self, msg: Any, pct: float | None) -> None:
         if self.d is None:
             return
@@ -208,6 +309,45 @@ def _probe_s(path: Path) -> float | None:
     return value if value > 0 else None
 
 
+def measure_s(path: Path) -> float | None:
+    """The length of the local upload (backend/worker.py probe_duration:
+    the header, else the last packet's timestamp), None when ffprobe
+    can't tell. A probe that runs out of time raises GateError (ours,
+    retried) — slowness is never "unreadable"."""
+    import subprocess
+    from src.ffmpeg_utils import get_ffprobe_path
+    ffprobe = get_ffprobe_path()
+
+    def _run(args: list[str], timeout: float) -> str:
+        try:
+            r = subprocess.run([ffprobe, "-v", "error", *args, str(path)],
+                               capture_output=True, text=True,
+                               timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            raise GateError(f"length probe timed out after {timeout:.0f} s"
+                            ) from e
+        except OSError as e:
+            raise GateError(f"length probe failed: {e}") from e
+        return r.stdout if r.returncode == 0 else ""
+
+    def _num(text: str) -> float:
+        try:
+            return float(text)
+        except ValueError:
+            return 0.0
+
+    dur = _num(_run(["-show_entries", "format=duration", "-of",
+                     "default=noprint_wrappers=1:nokey=1"],
+                    _PROBE_HEADER_S).strip())
+    if dur > 0:
+        return dur
+    out = _run(["-show_entries", "packet=pts_time", "-of", "csv=p=0"],
+               _PROBE_SCAN_S)
+    dur = max((_num(line.strip().strip(",")) for line in out.splitlines()),
+              default=0.0)
+    return dur if dur > 0 else None
+
+
 def describe_error(exc: BaseException, work: Path | None) -> dict[str, Any]:
     """What the API needs to rebuild `exc` (executor_modal.rebuild_error)
     and to settle the task like the local path does."""
@@ -218,6 +358,7 @@ def describe_error(exc: BaseException, work: Path | None) -> dict[str, Any]:
         and not isinstance(exc, InterruptedError),
         "interrupted": isinstance(exc, InterruptedError),
         "fenced": isinstance(exc, Fenced),
+        "refused": isinstance(exc, Refused),
         "traceback": "".join(traceback.format_exception(
             type(exc), exc, exc.__traceback__))[-4000:],
     }
@@ -240,6 +381,7 @@ def describe_error(exc: BaseException, work: Path | None) -> dict[str, Any]:
 
 def run(job_id: str, source_key: str, settings: dict[str, Any], *,
         token: str, degraded: bool = False, bucket: str | None = None,
+        gate: bool = False,
         analyze: Callable[..., dict] | None = None,
         channel: Channel | None = None) -> dict[str, Any]:
     """One analysis (see the module doc). Never raises for a failure of
@@ -288,6 +430,17 @@ def run(job_id: str, source_key: str, settings: dict[str, Any], *,
                 timings["get"] = round(time.monotonic() - t, 3)
                 if ch.fenced(force=True):
                     raise Fenced("Cancelled")
+                if gate:
+                    # Measured here, judged (and charged) by the API.
+                    progress(errors.stage_message("analyze.normalize",
+                                                  "Checking the video…"), 1)
+                    t = time.monotonic()
+                    try:
+                        verdict = ch.ask_gate(measure_s(src))
+                    finally:
+                        ch.drop_gate()
+                    settings = dict(verdict["settings"])
+                    timings["gate"] = round(time.monotonic() - t, 3)
 
                 def drop_source(*_a: Any, **_k: Any) -> None:
                     src.unlink(missing_ok=True)

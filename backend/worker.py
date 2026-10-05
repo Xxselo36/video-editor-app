@@ -671,10 +671,13 @@ def _fault_groq() -> None:
 
 
 def _length_gate(ctx: Attempt, job: Any, input_path: str,
-                 progress: Callable[[str, float], None]) -> dict:
+                 progress: Callable[[str, float], None],
+                 measured: tuple[float | None] | None = None) -> dict:
     """backend/main.py _length_gate, retry-safe: an upload POST /jobs
     couldn't measure is measured here (too long → refused), billed ones
-    charged — once: an earlier attempt's charge (the usage row) counts."""
+    charged — once: an earlier attempt's charge (the usage row) counts.
+    `measured`: the length as measured elsewhere (the Modal container,
+    on its copy) instead of probing `input_path`."""
     settings = dict(job.settings or {})
     measure = bool(settings.pop("_measure_length", False))
     charge = settings.pop("_charge", None)
@@ -682,7 +685,8 @@ def _length_gate(ctx: Attempt, job: Any, input_path: str,
     if measure:
         progress(errors.stage_message("analyze.normalize",
                                       "Checking the video…"), 1)
-        seconds = _get("probe_duration")(input_path)
+        seconds = (measured[0] if measured is not None
+                   else _get("probe_duration")(input_path))
         if _too_long(seconds):
             raise AnalysisRefused("video_too_long",
                                   max_minutes=_plain(_max_minutes()))
@@ -816,10 +820,28 @@ def _ingest_failure(ctx: Attempt, exc: BaseException,
     if type(exc).__name__ == "FunctionTimeoutError":
         result.update(refund=True)
         return ctx.fail(taskq.TIMEOUT, msg, False, result)
+    if type(exc).__name__ == "ModalIngestError" and getattr(
+            exc, "missing", False):
+        # analyze_r2 isn't deployed: not the job's failure — back to the
+        # queue for free; the dispatcher runs it here meanwhile
+        # (executor_modal.available, the local limit and disk check).
+        _log_error(f"[job {job_id}] analyze_r2 not deployed — the analysis "
+                   "goes back to the queue and runs on this box")
+        return ctx.fail(taskq.INFRA, msg, True,
+                        {**result, "free_retry": True, "refund": True,
+                         "infra": True})
+    if type(exc).__name__ == "ModalIngestError" and getattr(
+            exc, "timeout", False):
+        # Modal's function timeout / no result within the deadline: as
+        # the local timeout — the same input would hit it again: failed,
+        # refunded, no retry.
+        _capture(exc, job_id=job_id, phase="analyze")
+        result.update(refund=True, infra=True)
+        return ctx.fail(taskq.TIMEOUT, msg, False, result)
     if type(exc).__name__ == "ModalIngestError":
-        # Modal didn't deliver (timeout, a crashed container, not
-        # deployed, spend limit): ours — another attempt, then failed
-        # and refunded by the finalizer.
+        # Modal didn't deliver (a crashed or preempted container, spend
+        # limit, not started): ours — another attempt, then failed and
+        # refunded by the finalizer.
         _capture(exc, job_id=job_id, phase="analyze")
         result.update(refund=True, infra=True)
         return ctx.fail(taskq.INFRA, msg, True, result)
@@ -875,27 +897,34 @@ def _analyze_remote(ctx: Attempt, job: Any, source_key: str, where: str,
     em = _executor_modal()
     if ctx.cancelled():
         raise InterruptedError("Cancelled")
-    probe_target = ""
-    if (job.settings or {}).get("_measure_length"):
-        # The length of an upload POST /jobs couldn't measure, read over
-        # a presigned GET (ffprobe reads the header, ranged).
-        try:
-            probe_target = media.presign_get(source_key)
-        except Exception as e:
-            raise MediaTransferError(
-                f"presigning the upload failed: {type(e).__name__}: {e}"
-            ) from e
-    settings = _length_gate(ctx, job, probe_target, progress)
     t = ctx.task
     payload = t.payload or {}
+    gate = None
+    if (job.settings or {}).get("_measure_length"):
+        # An upload POST /jobs couldn't measure: the container measures
+        # its own copy before the heavy work and waits for this gate
+        # (refusal, the charge) — the upload never comes here.
+        settings = {k: v for k, v in (job.settings or {}).items()
+                    if k not in ("_measure_length", "_charge")}
+
+        def gate(seconds: float | None) -> dict:
+            return _length_gate(ctx, job, "", progress,
+                                measured=(_to_float(seconds) or None,))
+    else:
+        settings = _length_gate(ctx, job, "", progress)
     seconds = (_to_float(payload.get("charged_s"))
                or _to_float(settings.get("_max_seconds")) or None)
+
+    def spawned(call_id: str) -> None:
+        ctx.ts.mark_spawned(t.id, t.attempts, call_id)
+
     out = em.analyze(
         job_id=job.id, source_key=source_key, settings=settings,
         token=_modal_analyze().attempt_token(t.id, t.attempts),
         degraded=degraded, seconds=seconds,
         size=_to_float(payload.get("size")) or None,
-        progress=progress, cancel_check=ctx.cancelled)
+        progress=progress, cancel_check=ctx.cancelled, gate=gate,
+        on_spawned=spawned)
     costs.merge(out.get("usage") or {})
     _merge_observer(obs, out.get("obs"))
     if isinstance(out.get("error"), dict):
@@ -955,6 +984,9 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
 
     remote = (t.executor == "modal"
               and _executor_modal().eligible(where, source_key, input_path))
+    if remote and not _executor_modal().available():
+        remote = False
+        _log(f"[job {job_id}] analysed here: analyze_r2 not deployed")
     if t.executor == "modal" and not remote:
         _log(f"[job {job_id}] analysed here, not on Modal: its upload is "
              f"not an R2 object (media store {where})")

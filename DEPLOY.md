@@ -1329,7 +1329,7 @@ eigenen Modal-Container (8 Kerne, 16 GiB RAM, 100 GiB Platte, höchstens
 |---|---|
 | Upload | Browser → R2 (wie bisher) |
 | `POST /jobs`: Prüfung, Abbuchung, Task | Railway — Zulassung nur noch über Warteschlange/Limits, **keine Plattenprüfung** (auch nicht bei `/uploads/presign` und `/uploads/init`) |
-| Längenprüfung (nur wenn `POST /jobs` die Länge nicht kannte) | Railway, per ffprobe über einen presigned R2-Link |
+| Längenprüfung (nur wenn `POST /jobs` die Länge nicht kannte) | gemessen auf Modal an der heruntergeladenen Kopie, **vor** der eigentlichen Analyse; entschieden (zu lang → abgelehnt, Abbuchung) auf Railway — der Container wartet so lange auf die Antwort |
 | Download, Normalisieren (Mezz + Proxy), SmartCam, Lautheit/Peaks, **Groq-Transkription, Claude-Schritte**, Schnitt-Vorschau, Poster, CJK-Schriften, Filmstreifen | Modal `analyze_r2` (`backend/modal_analyze.py`) — dieselbe Funktion `pipeline.analyze_only` wie lokal |
 | Speichern | Modal → R2, **dieselben Keys** `jobs/{id}/…` und dieselben Felder (`pipeline.store_analysis_outputs`, auch der lokale Weg speichert darüber) |
 | Commit, Erstattung, True-up, Medien-GC, Events | Railway (Worker-Thread + Finalizer wie in P0) |
@@ -1352,12 +1352,37 @@ schreibt den Fortschritt (über ein `modal.Dict` `cleocuts-analyze`) in
 den Job. Wird der Task weggenommen (Lease verloren, Neustart), wird der
 Modal-Aufruf abgebrochen; ein Aufruf, den niemand mehr abbrechen konnte
 (Railway neu gestartet), sieht am Dict, dass ein späterer Versuch
-läuft, und speichert nichts mehr. Modal-Timeout, abgestürzter Container,
-nicht deployt, Ausgabenlimit oder kein Ergebnis innerhalb der Frist →
-Infrastruktur-Fehler: neuer Versuch (höchstens `CLEO_TASK_MAX_ATTEMPTS`,
-3), danach Fehler + Erstattung (`processing_interrupted`). Jobs, deren
-Upload noch als Datei auf Railway liegt (von vor R2), analysiert Railway
-selbst wie bisher (Log `analysed here, not on Modal`).
+läuft, und speichert nichts mehr.
+
+**Verwaiste Aufrufe:** Die Modal-Call-ID steht am Task
+(`tasks.modal_call_id`). Wird ein Versuch ohne seinen wartenden Thread
+beendet — Reaper (Lease abgelaufen, z. B. nach einem Neustart),
+Finalizer (Task aufgegeben/fehlgeschlagen), Job gelöscht, beim Start ein
+neuer Leader für alles, was nicht mehr geleast ist —, bricht Railway den
+Aufruf ab (`FunctionCall.from_id(…).cancel()`) und setzt im Dict einen
+Stopp-Zaun: der Container speichert danach nichts mehr. Das Präfix
+`jobs/{id}/` einer auf Modal fehlgeschlagenen Analyse löscht der GC erst
+nach Modals Funktions-Timeout + 5 min (wie bei Renders), damit ein
+gerade laufender Upload nichts neu anlegt.
+
+**Fehler:** abgestürzter oder verdrängter Container, Ausgabenlimit, nicht
+gestartet → Infrastruktur-Fehler: neuer Versuch (höchstens
+`CLEO_TASK_MAX_ATTEMPTS`, 3), danach Fehler + Erstattung
+(`processing_interrupted`). **Modal-Timeout oder kein Ergebnis innerhalb
+der Frist → sofort Fehler + Erstattung, kein neuer Versuch** (wie der
+lokale Timeout: dasselbe Video liefe wieder hinein; im Task steht
+`analyze_timeout`). Eine Längenmessung, die zu lange dauert, ist
+ebenfalls unser Fehler (neuer Versuch), nie `unreadable_video`.
+
+**Lokale Analysen im Modal-Modus:** Jobs, deren Upload noch als Datei auf
+Railway liegt (von vor R2), analysiert Railway selbst — mit dem
+**lokalen** Limit (`CLEO_MAX_ANALYZE`, 2) und der Plattenprüfung, nicht
+mit dem Modal-Limit. Ebenso, wenn `analyze_r2` **nicht deployt** ist
+(`NotFoundError`): der Versuch geht ohne Anrechnung zurück in die
+Warteschlange, Railway analysiert für die nächsten 10 min lokal und
+schaut dann wieder nach (ERROR-Log `analyze_r2 IS NOT DEPLOYED`). Das
+ist die sicherere Wahl als ein Start-Abbruch: kein Job scheitert daran,
+und mehr als 2 Analysen laufen auf Railway nie gleichzeitig.
 
 **Einschalten** (Voraussetzung: 11.2 läuft, `CLEO_TASK_QUEUE=1`;
 `CLEO_MEDIA_BACKEND=r2` und das Modal-Secret `cleocuts-r2` gibt es schon,
@@ -1404,7 +1429,7 @@ nicht mehr.)
 
 | Variable | Default | Wirkung |
 |---|---|---|
-| `CLEO_MODAL_ANALYZE_DEADLINE_S_BASE` / `_PER_S` / `_PER_GB` / `_MAX` | 900 / 3 / 120 / 7500 | Wartezeit auf einen Modal-Aufruf: 900 s + 3 × Videolänge + 120 s pro GB Upload, höchstens 2 h 5 min (Modals eigene Grenze für analyze_r2: 2 h); danach Abbruch + neuer Versuch |
+| `CLEO_MODAL_ANALYZE_DEADLINE_S_BASE` / `_PER_S` / `_PER_GB` / `_MAX` | 900 / 3 / 120 / 7500 | Wartezeit auf einen Modal-Aufruf: 900 s + 3 × Videolänge + 120 s pro GB Upload, höchstens 2 h 5 min (Modals eigene Grenze für analyze_r2: 2 h); danach Abbruch, Fehler + Erstattung |
 | `CLEO_MODAL_POLL_S`, `CLEO_MODAL_START_TIMEOUT_S` | 10, 120 | wie beim Render (9.3); nicht gestartet nach 120 s und kein Container → neuer Versuch |
 
 Nicht-geheime Analyse-Schalter von Railway (`CLEO_DISFLUENT_PROMPT`,

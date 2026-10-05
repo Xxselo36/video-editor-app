@@ -113,7 +113,7 @@ jobs:
             echo "Modal secret cleocuts-ai found — deploying analyze_r2 too."
             export CLEO_MODAL_ANALYZE=1
           else
-            echo "analyze_r2 not deployed (needs the Modal secrets cleocuts-r2 and cleocuts-ai; only required for CLEO_EXECUTOR_INGEST=modal, DEPLOY.md 11.5)."
+            echo "::warning title=analyze_r2 not deployed::The Modal secrets cleocuts-r2 and cleocuts-ai are both needed for analyze_r2, so it is not deployed. Only matters with CLEO_EXECUTOR_INGEST=modal on Railway: analyses then fall back to Railway (local limits, a loud log line). To enable it create the secret (DEPLOY.md section 11.5, step 1) and re-run this workflow."
             export CLEO_MODAL_ANALYZE=0
           fi
           modal deploy backend/modal_render.py

@@ -100,6 +100,18 @@ def running_limit(kind: str) -> int:
     return max(1, value)
 
 
+def local_running_limit(kind: str) -> int:
+    """With the Modal executor: how many tasks of `kind` that can't go
+    to Modal (a legacy upload file, analyze_r2 not deployed) may run on
+    this box at once — the local executor's own limit (CLEO_MAX_ANALYZE,
+    default 2). Without it: running_limit."""
+    if executor(kind) != "modal":
+        return running_limit(kind)
+    if kind == "ingest":
+        return max(1, _int("CLEO_MAX_ANALYZE", 2))
+    return running_limit(kind)
+
+
 def max_queue() -> int:
     """CLEO_MAX_QUEUE: analyses that may wait beyond the running ones
     before POST /jobs answers 503 server_busy (default 20 with the local

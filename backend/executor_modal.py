@@ -17,10 +17,23 @@ What runs where:
 A failure of the analysis itself (no speech, Groq down, an unreadable
 file, …) comes back described and is rebuilt here into the exception
 the local path would have raised, so backend/worker.py classifies it
-the same way (content / provider / infra). Modal not answering —
-not deployed, spend limit, a timeout, a crashed container, no result
-within the deadline — is ModalIngestError: ours, retried per
-CLEO_TASK_MAX_ATTEMPTS, then failed and refunded by the finalizer.
+the same way (content / provider / infra). Modal not answering — spend
+limit, a crashed or preempted container — is ModalIngestError: ours,
+retried per CLEO_TASK_MAX_ATTEMPTS, then failed and refunded by the
+finalizer. Modal's function timeout or no result within the deadline
+(code analyze_timeout) fail at once, refunded, like the local
+executor's timeout: the same input would hit it again. analyze_r2 not
+deployed (NotFoundError) is no failure of the job: the attempt goes
+back to the queue for free and this process analyses locally (local
+limits, local disk check) until a later lookup finds the function
+(MISSING_RECHECK_S) — with a loud log line.
+
+Orphans: the call id is stored on the task (tasks.modal_call_id). An
+attempt settled without its waiting thread — the reaper (lease ran
+out: a restart, a hang), the finalizer (task dead / failed), the job
+deleted, the boot pass of a new leader — cancels that call and writes a
+stop fence (stop_task / stop_job / stop_orphans), so the container
+exits before its next upload.
 
 Settings (Railway → Variables; defaults fit):
   CLEO_MODAL_ANALYZE_DEADLINE_S_BASE / _PER_S / _PER_GB / _MAX
@@ -44,6 +57,26 @@ APP = "cleocuts-render"
 FUNCTION = "analyze_r2"
 # backend/modal_render.py analyze_r2 timeout= (Modal's hard cap).
 FUNCTION_TIMEOUT_S = 7200.0
+# After a NotFoundError: analyse locally for this long, then look again.
+MISSING_RECHECK_S = 600.0
+_missing_until = 0.0
+
+
+def mark_missing() -> None:
+    """analyze_r2 isn't deployed: local analyses for MISSING_RECHECK_S."""
+    global _missing_until
+    _missing_until = time.monotonic() + MISSING_RECHECK_S
+
+
+def available() -> bool:
+    """False while a recent call found analyze_r2 not deployed."""
+    return time.monotonic() >= _missing_until
+
+
+def is_modal_call(call_id: str | None) -> bool:
+    """A Modal FunctionCall id (the column also holds a local worker's
+    id while it claims)."""
+    return bool(call_id) and str(call_id).startswith("fc-")
 
 
 class ModalIngestError(RuntimeError):
@@ -54,6 +87,14 @@ class ModalIngestError(RuntimeError):
         super().__init__(f"{code}: {reason}")
         self.reason = reason
         self.modal_code = code
+
+    @property
+    def timeout(self) -> bool:
+        return self.modal_code == "analyze_timeout"
+
+    @property
+    def missing(self) -> bool:
+        return self.modal_code == "analyze_missing"
 
 
 class RemoteAnalysisError(RuntimeError):
@@ -106,6 +147,92 @@ def eligible(where: str, source_key: str | None,
     return where == "r2" and bool(source_key) and not input_path
 
 
+def job_eligible(job: Any) -> bool:
+    """eligible() for a job as the worker sees it (its upload a file on
+    this box only while that file exists)."""
+    if job is None:
+        return False
+    from pathlib import Path
+    input_path = (job.input_path if job.input_path
+                  and Path(job.input_path).exists() else None)
+    return eligible(media.store_of(job), job.source_ref(), input_path)
+
+
+def stop_call(job_id: str, call_id: str | None, fence: str,
+              why: str) -> bool:
+    """Stop a Modal analysis nobody waits for any more: the stop fence
+    `fence` (modal_analyze.stop_token) — the container stores nothing
+    after it — then cancel the call. Best effort; True if `call_id` is a
+    Modal call."""
+    if not is_modal_call(call_id):
+        return False
+    try:
+        import modal
+    except ImportError:
+        return False
+    try:
+        d = modal.Dict.from_name(modal_analyze.CHANNEL,
+                                 create_if_missing=True)
+        key = modal_analyze.fence_key(job_id)
+        cur = d.get(key)
+        if not modal_analyze.newer(cur, fence):
+            d.put(key, fence)
+    except Exception as e:
+        _log(f"[modal] stop fence for job {job_id} failed: "
+             f"{type(e).__name__}: {e}")
+    try:
+        modal.FunctionCall.from_id(str(call_id)).cancel()
+    except Exception as e:
+        _log(f"[modal] cancelling {call_id} (job {job_id}) failed: "
+             f"{type(e).__name__}: {e}")
+    _log(f"[modal] analysis {call_id} of job {job_id} stopped ({why})")
+    return True
+
+
+def stop_task(t: Any, why: str, settled: bool) -> bool:
+    """stop_call for a task's stored call: `settled` (dead / failed /
+    cancelled: every attempt of it) or only its current attempt (a lease
+    that ran out — the next attempt's own fence still wins)."""
+    if getattr(t, "kind", None) not in KINDS:
+        return False
+    fence = (modal_analyze.stop_token(t.id) if settled
+             else modal_analyze.stop_token(t.id, t.attempts))
+    return stop_call(t.job_id, t.modal_call_id, fence, why)
+
+
+def stop_job(ts: Any, job_id: str) -> bool:
+    """The job is being deleted: stop every Modal call of its tasks
+    (before the rows go — the ids go with them). True if one was."""
+    stopped = False
+    try:
+        tasks = ts.for_job(job_id)
+    except Exception:
+        return False
+    for t in tasks:
+        if t.kind in KINDS and is_modal_call(t.modal_call_id) and t.state in (
+                "dispatching", "running", "failed", "dead"):
+            stopped = stop_call(job_id, t.modal_call_id,
+                                modal_analyze.stop_token(), "job deleted"
+                                ) or stopped
+    return stopped
+
+
+def stop_orphans(ts: Any) -> int:
+    """A new leader's boot pass: stop the stored calls of ingest tasks
+    no longer leased (lease ran out, or settled within Modal's function
+    timeout). Returns how many."""
+    now = time.time()
+    n = 0
+    for t in ts.modal_orphans(now, now - FUNCTION_TIMEOUT_S - 300.0):
+        settled = t.state not in ("dispatching", "running")
+        if stop_task(t, "boot: " + ("task settled" if settled
+                                    else "lease ran out"), settled):
+            n += 1
+    if n:
+        _log(f"[modal] boot: stopped {n} orphaned analysis call(s)")
+    return n
+
+
 def deadline_s(seconds: float | None, size_bytes: float | None) -> float:
     """The longest wait for one call (see the module doc)."""
     cap_default = FUNCTION_TIMEOUT_S + 300.0
@@ -138,6 +265,9 @@ def rebuild_error(err: dict[str, Any]) -> BaseException:
         from backend.pipeline import NoSpeechError
         exc = NoSpeechError(msg, speech_seconds=float(
             err.get("speech_seconds") or 0.0))
+    elif err.get("refused"):
+        exc = InterruptedError(msg)
+        exc._cleo_refused = True
     elif err.get("interrupted"):
         exc = InterruptedError(msg)
     elif err.get("oserror"):
@@ -160,7 +290,9 @@ def _give_up_reason(exc: BaseException) -> tuple[str, str]:
         return exc.code.replace("render_", "analyze_"), str(exc)
     if name == "FunctionTimeoutError":
         return "analyze_timeout", f"{name}: {exc}"
-    if name in pipeline._MODAL_UNAVAILABLE or name == "NotFoundError":
+    if name == "NotFoundError":
+        return "analyze_missing", f"{name}: {exc}"
+    if name in pipeline._MODAL_UNAVAILABLE:
         return "analyze_unavailable", f"{name}: {exc}"
     return "modal_failed", f"{name}: {exc}"
 
@@ -211,27 +343,53 @@ class _Channel:
         pct = v.get("pct")
         progress(msg, float(pct) if isinstance(pct, (int, float)) else -1)
 
+    def read_gate(self) -> dict | None:
+        """The container's measured length, once it is there."""
+        if self.d is None:
+            return None
+        try:
+            v = self.d.get(modal_analyze.gate_key(self.job_id, self.token))
+        except Exception:
+            return None
+        return v if isinstance(v, dict) else None
+
+    def verdict(self, value: dict) -> None:
+        if self.d is None:
+            raise ModalIngestError("analyze channel unavailable for the "
+                                   "length gate's verdict")
+        self.d.put(modal_analyze.verdict_key(self.job_id, self.token), value)
+
     def close(self) -> None:
         if self.d is None:
             return
-        try:
-            self.d.pop(modal_analyze.progress_key(self.job_id, self.token),
-                       None)
-        except Exception:
-            pass
+        # (gate / verdict: the container drops them once it has read the
+        # verdict.)
+        for key in (modal_analyze.progress_key(self.job_id, self.token),):
+            try:
+                self.d.pop(key, None)
+            except Exception:
+                pass
 
 
 def analyze(*, job_id: str, source_key: str, settings: dict[str, Any],
             token: str, degraded: bool, seconds: float | None,
             size: float | None,
             progress: Callable[[Any, float], None] | None = None,
-            cancel_check: Callable[[], bool] | None = None
+            cancel_check: Callable[[], bool] | None = None,
+            gate: Callable[[float | None], dict[str, Any]] | None = None,
+            on_spawned: Callable[[str], None] | None = None
             ) -> dict[str, Any]:
     """One analysis on Modal: spawn analyze_r2, wait (bounded), copy its
     progress into the job. Returns the call's result (modal_analyze.run:
     `res` + `stored`, or `error`, with `usage` / `obs` / `timings`).
     Raises InterruptedError when cancel_check says so (the call is
-    cancelled), ModalIngestError when Modal couldn't deliver."""
+    cancelled), ModalIngestError when Modal couldn't deliver.
+
+    `gate` (an upload of unknown length): the container measures its
+    copy and waits; gate(seconds) runs the API's length gate and returns
+    the settings to analyse with — what it raises (a refusal) is raised
+    here, the call cancelled. `on_spawned(call_id)` stores the call's id
+    on the task (orphan cleanup)."""
     from backend import pipeline
     pipeline._bound_modal_throttling()
     try:
@@ -243,20 +401,34 @@ def analyze(*, job_id: str, source_key: str, settings: dict[str, Any],
     start_s = _env_s("CLEO_MODAL_START_TIMEOUT_S", 120.0)
     limit_s = deadline_s(seconds, size)
     ch = _Channel(job_id, token)
+    if gate is not None and ch.d is None:
+        raise ModalIngestError("analyze channel unavailable: the length of "
+                               "this upload can't be checked")
     ch.set_fence()
     call = None
     ok = no_bill = started = False
     stuck = probes = 0
+    gate_exc: BaseException | None = None
+    gated = gate is None
     t0 = time.monotonic()
     try:
         fn = modal.Function.from_name(APP, FUNCTION)
-        call = fn.spawn(job_id=job_id, source_key=source_key,
-                        settings=settings, token=token,
-                        degraded=bool(degraded),
-                        env=modal_analyze.forward_env(),
-                        bucket=storage.bucket())
+        kw: dict[str, Any] = dict(
+            job_id=job_id, source_key=source_key, settings=settings,
+            token=token, degraded=bool(degraded),
+            env=modal_analyze.forward_env(), bucket=storage.bucket())
+        if gate is not None:
+            kw["gate"] = True
+        call = fn.spawn(**kw)
+        call_id = getattr(call, "object_id", None)
+        if on_spawned is not None and call_id:
+            try:
+                on_spawned(str(call_id))
+            except Exception as e:
+                _log(f"[modal] storing the call id of job {job_id} failed: "
+                     f"{e}")
         _log(f"[modal] analyze_r2 for job {job_id} (attempt {token}) "
-             f"spawned, deadline {limit_s:.0f} s")
+             f"spawned ({call_id}), deadline {limit_s:.0f} s")
         while True:
             if cancel_check is not None and cancel_check():
                 raise InterruptedError("Cancelled")
@@ -277,6 +449,22 @@ def analyze(*, job_id: str, source_key: str, settings: dict[str, Any],
                         and time.monotonic() - t_poll >= wait_s / 2):
                     raise
             ch.relay(progress)
+            if not gated:
+                asked = ch.read_gate()
+                if asked is not None:
+                    gated = True
+                    try:
+                        verdict = gate(asked.get("seconds"))
+                    except BaseException as e:
+                        gate_exc = e
+                        try:
+                            ch.verdict({"refused": True})
+                            ch.d.put(modal_analyze.fence_key(job_id),
+                                     f"{token}:stop")
+                        except Exception:
+                            pass
+                        raise
+                    ch.verdict({"settings": verdict})
             elapsed = time.monotonic() - t0
             if start_s > 0 and not started and elapsed >= start_s:
                 state = pipeline._modal_call_state(fn, call,
@@ -295,11 +483,19 @@ def analyze(*, job_id: str, source_key: str, settings: dict[str, Any],
     except InterruptedError:
         raise
     except Exception as e:
+        if gate_exc is not None and e is gate_exc:
+            raise
         no_bill = getattr(e, "started", None) is False
         code, reason = _give_up_reason(e)
         costs.record_event("modal_failed")
         _log_error(f"[modal] ANALYSIS {code.upper()} — job {job_id} "
                    f"(attempt {token}): {reason[:500]}")
+        if code == "analyze_missing":
+            mark_missing()
+            _log_error(f"[modal] analyze_r2 IS NOT DEPLOYED (app {APP}) — "
+                       "analyses run on this box (local limits) for the "
+                       f"next {MISSING_RECHECK_S:.0f} s; run 'Deploy Modal "
+                       "render' with the secret cleocuts-ai (DEPLOY.md 11.5)")
         raise ModalIngestError(reason, code) from e
     finally:
         if not ok and call is not None:

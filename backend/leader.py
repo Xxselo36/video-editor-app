@@ -79,6 +79,27 @@ def check_config() -> None:
             raise ConfigError(str(e)) from e
 
 
+def _stop_modal(t: taskq.Task, why: str, settled: bool) -> None:
+    """The task's stored Modal call, cancelled and fenced (best effort:
+    never holds up the reaper or the finalizer)."""
+    if not t.modal_call_id or not str(t.modal_call_id).startswith("fc-"):
+        return
+    try:
+        from backend import executor_modal
+        executor_modal.stop_task(t, why, settled)
+    except Exception as e:
+        _log(f"[leader] stopping the Modal call of task {t.id} failed: {e}")
+
+
+def _stop_orphans() -> int:
+    """Boot pass of a new leader (backend/executor_modal.py)."""
+    ts = jobs.task_store()
+    if not hasattr(ts, "modal_orphans"):
+        return 0
+    from backend import executor_modal
+    return executor_modal.stop_orphans(ts)
+
+
 def _modal_kinds() -> tuple[str, ...]:
     """The task kinds the Modal executor runs (none without it)."""
     try:
@@ -253,6 +274,8 @@ class Leader:
             kind: LocalExecutor(kind, ops.run_local) for kind in KINDS}
         self._errors: dict[str, float] = {}
         self._periodic_due: dict[str, float] = {}
+        # CLEO_EXECUTOR_INGEST=modal: can this task's job go to Modal?
+        self._modal_ok: dict[int, bool] = {}
 
     # ── lifecycle ────────────────────────────────────────────────────
 
@@ -355,6 +378,9 @@ class Leader:
                      f"{taskq.executor('render')}")
                 self._guard("taking over (stuck jobs)",
                             self.ops.on_leadership)
+                threading.Thread(target=self._guard, args=(
+                    "stopping orphaned Modal analyses", _stop_orphans),
+                    name="leader-modal-orphans", daemon=True).start()
                 self._dispatch_wake.set()
                 self._finalize_wake.set()
             try:
@@ -407,7 +433,20 @@ class Leader:
         queued, active = ts.counts(kind)
         if queued == 0:
             return 0, None
-        free = taskq.running_limit(kind) - active
+        # CLEO_EXECUTOR_INGEST=modal: the tasks that can go to Modal run
+        # under its limit; the others (a legacy upload file, analyze_r2
+        # not deployed) under the local one, with the local disk check.
+        split = kind == "ingest" and executor == "modal"
+        free_modal = free_local = 0
+        if split:
+            per = ts.active_by_executor(kind)
+            on_modal = per.get("modal", 0)
+            free_modal = max(0, taskq.running_limit(kind) - on_modal)
+            free_local = max(0, taskq.local_running_limit(kind)
+                             - (active - on_modal))
+            free = free_modal + free_local
+        else:
+            free = taskq.running_limit(kind) - active
         if free <= 0:
             return 0, None
         hint: str | None = None
@@ -428,7 +467,11 @@ class Leader:
                 free = min(free, 1 if active == 0 else 0)
             if free <= 0:
                 return 0, "capacity"
-            head = ts.queued(kind, limit=free)
+            if split:
+                head, targets = self._split_head(ts, kind, free, free_modal,
+                                                 free_local)
+            else:
+                head = ts.queued(kind, limit=free)
             budget = taskq.groq_budget_s()
             if budget > 0 and head:
                 used = ts.groq_window_s(now - 3600.0)
@@ -454,6 +497,27 @@ class Leader:
                     hint = "capacity"
                     self._disk_held = True
                 free = min(free, room)
+            if split:
+                local = [t for t in head if targets[t.id] == "local"]
+                if local:
+                    room = self.ops.local_room(local)
+                    if room < len(local):
+                        hint = "capacity"
+                        self._disk_held = True
+                    drop = {t.id for t in local[room:]}
+                    head = [t for t in head if t.id not in drop]
+                n = 0
+                for target in ("modal", "local"):
+                    ids = [t.id for t in head if targets[t.id] == target]
+                    if not ids:
+                        continue
+                    claimed = ts.claim_for_dispatch(
+                        kind, len(ids), self.id, taskq.start_timeout_s(),
+                        target, created_before=created_before, ids=ids)
+                    for task in claimed:
+                        self._spawn(ts, task)
+                    n += len(claimed)
+                return n, hint
         if free <= 0:
             return 0, hint
         claimed = ts.claim_for_dispatch(kind, free, self.id,
@@ -462,6 +526,49 @@ class Leader:
         for task in claimed:
             self._spawn(ts, task)
         return len(claimed), hint
+
+    def _split_head(self, ts: Any, kind: str, free: int, free_modal: int,
+                    free_local: int
+                    ) -> tuple[list[taskq.Task], dict[int, str]]:
+        """The next tasks to dispatch with the Modal executor on, in
+        queue order, each with where it runs ("modal" / "local"), at most
+        free_modal + free_local of them (`free` overall). A task that has
+        to run here waits for a local slot without holding up the ones
+        behind it that can go to Modal."""
+        from backend import executor_modal
+        modal_up = executor_modal.available()
+        if not modal_up and self._once_per("modal-missing", 300.0):
+            _log_error("[leader] analyze_r2 not deployed — analyses run "
+                       "on this box under the local limit "
+                       f"({taskq.local_running_limit(kind)})")
+        head: list[taskq.Task] = []
+        targets: dict[int, str] = {}
+        seen: set[int] = set()
+        n_modal = n_local = 0
+        for t in ts.queued(kind, limit=free + 50):
+            seen.add(t.id)
+            if len(head) >= free:
+                break
+            ok = self._modal_ok.get(t.id)
+            if ok is None:
+                try:
+                    ok = executor_modal.job_eligible(jobs.store.get(t.job_id))
+                except Exception:
+                    ok = False
+                self._modal_ok[t.id] = ok
+            if ok and modal_up:
+                if n_modal < free_modal:
+                    n_modal += 1
+                    head.append(t)
+                    targets[t.id] = "modal"
+            elif n_local < free_local:
+                n_local += 1
+                head.append(t)
+                targets[t.id] = "local"
+        if len(self._modal_ok) > 4 * (len(seen) + 50):
+            self._modal_ok = {k: v for k, v in self._modal_ok.items()
+                              if k in seen}
+        return head, targets
 
     def _spawn(self, ts: Any, task: taskq.Task) -> None:
         """Outside the claim's transaction. A spawn that fails never ran:
@@ -521,6 +628,9 @@ class Leader:
         for t in ts.expired(now):
             what = ("never claimed by a worker" if t.state == "dispatching"
                     else "no heartbeat")
+            # Its Modal call (if any) has nobody waiting for it any more;
+            # the id goes with the requeue.
+            _stop_modal(t, "lease expired", settled=False)
             new = ts.requeue(
                 t.id, expect_states=("dispatching", "running"),
                 attempts=t.attempts,
@@ -605,6 +715,7 @@ class Leader:
                         f"{taskq.retry_backoff_s(t.attempts):.0f} s"
                         if new == "queued" else ""))
             return new is not None
+        _stop_modal(t, f"task {t.state}", settled=True)
         event = self.ops.finalize_terminal(t)
         return ts.mark_finalized(t.id, event=event)
 
