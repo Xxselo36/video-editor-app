@@ -13,10 +13,19 @@ on:
       runs:
         description: >-
           profile:minutes[:preset], comma-separated. Profiles: synthetic,
-          phone1080, phone4k, iphone1080hdr, iphone4khdr. Presets: tiktok
+          phone1080, phone4k, iphone1080hdr, iphone4khdr, iphone4kloop (4K
+          HEVC, ~2 GB at 10 min: iphone4kloop:10). Presets: tiktok
           (default), podcast, vlog, captions. See .github/scripts/cost_test.py
         required: false
         default: 'phone1080:2,phone1080:10,phone4k:3,iphone4khdr:3'
+      ingest_executor:
+        description: >-
+          Expect this analysis executor on the server (GET /admin/queue) —
+          modal = the Modal analysis (CLEO_EXECUTOR_INGEST=modal); the run
+          stops before uploading when the server uses another one
+        type: choice
+        options: [any, local, modal]
+        default: any
       caption_engine:
         description: Ask for this caption engine at render (e.g. v2; empty = server default)
         required: false
@@ -68,4 +77,5 @@ jobs:
           RUNS: ${{ inputs.runs }}
           KEEP_JOBS: ${{ inputs.keep_jobs }}
           CAPTION_ENGINE: ${{ inputs.caption_engine }}
+          EXPECT_EXECUTOR: ${{ inputs.ingest_executor }}
         run: python .github/scripts/cost_test.py "$RUNS"

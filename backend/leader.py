@@ -57,21 +57,35 @@ class ConfigError(RuntimeError):
 
 
 def check_config() -> None:
-    """Refuse CLEO_EXECUTOR_*=modal until the Modal executor exists
-    (WP4 phase P1) — the local executor is no silent fallback."""
+    """Refuse CLEO_EXECUTOR_*=modal where this release has no Modal
+    executor (phase P1 has one for ingest only — renders already run on
+    Modal from the local executor, pipeline.render_to_keys) or its
+    prerequisites are missing (backend/executor_modal.py check_config:
+    media in R2, Modal credentials). The local executor is no silent
+    fallback."""
     for kind in KINDS:
-        if taskq.executor(kind) == "modal" and not _modal_available():
+        if taskq.executor(kind) != "modal":
+            continue
+        kinds = _modal_kinds()
+        if kind not in kinds:
             raise ConfigError(
-                f"CLEO_EXECUTOR_{kind.upper()}=modal, but this release has "
-                "no Modal task executor (WP4 phase P1) — use local")
+                f"CLEO_EXECUTOR_{kind.upper()}=modal, but this release runs "
+                f"only {', '.join(kinds) or 'nothing'} as Modal tasks "
+                "(WP4 phase P1) — use local")
+        from backend import executor_modal
+        try:
+            executor_modal.check_config()
+        except ValueError as e:
+            raise ConfigError(str(e)) from e
 
 
-def _modal_available() -> bool:
+def _modal_kinds() -> tuple[str, ...]:
+    """The task kinds the Modal executor runs (none without it)."""
     try:
-        import importlib.util
-        return importlib.util.find_spec("backend.executor_modal") is not None
-    except (ImportError, ValueError):
-        return False
+        from backend import executor_modal
+    except ImportError:
+        return ()
+    return tuple(executor_modal.KINDS)
 
 
 class LeaderOps(Protocol):

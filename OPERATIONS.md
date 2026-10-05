@@ -304,7 +304,10 @@ Alarm-Ausbau (WP6) sind das die Signale:
 | `[groq] audio budget: … analyses wait` | das eigene Stundenbudget ist voll, Analysen warten | nur Stoßzeiten; dauerhaft → Tier erhöhen, dann Budget anheben |
 | `[llm] SPEND LIMIT hit in …` / `[llm] SPEND LIMIT REACHED — breaker open` (ERROR) | Anthropic-Ausgabenlimit erreicht; Analysen warten (danach ohne LLM-Schritte, `processing_warnings`), Renders ohne Hooks/Caption | Anthropic Console → Limits/Billing erhöhen; der Breaker prüft stündlich selbst |
 | `[worker] PROTOCOL MISMATCH` / `SCHEMA BEHIND` (ERROR) | Deploy-Versatz zwischen API und Worker; wird wiederholt | nur kurz nach Deploys erwartet |
-| `[queue] NOT STARTING` | `CLEO_EXECUTOR_*=modal` in einer Version ohne Modal-Executor | Variable löschen |
+| `[queue] NOT STARTING` | `CLEO_EXECUTOR_RENDER=modal` (gibt es nicht), oder `CLEO_EXECUTOR_INGEST=modal` ohne `CLEO_MEDIA_BACKEND=r2` / `MODAL_TOKEN_ID` (der Grund steht in der Zeile) | Variable löschen bzw. die fehlende setzen (DEPLOY.md 11.5) |
+| `[modal] ANALYSIS ANALYZE_UNAVAILABLE — job …` (ERROR) | nur mit `CLEO_EXECUTOR_INGEST=modal`: Modal nimmt die Analyse nicht an (analyze_r2 nicht deployt, Ausgabenlimit, Token); neuer Versuch, nach 3 Fehler + Erstattung | "Deploy Modal render" prüfen (`deploying analyze_r2 too`?), Modal-Billing; notfalls `CLEO_EXECUTOR_INGEST` löschen |
+| `[modal] ANALYSIS ANALYZE_TIMEOUT` / `MODAL_FAILED` (ERROR) | Analyse auf Modal über ihre Frist / Container abgestürzt; neuer Versuch | gehäuft → Modal-Log (`modal app logs cleocuts-render`), bei OOM `memory` in `analyze_r2` erhöhen |
+| `[job …] analysed here, not on Modal` | ein Job von vor R2 (Upload als Datei auf Railway) wird lokal analysiert | — |
 
 ## Was kosten die Checks?
 

@@ -1783,6 +1783,43 @@ def analysis_fields(res: dict[str, Any]) -> dict[str, Any]:
     return {k: res[k] for k in _ANALYSIS_FIELDS if k in res}
 
 
+def store_analysis_outputs(
+    res: dict[str, Any], job_id: str,
+    put: Callable[[Any, str, str], int],
+    progress: Callable[[str, float], None] | None = None,
+) -> dict[str, Any]:
+    """Store everything an analysis made under the job's keys — the mezz,
+    the editor proxy and the first preview (in that order, a "Saving…"
+    tick before each), then store_analysis_extras — with put(path, key,
+    content_type) -> size (the caller's store, fence and error handling).
+    Returns the job fields: the keys, `media_bytes` {key: size} and the
+    extras' fields. One function for both places an analysis is stored:
+    the task queue's worker (backend/worker.py) and the Modal analysis
+    (backend/modal_analyze.py), so both write the same keys."""
+    from backend import media
+    prefix = media.job_prefix(job_id)
+    mezz = Path(res["normalized_path"])
+    items = [(mezz, prefix + "mezz.mp4", "mezz_key")]
+    proxy = mezz.with_name(PROXY_NAME)
+    if proxy.is_file():
+        items.append((proxy, prefix + "proxy.mp4", "proxy_key"))
+    preview = res.get("preview_path")
+    if preview and Path(preview).is_file():
+        items.append((Path(preview), prefix + "preview/v1.mp4",
+                      "preview_key"))
+    fields: dict[str, Any] = {"media_bytes": {}}
+    for i, (path, key, field_name) in enumerate(items):
+        if progress is not None:
+            progress(errors.stage_message("analyze.cuts", "Saving…"), 96 + i)
+        size = put(path, key, "video/mp4")
+        fields[field_name] = key
+        fields["media_bytes"][key] = size
+    extra, sizes = store_analysis_extras(res, job_id, put)
+    fields.update(extra)
+    fields["media_bytes"].update(sizes)
+    return fields
+
+
 def store_analysis_extras(
     res: dict[str, Any], job_id: str,
     put: Callable[[str, str, str], int],

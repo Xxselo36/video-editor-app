@@ -15,7 +15,10 @@ P1 — a Modal function.
      render-a{attempt}), wiped at the start, removed at the end.
   5. The work — ingest: fetch the upload, the length gate (charged here
      when POST /jobs couldn't know the length), analyze_only, store
-     mezz / proxy / preview; render: pipeline.render_to_keys (today's
+     mezz / proxy / preview (CLEO_EXECUTOR_INGEST=modal: everything after
+     the length gate in one Modal call, backend/executor_modal.py — this
+     attempt waits for it with its heartbeat, fence and commit
+     unchanged); render: pipeline.render_to_keys (today's
      render, on Modal when configured) with the post caption written
      next to it. The fence is checked again before every upload.
   6. Progress: at most one write a second, merged into the job row, only
@@ -723,33 +726,11 @@ def _length_gate(ctx: Attempt, job: Any, input_path: str,
 def _store_analysis(ctx: Attempt, job_id: str, res: dict,
                     progress: Callable[[str, float], None],
                     where: str) -> dict:
-    """mezz / proxy / first preview into the job's store — the fence
-    re-checked before every upload."""
-    prefix = media.job_prefix(job_id)
-    mezz = Path(res["normalized_path"])
-    items = [(mezz, prefix + "mezz.mp4", "mezz_key")]
-    proxy = mezz.with_name(jobs.LEGACY_PROXY_NAME)
-    if proxy.is_file():
-        items.append((proxy, prefix + "proxy.mp4", "proxy_key"))
-    preview = res.get("preview_path")
-    if preview and Path(preview).is_file():
-        items.append((Path(preview), prefix + "preview/v1.mp4",
-                      "preview_key"))
-    fields: dict[str, Any] = {"media_bytes": {}, "media_store": where}
-    for i, (path, key, field_name) in enumerate(items):
-        progress(errors.stage_message("analyze.cuts", "Saving…"), 96 + i)
-        if not ctx.fence_ok():
-            raise InterruptedError("fenced out before storing results")
-        try:
-            size = media.put_file(path, key, content_type="video/mp4",
-                                  store=where)
-        except Exception as e:
-            raise MediaTransferError(
-                f"storing {key} failed: {type(e).__name__}: {e}") from e
-        fields[field_name] = key
-        fields["media_bytes"][key] = size
+    """mezz / proxy / first preview and the extras into the job's store
+    (pipeline.store_analysis_outputs, the Modal analysis stores through
+    it too) — the fence re-checked before every upload."""
 
-    def put(path: str, key: str, ctype: str) -> int:
+    def put(path: Any, key: str, ctype: str) -> int:
         if not ctx.fence_ok():
             raise InterruptedError("fenced out before storing results")
         try:
@@ -757,10 +738,9 @@ def _store_analysis(ctx: Attempt, job_id: str, res: dict,
         except Exception as e:
             raise MediaTransferError(
                 f"storing {key} failed: {type(e).__name__}: {e}") from e
-    extra, sizes = _pipeline().store_analysis_extras(res, job_id, put)
-    fields.update(extra)
-    fields["media_bytes"].update(sizes)
-    return fields
+    stored = _pipeline().store_analysis_outputs(res, job_id, put, progress)
+    return {"media_bytes": stored.pop("media_bytes"), "media_store": where,
+            **stored}
 
 
 # Failure classification: the one catalogue in backend/errors.py (the
@@ -806,6 +786,9 @@ def _ingest_failure(ctx: Attempt, exc: BaseException,
                          "params": exc.params})
     tb = "".join(traceback.format_exception(type(exc), exc,
                                             exc.__traceback__))
+    remote_tb = getattr(exc, "_cleo_remote_tb", None)
+    if remote_tb:
+        tb += f"on Modal:\n{remote_tb}"
     _log(f"[job {job_id}] ANALYZE FAILED (task {t.id}, attempt "
          f"{t.attempts}/{t.max_attempts}): {exc}\n{tb}")
     msg = str(exc)
@@ -833,6 +816,13 @@ def _ingest_failure(ctx: Attempt, exc: BaseException,
     if type(exc).__name__ == "FunctionTimeoutError":
         result.update(refund=True)
         return ctx.fail(taskq.TIMEOUT, msg, False, result)
+    if type(exc).__name__ == "ModalIngestError":
+        # Modal didn't deliver (timeout, a crashed container, not
+        # deployed, spend limit): ours — another attempt, then failed
+        # and refunded by the finalizer.
+        _capture(exc, job_id=job_id, phase="analyze")
+        result.update(refund=True, infra=True)
+        return ctx.fail(taskq.INFRA, msg, True, result)
     _capture(exc, job_id=job_id, phase="analyze")
     if job_code == "no_speech":
         code, retryable = taskq.CONTENT_NO_SPEECH, False
@@ -844,9 +834,80 @@ def _ingest_failure(ctx: Attempt, exc: BaseException,
         code, retryable = taskq.CONTENT, False
     result["refund"] = bool(infra or _refund_content_failure(exc, job_code))
     if not retryable and not db.is_transient(exc):
-        # Charged by what was really processed (before the files go).
-        result["processed_s"] = _processed_s(ws)
+        # Charged by what was really processed (before the files go;
+        # measured on Modal for a Modal analysis).
+        result["processed_s"] = (exc._cleo_processed_s
+                                 if hasattr(exc, "_cleo_processed_s")
+                                 else _processed_s(ws))
     return ctx.fail(code, msg, retryable, result)
+
+
+def _executor_modal() -> Any:
+    from backend import executor_modal
+    return executor_modal
+
+
+def _modal_analyze() -> Any:
+    from backend import modal_analyze
+    return modal_analyze
+
+
+def _merge_observer(obs: llm.Observer, state: Any) -> None:
+    """The LLM observer state a Modal analysis reported, into `obs`."""
+    if not isinstance(state, dict):
+        return
+    obs.skipped += [str(s) for s in state.get("skipped") or []]
+    obs.failed += [tuple(f) for f in state.get("failed") or []
+                   if isinstance(f, (list, tuple)) and len(f) == 2]
+    obs.spend_limit = obs.spend_limit or bool(state.get("spend_limit"))
+    obs.detail = obs.detail or str(state.get("detail") or "")
+
+
+def _analyze_remote(ctx: Attempt, job: Any, source_key: str, where: str,
+                    progress: Callable[[str, float], None],
+                    obs: llm.Observer, degraded: bool
+                    ) -> tuple[dict, dict, dict]:
+    """CLEO_EXECUTOR_INGEST=modal: the length gate and the charge here,
+    the analysis and the storing on Modal (backend/executor_modal.py).
+    Returns (the analysis result, the stored fields, Modal's timings) —
+    what the local path has after analyze_only + _store_analysis; raises
+    what it would raise."""
+    em = _executor_modal()
+    if ctx.cancelled():
+        raise InterruptedError("Cancelled")
+    probe_target = ""
+    if (job.settings or {}).get("_measure_length"):
+        # The length of an upload POST /jobs couldn't measure, read over
+        # a presigned GET (ffprobe reads the header, ranged).
+        try:
+            probe_target = media.presign_get(source_key)
+        except Exception as e:
+            raise MediaTransferError(
+                f"presigning the upload failed: {type(e).__name__}: {e}"
+            ) from e
+    settings = _length_gate(ctx, job, probe_target, progress)
+    t = ctx.task
+    payload = t.payload or {}
+    seconds = (_to_float(payload.get("charged_s"))
+               or _to_float(settings.get("_max_seconds")) or None)
+    out = em.analyze(
+        job_id=job.id, source_key=source_key, settings=settings,
+        token=_modal_analyze().attempt_token(t.id, t.attempts),
+        degraded=degraded, seconds=seconds,
+        size=_to_float(payload.get("size")) or None,
+        progress=progress, cancel_check=ctx.cancelled)
+    costs.merge(out.get("usage") or {})
+    _merge_observer(obs, out.get("obs"))
+    if isinstance(out.get("error"), dict):
+        raise em.rebuild_error(out["error"])
+    if ctx.cancelled():
+        raise InterruptedError("Cancelled")
+    if obs.spend_limit and not degraded:
+        raise _SpendLimitHold(obs.detail or "spend limit")
+    stored = dict(out.get("stored") or {})
+    fields = {"media_bytes": dict(stored.pop("media_bytes", None) or {}),
+              "media_store": where, **stored}
+    return dict(out["res"]), fields, dict(out.get("timings") or {})
 
 
 def _ingest(ctx: Attempt) -> dict[str, Any]:
@@ -892,45 +953,60 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
             except OSError:
                 pass
 
+    remote = (t.executor == "modal"
+              and _executor_modal().eligible(where, source_key, input_path))
+    if t.executor == "modal" and not remote:
+        _log(f"[job {job_id}] analysed here, not on Modal: its upload is "
+             f"not an R2 object (media store {where})")
+    remote_timings: dict[str, Any] | None = None
+    # The disk guard watches this box's disk: only for a local analysis
+    # (interval 0 = no watcher thread, never trips).
     guard = DiskGuard(job_id, ws, _get("tmp_root"),
-                      _env_float("CLEO_MIN_FREE_GB", 1.0) * 1e9)
+                      _env_float("CLEO_MIN_FREE_GB", 1.0) * 1e9,
+                      interval=0 if remote else None)
     try:
         with costs.tracking(job_id, "analyze"), guard:
             try:
                 _fault_groq()
-                if not input_path:
-                    progress(errors.stage_message("analyze.normalize",
-                                                  "Fetching upload…"), 1)
-                    copy = ws / ("source" + upl.upload_ext(source_key))
-                    local_copy.append(copy)
-                    try:
-                        media.get_file(source_key, copy, store=where)
-                    except Exception as e:
-                        raise MediaTransferError(
-                            f"fetching the upload failed: "
-                            f"{type(e).__name__}: {e}") from e
-                    input_path = str(copy)
-                if ctx.cancelled():
-                    raise InterruptedError("Cancelled")
-                guard.check()
-                settings = _length_gate(ctx, job, input_path, progress)
-                analyze = _get("analyze_only")
-                extra: dict[str, Any] = {}
-                if _accepts(analyze, "on_normalized"):
-                    extra["on_normalized"] = _drop_local_copy
-                if _accepts(analyze, "cancel_check"):
-                    extra["cancel_check"] = guard.cancel_check(ctx.cancelled)
-                with llm.observing(obs):
-                    res = analyze(input_path=input_path, output_dir=str(ws),
-                                  settings=settings,
-                                  progress_cb=guard.progress(progress),
-                                  **extra)
-                if ctx.cancelled():
-                    raise InterruptedError("Cancelled")
-                guard.check()
-                if obs.spend_limit and not degraded:
-                    raise _SpendLimitHold(obs.detail or "spend limit")
-                stored = _store_analysis(ctx, job_id, res, progress, where)
+                if remote:
+                    res, stored, remote_timings = _analyze_remote(
+                        ctx, job, source_key, where, progress, obs, degraded)
+                else:
+                    if not input_path:
+                        progress(errors.stage_message("analyze.normalize",
+                                                      "Fetching upload…"), 1)
+                        copy = ws / ("source" + upl.upload_ext(source_key))
+                        local_copy.append(copy)
+                        try:
+                            media.get_file(source_key, copy, store=where)
+                        except Exception as e:
+                            raise MediaTransferError(
+                                f"fetching the upload failed: "
+                                f"{type(e).__name__}: {e}") from e
+                        input_path = str(copy)
+                    if ctx.cancelled():
+                        raise InterruptedError("Cancelled")
+                    guard.check()
+                    settings = _length_gate(ctx, job, input_path, progress)
+                    analyze = _get("analyze_only")
+                    extra: dict[str, Any] = {}
+                    if _accepts(analyze, "on_normalized"):
+                        extra["on_normalized"] = _drop_local_copy
+                    if _accepts(analyze, "cancel_check"):
+                        extra["cancel_check"] = guard.cancel_check(
+                            ctx.cancelled)
+                    with llm.observing(obs):
+                        res = analyze(input_path=input_path,
+                                      output_dir=str(ws), settings=settings,
+                                      progress_cb=guard.progress(progress),
+                                      **extra)
+                    if ctx.cancelled():
+                        raise InterruptedError("Cancelled")
+                    guard.check()
+                    if obs.spend_limit and not degraded:
+                        raise _SpendLimitHold(obs.detail or "spend limit")
+                    stored = _store_analysis(ctx, job_id, res, progress,
+                                             where)
             except Exception as e:
                 progress.close()
                 if guard.tripped and not ctx.cancelled():
@@ -966,6 +1042,9 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
                       "test": bool((job.settings or {}).get("_cost_test")),
                       "worker": ctx.call_id, "warnings": warnings,
                       "llm_ok": not obs.failed and not degraded}
+            if remote:
+                result["executor"] = "modal"
+                result["modal_timings"] = remote_timings or {}
             # The doc's style is settled against the job as stored at the
             # commit (backend.doc.commit_change), in the same transaction.
             outcome = ctx.commit(result, ("processing",), edit_doc.commit_change(

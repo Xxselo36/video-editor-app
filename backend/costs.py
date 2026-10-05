@@ -49,6 +49,10 @@ RATES: dict[str, float] = {
     "modal_gib_s": 0.00000222,
     "modal_cores": 8,
     "modal_gib": 8,
+    # The analysis function (analyze_r2, CLEO_EXECUTOR_INGEST=modal):
+    # cpu=8, memory=16 GiB
+    "modal_analyze_cores": 8,
+    "modal_analyze_gib": 16,
 }
 try:
     RATES.update(json.loads(os.environ.get("CLEO_COST_RATES", "") or "{}"))
@@ -102,13 +106,16 @@ def record_groq(audio_seconds: float) -> None:
     _add(bucket, "usd_groq", billed * RATES["groq_whisper_s"])
 
 
-def record_modal(wall_seconds: float) -> None:
-    """Add one Modal render call (container time ≈ call wall time)."""
+def record_modal(wall_seconds: float, cores: float | None = None,
+                 gib: float | None = None) -> None:
+    """Add one Modal call (container time ≈ call wall time), by default
+    of the render function's size."""
     bucket = _current()
     if bucket is None:
         return
-    per_s = (RATES["modal_core_s"] * RATES["modal_cores"]
-             + RATES["modal_gib_s"] * RATES["modal_gib"])
+    cores = RATES["modal_cores"] if cores is None else cores
+    gib = RATES["modal_gib"] if gib is None else gib
+    per_s = (RATES["modal_core_s"] * cores + RATES["modal_gib_s"] * gib)
     _add(bucket, "modal_s", wall_seconds)
     _add(bucket, "usd_modal", wall_seconds * per_s)
 

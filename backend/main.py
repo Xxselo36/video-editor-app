@@ -828,6 +828,10 @@ async def lifespan(app_: FastAPI):
             print(f"[queue] NOT STARTING: {e}", flush=True)
             raise
     else:
+        if taskq.executor("ingest") == "modal":
+            print("[queue] CLEO_EXECUTOR_INGEST=modal is ignored without "
+                  "CLEO_TASK_QUEUE=1 — analyses run on this box (WP1)",
+                  flush=True)
         # Any job stuck in 'processing'/'pending' from the previous
         # container generation is unrecoverable — its worker thread died
         # with the process. Surface it as a real error so the frontend
@@ -3387,7 +3391,7 @@ def queue_stats() -> dict[str, Any]:
     ts = _tasks()
     now = time.time()
     out: dict[str, Any] = {"enabled": taskq.enabled(), "kinds": {},
-                           "breakers": {}}
+                           "breakers": {}, "max_queue": taskq.max_queue()}
     for kind in task_leader.KINDS:
         queued_tasks = ts.queued(kind)
         queued, active = ts.counts(kind)

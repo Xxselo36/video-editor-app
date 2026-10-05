@@ -95,11 +95,25 @@ jobs:
             echo "::error title=Modal secret list failed::Could not list the Modal secrets (network / token?). Nothing deployed; re-run the workflow."
             exit 1
           fi
-          if printf '%s' "$secrets" | python -c 'import json,sys; names={s.get("name") or s.get("Name") for s in json.load(sys.stdin)}; sys.exit(0 if "cleocuts-r2" in names else 1)'; then
+          has_secret() {
+            printf '%s' "$secrets" | python -c 'import json,sys; names={s.get("name") or s.get("Name") for s in json.load(sys.stdin)}; sys.exit(0 if sys.argv[1] in names else 1)' "$1"
+          }
+          if has_secret cleocuts-r2; then
             echo "Modal secret cleocuts-r2 found — deploying render_burn_concat and render_r2."
             export CLEO_MODAL_R2=1
           else
             echo "::warning title=render_r2 not deployed::The Modal secret cleocuts-r2 does not exist, so only render_burn_concat is deployed. Renders keep working on the volume path. To enable render_r2 create the secret (DEPLOY.md section 10.2, step 3) and re-run this workflow."
             export CLEO_MODAL_R2=0
+          fi
+          # analyze_r2 (WP4 P1: analyses on Modal, CLEO_EXECUTOR_INGEST=modal
+          # on Railway) also needs the secret cleocuts-ai (GROQ_API_KEY,
+          # ANTHROPIC_API_KEY — DEPLOY.md 11.5). Without it nothing about
+          # analyses changes: Railway keeps analysing locally.
+          if [ "$CLEO_MODAL_R2" = 1 ] && has_secret cleocuts-ai; then
+            echo "Modal secret cleocuts-ai found — deploying analyze_r2 too."
+            export CLEO_MODAL_ANALYZE=1
+          else
+            echo "analyze_r2 not deployed (needs the Modal secrets cleocuts-r2 and cleocuts-ai; only required for CLEO_EXECUTOR_INGEST=modal, DEPLOY.md 11.5)."
+            export CLEO_MODAL_ANALYZE=0
           fi
           modal deploy backend/modal_render.py

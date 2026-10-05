@@ -70,7 +70,8 @@ def enabled() -> bool:
 def executor(kind: str) -> str:
     """CLEO_EXECUTOR_INGEST / _RENDER / _PREVIEW: `local` (default, also
     with MODAL_TOKEN_ID set — WP4 phase P0) or `modal` (phase P1: the
-    Modal app backend/modal_app.py; refused while it isn't there)."""
+    analysis on Modal, backend/executor_modal.py — ingest only; the
+    leader refuses it for a kind without a Modal executor)."""
     value = _env(f"CLEO_EXECUTOR_{kind.upper()}").lower() or "local"
     return value if value in ("local", "modal") else "local"
 
@@ -80,11 +81,12 @@ def running_limit(kind: str) -> int:
     (CLEO_MAX_RUNNING_INGEST / _RENDER / _PREVIEW). The local executor
     defaults to the WP1 slot counts (CLEO_MAX_ANALYZE, default 2;
     CLEO_MAX_RENDER, default 4 with MODAL_TOKEN_ID else 2) so switching
-    the queue on changes nothing about how much runs on this box."""
+    the queue on changes nothing about how much runs on this box. The
+    Modal executor's analyses use no disk or CPU here: 20 by default."""
     override = _env(f"CLEO_MAX_RUNNING_{kind.upper()}")
     local = executor(kind) == "local"
     if kind == "ingest":
-        default = _int("CLEO_MAX_ANALYZE", 2) if local else 16
+        default = _int("CLEO_MAX_ANALYZE", 2) if local else 20
     elif kind == "render":
         default = (_int("CLEO_MAX_RENDER",
                         4 if _env("MODAL_TOKEN_ID") else 2)
