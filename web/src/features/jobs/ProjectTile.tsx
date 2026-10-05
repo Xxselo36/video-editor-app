@@ -219,9 +219,9 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
       case "upload_failed":
         // The reason first (the resume line goes under it).
         if (!stoppedTileShowsError(p.errorCode, Boolean(resumable))) return null;
-        return describeError({ code: p.errorCode, params: p.errorParams, refunded: p.refunded }, t);
+        return describeError({ code: p.errorCode, params: p.errorParams, refunded: p.refunded }, t, { v2: true });
       case "failed":
-        return describeError({ code: p.errorCode, params: p.errorParams, refunded: p.refunded }, t);
+        return describeError({ code: p.errorCode, params: p.errorParams, refunded: p.refunded }, t, { v2: true });
       case "processing":
       case "exporting":
         if (p.note === "cancel_too_late") return t("app.projects.cancelTooLate");
@@ -242,6 +242,11 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
       : p.renderFailed && (p.state === "ready" || p.state === "edited")
         ? "var(--warn)"
         : "var(--text-muted)";
+
+  // A stopped upload's / failed job's code (snake_case only — never a
+  // stored sentence), in small print under its reason.
+  const showsCode =
+    (p.state === "upload_failed" || p.state === "failed") && typeof p.errorCode === "string" && /^[a-z][a-z0-9_]*$/.test(p.errorCode);
 
   const onRetry = () => {
     if (retryUpload(p.id)) return;
@@ -341,6 +346,12 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
         {status && (
           <p data-testid="job-card-status" className="text-xs leading-relaxed" style={{ color: statusTone }}>
             {status}
+          </p>
+        )}
+        {status && showsCode && (
+          // The code under the reason: what support asks for.
+          <p data-testid="job-card-code" className="text-[10px] leading-snug" style={{ color: "var(--text-faint)" }}>
+            {t("app.projects.errorCode", { code: p.errorCode! })}
           </p>
         )}
         {resumable && (

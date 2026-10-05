@@ -128,8 +128,9 @@ def test_settings_whitelist(client, probe):
         "voice_triggers": True, "remove_fillers": False,
         "smartcam_enabled": True, "smartcam_format": "portrait",
         "resolution": "1080", "output_formats": ["9:16"],
-        # set by the server, not the client's 99999: CLEO_MAX_MINUTES
-        "_max_seconds": 30 * 60 + 1}
+        # set by the server, not the client's 99999: the probed length
+        # (60 s) + the true-up tolerance (under CLEO_MAX_MINUTES)
+        "_max_seconds": 60 + 5}
 
 
 @pytest.mark.parametrize("value,kept", [
@@ -281,6 +282,9 @@ def test_disk_reservation_is_size_aware(client, fake_r2, probe, monkeypatch):
     real = M.shutil.disk_usage
     monkeypatch.setattr(M.shutil, "disk_usage",
                         lambda p: real(p)._replace(free=free["bytes"]))
+    # Length unknown (no header, no client reading): CLEO_DISK_FACTOR ×
+    # the upload, as before.
+    probe["value"] = None
     fake_r2["size"] = 2e9  # needs 7 GB + 1 GB floor
     r = client.post("/jobs", data={"settings": "{}",
                                    "storage_key": "uploads/a.mp4"})
@@ -292,6 +296,15 @@ def test_disk_reservation_is_size_aware(client, fake_r2, probe, monkeypatch):
                        ).status_code == 200
     r = client.post("/uploads/presign", json={"size": 2e9})
     assert r.status_code == 507
+    # Length known: what the analysis really writes (test_capacity.py) —
+    # 2 GB of 60 s fits now, also at presign with the browser's reading.
+    probe["value"] = 60.0
+    fake_r2["size"] = 2e9
+    assert client.post("/jobs", data={"settings": "{}",
+                                      "storage_key": "uploads/c.mp4"}
+                       ).status_code == 200
+    assert client.post("/uploads/presign",
+                       json={"size": 2e9, "duration": 60}).status_code == 200
 
 
 # ── idempotent POST /jobs ────────────────────────────────────────────

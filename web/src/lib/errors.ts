@@ -13,7 +13,7 @@ import { translate, type TFn } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
 import { ApiError } from "@/lib/api";
 import { DEFAULT_LIMITS } from "@/lib/config";
-import { AUDIO_WARNING_KEYS, CLIENT_ERROR_KEYS, ERROR_KEYS, STAGE_KEYS, WARNING_KEYS } from "@/lib/errorKeys";
+import { AUDIO_WARNING_KEYS, CLIENT_ERROR_KEYS, ERROR_KEYS, STAGE_KEYS, V2_ERROR_KEYS, WARNING_KEYS } from "@/lib/errorKeys";
 
 /** English translator (analytics labels, notifications' fallbacks). */
 export const tEn: TFn = (key, vars) => translate("en", key, vars);
@@ -92,17 +92,18 @@ function vars(code: string, p: ErrorParams): Record<string, string | number> {
   }
 }
 
-/** The message key of a code (generic for one we don't know). */
-export function errorKey(code: string | null | undefined): MessageKey {
+/** The message key of a code (generic for one we don't know); `v2`: the
+ *  v2 opt-in's own wording first (V2_ERROR_KEYS). */
+export function errorKey(code: string | null | undefined, opts?: { v2?: boolean }): MessageKey {
   if (!code) return "app.errors.generic";
-  return ERROR_KEYS[code] ?? CLIENT_ERROR_KEYS[code] ?? "app.errors.generic";
+  return (opts?.v2 ? V2_ERROR_KEYS[code] : undefined) ?? ERROR_KEYS[code] ?? CLIENT_ERROR_KEYS[code] ?? "app.errors.generic";
 }
 
 /** One sentence for any error (UX5's describeError). */
-export function describeError(e: unknown, t: TFn): string {
+export function describeError(e: unknown, t: TFn, opts?: { v2?: boolean }): string {
   const { code, params, refunded } = toCoded(e);
   if (code === "no_speech" && refunded) return t("app.errors.noSpeechRefunded");
-  return t(errorKey(code), vars(code ?? "", params ?? {}));
+  return t(errorKey(code, opts), vars(code ?? "", params ?? {}));
 }
 
 /** A failed job's message (GET /jobs/{id}, the status rows). */

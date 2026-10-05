@@ -80,7 +80,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 import time
 
 from fastapi import (
@@ -441,28 +441,109 @@ def _bytes_on_disk(entry: dict) -> int:
     return total
 
 
+# What the analysis of an R2 upload writes into its workspace
+# (_run_analyze_inner + pipeline.analyze_only): the downloaded source
+# (S); normalized.mp4, the mezz (M: libx264 crf 18 "fast" at the job's
+# resolution, 1080p by default — its size follows the length and the
+# resolution, not the upload); the 720p proxy (same pass) and the cut
+# preview. The source is deleted right after the normalize
+# (on_normalized), so the peak is S + M (normalizing) or M + M' (SmartCam
+# writing its reframed copy next to the mezz), plus proxy + preview:
+# max(S, M) + M + small (S + M + small without SmartCam).
+# Measured (10 s clips through _normalize_orientation, 1080p mezz):
+# 4K30 / 4K60 HEVC phone clips (46 / 56 Mbit/s) → 9–11 Mbit/s mezz (0.2×
+# the upload); 1080p30 H.264 16 Mbit/s → 15; 1080p60 HEVC 18 → 16; a
+# pathological 1080p60 of pure sensor noise 33 → 45; proxy ≤ 0.6.
+# CLEO_DISK_MEZZ_MBPS (40) is M's ceiling at 1080p (scaled by pixel area
+# for 1440p / 4K jobs), CLEO_DISK_PREVIEW_MBPS (10) that of proxy +
+# preview together. Without a known length (a legacy body upload, a
+# streamed WebM) the need stays the old CLEO_DISK_FACTOR × S, and it is
+# never more than that either.
+_RES_SIDE = {"1080": 1920, "1440": 2560, "2160": 3840, "4k": 3840}
+
+
+def _disk_factor() -> float:
+    return _env_float("CLEO_DISK_FACTOR", 3.5)
+
+
+def _disk_mezz_mbps() -> float:
+    return _env_float("CLEO_DISK_MEZZ_MBPS", 40)
+
+
+def _disk_preview_mbps() -> float:
+    return _env_float("CLEO_DISK_PREVIEW_MBPS", 10)
+
+
+def _disk_need(size: float | None, seconds: float | None = None,
+               resolution: Any = None, smartcam: bool = True) -> float:
+    """Bytes the analysis of an upload of `size` bytes and `seconds`
+    length writes at its peak (see above); `smartcam` False (the job's
+    settings ask for no reframe): no second mezz, S + M + small."""
+    size = max(0.0, float(size or 0.0))
+    legacy = _disk_factor() * size
+    try:
+        secs = float(seconds or 0.0)
+    except (TypeError, ValueError):
+        secs = 0.0
+    if not (secs > 0 and math.isfinite(secs)):
+        return legacy
+    side = _RES_SIDE.get(str(resolution or "1080").strip().lower(), 1920)
+    mezz = (secs * _disk_mezz_mbps() * 1e6 / 8
+            * (side / 1920) ** 2)
+    small = secs * _disk_preview_mbps() * 1e6 / 8
+    peak = (max(size, mezz) + mezz) if smartcam else size + mezz
+    return min(legacy, peak + small)
+
+
+class DiskRefusal(HTTPException):
+    """507 server_storage_full (the same body as before) with the numbers
+    behind it, for the upload_refused event — never sent to the client."""
+
+    def __init__(self, free: float, reserved: float, need: float) -> None:
+        super().__init__(507, "server_storage_full")
+        self.free, self.reserved, self.need = free, reserved, need
+
+
+def _upload_entry_ttl_s() -> float:
+    """An upload being accepted (kind "upload", no thread) older than
+    this is a leftover (CLEO_UPLOAD_ENTRY_TTL_S, default 2 h; 0 = never
+    swept): POST /jobs releases its entry in a finally, within seconds."""
+    return _env_float("CLEO_UPLOAD_ENTRY_TTL_S", 7200)
+
+
 class _Inflight:
     """This process's work in flight, per owner: uploads being accepted
     by POST /jobs (kind "upload") and analysis / render worker threads.
     Feeds the per-user limit, the queue cap, queue-position hints and
     the disk reservations. Entries of worker threads drop out by
-    themselves once the thread has ended."""
+    themselves once the thread has ended; thread-less ones when released
+    — or, should one ever be left behind, after _upload_entry_ttl_s (it
+    would otherwise count against the queue cap and hold its disk
+    reservation against every upload until a restart)."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._entries: dict[str, dict] = {}
 
     def _live(self) -> list[dict]:
+        now = time.monotonic()
+        ttl = _upload_entry_ttl_s()
         dead = [k for k, e in self._entries.items()
-                if e["thread"] is not None and not e["thread"].is_alive()]
+                if (e["thread"] is not None and not e["thread"].is_alive())
+                or (e["thread"] is None and ttl > 0
+                    and now - e.get("at", now) > ttl)]
         for k in dead:
-            del self._entries[k]
+            e = self._entries.pop(k)
+            if e["thread"] is None:
+                print(f"[jobs] dropped a stale {e['kind'] or 'upload'} "
+                      f"entry ({now - e.get('at', now):.0f} s old, "
+                      f"{e['need'] / 1e9:.1f} GB reserved)", flush=True)
         return list(self._entries.values())
 
     @staticmethod
     def _entry(owner: str | None, kind: str) -> dict:
         return {"owner": owner, "kind": kind, "thread": None, "need": 0.0,
-                "upload": None, "job_id": None}
+                "upload": None, "job_id": None, "at": time.monotonic()}
 
     def _check(self, user: User | None) -> None:
         live = self._live()
@@ -492,37 +573,94 @@ class _Inflight:
             return token
 
     def reserve_disk(self, token: str | None, size: float,
-                     upload_path: str | None = None) -> None:
-        """Size-aware free-space check: CLEO_DISK_FACTOR (3.5) × the
-        upload must fit beside what the other jobs in flight will still
-        write, plus the CLEO_MIN_FREE_GB floor — so parallel uploads
-        can't all pass the same check. Recorded under `token` (None =
-        only check, for presign). Raises 507 server_storage_full."""
-        need = _env_float("CLEO_DISK_FACTOR", 3.5) * max(0.0, size or 0.0)
-        # The filesystem is scanned WITHOUT the lock: the event loop takes
-        # it too (admit / attach / release), and a scan per entry per
-        # upload under it turned a burst of uploads into loop stalls.
+                     upload_path: str | None = None,
+                     seconds: float | None = None,
+                     resolution: Any = None,
+                     smartcam: bool = True) -> None:
+        """Size-aware free-space check: what the upload's analysis will
+        write (_disk_need: from its length and resolution when known,
+        else CLEO_DISK_FACTOR (3.5) × the upload) must fit beside what
+        the other jobs in flight will still write, plus the
+        CLEO_MIN_FREE_GB floor — so parallel uploads can't all pass the
+        same check. The editor's proxy cache (on the same disk) is
+        emptied first when that makes it fit. Recorded under `token`
+        (None = only check, for presign / multipart init). Raises 507
+        server_storage_full (DiskRefusal)."""
+        need = _disk_need(size, seconds, resolution, smartcam)
+        for attempt in (1, 2):
+            # The filesystem is scanned WITHOUT the lock: the event loop
+            # takes it too (admit / attach / release), and a scan per
+            # entry per upload under it turned a burst of uploads into
+            # loop stalls.
+            with self._lock:
+                self._live()
+                snapshot = [e for k, e in self._entries.items()
+                            if k != token]
+            written = {id(e): _bytes_on_disk(e) for e in snapshot}
+            # Where the analysis writes: its workspace (CLEO_TMP_ROOT).
+            free = shutil.disk_usage(_TMP_ROOT).free
+            with self._lock:
+                # Entries that came in meanwhile count in full; bytes
+                # written since the scan are both in `free` and in the
+                # reservations, so the stale numbers still add up.
+                others = sum(max(0.0, e["need"] - written.get(id(e), 0))
+                             for k, e in self._entries.items() if k != token)
+                short = need + _MIN_FREE_BYTES - (free - others)
+                if short <= 0:
+                    entry = self._entries.get(token) if token else None
+                    if entry is not None:
+                        entry["need"] = need
+                        entry["upload"] = upload_path
+                    return
+            # A cache, not work: give its room to the upload when that is
+            # enough (it refills from the media store on demand). Only
+            # for a real reservation: a check (token None) deletes
+            # nothing — it passes when the room could be made.
+            if attempt == 1 and token is None:
+                if _proxy_cache_reclaim(short, dry_run=True) >= short:
+                    return
+                break
+            if attempt == 1 and _proxy_cache_reclaim(short) >= short:
+                continue
+            break
+        print(f"[jobs] refusing upload: {free / 1e9:.1f} GB free, "
+              f"{others / 1e9:.1f} GB reserved, "
+              f"{need / 1e9:.1f} GB needed", flush=True)
+        raise DiskRefusal(free, others, need)
+
+    def room(self) -> tuple[float, float]:
+        """(free bytes on CLEO_TMP_ROOT, bytes the jobs in flight will
+        still write there) — reserve_disk's numbers, for reports."""
         with self._lock:
             self._live()
-            snapshot = [e for k, e in self._entries.items() if k != token]
-        written = {id(e): _bytes_on_disk(e) for e in snapshot}
-        # Where the analysis writes: its workspace (CLEO_TMP_ROOT).
-        free = shutil.disk_usage(_TMP_ROOT).free
+            snapshot = list(self._entries.values())
+        others = sum(max(0.0, e["need"] - _bytes_on_disk(e))
+                     for e in snapshot)
+        return float(shutil.disk_usage(_TMP_ROOT).free), others
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        """The live entries, for /admin/capacity and the upload_refused
+        events: kind, age, reservation, whether a worker thread runs —
+        no owners, no job ids."""
+        now = time.monotonic()
         with self._lock:
-            # Entries that came in meanwhile count in full; bytes written
-            # since the scan are both in `free` and in the reservations,
-            # so the stale numbers still add up.
-            others = sum(max(0.0, e["need"] - written.get(id(e), 0))
-                         for k, e in self._entries.items() if k != token)
-            if free - others < need + _MIN_FREE_BYTES:
-                print(f"[jobs] refusing upload: {free / 1e9:.1f} GB free, "
-                      f"{others / 1e9:.1f} GB reserved, "
-                      f"{need / 1e9:.1f} GB needed", flush=True)
-                raise HTTPException(507, "server_storage_full")
-            entry = self._entries.get(token) if token else None
-            if entry is not None:
-                entry["need"] = need
-                entry["upload"] = upload_path
+            live = self._live()
+            return [{"kind": e["kind"] or "upload",
+                     "age_s": round(now - e.get("at", now), 1),
+                     "need_gb": round(e["need"] / 1e9, 3),
+                     "has_thread": e["thread"] is not None}
+                    for e in live]
+
+    def counts(self) -> dict[str, Any]:
+        """Live entries per kind and their reservations in all (GB)."""
+        out: dict[str, Any] = {"n_upload": 0, "n_analyze": 0, "n_render": 0}
+        reserved = 0.0
+        for e in self.snapshot():
+            key = f"n_{e['kind']}"
+            out[key] = out.get(key, 0) + 1
+            reserved += e["need_gb"]
+        out["reserved_gb"] = round(reserved, 3)
+        return out
 
     def attach(self, token: str, job_id: str,
                thread: threading.Thread) -> None:
@@ -2267,9 +2405,10 @@ def _length_gate(job: Job, input_path: str,
             if ent is not None:
                 changed["plan"] = ent.plan
             if enforce:
-                settings["_max_seconds"] = (
-                    math.ceil(max(seconds or 0.0, 0.0))
-                    + accounts.TRUE_UP_TOLERANCE_S)
+                task_worker.limit_to_length(settings, seconds or 0.0)
+        if seconds:
+            # Billed or not: the analysis stops at the measured length.
+            task_worker.limit_to_length(settings, seconds)
     _cap_settings(settings)
     if measure or charge or settings != (job.settings or {}):
         changed["settings"] = settings
@@ -2402,6 +2541,9 @@ def _run_analyze_inner(job_id: str) -> None:
     _register_active(job_id)
     progress: _ProgressWriter | None = None
     ws = _workspace(job_id)
+    # Under the floor mid-analysis: this job stops (its ffmpeg killed) as
+    # server_storage_full instead of filling the volume for every job.
+    guard = task_worker.DiskGuard(job_id, ws, _TMP_ROOT, _MIN_FREE_BYTES)
     work_started = time.time()
     try:
         job = _db_retry(job_id, "reading the job", store.get, job_id)
@@ -2450,7 +2592,10 @@ def _run_analyze_inner(job_id: str) -> None:
         extra: dict[str, Any] = {}
         if _accepts(analyze_only, "on_normalized"):
             extra["on_normalized"] = _drop_upload
+        if _accepts(analyze_only, "cancel_check"):
+            extra["cancel_check"] = guard.cancel_check()
         try:
+            guard.start()
             input_path = job.input_path
             if not input_path:
                 progress(errors.stage_message("analyze.normalize",
@@ -2463,25 +2608,31 @@ def _run_analyze_inner(job_id: str) -> None:
                         f"fetching the upload failed: "
                         f"{type(e).__name__}: {e}") from e
                 input_path = str(local_copy)
+            guard.check()
             settings = _length_gate(job, input_path, progress)
             res = analyze_only(
                 input_path=input_path,
                 output_dir=str(ws),
                 settings=settings,
-                progress_cb=progress,
+                progress_cb=guard.progress(progress),
                 **extra,
             )
+            guard.check()
             stored = _store_analysis(job_id, res, progress, where)
         except AnalysisRefused as e:
+            guard.stop()
             progress.close()
             _analysis_refused(job_id, ws, e, _drop_upload, media_entries,
                               where, source_key)
             return
         except Exception as e:
+            guard.stop()
             progress.close()
-            _analysis_failed(job_id, ws, e, _drop_upload, media_entries,
-                             where)
+            # Whatever the killed step raised: the disk was full.
+            _analysis_failed(job_id, ws, guard.error(e), _drop_upload,
+                             media_entries, where)
             return
+        guard.stop()
         progress.close()
         try:
             # Pause here: status "awaiting_review" tells the UI to show the
@@ -2557,6 +2708,7 @@ def _run_analyze_inner(job_id: str) -> None:
             # Committed: the upload object isn't needed any more.
             _discard_upload(None, source_key, where)
     finally:
+        guard.stop()
         if progress is not None:
             progress.close()
         shutil.rmtree(ws, ignore_errors=True)
@@ -2841,19 +2993,20 @@ def _queue_soft_check(user: User | None) -> None:
         raise _server_busy()
 
 
-def _queue_disk_check(size: float | None) -> None:
+def _queue_disk_check(size: float | None, seconds: float | None = None,
+                      resolution: Any = None, smartcam: bool = True) -> None:
     """Queue mode with the local ingest executor: could this upload's
-    analysis (CLEO_DISK_FACTOR × its size + CLEO_MIN_FREE_GB) fit on this
-    box at all? 507 otherwise. Each analysis also waits for room before
-    it is dispatched (_QueueOps.local_room). Nothing with Modal."""
+    analysis (_disk_need + CLEO_MIN_FREE_GB) fit on this box at all? 507
+    otherwise. Each analysis also waits for room before it is dispatched
+    (_QueueOps.local_room). Nothing with Modal."""
     if taskq.executor("ingest") != "local":
         return
-    need = _env_float("CLEO_DISK_FACTOR", 3.5) * max(0.0, size or 0.0)
+    need = _disk_need(size, seconds, resolution, smartcam)
     free = shutil.disk_usage(_TMP_ROOT).free
     if free < need + _MIN_FREE_BYTES:
         print(f"[jobs] refusing upload: {free / 1e9:.1f} GB free, "
               f"{need / 1e9:.1f} GB needed", flush=True)
-        raise HTTPException(507, "server_storage_full")
+        raise DiskRefusal(free, 0.0, need)
 
 
 def _queue_position_now(task_id: int | None, kind: str) -> int | None:
@@ -2882,7 +3035,11 @@ def _queue_admit(job_id: str, user: User | None, parsed: dict, plan: str,
                "source_key": source_key, "charged_s": seconds,
                "max_seconds": parsed.get("_max_seconds"),
                "est_audio_s": taskq.est_audio_s(charged),
-               "size": float(size or 0.0)}
+               "size": float(size or 0.0),
+               # What _disk_need sized the admission by (local_room
+               # dispatches by the same formula).
+               "resolution": parsed.get("resolution"),
+               "smartcam": bool(pipeline.smartcam_plan(parsed)[0])}
     fields = dict(settings=parsed, plan=plan, status="processing",
                   **errors.stage("queued"), progress=0.0, queue_position=None)
     return _tasks().admit_ingest(
@@ -3184,15 +3341,17 @@ class _QueueOps:
 
     def local_room(self, tasks: list[taskq.Task]) -> int:
         """How many of these analyses (in order) fit on this box's disk
-        now: CLEO_DISK_FACTOR × the upload + CLEO_MIN_FREE_GB each."""
-        factor = _env_float("CLEO_DISK_FACTOR", 3.5)
+        now: _disk_need (by its length when charged_s is known, else
+        CLEO_DISK_FACTOR × the upload) + CLEO_MIN_FREE_GB each."""
         try:
             free = shutil.disk_usage(_TMP_ROOT).free
         except OSError:
             return len(tasks)
         n = 0
         for t in tasks:
-            need = factor * float((t.payload or {}).get("size") or 0.0)
+            p = t.payload or {}
+            need = _disk_need(float(p.get("size") or 0.0), p.get("charged_s"),
+                              p.get("resolution"), p.get("smartcam", True))
             if free - need < _MIN_FREE_BYTES:
                 break
             free -= need
@@ -3367,9 +3526,12 @@ def _storage_call(what: str, fn: Callable, *args: Any) -> Any:
 # 0 = no limit): each one is an open upload in R2 (Class-A operations,
 # parts kept until the lifecycle rule aborts it, 8 days later) — POST
 # /jobs's admission doesn't see them. Per user; per client address with
-# auth off. In-process (one uvicorn process).
+# auth off. In-process (one uvicorn process). Default 60: a resume or a
+# retry of a stopped upload continues its saved ticket (no init), so
+# only new picks count — and testing resume / retry by hand must never
+# run into it.
 def _init_limit() -> int:
-    return max(0, _env_int("CLEO_UPLOAD_INITS_PER_HOUR", 30))
+    return max(0, _env_int("CLEO_UPLOAD_INITS_PER_HOUR", 60))
 
 
 _INIT_RATE = upl.RateLimit(_init_limit(), 3600.0)
@@ -3407,28 +3569,113 @@ def _upload_ttl_s(now: float | None = None) -> int:
     return ttl
 
 
-def _check_init_rate(user: User | None, request: Request) -> None:
+def _check_init_rate(user: User | None, request: Request) -> str | None:
+    """Count one multipart init of this caller (429 too_many_uploads past
+    the limit). Returns the key it was counted under (None: no limit),
+    for _INIT_RATE.refund when the init then fails."""
     limit = _init_limit()
     if limit <= 0:
-        return
+        return None
     _INIT_RATE.limit = limit
     who = (f"u:{user.id}" if user is not None
            else f"ip:{request.client.host if request.client else ''}")
     if not _INIT_RATE.allow(who):
         raise ApiRefusal(429, "too_many_uploads",
                          headers={"Retry-After": "600"})
+    return who
+
+
+# ── Upload refusals, recorded ────────────────────────────────────────
+# Every refusal of the upload routes (multipart init / sign / complete,
+# presign, POST /jobs) is one upload_refused row in job_events (kept
+# EVENTS_KEEP_DAYS; GET /admin/capacity shows the newest): the code, the
+# upload's size and length, the disk numbers and what is in flight here
+# — so a refusal on production can be explained afterwards without the
+# logs. Identity only as a keyed hash ("who"), like no other user data.
+# At most 120 rows a minute (a refusal loop can't flood the table).
+_REFUSAL_EVENTS = upl.RateLimit(120, 60.0)
+# Answers of the upload protocol's normal flow, not refusals.
+_NOT_REFUSALS = frozenset({"use_single_put", "parts_missing"})
+
+
+def _who(user: User | None) -> str:
+    """A stable, non-reversible tag of the caller for upload_refused."""
+    if user is None:
+        return "anon"
+    if user.is_service:
+        return "service"
+    try:
+        secret = _ticket_secret()
+    except Exception:
+        secret = "cleo-upload-refusals"
+    return hmac.new(secret.encode(), f"refusal:{user.id}".encode(),
+                    hashlib.sha256).hexdigest()[:12]
+
+
+def _gb(n: float | None) -> float | None:
+    return None if n is None else round(float(n) / 1e9, 3)
+
+
+def _record_refusal(where: str, exc: BaseException, user: User | None,
+                    size: float | None = None,
+                    seconds: float | None = None) -> None:
+    """One upload_refused event for `exc` (an ApiRefusal / HTTPException
+    an upload route answers with). Never raises."""
+    try:
+        status = int(getattr(exc, "status", None)
+                     or getattr(exc, "status_code", 0) or 0)
+        code, _ = errors.http_code(status, getattr(exc, "detail", None))
+        if status < 400 or status == 401 or code in _NOT_REFUSALS:
+            return
+        if not _REFUSAL_EVENTS.allow("all"):
+            return
+        data: dict[str, Any] = {
+            "where": where, "code": code, "status": status,
+            "size_gb": _gb(size) if size else None,
+            "seconds": round(float(seconds), 1) if seconds else None,
+            "who": _who(user), **_INFLIGHT.counts()}
+        if isinstance(exc, DiskRefusal):
+            data.update(free_gb=_gb(exc.free), reserved_gb=_gb(exc.reserved),
+                        need_gb=_gb(exc.need))
+        else:
+            try:
+                data["free_gb"] = _gb(shutil.disk_usage(_TMP_ROOT).free)
+            except OSError:
+                pass
+        _record_event("upload_refused", None, test=False, **data)
+    except Exception as e:
+        print(f"[events] upload_refused not recorded: {e}", flush=True)
+
+
+@contextmanager
+def _refusals(where: str, user: User | None, size: Any = None,
+              seconds: Any = None):
+    """Record the refusal a (sync) upload route raises, then re-raise."""
+    try:
+        yield
+    except (ApiRefusal, HTTPException) as e:
+        _record_refusal(where, e, user, _to_float(size or 0) or None,
+                        _to_float(seconds or 0) or None)
+        raise
 
 
 @app.post("/uploads/multipart/init")
 def multipart_init(payload: dict, request: Request,
                    user: User | None = Depends(current_user)):
-    """Start a resumable upload: {filename, content_type, size, duration?}
-    → {ticket, storage_key, part_size, parts_total, expires_at, parts:
-    [{part_number, url}] (the first up to 8)}. Refuses like
-    /uploads/presign, in the same order: 402, 413, 429 / 503 server_busy,
-    507, 503 without R2; then 429 too_many_uploads (+ Retry-After) past
-    CLEO_UPLOAD_INITS_PER_HOUR; 409 use_single_put unless
-    CLEO_UPLOAD_MODE=multipart."""
+    """Start a resumable upload: {filename, content_type, size, duration?,
+    resolution?} → {ticket, storage_key, part_size, parts_total,
+    expires_at, parts: [{part_number, url}] (the first up to 8)}. Refuses
+    like /uploads/presign, in the same order: 402, 413, 429 / 503
+    server_busy, 507, 503 without R2; then 429 too_many_uploads (+
+    Retry-After) past CLEO_UPLOAD_INITS_PER_HOUR (an init that fails
+    after it doesn't count); 409 use_single_put unless
+    CLEO_UPLOAD_MODE=multipart. A resume never inits again (/parts with
+    the saved ticket)."""
+    with _refusals("init", user, payload.get("size"), payload.get("duration")):
+        return _multipart_init(payload, request, user)
+
+
+def _multipart_init(payload: dict, request: Request, user: User | None):
     from backend import storage
     _require_multipart()
     duration = _to_float(payload.get("duration") or 0)
@@ -3440,20 +3687,27 @@ def multipart_init(payload: dict, request: Request,
         raise _video_too_long()
     if taskq.enabled():
         _queue_soft_check(user)
-        _queue_disk_check(size)
+        _queue_disk_check(size, duration or None, payload.get("resolution"))
     else:
         _INFLIGHT.check(user)
-        _INFLIGHT.reserve_disk(None, size)
+        _INFLIGHT.reserve_disk(None, size, seconds=duration or None,
+                               resolution=payload.get("resolution"))
     if not storage.r2_available():
         raise _no_direct_upload()
-    _check_init_rate(user, request)
+    counted = _check_init_rate(user, request)
     size = int(size)
     ps, n = upl.part_plan(size)
     key = (auth.upload_prefix(user) + uuid.uuid4().hex
            + upl.upload_ext(payload.get("filename")))
     ct = upl.upload_content_type(payload.get("content_type"))
-    upload_id = _storage_call("CreateMultipartUpload", storage.mpu_create,
-                              key, ct)
+    try:
+        upload_id = _storage_call("CreateMultipartUpload",
+                                  storage.mpu_create, key, ct)
+    except BaseException:
+        # Nothing was opened: the caller's next try isn't one more upload.
+        if counted is not None:
+            _INIT_RATE.refund(counted)
+        raise
     exp = int(time.time() + _upload_ttl_s())
     ticket = upl.make_ticket(_ticket_secret(), {
         "u": _uid(user), "k": key, "id": upload_id, "s": size, "ps": ps,
@@ -3471,6 +3725,11 @@ def multipart_sign(payload: dict, user: User | None = Depends(current_user)):
     each URL signed for exactly that part's length, valid ≤ 6 h (the
     client signs again when a PUT answers 403). 409 use_single_put
     unless CLEO_UPLOAD_MODE=multipart."""
+    with _refusals("sign", user):
+        return _multipart_sign(payload, user)
+
+
+def _multipart_sign(payload: dict, user: User | None):
     _require_multipart()
     t = _read_ticket(payload, user)
     numbers = payload.get("part_numbers")
@@ -3526,6 +3785,11 @@ def multipart_complete(payload: dict,
     409 parts_missing + `missing` (≤ 100). The object must then have
     the announced size and fit the cap, else it is deleted → 413.
     Idempotent: an upload that is already complete answers the same."""
+    with _refusals("complete", user):
+        return _multipart_complete(payload, user)
+
+
+def _multipart_complete(payload: dict, user: User | None):
     from backend import storage
     t = _read_ticket(payload, user)
     done = {"storage_key": t["k"], "size": t["s"]}
@@ -3639,6 +3903,12 @@ def presign_upload_endpoint(
     + Retry-After) and too little disk for `size` (507). The 503 of a
     deployment without R2 has a different detail (not "server_busy").
     """
+    with _refusals("presign", user, payload.get("size"),
+                   payload.get("duration")):
+        return _presign_upload(payload, user)
+
+
+def _presign_upload(payload: dict, user: User | None):
     from backend.storage import r2_available, presign_upload
     # Paywall first, also without R2: the frontend falls back to the
     # legacy upload on 503, which would send the whole file before
@@ -3653,11 +3923,12 @@ def presign_upload_endpoint(
     if taskq.enabled():
         _queue_soft_check(user)
         if size > 0:
-            _queue_disk_check(size)
+            _queue_disk_check(size, duration or None, payload.get("resolution"))
     else:
         _INFLIGHT.check(user)
         if size > 0:
-            _INFLIGHT.reserve_disk(None, size)
+            _INFLIGHT.reserve_disk(None, size, seconds=duration or None,
+                                   resolution=payload.get("resolution"))
     if not r2_available():
         raise _no_direct_upload()
     filename = str(payload.get("filename") or "upload.mp4").strip()
@@ -3723,6 +3994,22 @@ async def create_job(
     slot the job comes back as status "processing", message "queued"
     with its queue_position.
     """
+    # The upload's size / length as far as known, for upload_refused.
+    ctx: dict[str, Any] = {"seconds": _to_float(duration or 0) or None}
+    try:
+        return await _create_job(file, settings, storage_key, filename,
+                                 preset_id, preset_label, duration, user, ctx)
+    except (ApiRefusal, HTTPException) as e:
+        await run_in_threadpool(_record_refusal, "jobs", e, user,
+                                ctx.get("size"), ctx.get("seconds"))
+        raise
+
+
+async def _create_job(file: UploadFile | None, settings: str,
+                      storage_key: str | None, filename: str | None,
+                      preset_id: str | None, preset_label: str | None,
+                      duration: str | None, user: User | None,
+                      ctx: dict[str, Any]) -> dict:
     try:
         parsed = json.loads(settings)
     except json.JSONDecodeError:
@@ -3737,7 +4024,7 @@ async def create_job(
                 400, "Either 'file' (multipart) or 'storage_key' (R2) required."
             )
         return await _accept_upload(parsed, file, None, filename, preset_id,
-                                    preset_label, user)
+                                    preset_label, user, ctx=ctx)
     client_duration = _to_float(duration or 0) or None
 
     # Only keys we handed this caller out (presign) — any other key
@@ -3759,7 +4046,7 @@ async def create_job(
             return {"job_id": existing.id, **existing.to_dict()}
         return await _accept_upload(parsed, None, storage_key, filename,
                                     preset_id, preset_label, user,
-                                    client_duration)
+                                    client_duration, ctx=ctx)
     finally:
         _CREATING_KEYS.pop(storage_key, None)
         claim.set()
@@ -3843,9 +4130,11 @@ async def _accept_upload(
     preset_label: str | None,
     user: User | None,
     client_duration: float | None = None,
+    ctx: dict[str, Any] | None = None,
 ) -> dict:
     """POST /jobs after the settings / key checks: admission, caps,
-    duration, charge, job row, analysis thread.
+    duration, charge, job row, analysis thread. `ctx` gets the upload's
+    size and length as they become known (for upload_refused).
 
     storage_key (the browser uploaded to R2): nothing is downloaded here
     — HEAD for the size, the length from the container header over a
@@ -3861,13 +4150,7 @@ async def _accept_upload(
         await run_in_threadpool(_discard_upload, None, storage_key)
         raise _quota_error("subscription_required")
 
-    # 429 / 503 before anything moves; the upload is kept for a retry.
-    queue = taskq.enabled()
-    token: str | None = None
-    if queue:
-        await run_in_threadpool(_queue_soft_check, user)
-    else:
-        token = _INFLIGHT.admit(user)
+    ctx = {} if ctx is None else ctx
     refusal: str | None = None
     input_path: str | None = None
     # Our own copy of a legacy body in the media store: dropped on any
@@ -3875,6 +4158,14 @@ async def _accept_upload(
     own_key: str | None = None
     job_id = new_job_id()
     job = None
+    # 429 / 503 before anything moves; the upload is kept for a retry.
+    queue = taskq.enabled()
+    token: str | None = None
+    if queue:
+        await run_in_threadpool(_queue_soft_check, user)
+    else:
+        token = _INFLIGHT.admit(user)
+    # Nothing between admit and this try: its finally releases the token.
     try:
         if storage_key:
             try:
@@ -3885,20 +4176,30 @@ async def _accept_upload(
                                  headers={"Retry-After": "10"})
             if size is None:
                 raise ApiRefusal(409, "upload_incomplete")
+            ctx["size"] = size
             if _too_big(size):
                 await run_in_threadpool(_discard_upload, None, storage_key)
                 raise _file_too_large()
-            # The analysis downloads + normalizes it in its workspace.
-            if queue:
-                await run_in_threadpool(_queue_disk_check, size)
-            else:
-                await run_in_threadpool(_INFLIGHT.reserve_disk, token, size,
-                                        None)
             seconds, has_audio, has_video = await _probe_upload(storage_key)
             if seconds is None and client_duration:
                 seconds = client_duration
+            if seconds:
+                ctx["seconds"] = seconds
+            # The analysis downloads + normalizes it in its workspace:
+            # sized by its length when known (_disk_need), so after the
+            # header probe; the upload stays for a retry on 507.
+            disk_seconds = seconds
+            disk = dict(seconds=seconds, resolution=parsed.get("resolution"),
+                        smartcam=pipeline.smartcam_plan(parsed)[0])
+            if queue:
+                await run_in_threadpool(functools.partial(
+                    _queue_disk_check, size, **disk))
+            else:
+                await run_in_threadpool(functools.partial(
+                    _INFLIGHT.reserve_disk, token, size, None, **disk))
         else:
             size = _upload_size(file)
+            ctx["size"] = size
             if _too_big(size):
                 raise _file_too_large()
             r2_media = media.is_r2()
@@ -3918,6 +4219,7 @@ async def _accept_upload(
                                         size or 0, input_path)
             await run_in_threadpool(_copy_upload, file, input_path)
             seconds = await run_in_threadpool(_probe_duration, input_path)
+            disk_seconds = seconds  # measured (packet scan): the cut too
             has_audio, has_video = await run_in_threadpool(_probe_streams,
                                                            input_path)
 
@@ -4025,8 +4327,12 @@ async def _accept_upload(
                     # controls: analyse no more than was charged (+ the
                     # true-up tolerance), or a file claiming 1 s would be
                     # transcribed in full, however long it really is.
-                    parsed["_max_seconds"] = (math.ceil(max(seconds, 0.0))
-                                              + accounts.TRUE_UP_TOLERANCE_S)
+                    task_worker.limit_to_length(parsed, seconds)
+            if disk_seconds:
+                # Billed or not: the disk was reserved for this length
+                # (_disk_need), the uploader's claim — the analysis
+                # (mezz, proxy, transcript) stops there.
+                task_worker.limit_to_length(parsed, disk_seconds)
             # Never more than CLEO_MAX_MINUTES, billed or not: the length
             # this was accepted with may be the uploader's claim.
             _cap_settings(parsed)
@@ -4723,12 +5029,14 @@ def _filmstrip_lazy(job_id: str) -> bool:
         return True
     if not (job.proxy_key or job.mezz_key):
         raise FileNotFoundError(f"job {job_id} has no stored video")
-    source = _cached_proxy(job)
     ws = _make_workspace(_workspace(job_id,
                                     f"filmstrip-{uuid.uuid4().hex[:8]}"))
     try:
         out = ws / pipeline.FILMSTRIP_NAME
-        meta = pipeline.make_filmstrip(source, str(out), job.duration or None)
+        with _proxy_in_use(job_id):
+            source = _cached_proxy(job)
+            meta = pipeline.make_filmstrip(source, str(out),
+                                           job.duration or None)
         if not meta:
             raise RuntimeError("the sprite could not be made")
         where = media.store_of(job)
@@ -5252,6 +5560,90 @@ def admin_queue(x_admin_token: str = Header(default="")):
     return queue_stats()
 
 
+# The limits GET /admin/capacity shows (as in effect: the env value, else
+# the default the code uses).
+_CAPACITY_LIMITS: dict[str, Callable[[], Any]] = {
+    "CLEO_DISK_FACTOR": _disk_factor,
+    "CLEO_DISK_MEZZ_MBPS": _disk_mezz_mbps,
+    "CLEO_DISK_PREVIEW_MBPS": _disk_preview_mbps,
+    "CLEO_MIN_FREE_GB": lambda: _MIN_FREE_BYTES / 1e9,
+    "CLEO_MAX_UPLOAD_GB": _max_upload_gb,
+    "CLEO_MAX_MINUTES": _max_minutes,
+    "CLEO_MAX_QUEUE": lambda: _env_int("CLEO_MAX_QUEUE", 20),
+    "CLEO_MAX_ANALYZE": lambda: _ANALYZE_SLOTS.limit(),
+    "CLEO_MAX_RENDER": lambda: _RENDER_SLOTS.limit(),
+    "CLEO_MAX_ACTIVE_PER_USER": lambda: _env_int("CLEO_MAX_ACTIVE_PER_USER", 2),
+    "CLEO_UPLOAD_INITS_PER_HOUR": _init_limit,
+    "CLEO_UPLOAD_ENTRY_TTL_S": _upload_entry_ttl_s,
+    "CLEO_PROXY_CACHE_GB": lambda: _env_float("CLEO_PROXY_CACHE_GB", 5),
+    "CLEO_UPLOAD_MODE": _upload_mode,
+    "CLEO_TASK_QUEUE": lambda: taskq.enabled(),
+}
+_REFUSAL_FIELDS = ("where", "code", "status", "size_gb", "seconds",
+                   "free_gb", "reserved_gb", "need_gb", "n_upload",
+                   "n_analyze", "n_render", "who")
+
+
+def _disk_of(path: Path) -> dict[str, Any]:
+    try:
+        u = shutil.disk_usage(path)
+    except OSError as e:
+        return {"error": type(e).__name__}
+    return {"total_gb": _gb(u.total), "used_gb": _gb(u.used),
+            "free_gb": _gb(u.free)}
+
+
+def capacity_report(now: float | None = None) -> dict[str, Any]:
+    """GET /admin/capacity: the numbers behind upload refusals."""
+    now = time.time() if now is None else now
+    try:
+        same = os.stat(_TMP_ROOT).st_dev == os.stat(_WORK_ROOT).st_dev
+    except OSError:
+        same = None
+    free, others = _INFLIGHT.room()
+    room = free - others - _MIN_FREE_BYTES
+    # What fits right now, for a 10-minute video of these sizes (1080p).
+    fits = [{"size_gb": s, "minutes": 10,
+             "need_gb": _gb(_disk_need(s * 1e9, 600)),
+             "fits": _disk_need(s * 1e9, 600) <= room}
+            for s in (0.5, 1, 2, 3, 4)]
+    # Counts per code over each whole window (grouped in the database),
+    # and the 50 newest refusals (newest first).
+    by_code = {label: store.event_counts(now - span, "upload_refused",
+                                         "code")
+               for label, span in (("24h", 86400), ("7d", 7 * 86400))}
+    events = store.events(now - EVENTS_KEEP_DAYS * 86400,
+                          kinds=["upload_refused"], limit=50, newest=True)
+    recent = [{"at": e["at"], "age_s": round(now - e["at"]),
+               **{k: (e.get("data") or {}).get(k) for k in _REFUSAL_FIELDS}}
+              for e in events]
+    return {
+        "tmp_root": {"same_disk_as_work_root": same, **_disk_of(_TMP_ROOT)},
+        "work_root": _disk_of(_WORK_ROOT),
+        "reserved_gb": _gb(others),
+        "room_gb": _gb(room),
+        "proxy_cache_gb": _gb(_proxy_cache_bytes()),
+        "fits_now": fits,
+        "inflight": {**_INFLIGHT.counts(), "entries": _INFLIGHT.snapshot()},
+        "init_rate": {"limit_per_hour": _init_limit(), **_INIT_RATE.stats()},
+        "limits": {k: f() for k, f in _CAPACITY_LIMITS.items()},
+        "refusals": {"by_code": by_code, "recent": recent},
+    }
+
+
+@app.get("/admin/capacity")
+def admin_capacity(x_admin_token: str = Header(default="")):
+    """Why uploads are refused: disk total / free of CLEO_TMP_ROOT (and
+    the work root), what the jobs in flight reserve, what a 10-minute
+    upload of 0.5–4 GB needs and whether it fits now, the _Inflight
+    entries (kind, age, reservation, thread), the multipart-init rate
+    state, the CLEO_* limits in effect and the newest 50 upload_refused
+    events with counts per code. Admin only (see /admin/costs);
+    .github/workflows/ops-inspect.yml prints it."""
+    _require_admin(x_admin_token)
+    return capacity_report()
+
+
 @app.post("/admin/sentry-test")
 def admin_sentry_test(x_admin_token: str = Header(default="")):
     """Send a test error to Sentry — the check that error reports arrive
@@ -5531,6 +5923,31 @@ def _effect(value, default: float, lo: float, hi: float) -> float:
 
 _PROXY_CACHE_LOCKS: dict[str, threading.Lock] = {}
 _PROXY_CACHE_GUARD = threading.Lock()
+# Job ids whose cached proxy an ffmpeg call is reading right now (count
+# of readers, under _PROXY_CACHE_GUARD): never deleted from under it.
+_PROXY_IN_USE: dict[str, int] = {}
+
+
+@contextmanager
+def _proxy_in_use(job_id: str):
+    """Around _cached_proxy + the ffmpeg call reading it: the cached file
+    stays (_proxy_cache_reclaim / _proxy_cache_trim skip it)."""
+    with _PROXY_CACHE_GUARD:
+        _PROXY_IN_USE[job_id] = _PROXY_IN_USE.get(job_id, 0) + 1
+    try:
+        yield
+    finally:
+        with _PROXY_CACHE_GUARD:
+            n = _PROXY_IN_USE.get(job_id, 0) - 1
+            if n > 0:
+                _PROXY_IN_USE[job_id] = n
+            else:
+                _PROXY_IN_USE.pop(job_id, None)
+
+
+def _proxy_busy(path: Path) -> bool:
+    with _PROXY_CACHE_GUARD:
+        return _PROXY_IN_USE.get(path.stem, 0) > 0
 
 
 def _proxy_cache_dir() -> Path:
@@ -5561,10 +5978,79 @@ def _proxy_cache_trim(keep: Path) -> None:
     for _, size, path in entries:
         if total <= limit:
             break
-        if path == keep:
+        if path == keep or _proxy_busy(path):
             continue
         path.unlink(missing_ok=True)
         total -= size
+
+
+def _proxy_cache_files() -> list[tuple[float, int, Path]]:
+    """(mtime, size, path) of the cached proxies, oldest first."""
+    out = []
+    try:
+        paths = list(_proxy_cache_dir().glob("*.mp4"))
+    except OSError:
+        return []
+    for p in paths:
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        out.append((st.st_mtime, st.st_size, p))
+    return sorted(out, key=lambda e: e[0])
+
+
+def _proxy_cache_bytes() -> int:
+    return sum(size for _, size, _ in _proxy_cache_files())
+
+
+def _proxy_reclaim_min_age_s() -> float:
+    """A cached proxy used (fetched or read) more recently than this
+    (CLEO_PROXY_RECLAIM_MIN_AGE_S, 10 min) is an editor session going
+    on: never reclaimed for an upload."""
+    return _env_float("CLEO_PROXY_RECLAIM_MIN_AGE_S", 600)
+
+
+def _proxy_cache_reclaim(want: float, dry_run: bool = False) -> int:
+    """An upload's disk reservation is `want` bytes short: delete cached
+    proxies, oldest first, until that much is free — only when the cache
+    holds enough to make it fit (otherwise nothing goes). Never one read
+    right now (_proxy_in_use), used in the last
+    _proxy_reclaim_min_age_s, or being fetched (its _proxy_cache_lock is
+    taken for the delete). Returns the bytes freed; `dry_run` (a check
+    without a reservation: presign / multipart init) deletes nothing
+    and returns what could be freed."""
+    if want <= 0:
+        return 0
+    cutoff = time.time() - _proxy_reclaim_min_age_s()
+    files = [(m, size, p) for m, size, p in _proxy_cache_files()
+             if m < cutoff and not _proxy_busy(p)
+             and not _proxy_cache_lock(p.stem).locked()]
+    reclaimable = sum(size for _, size, _ in files)
+    if reclaimable < want:
+        return 0
+    if dry_run:
+        return reclaimable
+    freed = 0
+    for _, size, path in files:
+        if freed >= want:
+            break
+        lock = _proxy_cache_lock(path.stem)
+        if not lock.acquire(blocking=False):
+            continue   # being fetched / refreshed right now
+        try:
+            # Checked again under the lock: read or refreshed meanwhile.
+            if _proxy_busy(path) or path.stat().st_mtime >= cutoff:
+                continue
+            path.unlink()
+            freed += size
+        except OSError:
+            pass
+        finally:
+            lock.release()
+    print(f"[jobs] proxy cache: {freed / 1e9:.2f} GB freed for an upload",
+          flush=True)
+    return freed
 
 
 def _cached_proxy(job: Job) -> str:
@@ -5598,13 +6084,14 @@ def _rebuild_preview(job_id: str, source: str | None, segments) -> None:
     job = store.get(job_id)
     if job is None:
         raise FileNotFoundError(f"job {job_id} is gone")
-    if source is None:
-        source = _cached_proxy(job)
     ws = _make_workspace(_workspace(job_id,
                                     f"preview-{threading.get_ident()}"))
     try:
         out = ws / "preview.mp4"
-        _ffmpeg_cuts_preview(source, segments, str(out))
+        with _proxy_in_use(job_id):
+            if source is None:
+                source = _cached_proxy(job)
+            _ffmpeg_cuts_preview(source, segments, str(out))
         version = (job.preview_version or 0) + 1
         key = f"{media.job_prefix(job_id)}preview/v{version}.mp4"
         where = media.store_of(job)

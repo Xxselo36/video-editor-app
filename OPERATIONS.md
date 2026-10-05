@@ -263,6 +263,26 @@ Der Text der Annotation sagt, was fehlt:
 - **not configured / misconfigured**: Secret `CLEO_ADMIN_TOKEN` fehlt,
   oder das Secret `COST_ALERT_USD_PER_DAY` ist keine positive Zahl.
 
+## Uploads abgelehnt? ("Ops inspect")
+
+Jede Ablehnung der Upload-Routen (multipart init / sign / complete,
+presign, POST /jobs) wird als `upload_refused`-Event gespeichert: Code,
+Größe, Länge, freier Platz, Reservierungen, laufende Uploads/Analysen —
+ohne Nutzerdaten (nur ein Hash). Ansehen: GitHub → Actions → **Ops
+inspect (live backend)** → *Run workflow* (liest `GET /admin/capacity`
+mit dem Secret `CLEO_ADMIN_TOKEN`; das Log zeigt nur Zahlen und Codes).
+
+| Ausgabe | Bedeutung | Tun |
+|---|---|---|
+| `DISK: … server_storage_full`, `ROOM: … does not fit` | das Volume (`CLEO_TMP_ROOT`) ist für das Video zu klein | Railway-Volume vergrößern, oder `CLEO_TMP_ROOT` auf die Container-Platte legen (DEPLOY.md 10.6) |
+| `RATE: … too_many_uploads` | `CLEO_UPLOAD_INITS_PER_HOUR` erreicht | Limit anheben |
+| `QUEUE: … server_busy` | mehr als `CLEO_MAX_QUEUE` Analysen warten | `CLEO_MAX_ANALYZE` / Queue prüfen |
+| `LEAK?: …` | Upload-Plätze ohne Worker, älter als 10 min | verfallen nach `CLEO_UPLOAD_ENTRY_TTL_S` (2 h) von selbst |
+
+Eine Analyse, während der das Volume unter `CLEO_MIN_FREE_GB` fällt,
+bricht ab (ihr ffmpeg wird beendet) und endet als `server_storage_full`
+mit Rückerstattung — im Log `disk guard: … under the … GB floor`.
+
 ## Task-Warteschlange (WP4, nur mit `CLEO_TASK_QUEUE=1`)
 
 Die Warteschlange (DEPLOY.md Abschnitt 11) hat noch keinen eigenen

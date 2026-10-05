@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import re
 import threading
 import time
 import uuid
@@ -513,6 +514,13 @@ _EVENTS_DDL = (
     "CREATE INDEX IF NOT EXISTS job_events_kind_at ON job_events(kind, at)",
 )
 EVENTS_KEEP_DAYS = 90.0
+
+
+def event_field(field: str) -> str:
+    """A data key event_counts may group by: a plain identifier."""
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", field or ""):
+        raise ValueError(f"not an event field: {field!r}")
+    return field
 
 # WP4 task queue (backend/taskq.py): the same tables as Postgres
 # (backend/pg.py _SCHEMA_V5), in this connection, so a job write and its
@@ -1115,21 +1123,36 @@ class JobStore:
                 raise
 
     def events(self, since: float, kinds: Iterable[str] | None = None,
-               limit: int = 200_000) -> list[dict[str, Any]]:
-        """Events at or after `since` (of `kinds`), oldest first, as
-        {at, kind, job_id, data}."""
+               limit: int = 200_000, newest: bool = False
+               ) -> list[dict[str, Any]]:
+        """Events at or after `since` (of `kinds`), oldest first (newest
+        first with `newest`: the `limit` newest), as {at, kind, job_id,
+        data}."""
         kinds = list(kinds or ())
         sql = "SELECT at, kind, job_id, data FROM job_events WHERE at >= ?"
         args: list[Any] = [float(since)]
         if kinds:
             sql += f" AND kind IN ({','.join('?' for _ in kinds)})"
             args += kinds
-        sql += " ORDER BY at, id LIMIT ?"
+        sql += (" ORDER BY at DESC, id DESC LIMIT ?" if newest
+                else " ORDER BY at, id LIMIT ?")
         args.append(int(limit))
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
         return [event_row(r["at"], r["kind"], r["job_id"], r["data"])
                 for r in rows]
+
+    def event_counts(self, since: float, kind: str,
+                     field: str) -> dict[str, int]:
+        """How many `kind` events at or after `since` there are per value
+        of data[field] (a missing one counts as "None")."""
+        path = "$." + event_field(field)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT json_extract(data, ?) AS v, COUNT(*) AS n "
+                "FROM job_events WHERE kind = ? AND at >= ? GROUP BY v",
+                (path, kind, float(since))).fetchall()
+        return {str(r["v"]): int(r["n"]) for r in rows}
 
     def prune_events(self, before: float) -> int:
         """Delete events older than `before`; returns how many."""

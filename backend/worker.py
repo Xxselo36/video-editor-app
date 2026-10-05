@@ -150,6 +150,25 @@ def _too_long(seconds: float | None) -> bool:
             and seconds > _max_minutes() * 60 + 1)
 
 
+def limit_to_length(settings: dict, seconds: float) -> dict:
+    """settings["_max_seconds"] no higher than `seconds` (the length the
+    job was admitted / charged and its disk reserved for) + the true-up
+    tolerance, billed or not. That length is the container header or the
+    browser's reading — the uploader's claim — so without the cut a file
+    claiming 10 s but holding an hour would be normalized (and its disk
+    filled) in full. The analysis stops there (pipeline: -t on the
+    precheck, the mezz and the proxy; everything after works from the
+    mezz)."""
+    from backend import accounts
+    cap = math.ceil(max(float(seconds), 0.0)) + accounts.TRUE_UP_TOLERANCE_S
+    try:
+        cur = float(settings.get("_max_seconds") or 0) or None
+    except (TypeError, ValueError):
+        cur = None
+    settings["_max_seconds"] = cap if cur is None else min(cur, cap)
+    return settings
+
+
 def _cap_settings(settings: dict) -> dict:
     minutes = _max_minutes()
     cap = minutes * 60 + 1 if minutes > 0 else None
@@ -237,6 +256,136 @@ class _SpendLimitHold(Exception):
 
 class _SourceGone(FileNotFoundError):
     """The render source (mezz) is gone: rendering can't help."""
+
+
+# ── disk guard ───────────────────────────────────────────────────────
+
+
+class DiskGuardTripped(OSError):
+    """Free space on the analysis disk fell under the floor mid-analysis
+    (DiskGuard). Worded like a real ENOSPC, so it fails exactly like one
+    (server_storage_full, ours: refunded)."""
+
+
+class DiskGuard:
+    """Defence in depth under the disk reservation (backend/main.py
+    _disk_need): while an analysis runs, a thread checks the free space
+    of `root` every CLEO_DISK_GUARD_S (2 s). Under `floor` bytes it
+    trips: this job's ffmpeg processes (children of this process whose
+    command line names its workspace `ws`) are killed at once, and
+    check() / cancel_check() / the wrapped progress callback make the
+    analysis stop at its next step — the job fails with
+    server_storage_full instead of filling the volume for every other
+    job. `with DiskGuard(...) as guard:`; error(exc) is the exception to
+    report for a failure (DiskGuardTripped once tripped)."""
+
+    def __init__(self, job_id: str, ws: Path | str, root: Path | str,
+                 floor: float, interval: float | None = None) -> None:
+        self.job_id = job_id
+        self.ws = str(ws)
+        self.root = str(root)
+        self.floor = float(floor)
+        self.interval = (_env_float("CLEO_DISK_GUARD_S", 2.0)
+                         if interval is None else interval)
+        self.free_at_trip: float | None = None
+        self._tripped = threading.Event()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> "DiskGuard":
+        if self.interval > 0 and self._thread is None:
+            self._thread = threading.Thread(
+                target=self._loop, name=f"disk-guard-{self.job_id}",
+                daemon=True)
+            self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        """Idempotent."""
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+
+    def __enter__(self) -> "DiskGuard":
+        return self.start()
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.stop()
+
+    def _loop(self) -> None:
+        while not self._tripped.is_set():
+            self.poll()
+            if self._stop.wait(self.interval):
+                return
+
+    @property
+    def tripped(self) -> bool:
+        return self._tripped.is_set()
+
+    def poll(self) -> bool:
+        """One check of the free space; True when (now) tripped."""
+        if self._tripped.is_set():
+            return True
+        try:
+            free = shutil.disk_usage(self.root).free
+        except OSError:
+            return False
+        if free >= self.floor:
+            return False
+        self.free_at_trip = float(free)
+        self._tripped.set()
+        _log_error(f"[job {self.job_id}] disk guard: {free / 1e9:.2f} GB "
+                   f"free on {self.root}, under the {self.floor / 1e9:.2f} "
+                   "GB floor — stopping this analysis")
+        self._kill_children()
+        return True
+
+    def _kill_children(self) -> None:
+        try:
+            import psutil
+        except ImportError:
+            return
+        try:
+            children = psutil.Process().children(recursive=True)
+        except Exception:
+            return
+        for p in children:
+            try:
+                if self.ws in " ".join(p.cmdline()):
+                    p.kill()
+                    _log(f"[job {self.job_id}] disk guard: killed "
+                         f"{p.name()} ({p.pid})")
+            except Exception:
+                pass
+
+    def error(self, exc: BaseException | None = None) -> BaseException:
+        """What to report for a failure: DiskGuardTripped once tripped
+        (whatever the killed step raised), else `exc`."""
+        if not self._tripped.is_set():
+            assert exc is not None
+            return exc
+        free = (self.free_at_trip or 0.0) / 1e9
+        return DiskGuardTripped(
+            28, f"No space left on device: disk guard — {free:.2f} GB "
+                f"free, under the {self.floor / 1e9:.2f} GB floor")
+
+    def check(self) -> None:
+        """Raise DiskGuardTripped when tripped."""
+        if self._tripped.is_set():
+            raise self.error()
+
+    def cancel_check(self, other: Callable[[], bool] | None = None
+                     ) -> Callable[[], bool]:
+        """A cancel_check for analyze_only: tripped, or `other`."""
+        return lambda: self._tripped.is_set() or bool(other and other())
+
+    def progress(self, cb: Callable[[Any, float], None]
+                 ) -> Callable[[Any, float], None]:
+        """`cb`, raising DiskGuardTripped first once tripped."""
+        def wrapped(msg: Any, pct: float) -> None:
+            self.check()
+            cb(msg, pct)
+        return wrapped
 
 
 # ── progress ─────────────────────────────────────────────────────────
@@ -558,9 +707,10 @@ def _length_gate(ctx: Attempt, job: Any, input_path: str,
                 if ent is not None:
                     changed["plan"] = ent.plan
             if enforce:
-                settings["_max_seconds"] = (
-                    math.ceil(max(seconds or 0.0, 0.0))
-                    + accounts.TRUE_UP_TOLERANCE_S)
+                limit_to_length(settings, seconds or 0.0)
+        if seconds:
+            # Billed or not: the analysis stops at the measured length.
+            limit_to_length(settings, seconds)
     _cap_settings(settings)
     if measure or charge or settings != (job.settings or {}):
         changed["settings"] = settings
@@ -742,8 +892,10 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
             except OSError:
                 pass
 
+    guard = DiskGuard(job_id, ws, _get("tmp_root"),
+                      _env_float("CLEO_MIN_FREE_GB", 1.0) * 1e9)
     try:
-        with costs.tracking(job_id, "analyze"):
+        with costs.tracking(job_id, "analyze"), guard:
             try:
                 _fault_groq()
                 if not input_path:
@@ -760,24 +912,30 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
                     input_path = str(copy)
                 if ctx.cancelled():
                     raise InterruptedError("Cancelled")
+                guard.check()
                 settings = _length_gate(ctx, job, input_path, progress)
                 analyze = _get("analyze_only")
                 extra: dict[str, Any] = {}
                 if _accepts(analyze, "on_normalized"):
                     extra["on_normalized"] = _drop_local_copy
                 if _accepts(analyze, "cancel_check"):
-                    extra["cancel_check"] = ctx.cancelled
+                    extra["cancel_check"] = guard.cancel_check(ctx.cancelled)
                 with llm.observing(obs):
                     res = analyze(input_path=input_path, output_dir=str(ws),
-                                  settings=settings, progress_cb=progress,
+                                  settings=settings,
+                                  progress_cb=guard.progress(progress),
                                   **extra)
                 if ctx.cancelled():
                     raise InterruptedError("Cancelled")
+                guard.check()
                 if obs.spend_limit and not degraded:
                     raise _SpendLimitHold(obs.detail or "spend limit")
                 stored = _store_analysis(ctx, job_id, res, progress, where)
             except Exception as e:
                 progress.close()
+                if guard.tripped and not ctx.cancelled():
+                    # Whatever the killed step raised: the disk was full.
+                    e = guard.error(e)
                 return _ingest_failure(ctx, e, ws)
             progress.close()
             fields = dict(

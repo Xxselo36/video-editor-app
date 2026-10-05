@@ -387,6 +387,8 @@ def test_init_refusals_in_presign_order(client, r2, enforce, bearer,
     assert r.headers["retry-after"] == "120"
     monkeypatch.setenv("CLEO_MAX_QUEUE", "20")
     monkeypatch.setenv("CLEO_DISK_FACTOR", "1e12")
+    # (with a length the need is the realistic one — test_capacity.py)
+    monkeypatch.setenv("CLEO_DISK_MEZZ_MBPS", "1e12")
     r = _init(client, 10, headers=h, duration=10)
     assert (r.status_code, r.json()) == (507, {"detail": "server_storage_full", "code": "server_storage_full", "params": {}})
     monkeypatch.setenv("CLEO_DISK_FACTOR", "0")

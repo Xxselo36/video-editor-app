@@ -103,8 +103,10 @@ def test_headerless_upload_within_the_cap_is_analysed_capped(client,
     M._run_analyze_inner(job_id)
     got = store.get(job_id)
     assert got.status == "awaiting_review"
-    assert headerless.analysed == [{"_max_seconds": 30 * 60 + 1}]
-    assert got.settings == {"_max_seconds": 30 * 60 + 1}   # flags gone
+    # Stops at the measured length (+ the true-up tolerance), billed or
+    # not; the flags are gone.
+    assert headerless.analysed == [{"_max_seconds": 12 + 5}]
+    assert got.settings == {"_max_seconds": 12 + 5}
 
 
 def test_every_analysis_is_capped_even_an_old_job(headerless, r2):

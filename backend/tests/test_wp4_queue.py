@@ -1095,3 +1095,51 @@ def test_postgres_patch_status_merges(pg_tasks_db):
         "x", 5.0, [{"text": "keep"}])
     st.update(job.id, status="error")
     assert not st.patch_status(job.id, ("processing",), message="late")
+
+
+def test_a_full_disk_mid_analysis_is_storage_full_and_refunded(
+        leader, analysis, auth_on, monkeypatch):
+    """The disk guard in the worker: under CLEO_MIN_FREE_GB mid-analysis
+    the attempt stops like a real ENOSPC (infra: retried, then dead with
+    server_storage_full and one refund). Dispatch itself still sees room
+    (local_room): the disk only fills while an analysis runs."""
+    monkeypatch.setenv("CLEO_DISK_GUARD_S", "0.02")
+    monkeypatch.setattr(M, "_MIN_FREE_BYTES", 1e9)
+    monkeypatch.setenv("CLEO_MIN_FREE_GB", "1")
+    state = {"low": False}
+    real = M.shutil.disk_usage
+
+    def usage(path):
+        u = real(path)
+        free = int(0.3e9) if state["low"] else int(50e9)
+        return u._replace(total=int(100e9), free=free,
+                          used=int(100e9) - free)
+    monkeypatch.setattr(M.shutil, "disk_usage", usage)
+    stopped = []
+
+    def analyze(input_path, output_dir, settings, progress_cb, **kw):
+        state["low"] = True
+        try:
+            end = time.monotonic() + 10
+            while time.monotonic() < end:
+                progress_cb("Analyzing audio…", 20)   # raises once tripped
+                time.sleep(0.01)
+            raise AssertionError("the guard never stopped the analysis")
+        except worker.DiskGuardTripped:
+            stopped.append(output_dir)
+            raise
+        finally:
+            state["low"] = False
+    monkeypatch.setattr(M, "analyze_only", analyze)
+    job, tid = _upload_job(owner="user_a", seconds=40)
+    _settle(leader)
+    t = ts().get(tid)
+    assert (t.state, t.attempts) == ("dead", t.max_attempts)
+    assert len(stopped) == t.max_attempts
+    got = store.get(job.id)
+    assert got.status == "error" and got.refunded is True
+    assert got.error_code == "server_storage_full", got.error
+    assert accounts.get_usage(job.id)["refunded"]
+    # The event names the queue's outcome (infra, retried to the end).
+    [ev] = _events("analysis_failed")
+    assert ev["data"]["code"] == "attempts_exhausted"
