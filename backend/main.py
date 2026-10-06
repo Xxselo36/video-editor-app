@@ -2860,7 +2860,7 @@ def _run_render_inner(
                                                       job.language))
             mezz_key = job.mezz_key or _backfill_mezz(job, progress, where)
             # UT4: pins the job's caption engine at its first render;
-            # a v2 spec only with CLEO_CAPTION_ENGINE=v2.
+            # a v2 spec only when captions_v2.decide() says so.
             captions = captions_v2.prepare_render(store, job_id, job,
                                                   edited_subtitles)
             result = pipeline.render_to_keys(
@@ -7107,7 +7107,7 @@ def post_render(job_id: str, payload: dict,
 
     if v2:
         _render_caps(job, user)
-    # UT4 opt-in (CLEO_CAPTION_ENGINE unset or optin): this request's
+    # UT4 opt-in (CLEO_CAPTION_ENGINE=optin): this request's
     # "caption_engine": "v2" asks for the v2 captions at the job's first
     # render. Kept on the job before the render starts; ignored in the
     # other modes and once the job's engine is pinned.

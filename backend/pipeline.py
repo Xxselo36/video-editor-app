@@ -3604,8 +3604,8 @@ def _try_modal_render_r2(
                     segment_effects=list(effects), hooks=list(hooks),
                     bucket=storage.bucket(),
                     # Only for v2 renders: a render_r2 deployed before
-                    # UT4 doesn't take the argument (CLEO_CAPTION_ENGINE
-                    # stays v1 until the deploy).
+                    # UT4 doesn't take the argument (deploy Modal before
+                    # the API: v2 is the CLEO_CAPTION_ENGINE default).
                     **({"captions": captions} if captions else {}))
                 result = _await_modal_call(fn, call, t0, deadline_s,
                                            len(segments), _stage,

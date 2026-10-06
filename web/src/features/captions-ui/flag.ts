@@ -1,13 +1,17 @@
 "use client";
 /**
- * The owner's opt-in to the v2 export captions (UT4,
- * CLEO_CAPTION_ENGINE unset or optin on the backend): `?captions=v2` on any /app
- * page switches this browser on, `?captions=v1` off; the choice is kept
+ * The per-browser opt-in to the v2 export captions for a backend with
+ * CLEO_CAPTION_ENGINE=optin (UT4): `?captions=v2` on any /app page
+ * switches this browser on, `?captions=v1` off again; the choice is kept
  * in localStorage like the editor flag (editor/v2/flag.ts). While on,
  * the export asks for the v2 captions ({caption_engine: "v2"} in POST
- * /jobs/{id}/render) and the editor shows a small marker. The backend
- * ignores the request when set to v1/off (and v2 doesn't need it), so this needs no
- * build flag.
+ * /jobs/{id}/render), the editor previews them live (the doc's engine
+ * "optin", EditorShell) and shows a small marker.
+ * The backend's default (CLEO_CAPTION_ENGINE unset = v2) needs none of
+ * this: every eligible job exports v2, and GET /jobs/{id}/doc says "v2",
+ * so the editor previews v2 captions without the opt-in; v1/off ignore
+ * the request. Off unless opted in, so no build flag and no marker for
+ * everyone.
  */
 import { useState } from "react";
 

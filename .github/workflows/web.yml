@@ -2,14 +2,17 @@ name: Web
 
 # Checks of the web app (web/) on every change to it (UX1, PLAN_TECH §3):
 #   checks  npm ci → typecheck → lint → vitest → i18n check
-#   e2e     next build → bundle budget (desktop) → Playwright against the stub backend
-#           (backend/tests/stub_server.py), in parallel:
+#   e2e     next build → bundle budget (desktop, editor-v2) → Playwright against
+#           the stub backend (backend/tests/stub_server.py), in parallel:
 #             desktop  Chromium 1440×900, anonymous beta
 #             pixel7   mobile emulation, anonymous beta
 #             auth     test auth (NEXT_PUBLIC_AUTH_TEST / CLEO_AUTH_TEST),
 #                      the @auth suites on desktop + pixel7
-#             editor-v2  NEXT_PUBLIC_EDITOR_V2=1 build, the @editor-v2
-#                      suites (UX7 shell layout) on desktop + pixel7
+#             (these three cover the v1 editor: a NEXT_PUBLIC_EDITOR_V2=optin
+#             build, v1 unless a browser opens ?editor=v2)
+#             editor-v2  the default build (NEXT_PUBLIC_EDITOR_V2 unset: the
+#                      v2 editor for everyone), the @editor-v2 suites (UX7
+#                      shell layout) on desktop + pixel7
 #             editor-v2-r2  the same build against the stub with R2 (moto):
 #                      the suites tagged @editor-v2 and @r2 (upload resume)
 # Nightly (and "Run workflow" with nightly ticked):
@@ -122,16 +125,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The v1 editor (NEXT_PUBLIC_EDITOR_V2=optin, set explicitly: the
+          # default is v2): the suites without @editor-v2
           - name: desktop
             mode: anon
             projects: --project=desktop
+            build_flag: optin
           - name: pixel7
             mode: anon
             projects: --project=pixel7
+            build_flag: optin
           - name: auth
             mode: auth
             projects: --project=desktop --project=pixel7
-          # UX7: a build with the v2 editor shell, its @editor-v2 suites only
+            build_flag: optin
+          # UX7: the default build (NEXT_PUBLIC_EDITOR_V2 unset: the v2
+          # editor shell), its @editor-v2 suites only
           - name: editor-v2
             mode: anon
             projects: --project=desktop --project=pixel7
@@ -146,7 +155,8 @@ jobs:
       E2E_MODE: ${{ matrix.mode }}
       E2E_WEB: start
       NEXT_PUBLIC_AUTH_TEST: ${{ matrix.mode == 'auth' && '1' || '' }}
-      NEXT_PUBLIC_EDITOR_V2: ${{ matrix.editor_v2 || '' }}
+      # Empty for the editor-v2 entries: the default (v2) build.
+      NEXT_PUBLIC_EDITOR_V2: ${{ matrix.build_flag || '' }}
       E2E_EDITOR_V2: ${{ matrix.editor_v2 || '' }}
       # UT1 interim captions + their test hook (e2e/captions-interim.spec.ts)
       NEXT_PUBLIC_CAPTIONS_INTERIM: '1'
@@ -161,9 +171,10 @@ jobs:
       - name: Build (next build)
         run: npm run build
       # First-load JS per route, gzipped (scripts/bundle-budget.mjs; /app
-      # ≤ 200 KB). Once per run: every matrix entry builds the same app.
+      # ≤ 200 KB). Once per build flavour: the v1 (optin) build and the
+      # default (v2) build.
       - name: Bundle budget
-        if: matrix.name == 'desktop'
+        if: matrix.name == 'desktop' || matrix.name == 'editor-v2'
         run: npm run bundle:budget
       - name: Playwright
         run: npx playwright test ${{ matrix.projects }}
@@ -216,6 +227,9 @@ jobs:
       E2E_WEB: start
       E2E_NIGHTLY: '1'
       NEXT_PUBLIC_AUTH_TEST: ${{ matrix.mode == 'auth' && '1' || '' }}
+      # The suites without @editor-v2: the v1 editor, set explicitly (the
+      # default is v2).
+      NEXT_PUBLIC_EDITOR_V2: optin
       # UT1 interim captions + their test hook (e2e/captions-interim.spec.ts)
       NEXT_PUBLIC_CAPTIONS_INTERIM: '1'
       NEXT_PUBLIC_TEST_PAGES: '1'

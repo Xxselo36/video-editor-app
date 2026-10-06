@@ -2,20 +2,21 @@
 /**
  * NEXT_PUBLIC_EDITOR_V2 (UX7): the review phase renders the v2 shell
  * instead of the v1 ReviewScreen.
- *   "off"   off: nothing changes, `?editor=` does nothing.
- *   "1"     v2 for everyone; `?editor=v1` switches this browser back.
- *   unset or "optin"
- *           v1 for everyone; `?editor=v2` switches this browser to v2
- *           (the owner's test on production before it goes live).
+ *   unset or "1"
+ *           v2 for everyone (the default); `?editor=v1` switches this
+ *           browser back.
+ *   "optin" v1 for everyone; `?editor=v2` switches this browser to v2.
+ *   "off"   v1: nothing changes, `?editor=` does nothing.
+ * Any other value counts as "off".
  * The per-browser choice is kept in localStorage (PLAN_TECH §0.11).
  */
 import { useState } from "react";
 
 // Literal reference: only `process.env.NEXT_PUBLIC_X` gets inlined.
 const MODE = process.env.NEXT_PUBLIC_EDITOR_V2;
-export const EDITOR_V2 = MODE === "1";
+export const EDITOR_V2 = MODE === "1" || !MODE;
 /** v2 only for browsers that opted in with `?editor=v2`. */
-export const EDITOR_V2_OPTIN = MODE === "optin" || !MODE;
+export const EDITOR_V2_OPTIN = MODE === "optin";
 const KEY = "cleocuts.editor.version.v1";
 
 /** This browser's choice (exported for the unit test). */
