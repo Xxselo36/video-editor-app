@@ -66,6 +66,8 @@ export type TimelineDockProps = {
   segments: EditorSeg[];
   /** UX10: what each seam removed, and its restore. */
   cuts: CutsApi;
+  /** A trim / extension of one clip committed (backlog #20: its revealed footage may get text). */
+  onTrimmed?: () => void;
   /** The mezz's frame rate (the frame grid; 30 when unknown). */
   fps?: number | null;
   /** UX7b: the loaded filmstrip sprite (null: plain clips). */
@@ -345,7 +347,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
       // the system took the gesture (a scroll): nothing is committed
       if (e.type !== "pointercancel") {
         // on release the edge moves to the frame both exports cut at (≤ half a frame)
-        p.history.commit(snapTrimToFrame(d.last, d.id, d.mode, d.bounds, p.fps));
+        if (p.history.commit(snapTrimToFrame(d.last, d.id, d.mode, d.bounds, p.fps))) p.onTrimmed?.();
       }
     }
     if (d.prevPps !== null) {

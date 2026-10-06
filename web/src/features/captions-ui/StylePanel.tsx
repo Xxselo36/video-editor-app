@@ -17,7 +17,7 @@
  *   "Reset to the style's look". Every change is one doc step (undo,
  *   autosave); a slider commits when it is let go.
  */
-import { ChevronRight, CaptionsOff, RotateCcw } from "lucide-react";
+import { BookmarkPlus, Check, ChevronRight, CaptionsOff, RotateCcw } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useLang, useT, type TFn } from "@/i18n";
 import {
@@ -34,6 +34,13 @@ import {
 import { setStyle, type EditDoc } from "@/features/editor/state/doc";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { MessageKey } from "@/i18n/messages/en";
+import {
+  defaultOfStyle,
+  loadCaptionDefault,
+  sameCaptionStyle,
+  saveCaptionDefault,
+  type CaptionStyleDefault,
+} from "@/features/start/captionDefault";
 import { shownWords, tileOrder, type TileInfo } from "./live";
 import c from "./captions.module.css";
 
@@ -548,6 +555,63 @@ export default function StylePanel(p: StylePanelProps) {
         <RotateCcw size={14} strokeWidth={1.75} aria-hidden />
         {t("editor.style.reset")}
       </button>
+      <SaveDefault style={style} />
     </div>
+  );
+}
+
+/**
+ * "Save as default": this preset and look for new videos (the v2 start
+ * screen sends it; start/captionDefault.ts). A caption's own position /
+ * size stays with this video. Shows "Saved as default" while the style
+ * is the saved one.
+ */
+function SaveDefault({ style }: { style: EditDoc["style"] }) {
+  const t = useT();
+  // undefined: not read yet
+  const [saved, setSaved] = useState<CaptionStyleDefault | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [failedFor, setFailedFor] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void loadCaptionDefault().then((d) => {
+      if (alive) setSaved(d);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const current = defaultOfStyle(style);
+  const key = JSON.stringify(current);
+  const same = saved !== undefined && sameCaptionStyle(saved, current);
+  const save = async () => {
+    setBusy(true);
+    const ok = await saveCaptionDefault(current);
+    setBusy(false);
+    if (ok) {
+      setSaved(current);
+      setFailedFor(null);
+    } else setFailedFor(key);
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className={c.reset}
+        disabled={same || busy}
+        title={t("editor.style.saveDefaultTip")}
+        onClick={() => void save()}
+        data-testid="ed-style-save-default"
+        data-state={same ? "saved" : busy ? "saving" : "idle"}
+      >
+        {same ? <Check size={14} strokeWidth={1.75} aria-hidden /> : <BookmarkPlus size={14} strokeWidth={1.75} aria-hidden />}
+        {t(same ? "editor.style.savedDefault" : "editor.style.saveDefault")}
+      </button>
+      {failedFor === key && (
+        <p className={c.note} role="alert" data-testid="ed-style-save-default-failed">
+          {t("editor.style.saveDefaultFailed")}
+        </p>
+      )}
+    </>
   );
 }

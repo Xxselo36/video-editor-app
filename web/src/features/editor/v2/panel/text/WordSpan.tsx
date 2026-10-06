@@ -15,7 +15,7 @@
  * pauses (≥ 0.4 s) and Cleo-cut takes, whose words collapse into the
  * chip. A click brings the footage back.
  */
-import { CornerDownRight, RotateCcw, Scissors } from "lucide-react";
+import { CornerDownRight, LoaderCircle, RotateCcw, Scissors } from "lucide-react";
 import { memo, useLayoutEffect, useRef } from "react";
 import { useT } from "@/i18n";
 import type { Chip } from "@/features/editor/state/cuts";
@@ -83,9 +83,40 @@ export type RowProps = {
   adjusted?: boolean;
 };
 
+/**
+ * Backlog #20: footage brought back without words — "Adding text…" while
+ * its transcription runs, then a retry chip if that failed.
+ */
+function SpanChip({ chip, at, k }: { chip: Chip; at: number; k: number }) {
+  const t = useT();
+  if (chip.span?.state === "busy") {
+    return (
+      <span className={s.chip} role="status" data-chip={`${at}:${k}`} data-kind="span" data-testid="ed-span-busy">
+        <LoaderCircle size={11} strokeWidth={1.75} aria-hidden className={s.spin} />
+        <span>{t("editor.text.spanBusy")}</span>
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={s.chip}
+      data-chip={`${at}:${k}`}
+      data-kind="span"
+      tabIndex={-1}
+      title={t("editor.text.spanRetryTip")}
+      data-testid="ed-span-retry"
+    >
+      <RotateCcw size={10} strokeWidth={1.75} aria-hidden style={{ flexShrink: 0 }} />
+      <span>{t("editor.text.spanFailed")}</span>
+    </button>
+  );
+}
+
 /** A removed pause or a Cleo-cut take in the text (DF chip): a button. */
 function ChipView({ chip, at, k, dec }: { chip: Chip; at: number; k: number; dec: string }) {
   const t = useT();
+  if (chip.kind === "span") return <SpanChip chip={chip} at={at} k={k} />;
   const len = fmtSeconds(chip.len, dec);
   const take = chip.kind === "take";
   const tip = take
