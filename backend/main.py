@@ -105,6 +105,7 @@ from backend import taskq  # noqa: E402
 from backend import leader as task_leader  # noqa: E402
 from backend import uploads as upl
 from backend import prefs as user_prefs  # noqa: E402
+from backend import span_transcribe as span_tx  # noqa: E402
 from backend.whisper_groq import SPOKEN_LANGUAGES  # noqa: E402
 from backend import worker as task_worker  # noqa: E402
 from backend.auth import (
@@ -4846,6 +4847,114 @@ def _patch_doc(job_id: str, payload: Any, user: User | None) -> dict:
     if "rev" not in outcome:  # deleted meanwhile
         raise HTTPException(404, "job not found")
     return {"rev": outcome["rev"]}
+
+
+# ── One span transcribed on demand (backlog #20, backend/span_transcribe.py)
+_SPAN_RATE = upl.RateLimit(span_tx.RATE_PER_MIN, 60.0)
+_SPAN_LOCKS: OrderedDict[str, threading.Lock] = OrderedDict()
+_SPAN_LOCKS_GUARD = threading.Lock()
+
+
+def _span_lock(job_id: str) -> threading.Lock:
+    """One span transcription per job at a time (a second call while one
+    runs is refused: 409 busy, Retry-After)."""
+    with _SPAN_LOCKS_GUARD:
+        lock = _SPAN_LOCKS.pop(job_id, None) or threading.Lock()
+        _SPAN_LOCKS[job_id] = lock
+        while len(_SPAN_LOCKS) > 256:
+            _SPAN_LOCKS.popitem(last=False)
+        return lock
+
+
+def _span_answer(doc: dict, span: dict, rev: float, changed: bool) -> dict:
+    return {"words": span_tx.words_in(doc, span["start"], span["end"]),
+            "rev": rev, "changed": changed}
+
+
+@app.post("/jobs/{job_id}/transcribe-span")
+def transcribe_span(job_id: str, payload: Any = Body(...),
+                    user: User | None = Depends(current_user)):
+    """{start, end, base_rev, rev} → {words, rev, changed}: the words of
+    one span of the recording (SOURCE seconds, ≤ 60 s) that the edit doc
+    has none for, transcribed now and merged into the doc with the
+    PATCH /jobs/{id}/doc revision rule (409 stale_rev). Same owner and
+    state rules as the doc routes (in review only). Idempotent (module
+    doc of backend/span_transcribe.py); at most span_tx.RATE_PER_MIN
+    calls a minute (429 too_many_requests). Never charged: billing is
+    off for it (no minutes, no credits)."""
+    job = get_owned_job(job_id, user)
+    refusal = _doc_state_refusal(job)
+    if refusal is not None:
+        raise refusal
+    try:
+        span = span_tx.parse(payload, job.duration)
+    except span_tx.SpanError as e:
+        raise ApiRefusal(e.status, e.code, **e.extra)
+    if not _SPAN_RATE.allow(_uid(user) or f"job:{job_id}"):
+        raise ApiRefusal(429, "too_many_requests", headers={"Retry-After": "60"})
+    lock = _span_lock(job_id)
+    # never wait for another span of this job: a request thread is held
+    # for its ffmpeg + Groq time at most once (the editor retries later)
+    if not lock.acquire(blocking=False):
+        raise ApiRefusal(409, "busy", headers={"Retry-After": "5"})
+    try:
+        job = get_owned_job(job_id, user)
+        refusal = _doc_state_refusal(job)
+        if refusal is not None:
+            raise refusal
+        done = span_tx.covered(job.doc, span["start"], span["end"])
+        if done is not False:
+            # this very request committed before (its answer was lost)
+            mine = (isinstance(done, list) and done[2] == span["base_rev"]
+                    and done[3] == float(job.doc_rev or 0))
+            return _span_answer(job.doc, span, float(job.doc_rev or 0), mine)
+        key = job.proxy_key or job.mezz_key
+        if not key:
+            raise ApiRefusal(409, "media_expired")
+        where = media.store_of(job)
+        cached = _proxy_cache_dir() / f"{job_id}.mp4"
+        if where == "local":
+            source = str(media.local_path(key))
+        elif job.proxy_key and cached.is_file():
+            source = str(cached)
+        else:
+            if not storage.r2_available():
+                raise ApiRefusal(503, "storage_unavailable",
+                                 headers={"Retry-After": "60"})
+            source = media.presign_get(key)
+        language = ((job.settings or {}).get("spoken_language")
+                    or (job.doc or {}).get("language") or None)
+        try:
+            raw, offset = span_tx.transcribe(source, span, language, job.duration)
+        except span_tx.SpanError as e:
+            raise ApiRefusal(e.status, e.code, **e.extra)
+        outcome: dict[str, Any] = {}
+
+        def change(cur: Job) -> dict | None:
+            refused = _doc_state_refusal(cur)
+            if refused is not None:
+                outcome["refusal"] = refused
+                return None
+            words = span_tx.new_words(raw, offset, span["start"], span["end"], cur.doc)
+            try:
+                doc, rev = span_tx.commit(cur.doc, cur.doc_rev, span, words,
+                                          cur.duration)
+            except edit_doc.DocError as e:
+                outcome["refusal"] = _doc_refusal(e)
+                return None
+            outcome["doc"], outcome["rev"] = doc, rev
+            return {"doc": doc, "doc_rev": rev}
+        store.modify(job_id, change)
+        if "refusal" in outcome:
+            raise outcome["refusal"]
+        if "rev" not in outcome:  # deleted meanwhile
+            raise HTTPException(404, "job not found")
+    finally:
+        lock.release()
+    print(f"[span] {job_id}: {span['start']:.2f}-{span['end']:.2f}s "
+          f"→ {len(span_tx.words_in(outcome['doc'], span['start'], span['end']))} "
+          f"word(s)", flush=True)
+    return _span_answer(outcome["doc"], span, outcome["rev"], True)
 
 
 # A project name (PATCH /jobs/{id} {title}): at most this many characters.

@@ -2,13 +2,18 @@
 
     {target_aspect, style, remove_fillers, voice_triggers,
      spoken_language, caption_style_by_aspect: {aspect: {presetId,
-     overrides}}}
+     overrides}}, caption_style_default: {presetId, overrides}}
 
 Every key is optional. The start screen saves the first five ("Save as
 default"); caption_style_by_aspect is the editor's remembered caption
 style per format (review E7), read by backend/doc.py resolve_style when
-an analysis ends. Signed-out users keep the same object in their
-browser (localStorage cleocuts.prefs.v1).
+an analysis ends. caption_style_default is the v2 Style tab's "Save as
+default": a preset plus the look's overrides — never a caption's own
+position / size (overrides.captions belong to one video's captions) —
+at most CAPTION_STYLE_MAX_BYTES as JSON. The v2 start screen sends it
+with new uploads (caption_style_hint, then PATCH /jobs/{id}
+caption_style). Signed-out users keep the same object in their browser
+(localStorage cleocuts.prefs.v1).
 
 Stored as JSON in the accounts database's meta table under
 "prefs:<user id>" (SQLite or Postgres, whichever backend/accounts.py
@@ -28,6 +33,8 @@ STYLES = ("tight", "smooth", "none")
 KEY_PREFIX = "prefs:"
 # A stored prefs object is tiny; anything bigger is not from our client.
 MAX_BYTES = 16_000
+# caption_style_default as compact JSON: the launch overrides take ~250.
+CAPTION_STYLE_MAX_BYTES = 1_000
 
 
 class BadPrefs(ValueError):
@@ -63,11 +70,33 @@ def _check(key: str, value: Any) -> Any:
                 raise BadPrefs(key) from None
             out[aspect] = style
         return out
+    elif key == "caption_style_default":
+        return _caption_style_default(value)
     else:
         raise BadPrefs(key)
     if not ok:
         raise BadPrefs(key)
     return value
+
+
+def _caption_style_default(value: Any) -> dict[str, Any]:
+    """{presetId, overrides} of "Save as default": a known preset (or v1
+    alias), the launch overrides in range, no per-caption ones, small."""
+    key = "caption_style_default"
+    if not isinstance(value, dict) or set(value) - {"presetId", "overrides"}:
+        raise BadPrefs(key)
+    if "overrides" in value and not isinstance(value["overrides"], dict):
+        raise BadPrefs(key)
+    style = edit_doc.style_ref(value)
+    if style is None or "captions" in style["overrides"]:
+        raise BadPrefs(key)
+    try:
+        style["overrides"] = edit_doc.validate_overrides(style["overrides"])
+    except edit_doc.DocError:
+        raise BadPrefs(key) from None
+    if len(json.dumps(style, separators=(",", ":"))) > CAPTION_STYLE_MAX_BYTES:
+        raise BadPrefs(key)
+    return style
 
 
 def merge(current: dict[str, Any] | None, patch: Any) -> dict[str, Any]:
@@ -89,7 +118,8 @@ def merge(current: dict[str, Any] | None, patch: Any) -> dict[str, Any]:
 
 
 PUBLIC_KEYS = ("target_aspect", "style", "remove_fillers", "voice_triggers",
-               "spoken_language", "caption_style_by_aspect")
+               "spoken_language", "caption_style_by_aspect",
+               "caption_style_default")
 
 
 def _parse(raw: str | None) -> dict[str, Any] | None:

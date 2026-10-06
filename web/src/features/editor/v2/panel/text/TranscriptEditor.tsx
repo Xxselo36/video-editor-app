@@ -49,6 +49,7 @@ import { TAKE_KINDS, textMarks, type Chip } from "@/features/editor/state/cuts";
 import { cutTimeOfSource, decimalSeparator, fmtClock } from "../../model";
 import type { CutsApi } from "../../useCuts";
 import { CutsHeader, plural } from "../CutsHeader";
+import type { SpanMark } from "../../useSpanFill";
 import { FindReplace } from "./FindReplace";
 import { SelectionBar } from "./SelectionBar";
 import { composing, WordRow, type EditKeys, type RowMarks } from "./WordSpan";
@@ -83,6 +84,13 @@ export type TranscriptEditorProps = {
   toast: (msg: string) => void;
   /** UT5: ids of words whose caption has its own size / position (a dot on their row). */
   adjusted?: ReadonlySet<string>;
+  /** "Show in text" of a caption: select this word, scroll to it, seek there (`n` counts the requests). */
+  reveal?: { id: string; n: number } | null;
+  /** The reveal was carried out (the shell clears it: a later mount must not repeat it). */
+  onRevealed?: () => void;
+  /** Backlog #20: spans whose text is on the way, or failed (useSpanFill). */
+  spans?: readonly SpanMark[];
+  onSpanRetry?: (key: string) => void;
 };
 
 const selWords = (st: DocState) => st.present.words;
@@ -120,7 +128,32 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
   // UX10: struck words, words inside a Cleo-cut take chip, pause chips
   // (a cut's marks follow in a render of their own: an edit shows at once)
   const pieces = useDeferredValue(p.cuts.pieces);
-  const marks = useMemo(() => textMarks(words, pieces, p.duration), [words, pieces, p.duration]);
+  const cutMarks = useMemo(() => textMarks(words, pieces, p.duration), [words, pieces, p.duration]);
+  // span chips (backlog #20) where their span starts, after the cut chips there
+  const spanMarks = p.spans;
+  const marks = useMemo(() => {
+    if (!spanMarks?.length) return cutMarks;
+    const chips = new Map(cutMarks.chips);
+    for (const m of spanMarks) {
+      let lo = 0;
+      let hi = words.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (words[mid].start < m.start) lo = mid + 1;
+        else hi = mid;
+      }
+      const chip: Chip = {
+        kind: "span",
+        reason: "silence",
+        len: m.end - m.start,
+        ranges: [{ start: m.start, end: m.end }],
+        start: m.start,
+        span: { state: m.state, key: m.key },
+      };
+      chips.set(lo, [...(chips.get(lo) ?? []), chip]);
+    }
+    return { ...cutMarks, chips };
+  }, [cutMarks, spanMarks, words]);
   const removed = marks.removed;
   // Each row gets the same props while it stays the same (its words, its
   // marks), so an edit re-renders only the rows it touches.
@@ -141,7 +174,7 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
       const cs = marks.chips.get(i);
       if (!cs) continue;
       chips.set(i, cs);
-      sig += `|${i}:${cs.map((x) => `${x.kind}${x.reason}${x.ranges.map((q) => `${q.start},${q.end}`).join(";")}`).join("/")}`;
+      sig += `|${i}:${cs.map((x) => `${x.kind}${x.reason}${x.span?.state ?? ""}${x.ranges.map((q) => `${q.start},${q.end}`).join(";")}`).join("/")}`;
     }
     const old = c.rows.get(ri);
     if (old && old.sig === sig) return old.m;
@@ -283,6 +316,26 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
       showRow(rowOf[i]);
     }
   };
+  // A caption's "Show in text": its word selected, in view, the playhead there.
+  const revealed = useRef(0);
+  const selectWordRef = useRef(selectWord);
+  useLayoutEffect(() => {
+    selectWordRef.current = selectWord;
+  });
+  const reveal = p.reveal;
+  const onRevealed = p.onRevealed;
+  useEffect(() => {
+    if (!reveal || reveal.n === revealed.current) return;
+    revealed.current = reveal.n;
+    onRevealed?.();
+    const i = index.get(reveal.id);
+    if (i === undefined) return;
+    if (phone) {
+      // no focus on a phone (no keyboard popping up): in view and selected
+      selectWordRef.current(i, false);
+      requestAnimationFrame(() => showRow(rowOf[i]));
+    } else selectWordRef.current(i, false, true);
+  }, [reveal, onRevealed, index, phone, showRow, rowOf]);
   const [draft, setDraft] = useState("");
   const freshEdit = useRef(false);
   const [editSerial, setEditSerial] = useState(0);
@@ -452,7 +505,10 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     if (chipEl) {
       const [at, k] = (chipEl.dataset.chip ?? "").split(":").map(Number);
       const chip = marks.chips.get(at)?.[k];
-      if (chip) restoreChip(chip);
+      // backlog #20: a failed span's chip asks again; a busy one does nothing
+      if (chip?.kind === "span") {
+        if (chip.span?.state === "failed") p.onSpanRetry?.(chip.span.key);
+      } else if (chip) restoreChip(chip);
       return;
     }
     const ts = el.closest<HTMLElement>("[data-ts]");

@@ -45,8 +45,9 @@ import { TranscriptEditor, type TextApi } from "./panel/text/TranscriptEditor";
 import { TranscriptPanel } from "./panel/TranscriptPanel";
 import { PreviewStage } from "./preview/PreviewStage";
 import { ExpiredView } from "./states";
-import { removedOf, useCuts } from "./useCuts";
+import { removedOf, useCuts, type CutsApi } from "./useCuts";
 import { useDocSession, type CaptionSourceHandler } from "./useDocSession";
+import { useSpanFill } from "./useSpanFill";
 import { TimelineDock, type DockApi } from "./timeline/TimelineDock";
 import { useFilmstrip } from "./timeline/Filmstrip";
 import type { FilmstripMeta } from "./timeline/filmstrip";
@@ -259,7 +260,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   // UX10: cuts in the text and the AI's cuts — timeline commits, so one
   // undo order with every other edit.
   const docWords = useDocStore(docStore ?? EMPTY_STORE, selWords);
-  const cuts = useCuts({
+  const rawCuts = useCuts({
     jobId: props.jobId,
     segs: editSegs,
     duration: props.duration,
@@ -268,6 +269,30 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     removed,
     commit: (next) => history.commit(next),
   });
+  // Backlog #20: footage brought back without words gets its text — after
+  // one deliberate action (a chip, a seam, a word, a trim), never after a
+  // bulk restore, an undo or a redo (useSpanFill)
+  const spanFill = useSpanFill({
+    segs: editSegs,
+    pieces: rawCuts.pieces,
+    words: docWords,
+    ready: doc.status === "ready" && !doc.readOnly,
+    transcribe: doc.status === "ready" ? doc.transcribeSpan : null,
+  });
+  const noteReveal = spanFill.note;
+  const cuts: CutsApi = {
+    ...rawCuts,
+    restore: (ranges) => {
+      const ok = rawCuts.restore(ranges);
+      if (ok) noteReveal();
+      return ok;
+    },
+    restoreWord: (w) => {
+      const ok = rawCuts.restoreWord(w);
+      if (ok) noteReveal();
+      return ok;
+    },
+  };
   const [selected, setSelected] = useState<string | null>(null);
   const selectedLive = selected && editSegs.some((x) => x.id === selected) ? selected : null;
 
@@ -306,6 +331,23 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   const film = useFilmstrip(props.jobId, props.filmstrip);
   const textApi = useRef<TextApi | null>(null);
   const fullscreenRef = useRef<(() => void) | null>(null);
+
+  // A caption's "Show in text" (its adjust bar): the Text tab — the sheet
+  // on a phone — opens with that word selected and the playhead on it
+  // (out of fullscreen first: the text is under it).
+  const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
+  const revealN = useRef(0);
+  const showInText = useCallback(
+    (id: string) => {
+      revealN.current += 1;
+      setReveal({ id, n: revealN.current });
+      if (root?.querySelector("[data-testid=ed-fullscreen-wrap]")?.getAttribute("data-fullscreen")) fullscreenRef.current?.();
+      if (phone) setSheet("text");
+      else setTab("text");
+    },
+    [phone, root, setSheet],
+  );
+  const revealDone = useCallback(() => setReveal(null), []);
 
   // ── toast ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -500,6 +542,10 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         apiRef={textApi}
         toast={showToast}
         adjusted={liveCaptions ? adjusted : undefined}
+        reveal={reveal}
+        onRevealed={revealDone}
+        spans={spanFill.spans}
+        onSpanRetry={spanFill.retry}
       />
     ) : doc.status === "loading" ? (
       <div className={s.empty} role="status" data-testid="ed-text-loading">
@@ -552,6 +598,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         phone={phone}
         zones={zones}
         readOnly={doc.readOnly}
+        onShowInText={showInText}
       />
     ) : undefined;
   const undoRedo = (
@@ -673,6 +720,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         seekOriginal={session.seekOriginal}
         onSplit={split}
         onDelete={() => void del()}
+        onTrimmed={noteReveal}
         apiRef={dockApi}
       />
       {phone && (
