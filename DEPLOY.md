@@ -150,6 +150,15 @@ NEXT_PUBLIC_BACKEND_URL = https://<deine-railway-url>
 (z.B. `https://cleo-production-xxxx.up.railway.app` — die URL aus
 Schritt 2.4)
 
+Optional, der Editor-Schalter `NEXT_PUBLIC_EDITOR_V2` (wirkt erst nach
+einem neuen Build/Deploy):
+
+| Wert | Wirkung |
+|---|---|
+| nicht gesetzt oder `1` (Default) | alle bekommen den neuen Editor (v2); `?editor=v1` schaltet einen Browser zurück |
+| `optin` | alle bekommen den alten Editor (v1); `?editor=v2` schaltet einen Browser auf v2 |
+| `off` | alle bekommen v1, `?editor=` wirkt nicht (Notbremse) |
+
 ### 3.3 Deploy
 
 - **Deploy**-Button
@@ -1456,9 +1465,9 @@ im Editor (`web/src/lib/captions`, auf dem Render-Server per Node), in
 Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
 `web/src/lib/captions/node/`.
 
-| Variable (Railway) | Default | Eingeschaltet | Zurück |
+| Variable (Railway) | Default | Anders | Zurück |
 |---|---|---|---|
-| `CLEO_CAPTION_ENGINE` | nicht gesetzt = Opt-in: alle bekommen v1, nur ein Browser, der einmal mit `?captions=v2` geöffnet wurde, bekommt v2 (unten) | `v2`: der **erste** Export jedes Projekts mit Edit-Dokument (UT3) läuft mit v2, wenn sein Stil in `CLEO_CAPTION_PRESETS_LIVE` steht und die Sprache kann | `v1` oder `off`: niemand bekommt v2, auch nicht per `?captions=v2` |
+| `CLEO_CAPTION_ENGINE` | nicht gesetzt = `v2`: der **erste** Export jedes Projekts mit Edit-Dokument (UT3) läuft mit v2, wenn sein Stil in `CLEO_CAPTION_PRESETS_LIVE` steht und die Sprache kann | `optin`: alle bekommen v1, nur ein Browser, der einmal mit `?captions=v2` geöffnet wurde, bekommt v2 (unten) | `v1` oder `off`: niemand bekommt v2, auch nicht per `?captions=v2` |
 | `CLEO_LOUDNORM` | aus: Lautstärke wie aufgenommen | `1`: v2-Exporte auf −14 LUFS (Messung aus der Analyse) | Variable löschen |
 
 - **Ein Projekt behält seine Technik:** Beim ersten Export wird `v1`
@@ -1471,26 +1480,25 @@ Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
   alten Volume-Weg (`render_burn_concat`) und beim lokalen Notfall-Render
   ohne Node wird auch ein v2-Projekt mit v1 exportiert (Log-Zeile
   `[captions] … rendering v1 captions`).
-- **Nur für dich testen (ohne Railway, wie der Editor-Schalter #44):**
-  solange `CLEO_CAPTION_ENGINE` nicht gesetzt ist, bleiben alle Kunden
-  bei v1. Öffne einmal `cleocuts.com/app?editor=v2&captions=v2` (oder
-  nur `?captions=v2`) — dein Browser merkt sich das, im Export-Bereich
-  des Editors steht dann klein „Neue Untertitel (Test)“. Jeder **erste**
-  Export eines Projekts aus diesem Browser fragt v2 an (sonst gelten
-  dieselben Regeln: Edit-Dokument, Stil live, Sprache passt; danach
-  bleibt das Projekt dabei). `?captions=v1` schaltet deinen Browser
-  zurück. Mit `v1`/`off` wird die Anfrage ignoriert, mit `v2` ist sie
-  unnötig.
-- **Reihenfolge:** selbst ein neues Projekt mit `?captions=v2`
-  exportieren und ansehen (Log: `[captions] v2 primary: … frames`),
-  dann `CLEO_CAPTION_ENGINE=v2` für alle. Notbremse: `off`.
+- **Nur für dich testen (`CLEO_CAPTION_ENGINE=optin`):** dann bleiben
+  alle Kunden bei v1. Öffne einmal `cleocuts.com/app?captions=v2` —
+  dein Browser merkt sich das, im Export-Bereich des Editors steht dann
+  klein „Neue Untertitel (Test)“. Jeder **erste** Export eines Projekts
+  aus diesem Browser fragt v2 an (sonst gelten dieselben Regeln:
+  Edit-Dokument, Stil live, Sprache passt; danach bleibt das Projekt
+  dabei). `?captions=v1` schaltet deinen Browser zurück. Mit `v1`/`off`
+  wird die Anfrage ignoriert, mit dem Default `v2` ist sie unnötig
+  (`?captions=` ändert dann nichts).
+- **Notbremse:** `CLEO_CAPTION_ENGINE=off` (wirkt nur auf Projekte, die
+  noch nie exportiert wurden). Prüfen, ob ein Export v2 bekam: Log
+  `[captions] v2 primary: … frames`.
 - **Stile:** Seit UT5 sind alle 12 Stile live (Default von
   `CLEO_CAPTION_PRESETS_LIVE`; jeder steht in der Paritätsprüfung
   Vorschau ↔ Export). Ein Stil, den du im Abnahmeblatt **nicht**
   abhakst, fliegt raus, indem du die Liste setzt, z. B.
   `CLEO_CAPTION_PRESETS_LIVE=power,clipper,karaoke` — der Stil-Tab
   bietet dann nur diese an.
-- **Editor (UT5):** Mit v2 (oder deinem `?captions=v2`-Browser) zeigt
+- **Editor (UT5):** Mit v2 (Default; bei `optin` nur in deinem `?captions=v2`-Browser) zeigt
   der neue Editor die Untertitel so, wie der Export sie zeichnet: Stil
   wählen im Tab „Stil“, einen Untertitel in der Vorschau ziehen
   (Position) oder an der Ecke ziehen (Größe), dann „Nur hier“ oder
@@ -1514,8 +1522,8 @@ Code: `backend/captions_v2.py`, `backend/captions/` (Node-Paket + Build),
 Ein fertiges Video lässt sich wieder öffnen und neu exportieren; der
 Export im neuen Editor bleibt im Editor (Export-Blatt → Fertig-Ansicht).
 **Die Oberfläche (Export-Blatt, neue Fertig-Ansicht, „Nochmal
-bearbeiten“) gehört zum Editor-v2-Opt-in** (`NEXT_PUBLIC_EDITOR_V2`,
-`?editor=v2`): v1-Kunden behalten ihren Export-Ablauf und die alte
+bearbeiten“) gehört zum Editor v2** (`NEXT_PUBLIC_EDITOR_V2`, Default
+an, §3.2): v1-Browser (`?editor=v1`, `optin`, `off`) behalten ihren Export-Ablauf und die alte
 Fertig-Ansicht unverändert. **Auch serverseitig gilt jede UX11-Regel
 nur für Exporte aus dem v2-Export-Blatt** (`POST /render` mit
 `"client": "v2"`, am Job als `export_client` vermerkt): Schutzgrenzen,
@@ -1554,7 +1562,7 @@ behält die Technik seines **ersten** Exports bei jedem weiteren Export.
 - Vor UT4 exportierte Projekte (kein `caption_engine`, aber Ausgaben
   vorhanden) exportieren wieder mit v1 und werden dabei auf v1 gepinnt
   (`exported_before`) — sie sehen nach dem Neu-Export aus wie vorher.
-- Ein auf v1 gepinntes Projekt im neuen Editor (`?editor=v2`): der
+- Ein auf v1 gepinntes Projekt im neuen Editor: der
   Stil-Tab ändert seinen Export nicht; der Editor sagt das im
   Hinweis „Seine Untertitel behalten den Look des ersten Exports“.
 - Ein auf v2 gepinntes Projekt exportiert immer v2 — auch wenn
@@ -1580,7 +1588,7 @@ App nur „Kostenlos“, keinen Zähler. Kein freiwilliges Geld-zurück.
 
 **Sofort-Export** (`CLEO_SPECULATIVE_RENDER=1`): direkt nach der Analyse
 rendert der Server ein Projekt, dessen erster Export v2 wäre (also mit
-`CLEO_CAPTION_ENGINE=v2`), einmal vorab — auf einem eigenen kleinen Pool,
+`CLEO_CAPTION_ENGINE` nicht gesetzt oder `v2`), einmal vorab — auf einem eigenen kleinen Pool,
 nie über einen Kunden-Slot, und nicht, wenn mehr als die Hälfte von
 `CLEO_MAX_RENDER_QUEUE` wartet. Exportiert der Nutzer ohne Änderung
 (gleiche Schnitte, gleicher Stil, gleicher Text — auch keine noch nicht
