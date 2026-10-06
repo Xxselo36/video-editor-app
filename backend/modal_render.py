@@ -417,8 +417,10 @@ if WITH_ANALYZE:
         cpu=8.0,
         memory=16384,
         # The upload, its mezz, the proxy and the previews: ~3.5 × the
-        # upload (4 GB → ~14 GB); 100 GiB leaves room.
-        ephemeral_disk=100 * 1024,
+        # upload (4 GB → ~14 GB). Modal only accepts 512 GiB – 3 TiB
+        # here (a smaller request fails the whole deploy), so take the
+        # minimum.
+        ephemeral_disk=512 * 1024,
         # Up to CLEO_MAX_MINUTES of 4K source; the API waits at most this
         # + 5 min (backend/executor_modal.py FUNCTION_TIMEOUT_S).
         timeout=7200,
