@@ -1320,7 +1320,7 @@ Nach drei Tagen ohne hängende Tasks und mit grünen Metriken ist P0 durch.
 braucht dort `CLEO_DISK_FACTOR` (3,5) × die Upload-Größe an Platte —
 große iPhone-Videos (1–4 GB) bekommen 507 `server_storage_full`, mehrere
 gleichzeitig passen nicht. Mit dem Schalter läuft jede Analyse in einem
-eigenen Modal-Container (8 Kerne, 16 GiB RAM, 100 GiB Platte, höchstens
+eigenen Modal-Container (8 Kerne, 16 GiB RAM, 512 GiB Platte (Modals Minimum), höchstens
 2 h); Railway braucht dafür **keine Platte und kaum CPU**.
 
 **Was wo läuft:**
