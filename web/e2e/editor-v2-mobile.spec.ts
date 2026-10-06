@@ -261,8 +261,12 @@ test.describe("editor v2 on an iPhone: captions, title, Stil sheet", TAG, () => 
     await expect(sheet).toBeVisible();
     await expect.poll(async () => Math.round((await sheet.boundingBox())!.height)).toBe(Math.round(vh * 0.54));
     // a style tap shows its result right away: the preview is above the sheet
-    const frame = (await page.getByTestId("ed-frame").boundingBox())!;
-    expect(frame.y + frame.height).toBeLessThanOrEqual((await sheet.boundingBox())!.y + 0.5);
+    // (the stage re-measures after the sheet has settled: poll, don't read once)
+    await expect.poll(async () => {
+      const frame = (await page.getByTestId("ed-frame").boundingBox())!;
+      const top = (await sheet.boundingBox())!.y;
+      return frame.y + frame.height - top;
+    }).toBeLessThanOrEqual(0.5);
   });
 });
 
