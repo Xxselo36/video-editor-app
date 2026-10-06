@@ -14,8 +14,8 @@
  *     reads that order); a quick swipe doesn't move it;
  *   - holding a trim handle still zooms in; the readout shows 2 decimals;
  *   - 0.1 s ruler marks once they are 6 px apart.
- * Desktop and pixel7 (touch via CDP touch events); a v2 build
- * (NEXT_PUBLIC_EDITOR_V2 unset or 1; E2E_EDITOR_V2=1). The speech clip:
+ * Desktop and pixel7 (touch via CDP touch events); a build with
+ * NEXT_PUBLIC_EDITOR_V2=1 (E2E_EDITOR_V2=1). The speech clip:
  *   0:00 "Hey, so today …" · pause · "Um," · "Mistake number one: …" ·
  *   "Nobody waits ten seconds for you to get to the point." · pause · …
  */

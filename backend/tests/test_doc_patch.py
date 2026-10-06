@@ -84,10 +84,7 @@ def test_get_doc_tells_the_editor_about_captions(client, monkeypatch):
     monkeypatch.delenv("CLEO_CAPTION_PRESETS_LIVE", raising=False)
     job = _review_job()
     body = client.get(f"/jobs/{job.id}/doc").json()
-    assert body["caption_engine"] == "v2"          # unset: the default
-    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "optin")
-    assert client.get(f"/jobs/{job.id}/doc").json()["caption_engine"] == "optin"
-    monkeypatch.delenv("CLEO_CAPTION_ENGINE")
+    assert body["caption_engine"] == "optin"
     assert body["render_style"] == {"presetId": "power", "overrides": {}}
     assert body["presets_live"] == list(D.PRESET_IDS)
     assert len(body["recommended"]) == 3 and "power" in body["recommended"]

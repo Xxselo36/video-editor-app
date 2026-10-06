@@ -1,7 +1,6 @@
 /**
- * The per-browser opt-in to the v2 export captions, the web side of
- * CLEO_CAPTION_ENGINE=optin (UT4; the stub runs optin, and the render
- * request is answered here): `/app?captions=v2` once switches this
+ * The owner's opt-in to the v2 export captions (UT4,
+ * CLEO_CAPTION_ENGINE unset): `/app?captions=v2` once switches this
  * browser on — the editor shows a small "New captions (test)" note by the
  * export, and the export asks for the v2 captions in its request body.
  * `?captions=v1` switches it off again.

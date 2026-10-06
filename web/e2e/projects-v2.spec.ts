@@ -4,9 +4,8 @@
  * library entries carried over, expired projects collapsed without
  * thumbnail requests, rename and delete through the ⋯ menu, search and
  * filters, no console errors, and /app/library redirects to /app.
- * The v2 editor only (@editor-v2: a v2 build, NEXT_PUBLIC_EDITOR_V2 unset
- * or 1); v1 browsers keep the dashboard and library (projects.spec.ts,
- * the v1 run's NEXT_PUBLIC_EDITOR_V2=optin build).
+ * The v2 opt-in only (@editor-v2: a build with NEXT_PUBLIC_EDITOR_V2=1);
+ * everyone else keeps the dashboard and library (projects.spec.ts).
  */
 import { expect, test } from "./support/fixtures";
 import {

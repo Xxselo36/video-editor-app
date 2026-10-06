@@ -52,8 +52,8 @@ export async function startRender(
       subtitles,
       disabled_cuts: [],
       // This browser opted in to the v2 export captions (?captions=v2,
-      // captions-ui/flag.ts); only CLEO_CAPTION_ENGINE=optin reads it
-      // (the default v2 gives every eligible job v2 anyway; v1/off ignore it).
+      // captions-ui/flag.ts); the backend honours it unless
+      // CLEO_CAPTION_ENGINE is v1/off (v2: everyone gets v2 anyway).
       ...(opts.captionsV2 ? { caption_engine: "v2" } : {}),
       // UX11: the v2 export sheet — only then the UX11 rules apply on the
       // server (fair use, caps, instant export); a v1 export is unchanged.

@@ -11,10 +11,16 @@ vi.mock("./uploadJob", () => ({
       file: File,
       s: unknown,
       _p: unknown,
-      cb: { tempId: string; onCreated: (id: string) => void; onEnd?: (id: string) => void },
+      cb: {
+        tempId: string;
+        onCreated: (id: string) => void;
+        onEnd?: (id: string) => void;
+        onProgress?: (id: string, pct: number, resuming: boolean) => void;
+      },
     ) => {
       calls.push(file.name);
       sources.push(s);
+      cb.onProgress?.(cb.tempId, 40, false);
       await new Promise<void>((resolve) => pending.push(resolve));
       if (file.name.startsWith("ok-")) cb.onCreated(`job-${file.name}`);
       cb.onEnd?.(cb.tempId);
@@ -89,5 +95,25 @@ describe("startUpload", () => {
     finish();
     await run2;
     expect(failed).toEqual([null]);
+  });
+
+  it("keeps the upload in the module, not in the screen that started it", async () => {
+    calls.length = 0;
+    const { startUpload, getLiveUpload, getLiveUploads } = await import("./uploadManager");
+    const { liveUploads } = await import("./records");
+    let tempId = "";
+    // The start screen hands over and goes (Projects opens): nothing of
+    // the upload is left with it.
+    const file = new File([new Uint8Array(15)], "ok-wandert.mp4", { type: "video/mp4", lastModified: 5 });
+    const run = startUpload(file, settings, null, { onCard: (id) => (tempId = id) });
+    await vi.waitFor(() => expect(calls).toEqual(["ok-wandert.mp4"]));
+    // Projects reads the live progress from the module, and the record is
+    // this page's (never taken for a dead one).
+    expect(getLiveUpload(tempId)).toMatchObject({ pct: 40, resuming: false });
+    expect(getLiveUploads().map((u) => u.id)).toContain(tempId);
+    expect(liveUploads.has(tempId)).toBe(true);
+    finish();
+    await run;
+    expect(getLiveUpload(tempId)).toBeNull();
   });
 });

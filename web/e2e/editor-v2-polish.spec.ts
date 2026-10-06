@@ -11,7 +11,7 @@
  *   4. Footage brought back without words gets its text (POST
  *      /jobs/{id}/transcribe-span, faked by the stub: seed option span):
  *      "Adding text…", then the words; a failure leaves a retry chip.
- * Desktop and pixel7; a v2 build (NEXT_PUBLIC_EDITOR_V2 unset or 1; E2E_EDITOR_V2=1).
+ * Desktop and pixel7; a build with NEXT_PUBLIC_EDITOR_V2=1 (E2E_EDITOR_V2=1).
  */
 import { devices, type Page, type Request } from "@playwright/test";
 import { expect, test } from "./support/fixtures";

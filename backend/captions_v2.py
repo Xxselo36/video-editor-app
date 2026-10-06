@@ -13,8 +13,8 @@ pipeline.render_to_keys):
 
     spec = prepare_render(store, job_id, job, subtitles)   # None → v1
 
-- Engine choice (review F11): CLEO_CAPTION_ENGINE unset or v2 makes new
-  renders v2; optin only those whose render request asks for it (a
+- Engine choice (review F11): CLEO_CAPTION_ENGINE=v2 makes new renders
+  v2; unset (= optin) only those whose render request asks for it (a
   browser opened with ?captions=v2); v1 / off nobody (engine_default).
   Either way only for jobs with an edit document (UT3) whose
   style's preset is live (CLEO_CAPTION_PRESETS_LIVE) and supports the
@@ -114,14 +114,15 @@ OPTIN_KEY = "caption_engine_optin"
 
 def engine_default() -> str:
     """CLEO_CAPTION_ENGINE: which jobs' first render pins v2.
-      unset / v2     every eligible job (the default)
-      optin          only eligible jobs whose first render request asks
+      unset / optin  only eligible jobs whose first render request asks
                      for it ({"caption_engine": "v2"} in POST
                      /jobs/{id}/render: a browser opened once with
-                     ?captions=v2)
+                     ?captions=v2) — the owner tests on production without
+                     a Railway variable, like the editor flag (#44)
       v1 / off       nobody; the request field is ignored
+      v2             every eligible job
     Anything else counts as v1 (nobody)."""
-    v = (os.environ.get("CLEO_CAPTION_ENGINE") or "").strip().lower() or "v2"
+    v = (os.environ.get("CLEO_CAPTION_ENGINE") or "").strip().lower() or "optin"
     if v == "off":
         return "v1"
     return v if v in MODES else "v1"

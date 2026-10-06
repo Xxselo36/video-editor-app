@@ -5,7 +5,7 @@
  * sentence fallback for jobs without an edit document, the captions-off
  * note, a second tab's save (409 stale_rev → banner, nothing
  * overwritten) and the unload flush (keepalive body < 64 KB).
- * Desktop and pixel7; runs against a v2 build (NEXT_PUBLIC_EDITOR_V2 unset or 1)
+ * Desktop and pixel7; runs against a build with NEXT_PUBLIC_EDITOR_V2=1
  * (E2E_EDITOR_V2=1). The speech clip says "Nobody waits ten seconds"
  * and "mistake" three times.
  */

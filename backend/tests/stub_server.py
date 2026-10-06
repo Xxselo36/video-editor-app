@@ -187,11 +187,6 @@ def _prepare_env(args: argparse.Namespace, tmp: Path) -> None:
         "CLEO_PROXY_VIDEO": "1",
     })
     os.environ.setdefault("CLEO_ALLOWED_ORIGINS", ",".join(sorted(origins)))
-    # The e2e suites are written against the caption opt-in (UT4/UT5): the
-    # v2 editor shows the UT1 interim overlay, and the live v2 captions
-    # only in a browser opened with ?captions=v2 (editor-captions.spec).
-    # Explicit, since unset is v2 for every job (captions_v2.engine_default).
-    os.environ.setdefault("CLEO_CAPTION_ENGINE", "optin")
     if args.auth:
         os.environ["CLEO_AUTH_TEST"] = "1"
     else:

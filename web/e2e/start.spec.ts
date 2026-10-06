@@ -7,9 +7,8 @@
  * with earlier projects keeps Clipper (review D11).
  *
  * The start screen is for browsers on the v2 editor only (flag.ts): its
- * suites are @editor-v2 (E2E_EDITOR_V2=1 runs); the v1 run (a build with
- * NEXT_PUBLIC_EDITOR_V2=optin) checks that /app/new keeps the v1 picker
- * flow there.
+ * suites are @editor-v2 (E2E_EDITOR_V2=1 runs); the flag-off run checks
+ * that /app/new keeps the v1 picker flow.
  */
 import fs from "node:fs";
 import type { Page, Request } from "@playwright/test";

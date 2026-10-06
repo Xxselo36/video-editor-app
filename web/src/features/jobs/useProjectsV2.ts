@@ -1,9 +1,8 @@
 "use client";
 /**
  * The UX12 gate: the Projects page, the processing view and the jobs
- * store are for browsers on the v2 editor only (features/editor/v2/flag:
- * the default, or `?editor=v2` with NEXT_PUBLIC_EDITOR_V2=optin); the
- * others (`?editor=v1`, "optin" without it, "off") keep the
+ * store are for browsers on the v2 opt-in only (features/editor/v2/flag:
+ * `?editor=v2`, or NEXT_PUBLIC_EDITOR_V2=1); everyone else keeps the
  * dashboard, the library and the cards of before.
  *
  * null during the server render and hydration (the choice lives in

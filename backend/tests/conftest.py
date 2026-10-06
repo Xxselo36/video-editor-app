@@ -66,7 +66,7 @@ _OPT_IN_ENV = ("CLEO_MEDIA_BACKEND", "CLEO_UPLOAD_MODE", "CLEO_MODAL_RENDER_FN",
                "CLEO_PROXY_VIDEO", "CLEO_MEDIA_ORPHAN_SWEEP",
                "CLEO_MEDIA_ORPHAN_MAX", "CLEO_MEDIA_PRESIGN",
                "R2_BACKUP_BUCKET", "CLEO_MODAL_R2",
-               # UT4: the default (unset = v2 captions) unless a test sets it.
+               # UT4: v1 captions unless a test switches v2 on.
                "CLEO_CAPTION_ENGINE", "CLEO_LOUDNORM",
                # UX11: the defaults unless a test sets them.
                "CLEO_SPECULATIVE_RENDER", "CLEO_FREE_RENDERS",

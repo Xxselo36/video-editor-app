@@ -5,9 +5,9 @@
  * and "Zurücksetzen" write the per-caption or the style's position / size,
  * the Text tab marks the row; and the preview shows the first frame of the
  * cut before playback (poster, or a seek without one).
- * Desktop and pixel7; runs against a v2 build (NEXT_PUBLIC_EDITOR_V2 unset or 1)
- * (E2E_EDITOR_V2=1). The browser opts in to the v2 captions (?captions=v2;
- * the stub runs CLEO_CAPTION_ENGINE=optin, stub_server.py).
+ * Desktop and pixel7; runs against a build with NEXT_PUBLIC_EDITOR_V2=1
+ * (E2E_EDITOR_V2=1). The browser opts in to the v2 captions (?captions=v2,
+ * CLEO_CAPTION_ENGINE unset on the stub).
  */
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type { Page } from "@playwright/test";
