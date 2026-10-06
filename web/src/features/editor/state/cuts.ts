@@ -422,7 +422,11 @@ export function reorderBreaks(segs: readonly EditorSeg[]): number[] {
 // ── the Text tab's marks ────────────────────────────────────────────
 
 export type Chip = {
-  kind: "pause" | "take";
+  /** span: footage brought back without words, its text on the way
+   *  (busy) or failed (a retry); v2/useSpanFill.ts, not textMarks. */
+  kind: "pause" | "take" | "span";
+  /** span chips: the request's state and key. */
+  span?: { state: "busy" | "failed"; key: string };
   /** The reason (a take chip: voice_cmd / bad_take; a pause chip: the main one). */
   reason: PieceKind;
   /** Removed seconds it stands for. */

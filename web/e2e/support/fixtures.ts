@@ -69,6 +69,10 @@ export type SeedOptions = {
   /** UX11 (review seeds): a finished speculative render — an export
    *  without changes is instant. */
   spec?: "ready";
+  /** Backlog #20: what POST /jobs/{id}/transcribe-span "hears" — text
+   *  spread over the span (default: nothing), the first `fail` calls
+   *  fail, each call takes `seconds`. */
+  span?: { text?: string; fail?: number; seconds?: number };
 };
 
 export type Seeded = { id: string; seed: SeedName; filename: string; status: string };

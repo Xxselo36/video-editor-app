@@ -16,7 +16,10 @@
  *   offered on top: picking a file with the same content — whatever its
  *   name — continues it where R2 has it; another file starts a new
  *   upload and leaves the interrupted one for later. "Discard" aborts it.
- * - No caption style here: the editor owns it (defaults.ts).
+ * - No caption style here: the editor owns it (defaults.ts). The one
+ *   saved in its Style tab ("Save as default", captionDefault.ts) goes
+ *   with the upload: its preset as the hint, the whole style once the
+ *   job exists.
  */
 import { ChevronDown, RotateCw, Upload } from "lucide-react";
 import Link from "next/link";
@@ -52,6 +55,7 @@ import { isPortrait, probeVideo, type VideoProbe } from "./probe";
 import { languageName, SettingsPanel } from "./SettingsSheet";
 import { useBillingHint } from "./useBillingHint";
 import { usePrefs } from "./usePrefs";
+import { applyToNewJob } from "./captionDefault";
 
 const ASPECT_SUB: Record<TargetAspect, MessageKey | null> = {
   "9:16": "app.start.formatVertical",
@@ -189,6 +193,9 @@ export function StartScreen() {
     // (review D11). Read before this upload's own card goes up.
     const returning =
       !prefs.saved && (readLocalJobs().length > 0 || getActiveJobs().length > 0 || getLibrary().length > 0);
+    // The caption style saved in the editor's Style tab: its preset goes
+    // as the hint, the whole style once the job exists (captionDefault.ts).
+    const captionStyle = prefs.captionStyle;
     const s = settingsRef.current;
     track("file_chosen", {
       preset: "start",
@@ -199,8 +206,12 @@ export function StartScreen() {
     });
     setUpload({ tempId: null, name: f.name });
     void probeVideo(f).then((p) => mounted.current && setProbe(p));
-    void startUpload(f, () => uploadSettings(settingsRef.current, { returning }), null, {
+    const captionPreset = captionStyle?.presetId ?? null;
+    void startUpload(f, () => uploadSettings(settingsRef.current, { returning, captionPreset }), null, {
       onCard: (tempId) => mounted.current && setUpload({ tempId, name: f.name }),
+      onCreated: (jobId) => {
+        if (captionStyle) void applyToNewJob(jobId, captionStyle);
+      },
       // Created, or failed (its card says why): the dashboard shows it.
       onEnd: () => {
         if (mounted.current) router.push("/app");
