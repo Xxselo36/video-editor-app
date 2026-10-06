@@ -1,6 +1,7 @@
 /**
  * Where an upload keeps its record (UX12 gate): browsers on the v2
- * opt-in (features/editor/v2/flag: `?editor=v2` / NEXT_PUBLIC_EDITOR_V2=1)
+ * editor (features/editor/v2/flag: the default, or `?editor=v2` with
+ * NEXT_PUBLIC_EDITOR_V2=optin)
  * use the jobs store of the Projects page (features/jobs/jobsStore:
  * codes, no English text); everyone else keeps the dashboard cards of
  * lib/activeJobs exactly as before (card + English sentence for older

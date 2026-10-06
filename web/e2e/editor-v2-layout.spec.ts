@@ -4,7 +4,7 @@
  * visible controls in the default state (Text tab, nothing selected,
  * outside the transcript and the style tiles): desktop ≤ 13 (the
  * signed-off mock: 12 + the visible search), phone ≤ 10 (mock: 9).
- * Runs against a build with NEXT_PUBLIC_EDITOR_V2=1 (E2E_EDITOR_V2=1).
+ * Runs against a v2 build (NEXT_PUBLIC_EDITOR_V2 unset or 1; E2E_EDITOR_V2=1).
  */
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";

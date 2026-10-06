@@ -1,7 +1,7 @@
 "use client";
 /**
  * Entry of the v2 editor (UX7), loaded as its own chunk by the /app page
- * when NEXT_PUBLIC_EDITOR_V2=1: the editor root (tokens, Geist fonts,
+ * when the browser is on the v2 editor (flag.ts): the editor root (tokens, Geist fonts,
  * `data-editor-root` for the shortcut filter), then the skeleton while the
  * job loads, else the shell.
  */

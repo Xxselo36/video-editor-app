@@ -2,8 +2,8 @@
 /**
  * /app/new: the start of a video.
  *
- * - Browsers on the v2 editor (features/editor/v2/flag.ts: ?editor=v2,
- *   or NEXT_PUBLIC_EDITOR_V2=1) get the one start screen of UX6
+ * - Browsers on the v2 editor (features/editor/v2/flag.ts: the default,
+ *   or ?editor=v2 with NEXT_PUBLIC_EDITOR_V2=optin) get the one start screen of UX6
  *   (StartScreen) — its own chunk (UX12: /app/new's first load stays in
  *   budget for everyone).
  * - Everyone else keeps the v1 flow exactly as before: workflow picker →
