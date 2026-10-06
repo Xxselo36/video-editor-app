@@ -814,6 +814,8 @@ Außerhalb von Railway:
   `render_burn_concat` deployt (die GitHub-Action prüft das selbst und
   warnt). Beim Deploy von Hand: `CLEO_MODAL_R2=1 modal deploy
   backend/modal_render.py` (mit Secret) bzw. ohne die Variable (ohne).
+  Mit dem zweiten Secret `cleocuts-ai` kommt `analyze_r2` dazu (11.5;
+  von Hand: `CLEO_MODAL_R2=1 CLEO_MODAL_ANALYZE=1 modal deploy …`).
 - **GitHub → Settings → Secrets and variables → Actions → Variables:**
   `CLEO_MODAL_RENDER_FN` — immer denselben Wert wie auf Railway, damit
   der Modal-Check (ops-watch, alle 6 h) die Funktion prüft, die wirklich
@@ -1242,10 +1244,11 @@ Versuch eines Tasks), `backend/pg_tasks.py` / `backend/jobs.py`
 | Variable | Default | Bedeutung |
 |---|---|---|
 | `CLEO_TASK_QUEUE` | aus | `1`: Task-Warteschlange an (dieser Abschnitt). Löschen = zurück zu WP1 |
-| `CLEO_EXECUTOR_INGEST` / `CLEO_EXECUTOR_RENDER` | `local` (auch wenn `MODAL_TOKEN_ID` gesetzt ist) | `modal` gibt es in dieser Version noch nicht (Phase P1) — gesetzt startet das Backend nicht (`[queue] NOT STARTING`) |
-| `CLEO_MAX_RUNNING_INGEST` | `CLEO_MAX_ANALYZE`, sonst 2 | gleichzeitige Analysen (wie bisher `CLEO_MAX_ANALYZE`) |
+| `CLEO_EXECUTOR_INGEST` | `local` (auch wenn `MODAL_TOKEN_ID` gesetzt ist) | `modal`: Analysen laufen auf Modal statt auf Railway (Phase P1, **11.5**). Braucht `CLEO_TASK_QUEUE=1`, `CLEO_MEDIA_BACKEND=r2` und `MODAL_TOKEN_ID` — sonst startet das Backend nicht (`[queue] NOT STARTING`); ohne `CLEO_TASK_QUEUE` wird es ignoriert (Log-Hinweis) |
+| `CLEO_EXECUTOR_RENDER` | `local` | `modal` gibt es für Renders nicht (sie laufen schon vom `local`-Executor aus auf Modal, `CLEO_MODAL_RENDER_FN`) — gesetzt startet das Backend nicht |
+| `CLEO_MAX_RUNNING_INGEST` | `CLEO_MAX_ANALYZE`, sonst 2; mit `CLEO_EXECUTOR_INGEST=modal`: **20** | gleichzeitige Analysen (wie bisher `CLEO_MAX_ANALYZE`; mit Modal brauchen sie hier weder Platte noch CPU) |
 | `CLEO_MAX_RUNNING_RENDER` | `CLEO_MAX_RENDER`, sonst 4 mit Modal / 2 ohne | gleichzeitige Renders (wie bisher `CLEO_MAX_RENDER`) |
-| `CLEO_MAX_QUEUE` | 20 | wartende Analysen, danach 503 `server_busy` (wie bisher) |
+| `CLEO_MAX_QUEUE` | 20; mit `CLEO_EXECUTOR_INGEST=modal`: 200 | wartende Analysen, danach 503 `server_busy` (wie bisher) |
 | `CLEO_MAX_ACTIVE_PER_USER` | 2 | laufende Jobs pro Konto, danach 429 (wie bisher) |
 | `CLEO_TASK_MAX_ATTEMPTS` | 3 | gezählte Versuche (verlorene Lease, Infrastruktur-Fehler) |
 | `CLEO_TASK_RETRY_BACKOFF_S` | `30,120,600` | Wartezeit vor Versuch 2, 3, … |
@@ -1310,6 +1313,140 @@ Nach drei Tagen ohne hängende Tasks und mit grünen Metriken ist P0 durch.
   so einen Task sofort ohne Arbeit, weil sein Job nicht mehr läuft.
 - **Code-Rollback** auf eine Version vor WP4: genauso (die neuen
   Tabellen stören alte Versionen nicht; die Migration bleibt).
+
+### 11.5 Analysen auf Modal (Phase P1, `CLEO_EXECUTOR_INGEST=modal`)
+
+**Wozu:** Heute läuft jede Analyse auf dem einen Railway-Container und
+braucht dort `CLEO_DISK_FACTOR` (3,5) × die Upload-Größe an Platte —
+große iPhone-Videos (1–4 GB) bekommen 507 `server_storage_full`, mehrere
+gleichzeitig passen nicht. Mit dem Schalter läuft jede Analyse in einem
+eigenen Modal-Container (8 Kerne, 16 GiB RAM, 100 GiB Platte, höchstens
+2 h); Railway braucht dafür **keine Platte und kaum CPU**.
+
+**Was wo läuft:**
+
+| Schritt | Wo |
+|---|---|
+| Upload | Browser → R2 (wie bisher) |
+| `POST /jobs`: Prüfung, Abbuchung, Task | Railway — Zulassung nur noch über Warteschlange/Limits, **keine Plattenprüfung** (auch nicht bei `/uploads/presign` und `/uploads/init`) |
+| Längenprüfung (nur wenn `POST /jobs` die Länge nicht kannte) | gemessen auf Modal an der heruntergeladenen Kopie, **vor** der eigentlichen Analyse; entschieden (zu lang → abgelehnt, Abbuchung) auf Railway — der Container wartet so lange auf die Antwort |
+| Download, Normalisieren (Mezz + Proxy), SmartCam, Lautheit/Peaks, **Groq-Transkription, Claude-Schritte**, Schnitt-Vorschau, Poster, CJK-Schriften, Filmstreifen | Modal `analyze_r2` (`backend/modal_analyze.py`) — dieselbe Funktion `pipeline.analyze_only` wie lokal |
+| Speichern | Modal → R2, **dieselben Keys** `jobs/{id}/…` und dieselben Felder (`pipeline.store_analysis_outputs`, auch der lokale Weg speichert darüber) |
+| Commit, Erstattung, True-up, Medien-GC, Events | Railway (Worker-Thread + Finalizer wie in P0) |
+
+**Warum Groq und Claude mit auf Modal:** Transkription und LLM-Schritte
+stecken mitten in der gemeinsamen Analyse (`src/plugin_api.analyze_video`
+liest das ganze Video für Länge und Ton und ruft das LLM zwischen seinen
+Durchgängen; Vorschau, Poster und Schriften brauchen das Transkript).
+Sie auf Railway zu lassen hieße, Desktop-Code in `src/` zu ändern oder
+`analyze_only` zu kopieren — und Railway bräuchte trotzdem die Mezzanine
+auf der Platte. Deshalb bekommt Modal die beiden API-Keys über **ein**
+neues Modal-Secret `cleocuts-ai`; die Keys auf Railway bleiben, wo sie
+sind (Renders, Beiträge, Fallback). Fehler von Groq/Claude kommen
+beschrieben zurück und werden auf Railway genau wie lokal eingeordnet
+(Groq-Breaker, Anthropic-Ausgabenlimit, `no_speech`-Erstattung, …).
+
+**Lease, Heartbeat, Fencing, Erstattung** bleiben wie in P0: ein
+Worker-Thread auf Railway hält die Lease, solange Modal arbeitet, und
+schreibt den Fortschritt (über ein `modal.Dict` `cleocuts-analyze`) in
+den Job. Wird der Task weggenommen (Lease verloren, Neustart), wird der
+Modal-Aufruf abgebrochen; ein Aufruf, den niemand mehr abbrechen konnte
+(Railway neu gestartet), sieht am Dict, dass ein späterer Versuch
+läuft, und speichert nichts mehr.
+
+**Verwaiste Aufrufe:** Die Modal-Call-ID steht am Task
+(`tasks.modal_call_id`). Wird ein Versuch ohne seinen wartenden Thread
+beendet — Reaper (Lease abgelaufen, z. B. nach einem Neustart),
+Finalizer (Task aufgegeben/fehlgeschlagen), Job gelöscht, beim Start ein
+neuer Leader für alles, was nicht mehr geleast ist —, bricht Railway den
+Aufruf ab (`FunctionCall.from_id(…).cancel()`) und setzt im Dict einen
+Stopp-Zaun: der Container speichert danach nichts mehr. Das Präfix
+`jobs/{id}/` einer auf Modal fehlgeschlagenen Analyse löscht der GC erst
+nach Modals Funktions-Timeout + 5 min (wie bei Renders), damit ein
+gerade laufender Upload nichts neu anlegt.
+
+**Fehler:** abgestürzter oder verdrängter Container, Ausgabenlimit, nicht
+gestartet → Infrastruktur-Fehler: neuer Versuch (höchstens
+`CLEO_TASK_MAX_ATTEMPTS`, 3), danach Fehler + Erstattung
+(`processing_interrupted`). **Modal-Timeout oder kein Ergebnis innerhalb
+der Frist → sofort Fehler + Erstattung, kein neuer Versuch** (wie der
+lokale Timeout: dasselbe Video liefe wieder hinein; im Task steht
+`analyze_timeout`). Eine Längenmessung, die zu lange dauert, ist
+ebenfalls unser Fehler (neuer Versuch), nie `unreadable_video`.
+
+**Lokale Analysen im Modal-Modus:** Jobs, deren Upload noch als Datei auf
+Railway liegt (von vor R2), analysiert Railway selbst — mit dem
+**lokalen** Limit (`CLEO_MAX_ANALYZE`, 2) und der Plattenprüfung, nicht
+mit dem Modal-Limit. Ebenso, wenn `analyze_r2` **nicht deployt** ist
+(`NotFoundError`): der Versuch geht ohne Anrechnung zurück in die
+Warteschlange, Railway analysiert für die nächsten 10 min lokal und
+schaut dann wieder nach (ERROR-Log `analyze_r2 IS NOT DEPLOYED`). Das
+ist die sicherere Wahl als ein Start-Abbruch: kein Job scheitert daran,
+und mehr als 2 Analysen laufen auf Railway nie gleichzeitig.
+
+**Einschalten** (Voraussetzung: 11.2 läuft, `CLEO_TASK_QUEUE=1`;
+`CLEO_MEDIA_BACKEND=r2` und das Modal-Secret `cleocuts-r2` gibt es schon,
+10.2):
+
+1. **Modal-Secret `cleocuts-ai` anlegen** (einmalig, das ist das einzige
+   neue Secret): Modal → Secrets → Create → Custom, Name `cleocuts-ai`,
+   zwei Einträge mit **denselben Werten wie auf Railway**:
+   `GROQ_API_KEY`, `ANTHROPIC_API_KEY`. (Oder auf einem Rechner mit
+   Modal-Login: `modal secret create cleocuts-ai GROQ_API_KEY=… ANTHROPIC_API_KEY=…`
+   — nicht in ein geteiltes Terminal-Log.) Wer einen Key auf Railway
+   wechselt, wechselt ihn hier mit.
+2. **GitHub → Actions → "Deploy Modal render" → Run workflow.** Im Log:
+   `Modal secret cleocuts-ai found — deploying analyze_r2 too.` (Ohne das
+   Secret: `analyze_r2 not deployed …` — dann nicht weitermachen.)
+   Danach deployt jeder Push auf `main` analyze_r2 automatisch mit.
+3. **Kosten-Test vorher** (optional, empfohlen): erst Schritt 4 in einem
+   ruhigen Moment, dann sofort GitHub → Actions → "Cost test" mit
+   `runs` = `synthetic:1`, `ingest_executor` = `modal`; der Lauf bricht
+   vor dem Upload ab, wenn der Server nicht auf Modal analysiert, und
+   druckt die Analyse-Zeit. Danach `iphone4kloop:10` (≈ 2 GB 4K-HEVC,
+   10 min) — genau der Fall, der heute mit 507 abgelehnt wird.
+4. **Railway → Backend-Service → Variables:** `CLEO_EXECUTOR_INGEST` =
+   `modal` → Deploy. Im Log beim Start:
+   `[queue] task queue ON (CLEO_TASK_QUEUE=1): executors ingest=modal render=local, running limits 20/4, queue cap 200`.
+   Pro Analyse: `[modal] analyze_r2 for job … spawned, deadline … s`.
+   `GET /admin/queue` zeigt `"executor": "modal"`, `limit` 20,
+   `max_queue` 200.
+5. Optional `CLEO_MAX_RUNNING_INGEST` (20) und `CLEO_MAX_QUEUE` (200)
+   anpassen. Die echte Obergrenze ist meist Groq: das Audio-Budget
+   `CLEO_GROQ_ASH_BUDGET` (11.1) gilt weiter und lässt Analysen sonst
+   warten.
+
+**Ausschalten:** Railway → `CLEO_EXECUTOR_INGEST` löschen → Deploy.
+Neue Analysen laufen wieder auf Railway (mit Plattenprüfung, Limits 2/20
+wie vorher). Analysen, die beim Umschalten auf Modal liefen, werden beim
+Neustart wie jede unterbrochene Analyse erneut eingereiht (11.1: Reaper)
+und laufen dann lokal. analyze_r2 und das Secret dürfen deployt bleiben
+— ohne die Variable ruft sie niemand. (Ganz zurück: das Secret
+`cleocuts-ai` löschen, dann deployt "Deploy Modal render" analyze_r2
+nicht mehr.)
+
+**Weitere Variablen** (nur bei Bedarf):
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `CLEO_MODAL_ANALYZE_DEADLINE_S_BASE` / `_PER_S` / `_PER_GB` / `_MAX` | 900 / 3 / 120 / 7500 | Wartezeit auf einen Modal-Aufruf: 900 s + 3 × Videolänge + 120 s pro GB Upload, höchstens 2 h 5 min (Modals eigene Grenze für analyze_r2: 2 h); danach Abbruch, Fehler + Erstattung |
+| `CLEO_MODAL_POLL_S`, `CLEO_MODAL_START_TIMEOUT_S` | 10, 120 | wie beim Render (9.3); nicht gestartet nach 120 s und kein Container → neuer Versuch |
+
+Nicht-geheime Analyse-Schalter von Railway (`CLEO_DISFLUENT_PROMPT`,
+`CLEO_SUSTAINED_VOWEL_CUTS`, `CLEO_GROQ_MAX_RETRY_WAIT`,
+`CLEO_GROQ_DEBUG`, `CLEO_CAPTION_PRESETS_LIVE`) schickt das Backend bei
+jedem Aufruf mit; Keys nie.
+
+**Kosten** (Modal $0,0000131 pro Kern-s und $0,00000222 pro GiB-s →
+8 Kerne + 16 GiB ≈ **$0,00014/s ≈ $0,50 pro Container-Stunde**, nur
+solange er läuft; Leerlauf nach 10 s beendet): geschätzt 15–25 s
+Container-Zeit pro Videominute bei 1080p, 40–60 s bei 4K-HEVC-HDR →
+**≈ $0,002–0,004 bzw. $0,006–0,009 pro analysierter Minute**. Dafür
+entfallen auf Railway die Analyse-CPU (≈ $0,002/min nach
+`CLEO_COST_RATES`) und der Egress beim Hochladen der Ergebnisse nach R2
+(≈ $0,015/min, 10.9). Groq (≈ $0,0037/min, zwei Durchgänge) und Claude
+bleiben gleich. Die echten Zahlen: `GET /admin/costs` (`usd_modal`,
+`modal_s`, `wall_s_analyze` je Job) bzw. die Tabelle des Kosten-Tests.
 
 ## 12. Untertitel v2 im Export (UT4)
 

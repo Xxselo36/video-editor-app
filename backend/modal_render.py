@@ -26,6 +26,14 @@ Two functions:
     it publishes, so without it the whole deploy — render_burn_concat
     included — would fail. The backend falls back to the volume path
     while render_r2 isn't deployed.
+
+And one for the analysis (WP4 phase P1, opt-in: CLEO_EXECUTOR_INGEST=
+modal with CLEO_TASK_QUEUE=1 on Railway):
+  - analyze_r2: an upload's whole analysis, R2 in and out
+    (backend/modal_analyze.py; the API side is backend/executor_modal.py).
+    Needs "cleocuts-r2" and "cleocuts-ai" (GROQ_API_KEY,
+    ANTHROPIC_API_KEY — DEPLOY.md 11.5); only deployed with
+    CLEO_MODAL_ANALYZE=1 (the workflow sets it when both secrets exist).
 """
 from __future__ import annotations
 
@@ -39,6 +47,13 @@ import modal
 # defined in the container.
 WITH_R2 = (os.environ.get("CLEO_MODAL_R2", "").strip() == "1"
            or not modal.is_local())
+# analyze_r2 (WP4 P1, CLEO_EXECUTOR_INGEST=modal) in this deploy? Needs
+# both Modal secrets, cleocuts-r2 and cleocuts-ai (the Groq / Anthropic
+# keys): the workflow sets CLEO_MODAL_ANALYZE=1 only when both exist —
+# like render_r2, a missing secret would fail the whole deploy.
+WITH_ANALYZE = WITH_R2 and (
+    os.environ.get("CLEO_MODAL_ANALYZE", "").strip() == "1"
+    or not modal.is_local())
 
 app = modal.App("cleocuts-render")
 
@@ -346,3 +361,92 @@ if WITH_R2:
         finally:
             # One user's video: never left on a warm container.
             shutil.rmtree(work, ignore_errors=True)
+
+
+# ── analysis (WP4 phase P1) ──────────────────────────────────────────
+# What the API box's image (backend/Dockerfile) has for an analysis:
+# Python 3.13, ffmpeg from apt, backend/requirements.txt's media and LLM
+# packages (no Node / caption layer, no local Whisper — Groq does the
+# transcription; CLEO_LOCAL_WHISPER=0 makes a missing GROQ_API_KEY a
+# loud failure instead of a silent fallback), the caption fonts and the
+# CJK faces font_subset cuts per job. Like the Dockerfile it leaves out
+# assets/models (YuNet): the same SmartCam result as on Railway.
+analyze_image = (
+    modal.Image.debian_slim(python_version="3.13")
+    .apt_install("ffmpeg", "libgl1", "libglib2.0-0", "libsndfile1",
+                 "ca-certificates", "fonts-dejavu-core", "fonts-liberation2")
+    .pip_install(
+        "moviepy==1.0.3",
+        "numpy>=1.21.0",
+        "Pillow>=9.0.0",
+        "opencv-python-headless>=4.8.0",
+        "imageio_ffmpeg>=0.4.9",
+        "scipy>=1.9.0",
+        "pydub>=0.25.1",
+        "anthropic==0.111.0",
+        "openai>=1.50.0",
+        # backend/font_subset.py: same pins as backend/requirements.txt
+        # (the subset bytes depend on them).
+        "fonttools==4.66.0",
+        "brotli==1.2.0",
+        "psutil>=5.9.0",
+        "boto3>=1.43,<1.44",
+        "botocore>=1.43,<1.44",
+    )
+    .env({"CLEO_LOCAL_WHISPER": "0", "CLEO_CACHE_DIR": "/tmp/cleo-cache",
+          "PYTHONUNBUFFERED": "1"})
+    .add_local_dir("src", remote_path="/app/src")
+    .add_local_dir("plugins", remote_path="/app/plugins")
+    .add_local_dir("backend", remote_path="/app/backend",
+                   ignore=["captions/node_modules", "**/__pycache__",
+                           "tests"])
+    .add_local_dir("assets/fonts", remote_path="/app/assets/fonts")
+    .add_local_dir("assets/caption-fonts/cjk",
+                   remote_path="/app/assets/caption-fonts/cjk")
+    .add_local_file("web/src/lib/captions/script-support.json",
+                    "/app/web/src/lib/captions/script-support.json")
+)
+
+
+if WITH_ANALYZE:
+    @app.function(
+        image=analyze_image,
+        # A 4K HEVC iPhone clip: decode + the mezz encode + SmartCam use
+        # the cores; the audio passes hold the whole track in RAM
+        # (~1.3 GB for 30 min at 44.1 kHz).
+        cpu=8.0,
+        memory=16384,
+        # The upload, its mezz, the proxy and the previews: ~3.5 × the
+        # upload (4 GB → ~14 GB); 100 GiB leaves room.
+        ephemeral_disk=100 * 1024,
+        # Up to CLEO_MAX_MINUTES of 4K source; the API waits at most this
+        # + 5 min (backend/executor_modal.py FUNCTION_TIMEOUT_S).
+        timeout=7200,
+        # Idle containers are billed: hand them back soon (a cold start
+        # is seconds next to a multi-minute analysis).
+        scaledown_window=10,
+        secrets=[modal.Secret.from_name("cleocuts-r2"),
+                 modal.Secret.from_name("cleocuts-ai")],
+    )
+    def analyze_r2(
+        job_id: str,
+        source_key: str,
+        settings: dict,
+        token: str,
+        degraded: bool = False,
+        env: dict | None = None,
+        bucket: str | None = None,
+        gate: bool = False,
+    ) -> dict:
+        """One upload's analysis, R2 in and out (backend/modal_analyze.py
+        run): the upload `source_key` → pipeline.analyze_only → mezz,
+        proxy, preview, peaks, poster, font subsets, filmstrip under
+        jobs/{job_id}/. Returns {res, stored, usage, obs, timings} or
+        {error, usage, obs, timings}; the API commits it."""
+        import sys
+        sys.path.insert(0, "/app")
+        from backend import modal_analyze
+        modal_analyze.apply_env(env)
+        return modal_analyze.run(job_id, source_key, settings, token=token,
+                                 degraded=degraded, bucket=bucket,
+                                 gate=gate)

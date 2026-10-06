@@ -15,6 +15,12 @@ is printed with the command to delete it later).
 Needs CLEO_ADMIN_TOKEN, ffmpeg + espeak-ng, --base-url and
 --i-understand-this-costs-money. Refuses to start when the estimate is
 above --max-usd.
+
+The server's ingest executor (GET /admin/queue: local, or modal with
+CLEO_EXECUTOR_INGEST=modal) is in the report; --executor modal refuses
+to start against a server that analyses locally. Without --max-analyze /
+--max-queue (and $CLEO_MAX_ANALYZE / $CLEO_MAX_QUEUE) the server's own
+running limit and queue cap are used — e.g. 20 / 200 with Modal.
 """
 from __future__ import annotations
 
@@ -66,13 +72,19 @@ def add_args(p) -> None:
                    help="refuse to start when the estimate is higher")
     p.add_argument("--cleanup-timeout", type=float, default=1800)
     p.add_argument("--max-analyze", type=int,
-                   default=_env_int("CLEO_MAX_ANALYZE", 2),
-                   help="the target's CLEO_MAX_ANALYZE (parallel analyses; "
-                        "default: $CLEO_MAX_ANALYZE or 2)")
+                   default=_env_int("CLEO_MAX_ANALYZE", 0) or None,
+                   help="the target's parallel analyses (default: "
+                        "$CLEO_MAX_ANALYZE, else the server's ingest running "
+                        "limit from /admin/queue, else 2)")
     p.add_argument("--max-queue", type=int,
-                   default=_env_int("CLEO_MAX_QUEUE", 20),
-                   help="the target's CLEO_MAX_QUEUE (default: $CLEO_MAX_QUEUE "
-                        "or 20)")
+                   default=_env_int("CLEO_MAX_QUEUE", 0) or None,
+                   help="the target's CLEO_MAX_QUEUE (default: $CLEO_MAX_QUEUE, "
+                        "else the server's queue cap from /admin/queue, else 20)")
+    p.add_argument("--executor", choices=("any", "local", "modal"),
+                   default="any",
+                   help="the ingest executor the server must use (GET "
+                        "/admin/queue); modal = the Modal analysis "
+                        "(CLEO_EXECUTOR_INGEST=modal)")
     p.add_argument("--min-accepted", type=int, default=None,
                    help="uploads that must be accepted (default: min(K, "
                         "--max-analyze + --max-queue)); 0 accepted always FAILs")
@@ -97,6 +109,36 @@ def _env_int(name: str, default: int) -> int:
 
 
 UPLOAD_TIMEOUT_MIN = 30  # cost_test.upload: curl -m 1800
+
+
+def server_queue(ct) -> dict:
+    """GET /admin/queue, or {} (an older server, the queue off)."""
+    try:
+        return ct.http("GET", "/admin/queue") or {}
+    except Exception as e:
+        log(f"/admin/queue: {ct.redact(e)[:160]}")
+        return {}
+
+
+def resolve_limits(args, queue: dict) -> str:
+    """The ingest executor of the server ("wp1" with the queue off, "?"
+    unknown); fills --max-analyze / --max-queue from it when not given.
+    Raises UsageError when --executor names another executor."""
+    ingest = (queue.get("kinds") or {}).get("ingest") or {}
+    if not queue:
+        executor = "?"
+    elif not queue.get("enabled"):
+        executor = "wp1"
+    else:
+        executor = ingest.get("executor") or "local"
+    if args.executor != "any" and executor != args.executor:
+        raise UsageError(f"the server analyses with {executor!r}, --executor "
+                         f"wants {args.executor!r} — nothing was uploaded")
+    if args.max_analyze is None:
+        args.max_analyze = int(ingest.get("limit") or 2)
+    if args.max_queue is None:
+        args.max_queue = int(queue.get("max_queue") or 20)
+    return executor
 
 
 def worst_case_minutes(args) -> float:
@@ -427,6 +469,7 @@ def main(args, base: str) -> Result:
                          "/admin/costs)")
     ct = import_cost_test(base, admin.token)
     plan = parse_clips(args.clips, ct)
+    executor = resolve_limits(args, server_queue(ct))
     k = sum(c for *_, c in plan)
     video_min = sum(m * c for _, m, _, c in plan)
     try:
@@ -446,7 +489,8 @@ def main(args, base: str) -> Result:
             f"the time budget of {args.time_budget_min:g} min (the CI job would "
             "be killed mid-run): lower --job-timeout / --cleanup-timeout")
     log(f"burst: {k} uploads ({video_min:g} video-min) within {args.window:g}s "
-        f"against {base}{' + render' if args.render else ''}")
+        f"against {base}{' + render' if args.render else ''}; ingest executor "
+        f"{executor}, {args.max_analyze} parallel + {args.max_queue} queued")
     # Only this run's own numbers: the whole server's spend would end up
     # in public Actions logs.
     log(f"COST ESTIMATE: ≈ ${estimate:.2f} (${rate:.4f}/video-min from {rate_src})")
@@ -591,6 +635,8 @@ def main(args, base: str) -> Result:
             f"`{u['job'] or '-'}` | {' → '.join(s.get('statuses', [])) or '-'} | "
             f"{' → '.join(map(str, _runs(s.get('queue', [])))) or '-'} |")
     meta = {"Target": base, "Identity": admin.label, "Run id": b.run_id,
+            "Ingest executor": f"{executor} ({args.max_analyze} parallel, "
+                               f"queue {args.max_queue})",
             "Clips": args.clips, "Uploads": f"{k} within {args.window:g} s",
             "Render": args.render, "Video minutes": f"{video_min:g}"}
     return Result(NAME, meta, rec, max(1.0, t_end - t_start), checks,
