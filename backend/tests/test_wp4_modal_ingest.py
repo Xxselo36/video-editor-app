@@ -1124,3 +1124,42 @@ def test_analysis_image_has_what_the_api_image_has_for_an_analysis():
                 "moviepy==1.0.3"):
         assert pin in reqs and f'"{pin}"' in image, pin
     assert '"CLEO_LOCAL_WHISPER": "0"' in image
+
+
+# ── with the capacity fix (#59): length cap, disk guard ──────────────
+
+
+def test_admitted_length_cap_reaches_analyze_r2(leader, analysis, modal_on,
+                                                r2):
+    job, _tid = _r2_upload_job(r2, settings={"_max_seconds": 61})
+    _settle(leader)
+    assert modal_on.spawns[0]["settings"]["_max_seconds"] == 61
+    assert analysis["settings"][0]["_max_seconds"] == 61
+
+
+@pytest.mark.parametrize("measured,cap", [(25.0, None), (100.0, 40)])
+def test_gate_keeps_the_admitted_cap(leader, analysis, modal_on, r2,
+                                     monkeypatch, measured, cap):
+    monkeypatch.setattr(modal_analyze, "measure_s", lambda p: measured)
+    job, tid = _r2_upload_job(r2, settings={"_measure_length": True,
+                                            "_max_seconds": 40})
+    _settle(leader)
+    assert ts().get(tid).state == "succeeded"
+    want = cap or min(40, 25 + accounts.TRUE_UP_TOLERANCE_S)
+    assert analysis["settings"][0]["_max_seconds"] == want
+
+
+def test_disk_guard_only_watches_local_analyses(leader, analysis, modal_on,
+                                                r2, monkeypatch):
+    from backend import worker as W
+    made = []
+
+    class Guard(W.DiskGuard):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            made.append(self.interval)
+    monkeypatch.setattr(W, "DiskGuard", Guard)
+    _r2_upload_job(r2)
+    _file_job()
+    _settle(leader)
+    assert sorted(made) == [0, W._env_float("CLEO_DISK_GUARD_S", 2.0)]

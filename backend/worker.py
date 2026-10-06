@@ -904,8 +904,10 @@ def _analyze_remote(ctx: Attempt, job: Any, source_key: str, where: str,
         # An upload POST /jobs couldn't measure: the container measures
         # its own copy before the heavy work and waits for this gate
         # (refusal, the charge) — the upload never comes here.
-        settings = {k: v for k, v in (job.settings or {}).items()
-                    if k not in ("_measure_length", "_charge")}
+        # (The admitted length cap rides along; the gate's verdict can
+        # only lower it — modal_analyze keeps the smaller.)
+        settings = _cap_settings({k: v for k, v in (job.settings or {}).items()
+                                  if k not in ("_measure_length", "_charge")})
 
         def gate(seconds: float | None) -> dict:
             return _length_gate(ctx, job, "", progress,

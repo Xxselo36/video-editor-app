@@ -348,6 +348,20 @@ def measure_s(path: Path) -> float | None:
     return dur if dur > 0 else None
 
 
+def _min_cap(*settings: Any) -> float | None:
+    """The smallest `_max_seconds` (the length cap) of these settings:
+    the gate's verdict never lifts the cap the call was sent with."""
+    caps = []
+    for s in settings:
+        try:
+            v = float((s or {}).get("_max_seconds") or 0)
+        except (TypeError, ValueError):
+            continue
+        if v > 0:
+            caps.append(v)
+    return min(caps) if caps else None
+
+
 def describe_error(exc: BaseException, work: Path | None) -> dict[str, Any]:
     """What the API needs to rebuild `exc` (executor_modal.rebuild_error)
     and to settle the task like the local path does."""
@@ -439,7 +453,10 @@ def run(job_id: str, source_key: str, settings: dict[str, Any], *,
                         verdict = ch.ask_gate(measure_s(src))
                     finally:
                         ch.drop_gate()
+                    capped = _min_cap(settings, verdict["settings"])
                     settings = dict(verdict["settings"])
+                    if capped is not None:
+                        settings["_max_seconds"] = capped
                     timings["gate"] = round(time.monotonic() - t, 3)
 
                 def drop_source(*_a: Any, **_k: Any) -> None:
