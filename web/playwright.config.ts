@@ -11,7 +11,8 @@
  * Servers (reused when already running, except on CI):
  *   stub  python ../backend/tests/stub_server.py (STUB_PYTHON, default python3)
  *   web   E2E_WEB=start (default: `next start`, build it first with
- *         NEXT_PUBLIC_BACKEND_URL=http://localhost:8501), build (build, then
+ *         NEXT_PUBLIC_BACKEND_URL=http://localhost:8501, and for a run
+ *         without E2E_EDITOR_V2=1 NEXT_PUBLIC_EDITOR_V2=optin), build (build, then
  *         start) or dev (`next dev`; the default in auth mode)
  */
 import { defineConfig, devices, type PlaywrightTestConfig } from "@playwright/test";
@@ -27,8 +28,11 @@ const webEnv: Record<string, string> = {
   NEXT_PUBLIC_CAPTIONS_INTERIM: "1",
   NEXT_PUBLIC_TEST_PAGES: "1",
   ...(MODE === "auth" ? { NEXT_PUBLIC_AUTH_TEST: "1" } : {}),
-  // UX7: the v2 editor shell (E2E_EDITOR_V2=1 runs; CI: the editor-v2 entry).
-  ...(EDITOR_V2 ? { NEXT_PUBLIC_EDITOR_V2: "1" } : {}),
+  // UX7: the v2 editor shell is the default (E2E_EDITOR_V2=1 runs; CI: the
+  // editor-v2 entry); the other runs cover the v1 editor, so they say so
+  // explicitly: "optin" (v1, `?editor=v2` opts a browser in — start.spec,
+  // claim.spec).
+  NEXT_PUBLIC_EDITOR_V2: EDITOR_V2 ? "1" : "optin",
 };
 const webCommand = {
   start: `npx next start -p ${WEB_PORT}`,

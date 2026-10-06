@@ -3,7 +3,7 @@
  * range from the job's sprite (GET /jobs/{id}/filmstrip), at the clip's
  * height (52 px desktop, 80 px phone), drawn for the visible window only;
  * a job from before the filmstrip gets one made on request. Runs against a
- * build with NEXT_PUBLIC_EDITOR_V2=1 (E2E_EDITOR_V2=1).
+ * v2 build (NEXT_PUBLIC_EDITOR_V2 unset or 1; E2E_EDITOR_V2=1).
  */
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";

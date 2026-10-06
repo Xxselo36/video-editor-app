@@ -25,15 +25,22 @@ describe("editor v2 flag", () => {
     expect(await choice("off", "?editor=v2")).toEqual({ on: false, stored: null });
   });
 
-  it("unset: like optin, v1 unless this browser opted in", async () => {
-    expect((await choice(undefined, "")).on).toBe(false);
-    expect(await choice(undefined, "?editor=v2")).toEqual({ on: true, stored: "v2" });
+  it('unset (the default): like "1", v2 unless this browser chose v1', async () => {
+    expect((await choice(undefined, "")).on).toBe(true);
+    expect((await choice("", "")).on).toBe(true);
+    expect(await choice(undefined, "?editor=v1")).toEqual({ on: false, stored: "v1" });
+    expect((await choice(undefined, "", "v1")).on).toBe(false);
+    expect(await choice(undefined, "?editor=v2", "v1")).toEqual({ on: true, stored: "v2" });
   });
 
   it('"1": v2 unless this browser chose v1', async () => {
     expect((await choice("1", "")).on).toBe(true);
     expect(await choice("1", "?editor=v1")).toEqual({ on: false, stored: "v1" });
     expect((await choice("1", "", "v1")).on).toBe(false);
+  });
+
+  it('any other value counts as "off"', async () => {
+    expect(await choice("0", "?editor=v2")).toEqual({ on: false, stored: null });
   });
 
   it('"optin": v1 unless this browser opted in with ?editor=v2', async () => {
