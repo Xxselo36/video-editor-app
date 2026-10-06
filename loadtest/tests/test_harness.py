@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import aiohttp
@@ -233,6 +234,31 @@ class Burst(unittest.TestCase):
         self.assertEqual(c.result, report.FAIL, c.detail)
         args.expect_video_min_per_hour = 10
         self.assertEqual(burst.drain_check(args, b, 4.0, 900).result, report.PASS)
+
+    def test_limits_and_executor_from_the_server(self):
+        def parse(*extra):
+            with mock.patch.dict(os.environ, {"CLEO_MAX_ANALYZE": "",
+                                              "CLEO_MAX_QUEUE": ""}):
+                return cli.build_parser().parse_args(
+                    ["burst", "--base-url", "http://x", *extra])
+        modal = {"enabled": True, "max_queue": 200,
+                 "kinds": {"ingest": {"executor": "modal", "limit": 20}}}
+        args = parse("--executor", "modal")
+        self.assertEqual(burst.resolve_limits(args, modal), "modal")
+        self.assertEqual((args.max_analyze, args.max_queue), (20, 200))
+        # Given limits win; another executor than asked refuses to start.
+        args = parse("--max-analyze", "3")
+        burst.resolve_limits(args, modal)
+        self.assertEqual((args.max_analyze, args.max_queue), (3, 200))
+        local = {"enabled": True, "max_queue": 20,
+                 "kinds": {"ingest": {"executor": "local", "limit": 2}}}
+        with self.assertRaises(UsageError):
+            burst.resolve_limits(parse("--executor", "modal"), local)
+        args = parse()
+        self.assertEqual(burst.resolve_limits(args, {}), "?")
+        self.assertEqual((args.max_analyze, args.max_queue), (2, 20))
+        self.assertEqual(burst.resolve_limits(parse(), {"enabled": False}),
+                         "wp1")
 
 
 class ReportRendering(unittest.TestCase):

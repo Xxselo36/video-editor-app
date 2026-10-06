@@ -31,8 +31,10 @@ on:
         description: >-
           Extra arguments, e.g. "--users 1000 --minutes 30" (poll-soak),
           "--editors 100" (editor-saves), "--streams 200 --downloads 50"
-          (media), "--clips synthetic:2x50,synthetic:10x10" (burst).
-          See python -m loadtest <scenario> --help
+          (media), "--clips synthetic:2x50,synthetic:10x10" (burst),
+          "--executor modal --clips iphone4kloop:10x4" (burst on the Modal
+          analysis, DEPLOY.md 11.5: big 4K HEVC uploads at once; stops when
+          the server analyses locally). See python -m loadtest <scenario> --help
         required: false
         default: ''
       identity:

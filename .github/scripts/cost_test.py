@@ -16,10 +16,19 @@ Profiles (PROFILES below):
   phone4k      4K 30p H.264 High 45 Mbit/s, stored landscape + rotation flag
   iphone1080hdr 1080p 30p HEVC 10-bit HLG ~10 Mbit/s, rotated (iPhone default)
   iphone4khdr  4K 30p HEVC 10-bit HLG ~45 Mbit/s, rotated (iPhone 4K HDR)
+  iphone4kloop iphone4khdr at 28 Mbit/s with a 30 s picture looped (built
+               in minutes: 10 min ≈ 2.1 GB) — the big-upload case
+               (iphone4kloop:10), e.g. for the Modal analysis
 Presets mirror web/src/features/start/presets.legacy.ts PRESETS (default: tiktok).
 A bare number means "synthetic". Files over 90 MB go straight to R2
 like in the web app. Jobs are tagged _cost_test so /admin/costs can
 exclude them (?exclude_tests=true).
+
+EXPECT_EXECUTOR=local|modal (the workflow's ingest_executor input):
+before anything is built, GET /admin/queue must report that ingest
+executor (the server's CLEO_EXECUTOR_INGEST with CLEO_TASK_QUEUE=1) —
+so a run meant for the Modal analysis can't silently measure the local
+one. The executor is printed either way (with the admin token).
 
 Known limits: the grain level is a guess, not calibrated against real
 footage (it strongly affects file sizes); egress is an estimate (every
@@ -70,6 +79,12 @@ PROFILES: dict[str, dict] = {
     "iphone4khdr": {"w": 2160, "h": 3840, "fps": 30, "vb": "45M", "noise": 6,
                     "codec": _HLG, "preset": "superfast", "rotate": True,
                     "audio": _PHONE_AUDIO},
+    # Encoding 10 min of 4K HEVC takes a runner most of an hour; 30 s
+    # encoded once and stream-copied in a loop takes minutes and decodes
+    # exactly as expensively on the server.
+    "iphone4kloop": {"w": 2160, "h": 3840, "fps": 30, "vb": "28M", "noise": 6,
+                     "codec": _HLG, "preset": "superfast", "rotate": True,
+                     "audio": _PHONE_AUDIO, "loop_s": 30},
 }
 
 # web/src/features/start/presets.legacy.ts PRESETS[*].settings, as sent by
@@ -176,11 +191,30 @@ def make_video(profile: str, minutes: float, work: Path) -> Path:
     vb = cfg["vb"]
     num = float(vb[:-1]) * (1e6 if vb.endswith("M") else 1e3)
     raw = work / f"raw_{profile}_{minutes:g}.mp4"
-    run(["ffmpeg", "-y", "-f", "lavfi", "-i", vf, "-i", str(audio),
-         "-shortest", *cfg["codec"], "-preset", cfg["preset"],
-         "-g", str(cfg["fps"]), "-b:v", vb, "-maxrate", str(int(num * 1.2)),
-         "-bufsize", str(int(num * 2)),
-         "-c:a", "aac", *cfg["audio"], "-movflags", "+faststart", str(raw)])
+    rate = ["-b:v", vb, "-maxrate", str(int(num * 1.2)),
+            "-bufsize", str(int(num * 2))]
+    loop_s = cfg.get("loop_s")
+    if loop_s and minutes * 60 > loop_s:
+        # One loop_s piece of picture, then stream-copied over the whole
+        # speech track (no second encode).
+        piece = work / f"piece_{profile}.mp4"
+        run(["ffmpeg", "-y", "-f", "lavfi", "-i", vf, "-t", str(loop_s),
+             *cfg["codec"], "-preset", cfg["preset"],
+             "-g", str(cfg["fps"]), *rate, "-an", str(piece)])
+        # -t, not -shortest: with an endless copied input -shortest
+        # doesn't stop the copy.
+        run(["ffmpeg", "-y", "-stream_loop", "-1", "-i", str(piece),
+             "-i", str(audio), "-map", "0:v:0", "-map", "1:a:0",
+             "-t", f"{wav_seconds(audio):.3f}",
+             "-c:v", "copy", "-c:a", "aac", *cfg["audio"],
+             "-movflags", "+faststart", str(raw)])
+        piece.unlink(missing_ok=True)
+    else:
+        run(["ffmpeg", "-y", "-f", "lavfi", "-i", vf, "-i", str(audio),
+             "-shortest", *cfg["codec"], "-preset", cfg["preset"],
+             "-g", str(cfg["fps"]), *rate,
+             "-c:a", "aac", *cfg["audio"], "-movflags", "+faststart",
+             str(raw)])
     audio.unlink(missing_ok=True)
     out = work / f"{profile}_{minutes:g}min.mp4"
     if cfg["rotate"]:
@@ -379,8 +413,9 @@ def report(rows: list[dict], final: bool) -> str:
                          headers={"X-Admin-Token": ADMIN})
             by_job = {c["job_id"]: c for c in costs["rows"]}
             lines += ["", "| Profil | Min | Speicher MB | USD gesamt | USD/Min "
-                      "| Teile | Modal s / fallback | Dateien MB |",
-                      "|---|---|---|---|---|---|---|---|"]
+                      "| Teile | Analyse s (Server) | Modal s / fallback "
+                      "| Dateien MB |",
+                      "|---|---|---|---|---|---|---|---|---|"]
             for r in rows:
                 c = by_job.get(r["job"])
                 if not c:
@@ -391,7 +426,8 @@ def report(rows: list[dict], final: bool) -> str:
                 lines.append(
                     f"| {r['profile']} | {c['video_minutes']} | {c['storage_mb']} "
                     f"| {c['usd_all_in']:.4f} | {c['usd_per_video_minute']} | "
-                    f"{parts} | {u.get('modal_s', 0):.0f} / "
+                    f"{parts} | {u.get('wall_s_analyze', 0):.0f} | "
+                    f"{u.get('modal_s', 0):.0f} / "
                     f"{int(u.get('modal_failed', 0))} | "
                     f"{json.dumps(c.get('files_mb', {}))} |")
         except Exception as e:
@@ -400,6 +436,36 @@ def report(rows: list[dict], final: bool) -> str:
     if SUMMARY:
         Path(SUMMARY).write_text("## Cost test\n\n" + text + "\n")
     return text
+
+
+def check_executor() -> str | None:
+    """The server's ingest executor (GET /admin/queue, admin token);
+    exits when EXPECT_EXECUTOR names another one."""
+    want = os.environ.get("EXPECT_EXECUTOR", "").strip().lower()
+    if want in ("", "any"):
+        want = ""
+    if not ADMIN:
+        if want:
+            raise SystemExit("EXPECT_EXECUTOR needs CLEO_ADMIN_TOKEN "
+                             "(GET /admin/queue)")
+        return None
+    try:
+        q = http("GET", "/admin/queue")
+    except Exception as e:
+        if want:
+            raise SystemExit(f"can't read the ingest executor: {redact(e)}")
+        print(f"(ingest executor unknown: {redact(e)})", flush=True)
+        return None
+    ingest = (q.get("kinds") or {}).get("ingest") or {}
+    got = (ingest.get("executor") or "local") if q.get("enabled") else "wp1"
+    print(f"ingest executor: {got} (task queue "
+          f"{'on' if q.get('enabled') else 'off'}, running limit "
+          f"{ingest.get('limit')}, queue cap {q.get('max_queue', '?')})",
+          flush=True)
+    if want and got != want:
+        raise SystemExit(f"the server analyses with {got!r}, this run expects "
+                         f"{want!r} (EXPECT_EXECUTOR) — nothing was uploaded")
+    return got
 
 
 def delete_jobs(ids: list[str]) -> None:
@@ -440,6 +506,7 @@ def main() -> int:
         return 0
     runs = parse_runs(sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else
                       "phone1080:2,phone1080:10,phone4k:3,iphone4khdr:3")
+    executor = check_executor()
     rows: list[dict] = []
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -489,8 +556,10 @@ def main() -> int:
             finally:
                 if video is not None:
                     video.unlink(missing_ok=True)
-            print(f"   analyze {row['an']:.0f}s, render {row['re']:.0f}s "
-                  f"→ {row['status']}", flush=True)
+            print(f"   analyze {row['an']:.0f}s"
+                  + (f" ({executor})" if executor else "")
+                  + f", render {row['re']:.0f}s → {row['status']}",
+                  flush=True)
             report(rows, final=False)  # summary survives a later cancel
 
     print(report(rows, final=True))

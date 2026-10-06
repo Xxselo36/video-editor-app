@@ -304,7 +304,13 @@ Alarm-Ausbau (WP6) sind das die Signale:
 | `[groq] audio budget: … analyses wait` | das eigene Stundenbudget ist voll, Analysen warten | nur Stoßzeiten; dauerhaft → Tier erhöhen, dann Budget anheben |
 | `[llm] SPEND LIMIT hit in …` / `[llm] SPEND LIMIT REACHED — breaker open` (ERROR) | Anthropic-Ausgabenlimit erreicht; Analysen warten (danach ohne LLM-Schritte, `processing_warnings`), Renders ohne Hooks/Caption | Anthropic Console → Limits/Billing erhöhen; der Breaker prüft stündlich selbst |
 | `[worker] PROTOCOL MISMATCH` / `SCHEMA BEHIND` (ERROR) | Deploy-Versatz zwischen API und Worker; wird wiederholt | nur kurz nach Deploys erwartet |
-| `[queue] NOT STARTING` | `CLEO_EXECUTOR_*=modal` in einer Version ohne Modal-Executor | Variable löschen |
+| `[queue] NOT STARTING` | `CLEO_EXECUTOR_RENDER=modal` (gibt es nicht), oder `CLEO_EXECUTOR_INGEST=modal` ohne `CLEO_MEDIA_BACKEND=r2` / `MODAL_TOKEN_ID` (der Grund steht in der Zeile) | Variable löschen bzw. die fehlende setzen (DEPLOY.md 11.5) |
+| `[modal] ANALYSIS ANALYZE_UNAVAILABLE — job …` (ERROR) | nur mit `CLEO_EXECUTOR_INGEST=modal`: Modal nimmt die Analyse nicht an (Ausgabenlimit, Token, nicht gestartet); neuer Versuch, nach 3 Fehler + Erstattung | Modal-Billing / Token prüfen; notfalls `CLEO_EXECUTOR_INGEST` löschen |
+| `[modal] analyze_r2 IS NOT DEPLOYED` (ERROR) | analyze_r2 fehlt (NotFoundError); Analysen laufen 10 min lang auf Railway (lokales Limit 2, Plattenprüfung), dann neuer Blick | "Deploy Modal render" laufen lassen (Warnung `analyze_r2 not deployed`? → Secret `cleocuts-ai` anlegen, DEPLOY.md 11.5) |
+| `[modal] ANALYSIS ANALYZE_TIMEOUT` (ERROR) | Analyse auf Modal über ihre Frist / Modals Funktions-Timeout; Fehler + Erstattung, kein neuer Versuch | gehäuft → Modal-Log (`modal app logs cleocuts-render`); Frist (`CLEO_MODAL_ANALYZE_DEADLINE_S_*`) prüfen |
+| `[modal] ANALYSIS MODAL_FAILED` (ERROR) | Container abgestürzt / verdrängt; neuer Versuch | gehäuft → Modal-Log, bei OOM `memory` in `analyze_r2` erhöhen |
+| `[modal] analysis fc-… of job … stopped (…)` | ein verwaister Modal-Aufruf wurde abgebrochen (Lease abgelaufen, Task beendet, Job gelöscht, Start-Durchlauf) | — (gehäuft `lease expired` → Railway-Neustarts/Hänger) |
+| `[job …] analysed here, not on Modal` | ein Job von vor R2 (Upload als Datei auf Railway) wird lokal analysiert | — |
 
 ## Was kosten die Checks?
 

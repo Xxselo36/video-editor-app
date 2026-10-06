@@ -203,6 +203,23 @@ class PgTaskStore:
     def active_count(self, kind: str) -> int:
         return self.counts(kind)[1]
 
+    def active_by_executor(self, kind: str) -> dict[str, int]:
+        with self._db.connection() as conn:
+            rows = conn.execute(
+                "SELECT coalesce(executor, 'local'), count(*) FROM tasks "
+                "WHERE kind = %s AND state IN ('dispatching', 'running') "
+                "GROUP BY 1", (kind,)).fetchall()
+        return {str(r[0]): int(r[1]) for r in rows}
+
+    def modal_orphans(self, now: float, settled_since: float
+                      ) -> list[taskq.Task]:
+        return self._tasks(
+            f"SELECT {_COLS} FROM tasks WHERE kind = 'ingest' AND "
+            "modal_call_id LIKE 'fc-%%' AND ((state IN ('dispatching', "
+            "'running') AND locked_until < %s) OR (state IN ('failed', "
+            "'dead', 'cancelled') AND coalesce(finished_at, updated_at) > "
+            "%s)) ORDER BY id", (pg._dt(now), pg._dt(settled_since)))
+
     def queued(self, kind: str | None = None, limit: int | None = None
                ) -> list[taskq.Task]:
         sql = f"SELECT {_COLS} FROM tasks WHERE state = 'queued'"
@@ -218,17 +235,22 @@ class PgTaskStore:
 
     def claim_for_dispatch(self, kind: str, limit: int, leader_id: str,
                            lease_s: float, executor: str, *,
-                           created_before: float | None = None
+                           created_before: float | None = None,
+                           ids: list[int] | None = None
                            ) -> list[taskq.Task]:
         """The verified claim (WP4 §5.3): FOR UPDATE SKIP LOCKED over the
-        tasks_queue index, attempts + 1, a start lease."""
-        if limit <= 0:
+        tasks_queue index, attempts + 1, a start lease (only tasks of
+        `ids`, when given)."""
+        if limit <= 0 or ids == []:
             return []
         extra = ""
         args: list[Any] = [kind]
         if created_before is not None:
             extra = " AND created_at <= %s"
             args.append(pg._dt(created_before))
+        if ids is not None:
+            extra += " AND id = ANY(%s)"
+            args.append([int(i) for i in ids])
         args += [int(limit), leader_id, float(lease_s), executor]
         with self._db.connection() as conn:
             cur = conn.execute(

@@ -68,6 +68,11 @@ python -m loadtest abuse --base-url https://api.cleocuts.com \
 # Burst wie WP4 (teuer!)
 python -m loadtest burst --base-url https://api.cleocuts.com \
   --clips synthetic:2x50,synthetic:10x10 --max-usd 20 --i-understand-this-costs-money
+
+# Analysen auf Modal (CLEO_EXECUTOR_INGEST=modal, DEPLOY.md 11.5): mehrere
+# große 4K-HEVC-Uploads gleichzeitig; bricht ab, wenn der Server lokal analysiert
+python -m loadtest burst --base-url https://api.cleocuts.com --executor modal \
+  --clips iphone4kloop:10x4 --max-usd 10 --i-understand-this-costs-money
 ```
 
 Hinweise:
@@ -79,7 +84,9 @@ Hinweise:
   Abbruch: `python -m loadtest cleanup --base-url … --ids-file <out>/created-ids.txt`.
   Der Workflow macht das in einem `always()`-Schritt selbst.
 - `burst` schlägt fehl, wenn weniger als `--min-accepted` Uploads angenommen werden
-  (Standard min(K, `CLEO_MAX_ANALYZE` + `CLEO_MAX_QUEUE`), 0 angenommen immer FAIL),
+  (Standard min(K, `--max-analyze` + `--max-queue`; ohne Angabe und ohne
+  `CLEO_MAX_ANALYZE`/`CLEO_MAX_QUEUE` die Werte des Servers aus `/admin/queue`,
+  mit Modal 20 + 200), 0 angenommen immer FAIL),
   und wenn die Queue langsamer als 80 % der Vorhersage abläuft
   (`--expect-video-min-per-hour` oder aus den nie wartenden Jobs des Laufs).
 - Als Service-Identität (`--identity auto`/`admin`) gibt es eine WARN-Zeile: JWT-Prüfung,

@@ -1447,6 +1447,26 @@ class SqliteTaskStore:
     def active_count(self, kind: str) -> int:
         return self.counts(kind)[1]
 
+    def active_by_executor(self, kind: str) -> dict[str, int]:
+        """Dispatched or running tasks of `kind` per executor."""
+        with self._s._lock:
+            rows = self._s._conn.execute(
+                "SELECT coalesce(executor, 'local'), count(*) FROM tasks "
+                "WHERE kind = ? AND state IN ('dispatching', 'running') "
+                "GROUP BY 1", (kind,)).fetchall()
+        return {str(r[0]): int(r[1]) for r in rows}
+
+    def modal_orphans(self, now: float, settled_since: float
+                      ) -> list[taskq.Task]:
+        """Ingest tasks with a stored Modal call nobody waits for: the
+        lease ran out, or settled (not succeeded) after settled_since."""
+        return self._tasks(
+            "SELECT * FROM tasks WHERE kind = 'ingest' AND modal_call_id "
+            "LIKE 'fc-%' AND ((state IN ('dispatching', 'running') AND "
+            "locked_until < ?) OR (state IN ('failed', 'dead', "
+            "'cancelled') AND coalesce(finished_at, updated_at) > ?)) "
+            "ORDER BY id", [now, settled_since])
+
     def queued(self, kind: str | None = None, limit: int | None = None
                ) -> list[taskq.Task]:
         """Queued tasks in dispatch order (per kind: sort_at, id)."""
@@ -1463,13 +1483,15 @@ class SqliteTaskStore:
 
     def claim_for_dispatch(self, kind: str, limit: int, leader_id: str,
                            lease_s: float, executor: str, *,
-                           created_before: float | None = None
+                           created_before: float | None = None,
+                           ids: list[int] | None = None
                            ) -> list[taskq.Task]:
         """Take up to `limit` queued tasks of `kind` that are due, in
-        order: state dispatching, attempts + 1 (the fencing token), a
-        start lease of lease_s; ingest tasks count against the Groq
-        window from now (started_at)."""
-        if limit <= 0:
+        order (only those of `ids`, when given): state dispatching,
+        attempts + 1 (the fencing token), a start lease of lease_s;
+        ingest tasks count against the Groq window from now
+        (started_at)."""
+        if limit <= 0 or ids == []:
             return []
         now = time.time()
         with self._tx() as conn:
@@ -1479,6 +1501,9 @@ class SqliteTaskStore:
             if created_before is not None:
                 sql += " AND created_at <= ?"
                 args.append(created_before)
+            if ids is not None:
+                sql += f" AND id IN ({','.join('?' for _ in ids)})"
+                args += [int(i) for i in ids]
             sql += " ORDER BY sort_at, id LIMIT ?"
             args.append(int(limit))
             ids = [r[0] for r in conn.execute(sql, args).fetchall()]

@@ -46,7 +46,10 @@ IMAGE_FONT_FILES = {
 
 
 def _modal_layout() -> list[tuple[str, str]]:
+    # The render image (the analysis image, analyze_image, follows it in
+    # the file and has its own layout: test_wp4_modal_ingest.py).
     src = (REPO / "backend" / "modal_render.py").read_text()
+    src = src.split("\nanalyze_image = (", 1)[0]
     return re.findall(r'\.add_local_dir\(\s*"([^"]+)"\s*,\s*'
                       r'remote_path\s*=\s*"([^"]+)"', src)
 
