@@ -243,6 +243,7 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "हम आपके वीडियो कैसे संभालते हैं",
   "app.upload.resuming":
     "अपलोड वहीं से फिर शुरू हो रहा है जहाँ रुका था — इस पेज को खुला रखें।",
+  "app.upload.paused": "कनेक्शन का इंतज़ार… अपलोड अपने-आप जारी रहेगा।",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "वापस",
@@ -393,6 +394,7 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "रद्द करें",
   "app.projects.retry": "फिर कोशिश करें",
   "app.projects.pickAgain": "अपलोड जारी रखने के लिए वही फ़ाइल दोबारा चुनें",
+  "app.projects.wrongFile": "यह कोई दूसरा वीडियो है। जारी रखने के लिए “{name}” फिर से चुनें — या यह अपलोड हटाकर नया शुरू करें।",
   "app.projects.resumeAt": "{pct}% पर रुका — जारी रखने के लिए वही वीडियो चुनें।",
   "app.projects.resume": "अपलोड जारी रखें",
   "app.projects.download": "डाउनलोड करें",

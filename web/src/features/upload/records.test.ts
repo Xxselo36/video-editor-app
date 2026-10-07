@@ -93,3 +93,25 @@ describe("upload records as the page goes", () => {
     r.liveUploads.delete("upl-bf");
   });
 });
+
+describe("the page comes back (iOS: pagehide for a page that only went to the background)", () => {
+  it("its running uploads are running again: no stopped tile", async () => {
+    const r = await running("upl-bg");
+    r.pageHidden(false);
+    await vi.waitFor(async () => expect(await code("upl-bg")).toBe("upload_interrupted"));
+    // visible / focus / pageshow: the same document, the upload still runs.
+    r.pageShown();
+    await vi.waitFor(async () => expect(await code("upl-bg")).toBeNull());
+    r.liveUploads.delete("upl-bg");
+  });
+
+  it("an upload that ended meanwhile stays as it was", async () => {
+    const r = await running("upl-ended");
+    r.pageHidden(false);
+    await vi.waitFor(async () => expect(await code("upl-ended")).toBe("upload_interrupted"));
+    r.liveUploads.delete("upl-ended");
+    r.pageShown();
+    await new Promise((res) => setTimeout(res, 10));
+    expect(await code("upl-ended")).toBe("upload_interrupted");
+  });
+});

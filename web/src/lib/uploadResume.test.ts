@@ -378,13 +378,22 @@ describe("uploadResumable", () => {
     expect(store.get(fp)?.ticket).toBe("new");
   });
 
-  it("a 5xx from /parts keeps the record for the next try", async () => {
+  it("a 5xx from /parts (a deploy restarting the backend) is waited out: the record stays, nothing is sent meanwhile", async () => {
     const bytes = content(size, 13);
     const fp = (await fingerprint(fileOf(bytes, "a", 1)))!;
     store.set(fp, record(fp, { size, part_size: part, parts_total: total }));
     answer = () => json({ detail: "storage_error" }, 502);
-    await expect(uploadResumable({ file: fileOf(bytes, "a", 1) })).rejects.toBeTruthy();
+    const ctl = new AbortController();
+    const paused: boolean[] = [];
+    const up = uploadResumable({ file: fileOf(bytes, "a", 1), signal: ctl.signal, onPaused: (p) => paused.push(p) });
+    up.catch(() => {});
+    // Two 502 in a row: "waiting" (the retry after 1 s, then 3 s).
+    await vi.waitFor(() => expect(paused).toEqual([true]), { timeout: 4000 });
     expect(store.has(fp)).toBe(true);
     expect(puts).toHaveLength(0);
+    expect(calls.filter((c) => c.path === "/uploads/multipart/init")).toHaveLength(0);
+    ctl.abort();
+    await expect(up).rejects.toMatchObject({ name: "AbortError" });
+    expect(store.has(fp)).toBe(true);
   });
 });

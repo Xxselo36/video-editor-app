@@ -243,6 +243,7 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Cara kami menangani videomu",
   "app.upload.resuming":
     "Melanjutkan unggahan dari titik terakhirnya — biarkan halaman ini terbuka.",
+  "app.upload.paused": "Menunggu koneksi… Unggahan berlanjut otomatis.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "kembali",
@@ -393,6 +394,7 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Batal",
   "app.projects.retry": "Coba lagi",
   "app.projects.pickAgain": "Pilih file yang sama lagi untuk melanjutkan unggahan",
+  "app.projects.wrongFile": "Itu video lain. Untuk melanjutkan, pilih “{name}” lagi — atau hapus unggahan ini dan mulai yang baru.",
   "app.projects.resumeAt": "Berhenti di {pct}% — pilih video yang sama untuk melanjutkan.",
   "app.projects.resume": "Lanjutkan unggahan",
   "app.projects.download": "Unduh",

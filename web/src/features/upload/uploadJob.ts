@@ -18,6 +18,7 @@ import {
   uploadResumable,
   UPLOAD_STALL_MS,
   UPLOAD_STALLED_MSG,
+  waitRetry,
 } from "@/lib/chunkedUpload";
 import { getConfig } from "@/lib/config";
 import { REFUSAL_CODES, tEn } from "@/lib/errors";
@@ -93,7 +94,7 @@ export async function uploadJob(
   targetFile: File,
   settings: SettingsSource,
   selectedPreset: PresetId | null,
-  { tempId, signal, onPaywall, onCreated, onFailed, onStarting, onProgress, onEnd }: {
+  { tempId, signal, onPaywall, onCreated, onFailed, onStarting, onProgress, onPaused, onEnd }: {
     /** The upload record's temporary id (uploadCard). */
     tempId: string;
     /** Cancel (UX12): stops the upload and aborts it on the server. */
@@ -110,6 +111,8 @@ export async function uploadJob(
     onStarting?: () => void;
     /** Live progress of the upload card (memory only: uploadManager). */
     onProgress?: (tempId: string, pct: number, resuming: boolean) => void;
+    /** Waiting for the connection (it continues by itself) / going again. */
+    onPaused?: (tempId: string, paused: boolean) => void;
     /** The upload is over (job created or failed). */
     onEnd?: (tempId: string) => void;
   },
@@ -134,7 +137,17 @@ export async function uploadJob(
   // Set while the card says "resuming" (an interrupted upload of this
   // file continues); cleared if it starts over after all.
   let resumingFrom: number | null = null;
+  let lastPct = 0;
+  // The stored card's heartbeat also while no bytes move (waiting for the
+  // connection): another tab must not take it for a dead upload.
+  const beat = setInterval(() => {
+    if (Date.now() - lastBeat < UPLOAD_HEARTBEAT_MS) return;
+    lastBeat = Date.now();
+    uploadProgress(tempId, { pct: lastPct, lastProgressAt: lastBeat });
+  }, UPLOAD_HEARTBEAT_MS);
+  const setPaused = (paused: boolean) => onPaused?.(tempId, paused);
   const setPct = (pct: number) => {
+    lastPct = pct;
     const now = Date.now();
     if (now - lastUiUpdate > 200 || pct >= 100) {
       lastUiUpdate = now;
@@ -155,18 +168,25 @@ export async function uploadJob(
 
   // Acquire a Wake Lock so the OS doesn't put the tab to sleep
   // mid-upload. iOS 16.4+ / Android Chrome 84+ / desktop most.
-  // Silent no-op if unsupported (older iOS, private mode).
-  let _wakeLock: { release: () => Promise<void> } | null = null;
-  try {
-    const nav = navigator as unknown as {
-      wakeLock?: { request: (t: string) => Promise<{ release: () => Promise<void> }> };
-    };
-    if (nav.wakeLock?.request) {
+  // Silent no-op if unsupported (older iOS, private mode). The browser
+  // drops it when the page is hidden: taken again when it is back.
+  type Lock = { release: () => Promise<void>; released?: boolean };
+  let _wakeLock: Lock | null = null;
+  let over = false;
+  const lock = async () => {
+    try {
+      const nav = navigator as unknown as { wakeLock?: { request: (t: string) => Promise<Lock> } };
+      if (over || !nav.wakeLock?.request || (_wakeLock && !_wakeLock.released)) return;
+      if (document.visibilityState !== "visible") return;
       _wakeLock = await nav.wakeLock.request("screen");
+      if (over) void _wakeLock.release().catch(() => {});
+    } catch {
+      // ignore — unsupported, permission denied, or lost focus
     }
-  } catch {
-    // ignore — unsupported, permission denied, or lost focus
-  }
+  };
+  const onVisible = () => void lock();
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
+  await lock();
 
   try {
     // Two upload paths:
@@ -234,6 +254,11 @@ export async function uploadJob(
       const up = await uploadResumable({
         file: targetFile,
         onProgress: (pct) => setPct(pct),
+        onPaused: (paused) => {
+          setPaused(paused);
+          lastBeat = Date.now();
+          uploadProgress(tempId, { pct: lastPct, lastProgressAt: lastBeat });
+        },
         signal,
         duration,
       });
@@ -286,12 +311,21 @@ export async function uploadJob(
         });
       };
       let failure: unknown = null;
+      // No answer at all (the connection is gone, the page in the
+      // background): waited out for as long as it takes — the key makes
+      // POST /jobs idempotent. A 5xx gets the ~75 s above.
+      let netFails = 0;
       const retryDelays = legacyApi ? [] : POST_JOBS_RETRY_MS;
       for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
-        if (attempt > 0) await sleep(retryDelays[attempt - 1]);
+        if (attempt > 0) {
+          if (netFails > 1) setPaused(true);
+          await (netFails ? waitRetry(retryDelays[attempt - 1]) : sleep(retryDelays[attempt - 1]));
+        }
         failure = null;
         try {
           res = await post();
+          if (netFails > 1) setPaused(false);
+          netFails = 0;
           // 503 server_busy / 507 are refusals (and 503
           // storage_unavailable a short outage: retried).
           if (res.status >= 500 && !REFUSAL_CODES.has(apiErrorFromText(res.status, res.responseText).code ?? "")) {
@@ -299,6 +333,9 @@ export async function uploadJob(
           }
         } catch (e) {
           failure = e;
+          netFails++;
+          // (The budget is kept for the 5xx.)
+          if (!legacyApi && attempt === retryDelays.length) attempt--;
         }
         if (failure === null) break;
       }
@@ -455,11 +492,14 @@ export async function uploadJob(
     recordUploadFailed(tempId, failure);
     onFailed?.();
   } finally {
+    over = true;
+    clearInterval(beat);
+    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
     liveUploads.delete(tempId);
     onEnd?.(tempId);
     // Release wake lock when upload path exits (success OR error).
     try {
-      await _wakeLock?.release();
+      await (_wakeLock as Lock | null)?.release();
     } catch {
       // ignore
     }

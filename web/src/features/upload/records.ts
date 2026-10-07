@@ -113,25 +113,44 @@ const CUT_CODES = new Set(["connection_lost", "server_no_response", "processing_
 export const PAGE_CUT_MS = 10_000;
 const cutAt = new Map<string, number>();
 let pageGone = false;
+/** Running uploads pagehide wrote as interrupted. */
+const hidden = new Set<string>();
 
 /** pagehide (exported for the unit test): this page's uploads, and the
  *  ones it just saw cut, are interrupted. Not when the page goes into the
- *  back/forward cache (`persisted`): it may come back as it was. */
+ *  back/forward cache (`persisted`): it may come back as it was. Written
+ *  in case the document dies — but iOS also fires it for a page that
+ *  only goes to the background and lives on: see pageShown. */
 export function pageHidden(persisted: boolean, now = Date.now()): void {
   if (persisted) return;
   pageGone = true;
   const cut = [...cutAt].filter(([, at]) => now - at < PAGE_CUT_MS).map(([id]) => id);
+  for (const id of liveUploads) hidden.add(id);
   for (const id of new Set([...liveUploads, ...cut])) writeFailed(id, INTERRUPTED);
 }
 
-/** pageshow: the page is shown again (exported for the unit test). */
+/** The page is back — pageshow, visible, focus (exported for the unit
+ *  test): the same document, so its uploads still run (the File is still
+ *  here) and go on by themselves; the "interrupted" pagehide wrote for
+ *  them goes again. */
 export function pageShown(): void {
   pageGone = false;
+  const now = Date.now();
+  for (const id of hidden) {
+    if (!liveUploads.has(id)) continue;
+    if (projectsV2()) withStore((store) => store.updateUpload(id, { errorCode: null, errorParams: null, lastProgressAt: now }));
+    else updateActiveJob(id, { error: undefined, errorCode: null, lastProgressAt: now });
+  }
+  hidden.clear();
 }
 
 if (typeof window !== "undefined") {
   window.addEventListener("pagehide", (e) => pageHidden(e.persisted));
   window.addEventListener("pageshow", pageShown);
+  window.addEventListener("focus", pageShown);
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && pageShown());
+  }
 }
 
 /** POST /jobs created the job: the record becomes the project. */

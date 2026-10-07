@@ -414,7 +414,11 @@ export function StartScreen() {
             <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{Math.round(live?.pct ?? 0)}%</span>
           </div>
           <Progress value={live?.pct ?? 0} min={2} color="var(--brand)" label={t("app.start.uploading")} />
-          {live?.resuming && <p className="mt-2 text-xs text-[var(--text-muted)]">{t("app.upload.resuming")}</p>}
+          {live?.paused ? (
+            <p className="mt-2 text-xs text-[var(--warn)]" role="status" data-testid="start-paused">{t("app.upload.paused")}</p>
+          ) : (
+            live?.resuming && <p className="mt-2 text-xs text-[var(--text-muted)]">{t("app.upload.resuming")}</p>
+          )}
           {probe?.duration && minutesLeft !== null && (
             <p className="mt-2 text-xs text-[var(--text-body)]" data-testid="start-uses">
               {t("app.start.usesMinutes", { used: clock(probe.duration), left: fmtMinutes(minutesLeft, lang) })}

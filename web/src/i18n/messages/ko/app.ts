@@ -240,6 +240,7 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "영상 처리 방식 안내",
   "app.upload.resuming":
     "중단된 곳부터 업로드를 이어서 하고 있어요 — 이 페이지를 열어 두세요.",
+  "app.upload.paused": "연결을 기다리는 중… 업로드가 자동으로 이어집니다.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "뒤로",
@@ -389,6 +390,7 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "취소",
   "app.projects.retry": "다시 시도",
   "app.projects.pickAgain": "업로드를 이어가려면 같은 파일을 다시 선택하세요",
+  "app.projects.wrongFile": "다른 동영상이에요. 이어서 올리려면 “{name}”을(를) 다시 선택하거나, 이 업로드를 삭제하고 새로 시작하세요.",
   "app.projects.resumeAt": "{pct}%에서 중단됨 — 이어서 하려면 같은 동영상을 선택하세요.",
   "app.projects.resume": "업로드 이어서 하기",
   "app.projects.download": "다운로드",

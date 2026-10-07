@@ -97,6 +97,21 @@ export function isUploading(file: File): boolean {
   return running.has(fileKey(file));
 }
 
+// Desktop: leaving the page (reload, closing the tab) while an upload
+// runs asks first. iOS ignores beforeunload; the listener is only there
+// while something uploads (it may keep a page out of the bfcache).
+const touch = () => /iPad|iPhone|iPod|Android/.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
+function onBeforeUnload(e: BeforeUnloadEvent): void {
+  if (!running.size) return;
+  e.preventDefault();
+  e.returnValue = "";
+}
+function guardUnload(): void {
+  if (typeof window === "undefined" || typeof navigator === "undefined" || touch()) return;
+  if (running.size) window.addEventListener("beforeunload", onBeforeUnload);
+  else window.removeEventListener("beforeunload", onBeforeUnload);
+}
+
 /**
  * Upload `file` and create its job, in the background whatever route is
  * shown; resolves when that is over (callers don't wait for it). Never
@@ -126,6 +141,7 @@ export async function startUpload(
   // the moment it opens.
   const tempId = uploadCard(file, settings, preset);
   running.set(fk, tempId);
+  guardUnload();
   onCard?.(tempId);
   let created: string | null = null;
   const ctl = new AbortController();
@@ -141,6 +157,7 @@ export async function startUpload(
     liveUploads.delete(tempId);
     live.delete(tempId);
     running.delete(fk);
+    guardUnload();
     controllers.delete(tempId);
     const online = typeof navigator === "undefined" || navigator.onLine !== false;
     retries.set(tempId, { file, settings, preset });
@@ -177,8 +194,15 @@ export async function startUpload(
       live.set(id, { ...cur, id, pct, resuming });
       emit();
     },
+    onPaused: (id, paused) => {
+      const cur = live.get(id);
+      if (!cur || Boolean(cur.paused) === paused) return;
+      live.set(id, { ...cur, paused });
+      emit();
+    },
     onEnd: (id) => {
       running.delete(fk);
+      guardUnload();
       controllers.delete(id);
       if (live.delete(id)) emit();
       onEnd?.(created);

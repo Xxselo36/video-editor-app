@@ -241,6 +241,7 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Como tratamos seus vídeos",
   "app.upload.resuming":
     "Retomando o envio de onde parou — mantenha esta página aberta.",
+  "app.upload.paused": "Aguardando conexão… O envio continua automaticamente.",
 
   // ── app: configure (custom settings) ──
   "app.configure.back": "voltar",
@@ -391,6 +392,7 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Cancelar",
   "app.projects.retry": "Tentar de novo",
   "app.projects.pickAgain": "Escolha o mesmo arquivo de novo para continuar o envio",
+  "app.projects.wrongFile": "Esse é outro vídeo. Para continuar, escolha “{name}” de novo — ou remova este envio e comece um novo.",
   "app.projects.resumeAt": "Parou em {pct}% — escolha o mesmo vídeo para continuar.",
   "app.projects.resume": "Continuar envio",
   "app.projects.download": "Baixar",
