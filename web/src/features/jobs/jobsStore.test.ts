@@ -121,6 +121,23 @@ describe("uploads", () => {
     expect(s.getLocalJob("upl-c")?.upload?.errorCode).toBe("upload_interrupted");
     s.liveUploads.clear();
   });
+
+  it("an upload running in another tab (its Web Lock) is never marked, however late its heartbeat", async () => {
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: async () => {},
+        query: async () => ({ held: [{ name: "cleocuts-upload-rec:upl-elsewhere" }, { name: "something-else" }] }),
+      },
+    });
+    const s = await import("./jobsStore");
+    for (const id of ["upl-elsewhere", "upl-dead"]) {
+      s.addUpload(id, { filename: `${id}.mp4` }, {});
+      s.updateUpload(id, { lastProgressAt: Date.now() - 120_000 });
+    }
+    s.markStaleUploads();
+    await vi.waitFor(() => expect(s.getLocalJob("upl-dead")?.upload?.errorCode).toBe("upload_interrupted"));
+    expect(s.getLocalJob("upl-elsewhere")?.upload?.errorCode).toBeUndefined();
+  });
 });
 
 describe("per user", () => {

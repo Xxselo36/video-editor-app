@@ -132,7 +132,9 @@ const reportOnlyCsp = [
   `media-src ${uniq(["'self'", "blob:", ...api, ...media])}`,
   `connect-src ${uniq(["'self'", ...api, ...media, ...clerkConnect, sentryIngest, ...analyticsScripts])}`,
   "font-src 'self' data:",
-  `frame-src ${clerkFrames.length ? uniq(clerkFrames) : "'none'"}`,
+  // The API / media origins: a download clicked while an upload runs
+  // loads in a hidden frame (features/upload/uploadManager).
+  `frame-src ${uniq([...clerkFrames, ...api, ...media])}`,
   "worker-src 'self' blob:",
   "manifest-src 'self'",
   ...enforcedCsp,

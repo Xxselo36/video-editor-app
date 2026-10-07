@@ -11,7 +11,7 @@
  * everyone off the opt-in); its calls run in order on the loaded module.
  */
 import { addActiveJob, getActiveJobs, liveUploads, removeActiveJob, updateActiveJob } from "@/lib/activeJobs";
-import { cardError, toCoded, type CodedError } from "@/lib/errors";
+import { cardError, tEn, toCoded, type CodedError } from "@/lib/errors";
 import { getLibrary } from "@/lib/library";
 import { readChoice } from "@/features/editor/v2/flag";
 type Store = typeof import("@/features/jobs/jobsStore");
@@ -205,6 +205,7 @@ export function recordJobCreated(
   }
   removeActiveJob(tempId);
   addActiveJob({
+    ...(opts.cancelTooLate ? { note: tEn("app.projects.cancelTooLate"), noteCode: "cancel_too_late" } : {}),
     jobId,
     phase: "analyzing",
     timestamp: Date.now(),
