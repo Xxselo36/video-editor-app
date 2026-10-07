@@ -68,6 +68,11 @@ export function ActiveJobCard({
   const pct =
     job.phase === "uploading" ? liveUpload?.pct ?? job.uploadPct ?? 0 : status?.progress ?? 0;
   const canOpen = job.phase === "reviewing" && !isError;
+  // This page's upload can be cancelled — until POST /jobs went out,
+  // and again while that waits for the connection (a way out of
+  // "waiting").
+  const canCancel =
+    job.phase === "uploading" && !isError && liveUpload !== null && (!liveUpload.starting || Boolean(liveUpload.paused));
   const copy =
     job.phase === "uploading" && liveUpload?.paused
       ? { ...phaseCopy.uploading, sub: t("app.upload.paused") }
@@ -81,7 +86,7 @@ export function ActiveJobCard({
       onClick={canOpen ? onOpen : undefined}
       // Error cards stay enabled: a disabled <button> swallows clicks on
       // its children, which made the "Try again" chip below dead.
-      disabled={!canOpen && !isError}
+      disabled={!canOpen && !isError && !canCancel}
       data-testid="job-card"
       data-phase={job.phase}
       className={`group relative flex flex-col overflow-hidden rounded-2xl p-4 text-left transition-all ${
@@ -179,6 +184,23 @@ export function ActiveJobCard({
             {!queued && <span className="tabular-nums">{Math.round(pct)}%</span>}
           </div>
         </div>
+      )}
+
+      {canCancel && (
+        <span
+          role="button"
+          tabIndex={0}
+          data-testid="job-card-cancel"
+          onClick={(e) => {
+            e.stopPropagation();
+            void import("@/features/upload/uploadControls").then((m) => m.cancelUpload(job.jobId));
+          }}
+          className="relative z-10 mt-3 inline-flex w-fit cursor-pointer items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+          style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
+        >
+          <Icon icon={X} />
+          {t("app.projects.cancel")}
+        </span>
       )}
 
       {/* Error retry */}

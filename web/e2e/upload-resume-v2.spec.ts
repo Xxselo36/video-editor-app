@@ -143,8 +143,9 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
     const [chooser] = await Promise.all([page.waitForEvent("filechooser"), card.getByTestId("start-resume-choose").click()]);
     await chooser.setFiles(fileOf("trim.6F1C2D3A.mp4", bytes));
     await expect(page).toHaveURL(`${WEB}/app`, { timeout: 120_000 });
+    // (The record is written as the start screen leaves: polled.)
+    await expect.poll(() => createdJobId(page, "trim.6F1C2D3A.mp4")).not.toBeNull();
     const id = await createdJobId(page, "trim.6F1C2D3A.mp4");
-    expect(id).not.toBeNull();
 
     // Only the parts R2 didn't have went up; no second upload was opened.
     expect(api).not.toContain("init");
@@ -185,7 +186,7 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
     const [chooser] = await Promise.all([page.waitForEvent("filechooser"), card.getByTestId("start-resume-choose").click()]);
     await chooser.setFiles({ name: "erstes.mp4", mimeType: "video/mp4", buffer: otherBytes });
     await expect(page).toHaveURL(`${WEB}/app`, { timeout: 120_000 });
-    expect(await createdJobId(page, "erstes.mp4")).not.toBeNull();
+    await expect.poll(() => createdJobId(page, "erstes.mp4")).not.toBeNull();
     expect(api).toContain("init");
     expect(api).not.toContain("parts");
     expect(okParts()).toEqual([1, 2]);

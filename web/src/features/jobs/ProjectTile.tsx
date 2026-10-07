@@ -256,19 +256,13 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
     if (retryUpload(p.id)) return;
     fileRef.current?.click();
   };
-  // "Continue upload" got another video than the stopped one: said so,
-  // and nothing starts (the stopped upload stays offered).
-  const [wrongFile, setWrongFile] = useState(false);
-  const onPicked = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    if (resumable) {
-      const rec = await findRecord(file).catch(() => null);
-      const same = rec !== null && rec.size === resumable.size;
-      setWrongFile(!same);
-      if (!same) return;
-    }
+  // "Continue upload" got a file whose bytes don't match the stopped
+  // upload: another video — or the same one, converted again (the iPhone
+  // Photos picker may hand over a new copy on every pick). Asked, not
+  // refused: it can go up from the start instead.
+  const [mismatch, setMismatch] = useState<File | null>(null);
+  const upload = (file: File) => {
+    setMismatch(null);
     const s = retrySettings(p.id);
     if (!s) {
       removeJob(p.id);
@@ -276,6 +270,22 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
       return;
     }
     retryUploadWith(p.id, file, s.settings, s.preset);
+  };
+  const onPicked = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (resumable) {
+      const rec = await findRecord(file).catch(() => null);
+      if (!rec || rec.size !== resumable.size) return setMismatch(file);
+    }
+    upload(file);
+  };
+  const fromStart = () => {
+    if (!mismatch) return;
+    // The stopped upload can't continue with this copy: it goes.
+    if (resumable) void discardResumable(resumable.fp);
+    upload(mismatch);
   };
 
   return (
@@ -372,14 +382,26 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
             {t("app.projects.resumeAt", { pct: resumable.pct })}
           </p>
         )}
-        {resumable && wrongFile && (
-          <p role="alert" data-testid="job-card-wrong-file" className="text-xs leading-relaxed" style={{ color: "var(--danger)" }}>
-            {t("app.projects.wrongFile", { name: resumable.name })}
-          </p>
+        {resumable && mismatch && (
+          <div role="alert" data-testid="job-card-mismatch" className="pointer-events-auto relative z-10 flex flex-col items-start gap-1.5">
+            <p className="text-xs leading-relaxed" style={{ color: "var(--warn)" }}>
+              {t("app.projects.copyMismatch")}
+            </p>
+            <button
+              type="button"
+              data-testid="job-card-from-start"
+              onClick={fromStart}
+              className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+              style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
+            >
+              <Icon icon={RotateCw} />
+              {t("app.projects.uploadFromStart")}
+            </button>
+          </div>
         )}
         {(uploading || p.state === "upload_failed" || p.state === "expired") && (
           <div className="pointer-events-auto relative z-10 mt-1 flex flex-wrap gap-1.5">
-            {uploading && !starting && (
+            {uploading && (!starting || liveUpload?.paused) && (
               <button
                 type="button"
                 data-testid="job-card-cancel"

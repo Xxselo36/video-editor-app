@@ -46,7 +46,90 @@ export type { UploadSettings } from "./settings";
  *  markStaleUploads tells a live upload from a dead one by it). */
 export const UPLOAD_HEARTBEAT_MS = 10_000;
 
+const offline = () => typeof navigator !== "undefined" && navigator.onLine === false;
+
 const POST_JOBS_RETRY_MS = [2_000, 4_000, 8_000, 15_000, 15_000, 15_000, 15_000];
+/** POST /jobs without an answer while the page is online and visible —
+ *  a server bug can look like that (a 500 without CORS headers, a
+ *  timeout) — is tried for this long, then the upload fails. */
+export const POST_JOBS_NET_CAP_MS = 10 * 60_000;
+
+/**
+ * POST /jobs with retries (exported for the unit test). A 5xx: the ~75 s
+ * of POST_JOBS_RETRY_MS. No answer at all: waited out for as long as the
+ * connection or the page was really gone (offline, or the page hidden
+ * since the last try — the key makes POST /jobs idempotent), else for
+ * POST_JOBS_NET_CAP_MS. `signal` stops a wait for the connection
+ * (Cancel while "waiting": `stopped`); `failure` is the last one when it
+ * gave up.
+ */
+export async function postJobsWithRetry(
+  post: () => Promise<XMLHttpRequest>,
+  {
+    legacyApi = false,
+    signal,
+    setPaused,
+    lost,
+  }: {
+    legacyApi?: boolean;
+    signal?: AbortSignal;
+    setPaused: (paused: boolean) => void;
+    /** Was the connection or the page gone since the last try? (Asked
+     *  once per failure.) */
+    lost: () => boolean;
+  },
+): Promise<{ res: XMLHttpRequest | null; failure: unknown; stopped: boolean }> {
+  let res: XMLHttpRequest | null = null;
+  let failure: unknown = null;
+  let serverFails = 0;
+  let netFails = 0;
+  // Since when POST /jobs has had no answer although nothing was gone.
+  let onlineSince = 0;
+  let paused = false;
+  const pause = (on: boolean) => {
+    if (on !== paused) setPaused((paused = on));
+  };
+  for (;;) {
+    failure = null;
+    let net = false;
+    try {
+      res = await post();
+      pause(false);
+      netFails = 0;
+      onlineSince = 0;
+      // 503 server_busy / 507 are refusals (and 503
+      // storage_unavailable a short outage: retried).
+      if (res.status >= 500 && !REFUSAL_CODES.has(apiErrorFromText(res.status, res.responseText).code ?? "")) {
+        failure = new Error(`Upload failed: ${res.responseText}`);
+      }
+    } catch (e) {
+      failure = e;
+      net = true;
+    }
+    if (failure === null || legacyApi) break;
+    let wait: number;
+    if (net) {
+      netFails++;
+      if (lost()) onlineSince = 0;
+      else if (!onlineSince) onlineSince = Date.now();
+      else if (Date.now() - onlineSince >= POST_JOBS_NET_CAP_MS) break;
+      if (netFails > 1) pause(true);
+      wait = POST_JOBS_RETRY_MS[Math.min(netFails, POST_JOBS_RETRY_MS.length) - 1];
+    } else {
+      if (serverFails >= POST_JOBS_RETRY_MS.length) break;
+      wait = POST_JOBS_RETRY_MS[serverFails++];
+    }
+    if (signal?.aborted) return { res, failure, stopped: true };
+    try {
+      // (Waiting for the connection: at once when it is back.)
+      await (net ? waitRetry(wait, signal) : sleep(wait));
+    } catch {
+      return { res, failure, stopped: true };
+    }
+  }
+  pause(false);
+  return { res, failure, stopped: false };
+}
 
 /** Wait `ms` — or less, when `signal` aborts meanwhile. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -133,6 +216,9 @@ export async function uploadJob(
   let lastUiUpdate = 0;
   // POST /jobs went out (or the legacy body is sent): see onStarting.
   let started = false;
+  // Cancel came while POST /jobs waited for the connection (the tile
+  // offers it then): no job from here.
+  let stoppedWaiting = false;
   let lastBeat = Date.now();
   // Set while the card says "resuming" (an interrupted upload of this
   // file continues); cleared if it starts over after all.
@@ -140,11 +226,12 @@ export async function uploadJob(
   let lastPct = 0;
   // The stored card's heartbeat also while no bytes move (waiting for the
   // connection): another tab must not take it for a dead upload.
+  // (Checked twice a period: a beat is never more than 1.5 periods old.)
   const beat = setInterval(() => {
     if (Date.now() - lastBeat < UPLOAD_HEARTBEAT_MS) return;
     lastBeat = Date.now();
     uploadProgress(tempId, { pct: lastPct, lastProgressAt: lastBeat });
-  }, UPLOAD_HEARTBEAT_MS);
+  }, UPLOAD_HEARTBEAT_MS / 2);
   const setPaused = (paused: boolean) => onPaused?.(tempId, paused);
   const setPct = (pct: number) => {
     lastPct = pct;
@@ -184,7 +271,13 @@ export async function uploadJob(
       // ignore — unsupported, permission denied, or lost focus
     }
   };
-  const onVisible = () => void lock();
+  // The page was hidden since POST /jobs' last try (iOS: Safari in the
+  // background cuts it): a lost connection, not a server bug.
+  let wasHidden = false;
+  const onVisible = () => {
+    if (document.visibilityState !== "visible") wasHidden = true;
+    void lock();
+  };
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
   await lock();
 
@@ -208,8 +301,11 @@ export async function uploadJob(
     const resumedPct = await resumableProgress(targetFile);
     if (resumedPct !== null) {
       resumingFrom = resumedPct;
+      // The heartbeat and "waiting" writes carry it until bytes move.
+      lastPct = resumedPct;
+      lastBeat = Date.now();
       onProgress?.(tempId, resumedPct, true);
-      uploadProgress(tempId, { pct: resumedPct, resuming: true, lastProgressAt: Date.now() });
+      uploadProgress(tempId, { pct: resumedPct, resuming: true, lastProgressAt: lastBeat });
       removeStoppedUploads(targetFile.size, tempId);
     }
 
@@ -310,34 +406,26 @@ export async function uploadJob(
           xhr.send(form);
         });
       };
-      let failure: unknown = null;
-      // No answer at all (the connection is gone, the page in the
-      // background): waited out for as long as it takes — the key makes
-      // POST /jobs idempotent. A 5xx gets the ~75 s above.
-      let netFails = 0;
-      const retryDelays = legacyApi ? [] : POST_JOBS_RETRY_MS;
-      for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
-        if (attempt > 0) {
-          if (netFails > 1) setPaused(true);
-          await (netFails ? waitRetry(retryDelays[attempt - 1]) : sleep(retryDelays[attempt - 1]));
-        }
-        failure = null;
-        try {
-          res = await post();
-          if (netFails > 1) setPaused(false);
-          netFails = 0;
-          // 503 server_busy / 507 are refusals (and 503
-          // storage_unavailable a short outage: retried).
-          if (res.status >= 500 && !REFUSAL_CODES.has(apiErrorFromText(res.status, res.responseText).code ?? "")) {
-            failure = new Error(`Upload failed: ${res.responseText}`);
-          }
-        } catch (e) {
-          failure = e;
-          netFails++;
-          // (The budget is kept for the 5xx.)
-          if (!legacyApi && attempt === retryDelays.length) attempt--;
-        }
-        if (failure === null) break;
+      wasHidden = false;
+      const tried = await postJobsWithRetry(post, {
+        legacyApi,
+        signal,
+        setPaused,
+        lost: () => {
+          const gone = offline() || wasHidden || document.visibilityState !== "visible";
+          wasHidden = false;
+          return gone;
+        },
+      });
+      res = tried.res;
+      const failure = tried.failure;
+      if (tried.stopped) {
+        // Cancel while it waited for the connection: no job from here (one
+        // the server made already shows up in the project list), and the
+        // stored file is given up like the rest.
+        stoppedWaiting = true;
+        await releaseUpload?.().catch(() => {});
+        throw new Error("Upload aborted");
       }
       if (failure !== null) {
         // Still no answer: with accounts on the job may exist anyway —
@@ -462,12 +550,12 @@ export async function uploadJob(
     );
     onCreated(initial.id);
   } catch (err) {
-    if (signal?.aborted && !started) {
+    if (signal?.aborted && (!started || stoppedWaiting)) {
       // Cancelled (UX12): the multipart upload goes too — the user gave
       // the file up; nothing is left on the list.
       removeUploadRecord(tempId);
       try {
-        await abortResumable({ file: targetFile });
+        if (!started) await abortResumable({ file: targetFile });
       } catch {
         /* the bucket's lifecycle rule aborts it anyway */
       }
