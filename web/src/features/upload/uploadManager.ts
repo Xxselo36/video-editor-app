@@ -34,6 +34,8 @@ import {
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import { readSettings, type SettingsSource } from "./settings";
 import { controllers, emit, live, moveThumb, retries, setPaywall, setThumb } from "./uploadState";
+import { isMobile } from "@/features/start/ios";
+import { holdUploadLock } from "@/lib/uploadLock";
 
 export {
   _version,
@@ -98,25 +100,37 @@ export function isUploading(file: File): boolean {
 }
 
 // Desktop: leaving the page (reload, closing the tab) while an upload
-// runs asks first. Phones and tablets ignore beforeunload (a touch
-// laptop doesn't: maxTouchPoints alone says nothing); the listener is
-// only there while something uploads (it may keep a page out of the
-// bfcache). A download link (another origin: the browser navigates
-// until the answer turns out to be an attachment) doesn't ask.
-const mobile = () =>
-  /iPad|iPhone|iPod|Android/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+// runs asks first. Phones and tablets ignore beforeunload (isMobile); the
+// listener is only there while something uploads (it may keep a page
+// out of the bfcache). A download link of another origin would navigate
+// this page until its answer turns out to be an attachment — and an
+// error answer (409, 404) would replace the page: while an upload runs
+// it loads in a hidden frame instead, so the page never goes and
+// nothing asks.
 let downloadClickAt = 0;
 function onClickCapture(e: Event): void {
-  if ((e.target as Element | null)?.closest?.("a[download]")) downloadClickAt = Date.now();
+  const m = e as MouseEvent;
+  const a = (e.target as Element | null)?.closest?.("a[download]") as HTMLAnchorElement | null;
+  if (!a?.href || m.defaultPrevented || m.button || m.metaKey || m.ctrlKey || m.shiftKey || m.altKey) return;
+  downloadClickAt = Date.now();
+  if (new URL(a.href, location.href).origin === location.origin) return; // a blob: or same-origin file: no navigation
+  e.preventDefault();
+  let frame = document.getElementById("cleo-download") as HTMLIFrameElement | null;
+  if (!frame) {
+    frame = document.createElement("iframe");
+    frame.id = "cleo-download";
+    frame.hidden = true;
+    document.body.append(frame);
+  }
+  frame.src = a.href;
 }
-/** (Exported for the unit test.) */
-export function onBeforeUnload(e: BeforeUnloadEvent): void {
+function onBeforeUnload(e: BeforeUnloadEvent): void {
   if (!running.size || Date.now() - downloadClickAt < 1000) return;
   e.preventDefault();
   e.returnValue = "";
 }
 function guardUnload(): void {
-  if (typeof window === "undefined" || typeof navigator === "undefined" || mobile()) return;
+  if (typeof window === "undefined" || typeof navigator === "undefined" || isMobile(navigator)) return;
   const on = running.size > 0;
   if (on) {
     window.addEventListener("beforeunload", onBeforeUnload);
@@ -157,6 +171,8 @@ export async function startUpload(
   const tempId = uploadCard(file, settings, preset);
   running.set(fk, tempId);
   guardUnload();
+  // Other tabs: this record's upload runs (lib/uploadLock), until onEnd.
+  const unlock = holdUploadLock(tempId);
   onCard?.(tempId);
   let created: string | null = null;
   const ctl = new AbortController();
@@ -173,6 +189,7 @@ export async function startUpload(
     live.delete(tempId);
     running.delete(fk);
     guardUnload();
+    unlock();
     controllers.delete(tempId);
     const online = typeof navigator === "undefined" || navigator.onLine !== false;
     retries.set(tempId, { file, settings, preset });
@@ -224,6 +241,7 @@ export async function startUpload(
     onEnd: (id) => {
       running.delete(fk);
       guardUnload();
+      unlock();
       controllers.delete(id);
       if (live.delete(id)) emit();
       onEnd?.(created);

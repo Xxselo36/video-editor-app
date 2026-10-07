@@ -8,6 +8,14 @@ import type { SettingsSource } from "./settings";
 import { startUpload } from "./uploadManager";
 import { controllers, live, retries, setThumb } from "./uploadState";
 import type { PresetId } from "@/features/start/presets.legacy";
+import { runningUploads } from "@/lib/uploadLock";
+
+/** The upload of record `id` runs in another tab (its Web Lock): its
+ *  record is not this tab's to remove or to upload again. */
+export async function runsElsewhere(id: string): Promise<boolean> {
+  if (controllers.has(id) || live.has(id)) return false;
+  return Boolean((await runningUploads())?.has(id));
+}
 
 /** This page still has the File of the failed upload `id` ("Try again"
  *  goes at once; else the file is picked again). */
@@ -28,6 +36,7 @@ export async function cancelUpload(id: string): Promise<void> {
   if (cur?.starting && !cur.paused) return;
   const ctl = controllers.get(id);
   const retry = retries.get(id);
+  if (!ctl && !retry && (await runsElsewhere(id))) return;
   retries.delete(id);
   setThumb(id, null);
   removeUploadRecord(id);
@@ -60,10 +69,13 @@ export function retryUpload(id: string): boolean {
   return true;
 }
 
-/** "Try again" after a reload: the user picked `file` again. */
-export function retryUploadWith(id: string, file: File, settings: SettingsSource, preset: PresetId | null): void {
+/** "Try again" after a reload: the user picked `file` again. False (and
+ *  nothing happens) while the upload still runs in another tab. */
+export async function retryUploadWith(id: string, file: File, settings: SettingsSource, preset: PresetId | null): Promise<boolean> {
+  if (await runsElsewhere(id)) return false;
   retries.delete(id);
   removeUploadRecord(id);
   setThumb(id, null);
   void startUpload(file, settings, preset);
+  return true;
 }

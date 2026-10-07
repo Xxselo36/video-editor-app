@@ -125,6 +125,18 @@ describe("the page comes back (iOS: pagehide for a page that only went to the ba
     expect(await code("upl-other")).toBe("upload_interrupted");
   });
 
+  it("a resumed upload is 'resuming' again after another tab's mark (the beat carries it)", async () => {
+    const r = await running("upl-res");
+    const store = await import("@/features/jobs/jobsStore");
+    store.updateUpload("upl-res", { resuming: true });
+    // markStaleUploads in another tab: interrupted, resuming off.
+    store.updateUpload("upl-res", { errorCode: "upload_interrupted", resuming: false });
+    r.uploadProgress("upl-res", { pct: 61, lastProgressAt: Date.now(), resuming: true });
+    await vi.waitFor(async () => expect(await code("upl-res")).toBeNull());
+    expect(store.getLocalJob("upl-res")?.upload?.resuming).toBe(true);
+    r.liveUploads.delete("upl-res");
+  });
+
   it("pagehide keeps 'starting' and 'resuming' of a running upload", async () => {
     const r = await running("upl-flags");
     const store = await import("@/features/jobs/jobsStore");

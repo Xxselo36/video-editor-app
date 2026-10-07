@@ -205,8 +205,14 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     let [picker] = await Promise.all([page.waitForEvent("filechooser"), retry.click()]);
     await picker.setFiles(fileOf("anderes.mp4", crypto.randomBytes(size)));
     const note = tile.getByTestId("job-card-mismatch");
-    await expect(note).toContainText("match the stopped upload");
+    // (Not an iPhone here: the file it expects, by name.)
+    await expect(note).toContainText("That isn’t “urlaub.mp4”");
     await expect(note.getByTestId("job-card-from-start")).toHaveText("Upload from the start");
+    // "From the start" asks first; Cancel keeps the stopped upload.
+    await note.getByTestId("job-card-from-start").click();
+    await expect(note).toContainText("gives up the stopped upload at 53%");
+    await note.getByTestId("job-card-from-start-back").click();
+    await expect(note).toHaveCount(0);
     await page.waitForTimeout(1000);
     expect(api).toEqual([]);
     await expect(tile).toHaveAttribute("data-state", "upload_failed");
@@ -229,6 +235,8 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     const copy = crypto.randomBytes(size);
     const [picker] = await Promise.all([page.waitForEvent("filechooser"), tile.getByTestId("job-card-retry").click()]);
     await picker.setFiles(fileOf("IMG_0200 2.mov", copy));
+    await tile.getByTestId("job-card-from-start").click();
+    await expect(tile.getByTestId("job-card-mismatch")).toContainText("gives up the stopped upload");
     await tile.getByTestId("job-card-from-start").click();
     // A new upload of that copy (its own init); the stopped one is given
     // up on the server too.

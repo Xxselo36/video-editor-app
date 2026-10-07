@@ -24,6 +24,7 @@
  */
 import { useEffect, useSyncExternalStore } from "react";
 import { ACTIVE_JOBS_KEY, dropLegacyActiveJob, liveUploads } from "@/lib/activeJobs";
+import { runningUploads, uploadLocks } from "@/lib/uploadLock";
 import { track } from "@/lib/analytics";
 import { apiFetch } from "@/lib/api";
 import { AUTH_ENABLED, getAuthState, storageScope, subscribeAuth } from "@/lib/auth";
@@ -345,14 +346,20 @@ function pendingRemote(id: string): RemoteJob {
 /**
  * Upload records whose upload no longer exists become failed uploads
  * ("Try again"), instead of staying frozen at their last percentage: not
- * this page's and no heartbeat from another tab for `idleMs`.
+ * this page's, not running in another tab (its Web Lock: lib/uploadLock)
+ * and — where Web Locks are missing — no heartbeat for `idleMs`.
  */
 export function markStaleUploads(idleMs = 20_000): void {
+  if (!uploadLocks()) return markStale(idleMs, null);
+  void runningUploads().then((running) => markStale(idleMs, running));
+}
+
+function markStale(idleMs: number, running: Set<string> | null): void {
   ensureLoaded();
   const now = Date.now();
   let changed = false;
   const next = locals.map((j) => {
-    if (!isUploadId(j.jobId) || j.upload?.errorCode || liveUploads.has(j.jobId)) return j;
+    if (!isUploadId(j.jobId) || j.upload?.errorCode || liveUploads.has(j.jobId) || running?.has(j.jobId)) return j;
     if (now - (j.upload?.lastProgressAt ?? j.timestamp) < idleMs) return j;
     changed = true;
     return { ...j, upload: { ...j.upload, errorCode: "upload_interrupted", resuming: false } };

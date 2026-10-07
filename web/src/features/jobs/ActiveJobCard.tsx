@@ -80,13 +80,20 @@ export function ActiveJobCard({
         ? { ...phaseCopy.uploading, sub: t("app.upload.resuming") }
         : phaseCopy[job.phase];
   const accent = phaseAccent[job.phase];
+  const Card = canCancel ? "div" : "button";
 
   return (
-    <button
-      onClick={canOpen ? onOpen : undefined}
-      // Error cards stay enabled: a disabled <button> swallows clicks on
-      // its children, which made the "Try again" chip below dead.
-      disabled={!canOpen && !isError && !canCancel}
+    <Card
+      // A card with a Cancel button is no button itself (no nested
+      // controls); the others open on click.
+      {...(canCancel
+        ? {}
+        : {
+            onClick: canOpen ? onOpen : undefined,
+            // Error cards stay enabled: a disabled <button> swallows clicks on
+            // its children, which made the "Try again" chip below dead.
+            disabled: !canOpen && !isError,
+          })}
       data-testid="job-card"
       data-phase={job.phase}
       className={`group relative flex flex-col overflow-hidden rounded-2xl p-4 text-left transition-all ${
@@ -187,20 +194,16 @@ export function ActiveJobCard({
       )}
 
       {canCancel && (
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           data-testid="job-card-cancel"
-          onClick={(e) => {
-            e.stopPropagation();
-            void import("@/features/upload/uploadControls").then((m) => m.cancelUpload(job.jobId));
-          }}
-          className="relative z-10 mt-3 inline-flex w-fit cursor-pointer items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+          onClick={() => void import("@/features/upload/uploadControls").then((m) => m.cancelUpload(job.jobId))}
+          className="relative z-10 mt-3 inline-flex w-fit items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
           style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
         >
           <Icon icon={X} />
           {t("app.projects.cancel")}
-        </span>
+        </button>
       )}
 
       {/* Error retry */}
@@ -221,6 +224,6 @@ export function ActiveJobCard({
           {t("app.card.remove")}
         </span>
       )}
-    </button>
+    </Card>
   );
 }

@@ -6,8 +6,9 @@
 // the File in memory, without a new init.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-/** "moved": the whole part goes out, then the connection drops. */
-type Plan = "ok" | "network" | "abort" | "hang" | "moved" | "403";
+/** "moved": the whole part goes out, then the connection drops; "500":
+ *  R2 answers 500 after the whole body; "slow": ok after 1.5 s. */
+type Plan = "ok" | "network" | "abort" | "hang" | "moved" | "403" | "500" | "slow";
 /** Outcomes per part number, in order (then "ok"). */
 const plans = new Map<number, Plan[]>();
 const puts: [part: number, plan: Plan, url: string][] = [];
@@ -15,6 +16,10 @@ const api: string[] = [];
 let completeFails = 0;
 /** API calls (by name) whose next request never answers. */
 const hangOnce = new Set<string>();
+/** … whose next answer's body never ends. */
+const hangBodyOnce = new Set<string>();
+/** … whose next answer waits for this. */
+const holdOnce = new Map<string, Promise<void>>();
 let signs = 0;
 
 vi.mock("@/lib/api", async (orig) => {
@@ -28,6 +33,10 @@ vi.mock("@/lib/api", async (orig) => {
       if (name === "telemetry") return json({});
       api.push(name);
       if (hangOnce.delete(name)) return new Promise<Response>(() => {});
+      if (hangBodyOnce.delete(name)) return new Response(new ReadableStream({ start() {} }), { status: 200 });
+      const hold = holdOnce.get(name);
+      holdOnce.delete(name);
+      if (hold) await hold;
       if (name === "init") {
         return json({
           ticket: "t1",
@@ -80,16 +89,16 @@ class FakeXHR {
     setTimeout(() => {
       if (!this.pending || plan === "hang") return;
       this.pending = false;
-      if (plan === "ok" || plan === "403") {
+      if (plan === "ok" || plan === "slow" || plan === "403" || plan === "500") {
         this.upload.onprogress?.({ loaded: body.size });
-        this.status = plan === "ok" ? 200 : 403;
+        this.status = plan === "403" ? 403 : plan === "500" ? 500 : 200;
         this.onload?.();
       } else if (plan === "moved") {
         this.upload.onprogress?.({ loaded: body.size });
         this.onerror?.();
       } else if (plan === "network") this.onerror?.();
       else this.onabort?.();
-    }, 0);
+    }, plan === "slow" ? 1500 : 0);
   }
 }
 
@@ -112,6 +121,8 @@ beforeEach(async () => {
   api.length = 0;
   completeFails = 0;
   hangOnce.clear();
+  hangBodyOnce.clear();
+  holdOnce.clear();
   signs = 0;
   nav.onLine = true;
   vi.stubGlobal("XMLHttpRequest", FakeXHR);
@@ -161,7 +172,9 @@ describe("a part fails with a network error", () => {
 
   it("offline: paused at once, and still never a failure", async () => {
     nav.onLine = false;
+    // (Both workers' parts: nothing gets through.)
     plans.set(1, ["network", "network", "network", "network", "network", "network"]);
+    plans.set(2, ["network"]);
     const { p, paused } = await start();
     await vi.waitFor(() => expect(paused).toEqual([true]));
     // More failures than the old 4 attempts: it keeps waiting.
@@ -172,7 +185,10 @@ describe("a part fails with a network error", () => {
     nav.onLine = true;
     fire("online");
     await expect(p).resolves.toMatchObject({ storage_key: "uploads/k1" });
-    expect(paused).toEqual([true, false]);
+    // (Waiting goes whenever bytes get through, and comes back with the
+    // next failure while offline.)
+    expect(paused[0]).toBe(true);
+    expect(paused.at(-1)).toBe(false);
     expect(api.filter((c) => c === "init")).toHaveLength(1);
   });
 
@@ -216,6 +232,7 @@ describe("a part fails with a network error", () => {
   it("Cancel while it waits stops it", async () => {
     nav.onLine = false;
     plans.set(1, Array<Plan>(50).fill("network"));
+    plans.set(2, Array<Plan>(50).fill("network"));
     const ctl = new AbortController();
     const { p, paused } = await start(ctl.signal);
     await vi.waitFor(() => expect(paused).toEqual([true]));
@@ -263,7 +280,9 @@ describe("presigned part URLs across a long pause (6 h)", () => {
   });
 
   it("stale URLs are signed again before use, in one batch", async () => {
+    // (Both workers' parts: no success wakes the other one early.)
     plans.set(1, ["network"]);
+    plans.set(2, ["network"]);
     const { p } = await start();
     await vi.waitFor(() => expect(tries(1)).toBe(1));
     later(7 * 3600_000);
@@ -328,15 +347,76 @@ describe("a hung API call", () => {
   });
 });
 
-describe("waiting is shown only when nothing gets through", () => {
-  it("failures after the part went out don't count as 'in a row'", async () => {
-    plans.set(1, ["moved", "moved", "moved"]);
+describe("backoff and waiting", () => {
+  it("R2 answering 500 after the whole body backs off like any failure, and shows waiting", async () => {
+    // (An R2 incident: every part, both workers.)
+    plans.set(1, ["500", "500", "500"]);
+    plans.set(2, ["500", "500", "500"]);
     const { p, paused } = await start();
+    // The second 500 in a row (after 1 s): "waiting", the next try after 3 s.
+    await vi.waitFor(() => expect(paused).toContain(true), { timeout: 2500 });
+    expect(tries(1)).toBe(2);
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(tries(1)).toBe(2);
     await vi.waitFor(() => {
       fire("online");
       expect(tries(1)).toBe(4);
     });
     await expect(p).resolves.toMatchObject({ storage_key: "uploads/k1" });
-    expect(paused).toEqual([]);
+  });
+
+  it("a part that gets through wakes the other part's retry at once", async () => {
+    plans.set(1, ["network", "network"]);
+    plans.set(2, ["slow"]);
+    const t0 = Date.now();
+    const { p } = await start();
+    // Part 1's second failure (1 s) → a 3 s backoff; part 2 is in at 1.5 s.
+    await expect(p).resolves.toMatchObject({ storage_key: "uploads/k1" });
+    expect(Date.now() - t0).toBeLessThan(3500);
+    expect(tries(1)).toBe(3);
+  });
+});
+
+describe("API answers", () => {
+  it("a body that never ends is cut on wake and asked again", async () => {
+    hangBodyOnce.add("complete");
+    const { p } = await start();
+    await vi.waitFor(() => expect(api.filter((c) => c === "complete")).toHaveLength(1));
+    later(60_000);
+    await vi.waitFor(() => {
+      fire("visibilitychange");
+      expect(api.filter((c) => c === "complete")).toHaveLength(2);
+    });
+    await expect(p).resolves.toMatchObject({ storage_key: "uploads/k1" });
+  });
+
+  it("URLs count from when their request went out: init's answer after a long suspension is stale at once", async () => {
+    let release!: () => void;
+    holdOnce.set("init", new Promise<void>((r) => (release = r)));
+    const { p } = await start();
+    await vi.waitFor(() => expect(api).toEqual(["init"]));
+    // The answer is processed 7 h after the request (iOS suspended the page).
+    later(7 * 3600_000);
+    release();
+    await expect(p).resolves.toMatchObject({ storage_key: "uploads/k1" });
+    // No PUT with init's (expired) URLs: signed again first.
+    expect(puts.every(([, , u]) => u.includes("&s="))).toBe(true);
+    expect(signs).toBe(1);
+  });
+
+  it("no answer twice on a URL signed a while ago: the next try gets a new one", async () => {
+    plans.set(1, ["network", "network"]);
+    plans.set(2, ["network", "network"]);
+    const { p } = await start();
+    await vi.waitFor(() => expect(tries(1)).toBe(1));
+    later(10 * 60_000); // older than 5 min, not expired
+    await vi.waitFor(() => {
+      fire("online");
+      expect(tries(1)).toBe(3);
+    });
+    const urls = puts.filter(([n]) => n === 1).map(([, , u]) => u);
+    expect(urls[1]).not.toContain("&s=");
+    expect(urls[2]).toContain("&s=");
+    await expect(p).resolves.toMatchObject({ storage_key: "uploads/k1" });
   });
 });
