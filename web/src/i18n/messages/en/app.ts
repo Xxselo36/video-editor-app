@@ -247,6 +247,7 @@ export const enApp = {
   "app.upload.privacyLink": "How we handle your videos",
   "app.upload.resuming":
     "Resuming the upload where it stopped — keep this page open.",
+  "app.upload.paused": "Waiting for connection… The upload continues automatically.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "back",
@@ -396,6 +397,7 @@ export const enApp = {
   "app.projects.cancel": "Cancel",
   "app.projects.retry": "Try again",
   "app.projects.pickAgain": "Pick the same file again to continue the upload",
+  "app.projects.wrongFile": "That’s a different video. To continue, choose “{name}” again — or remove this upload and start a new one.",
   "app.projects.resumeAt": "Stopped at {pct}% — choose the same video to continue.",
   "app.projects.resume": "Continue upload",
   "app.projects.download": "Download",

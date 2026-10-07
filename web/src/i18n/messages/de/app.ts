@@ -243,6 +243,7 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "So gehen wir mit deinen Videos um",
   "app.upload.resuming":
     "Der Upload geht dort weiter, wo er unterbrochen wurde — lass diese Seite offen.",
+  "app.upload.paused": "Warte auf Verbindung … Der Upload geht automatisch weiter.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "zurück",
@@ -393,6 +394,7 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Abbrechen",
   "app.projects.retry": "Nochmal versuchen",
   "app.projects.pickAgain": "Wähle dieselbe Datei noch einmal, um den Upload fortzusetzen",
+  "app.projects.wrongFile": "Das ist ein anderes Video. Wähle zum Fortsetzen wieder „{name}“ – oder entferne diesen Upload und starte einen neuen.",
   "app.projects.resumeAt": "Unterbrochen bei {pct} % — wähle dasselbe Video, um weiterzumachen.",
   "app.projects.resume": "Upload fortsetzen",
   "app.projects.download": "Herunterladen",

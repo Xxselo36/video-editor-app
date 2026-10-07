@@ -240,6 +240,7 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "動画の取り扱いについて",
   "app.upload.resuming":
     "中断したところからアップロードを再開しています — このページを開いたままにしてください。",
+  "app.upload.paused": "接続を待っています… アップロードは自動的に再開されます。",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "戻る",
@@ -389,6 +390,7 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "キャンセル",
   "app.projects.retry": "再試行",
   "app.projects.pickAgain": "同じファイルをもう一度選ぶとアップロードを再開します",
+  "app.projects.wrongFile": "別の動画です。続けるには「{name}」をもう一度選ぶか、このアップロードを削除して新しく始めてください。",
   "app.projects.resumeAt": "{pct}%で中断 — 続けるには同じ動画を選んでください。",
   "app.projects.resume": "アップロードを再開",
   "app.projects.download": "ダウンロード",

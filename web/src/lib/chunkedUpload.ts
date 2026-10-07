@@ -16,7 +16,11 @@
  *     video): lib/uploadResume; the record goes in before part 1;
  *   - a resume asks the server which parts R2 has (/parts) and sends
  *     only the others;
- *   - 2 parts in parallel on phones / slow networks, else 4 (171ac36).
+ *   - 2 parts in parallel on phones / slow networks, else 4 (171ac36);
+ *   - a transient failure (network, stall, an abort the browser did,
+ *     a 5xx) never ends the upload while the page lives: it waits for
+ *     the connection and goes on from the missing parts (2026-10, iOS
+ *     Safari in the background).
  * Retries and failures are reported to POST /uploads/telemetry (the
  * iOS hangs of Sept 2026 couldn't be diagnosed without a tethered Mac).
  *
@@ -89,6 +93,8 @@ export type UploadOptions = {
    *  that is too long (or longer than the minutes left) before any bytes
    *  are uploaded. */
   duration?: number | null;
+  /** The upload waits for the connection (true) / bytes flow again. */
+  onPaused?: (paused: boolean) => void;
 };
 
 // ── resume state: lib/uploadResume (IndexedDB, by content) ──────────
@@ -125,20 +131,54 @@ function abortError(): DOMException {
   return new DOMException("aborted", "AbortError");
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(abortError());
-    const t = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(t);
-      reject(abortError());
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
+// ── waiting out a lost connection ────────────────────────────────────
+// iOS Safari suspends or cuts the requests of a page in the background
+// (another app, the screen locked) and comes back with the File still
+// in memory. A transient failure never ends the upload: it waits — with
+// backoff, and at once when the connection or the page comes back
+// (online, visible, pageshow, focus) — and continues with the parts
+// still missing. Only Cancel or a definitive answer stops it.
+const wakers = new Set<() => void>();
+let listening = false;
+
+/** Wake every waiting retry and kick hung parts (exported for tests). */
+export function wakeUploads(): void {
+  [...wakers].forEach((f) => f());
+}
+
+function listen(): void {
+  if (listening || typeof window === "undefined") return;
+  listening = true;
+  for (const ev of ["online", "pageshow", "focus"]) window.addEventListener(ev, wakeUploads);
+  document?.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") wakeUploads();
   });
 }
+
+/** Backoff of the n-th retry: 1, 3, 9, 15 s, then every 30 s. */
+export const retryDelay = (n: number): number => [1000, 3000, 9000, 15000][n - 1] ?? 30_000;
+
+/** Wait `ms`, or less: the connection / the page came back. Rejects on abort. */
+export function waitRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  listen();
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(abortError());
+    const end = (ok: boolean) => {
+      clearTimeout(t);
+      wakers.delete(wake);
+      signal?.removeEventListener("abort", onAbort);
+      if (ok) resolve();
+      else reject(abortError());
+    };
+    const wake = () => end(true);
+    const onAbort = () => end(false);
+    const t = setTimeout(wake, ms);
+    wakers.add(wake);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+const offline = () => typeof navigator !== "undefined" && navigator.onLine === false;
 
 /** Parallel part PUTs: 2 on phones and slow networks, else 4. */
 function parallelism(): number {
@@ -191,14 +231,25 @@ function putPart(url: string, body: Blob, signal: AbortSignal, onLoaded: (loaded
     let loaded = 0;
     let settled = false;
     let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastAt = Date.now();
     const done = (r: PutResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(stallTimer);
+      wakers.delete(kick);
       signal.removeEventListener("abort", onAbort);
       resolve(r);
     };
+    // The page / connection is back and this part hasn't moved for a
+    // while: iOS left it hanging in the background — send it again now
+    // rather than after the watchdog.
+    const kick = () => {
+      if (Date.now() - lastAt < KICK_MS) return;
+      done({ ok: false, kind: "stall", status: 0, loaded });
+      xhr.abort();
+    };
     const armStall = () => {
+      lastAt = Date.now();
       clearTimeout(stallTimer);
       stallTimer = setTimeout(() => {
         done({ ok: false, kind: "stall", status: 0, loaded });
@@ -224,13 +275,17 @@ function putPart(url: string, body: Blob, signal: AbortSignal, onLoaded: (loaded
     xhr.onabort = () => done({ ok: false, kind: "abort", status: 0, loaded });
     if (signal.aborted) return onAbort();
     signal.addEventListener("abort", onAbort, { once: true });
+    listen();
+    wakers.add(kick);
     armStall();
     xhr.send(body);
   });
 }
 
+/** Retries of a part reported to telemetry (it retries for as long as
+ *  the page lives). */
 const MAX_ATTEMPTS = 4;
-const BACKOFF_MS = [1000, 3000, 9000];
+const KICK_MS = 15_000;
 const SIGN_BATCH = 32;
 
 /** Fall back to the single PUT? (The backend has no multipart API, is
@@ -270,6 +325,34 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
   const onOuterAbort = () => ctl.abort();
   outer?.addEventListener("abort", onOuterAbort, { once: true });
   const signal = ctl.signal;
+  // What waits for the connection now (parts, API calls): "paused".
+  const waiting = new Set<unknown>();
+  const setWaiting = (k: unknown, on: boolean) => {
+    const was = waiting.size > 0;
+    if (on) waiting.add(k);
+    else waiting.delete(k);
+    if (was !== waiting.size > 0) opts.onPaused?.(!was);
+  };
+  /** An API call that waits out a network error (and, `busy`, a 502 /
+   *  503 / 504 while the backend restarts) instead of failing. */
+  const call = async (path: string, body: unknown, busy = true): Promise<Response> => {
+    const key = {};
+    try {
+      for (let n = 1; ; n++) {
+        try {
+          const r = await postJson(path, body, signal);
+          if (!busy || ![502, 503, 504].includes(r.status)) return r;
+        } catch {
+          // A network error (or no token: offline).
+          if (signal.aborted) throw abortError();
+        }
+        if (n >= 2 || offline()) setWaiting(key, true);
+        await waitRetry(retryDelay(n), signal);
+      }
+    } finally {
+      setWaiting(key, false);
+    }
+  };
   // This page's upload of these bytes: no "interrupted" card for it.
   const fileFp = await fingerprint(file);
   if (fileFp) markUploadActive(fileFp, true);
@@ -298,7 +381,7 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
 
     if (rec) {
       // Resume: the server's list of parts wins over ours.
-      const r = await postJson("/uploads/multipart/parts", { ticket: rec.ticket }, signal);
+      const r = await call("/uploads/multipart/parts", { ticket: rec.ticket });
       if (r.ok) {
         const body = (await r.json()) as { completed?: boolean; parts: { part_number: number; size: number }[] };
         const cur = rec;
@@ -327,7 +410,7 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
     }
 
     if (!rec) {
-      const r = await postJson(
+      const r = await call(
         "/uploads/multipart/init",
         {
           filename: file.name,
@@ -337,7 +420,8 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
           size: file.size,
           ...(duration ? { duration } : {}),
         },
-        signal,
+        // (Its 503 is an answer: server_busy, or no R2 here.)
+        false,
       );
       if (!r.ok) {
         // Typed so the caller can tell 401 / 402 / 413 / 429 / 503 apart.
@@ -397,7 +481,7 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
     report(true);
 
     const signBatch = async (numbers: number[]) => {
-      const r = await postJson("/uploads/multipart/sign", { ticket: state.ticket, part_numbers: numbers }, signal);
+      const r = await call("/uploads/multipart/sign", { ticket: state.ticket, part_numbers: numbers });
       if (!r.ok) throw await apiError(r);
       const body = (await r.json()) as { parts: { part_number: number; url: string }[] };
       for (const p of body.parts) urls.set(p.part_number, p.url);
@@ -434,10 +518,12 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
         inflight.set(n, 0);
         const res = await putPart(url, blob, signal, (loaded) => {
           inflight.set(n, loaded);
+          if (loaded > 0) setWaiting(n, false);
           report();
         });
         inflight.delete(n);
         if (res.ok) {
+          setWaiting(n, false);
           doneSet.add(n);
           doneTotal += blob.size;
           report();
@@ -445,7 +531,10 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
           if (state.fp) void saveRecord(state);
           return;
         }
-        if (res.kind === "abort" || signal.aborted) throw abortError();
+        // Cancelled — or a part that failed for good stopped the others.
+        // An abort the browser did itself (iOS, the page in the
+        // background) is a lost connection like any other.
+        if (signal.aborted) throw abortError();
         if (res.kind === "http" && res.status === 403 && !resigned) {
           // The URL expired (6 h) or the signature is off: sign again,
           // once, without counting it as a failed attempt.
@@ -455,17 +544,23 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
           attempt--;
           continue;
         }
-        const last = attempt >= MAX_ATTEMPTS;
-        telemetry(state.ticket, last ? "part_failed" : "part_retry", {
-          part: n,
-          attempt,
-          status: res.status,
-          elapsed_ms: Date.now() - t0,
-          loaded: res.loaded,
-          kind: res.kind,
-        });
-        if (last) throw new Error(res.kind === "stall" ? UPLOAD_STALLED_MSG : UPLOAD_NETWORK_MSG);
-        await sleep(BACKOFF_MS[attempt - 1] ?? 9000, signal);
+        // R2's 4xx is an answer (a 5xx, 408 / 429, a network error, a
+        // stall or an abort the browser did is not): the upload stops,
+        // resumable.
+        const final = res.kind === "http" && res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429;
+        if (attempt <= MAX_ATTEMPTS || final) {
+          telemetry(state.ticket, final ? "part_failed" : "part_retry", {
+            part: n,
+            attempt,
+            status: res.status,
+            elapsed_ms: Date.now() - t0,
+            loaded: res.loaded,
+            kind: res.kind,
+          });
+        }
+        if (final) throw new Error(UPLOAD_NETWORK_MSG);
+        if (attempt >= 2 || offline()) setWaiting(n, true);
+        await waitRetry(retryDelay(attempt), signal);
       }
     };
 
@@ -488,7 +583,7 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
 
     for (let round = 0; ; round++) {
       if (!completed) await uploadPending();
-      const r = await postJson("/uploads/multipart/complete", { ticket: state.ticket }, signal);
+      const r = await call("/uploads/multipart/complete", { ticket: state.ticket });
       if (r.ok) break;
       const e = await apiError(r);
       if (e.status === 409 && e.code === "parts_missing" && round < 2) {

@@ -244,6 +244,7 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Comment nous traitons tes vidéos",
   "app.upload.resuming":
     "Reprise de l'envoi là où il s'était arrêté — garde cette page ouverte.",
+  "app.upload.paused": "En attente de connexion… L’import reprend automatiquement.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "retour",
@@ -394,6 +395,7 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Annuler",
   "app.projects.retry": "Réessayer",
   "app.projects.pickAgain": "Choisis à nouveau le même fichier pour reprendre l’import",
+  "app.projects.wrongFile": "C’est une autre vidéo. Pour reprendre, choisis à nouveau « {name} » — ou retire cet import et lances-en un nouveau.",
   "app.projects.resumeAt": "Arrêté à {pct} % — choisis la même vidéo pour continuer.",
   "app.projects.resume": "Reprendre l’envoi",
   "app.projects.download": "Télécharger",

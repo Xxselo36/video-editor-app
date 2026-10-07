@@ -244,6 +244,7 @@ export const esApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Cómo tratamos tus videos",
   "app.upload.resuming":
     "Reanudando la subida donde se quedó — mantén esta página abierta.",
+  "app.upload.paused": "Esperando conexión… La subida continúa automáticamente.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "atrás",
@@ -394,6 +395,7 @@ export const esApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Cancelar",
   "app.projects.retry": "Reintentar",
   "app.projects.pickAgain": "Elige el mismo archivo otra vez para continuar la subida",
+  "app.projects.wrongFile": "Ese es otro vídeo. Para continuar, vuelve a elegir «{name}», o quita esta subida y empieza una nueva.",
   "app.projects.resumeAt": "Detenida en el {pct} % — elige el mismo vídeo para continuar.",
   "app.projects.resume": "Continuar subida",
   "app.projects.download": "Descargar",

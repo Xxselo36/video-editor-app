@@ -243,6 +243,7 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Come trattiamo i tuoi video",
   "app.upload.resuming":
     "Il caricamento riprende da dove si era interrotto — tieni questa pagina aperta.",
+  "app.upload.paused": "In attesa di connessione… Il caricamento riprende automaticamente.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "indietro",
@@ -393,6 +394,7 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Annulla",
   "app.projects.retry": "Riprova",
   "app.projects.pickAgain": "Scegli di nuovo lo stesso file per continuare il caricamento",
+  "app.projects.wrongFile": "Questo è un altro video. Per continuare, scegli di nuovo “{name}”, oppure rimuovi questo caricamento e iniziane uno nuovo.",
   "app.projects.resumeAt": "Interrotto al {pct}% — scegli lo stesso video per continuare.",
   "app.projects.resume": "Continua il caricamento",
   "app.projects.download": "Scarica",

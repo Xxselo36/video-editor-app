@@ -20,7 +20,7 @@ import { presetLabelFor, PRESETS, type PresetId } from "@/features/start/presets
 import { canRetryInPlace, cancelUpload, retryUpload, retryUploadWith } from "@/features/upload/uploadControls";
 import { useLiveUpload, useLocalThumb } from "@/features/upload/uploadState";
 import { matchResumable, stoppedTileShowsError, useResumableUploads } from "@/features/upload/useResumable";
-import { discardResumable } from "@/lib/uploadResume";
+import { discardResumable, findRecord } from "@/lib/uploadResume";
 import type { UploadSettings } from "@/features/upload/uploadJob";
 import { getLocalJob, removeJob } from "./jobsStore";
 import { daysLeft, middleEllipsis, type Project, type ProjectState } from "./projects";
@@ -172,14 +172,17 @@ function Thumb({ p }: { p: Project }) {
   );
 }
 
-export function ProjectTile({ p, onOpen, onMenuAction }: {
+export function ProjectTile({ p: project, onOpen, onMenuAction }: {
   p: Project;
   onOpen: (href: string) => void;
   onMenuAction: (action: "rename" | "delete", p: Project) => void;
 }) {
   const t = useT();
   const lang = useLang();
-  const liveUpload = useLiveUpload(p.id);
+  const liveUpload = useLiveUpload(project.id);
+  // Still running in this page (waiting for the connection, say): never
+  // a stopped tile, whatever the record says.
+  const p: Project = liveUpload && project.state === "upload_failed" ? { ...project, state: "uploading" } : project;
   const fileRef = useRef<HTMLInputElement>(null);
   // A stopped upload whose resume record is still here: "Continue upload"
   // at its percent (the same bytes continue, whatever the file is called).
@@ -214,6 +217,7 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
   const status = (() => {
     switch (p.state) {
       case "uploading":
+        if (liveUpload?.paused) return t("app.upload.paused");
         if (starting) return t("app.projects.starting");
         return resuming ? t("app.upload.resuming") : t(touchDevice() ? "app.projects.uploadKeepOpenPhone" : "app.projects.uploadKeepOpen");
       case "upload_failed":
@@ -252,10 +256,19 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
     if (retryUpload(p.id)) return;
     fileRef.current?.click();
   };
-  const onPicked = (e: ChangeEvent<HTMLInputElement>) => {
+  // "Continue upload" got another video than the stopped one: said so,
+  // and nothing starts (the stopped upload stays offered).
+  const [wrongFile, setWrongFile] = useState(false);
+  const onPicked = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    if (resumable) {
+      const rec = await findRecord(file).catch(() => null);
+      const same = rec !== null && rec.size === resumable.size;
+      setWrongFile(!same);
+      if (!same) return;
+    }
     const s = retrySettings(p.id);
     if (!s) {
       removeJob(p.id);
@@ -359,6 +372,11 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
             {t("app.projects.resumeAt", { pct: resumable.pct })}
           </p>
         )}
+        {resumable && wrongFile && (
+          <p role="alert" data-testid="job-card-wrong-file" className="text-xs leading-relaxed" style={{ color: "var(--danger)" }}>
+            {t("app.projects.wrongFile", { name: resumable.name })}
+          </p>
+        )}
         {(uploading || p.state === "upload_failed" || p.state === "expired") && (
           <div className="pointer-events-auto relative z-10 mt-1 flex flex-wrap gap-1.5">
             {uploading && !starting && (
@@ -394,7 +412,7 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
                   className="hidden"
                   aria-label={t("app.projects.pickAgain")}
                   data-testid="job-card-retry-input"
-                  onChange={onPicked}
+                  onChange={(e) => void onPicked(e)}
                 />
               </>
             )}

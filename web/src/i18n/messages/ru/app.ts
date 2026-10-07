@@ -242,6 +242,7 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Как мы обращаемся с твоими видео",
   "app.upload.resuming":
     "Продолжаем загрузку с того места, где она прервалась — держи эту страницу открытой.",
+  "app.upload.paused": "Ждём подключения… Загрузка продолжится автоматически.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "назад",
@@ -392,6 +393,7 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Отмена",
   "app.projects.retry": "Повторить",
   "app.projects.pickAgain": "Выбери тот же файл ещё раз, чтобы продолжить загрузку",
+  "app.projects.wrongFile": "Это другое видео. Чтобы продолжить, снова выбери «{name}» — или удали эту загрузку и начни новую.",
   "app.projects.resumeAt": "Остановлено на {pct} % — выбери то же видео, чтобы продолжить.",
   "app.projects.resume": "Продолжить загрузку",
   "app.projects.download": "Скачать",

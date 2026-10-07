@@ -69,9 +69,11 @@ export function ActiveJobCard({
     job.phase === "uploading" ? liveUpload?.pct ?? job.uploadPct ?? 0 : status?.progress ?? 0;
   const canOpen = job.phase === "reviewing" && !isError;
   const copy =
-    job.phase === "uploading" && (liveUpload ? liveUpload.resuming : job.resuming)
-      ? { ...phaseCopy.uploading, sub: t("app.upload.resuming") }
-      : phaseCopy[job.phase];
+    job.phase === "uploading" && liveUpload?.paused
+      ? { ...phaseCopy.uploading, sub: t("app.upload.paused") }
+      : job.phase === "uploading" && (liveUpload ? liveUpload.resuming : job.resuming)
+        ? { ...phaseCopy.uploading, sub: t("app.upload.resuming") }
+        : phaseCopy[job.phase];
   const accent = phaseAccent[job.phase];
 
   return (

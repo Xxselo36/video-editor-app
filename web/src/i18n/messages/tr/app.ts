@@ -244,6 +244,7 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Videolarını nasıl işliyoruz",
   "app.upload.resuming":
     "Yükleme kaldığı yerden devam ediyor — bu sayfayı açık tut.",
+  "app.upload.paused": "Bağlantı bekleniyor… Yükleme otomatik olarak devam edecek.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "geri",
@@ -394,6 +395,7 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "İptal",
   "app.projects.retry": "Tekrar dene",
   "app.projects.pickAgain": "Yüklemeye devam etmek için aynı dosyayı yeniden seç",
+  "app.projects.wrongFile": "Bu başka bir video. Devam etmek için “{name}” dosyasını yeniden seç ya da bu yüklemeyi kaldırıp yeni bir tane başlat.",
   "app.projects.resumeAt": "%{pct} noktasında durdu — devam etmek için aynı videoyu seç.",
   "app.projects.resume": "Yüklemeye devam et",
   "app.projects.download": "İndir",

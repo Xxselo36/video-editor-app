@@ -243,6 +243,7 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Jak postępujemy z twoimi filmami",
   "app.upload.resuming":
     "Wznawiamy przesyłanie od miejsca, w którym zostało przerwane — trzymaj tę stronę otwartą.",
+  "app.upload.paused": "Czekam na połączenie… Przesyłanie wznowi się automatycznie.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "wstecz",
@@ -393,6 +394,7 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Anuluj",
   "app.projects.retry": "Spróbuj ponownie",
   "app.projects.pickAgain": "Wybierz ten sam plik ponownie, aby kontynuować przesyłanie",
+  "app.projects.wrongFile": "To inny film. Aby kontynuować, wybierz ponownie „{name}” — albo usuń to przesyłanie i zacznij nowe.",
   "app.projects.resumeAt": "Zatrzymano na {pct}% — wybierz ten sam film, aby kontynuować.",
   "app.projects.resume": "Wznów przesyłanie",
   "app.projects.download": "Pobierz",

@@ -25,6 +25,8 @@ export type LiveUpload = {
   resuming: boolean;
   /** The file is stored and POST /jobs went out: no cancel any more. */
   starting?: boolean;
+  /** Waiting for the connection: it continues by itself. */
+  paused?: boolean;
 };
 
 export const live = new Map<string, LiveUpload>();
