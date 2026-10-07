@@ -10,9 +10,11 @@
  *            stopped"; once they get through the upload finishes from the
  *            next missing part — same document, no new init, no re-pick
  *   reload   after a reload (the File is gone) the stopped tile's
- *            "Continue upload" asks for the file: another video is
- *            refused with a clear message, the same bytes continue from
- *            the parts R2 has, without a new init
+ *            "Continue upload" asks for the file. The same bytes continue
+ *            from the parts R2 has, without a new init. Other bytes —
+ *            another video, or the same one converted again (the iPhone
+ *            Photos picker) — are not refused: the tile says so and
+ *            offers to upload that copy from the start
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -131,6 +133,22 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     const leaveAsks = () => page.evaluate(() => !window.dispatchEvent(new Event("beforeunload", { cancelable: true })));
     const desktop = test.info().project.name === "desktop";
     expect(await leaveAsks()).toBe(desktop);
+    // A download link (another origin: a navigation to the browser)
+    // doesn't ask.
+    const downloadAsks = () =>
+      page.evaluate(() => {
+        const a = document.createElement("a");
+        a.download = "";
+        a.href = "#";
+        a.addEventListener("click", (e) => e.preventDefault());
+        document.body.append(a);
+        a.click();
+        a.remove();
+        return !window.dispatchEvent(new Event("beforeunload", { cancelable: true }));
+      });
+    expect(await downloadAsks()).toBe(false);
+    await page.waitForTimeout(1100);
+    expect(await leaveAsks()).toBe(desktop);
 
     // The connection is back: it goes on by itself, from part 3.
     blocked = false;
@@ -147,9 +165,9 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     expect(await leaveAsks()).toBe(false);
   });
 
-  test("after a reload: Continue upload refuses another video and resumes the same bytes", async ({ page }) => {
-    const size = 60 * MIB + 777; // 4 parts
-    const bytes = crypto.randomBytes(size);
+  /** An upload of `bytes` as `name`, reloaded once parts 1 and 2 are in
+   *  R2 (the owner pulled to refresh): its stopped tile on Projects. */
+  async function stoppedByReload(page: Page, name: string, bytes: Buffer) {
     const held: Route[] = [];
     await page.route(`${moto}/**`, async (route) => {
       if (route.request().method() === "PUT" && partOf(route) >= 3) {
@@ -160,28 +178,35 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     });
     await openWithStorage(page, "/app/new");
     const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
-    await chooser.setFiles(fileOf("urlaub.mp4", bytes));
+    await chooser.setFiles(fileOf(name, bytes));
     await expect.poll(okParts, { timeout: 90_000 }).toEqual([1, 2]);
     await page.waitForTimeout(1000); // the resume record has parts 1 and 2
-    // The owner pulled to refresh mid-upload: the File is gone.
     page.on("dialog", (d) => void d.accept());
     await page.reload();
     await page.unroute(`${moto}/**`);
     for (const r of held) r.abort().catch(() => {});
     await page.goto("/app");
-    const tile = jobCard(page, "urlaub.mp4");
+    const tile = jobCard(page, name);
     await expect(tile).toHaveAttribute("data-state", "upload_failed", { timeout: 45_000 });
     await expect(tile.getByTestId("job-card-resume")).toContainText("choose the same video");
     api.length = 0;
     puts.length = 0;
+    return tile;
+  }
 
-    // Another video: refused, said so; nothing starts and the tile stays.
+  test("after a reload: Continue upload resumes the same bytes; other bytes are asked about, not refused", async ({ page }) => {
+    const size = 60 * MIB + 777; // 4 parts
+    const bytes = crypto.randomBytes(size);
+    const tile = await stoppedByReload(page, "urlaub.mp4", bytes);
+
+    // Other bytes: the tile says so and asks; nothing starts by itself.
     const retry = tile.getByTestId("job-card-retry");
     await expect(retry).toContainText("Continue upload");
     let [picker] = await Promise.all([page.waitForEvent("filechooser"), retry.click()]);
     await picker.setFiles(fileOf("anderes.mp4", crypto.randomBytes(size)));
-    await expect(tile.getByTestId("job-card-wrong-file")).toContainText("different video");
-    await expect(tile.getByTestId("job-card-wrong-file")).toContainText("urlaub.mp4");
+    const note = tile.getByTestId("job-card-mismatch");
+    await expect(note).toContainText("match the stopped upload");
+    await expect(note.getByTestId("job-card-from-start")).toHaveText("Upload from the start");
     await page.waitForTimeout(1000);
     expect(api).toEqual([]);
     await expect(tile).toHaveAttribute("data-state", "upload_failed");
@@ -195,5 +220,26 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     expect(api[0]).toBe("parts");
     expect(okParts()).toEqual([3, 4]);
     await expect(jobCard(page, "urlaub.mp4")).toHaveCount(0);
+  });
+
+  test("after a reload: a copy that doesn't match goes up from the start when the user says so", async ({ page }) => {
+    const size = 40 * MIB + 99; // 3 parts
+    const tile = await stoppedByReload(page, "IMG_0200.mov", crypto.randomBytes(size));
+    // The iPhone converted the video again: other bytes, other name.
+    const copy = crypto.randomBytes(size);
+    const [picker] = await Promise.all([page.waitForEvent("filechooser"), tile.getByTestId("job-card-retry").click()]);
+    await picker.setFiles(fileOf("IMG_0200 2.mov", copy));
+    await tile.getByTestId("job-card-from-start").click();
+    // A new upload of that copy (its own init); the stopped one is given
+    // up on the server too.
+    await expect.poll(() => createdJobId(page, "IMG_0200 2.mov"), { timeout: 120_000 }).not.toBeNull();
+    expect(api.filter((c) => c === "init")).toHaveLength(1);
+    expect(api).toContain("abort");
+    expect(api).not.toContain("parts");
+    expect(okParts()).toEqual([1, 2, 3]);
+    await expect(jobCard(page, "IMG_0200.mov")).toHaveCount(0);
+    await page.goto("/app/new");
+    await expect(page.getByTestId("upload-dropzone")).toBeVisible();
+    await expect(page.getByTestId("start-resume")).toHaveCount(0);
   });
 });

@@ -22,8 +22,10 @@ export function canRetryInPlace(id: string): boolean {
  */
 export async function cancelUpload(id: string): Promise<void> {
   // POST /jobs went out: the job may exist and can't be stopped — the
-  // record stays (the tile no longer offers Cancel).
-  if (live.get(id)?.starting) return;
+  // record stays (the tile no longer offers Cancel) — unless it waits
+  // for the connection: then Cancel stops the waiting.
+  const cur = live.get(id);
+  if (cur?.starting && !cur.paused) return;
   const ctl = controllers.get(id);
   const retry = retries.get(id);
   retries.delete(id);

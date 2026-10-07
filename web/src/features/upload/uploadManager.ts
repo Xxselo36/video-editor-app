@@ -98,18 +98,33 @@ export function isUploading(file: File): boolean {
 }
 
 // Desktop: leaving the page (reload, closing the tab) while an upload
-// runs asks first. iOS ignores beforeunload; the listener is only there
-// while something uploads (it may keep a page out of the bfcache).
-const touch = () => /iPad|iPhone|iPod|Android/.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
-function onBeforeUnload(e: BeforeUnloadEvent): void {
-  if (!running.size) return;
+// runs asks first. Phones and tablets ignore beforeunload (a touch
+// laptop doesn't: maxTouchPoints alone says nothing); the listener is
+// only there while something uploads (it may keep a page out of the
+// bfcache). A download link (another origin: the browser navigates
+// until the answer turns out to be an attachment) doesn't ask.
+const mobile = () =>
+  /iPad|iPhone|iPod|Android/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+let downloadClickAt = 0;
+function onClickCapture(e: Event): void {
+  if ((e.target as Element | null)?.closest?.("a[download]")) downloadClickAt = Date.now();
+}
+/** (Exported for the unit test.) */
+export function onBeforeUnload(e: BeforeUnloadEvent): void {
+  if (!running.size || Date.now() - downloadClickAt < 1000) return;
   e.preventDefault();
   e.returnValue = "";
 }
 function guardUnload(): void {
-  if (typeof window === "undefined" || typeof navigator === "undefined" || touch()) return;
-  if (running.size) window.addEventListener("beforeunload", onBeforeUnload);
-  else window.removeEventListener("beforeunload", onBeforeUnload);
+  if (typeof window === "undefined" || typeof navigator === "undefined" || mobile()) return;
+  const on = running.size > 0;
+  if (on) {
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClickCapture, true);
+  } else {
+    window.removeEventListener("beforeunload", onBeforeUnload);
+    document.removeEventListener("click", onClickCapture, true);
+  }
 }
 
 /**
@@ -197,6 +212,12 @@ export async function startUpload(
     onPaused: (id, paused) => {
       const cur = live.get(id);
       if (!cur || Boolean(cur.paused) === paused) return;
+      // POST /jobs waiting for the connection: Cancel is offered again
+      // (it stops the waiting; uploadJob).
+      if (cur.starting) {
+        if (paused) controllers.set(id, ctl);
+        else controllers.delete(id);
+      }
       live.set(id, { ...cur, paused });
       emit();
     },
