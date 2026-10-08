@@ -38,6 +38,8 @@ on:
       - 'backend/font_metrics.py'
       - 'docs/i18n-glossary.md'
       - '.github/workflows/web.yml'
+      - '.github/actions/e2e-setup/**'
+      - '.github/scripts/apt-install.sh'
   pull_request:
     paths:
       - 'web/**'
@@ -49,6 +51,8 @@ on:
       - 'backend/font_metrics.py'
       - 'docs/i18n-glossary.md'
       - '.github/workflows/web.yml'
+      - '.github/actions/e2e-setup/**'
+      - '.github/scripts/apt-install.sh'
   schedule:
     - cron: '17 2 * * *'
   workflow_dispatch:
