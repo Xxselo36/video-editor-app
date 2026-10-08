@@ -1,7 +1,7 @@
 // The beforeunload guard of a running upload (PR #66 review): on desktops
 // (a touch laptop included) leaving asks first; phones and tablets get
-// none (they ignore it); a download link of another origin loads in a
-// hidden frame instead of navigating the page away, and doesn't ask.
+// none (they ignore it); a click on a download link doesn't ask (the
+// browser navigates until the answer turns out to be an attachment).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "@/features/jobs/test-storage";
 
@@ -23,7 +23,6 @@ const target = (m: Map<string, Set<Listener>>) => ({
   removeEventListener: (ev: string, f: Listener) => void m.get(ev)?.delete(f),
 });
 const fire = (m: Map<string, Set<Listener>>, ev: string, e: unknown) => m.get(ev)?.forEach((f) => f(e));
-const frames: { id?: string; hidden?: boolean; src?: string }[] = [];
 
 const WIN_TOUCH = { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", platform: "Win32", maxTouchPoints: 10 };
 const IPHONE = { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X)", platform: "iPhone", maxTouchPoints: 5 };
@@ -31,7 +30,6 @@ const IPHONE = { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS
 function page(nav: typeof WIN_TOUCH) {
   on.window.clear();
   on.document.clear();
-  frames.length = 0;
   const storage = new MemoryStorage();
   vi.stubGlobal("localStorage", storage);
   vi.stubGlobal("sessionStorage", new MemoryStorage());
@@ -40,13 +38,7 @@ function page(nav: typeof WIN_TOUCH) {
   vi.stubGlobal("document", {
     ...target(on.document),
     visibilityState: "visible",
-    getElementById: (id: string) => frames.find((f) => f.id === id) ?? null,
-    createElement: () => {
-      const f = {};
-      frames.push(f);
-      return f;
-    },
-    body: { append: () => {} },
+    createElement: () => ({}),
   });
   vi.stubGlobal("navigator", nav);
 }
@@ -86,21 +78,19 @@ describe("leaving the page while an upload runs", () => {
     expect(unload()).toBe(false);
   });
 
-  it("a download link of another origin goes to a hidden frame and doesn't ask", async () => {
+  it("a click on a download link doesn't ask (for a second); the page is left alone", async () => {
     page(WIN_TOUCH);
     const { startUpload } = await import("./uploadManager");
     void startUpload(new File([new Uint8Array(4)], "b.mp4", { lastModified: 1 }), settings, null);
     await vi.waitFor(() => expect(pending).toHaveLength(1));
-    const a = { href: "https://api.test/jobs/j1/download" };
-    const click = { target: { closest: () => a }, button: 0, defaultPrevented: false, preventDefault: vi.fn() };
+    // Another link: still asks.
+    fire(on.document, "click", { target: { closest: () => null }, preventDefault: vi.fn() });
+    expect(unload()).toBe(true);
+    const click = { target: { closest: () => ({ href: "https://api.test/jobs/j1/download" }) }, preventDefault: vi.fn() };
     fire(on.document, "click", click);
-    expect(click.preventDefault).toHaveBeenCalled();
-    expect(frames.filter((f) => f.id === "cleo-download")).toEqual([{ id: "cleo-download", hidden: true, src: a.href }]);
+    // The browser handles the download itself (no frame, nothing prevented).
+    expect(click.preventDefault).not.toHaveBeenCalled();
     expect(unload()).toBe(false);
-    // A same-origin (blob:) download downloads by itself: left alone.
-    const local = { ...click, target: { closest: () => ({ href: "https://app.test/x.srt" }) }, preventDefault: vi.fn() };
-    fire(on.document, "click", local);
-    expect(local.preventDefault).not.toHaveBeenCalled();
   });
 
   it("phones and tablets get no guard (they ignore beforeunload)", async () => {
