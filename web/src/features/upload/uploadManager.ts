@@ -102,27 +102,14 @@ export function isUploading(file: File): boolean {
 // Desktop: leaving the page (reload, closing the tab) while an upload
 // runs asks first. Phones and tablets ignore beforeunload (isMobile); the
 // listener is only there while something uploads (it may keep a page
-// out of the bfcache). A download link of another origin would navigate
-// this page until its answer turns out to be an attachment — and an
-// error answer (409, 404) would replace the page: while an upload runs
-// it loads in a hidden frame instead, so the page never goes and
-// nothing asks.
+// out of the bfcache). A download link (another origin: the browser
+// navigates until the answer turns out to be an attachment) doesn't ask.
+// (An error answer instead of the file then replaces the page — rare,
+// and accepted: loading downloads in a hidden frame broke the API's
+// attachments, which it serves with X-Frame-Options: DENY.)
 let downloadClickAt = 0;
 function onClickCapture(e: Event): void {
-  const m = e as MouseEvent;
-  const a = (e.target as Element | null)?.closest?.("a[download]") as HTMLAnchorElement | null;
-  if (!a?.href || m.defaultPrevented || m.button || m.metaKey || m.ctrlKey || m.shiftKey || m.altKey) return;
-  downloadClickAt = Date.now();
-  if (new URL(a.href, location.href).origin === location.origin) return; // a blob: or same-origin file: no navigation
-  e.preventDefault();
-  let frame = document.getElementById("cleo-download") as HTMLIFrameElement | null;
-  if (!frame) {
-    frame = document.createElement("iframe");
-    frame.id = "cleo-download";
-    frame.hidden = true;
-    document.body.append(frame);
-  }
-  frame.src = a.href;
+  if ((e.target as Element | null)?.closest?.("a[download]")) downloadClickAt = Date.now();
 }
 function onBeforeUnload(e: BeforeUnloadEvent): void {
   if (!running.size || Date.now() - downloadClickAt < 1000) return;
