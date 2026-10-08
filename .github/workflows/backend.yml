@@ -31,6 +31,7 @@ on:
       # The caption engine the v2 render bundles (UT4).
       - 'web/src/lib/captions/**'
       - '.github/workflows/backend.yml'
+      - '.github/scripts/apt-install.sh'
   pull_request:
     paths:
       - 'backend/**'
@@ -40,6 +41,7 @@ on:
       - 'web/src/lib/errorCodes.json'
       - 'web/src/lib/captions/**'
       - '.github/workflows/backend.yml'
+      - '.github/scripts/apt-install.sh'
   workflow_dispatch:
 
 permissions:
@@ -103,10 +105,40 @@ jobs:
           cache-dependency-path: |
             backend/requirements.txt
             backend/requirements-dev.txt
+      # System packages as in backend/Dockerfile: the .debs from an earlier
+      # run on this runner image when there are some (installed offline),
+      # else the network with three mirrors in turn
+      # (.github/scripts/apt-install.sh). Saved right after a network
+      # install, whatever pytest does later.
+      - name: apt cache key
+        id: apt-key
+        env:
+          PACKAGES: ffmpeg libsndfile1 fonts-dejavu-core fonts-liberation2
+        run: |
+          echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
+          # shellcheck disable=SC2086
+          .github/scripts/apt-install.sh --cache-key $PACKAGES >> "$GITHUB_OUTPUT"
+      - name: Restore the apt .debs
+        id: apt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
+          restore-keys: ${{ steps.apt-key.outputs.restore-key }}
       - name: System packages (as in backend/Dockerfile)
-        run: >-
-          .github/scripts/apt-install.sh
-          ffmpeg libsndfile1 fonts-dejavu-core fonts-liberation2
+        id: apt
+        env:
+          APT_DEB_CACHE: ${{ runner.temp }}/apt-debs
+          PACKAGES: ${{ steps.apt-key.outputs.packages }}
+        run: |
+          # shellcheck disable=SC2086
+          .github/scripts/apt-install.sh $PACKAGES
+      - name: Save the apt .debs
+        if: steps.apt-cache.outputs.cache-hit != 'true' && steps.apt.outputs.save == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
       - name: Requirements
         run: python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       # UT4: the caption layer the v2 render tests run (backend/captions,
