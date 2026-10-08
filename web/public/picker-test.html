@@ -26,7 +26,7 @@
 </head>
 <body>
 <h1>Video-Auswahl testen</h1>
-<p>Wähle bei jedem Knopf dasselbe lange Video (z. B. 10 Minuten). Achte darauf, ob im Fotos-Fenster der Kreis lange lädt. Es wird nichts hochgeladen.</p>
+<p>Wähle beim selben Knopf <b>zweimal hintereinander dasselbe Video</b>. Die Seite vergleicht beide Auswahlen und zeigt ✅ GLEICH oder ❌ ANDERS. Es wird nichts hochgeladen.</p>
 
 <div class="card"><b>A · wie jetzt (video/*)</b>
   <label class="btn">Video wählen<input type="file" data-v="A" accept="video/*"></label><div class="out"></div></div>
@@ -41,19 +41,54 @@
   <label class="btn">Video wählen<input type="file" data-v="D" accept="*/*"></label><div class="out"></div></div>
 
 <script>
+  // Every pick is listed (newest first) and compared with the pick before
+  // it on the same button. The value is reset after each pick, otherwise
+  // Safari fires no change event when the same video is chosen again.
+  // "Kennung" is the app's resume fingerprint: SHA-256 of the first and
+  // last 2 MiB (web/src/lib/uploadResume.ts) — equal means "continue
+  // upload" can pick up where it stopped.
+  var SAMPLE = 2 * 1024 * 1024;
+  function hex(buf) {
+    return Array.from(new Uint8Array(buf), function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  }
+  function kennung(f) {
+    if (!window.crypto || !crypto.subtle) return Promise.resolve('(nicht verfügbar)');
+    return Promise.all([
+      f.slice(0, SAMPLE).arrayBuffer(),
+      f.slice(Math.max(0, f.size - SAMPLE)).arrayBuffer()
+    ]).then(function (parts) {
+      var all = new Uint8Array(parts[0].byteLength + parts[1].byteLength);
+      all.set(new Uint8Array(parts[0]), 0);
+      all.set(new Uint8Array(parts[1]), parts[0].byteLength);
+      return crypto.subtle.digest('SHA-256', all);
+    }).then(function (d) { return hex(d).slice(0, 12); }, function () { return '(Fehler beim Lesen)'; });
+  }
   document.querySelectorAll('input[type=file]').forEach(function (inp) {
-    var opened = 0;
+    var opened = 0, n = 0, last = null;
+    var out = inp.closest('.card').querySelector('.out');
     inp.addEventListener('click', function () { opened = Date.now(); });
     inp.addEventListener('change', function () {
-      var out = inp.closest('.card').querySelector('.out');
       var f = inp.files && inp.files[0];
-      if (!f) { out.textContent = 'Keine Datei.'; return; }
       var secs = opened ? ((Date.now() - opened) / 1000).toFixed(0) : '?';
-      out.textContent =
-        'Name: ' + f.name + '\n' +
-        'Typ: ' + (f.type || '(leer)') + '\n' +
-        'Größe: ' + (f.size / 1048576).toFixed(1) + ' MB\n' +
-        'Zeit vom Antippen bis fertig: ' + secs + ' s';
+      if (!f) return;
+      n += 1;
+      var entry = document.createElement('div');
+      entry.style.marginBottom = '10px';
+      entry.textContent = 'Auswahl ' + n + ': wird geprüft …';
+      out.insertBefore(entry, out.firstChild);
+      kennung(f).then(function (k) {
+        var now = { size: f.size, k: k };
+        var same = last ? (last.size === now.size && last.k === now.k ? '✅ GLEICH wie Auswahl ' + (n - 1) : '❌ ANDERS als Auswahl ' + (n - 1)) : '';
+        entry.textContent =
+          'Auswahl ' + n + (same ? '  —  ' + same : '') + '\n' +
+          'Name: ' + f.name + '\n' +
+          'Typ: ' + (f.type || '(leer)') + '\n' +
+          'Größe: ' + (f.size / 1048576).toFixed(1) + ' MB (' + f.size + ' Bytes)\n' +
+          'Kennung: ' + k + '\n' +
+          'Zeit vom Antippen bis fertig: ' + secs + ' s';
+        last = now;
+        inp.value = '';
+      });
     });
   });
 </script>
