@@ -3,8 +3,8 @@ description: >-
   Everything the web e2e suites need (.github/workflows/web.yml): Node +
   npm ci in web/, Python + the backend requirements for the stub backend
   (backend/tests/stub_server.py), ffmpeg + espeak-ng for its generated
-  media, and the Playwright browsers. Caches pip, npm, the browsers and
-  the generated media.
+  media, and the Playwright browsers with their system packages. Caches
+  pip, npm, the apt .debs, the browsers and the generated media.
 
 inputs:
   node-version:
@@ -41,9 +41,61 @@ runs:
       shell: bash
       run: python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
-    - name: ffmpeg + espeak-ng (stub media)
+    - name: Playwright version and system packages
+      id: pw
       shell: bash
-      run: .github/scripts/apt-install.sh ffmpeg espeak-ng
+      working-directory: web
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+      run: |
+        echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+        # The apt packages `playwright install --with-deps` would install
+        # (its dry run prints the apt-get command): they come with ffmpeg
+        # below, from the same cache and mirror fallback.
+        # shellcheck disable=SC2086
+        deps=$(npx playwright install-deps --dry-run $BROWSERS \
+               | sed -n 's/.*apt-get install -y --no-install-recommends \([a-z0-9.+ -]*\)".*/\1/p') || deps=''
+        if [ -z "$deps" ]; then
+          echo "::warning title=Playwright::no package list from 'playwright install-deps --dry-run'; Playwright installs its system packages itself (not cached, no mirror fallback)"
+        fi
+        echo "deps=$deps" >> "$GITHUB_OUTPUT"
+
+    # apt: the .debs from an earlier run on this runner image when there are
+    # some (installed offline), else the network with three mirrors in turn
+    # (.github/scripts/apt-install.sh). Saved right after a network install,
+    # whatever the tests do later.
+    - name: apt cache key
+      id: apt-key
+      shell: bash
+      env:
+        PACKAGES: ffmpeg espeak-ng ${{ steps.pw.outputs.deps }}
+      run: |
+        echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
+        # shellcheck disable=SC2086
+        .github/scripts/apt-install.sh --cache-key $PACKAGES >> "$GITHUB_OUTPUT"
+    - name: Restore the apt .debs
+      id: apt-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/apt-debs
+        key: ${{ steps.apt-key.outputs.key }}
+        restore-keys: ${{ steps.apt-key.outputs.restore-key }}
+    - name: ffmpeg + espeak-ng (stub media) + the browsers' system packages
+      id: apt
+      shell: bash
+      env:
+        APT_DEB_CACHE: ${{ runner.temp }}/apt-debs
+        PACKAGES: ${{ steps.apt-key.outputs.packages }}
+      run: |
+        # shellcheck disable=SC2086
+        .github/scripts/apt-install.sh $PACKAGES
+    - name: Save the apt .debs
+      if: steps.apt-cache.outputs.cache-hit != 'true' && steps.apt.outputs.save == 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/apt-debs
+        key: ${{ steps.apt-key.outputs.key }}
+
     - name: Cache the stub media
       uses: actions/cache@v4
       with:
@@ -56,11 +108,6 @@ runs:
         STUB_MEDIA_DIR: ${{ github.workspace }}/.stub-media
       run: python backend/tests/stub_media.py all
 
-    - name: Playwright version
-      id: pw
-      shell: bash
-      working-directory: web
-      run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
     - name: Cache the Playwright browsers
       id: pw-cache
       uses: actions/cache@v4
@@ -73,10 +120,15 @@ runs:
       env:
         BROWSERS: ${{ inputs.browsers }}
         CACHED: ${{ steps.pw-cache.outputs.cache-hit }}
+        DEPS: ${{ steps.pw.outputs.deps }}
       run: |
-        # The system libraries always (not cached); the browsers unless cached.
+        # The browsers unless cached. Their system packages came with ffmpeg
+        # above, unless the dry run listed none: then Playwright installs
+        # them, as it did before.
         # shellcheck disable=SC2086
-        if [ "$CACHED" = "true" ]; then
+        if [ -n "$DEPS" ]; then
+          [ "$CACHED" = "true" ] || npx playwright install $BROWSERS
+        elif [ "$CACHED" = "true" ]; then
           npx playwright install-deps $BROWSERS
         else
           npx playwright install --with-deps $BROWSERS
