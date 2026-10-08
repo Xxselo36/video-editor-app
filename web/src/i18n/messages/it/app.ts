@@ -243,6 +243,7 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Come trattiamo i tuoi video",
   "app.upload.resuming":
     "Il caricamento riprende da dove si era interrotto — tieni questa pagina aperta.",
+  "app.upload.paused": "In attesa di connessione… Il caricamento riprende automaticamente.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "indietro",
@@ -393,6 +394,12 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Annulla",
   "app.projects.retry": "Riprova",
   "app.projects.pickAgain": "Scegli di nuovo lo stesso file per continuare il caricamento",
+  "app.projects.copyMismatch": "Questa copia non corrisponde a “{name}”: forse l’iPhone l’ha convertita di nuovo. Caricarla dall’inizio?",
+  "app.projects.copyMismatchOther": "Questo non è “{name}”. Sceglilo di nuovo per continuare, oppure carica questo file dall’inizio.",
+  "app.projects.otherUpload": "Questo è il video di un altro caricamento interrotto (“{name}”). Continualo nel suo riquadro.",
+  "app.projects.fromStartConfirm": "Così rinunci per sempre al caricamento interrotto al {pct}%. Caricare il nuovo file dall’inizio?",
+  "app.projects.fromStartYes": "Sì, dall’inizio",
+  "app.projects.uploadFromStart": "Carica dall’inizio",
   "app.projects.resumeAt": "Interrotto al {pct}% — scegli lo stesso video per continuare.",
   "app.projects.resume": "Continua il caricamento",
   "app.projects.download": "Scarica",

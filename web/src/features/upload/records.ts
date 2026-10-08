@@ -11,7 +11,7 @@
  * everyone off the opt-in); its calls run in order on the loaded module.
  */
 import { addActiveJob, getActiveJobs, liveUploads, removeActiveJob, updateActiveJob } from "@/lib/activeJobs";
-import { cardError, toCoded, type CodedError } from "@/lib/errors";
+import { cardError, tEn, toCoded, type CodedError } from "@/lib/errors";
 import { getLibrary } from "@/lib/library";
 import { readChoice } from "@/features/editor/v2/flag";
 type Store = typeof import("@/features/jobs/jobsStore");
@@ -70,24 +70,56 @@ export function addUploadRecord(tempId: string, info: UploadInfo): void {
   });
 }
 
+// A running upload of this page is never "interrupted": a mark that
+// pagehide wrote (iOS fires it for a page that lives on), or another
+// tab's markStaleUploads while this one was frozen or throttled, goes
+// with its next write.
+const isMarked = (code: string | null | undefined) => code === "upload_interrupted";
+const UNMARK_V2 = { errorCode: null, errorParams: null };
+const UNMARK_V1 = { error: undefined, errorCode: null, errorParams: undefined };
+const markedV1 = (id: string) => isMarked(getActiveJobs().find((j) => j.jobId === id)?.errorCode);
+
+/** A write of a running upload of this page (`live`: unmarks it). */
+function writeUpload(
+  tempId: string,
+  v2: Parameters<Store["updateUpload"]>[1],
+  v1: Parameters<typeof updateActiveJob>[1] | null,
+): void {
+  const live = liveUploads.has(tempId);
+  if (projectsV2()) {
+    withStore((store) => {
+      const unmark = live && isMarked(store.getLocalJob(tempId)?.upload?.errorCode);
+      store.updateUpload(tempId, unmark ? { ...v2, ...UNMARK_V2 } : v2);
+    });
+  } else if (v1) {
+    updateActiveJob(tempId, live && markedV1(tempId) ? { ...v1, ...UNMARK_V1 } : v1);
+  }
+}
+
 /** A heartbeat / state change of a running upload. */
 export function uploadProgress(tempId: string, p: { pct: number; lastProgressAt: number; resuming?: boolean }): void {
   const resuming = p.resuming === undefined ? {} : { resuming: p.resuming };
-  if (projectsV2()) withStore((store) => store.updateUpload(tempId, { pct: p.pct, lastProgressAt: p.lastProgressAt, ...resuming }));
-  else updateActiveJob(tempId, { uploadPct: p.pct, lastProgressAt: p.lastProgressAt, ...resuming });
+  writeUpload(
+    tempId,
+    { pct: p.pct, lastProgressAt: p.lastProgressAt, ...resuming },
+    { uploadPct: p.pct, lastProgressAt: p.lastProgressAt, ...resuming },
+  );
 }
 
 /** The file is stored and POST /jobs went out (v2 tile: "Starting…",
  *  no cancel). */
 export function recordUploadStarting(tempId: string): void {
-  if (projectsV2()) withStore((store) => store.updateUpload(tempId, { starting: true, pct: 100, lastProgressAt: Date.now() }));
+  writeUpload(tempId, { starting: true, pct: 100, lastProgressAt: Date.now() }, null);
 }
 
-/** The upload failed: `e` an error, or a code ({code}). */
+/** The upload failed: `e` an error, or a code ({code}). While the page
+ *  may be going (pagehide), a request the browser cut is "interrupted";
+ *  a server's answer (too long, no audio, …) stays what it is. */
 export function recordUploadFailed(tempId: string, e: unknown): void {
   const coded = toCoded(e);
-  if (pageGone) return writeFailed(tempId, INTERRUPTED);
-  if (CUT_CODES.has(coded.code ?? "")) cutAt.set(tempId, Date.now());
+  const cut = CUT_CODES.has(coded.code ?? "");
+  if (pageGone && cut) return writeFailed(tempId, INTERRUPTED);
+  if (cut) cutAt.set(tempId, Date.now());
   writeFailed(tempId, coded);
 }
 
@@ -116,22 +148,48 @@ let pageGone = false;
 
 /** pagehide (exported for the unit test): this page's uploads, and the
  *  ones it just saw cut, are interrupted. Not when the page goes into the
- *  back/forward cache (`persisted`): it may come back as it was. */
+ *  back/forward cache (`persisted`): it may come back as it was. Written
+ *  in case the document dies — but iOS also fires it for a page that
+ *  only goes to the background and lives on: see pageShown. */
 export function pageHidden(persisted: boolean, now = Date.now()): void {
   if (persisted) return;
   pageGone = true;
-  const cut = [...cutAt].filter(([, at]) => now - at < PAGE_CUT_MS).map(([id]) => id);
-  for (const id of new Set([...liveUploads, ...cut])) writeFailed(id, INTERRUPTED);
+  // Running ones: only the mark — "starting" / "resuming" stay for when
+  // the page comes back (the tile reads them only while uploading).
+  for (const id of liveUploads) {
+    if (projectsV2()) withStore((store) => store.updateUpload(id, { errorCode: INTERRUPTED.code, errorParams: null }));
+    else updateActiveJob(id, cardError(INTERRUPTED));
+  }
+  for (const [id, at] of cutAt) {
+    if (now - at < PAGE_CUT_MS && !liveUploads.has(id)) writeFailed(id, INTERRUPTED);
+  }
 }
 
-/** pageshow: the page is shown again (exported for the unit test). */
+/** The page is back — pageshow, visible, focus (exported for the unit
+ *  test): the same document, so its uploads still run (the File is still
+ *  here) and go on by themselves; an "interrupted" mark on any of them —
+ *  pagehide's, or another tab's — goes. */
 export function pageShown(): void {
   pageGone = false;
+  const now = Date.now();
+  for (const id of liveUploads) {
+    if (projectsV2()) {
+      withStore((store) => {
+        if (isMarked(store.getLocalJob(id)?.upload?.errorCode)) store.updateUpload(id, { ...UNMARK_V2, lastProgressAt: now });
+      });
+    } else if (markedV1(id)) {
+      updateActiveJob(id, { ...UNMARK_V1, lastProgressAt: now });
+    }
+  }
 }
 
 if (typeof window !== "undefined") {
   window.addEventListener("pagehide", (e) => pageHidden(e.persisted));
   window.addEventListener("pageshow", pageShown);
+  window.addEventListener("focus", pageShown);
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && pageShown());
+  }
 }
 
 /** POST /jobs created the job: the record becomes the project. */
@@ -147,6 +205,7 @@ export function recordJobCreated(
   }
   removeActiveJob(tempId);
   addActiveJob({
+    ...(opts.cancelTooLate ? { note: tEn("app.projects.cancelTooLate"), noteCode: "cancel_too_late" } : {}),
     jobId,
     phase: "analyzing",
     timestamp: Date.now(),

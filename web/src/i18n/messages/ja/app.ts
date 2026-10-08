@@ -240,6 +240,7 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "動画の取り扱いについて",
   "app.upload.resuming":
     "中断したところからアップロードを再開しています — このページを開いたままにしてください。",
+  "app.upload.paused": "接続を待っています… アップロードは自動的に再開されます。",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "戻る",
@@ -389,6 +390,12 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "キャンセル",
   "app.projects.retry": "再試行",
   "app.projects.pickAgain": "同じファイルをもう一度選ぶとアップロードを再開します",
+  "app.projects.copyMismatch": "このコピーは「{name}」と一致しません。iPhone が再変換した可能性があります。最初からアップロードしますか?",
+  "app.projects.copyMismatchOther": "これは「{name}」ではありません。続けるにはもう一度それを選ぶか、このファイルを最初からアップロードしてください。",
+  "app.projects.otherUpload": "これは別の停止したアップロード(「{name}」)の動画です。そのタイルで続けてください。",
+  "app.projects.fromStartConfirm": "{pct}% で停止したアップロードは完全に破棄されます。新しいファイルを最初からアップロードしますか?",
+  "app.projects.fromStartYes": "はい、最初から",
+  "app.projects.uploadFromStart": "最初からアップロード",
   "app.projects.resumeAt": "{pct}%で中断 — 続けるには同じ動画を選んでください。",
   "app.projects.resume": "アップロードを再開",
   "app.projects.download": "ダウンロード",

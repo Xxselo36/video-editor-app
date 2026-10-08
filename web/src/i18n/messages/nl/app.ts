@@ -243,6 +243,7 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Zo gaan we met je video's om",
   "app.upload.resuming":
     "De upload gaat verder waar hij gestopt was — houd deze pagina open.",
+  "app.upload.paused": "Wachten op verbinding… De upload gaat automatisch verder.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "terug",
@@ -393,6 +394,12 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Annuleren",
   "app.projects.retry": "Opnieuw proberen",
   "app.projects.pickAgain": "Kies hetzelfde bestand opnieuw om de upload voort te zetten",
+  "app.projects.copyMismatch": "Deze kopie past niet bij „{name}” — de iPhone heeft hem misschien opnieuw omgezet. Vanaf het begin uploaden?",
+  "app.projects.copyMismatchOther": "Dat is niet „{name}”. Kies het opnieuw om verder te gaan — of upload dit bestand vanaf het begin.",
+  "app.projects.otherUpload": "Dit is de video van een andere gestopte upload („{name}”). Ga daar verder op de eigen tegel.",
+  "app.projects.fromStartConfirm": "Hiermee geef je de gestopte upload bij {pct}% definitief op. Het nieuwe bestand vanaf het begin uploaden?",
+  "app.projects.fromStartYes": "Ja, vanaf het begin",
+  "app.projects.uploadFromStart": "Vanaf het begin uploaden",
   "app.projects.resumeAt": "Gestopt bij {pct}% — kies dezelfde video om verder te gaan.",
   "app.projects.resume": "Upload hervatten",
   "app.projects.download": "Downloaden",

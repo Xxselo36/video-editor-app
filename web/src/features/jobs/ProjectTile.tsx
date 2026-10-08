@@ -17,10 +17,11 @@ import { useMediaUrl } from "@/lib/api";
 import { describeError, stageText } from "@/lib/errors";
 import { plural } from "@/lib/i18n/plural";
 import { presetLabelFor, PRESETS, type PresetId } from "@/features/start/presets.legacy";
-import { canRetryInPlace, cancelUpload, retryUpload, retryUploadWith } from "@/features/upload/uploadControls";
+import { isIOS } from "@/features/start/ios";
+import { canRetryInPlace, cancelUpload, retryUpload, retryUploadWith, runsElsewhere } from "@/features/upload/uploadControls";
 import { useLiveUpload, useLocalThumb } from "@/features/upload/uploadState";
 import { matchResumable, stoppedTileShowsError, useResumableUploads } from "@/features/upload/useResumable";
-import { discardResumable } from "@/lib/uploadResume";
+import { discardResumable, findRecord } from "@/lib/uploadResume";
 import type { UploadSettings } from "@/features/upload/uploadJob";
 import { getLocalJob, removeJob } from "./jobsStore";
 import { daysLeft, middleEllipsis, type Project, type ProjectState } from "./projects";
@@ -133,6 +134,28 @@ function retrySettings(id: string): { settings: UploadSettings; preset: PresetId
   };
 }
 
+/** The upload of this record runs in another tab (asked while `ask`,
+ *  every few seconds). */
+function useRunsElsewhere(id: string, ask: boolean): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (!ask) return;
+    let mounted = true;
+    const check = () => void runsElsewhere(id).then((v) => mounted && setOn(v));
+    check();
+    const timer = setInterval(check, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [id, ask]);
+  return ask && on;
+}
+
+/** "Continue upload" got a file whose bytes don't match the stopped
+ *  upload: `other` names the stopped upload they do belong to. */
+type Mismatch = { file: File; other: string | null; confirm: boolean };
+
 function Thumb({ p }: { p: Project }) {
   const t = useT();
   const local = useLocalThumb(p.id);
@@ -172,14 +195,20 @@ function Thumb({ p }: { p: Project }) {
   );
 }
 
-export function ProjectTile({ p, onOpen, onMenuAction }: {
+export function ProjectTile({ p: project, onOpen, onMenuAction }: {
   p: Project;
   onOpen: (href: string) => void;
   onMenuAction: (action: "rename" | "delete", p: Project) => void;
 }) {
   const t = useT();
   const lang = useLang();
-  const liveUpload = useLiveUpload(p.id);
+  const liveUpload = useLiveUpload(project.id);
+  // Running in another tab: shown as running, nothing to cancel, remove
+  // or upload again here.
+  const elsewhere = useRunsElsewhere(project.id, !liveUpload && (project.state === "uploading" || project.state === "upload_failed"));
+  // Still running in this page (waiting for the connection, say) or in
+  // another tab: never a stopped tile, whatever the record says.
+  const p: Project = (liveUpload || elsewhere) && project.state === "upload_failed" ? { ...project, state: "uploading" } : project;
   const fileRef = useRef<HTMLInputElement>(null);
   // A stopped upload whose resume record is still here: "Continue upload"
   // at its percent (the same bytes continue, whatever the file is called).
@@ -214,6 +243,7 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
   const status = (() => {
     switch (p.state) {
       case "uploading":
+        if (liveUpload?.paused) return t("app.upload.paused");
         if (starting) return t("app.projects.starting");
         return resuming ? t("app.upload.resuming") : t(touchDevice() ? "app.projects.uploadKeepOpenPhone" : "app.projects.uploadKeepOpen");
       case "upload_failed":
@@ -252,17 +282,42 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
     if (retryUpload(p.id)) return;
     fileRef.current?.click();
   };
-  const onPicked = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  // "Continue upload" got a file whose bytes don't match the stopped
+  // upload: another video — or, on an iPhone, the same one converted
+  // again (the Photos picker may hand over a new copy on every pick).
+  // Asked, not refused: it can go up from the start, after a second "yes"
+  // (that gives the stopped upload up). The video of ANOTHER stopped
+  // upload is pointed to that one's tile (its own settings).
+  const [mismatch, setMismatch] = useState<Mismatch | null>(null);
+  const upload = (file: File) => {
+    setMismatch(null);
     const s = retrySettings(p.id);
     if (!s) {
       removeJob(p.id);
       onOpen("/app/new");
       return;
     }
-    retryUploadWith(p.id, file, s.settings, s.preset);
+    void retryUploadWith(p.id, file, s.settings, s.preset);
+  };
+  const onPicked = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (resumable) {
+      // (A record moved from an older key has a new fp: the size says.)
+      const rec = await findRecord(file).catch(() => null);
+      if (!rec || (rec.fp !== resumable.fp && rec.size !== resumable.size)) {
+        return setMismatch({ file, other: rec?.name ?? null, confirm: false });
+      }
+    }
+    upload(file);
+  };
+  const fromStart = () => {
+    if (!mismatch || mismatch.other) return;
+    if (!mismatch.confirm) return setMismatch({ ...mismatch, confirm: true });
+    // The stopped upload can't continue with this copy: it goes.
+    if (resumable) void discardResumable(resumable.fp);
+    upload(mismatch.file);
   };
 
   return (
@@ -359,9 +414,47 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
             {t("app.projects.resumeAt", { pct: resumable.pct })}
           </p>
         )}
+        {resumable && mismatch && (
+          <div role="alert" data-testid="job-card-mismatch" className="pointer-events-auto relative z-10 flex flex-col items-start gap-1.5">
+            <p className="text-xs leading-relaxed" style={{ color: "var(--warn)" }}>
+              {mismatch.other
+                ? t("app.projects.otherUpload", { name: mismatch.other })
+                : mismatch.confirm
+                  ? t("app.projects.fromStartConfirm", { pct: resumable.pct })
+                  : t(isIOS(typeof navigator === "undefined" ? undefined : navigator) ? "app.projects.copyMismatch" : "app.projects.copyMismatchOther", {
+                      name: resumable.name,
+                    })}
+            </p>
+            {!mismatch.other && (
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  data-testid="job-card-from-start"
+                  onClick={fromStart}
+                  className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+                  style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
+                >
+                  <Icon icon={RotateCw} />
+                  {t(mismatch.confirm ? "app.projects.fromStartYes" : "app.projects.uploadFromStart")}
+                </button>
+                {mismatch.confirm && (
+                  <button
+                    type="button"
+                    data-testid="job-card-from-start-back"
+                    onClick={() => setMismatch(null)}
+                    className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+                    style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
+                  >
+                    {t("app.projects.cancel")}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {(uploading || p.state === "upload_failed" || p.state === "expired") && (
           <div className="pointer-events-auto relative z-10 mt-1 flex flex-wrap gap-1.5">
-            {uploading && !starting && (
+            {uploading && !elsewhere && (!starting || liveUpload?.paused) && (
               <button
                 type="button"
                 data-testid="job-card-cancel"
@@ -394,7 +487,7 @@ export function ProjectTile({ p, onOpen, onMenuAction }: {
                   className="hidden"
                   aria-label={t("app.projects.pickAgain")}
                   data-testid="job-card-retry-input"
-                  onChange={onPicked}
+                  onChange={(e) => void onPicked(e)}
                 />
               </>
             )}

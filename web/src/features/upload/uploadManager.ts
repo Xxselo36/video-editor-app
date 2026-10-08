@@ -34,6 +34,8 @@ import {
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import { readSettings, type SettingsSource } from "./settings";
 import { controllers, emit, live, moveThumb, retries, setPaywall, setThumb } from "./uploadState";
+import { isMobile } from "@/features/start/ios";
+import { holdUploadLock } from "@/lib/uploadLock";
 
 export {
   _version,
@@ -97,6 +99,35 @@ export function isUploading(file: File): boolean {
   return running.has(fileKey(file));
 }
 
+// Desktop: leaving the page (reload, closing the tab) while an upload
+// runs asks first. Phones and tablets ignore beforeunload (isMobile); the
+// listener is only there while something uploads (it may keep a page
+// out of the bfcache). A download link (another origin: the browser
+// navigates until the answer turns out to be an attachment) doesn't ask.
+// (An error answer instead of the file then replaces the page — rare,
+// and accepted: loading downloads in a hidden frame broke the API's
+// attachments, which it serves with X-Frame-Options: DENY.)
+let downloadClickAt = 0;
+function onClickCapture(e: Event): void {
+  if ((e.target as Element | null)?.closest?.("a[download]")) downloadClickAt = Date.now();
+}
+function onBeforeUnload(e: BeforeUnloadEvent): void {
+  if (!running.size || Date.now() - downloadClickAt < 1000) return;
+  e.preventDefault();
+  e.returnValue = "";
+}
+function guardUnload(): void {
+  if (typeof window === "undefined" || typeof navigator === "undefined" || isMobile(navigator)) return;
+  const on = running.size > 0;
+  if (on) {
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClickCapture, true);
+  } else {
+    window.removeEventListener("beforeunload", onBeforeUnload);
+    document.removeEventListener("click", onClickCapture, true);
+  }
+}
+
 /**
  * Upload `file` and create its job, in the background whatever route is
  * shown; resolves when that is over (callers don't wait for it). Never
@@ -126,6 +157,9 @@ export async function startUpload(
   // the moment it opens.
   const tempId = uploadCard(file, settings, preset);
   running.set(fk, tempId);
+  guardUnload();
+  // Other tabs: this record's upload runs (lib/uploadLock), until onEnd.
+  const unlock = holdUploadLock(tempId);
   onCard?.(tempId);
   let created: string | null = null;
   const ctl = new AbortController();
@@ -141,6 +175,8 @@ export async function startUpload(
     liveUploads.delete(tempId);
     live.delete(tempId);
     running.delete(fk);
+    guardUnload();
+    unlock();
     controllers.delete(tempId);
     const online = typeof navigator === "undefined" || navigator.onLine !== false;
     retries.set(tempId, { file, settings, preset });
@@ -177,8 +213,22 @@ export async function startUpload(
       live.set(id, { ...cur, id, pct, resuming });
       emit();
     },
+    onPaused: (id, paused) => {
+      const cur = live.get(id);
+      if (!cur || Boolean(cur.paused) === paused) return;
+      // POST /jobs waiting for the connection: Cancel is offered again
+      // (it stops the waiting; uploadJob).
+      if (cur.starting) {
+        if (paused) controllers.set(id, ctl);
+        else controllers.delete(id);
+      }
+      live.set(id, { ...cur, paused });
+      emit();
+    },
     onEnd: (id) => {
       running.delete(fk);
+      guardUnload();
+      unlock();
       controllers.delete(id);
       if (live.delete(id)) emit();
       onEnd?.(created);

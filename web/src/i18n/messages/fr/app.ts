@@ -244,6 +244,7 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Comment nous traitons tes vidéos",
   "app.upload.resuming":
     "Reprise de l'envoi là où il s'était arrêté — garde cette page ouverte.",
+  "app.upload.paused": "En attente de connexion… L’import reprend automatiquement.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "retour",
@@ -394,6 +395,12 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Annuler",
   "app.projects.retry": "Réessayer",
   "app.projects.pickAgain": "Choisis à nouveau le même fichier pour reprendre l’import",
+  "app.projects.copyMismatch": "Cette copie ne correspond pas à « {name} » — l’iPhone l’a peut-être reconvertie. L’importer depuis le début ?",
+  "app.projects.copyMismatchOther": "Ce n’est pas « {name} ». Choisis-le à nouveau pour reprendre — ou importe ce fichier depuis le début.",
+  "app.projects.otherUpload": "C’est la vidéo d’un autre import arrêté (« {name} »). Reprends-le sur sa propre vignette.",
+  "app.projects.fromStartConfirm": "Tu abandonnes ainsi définitivement l’import arrêté à {pct} %. Importer le nouveau fichier depuis le début ?",
+  "app.projects.fromStartYes": "Oui, depuis le début",
+  "app.projects.uploadFromStart": "Importer depuis le début",
   "app.projects.resumeAt": "Arrêté à {pct} % — choisis la même vidéo pour continuer.",
   "app.projects.resume": "Reprendre l’envoi",
   "app.projects.download": "Télécharger",

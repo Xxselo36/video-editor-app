@@ -243,6 +243,7 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "हम आपके वीडियो कैसे संभालते हैं",
   "app.upload.resuming":
     "अपलोड वहीं से फिर शुरू हो रहा है जहाँ रुका था — इस पेज को खुला रखें।",
+  "app.upload.paused": "कनेक्शन का इंतज़ार… अपलोड अपने-आप जारी रहेगा।",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "वापस",
@@ -393,6 +394,12 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "रद्द करें",
   "app.projects.retry": "फिर कोशिश करें",
   "app.projects.pickAgain": "अपलोड जारी रखने के लिए वही फ़ाइल दोबारा चुनें",
+  "app.projects.copyMismatch": "यह कॉपी “{name}” से मेल नहीं खाती — हो सकता है iPhone ने इसे फिर से कन्वर्ट किया हो। शुरू से अपलोड करें?",
+  "app.projects.copyMismatchOther": "यह “{name}” नहीं है। जारी रखने के लिए उसे फिर से चुनें — या इस फ़ाइल को शुरू से अपलोड करें।",
+  "app.projects.otherUpload": "यह किसी दूसरे रुके हुए अपलोड (“{name}”) का वीडियो है। उसे उसकी अपनी टाइल पर जारी रखें।",
+  "app.projects.fromStartConfirm": "इससे {pct}% पर रुका अपलोड हमेशा के लिए छूट जाएगा। नई फ़ाइल शुरू से अपलोड करें?",
+  "app.projects.fromStartYes": "हाँ, शुरू से",
+  "app.projects.uploadFromStart": "शुरू से अपलोड करें",
   "app.projects.resumeAt": "{pct}% पर रुका — जारी रखने के लिए वही वीडियो चुनें।",
   "app.projects.resume": "अपलोड जारी रखें",
   "app.projects.download": "डाउनलोड करें",

@@ -242,6 +242,7 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Как мы обращаемся с твоими видео",
   "app.upload.resuming":
     "Продолжаем загрузку с того места, где она прервалась — держи эту страницу открытой.",
+  "app.upload.paused": "Ждём подключения… Загрузка продолжится автоматически.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "назад",
@@ -392,6 +393,12 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Отмена",
   "app.projects.retry": "Повторить",
   "app.projects.pickAgain": "Выбери тот же файл ещё раз, чтобы продолжить загрузку",
+  "app.projects.copyMismatch": "Эта копия не совпадает с «{name}» — возможно, iPhone снова её преобразовал. Загрузить с начала?",
+  "app.projects.copyMismatchOther": "Это не «{name}». Выбери его снова, чтобы продолжить, — или загрузи этот файл с начала.",
+  "app.projects.otherUpload": "Это видео другой остановленной загрузки («{name}»). Продолжи её на её собственной карточке.",
+  "app.projects.fromStartConfirm": "Остановленная на {pct}% загрузка будет отменена навсегда. Загрузить новый файл с начала?",
+  "app.projects.fromStartYes": "Да, с начала",
+  "app.projects.uploadFromStart": "Загрузить с начала",
   "app.projects.resumeAt": "Остановлено на {pct} % — выбери то же видео, чтобы продолжить.",
   "app.projects.resume": "Продолжить загрузку",
   "app.projects.download": "Скачать",

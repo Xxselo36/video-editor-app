@@ -243,6 +243,7 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "So gehen wir mit deinen Videos um",
   "app.upload.resuming":
     "Der Upload geht dort weiter, wo er unterbrochen wurde — lass diese Seite offen.",
+  "app.upload.paused": "Warte auf Verbindung … Der Upload geht automatisch weiter.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "zurück",
@@ -393,6 +394,12 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Abbrechen",
   "app.projects.retry": "Nochmal versuchen",
   "app.projects.pickAgain": "Wähle dieselbe Datei noch einmal, um den Upload fortzusetzen",
+  "app.projects.copyMismatch": "Diese Kopie passt nicht zu „{name}“ – das iPhone hat sie vielleicht neu umgewandelt. Von vorne hochladen?",
+  "app.projects.copyMismatchOther": "Das ist nicht „{name}“. Wähle es noch einmal, um fortzusetzen – oder lade diese Datei von vorne hoch.",
+  "app.projects.otherUpload": "Das ist das Video eines anderen gestoppten Uploads („{name}“). Setze es auf dessen eigener Kachel fort.",
+  "app.projects.fromStartConfirm": "Damit gibst du den gestoppten Upload bei {pct} % endgültig auf. Die neue Datei von vorne hochladen?",
+  "app.projects.fromStartYes": "Ja, von vorne",
+  "app.projects.uploadFromStart": "Von vorne hochladen",
   "app.projects.resumeAt": "Unterbrochen bei {pct} % — wähle dasselbe Video, um weiterzumachen.",
   "app.projects.resume": "Upload fortsetzen",
   "app.projects.download": "Herunterladen",

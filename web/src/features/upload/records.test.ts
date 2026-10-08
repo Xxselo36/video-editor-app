@@ -93,3 +93,83 @@ describe("upload records as the page goes", () => {
     r.liveUploads.delete("upl-bf");
   });
 });
+
+describe("the page comes back (iOS: pagehide for a page that only went to the background)", () => {
+  it("its running uploads are running again: no stopped tile", async () => {
+    const r = await running("upl-bg");
+    r.pageHidden(false);
+    await vi.waitFor(async () => expect(await code("upl-bg")).toBe("upload_interrupted"));
+    // visible / focus / pageshow: the same document, the upload still runs.
+    r.pageShown();
+    await vi.waitFor(async () => expect(await code("upl-bg")).toBeNull());
+    r.liveUploads.delete("upl-bg");
+  });
+
+  it("another tab's 'interrupted' (this one was frozen) goes with the next heartbeat, and when the page is back", async () => {
+    const r = await running("upl-other");
+    const store = await import("@/features/jobs/jobsStore");
+    // Another tab's markStaleUploads, through the shared store.
+    store.updateUpload("upl-other", { errorCode: "upload_interrupted", resuming: false });
+    expect(await code("upl-other")).toBe("upload_interrupted");
+    r.uploadProgress("upl-other", { pct: 42, lastProgressAt: Date.now() });
+    await vi.waitFor(async () => expect(await code("upl-other")).toBeNull());
+    expect(store.getLocalJob("upl-other")?.upload?.pct).toBe(42);
+    store.updateUpload("upl-other", { errorCode: "upload_interrupted" });
+    r.pageShown();
+    await vi.waitFor(async () => expect(await code("upl-other")).toBeNull());
+    // A record of no upload of this page keeps the mark.
+    r.liveUploads.delete("upl-other");
+    store.updateUpload("upl-other", { errorCode: "upload_interrupted" });
+    r.uploadProgress("upl-other", { pct: 43, lastProgressAt: Date.now() });
+    await new Promise((res) => setTimeout(res, 10));
+    expect(await code("upl-other")).toBe("upload_interrupted");
+  });
+
+  it("a resumed upload is 'resuming' again after another tab's mark (the beat carries it)", async () => {
+    const r = await running("upl-res");
+    const store = await import("@/features/jobs/jobsStore");
+    store.updateUpload("upl-res", { resuming: true });
+    // markStaleUploads in another tab: interrupted, resuming off.
+    store.updateUpload("upl-res", { errorCode: "upload_interrupted", resuming: false });
+    r.uploadProgress("upl-res", { pct: 61, lastProgressAt: Date.now(), resuming: true });
+    await vi.waitFor(async () => expect(await code("upl-res")).toBeNull());
+    expect(store.getLocalJob("upl-res")?.upload?.resuming).toBe(true);
+    r.liveUploads.delete("upl-res");
+  });
+
+  it("pagehide keeps 'starting' and 'resuming' of a running upload", async () => {
+    const r = await running("upl-flags");
+    const store = await import("@/features/jobs/jobsStore");
+    store.updateUpload("upl-flags", { starting: true, resuming: true });
+    r.pageHidden(false);
+    await vi.waitFor(async () => expect(await code("upl-flags")).toBe("upload_interrupted"));
+    r.pageShown();
+    await vi.waitFor(async () => expect(await code("upl-flags")).toBeNull());
+    expect(store.getLocalJob("upl-flags")?.upload).toMatchObject({ starting: true, resuming: true });
+    r.liveUploads.delete("upl-flags");
+  });
+
+  it("a server's answer while the page is hidden keeps its code (not 'interrupted')", async () => {
+    const r = await running("upl-refusal");
+    r.pageHidden(false);
+    await vi.waitFor(async () => expect(await code("upl-refusal")).toBe("upload_interrupted"));
+    r.recordUploadFailed("upl-refusal", { code: "video_too_long", params: { max_minutes: 30 } });
+    r.liveUploads.delete("upl-refusal");
+    await vi.waitFor(async () => expect(await code("upl-refusal")).toBe("video_too_long"));
+    // A request the browser cut meanwhile: interrupted.
+    const c = await running("upl-cut2");
+    c.recordUploadFailed("upl-cut2", new Error("R2 network error"));
+    c.liveUploads.delete("upl-cut2");
+    await vi.waitFor(async () => expect(await code("upl-cut2")).toBe("upload_interrupted"));
+  });
+
+  it("an upload that ended meanwhile stays as it was", async () => {
+    const r = await running("upl-ended");
+    r.pageHidden(false);
+    await vi.waitFor(async () => expect(await code("upl-ended")).toBe("upload_interrupted"));
+    r.liveUploads.delete("upl-ended");
+    r.pageShown();
+    await new Promise((res) => setTimeout(res, 10));
+    expect(await code("upl-ended")).toBe("upload_interrupted");
+  });
+});

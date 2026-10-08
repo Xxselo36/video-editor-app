@@ -198,11 +198,11 @@ export function cardErrorText(card: CardFailure, t: TFn): string {
   return describeError({ ...legacy, refunded: legacy.refunded ?? card.refunded }, t);
 }
 
-/** A job card's note, translated (the render-failed note is the only
- *  kind: `noteCode` "render_failed", or its English sentence). */
+/** A job card's note, translated: a cancel that came too late (the job
+ *  was made already), else the render-failed note (`noteCode`
+ *  "render_failed", or its English sentence). */
 export function cardNoteText(card: { note?: string; noteCode?: string | null }, t: TFn): string {
-  void card;
-  return t("app.card.renderFailedNote");
+  return t(card.noteCode === "cancel_too_late" ? "app.projects.cancelTooLate" : "app.card.renderFailedNote");
 }
 
 /** The note fields of a card whose render failed. */

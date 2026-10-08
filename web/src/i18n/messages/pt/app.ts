@@ -241,6 +241,7 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Como tratamos seus vídeos",
   "app.upload.resuming":
     "Retomando o envio de onde parou — mantenha esta página aberta.",
+  "app.upload.paused": "Aguardando conexão… O envio continua automaticamente.",
 
   // ── app: configure (custom settings) ──
   "app.configure.back": "voltar",
@@ -391,6 +392,12 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Cancelar",
   "app.projects.retry": "Tentar de novo",
   "app.projects.pickAgain": "Escolha o mesmo arquivo de novo para continuar o envio",
+  "app.projects.copyMismatch": "Esta cópia não corresponde a “{name}” — o iPhone pode tê-la convertido de novo. Enviar desde o início?",
+  "app.projects.copyMismatchOther": "Isso não é “{name}”. Escolha-o de novo para continuar — ou envie este arquivo desde o início.",
+  "app.projects.otherUpload": "Este é o vídeo de outro envio parado (“{name}”). Continue-o no próprio cartão.",
+  "app.projects.fromStartConfirm": "Isso abandona de vez o envio parado em {pct}%. Enviar o novo arquivo desde o início?",
+  "app.projects.fromStartYes": "Sim, desde o início",
+  "app.projects.uploadFromStart": "Enviar desde o início",
   "app.projects.resumeAt": "Parou em {pct}% — escolha o mesmo vídeo para continuar.",
   "app.projects.resume": "Continuar envio",
   "app.projects.download": "Baixar",

@@ -243,6 +243,7 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.upload.privacyLink": "Jak postępujemy z twoimi filmami",
   "app.upload.resuming":
     "Wznawiamy przesyłanie od miejsca, w którym zostało przerwane — trzymaj tę stronę otwartą.",
+  "app.upload.paused": "Czekam na połączenie… Przesyłanie wznowi się automatycznie.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "wstecz",
@@ -393,6 +394,12 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Anuluj",
   "app.projects.retry": "Spróbuj ponownie",
   "app.projects.pickAgain": "Wybierz ten sam plik ponownie, aby kontynuować przesyłanie",
+  "app.projects.copyMismatch": "Ta kopia nie pasuje do „{name}” — iPhone mógł ją ponownie przekonwertować. Przesłać od początku?",
+  "app.projects.copyMismatchOther": "To nie jest „{name}”. Wybierz go ponownie, aby kontynuować — albo prześlij ten plik od początku.",
+  "app.projects.otherUpload": "To film z innego zatrzymanego przesyłania („{name}”). Kontynuuj je na jego własnym kafelku.",
+  "app.projects.fromStartConfirm": "To na zawsze porzuci przesyłanie zatrzymane na {pct}%. Przesłać nowy plik od początku?",
+  "app.projects.fromStartYes": "Tak, od początku",
+  "app.projects.uploadFromStart": "Prześlij od początku",
   "app.projects.resumeAt": "Zatrzymano na {pct}% — wybierz ten sam film, aby kontynuować.",
   "app.projects.resume": "Wznów przesyłanie",
   "app.projects.download": "Pobierz",

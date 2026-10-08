@@ -7,6 +7,7 @@
 
 import { storageScope } from "@/lib/auth";
 import { foldScopedKeys } from "@/lib/scopedStorage";
+import { runningUploads, uploadLocks } from "@/lib/uploadLock";
 
 export const ACTIVE_JOBS_KEY = "cleocuts.activeJobs.v1";
 // Per user when accounts are on (shared devices); unchanged when off.
@@ -127,12 +128,19 @@ export const liveUploads = new Set<string>();
 // cards (with "Try again"), instead of leaving them frozen at their
 // last percentage forever. A card is dead when this page doesn't own
 // it and no other tab has reported progress for `idleMs`.
+// A card of an upload running in another tab (its Web Lock: lib/uploadLock)
+// is never dead, however late its heartbeat.
 export function markStaleUploads(idleMs = 20_000): void {
+  if (!uploadLocks()) return markStale(idleMs, null);
+  void runningUploads().then((running) => markStale(idleMs, running));
+}
+
+function markStale(idleMs: number, running: Set<string> | null): void {
   const now = Date.now();
   const jobs = getActiveJobs();
   let changed = false;
   const next = jobs.map((j) => {
-    if (j.phase !== "uploading" || j.error || liveUploads.has(j.jobId)) return j;
+    if (j.phase !== "uploading" || j.error || liveUploads.has(j.jobId) || running?.has(j.jobId)) return j;
     if (now - (j.lastProgressAt ?? j.timestamp) < idleMs) return j;
     changed = true;
     return { ...j, error: INTERRUPTED_TEXT, errorCode: "upload_interrupted" };

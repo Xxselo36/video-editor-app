@@ -247,6 +247,7 @@ export const enApp = {
   "app.upload.privacyLink": "How we handle your videos",
   "app.upload.resuming":
     "Resuming the upload where it stopped — keep this page open.",
+  "app.upload.paused": "Waiting for connection… The upload continues automatically.",
 
   // ── Configure (custom settings) ─────────────────────────────────────
   "app.configure.back": "back",
@@ -396,6 +397,12 @@ export const enApp = {
   "app.projects.cancel": "Cancel",
   "app.projects.retry": "Try again",
   "app.projects.pickAgain": "Pick the same file again to continue the upload",
+  "app.projects.copyMismatch": "This copy doesn’t match “{name}” — the iPhone may have converted it again. Upload it from the start?",
+  "app.projects.copyMismatchOther": "That isn’t “{name}”. Choose it again to continue — or upload this file from the start.",
+  "app.projects.otherUpload": "This is the video of another stopped upload (“{name}”). Continue it on its own tile.",
+  "app.projects.fromStartConfirm": "This gives up the stopped upload at {pct}% for good. Upload the new file from the start?",
+  "app.projects.fromStartYes": "Yes, from the start",
+  "app.projects.uploadFromStart": "Upload from the start",
   "app.projects.resumeAt": "Stopped at {pct}% — choose the same video to continue.",
   "app.projects.resume": "Continue upload",
   "app.projects.download": "Download",

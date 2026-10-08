@@ -11,3 +11,10 @@ export function isIOS(nav: NavigatorLike | undefined): boolean {
   if (/iPad|iPhone|iPod/.test(nav.userAgent ?? "")) return true;
   return nav.platform === "MacIntel" && (nav.maxTouchPoints ?? 0) > 1;
 }
+
+/** A phone or tablet (iOS, Android): ignores beforeunload, and cuts or
+ *  freezes the requests of a page in the background. A touch laptop is
+ *  not one (maxTouchPoints alone says nothing). */
+export function isMobile(nav: NavigatorLike | undefined): boolean {
+  return isIOS(nav) || /Android/.test(nav?.userAgent ?? "");
+}
