@@ -26,7 +26,7 @@
 </head>
 <body>
 <h1>Video-Auswahl testen</h1>
-<p>Wähle beim selben Knopf <b>zweimal hintereinander dasselbe Video</b>. Die Seite vergleicht beide Auswahlen und zeigt ✅ GLEICH oder ❌ ANDERS. Es wird nichts hochgeladen.</p>
+<p>Wähle beim selben Knopf <b>zweimal hintereinander dasselbe Video</b>. Die Seite vergleicht beide Auswahlen, zeigt ✅ GLEICH oder ❌ ANDERS und bei ANDERS auch, <b>wo</b> sie sich unterscheiden. Es wird nichts hochgeladen.</p>
 
 <div class="card"><b>A · wie jetzt (video/*)</b>
   <label class="btn">Video wählen<input type="file" data-v="A" accept="video/*"></label><div class="out"></div></div>
@@ -45,23 +45,108 @@
   // it on the same button. The value is reset after each pick, otherwise
   // Safari fires no change event when the same video is chosen again.
   // "Kennung" is the app's resume fingerprint: SHA-256 of the first and
-  // last 2 MiB (web/src/lib/uploadResume.ts) — equal means "continue
-  // upload" can pick up where it stopped.
-  var SAMPLE = 2 * 1024 * 1024;
+  // last 2 MiB (web/src/lib/uploadResume.ts).
+  // "Wo verschieden" answers WHERE two picks differ: the top-level boxes
+  // (ftyp/mdat/moov…) are read, the media data (mdat) is compared at 64
+  // spread samples, and the metadata box (moov) is compared byte by byte,
+  // naming the child boxes the differing bytes sit in (mvhd/tkhd/mdhd
+  // hold creation times). If only moov timestamps differ, the video bytes
+  // are the same and an upload can safely continue from a re-pick.
+  var SAMPLE = 2 * 1024 * 1024, PROBE = 256 * 1024, PROBES = 64;
+  var MAX_MOOV = 32 * 1024 * 1024;
   function hex(buf) {
     return Array.from(new Uint8Array(buf), function (b) { return b.toString(16).padStart(2, '0'); }).join('');
   }
+  function read(f, a, b) { return f.slice(a, b).arrayBuffer(); }
+  function sha(buf) { return crypto.subtle.digest('SHA-256', buf).then(hex); }
   function kennung(f) {
-    if (!window.crypto || !crypto.subtle) return Promise.resolve('(nicht verfügbar)');
-    return Promise.all([
-      f.slice(0, SAMPLE).arrayBuffer(),
-      f.slice(Math.max(0, f.size - SAMPLE)).arrayBuffer()
-    ]).then(function (parts) {
+    return Promise.all([read(f, 0, SAMPLE), read(f, Math.max(0, f.size - SAMPLE), f.size)]).then(function (parts) {
       var all = new Uint8Array(parts[0].byteLength + parts[1].byteLength);
       all.set(new Uint8Array(parts[0]), 0);
       all.set(new Uint8Array(parts[1]), parts[0].byteLength);
-      return crypto.subtle.digest('SHA-256', all);
-    }).then(function (d) { return hex(d).slice(0, 12); }, function () { return '(Fehler beim Lesen)'; });
+      return sha(all.buffer);
+    }).then(function (h) { return h.slice(0, 12); });
+  }
+  // Top-level boxes: [{type, start, size}], following 32/64-bit sizes.
+  async function boxes(f, from, to) {
+    var out = [], at = from;
+    while (at + 8 <= to && out.length < 64) {
+      var dv = new DataView(await read(f, at, Math.min(at + 16, to)));
+      var size = dv.getUint32(0), type = String.fromCharCode(dv.getUint8(4), dv.getUint8(5), dv.getUint8(6), dv.getUint8(7));
+      if (size === 1 && dv.byteLength >= 16) size = dv.getUint32(8) * 4294967296 + dv.getUint32(12);
+      else if (size === 0) size = to - at;
+      if (size < 8 || !/^[\x20-\x7e]{4}$/.test(type)) break;
+      out.push({ type: type, start: at, size: size });
+      at += size;
+    }
+    return out;
+  }
+  // Child boxes inside a container held in memory (for naming moov diffs).
+  function children(u8, base, from, to, path, out) {
+    var dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), at = from;
+    while (at + 8 <= to) {
+      var size = dv.getUint32(at), type = String.fromCharCode(u8[at + 4], u8[at + 5], u8[at + 6], u8[at + 7]);
+      if (size === 1 && at + 16 <= to) size = dv.getUint32(at + 8) * 4294967296 + dv.getUint32(at + 12);
+      if (size < 8 || at + size > to || !/^[\x20-\x7e]{4}$/.test(type)) break;
+      var p = path ? path + '/' + type : type;
+      out.push({ path: p, start: at, end: at + size });
+      if (/^(moov|trak|mdia|minf|stbl|udta|edts|dinf)$/.test(type)) children(u8, base, at + 8, at + size, p, out);
+      if (type === 'meta') children(u8, base, at + 12, at + size, p, out);
+      at += size;
+    }
+    return out;
+  }
+  async function inspect(f) {
+    var top = await boxes(f, 0, f.size);
+    var mdat = top.filter(function (b) { return b.type === 'mdat'; }).sort(function (a, b) { return b.size - a.size; })[0];
+    var moov = top.filter(function (b) { return b.type === 'moov'; })[0];
+    var probes = [];
+    if (mdat) {
+      var span = mdat.size - 16 - PROBE;
+      for (var i = 0; i < PROBES; i++) {
+        var off = mdat.start + 16 + Math.floor(span * i / (PROBES - 1));
+        probes.push(await sha(await read(f, off, off + PROBE)));
+      }
+    }
+    var moovBytes = moov && moov.size <= MAX_MOOV ? new Uint8Array(await read(f, moov.start, moov.start + moov.size)) : null;
+    return { top: top, mdat: mdat, moov: moov, probes: probes, moovBytes: moovBytes };
+  }
+  function layout(top) {
+    return top.map(function (b) {
+      var s = b.size >= 1048576 ? (b.size / 1048576).toFixed(1) + ' MB' : b.size >= 1024 ? (b.size / 1024).toFixed(0) + ' KB' : b.size + ' B';
+      return b.type + ' ' + s;
+    }).join(' · ');
+  }
+  function where(a, b) {
+    var lines = [];
+    var sameLayout = a.top.length === b.top.length && a.top.every(function (x, i) { return x.type === b.top[i].type && x.start === b.top[i].start && x.size === b.top[i].size; });
+    lines.push('Aufbau: ' + (sameLayout ? '✅ gleich' : '❌ verschieden'));
+    if (a.probes.length && a.probes.length === b.probes.length) {
+      var eq = a.probes.filter(function (h, i) { return h === b.probes[i]; }).length;
+      lines.push('Videodaten (mdat): ' + (eq === a.probes.length ? '✅ ' : '❌ ') + eq + ' von ' + a.probes.length + ' Proben gleich');
+    } else {
+      lines.push('Videodaten (mdat): nicht gefunden');
+    }
+    if (a.moovBytes && b.moovBytes) {
+      if (a.moovBytes.length !== b.moovBytes.length) {
+        lines.push('Metadaten (moov): ❌ andere Länge (' + a.moovBytes.length + ' / ' + b.moovBytes.length + ' Bytes)');
+      } else {
+        var diff = 0, where = {}, kids = children(b.moovBytes, 0, 0, b.moovBytes.length, '', []);
+        for (var i = 0; i < a.moovBytes.length; i++) {
+          if (a.moovBytes[i] !== b.moovBytes[i]) {
+            diff++;
+            var name = 'moov';
+            for (var k = 0; k < kids.length; k++) if (i >= kids[k].start && i < kids[k].end && kids[k].path.length >= name.length) name = kids[k].path;
+            where[name] = (where[name] || 0) + 1;
+          }
+        }
+        if (!diff) lines.push('Metadaten (moov): ✅ gleich');
+        else lines.push('Metadaten (moov): ❌ ' + diff + ' Bytes verschieden, in: ' + Object.keys(where).map(function (k) { return k + ' (' + where[k] + ')'; }).join(', '));
+      }
+    } else {
+      lines.push('Metadaten (moov): ' + (a.moov && b.moov ? 'zu groß zum Vergleichen' : 'nicht gefunden'));
+    }
+    return lines.join('\n');
   }
   document.querySelectorAll('input[type=file]').forEach(function (inp) {
     var opened = 0, n = 0, last = null;
@@ -72,21 +157,32 @@
       var secs = opened ? ((Date.now() - opened) / 1000).toFixed(0) : '?';
       if (!f) return;
       n += 1;
+      var my = n;
       var entry = document.createElement('div');
-      entry.style.marginBottom = '10px';
-      entry.textContent = 'Auswahl ' + n + ': wird geprüft …';
+      entry.style.marginBottom = '14px';
+      entry.textContent = 'Auswahl ' + my + ': wird geprüft … (dauert ein paar Sekunden)';
       out.insertBefore(entry, out.firstChild);
-      kennung(f).then(function (k) {
-        var now = { size: f.size, k: k };
-        var same = last ? (last.size === now.size && last.k === now.k ? '✅ GLEICH wie Auswahl ' + (n - 1) : '❌ ANDERS als Auswahl ' + (n - 1)) : '';
-        entry.textContent =
-          'Auswahl ' + n + (same ? '  —  ' + same : '') + '\n' +
+      if (!window.crypto || !crypto.subtle) { entry.textContent = 'Auswahl ' + my + ': Prüfung hier nicht möglich (kein crypto.subtle).'; inp.value = ''; return; }
+      Promise.all([kennung(f), inspect(f)]).then(function (r) {
+        var now = { size: f.size, k: r[0], info: r[1] };
+        var head = 'Auswahl ' + my;
+        var cmp = '';
+        if (last) {
+          var same = last.size === now.size && last.k === now.k;
+          head += '  —  ' + (same ? '✅ GLEICH wie Auswahl ' + (my - 1) : '❌ ANDERS als Auswahl ' + (my - 1));
+          if (!same) cmp = '\nWo verschieden?\n' + where(last.info, now.info);
+        }
+        entry.textContent = head + '\n' +
           'Name: ' + f.name + '\n' +
           'Typ: ' + (f.type || '(leer)') + '\n' +
           'Größe: ' + (f.size / 1048576).toFixed(1) + ' MB (' + f.size + ' Bytes)\n' +
-          'Kennung: ' + k + '\n' +
-          'Zeit vom Antippen bis fertig: ' + secs + ' s';
+          'Kennung: ' + now.k + '\n' +
+          'Aufbau: ' + (layout(now.info.top) || '(nicht lesbar)') + '\n' +
+          'Zeit vom Antippen bis fertig: ' + secs + ' s' + cmp;
         last = now;
+        inp.value = '';
+      }, function (e) {
+        entry.textContent = 'Auswahl ' + my + ': Fehler beim Lesen (' + (e && e.message || e) + ')';
         inp.value = '';
       });
     });
