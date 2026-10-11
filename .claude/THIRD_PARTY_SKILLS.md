@@ -14,6 +14,7 @@ Vendored into `.claude/skills/` (and `.claude/agents/impeccable-*`) so cloud ses
 | gsap-core, gsap-timeline, gsap-scrolltrigger, gsap-plugins, gsap-react, gsap-frameworks, gsap-utils, gsap-performance | https://github.com/greensock/gsap-skills | MIT (`licenses/gsap-skills.txt`) |
 | threejs-fundamentals, threejs-geometry, threejs-materials, threejs-lighting, threejs-textures, threejs-loaders, threejs-animation, threejs-interaction, threejs-shaders, threejs-postprocessing | https://github.com/CloudAI-X/threejs-skills | MIT (per README) |
 | awwwards | https://github.com/tponscr-debug/claude-skill-awwwards | MIT (per README); reference path made relative |
+| remotion-best-practices (router), remotion-create, remotion-markup, remotion-captions, remotion-studio, remotion-render, remotion-multimedia, remotion-interactivity, remotion-maps, remotion-saas, remotion-docs, remotion-upgrade | https://github.com/remotion-dev/skills | Remotion License (`licenses/remotion.txt`) — free for individuals and companies up to 3 employees; larger companies need a Company License |
 | playwright-cli | https://github.com/microsoft/playwright-cli | Apache-2.0 (`licenses/playwright-cli.txt`) |
 
 Snapshot taken 2026-10-11. To update, replace the skill folder with the upstream version.
