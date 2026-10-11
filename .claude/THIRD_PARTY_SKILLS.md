@@ -11,6 +11,9 @@ Vendored into `.claude/skills/` (and `.claude/agents/impeccable-*`) so cloud ses
 | frontend-design, webapp-testing | https://github.com/anthropics/skills | Apache-2.0 (`licenses/anthropic-skills.txt`) |
 | design-auditor | https://github.com/Ashutos1997/claude-design-auditor-skill | MIT (per README) |
 | web-design-guidelines, react-best-practices, composition-patterns, react-view-transitions | https://github.com/vercel-labs/agent-skills | MIT (per README) |
+| gsap-core, gsap-timeline, gsap-scrolltrigger, gsap-plugins, gsap-react, gsap-frameworks, gsap-utils, gsap-performance | https://github.com/greensock/gsap-skills | MIT (`licenses/gsap-skills.txt`) |
+| threejs-fundamentals, threejs-geometry, threejs-materials, threejs-lighting, threejs-textures, threejs-loaders, threejs-animation, threejs-interaction, threejs-shaders, threejs-postprocessing | https://github.com/CloudAI-X/threejs-skills | MIT (per README) |
+| awwwards | https://github.com/tponscr-debug/claude-skill-awwwards | MIT (per README); reference path made relative |
 | playwright-cli | https://github.com/microsoft/playwright-cli | Apache-2.0 (`licenses/playwright-cli.txt`) |
 
 Snapshot taken 2026-10-11. To update, replace the skill folder with the upstream version.
