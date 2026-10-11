@@ -537,7 +537,7 @@
       },
       {
         "name": "step-rise",
-        "value": "transform 700ms, opacity 300ms ease-out; perspective(60rem) rotateX(78deg) to 0",
+        "value": "transform 560ms ease-out; lies at perspective(60rem) rotateX(80deg) on the tape end, stands up to 0",
         "purpose": "The finished 9:16 clip stands up; caption pops in at 240ms."
       },
       {
@@ -661,7 +661,7 @@
       "Violet for action and focus; magenta only as violet's gradient partner.",
       "Fixed command colours wherever a \"Cleo …\" command appears.",
       "System font on the site; Geist only in the editor; Bangers only in captions and share images.",
-      "One ease-out curve, 150 to 700 ms, reduced motion respected everywhere."
+      "One ease-out curve, UI steps of 150 to 600 ms, reduced motion respected everywhere. The one exception is a playhead (the take strip's recording sweep, the clip's scrub): it moves at the speed of time, linear."
     ],
     "rules": [
       {

@@ -27,6 +27,7 @@ export const idLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.keep": "Menyimpan take-nya dan memulai scene berikutnya.",
   "site.commands.stopgo": "Melewati semua yang kamu ucapkan di antaranya.",
   "site.commands.finish": "Mengakhiri videomu. Semua yang sesudahnya dibuang.",
+  "site.commands.note": "Untuk saat ini, perintahnya dibuat untuk video berbahasa Inggris dan Jerman.",
   "site.auto.title": "Jeda dan kata pengisi dipotong otomatis.",
   "site.auto.body": "Tidak perlu perintah. CleoCuts menghapus jeda dan kata pengisi seperti {um} dari seluruh video. Kamu yang pilih tempo potongannya: {tight}, {natural}, atau {none}.",
   "site.auto.sample": "Jadi {um} tiga tips {pause} bikin hook {um} lebih nendang.",

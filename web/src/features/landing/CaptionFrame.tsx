@@ -42,6 +42,29 @@ export function splitCaption(text: string): { before: string; word: string; afte
   return m ? { before: m[1], word: m[2], after: m[3] } : { before: text, word: "", after: "" };
 }
 
+/** The page with word `active` (0-based, spaces split words) spoken
+ *  instead of the [bracketed] one: captions that follow the speech. */
+function steppedNodes(text: string, active: number): React.ReactNode {
+  const parts = text.replace(/[[\]]/g, "").split(/(\s+)/);
+  let w = -1;
+  return parts.map((part, i) => {
+    if (!part.trim()) return part;
+    w += 1;
+    return w === active ? (
+      <span key={i} className={styles.hl}>
+        {withNumbers(part, `s${i}`)}
+      </span>
+    ) : (
+      <span key={i}>{withNumbers(part, `s${i}`)}</span>
+    );
+  });
+}
+
+/** The number of words `steppedNodes` counts. */
+export function wordCount(text: string): number {
+  return text.replace(/[[\]]/g, "").split(/\s+/).filter(Boolean).length;
+}
+
 /** The visible text and highlight of one page, per preset:
  *  karaoke fills every word spoken so far, word-by-word shows the line
  *  only up to the spoken word, Clipper shows one line of three words. */
@@ -88,8 +111,10 @@ export function CaptionFrame({
   text,
   tag,
   showText = true,
+  active,
   captionClassName,
   className,
+  children,
 }: {
   preset: FramePreset;
   text: string;
@@ -97,13 +122,21 @@ export function CaptionFrame({
   tag?: string;
   /** false: the frame without its caption (fonts not loaded yet). */
   showText?: boolean;
+  /** The spoken word's index, instead of the [bracketed] word. */
+  active?: number;
   captionClassName?: string;
   className?: string;
+  children?: React.ReactNode;
 }) {
   return (
     <div className={cx(styles.frame, className)}>
       {tag && <span className={styles.frameTag}>{tag}</span>}
-      {showText && <p className={cx(styles.caption, PRESET_CLASS[preset], captionClassName)}>{pageNodes(preset, text)}</p>}
+      {showText && (
+        <p className={cx(styles.caption, PRESET_CLASS[preset], captionClassName)}>
+          {active === undefined ? pageNodes(preset, text) : steppedNodes(text, active)}
+        </p>
+      )}
+      {children}
     </div>
   );
 }

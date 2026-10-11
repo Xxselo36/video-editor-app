@@ -101,6 +101,7 @@ export function CommandsSection() {
             </li>
           ))}
         </ul>
+        <p className={styles.cleanupNote}>{t("site.commands.note")}</p>
       </div>
     </section>
   );

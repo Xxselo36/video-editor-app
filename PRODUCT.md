@@ -31,7 +31,7 @@ Voice commands spoken during the recording steer the edit. “Cleo start” open
 - 12 animated caption styles (Power, Mega, Clipper, Karaoke, Highlight Box, One Word, Word by Word, Neon, Sunset, Elegant, Subtitle Bar, Minimal) plus Off. Style availability depends on the script; right-to-left scripts get none yet.
 - Landscape to 9:16 with face tracking; 1080p export.
 - AI caption cleanup fixes misheard words and brand names; it decides no cuts.
-- Bonus clips: for sources of 90 s or more, up to 3 clips of 20 to 60 s.
+- Bonus clips: when the recording and the finished (edited) video both run 90 s or more, up to 3 clips of 20 to 60 s; they are offered while the timeline is untouched since analysis.
 - 14 interface languages; 97 spoken languages plus auto-detect.
 - Plans (when billing is on): Starter / Pro / Studio with monthly minutes; prices come only from Lemon Squeezy at runtime and are never hardcoded.
 - Undecided or unmeasured: processing time (never measured), any comparison with other editors.

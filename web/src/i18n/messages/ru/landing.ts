@@ -27,6 +27,7 @@ export const ruLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.keep": "Сохраняет дубль и начинает следующую сцену.",
   "site.commands.stopgo": "Пропускает всё, что ты говоришь между ними.",
   "site.commands.finish": "Заканчивает видео. Всё, что после этого, отбрасывается.",
+  "site.commands.note": "Пока команды рассчитаны на видео на английском и немецком.",
   "site.auto.title": "Паузы и слова-паразиты вырезаются автоматически.",
   "site.auto.body": "Никаких команд не нужно. CleoCuts убирает паузы и слова-паразиты вроде {um} из всего видео. Темп выбираешь ты: {tight}, {natural} или {none}.",
   "site.auto.sample": "Итак, {um} три совета {pause} для сильных {um} хуков.",

@@ -157,7 +157,7 @@ Type is the system font, set heavy and tight for headlines and plain for reading
 - Violet for action and focus; magenta only as violet's gradient partner.
 - Fixed command colours wherever a "Cleo …" command appears.
 - System font on the site; Geist only in the editor; Bangers only in captions and share images.
-- One ease-out curve, 150 to 700 ms, reduced motion respected everywhere.
+- One ease-out curve, UI steps of 150 to 600 ms, reduced motion respected everywhere. The one exception is a playhead (the take strip's recording sweep, the clip's scrub): it moves at the speed of time, linear.
 
 ## Colors
 
@@ -271,7 +271,7 @@ lucide-react through `ui/Icon`: on the text baseline, 0.84em by default, decorat
 Sticky header on `surface-0` with a bottom hairline: `LogoWord` left; pricing link, language switcher, account and (desktop, once the hero button has gone) the pill CTA right. Phones narrower than 360px show the mark only. Footer links in `text-muted`, `text-strong` on hover.
 
 ### Take Strip (signature)
-A recording drawn as a row of surface-2 segments with a waveform texture, separated by thin posts in command colours. A marked piece tints toward its command colour; a removed piece collapses to nothing. Narration chips appear above it; a 9:16 caption frame stands up at its end.
+A recording drawn as a tape lying in 3D: a plate (surface-1 to surface-2, lit far edge, a thickness edge in front) carrying surface-2 segments with a waveform texture, separated by thin posts in command colours. A marked piece tints toward its command colour; a removed piece lifts off the tape (translateZ, a small tilt, 360 ms) and then the gap closes (520 ms). Narration chips appear over the piece they describe. A 9:16 caption frame lies on the tape's end and stands up at “Cleo finish” (560 ms); its captions then step word by word while its scrub bar plays. A step machine drives it: transitions only between steps, paused off-screen, in hidden tabs and by a pause button; reduced motion shows one still frame with the removed pieces marked.
 
 ### Caption Frame
 `2xl` corners, `border-strong` edge, `--shadow-md`, a dark surface-tint to surface-0 gradient; caption text in the real caption fonts and preset values, sized by container width (`cqw`).

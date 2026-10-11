@@ -24,7 +24,7 @@ import { useT } from "@/i18n";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
-import { CaptionFrame } from "./CaptionFrame";
+import { CaptionFrame, wordCount } from "./CaptionFrame";
 import { Cmd, useDocumentVisible, useInView, useReducedMotion } from "./shared";
 import styles from "./Landing.module.css";
 
@@ -73,11 +73,26 @@ export function TakeStrip() {
   const reduced = useReducedMotion();
   const running = !paused && inView && visible && !reduced;
 
+  // While the captions play, the spoken word steps through the line:
+  // the caption step is split into one slot per word.
+  const caption = t("site.demo.caption");
+  const words = Math.max(1, wordCount(caption));
+  const [word, setWord] = useState(0);
+  const onCaption = Boolean(STEPS[i].caption);
   useEffect(() => {
     if (!running) return;
-    const id = window.setTimeout(() => setI((n) => (n + 1) % STEPS.length), STEPS[i].ms);
+    const slot = onCaption ? STEPS[i].ms / words : STEPS[i].ms;
+    const id = window.setTimeout(() => {
+      if (onCaption && word < words - 1) {
+        setWord(word + 1);
+      } else {
+        setWord(0);
+        setI((n) => (n + 1) % STEPS.length);
+      }
+    }, slot);
     return () => window.clearTimeout(id);
-  }, [running, i]);
+  }, [running, i, onCaption, word, words]);
+  const playing = running && onCaption;
 
   const s = reduced ? STILL : STEPS[i];
   return (
@@ -139,10 +154,22 @@ export function TakeStrip() {
         <div className={styles.clip}>
           <CaptionFrame
             preset="power"
-            text={t("site.demo.caption")}
+            text={caption}
             tag={t("site.demo.example")}
+            active={playing ? Math.min(word, words - 1) : undefined}
             captionClassName={styles.clipCaption}
-          />
+          >
+            {/* The clip's own timeline: the kept takes between their posts. */}
+            <div className={styles.scrub}>
+              <span className={styles.scrubPost} style={{ "--pc": "var(--cmd-start)" } as React.CSSProperties} />
+              <span className={styles.scrubSeg} style={{ "--g": 18 } as React.CSSProperties} />
+              <span className={styles.scrubSeg} style={{ "--g": 12 } as React.CSSProperties} />
+              <span className={styles.scrubPost} style={{ "--pc": "var(--cmd-keep)" } as React.CSSProperties} />
+              <span className={styles.scrubSeg} style={{ "--g": 21 } as React.CSSProperties} />
+              <span className={styles.scrubPost} style={{ "--pc": "var(--cmd-finish)" } as React.CSSProperties} />
+              <span className={styles.scrubHead} />
+            </div>
+          </CaptionFrame>
         </div>
       </div>
 
