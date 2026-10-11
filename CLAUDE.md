@@ -102,4 +102,8 @@ Design skills live in `.claude/skills/` (sources: `.claude/THIRD_PARTY_SKILLS.md
 - `ui-ux-pro-max` for palettes, font pairings and UX rules; `frontend-design` overlaps with `impeccable` — prefer `impeccable`.
 - React/Next.js: `react-best-practices`, `composition-patterns`, `react-view-transitions`. Reviews: `web-design-guidelines`, `design-auditor`.
 - Style variants (`high-end-visual-design`, `minimalist-ui`, `industrial-brutalist-ui`) only when the brief asks for that style.
+- Creative marketing pages (landing, hero pieces): `awwwards` for art direction, `gsap-*` for GSAP, `threejs-*` for 3D/shaders. Not for the editor/app UI, where speed and calm win. One animation library per project — use what `web/` already has before adding GSAP or Three.js.
 - After UI changes, screenshot desktop + mobile (`playwright-cli` or `webapp-testing`) and fix what looks off.
+
+## Videos with Remotion
+For promo, demo or social videos built in code, use the Remotion skills (start with `remotion-best-practices`). Open the Studio preview first; render only when explicitly asked. Apply `cleocuts-brand` (colors, logo, voice-command colors) to every video.
