@@ -14,13 +14,13 @@ const MIB = 1024 * 1024;
 const L = DEFAULT_LIMITS;
 
 describe("uploadLimitHit", () => {
-  it("uses the backend's defaults until GET /config answers (4 GB, 30 min, 3 s)", () => {
-    expect(L).toEqual({ max_upload_bytes: 4e9, max_seconds: 1800, min_seconds: 3 });
+  it("uses the backend's defaults until GET /config answers (10 GB, 30 min, 3 s)", () => {
+    expect(L).toEqual({ max_upload_bytes: 10e9, max_seconds: 1800, min_seconds: 3 });
   });
 
   it("counts decimal gigabytes like the backend", () => {
-    expect(uploadLimitHit(4e9, 60, L)).toBeNull();
-    expect(uploadLimitHit(4e9 + 1, 60, L)).toEqual({ code: "file_too_large", params: { max_gb: 4 } });
+    expect(uploadLimitHit(10e9, 60, L)).toBeNull();
+    expect(uploadLimitHit(10e9 + 1, 60, L)).toEqual({ code: "file_too_large", params: { max_gb: 10 } });
   });
 
   it("allows one second of slack on the length", () => {
@@ -45,7 +45,7 @@ describe("uploadLimitHit", () => {
   });
 
   it("reports the size first", () => {
-    expect(uploadLimitHit(5e9, 99 * 60, L)?.code).toBe("file_too_large");
+    expect(uploadLimitHit(11e9, 99 * 60, L)?.code).toBe("file_too_large");
   });
 });
 

@@ -8,19 +8,44 @@
  * the backend opened the upload — before part 1 — and after every part.
  *
  * Matching a re-picked file (2026-10, the owner's lost iPhone upload):
- * the record is found by CONTENT — size + SHA-256 of the first and last
- * 2 MiB — never by name or lastModified. iOS gives a video picked from
- * Photos a fresh lastModified on every pick (8b94155) and often a fresh
- * name too (trim.<UUID>.MOV / a random temp name), so the fingerprint
- * of before (name ‖ first MiB ‖ last MiB) never matched again after a
- * reload. Records written under that old key are still found
- * (legacyFingerprint) and moved to the new one.
+ * the record is found by CONTENT, never by name or lastModified. iOS
+ * gives a video picked from Photos a fresh lastModified on every pick
+ * (8b94155) and often a fresh name too (trim.<UUID>.MOV / a random temp
+ * name), so the fingerprint of before (name ‖ first MiB ‖ last MiB)
+ * never matched again after a reload.
+ *
+ * The content key (fingerprint):
+ *   - "m1:" for an MP4 / QuickTime file: size + its top-level layout +
+ *     its moov with the creation / modification times zeroed
+ *     (lib/mp4Moov). iOS exports the video afresh on every pick and
+ *     writes new times into moov (mvhd / tkhd / mdhd), which sits in the
+ *     first 2 MiB: the raw-bytes key below changed on every re-pick, so
+ *     the upload started over after every reload (2026-10, the owner's
+ *     picker tests). moov's sample tables pin where every sample lies
+ *     and how big it is.
+ *   - "c2:" (contentFingerprint) for anything else: size + SHA-256 of
+ *     the first and last 2 MiB.
+ * Records written under an older key (the c2 key of an MP4 written
+ * before the m1 key existed, the legacy key with the name) are still
+ * found and moved to the current one.
+ *
+ * Part probes (data safety of a resume from a re-pick): every uploaded
+ * part's record entry carries a short hash of a window in its middle
+ * (partProbe). A resume keeps a part R2 has only if the re-picked file
+ * has the same bytes there; any other part goes up again. A re-export
+ * that differs only in the moov times keeps every part: part 1 then
+ * holds the FIRST pick's moov, which is the second pick's moov but for
+ * those times — the same sample tables, so it describes the parts after
+ * it exactly. A file with the same layout but other media (two
+ * uncompressed clips of one length) fails the probes and goes up anew.
  *
  * Lifetime: the backend's ticket (`expires_at` of init: up to 7 days, and
  * never longer than the bucket keeps an incomplete upload — backend/
  * uploads.py resume_window_s). Records from before carry no expiry: 23 h
  * after they were written, the ticket lifetime of then.
  */
+
+import { moovFingerprintInput } from "./mp4Moov";
 
 /** v1: keyed by the old fingerprint (with the name); v2: by content. */
 export type UploadRecord = {
@@ -42,6 +67,10 @@ export type UploadRecord = {
    *  deploy restart or a 502 doesn't cost a second upload) until the
    *  job exists or the server refused the upload. */
   completed?: boolean;
+  /** Part number → partProbe of the bytes that went up as that part.
+   *  Missing on records from before (their parts are trusted as they
+   *  were: they matched the raw first and last 2 MiB). */
+  probes?: Record<number, string>;
 };
 
 /** What the start screen / a Projects tile shows of a record. */
@@ -64,6 +93,8 @@ export const LEGACY_TTL_MS = 23 * 3600_000;
 export const EXPIRY_MARGIN_MS = 10 * 60_000;
 export const FP_SAMPLE = 2 * 1024 * 1024;
 const LEGACY_FP_SAMPLE = 1024 * 1024;
+/** The window of a part that partProbe hashes (in its middle). */
+export const PROBE_BYTES = 16 * 1024;
 
 // ── storage (IndexedDB; a memory map in unit tests) ──────────────────
 
@@ -265,14 +296,14 @@ async function activeElsewhere(recs: UploadRecord[], now: number): Promise<Set<s
 
 // ── fingerprints ─────────────────────────────────────────────────────
 
-async function sha256Hex(parts: ArrayBuffer[]): Promise<string | null> {
+async function sha256Hex(parts: (ArrayBuffer | Uint8Array)[]): Promise<string | null> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) return null;
   const len = parts.reduce((s, p) => s + p.byteLength, 0);
   const buf = new Uint8Array(len);
   let at = 0;
   for (const p of parts) {
-    buf.set(new Uint8Array(p), at);
+    buf.set(p instanceof Uint8Array ? p : new Uint8Array(p), at);
     at += p.byteLength;
   }
   const digest = new Uint8Array(await subtle.digest("SHA-256", buf));
@@ -280,13 +311,45 @@ async function sha256Hex(parts: ArrayBuffer[]): Promise<string | null> {
 }
 
 const fpCache = new WeakMap<File, Promise<string | null>>();
+const contentCache = new WeakMap<File, Promise<string | null>>();
 const legacyCache = new WeakMap<File, Promise<string | null>>();
+
+/** The resume key of `file`: "m1:" + size + ":" + hex(SHA-256(layout ‖
+ *  moov without its times)) for an MP4 / QuickTime file (a re-export by
+ *  iOS matches), else the raw-bytes key (contentFingerprint). Null where
+ *  crypto.subtle is missing (plain-http LAN dev): no resume. */
+export function fingerprint(file: File): Promise<string | null> {
+  let p = fpCache.get(file);
+  if (!p) {
+    p = (async () => {
+      try {
+        if (!globalThis.crypto?.subtle) return null;
+        const m = await moovFingerprint(file);
+        return m ?? (await contentFingerprint(file));
+      } catch {
+        return contentFingerprint(file);
+      }
+    })();
+    fpCache.set(file, p);
+  }
+  return p;
+}
+
+/** The moov key of `file`, or null when it isn't a plain MP4 /
+ *  QuickTime file (lib/mp4Moov). */
+async function moovFingerprint(file: File): Promise<string | null> {
+  const input = await moovFingerprintInput(file);
+  if (!input) return null;
+  const head = new TextEncoder().encode(`cleocuts-moov-v1\n${file.size}\n${input.layout}\n`);
+  const hex = await sha256Hex([head, input.moov]);
+  return hex ? `m1:${file.size}:${hex}` : null;
+}
 
 /** "c2:" + size + ":" + hex(SHA-256(first 2 MiB ‖ last 2 MiB)): the same
  *  bytes match whatever the file is called and whenever it was picked.
- *  Null where crypto.subtle is missing (plain-http LAN dev): no resume. */
-export function fingerprint(file: File): Promise<string | null> {
-  let p = fpCache.get(file);
+ *  The key of every file before the m1 key, and of non-MP4 files now. */
+export function contentFingerprint(file: File): Promise<string | null> {
+  let p = contentCache.get(file);
   if (!p) {
     p = (async () => {
       try {
@@ -299,7 +362,7 @@ export function fingerprint(file: File): Promise<string | null> {
         return null;
       }
     })();
-    fpCache.set(file, p);
+    contentCache.set(file, p);
   }
   return p;
 }
@@ -358,30 +421,57 @@ export function recordPct(rec: UploadRecord): number {
   return Math.min(100, Math.floor((doneBytes(rec.done, rec.part_size, rec.size, rec.parts_total) / rec.size) * 100));
 }
 
-/** The record of an interrupted upload of this file (by content; an old
- *  record by its old key, moved to the new one), or null. */
+/** The record of an interrupted upload of this file (by content; a
+ *  record under an older key of the same file is moved to the current
+ *  one), or null. */
 export async function findRecord(file: File): Promise<UploadRecord | null> {
   const fp = await fingerprint(file);
   if (!fp) return null;
-  const rec = await backend.get(fp);
-  if (rec) {
-    if (rec.size === file.size && recordUsable(rec)) return rec;
-    await dropRecord(fp);
+  // The current key, then the raw-bytes key (an MP4's records from
+  // before the m1 key), then the legacy key (with the name); each read
+  // only when the ones before found nothing.
+  const keys = [async () => fp, () => contentFingerprint(file), () => legacyFingerprint(file)];
+  const tried = new Set<string>();
+  for (const next of keys) {
+    const key = await next();
+    if (!key || tried.has(key)) continue;
+    tried.add(key);
+    const rec = await backend.get(key);
+    if (!rec) continue;
+    if (rec.size !== file.size || !recordUsable(rec)) {
+      await dropRecord(key);
+      continue;
+    }
+    if (key === fp) return rec;
+    const moved: UploadRecord = { ...rec, v: 2, fp };
+    await backend.put(moved);
+    await backend.delete(key);
+    changed();
+    return moved;
+  }
+  return null;
+}
+
+/** A short hash of part `n`'s bytes in `file`: SHA-256 of PROBE_BYTES in
+ *  the middle of the part, 16 hex digits. Null when it can't be read. */
+export async function partProbe(
+  file: Blob,
+  n: number,
+  partSize: number,
+  size: number,
+  total: number,
+): Promise<string | null> {
+  try {
+    if (!globalThis.crypto?.subtle) return null;
+    const start = (n - 1) * partSize;
+    const len = partLength(n, partSize, size, total);
+    const w = Math.min(PROBE_BYTES, len);
+    const from = start + Math.floor((len - w) / 2);
+    const hex = await sha256Hex([await file.slice(from, from + w).arrayBuffer()]);
+    return hex ? hex.slice(0, 16) : null;
+  } catch {
     return null;
   }
-  const old = await legacyFingerprint(file);
-  if (!old) return null;
-  const legacy = await backend.get(old);
-  if (!legacy) return null;
-  if (legacy.size !== file.size || !recordUsable(legacy)) {
-    await dropRecord(old);
-    return null;
-  }
-  const moved: UploadRecord = { ...legacy, v: 2, fp };
-  await backend.put(moved);
-  await backend.delete(old);
-  changed();
-  return moved;
 }
 
 export async function saveRecord(rec: UploadRecord): Promise<void> {

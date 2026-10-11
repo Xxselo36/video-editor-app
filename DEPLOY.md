@@ -784,7 +784,7 @@ am besten nachts.
 | `CLEO_MEDIA_BACKEND` | `local`: neue Jobs auf dem Volume | `r2`: neue Jobs in R2 (ohne `R2_*` startet das Backend nicht: `[media] NOT STARTING`) | Variable löschen: neue Jobs wieder lokal, R2-Jobs bleiben in R2 |
 | `CLEO_MODAL_RENDER_FN` | `render_burn_concat` (bisheriger Weg) | `render_r2`: Jobs mit Medien in R2 rendern direkt aus R2 (lokale Jobs immer auf dem alten Weg). Fehlt `render_r2` auf Modal, wird automatisch der alte Weg genommen | Variable löschen |
 | `CLEO_PROXY_VIDEO` | aus: `/jobs/{id}/proxy-video` → 404, der Editor spielt wie bisher die Vorschau | `1`: Editor spielt den 720p-Proxy direkt | Variable löschen |
-| `CLEO_UPLOAD_MODE` | `single`: einfacher presigned PUT wie bisher; `init`, `parts`, `sign` antworten 409 `use_single_put` | `multipart`: fortsetzbare Uploads | Variable löschen — auch Browser mitten in einem fortgesetzten Upload wechseln dann auf den einfachen PUT |
+| `CLEO_UPLOAD_MODE` | `single`: einfacher presigned PUT wie bisher; `init`, `parts`, `sign` antworten 409 `use_single_put`; Uploads höchstens 5 GB (ein PUT nach R2 nimmt nicht mehr als 5 GiB) | `multipart`: fortsetzbare Uploads bis `CLEO_MAX_UPLOAD_GB` | Variable löschen — auch Browser mitten in einem fortgesetzten Upload wechseln dann auf den einfachen PUT (und die 5-GB-Grenze) |
 | `CLEO_MEDIA_PRESIGN` | `day`: R2-Links gleich für den ganzen UTC-Tag (Browser-Cache) | `standard`: normale presigned URLs (falls R2/ein Gerät die tagesgenauen ablehnt) | Variable löschen |
 | `CLEO_TMP_ROOT` | `<CLEO_WORK_ROOT>/tmp`, also **auf dem Volume** (wie bisher) | z. B. `/tmp/cleo` (Container-Platte) — erst nach Prüfung, 10.6 | Variable löschen |
 | `CLEO_BACKFILL` | aus | `1`: stündlich ein paar alte Jobs nach R2 verschieben (10.5) | Variable löschen |
@@ -1028,7 +1028,9 @@ Weiterleitung; Download öffnet).
 
 - **Uploads machen Ärger:** `CLEO_UPLOAD_MODE` löschen. (Neustart →
   laufende Analysen brechen ab und werden erstattet; es gibt keinen
-  Schalter "ohne Neustart".)
+  Schalter "ohne Neustart".) Danach gilt für Uploads höchstens 5 GB,
+  auch wenn `CLEO_MAX_UPLOAD_GB` mehr erlaubt (`GET /config` meldet
+  dann 5 GB, `/uploads/presign` lehnt mehr mit 413 ab).
 - **Editor-Wiedergabe macht Ärger:** `CLEO_PROXY_VIDEO` löschen; bei
   Problemen mit R2-Links allgemein zusätzlich `CLEO_MEDIA_PRESIGN=standard`.
 - **Renders aus R2 machen Ärger:** `CLEO_MODAL_RENDER_FN` löschen → alter
@@ -1093,9 +1095,11 @@ vorher auch lief, und dort misst die Platz-Prüfung (507
 `server_storage_full`) richtig. Auf die Container-Platte (`/tmp/cleo`)
 erst umstellen, wenn in der Railway-Shell `df -h /tmp` genug Platz für
 mehrere gleichzeitige Analysen zeigt (≥ 3,5 × die größte erlaubte
-Upload-Größe × `CLEO_MAX_ANALYZE` + 1 GB). Vorsicht: auf der
+Upload-Größe × `CLEO_MAX_ANALYZE` + 1 GB; bei 10 GB und 2 Analysen
+also rund 71 GB). Vorsicht: auf der
 Container-Platte meldet `df` evtl. den Platz des Hosts, nicht das Limit
-des Plans.
+des Plans. Das gilt nur für Analysen auf Railway selbst: mit
+`CLEO_EXECUTOR_INGEST=modal` (11.5) lädt Railway den Upload nie herunter.
 
 ### 10.7 Betrieb
 
@@ -1153,10 +1157,19 @@ des Plans.
   Abrechnung: erst dann abgebucht, zu wenig Minuten → "quota_exceeded" —
   in beiden Fällen wird nichts transkribiert und der Upload gelöscht.
   Jede Analyse hört spätestens bei `CLEO_MAX_MINUTES` auf.
-- **Grenzen fürs Web (UX5)**: das Frontend liest `CLEO_MAX_UPLOAD_GB`,
-  `CLEO_MAX_MINUTES` und `CLEO_MIN_SECONDS` (Standard 3; `0` = aus) über
+- **Grenzen fürs Web (UX5)**: das Frontend liest `CLEO_MAX_UPLOAD_GB`
+  (Standard 10), `CLEO_MAX_MINUTES` (Standard 30) und `CLEO_MIN_SECONDS`
+  (Standard 3; `0` = aus) über
   `GET /config` — keine `NEXT_PUBLIC_MAX_*`-Variablen und kein Web-Build
-  mehr nötig, wenn sie sich ändern. Audiodateien (`no_video`), Videos ohne
+  mehr nötig, wenn sie sich ändern. Mehr als 5 GB gehen nur mit
+  `CLEO_UPLOAD_MODE=multipart` (sonst ein einziger PUT nach R2, höchstens
+  5 GiB): ohne den Schalter meldet `GET /config` höchstens 5 GB. 10 GB
+  sind sicher, solange Analysen auf Modal laufen
+  (`CLEO_EXECUTOR_INGEST=modal`, 11.5): Railway lädt den Upload dann nie
+  herunter (nur HEAD und ein Header-Probe über eine presigned URL), die
+  Analyse hat auf Modal 512 GiB Platte (Spitze ≈ 3,5 × Upload).
+  Analysen auf Railway selbst (ohne Modal) brauchen 3,5 × die Upload-Größe
+  auf dem Volume: dort `CLEO_MAX_UPLOAD_GB` passend kleiner setzen. Audiodateien (`no_video`), Videos ohne
   Ton (`no_audio`) und Clips unter `CLEO_MIN_SECONDS` (`video_too_short`)
   lehnt `POST /jobs` vor jeder Abbuchung ab.
 - `GET /admin/costs`: Speicher aus `media_bytes` der Jobs (R2-Preis für

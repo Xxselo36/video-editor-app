@@ -22,6 +22,7 @@ import { ConfigureScreen } from "./ConfigureScreen";
 import { IdleScreen } from "./IdleScreen";
 import { PickerScreen } from "./PickerScreen";
 import { PRESETS, type PresetId } from "./presets.legacy";
+import { useVideoAccept } from "./videoPicker";
 
 type Step = "picker" | "idle" | "configuring";
 
@@ -35,6 +36,8 @@ function urlStep(): string | null {
 export function LegacyNewVideoPage() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("picker");
+  // The original formats on iOS (./videoPicker), "video/*" elsewhere.
+  const accept = useVideoAccept();
   const [selectedPreset, setSelectedPreset] = useState<PresetId | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [captionPreset, setCaptionPreset] = useState("clean");
@@ -199,7 +202,7 @@ export function LegacyNewVideoPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="video/*"
+        accept={accept}
         data-testid="upload-input"
         className="sr-only"
         onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}

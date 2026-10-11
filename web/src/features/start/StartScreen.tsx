@@ -11,7 +11,10 @@
  * - A local probe greys out 16:9 for a vertical video (the server
  *   decides anyway: SmartCam from the real video).
  * - iOS: after the chooser closes, "Preparing video…" until the file
- *   arrives (Photos may transcode it first).
+ *   arrives (Photos may transcode it first). The chooser offers the
+ *   original formats (./videoPicker); when iOS gives up on a very large
+ *   video (./pickWatch), a hint says why and "Pick anyway" opens the
+ *   chooser without a format filter (iOS converts the video).
  * - An interrupted upload (a reload, a dead phone: lib/uploadResume) is
  *   offered on top: picking a file with the same content — whatever its
  *   name — continues it where R2 has it; another file starts a new
@@ -50,12 +53,14 @@ import {
   type JobSettings,
   type TargetAspect,
 } from "./defaults";
-import { isIOS } from "./ios";
+import { PickMissedHint } from "./PickMissedHint";
+import { usePickWatch } from "./pickWatch";
 import { isPortrait, probeVideo, type VideoProbe } from "./probe";
 import { languageName, SettingsPanel } from "./SettingsSheet";
 import { useBillingHint } from "./useBillingHint";
 import { usePrefs } from "./usePrefs";
 import { applyToNewJob } from "./captionDefault";
+import { pickedKind, useIsIOS, useVideoAccept } from "./videoPicker";
 
 const ASPECT_SUB: Record<TargetAspect, MessageKey | null> = {
   "9:16": "app.start.formatVertical",
@@ -71,10 +76,6 @@ function subscribePhone(cb: () => void) {
 }
 const usePhone = () =>
   useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_QUERY).matches, () => false);
-
-// iPhone/iPad: read after hydration (the server render says no), never changes.
-const subscribeNever = () => () => {};
-const useIOS = () => useSyncExternalStore(subscribeNever, () => isIOS(navigator), () => false);
 
 /** How long "Preparing video…" shows before it says iOS is still at it. */
 const PREPARING_SLOW_MS = 4000;
@@ -96,7 +97,14 @@ export function StartScreen() {
   const { me } = useMe();
   const prefs = usePrefs();
   const phone = usePhone();
-  const ios = useIOS();
+  // iPhone/iPad: read after hydration (the server render says no).
+  const ios = useIsIOS();
+  // The chooser's formats: the original ones on iOS (./videoPicker).
+  const accept = useVideoAccept();
+  // iOS gave up on the video (the chooser closed, no file came).
+  const { missed, watch } = usePickWatch(ios);
+  // Why the last "Pick anyway" file wasn't taken (not a video).
+  const [pickError, setPickError] = useState<string | null>(null);
 
   const [settings, setSettings] = useState<JobSettings>(DEFAULT_SETTINGS);
   // The saved defaults apply once they are read — unless the user
@@ -129,6 +137,8 @@ export function StartScreen() {
   const [preparingSlow, setPreparingSlow] = useState(false);
   const [hasDashboard, setHasDashboard] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // iOS: "Pick anyway" (no format filter: iOS converts the video).
+  const anyRef = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
   // Set once a file was taken: a second pick, drop or double tap
   // meanwhile must not start a second upload — a second job, charged
@@ -181,6 +191,9 @@ export function StartScreen() {
     choosing.current = false;
     setPreparing(false);
     if (!f || startedRef.current) return;
+    // (A slow export that arrives after all: the hint goes.)
+    watch.arrived();
+    setPickError(null);
     // This very file is uploading already (started here before, the
     // user came back): its card is on the dashboard — no second upload,
     // and nothing to wait for here.
@@ -224,6 +237,10 @@ export function StartScreen() {
   const choose = () => {
     if (startedRef.current) return;
     choosing.current = true;
+    if (ios) {
+      watch.opened();
+      setPickError(null);
+    }
     inputRef.current?.click();
     // iOS: once the chooser closes the page gets focus back; the file
     // may take a while to arrive (Photos prepares it).
@@ -238,17 +255,35 @@ export function StartScreen() {
     };
     window.addEventListener("focus", onFocus);
   };
+  // iOS: the chooser without a format filter; a photo or an audio file
+  // picked there isn't uploaded (the hint says so and stays).
+  const chooseAnyway = () => {
+    if (startedRef.current) return;
+    setPickError(null);
+    watch.opened({ fromHint: true });
+    anyRef.current?.click();
+  };
+  const takeAnyway = (f: File | null) => {
+    if (!f) return;
+    const kind = pickedKind(f);
+    if (kind !== "video") {
+      watch.closed();
+      setPickError(t(kind === "audio" ? "app.errors.noVideoTrack" : "app.start.notVideo"));
+      return;
+    }
+    takeFile(f);
+  };
   useEffect(() => {
-    // A cancelled chooser: nothing is coming.
-    const input = inputRef.current;
-    if (!input) return;
+    // A cancelled chooser: nothing is coming (iOS: maybe it gave up).
+    const inputs = [inputRef.current, anyRef.current].filter((i): i is HTMLInputElement => i !== null);
     const onCancel = () => {
       choosing.current = false;
       setPreparing(false);
+      watch.cancelled();
     };
-    input.addEventListener("cancel", onCancel);
-    return () => input.removeEventListener("cancel", onCancel);
-  }, []);
+    inputs.forEach((i) => i.addEventListener("cancel", onCancel));
+    return () => inputs.forEach((i) => i.removeEventListener("cancel", onCancel));
+  }, [ios, watch]);
   useEffect(() => {
     if (!preparing) return;
     const timer = setTimeout(() => setPreparing(false), 90_000);
@@ -392,7 +427,7 @@ export function StartScreen() {
           <p id="start-limits" className="mt-2 text-center text-xs text-[var(--text-muted)]" data-testid="start-limits">
             {limitsLine}
           </p>
-          {preparing && (
+          {preparing && !missed && (
             <div role="status" className="mt-2 text-center" data-testid="start-preparing-status">
               <p className="text-sm font-medium text-[var(--text-body)]" data-testid="start-preparing">
                 {t("app.start.preparing")}
@@ -403,6 +438,9 @@ export function StartScreen() {
                 </p>
               )}
             </div>
+          )}
+          {ios && (missed || pickError) && (
+            <PickMissedHint variant="screen" className="mt-3" onPickAnyway={chooseAnyway} error={pickError} />
           )}
         </div>
       ) : (
@@ -535,13 +573,29 @@ export function StartScreen() {
       <input
         ref={inputRef}
         type="file"
-        accept="video/*"
+        accept={accept}
         data-testid="upload-input"
         className="sr-only"
         tabIndex={-1}
         aria-hidden
         onChange={(e) => takeFile(e.target.files?.[0] ?? null)}
       />
+      {ios && (
+        <input
+          ref={anyRef}
+          type="file"
+          data-testid="upload-input-any"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0] ?? null;
+            // The same file again must fire change again.
+            e.target.value = "";
+            takeAnyway(f);
+          }}
+        />
+      )}
     </div>
   );
 }

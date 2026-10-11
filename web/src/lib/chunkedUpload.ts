@@ -13,9 +13,12 @@
  *     blocked the iOS main thread, 171ac36), keyed by the file's
  *     CONTENT — neither lastModified (iOS makes a new one on every
  *     pick, 8b94155) nor the name (iOS often renames a re-picked
- *     video): lib/uploadResume; the record goes in before part 1;
+ *     video), and for MP4 / MOV not the moov times either (iOS writes
+ *     new ones on every pick): lib/uploadResume; the record goes in
+ *     before part 1;
  *   - a resume asks the server which parts R2 has (/parts) and sends
- *     only the others;
+ *     only the others, except those whose bytes differ in the re-picked
+ *     file (part probes, keepParts);
  *   - 2 parts in parallel on phones / slow networks, else 4 (171ac36);
  *   - a transient failure (network, stall, an abort the browser did,
  *     a 5xx) never ends the upload while the page lives: it waits for
@@ -42,11 +45,12 @@ import {
   HEARTBEAT_MS,
   markUploadActive,
   partLength,
+  partProbe,
   recordPct,
   saveRecord,
   type UploadRecord,
 } from "@/lib/uploadResume";
-export { doneBytes, fingerprint, legacyFingerprint, partLength } from "@/lib/uploadResume";
+export { contentFingerprint, doneBytes, fingerprint, legacyFingerprint, partLength } from "@/lib/uploadResume";
 
 // No upload progress for this long → treat the upload as dead.
 export const UPLOAD_STALL_MS = 60_000;
@@ -408,6 +412,50 @@ export function recordGone(e: ApiError): boolean {
   );
 }
 
+/** Reads at once while a resume checks the parts R2 has. */
+const PROBE_READS = 8;
+
+/**
+ * The parts of `listed` (what R2 has of `rec`'s upload) that a resume
+ * with `file` keeps: those whose probe (lib/uploadResume partProbe)
+ * matches `file`'s bytes there. The others go up again (`redo`): the
+ * file was found by its content key, but a re-pick on iOS is a new
+ * export, and only these bytes say that the media in a part is the same.
+ * A part R2 has without a probe in the record (the tab died between the
+ * part's answer and the record's write) goes up again too. Records from
+ * before probes keep every listed part, as they did (they matched the
+ * raw first and last 2 MiB); their probes are taken from `file` now, so
+ * a later re-pick is checked against what went up.
+ */
+export async function keepParts(
+  file: Blob,
+  rec: Pick<UploadRecord, "part_size" | "parts_total" | "probes">,
+  listed: number[],
+): Promise<{ done: number[]; probes: Record<number, string>; redo: number }> {
+  const probes: Record<number, string> = {};
+  const done: number[] = [];
+  let redo = 0;
+  const queue = [...listed];
+  const worker = async () => {
+    for (let n = queue.shift(); n !== undefined; n = queue.shift()) {
+      const want = rec.probes ? rec.probes[n] : undefined;
+      if (rec.probes && !want) {
+        redo++;
+        continue;
+      }
+      const got = await partProbe(file, n, rec.part_size, file.size, rec.parts_total);
+      if (rec.probes && got !== want) {
+        redo++;
+        continue;
+      }
+      done.push(n);
+      if (got) probes[n] = got;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PROBE_READS, queue.length) }, () => worker()));
+  return { done: done.sort((a, b) => a - b), probes, redo };
+}
+
 // ── the resumable upload ─────────────────────────────────────────────
 
 export async function uploadResumable(opts: UploadOptions): Promise<UploadResult> {
@@ -487,15 +535,19 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
       if (r.ok) {
         const body = (await r.json()) as { completed?: boolean; parts: { part_number: number; size: number }[] };
         const cur = rec;
-        doneSet = new Set(
-          body.parts
-            .filter((p) => p.size === partLength(p.part_number, cur.part_size, file.size, cur.parts_total))
-            .map((p) => p.part_number),
-        );
+        const listed = body.parts
+          .filter((p) => p.size === partLength(p.part_number, cur.part_size, file.size, cur.parts_total))
+          .map((p) => p.part_number);
         completed = Boolean(body.completed);
-        rec = { ...rec, done: [...doneSet] };
+        // A completed upload takes no more parts: it is whole as it is.
+        const kept = completed ? { done: listed, probes: cur.probes ?? {}, redo: 0 } : await keepParts(file, cur, listed);
+        doneSet = new Set(kept.done);
+        rec = { ...rec, done: [...doneSet], probes: kept.probes };
         await saveRecord(rec);
-        telemetry(rec.ticket, "resume", { loaded: doneBytes(rec.done, rec.part_size, file.size, rec.parts_total) });
+        telemetry(rec.ticket, "resume", {
+          loaded: doneBytes(rec.done, rec.part_size, file.size, rec.parts_total),
+          redo: kept.redo,
+        });
       } else {
         const e = await apiError(r);
         if (!recordGone(e)) {
@@ -556,6 +608,7 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
         part_size: init.part_size,
         parts_total: init.parts_total,
         done: [],
+        probes: {},
         created_at: now,
         ...(typeof init.expires_at === "number" && init.expires_at > 0 ? { expires_at: init.expires_at * 1000 } : {}),
       };
@@ -619,6 +672,9 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
     const uploadPart = async (n: number): Promise<void> => {
       const a = (n - 1) * state.part_size;
       const blob = file.slice(a, a + partLength(n, state.part_size, size, total));
+      // What a resume from a re-pick checks this part against (read
+      // while the part goes up: ready by the time it is done).
+      const probe = state.fp ? partProbe(file, n, state.part_size, size, total) : Promise.resolve(null);
       const t0 = Date.now();
       // Failures of this part since it started (the backoff and
       // "waiting"; only its success ends them — a part R2 refuses after
@@ -643,10 +699,16 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
           setWaiting(n, false);
           // The connection is back: the other retries go now.
           [...sleepers].forEach((f) => f());
+          const hash = await probe;
           doneSet.add(n);
           doneTotal += blob.size;
           report();
           state.done = [...doneSet];
+          // Without its probe a resume sends this part again.
+          if (state.probes) {
+            if (hash) state.probes[n] = hash;
+            else delete state.probes[n];
+          }
           if (state.fp) void saveRecord(state);
           return;
         }

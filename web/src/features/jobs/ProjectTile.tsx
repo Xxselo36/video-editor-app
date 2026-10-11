@@ -17,7 +17,9 @@ import { useMediaUrl } from "@/lib/api";
 import { describeError, stageText } from "@/lib/errors";
 import { plural } from "@/lib/i18n/plural";
 import { presetLabelFor, PRESETS, type PresetId } from "@/features/start/presets.legacy";
-import { isIOS } from "@/features/start/ios";
+import { PickMissedHint } from "@/features/start/PickMissedHint";
+import { usePickWatch } from "@/features/start/pickWatch";
+import { pickedKind, useIsIOS, useVideoAccept } from "@/features/start/videoPicker";
 import { canRetryInPlace, cancelUpload, retryUpload, retryUploadWith, runsElsewhere } from "@/features/upload/uploadControls";
 import { useLiveUpload, useLocalThumb } from "@/features/upload/uploadState";
 import { matchResumable, stoppedTileShowsError, useResumableUploads } from "@/features/upload/useResumable";
@@ -210,6 +212,14 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
   // another tab: never a stopped tile, whatever the record says.
   const p: Project = (liveUpload || elsewhere) && project.state === "upload_failed" ? { ...project, state: "uploading" } : project;
   const fileRef = useRef<HTMLInputElement>(null);
+  // iPhone/iPad: the original-formats chooser, and "Pick anyway" (no
+  // filter) when iOS gives up on a very large video (features/start/
+  // videoPicker, pickWatch).
+  const anyRef = useRef<HTMLInputElement>(null);
+  const accept = useVideoAccept();
+  const ios = useIsIOS();
+  const { missed, watch } = usePickWatch(ios && p.state === "upload_failed");
+  const [pickError, setPickError] = useState<string | null>(null);
   // A stopped upload whose resume record is still here: "Continue upload"
   // at its percent (the same bytes continue, whatever the file is called).
   const resumables = useResumableUploads();
@@ -280,8 +290,24 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
 
   const onRetry = () => {
     if (retryUpload(p.id)) return;
+    if (ios) {
+      watch.opened();
+      setPickError(null);
+    }
     fileRef.current?.click();
   };
+  const chooseAnyway = () => {
+    setPickError(null);
+    watch.opened({ fromHint: true });
+    anyRef.current?.click();
+  };
+  useEffect(() => {
+    // A chooser closed without a file (iOS: maybe it gave up).
+    const inputs = [fileRef.current, anyRef.current].filter((i): i is HTMLInputElement => i !== null);
+    const onCancel = () => watch.cancelled();
+    inputs.forEach((i) => i.addEventListener("cancel", onCancel));
+    return () => inputs.forEach((i) => i.removeEventListener("cancel", onCancel));
+  }, [ios, p.state, watch]);
   // "Continue upload" got a file whose bytes don't match the stopped
   // upload: another video — or, on an iPhone, the same one converted
   // again (the Photos picker may hand over a new copy on every pick).
@@ -299,10 +325,19 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
     }
     void retryUploadWith(p.id, file, s.settings, s.preset);
   };
-  const onPicked = async (e: ChangeEvent<HTMLInputElement>) => {
+  const onPicked = async (e: ChangeEvent<HTMLInputElement>, anyway = false) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    // "Pick anyway" lists photos too: only a video goes up.
+    const kind = anyway ? pickedKind(file) : "video";
+    if (kind !== "video") {
+      watch.closed();
+      setPickError(t(kind === "audio" ? "app.errors.noVideoTrack" : "app.start.notVideo"));
+      return;
+    }
+    watch.arrived();
+    setPickError(null);
     if (resumable) {
       // (A record moved from an older key has a new fp: the size says.)
       const rec = await findRecord(file).catch(() => null);
@@ -421,7 +456,7 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
                 ? t("app.projects.otherUpload", { name: mismatch.other })
                 : mismatch.confirm
                   ? t("app.projects.fromStartConfirm", { pct: resumable.pct })
-                  : t(isIOS(typeof navigator === "undefined" ? undefined : navigator) ? "app.projects.copyMismatch" : "app.projects.copyMismatchOther", {
+                  : t(ios ? "app.projects.copyMismatch" : "app.projects.copyMismatchOther", {
                       name: resumable.name,
                     })}
             </p>
@@ -451,6 +486,15 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
               </div>
             )}
           </div>
+        )}
+        {ios && p.state === "upload_failed" && (missed || pickError) && (
+          <PickMissedHint
+            variant="tile"
+            testId="job-card-pick-missed"
+            className="pointer-events-auto relative z-10"
+            onPickAnyway={chooseAnyway}
+            error={pickError}
+          />
         )}
         {(uploading || p.state === "upload_failed" || p.state === "expired") && (
           <div className="pointer-events-auto relative z-10 mt-1 flex flex-wrap gap-1.5">
@@ -483,12 +527,22 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
                 <input
                   ref={fileRef}
                   type="file"
-                  accept="video/*"
+                  accept={accept}
                   className="hidden"
                   aria-label={t("app.projects.pickAgain")}
                   data-testid="job-card-retry-input"
                   onChange={(e) => void onPicked(e)}
                 />
+                {ios && (
+                  <input
+                    ref={anyRef}
+                    type="file"
+                    className="hidden"
+                    aria-label={t("app.start.pickAnyway")}
+                    data-testid="job-card-retry-input-any"
+                    onChange={(e) => void onPicked(e, true)}
+                  />
+                )}
               </>
             )}
             {(p.state === "upload_failed" || p.state === "expired") && (

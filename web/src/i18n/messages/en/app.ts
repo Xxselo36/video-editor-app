@@ -192,6 +192,12 @@ export const enApp = {
   "app.start.preparing": "Preparing video…",
   "app.start.iosHint": "Your iPhone prepares long videos before they upload — for a 10-minute video this can take a minute or more.",
   "app.start.preparingSlow": "Your iPhone is still preparing the video — please wait, don't close this page.",
+  // iOS gave up on a very large video (features/start/pickWatch, PickMissedHint)
+  "app.start.pickMissed": "Your video didn't arrive.",
+  "app.start.pickMissedWhy": "Very large videos, like 4K at 60 fps, sometimes fail on the iPhone. Free up some storage or film in 1080p, then pick it again.",
+  "app.start.pickAnyway": "Pick anyway",
+  "app.start.pickAnywayNote": "Your iPhone converts the video first, which can take a few minutes. The list shows photos too.",
+  "app.start.notVideo": "That's not a video. Pick a video file.",
   "app.start.format": "Format",
   "app.start.formatVertical": "TikTok · Reels · Shorts",
   "app.start.formatWide": "YouTube",

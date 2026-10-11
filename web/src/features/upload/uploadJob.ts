@@ -345,9 +345,10 @@ export async function uploadJob(
     const R2_THRESHOLD = 90 * 1024 * 1024; // 90MB
     let res: XMLHttpRequest | null = null;
 
-    // An interrupted upload of these very bytes (size + first and last
-    // 2 MiB, whatever the file is called now): the card starts where it
-    // stopped, and the stopped tile of it goes (v2).
+    // An interrupted upload of this video (by content, whatever the file
+    // is called now, also when iOS exported it again: lib/uploadResume):
+    // the card starts where it stopped, and the stopped tile of it goes
+    // (v2).
     const resumedPct = await resumableProgress(targetFile);
     if (resumedPct !== null) {
       resumingFrom = resumedPct;

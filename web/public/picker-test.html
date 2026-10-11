@@ -148,13 +148,39 @@
     }
     return lines.join('\n');
   }
+  // What the page hears while a picker is open (2026-10: does iOS say
+  // when it gives up on a video? WebKit reports a failed export as a
+  // plain "cancel"; focus / visibility depend on the iOS version). Each
+  // event is written under the button that opened the picker, with the
+  // seconds since the tap. The app (features/start/pickWatch) shows its
+  // "video didn't arrive" hint on a cancel after 10 s or more, or 15 s
+  // after the page is back without a file.
+  var open = null;
+  function note(what) {
+    if (!open) return;
+    var line = document.createElement('div');
+    line.style.color = 'var(--muted)';
+    line.textContent = 'Ereignis: ' + what + ' nach ' + ((Date.now() - open.at) / 1000).toFixed(1) + ' s';
+    open.out.insertBefore(line, open.out.firstChild);
+  }
+  window.addEventListener('focus', function () { note('focus'); });
+  window.addEventListener('blur', function () { note('blur'); });
+  window.addEventListener('pageshow', function () { note('pageshow'); });
+  document.addEventListener('visibilitychange', function () { note('visibilitychange (' + document.visibilityState + ')'); });
+  document.addEventListener('pointerdown', function () { note('Tippen auf die Seite'); }, true);
   document.querySelectorAll('input[type=file]').forEach(function (inp) {
     var opened = 0, n = 0, last = null;
     var out = inp.closest('.card').querySelector('.out');
-    inp.addEventListener('click', function () { opened = Date.now(); });
+    inp.addEventListener('click', function () { opened = Date.now(); open = { at: opened, out: out }; });
+    inp.addEventListener('cancel', function () {
+      note('cancel: kein Video angekommen');
+      open = null;
+    });
     inp.addEventListener('change', function () {
       var f = inp.files && inp.files[0];
       var secs = opened ? ((Date.now() - opened) / 1000).toFixed(0) : '?';
+      note('change');
+      open = null;
       if (!f) return;
       n += 1;
       var my = n;
