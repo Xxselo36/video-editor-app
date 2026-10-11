@@ -5,55 +5,6 @@ export const itSite: Partial<Record<SiteKey, string>> = {
   "site.header.homeAria": "Home di CleoCuts",
   "site.header.openEditor": "Apri l'editor",
 
-  // ── Landing: hero ── */
-  "site.hero.badge": "Beta aperta · gratis",
-  // Replaces the badge once paid plans are live (NEXT_PUBLIC_BILLING_ENABLED).
-  "site.hero.badgePricing": "Scopri piani e prezzi",
-  "site.hero.titleLead": "Monta mentre",
-  "site.hero.titleAccent": "registri.",
-  "site.hero.sub":
-    "Di' {cut} quando sbagli. Di' {finish} quando hai finito. Pronto da pubblicare in pochi minuti, con sottotitoli e tagli inclusi.",
-  "site.hero.cta": "Prova CleoCuts",
-
-  // ── Landing: caption showcase ── */
-  "site.showcase.listening": "CleoCuts in ascolto",
-  "site.showcase.captionStyle": "stile sottotitoli",
-  "site.showcase.clipper": "IL PARLATO È L'EDITOR",
-  "site.showcase.highlight": "PRONTO PER LA PUBBLICAZIONE",
-  "site.showcase.flash": "DI' CUT",
-  "site.showcase.punch": "PERFETTO",
-  "site.showcase.elegant": "Ascolta e basta.",
-
-  // ── Landing: features ── */
-  "site.features.title": "Cosa fa CleoCuts.",
-  "site.features.voice.title": "Comandi vocali",
-  "site.features.voice.body":
-    "Di' {cut} durante la ripresa. CleoCuts rimuove il tentativo fallito.",
-  "site.features.cleanup.title": "Pulizia AI",
-  "site.features.cleanup.body":
-    "Corregge le parole riconosciute male e i nomi dei marchi nei tuoi sottotitoli.",
-  "site.features.captions.title": "Sottotitoli animati",
-  "site.features.captions.body": "Diversi stili, da Pulito a Clipper.",
-  "site.features.vertical.title": "Verticale automatico",
-  "site.features.vertical.body": "Orizzontale → 9:16 con face tracking.",
-  "site.features.hooks.title": "I momenti migliori come clip",
-  "site.features.hooks.body":
-    "Nei video da 90 secondi in su, CleoCuts trova fino a {count} dei momenti migliori e ricava da ognuno una clip breve.",
-
-  // ── Landing: how it works ── */
-  "site.steps.title": "Tre passi.",
-  "site.steps.sub": "Registra. Parla con CleoCuts. Pubblica.",
-  "site.steps.record.title": "Registra",
-  "site.steps.record.body": "Di' {cut} quando sbagli. Niente riprese ripetute.",
-  "site.steps.record.hint": "Riprese di qualsiasi durata",
-  "site.steps.upload.title": "Carica",
-  "site.steps.upload.body": "Carica il tuo video. Scegli un workflow. L'AI fa il resto.",
-  "site.steps.upload.hint": "Pochi minuti, in base alla durata",
-  "site.steps.post.title": "Pubblica",
-  "site.steps.post.body": "Scarica il tuo video finito, pronto per TikTok, Instagram e YouTube.",
-  "site.steps.post.hint": "Scarica quando è pronto",
-
-  // ── Landing: footer ── */
   "site.footer.editor": "Editor",
   "site.footer.library": "Libreria",
   "site.footer.imprint": "Note legali",

@@ -20,6 +20,7 @@
  * Counts: lib/i18n/plural.ts.
  */
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { Globe } from "lucide-react";
 import { LANGS, LANG_COOKIE, LANG_STORAGE_KEY, detectLang, isLang, type Lang } from "./langs";
 import { en, type Dict, type MessageKey } from "./messages/en";
 
@@ -196,24 +197,32 @@ export function useT(): TFn {
   return useCallback<TFn>((key, vars) => translate(shown, key, vars), [shown]);
 }
 
-/** Compact language picker (native select: works well on phones). */
+/**
+ * Compact language picker (native select: works well on phones). On
+ * phones it shows only the globe and the language code — the native
+ * select sits invisibly on top, so a tap still opens the system list —
+ * because the longest name ("Bahasa Indonesia") made the header wider
+ * than the screen.
+ */
 export function LanguageSwitcher({ className = "" }: { className?: string }) {
   const lang = useLang();
   const t = useT();
   return (
-    <label className={`relative inline-flex items-center ${className}`}>
+    <label
+      className={`relative inline-flex items-center rounded-full focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--brand-hover)] sm:focus-within:outline-0 ${className}`}
+      style={{ background: "var(--surface-2)", color: "var(--text-body)", border: "1px solid var(--border)" }}
+    >
       <span className="sr-only">{t("common.language")}</span>
-      <span aria-hidden className="pointer-events-none absolute left-2 text-sm">🌐</span>
+      <Globe aria-hidden size={14} strokeWidth={2} className="pointer-events-none absolute left-2.5 shrink-0" />
+      <span aria-hidden className="py-1.5 pl-7 pr-3 text-xs font-semibold uppercase sm:hidden">
+        {lang}
+      </span>
       <select
         value={lang}
         onChange={(e) => setLang(e.target.value as Lang)}
         data-testid="language-switcher"
-        className="appearance-none rounded-full py-1.5 pl-7 pr-3 text-base sm:text-xs"
-        style={{
-          background: "var(--surface-2)",
-          color: "var(--text-body)",
-          border: "1px solid var(--border)",
-        }}
+        className="absolute inset-0 cursor-pointer appearance-none rounded-full bg-transparent py-1.5 pl-7 pr-3 text-base opacity-0 sm:static sm:text-xs sm:opacity-100"
+        style={{ color: "var(--text-body)" }}
       >
         {(Object.keys(LANGS) as Lang[]).map((l) => (
           <option key={l} value={l}>

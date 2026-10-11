@@ -84,12 +84,11 @@ export async function renderShareImage(): Promise<ImageResponse> {
             <div style={{ marginLeft: 16, fontSize: 44, letterSpacing: -1 }}>{SITE_NAME}</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", fontFamily: display, fontSize: 92, lineHeight: 1.02 }}>
-            <div>CUT PAUSES.</div>
-            <div>ADD CAPTIONS.</div>
-            <div style={{ color: "#a78bfa" }}>POST IN MINUTES.</div>
+            <div>YOU TALK.</div>
+            <div style={{ color: "#a78bfa" }}>CLEO EDITS.</div>
           </div>
           <div style={{ display: "flex", fontSize: 30, color: "#c4c0d0", maxWidth: 660, lineHeight: 1.35 }}>
-            Upload a talking video. Get a clean, captioned 9:16 cut you can fine-tune in your browser.
+            Film on your phone and talk to Cleo. Get a cut, captioned 9:16 video back.
           </div>
         </div>
         {/* A 9:16 phone frame with a caption, the way the videos come out. */}
@@ -119,7 +118,7 @@ export async function renderShareImage(): Promise<ImageResponse> {
               textShadow: outline,
             }}
           >
-            POST IN
+            3 TIPS FOR
           </div>
           <div
             style={{
@@ -133,7 +132,7 @@ export async function renderShareImage(): Promise<ImageResponse> {
               letterSpacing: 1,
             }}
           >
-            MINUTES
+            HOOKS
           </div>
         </div>
       </div>

@@ -5,48 +5,6 @@ export const hiSite: Partial<Record<SiteKey, string>> = {
   "site.header.homeAria": "CleoCuts होम",
   "site.header.openEditor": "एडिटर खोलें",
 
-  "site.hero.badge": "ओपन बीटा · फ़्री",
-  "site.hero.badgePricing": "प्लान और प्राइसिंग देखें",
-  "site.hero.titleLead": "रिकॉर्ड करते हुए ही",
-  "site.hero.titleAccent": "एडिट करें।",
-  "site.hero.sub":
-    "गलती होने पर {cut} बोलें। ख़त्म करने पर {finish} बोलें। कैप्शन और कट्स के साथ, मिनटों में पोस्ट करने के लिए तैयार।",
-  "site.hero.cta": "CleoCuts आज़माएं",
-
-  "site.showcase.listening": "CleoCuts सुन रहा है",
-  "site.showcase.captionStyle": "कैप्शन स्टाइल",
-  "site.showcase.clipper": "बोलना ही एडिटर है",
-  "site.showcase.highlight": "पोस्ट करने के लिए तैयार",
-  "site.showcase.flash": "बोलें CUT",
-  "site.showcase.punch": "एकदम सही",
-  "site.showcase.elegant": "यह बस सुनता है।",
-
-  "site.features.title": "CleoCuts क्या करता है।",
-  "site.features.voice.title": "वॉइस ट्रिगर्स",
-  "site.features.voice.body": "टेक के बीच में {cut} बोलें। CleoCuts फेल हुई कोशिश हटा देता है।",
-  "site.features.cleanup.title": "AI क्लीनअप",
-  "site.features.cleanup.body": "आपके कैप्शन में गलत सुने गए शब्द और ब्रांड नेम ठीक करता है।",
-  "site.features.captions.title": "एनिमेटेड कैप्शन",
-  "site.features.captions.body": "Clean से Clipper तक, कई स्टाइल।",
-  "site.features.vertical.title": "ऑटो वर्टिकल",
-  "site.features.vertical.body": "लैंडस्केप → फेस ट्रैकिंग के साथ 9:16।",
-  "site.features.hooks.title": "सबसे अच्छे पल, अलग क्लिप्स में",
-  "site.features.hooks.body":
-    "90 सेकंड या उससे लंबे वीडियो में CleoCuts {count} तक सबसे अच्छे पल ढूंढता है और हर एक से अलग छोटी क्लिप बनाता है।",
-
-  "site.steps.title": "तीन स्टेप्स।",
-  "site.steps.sub": "रिकॉर्ड करें। CleoCuts से बोलें। पोस्ट करें।",
-  "site.steps.record.title": "रिकॉर्ड करें",
-  "site.steps.record.body": "गलती होने पर {cut} बोलें। कोई रीटेक नहीं।",
-  "site.steps.record.hint": "किसी भी लंबाई के टेक्स",
-  "site.steps.upload.title": "अपलोड करें",
-  "site.steps.upload.body": "अपना वीडियो डालें। एक वर्कफ़्लो चुनें। बाकी काम AI करेगा।",
-  "site.steps.upload.hint": "लंबाई के हिसाब से कुछ मिनट",
-  "site.steps.post.title": "पोस्ट करें",
-  "site.steps.post.body":
-    "अपना तैयार वीडियो डाउनलोड करें — TikTok, Instagram और YouTube के लिए तैयार।",
-  "site.steps.post.hint": "तैयार होने पर डाउनलोड करें",
-
   "site.footer.editor": "एडिटर",
   "site.footer.library": "लाइब्रेरी",
   "site.footer.imprint": "इम्प्रिंट",
