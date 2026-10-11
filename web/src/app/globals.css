@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
-/* ── Dark-warm creator palette ─────────────────────────────────
- * Near-black with warm undertones. Amber for the primary accent
- * (pops on dark), rose for energy on CTAs. No cold zinc/gray.
+/* ── Dark violet creator palette ───────────────────────────────
+ * Near-black with a slight violet undertone. Deep violet for the
+ * primary accent, magenta as its gradient partner for energy.
+ * No cold zinc/gray.
  */
 :root {
   /* Dark UI only: native controls (select dropdowns, scrollbars, date
