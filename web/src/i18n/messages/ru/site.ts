@@ -5,48 +5,6 @@ export const ruSite: Partial<Record<SiteKey, string>> = {
   "site.header.homeAria": "CleoCuts — на главную",
   "site.header.openEditor": "Открыть редактор",
 
-  "site.hero.badge": "Открытая бета · бесплатно",
-  "site.hero.badgePricing": "Тарифы и цены",
-  "site.hero.titleLead": "Монтируй прямо во время",
-  "site.hero.titleAccent": "записи.",
-  "site.hero.sub":
-    "Скажи {cut}, если ошибся. Скажи {finish}, когда закончишь. Готово к публикации за пару минут — с субтитрами и монтажом.",
-  "site.hero.cta": "Попробовать CleoCuts",
-
-  "site.showcase.listening": "CleoCuts слушает",
-  "site.showcase.captionStyle": "стиль субтитров",
-  "site.showcase.clipper": "РЕДАКТОР — ЭТО ГОЛОС",
-  "site.showcase.highlight": "ГОТОВО К ПУБЛИКАЦИИ",
-  "site.showcase.flash": "СКАЖИ CUT",
-  "site.showcase.punch": "ИДЕАЛЬНО",
-  "site.showcase.elegant": "Просто слушает.",
-
-  "site.features.title": "Что умеет CleoCuts.",
-  "site.features.voice.title": "Голосовые команды",
-  "site.features.voice.body": "Скажи {cut} прямо во время дубля. CleoCuts удалит неудачную попытку.",
-  "site.features.cleanup.title": "ИИ-чистка",
-  "site.features.cleanup.body":
-    "Исправляет неверно распознанные слова и названия брендов в субтитрах.",
-  "site.features.captions.title": "Анимированные субтитры",
-  "site.features.captions.body": "Несколько стилей — от Clean до Clipper.",
-  "site.features.vertical.title": "Автовертикаль",
-  "site.features.vertical.body": "Горизонтальное → 9:16 с трекингом лица.",
-  "site.features.hooks.title": "Лучшие моменты — отдельными клипами",
-  "site.features.hooks.body":
-    "В видео от 90 секунд CleoCuts находит до {count} лучших моментов и делает из каждого отдельный короткий клип.",
-
-  "site.steps.title": "Три шага.",
-  "site.steps.sub": "Записывай. Говори с CleoCuts. Публикуй.",
-  "site.steps.record.title": "Записывай",
-  "site.steps.record.body": "Скажи {cut}, если ошибся. Никаких пересъёмок.",
-  "site.steps.record.hint": "Дубли любой длины",
-  "site.steps.upload.title": "Загружай",
-  "site.steps.upload.body": "Загрузи видео. Выбери workflow. Остальное сделает ИИ.",
-  "site.steps.upload.hint": "Пара минут — в зависимости от длины",
-  "site.steps.post.title": "Публикуй",
-  "site.steps.post.body": "Скачай готовое видео — оно подходит для TikTok, Instagram и YouTube.",
-  "site.steps.post.hint": "Скачай, когда будет готово",
-
   "site.footer.editor": "Редактор",
   "site.footer.library": "Библиотека",
   "site.footer.imprint": "Реквизиты",

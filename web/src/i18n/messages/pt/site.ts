@@ -5,53 +5,6 @@ export const ptSite: Partial<Record<SiteKey, string>> = {
   "site.header.homeAria": "Início da CleoCuts",
   "site.header.openEditor": "Abrir editor",
 
-  // ── site: hero ──
-  "site.hero.badge": "Beta aberto · gratuito",
-  "site.hero.badgePricing": "Ver planos e preços",
-  "site.hero.titleLead": "Edite enquanto",
-  "site.hero.titleAccent": "grava.",
-  "site.hero.sub":
-    "Diga {cut} quando errar. Diga {finish} quando terminar. Pronto para postar em minutos, com legendas e cortes incluídos.",
-  "site.hero.cta": "Experimentar a CleoCuts",
-
-  // ── site: caption showcase ──
-  "site.showcase.listening": "CleoCuts ouvindo",
-  "site.showcase.captionStyle": "estilo de legenda",
-  "site.showcase.clipper": "A FALA É A EDIÇÃO",
-  "site.showcase.highlight": "PRONTO PARA POSTAR",
-  "site.showcase.flash": "DIGA CUT",
-  "site.showcase.punch": "ARRASOU",
-  "site.showcase.elegant": "Ela só escuta.",
-
-  // ── site: features ──
-  "site.features.title": "O que a CleoCuts faz.",
-  "site.features.voice.title": "Comandos de voz",
-  "site.features.voice.body": "Diga {cut} no meio da tomada. A CleoCuts remove a tentativa falha.",
-  "site.features.cleanup.title": "Limpeza com IA",
-  "site.features.cleanup.body":
-    "Corrige palavras mal reconhecidas e nomes de marca nas suas legendas.",
-  "site.features.captions.title": "Legendas animadas",
-  "site.features.captions.body": "Vários estilos, de Clean a Clipper.",
-  "site.features.vertical.title": "Vertical automático",
-  "site.features.vertical.body": "Paisagem → 9:16 com rastreamento de rosto.",
-  "site.features.hooks.title": "Os melhores momentos em clipes",
-  "site.features.hooks.body":
-    "Em vídeos de 90 segundos ou mais, a CleoCuts encontra até {count} dos melhores momentos e transforma cada um em um clipe curto.",
-
-  // ── site: how it works ──
-  "site.steps.title": "Três passos.",
-  "site.steps.sub": "Grave. Fale com a CleoCuts. Poste.",
-  "site.steps.record.title": "Grave",
-  "site.steps.record.body": "Diga {cut} quando errar. Sem regravações.",
-  "site.steps.record.hint": "Tomadas de qualquer duração",
-  "site.steps.upload.title": "Envie",
-  "site.steps.upload.body": "Envie seu vídeo. Escolha um fluxo de trabalho. A IA faz o resto.",
-  "site.steps.upload.hint": "Alguns minutos, dependendo da duração",
-  "site.steps.post.title": "Poste",
-  "site.steps.post.body": "Baixe seu vídeo finalizado, pronto para TikTok, Instagram e YouTube.",
-  "site.steps.post.hint": "Baixe quando estiver pronto",
-
-  // ── site: footer ──
   "site.footer.editor": "Editor",
   "site.footer.library": "Biblioteca",
   "site.footer.imprint": "Aviso legal",

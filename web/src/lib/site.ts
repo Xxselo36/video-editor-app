@@ -11,11 +11,11 @@ export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://cleocuts.c
 export const SITE_NAME = "CleoCuts";
 
 /** <title> of the landing and the default for pages without their own. */
-export const SITE_TITLE = "CleoCuts – Cut pauses & add captions to TikToks with AI";
+export const SITE_TITLE = "CleoCuts: voice-controlled video editor for short videos";
 
 /** Meta / share description — only what the product does today. */
 export const SITE_DESCRIPTION =
-  "Upload a talking video. CleoCuts removes pauses and filler words, adds animated captions and reframes to 9:16. Fine-tune in your browser, post in minutes.";
+  "Film on your phone and talk to Cleo: say “Cleo start”, then “Cleo cut” after a bad take. CleoCuts removes bad takes, pauses and filler words and returns a captioned 9:16 video.";
 
 /** Short line for the share image and the manifest. */
-export const SITE_TAGLINE = "Cut pauses. Add captions. Post in minutes.";
+export const SITE_TAGLINE = "You talk. Cleo edits.";

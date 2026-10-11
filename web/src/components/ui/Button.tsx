@@ -19,6 +19,12 @@ const SIZE = {
   pill: "rounded-full px-4 py-2 text-sm font-semibold",
 } as const;
 
+/** The classes of a Button, for a link that looks like one (the
+ *  landing's calls to action are links to other pages). */
+export function buttonClass(variant: keyof typeof VARIANT = "primary", size: keyof typeof SIZE = "md"): string {
+  return cx(SIZE[size], VARIANT[variant]);
+}
+
 /**
  * A text button. `className` adds layout (width, margins, flex); it must
  * not repeat what the variant and size set.

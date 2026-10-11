@@ -1,61 +1,14 @@
 /**
- * English strings for the landing page (site.*), the library (library.*)
- * and shared components (common.*).
+ * English strings for the site's header and footer, the pricing page
+ * (site.*), the library (library.*) and shared components (common.*).
+ * The landing page's own strings are in landing.ts.
  *
- * "{name}" placeholders are filled at render time. The voice commands
- * ("Cleo cut" / "Cleo finish") and aspect ratios are passed in as
- * placeholders because they must stay literal in every language.
+ * "{name}" placeholders are filled at render time.
  */
 export const enSite = {
   /* ── Landing: header ── */
   "site.header.homeAria": "CleoCuts home",
   "site.header.openEditor": "Open editor",
-
-  /* ── Landing: hero ── */
-  "site.hero.badge": "Open beta · free",
-  // Replaces the badge once paid plans are live (NEXT_PUBLIC_BILLING_ENABLED).
-  "site.hero.badgePricing": "See plans & pricing",
-  "site.hero.titleLead": "Edit while you",
-  "site.hero.titleAccent": "record.",
-  "site.hero.sub":
-    "Say {cut} when you mess up. Say {finish} when you're done. Ready to post in minutes, with captions and cuts included.",
-  "site.hero.cta": "Try CleoCuts",
-
-  /* ── Landing: caption showcase ── */
-  "site.showcase.listening": "CleoCuts listening",
-  "site.showcase.captionStyle": "caption style",
-  "site.showcase.clipper": "TALK IS THE EDITOR",
-  "site.showcase.highlight": "READY TO POST",
-  "site.showcase.flash": "SAY CUT",
-  "site.showcase.punch": "NAILED IT",
-  "site.showcase.elegant": "It just listens.",
-
-  /* ── Landing: features ── */
-  "site.features.title": "What CleoCuts does.",
-  "site.features.voice.title": "Voice triggers",
-  "site.features.voice.body": "Say {cut} mid-take. CleoCuts removes the failed attempt.",
-  "site.features.cleanup.title": "AI cleanup",
-  "site.features.cleanup.body": "Fixes misheard words and brand names in your captions.",
-  "site.features.captions.title": "Animated captions",
-  "site.features.captions.body": "Several styles, from Clean to Clipper.",
-  "site.features.vertical.title": "Auto vertical",
-  "site.features.vertical.body": "Landscape → 9:16 with face tracking.",
-  "site.features.hooks.title": "Best moments as clips",
-  "site.features.hooks.body":
-    "For videos of 90 seconds or more, CleoCuts finds up to {count} of the best moments and cuts each into its own short clip.",
-
-  /* ── Landing: how it works ── */
-  "site.steps.title": "Three steps.",
-  "site.steps.sub": "Record. Talk to CleoCuts. Post.",
-  "site.steps.record.title": "Record",
-  "site.steps.record.body": "Say {cut} when you mess up. No retakes.",
-  "site.steps.record.hint": "Takes of any length",
-  "site.steps.upload.title": "Upload",
-  "site.steps.upload.body": "Drop in your video. Pick a workflow. AI does the rest.",
-  "site.steps.upload.hint": "A few minutes, depending on length",
-  "site.steps.post.title": "Post",
-  "site.steps.post.body": "Download your finished video, ready for TikTok, Instagram and YouTube.",
-  "site.steps.post.hint": "Download when it's ready",
 
   /* ── Landing: footer ── */
   "site.footer.editor": "Editor",

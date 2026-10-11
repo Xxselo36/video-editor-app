@@ -2,7 +2,7 @@
 /**
  * i18n check — `npm run i18n:check` (CI: .github/workflows/web.yml).
  *
- * Reads the message files (src/i18n/messages/{lang}/{site,app,editor,
+ * Reads the message files (src/i18n/messages/{lang}/{site,landing,app,editor,
  * mail}.ts, merged by {lang}/index.ts; English is the source of truth) of
  * every language in LANGS (src/i18n/langs.ts) and checks:
  *
@@ -71,7 +71,7 @@ export function readLangs(indexSource) {
 }
 
 /** The message files of a language, one per part of the app. */
-export const PARTS = ["site", "app", "editor", "mail"];
+export const PARTS = ["site", "landing", "app", "editor", "mail"];
 
 /**
  * { dicts: { lang: { key: message } }, parts: { lang: { part: [keys] } } }
@@ -88,13 +88,16 @@ export function loadMessages() {
     const mod = loadTs(file, cache);
     const dict = mod[lang] ?? mod.default;
     if (!dict || typeof dict !== "object") throw new Error(`${path.relative(WEB, file)} exports no "${lang}" object`);
-    dicts[lang] = dict;
+    // Every part's messages: English's index leaves landing.ts out (the
+    // landing registers it), the other languages merge it in.
+    dicts[lang] = { ...dict };
     parts[lang] = {};
     for (const part of PARTS) {
       const pfile = path.join(MESSAGES, lang, `${part}.ts`);
       if (!fs.existsSync(pfile)) throw new Error(`no message file ${path.relative(WEB, pfile)}`);
       const exported = Object.values(loadTs(pfile, cache)).find((v) => v && typeof v === "object");
       parts[lang][part] = Object.keys(exported ?? {});
+      Object.assign(dicts[lang], exported ?? {});
     }
   }
   return { dicts, parts };

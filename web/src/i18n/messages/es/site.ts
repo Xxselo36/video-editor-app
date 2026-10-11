@@ -5,53 +5,6 @@ export const esSite: Partial<Record<SiteKey, string>> = {
   "site.header.homeAria": "Inicio de CleoCuts",
   "site.header.openEditor": "Abrir editor",
 
-  /* ── Landing: hero ── */
-  "site.hero.badge": "Beta abierta · gratis",
-  "site.hero.badgePricing": "Ver planes y precios",
-  "site.hero.titleLead": "Edita mientras",
-  "site.hero.titleAccent": "grabas.",
-  "site.hero.sub":
-    "Di {cut} cuando te equivoques. Di {finish} cuando termines. Listo para publicar en minutos, con subtítulos y cortes incluidos.",
-  "site.hero.cta": "Probar CleoCuts",
-
-  /* ── Landing: caption showcase ── */
-  "site.showcase.listening": "CleoCuts escuchando",
-  "site.showcase.captionStyle": "estilo de subtítulos",
-  "site.showcase.clipper": "TU VOZ ES EL EDITOR",
-  "site.showcase.highlight": "LISTO PARA PUBLICAR",
-  "site.showcase.flash": "DI CUT",
-  "site.showcase.punch": "LO CLAVASTE",
-  "site.showcase.elegant": "Simplemente escucha.",
-
-  /* ── Landing: features ── */
-  "site.features.title": "Qué hace CleoCuts.",
-  "site.features.voice.title": "Comandos de voz",
-  "site.features.voice.body": "Di {cut} a mitad de la toma. CleoCuts elimina el intento fallido.",
-  "site.features.cleanup.title": "Limpieza con IA",
-  "site.features.cleanup.body":
-    "Corrige palabras mal reconocidas y nombres de marca en tus subtítulos.",
-  "site.features.captions.title": "Subtítulos animados",
-  "site.features.captions.body": "Varios estilos, de Limpio a Clipper.",
-  "site.features.vertical.title": "Vertical automático",
-  "site.features.vertical.body": "Horizontal → 9:16 con seguimiento facial.",
-  "site.features.hooks.title": "Los mejores momentos, como clips",
-  "site.features.hooks.body":
-    "En videos de 90 segundos o más, CleoCuts encuentra hasta {count} de los mejores momentos y convierte cada uno en un clip corto.",
-
-  /* ── Landing: how it works ── */
-  "site.steps.title": "Tres pasos.",
-  "site.steps.sub": "Graba. Habla con CleoCuts. Publica.",
-  "site.steps.record.title": "Grabar",
-  "site.steps.record.body": "Di {cut} cuando te equivoques. Sin repetir tomas.",
-  "site.steps.record.hint": "Tomas de cualquier duración",
-  "site.steps.upload.title": "Subir",
-  "site.steps.upload.body": "Sube tu video. Elige un flujo de trabajo. La IA hace el resto.",
-  "site.steps.upload.hint": "Unos minutos, según la duración",
-  "site.steps.post.title": "Publicar",
-  "site.steps.post.body": "Descarga tu video terminado, listo para TikTok, Instagram y YouTube.",
-  "site.steps.post.hint": "Descárgalo cuando esté listo",
-
-  /* ── Landing: footer ── */
   "site.footer.editor": "Editor",
   "site.footer.library": "Biblioteca",
   "site.footer.imprint": "Aviso legal",

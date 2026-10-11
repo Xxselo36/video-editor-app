@@ -5,49 +5,6 @@ export const deSite: Partial<Record<SiteKey, string>> = {
   "site.header.homeAria": "CleoCuts Startseite",
   "site.header.openEditor": "Editor öffnen",
 
-  "site.hero.badge": "Offene Beta · kostenlos",
-  "site.hero.badgePricing": "Tarife & Preise ansehen",
-  "site.hero.titleLead": "Schneiden, während du",
-  "site.hero.titleAccent": "aufnimmst.",
-  "site.hero.sub":
-    "Sag {cut}, wenn dir ein Fehler passiert. Sag {finish}, wenn du fertig bist. In wenigen Minuten postbereit – mit Untertiteln und Schnitten.",
-  "site.hero.cta": "CleoCuts testen",
-
-  "site.showcase.listening": "CleoCuts hört zu",
-  "site.showcase.captionStyle": "Untertitel-Stil",
-  "site.showcase.clipper": "DEINE STIMME SCHNEIDET",
-  "site.showcase.highlight": "BEREIT ZUM POSTEN",
-  "site.showcase.flash": "SAG CUT",
-  "site.showcase.punch": "PERFEKT",
-  "site.showcase.elegant": "Es hört einfach zu.",
-
-  "site.features.title": "Das kann CleoCuts.",
-  "site.features.voice.title": "Sprachbefehle",
-  "site.features.voice.body": "Sag {cut} mitten im Take. CleoCuts entfernt den misslungenen Versuch.",
-  "site.features.cleanup.title": "KI-Bereinigung",
-  "site.features.cleanup.body":
-    "Korrigiert falsch erkannte Wörter und Markennamen in deinen Untertiteln.",
-  "site.features.captions.title": "Animierte Untertitel",
-  "site.features.captions.body": "Mehrere Stile, von Clean bis Clipper.",
-  "site.features.vertical.title": "Automatisch vertikal",
-  "site.features.vertical.body": "Querformat → 9:16 mit Gesichtserkennung.",
-  "site.features.hooks.title": "Die besten Momente als Clips",
-  "site.features.hooks.body":
-    "Bei Videos ab 90 Sekunden findet CleoCuts bis zu {count} der besten Momente und schneidet jeden zu einem eigenen kurzen Clip.",
-
-  "site.steps.title": "Drei Schritte.",
-  "site.steps.sub": "Aufnehmen. Mit CleoCuts sprechen. Posten.",
-  "site.steps.record.title": "Aufnehmen",
-  "site.steps.record.body": "Sag {cut}, wenn dir ein Fehler passiert. Kein zweiter Take nötig.",
-  "site.steps.record.hint": "Takes jeder Länge",
-  "site.steps.upload.title": "Hochladen",
-  "site.steps.upload.body": "Video hineinziehen. Workflow wählen. Den Rest macht die KI.",
-  "site.steps.upload.hint": "Ein paar Minuten, je nach Länge",
-  "site.steps.post.title": "Posten",
-  "site.steps.post.body":
-    "Lade dein fertiges Video herunter – bereit für TikTok, Instagram und YouTube.",
-  "site.steps.post.hint": "Herunterladen, wenn es fertig ist",
-
   "site.footer.editor": "Editor",
   "site.footer.library": "Bibliothek",
   "site.footer.imprint": "Impressum",

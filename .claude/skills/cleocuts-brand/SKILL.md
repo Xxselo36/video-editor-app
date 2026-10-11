@@ -55,7 +55,7 @@ Rules:
 
 ## Voice-command colors
 
-Each "Cleo …" command has a fixed color (source: `web/src/features/voice-test/VoiceTestDialog.tsx`). Job states reuse the same hues (uploading blue, analyzing amber, reviewing green, rendering purple, error red — `features/jobs/ActiveJobCard.tsx`). Use them wherever commands appear (UI chips, tutorials, marketing, video overlays) — never swap them.
+Each "Cleo …" command has a fixed color — tokens `--cmd-start`, `--cmd-cut`, `--cmd-keep`, `--cmd-finish`, `--cmd-stopgo` in `globals.css` (also hardcoded in `web/src/features/voice-test/VoiceTestDialog.tsx`). Job states reuse the same hues (uploading blue, analyzing amber, reviewing green, rendering purple, error red — `features/jobs/ActiveJobCard.tsx`). Use them wherever commands appear (UI chips, tutorials, marketing, video overlays) — never swap them.
 
 | Command | Meaning | Color |
 |---|---|---|
@@ -73,7 +73,7 @@ Write commands with curly quotes in UI copy: “Cleo cut”.
 - Wordmark: `LogoWord` — mark + "CleoCuts" in bold, tight tracking (`-0.02em`), `--text-strong`.
 - Spelling: always **CleoCuts** (capital C twice, one word). Never "Cleocuts", "Cleo Cuts", "CLEOCUTS".
 - Use the components, never redraw. Only on dark backgrounds. Don't recolor, stretch, or add effects.
-- Raster files: `docs/logo.png`, `logo.png`, `icon.icns` / `icon.ico` (desktop app).
+- Raster files: `web/src/app/icon.svg`, `web/src/app/apple-icon.png`, `web/public/icons/`. (`docs/logo.png` and `logo.png` are old SmartCut branding, not CleoCuts.)
 
 ## Typography
 
