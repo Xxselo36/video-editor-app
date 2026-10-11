@@ -92,8 +92,9 @@ type MoovScan = { ok: boolean; tracks: number; fragmented: boolean };
  * box, header included). Version 0 boxes hold them as two 32-bit fields
  * after version + flags, version 1 as two 64-bit fields. `ok` false: the
  * box structure doesn't add up (or a version this doesn't know).
+ * `times`, when given, gets each zeroed range as [from, to) in `moov`.
  */
-export function normalizeMoov(moov: Uint8Array): MoovScan {
+export function normalizeMoov(moov: Uint8Array, times?: [number, number][]): MoovScan {
   const dv = new DataView(moov.buffer, moov.byteOffset, moov.byteLength);
   const scan: MoovScan = { ok: true, tracks: 0, fragmented: false };
   const top = boxSize(dv, 0, moov.length);
@@ -107,6 +108,7 @@ export function normalizeMoov(moov: Uint8Array): MoovScan {
     const width = version === 0 ? 4 : version === 1 ? 8 : 0;
     if (!width || payload + 4 + 2 * width > end) return false;
     moov.fill(0, payload + 4, payload + 4 + 2 * width);
+    times?.push([payload + 4, payload + 4 + 2 * width]);
     return true;
   };
 
@@ -148,6 +150,11 @@ export type MoovFingerprintInput = {
   layout: string;
   /** moov with its times zeroed. */
   moov: Uint8Array;
+  /** Where those times lie in the file: [from, to) byte ranges. The part
+   *  hashes of a resume (lib/uploadResume partDigest) zero them too, so
+   *  a re-export by iOS (new times, the same bytes otherwise) checks out
+   *  part by part, while any other byte that differs doesn't. */
+  times: [number, number][];
 };
 
 export async function moovFingerprintInput(file: Readable): Promise<MoovFingerprintInput | null> {
@@ -161,7 +168,12 @@ export async function moovFingerprintInput(file: Readable): Promise<MoovFingerpr
   if (box.size > MAX_MOOV_BYTES) return null;
   const moov = new Uint8Array(await file.slice(box.start, box.start + box.size).arrayBuffer());
   if (moov.length !== box.size) return null;
-  const scan = normalizeMoov(moov);
+  const rel: [number, number][] = [];
+  const scan = normalizeMoov(moov, rel);
   if (!scan.ok || scan.fragmented || scan.tracks === 0) return null;
-  return { layout: top.map((b) => `${b.type}@${b.start}+${b.size}`).join(","), moov };
+  return {
+    layout: top.map((b) => `${b.type}@${b.start}+${b.size}`).join(","),
+    moov,
+    times: rel.map(([a, b]) => [box.start + a, box.start + b]),
+  };
 }

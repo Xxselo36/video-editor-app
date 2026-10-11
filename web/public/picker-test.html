@@ -27,6 +27,7 @@
 <body>
 <h1>Video-Auswahl testen</h1>
 <p>Wähle beim selben Knopf <b>zweimal hintereinander dasselbe Video</b>. Die Seite vergleicht beide Auswahlen, zeigt ✅ GLEICH oder ❌ ANDERS und bei ANDERS auch, <b>wo</b> sie sich unterscheiden. Es wird nichts hochgeladen.</p>
+<p>Kommt ein Video nicht an (cancel), steht darunter <b>„Rückkehr → cancel: … s“</b>: wie lange nach der Rückkehr zur Seite das cancel kam. Bitte diese Zeile mitschicken, einmal für ein Video, an dem iOS scheitert, und einmal fürs eigene Abbrechen nach längerem Blättern in den Fotos.</p>
 
 <div class="card"><b>A · wie jetzt (video/*)</b>
   <label class="btn">Video wählen<input type="file" data-v="A" accept="video/*"></label><div class="out"></div></div>
@@ -152,9 +153,14 @@
   // when it gives up on a video? WebKit reports a failed export as a
   // plain "cancel"; focus / visibility depend on the iOS version). Each
   // event is written under the button that opened the picker, with the
-  // seconds since the tap. The app (features/start/pickWatch) shows its
-  // "video didn't arrive" hint on a cancel after 10 s or more, or 15 s
-  // after the page is back without a file.
+  // seconds since the tap. The app (features/start/pickWatch) tells a
+  // give-up from the user's own cancel by the gap between the page coming
+  // back (focus / visible / pageshow / a tap, from 1 s after opening) and
+  // the cancel: 1.5 s or more is iOS giving up on a selected video; a
+  // cancel with the page coming back (either order) is the user's. With
+  // no back signal at all it goes by the time open (10 s). So on a cancel
+  // this page writes that gap ("Rückkehr → cancel"), for the owner's next
+  // test to check the 1.5 s.
   var open = null;
   function note(what) {
     if (!open) return;
@@ -163,18 +169,49 @@
     line.textContent = 'Ereignis: ' + what + ' nach ' + ((Date.now() - open.at) / 1000).toFixed(1) + ' s';
     open.out.insertBefore(line, open.out.firstChild);
   }
-  window.addEventListener('focus', function () { note('focus'); });
+  // The page is back (what pickWatch counts): the first such signal of
+  // this pick, from 1 s after the tap that opened the picker; and, for a
+  // cancel that came first, the first one in the 2 s after it.
+  var cancelled = null;
+  function back(what) {
+    note(what);
+    if (open && open.back === null && Date.now() - open.at >= 1000) open.back = Date.now();
+    if (cancelled && cancelled.after === null) cancelled.after = Date.now();
+  }
+  function gapLine(cur) {
+    var line = document.createElement('div');
+    line.style.fontWeight = '600';
+    line.textContent = 'Rückkehr → cancel: ' + (cur.back !== null
+      ? ((cur.cancelAt - cur.back) / 1000).toFixed(1) + ' s'
+      : cur.after !== null
+        ? 'Rückkehr erst ' + ((cur.after - cur.cancelAt) / 1000).toFixed(1) + ' s nach dem cancel'
+        : 'keine Rückkehr (Picker ' + ((cur.cancelAt - cur.at) / 1000).toFixed(1) + ' s offen)');
+    cur.out.insertBefore(line, cur.out.firstChild);
+  }
+  window.addEventListener('focus', function () { back('focus'); });
   window.addEventListener('blur', function () { note('blur'); });
-  window.addEventListener('pageshow', function () { note('pageshow'); });
-  document.addEventListener('visibilitychange', function () { note('visibilitychange (' + document.visibilityState + ')'); });
-  document.addEventListener('pointerdown', function () { note('Tippen auf die Seite'); }, true);
+  window.addEventListener('pageshow', function () { back('pageshow'); });
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') back('visibilitychange (visible)');
+    else note('visibilitychange (' + document.visibilityState + ')');
+  });
+  document.addEventListener('pointerdown', function () { back('Tippen auf die Seite'); }, true);
   document.querySelectorAll('input[type=file]').forEach(function (inp) {
     var opened = 0, n = 0, last = null;
     var out = inp.closest('.card').querySelector('.out');
-    inp.addEventListener('click', function () { opened = Date.now(); open = { at: opened, out: out }; });
+    inp.addEventListener('click', function () { opened = Date.now(); open = { at: opened, out: out, back: null }; });
     inp.addEventListener('cancel', function () {
       note('cancel: kein Video angekommen');
+      var cur = open;
       open = null;
+      if (!cur) return;
+      cur.cancelAt = Date.now();
+      cur.after = null;
+      cancelled = cur;
+      setTimeout(function () {
+        if (cancelled === cur) cancelled = null;
+        gapLine(cur);
+      }, 2000);
     });
     inp.addEventListener('change', function () {
       var f = inp.files && inp.files[0];

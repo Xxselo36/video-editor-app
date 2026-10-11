@@ -29,15 +29,26 @@
  * before the m1 key existed, the legacy key with the name) are still
  * found and moved to the current one.
  *
- * Part probes (data safety of a resume from a re-pick): every uploaded
- * part's record entry carries a short hash of a window in its middle
- * (partProbe). A resume keeps a part R2 has only if the re-picked file
- * has the same bytes there; any other part goes up again. A re-export
- * that differs only in the moov times keeps every part: part 1 then
- * holds the FIRST pick's moov, which is the second pick's moov but for
- * those times — the same sample tables, so it describes the parts after
- * it exactly. A file with the same layout but other media (two
- * uncompressed clips of one length) fails the probes and goes up anew.
+ * Part hashes (data safety of a resume from a re-pick): the m1 key says
+ * nothing about the media bytes (an equal moov means equal sample sizes
+ * and offsets, not equal samples), so every uploaded part's record entry
+ * carries the SHA-256 of the WHOLE part (`hashes`: read once as the part
+ * goes up, and those very bytes are sent) and a short hash of 16 KiB in
+ * its middle (`probes`: a cheap first check), both with moov's times
+ * zeroed where the part holds them (lib/mp4Moov `times`). A resume keeps
+ * a part R2 has only when the re-picked file's bytes there hash the
+ * same; any other part goes up again. A completed upload whose POST
+ * /jobs failed is used again only when every part checks out; else the
+ * file goes up anew. So a re-export by iOS (new moov times, the same
+ * bytes otherwise) keeps every part: part 1 then holds the FIRST pick's
+ * moov, the second pick's but for those times. A re-export with other
+ * media of the same length (PCM audio, a fixed-size codec, a smart
+ * render: the same moov) and two iOS picks whose mdat differs in a few
+ * places (the owner's test B: 63 of 64 sampled windows equal) fail on
+ * the parts that differ. Records from before the hashes that were found
+ * by a raw-bytes key (c2 / legacy: the raw first and last 2 MiB matched)
+ * keep their parts as before and take the hashes from the file now; a
+ * record found by the m1 key without hashes keeps none.
  *
  * Lifetime: the backend's ticket (`expires_at` of init: up to 7 days, and
  * never longer than the bucket keeps an incomplete upload — backend/
@@ -67,10 +78,19 @@ export type UploadRecord = {
    *  deploy restart or a 502 doesn't cost a second upload) until the
    *  job exists or the server refused the upload. */
   completed?: boolean;
-  /** Part number → partProbe of the bytes that went up as that part.
-   *  Missing on records from before (their parts are trusted as they
-   *  were: they matched the raw first and last 2 MiB). */
+  /** Part number → partProbe of the bytes that went up as that part
+   *  (a first check on resume). Missing on records from before. */
   probes?: Record<number, string>;
+  /** Part number → SHA-256 (hex) of the whole part as it went up, moov's
+   *  times zeroed (partDigest): a resume keeps a part R2 has only when
+   *  the re-picked file's bytes hash the same. Only ever names bytes R2
+   *  has (a part sent again loses its hash before it goes). Missing on
+   *  records from before (see the top of this file). */
+  hashes?: Record<number, string>;
+  /** "any": picked with the unfiltered iOS input ("Pick anyway": iOS
+   *  converted the video), so a resume opens that one again (the
+   *  original-formats picker hands over other bytes). */
+  source?: "any";
 };
 
 /** What the start screen / a Projects tile shows of a record. */
@@ -82,6 +102,8 @@ export type ResumableUpload = {
   pct: number;
   updatedAt: number;
   expiresAt: number;
+  /** See UploadRecord.source. */
+  source?: "any";
 };
 
 const DB_NAME = "cleocuts-uploads";
@@ -299,12 +321,19 @@ async function activeElsewhere(recs: UploadRecord[], now: number): Promise<Set<s
 async function sha256Hex(parts: (ArrayBuffer | Uint8Array)[]): Promise<string | null> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) return null;
-  const len = parts.reduce((s, p) => s + p.byteLength, 0);
-  const buf = new Uint8Array(len);
-  let at = 0;
-  for (const p of parts) {
-    buf.set(p instanceof Uint8Array ? p : new Uint8Array(p), at);
-    at += p.byteLength;
+  let buf: ArrayBuffer | Uint8Array<ArrayBuffer>;
+  if (parts.length === 1) {
+    // One buffer (a whole part: 16 MiB and more): digested as it is.
+    // (Every buffer here is a plain ArrayBuffer's: File reads, copies.)
+    buf = parts[0] as ArrayBuffer | Uint8Array<ArrayBuffer>;
+  } else {
+    const all = new Uint8Array(parts.reduce((s, p) => s + p.byteLength, 0));
+    let at = 0;
+    for (const p of parts) {
+      all.set(p instanceof Uint8Array ? p : new Uint8Array(p), at);
+      at += p.byteLength;
+    }
+    buf = all;
   }
   const digest = new Uint8Array(await subtle.digest("SHA-256", buf));
   return Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -313,6 +342,24 @@ async function sha256Hex(parts: (ArrayBuffer | Uint8Array)[]): Promise<string | 
 const fpCache = new WeakMap<File, Promise<string | null>>();
 const contentCache = new WeakMap<File, Promise<string | null>>();
 const legacyCache = new WeakMap<File, Promise<string | null>>();
+/** [from, to) byte ranges of a file. */
+type Range = [number, number];
+const timesCache = new WeakMap<Blob, Promise<Range[]>>();
+
+/** Where moov's creation / modification times lie in `file` (lib/
+ *  mp4Moov), or none (not a plain MP4 / QuickTime file): the bytes the
+ *  part hashes zero. */
+export function moovTimes(file: Blob): Promise<Range[]> {
+  let p = timesCache.get(file);
+  if (!p) {
+    p = moovFingerprintInput(file).then(
+      (input) => input?.times ?? [],
+      () => [],
+    );
+    timesCache.set(file, p);
+  }
+  return p;
+}
 
 /** The resume key of `file`: "m1:" + size + ":" + hex(SHA-256(layout ‖
  *  moov without its times)) for an MP4 / QuickTime file (a re-export by
@@ -339,6 +386,8 @@ export function fingerprint(file: File): Promise<string | null> {
  *  QuickTime file (lib/mp4Moov). */
 async function moovFingerprint(file: File): Promise<string | null> {
   const input = await moovFingerprintInput(file);
+  // (Read once: the part hashes need where the times are.)
+  if (!timesCache.has(file)) timesCache.set(file, Promise.resolve(input?.times ?? []));
   if (!input) return null;
   const head = new TextEncoder().encode(`cleocuts-moov-v1\n${file.size}\n${input.layout}\n`);
   const hex = await sha256Hex([head, input.moov]);
@@ -421,18 +470,32 @@ export function recordPct(rec: UploadRecord): number {
   return Math.min(100, Math.floor((doneBytes(rec.done, rec.part_size, rec.size, rec.parts_total) / rec.size) * 100));
 }
 
+/** A record and the key it was found by: "m1" (the moov key: the media
+ *  may differ, only the part hashes tell) or a raw-bytes key ("c2", or
+ *  "legacy" with the name). */
+export type RecordMatch = { rec: UploadRecord; by: "m1" | "c2" | "legacy" };
+
+/** Files whose record was found by a raw-bytes key and moved to the
+ *  current one: a later look-up with the same File (the upload after the
+ *  start screen's percent) still knows that these bytes matched. */
+const movedFor = new WeakMap<File, { fp: string; by: RecordMatch["by"] }>();
+
 /** The record of an interrupted upload of this file (by content; a
  *  record under an older key of the same file is moved to the current
- *  one), or null. */
-export async function findRecord(file: File): Promise<UploadRecord | null> {
+ *  one), and how it was found; or null. */
+export async function findRecordMatch(file: File): Promise<RecordMatch | null> {
   const fp = await fingerprint(file);
   if (!fp) return null;
   // The current key, then the raw-bytes key (an MP4's records from
   // before the m1 key), then the legacy key (with the name); each read
   // only when the ones before found nothing.
-  const keys = [async () => fp, () => contentFingerprint(file), () => legacyFingerprint(file)];
+  const keys: [RecordMatch["by"], () => Promise<string | null>][] = [
+    [fp.startsWith("m1:") ? "m1" : "c2", async () => fp],
+    ["c2", () => contentFingerprint(file)],
+    ["legacy", () => legacyFingerprint(file)],
+  ];
   const tried = new Set<string>();
-  for (const next of keys) {
+  for (const [by, next] of keys) {
     const key = await next();
     if (!key || tried.has(key)) continue;
     tried.add(key);
@@ -442,18 +505,48 @@ export async function findRecord(file: File): Promise<UploadRecord | null> {
       await dropRecord(key);
       continue;
     }
-    if (key === fp) return rec;
+    if (key === fp) {
+      const was = movedFor.get(file);
+      return { rec, by: was?.fp === fp ? was.by : by };
+    }
     const moved: UploadRecord = { ...rec, v: 2, fp };
     await backend.put(moved);
     await backend.delete(key);
+    movedFor.set(file, { fp, by });
     changed();
-    return moved;
+    return { rec: moved, by };
   }
   return null;
 }
 
+/** findRecordMatch's record. */
+export async function findRecord(file: File): Promise<UploadRecord | null> {
+  return (await findRecordMatch(file))?.rec ?? null;
+}
+
+/** `bytes` (at file offset `at`) with every byte of `times` in them
+ *  zeroed: a copy when any is, else `bytes` itself. */
+function withoutTimes(bytes: Uint8Array<ArrayBuffer>, at: number, times: Range[]): Uint8Array<ArrayBuffer> {
+  let out = bytes;
+  for (const [a, b] of times) {
+    const from = Math.max(a, at);
+    const to = Math.min(b, at + bytes.length);
+    if (from >= to) continue;
+    if (out === bytes) out = bytes.slice();
+    out.fill(0, from - at, to - at);
+  }
+  return out;
+}
+
+/** Where partProbe's window lies in a part of `len` bytes. */
+function probeWindow(len: number): { from: number; w: number } {
+  const w = Math.min(PROBE_BYTES, len);
+  return { from: Math.floor((len - w) / 2), w };
+}
+
 /** A short hash of part `n`'s bytes in `file`: SHA-256 of PROBE_BYTES in
- *  the middle of the part, 16 hex digits. Null when it can't be read. */
+ *  the middle of the part (moov's times zeroed), 16 hex digits. Null when
+ *  it can't be read. */
 export async function partProbe(
   file: Blob,
   n: number,
@@ -464,11 +557,53 @@ export async function partProbe(
   try {
     if (!globalThis.crypto?.subtle) return null;
     const start = (n - 1) * partSize;
-    const len = partLength(n, partSize, size, total);
-    const w = Math.min(PROBE_BYTES, len);
-    const from = start + Math.floor((len - w) / 2);
-    const hex = await sha256Hex([await file.slice(from, from + w).arrayBuffer()]);
+    const { from, w } = probeWindow(partLength(n, partSize, size, total));
+    const bytes = new Uint8Array(await file.slice(start + from, start + from + w).arrayBuffer());
+    const hex = await sha256Hex([withoutTimes(bytes, start + from, await moovTimes(file))]);
     return hex ? hex.slice(0, 16) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What a resume checks a part against. */
+export type PartDigest = {
+  /** SHA-256 (hex) of the whole part. */
+  hash: string;
+  /** partProbe of it. */
+  probe: string;
+};
+
+/** The digests of one whole part, `bytes`, which starts at file offset
+ *  `start` (moov's `times` zeroed, as partProbe does). Null without
+ *  crypto.subtle. */
+export async function partDigest(bytes: Uint8Array<ArrayBuffer>, start: number, times: Range[]): Promise<PartDigest | null> {
+  try {
+    const clean = withoutTimes(bytes, start, times);
+    const { from, w } = probeWindow(clean.length);
+    const [hash, probe] = await Promise.all([sha256Hex([clean]), sha256Hex([clean.subarray(from, from + w)])]);
+    return hash && probe ? { hash, probe: probe.slice(0, 16) } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** partDigest of part `n` of `file`, read now (the whole part). Null when
+ *  it can't be read. */
+export async function partHash(
+  file: Blob,
+  n: number,
+  partSize: number,
+  size: number,
+  total: number,
+): Promise<PartDigest | null> {
+  try {
+    if (!globalThis.crypto?.subtle) return null;
+    const start = (n - 1) * partSize;
+    const len = partLength(n, partSize, size, total);
+    const bytes = new Uint8Array(await file.slice(start, start + len).arrayBuffer());
+    if (bytes.length !== len) return null;
+    return await partDigest(bytes, start, await moovTimes(file));
   } catch {
     return null;
   }
@@ -494,7 +629,8 @@ export async function getRecord(fp: string): Promise<UploadRecord | null> {
 /** The interrupted uploads of this browser, newest first: not expired
  *  (expired ones are deleted), not running in this page or another tab,
  *  and not completed (the file is stored: POST /jobs owns it — picking
- *  the file again still goes straight there). */
+ *  the file again still goes straight there, once its bytes match every
+ *  part: lib/chunkedUpload). */
 export async function listResumable(now = Date.now()): Promise<ResumableUpload[]> {
   const out: ResumableUpload[] = [];
   const usable: UploadRecord[] = [];
@@ -516,6 +652,7 @@ export async function listResumable(now = Date.now()): Promise<ResumableUpload[]
       pct: recordPct(r),
       updatedAt: r.updated_at ?? r.created_at,
       expiresAt: recordExpiry(r),
+      ...(r.source === "any" ? { source: "any" as const } : {}),
     });
   }
   return out.sort((a, b) => b.updatedAt - a.updatedAt);

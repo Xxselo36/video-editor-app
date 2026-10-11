@@ -227,9 +227,11 @@ export async function uploadJob(
   targetFile: File,
   settings: SettingsSource,
   selectedPreset: PresetId | null,
-  { tempId, signal, onPaywall, onCreated, onFailed, onStarting, onProgress, onPaused, onEnd }: {
+  { tempId, signal, source, onPaywall, onCreated, onFailed, onStarting, onProgress, onPaused, onEnd }: {
     /** The upload record's temporary id (uploadCard). */
     tempId: string;
+    /** "any": picked with the unfiltered iOS input (lib/uploadResume). */
+    source?: "any";
     /** Cancel (UX12): stops the upload and aborts it on the server. */
     signal?: AbortSignal;
     /** Billing refused the upload (402): the dialog with a way to a plan. */
@@ -416,6 +418,7 @@ export async function uploadJob(
         },
         signal,
         duration,
+        source,
       });
       storageKey = up.storage_key;
       releaseUpload = up.release;

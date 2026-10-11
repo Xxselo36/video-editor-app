@@ -65,17 +65,24 @@ export function retryUpload(id: string): boolean {
   retries.delete(id);
   removeUploadRecord(id);
   setThumb(id, null);
-  void startUpload(r.file, r.settings, r.preset);
+  void startUpload(r.file, r.settings, r.preset, { source: r.source });
   return true;
 }
 
-/** "Try again" after a reload: the user picked `file` again. False (and
- *  nothing happens) while the upload still runs in another tab. */
-export async function retryUploadWith(id: string, file: File, settings: SettingsSource, preset: PresetId | null): Promise<boolean> {
+/** "Try again" after a reload: the user picked `file` again (`source`
+ *  "any": with the unfiltered iOS input). False (and nothing happens)
+ *  while the upload still runs in another tab. */
+export async function retryUploadWith(
+  id: string,
+  file: File,
+  settings: SettingsSource,
+  preset: PresetId | null,
+  source?: "any",
+): Promise<boolean> {
   if (await runsElsewhere(id)) return false;
   retries.delete(id);
   removeUploadRecord(id);
   setThumb(id, null);
-  void startUpload(file, settings, preset);
+  void startUpload(file, settings, preset, { source });
   return true;
 }

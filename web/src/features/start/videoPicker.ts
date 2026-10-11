@@ -16,6 +16,13 @@
  * anyway" opens an input without accept (B, ./PickMissedHint). Every
  * other platform keeps "video/*". All browsers on iOS share Safari's
  * picker: this goes by the platform (./ios), not the browser.
+ *
+ * C lists only MOV / MP4 / HEVC: a video in another format (3GP, AVI,
+ * WebM, MKV from the Files app) is picked with B ("Other video formats"
+ * under the start screen's dropzone). An original over the upload cap
+ * isn't uploaded: B's converted copy is a fraction of it
+ * (originalTooBig). An upload that came from B resumes with B
+ * (resumeWithAny): C hands over the original, other bytes.
  */
 import { useSyncExternalStore } from "react";
 import { isIOS, type NavigatorLike } from "./ios";
@@ -55,4 +62,28 @@ export function pickedKind(file: Pick<File, "type" | "name">): "video" | "audio"
   if (type.startsWith("audio/")) return "audio";
   if ((!type || type === "application/octet-stream") && VIDEO_EXT.test(file.name)) return "video";
   return "other";
+}
+
+/** iOS, a pick from the original-formats input (C): over the upload cap
+ *  it isn't uploaded (the server would refuse it); "Pick anyway" sends
+ *  the converted copy instead, a fraction of the size (the owner's 4K
+ *  60 fps HDR video: about 0.8 GB a minute as the original, 0.2 GB
+ *  converted). Any other pick goes to the upload, which checks the cap
+ *  itself (file_too_large). */
+export function originalTooBig(size: number, maxBytes: number, { ios, original }: { ios: boolean; original: boolean }): boolean {
+  return ios && original && maxBytes > 0 && size > maxBytes;
+}
+
+/** A size in GB for the "over the limit" message: one decimal, rounded
+ *  up (10.04 GB shows as 10.1, never as the 10 GB limit itself). */
+export function overLimitGb(bytes: number): number {
+  return Math.ceil(bytes / 1e8) / 10;
+}
+
+/** Does "Continue upload" of an upload that came from `source` open the
+ *  unfiltered input (B) again? On iOS, for one picked with it: the
+ *  original-formats picker would hand over the original, which never
+ *  matches the converted copy that went up. */
+export function resumeWithAny(ios: boolean, source: "any" | undefined | null): boolean {
+  return ios && source === "any";
 }

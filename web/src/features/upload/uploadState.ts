@@ -11,7 +11,13 @@ import type { SettingsSource } from "./settings";
 
 /** What a failed upload of this page needs to go again without asking
  *  for the file ("Try again", UX12). */
-export type Retry = { file: File; settings: SettingsSource; preset: PresetId | null };
+export type Retry = {
+  file: File;
+  settings: SettingsSource;
+  preset: PresetId | null;
+  /** "any": picked with the unfiltered iOS input (lib/uploadResume). */
+  source?: "any";
+};
 export const retries = new Map<string, Retry>();
 /** Cancel (UX12): the abort of each running upload of this page. */
 export const controllers = new Map<string, AbortController>();

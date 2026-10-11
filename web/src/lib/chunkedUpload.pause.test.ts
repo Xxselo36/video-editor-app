@@ -81,7 +81,9 @@ class FakeXHR {
     this.pending = false;
     this.onabort?.();
   }
-  send(body: Blob) {
+  send(body: Blob | ArrayBuffer) {
+    // (A part goes as the bytes it was hashed from, or as its slice.)
+    const size = body instanceof ArrayBuffer ? body.byteLength : body.size;
     const n = Number(new URL(this.url).searchParams.get("partNumber"));
     const plan = plans.get(n)?.shift() ?? "ok";
     puts.push([n, plan, this.url]);
@@ -90,11 +92,11 @@ class FakeXHR {
       if (!this.pending || plan === "hang") return;
       this.pending = false;
       if (plan === "ok" || plan === "slow" || plan === "403" || plan === "500") {
-        this.upload.onprogress?.({ loaded: body.size });
+        this.upload.onprogress?.({ loaded: size });
         this.status = plan === "403" ? 403 : plan === "500" ? 500 : 200;
         this.onload?.();
       } else if (plan === "moved") {
-        this.upload.onprogress?.({ loaded: body.size });
+        this.upload.onprogress?.({ loaded: size });
         this.onerror?.();
       } else if (plan === "network") this.onerror?.();
       else this.onabort?.();

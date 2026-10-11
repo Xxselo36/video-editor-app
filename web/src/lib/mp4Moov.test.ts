@@ -108,6 +108,31 @@ describe("normalizeMoov", () => {
   });
 });
 
+describe("moovFingerprintInput times (what the part hashes zero)", () => {
+  it("names exactly the bytes where two exports differ, at the start and at the end of the file", async () => {
+    for (const o of [{}, { version: 1, moovAtEnd: true, tracks: 2 }]) {
+      const media = noise(9000, 6);
+      const a = movie({ ...o, media, created: 3_900_000_000, modified: 3_900_000_001 });
+      const b = movie({ ...o, media, created: 3_955_555_555, modified: 3_955_555_556 });
+      const input = (await moovFingerprintInput(fileOf(a)))!;
+      // mvhd + a tkhd and an mdhd per track.
+      expect(input.times).toHaveLength(1 + 2 * (o.tracks ?? 1));
+      const differ: number[] = [];
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) differ.push(i);
+      expect(differ.length).toBeGreaterThan(0);
+      const inTimes = (i: number) => input.times.some(([from, to]) => i >= from && i < to);
+      expect(differ.every(inTimes)).toBe(true);
+      // With those ranges zeroed the two files are the same bytes.
+      const zero = (bytes: Uint8Array) => {
+        const c = bytes.slice();
+        for (const [from, to] of input.times) c.fill(0, from, to);
+        return c;
+      };
+      expect(Buffer.from(zero(a)).equals(Buffer.from(zero(b)))).toBe(true);
+    }
+  });
+});
+
 describe("the resume fingerprint of an MP4 / QuickTime file", () => {
   it("matches two exports that differ only in mvhd / tkhd / mdhd times (the raw key doesn't)", async () => {
     const media = noise(50_000, 3);
