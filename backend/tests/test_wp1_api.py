@@ -166,6 +166,31 @@ def test_presign_caps(client, fake_r2, monkeypatch):
     assert r.status_code == 200, r.text
 
 
+def test_single_put_cap_is_5_gb_whatever_the_upload_cap(client, fake_r2,
+                                                        monkeypatch):
+    """R2 takes at most 5 GiB in one PUT: /uploads/presign (and GET
+    /config, which the web app checks files against) never go above
+    5 GB, also with the 10 GB default; multipart uploads get the full
+    cap."""
+    monkeypatch.delenv("CLEO_MAX_UPLOAD_GB", raising=False)
+    monkeypatch.delenv("CLEO_UPLOAD_MODE", raising=False)
+    # Sizes of several GB without the disk for them here.
+    monkeypatch.setenv("CLEO_DISK_FACTOR", "0")
+    r = client.post("/uploads/presign", json={"size": 5.5e9})
+    assert r.status_code == 413
+    assert r.json() == {"detail": "file_too_large", "max_gb": 5, "code": "file_too_large", "params": {"max_gb": 5}}
+    assert client.get("/config").json()["limits"]["max_upload_bytes"] == 5_000_000_000
+    assert client.post("/uploads/presign", json={"size": 4.9e9}).status_code == 200
+    monkeypatch.setenv("CLEO_UPLOAD_MODE", "multipart")
+    assert client.get("/config").json()["limits"]["max_upload_bytes"] == 10_000_000_000
+    # (The single PUT stays capped: a client that still uses it.)
+    assert client.post("/uploads/presign", json={"size": 5.5e9}).status_code == 413
+    monkeypatch.setenv("CLEO_MAX_UPLOAD_GB", "2")
+    assert client.get("/config").json()["limits"]["max_upload_bytes"] == 2_000_000_000
+    r = client.post("/uploads/presign", json={"size": 2.5e9})
+    assert r.json()["max_gb"] == 2
+
+
 def test_post_jobs_size_cap_uses_r2_head(client, fake_r2, monkeypatch):
     monkeypatch.setenv("CLEO_MAX_UPLOAD_GB", "0.5")
     fake_r2["size"] = 600_000_000

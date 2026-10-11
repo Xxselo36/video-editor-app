@@ -196,6 +196,9 @@ export function LegacyNewVideoPage() {
           starting={starting}
         />
       )}
+      {/* "video/*" on every device, iOS too: this page has no "Pick anyway"
+          for a video iOS gives up on with the original-formats list
+          (./videoPicker); with video/* iOS converts it instead. */}
       <input
         ref={fileInputRef}
         type="file"

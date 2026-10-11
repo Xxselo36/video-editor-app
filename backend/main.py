@@ -184,15 +184,39 @@ class ApiRefusal(Exception):
 
 
 def _max_upload_gb() -> float:
-    return _env_float("CLEO_MAX_UPLOAD_GB", 4)
+    """The upload cap in decimal GB (CLEO_MAX_UPLOAD_GB, default 10: an
+    iPhone original of 4K at 60 fps reaches 10 GB at about 12 minutes).
+    Safe at 10 with the production setup (uploads go to R2 in parts,
+    analysis on Modal): nothing on this server downloads the upload."""
+    return _env_float("CLEO_MAX_UPLOAD_GB", 10)
+
+
+# R2, like S3, takes at most 5 GiB in one PUT: the single-PUT upload
+# (/uploads/presign, any CLEO_UPLOAD_MODE but multipart) can't send
+# more, whatever CLEO_MAX_UPLOAD_GB says. 5 GB (decimal, as every cap
+# here) stays under it.
+_SINGLE_PUT_MAX_GB = 5.0
+
+
+def _upload_cap_gb(single_put: bool = False) -> float:
+    """The cap an upload is held to: CLEO_MAX_UPLOAD_GB, and no more than
+    one PUT takes for a single-PUT upload."""
+    cap = _max_upload_gb()
+    return min(cap, _SINGLE_PUT_MAX_GB) if single_put else cap
+
+
+def _web_upload_cap_gb() -> float:
+    """The cap the web app sends files under (GET /config): the
+    single-PUT one unless uploads are multipart."""
+    return _upload_cap_gb(single_put=_upload_mode() != "multipart")
 
 
 def _max_minutes() -> float:
     return _env_float("CLEO_MAX_MINUTES", 30)
 
 
-def _too_big(size: float | None) -> bool:
-    return size is not None and size > _max_upload_gb() * 1e9
+def _too_big(size: float | None, single_put: bool = False) -> bool:
+    return size is not None and size > _upload_cap_gb(single_put) * 1e9
 
 
 def _too_long(seconds: float | None) -> bool:
@@ -215,8 +239,9 @@ def _too_short(seconds: float | None) -> bool:
             and seconds < _min_seconds() - 0.1)
 
 
-def _file_too_large() -> ApiRefusal:
-    return ApiRefusal(413, "file_too_large", max_gb=_plain(_max_upload_gb()))
+def _file_too_large(single_put: bool = False) -> ApiRefusal:
+    return ApiRefusal(413, "file_too_large",
+                      max_gb=_plain(_upload_cap_gb(single_put)))
 
 
 def _video_too_long() -> ApiRefusal:
@@ -2167,7 +2192,8 @@ def public_config() -> dict[str, Any]:
     max_minutes = _max_minutes()
     return {
         "limits": {
-            "max_upload_bytes": int(_max_upload_gb() * 1e9),
+            # The single-PUT cap (5 GB) unless uploads are multipart.
+            "max_upload_bytes": int(_web_upload_cap_gb() * 1e9),
             # None: no length cap (CLEO_MAX_MINUTES <= 0).
             "max_seconds": _plain(max_minutes * 60) if max_minutes > 0 else None,
             "min_seconds": _plain(_min_seconds()),
@@ -3886,8 +3912,10 @@ def multipart_abort(payload: dict, user: User | None = Depends(current_user)):
 
 
 _TELEMETRY = upl.RateLimit(30, 60.0)
+# redo: parts a resume sends again because the re-picked file's bytes
+# differ there (web lib/chunkedUpload keepParts).
 _TELEMETRY_FIELDS = ("event", "part", "attempt", "elapsed_ms", "loaded",
-                     "status", "kind", "ua")
+                     "redo", "status", "kind", "ua")
 
 
 @app.post("/uploads/telemetry", status_code=204)
@@ -3965,8 +3993,9 @@ def _presign_upload(payload: dict, user: User | None):
     duration = _to_float(payload.get("duration") or 0)
     _paywall_soft_check(user, duration)
     size = _to_float(payload.get("size") or 0)
-    if _too_big(size):
-        raise _file_too_large()
+    # One PUT: R2 refuses more than 5 GiB, so this cap is never above 5 GB.
+    if _too_big(size, single_put=True):
+        raise _file_too_large(single_put=True)
     if _too_long(duration):
         raise _video_too_long()
     if taskq.enabled():

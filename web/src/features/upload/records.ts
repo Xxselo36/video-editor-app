@@ -42,6 +42,8 @@ export type UploadInfo = {
   presetId: string | null;
   presetLabel: string | null;
   settings: UploadSettings;
+  /** See features/jobs/projects UploadRecord.source (v2 only). */
+  source?: "any";
 };
 
 export function addUploadRecord(tempId: string, info: UploadInfo): void {
@@ -50,7 +52,7 @@ export function addUploadRecord(tempId: string, info: UploadInfo): void {
       store.addUpload(
         tempId,
         { filename: info.filename, fileSize: info.fileSize, presetId: info.presetId, presetLabel: info.presetLabel },
-        { settings: info.settings },
+        { settings: info.settings, ...(info.source ? { source: info.source } : {}) },
       ),
     );
     return;

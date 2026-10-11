@@ -62,7 +62,8 @@ test("one click and the file chooser start the upload with the defaults @editor-
   await openWithStorage(page, "/app/new");
   const posts = await watchJobPosts(page);
   // Limits and defaults are visible before any file.
-  await expect(page.getByTestId("start-limits")).toContainText("up to 30 min and 4 GB");
+  // (The stub uploads with single PUTs: 5 GB, the most one PUT to R2 takes.)
+  await expect(page.getByTestId("start-limits")).toContainText("up to 30 min and 5 GB");
   await expect(page.getByTestId("start-format-9x16")).toHaveAttribute("aria-checked", "true");
   await expect(page.getByTestId("start-summary")).toHaveText("Tight cuts · “um/uh” removed · “Cleo cut” on");
 
@@ -220,9 +221,7 @@ test("iOS: Preparing video… between the chooser closing and the file arriving 
   await expect(page.getByTestId("start-preparing")).toHaveText("Preparing video…");
   await expect(page.getByTestId("start-preparing-slow")).toHaveCount(0);
   // Still nothing after ~4 s: iOS is still at it, the page says so.
-  await expect(page.getByTestId("start-preparing-slow")).toHaveText(
-    "Your iPhone is still preparing the video — please wait, don't close this page.",
-  );
+  await expect(page.getByTestId("start-preparing-slow")).toHaveText("Still preparing the video. Please wait and keep this page open.");
   // Cancelled after all: nothing is coming.
   await page.getByTestId("upload-input").dispatchEvent("cancel");
   await expect(page.getByTestId("start-preparing")).toHaveCount(0);
@@ -237,9 +236,212 @@ test.describe("on an iPhone", () => {
   test("the start screen says iOS prepares long videos first @editor-v2", async ({ page }) => {
     await openWithStorage(page, "/app/new");
     await expect(page.getByTestId("start-ios-hint")).toHaveText(
-      "Your iPhone prepares long videos before they upload — for a 10-minute video this can take a minute or more.",
+      "Long videos are prepared on your iPhone or iPad before they upload. For a 10-minute video this can take a minute or more.",
     );
   });
+
+  // (Playwright's chooser ignores `accept`: what iOS does with it only
+  // the owner's iPhone shows. Here: the attributes and the hint.)
+  test("iOS gives up on a huge video: the hint, and Pick anyway without a format filter @editor-v2", async ({ page, stub }) => {
+    await page.clock.install();
+    await openWithStorage(page, "/app/new");
+    await expect(page.getByTestId("upload-input")).toHaveAttribute(
+      "accept",
+      "video/quicktime,video/mp4,video/hevc,.mov,.mp4,.m4v,.hevc",
+    );
+    // Closed again within seconds: the user did that, no hint.
+    await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await page.clock.fastForward(3000);
+    await page.getByTestId("upload-input").dispatchEvent("cancel");
+    await expect(page.getByTestId("pick-missed")).toHaveCount(0);
+    // iOS worked on it for a while, then gave up (WebKit: a plain cancel;
+    // no back signal comes with it, unlike the user closing the picker).
+    await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await page.clock.fastForward(40_000);
+    await page.getByTestId("upload-input").dispatchEvent("cancel");
+    await page.clock.fastForward(2000);
+    const hint = page.getByTestId("pick-missed");
+    await expect(hint).toContainText("Your video didn't arrive.");
+    await expect(hint).toContainText("4K at 60 fps");
+    // "Pick anyway": the chooser without accept (it lists photos too).
+    expect(await page.getByTestId("upload-input-any").getAttribute("accept")).toBeNull();
+    let [chooser] = await Promise.all([page.waitForEvent("filechooser"), hint.getByTestId("pick-anyway").click()]);
+    await chooser.setFiles({ name: "IMG_0043.HEIC", mimeType: "image/heic", buffer: Buffer.from("not a video") });
+    await expect(hint.getByTestId("pick-missed-error")).toHaveText("That's not a video. Pick a video file.");
+    [chooser] = await Promise.all([page.waitForEvent("filechooser"), hint.getByTestId("pick-anyway").click()]);
+    await chooser.setFiles({ name: "IMG_0042.MOV", mimeType: "video/quicktime", buffer: await stub.media("grid.mp4") });
+    await expect(page.getByTestId("pick-missed")).toHaveCount(0);
+    await expect(page).toHaveURL(`${WEB}/app`, { timeout: 30_000 });
+  });
+
+  test("the picker closed with a selection and iOS gave up seconds later: the hint, not a user's cancel @editor-v2", async ({ page }) => {
+    await page.clock.install();
+    await openWithStorage(page, "/app/new");
+    // A user who browsed Photos for 20 s and closed it: the page comes
+    // back with the cancel. Nothing to say.
+    await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await page.clock.fastForward(20_000);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.getByTestId("upload-input").dispatchEvent("cancel");
+    await page.clock.fastForward(3000);
+    await expect(page.getByTestId("pick-missed")).toHaveCount(0);
+    // Selected after 4 s (the sheet closes, the page is back), iOS gave
+    // up 3 s later.
+    await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await page.clock.fastForward(4000);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByTestId("start-preparing")).toBeVisible();
+    await page.clock.fastForward(3000);
+    await page.getByTestId("upload-input").dispatchEvent("cancel");
+    await expect(page.getByTestId("pick-missed")).toContainText("Your video didn't arrive.");
+    await expect(page.getByTestId("start-preparing")).toHaveCount(0);
+  });
+
+  test("the page is back but no file came: Preparing stays, 'Still nothing?' after 90 s, all gone when a slow export arrives @editor-v2", async ({ page, stub }) => {
+    await page.clock.install();
+    await openWithStorage(page, "/app/new");
+    await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await page.clock.fastForward(2000);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByTestId("start-preparing")).toBeVisible();
+    // iOS may still be preparing a normal video (43 s for a 140 MB clip
+    // in the owner's test): no "didn't arrive" here.
+    await page.clock.fastForward(45_000);
+    await expect(page.getByTestId("start-preparing")).toBeVisible();
+    await expect(page.getByTestId("start-preparing-slow")).toBeVisible();
+    await expect(page.getByTestId("pick-missed")).toHaveCount(0);
+    await expect(page.getByTestId("pick-stalled")).toHaveCount(0);
+    // Still nothing after 90 s: a soft line with "Pick anyway" under it.
+    await page.clock.fastForward(50_000);
+    await expect(page.getByTestId("pick-stalled")).toContainText("Still nothing?");
+    await expect(page.getByTestId("pick-stalled").getByTestId("pick-anyway")).toBeVisible();
+    await expect(page.getByTestId("start-preparing")).toBeVisible();
+    await expect(page.getByTestId("pick-missed")).toHaveCount(0);
+    // The file arrives after all.
+    await page
+      .getByTestId("upload-input")
+      .setInputFiles({ name: "IMG_0044.MOV", mimeType: "video/quicktime", buffer: await stub.media("grid.mp4") });
+    await expect(page.getByTestId("pick-stalled")).toHaveCount(0);
+    await expect(page).toHaveURL(`${WEB}/app`, { timeout: 30_000 });
+  });
+
+  test("Pick anyway: Preparing video… while iOS converts, the hint back on a cancel @editor-v2", async ({ page }) => {
+    await page.clock.install();
+    await openWithStorage(page, "/app/new");
+    await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await page.clock.fastForward(40_000);
+    await page.getByTestId("upload-input").dispatchEvent("cancel");
+    await page.clock.fastForward(2000);
+    const hint = page.getByTestId("pick-missed");
+    await expect(hint).toBeVisible();
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), hint.getByTestId("pick-anyway").click()]);
+    expect(await chooser.element().getAttribute("data-testid")).toBe("upload-input-any");
+    // Selected: the picker closed, iOS converts (minutes). No "didn't
+    // arrive" with an active "Pick anyway" meanwhile.
+    await page.clock.fastForward(2000);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByTestId("start-preparing")).toBeVisible();
+    await expect(page.getByTestId("pick-missed")).toHaveCount(0);
+    await page.clock.fastForward(5 * 60_000);
+    await expect(page.getByTestId("start-preparing")).toBeVisible();
+    await expect(page.getByTestId("pick-missed")).toHaveCount(0);
+    await expect(page.getByTestId("pick-stalled")).toHaveCount(0);
+    // iOS gave up on the conversion too: the hint is back.
+    await page.getByTestId("upload-input-any").dispatchEvent("cancel");
+    await expect(page.getByTestId("pick-missed")).toBeVisible();
+    await expect(page.getByTestId("start-preparing")).toHaveCount(0);
+  });
+
+  test("an original over the upload cap isn't uploaded: Pick anyway sends the converted copy @editor-v2", async ({ page, stub }) => {
+    // A cap the stub's clip is over (GET /config).
+    await page.route(`${API}/config`, async (route) => {
+      const r = await route.fetch();
+      const body = (await r.json()) as { limits: { max_upload_bytes: number } };
+      body.limits.max_upload_bytes = 1000;
+      await route.fulfill({ response: r, json: body });
+    });
+    await openWithStorage(page, "/app/new");
+    await expect(page.getByTestId("start-limits")).toContainText("0 GB");
+    const posts = await watchJobPosts(page);
+    let inits = 0;
+    page.on("request", (r) => {
+      if (/\/uploads\/(multipart\/init|presign)$/.test(r.url())) inits++;
+    });
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await chooser.setFiles({ name: "IMG_0045.MOV", mimeType: "video/quicktime", buffer: await stub.media("grid.mp4") });
+    const hint = page.getByTestId("pick-missed");
+    await expect(hint).toHaveAttribute("data-reason", "too-big");
+    await expect(hint).toContainText("over the 0 GB limit");
+    await expect(hint.getByTestId("pick-anyway")).toBeVisible();
+    await expect(page.getByTestId("start-upload")).toHaveCount(0);
+    await expect(page).toHaveURL(`${WEB}/app/new`);
+    expect(inits).toBe(0);
+    expect(posts).toEqual([]);
+    // "Pick anyway" opens the converting chooser.
+    const [any] = await Promise.all([page.waitForEvent("filechooser"), hint.getByTestId("pick-anyway").click()]);
+    expect(await any.element().getAttribute("data-testid")).toBe("upload-input-any");
+  });
+
+  test("Other video formats opens the chooser without a format filter @editor-v2", async ({ page }) => {
+    await openWithStorage(page, "/app/new");
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("start-other-formats").click()]);
+    expect(await chooser.element().getAttribute("data-testid")).toBe("upload-input-any");
+    expect(await page.getByTestId("upload-input-any").getAttribute("accept")).toBeNull();
+  });
+
+  test("an interrupted upload picked with Pick anyway resumes with that chooser after a reload @editor-v2", async ({ page }) => {
+    await openWithStorage(page, "/app/new");
+    // Its resume record (lib/uploadResume), as the reload left it.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const req = indexedDB.open("cleocuts-uploads", 1);
+          req.onupgradeneeded = () => {
+            if (!req.result.objectStoreNames.contains("uploads")) req.result.createObjectStore("uploads", { keyPath: "fp" });
+          };
+          req.onerror = () => reject(req.error);
+          req.onsuccess = () => {
+            const tx = req.result.transaction("uploads", "readwrite");
+            const now = Date.now();
+            tx.objectStore("uploads").put({
+              v: 2,
+              fp: "m1:60000000:ab12",
+              name: "IMG_0046.MOV",
+              size: 60_000_000,
+              ticket: "t",
+              storage_key: "uploads/x.mov",
+              part_size: 16 * 1024 * 1024,
+              parts_total: 4,
+              done: [1, 2],
+              created_at: now - 600_000,
+              updated_at: now - 600_000,
+              expires_at: now + 86_400_000,
+              source: "any",
+            });
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+          };
+        }),
+    );
+    await page.reload();
+    const card = page.getByTestId("start-resume");
+    await expect(card).toContainText("IMG_0046.MOV");
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), card.getByTestId("start-resume-choose").click()]);
+    expect(await chooser.element().getAttribute("data-testid")).toBe("upload-input-any");
+  });
+});
+
+test("not on a desktop: video/*, and a late cancel shows no iOS hint @editor-v2", async ({ page }) => {
+  await page.clock.install();
+  await openWithStorage(page, "/app/new");
+  await expect(page.getByTestId("upload-input")).toHaveAttribute("accept", "video/*");
+  await expect(page.getByTestId("upload-input-any")).toHaveCount(0);
+  await expect(page.getByTestId("start-other-formats")).toHaveCount(0);
+  await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+  await page.clock.fastForward(40_000);
+  await page.getByTestId("upload-input").dispatchEvent("cancel");
+  await expect(page.getByTestId("start-limits")).toBeVisible();
+  await expect(page.getByTestId("pick-missed")).toHaveCount(0);
 });
 
 test("no iOS hint on a desktop or Android browser @editor-v2", async ({ page }) => {

@@ -190,8 +190,20 @@ export const enApp = {
   "app.start.limits": "MP4 · MOV · WebM · up to {minutes} min and {gb} GB · any language",
   "app.start.limitsNoLength": "MP4 · MOV · WebM · up to {gb} GB · any language",
   "app.start.preparing": "Preparing video…",
-  "app.start.iosHint": "Your iPhone prepares long videos before they upload — for a 10-minute video this can take a minute or more.",
-  "app.start.preparingSlow": "Your iPhone is still preparing the video — please wait, don't close this page.",
+  "app.start.iosHint": "Long videos are prepared on your iPhone or iPad before they upload. For a 10-minute video this can take a minute or more.",
+  "app.start.preparingSlow": "Still preparing the video. Please wait and keep this page open.",
+  // iOS gave up on a very large video (features/start/pickWatch, PickMissedHint)
+  "app.start.pickMissed": "Your video didn't arrive.",
+  "app.start.pickMissedWhy": "Very large videos, like 4K at 60 fps, sometimes fail on iPhone and iPad. Free up some storage or film in 1080p, then pick it again.",
+  "app.start.pickAnyway": "Pick anyway",
+  "app.start.pickAnywayNote": "The video is converted first, which can take a few minutes. The list shows photos too.",
+  "app.start.notVideo": "That's not a video. Pick a video file.",
+  // iOS: an original over the upload cap (features/start/videoPicker originalTooBig)
+  "app.start.pickTooBig": "This video is {size} GB, over the {max} GB limit. Pick it anyway to send a smaller, converted copy.",
+  // No word from iOS for a long while (features/start/pickWatch STALL_MS), then "Pick anyway"
+  "app.start.stillNothing": "Still nothing?",
+  // iOS: the chooser without a format filter (3GP, AVI, WebM, MKV …)
+  "app.start.otherFormats": "Other video formats",
   "app.start.format": "Format",
   "app.start.formatVertical": "TikTok · Reels · Shorts",
   "app.start.formatWide": "YouTube",

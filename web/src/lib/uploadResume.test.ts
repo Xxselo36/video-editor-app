@@ -21,19 +21,25 @@ vi.mock("@/lib/api", async (orig) => ({
 import {
   _useMemoryStoreForTests,
   ACTIVE_MS,
+  contentFingerprint,
   discardResumable,
   EXPIRY_MARGIN_MS,
   findRecord,
+  findRecordMatch,
   fingerprint,
   legacyFingerprint,
   LEGACY_TTL_MS,
   listResumable,
   markUploadActive,
+  partHash,
+  partProbe,
+  PROBE_BYTES,
   recordPct,
   type UploadRecord,
 } from "@/lib/uploadResume";
-import { resumableProgress, uploadResumable } from "@/lib/chunkedUpload";
+import { keepParts, resumableProgress, uploadResumable } from "@/lib/chunkedUpload";
 import { stoppedTileShowsError } from "@/features/upload/useResumable";
+import { movie, noise } from "./__tests__/mp4Fixtures";
 
 const MIB = 1024 * 1024;
 const json = (v: unknown, status = 200) =>
@@ -73,6 +79,8 @@ function record(fp: string, over: Partial<UploadRecord> = {}): UploadRecord {
 
 // ── a fake XMLHttpRequest: every PUT "uploads" at once ────────────────
 const puts: string[] = [];
+/** The bytes of each PUT that went as a buffer (read once, hashed, sent). */
+const sent: Uint8Array[] = [];
 class FakeXhr {
   status = 0;
   upload: { onprogress?: (e: { loaded: number }) => void; onload?: () => void } = {};
@@ -87,10 +95,11 @@ class FakeXhr {
   abort() {
     this.onabort?.();
   }
-  send(body: Blob) {
+  send(body: Blob | ArrayBuffer) {
     puts.push(this.url);
+    sent.push(new Uint8Array(body instanceof ArrayBuffer ? body.slice(0) : new ArrayBuffer(0)));
     setTimeout(() => {
-      this.upload.onprogress?.({ loaded: body.size });
+      this.upload.onprogress?.({ loaded: body instanceof ArrayBuffer ? body.byteLength : body.size });
       this.upload.onload?.();
       this.status = 200;
       this.onload?.();
@@ -103,6 +112,7 @@ beforeEach(() => {
   store = _useMemoryStoreForTests();
   calls.length = 0;
   puts.length = 0;
+  sent.length = 0;
   vi.stubGlobal("XMLHttpRequest", FakeXhr);
 });
 afterEach(() => {
@@ -314,6 +324,46 @@ describe("uploadResumable", () => {
     expect(rec.done.sort()).toEqual([1, 2, 3, 4]);
     expect(rec.completed).toBe(true);
     expect(puts).toHaveLength(4);
+    // Every part's probe and whole-part hash went in with it (what a
+    // re-pick is checked against) …
+    const f = fileOf(bytes, "x", 1);
+    for (const n of [1, 2, 3, 4]) {
+      expect(rec.probes?.[n]).toBe(await partProbe(f, n, part, size, total));
+      expect(rec.hashes?.[n]).toBe((await partHash(f, n, part, size, total))?.hash);
+      expect(rec.hashes?.[n]).toMatch(/^[0-9a-f]{64}$/);
+    }
+    // … read once: the bytes hashed are the bytes sent.
+    const byPart = new Map(puts.map((u, i) => [Number(new URL(u).searchParams.get("partNumber")), sent[i]]));
+    for (const n of [1, 2, 3, 4]) {
+      const want = Buffer.from(bytes.subarray((n - 1) * part, Math.min(size, n * part)));
+      expect(Buffer.from(byPart.get(n)!).equals(want)).toBe(true);
+    }
+  });
+
+  it("keeps the picker the file came from (Pick anyway) on the record and in the list", async () => {
+    const bytes = content(size, 8);
+    answer = (path) => {
+      if (path === "/uploads/multipart/init") {
+        return json({ ticket: "tk", storage_key: "uploads/k.mov", part_size: part, parts_total: total, parts: [] });
+      }
+      return json({}, 500);
+    };
+    const ctl = new AbortController();
+    const origSend = FakeXhr.prototype.send;
+    FakeXhr.prototype.send = () => {}; // the parts never answer: the upload stops there
+    try {
+      const up = uploadResumable({ file: fileOf(bytes, "IMG_1.MOV", 1), signal: ctl.signal, source: "any" });
+      up.catch(() => {});
+      await vi.waitFor(() => expect(store.size).toBe(1));
+      ctl.abort();
+      await up.catch(() => {});
+    } finally {
+      FakeXhr.prototype.send = origSend;
+    }
+    // After a reload: the start screen's card and the tile open the
+    // unfiltered picker for it (features/start/videoPicker resumeWithAny).
+    expect([...store.values()][0].source).toBe("any");
+    expect((await listResumable()).map((r) => r.source)).toEqual(["any"]);
   });
 
   it("a renamed re-pick resumes from the server's list of parts, never sending a listed part again", async () => {
@@ -349,6 +399,9 @@ describe("uploadResumable", () => {
     // It started where the SERVER says (2 of 4 parts ≈ 66 % of the bytes), not at 0.
     expect(progress[0]).toBe(Math.floor((2 * part / size) * 100));
     expect(store.get(fp)?.completed).toBe(true);
+    // A record from before probes: its parts were trusted as before, and
+    // now carry the probes of the file that continued them.
+    expect(Object.keys(store.get(fp)?.probes ?? {}).sort()).toEqual(["1", "2", "3", "4"]);
     await res.release?.();
     expect(store.size).toBe(0);
   });
@@ -395,5 +448,335 @@ describe("uploadResumable", () => {
     ctl.abort();
     await expect(up).rejects.toMatchObject({ name: "AbortError" });
     expect(store.has(fp)).toBe(true);
+  });
+});
+
+// ── a re-pick that iOS exported again (2026-10, the owner's picker tests)
+//
+// Every pick of a video from Photos is a fresh export: the same bytes but
+// new creation / modification times in moov (mvhd, tkhd, mdhd), which sits
+// in part 1. The upload must continue after a reload all the same, and
+// only from parts whose bytes the new copy has too.
+describe("a re-pick exported again by iOS", () => {
+  const part = 1024 * 1024;
+  const total = 4;
+  /** 4 parts of 1 MiB: ftyp, moov (with these times), wide, mdat. */
+  const video = (created: number, media = noise(3 * part + 1000, 31)) =>
+    movie({ media, created, modified: created + 5, sampleSizes: [part, part, part, 1000] });
+  const signAll = (path: string, body: Record<string, unknown>) => {
+    if (path === "/uploads/multipart/sign") {
+      return json({ parts: (body.part_numbers as number[]).map((n) => ({ part_number: n, url: `https://r2/k?partNumber=${n}` })) });
+    }
+    if (path === "/uploads/multipart/complete") return json({ storage_key: "uploads/k.mov" });
+    return null;
+  };
+  const partsSent = () => puts.map((u) => Number(new URL(u).searchParams.get("partNumber"))).sort();
+
+  /** The first pick's upload, stopped once parts 1 and 2 are in (the
+   *  tab reloaded): its record, as the next page finds it. */
+  async function stoppedUpload(first: Uint8Array): Promise<UploadRecord> {
+    answer = (path, body) => {
+      if (path === "/uploads/multipart/init") {
+        return json({
+          ticket: "tk",
+          storage_key: "uploads/k.mov",
+          part_size: part,
+          parts_total: total,
+          expires_at: Math.floor(Date.now() / 1000) + 86400,
+          parts: [],
+        });
+      }
+      return signAll(path, body) ?? json({}, 500);
+    };
+    const origSend = FakeXhr.prototype.send;
+    FakeXhr.prototype.send = function (this: FakeXhr, b: Blob) {
+      // Parts 3 and 4 never get an answer.
+      if (Number(new URL((this as unknown as { url: string }).url).searchParams.get("partNumber")) >= 3) return;
+      return origSend.call(this, b);
+    };
+    const ctl = new AbortController();
+    const up = uploadResumable({ file: fileOf(first, "IMG_0042.MOV", 1), signal: ctl.signal });
+    up.catch(() => {});
+    try {
+      await vi.waitFor(() => expect([...store.values()][0]?.done.sort()).toEqual([1, 2]), { timeout: 4000 });
+    } finally {
+      ctl.abort();
+      await up.catch(() => {});
+      FakeXhr.prototype.send = origSend;
+    }
+    calls.length = 0;
+    puts.length = 0;
+    return [...store.values()][0];
+  }
+
+  it("finds the record although the moov times differ, and sends only the parts R2 lacks", async () => {
+    const first = video(3_900_000_000);
+    const again = video(3_911_111_111);
+    expect(await contentFingerprint(fileOf(again, "b", 2))).not.toBe(await contentFingerprint(fileOf(first, "a", 1)));
+    const rec = await stoppedUpload(first);
+    expect(rec.fp).toMatch(/^m1:/);
+    expect(Object.keys(rec.probes ?? {}).sort()).toEqual(["1", "2"]);
+
+    const repick = fileOf(again, "trim.5C1D.MOV", 2_000_000_000_000);
+    expect((await findRecord(repick))?.fp).toBe(rec.fp);
+    answer = (path, body) => {
+      if (path === "/uploads/multipart/parts") return json({ parts: [{ part_number: 1, size: part }, { part_number: 2, size: part }] });
+      return signAll(path, body) ?? json({}, 500);
+    };
+    const res = await uploadResumable({ file: repick });
+    expect(res.storage_key).toBe("uploads/k.mov");
+    expect(calls.map((c) => c.path)).not.toContain("/uploads/multipart/init");
+    // Part 1 (with the first pick's moov) stays: same sample tables.
+    expect(partsSent()).toEqual([3, 4]);
+    expect(calls.find((c) => c.path === "/uploads/telemetry" && c.body.event === "resume")?.body.redo).toBe(0);
+  });
+
+  it("sends a part again when the new copy's bytes differ there (same layout, other media)", async () => {
+    const rec = await stoppedUpload(video(3_900_000_000));
+    // Same size, same sample tables, other media: the same m1 key …
+    const other = video(3_900_000_000, noise(3 * part + 1000, 99));
+    const repick = fileOf(other, "IMG_0042.MOV", 3);
+    expect((await findRecord(repick))?.fp).toBe(rec.fp);
+    answer = (path, body) => {
+      if (path === "/uploads/multipart/parts") return json({ parts: [{ part_number: 1, size: part }, { part_number: 2, size: part }] });
+      return signAll(path, body) ?? json({}, 500);
+    };
+    await uploadResumable({ file: repick });
+    // … but the probes of parts 1 and 2 don't match: everything goes up.
+    expect(partsSent()).toEqual([1, 2, 3, 4]);
+    expect(calls.find((c) => c.path === "/uploads/telemetry" && c.body.event === "resume")?.body.redo).toBe(2);
+  });
+
+  it("keepParts: a part stays only when its whole-part hash matches; without a hash it goes again", async () => {
+    const f = fileOf(video(1), "a.mov", 1);
+    const d1 = (await partHash(f, 1, part, f.size, total))!;
+    const d2 = (await partHash(f, 2, part, f.size, total))!;
+    expect(d1.probe).toMatch(/^[0-9a-f]{16}$/);
+    expect(d1.probe).toBe(await partProbe(f, 1, part, f.size, total));
+    const rec = { part_size: part, parts_total: total };
+    // Part 2 has no hash (the tab died before the record's write).
+    expect(await keepParts(f, { ...rec, probes: { 1: d1.probe }, hashes: { 1: d1.hash } }, [1, 2])).toEqual({
+      done: [1],
+      probes: { 1: d1.probe },
+      hashes: { 1: d1.hash },
+      redo: 1,
+    });
+    // A hash that doesn't match (whatever the probe says).
+    expect(
+      await keepParts(f, { ...rec, probes: { 1: d1.probe, 2: d2.probe }, hashes: { 1: d1.hash, 2: "0".repeat(64) } }, [2, 1]),
+    ).toMatchObject({ done: [1], redo: 1 });
+    // A probe that doesn't match: no need to read the whole part.
+    expect(
+      await keepParts(f, { ...rec, probes: { 1: d1.probe, 2: "0".repeat(16) }, hashes: { 1: d1.hash, 2: d2.hash } }, [2, 1]),
+    ).toMatchObject({ done: [1], redo: 1 });
+  });
+
+  it("keepParts: a record from before the hashes keeps its parts when found by raw bytes, none when found by the moov key", async () => {
+    const f = fileOf(video(1), "a.mov", 1);
+    const d1 = (await partHash(f, 1, part, f.size, total))!;
+    const d2 = (await partHash(f, 2, part, f.size, total))!;
+    const rec = { part_size: part, parts_total: total };
+    // c2 / legacy: the raw first and last 2 MiB matched, as before;
+    // the digests come from the file now.
+    expect(await keepParts(f, rec, [2, 1], { rawMatch: true })).toEqual({
+      done: [1, 2],
+      probes: { 1: d1.probe, 2: d2.probe },
+      hashes: { 1: d1.hash, 2: d2.hash },
+      redo: 0,
+    });
+    // (with probes: those are checked)
+    expect(await keepParts(f, { ...rec, probes: { 1: d1.probe } }, [2, 1], { rawMatch: true })).toMatchObject({ done: [1], redo: 1 });
+    // m1: nothing to check the media against.
+    expect(await keepParts(f, rec, [2, 1])).toMatchObject({ done: [], redo: 2 });
+    expect(await keepParts(f, { ...rec, probes: { 1: d1.probe, 2: d2.probe } }, [2, 1])).toMatchObject({ done: [], redo: 2 });
+  });
+
+  it("keepParts: a difference outside the probe window is caught (a same-length re-export, 16 MiB parts)", async () => {
+    // The review's case: 48 MiB of media; the second export differs in
+    // 64 KiB runs at 1 MiB, 16 + 2 MiB and 32 + 3 MiB, its moov only in
+    // the times. Same m1 key, same probes: only the whole-part hashes
+    // tell the parts apart.
+    const big = 16 * MIB;
+    const media = noise(48 * MIB, 5);
+    const a = movie({ media, created: 3_900_000_000, sampleSizes: [big, big, big] });
+    const changed = media.slice();
+    const head = a.length - media.length;
+    for (const at of [1 * MIB, 16 * MIB + 2 * MIB, 32 * MIB + 3 * MIB]) {
+      const run = noise(64 * 1024, at);
+      changed.set(run, at - head);
+    }
+    const b = movie({ media: changed, created: 3_911_111_111, sampleSizes: [big, big, big] });
+    const fa = fileOf(a, "a.mov", 1);
+    const fb = fileOf(b, "b.mov", 2);
+    expect(await fingerprint(fb)).toBe(await fingerprint(fa));
+    const parts = Math.ceil(a.length / big);
+    const probes: Record<number, string> = {};
+    const hashes: Record<number, string> = {};
+    for (const n of [1, 2, 3]) {
+      const d = (await partHash(fa, n, big, fa.size, parts))!;
+      probes[n] = d.probe;
+      hashes[n] = d.hash;
+      // The 16 KiB in the middle are the same: a probe alone keeps it.
+      expect(await partProbe(fb, n, big, fb.size, parts)).toBe(d.probe);
+    }
+    expect(PROBE_BYTES).toBe(16 * 1024);
+    expect(await keepParts(fb, { part_size: big, parts_total: parts, probes, hashes }, [1, 2, 3])).toMatchObject({
+      done: [],
+      redo: 3,
+    });
+    // The same file, picked again (other times, the same media): all stay.
+    const again = fileOf(movie({ media, created: 3_922_222_222, sampleSizes: [big, big, big] }), "c.mov", 3);
+    expect(await keepParts(again, { part_size: big, parts_total: parts, probes, hashes }, [1, 2, 3])).toMatchObject({
+      done: [1, 2, 3],
+      redo: 0,
+    });
+  });
+
+  it("a resume sends again a part whose bytes differ only outside the probe window", async () => {
+    const media = noise(3 * part + 1000, 31);
+    const rec = await stoppedUpload(video(3_900_000_000, media));
+    // Part 2's bytes differ 100 KiB into it (its probe window is in the
+    // middle); everything else is the first pick's but for the times.
+    const changed = media.slice();
+    const first = video(3_900_000_000, media);
+    const head = first.length - media.length;
+    changed.set(noise(4096, 77), part + 100 * 1024 - head);
+    const repick = fileOf(video(3_955_555_555, changed), "trim.AB12.MOV", 4);
+    expect((await findRecord(repick))?.fp).toBe(rec.fp);
+    expect(await partProbe(repick, 2, part, repick.size, total)).toBe(rec.probes?.[2]);
+    answer = (path, body) => {
+      if (path === "/uploads/multipart/parts") return json({ parts: [{ part_number: 1, size: part }, { part_number: 2, size: part }] });
+      return signAll(path, body) ?? json({}, 500);
+    };
+    await uploadResumable({ file: repick });
+    expect(partsSent()).toEqual([2, 3, 4]);
+    expect(calls.find((c) => c.path === "/uploads/telemetry" && c.body.event === "resume")?.body.redo).toBe(1);
+    // The record now names what R2 has: part 2 of the re-pick.
+    const now = [...store.values()][0];
+    expect(now.hashes?.[2]).toBe((await partHash(repick, 2, part, repick.size, total))?.hash);
+    expect(now.hashes?.[1]).toBe(rec.hashes?.[1]);
+  });
+
+  /** The first pick uploaded whole and completed; POST /jobs never
+   *  answered (the record stays, completed). */
+  async function completedUpload(first: Uint8Array): Promise<UploadRecord> {
+    answer = (path, body) => {
+      if (path === "/uploads/multipart/init") {
+        return json({
+          ticket: "tk",
+          storage_key: "uploads/A.mov",
+          part_size: part,
+          parts_total: total,
+          expires_at: Math.floor(Date.now() / 1000) + 86400,
+          parts: [],
+        });
+      }
+      return signAll(path, body) ?? json({}, 500);
+    };
+    const res = await uploadResumable({ file: fileOf(first, "IMG_0042.MOV", 1) });
+    expect(res.storage_key).toBe("uploads/A.mov");
+    calls.length = 0;
+    puts.length = 0;
+    const rec = [...store.values()][0];
+    expect(rec.completed).toBe(true);
+    return rec;
+  }
+  const newUpload = (path: string, body: Record<string, unknown>) => {
+    if (path === "/uploads/multipart/init") {
+      return json({
+        ticket: "tk2",
+        storage_key: "uploads/B.mov",
+        part_size: part,
+        parts_total: total,
+        expires_at: Math.floor(Date.now() / 1000) + 86400,
+        parts: [],
+      });
+    }
+    return signAll(path, body) ?? json({}, 500);
+  };
+
+  it("a completed upload goes straight to POST /jobs for the same video exported again (other times only)", async () => {
+    await completedUpload(video(3_900_000_000));
+    const repick = fileOf(video(3_977_777_777), "trim.99.MOV", 5);
+    answer = newUpload;
+    const res = await uploadResumable({ file: repick });
+    expect(res.storage_key).toBe("uploads/A.mov");
+    expect(calls).toEqual([]);
+    expect(puts).toEqual([]);
+  });
+
+  it("a completed upload is NOT used for another clip with the same moov: a new upload", async () => {
+    // The review's case: an export whose upload completed but whose POST
+    // /jobs failed; re-exported at the same length with other media.
+    const a = await completedUpload(video(3_900_000_000, noise(3 * part + 1000, 1)));
+    const b = fileOf(video(3_900_000_999, noise(3 * part + 1000, 2)), "IMG_0042.MOV", 6);
+    expect((await findRecordMatch(b))?.by).toBe("m1");
+    expect((await findRecord(b))?.fp).toBe(a.fp);
+    answer = newUpload;
+    const progress: number[] = [];
+    const res = await uploadResumable({ file: b, onProgress: (p) => progress.push(p) });
+    expect(res.storage_key).toBe("uploads/B.mov");
+    expect(calls.map((c) => c.path)).toContain("/uploads/multipart/init");
+    expect(partsSent()).toEqual([1, 2, 3, 4]);
+    expect(calls.find((c) => c.body.event === "resume_stale")?.body).toMatchObject({ redo: 4, kind: "completed" });
+    expect(progress[0]).toBe(0);
+    expect([...store.values()].map((r) => r.ticket)).toEqual(["tk2"]);
+  });
+
+  it("an upload the server reports completed is not used for another clip either", async () => {
+    const a = await completedUpload(video(3_900_000_000, noise(3 * part + 1000, 1)));
+    // (As if the tab died between "complete" and the record's write.)
+    store.set(a.fp, { ...a, completed: undefined });
+    const b = fileOf(video(3_900_000_000, noise(3 * part + 1000, 3)), "IMG_0042.MOV", 7);
+    answer = (path, body) => {
+      if (path === "/uploads/multipart/parts") {
+        return json({ completed: true, parts: [1, 2, 3, 4].map((n) => ({ part_number: n, size: n < 4 ? part : b.size - 3 * part })) });
+      }
+      return newUpload(path, body);
+    };
+    const res = await uploadResumable({ file: b });
+    expect(res.storage_key).toBe("uploads/B.mov");
+    const paths = [...new Set(calls.map((c) => c.path).filter((p) => p !== "/uploads/telemetry"))];
+    expect(paths).toEqual(["/uploads/multipart/parts", "/uploads/multipart/init", "/uploads/multipart/sign", "/uploads/multipart/complete"]);
+    expect(partsSent()).toEqual([1, 2, 3, 4]);
+  });
+
+  it("an MP4's record from before the hashes keeps its parts as before, also after the start screen read it", async () => {
+    const bytes = video(11);
+    const f = fileOf(bytes, "IMG_0042.MOV", 1);
+    const c2 = (await contentFingerprint(f))!;
+    store.set(c2, record(c2, { size: bytes.length, part_size: part, parts_total: total, done: [1, 2], ticket: "tk" }));
+    // uploadJob asks for the percent first (that moves the record).
+    expect(await resumableProgress(f)).not.toBeNull();
+    answer = (path, body) => {
+      if (path === "/uploads/multipart/parts") return json({ parts: [{ part_number: 1, size: part }, { part_number: 2, size: part }] });
+      return signAll(path, body) ?? json({}, 500);
+    };
+    await uploadResumable({ file: f });
+    expect(partsSent()).toEqual([3, 4]);
+    // From now on its parts carry hashes.
+    expect(Object.keys([...store.values()][0].hashes ?? {}).sort()).toEqual(["1", "2", "3", "4"]);
+  });
+
+  it("an MP4's record under the raw-bytes key (from before the m1 key) is found and moved", async () => {
+    const bytes = video(7);
+    const f = fileOf(bytes, "a.mov", 1);
+    const c2 = (await contentFingerprint(f))!;
+    const m1 = (await fingerprint(f))!;
+    expect(c2).toMatch(/^c2:/);
+    expect(m1).toMatch(/^m1:/);
+    store.set(c2, record(c2, { size: bytes.length, part_size: part, parts_total: total }));
+    const f2 = fileOf(bytes, "b.mov", 2);
+    const rec = await findRecord(f2);
+    expect(rec?.fp).toBe(m1);
+    expect([...store.keys()]).toEqual([m1]);
+    // The same File asked again (the upload after the start screen's
+    // percent): still a raw-bytes match. Another File: the moov key's.
+    expect((await findRecordMatch(f2))?.by).toBe("c2");
+    expect((await findRecordMatch(fileOf(bytes, "c.mov", 3)))?.by).toBe("m1");
+    // Only these very bytes find it there: a re-export (other times) doesn't.
+    store.clear();
+    store.set(c2, record(c2, { size: bytes.length }));
+    expect(await findRecord(fileOf(video(8), "a.mov", 1))).toBeNull();
   });
 });

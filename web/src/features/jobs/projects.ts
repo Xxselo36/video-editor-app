@@ -29,6 +29,9 @@ export type UploadRecord = {
   /** What POST /jobs gets: "Try again" after a reload asks for the file
    *  again and starts it with these. */
   settings?: UploadSettings;
+  /** "any": the file came from the unfiltered iOS input ("Pick anyway",
+   *  iOS converted it): "Continue upload" opens that one again. */
+  source?: "any";
 };
 
 /** What this device keeps of a project (cleocuts.jobs.v2). */

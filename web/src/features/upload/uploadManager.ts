@@ -55,7 +55,7 @@ export {
 
 /** Put up the record of a new upload (its temporary id until POST /jobs
  *  names the job); marked as this page's (liveUploads). */
-export function uploadCard(file: File, settings: SettingsSource, preset: PresetId | null): string {
+export function uploadCard(file: File, settings: SettingsSource, preset: PresetId | null, source?: "any"): string {
   const tempId = `upl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const info = preset ? PRESETS[preset] : null;
   liveUploads.add(tempId);
@@ -66,6 +66,7 @@ export function uploadCard(file: File, settings: SettingsSource, preset: PresetI
     presetLabel: info ? tEn(info.labelKey) : null,
     // (Read now for the record: a later change still reaches POST /jobs.)
     settings: readSettings(settings),
+    ...(source ? { source } : {}),
   });
   live.set(tempId, { id: tempId, pct: 0, resuming: false });
   emit();
@@ -141,7 +142,11 @@ export async function startUpload(
     onCard,
     onCreated,
     onEnd,
+    source,
   }: {
+    /** "any": picked with the unfiltered iOS input ("Pick anyway"): kept
+     *  with the upload, so a resume opens that input again. */
+    source?: "any";
     /** The upload's card is up (its temporary id: useLiveUpload). */
     onCard?: (tempId: string) => void;
     /** The job exists (its card replaced the upload's). */
@@ -155,7 +160,7 @@ export async function startUpload(
   if (running.has(fk)) return;
   // The tile goes up now, before anything is awaited: Projects shows it
   // the moment it opens.
-  const tempId = uploadCard(file, settings, preset);
+  const tempId = uploadCard(file, settings, preset, source);
   running.set(fk, tempId);
   guardUnload();
   // Other tabs: this record's upload runs (lib/uploadLock), until onEnd.
@@ -179,7 +184,7 @@ export async function startUpload(
     unlock();
     controllers.delete(tempId);
     const online = typeof navigator === "undefined" || navigator.onLine !== false;
-    retries.set(tempId, { file, settings, preset });
+    retries.set(tempId, { file, settings, preset, ...(source ? { source } : {}) });
     recordUploadFailed(tempId, { code: online ? "app_updated" : "connection_lost" });
     emit();
     onEnd?.(null);
@@ -188,6 +193,7 @@ export async function startUpload(
   return uploadJob(file, settings, preset, {
     tempId,
     signal: ctl.signal,
+    source,
     onPaywall: (pw) => {
       setPaywall(pw);
     },
@@ -205,7 +211,7 @@ export async function startUpload(
       emit();
     },
     onFailed: () => {
-      retries.set(tempId, { file, settings, preset });
+      retries.set(tempId, { file, settings, preset, ...(source ? { source } : {}) });
     },
     onProgress: (id, pct, resuming) => {
       const cur = live.get(id);

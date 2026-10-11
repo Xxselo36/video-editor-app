@@ -371,10 +371,10 @@ def test_init_refusals_in_presign_order(client, r2, enforce, bearer,
     add_sub(plan="starter", period_start=time.time() - 60)
     r = _init(client, 10, headers=h, duration=6000)
     assert r.json()["detail"]["code"] == "quota_exceeded"
-    for size in (0, -5, 4.1e9):
+    for size in (0, -5, 10.1e9):
         r = _init(client, size, headers=h)
         assert (r.status_code, r.json()) == (
-            413, {"detail": "file_too_large", "max_gb": 4, "code": "file_too_large", "params": {"max_gb": 4}})
+            413, {"detail": "file_too_large", "max_gb": 10, "code": "file_too_large", "params": {"max_gb": 10}})
     monkeypatch.setenv("CLEO_MAX_MINUTES", "1")
     r = _init(client, 10, headers=h, duration=120)
     assert (r.status_code, r.json()) == (

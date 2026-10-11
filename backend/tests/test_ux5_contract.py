@@ -307,12 +307,16 @@ def test_config(client, monkeypatch):
     c = r.json()
     assert sorted(c) == ["billing", "caption_presets", "formats", "free_renders",
                          "incident", "limits", "spoken_languages"]
-    assert c["limits"] == {"max_upload_bytes": 4_000_000_000, "max_seconds": 1800,
+    # CLEO_UPLOAD_MODE unset: single PUTs, so 5 GB (R2 takes at most
+    # 5 GiB in one PUT), not the 10 GB default.
+    assert c["limits"] == {"max_upload_bytes": 5_000_000_000, "max_seconds": 1800,
                            "min_seconds": 3}
     assert c["formats"] == ["9:16", "1:1", "16:9"]
     assert c["caption_presets"][0] == {"id": "clean", "name_key": "app.captions.clean",
                                        "status": "live", "scripts": None}
     assert c["billing"] == {"enabled": False} and c["incident"] is None
+    monkeypatch.setenv("CLEO_UPLOAD_MODE", "multipart")
+    assert client.get("/config").json()["limits"]["max_upload_bytes"] == 10_000_000_000
     monkeypatch.setenv("CLEO_MAX_UPLOAD_GB", "0.5")
     monkeypatch.setenv("CLEO_MAX_MINUTES", "0")
     monkeypatch.setenv("CLEO_MIN_SECONDS", "0")

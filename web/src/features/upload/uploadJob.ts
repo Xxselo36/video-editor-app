@@ -227,9 +227,11 @@ export async function uploadJob(
   targetFile: File,
   settings: SettingsSource,
   selectedPreset: PresetId | null,
-  { tempId, signal, onPaywall, onCreated, onFailed, onStarting, onProgress, onPaused, onEnd }: {
+  { tempId, signal, source, onPaywall, onCreated, onFailed, onStarting, onProgress, onPaused, onEnd }: {
     /** The upload record's temporary id (uploadCard). */
     tempId: string;
+    /** "any": picked with the unfiltered iOS input (lib/uploadResume). */
+    source?: "any";
     /** Cancel (UX12): stops the upload and aborts it on the server. */
     signal?: AbortSignal;
     /** Billing refused the upload (402): the dialog with a way to a plan. */
@@ -345,9 +347,10 @@ export async function uploadJob(
     const R2_THRESHOLD = 90 * 1024 * 1024; // 90MB
     let res: XMLHttpRequest | null = null;
 
-    // An interrupted upload of these very bytes (size + first and last
-    // 2 MiB, whatever the file is called now): the card starts where it
-    // stopped, and the stopped tile of it goes (v2).
+    // An interrupted upload of this video (by content, whatever the file
+    // is called now, also when iOS exported it again: lib/uploadResume):
+    // the card starts where it stopped, and the stopped tile of it goes
+    // (v2).
     const resumedPct = await resumableProgress(targetFile);
     if (resumedPct !== null) {
       resumingFrom = resumedPct;
@@ -415,6 +418,7 @@ export async function uploadJob(
         },
         signal,
         duration,
+        source,
       });
       storageKey = up.storage_key;
       releaseUpload = up.release;

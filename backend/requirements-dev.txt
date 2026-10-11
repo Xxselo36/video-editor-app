@@ -8,7 +8,11 @@ httpx>=0.27
 # moto fakes R2 (S3 API) in the backend tests — in-process (mock_aws)
 # and as a server (ThreadedMotoServer, needs the server extra) for the ffprobe / browser tests;
 # CLEO_TEST_MEDIA=r2 runs the whole suite on it.
-moto[s3,server]>=5.2
+# Below 5.2.4: from 5.2.4 the active mock_aws reads a streamed body
+# (upload_file) even of a request it passes through, so under
+# CLEO_TEST_MEDIA=r2 the PUTs test_wp3_http sends its ThreadedMotoServer
+# arrive empty and time out. Lift the cap once a release fixes that.
+moto[s3,server]>=5.2,<5.2.4
 # An embedded Postgres for CLEO_TEST_DB=postgres and the test_pg_* files.
 # No wheels for Python ≥ 3.13 yet: there (and in CI) CLEO_TEST_PG_URL
 # names a Postgres server instead, and the outage test (which stops and

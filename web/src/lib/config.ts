@@ -29,9 +29,9 @@ export type AppConfig = {
   incident: { key: string; severity: string } | null;
 };
 
-/** backend/main.py's defaults (CLEO_MAX_UPLOAD_GB=4, CLEO_MAX_MINUTES=30,
- *  CLEO_MIN_SECONDS=3). */
-export const DEFAULT_LIMITS: Limits = { max_upload_bytes: 4e9, max_seconds: 30 * 60, min_seconds: 3 };
+/** backend/main.py's defaults (CLEO_MAX_UPLOAD_GB=10 with multipart
+ *  uploads, CLEO_MAX_MINUTES=30, CLEO_MIN_SECONDS=3). */
+export const DEFAULT_LIMITS: Limits = { max_upload_bytes: 10e9, max_seconds: 30 * 60, min_seconds: 3 };
 
 export const DEFAULT_CONFIG: AppConfig = {
   limits: DEFAULT_LIMITS,
