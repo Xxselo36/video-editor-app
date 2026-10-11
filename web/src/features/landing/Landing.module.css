@@ -276,16 +276,17 @@
   position: relative;
 }
 .hero {
-  --clip-w: 7rem;
+  --clip-w: 6.5rem;
 }
 .stage {
-  --clip-w: 7rem;
+  --clip-w: 6.5rem;
   /* where the tape ends: under the middle of the clip */
   --tape-end: calc(var(--clip-w) * 0.5);
-  --strip-h: 8rem;
+  --strip-h: 9.5rem;
   position: relative;
+  isolation: isolate;
   margin-top: 2rem;
-  height: 13rem;
+  height: 12.5rem;
 }
 @media (min-width: 768px) {
   .hero { --clip-w: clamp(10rem, 13vw, 13.5rem); }
@@ -298,9 +299,12 @@
   }
 }
 
-/* Narration: one chip at a time, over the piece it is about. */
+/* Narration: one chip at a time, over the piece it is about, on its
+ * own layer above the tape; chips further right sit a little higher
+ * because the tape rises toward its end. */
 .rail {
   position: absolute;
+  z-index: 4;
   left: 0;
   right: var(--tape-end);
   bottom: calc(var(--strip-h) * 0.62 + 0.5rem);
@@ -309,7 +313,7 @@
 .railItem {
   position: absolute;
   left: var(--at, 0%);
-  bottom: 0;
+  bottom: var(--lift, 0rem);
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
@@ -332,13 +336,18 @@
  * at the moment its chip shows; the earlier pieces are gone by then. */
 .railStart { --rc: var(--cmd-start); --at: 0%; --ax: 0%; }
 .railCut { --rc: var(--cmd-cut); --at: 13%; }
-.railFiller { --at: 27%; }
-.railPause { --at: 45%; }
-.railSkip { --rc: var(--cmd-stopgo); --at: 56%; }
+.railFiller { --at: 27%; --lift: 0.25rem; }
+.railPause { --at: 45%; --lift: 0.5rem; }
+.railSkip { --rc: var(--cmd-stopgo); --at: 56%; --lift: 0.625rem; }
+/* Phones: the tape is narrow; keep the first chips inside the gutter. */
+@media (max-width: 767px) {
+  .railCut { --ax: 0%; }
+}
 /* “Cleo finish” sits just left of the clip that stands up at the end. */
 .railFinish {
   --rc: var(--cmd-finish);
   --ax: 0%;
+  --lift: 1rem;
   left: auto;
   right: calc(var(--clip-w) * 0.5 + 0.75rem);
 }
@@ -559,6 +568,16 @@
 }
 .demo[data-clip="up"] .clip {
   transform: perspective(60rem) rotateX(0deg);
+}
+/* Lying flat, the clip's tag and scrub bar would smear; they appear
+ * as it stands up. */
+.clip .frameTag,
+.clip .scrub {
+  transition: opacity 240ms var(--ease-out);
+}
+.demo:not([data-clip="up"]) .clip .frameTag,
+.demo:not([data-clip="up"]) .clip .scrub {
+  opacity: 0;
 }
 .clip .clipCaption {
   opacity: 0;
@@ -1334,6 +1353,8 @@
   .post,
   .clip,
   .clip .clipCaption,
+  .clip .frameTag,
+  .clip .scrub,
   .scrubHead,
   .legendItem,
   .pan,
