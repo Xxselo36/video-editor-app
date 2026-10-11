@@ -20,7 +20,6 @@
  * Counts: lib/i18n/plural.ts.
  */
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { Globe } from "lucide-react";
 import { LANGS, LANG_COOKIE, LANG_STORAGE_KEY, detectLang, isLang, type Lang } from "./langs";
 import { en, type Dict, type MessageKey } from "./messages/en";
 
@@ -47,6 +46,14 @@ const LOADERS: Record<Exclude<Lang, "en">, Loader> = {
 
 // Loaded dictionaries; English always.
 const DICTS: Partial<Record<Lang, Dict>> = { en };
+// English strings a page brings itself (the landing's, kept out of `en`
+// so the app routes don't carry them).
+const EN_EXTRA: Dict = {};
+
+/** Add English strings that aren't in `en` (call at module level). */
+export function registerEnglish(messages: Dict): void {
+  Object.assign(EN_EXTRA, messages);
+}
 const pending = new Map<Lang, Promise<boolean>>();
 const dictListeners = new Set<() => void>();
 
@@ -183,7 +190,7 @@ export function translate(
   key: MessageKey,
   vars?: Record<string, string | number>,
 ): string {
-  let s = DICTS[lang]?.[key] ?? en[key] ?? key;
+  let s = DICTS[lang]?.[key] ?? (en as Dict)[key] ?? EN_EXTRA[key] ?? key;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(String(v));
   }
@@ -213,8 +220,25 @@ export function LanguageSwitcher({ className = "" }: { className?: string }) {
       style={{ background: "var(--surface-2)", color: "var(--text-body)", border: "1px solid var(--border)" }}
     >
       <span className="sr-only">{t("common.language")}</span>
-      <Globe aria-hidden size={14} strokeWidth={2} className="pointer-events-none absolute left-2.5 shrink-0" />
-      <span aria-hidden className="py-1.5 pl-7 pr-3 text-xs font-semibold uppercase sm:hidden">
+      {/* lucide "globe", inline: lucide-react here would add ~5 KB to every
+          route's first load (the switcher is on every page). */}
+      <svg
+        aria-hidden
+        width={14}
+        height={14}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="pointer-events-none absolute left-2.5 shrink-0"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+        <path d="M2 12h20" />
+      </svg>
+      <span aria-hidden className="py-1.5 pl-7 pr-3 text-xs font-semibold uppercase tracking-wider sm:hidden">
         {lang}
       </span>
       <select

@@ -55,6 +55,35 @@
   unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
+@font-face {
+  font-family: "CleoCap Poppins";
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/captions/poppins-800.latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2212;
+}
+@font-face {
+  font-family: "CleoCap Poppins";
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/captions/poppins-800.devanagari.ttf") format("truetype");
+  unicode-range: U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+25CC, U+A830-A839, U+A8E0-A8FF;
+}
+@font-face {
+  font-family: "CleoCap Inter";
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/captions/inter-display-700.latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2212;
+}
+@font-face {
+  font-family: "CleoCap Inter";
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/captions/inter-display-700.cyrillic.woff2") format("woff2");
+  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
 /* ── Page frame ─────────────────────────────────────────────────── */
 
 .page {
@@ -106,6 +135,17 @@
   transform: none;
 }
 
+/* Keep focused or anchored elements clear of the sticky header and,
+ * on phones, of the bottom bar (WCAG 2.4.11). */
+:global(html):has(.page) {
+  scroll-padding-top: 5rem;
+}
+@media (max-width: 767px) {
+  :global(html):has(.page) {
+    scroll-padding-bottom: 6rem;
+  }
+}
+
 /* ── Header ─────────────────────────────────────────────────────── */
 
 .header {
@@ -121,6 +161,11 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+}
+@media (max-width: 359px) {
+  .logo > span > span {
+    display: none;
+  }
 }
 .headerActions {
   display: flex;
@@ -224,10 +269,14 @@
 }
 
 /* ── Take strip (hero stage) ────────────────────────────────────── */
+/* Driven by TakeStrip's step machine: data-* attributes on .demo say
+ * what the current step shows, and transitions run only between steps,
+ * so nothing animates during the holds. */
 
+.demo {
+  position: relative;
+}
 .stage {
-  --T: 14s;
-  --t0: -11s;
   --clip-w: 7.5rem;
   position: relative;
   margin-top: 2rem;
@@ -272,14 +321,24 @@
   white-space: nowrap;
   color: var(--rc, var(--text-body));
   opacity: 0;
-  animation: var(--T) var(--ease-out) var(--t0) infinite;
+  transform: translateY(6px);
+  transition:
+    opacity 280ms var(--ease-out),
+    transform 280ms var(--ease-out);
 }
-.railStart { --rc: var(--cmd-start); animation-name: rail-start; }
-.railCut { --rc: var(--cmd-cut); animation-name: rail-cut; }
-.railFiller { animation-name: rail-filler; }
-.railPause { animation-name: rail-pause; }
-.railSkip { --rc: var(--cmd-stopgo); animation-name: rail-skip; }
-.railFinish { --rc: var(--cmd-finish); animation-name: rail-finish; }
+.railStart { --rc: var(--cmd-start); }
+.railCut { --rc: var(--cmd-cut); }
+.railSkip { --rc: var(--cmd-stopgo); }
+.railFinish { --rc: var(--cmd-finish); }
+.demo[data-rail="start"] .railStart,
+.demo[data-rail="cut"] .railCut,
+.demo[data-rail="filler"] .railFiller,
+.demo[data-rail="pause"] .railPause,
+.demo[data-rail="skip"] .railSkip,
+.demo[data-rail="finish"] .railFinish {
+  opacity: 1;
+  transform: none;
+}
 .struck {
   text-decoration: line-through;
   text-decoration-thickness: 2px;
@@ -291,37 +350,6 @@
   height: 0.75rem;
   border-radius: 0.25rem;
   background: repeating-linear-gradient(135deg, var(--border-strong) 0 2px, transparent 2px 5px);
-}
-
-@keyframes rail-start {
-  0%, 15.5% { opacity: 1; transform: none; }
-  17%, 97% { opacity: 0; transform: translateY(-4px); }
-  99.5%, 100% { opacity: 1; transform: none; }
-}
-@keyframes rail-cut {
-  0%, 16% { opacity: 0; transform: translateY(6px); }
-  18%, 27% { opacity: 1; transform: none; }
-  28.5%, 100% { opacity: 0; transform: translateY(-4px); }
-}
-@keyframes rail-filler {
-  0%, 28% { opacity: 0; transform: translateY(6px); }
-  29.5%, 37.5% { opacity: 1; transform: none; }
-  38.5%, 100% { opacity: 0; transform: translateY(-4px); }
-}
-@keyframes rail-pause {
-  0%, 38% { opacity: 0; transform: translateY(6px); }
-  39.5%, 47.5% { opacity: 1; transform: none; }
-  48.5%, 100% { opacity: 0; transform: translateY(-4px); }
-}
-@keyframes rail-skip {
-  0%, 48% { opacity: 0; transform: translateY(6px); }
-  49.5%, 57.5% { opacity: 1; transform: none; }
-  58.5%, 100% { opacity: 0; transform: translateY(-4px); }
-}
-@keyframes rail-finish {
-  0%, 58% { opacity: 0; transform: translateY(6px); }
-  59.5%, 90% { opacity: 1; transform: none; }
-  92.5%, 100% { opacity: 0; transform: translateY(-4px); }
 }
 
 .stripArea {
@@ -349,7 +377,7 @@
   bottom: -0.5rem;
   height: 1.5rem;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.55), transparent);
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--surface-0) 85%, transparent), transparent);
   transform: translateY(0.5rem);
   pointer-events: none;
 }
@@ -360,7 +388,7 @@
   align-items: stretch;
   gap: 3px;
   overflow: hidden;
-  border-radius: 0.875rem;
+  border-radius: 0.75rem;
   transform: rotateX(56deg) rotateZ(-2.5deg);
   transform-origin: 50% 100%;
 }
@@ -369,10 +397,14 @@
   position: relative;
   flex: var(--g) 1 0px;
   min-width: 0;
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
   border: 1px solid var(--border-hover);
-  background: var(--surface-2);
-  animation: var(--T) var(--ease-out) var(--t0) infinite;
+  background-color: var(--surface-2);
+  transition:
+    flex-grow 520ms var(--ease-out),
+    opacity 360ms var(--ease-out),
+    background-color 240ms var(--ease-out),
+    border-color 240ms var(--ease-out);
 }
 .seg::before {
   content: "";
@@ -386,13 +418,12 @@
 .segTake { --g: 18; }
 .segTake2 { --g: 12; }
 .segTake3 { --g: 21; }
-.segBad { --g: 22; animation-name: seg-bad; }
-.segFiller { --g: 5; animation-name: seg-filler; }
+.segBad { --g: 22; }
+.segFiller { --g: 5; }
 .segFiller::before { inset: 34% 0.25rem; }
 .segPause {
   --g: 8;
-  background: repeating-linear-gradient(135deg, var(--surface-1) 0 5px, var(--surface-tint) 5px 7px);
-  animation-name: seg-pause;
+  background-image: repeating-linear-gradient(135deg, var(--surface-1) 0 5px, var(--surface-tint) 5px 7px);
 }
 .segPause::before {
   inset: calc(50% - 1px) 0.5rem;
@@ -400,26 +431,55 @@
   mask: none;
   opacity: 0.5;
 }
-.segSkip { --g: 14; animation-name: seg-skip; }
+.segSkip { --g: 14; }
 
 .post {
   position: relative;
   flex: 0 0 3px;
   border-radius: 2px;
   background: var(--pc);
-  box-shadow: 0 0 10px color-mix(in oklab, var(--pc) 70%, transparent);
+  transition:
+    flex-basis 520ms var(--ease-out),
+    opacity 360ms var(--ease-out);
 }
 .postStart { --pc: var(--cmd-start); }
 .postKeep { --pc: var(--cmd-keep); }
 .postFinish { --pc: var(--cmd-finish); }
-.postCut {
-  --pc: var(--cmd-cut);
-  animation: post-cut var(--T) var(--ease-out) var(--t0) infinite;
-}
+.postCut { --pc: var(--cmd-cut); }
 .postStop,
-.postGo {
-  --pc: var(--cmd-stopgo);
-  animation: post-skip var(--T) var(--ease-out) var(--t0) infinite;
+.postGo { --pc: var(--cmd-stopgo); }
+
+/* A piece the current step is about, then the piece removed. */
+.demo[data-take="mark"] .segBad {
+  --wave: var(--cmd-cut);
+  border-color: var(--cmd-cut);
+  background-color: color-mix(in oklab, var(--cmd-cut) 32%, var(--surface-2));
+}
+.demo[data-filler="mark"] .segFiller {
+  border-color: var(--border-strong);
+  background-color: var(--surface-tint);
+}
+.demo[data-pause="mark"] .segPause {
+  border-color: var(--border-strong);
+}
+.demo[data-skip="mark"] .segSkip {
+  --wave: var(--cmd-stopgo);
+  border-color: var(--cmd-stopgo);
+  background-color: color-mix(in oklab, var(--cmd-stopgo) 28%, var(--surface-2));
+}
+.demo[data-take="gone"] .segBad,
+.demo[data-filler="gone"] .segFiller,
+.demo[data-pause="gone"] .segPause,
+.demo[data-skip="gone"] .segSkip {
+  flex-grow: 0;
+  border-width: 0;
+  opacity: 0;
+}
+.demo[data-take="gone"] .postCut,
+.demo[data-skip="gone"] .postStop,
+.demo[data-skip="gone"] .postGo {
+  flex-basis: 0px;
+  opacity: 0;
 }
 
 /* The recording sweep at the start of each loop. */
@@ -429,7 +489,6 @@
   transform: translateX(-100%);
   opacity: 0;
   pointer-events: none;
-  animation: sweep var(--T) linear var(--t0) infinite;
 }
 .sweep::after {
   content: "";
@@ -440,47 +499,18 @@
   width: 2px;
   border-radius: 1px;
   background: var(--text-strong);
-  box-shadow: 0 0 12px var(--text-strong);
 }
-
-@keyframes sweep {
-  0% { transform: translateX(-100%); opacity: 1; }
-  15.5% { transform: translateX(0%); opacity: 1; }
-  17%, 100% { transform: translateX(0%); opacity: 0; }
+.demo[data-sweep="run"] .sweep {
+  transform: none;
+  opacity: 1;
+  transition:
+    transform 2200ms linear,
+    opacity 160ms var(--ease-out);
 }
-@keyframes seg-bad {
-  0%, 17% { flex-grow: 22; opacity: 1; background: var(--surface-2); border-color: var(--border-hover); --wave: var(--text-muted); }
-  19%, 21.5% { flex-grow: 22; opacity: 1; background: color-mix(in oklab, var(--cmd-cut) 32%, var(--surface-2)); border-color: var(--cmd-cut); --wave: var(--cmd-cut); }
-  25.5%, 91% { flex-grow: 0; opacity: 0; background: color-mix(in oklab, var(--cmd-cut) 32%, var(--surface-2)); border-color: var(--cmd-cut); border-width: 0; }
-  98%, 100% { flex-grow: 22; opacity: 1; background: var(--surface-2); border-color: var(--border-hover); border-width: 1px; }
-}
-@keyframes post-cut {
-  0%, 21.5% { flex-basis: 3px; opacity: 1; }
-  25.5%, 91% { flex-basis: 0px; opacity: 0; }
-  98%, 100% { flex-basis: 3px; opacity: 1; }
-}
-@keyframes seg-filler {
-  0%, 29.5% { flex-grow: 5; opacity: 1; background: var(--surface-2); }
-  31%, 32% { flex-grow: 5; opacity: 1; background: var(--surface-tint); border-color: var(--border-strong); }
-  35.5%, 91% { flex-grow: 0; opacity: 0; border-width: 0; }
-  98%, 100% { flex-grow: 5; opacity: 1; background: var(--surface-2); border-width: 1px; }
-}
-@keyframes seg-pause {
-  0%, 39.5% { flex-grow: 8; opacity: 1; border-color: var(--border-hover); }
-  41%, 42% { flex-grow: 8; opacity: 1; border-color: var(--border-strong); }
-  45.5%, 91% { flex-grow: 0; opacity: 0; border-width: 0; }
-  98%, 100% { flex-grow: 8; opacity: 1; border-width: 1px; border-color: var(--border-hover); }
-}
-@keyframes seg-skip {
-  0%, 49.5% { flex-grow: 14; opacity: 1; background: var(--surface-2); border-color: var(--border-hover); --wave: var(--text-muted); }
-  51.5%, 52.5% { flex-grow: 14; opacity: 1; background: color-mix(in oklab, var(--cmd-stopgo) 28%, var(--surface-2)); border-color: var(--cmd-stopgo); --wave: var(--cmd-stopgo); }
-  56%, 91% { flex-grow: 0; opacity: 0; border-width: 0; }
-  98%, 100% { flex-grow: 14; opacity: 1; background: var(--surface-2); border-color: var(--border-hover); border-width: 1px; }
-}
-@keyframes post-skip {
-  0%, 52.5% { flex-basis: 3px; opacity: 1; }
-  56%, 91% { flex-basis: 0px; opacity: 0; }
-  98%, 100% { flex-basis: 3px; opacity: 1; }
+.demo[data-sweep="end"] .sweep {
+  transform: none;
+  opacity: 0;
+  transition: opacity 240ms var(--ease-out);
 }
 
 /* The finished clip stands up out of the strip's end. */
@@ -492,7 +522,11 @@
   width: var(--clip-w);
   aspect-ratio: 9 / 16;
   transform-origin: 50% 100%;
-  animation: clip-rise var(--T) var(--ease-out) var(--t0) infinite;
+  transform: perspective(60rem) rotateX(78deg);
+  opacity: 0;
+  transition:
+    transform 700ms var(--ease-out),
+    opacity 300ms var(--ease-out);
 }
 @media (min-width: 768px) {
   .clip {
@@ -500,19 +534,20 @@
     bottom: 4.75rem;
   }
 }
-@keyframes clip-rise {
-  0%, 58.5% { transform: perspective(60rem) rotateX(78deg); opacity: 0; }
-  60% { opacity: 1; }
-  65%, 91% { transform: perspective(60rem) rotateX(0deg); opacity: 1; }
-  97%, 100% { transform: perspective(60rem) rotateX(78deg); opacity: 0; }
+.demo[data-clip="up"] .clip {
+  transform: perspective(60rem) rotateX(0deg);
+  opacity: 1;
 }
-.clipCaption {
-  animation: clip-caption var(--T) var(--ease-out) var(--t0) infinite;
+.clip .clipCaption {
+  opacity: 0;
+  transform: translateY(-50%) scale(0.92);
+  transition:
+    opacity 240ms var(--ease-out),
+    transform 240ms var(--ease-out);
 }
-@keyframes clip-caption {
-  0%, 64% { opacity: 0; transform: translateY(-50%) scale(0.92); }
-  66.5%, 91% { opacity: 1; transform: translateY(-50%) scale(1); }
-  93%, 100% { opacity: 0; transform: translateY(-50%) scale(1); }
+.demo[data-caption="on"] .clip .clipCaption {
+  opacity: 1;
+  transform: translateY(-50%);
 }
 
 /* Legend: what gets removed and added; the current step lights up. */
@@ -539,8 +574,6 @@
   list-style: none;
 }
 .legendItem {
-  --T: 14s;
-  --t0: -11s;
   display: inline-flex;
   align-items: center;
   gap: 0.4375rem;
@@ -551,7 +584,16 @@
   font-size: 0.8125rem;
   line-height: 1.3;
   color: var(--text-body);
-  animation: var(--T) var(--ease-out) var(--t0) infinite;
+  transition:
+    border-color 240ms var(--ease-out),
+    color 240ms var(--ease-out);
+}
+@media (min-width: 768px) {
+  .legendItem {
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+  }
 }
 .swatch {
   width: 0.625rem;
@@ -564,45 +606,20 @@
   background: repeating-linear-gradient(135deg, var(--border-strong) 0 2px, transparent 2px 4px);
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
-.liTake { --sw: var(--cmd-cut); --lc: var(--cmd-cut); animation-name: li-take; }
-.liFillers { --sw: var(--text-muted); --lc: var(--text-muted); animation-name: li-fillers; }
-.liPauses { --lc: var(--text-muted); animation-name: li-pauses; }
-.liSkip { --sw: var(--cmd-stopgo); --lc: var(--cmd-stopgo); animation-name: li-skip; }
-.liCaptions { --sw: var(--text-strong); --lc: var(--text-strong); animation-name: li-captions; }
-
-@keyframes li-take {
-  0%, 16.5% { border-color: var(--border); color: var(--text-body); }
-  18%, 27% { border-color: var(--lc); color: var(--text-strong); }
-  28.5%, 100% { border-color: var(--border); color: var(--text-body); }
-}
-@keyframes li-fillers {
-  0%, 28% { border-color: var(--border); color: var(--text-body); }
-  29.5%, 37.5% { border-color: var(--border-strong); color: var(--text-strong); }
-  38.5%, 100% { border-color: var(--border); color: var(--text-body); }
-}
-@keyframes li-pauses {
-  0%, 38% { border-color: var(--border); color: var(--text-body); }
-  39.5%, 47.5% { border-color: var(--border-strong); color: var(--text-strong); }
-  48.5%, 100% { border-color: var(--border); color: var(--text-body); }
-}
-@keyframes li-skip {
-  0%, 48% { border-color: var(--border); color: var(--text-body); }
-  49.5%, 57.5% { border-color: var(--lc); color: var(--text-strong); }
-  58.5%, 100% { border-color: var(--border); color: var(--text-body); }
-}
-@keyframes li-captions {
-  0%, 64% { border-color: var(--border); color: var(--text-body); }
-  66%, 90% { border-color: var(--border-strong); color: var(--text-strong); }
-  92%, 100% { border-color: var(--border); color: var(--text-body); }
+.liTake { --sw: var(--cmd-cut); --lc: var(--cmd-cut); }
+.liFillers { --sw: var(--text-muted); --lc: var(--border-strong); }
+.liPauses { --lc: var(--border-strong); }
+.liSkip { --sw: var(--cmd-stopgo); --lc: var(--cmd-stopgo); }
+.liCaptions { --sw: var(--text-strong); --lc: var(--border-strong); }
+.demo[data-li="take"] .liTake,
+.demo[data-li="fillers"] .liFillers,
+.demo[data-li="pauses"] .liPauses,
+.demo[data-li="skip"] .liSkip,
+.demo[data-li="captions"] .liCaptions {
+  border-color: var(--lc);
+  color: var(--text-strong);
 }
 
-@media (min-width: 768px) {
-  .legendItem {
-    gap: 0.5rem;
-    padding: 0.375rem 0.75rem;
-    font-size: 0.875rem;
-  }
-}
 /* Phones: the toggle sits in the stage's free corner, left above the
  * strip; from tablets on it ends the legend row. */
 .playToggle {
@@ -610,13 +627,6 @@
   left: 0;
   top: calc(2rem + 2.75rem);
   z-index: 4;
-}
-@media (min-width: 768px) {
-  .playToggle {
-    position: static;
-  }
-}
-.playToggle {
   display: inline-flex;
   flex: none;
   height: 2.25rem;
@@ -632,6 +642,11 @@
     color 150ms var(--ease-out),
     transform 150ms var(--ease-out);
 }
+@media (min-width: 768px) {
+  .playToggle {
+    position: static;
+  }
+}
 .playToggle:active {
   transform: scale(0.94);
 }
@@ -640,20 +655,6 @@
     border-color: var(--border-strong);
     color: var(--text-strong);
   }
-}
-
-/* Stopped: paused by the visitor, off-screen or in a hidden tab. */
-.demo {
-  position: relative;
-}
-.demo[data-running="false"] .railItem,
-.demo[data-running="false"] .seg,
-.demo[data-running="false"] .post,
-.demo[data-running="false"] .sweep,
-.demo[data-running="false"] .clip,
-.demo[data-running="false"] .clipCaption,
-.demo[data-running="false"] .legendItem {
-  animation-play-state: paused;
 }
 
 /* ── Caption frames (hero clip and the styles section) ──────────── */
@@ -665,9 +666,9 @@
   border-radius: 1rem;
   border: 1px solid var(--border-strong);
   background:
-    radial-gradient(120% 60% at 50% 18%, color-mix(in oklab, var(--brand) 22%, transparent), transparent 70%),
+    radial-gradient(120% 60% at 50% 18%, color-mix(in oklab, var(--text-strong) 7%, transparent), transparent 70%),
     linear-gradient(172deg, var(--surface-tint), var(--surface-1) 55%, var(--surface-0));
-  box-shadow: 0 24px 48px -24px rgba(0, 0, 0, 0.9), 0 2px 6px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-md);
 }
 .clip .frame {
   height: 100%;
@@ -687,7 +688,7 @@
   position: absolute;
   left: 8%;
   right: 8%;
-  top: 68%;
+  top: var(--cap-y, 68%);
   transform: translateY(-50%);
   text-align: center;
   color: #fff;
@@ -716,6 +717,48 @@
   paint-order: stroke fill;
 }
 .capClipper .hl { color: #39ff14; }
+.capKaraoke {
+  font-family: "CleoCap Poppins", var(--font-sans, system-ui), sans-serif;
+  font-weight: 800;
+  font-size: 7.8cqw;
+  line-height: 1.15;
+  -webkit-text-stroke: 0.1em #000;
+  paint-order: stroke fill;
+  text-shadow: 0 0.04em 0.08em rgba(0, 0, 0, 0.5);
+}
+.capKaraoke .hl { color: #ffd400; }
+.capReveal {
+  font-family: "CleoCap Poppins", var(--font-sans, system-ui), sans-serif;
+  font-weight: 800;
+  font-size: 9cqw;
+  line-height: 1.12;
+  -webkit-text-stroke: 0.08em #000;
+  paint-order: stroke fill;
+  text-shadow: 0 0.04em 0.1em rgba(0, 0, 0, 0.45);
+}
+.capReveal .hl { color: #7cf3ff; }
+.capSubtitle {
+  --cap-y: 72%;
+  font-family: "CleoCap Inter", var(--font-sans, system-ui), sans-serif;
+  font-weight: 700;
+  font-size: 5.6cqw;
+  line-height: 1.3;
+}
+.capSubtitle .line {
+  border-radius: 0.25em;
+  background: rgba(0, 0, 0, 0.72);
+  padding: 0.12em 0.35em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.capMinimal {
+  --cap-y: 74%;
+  font-family: "CleoCap Inter", var(--font-sans, system-ui), sans-serif;
+  font-weight: 700;
+  font-size: 5.8cqw;
+  line-height: 1.2;
+  text-shadow: 0 0.03em 0.25em rgba(0, 0, 0, 0.75);
+}
 .capBoxed {
   font-family: "CleoCap Montserrat", var(--font-sans, system-ui), sans-serif;
   font-weight: 800;
@@ -860,6 +903,7 @@
   }
 }
 .sentence {
+  display: grid;
   margin: 0;
   border-radius: 1rem;
   border: 1px solid var(--border);
@@ -874,16 +918,21 @@
 @media (min-width: 768px) {
   .sentence { padding: 2.5rem; }
 }
+.sentence > span {
+  grid-area: 1 / 1;
+  transition: opacity 480ms var(--ease-out);
+}
+.sentenceClean {
+  opacity: 0;
+}
+.sentence[data-clean="true"] .sentenceRaw {
+  opacity: 0;
+}
+.sentence[data-clean="true"] .sentenceClean {
+  opacity: 1;
+}
 .token {
-  display: inline-flex;
-  max-width: 12em;
-  vertical-align: baseline;
-  overflow: hidden;
   white-space: nowrap;
-  transition:
-    max-width 600ms var(--ease-out),
-    opacity 400ms var(--ease-out),
-    margin 600ms var(--ease-out);
 }
 .tokenFiller {
   color: var(--text-muted);
@@ -892,7 +941,8 @@
   text-decoration-color: var(--text-muted);
 }
 .tokenPause {
-  align-self: center;
+  display: inline-block;
+  vertical-align: 0.3em;
   margin-inline: 0.1em;
   border-radius: 0.375rem;
   background: repeating-linear-gradient(135deg, var(--surface-tint) 0 4px, transparent 4px 7px);
@@ -902,13 +952,7 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.9;
-  color: var(--text-muted);
-}
-.sentence[data-clean="true"] .token {
-  max-width: 0;
-  opacity: 0;
-  margin: 0;
-  padding: 0;
+  color: var(--text-body);
 }
 .cleanupNote {
   margin-top: 1rem;
@@ -969,32 +1013,41 @@
   width: min(100%, 21.25rem);
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  border-radius: 0.875rem;
+  border-radius: 0.75rem;
   border: 1px solid var(--border-hover);
-  background:
-    radial-gradient(28% 50% at var(--subject-x, 50%) 55%, color-mix(in oklab, var(--text-strong) 14%, transparent), transparent 70%),
-    linear-gradient(180deg, var(--surface-2), var(--surface-1));
-  animation: subject 9s ease-in-out infinite alternate;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+}
+/* The subject and the 9:16 crop move together: the crop follows the
+ * face. Once, when the figure comes into view. */
+.pan {
+  position: absolute;
+  inset: 0;
+  transform: translateX(-16%);
+  transition: transform 600ms var(--ease-out);
+}
+.wide[data-shown="true"] .pan {
+  transform: none;
+}
+.subject {
+  position: absolute;
+  left: 50%;
+  top: 55%;
+  width: 40%;
+  height: 90%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--text-strong) 16%, transparent), transparent);
 }
 .window {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--subject-x, 50%) - 15.8%);
+  left: 34.2%;
   aspect-ratio: 9 / 16;
   border-radius: 0.5rem;
   box-shadow:
     0 0 0 2px var(--text-strong),
     0 0 0 100vmax color-mix(in oklab, var(--surface-0) 55%, transparent);
-}
-@property --subject-x {
-  syntax: "<percentage>";
-  inherits: true;
-  initial-value: 50%;
-}
-@keyframes subject {
-  0% { --subject-x: 38%; }
-  100% { --subject-x: 62%; }
 }
 .clips {
   width: 100%;
@@ -1063,7 +1116,7 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
   background: var(--surface-2);
   color: var(--text-strong);
 }
@@ -1162,6 +1215,10 @@
     transform 200ms var(--ease-out),
     visibility 0s linear 200ms;
 }
+/* (beats .ctaWide's width: auto from 640 px) */
+.sticky .cta {
+  width: 100%;
+}
 @media (min-width: 768px) {
   .sticky { display: none; }
 }
@@ -1217,47 +1274,35 @@
 }
 
 /* ── Reduced motion: one still frame that tells the whole story ── */
+/* TakeStrip shows its still step (everything removed is marked); here
+ * the transitions go and the marked pieces get a struck-out hatch. */
 
 @media (prefers-reduced-motion: reduce) {
   .railItem,
-  .seg,
-  .post,
   .sweep,
-  .clip,
-  .clipCaption,
-  .legendItem,
-  .wide {
-    animation: none;
-  }
-  .railItem,
-  .sweep {
-    display: none;
-  }
-  .segBad {
-    background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--cmd-cut) 40%, var(--surface-2)) 0 5px, var(--surface-2) 5px 9px);
-    border-color: var(--cmd-cut);
-  }
-  .segSkip {
-    background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--cmd-stopgo) 36%, var(--surface-2)) 0 5px, var(--surface-2) 5px 9px);
-    border-color: var(--cmd-stopgo);
-  }
-  .segFiller {
-    background: var(--surface-tint);
-    border-color: var(--border-strong);
-  }
-  .clipCaption {
-    opacity: 1;
-    transform: translateY(-50%);
-  }
   .playToggle {
     display: none;
   }
-  .token,
-  .headerCta,
-  .sticky,
+  .seg,
+  .post,
+  .clip,
+  .clip .clipCaption,
+  .legendItem,
+  .pan,
+  .sentence > span,
   .faqChevron,
   .cta,
-  .footerLink {
+  .footerLink,
+  .headerActions .headerCta,
+  .headerActions .headerCta[data-shown="false"],
+  .sticky,
+  .sticky[data-shown="false"] {
     transition: none;
+  }
+  .demo[data-take="mark"] .segBad {
+    background-image: repeating-linear-gradient(135deg, color-mix(in oklab, var(--cmd-cut) 40%, var(--surface-2)) 0 5px, var(--surface-2) 5px 9px);
+  }
+  .demo[data-skip="mark"] .segSkip {
+    background-image: repeating-linear-gradient(135deg, color-mix(in oklab, var(--cmd-stopgo) 36%, var(--surface-2)) 0 5px, var(--surface-2) 5px 9px);
   }
 }

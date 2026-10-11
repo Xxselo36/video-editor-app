@@ -15,7 +15,8 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import { LogoWord } from "@/components/Logo";
-import { LanguageSwitcher, useT } from "@/i18n";
+import { LanguageSwitcher, registerEnglish, useT } from "@/i18n";
+import { enLanding } from "@/i18n/messages/en/landing";
 import { useBillingEnabled } from "@/lib/account";
 import { track } from "@/lib/analytics";
 import { COPYRIGHT } from "@/lib/legal";
@@ -34,12 +35,16 @@ import {
 import { CtaLink, rich, useCmdNodes, useInView } from "@/features/landing/shared";
 import styles from "@/features/landing/Landing.module.css";
 
+// The landing's English strings live outside the shared `en` bundle.
+registerEnglish(enLanding);
+
 export default function Landing() {
   const t = useT();
   const billingOn = useBillingEnabled();
   const cmds = useCmdNodes();
-  // The hero's button counts as on screen until measured.
-  const [heroCtaRef, heroCtaVisible] = useInView<HTMLAnchorElement>({}, true);
+  // The hero's button counts as on screen until measured, and as gone
+  // once it is under the sticky header (4rem + its border).
+  const [heroCtaRef, heroCtaVisible] = useInView<HTMLAnchorElement>({ rootMargin: "-65px 0px 0px 0px" }, true);
   const [finalCtaRef, finalCtaVisible] = useInView<HTMLAnchorElement>();
   const extraShown = !heroCtaVisible && !finalCtaVisible;
 
@@ -55,11 +60,14 @@ export default function Landing() {
 
       <header className={styles.header}>
         <div className={cx(styles.wrap, styles.headerInner)}>
-          <Link href="/" className="shrink-0" aria-label={t("site.header.homeAria")}>
+          {/* The narrowest phones show the mark only (room for "Sign in").
+              One LogoWord, not two logos: a hidden copy of the mark would
+              own the SVG gradient ids and blank the visible one. */}
+          <Link href="/" className={cx("shrink-0", styles.logo)} aria-label={t("site.header.homeAria")}>
             <LogoWord />
           </Link>
           <div className={styles.headerActions}>
-            <PricingLink className="mr-2 hidden text-sm sm:inline" />
+            <PricingLink className="mr-2 hidden sm:inline" />
             <LanguageSwitcher />
             {/* Accounts on: "Sign in" (stays visible on phones) or the avatar. */}
             <AccountMenu returnHere={false} />

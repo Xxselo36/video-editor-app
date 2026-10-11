@@ -8,14 +8,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ChevronDown, FileText, RefreshCw, Share2, Type, Undo2 } from "lucide-react";
-import { useT } from "@/i18n";
+import { useLang, useT, type Lang } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
 import { BILLING_COPY } from "@/lib/auth";
 import { useBillingEnabled } from "@/lib/account";
 import { Icon } from "@/components/ui/Icon";
 import { cx } from "@/components/ui/cx";
 import { CaptionFrame, type FramePreset } from "./CaptionFrame";
-import { CMD_COLOR, Cmd, CtaLink, rich, useInView, useReducedMotion, type CmdId } from "./shared";
+import { CMD_COLOR, Cmd, CtaLink, rich, useCmdNodes, useInView, useReducedMotion, type CmdId } from "./shared";
 import styles from "./Landing.module.css";
 
 /** Bonus clips: at most this many (backend/llm.py detect_hook_moments),
@@ -76,13 +76,14 @@ function Mini({ parts }: { parts: MiniPart[] }) {
 
 export function CommandsSection() {
   const t = useT();
+  const cmds = useCmdNodes();
   return (
     <section className={styles.section} aria-labelledby="commands-title">
       <div className={styles.wrap}>
         <h2 id="commands-title" className={styles.h2}>
           {t("site.commands.title")}
         </h2>
-        <p className={styles.body}>{t("site.commands.sub")}</p>
+        <p className={styles.body}>{rich(t("site.commands.sub"), cmds)}</p>
         <ul className={styles.cmdList}>
           {COMMAND_ROWS.map((row) => (
             <li key={row.ids.join("-")} className={styles.cmdRow}>
@@ -119,10 +120,17 @@ export function AutoSection() {
   }, [inView, clean, reduced]);
 
   const filler = t("site.demo.filler");
-  const sentence = rich(t("site.auto.sample"), {
+  const sample = t("site.auto.sample");
+  const raw = rich(sample, {
     um: <span className={cx(styles.token, styles.tokenFiller)}>{filler}</span>,
     pause: <span className={cx(styles.token, styles.tokenPause)}>{t("site.auto.pause")}</span>,
   });
+  // The same sentence without the pauses and filler words.
+  const cleaned = sample
+    .replace(/\{(um|pause)\}/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([.,!?;:。、，！？])/g, "$1")
+    .trim();
   const body = rich(t("site.auto.body"), {
     um: t("site.quote", { text: filler }),
     tight: <strong className="font-semibold text-[var(--text-strong)]">{t("app.start.paceTight")}</strong>,
@@ -140,8 +148,13 @@ export function AutoSection() {
           <p className={styles.body}>{body}</p>
           <p className={styles.cleanupNote}>{t("site.auto.cleanup")}</p>
         </div>
+        {/* Both versions sit in one grid cell and cross-fade, so the
+            page never shifts; screen readers get the cleaned one. */}
         <p ref={ref} className={styles.sentence} data-clean={clean}>
-          {sentence}
+          <span className={styles.sentenceRaw} aria-hidden="true">
+            {raw}
+          </span>
+          <span className={styles.sentenceClean}>{cleaned}</span>
         </p>
       </div>
     </section>
@@ -150,24 +163,65 @@ export function AutoSection() {
 
 /* ── Caption styles ── */
 
-const STYLE_FRAMES: FramePreset[] = ["power", "boxed", "clipper", "elegant"];
+/** Four styles the page language's script really gets
+ *  (lib/captions/script-support.json: Cyrillic has no Mega, Clipper,
+ *  One Word; CJK also no Elegant; Devanagari only five styles). */
+const STYLE_FRAMES: Record<"latin" | "cyrillic" | "cjk" | "devanagari", FramePreset[]> = {
+  latin: ["power", "boxed", "clipper", "elegant"],
+  cyrillic: ["power", "boxed", "karaoke", "elegant"],
+  cjk: ["power", "boxed", "karaoke", "minimal"],
+  devanagari: ["karaoke", "reveal", "subtitle", "minimal"],
+};
+function scriptOf(lang: Lang): keyof typeof STYLE_FRAMES {
+  if (lang === "ru") return "cyrillic";
+  if (lang === "ja" || lang === "ko") return "cjk";
+  if (lang === "hi") return "devanagari";
+  return "latin";
+}
+/** The CSS font of each frame preset (Landing.module.css @font-face). */
+const PRESET_FONT: Record<FramePreset, string> = {
+  power: '900 1em "CleoCap Montserrat"',
+  boxed: '800 1em "CleoCap Montserrat"',
+  clipper: '1em "CleoCap Bangers"',
+  elegant: 'italic 800 1em "CleoCap Playfair"',
+  karaoke: '800 1em "CleoCap Poppins"',
+  reveal: '800 1em "CleoCap Poppins"',
+  subtitle: '700 1em "CleoCap Inter"',
+  minimal: '700 1em "CleoCap Inter"',
+};
 
-/** Render the caption text (and so fetch its fonts) once the section is
- *  near, or after the page has settled. */
-function useLateFonts(): [React.RefObject<HTMLUListElement | null>, boolean] {
+/** Once the section is near (or the page has settled), fetch the frames'
+ *  fonts for this text, then show the captions: no fallback-font flash. */
+function useLateFonts(presets: FramePreset[], text: string): [React.RefObject<HTMLUListElement | null>, boolean] {
   const [ref, near] = useInView<HTMLUListElement>({ rootMargin: "600px 0px" });
   const [idle, setIdle] = useState(false);
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     const id = window.setTimeout(() => setIdle(true), 3000);
     return () => window.clearTimeout(id);
   }, []);
-  return [ref, near || idle];
+  const key = presets.join(",");
+  useEffect(() => {
+    if (!(near || idle)) return;
+    let live = true;
+    const fonts = typeof document !== "undefined" ? document.fonts : undefined;
+    const loads = fonts ? key.split(",").map((p) => fonts.load(PRESET_FONT[p as FramePreset], text).catch(() => [])) : [];
+    // Show the captions anyway after a while (slow network, blocked fonts).
+    const late = window.setTimeout(() => live && setReady(true), 2500);
+    Promise.all(loads).then(() => live && setReady(true));
+    return () => {
+      live = false;
+      window.clearTimeout(late);
+    };
+  }, [near, idle, key, text]);
+  return [ref, ready];
 }
 
 export function CaptionsSection() {
   const t = useT();
-  const [ref, ready] = useLateFonts();
+  const presets = STYLE_FRAMES[scriptOf(useLang())];
   const sample = t("site.demo.caption");
+  const [ref, ready] = useLateFonts(presets, sample.replace(/[[\]]/g, ""));
   return (
     <section className={styles.section} aria-labelledby="captions-title">
       <div className={styles.wrap}>
@@ -176,7 +230,7 @@ export function CaptionsSection() {
         </h2>
         <p className={styles.body}>{t("site.captions.body")}</p>
         <ul ref={ref} className={styles.styles}>
-          {STYLE_FRAMES.map((p) => (
+          {presets.map((p) => (
             <li key={p} className={styles.styleItem}>
               <CaptionFrame preset={p} text={sample} showText={ready} />
               <p className={styles.styleName}>{t(`editor.style.preset.${p}` as MessageKey)}</p>
@@ -192,13 +246,18 @@ export function CaptionsSection() {
 
 export function FormatSection() {
   const t = useT();
+  // The crop follows the face once, when the figure comes into view.
+  const [figRef, figSeen] = useInView<HTMLDivElement>({ threshold: 0.5 });
   return (
     <section className={styles.section}>
       <div className={cx(styles.wrap, styles.pair)}>
         <div>
           <div className={styles.figure} aria-hidden="true">
-            <div className={styles.wide}>
-              <div className={styles.window} />
+            <div ref={figRef} className={styles.wide} data-shown={figSeen}>
+              <div className={styles.pan}>
+                <span className={styles.subject} />
+                <span className={styles.window} />
+              </div>
             </div>
           </div>
           <h2 className={styles.h3}>{t("site.format.title")}</h2>

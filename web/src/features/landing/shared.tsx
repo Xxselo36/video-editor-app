@@ -127,7 +127,12 @@ export function useInView<T extends Element>(
       setInView(true);
       return;
     }
-    const io = new IntersectionObserver(([e]) => setInView(e.isIntersecting), { root, rootMargin, threshold });
+    // The latest entry: several can queue up between two callbacks.
+    const io = new IntersectionObserver((entries) => setInView(entries[entries.length - 1].isIntersecting), {
+      root,
+      rootMargin,
+      threshold,
+    });
     io.observe(el);
     return () => io.disconnect();
   }, [root, rootMargin, threshold]);

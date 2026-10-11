@@ -2,6 +2,7 @@ import type { Dict } from "../en";
 import { idApp } from "./app";
 import { idEditor } from "./editor";
 import { idMail } from "./mail";
+import { idLanding } from "./landing";
 import { idSite } from "./site";
 
-export const id: Dict = { ...idSite, ...idApp, ...idEditor, ...idMail };
+export const id: Dict = { ...idSite, ...idLanding, ...idApp, ...idEditor, ...idMail };
