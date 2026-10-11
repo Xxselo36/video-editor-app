@@ -94,3 +94,12 @@ python gui.py  # (after pip install -r requirements.txt)
 - When editing gui.py, keep the THEME dict and style consistent
 - Test changes by running from source before committing
 - All three platforms (macOS, Windows, Linux) share the same gui.py — platform-specific code uses `sys.platform` checks
+
+## Web design (`web/`)
+Design skills live in `.claude/skills/` (sources: `.claude/THIRD_PARTY_SKILLS.md`). For any UI work on the website or web app:
+- `cleocuts-brand` always wins on colors, fonts, logo, components and copy voice — over every other skill's style presets.
+- Load `impeccable` (main workflow and quality floor), `design-taste-frontend` (use `redesign-existing-projects` when improving existing pages) and `emil-design-eng` (polish, motion; `animate` to build animations) before writing UI code.
+- `ui-ux-pro-max` for palettes, font pairings and UX rules; `frontend-design` overlaps with `impeccable` — prefer `impeccable`.
+- React/Next.js: `react-best-practices`, `composition-patterns`, `react-view-transitions`. Reviews: `web-design-guidelines`, `design-auditor`.
+- Style variants (`high-end-visual-design`, `minimalist-ui`, `industrial-brutalist-ui`) only when the brief asks for that style.
+- After UI changes, screenshot desktop + mobile (`playwright-cli` or `webapp-testing`) and fix what looks off.
