@@ -1,0 +1,718 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-11T20:07:29+00:00",
+  "title": "Design System: CleoCuts",
+  "extensions": {
+    "colorMeta": {
+      "surface-0": {
+        "role": "neutral",
+        "displayName": "Studio Black",
+        "canonical": "#0b0a10",
+        "tonalRamp": [
+          "oklch(15% 0.004 292.4)",
+          "oklch(25% 0.006 292.4)",
+          "oklch(35% 0.008 292.4)",
+          "oklch(45% 0.011 292.4)",
+          "oklch(55% 0.013 292.4)",
+          "oklch(65% 0.011 292.4)",
+          "oklch(80% 0.008 292.4)",
+          "oklch(95% 0.013 292.4)"
+        ]
+      },
+      "surface-1": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "#131217",
+        "tonalRamp": [
+          "oklch(15% 0.003 294.6)",
+          "oklch(25% 0.005 294.6)",
+          "oklch(35% 0.006 294.6)",
+          "oklch(45% 0.008 294.6)",
+          "oklch(55% 0.010 294.6)",
+          "oklch(65% 0.008 294.6)",
+          "oklch(80% 0.006 294.6)",
+          "oklch(95% 0.010 294.6)"
+        ]
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Raised",
+        "canonical": "#1b1a22",
+        "tonalRamp": [
+          "oklch(15% 0.004 290.8)",
+          "oklch(25% 0.007 290.8)",
+          "oklch(35% 0.010 290.8)",
+          "oklch(45% 0.013 290.8)",
+          "oklch(55% 0.016 290.8)",
+          "oklch(65% 0.013 290.8)",
+          "oklch(80% 0.009 290.8)",
+          "oklch(95% 0.016 290.8)"
+        ]
+      },
+      "surface-tint": {
+        "role": "neutral",
+        "displayName": "Wash",
+        "canonical": "#24222d",
+        "tonalRamp": [
+          "oklch(15% 0.006 293.2)",
+          "oklch(25% 0.009 293.2)",
+          "oklch(35% 0.013 293.2)",
+          "oklch(45% 0.017 293.2)",
+          "oklch(55% 0.021 293.2)",
+          "oklch(65% 0.017 293.2)",
+          "oklch(80% 0.012 293.2)",
+          "oklch(95% 0.021 293.2)"
+        ]
+      },
+      "text-strong": {
+        "role": "neutral",
+        "displayName": "Heading Text",
+        "canonical": "#f5f3fa",
+        "tonalRamp": [
+          "oklch(15% 0.003 299.2)",
+          "oklch(25% 0.004 299.2)",
+          "oklch(35% 0.006 299.2)",
+          "oklch(45% 0.008 299.2)",
+          "oklch(55% 0.010 299.2)",
+          "oklch(65% 0.008 299.2)",
+          "oklch(80% 0.006 299.2)",
+          "oklch(95% 0.010 299.2)"
+        ]
+      },
+      "text-body": {
+        "role": "neutral",
+        "displayName": "Body Text",
+        "canonical": "#c4c0d0",
+        "tonalRamp": [
+          "oklch(15% 0.006 297.3)",
+          "oklch(25% 0.010 297.3)",
+          "oklch(35% 0.014 297.3)",
+          "oklch(45% 0.018 297.3)",
+          "oklch(55% 0.023 297.3)",
+          "oklch(65% 0.019 297.3)",
+          "oklch(80% 0.013 297.3)",
+          "oklch(95% 0.023 297.3)"
+        ]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Muted Text",
+        "canonical": "#8b869a",
+        "tonalRamp": [
+          "oklch(15% 0.008 297.0)",
+          "oklch(25% 0.014 297.0)",
+          "oklch(35% 0.019 297.0)",
+          "oklch(45% 0.025 297.0)",
+          "oklch(55% 0.030 297.0)",
+          "oklch(65% 0.025 297.0)",
+          "oklch(80% 0.018 297.0)",
+          "oklch(95% 0.030 297.0)"
+        ]
+      },
+      "text-faint": {
+        "role": "neutral",
+        "displayName": "Faint Text",
+        "canonical": "#85809a",
+        "tonalRamp": [
+          "oklch(15% 0.011 294.0)",
+          "oklch(25% 0.018 294.0)",
+          "oklch(35% 0.025 294.0)",
+          "oklch(45% 0.032 294.0)",
+          "oklch(55% 0.039 294.0)",
+          "oklch(65% 0.033 294.0)",
+          "oklch(80% 0.023 294.0)",
+          "oklch(95% 0.039 294.0)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#23222b",
+        "tonalRamp": [
+          "oklch(15% 0.005 290.3)",
+          "oklch(25% 0.008 290.3)",
+          "oklch(35% 0.011 290.3)",
+          "oklch(45% 0.014 290.3)",
+          "oklch(55% 0.017 290.3)",
+          "oklch(65% 0.014 290.3)",
+          "oklch(80% 0.010 290.3)",
+          "oklch(95% 0.017 290.3)"
+        ]
+      },
+      "border-hover": {
+        "role": "neutral",
+        "displayName": "Hairline Hover",
+        "canonical": "#3a3849",
+        "tonalRamp": [
+          "oklch(15% 0.008 290.2)",
+          "oklch(25% 0.013 290.2)",
+          "oklch(35% 0.019 290.2)",
+          "oklch(45% 0.024 290.2)",
+          "oklch(55% 0.029 290.2)",
+          "oklch(65% 0.025 290.2)",
+          "oklch(80% 0.017 290.2)",
+          "oklch(95% 0.029 290.2)"
+        ]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Hairline Strong",
+        "canonical": "#545267",
+        "tonalRamp": [
+          "oklch(15% 0.009 289.3)",
+          "oklch(25% 0.016 289.3)",
+          "oklch(35% 0.022 289.3)",
+          "oklch(45% 0.028 289.3)",
+          "oklch(55% 0.034 289.3)",
+          "oklch(65% 0.028 289.3)",
+          "oklch(80% 0.020 289.3)",
+          "oklch(95% 0.034 289.3)"
+        ]
+      },
+      "brand": {
+        "role": "primary",
+        "displayName": "Deep Violet",
+        "canonical": "#8b5cf6",
+        "tonalRamp": [
+          "oklch(15% 0.060 292.7)",
+          "oklch(25% 0.100 292.7)",
+          "oklch(35% 0.139 292.7)",
+          "oklch(45% 0.179 292.7)",
+          "oklch(55% 0.219 292.7)",
+          "oklch(65% 0.182 292.7)",
+          "oklch(80% 0.128 292.7)",
+          "oklch(95% 0.060 292.7)"
+        ]
+      },
+      "brand-solid": {
+        "role": "primary",
+        "displayName": "Solid Violet",
+        "canonical": "#7c3aed",
+        "tonalRamp": [
+          "oklch(15% 0.067 293.0)",
+          "oklch(25% 0.112 293.0)",
+          "oklch(35% 0.157 293.0)",
+          "oklch(45% 0.202 293.0)",
+          "oklch(55% 0.247 293.0)",
+          "oklch(65% 0.205 293.0)",
+          "oklch(80% 0.144 293.0)",
+          "oklch(95% 0.060 293.0)"
+        ]
+      },
+      "brand-solid-hover": {
+        "role": "primary",
+        "displayName": "Solid Violet Hover",
+        "canonical": "#6d28d9",
+        "tonalRamp": [
+          "oklch(15% 0.066 292.6)",
+          "oklch(25% 0.110 292.6)",
+          "oklch(35% 0.154 292.6)",
+          "oklch(45% 0.197 292.6)",
+          "oklch(55% 0.241 292.6)",
+          "oklch(65% 0.201 292.6)",
+          "oklch(80% 0.141 292.6)",
+          "oklch(95% 0.060 292.6)"
+        ]
+      },
+      "brand-hover": {
+        "role": "primary",
+        "displayName": "Lilac",
+        "canonical": "#a78bfa",
+        "tonalRamp": [
+          "oklch(15% 0.043 293.5)",
+          "oklch(25% 0.072 293.5)",
+          "oklch(35% 0.101 293.5)",
+          "oklch(45% 0.130 293.5)",
+          "oklch(55% 0.159 293.5)",
+          "oklch(65% 0.133 293.5)",
+          "oklch(80% 0.093 293.5)",
+          "oklch(95% 0.060 293.5)"
+        ]
+      },
+      "brand-strong": {
+        "role": "primary",
+        "displayName": "Pale Violet (text on tint)",
+        "canonical": "#ddd6fe",
+        "tonalRamp": [
+          "oklch(15% 0.015 293.3)",
+          "oklch(25% 0.025 293.3)",
+          "oklch(35% 0.035 293.3)",
+          "oklch(45% 0.045 293.3)",
+          "oklch(55% 0.055 293.3)",
+          "oklch(65% 0.046 293.3)",
+          "oklch(80% 0.032 293.3)",
+          "oklch(95% 0.055 293.3)"
+        ]
+      },
+      "on-brand-solid": {
+        "role": "neutral",
+        "displayName": "White on Solid Violet",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0.000 89.9)",
+          "oklch(25% 0.000 89.9)",
+          "oklch(35% 0.000 89.9)",
+          "oklch(45% 0.000 89.9)",
+          "oklch(55% 0.000 89.9)",
+          "oklch(65% 0.000 89.9)",
+          "oklch(80% 0.000 89.9)",
+          "oklch(95% 0.000 89.9)"
+        ]
+      },
+      "accent": {
+        "role": "secondary",
+        "displayName": "Magenta (gradient partner)",
+        "canonical": "#ec4899",
+        "tonalRamp": [
+          "oklch(15% 0.058 354.3)",
+          "oklch(25% 0.096 354.3)",
+          "oklch(35% 0.135 354.3)",
+          "oklch(45% 0.173 354.3)",
+          "oklch(55% 0.212 354.3)",
+          "oklch(65% 0.176 354.3)",
+          "oklch(80% 0.124 354.3)",
+          "oklch(95% 0.060 354.3)"
+        ]
+      },
+      "danger": {
+        "role": "neutral",
+        "displayName": "Danger",
+        "canonical": "#ef6b57",
+        "tonalRamp": [
+          "oklch(15% 0.046 30.6)",
+          "oklch(25% 0.076 30.6)",
+          "oklch(35% 0.106 30.6)",
+          "oklch(45% 0.137 30.6)",
+          "oklch(55% 0.167 30.6)",
+          "oklch(65% 0.139 30.6)",
+          "oklch(80% 0.097 30.6)",
+          "oklch(95% 0.060 30.6)"
+        ]
+      },
+      "warn": {
+        "role": "neutral",
+        "displayName": "Warning",
+        "canonical": "#f59e0b",
+        "tonalRamp": [
+          "oklch(15% 0.045 70.1)",
+          "oklch(25% 0.075 70.1)",
+          "oklch(35% 0.105 70.1)",
+          "oklch(45% 0.135 70.1)",
+          "oklch(55% 0.165 70.1)",
+          "oklch(65% 0.137 70.1)",
+          "oklch(80% 0.096 70.1)",
+          "oklch(95% 0.060 70.1)"
+        ]
+      },
+      "success": {
+        "role": "neutral",
+        "displayName": "Success",
+        "canonical": "#10b981",
+        "tonalRamp": [
+          "oklch(15% 0.041 162.5)",
+          "oklch(25% 0.068 162.5)",
+          "oklch(35% 0.095 162.5)",
+          "oklch(45% 0.122 162.5)",
+          "oklch(55% 0.149 162.5)",
+          "oklch(65% 0.124 162.5)",
+          "oklch(80% 0.087 162.5)",
+          "oklch(95% 0.060 162.5)"
+        ]
+      },
+      "cmd-start": {
+        "role": "tertiary",
+        "displayName": "Start Blue",
+        "canonical": "#5a9fff",
+        "tonalRamp": [
+          "oklch(15% 0.043 257.0)",
+          "oklch(25% 0.072 257.0)",
+          "oklch(35% 0.101 257.0)",
+          "oklch(45% 0.129 257.0)",
+          "oklch(55% 0.158 257.0)",
+          "oklch(65% 0.132 257.0)",
+          "oklch(80% 0.092 257.0)",
+          "oklch(95% 0.060 257.0)"
+        ]
+      },
+      "cmd-cut": {
+        "role": "tertiary",
+        "displayName": "Cut Red",
+        "canonical": "#f26e6e",
+        "tonalRamp": [
+          "oklch(15% 0.045 22.2)",
+          "oklch(25% 0.074 22.2)",
+          "oklch(35% 0.104 22.2)",
+          "oklch(45% 0.134 22.2)",
+          "oklch(55% 0.163 22.2)",
+          "oklch(65% 0.136 22.2)",
+          "oklch(80% 0.095 22.2)",
+          "oklch(95% 0.060 22.2)"
+        ]
+      },
+      "cmd-keep": {
+        "role": "tertiary",
+        "displayName": "Keep Green",
+        "canonical": "#4ecc77",
+        "tonalRamp": [
+          "oklch(15% 0.045 151.0)",
+          "oklch(25% 0.075 151.0)",
+          "oklch(35% 0.105 151.0)",
+          "oklch(45% 0.135 151.0)",
+          "oklch(55% 0.165 151.0)",
+          "oklch(65% 0.137 151.0)",
+          "oklch(80% 0.096 151.0)",
+          "oklch(95% 0.060 151.0)"
+        ]
+      },
+      "cmd-finish": {
+        "role": "tertiary",
+        "displayName": "Finish Purple",
+        "canonical": "#b979ff",
+        "tonalRamp": [
+          "oklch(15% 0.053 303.8)",
+          "oklch(25% 0.089 303.8)",
+          "oklch(35% 0.124 303.8)",
+          "oklch(45% 0.160 303.8)",
+          "oklch(55% 0.195 303.8)",
+          "oklch(65% 0.163 303.8)",
+          "oklch(80% 0.114 303.8)",
+          "oklch(95% 0.060 303.8)"
+        ]
+      },
+      "cmd-stopgo": {
+        "role": "tertiary",
+        "displayName": "Stop/Go Amber",
+        "canonical": "#f5b54d",
+        "tonalRamp": [
+          "oklch(15% 0.038 76.4)",
+          "oklch(25% 0.063 76.4)",
+          "oklch(35% 0.089 76.4)",
+          "oklch(45% 0.114 76.4)",
+          "oklch(55% 0.139 76.4)",
+          "oklch(65% 0.116 76.4)",
+          "oklch(80% 0.081 76.4)",
+          "oklch(95% 0.060 76.4)"
+        ]
+      },
+      "brand-tint": {
+        "role": "primary",
+        "displayName": "Violet Wash",
+        "canonical": "rgba(139, 92, 246, 0.12)",
+        "tonalRamp": [
+          "oklch(15% 0.060 292.7)",
+          "oklch(25% 0.100 292.7)",
+          "oklch(35% 0.139 292.7)",
+          "oklch(45% 0.179 292.7)",
+          "oklch(55% 0.219 292.7)",
+          "oklch(65% 0.182 292.7)",
+          "oklch(80% 0.128 292.7)",
+          "oklch(95% 0.060 292.7)"
+        ]
+      },
+      "brand-glow": {
+        "role": "primary",
+        "displayName": "Violet Glow",
+        "canonical": "rgba(139, 92, 246, 0.4)",
+        "tonalRamp": [
+          "oklch(15% 0.060 292.7)",
+          "oklch(25% 0.100 292.7)",
+          "oklch(35% 0.139 292.7)",
+          "oklch(45% 0.179 292.7)",
+          "oklch(55% 0.219 292.7)",
+          "oklch(65% 0.182 292.7)",
+          "oklch(80% 0.128 292.7)",
+          "oklch(95% 0.060 292.7)"
+        ]
+      },
+      "accent-tint": {
+        "role": "secondary",
+        "displayName": "Magenta Wash",
+        "canonical": "rgba(236, 72, 153, 0.14)",
+        "tonalRamp": [
+          "oklch(15% 0.058 354.3)",
+          "oklch(25% 0.096 354.3)",
+          "oklch(35% 0.135 354.3)",
+          "oklch(45% 0.173 354.3)",
+          "oklch(55% 0.212 354.3)",
+          "oklch(65% 0.176 354.3)",
+          "oklch(80% 0.124 354.3)",
+          "oklch(95% 0.060 354.3)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Page headline (landing hero); closing headline uses the same voice up to 4rem."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section titles, max 22 to 28ch, balanced."
+      },
+      "command-word": {
+        "displayName": "Command Word",
+        "purpose": "A spoken command set in its --cmd-* colour."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Feature titles inside a section."
+      },
+      "lead": {
+        "displayName": "Lead",
+        "purpose": "Hero sub, text-body, max 34rem."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Paragraphs, text-body, max 38 to 40rem."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Buttons, chips, legend items (600 to 650)."
+      },
+      "group-label": {
+        "displayName": "Group Label",
+        "purpose": "SectionLabel: uppercase name of a group of items inside the app; not placed above headlines."
+      },
+      "editor-ui": {
+        "displayName": "Editor UI",
+        "purpose": "Geist, loaded only in the editor v2 chunk (--ed-font)."
+      },
+      "editor-mono": {
+        "displayName": "Editor Mono",
+        "purpose": "Geist Mono, editor only (--ed-mono): timecodes, numbers."
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow-sm",
+        "value": "0 1px 2px rgba(0, 0, 0, 0.4)",
+        "purpose": "Hairline lift for small controls."
+      },
+      {
+        "name": "shadow-md",
+        "value": "0 8px 20px rgba(0, 0, 0, 0.35)",
+        "purpose": "Caption frames and floating panels."
+      },
+      {
+        "name": "shadow-glow",
+        "value": "0 0 0 1px rgba(139, 92, 246, 0.25), 0 8px 32px rgba(139, 92, 246, 0.22)",
+        "purpose": "Primary calls to action and focused hero elements only."
+      },
+      {
+        "name": "dialog-backdrop",
+        "value": "background: rgba(0,0,0,0.7); backdrop-filter: blur(6px)",
+        "purpose": "Behind every Dialog."
+      },
+      {
+        "name": "ambient-glow",
+        "value": "radial-gradient(ellipse 70% 50% at 50% 0%, rgba(139,92,246,0.22), transparent 70%), radial-gradient(ellipse 50% 35% at 90% 15%, rgba(236,72,153,0.12), transparent 70%), radial-gradient(ellipse 40% 30% at 10% 20%, rgba(139,92,246,0.10), transparent 70%)",
+        "purpose": "Fixed body::before glow behind every page; the only place magenta appears on its own surface, always paired with violet."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "The one curve for entries and state transitions (landing --ease-out)."
+      },
+      {
+        "name": "phase-fade",
+        "value": "phase-fade-in 280ms cubic-bezier(0.16, 1, 0.3, 1) backwards; from opacity 0, translateY(8px)",
+        "purpose": "Screen and phase entry. Fill-mode backwards so no transform lingers to trap fixed dialogs."
+      },
+      {
+        "name": "press",
+        "value": "transform 150ms ease-out; scale(0.97) on :active",
+        "purpose": "Button and toggle press feedback (play toggle 0.94)."
+      },
+      {
+        "name": "step-chip",
+        "value": "opacity/transform 280ms ease-out, translateY(6px) to none",
+        "purpose": "Narration chips entering per demo step."
+      },
+      {
+        "name": "step-collapse",
+        "value": "flex-grow 520ms, opacity 360ms, colour 240ms ease-out",
+        "purpose": "A marked strip piece collapses out; transitions run only between step-machine steps, never during holds."
+      },
+      {
+        "name": "step-rise",
+        "value": "transform 700ms, opacity 300ms ease-out; perspective(60rem) rotateX(78deg) to 0",
+        "purpose": "The finished 9:16 clip stands up; caption pops in at 240ms."
+      },
+      {
+        "name": "step-sweep",
+        "value": "transform 2200ms linear",
+        "purpose": "The recording playhead sweep at the start of each loop."
+      },
+      {
+        "name": "reveal-once",
+        "value": "transform 600ms ease-out; opacity 480ms ease-out",
+        "purpose": "One-time in-view demos (reframe pan, sentence cleanup)."
+      },
+      {
+        "name": "bar-show-hide",
+        "value": "show 220 to 240ms, hide 160 to 200ms ease-out, visibility delayed on hide",
+        "purpose": "Header pill CTA and phone bottom bar appearing when the hero button is gone."
+      },
+      {
+        "name": "pulse-dot",
+        "value": "soft-pulse 2s ease-in-out infinite",
+        "purpose": "Live and listening indicators."
+      },
+      {
+        "name": "skeleton",
+        "value": "skeleton-shimmer 1.6s linear infinite",
+        "purpose": "Loading placeholders."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "@media (prefers-reduced-motion: reduce)",
+        "purpose": "phase-fade, skeleton, pulse-dot stop; landing transitions drop to none, the take strip shows one still frame with removed pieces hatched; loops also pause off screen and in hidden tabs."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary-lg",
+      "description": "The view's one main action (landing CTA adds the violet glow).",
+      "html": "<a class=\"ds-btn-primary\" href=\"#\">Create free account</a>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; border-radius: 0.75rem; padding: 1rem 1.5rem; font-size: 1rem; font-weight: 600; color: #fff; background: var(--brand-solid, #7c3aed); box-shadow: var(--shadow-glow, 0 0 0 1px rgba(139,92,246,0.25), 0 8px 32px rgba(139,92,246,0.22)); text-decoration: none; transition: background-color 150ms cubic-bezier(0.16,1,0.3,1), transform 150ms cubic-bezier(0.16,1,0.3,1); } .ds-btn-primary:hover { background: var(--brand-solid-hover, #6d28d9); } .ds-btn-primary:active { transform: scale(0.97); } .ds-btn-primary:focus-visible { outline: 2px solid var(--brand-hover, #a78bfa); outline-offset: 3px; }"
+    },
+    {
+      "name": "Pill Button",
+      "kind": "button",
+      "refersTo": "button-primary-pill",
+      "description": "Header action (New video, sticky header CTA).",
+      "html": "<button class=\"ds-btn-pill\">New video</button>",
+      "css": ".ds-btn-pill { border: none; border-radius: 9999px; padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 600; color: #fff; background: var(--brand-solid, #7c3aed); cursor: pointer; transition: background-color 150ms cubic-bezier(0.16,1,0.3,1); } .ds-btn-pill:hover { background: var(--brand-solid-hover, #6d28d9); } .ds-btn-pill:focus-visible { outline: 2px solid var(--brand-hover, #a78bfa); outline-offset: 3px; }"
+    },
+    {
+      "name": "Tint Button",
+      "kind": "button",
+      "refersTo": "button-tint",
+      "description": "Secondary action next to a primary.",
+      "html": "<button class=\"ds-btn-tint\">Edit again</button>",
+      "css": ".ds-btn-tint { border: none; border-radius: 0.75rem; padding: 0.625rem 1.5rem; font-size: 0.875rem; font-weight: 600; color: var(--brand-strong, #ddd6fe); background: var(--brand-tint, rgba(139,92,246,0.12)); cursor: pointer; } .ds-btn-tint:hover { background: rgba(139,92,246,0.2); } .ds-btn-tint:focus-visible { outline: 2px solid var(--brand-hover, #a78bfa); outline-offset: 3px; }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A panel on the page: surface-1, hairline border, 16px corners.",
+      "html": "<div class=\"ds-card\"><h3 class=\"ds-card-title\">Your video is ready</h3><p class=\"ds-card-body\">Captions burned in, 1080p, 9:16.</p></div>",
+      "css": ".ds-card { overflow: hidden; border-radius: 1rem; border: 1px solid var(--border, #23222b); background: var(--surface-1, #131217); padding: 1.5rem; transition: border-color 150ms cubic-bezier(0.16,1,0.3,1); } .ds-card:hover { border-color: var(--border-hover, #3a3849); } .ds-card-title { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.015em; color: var(--text-strong, #f5f3fa); } .ds-card-body { margin: 0.5rem 0 0; font-size: 1.0625rem; line-height: 1.6; color: var(--text-body, #c4c0d0); }"
+    },
+    {
+      "name": "Command Chip",
+      "kind": "chip",
+      "refersTo": "command-chip",
+      "description": "A spoken command narrated as a chip in its fixed colour.",
+      "html": "<span class=\"ds-cmd-chip\" style=\"--rc: var(--cmd-cut, #f26e6e)\">“Cleo cut”</span>",
+      "css": ".ds-cmd-chip { display: inline-flex; align-items: center; gap: 0.375rem; border-radius: 9999px; border: 1px solid var(--rc); background: color-mix(in oklab, var(--rc) 14%, var(--surface-1, #131217)); padding: 0.3125rem 0.75rem; font-size: 0.875rem; font-weight: 650; line-height: 1.3; white-space: nowrap; color: var(--rc); }"
+    },
+    {
+      "name": "Legend Chip",
+      "kind": "chip",
+      "refersTo": "legend-chip",
+      "description": "Neutral narration chip; the active one lights its border.",
+      "html": "<span class=\"ds-legend\"><i class=\"ds-swatch\"></i>Bad takes</span>",
+      "css": ".ds-legend { display: inline-flex; align-items: center; gap: 0.5rem; border-radius: 9999px; border: 1px solid var(--border, #23222b); background: var(--surface-1, #131217); padding: 0.375rem 0.75rem; font-size: 0.875rem; line-height: 1.3; color: var(--text-body, #c4c0d0); transition: border-color 240ms cubic-bezier(0.16,1,0.3,1), color 240ms cubic-bezier(0.16,1,0.3,1); } .ds-legend:hover { border-color: var(--cmd-cut, #f26e6e); color: var(--text-strong, #f5f3fa); } .ds-swatch { width: 0.625rem; height: 0.625rem; border-radius: 0.1875rem; background: var(--cmd-cut, #f26e6e); }"
+    },
+    {
+      "name": "Command Row",
+      "kind": "custom",
+      "refersTo": "command-word",
+      "description": "Dictionary row: the command word in its colour, then what it does, divided by hairlines.",
+      "html": "<div class=\"ds-cmd-row\"><h3 class=\"ds-cmd-word\" style=\"--c: var(--cmd-keep, #4ecc77)\">“Cleo keep”</h3><p class=\"ds-cmd-desc\">Keeps the take and moves to the next scene.</p></div>",
+      "css": ".ds-cmd-row { display: grid; gap: 0.75rem; padding-block: 1.5rem; border-top: 1px solid var(--border, #23222b); border-bottom: 1px solid var(--border, #23222b); } .ds-cmd-word { margin: 0; font-size: clamp(1.625rem, 1.3rem + 1.3vw, 2.25rem); line-height: 1.1; font-weight: 800; letter-spacing: -0.03em; color: var(--c); } .ds-cmd-desc { margin: 0; max-width: 34rem; font-size: 1.0625rem; line-height: 1.55; color: var(--text-body, #c4c0d0); }"
+    },
+    {
+      "name": "Icon Item",
+      "kind": "custom",
+      "refersTo": "icon-tile",
+      "description": "A lucide icon on a 36px raised tile beside a line of body text.",
+      "html": "<div class=\"ds-icon-item\"><span class=\"ds-icon-tile\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\"/><path d=\"M3 3v5h5\"/></svg></span><span>Restore any cut in the editor.</span></div>",
+      "css": ".ds-icon-item { display: flex; align-items: flex-start; gap: 1rem; padding-block: 1.25rem; border-bottom: 1px solid var(--border, #23222b); font-size: 1.0625rem; line-height: 1.55; color: var(--text-body, #c4c0d0); } .ds-icon-tile { display: inline-flex; width: 2.25rem; height: 2.25rem; flex: none; align-items: center; justify-content: center; border-radius: 0.5rem; background: var(--surface-2, #1b1a22); color: var(--text-strong, #f5f3fa); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Listening Studio",
+    "overview": "A dark, quiet edit bay at night. Surfaces are near-black with a slight violet undertone, layered from page to card to elevated by lightness, with a soft ambient violet and magenta glow fixed behind the page. Into that calm, colour enters for exactly two reasons: violet marks the one thing to do (the action, focus, the link), and five fixed hues name the spoken commands. Everything else is neutral, so a coloured word always means something.\n\nType is the system font, set heavy and tight for headlines and plain for reading; the site ships no web font. The editor alone loads Geist and Geist Mono. Caption fonts (Bangers, Montserrat, Poppins, Playfair, Inter) belong to the video, never to the interface. Motion is quick and calm: one ease-out curve, short steps, no bounce, and every animation has a reduced-motion answer.",
+    "keyCharacteristics": [
+      "Dark UI only (`color-scheme: dark`); no light theme, no pure black, no cold zinc.",
+      "Depth by lighter surface and hairline border, not heavy shadow.",
+      "Violet for action and focus; magenta only as violet's gradient partner.",
+      "Fixed command colours wherever a \"Cleo …\" command appears.",
+      "System font on the site; Geist only in the editor; Bangers only in captions and share images.",
+      "One ease-out curve, 150 to 700 ms, reduced motion respected everywhere."
+    ],
+    "rules": [
+      {
+        "name": "The One Violet Rule",
+        "body": "Violet is spent on actions, links, focus and active states. One primary (brand-solid) action per view; on the landing the header and phone bar carry it only while the hero and closing buttons are off screen.",
+        "section": "colors"
+      },
+      {
+        "name": "The Fixed Command Rule",
+        "body": "Each \"Cleo …\" command always wears its own `--cmd-*` colour, as text, chip border, marker post or tint, and nothing else uses those hues as decoration. Never swap them. Commands are written in the language's quotation marks and never translated.",
+        "section": "colors"
+      },
+      {
+        "name": "The Caption Data Rule",
+        "body": "Caption preset colours (yellow, neon green, cyan and so on from `web/src/lib/captions/presets.ts`) and their black strokes and drop shadows are video data rendered inside caption frames, not UI colours or UI shadows.",
+        "section": "colors"
+      },
+      {
+        "name": "The No Web Font Rule",
+        "body": "Site pages load no UI web font. Geist lives only in the editor; Bangers only in the Clipper caption style and share images; caption fonts load only inside caption frames.",
+        "section": "typography"
+      },
+      {
+        "name": "The Language Rule",
+        "body": "Headlines break by phrase in Japanese (`word-break: auto-phrase`) and keep words whole in Korean (`keep-all`); every string ships in all 14 languages.",
+        "section": "typography"
+      },
+      {
+        "name": "The Lighter-Surface Rule",
+        "body": "To raise something, make its surface lighter and give it a hairline; do not reach for a bigger shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use the CSS variables from `globals.css`, never raw hex, in UI components.",
+      "Do fill every filled brand button with `brand-solid` and white text, `brand-solid-hover` on hover.",
+      "Do colour every spoken command with its `--cmd-*` token, in quotation marks.",
+      "Do raise surfaces by lightness (surface-0 to 1 to 2) plus a 1px border.",
+      "Do enter screens with `phase-fade` (280ms, `cubic-bezier(0.16, 1, 0.3, 1)`, 8px rise) and use the same curve for every transition.",
+      "Do give every new animation a `prefers-reduced-motion` rule; looping demos pause off screen, in hidden tabs, on a pause control, and show one still frame under reduced motion.",
+      "Do focus with a 2px `brand-hover` outline at 3px offset."
+    ],
+    "donts": [
+      "Don't use `brand` (#8b5cf6) as a fill behind white text (4.23:1).",
+      "Don't use magenta as a standalone button, text or fill colour.",
+      "Don't swap, reuse or decorate with the command colours.",
+      "Don't load a web font on site pages, or use Geist outside the editor or Bangers outside captions and share images.",
+      "Don't add a light theme, pure black, cold zinc greys, or a text colour dimmer than `text-faint`.",
+      "Don't use emoji or unicode glyphs as UI icons; use lucide through `ui/Icon`.",
+      "Don't carry caption styling (black text stroke, hard drop shadows, preset colours) into UI elements.",
+      "Don't use bouncy easing or long hero animations."
+    ]
+  }
+}
