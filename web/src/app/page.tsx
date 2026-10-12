@@ -22,7 +22,8 @@ import { track } from "@/lib/analytics";
 import { COPYRIGHT } from "@/lib/legal";
 import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { cx } from "@/components/ui/cx";
-import { TakeStrip } from "@/features/landing/TakeStrip";
+import { TakeStrip } from "@/features/landing/hero/TakeStrip";
+import { SceneSprite } from "@/features/landing/scene/Scene";
 import {
   AutoSection,
   CaptionsSection,
@@ -54,6 +55,7 @@ export default function Landing() {
 
   return (
     <div className={styles.page}>
+      <SceneSprite />
       <a href="#main" className={styles.skip}>
         {t("site.skipToContent")}
       </a>

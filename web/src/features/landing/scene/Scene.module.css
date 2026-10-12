@@ -1,0 +1,82 @@
+/* The synthetic recording (Scene.tsx). The camera is the full 16:9
+ * shot at the frame's height; a 9:16 frame centres it on the creator
+ * with a translate in % of the camera's own width. */
+
+.sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--surface-1);
+}
+
+/* Lens: a soft vignette over everything. */
+.scene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    120% 85% at 50% 38%,
+    transparent 52%,
+    color-mix(in oklab, var(--surface-0) 72%, transparent)
+  );
+  pointer-events: none;
+}
+
+.camera {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  aspect-ratio: 16 / 9;
+}
+/* 9:16 crop around the creator: half the crop's width (0.3164 of the
+   shot) minus where the creator stands. */
+.scene[data-crop="vertical"] .camera {
+  transform: translateX(calc(15.82% - var(--cx) * 100%));
+}
+.scene[data-crop="wide"] .camera {
+  right: 0;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.creator {
+  position: absolute;
+  inset: 0;
+}
+
+.head {
+  position: absolute;
+  inset: 0;
+  transform-origin: calc(var(--cx) * 100%) calc(var(--neck) * 100%);
+  transform: rotate(var(--pose));
+}
+
+/* Speaking: a small nod from the neck, while a caption plays. */
+@media (prefers-reduced-motion: no-preference) {
+  .scene[data-talking] .head {
+    animation: nod 380ms cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+  }
+}
+@keyframes nod {
+  from {
+    transform: rotate(var(--pose));
+  }
+  to {
+    transform: rotate(calc(var(--pose) - 0.8deg));
+  }
+}

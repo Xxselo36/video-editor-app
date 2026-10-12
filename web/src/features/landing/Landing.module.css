@@ -220,7 +220,7 @@
 
 .hero {
   position: relative;
-  padding-block: 2.5rem 1.5rem;
+  padding-block: 1.5rem 1rem;
 }
 @media (min-width: 768px) {
   .hero { padding-block: 4.5rem 2.5rem; }
@@ -230,8 +230,8 @@
   z-index: 2;
   max-width: 42rem;
 }
-@media (min-width: 768px) {
-  .heroText { max-width: min(42rem, calc(100% - var(--clip-w) - 4rem)); }
+@media (min-width: 1024px) {
+  .heroText { max-width: min(38rem, calc(100% - var(--clip-w) - 4rem)); }
 }
 .h1 {
   margin: 0;
@@ -254,7 +254,7 @@
   word-break: keep-all;
 }
 .lead {
-  margin-top: 1.25rem;
+  margin-top: 0.875rem;
   max-width: 34rem;
   font-size: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
   line-height: 1.55;
@@ -262,7 +262,18 @@
   text-wrap: pretty;
 }
 .heroCta {
-  margin-top: 1.75rem;
+  margin-top: 1.25rem;
+}
+@media (min-width: 768px) {
+  .lead { margin-top: 1.25rem; }
+  .heroCta { margin-top: 1.75rem; }
+}
+/* Laptops with short screens: the whole stage stays above the fold. */
+@media (min-width: 1024px) and (max-height: 820px) {
+  .hero { padding-block: 2.25rem 1rem; }
+  .h1 { font-size: clamp(2.25rem, 1.55rem + 3.4vw, 3.75rem); }
+  .lead { margin-top: 1rem; }
+  .heroCta { margin-top: 1.25rem; }
 }
 
 /* ── Take strip (hero stage) ────────────────────────────────────── */
@@ -276,7 +287,10 @@
   position: relative;
 }
 .hero {
-  --clip-w: 6.5rem;
+  --clip-w: 0rem;
+}
+@media (min-width: 1024px) {
+  .hero { --clip-w: clamp(13rem, 17vw, 16rem); }
 }
 .stage {
   --clip-w: 6.5rem;
@@ -289,7 +303,6 @@
   height: 12.5rem;
 }
 @media (min-width: 768px) {
-  .hero { --clip-w: clamp(10rem, 13vw, 13.5rem); }
   .stage {
     --clip-w: clamp(10rem, 13vw, 13.5rem);
     --tape-end: calc(1.5rem + var(--clip-w) * 0.5);
@@ -1175,6 +1188,14 @@
   line-height: 1.55;
   color: var(--text-body);
 }
+/* The first promise (every cut can come back) leads, across the row. */
+@media (min-width: 768px) {
+  .controlItem:first-child {
+    grid-column: 1 / -1;
+    font-size: 1.1875rem;
+    color: var(--text-strong);
+  }
+}
 .controlIcon {
   display: inline-flex;
   height: 2.25rem;
@@ -1187,11 +1208,50 @@
   color: var(--text-strong);
 }
 
-/* FAQ */
+/* FAQ: on wide screens the heading stays beside the questions. */
+@media (min-width: 1024px) {
+  .faqLayout {
+    display: grid;
+    grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+    gap: 4rem;
+    align-items: start;
+  }
+  .faqLayout .h2 {
+    position: sticky;
+    top: 6rem;
+  }
+  .faqLayout .faq {
+    margin-top: 0;
+  }
+}
 .faq {
   margin-top: 2.5rem;
   max-width: 46rem;
   border-top: 1px solid var(--border);
+}
+/* Opening and closing glide where the browser can size to auto. */
+@supports (interpolate-size: allow-keywords) {
+  .faqItem {
+    interpolate-size: allow-keywords;
+  }
+  .faqItem::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition:
+      block-size 240ms var(--ease-out),
+      content-visibility 240ms allow-discrete;
+  }
+  .faqItem[open]::details-content {
+    block-size: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .faqItem::details-content {
+    transition: none;
+  }
+}
+.faqItem summary:active {
+  background: var(--surface-1);
 }
 .faqItem {
   border-bottom: 1px solid var(--border);
@@ -1210,6 +1270,9 @@
 }
 .faqItem summary::-webkit-details-marker {
   display: none;
+}
+@media (pointer: coarse) {
+  .faqItem summary { min-height: 2.75rem; }
 }
 .faqChevron {
   flex: none;
@@ -1241,6 +1304,55 @@
 @media (min-width: 768px) {
   .final { padding-block: 8rem 9rem; }
 }
+/* The finished video once more, standing on its last bit of tape. */
+.reprise {
+  position: relative;
+  width: 9rem;
+  margin: 0 auto 2.5rem;
+  perspective: 40rem;
+}
+@media (min-width: 768px) {
+  .reprise { width: 10.5rem; margin-bottom: 3rem; }
+}
+.repriseFrame {
+  position: relative;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-md);
+  transform-origin: 50% 100%;
+}
+.repriseTape {
+  position: relative;
+  height: 0.875rem;
+  margin: -0.25rem -1.75rem 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: linear-gradient(to bottom, var(--surface-2), var(--surface-1));
+}
+.repriseTape::after {
+  content: "";
+  position: absolute;
+  right: 1.25rem;
+  top: -0.375rem;
+  bottom: -0.375rem;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--cmd-finish);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .reprise[data-shown="false"] .repriseFrame {
+    opacity: 0;
+    transform: rotateX(62deg) translateY(6%);
+  }
+  .repriseFrame {
+    transition:
+      transform 600ms var(--ease-out) 120ms,
+      opacity 200ms var(--ease-out) 120ms;
+  }
+}
 .finalTitle {
   margin: 0 auto;
   max-width: 18ch;
@@ -1269,7 +1381,7 @@
   z-index: 25;
   border-top: 1px solid var(--border);
   background: var(--surface-0);
-  padding: 0.75rem var(--gutter) calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  padding: 0.5rem var(--gutter) calc(0.5rem + env(safe-area-inset-bottom, 0px));
   transition:
     transform 240ms var(--ease-out),
     visibility 0s linear 0s;

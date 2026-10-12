@@ -14,7 +14,11 @@ import { BILLING_COPY } from "@/lib/auth";
 import { useBillingEnabled } from "@/lib/account";
 import { Icon } from "@/components/ui/Icon";
 import { cx } from "@/components/ui/cx";
-import { CaptionFrame, type FramePreset } from "./CaptionFrame";
+import { CaptionFrame, CaptionPoster, type FramePreset } from "./CaptionFrame";
+import { LiveCaption } from "./captions/LiveCaption";
+import { Scene } from "./scene/Scene";
+import { presetSupport } from "@/lib/captions/scripts";
+import { LAUNCH_PRESETS } from "@/lib/captions/presets";
 import { CMD_COLOR, Cmd, CtaLink, rich, useCmdNodes, useInView, useReducedMotion, type CmdId } from "./shared";
 import styles from "./Landing.module.css";
 
@@ -351,7 +355,7 @@ export function FaqSection() {
   ];
   return (
     <section className={styles.section} aria-labelledby="faq-title">
-      <div className={styles.wrap}>
+      <div className={cx(styles.wrap, styles.faqLayout)}>
         <h2 id="faq-title" className={styles.h2}>
           {t("site.faq.title")}
         </h2>
@@ -373,6 +377,29 @@ export function FaqSection() {
 
 /* ── Closing call ── */
 
+/** The finished video once more: it stands up on its last bit of tape
+ *  (with the “Cleo finish” post) and plays its captions once. */
+function FinalReprise() {
+  const t = useT();
+  const lang = useLang();
+  const reduced = useReducedMotion();
+  const [ref, shown] = useInView<HTMLDivElement>({ threshold: 0.5 });
+  const preset = presetSupport("power", lang).level !== "unavailable" ? "power" : (LAUNCH_PRESETS.find((p) => presetSupport(p, lang).level !== "unavailable") ?? "power");
+  const caption = t("site.demo.caption");
+  return (
+    <div ref={ref} className={styles.reprise} data-shown={shown} aria-hidden="true">
+      <div className={styles.repriseFrame}>
+        <Scene talking={shown && !reduced} />
+        <LiveCaption preset={preset} text={caption} lang={lang} playing={shown && !reduced} loop={false} hold={0.4}>
+          <CaptionPoster preset={preset} text={caption} />
+        </LiveCaption>
+        <span className={styles.frameTag}>{t("site.demo.example")}</span>
+      </div>
+      <div className={styles.repriseTape} />
+    </div>
+  );
+}
+
 export function FinalSection({ ctaRef }: { ctaRef: React.Ref<HTMLAnchorElement> }) {
   const t = useT();
   const billingOn = useBillingEnabled();
@@ -380,6 +407,7 @@ export function FinalSection({ ctaRef }: { ctaRef: React.Ref<HTMLAnchorElement> 
   return (
     <section className={styles.final} aria-labelledby="final-title">
       <div className={styles.wrap}>
+        <FinalReprise />
         <h2 id="final-title" className={styles.finalTitle}>
           {t("site.final.title")}
         </h2>
