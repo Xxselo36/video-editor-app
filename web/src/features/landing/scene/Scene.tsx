@@ -250,11 +250,11 @@ export function Scene({
       style={style}
       aria-hidden="true"
     >
-      <div ref={cameraRef} className={styles.camera}>
+      <div ref={cameraRef} className={styles.camera} data-part="camera">
         <svg className={styles.layer} viewBox={`0 0 ${SHOT_W} ${SHOT_H}`} preserveAspectRatio="xMidYMid slice">
           <use href="#cc-room" />
         </svg>
-        <div ref={creatorRef} className={styles.creator}>
+        <div ref={creatorRef} className={styles.creator} data-part="creator">
           <svg className={styles.layer} viewBox={`0 0 ${SHOT_W} ${SHOT_H}`} preserveAspectRatio="xMidYMid slice">
             <use href="#cc-body" x={CREATOR_X * SHOT_W} />
           </svg>

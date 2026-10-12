@@ -29,7 +29,7 @@ describe("hero score", () => {
 
   it("removals only grow during a loop, and each is marked before it goes", () => {
     let prev = new Set<PieceId>();
-    let marked = new Set<PieceId>();
+    const marked = new Set<PieceId>();
     // from the reset (raw) to the end of the loop
     const start = STEPS.findIndex((s) => s.fade === "snap");
     for (const s of STEPS.slice(start)) {

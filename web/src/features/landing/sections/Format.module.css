@@ -111,14 +111,14 @@
 }
 
 /* The settled state. The creator stepped right by --rf-move of the shot
- * (Scene's creator wrapper: camera > div); the crop followed: the window
+ * (Scene's [data-part=creator]); the crop followed: the window
  * moved with them and the 9:16 result's camera by the same amount. The
  * `translate` property composes with Scene's own camera transform. */
-.srcScene > div > div,
-.resScene > div > div {
+.srcScene [data-part="creator"],
+.resScene [data-part="creator"] {
   translate: var(--rf-move) 0;
 }
-.resScene > div {
+.resScene [data-part="camera"] {
   translate: calc(-1 * var(--rf-move)) 0;
 }
 
@@ -443,4 +443,9 @@
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
   color: var(--text-body);
+}
+
+/* Hindi (Karaoke) poster on the small tiles, matching the engine's 1.6x. */
+.tile .capLarge {
+  font-size: calc(7.8cqw * 1.6);
 }

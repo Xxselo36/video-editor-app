@@ -25,6 +25,8 @@ const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** KB gz of first-load JS per route (PLAN_TECH §0.12 targets). */
 export const BUDGETS = {
+  // The landing: the hero only; the demos below it are lazy chunks.
+  "/": 200,
   "/app": 200,
   "/app/new": 200,
   "/app/p/[jobId]": 200,

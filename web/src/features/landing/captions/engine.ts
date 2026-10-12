@@ -24,11 +24,15 @@ export function loadEngine(): Promise<Engine> {
       import("@/lib/captions/cache"),
       import("@/lib/captions/presets"),
       import("@/lib/captions/fonts"),
-    ]).then(([cache, presets, fonts]) => ({
-      CaptionRenderer: cache.CaptionRenderer,
-      resolveStyle: presets.resolveStyle,
-      ensureFonts: fonts.ensureFonts,
-    }));
+    ]).then(([cache, presets, fonts]) => {
+      // One browser loader for the page: each face loads (and revalidates) once.
+      fonts.setDefaultFontLoader(fonts.browserFontLoader());
+      return {
+        CaptionRenderer: cache.CaptionRenderer,
+        resolveStyle: presets.resolveStyle,
+        ensureFonts: fonts.ensureFonts,
+      };
+    });
     loading.catch(() => {
       loading = null;
     });

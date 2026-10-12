@@ -15,7 +15,7 @@
  * - The handle lets a score (the hero) seek the clock.
  */
 import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { PresetId } from "@/lib/captions/types";
+import type { PresetId, StyleOverrides } from "@/lib/captions/types";
 import type { CaptionRenderer } from "@/lib/captions/cache";
 import { cx } from "@/components/ui/cx";
 import { loadEngine } from "./engine";
@@ -32,6 +32,7 @@ export type LiveCaptionHandle = {
 
 export function LiveCaption({
   preset,
+  overrides,
   text,
   lang,
   playing,
@@ -45,6 +46,8 @@ export function LiveCaption({
   children,
 }: {
   preset: PresetId;
+  /** Style overrides (e.g. a larger size on a small frame). */
+  overrides?: StyleOverrides;
   text: string;
   lang: string;
   playing: boolean;
@@ -61,7 +64,10 @@ export function LiveCaption({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const words = useMemo(() => captionWords(text, lang), [text, lang]);
   const end = spokenUntil(words) + hold;
-  const poster = words.length ? words[words.length - 1].start + 0.3 : 0;
+  // The settled frame: the last word fully spoken (karaoke fills it).
+  const lastEnd = spokenUntil(words);
+  const poster = words.length ? Math.max(words[words.length - 1].start + 0.3, lastEnd - 0.02) : 0;
+  const overridesKey = JSON.stringify(overrides ?? {});
   const [ready, setReady] = useState(false);
   const live = useRef({
     renderer: null as CaptionRenderer | null,
@@ -70,12 +76,14 @@ export function LiveCaption({
     done: false,
     end,
     poster,
+    lastEnd,
     loop,
     onCycle,
   });
   useEffect(() => {
     live.current.end = end;
     live.current.poster = poster;
+    live.current.lastEnd = lastEnd;
     live.current.loop = loop;
     live.current.onCycle = onCycle;
   });
@@ -84,7 +92,8 @@ export function LiveCaption({
     const L = live.current;
     const ctx = canvasRef.current?.getContext("2d");
     if (!L.renderer || !ctx) return;
-    L.renderer.drawFrame(ctx as never, L.t, { force });
+    // during the hold after the last word, keep its page on screen
+    L.renderer.drawFrame(ctx as never, Math.min(L.t, L.lastEnd - 0.02), { force });
   };
 
   useImperativeHandle(
@@ -107,6 +116,7 @@ export function LiveCaption({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     let alive = true;
     let size = { W: 0, H: 0 };
     let near = false;
@@ -115,7 +125,7 @@ export function LiveCaption({
       const { W, H } = size;
       const engine = await loadEngine().catch(() => null);
       if (!alive || !engine) return;
-      const style = engine.resolveStyle(preset, {}, { W, H });
+      const style = engine.resolveStyle(preset, JSON.parse(overridesKey) as StyleOverrides, { W, H });
       if (!style) return;
       const fonts = await engine.ensureFonts(style, { lang, text: words.map((w) => w.text) }).catch(() => null);
       if (!alive || !fonts?.ok || size.W !== W || size.H !== H) return;
@@ -157,7 +167,7 @@ export function LiveCaption({
     };
     // onReady is a notification; a new one must not rebuild the renderer
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preset, lang, words]);
+  }, [preset, lang, words, overridesKey]);
 
   // A new style or sentence starts from its first word.
   useEffect(() => {

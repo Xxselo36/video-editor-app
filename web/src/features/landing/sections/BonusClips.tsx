@@ -25,7 +25,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLang, useT } from "@/i18n";
 import { LAUNCH_PRESETS } from "@/lib/captions/presets";
 import { presetSupport } from "@/lib/captions/scripts";
-import type { PresetId } from "@/lib/captions/types";
+import type { PresetId, StyleOverrides } from "@/lib/captions/types";
 import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "../CaptionFrame";
 import { LiveCaption, type LiveCaptionHandle } from "../captions/LiveCaption";
@@ -37,6 +37,10 @@ import f from "./Format.module.css";
 
 /** Bonus clips: at most this many (backend/llm.py detect_hook_moments). */
 const MAX_HOOK_CLIPS = 3;
+
+/** Karaoke (Hindi) draws at 0.078 of the width: on the small tiles it
+ *  gets 1.6x and two words a page, so it stays legible. */
+const CLIP_OVERRIDES: Partial<Record<PresetId, StyleOverrides>> = { karaoke: { sizeScale: 1.6, wordsPerPage: 2 } };
 
 /** The finished video, in seconds. */
 const VIDEO_S = 180;
@@ -282,7 +286,7 @@ export function BonusClipsSection() {
 
   return (
     <section className={styles.section} aria-labelledby="clips-title">
-      <div className={cx(styles.wrap, f.clips)}>
+      <div className={styles.wrap}>
         <h2 id="clips-title" className={styles.h2}>
           {t("site.clips.title")}
         </h2>
@@ -354,6 +358,7 @@ export function BonusClipsSection() {
                 {preset && (
                   <LiveCaption
                     preset={preset}
+                    overrides={CLIP_OVERRIDES[preset]}
                     text={caption}
                     lang={lang}
                     playing={false}
@@ -362,7 +367,7 @@ export function BonusClipsSection() {
                     onReady={onReady[i]}
                     handle={capHandles[i]}
                   >
-                    <CaptionPoster preset={preset} text={caption} />
+                    <CaptionPoster preset={preset} text={caption} className={preset === "karaoke" ? f.capLarge : undefined} />
                   </LiveCaption>
                 )}
                 <span className={f.dur}>{clock(c.to - c.from)}</span>

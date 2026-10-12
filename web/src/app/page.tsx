@@ -2,16 +2,18 @@
 
 /**
  * The landing page (UX15 redesign, concept "take strip"; direction
- * contract in .impeccable/surfaces). One recording, laid out as a strip:
- * spoken commands and the automatic cleanup remove the bad parts and a
- * captioned 9:16 clip stands up. Then the command words, what is cut
- * automatically, real caption styles, format and bonus clips, what the
- * editor leaves to the creator, questions and the closing call.
+ * contract in .impeccable/surfaces; v2 polish in October 2026). One
+ * recording of one example creator: the hero's tape loses its bad parts
+ * and becomes a captioned 9:16 video. Then the command words, what is
+ * cut automatically, the caption styles live, the 9:16 reframe, bonus
+ * clips, what the editor leaves to the creator, questions and the
+ * closing call. Every video frame shows the same recording (scene/).
  *
  * One primary action per view: the hero's button; once it has scrolled
  * away, the header (desktop) or a bottom bar (phones) carries it, until
  * the closing section's own button is on screen.
  */
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect } from "react";
 import { LogoWord } from "@/components/Logo";
@@ -24,15 +26,15 @@ import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { cx } from "@/components/ui/cx";
 import { TakeStrip } from "@/features/landing/hero/TakeStrip";
 import { SceneSprite } from "@/features/landing/scene/Scene";
-import {
-  AutoSection,
-  CaptionsSection,
-  CommandsSection,
-  ControlSection,
-  FaqSection,
-  FinalSection,
-  FormatSection,
-} from "@/features/landing/Sections";
+import { ControlSection, FaqSection, FinalSection } from "@/features/landing/Sections";
+
+// The demos below the hero: server-rendered as usual, their code in
+// separate chunks, so the first load carries only the hero.
+const CommandRowsSection = dynamic(() => import("@/features/landing/sections/CommandRows").then((m) => m.CommandRowsSection));
+const AutoCleanupSection = dynamic(() => import("@/features/landing/sections/AutoCleanup").then((m) => m.AutoCleanupSection));
+const CaptionPlayerSection = dynamic(() => import("@/features/landing/captions/CaptionPlayer").then((m) => m.CaptionPlayerSection));
+const ReframeSection = dynamic(() => import("@/features/landing/sections/ReframeDemo").then((m) => m.ReframeSection));
+const BonusClipsSection = dynamic(() => import("@/features/landing/sections/BonusClips").then((m) => m.BonusClipsSection));
 import { CtaLink, rich, useCmdNodes, useInView } from "@/features/landing/shared";
 import styles from "@/features/landing/Landing.module.css";
 
@@ -95,10 +97,11 @@ export default function Landing() {
           </div>
         </section>
 
-        <CommandsSection />
-        <AutoSection />
-        <CaptionsSection />
-        <FormatSection />
+        <CommandRowsSection />
+        <AutoCleanupSection />
+        <CaptionPlayerSection />
+        <ReframeSection />
+        <BonusClipsSection />
         <ControlSection />
         <FaqSection />
         <FinalSection ctaRef={finalCtaRef} />
