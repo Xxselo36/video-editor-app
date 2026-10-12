@@ -6,7 +6,7 @@
  * today.
  */
 import Link from "next/link";
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { ChevronDown, FileText, RefreshCw, Share2, Type } from "lucide-react";
 import { useLang, useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
@@ -16,7 +16,8 @@ import { Icon } from "@/components/ui/Icon";
 import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "./CaptionFrame";
 import { LiveCaption } from "./captions/LiveCaption";
-import { Scene } from "./scene/Scene";
+import { LoopToggle, Scene } from "./scene/Scene";
+import { useClipsMove } from "./scene/useClipPlayback";
 import { presetSupport } from "@/lib/captions/scripts";
 import { LAUNCH_PRESETS } from "@/lib/captions/presets";
 import { CtaLink, useInView, useReducedMotion } from "./shared";
@@ -108,26 +109,31 @@ export function FaqSection() {
  *  (and hydration) and the client. */
 const noSubscription = () => () => {};
 
-/** The finished video once more: it tips up from its bottom edge and
- *  plays its captions once. Laid down (armed) only once the script runs,
- *  so without it the frame stands as it ends. */
+/** The finished video once more (the hero's clip): it tips up from its
+ *  bottom edge, plays its captions once and keeps looping under the
+ *  settled caption while it is up, with a pause control beside it.
+ *  Laid down (armed) only once the script runs, so without it the frame
+ *  stands as it ends. */
 function FinalReprise() {
   const t = useT();
   const lang = useLang();
   const reduced = useReducedMotion();
+  const moves = useClipsMove();
+  const [paused, setPaused] = useState(false);
   const [ref, shown] = useInView<HTMLDivElement>({ threshold: 0.5 });
   const armed = useSyncExternalStore(noSubscription, () => true, () => false);
   const preset = presetSupport("power", lang).level !== "unavailable" ? "power" : (LAUNCH_PRESETS.find((p) => presetSupport(p, lang).level !== "unavailable") ?? "power");
   const caption = t("site.demo.caption");
   return (
-    <div ref={ref} className={styles.reprise} data-shown={shown} data-armed={armed || undefined} aria-hidden="true">
-      <div className={styles.repriseFrame}>
-        <Scene shot="passport" talking={shown && !reduced} sizes="10.5rem" />
+    <div ref={ref} className={styles.reprise} data-shown={shown} data-armed={armed || undefined}>
+      <div className={styles.repriseFrame} aria-hidden="true">
+        <Scene clip="hero" playing={shown && !paused} />
         <LiveCaption preset={preset} text={caption} lang={lang} playing={shown && !reduced} loop={false} hold={0.4}>
           <CaptionPoster preset={preset} text={caption} />
         </LiveCaption>
         <span className={styles.frameTag}>{t("site.demo.example")}</span>
       </div>
+      {moves && <LoopToggle place="beside" paused={paused} onToggle={() => setPaused((p) => !p)} shown={shown} />}
     </div>
   );
 }

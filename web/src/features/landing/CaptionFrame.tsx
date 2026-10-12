@@ -9,6 +9,7 @@
  * digits get the preset's number colour where it has one.
  */
 import { cx } from "@/components/ui/cx";
+import type { ClipId } from "./scene/clips";
 import { Scene } from "./scene/Scene";
 import styles from "./Landing.module.css";
 
@@ -122,7 +123,8 @@ export function CaptionFrame({
   active,
   captionClassName,
   className,
-  scene = false,
+  scene,
+  scenePlaying = true,
   children,
 }: {
   preset: FramePreset;
@@ -135,13 +137,15 @@ export function CaptionFrame({
   active?: number;
   captionClassName?: string;
   className?: string;
-  /** Show the synthetic recording behind the caption. */
-  scene?: boolean;
+  /** The clip of the footage behind the caption (scene/clips.ts). */
+  scene?: ClipId;
+  /** false pauses the clip on its frame (the section's pause control). */
+  scenePlaying?: boolean;
   children?: React.ReactNode;
 }) {
   return (
     <div className={cx(styles.frame, className)}>
-      {scene && <Scene />}
+      {scene && <Scene clip={scene} playing={scenePlaying} />}
       {tag && <span className={styles.frameTag}>{tag}</span>}
       {showText && (
         <p className={cx(styles.caption, PRESET_CLASS[preset], captionClassName)}>

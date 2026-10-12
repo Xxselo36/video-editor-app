@@ -3,19 +3,24 @@
  * The hero demo: one recording as a tape lying in 3D, and the finished
  * 9:16 video it becomes. In an endless loop it tells the headline in two
  * acts (hero/score.ts): "You talk" (a playhead records, each command
- * flags where it was said and plants its post) and "Cleo edits" (the bad
- * take, a filler word, a pause and the skipped sentence lift off, the
- * tape closes behind them and gets visibly shorter), then the video
+ * flags where it was said and plants its post, “Cleo keep” at the end of
+ * the first scene among them) and "Cleo edits" (the bad take, a filler
+ * word, a pause and the skipped sentence lift off, the tape closes behind
+ * them and gets visibly shorter; keep's post stays), then the video
  * lights up and its captions play, drawn by the real caption engine.
+ *
+ * The video is the real clip (scene/, clip "hero"): a dimmed raw monitor
+ * while the tape is cut, lit when it is done. It plays while the loop
+ * runs and pauses on its frame with it.
  *
  * A step machine: each step is data-* attributes and per-piece
  * translates; CSS transitions move between steps, so the holds cost
  * nothing. It runs while on screen and the tab is visible, unless the
  * visitor paused it (WCAG 2.2.2); a stop freezes the stage where it is
- * and resumes from there. Reduced motion shows the finished still. The
- * first frame is the finished video, so a screenshot or a slow start
- * shows the result, and the first motion is the result playing, never
- * an undo.
+ * and resumes from there. Reduced motion shows the finished still (the
+ * video's poster). The first frame is the finished video, so a
+ * screenshot or a slow start shows the result, and the first motion is
+ * the result playing, never an undo.
  *
  * The stage is decoration for sighted visitors (aria-hidden); the list
  * under it says the same in words.
@@ -33,8 +38,8 @@ import { CaptionPoster } from "../CaptionFrame";
 import { LiveCaption } from "../captions/LiveCaption";
 import { captionWords, spokenUntil } from "../captions/words";
 import { Scene } from "../scene/Scene";
-import { CMD_COLOR, Cmd, SMALL_FRAME_OVERRIDES, useDocumentVisible, useInView, useReducedMotion } from "../shared";
-import { AT, FINISHED, FIRST, LOOP_FROM, MARKED, PIECES, POSTS, STEPS, keptLength, shiftAt, type FlagId, type LegendId, type PieceId, type Step } from "./score";
+import { CMD_COLOR, Cmd, SMALL_FRAME_OVERRIDES, useDocumentVisible, useInView, useReducedMotion, type CmdId } from "../shared";
+import { AT, FINISHED, FIRST, HEAD_FROM, LOOP_FROM, MARKED, PIECES, POSTS, STEPS, keptLength, shiftAt, type FlagId, type LegendId, type PieceId, type PostId, type Step } from "./score";
 import styles from "./Hero.module.css";
 
 const LEGEND: { id: LegendId; key: "site.demo.take" | "site.demo.fillers" | "site.demo.pauses" | "site.demo.skip" | "site.demo.captions" }[] = [
@@ -46,9 +51,10 @@ const LEGEND: { id: LegendId; key: "site.demo.take" | "site.demo.fillers" | "sit
 ];
 
 /** The flag's target on the tape: a post, or the middle of a piece. */
-const FLAG_TARGET: Record<FlagId, { post?: string; piece?: PieceId }> = {
+const FLAG_TARGET: Record<FlagId, { post?: PostId; piece?: PieceId }> = {
   start: { post: "start" },
   cut: { post: "cut" },
+  keep: { post: "keep" },
   stop: { post: "stop" },
   stopgo: { post: "go" },
   finish: { post: "finish" },
@@ -58,8 +64,19 @@ const FLAG_TARGET: Record<FlagId, { post?: string; piece?: PieceId }> = {
   skip: { piece: "skip" },
 };
 
-/** Where the playhead is at the end of each talk step (% of the tape). */
-const HEAD_TO: Partial<Record<FlagId, number>> = { start: AT.a, cut: AT.skip, stop: AT.d, stopgo: AT.post, finish: AT.post };
+/** The flag chip's colour: its command's; a filler or a pause stays neutral. */
+const FLAG_CMD: Record<FlagId, CmdId | undefined> = {
+  start: "start",
+  cut: "cut",
+  cutTake: "cut",
+  keep: "keep",
+  stop: "stop",
+  stopgo: "stop",
+  skip: "stop",
+  finish: "finish",
+  um: undefined,
+  pause: undefined,
+};
 
 /** The caption's hold after its last word (s). */
 const CAPTION_HOLD = 0.4;
@@ -70,14 +87,24 @@ function heroPreset(lang: string): PresetId {
   return LAUNCH_PRESETS.find((p) => presetSupport(p, lang).level !== "unavailable") ?? "power";
 }
 
+/** A media query as a store for useSyncExternalStore (false on the server). */
+function mediaStore(query: string) {
+  return {
+    subscribe: (cb: () => void): (() => void) => {
+      const mq = window.matchMedia(query);
+      mq.addEventListener("change", cb);
+      return () => mq.removeEventListener("change", cb);
+    },
+    get: () => window.matchMedia(query).matches,
+    server: () => false,
+  };
+}
+
 /** Phones: the frame is about 100 px wide, so a style that draws small
  *  (Karaoke, for Hindi) draws larger, as on the bonus clips. */
-const SMALL_FRAME = "(max-width: 767px)";
-function subscribeSmallFrame(cb: () => void): () => void {
-  const mq = window.matchMedia(SMALL_FRAME);
-  mq.addEventListener("change", cb);
-  return () => mq.removeEventListener("change", cb);
-}
+const SMALL_FRAME = mediaStore("(max-width: 767px)");
+/** Phones and tablets: the video is hidden until the finish (Hero.module.css). */
+const LIT_ONLY = mediaStore("(max-width: 1023px)");
 
 type Chip = { key: number; flag: FlagId; leaving?: boolean };
 
@@ -91,7 +118,8 @@ export function TakeStrip() {
   const visible = useDocumentVisible();
   const reduced = useReducedMotion();
   const running = !paused && inView && visible && !reduced;
-  const smallFrame = useSyncExternalStore(subscribeSmallFrame, () => window.matchMedia(SMALL_FRAME).matches, () => false);
+  const smallFrame = useSyncExternalStore(SMALL_FRAME.subscribe, SMALL_FRAME.get, SMALL_FRAME.server);
+  const litOnly = useSyncExternalStore(LIT_ONLY.subscribe, LIT_ONLY.get, LIT_ONLY.server);
   const caption = t("site.demo.caption");
 
   // A play step lasts as long as the sentence and its hold.
@@ -120,8 +148,9 @@ export function TakeStrip() {
   }, [running, i, ms]);
 
   // A stop freezes the stage's CSS motion where it is (the playhead, the
-  // scrub, lifting pieces, closing lanes, the push-in) and resumes it.
-  // Only running ones: a finished fill-both entrance is never replayed.
+  // scrub, lifting pieces, closing lanes) and resumes it; the video
+  // pauses on its frame (Scene playing). Only running ones: a finished
+  // fill-both entrance is never replayed.
   const stageRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const stage = stageRef.current;
@@ -174,6 +203,8 @@ export function TakeStrip() {
       case "cut":
       case "cutTake":
         return <Cmd id="cut" />;
+      case "keep":
+        return <Cmd id="keep" />;
       case "stop":
         return <Cmd id="stop" />;
       case "stopgo":
@@ -196,10 +227,12 @@ export function TakeStrip() {
         );
     }
   };
-  const chipColor = (f: FlagId) =>
-    f === "start" ? CMD_COLOR.start : f === "cut" || f === "cutTake" ? CMD_COLOR.cut : f === "finish" ? CMD_COLOR.finish : f === "stop" || f === "stopgo" || f === "skip" ? CMD_COLOR.stop : undefined;
+  const chipColor = (f: FlagId) => {
+    const cmd = FLAG_CMD[f];
+    return cmd ? CMD_COLOR[cmd] : undefined;
+  };
 
-  const headX = s.flag && HEAD_TO[s.flag] !== undefined ? HEAD_TO[s.flag]! : AT.bad;
+  const headX = s.to ?? HEAD_FROM;
   const phaseText = s.phase === "talk" ? t("site.demo.phaseTalk") : s.phase === "edit" ? t("site.demo.phaseEdit") : t("site.demo.phaseReady");
   const legendNow = LEGEND.find((l) => l.id === s.li);
   const status = s.phase === "edit" && legendNow ? t(legendNow.key) : phaseText;
@@ -264,7 +297,12 @@ export function TakeStrip() {
               {MARKED.map((m) =>
                 gone.has(m.id) ? (
                   <div key={`cut-${m.id}`} className={styles.lane} style={{ transform: `translateX(${-shiftAt(AT[m.id], gone)}%)` }}>
-                    <span className={styles.marker} data-tone={m.tone} style={{ left: `${AT[m.id]}%` }} />
+                    <span
+                      className={styles.marker}
+                      data-tone={m.tone}
+                      data-beside={m.beside ? "true" : undefined}
+                      style={{ left: `${AT[m.id]}%` }}
+                    />
                   </div>
                 ) : null,
               )}
@@ -303,12 +341,9 @@ export function TakeStrip() {
 
         <div className={styles.video}>
           <div className={styles.screen}>
-            <Scene
-              priority
-              sizes="(min-width: 1024px) 16rem, (min-width: 768px) 9.5rem, 6.75rem"
-              talking={!!s.play && !reduced}
-              className={styles.scene}
-            />
+            {/* It plays with the loop; where it is hidden until the
+                finish (phones, tablets), only once it shows. */}
+            <Scene clip="hero" priority playing={running && (s.frame === "lit" || !litOnly)} className={styles.scene} />
             <div className={styles.captionLayer}>
               <LiveCaption
                 preset={preset}
