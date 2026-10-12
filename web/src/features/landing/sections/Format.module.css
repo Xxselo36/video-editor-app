@@ -2,10 +2,10 @@
  * Tokens only (globals.css). The base styles are each figure's settled
  * end state, so reduced motion, screenshots and a page without JS show
  * the result; the passes are WAAPI animations from each file's score
- * (transform, translate, opacity, clip-path). UI transitions use the
- * page's one curve, var(--ease-out) (Landing.module.css .page). */
+ * (transform, translate, scale, opacity, clip-path). UI transitions use
+ * the page's one curve, var(--ease-out) (Landing.module.css .page). */
 
-/* ── Reframe: a centre crop misses him; the window finds his face ── */
+/* ── Reframe: SmartCam lifts the 9:16 out of a wide recording ── */
 
 .reframe {
   display: grid;
@@ -19,187 +19,411 @@
   }
 }
 
-/* Source, arrow, result. Phones and tablets: a column. */
+/* The figure's geometry, all from W (--rf-w), the plate's width. The
+ * plate lies tilted on the floor line like the hero's tape (its camera:
+ * perspective-origin 40% -40%), hinged on its front edge; the 9:16
+ * stands on the same floor line at --rf-foot (its foot's centre, x W).
+ *
+ * Two compositions, by the column's width (container rf):
+ * - "front", under 34rem (phones): the plate fills the column; the
+ *   vertical stands on its front edge over the empty right half (the
+ *   whiteboard; he sits left of centre), clear of the window.
+ * - "beside", from 34rem: the vertical stands 1.25rem right of the
+ *   plate; the row (plate, gap, vertical: 1 + c x 1.35 W wide) is centred.
+ *
+ * The pass reads the pose values (--rf-armed, --rf-tilt, --rf-lift,
+ * --rf-stand-x, --rf-pass) from here at its start, so its last keyframes
+ * are exactly the base styles below. The constants every composition
+ * shares come inline from ReframeDemo.tsx: --rf-c (the 9:16 crop's width,
+ * a fraction of the 16:9 frame's), --rf-scale (the stood vertical's
+ * scale), --rf-roll (the plate's turn on the table), --rf-x0 (the crop at
+ * the clip's first frame, as a translate of a crop-wide box) and
+ * --rf-inset (where the corner brackets sit in the window). */
 .rfBox {
-  container-type: inline-size;
+  container: rf / inline-size;
 }
-.rf {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
+.rfFig {
+  --rf-w: 100cqw;
+  --rf-row: 100cqw;
+  --rf-x: 0px;
+  /* the room above the plate for the stood vertical (x W) and below
+     the floor line for the plate's edge, its shadow and the labels */
+  --rf-top: 0.215;
+  --rf-floor: 2.75rem;
+  --rf-persp: 40rem;
+  --rf-armed: 24deg;
+  --rf-tilt: 48deg;
+  --rf-lift: 3rem;
+  --rf-foot: 0.772;
+  --rf-gap: 0rem;
+  --rf-wide-label: 0.28;
+  /* the share of the stage in the clear area that starts the pass */
+  --rf-pass: 0.8;
+  --rf-dim: 72%;
+  /* the stood vertical's x: a translate of the slice (a crop-wide box at
+     the plate's left edge) that puts its foot at --rf-foot */
+  --rf-stand-x: calc((var(--rf-foot) - var(--rf-c) / 2) / var(--rf-c) * 100% + var(--rf-gap));
 }
-.rfCol {
-  display: flex;
-  width: 100%;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-}
-.srcWrap {
-  position: relative;
-  width: min(100%, 34rem);
-}
-.src,
-.res {
-  position: relative;
-  overflow: hidden;
-  border-radius: 0.75rem;
-  background: var(--surface-1);
-}
-.src {
-  aspect-ratio: 16 / 9;
-  border: 1px solid var(--border-hover);
-}
-.res {
-  width: 8.5rem;
-  aspect-ratio: 9 / 16;
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-md);
-}
-.rfArrow {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-}
-.arrowWide {
-  display: none;
-}
-.ratio {
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-}
-
-/* Desktop: one row, the 9:16 result at the source's height (its width is
- * 0.3164 of the source's). --sw is sized so the whole row (source, two
- * gaps, the arrow, result) fits the column. */
-@media (min-width: 1024px) {
-  .rf {
-    --sw: min(26rem, (100cqw - 3.25rem) / 1.31640625);
-    flex-direction: row;
-    align-items: flex-start;
-    justify-content: center;
-    gap: 1rem;
+@container rf (min-width: 34rem) {
+  .rfFig {
+    --rf-gap: 1.25rem;
+    --rf-w: min(25rem, (100cqw - var(--rf-gap)) / (1 + var(--rf-c) * var(--rf-scale)));
+    --rf-row: calc(var(--rf-w) * (1 + var(--rf-c) * var(--rf-scale)) + var(--rf-gap));
+    --rf-x: calc((100cqw - var(--rf-row)) / 2);
+    --rf-top: 0.22;
+    --rf-persp: 56rem;
+    --rf-armed: 30deg;
+    --rf-tilt: 54deg;
+    --rf-lift: 4.5rem;
+    --rf-foot: calc(1 + var(--rf-c) * var(--rf-scale) / 2);
+    --rf-wide-label: 0.5;
+    --rf-pass: 0.6;
   }
-  .rfCol {
-    width: auto;
-  }
-  .srcWrap {
-    width: var(--sw);
-  }
-  .res {
-    width: calc(var(--sw) * 0.31640625);
-  }
-  .rfArrow {
-    height: calc(var(--sw) * 0.5625);
-  }
-  .arrowWide {
-    display: inline-block;
-  }
-  .arrowTall {
-    display: none;
+}
+@media (prefers-contrast: more) {
+  .rfFig {
+    --rf-dim: 85%;
   }
 }
 
-/* The settled state: the window sits on his face (--rf-crop-x), the
- * result's camera is centred on it (Scene, crop="track"), and the face
- * box marks what Cleo found. The pass animates `translate`, `scale` and
- * `opacity` from the centre crop to here; they compose with Scene's own
- * camera transform. */
-.face {
+/* The stage: the 3D rig, the "Example" chip over its top-left corner
+ * and the format labels under the floor line (all flat, outside the 3D
+ * tree, so they stay sharp and readable). */
+.stage {
+  position: relative;
+  isolation: isolate;
+  height: calc(var(--rf-w) * (0.5625 + var(--rf-top)) + var(--rf-floor));
+  -webkit-user-select: none;
+  user-select: none;
+}
+.rig {
   position: absolute;
-  left: var(--rf-face-x);
-  top: var(--rf-face-y);
-  width: var(--rf-face-w);
-  height: var(--rf-face-h);
-  --fc: var(--brand-hover);
-  --fl: 0.75rem;
-  background:
-    linear-gradient(var(--fc), var(--fc)) 0 0 / var(--fl) 2px no-repeat,
-    linear-gradient(var(--fc), var(--fc)) 0 0 / 2px var(--fl) no-repeat,
-    linear-gradient(var(--fc), var(--fc)) 100% 0 / var(--fl) 2px no-repeat,
-    linear-gradient(var(--fc), var(--fc)) 100% 0 / 2px var(--fl) no-repeat,
-    linear-gradient(var(--fc), var(--fc)) 0 100% / var(--fl) 2px no-repeat,
-    linear-gradient(var(--fc), var(--fc)) 0 100% / 2px var(--fl) no-repeat,
-    linear-gradient(var(--fc), var(--fc)) 100% 100% / var(--fl) 2px no-repeat,
-    linear-gradient(var(--fc), var(--fc)) 100% 100% / 2px var(--fl) no-repeat;
-  filter: drop-shadow(0 0 4px color-mix(in oklab, var(--surface-0) 60%, transparent));
+  left: var(--rf-x);
+  bottom: var(--rf-floor);
+  width: var(--rf-w);
+  aspect-ratio: 16 / 9;
+  perspective: var(--rf-persp);
+  perspective-origin: 40% -40%;
+}
+/* A flat floor shadow under the plate's front edge (the tape's),
+   painted before the plate so it never darkens it. */
+.rig::before {
+  content: "";
+  position: absolute;
+  left: 3%;
+  right: 3%;
+  bottom: -0.25rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--surface-0) 85%, transparent), transparent);
   pointer-events: none;
 }
 
-/* The crop window and the dimmed outside move as one lens. */
-.lens {
+/* The plate: the 3D context. Never overflow, opacity, filter, clip-path
+ * or mask here or on .rig (they flatten preserve-3d in Safari): clipping
+ * and fades live on the flat leaves inside it. */
+.plate {
   position: absolute;
   inset: 0;
+  transform-style: preserve-3d;
+  transform-origin: 50% 100%;
+  transform: rotateX(var(--rf-tilt)) rotateZ(calc(var(--rf-roll) * -1));
+}
+/* Layers ahead of the pass only; afterwards the canvas and the plate
+   re-rasterise sharp at their settled scale. */
+.stage[data-pass] .plate,
+.stage[data-pass] .slice {
+  will-change: transform;
+}
+.screen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: var(--surface-1);
+}
+/* The edge over the video (the video keeps the frame's full width, so
+   the crop's fractions are exact). */
+.rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid var(--border-strong);
+  pointer-events: none;
+}
+/* The plate's thickness, in front (the tape's). */
+.edge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 0.75rem;
+  border-radius: 0 0 0.75rem 0.75rem;
+  background: linear-gradient(to bottom, var(--surface-tint), var(--surface-0));
+  transform-origin: 50% 0;
+  transform: rotateX(-90deg);
+}
+
+/* The crop window: one crop wide, moved to the face track's x on every
+ * video frame (ReframeDemo.tsx writes its transform; --rf-x0 is the
+ * first frame's, for the still). The dimmed outside, the outline and
+ * the corner brackets ride with it. Its own layer: the per-frame move
+ * only recomposites. */
+.cropTrack {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(var(--rf-c) * 100%);
+  transform: translateX(var(--rf-x0));
+  will-change: transform;
   pointer-events: none;
 }
 .window {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: var(--rf-crop-x);
-  width: var(--rf-crop-w);
-  border-radius: 0.5rem;
+  inset: 0;
+  border-radius: 0.75rem;
   outline: 2px solid var(--text-strong);
   outline-offset: -2px;
 }
-/* One shade three frames wide with a hole the window's width (the middle
- * frame starts where the window does), so it covers the frame wherever
- * the lens sits. --rf-dim is the settled 85 %; the pass starts at 68 %
- * through opacity. The hole is 1px narrower on each side than the window,
- * whose 2px inner outline covers the seam (no sliver of undimmed shot
- * from rounding the stops of a 300 %-wide box). */
+@media (prefers-contrast: more) {
+  .window {
+    outline-width: 3px;
+    outline-offset: -3px;
+  }
+}
+/* One shade a frame wide on each side of a hole the window's size (the
+ * hole starts at 1 / (2 + c) of the shade's width), so it covers the
+ * plate wherever the window sits; .screen clips it. The hole is 1px
+ * narrower on each side than the window, whose 2px inner outline covers
+ * the seam. */
 .dim {
   --rf-shade: color-mix(in oklab, var(--surface-0) var(--rf-dim), transparent);
+  --rf-hole: calc(100% / (2 + var(--rf-c)));
+  --rf-hole-w: calc(100% * var(--rf-c) / (2 + var(--rf-c)));
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--rf-crop-x) - 100%);
-  width: 300%;
+  left: calc(-100% / var(--rf-c));
+  width: calc(100% * (2 / var(--rf-c) + 1));
   background: linear-gradient(
     90deg,
-    var(--rf-shade) 0 calc(100% / 3 + 1px),
-    transparent calc(100% / 3 + 1px) calc(100% / 3 + var(--rf-crop-w) / 3 - 1px),
-    var(--rf-shade) calc(100% / 3 + var(--rf-crop-w) / 3 - 1px) 100%
+    var(--rf-shade) 0 calc(var(--rf-hole) + 1px),
+    transparent calc(var(--rf-hole) + 1px) calc(var(--rf-hole) + var(--rf-hole-w) - 1px),
+    var(--rf-shade) calc(var(--rf-hole) + var(--rf-hole-w) - 1px) 100%
   );
 }
-/* The hole's corners follow the window's 8 px radius. */
+/* The hole's corners follow the window's 12px radius. */
 .dim::before {
-  --r: 0.5rem;
+  --r: 0.75rem;
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(100% / 3 + 1px);
-  width: calc(var(--rf-crop-w) / 3 - 2px);
+  left: calc(var(--rf-hole) + 1px);
+  width: calc(var(--rf-hole-w) - 2px);
   background:
     radial-gradient(circle var(--r) at 100% 100%, transparent calc(var(--r) - 0.5px), var(--rf-shade) var(--r)) 0 0 / var(--r) var(--r) no-repeat,
     radial-gradient(circle var(--r) at 0 100%, transparent calc(var(--r) - 0.5px), var(--rf-shade) var(--r)) 100% 0 / var(--r) var(--r) no-repeat,
     radial-gradient(circle var(--r) at 100% 0, transparent calc(var(--r) - 0.5px), var(--rf-shade) var(--r)) 0 100% / var(--r) var(--r) no-repeat,
     radial-gradient(circle var(--r) at 0 0, transparent calc(var(--r) - 0.5px), var(--rf-shade) var(--r)) 100% 100% / var(--r) var(--r) no-repeat;
 }
-
-/* Replay: outside the clipped frame (its focus ring stays whole), over
- * its bottom-right corner. Shown after a pass; hidden (and out of the tab
- * order) until then. */
-.replay {
+/* The corner brackets: what Cleo locked onto. Settled, at the window's
+ * corners; the pass brings them in from his face (translate only, so
+ * the 2px stroke never scales). The dark halo keeps them visible on the
+ * bright wall. */
+.corner {
+  --rf-cl: var(--brand-hover);
   position: absolute;
-  right: 0.5rem;
-  bottom: 0.5rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 0 solid var(--rf-cl);
+  filter: drop-shadow(0 0 3px color-mix(in oklab, var(--surface-0) 70%, transparent));
+}
+.tl {
+  left: var(--rf-inset);
+  top: var(--rf-inset);
+  border-top-width: 2px;
+  border-left-width: 2px;
+  border-top-left-radius: 4px;
+}
+.tr {
+  right: var(--rf-inset);
+  top: var(--rf-inset);
+  border-top-width: 2px;
+  border-right-width: 2px;
+  border-top-right-radius: 4px;
+}
+.bl {
+  left: var(--rf-inset);
+  bottom: var(--rf-inset);
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+  border-bottom-left-radius: 4px;
+}
+.br {
+  right: var(--rf-inset);
+  bottom: var(--rf-inset);
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+  border-bottom-right-radius: 4px;
+}
+
+/* Shadows on the plate's plane, 1px above it (no z-fight with the
+   video): the lifted slice's (only during the pass) and the stood
+   vertical's contact shadow at its foot. Pre-blurred gradients; only
+   their opacity and scale animate. */
+.liftShadow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(var(--rf-c) * 100%);
+  height: 100%;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--surface-0) 80%, transparent), transparent);
+  opacity: 0;
+  transform: translate3d(var(--rf-x0), 0%, 1px);
+  pointer-events: none;
+}
+.footShadow {
+  position: absolute;
+  top: calc(100% - 1.5rem);
+  left: calc((var(--rf-foot) - var(--rf-c) * var(--rf-scale) * 0.6) * 100% + var(--rf-gap));
+  width: calc(var(--rf-c) * var(--rf-scale) * 120%);
+  height: 2rem;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--surface-0) 85%, transparent), transparent);
+  transform: translateZ(1px);
+  pointer-events: none;
+}
+
+/* The 9:16: the window's slice of the same video (a canvas the clip is
+ * drawn into, cropped at the tracked x), standing upright. A crop-wide
+ * box at the plate's left edge, hinged on its foot. Settled: its
+ * rotation exactly undoes the plate's (same constants, rotateZ then
+ * rotateX), so it faces the screen with no keystone, at 1.35x. */
+.slice {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: calc(var(--rf-c) * 100%);
+  height: 100%;
+  transform-origin: 50% 100%;
+  transform: translate3d(var(--rf-stand-x), 0%, 2px) rotateZ(var(--rf-roll)) rotateX(calc(var(--rf-tilt) * -1))
+    scale(var(--rf-scale));
+}
+.sliceShadow,
+.sliceClip,
+.sliceFrame,
+.sliceOutline {
+  position: absolute;
+  inset: 0;
+  border-radius: 0.75rem;
+}
+/* shadow-md under it; only its opacity animates */
+.sliceShadow {
+  box-shadow: var(--shadow-md);
+}
+.sliceClip {
+  overflow: hidden;
+  background: var(--surface-1);
+}
+/* Under the canvas: the clip's first frame, cut like Scene crop="track"
+   at the track's first x (the 16:9 frame at the slice's height), on
+   its 12px preview. So the slice is never empty: before the first video
+   frame, and as the still. */
+.slicePoster {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: calc(100% / var(--rf-c));
+  max-width: none;
+  height: 100%;
+  background-size: cover;
+  transform: translateX(calc(var(--rf-x0) * var(--rf-c) * -1));
+  pointer-events: none;
+}
+.sliceCanvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* One soft band of light across it while it turns (CSS has no light;
+   this is what reads as rotation). */
+.sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    var(--text-strong) 50%,
+    transparent 70%
+  );
+  opacity: 0;
+}
+/* Settled: the frame's 1px edge. Lifting: the window's 2px outline
+   (the same pixels), which crossfades to the edge as it stands up. */
+.sliceFrame {
+  border: 1px solid var(--border-strong);
+}
+.sliceOutline {
+  outline: 2px solid var(--text-strong);
+  outline-offset: -2px;
+  opacity: 0;
+}
+
+/* On the page, not on video: the tag gets a visible chip surface, at
+   the figure's top-left corner (level with the stood vertical's top). */
+.stage > .tag {
+  top: 0;
+  left: var(--rf-x);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+}
+/* "16:9" under the plate, "9:16" under the vertical. */
+.ratio {
+  position: absolute;
+  bottom: 0;
+  width: 4rem;
+  margin-left: -2rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.ratioWide {
+  left: calc(var(--rf-x) + var(--rf-w) * var(--rf-wide-label));
+}
+.ratioTall {
+  left: calc(var(--rf-x) + var(--rf-w) * var(--rf-foot) + var(--rf-gap));
+}
+
+/* Replay (after a pass) and Pause/Play (the loop runs longer than 5 s,
+ * WCAG 2.2.2): right-aligned under the row, outside the 3D tree so the
+ * focus ring stays square. 44px, as the page's other loop controls.
+ * Replay is hidden (and out of the tab order) until the pass ends. */
+.controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  width: var(--rf-row);
+  margin-top: 0.75rem;
+  margin-left: var(--rf-x);
+}
+.ctl {
   display: inline-flex;
-  width: 2.25rem;
-  height: 2.25rem;
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  border: 1px solid var(--border-hover);
+  border: 1px solid var(--border);
   background: var(--surface-1);
   color: var(--text-body);
-  opacity: 0;
-  visibility: hidden;
+  cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   -webkit-user-select: none;
@@ -207,33 +431,45 @@
   transition:
     opacity 200ms var(--ease-out),
     visibility 0s linear 200ms,
-    transform 150ms var(--ease-out),
+    transform 120ms var(--ease-out),
     border-color 150ms var(--ease-out),
     color 150ms var(--ease-out);
 }
-.replay[data-shown="true"] {
-  opacity: 1;
-  visibility: visible;
+.ctl[data-shown="false"] {
+  opacity: 0;
+  visibility: hidden;
+}
+.ctl[data-shown="true"] {
   transition-delay: 0s;
 }
-.replay:active {
-  transform: scale(0.94);
-}
-.replay:focus-visible {
-  outline: 2px solid var(--brand-hover);
-  outline-offset: 3px;
-}
-/* Any touch screen (hybrids report a fine primary pointer): 44 px. */
-@media (any-pointer: coarse) {
-  .replay {
-    width: 2.75rem;
-    height: 2.75rem;
-  }
+.ctl:active {
+  transform: scale(0.97);
 }
 @media (hover: hover) and (pointer: fine) {
-  .replay:hover {
-    border-color: var(--border-strong);
+  .ctl:hover {
+    border-color: var(--border-hover);
     color: var(--text-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctl {
+    transition: opacity 200ms var(--ease-out), visibility 0s linear 200ms;
+  }
+  .ctl:active {
+    transform: none;
+  }
+}
+@media (forced-colors: active) {
+  .rim,
+  .sliceFrame {
+    border-color: CanvasText;
+  }
+  .window {
+    outline-color: Highlight;
+  }
+  .corner {
+    --rf-cl: Highlight;
   }
 }
 
@@ -242,8 +478,7 @@
 .clipsFig {
   /* Tile width: clamp(6.5rem, 11vw, 8.5rem), but never wider than a
      third of the figure (three tiles and two 3 px gaps fit at 320 px:
-     94 px, where Power's caption is 12 px). The tiles' image `sizes`
-     (BonusClips.tsx) mirrors the clamp. */
+     94 px, where Power's caption is 12 px). */
   --tg: 3px;
   --tw: min(8.5rem, (100cqw - 2 * var(--tg)) / 3, max(6.5rem, 11vw));
   position: relative;

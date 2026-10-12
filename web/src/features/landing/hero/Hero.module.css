@@ -1,9 +1,11 @@
 /* The hero stage (hero/TakeStrip.tsx, hero/score.ts). A step machine
  * sets data-* on .demo and per-piece translates; CSS transitions move
- * between steps. One easing curve (--ease-out, the brand's); linear only
+ * between steps. One easing curve (--ease, the brand's); linear only
  * for the playhead and the scrub head, which move at the speed of time.
  * Removing a piece: it lifts off the tape (420ms), then the lanes after
- * it slide left (420ms, starting 200ms in), leaving a thin cut marker. */
+ * it slide left (420ms, starting 200ms in), leaving a thin cut marker.
+ * Posts that stay (start, keep, finish) never lift. The video inside the
+ * frame is the real clip (scene/Scene): its motion is video content. */
 
 .demo {
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
@@ -304,8 +306,11 @@
 @starting-style {
   .marker { opacity: 0; }
 }
-/* the bad take's seam sits just right of the start post, not under it */
-.marker[data-tone="cut"] { --mc: var(--cmd-cut); margin-left: 2px; }
+/* a seam on the same spot as a post that stays (the bad take's at
+   “Cleo start”, the pause's at “Cleo keep”) sits just right of it, not
+   under it */
+.marker[data-beside] { margin-left: 2px; }
+.marker[data-tone="cut"] { --mc: var(--cmd-cut); }
 .marker[data-tone="stopgo"] { --mc: var(--cmd-stopgo); }
 .marker[data-tone="neutral"] { --mc: var(--text-muted); }
 

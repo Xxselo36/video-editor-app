@@ -8,7 +8,8 @@
  * are cut from the same captioned video, so they share one caption style:
  * Power, or the language's first native style where Power is unavailable
  * (Hindi: Karaoke). Each clip says its own line of the video (one of its
- * three tips).
+ * three tips), and each tile loops its own clip of him (scene/); the
+ * control under the figure pauses them (WCAG 2.2.2).
  *
  * One pass (~2 s, then the captions; under 5 s in every language) once
  * the tape and the tiles are in view (clear of the sticky header and the
@@ -33,7 +34,9 @@ import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "../CaptionFrame";
 import { LiveCaption, type LiveCaptionHandle } from "../captions/LiveCaption";
 import { subscribe } from "../captions/ticker";
-import { Scene, type ShotId } from "../scene/Scene";
+import type { ClipId } from "../scene/clips";
+import { LoopToggle, Scene } from "../scene/Scene";
+import { useClipsMove } from "../scene/useClipPlayback";
 import { PASS_ROOT_MARGIN, PASS_THRESHOLDS, SMALL_FRAME_OVERRIDES, passShare, useReducedMotion } from "../shared";
 import styles from "../Landing.module.css";
 import f from "./Format.module.css";
@@ -44,11 +47,12 @@ const MAX_HOOK_CLIPS = 3;
 /** The finished video, in seconds. */
 const VIDEO_S = 180;
 /** The picked clips (seconds into the finished video), each its own
- *  moment of the trip video, with the line said in it. */
-const CLIPS: readonly { from: number; to: number; shot: ShotId; cap: MessageKey }[] = [
-  { from: 10, to: 34, shot: "globe", cap: "site.clips.cap1" },
-  { from: 65, to: 106, shot: "map", cap: "site.clips.cap2" },
-  { from: 135, to: 168, shot: "shirt", cap: "site.clips.cap3" },
+ *  moment of the video (its own looping clip of him), with the line said
+ *  in it. */
+const CLIPS: readonly { from: number; to: number; clip: ClipId; cap: MessageKey }[] = [
+  { from: 10, to: 34, clip: "tileCafe", cap: "site.clips.cap1" },
+  { from: 65, to: 106, clip: "tileOffice", cap: "site.clips.cap2" },
+  { from: 135, to: 168, clip: "tileRoom", cap: "site.clips.cap3" },
 ];
 /** The ruler: a tick every 30 s, three labels. */
 const TICKS = [0, 30, 60, 90, 120, 150, 180];
@@ -142,6 +146,8 @@ export function BonusClipsSection() {
   const t = useT();
   const lang = useLang();
   const reduced = useReducedMotion();
+  const moves = useClipsMove();
+  const [paused, setPaused] = useState(false);
   const preset = clipPreset(lang);
   // One string for the effect below: a new line in any clip resets them.
   const captions = CLIPS.map((c) => t(c.cap)).join("|");
@@ -298,8 +304,8 @@ export function BonusClipsSection() {
         </h2>
         <p className={styles.body}>{t("site.clips.body", { count: MAX_HOOK_CLIPS })}</p>
 
-        <div ref={figRef} className={f.clipsFig} aria-hidden="true">
-          <div className={f.tapeBox}>
+        <div ref={figRef} className={f.clipsFig}>
+          <div className={f.tapeBox} aria-hidden="true">
             <span className={cx(styles.frameTag, f.tapeTag)}>{t("site.demo.example")}</span>
             <div ref={tapeRef} className={f.tape}>
               {CLIPS.map((c, i) => (
@@ -318,7 +324,7 @@ export function BonusClipsSection() {
             </div>
           </div>
 
-          <div className={f.links}>
+          <div className={f.links} aria-hidden="true">
             {TICKS.map((s) => (
               <span key={s} className={f.tick} style={{ "--at": s / VIDEO_S } as React.CSSProperties} />
             ))}
@@ -350,7 +356,7 @@ export function BonusClipsSection() {
             ))}
           </div>
 
-          <div ref={tilesRef} className={f.tiles}>
+          <div ref={tilesRef} className={f.tiles} aria-hidden="true">
             {CLIPS.map((c, i) => (
               <div
                 key={c.from}
@@ -360,7 +366,7 @@ export function BonusClipsSection() {
                 className={cx(styles.frame, f.tile)}
                 style={{ "--i": i, "--c": mid(c) } as React.CSSProperties}
               >
-                <Scene shot={c.shot} sizes="(min-width: 1237px) 8.5rem, (min-width: 946px) 11vw, 6.5rem" />
+                <Scene clip={c.clip} playing={!paused} />
                 {preset && (
                   <LiveCaption
                     preset={preset}
@@ -380,6 +386,10 @@ export function BonusClipsSection() {
               </div>
             ))}
           </div>
+
+          {/* The figure is decoration (each part aria-hidden); the
+              clips' pause control is not. */}
+          {moves && <LoopToggle place="row" paused={paused} onToggle={() => setPaused((p) => !p)} />}
         </div>
       </div>
     </section>

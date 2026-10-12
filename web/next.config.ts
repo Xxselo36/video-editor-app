@@ -193,11 +193,11 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
-      // public/ files get max-age=0 by default: the landing's creator
-      // photos and caption fonts would be revalidated on every visit. A
+      // public/ files get max-age=0 by default: the landing's video
+      // clips and caption fonts would be revalidated on every visit. A
       // day, then served stale while revalidating; `immutable` only
       // together with versioned file names.
-      { source: "/landing/creator/:path*", headers: [publicAssetCache] },
+      { source: "/landing/video/:path*", headers: [publicAssetCache] },
       { source: "/fonts/captions/:path*", headers: [publicAssetCache] },
     ];
   },

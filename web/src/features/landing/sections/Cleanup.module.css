@@ -1,7 +1,8 @@
 /* The command words (sections/CommandRows.tsx) and the automatic cleanup
  * (sections/AutoCleanup.tsx). One easing curve, the brand's; every motion
  * is a WAAPI animation on transform, translate, scale or opacity started
- * from JS. The CSS here is the settled state, so reduced motion,
+ * from JS (the command rows' light: an opacity transition on attributes
+ * set from JS). The CSS here is the settled state, so reduced motion,
  * screenshots and a page without JS show the result. */
 
 /* ── Command words ──────────────────────────────────────────────── */
@@ -164,6 +165,74 @@
 .mini[data-close="right"] .cutMark {
   left: auto;
   right: 0;
+}
+
+/* The light: while a row plays (data-playing on the list, data-active on
+ * the row, set with the passes in CommandRows.tsx), the other rows' words
+ * and minis step back a little, so the eye follows the sequence down the
+ * list. Opacity only (nothing moves); a quiet word stays at 3:1 or more
+ * on the page (large text), the descriptions stay as they are. */
+.row .word,
+.row .mini {
+  transition: opacity 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cmdList[data-playing] .row:not([data-active]) .word {
+  opacity: 0.6;
+}
+.cmdList[data-playing] .row:not([data-active]) .mini {
+  opacity: 0.5;
+}
+
+/* The passes' pause control: under the list at its right edge, as the
+ * other demos' controls sit, but out of flow (in the section's bottom
+ * padding, 4.5rem and up), so it moves nothing when it appears after
+ * hydration. Not there under reduced motion. */
+.passBar {
+  position: relative;
+  height: 0;
+}
+.passToggle {
+  position: absolute;
+  top: 0.75rem;
+  inset-inline-end: 0;
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-body);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  transition:
+    transform 120ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.passToggle:active {
+  transform: scale(0.97);
+}
+@media (hover: hover) and (pointer: fine) {
+  .passToggle:hover {
+    border-color: var(--border-hover);
+    color: var(--text-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row .word,
+  .row .mini,
+  .passToggle {
+    transition: none;
+  }
+  .passToggle:active {
+    transform: none;
+  }
 }
 
 /* ── Automatic cleanup ──────────────────────────────────────────── */

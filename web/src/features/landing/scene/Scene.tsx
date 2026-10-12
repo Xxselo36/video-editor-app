@@ -1,125 +1,170 @@
+"use client";
 /**
- * The landing's one recording: a creator on his sofa, packing for a trip
- * and talking to the camera (stock photos by Gustavo Fring on Pexels,
- * free to use; every frame that shows him carries the "Example" tag, so
- * he is never presented as a customer). Each frame on the page is a
- * moment of that one shoot, so the frames read as one video at different
+ * The landing's footage: one creator talking to the camera, in muted
+ * looping clips (clips.ts: stock video by MART PRODUCTION on Pexels, free
+ * to use; every frame that shows him carries the "Example" tag, so he is
+ * never presented as a customer). Every frame on the page that shows him
+ * is a <Scene>, so they all read as one creator's videos at different
  * stages of the edit.
  *
- * The photos are stills: what moves is the edit around them (captions,
- * the crop window, the tape). While a caption plays the camera pushes in
- * slowly on his face and holds, as edited talking-head videos do; that is
- * video content (brand SKILL.md, Motion).
+ * His movement is the clip's own: motion inside a video frame is video
+ * content (brand SKILL.md, Motion). When it loads and plays is
+ * useClipPlayback's: lazily, only on screen in a visible tab, never under
+ * reduced motion or data saver (the poster, his first frame, stays).
+ * Until the video has a frame the poster shows, and under the poster the
+ * clip's inline 12 px preview, so a frame is never empty.
  *
- * Files: public/landing/creator/<shot>-{360,720}.webp (9:16 crops, cropped
- * and graded from the originals) and wide-{800,1400}.webp (the 16:9 take
- * the format section reframes). Each shot inlines a 12 px preview as its
- * background, so a frame is never empty while the photo loads.
+ * A loop longer than five seconds needs a way to stop it (WCAG 2.2.2):
+ * the section that shows it renders a LoopToggle and passes `playing`.
  */
+import { useCallback, useRef } from "react";
+import { Pause, Play } from "lucide-react";
+import { useT } from "@/i18n";
+import { Icon } from "@/components/ui/Icon";
+import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
+import { CLIPS, CLIP_DIR, SMARTCAM_TRACK, type ClipId } from "./clips";
+import { useClipPlayback } from "./useClipPlayback";
 import styles from "./Scene.module.css";
 
-export type ShotId = "talk" | "globe" | "map" | "shirt" | "passport";
-
-/** A 9:16 crop: its preview and where his face is (fractions of the crop),
- *  the point the push-in closes on. */
-const SHOTS: Record<ShotId, { lqip: string; face: readonly [number, number] }> = {
-  talk: {
-    lqip: "data:image/webp;base64,UklGRoYAAABXRUJQVlA4IHoAAACwBACdASoMABUAPu1kqk2ppaQiMAgBMB2JZQBTBfgP/+AwNfXFMpcj8M2s1jlQAP7qaF9CiORjB53I/TJfPIdswo+x6+7GU5fxfKlL8muwwe9O2Wzr9IdpV5Oavon2aaZmL+mqpdbM1kHmGgWKTZCEsdNgXfnVZFQAAA==",
-    face: [0.53, 0.33],
-  },
-  globe: {
-    lqip: "data:image/webp;base64,UklGRo4AAABXRUJQVlA4IIIAAABwBACdASoMABUAPu1kqk2ppaQiMAgBMB2JZQAD5AoSPhU9TiYT33LfwUSXAAD+6o6d44GXbhAe0krVFIMZ8EqTB4aZxUsHYGbWPoJYBvleJyBwdKXN+vrdWXLkZ1y1WJMJfgXuCvhk1audq/P6X9dhiunQtISQDK26du3HfCP9wAAA",
-    face: [0.48, 0.28],
-  },
-  map: {
-    lqip: "data:image/webp;base64,UklGRoAAAABXRUJQVlA4IHQAAABwAwCdASoMABUALrV2u12jqampiYC0SgDKAEO/32osfQbA47wA/vOBdDHg1OM13dfhKmUgahX+W5u7WBzOeQD/F0DhlaSVPRV2Fzsu8gKZqVGtnCzSjU2TLj4wWLHTHMKlzrb4Avb17iWxYP0JTNtEvJFgAA==",
-    face: [0.76, 0.29],
-  },
-  shirt: {
-    lqip: "data:image/webp;base64,UklGRnQAAABXRUJQVlA4IGgAAACwAwCdASoMABUAPu1kqU2ppaOiMAgBMB2JZwAAXKdJnz8IX+u6EAD+6o/VJKLN6tfjWeJbx4zp7s+y+GbsjmfTvHJymmcOnPIHHlMarC1vwKbMhpjiSMJPXldfej0xv3NC+tnxk14oAA==",
-    face: [0.74, 0.33],
-  },
-  passport: {
-    lqip: "data:image/webp;base64,UklGRpYAAABXRUJQVlA4IIoAAABQBACdASoMABUAPu1iqU2ppaOiMAgBMB2JZQAjwACqiDxuiua0IhaesT7gAP7qltvrmuR1kkJ4cTJrPTqVzFgK873jDxvSQWOqhq8t6U2KW5hR+gRVDf1+xNaaPM0Lz5iFc4m3Pz4oO0YWb7Ruvv8k0r+Iuv14Hgc1jeP/AxR+fDJaFwc+aosAAAA=",
-    face: [0.55, 0.26],
-  },
-};
-
-/** The 16:9 take and the face in it (fractions of the take): centre and
- *  size, where the format section's face box goes. */
-export const WIDE = {
-  lqip: "data:image/webp;base64,UklGRlAAAABXRUJQVlA4IEQAAADQAQCdASoMAAcAA4BaJZQAAudCan5dgAD+84F0Z/iLvuSF60xggClSt7Ym5eJmTzNI26GNpMO2Gf6ctNH759FT3WAAAA==",
-  face: { x: 0.69, y: 0.39, w: 0.2, h: 0.44 },
-} as const;
-
-/** A 9:16 crop's width as a fraction of a 16:9 shot's width. */
+/** A 9:16 crop's width as a fraction of a 16:9 frame's width. */
 export const CROP_W = (9 / 16) * (9 / 16);
 
-const SRC = "/landing/creator";
+function setRef<T>(ref: React.Ref<T> | undefined, value: T | null): void {
+  if (typeof ref === "function") ref(value);
+  else if (ref) ref.current = value;
+}
 
 /**
- * One frame of the recording.
- * - `crop="vertical"` (default): a 9:16 frame showing `shot`.
- * - `crop="wide"`: a 16:9 frame showing the whole take.
- * - `crop="track"`: a 9:16 frame cut from the 16:9 take, centred on his
- *   face; the take is the `cameraRef` element, so the format section can
- *   slide it under the frame.
- * `sizes` is the frame's rendered width (for srcset); `priority` loads it
- * eagerly (the hero).
+ * One frame of the footage. The Scene fills its (positioned) parent.
+ * - `crop="vertical"` (default): a 9:16 frame filled by a 9:16 clip.
+ * - `crop="wide"`: a 16:9 frame filled by the 16:9 clip ("smartcam").
+ * - `crop="track"`: a 9:16 frame cut from the 16:9 clip. The clip is the
+ *   `cameraRef` element, at the frame's height, moved so x = `--cx` (a
+ *   fraction of the clip's width, a custom property on the Scene root)
+ *   is in the middle. It starts at the face track's first x; a consumer
+ *   may write `--cx` on the root every frame (the subtree is three
+ *   elements, so the style recalc stays small).
+ * `playing` (default true) lets the clip play; false pauses it on its
+ * frame. `priority` loads it eagerly (the hero). `videoRef` hands out the
+ * <video> (currentTime, requestVideoFrameCallback, drawing to a canvas).
  */
 export function Scene({
-  shot = "talk",
+  clip,
   crop = "vertical",
-  talking = false,
-  sizes = "16rem",
+  playing = true,
   priority = false,
   className,
   cameraRef,
+  videoRef,
 }: {
-  shot?: ShotId;
+  clip: ClipId;
   crop?: "vertical" | "wide" | "track";
-  /** He is speaking: the camera pushes in on his face and holds; when
-   *  false it eases back. */
-  talking?: boolean;
-  sizes?: string;
+  playing?: boolean;
   priority?: boolean;
   className?: string;
   cameraRef?: React.Ref<HTMLDivElement>;
+  videoRef?: React.Ref<HTMLVideoElement>;
 }) {
-  const wide = crop !== "vertical";
-  const lqip = wide ? WIDE.lqip : SHOTS[shot].lqip;
-  const [fx, fy] = wide ? [WIDE.face.x, WIDE.face.y] : SHOTS[shot].face;
-  const name = wide ? "wide" : shot;
-  const widths = wide ? [800, 1400] : [360, 720];
-  const style = {
-    "--cx": WIDE.face.x,
-    "--fx": `${fx * 100}%`,
-    "--fy": `${fy * 100}%`,
-    backgroundImage: lqip ? `url("${lqip}")` : undefined,
-  } as React.CSSProperties;
+  const { file, w, h, lqip } = CLIPS[clip];
+  const rootRef = useRef<HTMLDivElement>(null);
+  const ownVideoRef = useRef<HTMLVideoElement>(null);
+  const playback = useClipPlayback({ src: `${CLIP_DIR}/${file}.mp4`, playing, priority, rootRef, videoRef: ownVideoRef });
+
+  // Muted and inline as attributes too, before any src: iOS plays a
+  // video without a tap only then, and React sets `muted` as a property
+  // only.
+  const attachVideo = useCallback(
+    (el: HTMLVideoElement | null) => {
+      ownVideoRef.current = el;
+      if (el) {
+        el.defaultMuted = true;
+        el.muted = true;
+        el.setAttribute("muted", "");
+        el.playsInline = true;
+        el.setAttribute("playsinline", "");
+        el.setAttribute("webkit-playsinline", "");
+        el.loop = true;
+      }
+      setRef(videoRef, el);
+    },
+    [videoRef],
+  );
+
   return (
     <div
+      ref={rootRef}
       className={cx(styles.scene, className)}
       data-crop={crop}
-      data-talking={talking || undefined}
-      style={style}
+      data-live={playback.live || undefined}
+      style={crop === "track" ? ({ "--cx": SMARTCAM_TRACK.x[0] } as React.CSSProperties) : undefined}
       aria-hidden="true"
     >
-      <div ref={cameraRef} className={styles.camera} data-part="camera">
-        {/* eslint-disable-next-line @next/next/no-img-element -- pre-sized webp crops, no optimizer needed */}
+      <div ref={cameraRef} className={styles.camera} style={{ backgroundImage: `url("${lqip}")` }}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- the clip's pre-sized first frame, no optimizer needed */}
         <img
-          className={styles.photo}
-          src={`${SRC}/${name}-${widths[1]}.webp`}
-          srcSet={widths.map((w) => `${SRC}/${name}-${w}.webp ${w}w`).join(", ")}
-          sizes={crop === "track" ? `calc(${sizes} * 16 / 9 * 16 / 9)` : sizes}
+          className={styles.poster}
+          src={`${CLIP_DIR}/${file}.webp`}
+          width={w}
+          height={h}
           alt=""
           draggable={false}
           loading={priority ? "eager" : "lazy"}
           fetchPriority={priority ? "high" : undefined}
           decoding="async"
         />
+        <video
+          // A new clip is a new element: it starts on its poster again.
+          key={file}
+          ref={attachVideo}
+          className={styles.video}
+          src={playback.src}
+          preload={playback.preload}
+          muted
+          playsInline
+          loop
+          disablePictureInPicture
+          disableRemotePlayback
+          onLoadedData={playback.onLoadedData}
+          onPlaying={playback.onPlaying}
+        />
       </div>
     </div>
   );
+}
+
+/**
+ * The pause control for the clips a section loops (WCAG 2.2.2), as the
+ * hero's: a 44 px round button, "Pause the demo" / "Play the demo".
+ * Render it only while clips can move (useClipsMove).
+ * - `place="row"`: in its own row under a figure, at the right edge.
+ * - `place="beside"`: right of a frame, level with its bottom edge; the
+ *   positioned parent is the frame's box.
+ * `shown={false}` hides it while the frame it controls is not up yet; it
+ * stays in the tab order and shows on keyboard focus, so it is never
+ * skipped.
+ */
+export function LoopToggle({
+  paused,
+  onToggle,
+  place,
+  shown = true,
+}: {
+  paused: boolean;
+  onToggle: () => void;
+  place: "row" | "beside";
+  shown?: boolean;
+}) {
+  const t = useT();
+  const button = (
+    <IconButton
+      label={paused ? t("site.demo.play") : t("site.demo.pause")}
+      className={cx(styles.toggle, place === "beside" && styles.beside)}
+      data-shown={shown}
+      onClick={onToggle}
+    >
+      <Icon icon={paused ? Play : Pause} size={16} />
+    </IconButton>
+  );
+  return place === "row" ? <div className={styles.toggleRow}>{button}</div> : button;
 }
