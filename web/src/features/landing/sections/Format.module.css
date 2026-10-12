@@ -5,7 +5,7 @@
  * (transform, translate, opacity, clip-path). UI transitions use the
  * page's one curve, var(--ease-out) (Landing.module.css .page). */
 
-/* ── Reframe: one cause (the creator moves), one effect (the crop follows) ── */
+/* ── Reframe: a centre crop misses him; the window finds his face ── */
 
 .reframe {
   display: grid;
@@ -50,12 +50,6 @@
 .src {
   aspect-ratio: 16 / 9;
   border: 1px solid var(--border-hover);
-}
-/* The tag sits top-right here: the crop window starts left of centre
-   (on the face) and never passes 61 % of the frame. */
-.src > .srcTag {
-  left: auto;
-  right: 0.5rem;
 }
 .res {
   width: 8.5rem;
@@ -110,23 +104,36 @@
   }
 }
 
-/* The settled state. The creator stepped right by --rf-move of the shot
- * (Scene's [data-part=creator]); the crop followed: the window
- * moved with them and the 9:16 result's camera by the same amount. The
- * `translate` property composes with Scene's own camera transform. */
-.srcScene [data-part="creator"],
-.resScene [data-part="creator"] {
-  translate: var(--rf-move) 0;
-}
-.resScene [data-part="camera"] {
-  translate: calc(-1 * var(--rf-move)) 0;
+/* The settled state: the window sits on his face (--rf-crop-x), the
+ * result's camera is centred on it (Scene, crop="track"), and the face
+ * box marks what Cleo found. The pass animates `translate`, `scale` and
+ * `opacity` from the centre crop to here; they compose with Scene's own
+ * camera transform. */
+.face {
+  position: absolute;
+  left: var(--rf-face-x);
+  top: var(--rf-face-y);
+  width: var(--rf-face-w);
+  height: var(--rf-face-h);
+  --fc: var(--brand-hover);
+  --fl: 0.75rem;
+  background:
+    linear-gradient(var(--fc), var(--fc)) 0 0 / var(--fl) 2px no-repeat,
+    linear-gradient(var(--fc), var(--fc)) 0 0 / 2px var(--fl) no-repeat,
+    linear-gradient(var(--fc), var(--fc)) 100% 0 / var(--fl) 2px no-repeat,
+    linear-gradient(var(--fc), var(--fc)) 100% 0 / 2px var(--fl) no-repeat,
+    linear-gradient(var(--fc), var(--fc)) 0 100% / var(--fl) 2px no-repeat,
+    linear-gradient(var(--fc), var(--fc)) 0 100% / 2px var(--fl) no-repeat,
+    linear-gradient(var(--fc), var(--fc)) 100% 100% / var(--fl) 2px no-repeat,
+    linear-gradient(var(--fc), var(--fc)) 100% 100% / 2px var(--fl) no-repeat;
+  filter: drop-shadow(0 0 4px color-mix(in oklab, var(--surface-0) 60%, transparent));
+  pointer-events: none;
 }
 
 /* The crop window and the dimmed outside move as one lens. */
 .lens {
   position: absolute;
   inset: 0;
-  translate: var(--rf-move) 0;
   pointer-events: none;
 }
 .window {

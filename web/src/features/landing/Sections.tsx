@@ -115,7 +115,7 @@ function FinalReprise() {
   return (
     <div ref={ref} className={styles.reprise} data-shown={shown} aria-hidden="true">
       <div className={styles.repriseFrame}>
-        <Scene talking={shown && !reduced} />
+        <Scene shot="passport" talking={shown && !reduced} sizes="10.5rem" />
         <LiveCaption preset={preset} text={caption} lang={lang} playing={shown && !reduced} loop={false} hold={0.4}>
           <CaptionPoster preset={preset} text={caption} />
         </LiveCaption>

@@ -345,7 +345,7 @@ export function CaptionPlayerSection() {
                   role="img"
                   aria-label={t("site.captions.frameAria", { style: name(shown) })}
                 >
-                  <Scene crop="vertical" talking={running} />
+                  <Scene talking={running} sizes="15.5rem" />
                   <LiveCaption
                     preset={shown}
                     text={text}

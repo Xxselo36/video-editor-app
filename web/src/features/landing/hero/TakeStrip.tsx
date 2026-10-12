@@ -252,7 +252,12 @@ export function TakeStrip() {
 
         <div className={styles.video}>
           <div className={styles.screen}>
-            <Scene pose="center" talking={running && !!s.play} className={styles.scene} />
+            <Scene
+              priority
+              sizes="(min-width: 1024px) 16rem, (min-width: 768px) 9.5rem, 6.75rem"
+              talking={running && !!s.play}
+              className={styles.scene}
+            />
             <div className={styles.captionLayer}>
               <LiveCaption
                 preset={preset}

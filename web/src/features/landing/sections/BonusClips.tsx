@@ -30,7 +30,7 @@ import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "../CaptionFrame";
 import { LiveCaption, type LiveCaptionHandle } from "../captions/LiveCaption";
 import { subscribe } from "../captions/ticker";
-import { Scene, type ScenePose } from "../scene/Scene";
+import { Scene, type ShotId } from "../scene/Scene";
 import { useReducedMotion } from "../shared";
 import styles from "../Landing.module.css";
 import f from "./Format.module.css";
@@ -44,11 +44,12 @@ const CLIP_OVERRIDES: Partial<Record<PresetId, StyleOverrides>> = { karaoke: { s
 
 /** The finished video, in seconds. */
 const VIDEO_S = 180;
-/** The picked clips (seconds into the finished video). */
-const CLIPS: readonly { from: number; to: number; pose: ScenePose }[] = [
-  { from: 10, to: 34, pose: "left" },
-  { from: 65, to: 106, pose: "center" },
-  { from: 135, to: 168, pose: "right" },
+/** The picked clips (seconds into the finished video), each its own
+ *  moment of the trip video. */
+const CLIPS: readonly { from: number; to: number; shot: ShotId }[] = [
+  { from: 10, to: 34, shot: "globe" },
+  { from: 65, to: 106, shot: "map" },
+  { from: 135, to: 168, shot: "shirt" },
 ];
 /** The ruler: a tick every 30 s, three labels. */
 const TICKS = [0, 30, 60, 90, 120, 150, 180];
@@ -354,7 +355,7 @@ export function BonusClipsSection() {
                 className={cx(styles.frame, f.tile)}
                 style={{ "--i": i, "--c": mid(c) } as React.CSSProperties}
               >
-                <Scene pose={c.pose} />
+                <Scene shot={c.shot} sizes="8.5rem" />
                 {preset && (
                   <LiveCaption
                     preset={preset}

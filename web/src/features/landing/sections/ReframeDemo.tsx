@@ -1,26 +1,26 @@
 "use client";
 /**
- * Format: "Vertical, even if you filmed wide." One cause and one effect on
- * the same recording, shown twice side by side: in the 16:9 source the
- * creator steps to the side (the cause, filmed movement) and the 9:16
- * crop window follows their face (the effect); next to it, the 9:16
- * result that window produces. The result's camera moves by exactly what
- * the window moves, so the two frames can never disagree.
+ * Format: "Vertical, even if you filmed wide." The same take twice, side
+ * by side: the 16:9 recording with a 9:16 crop window on it, and the
+ * 9:16 result that window produces.
  *
- * One pass (~3.4 s) once the result frame is mostly in view (and the
+ * The pass: the window starts where a plain centre crop would sit, with
+ * his face half outside it (he sits right of centre). Cleo finds the face
+ * (a box closes on it), the window glides over to it, and the outside
+ * settles darker. The result's camera moves by exactly what the window
+ * moves, so the two frames can never disagree. Nothing in the photo moves.
+ *
+ * One pass (~2.4 s) once the result frame is mostly in view (and the
  * source with it) in a visible tab. It is re-armed when the figure is
  * fully out of view (so it plays again on re-entry) and replayed by the
  * Replay button. Every moving part takes its keyframes from
- * `reframeScore` (WAAPI on translate and opacity). The base CSS is the
- * settled end state, so reduced motion, screenshots and a page without JS
- * show the result.
+ * `reframeScore` (WAAPI on translate, scale and opacity). The base CSS is
+ * the settled end state, so reduced motion, screenshots and a page
+ * without JS show the result.
  *
- * The crop is a tracking camera: its path is the creator's own move,
- * 200 ms later (a delayed copy of a monotonic move can never get ahead of
- * it). In the result the creator drifts a little in the direction they
- * walk and settles back to centre, with no catch-up whip. The window and
- * the result's camera are the reframe's virtual camera, so they move on
- * the filmed curve: motion inside a video frame is video content.
+ * The window and the result's camera are the reframe's virtual camera,
+ * so they glide on the filmed curve (motion inside a video frame is video
+ * content); the face box is UI and uses the brand curve.
  */
 import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowRight, RotateCcw } from "lucide-react";
@@ -28,59 +28,55 @@ import { useT } from "@/i18n";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
-import { CREATOR_X, CROP_W, Scene } from "../scene/Scene";
+import { CROP_W, Scene, WIDE } from "../scene/Scene";
 import { useReducedMotion } from "../shared";
 import styles from "../Landing.module.css";
 import f from "./Format.module.css";
 
 /** The brand curve: every UI enter, exit and on-screen travel. */
 const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
-/** Movement inside the video: the filmed person and the reframe's
- *  virtual camera (video content, not UI). */
+/** The reframe's virtual camera (video content, not UI). */
 const FILMED = "cubic-bezier(0.37, 0, 0.63, 1)";
-/** The tracking lag: the camera follows 200 ms behind the creator. */
-const LAG = 200;
-/** How far the creator steps right, in % of the shot's width. */
-const MOVE = 9;
+/** From a centre crop to his face, in % of the take's width. */
+const MOVE = (WIDE.face.x - 0.5) * 100;
 /** The dimming outside the crop: during the pass, then settled. */
 const DIM_FROM = 68;
 const DIM_TO = 85;
 
-type ReframePart = "creator" | "resultCreator" | "lens" | "camera" | "dim";
+type ReframePart = "face" | "lens" | "camera" | "dim";
 type ReframeCue = {
   at: number;
   ms: number;
   easing: string;
-  prop: "translate" | "opacity";
-  /** Each part's [start, settled] value; settled = the base CSS. */
-  parts: Partial<Record<ReframePart, readonly [string | number, string | number]>>;
+  /** Keyframes per part: [start, settled]; settled = the base CSS. */
+  parts: Partial<Record<ReframePart, readonly [Keyframe, Keyframe]>>;
 };
 
 /** The pass. One table, so the window, the dimming and the result's
  *  camera never drift apart. */
 const reframeScore: { ms: number; cues: readonly ReframeCue[] } = {
-  ms: 3400,
+  ms: 2400,
   cues: [
-    // The cause: the creator steps right (filmed, in both frames).
+    // Found: the face box closes on his face.
     {
-      at: 300,
-      ms: 1300,
-      easing: FILMED,
-      prop: "translate",
-      parts: { creator: ["0 0", `${MOVE}% 0`], resultCreator: ["0 0", `${MOVE}% 0`] },
+      at: 250,
+      ms: 320,
+      easing: EASE,
+      parts: { face: [{ opacity: 0, scale: "1.25" }, { opacity: 1, scale: "1" }] },
     },
-    // The effect: the crop tracks them, on their own path LAG later. The
-    // window and the result's camera (which moves the other way: the shot
-    // slides under the crop).
+    // The window glides from the centre crop to the face; the result's
+    // camera moves the other way (the take slides under the crop).
     {
-      at: 300 + LAG,
-      ms: 1300,
+      at: 750,
+      ms: 1000,
       easing: FILMED,
-      prop: "translate",
-      parts: { lens: ["0 0", `${MOVE}% 0`], camera: ["0 0", `${-MOVE}% 0`] },
+      parts: {
+        lens: [{ translate: `${-MOVE}% 0` }, { translate: "0 0" }],
+        camera: [{ translate: `${MOVE}% 0` }, { translate: "0 0" }],
+      },
     },
     // Locked on: the outside settles darker.
-    { at: 1900, ms: 300, easing: EASE, prop: "opacity", parts: { dim: [DIM_FROM / DIM_TO, 1] } },
+    { at: 1850, ms: 300, easing: EASE, parts: { dim: [{ opacity: DIM_FROM / DIM_TO }, { opacity: 1 }] } },
   ],
 };
 
@@ -88,10 +84,10 @@ const reframeScore: { ms: number; cues: readonly ReframeCue[] } = {
 function armScore(els: Record<ReframePart, HTMLElement | null>): Animation[] {
   const out: Animation[] = [];
   for (const cue of reframeScore.cues) {
-    for (const [part, values] of Object.entries(cue.parts) as [ReframePart, readonly [string | number, string | number]][]) {
+    for (const [part, values] of Object.entries(cue.parts) as [ReframePart, readonly [Keyframe, Keyframe]][]) {
       const el = els[part];
       if (!el) continue;
-      const a = el.animate([{ [cue.prop]: values[0] }, { [cue.prop]: values[1] }], {
+      const a = el.animate([values[0], values[1]], {
         delay: cue.at,
         duration: cue.ms,
         easing: cue.easing,
@@ -117,8 +113,7 @@ export function ReframeSection() {
   const figRef = useRef<HTMLDivElement>(null);
   const srcRef = useRef<HTMLDivElement>(null);
   const resRef = useRef<HTMLDivElement>(null);
-  const creatorRef = useRef<HTMLDivElement>(null);
-  const resultCreatorRef = useRef<HTMLDivElement>(null);
+  const faceRef = useRef<HTMLSpanElement>(null);
   const lensRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<HTMLDivElement>(null);
   const dimRef = useRef<HTMLDivElement>(null);
@@ -133,8 +128,7 @@ export function ReframeSection() {
       return;
     }
     const els: Record<ReframePart, HTMLElement | null> = {
-      creator: creatorRef.current,
-      resultCreator: resultCreatorRef.current,
+      face: faceRef.current,
       lens: lensRef.current,
       camera: cameraRef.current,
       dim: dimRef.current,
@@ -192,11 +186,15 @@ export function ReframeSection() {
     };
   }, [reduced]);
 
+  const { face } = WIDE;
   const figStyle = {
-    "--rf-move": `${MOVE}%`,
     "--rf-dim": `${DIM_TO}%`,
-    "--rf-crop-x": `${(CREATOR_X - CROP_W / 2) * 100}%`,
+    "--rf-crop-x": `${(face.x - CROP_W / 2) * 100}%`,
     "--rf-crop-w": `${CROP_W * 100}%`,
+    "--rf-face-x": `${(face.x - face.w / 2) * 100}%`,
+    "--rf-face-y": `${(face.y - face.h / 2) * 100}%`,
+    "--rf-face-w": `${face.w * 100}%`,
+    "--rf-face-h": `${face.h * 100}%`,
   } as React.CSSProperties;
 
   return (
@@ -213,12 +211,13 @@ export function ReframeSection() {
             <div className={f.rfCol}>
               <div className={f.srcWrap}>
                 <div ref={srcRef} className={f.src} aria-hidden="true">
-                  <Scene crop="wide" className={f.srcScene} creatorRef={creatorRef} />
+                  <Scene crop="wide" sizes="(min-width: 1024px) 26rem, min(100vw, 34rem)" />
                   <div ref={lensRef} className={f.lens}>
                     <div ref={dimRef} className={f.dim} />
                     <div className={f.window} />
                   </div>
-                  <span className={cx(styles.frameTag, f.srcTag)}>{t("site.demo.example")}</span>
+                  <span ref={faceRef} className={f.face} />
+                  <span className={styles.frameTag}>{t("site.demo.example")}</span>
                 </div>
                 {!reduced && (
                   <IconButton
@@ -241,7 +240,7 @@ export function ReframeSection() {
             </span>
             <div className={f.rfCol}>
               <div ref={resRef} className={f.res} aria-hidden="true">
-                <Scene crop="vertical" className={f.resScene} cameraRef={cameraRef} creatorRef={resultCreatorRef} />
+                <Scene crop="track" sizes="8.5rem" cameraRef={cameraRef} />
               </div>
               <span className={f.ratio} aria-hidden="true">
                 9:16

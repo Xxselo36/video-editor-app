@@ -25,7 +25,6 @@ import { COPYRIGHT } from "@/lib/legal";
 import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { cx } from "@/components/ui/cx";
 import { TakeStrip } from "@/features/landing/hero/TakeStrip";
-import { SceneSprite } from "@/features/landing/scene/Scene";
 import { ControlSection, FaqSection, FinalSection } from "@/features/landing/Sections";
 
 // The demos below the hero: server-rendered as usual, their code in
@@ -57,7 +56,6 @@ export default function Landing() {
 
   return (
     <div className={styles.page}>
-      <SceneSprite />
       <a href="#main" className={styles.skip}>
         {t("site.skipToContent")}
       </a>
