@@ -170,6 +170,8 @@ const securityHeaders = [
   { key: "Content-Security-Policy-Report-Only", value: reportOnlyCsp.join("; ") },
 ];
 
+const publicAssetCache = { key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" };
+
 const nextConfig: NextConfig = {
   // Allow LAN IPs so we can open the dev server on phone/tablet
   // (Next 16 blocks cross-origin dev resources by default).
@@ -189,7 +191,15 @@ const nextConfig: NextConfig = {
   },
   serverExternalPackages: ["harfbuzzjs"],
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // public/ files get max-age=0 by default: the landing's creator
+      // photos and caption fonts would be revalidated on every visit. A
+      // day, then served stale while revalidating; `immutable` only
+      // together with versioned file names.
+      { source: "/landing/creator/:path*", headers: [publicAssetCache] },
+      { source: "/fonts/captions/:path*", headers: [publicAssetCache] },
+    ];
   },
 };
 

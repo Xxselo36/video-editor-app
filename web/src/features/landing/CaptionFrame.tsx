@@ -9,6 +9,7 @@
  * digits get the preset's number colour where it has one.
  */
 import { cx } from "@/components/ui/cx";
+import { Scene } from "./scene/Scene";
 import styles from "./Landing.module.css";
 
 export type FramePreset = "power" | "boxed" | "clipper" | "elegant" | "karaoke" | "reveal" | "subtitle" | "minimal";
@@ -106,6 +107,13 @@ function pageNodes(preset: FramePreset, text: string): React.ReactNode {
   );
 }
 
+/** A still of the caption in the closest CSS preset: the poster a live
+ *  (engine) caption shows until its engine and font have loaded. */
+export function CaptionPoster({ preset, text, className }: { preset: string; text: string; className?: string }) {
+  const frame: FramePreset = preset in PRESET_CLASS ? (preset as FramePreset) : "power";
+  return <p className={cx(styles.caption, PRESET_CLASS[frame], className)}>{pageNodes(frame, text)}</p>;
+}
+
 export function CaptionFrame({
   preset,
   text,
@@ -114,6 +122,7 @@ export function CaptionFrame({
   active,
   captionClassName,
   className,
+  scene = false,
   children,
 }: {
   preset: FramePreset;
@@ -126,10 +135,13 @@ export function CaptionFrame({
   active?: number;
   captionClassName?: string;
   className?: string;
+  /** Show the synthetic recording behind the caption. */
+  scene?: boolean;
   children?: React.ReactNode;
 }) {
   return (
     <div className={cx(styles.frame, className)}>
+      {scene && <Scene />}
       {tag && <span className={styles.frameTag}>{tag}</span>}
       {showText && (
         <p className={cx(styles.caption, PRESET_CLASS[preset], captionClassName)}>

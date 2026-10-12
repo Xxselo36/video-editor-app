@@ -95,6 +95,9 @@
   min-height: 100dvh;
   flex-direction: column;
   color: var(--text-strong);
+  /* The buttons, chips and FAQ rows have their own press states (the
+   * footer links one below); no grey flash on top. */
+  -webkit-tap-highlight-color: transparent;
 }
 @media (min-width: 640px) {
   .page { --gutter: 1.5rem; }
@@ -218,9 +221,12 @@
 
 /* ── Hero ───────────────────────────────────────────────────────── */
 
+/* overflow-x: clip, not hidden: nothing in the stage may widen the page,
+ * yet it makes no scroll container and vertical overflow stays visible. */
 .hero {
   position: relative;
-  padding-block: 2.5rem 1.5rem;
+  padding-block: 1.5rem 1rem;
+  overflow-x: clip;
 }
 @media (min-width: 768px) {
   .hero { padding-block: 4.5rem 2.5rem; }
@@ -230,8 +236,8 @@
   z-index: 2;
   max-width: 42rem;
 }
-@media (min-width: 768px) {
-  .heroText { max-width: min(42rem, calc(100% - var(--clip-w) - 4rem)); }
+@media (min-width: 1024px) {
+  .heroText { max-width: calc(100% - var(--clip-w) - 4rem); }
 }
 .h1 {
   margin: 0;
@@ -242,19 +248,24 @@
   color: var(--text-strong);
   text-wrap: balance;
 }
-/* Japanese breaks at phrase boundaries (after 。), Korean between words. */
+.h1Line {
+  display: block;
+}
+/* Japanese breaks at phrase boundaries (after 。) in headings and body
+ * copy (Safari ignores auto-phrase and breaks as before); Korean between
+ * words everywhere on the page, caption posters included. */
 .h1:lang(ja),
 .h2:lang(ja),
-.finalTitle:lang(ja) {
+.finalTitle:lang(ja),
+.page:lang(ja) :is(p, li, summary) {
   word-break: auto-phrase;
 }
-.h1:lang(ko),
-.h2:lang(ko),
-.finalTitle:lang(ko) {
+.page:lang(ko) {
   word-break: keep-all;
+  overflow-wrap: break-word;
 }
 .lead {
-  margin-top: 1.25rem;
+  margin-top: 0.875rem;
   max-width: 34rem;
   font-size: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
   line-height: 1.55;
@@ -262,468 +273,30 @@
   text-wrap: pretty;
 }
 .heroCta {
-  margin-top: 1.75rem;
-}
-
-/* ── Take strip (hero stage) ────────────────────────────────────── */
-/* Driven by TakeStrip's step machine: data-* attributes on .demo say
- * what the current step shows, and transitions run only between steps,
- * so nothing animates during the holds. The strip is a tape lying in
- * 3D; removed pieces lift off it, then the gap closes. The finished
- * clip lies on the tape's end and stands up at “Cleo finish”. */
-
-.demo {
-  position: relative;
-}
-.hero {
-  --clip-w: 6.5rem;
-}
-.stage {
-  --clip-w: 6.5rem;
-  /* where the tape ends: under the middle of the clip */
-  --tape-end: calc(var(--clip-w) * 0.5);
-  --strip-h: 9.5rem;
-  position: relative;
-  isolation: isolate;
-  margin-top: 2rem;
-  height: 12.5rem;
-}
-@media (min-width: 768px) {
-  .hero { --clip-w: clamp(10rem, 13vw, 13.5rem); }
-  .stage {
-    --clip-w: clamp(10rem, 13vw, 13.5rem);
-    --tape-end: calc(1.5rem + var(--clip-w) * 0.5);
-    --strip-h: 10rem;
-    margin-top: 2.5rem;
-    height: 13.25rem;
-  }
-}
-
-/* Narration: one chip at a time, over the piece it is about, on its
- * own layer above the tape; chips further right sit a little higher
- * because the tape rises toward its end. */
-.rail {
-  position: absolute;
-  z-index: 4;
-  left: 0;
-  right: var(--tape-end);
-  bottom: calc(var(--strip-h) * 0.62 + 0.5rem);
-  height: 2.25rem;
-}
-.railItem {
-  position: absolute;
-  left: var(--at, 0%);
-  bottom: var(--lift, 0rem);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  border-radius: 9999px;
-  border: 1px solid var(--rc, var(--border-hover));
-  background: color-mix(in oklab, var(--rc, var(--surface-2)) 14%, var(--surface-1));
-  padding: 0.3125rem 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 650;
-  line-height: 1.3;
-  white-space: nowrap;
-  color: var(--rc, var(--text-body));
-  opacity: 0;
-  transform: translate(var(--ax, -50%), 6px);
-  transition:
-    opacity 280ms var(--ease-out),
-    transform 280ms var(--ease-out);
-}
-/* Positions: the piece's middle along the tape (perspective included)
- * at the moment its chip shows; the earlier pieces are gone by then. */
-.railStart { --rc: var(--cmd-start); --at: 0%; --ax: 0%; }
-.railCut { --rc: var(--cmd-cut); --at: 13%; }
-.railFiller { --at: 27%; --lift: 0.25rem; }
-.railPause { --at: 45%; --lift: 0.5rem; }
-.railSkip { --rc: var(--cmd-stopgo); --at: 56%; --lift: 0.625rem; }
-/* Phones: the tape is narrow; keep the first chips inside the gutter. */
-@media (max-width: 767px) {
-  .railCut { --ax: 0%; }
-}
-/* “Cleo finish” sits just left of the clip that stands up at the end. */
-.railFinish {
-  --rc: var(--cmd-finish);
-  --ax: 0%;
-  --lift: 1rem;
-  left: auto;
-  right: calc(var(--clip-w) * 0.5 + 0.75rem);
-}
-.demo[data-rail="start"] .railStart,
-.demo[data-rail="cut"] .railCut,
-.demo[data-rail="filler"] .railFiller,
-.demo[data-rail="pause"] .railPause,
-.demo[data-rail="skip"] .railSkip,
-.demo[data-rail="finish"] .railFinish {
-  opacity: 1;
-  transform: translate(var(--ax, -50%), 0);
-}
-.struck {
-  text-decoration: line-through;
-  text-decoration-thickness: 2px;
-  color: var(--text-muted);
-}
-.hatch {
-  display: inline-block;
-  width: 1.75rem;
-  height: 0.75rem;
-  border-radius: 0.25rem;
-  background: repeating-linear-gradient(135deg, var(--border-strong) 0 2px, transparent 2px 5px);
-}
-
-.stripArea {
-  position: absolute;
-  left: 0;
-  right: var(--tape-end);
-  bottom: 0;
-  height: var(--strip-h);
-  perspective: 56rem;
-  perspective-origin: 35% -60%;
-}
-/* The tape's soft contact shadow on the "table". */
-.stripArea::after {
-  content: "";
-  position: absolute;
-  left: 3%;
-  right: 3%;
-  bottom: -0.25rem;
-  height: 1.5rem;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, color-mix(in oklab, var(--surface-0) 85%, transparent), transparent);
-  pointer-events: none;
-}
-/* The tape: a plate with a lit far edge and a thickness edge in front. */
-.strip {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: stretch;
-  gap: 3px;
-  padding: 6px;
-  border-radius: 0.75rem;
-  border: 1px solid var(--border);
-  background: linear-gradient(to bottom, var(--surface-1), var(--surface-2));
-  transform: rotateX(56deg) rotateZ(-2.5deg);
-  transform-origin: 50% 100%;
-  transform-style: preserve-3d;
-}
-.strip::after {
-  content: "";
-  position: absolute;
-  left: -1px;
-  right: -1px;
-  top: 100%;
-  height: 0.75rem;
-  border-radius: 0 0 0.75rem 0.75rem;
-  background: linear-gradient(to bottom, var(--surface-tint), var(--surface-0));
-  transform-origin: 50% 0;
-  transform: rotateX(-90deg);
-}
-
-.seg {
-  position: relative;
-  flex: var(--g) 1 0px;
-  min-width: 0;
-  border-radius: 0.5rem;
-  border: 1px solid var(--border-hover);
-  background-color: var(--surface-2);
-  transition:
-    transform 360ms var(--ease-out),
-    opacity 360ms var(--ease-out),
-    flex-grow 520ms var(--ease-out) 280ms,
-    background-color 240ms var(--ease-out),
-    border-color 240ms var(--ease-out);
-}
-.seg::before {
-  content: "";
-  position: absolute;
-  inset: 20% 0.5rem;
-  background: var(--wave, var(--text-muted));
-  opacity: 0.6;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='192' height='32'%3E%3Crect x='0' y='7' width='2' height='18' rx='1'/%3E%3Crect x='4' y='10' width='2' height='12' rx='1'/%3E%3Crect x='8' y='6' width='2' height='20' rx='1'/%3E%3Crect x='12' y='2' width='2' height='28' rx='1'/%3E%3Crect x='16' y='12' width='2' height='8' rx='1'/%3E%3Crect x='20' y='11' width='2' height='10' rx='1'/%3E%3Crect x='24' y='3' width='2' height='26' rx='1'/%3E%3Crect x='28' y='4' width='2' height='24' rx='1'/%3E%3Crect x='32' y='11' width='2' height='10' rx='1'/%3E%3Crect x='36' y='7' width='2' height='18' rx='1'/%3E%3Crect x='40' y='3' width='2' height='26' rx='1'/%3E%3Crect x='44' y='12' width='2' height='8' rx='1'/%3E%3Crect x='48' y='5' width='2' height='22' rx='1'/%3E%3Crect x='52' y='4' width='2' height='24' rx='1'/%3E%3Crect x='56' y='9' width='2' height='14' rx='1'/%3E%3Crect x='60' y='12' width='2' height='8' rx='1'/%3E%3Crect x='64' y='11' width='2' height='10' rx='1'/%3E%3Crect x='68' y='6' width='2' height='20' rx='1'/%3E%3Crect x='72' y='6' width='2' height='20' rx='1'/%3E%3Crect x='76' y='11' width='2' height='10' rx='1'/%3E%3Crect x='80' y='9' width='2' height='14' rx='1'/%3E%3Crect x='84' y='11' width='2' height='10' rx='1'/%3E%3Crect x='88' y='4' width='2' height='24' rx='1'/%3E%3Crect x='92' y='6' width='2' height='20' rx='1'/%3E%3Crect x='96' y='12' width='2' height='8' rx='1'/%3E%3Crect x='100' y='3' width='2' height='26' rx='1'/%3E%3Crect x='104' y='3' width='2' height='26' rx='1'/%3E%3Crect x='108' y='11' width='2' height='10' rx='1'/%3E%3Crect x='112' y='9' width='2' height='14' rx='1'/%3E%3Crect x='116' y='2' width='2' height='28' rx='1'/%3E%3Crect x='120' y='2' width='2' height='28' rx='1'/%3E%3Crect x='124' y='3' width='2' height='26' rx='1'/%3E%3Crect x='128' y='12' width='2' height='8' rx='1'/%3E%3Crect x='132' y='3' width='2' height='26' rx='1'/%3E%3Crect x='136' y='3' width='2' height='26' rx='1'/%3E%3Crect x='140' y='6' width='2' height='20' rx='1'/%3E%3Crect x='144' y='12' width='2' height='8' rx='1'/%3E%3Crect x='148' y='9' width='2' height='14' rx='1'/%3E%3Crect x='152' y='12' width='2' height='8' rx='1'/%3E%3Crect x='156' y='4' width='2' height='24' rx='1'/%3E%3Crect x='160' y='3' width='2' height='26' rx='1'/%3E%3Crect x='164' y='10' width='2' height='12' rx='1'/%3E%3Crect x='168' y='8' width='2' height='16' rx='1'/%3E%3Crect x='172' y='6' width='2' height='20' rx='1'/%3E%3Crect x='176' y='10' width='2' height='12' rx='1'/%3E%3Crect x='180' y='4' width='2' height='24' rx='1'/%3E%3Crect x='184' y='11' width='2' height='10' rx='1'/%3E%3Crect x='188' y='3' width='2' height='26' rx='1'/%3E%3C/svg%3E") repeat-x center / auto 100%;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='192' height='32'%3E%3Crect x='0' y='7' width='2' height='18' rx='1'/%3E%3Crect x='4' y='10' width='2' height='12' rx='1'/%3E%3Crect x='8' y='6' width='2' height='20' rx='1'/%3E%3Crect x='12' y='2' width='2' height='28' rx='1'/%3E%3Crect x='16' y='12' width='2' height='8' rx='1'/%3E%3Crect x='20' y='11' width='2' height='10' rx='1'/%3E%3Crect x='24' y='3' width='2' height='26' rx='1'/%3E%3Crect x='28' y='4' width='2' height='24' rx='1'/%3E%3Crect x='32' y='11' width='2' height='10' rx='1'/%3E%3Crect x='36' y='7' width='2' height='18' rx='1'/%3E%3Crect x='40' y='3' width='2' height='26' rx='1'/%3E%3Crect x='44' y='12' width='2' height='8' rx='1'/%3E%3Crect x='48' y='5' width='2' height='22' rx='1'/%3E%3Crect x='52' y='4' width='2' height='24' rx='1'/%3E%3Crect x='56' y='9' width='2' height='14' rx='1'/%3E%3Crect x='60' y='12' width='2' height='8' rx='1'/%3E%3Crect x='64' y='11' width='2' height='10' rx='1'/%3E%3Crect x='68' y='6' width='2' height='20' rx='1'/%3E%3Crect x='72' y='6' width='2' height='20' rx='1'/%3E%3Crect x='76' y='11' width='2' height='10' rx='1'/%3E%3Crect x='80' y='9' width='2' height='14' rx='1'/%3E%3Crect x='84' y='11' width='2' height='10' rx='1'/%3E%3Crect x='88' y='4' width='2' height='24' rx='1'/%3E%3Crect x='92' y='6' width='2' height='20' rx='1'/%3E%3Crect x='96' y='12' width='2' height='8' rx='1'/%3E%3Crect x='100' y='3' width='2' height='26' rx='1'/%3E%3Crect x='104' y='3' width='2' height='26' rx='1'/%3E%3Crect x='108' y='11' width='2' height='10' rx='1'/%3E%3Crect x='112' y='9' width='2' height='14' rx='1'/%3E%3Crect x='116' y='2' width='2' height='28' rx='1'/%3E%3Crect x='120' y='2' width='2' height='28' rx='1'/%3E%3Crect x='124' y='3' width='2' height='26' rx='1'/%3E%3Crect x='128' y='12' width='2' height='8' rx='1'/%3E%3Crect x='132' y='3' width='2' height='26' rx='1'/%3E%3Crect x='136' y='3' width='2' height='26' rx='1'/%3E%3Crect x='140' y='6' width='2' height='20' rx='1'/%3E%3Crect x='144' y='12' width='2' height='8' rx='1'/%3E%3Crect x='148' y='9' width='2' height='14' rx='1'/%3E%3Crect x='152' y='12' width='2' height='8' rx='1'/%3E%3Crect x='156' y='4' width='2' height='24' rx='1'/%3E%3Crect x='160' y='3' width='2' height='26' rx='1'/%3E%3Crect x='164' y='10' width='2' height='12' rx='1'/%3E%3Crect x='168' y='8' width='2' height='16' rx='1'/%3E%3Crect x='172' y='6' width='2' height='20' rx='1'/%3E%3Crect x='176' y='10' width='2' height='12' rx='1'/%3E%3Crect x='180' y='4' width='2' height='24' rx='1'/%3E%3Crect x='184' y='11' width='2' height='10' rx='1'/%3E%3Crect x='188' y='3' width='2' height='26' rx='1'/%3E%3C/svg%3E") repeat-x center / auto 100%;
-}
-.segTake { --g: 18; }
-.segTake2 { --g: 12; }
-.segTake3 { --g: 21; }
-.segBad { --g: 22; }
-.segFiller { --g: 5; }
-.segFiller::before { inset: 34% 0.25rem; }
-.segPause {
-  --g: 8;
-  background-image: repeating-linear-gradient(135deg, var(--surface-1) 0 5px, var(--surface-tint) 5px 7px);
-}
-.segPause::before {
-  inset: calc(50% - 1px) 0.5rem;
-  -webkit-mask: none;
-  mask: none;
-  opacity: 0.5;
-}
-.segSkip { --g: 14; }
-
-.post {
-  position: relative;
-  flex: 0 0 3px;
-  border-radius: 2px;
-  background: var(--pc);
-  transition:
-    transform 360ms var(--ease-out),
-    opacity 360ms var(--ease-out),
-    flex-basis 520ms var(--ease-out) 280ms;
-}
-.postStart { --pc: var(--cmd-start); }
-.postKeep { --pc: var(--cmd-keep); }
-.postFinish { --pc: var(--cmd-finish); }
-.postCut { --pc: var(--cmd-cut); }
-.postStop,
-.postGo { --pc: var(--cmd-stopgo); }
-
-/* A piece the current step is about; then it lifts off the tape and
- * the gap closes. */
-.demo[data-take="mark"] .segBad {
-  --wave: var(--cmd-cut);
-  border-color: var(--cmd-cut);
-  background-color: color-mix(in oklab, var(--cmd-cut) 32%, var(--surface-2));
-}
-.demo[data-filler="mark"] .segFiller {
-  border-color: var(--border-strong);
-  background-color: var(--surface-tint);
-}
-.demo[data-pause="mark"] .segPause {
-  border-color: var(--border-strong);
-}
-.demo[data-skip="mark"] .segSkip {
-  --wave: var(--cmd-stopgo);
-  border-color: var(--cmd-stopgo);
-  background-color: color-mix(in oklab, var(--cmd-stopgo) 28%, var(--surface-2));
-}
-.demo[data-take="gone"] .segBad,
-.demo[data-filler="gone"] .segFiller,
-.demo[data-pause="gone"] .segPause,
-.demo[data-skip="gone"] .segSkip {
-  flex-grow: 0;
-  border-width: 0;
-  opacity: 0;
-  transform: translateZ(2rem) rotateX(-18deg);
-}
-.demo[data-take="gone"] .postCut,
-.demo[data-skip="gone"] .postStop,
-.demo[data-skip="gone"] .postGo {
-  flex-basis: 0px;
-  opacity: 0;
-  transform: translateZ(2rem);
-}
-
-/* The recording sweep at the start of each loop: a playhead moving
- * through time, so it runs at the speed of time (linear), not on the
- * UI's 240-600 ms steps. */
-.sweep {
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  opacity: 0;
-  pointer-events: none;
-}
-.sweep::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: -2px;
-  bottom: -2px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--text-strong);
-}
-.demo[data-sweep="run"] .sweep {
-  transform: none;
-  opacity: 1;
-  transition:
-    transform 2200ms linear,
-    opacity 160ms var(--ease-out);
-}
-.demo[data-sweep="end"] .sweep {
-  transform: none;
-  opacity: 0;
-  transition: opacity 240ms var(--ease-out);
-}
-
-/* The finished clip lies on the tape's end and stands up. */
-.clip {
-  position: absolute;
-  right: 0;
-  bottom: calc(var(--strip-h) * 0.28);
-  z-index: 3;
-  width: var(--clip-w);
-  aspect-ratio: 9 / 16;
-  transform-origin: 50% 100%;
-  transform: perspective(60rem) rotateX(80deg);
-  transition: transform 560ms var(--ease-out);
-}
-@media (min-width: 768px) {
-  .clip {
-    right: 1.5rem;
-  }
-}
-.demo[data-clip="up"] .clip {
-  transform: perspective(60rem) rotateX(0deg);
-}
-/* Lying flat, the clip's tag and scrub bar would smear; they appear
- * as it stands up. */
-.clip .frameTag,
-.clip .scrub {
-  transition: opacity 240ms var(--ease-out);
-}
-.demo:not([data-clip="up"]) .clip .frameTag,
-.demo:not([data-clip="up"]) .clip .scrub {
-  opacity: 0;
-}
-.clip .clipCaption {
-  opacity: 0;
-  transform: translateY(-50%) scale(0.92);
-  transition:
-    opacity 240ms var(--ease-out),
-    transform 240ms var(--ease-out);
-}
-.demo[data-caption="on"] .clip .clipCaption {
-  opacity: 1;
-  transform: translateY(-50%);
-}
-/* The clip's own timeline: the three kept pieces between the command
- * posts, and a playhead while the captions play. */
-.scrub {
-  position: absolute;
-  left: 8%;
-  right: 8%;
-  bottom: 6%;
-  display: flex;
-  height: 4px;
-  gap: 2px;
-}
-.scrubSeg {
-  flex: var(--g) 1 0px;
-  border-radius: 2px;
-  background: color-mix(in oklab, var(--text-strong) 30%, transparent);
-}
-.scrubPost {
-  flex: 0 0 2px;
-  border-radius: 1px;
-  background: var(--pc);
-}
-.scrubHead {
-  position: absolute;
-  inset: -3px 0;
-  transform: translateX(-100%);
-  pointer-events: none;
-}
-.scrubHead::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--text-strong);
-}
-.demo[data-caption="on"] .scrubHead {
-  transform: none;
-  transition: transform 3600ms linear;
-}
-
-/* Legend: what gets removed and added; the current step lights up. */
-.legend {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
   margin-top: 1.25rem;
 }
-.legendList {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.legendItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4375rem;
-  border-radius: 9999px;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  padding: 0.3125rem 0.625rem;
-  font-size: 0.8125rem;
-  line-height: 1.3;
-  color: var(--text-body);
-  transition:
-    border-color 240ms var(--ease-out),
-    color 240ms var(--ease-out);
-}
 @media (min-width: 768px) {
-  .legendItem {
-    gap: 0.5rem;
-    padding: 0.375rem 0.75rem;
-    font-size: 0.875rem;
-  }
+  .lead { margin-top: 1.25rem; }
+  .heroCta { margin-top: 1.75rem; }
 }
-.swatch {
-  width: 0.625rem;
-  height: 0.625rem;
-  flex: none;
-  border-radius: 0.1875rem;
-  background: var(--sw);
-}
-.swatchHatch {
-  background: repeating-linear-gradient(135deg, var(--border-strong) 0 2px, transparent 2px 4px);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-}
-.liTake { --sw: var(--cmd-cut); --lc: var(--cmd-cut); }
-.liFillers { --sw: var(--text-muted); --lc: var(--border-strong); }
-.liPauses { --lc: var(--border-strong); }
-.liSkip { --sw: var(--cmd-stopgo); --lc: var(--cmd-stopgo); }
-.liCaptions { --sw: var(--text-strong); --lc: var(--border-strong); }
-.demo[data-li="take"] .liTake,
-.demo[data-li="fillers"] .liFillers,
-.demo[data-li="pauses"] .liPauses,
-.demo[data-li="skip"] .liSkip,
-.demo[data-li="captions"] .liCaptions {
-  border-color: var(--lc);
-  color: var(--text-strong);
+/* Laptops with short screens: the whole stage stays above the fold. */
+@media (min-width: 1024px) and (max-height: 820px) {
+  .hero { padding-block: 2.25rem 1rem; }
+  .h1 { font-size: clamp(2.25rem, 1.55rem + 3.4vw, 3.75rem); }
+  .lead { margin-top: 1rem; }
+  .heroCta { margin-top: 1.25rem; }
 }
 
-/* Ends the legend row. */
-.playToggle {
-  display: inline-flex;
-  flex: none;
-  height: 2.25rem;
-  width: 2.25rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9999px;
-  border: 1px solid var(--border-hover);
-  background: var(--surface-1);
-  color: var(--text-body);
-  transition:
-    border-color 150ms var(--ease-out),
-    color 150ms var(--ease-out),
-    transform 150ms var(--ease-out);
+/* The hero stage itself lives in hero/Hero.module.css; the text column
+ * leaves room for its 9:16 video on wide screens. */
+.hero {
+  --clip-w: 0rem;
 }
-.playToggle:active {
-  transform: scale(0.94);
-}
-@media (hover: hover) and (pointer: fine) {
-  .playToggle:hover {
-    border-color: var(--border-strong);
-    color: var(--text-strong);
-  }
+@media (min-width: 1024px) {
+  .hero { --clip-w: clamp(13rem, 17vw, 16rem); }
 }
 
-/* ── Caption frames (hero clip and the styles section) ──────────── */
+/* ── Caption frames and CSS caption posters (shown until the engine draws) ── */
 
 .frame {
   position: relative;
@@ -736,15 +309,13 @@
     linear-gradient(172deg, var(--surface-tint), var(--surface-1) 55%, var(--surface-0));
   box-shadow: var(--shadow-md);
 }
-.clip .frame {
-  height: 100%;
-}
+
 .frameTag {
   position: absolute;
   left: 0.5rem;
   top: 0.5rem;
   border-radius: 9999px;
-  background: color-mix(in oklab, var(--surface-0) 70%, transparent);
+  background: color-mix(in oklab, var(--surface-0) 85%, transparent);
   padding: 0.125rem 0.5rem;
   font-size: 0.75rem;
   line-height: 1.4;
@@ -870,9 +441,7 @@
   color: var(--text-strong);
   text-wrap: balance;
 }
-.h2Wide {
-  max-width: 28ch;
-}
+
 .body {
   margin-top: 1rem;
   max-width: 38rem;
@@ -880,274 +449,6 @@
   line-height: 1.6;
   color: var(--text-body);
   text-wrap: pretty;
-}
-.h3 {
-  margin: 0;
-  font-size: 1.25rem;
-  line-height: 1.3;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-  color: var(--text-strong);
-  text-wrap: balance;
-}
-
-/* Commands: one dictionary row per command. */
-.cmdList {
-  margin: 3rem 0 0;
-  padding: 0;
-  list-style: none;
-  border-top: 1px solid var(--border);
-}
-.cmdRow {
-  display: grid;
-  gap: 0.75rem;
-  padding-block: 1.5rem;
-  border-bottom: 1px solid var(--border);
-}
-@media (min-width: 768px) {
-  .cmdRow {
-    grid-template-columns: minmax(0, 17rem) minmax(0, 1fr) 9rem;
-    align-items: center;
-    gap: 2rem;
-    padding-block: 1.75rem;
-  }
-}
-.cmdWord {
-  margin: 0;
-  font-size: clamp(1.625rem, 1.3rem + 1.3vw, 2.25rem);
-  line-height: 1.1;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  color: var(--c);
-}
-.cmdWord small {
-  font-size: 0.6em;
-  font-weight: 700;
-  color: var(--text-muted);
-}
-.cmdDesc {
-  margin: 0;
-  max-width: 34rem;
-  font-size: 1.0625rem;
-  line-height: 1.55;
-  color: var(--text-body);
-}
-
-/* Mini strips: the hero's strip, flat, showing one command's effect. */
-.mini {
-  display: flex;
-  height: 1.5rem;
-  width: 9rem;
-  align-items: stretch;
-  gap: 2px;
-}
-.miniSeg {
-  flex: var(--g, 1) 1 0px;
-  border-radius: 0.25rem;
-  background: var(--surface-tint);
-}
-.miniGone {
-  background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--c) 45%, transparent) 0 3px, transparent 3px 6px);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--c) 70%, transparent);
-}
-.miniPost {
-  flex: 0 0 3px;
-  border-radius: 2px;
-  background: var(--c);
-}
-
-/* Automatic cleanup: the sentence loses its pauses and filler words. */
-.auto {
-  display: grid;
-  gap: 2.5rem;
-}
-@media (min-width: 1024px) {
-  .auto {
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-    align-items: center;
-    gap: 4rem;
-  }
-}
-.sentence {
-  display: grid;
-  margin: 0;
-  border-radius: 1rem;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  padding: 1.75rem 1.5rem;
-  font-size: clamp(1.5rem, 1.2rem + 1.3vw, 2.25rem);
-  line-height: 1.45;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text-strong);
-}
-@media (min-width: 768px) {
-  .sentence { padding: 2.5rem; }
-}
-.sentence > span {
-  grid-area: 1 / 1;
-  transition: opacity 480ms var(--ease-out);
-}
-.sentenceClean {
-  opacity: 0;
-}
-.sentence[data-clean="true"] .sentenceRaw {
-  opacity: 0;
-}
-.sentence[data-clean="true"] .sentenceClean {
-  opacity: 1;
-}
-.token {
-  white-space: nowrap;
-}
-.tokenFiller {
-  color: var(--text-muted);
-  text-decoration: line-through;
-  text-decoration-thickness: 3px;
-  text-decoration-color: var(--text-muted);
-}
-.tokenPause {
-  display: inline-block;
-  vertical-align: 0.3em;
-  margin-inline: 0.1em;
-  border-radius: 0.375rem;
-  background: repeating-linear-gradient(135deg, var(--surface-tint) 0 4px, transparent 4px 7px);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-  padding-inline: 0.4em;
-  font-size: 0.5em;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1.9;
-  color: var(--text-body);
-}
-.cleanupNote {
-  margin-top: 1rem;
-  font-size: 0.9375rem;
-  line-height: 1.55;
-  color: var(--text-muted);
-}
-
-/* Caption styles: the same sentence in four real presets. */
-.styles {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-  margin: 3rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-@media (min-width: 768px) {
-  .styles {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 1.5rem;
-  }
-}
-.styleItem {
-  margin: 0;
-}
-.styleItem .frame {
-  aspect-ratio: 9 / 16;
-}
-.styleName {
-  margin-top: 0.75rem;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--text-body);
-}
-
-/* Format and bonus clips: two features side by side. */
-.pair {
-  display: grid;
-  gap: 4rem;
-}
-@media (min-width: 900px) {
-  .pair {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 4rem;
-  }
-}
-.figure {
-  position: relative;
-  display: flex;
-  height: 12rem;
-  margin: 0 0 2rem;
-  align-items: center;
-  justify-content: center;
-}
-.wide {
-  position: relative;
-  width: min(100%, 21.25rem);
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  border-radius: 0.75rem;
-  border: 1px solid var(--border-hover);
-  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
-}
-/* The subject and the 9:16 crop move together: the crop follows the
- * face. Once, when the figure comes into view. */
-.pan {
-  position: absolute;
-  inset: 0;
-  transform: translateX(-16%);
-  transition: transform 600ms var(--ease-out);
-}
-.wide[data-shown="true"] .pan {
-  transform: none;
-}
-.subject {
-  position: absolute;
-  left: 50%;
-  top: 55%;
-  width: 40%;
-  height: 90%;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: radial-gradient(closest-side, color-mix(in oklab, var(--text-strong) 16%, transparent), transparent);
-}
-.window {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 34.2%;
-  aspect-ratio: 9 / 16;
-  border-radius: 0.5rem;
-  box-shadow:
-    0 0 0 2px var(--text-strong),
-    0 0 0 100vmax color-mix(in oklab, var(--surface-0) 55%, transparent);
-}
-.clips {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  grid-template-rows: auto 1fr;
-  gap: 1rem;
-}
-.timeline {
-  display: flex;
-  height: 2.25rem;
-  gap: 3px;
-}
-.tlSeg {
-  flex: var(--g) 1 0px;
-  border-radius: 0.375rem;
-  background: var(--surface-2);
-  box-shadow: inset 0 0 0 1px var(--border-hover);
-}
-.tlPick {
-  background: color-mix(in oklab, var(--text-strong) 22%, var(--surface-2));
-  box-shadow: inset 0 0 0 1px var(--text-muted);
-}
-.tiles {
-  display: flex;
-  justify-content: center;
-  gap: 0.75rem;
-}
-.tile {
-  height: 100%;
-  aspect-ratio: 9 / 16;
-  border-radius: 0.5rem;
-  border: 1px solid var(--border-strong);
-  background: linear-gradient(172deg, var(--surface-tint), var(--surface-1));
 }
 
 /* You have the last word: what the editor and the result give you. */
@@ -1187,11 +488,50 @@
   color: var(--text-strong);
 }
 
-/* FAQ */
+/* FAQ: on wide screens the heading stays beside the questions. */
+@media (min-width: 1024px) {
+  .faqLayout {
+    display: grid;
+    grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+    gap: 4rem;
+    align-items: start;
+  }
+  .faqLayout .h2 {
+    position: sticky;
+    top: 6rem;
+  }
+  .faqLayout .faq {
+    margin-top: 0;
+  }
+}
 .faq {
   margin-top: 2.5rem;
   max-width: 46rem;
   border-top: 1px solid var(--border);
+}
+/* Opening and closing glide where the browser can size to auto. */
+@supports (interpolate-size: allow-keywords) {
+  .faqItem {
+    interpolate-size: allow-keywords;
+  }
+  .faqItem::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition:
+      block-size 240ms var(--ease-out),
+      content-visibility 240ms allow-discrete;
+  }
+  .faqItem[open]::details-content {
+    block-size: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .faqItem::details-content {
+    transition: none;
+  }
+}
+.faqItem summary:active {
+  background: var(--surface-1);
 }
 .faqItem {
   border-bottom: 1px solid var(--border);
@@ -1210,6 +550,9 @@
 }
 .faqItem summary::-webkit-details-marker {
   display: none;
+}
+@media (pointer: coarse) {
+  .faqItem summary { min-height: 2.75rem; }
 }
 .faqChevron {
   flex: none;
@@ -1241,6 +584,40 @@
 @media (min-width: 768px) {
   .final { padding-block: 8rem 9rem; }
 }
+/* The finished video once more: it tips up from its bottom edge. */
+.reprise {
+  position: relative;
+  width: 9rem;
+  margin: 0 auto 2.5rem;
+  perspective: 40rem;
+}
+@media (min-width: 768px) {
+  .reprise { width: 10.5rem; margin-bottom: 3rem; }
+}
+.repriseFrame {
+  position: relative;
+  container-type: inline-size;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-md);
+  transform-origin: 50% 100%;
+}
+/* Laid down only once the page's script runs (data-armed): without it,
+ * the frame stays upright. */
+@media (prefers-reduced-motion: no-preference) {
+  .reprise[data-shown="false"][data-armed] .repriseFrame {
+    opacity: 0;
+    transform: rotateX(62deg) translateY(6%);
+  }
+  .repriseFrame {
+    transition:
+      transform 600ms var(--ease-out) 120ms,
+      opacity 200ms var(--ease-out) 120ms;
+  }
+}
 .finalTitle {
   margin: 0 auto;
   max-width: 18ch;
@@ -1269,7 +646,7 @@
   z-index: 25;
   border-top: 1px solid var(--border);
   background: var(--surface-0);
-  padding: 0.75rem var(--gutter) calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  padding: 0.5rem var(--gutter) calc(0.5rem + env(safe-area-inset-bottom, 0px));
   transition:
     transform 240ms var(--ease-out),
     visibility 0s linear 0s;
@@ -1334,31 +711,35 @@
 @media (hover: hover) and (pointer: fine) {
   .footerLink:hover { color: var(--text-strong); }
 }
+.footerLink:active {
+  color: var(--text-strong);
+}
+/* Touch: 44 px tall links, and a larger tap area for the language
+ * switcher's invisible select (absolute below 640 px; static, so
+ * unaffected, from there). */
+@media (pointer: coarse) {
+  .footerLink {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
+  .footerLinks,
+  .footerLinks ul {
+    row-gap: 0;
+  }
+  .headerActions select {
+    inset: -0.5rem -0.25rem;
+  }
+}
 .copyright {
   font-size: 0.8125rem;
   color: var(--text-muted);
 }
 
-/* ── Reduced motion: one still frame that tells the whole story ── */
-/* TakeStrip shows its still step (everything removed is marked); here
- * the transitions go and the marked pieces get a struck-out hatch. */
-
+/* ── Reduced motion ── */
+/* The demos (hero/, sections/, captions/) render their settled frame
+ * under reduced motion; here the page's own transitions go. */
 @media (prefers-reduced-motion: reduce) {
-  .railItem,
-  .sweep,
-  .playToggle {
-    display: none;
-  }
-  .seg,
-  .post,
-  .clip,
-  .clip .clipCaption,
-  .clip .frameTag,
-  .clip .scrub,
-  .scrubHead,
-  .legendItem,
-  .pan,
-  .sentence > span,
   .faqChevron,
   .cta,
   .footerLink,
@@ -1366,11 +747,5 @@
   .sticky,
   .sticky[data-shown="false"] {
     transition: none;
-  }
-  .demo[data-take="mark"] .segBad {
-    background-image: repeating-linear-gradient(135deg, color-mix(in oklab, var(--cmd-cut) 40%, var(--surface-2)) 0 5px, var(--surface-2) 5px 9px);
-  }
-  .demo[data-skip="mark"] .segSkip {
-    background-image: repeating-linear-gradient(135deg, color-mix(in oklab, var(--cmd-stopgo) 36%, var(--surface-2)) 0 5px, var(--surface-2) 5px 9px);
   }
 }

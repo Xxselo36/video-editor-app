@@ -1,0 +1,33 @@
+/* LiveCaption: the engine's canvas over the frame, a CSS poster under it
+ * until the engine has drawn. Both fill the frame. */
+.live {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.poster,
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.canvas {
+  opacity: 0;
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.poster {
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.live[data-ready="true"] .canvas {
+  opacity: 1;
+}
+.live[data-ready="true"] .poster {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas,
+  .poster {
+    transition: none;
+  }
+}
