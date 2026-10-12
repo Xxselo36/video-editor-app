@@ -10,7 +10,8 @@
  *   of the settled caption, so a frame is never empty.
  * - `playing` advances the caption's clock on the page's one rAF ticker;
  *   when false the current frame holds (first time: the settled last
- *   word). Loops after the last word plus `hold`.
+ *   word). Loops after the last word plus `hold`; with `loop={false}` it
+ *   plays once, holds the settled last page and leaves the ticker.
  * - `restartKey` starts over from the first word (a style switch).
  * - The handle lets a score (the hero) seek the clock.
  */
@@ -178,16 +179,18 @@ export function LiveCaption({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restartKey, preset, words]);
 
-  // The clock.
+  // The clock. A one-pass caption leaves the ticker when it is done (the
+  // page can idle); a restart (the effect above, which runs first) clears
+  // `done` and this one subscribes again.
   useEffect(() => {
     if (!playing || !ready) return;
     const L = live.current;
+    if (L.done) return;
     if (!L.started) {
       L.t = 0;
       L.started = true;
     }
-    return subscribe((dt) => {
-      if (L.done) return;
+    const stop = subscribe((dt) => {
       L.t += dt;
       if (L.t >= L.end) {
         if (L.loop) {
@@ -197,11 +200,13 @@ export function LiveCaption({
           // one pass: hold the settled last page until restarted
           L.t = L.poster;
           L.done = true;
+          stop();
         }
       }
       draw();
     });
-  }, [playing, ready]);
+    return stop;
+  }, [playing, ready, restartKey, preset, words]);
 
   return (
     <span className={cx(styles.live, className)} data-ready={ready} aria-hidden="true">

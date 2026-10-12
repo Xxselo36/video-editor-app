@@ -249,7 +249,7 @@ export function LanguageSwitcher({ className = "" }: { className?: string }) {
         style={{ color: "var(--text-body)" }}
       >
         {(Object.keys(LANGS) as Lang[]).map((l) => (
-          <option key={l} value={l}>
+          <option key={l} value={l} lang={l}>
             {LANGS[l]}
           </option>
         ))}

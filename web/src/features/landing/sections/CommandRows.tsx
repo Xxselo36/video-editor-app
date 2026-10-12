@@ -7,12 +7,13 @@
  * close the gap, leaving a thin cut marker; “Cleo keep” brings in the
  * next scene instead.
  *
- * Each row plays once when it is 60% in view (rows entering together
- * start at least 120 ms apart), is reset when fully out of view and plays
- * again on re-entry. At rest (reduced motion, screenshots, no JS) the
- * strip shows the hatched piece in place. Motion: WAAPI on scale,
- * translate and opacity only; the closing translate is sized in cqw of
- * the strip, so it stays right when the strip changes width.
+ * Each row plays once when it is 60% in view, clear of the sticky header
+ * and the phone bar (rows entering together start at least 450 ms apart),
+ * is reset when fully out of view and plays again on re-entry. At rest
+ * (reduced motion, screenshots, no JS) the strip shows the hatched piece
+ * in place. Motion: WAAPI on scale, translate and opacity only; the
+ * closing translate is sized in cqw of the strip, so it stays right when
+ * the strip changes width.
  *
  * The gap closes toward the edge the mini lines up on: the left from
  * 1024px (a left-aligned column) and wherever the mini has a line of its
@@ -22,7 +23,7 @@
 import { useEffect, useRef } from "react";
 import { useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
-import { CMD_COLOR, Cmd, rich, useCmdNodes, useReducedMotion, type CmdId } from "../shared";
+import { CMD_COLOR, Cmd, PASS_ROOT_MARGIN, rich, useCmdNodes, useReducedMotion, type CmdId } from "../shared";
 import styles from "../Landing.module.css";
 import c from "./Cleanup.module.css";
 
@@ -60,21 +61,22 @@ const ROWS: { ids: CmdId[]; desc: MessageKey; mini: Piece[] }[] = [
   },
 ];
 
-/** The row's pass (ms). Ends by 740 ms; the keep row by 480 ms. */
+/** The row's pass (ms). Ends by 1000 ms; the keep row by 660 ms. The
+ *  piece lifts once the post's flare has settled: said, then removed. */
 const T = {
   flare: 240,
   /** the second post (“Cleo go”) flares this much later */
   flare2: 60,
-  liftAt: 120,
+  liftAt: 380,
   lift: 300,
   fadeDelay: 80,
-  closeAt: 320,
+  closeAt: 580,
   close: 420,
   mark: 200,
-  newAt: 200,
+  newAt: 380,
   newIn: 280,
   /** rows entering together start at least this far apart */
-  stagger: 120,
+  stagger: 450,
 };
 const POST_W = 3;
 const GAP = 1;
@@ -194,8 +196,9 @@ function armRow(row: HTMLElement, cqw: boolean, toRight: boolean): Animation[] {
 
 type RowState = { anims: Animation[]; played: boolean; ratio: number; timer: number; toRight: boolean };
 
-/** Plays each row once at 60% in view, staggered; re-arms it when it is
- *  fully out of view. Nothing moves under reduced motion. */
+/** Plays each row once at 60% in view (clear of the fixed chrome),
+ *  staggered; re-arms it when it is fully out of view. Nothing moves
+ *  under reduced motion. */
 function useRowPasses(listRef: React.RefObject<HTMLUListElement | null>, reduced: boolean) {
   useEffect(() => {
     const list = listRef.current;
@@ -252,25 +255,33 @@ function useRowPasses(listRef: React.RefObject<HTMLUListElement | null>, reduced
       state.set(row, { anims: [], played: false, ratio: 0, timer: 0, toRight: false });
       arm(row);
     }
-    const io = new IntersectionObserver(
+    const near = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
           const s = state.get(e.target);
           if (!s) continue;
           s.ratio = e.isIntersecting ? e.intersectionRatio : 0;
-          if (!e.isIntersecting) {
-            if (s.played) arm(e.target as HTMLElement);
-          } else play(e.target);
+          if (e.isIntersecting) play(e.target);
         }
       },
-      { threshold: [0, 0.6] },
+      { threshold: [0, 0.6], rootMargin: PASS_ROOT_MARGIN },
     );
-    rows.forEach((row) => io.observe(row));
+    // Fully out of view: back to the first frame for the next entry.
+    const away = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting && state.get(e.target)?.played) arm(e.target as HTMLElement);
+      }
+    });
+    rows.forEach((row) => {
+      near.observe(row);
+      away.observe(row);
+    });
     const onVisibility = () => rows.forEach(play);
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("resize", onResize);
     return () => {
-      io.disconnect();
+      near.disconnect();
+      away.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("resize", onResize);
       window.cancelAnimationFrame(frame);

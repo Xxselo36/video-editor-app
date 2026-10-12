@@ -10,13 +10,14 @@
  * settles darker. The result's camera moves by exactly what the window
  * moves, so the two frames can never disagree. Nothing in the photo moves.
  *
- * One pass (~2.4 s) once the result frame is mostly in view (and the
- * source with it) in a visible tab. It is re-armed when the figure is
- * fully out of view (so it plays again on re-entry) and replayed by the
- * Replay button. Every moving part takes its keyframes from
- * `reframeScore` (WAAPI on translate, scale and opacity). The base CSS is
- * the settled end state, so reduced motion, screenshots and a page
- * without JS show the result.
+ * One pass (~2.4 s) in a visible tab once the effect is in view, clear of
+ * the sticky header and the phone bar: side by side, most of the result
+ * frame (and the source with it); stacked, the whole source. It is
+ * re-armed when the figure is fully out of view (so it plays again on
+ * re-entry) and replayed by the Replay button. Every moving part takes
+ * its keyframes from `reframeScore` (WAAPI on translate, scale and
+ * opacity). The base CSS is the settled end state, so reduced motion,
+ * screenshots and a page without JS show the result.
  *
  * The window and the result's camera are the reframe's virtual camera,
  * so they glide on the filmed curve (motion inside a video frame is video
@@ -29,7 +30,7 @@ import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
 import { CROP_W, Scene, WIDE } from "../scene/Scene";
-import { useReducedMotion } from "../shared";
+import { PASS_ROOT_MARGIN, PASS_THRESHOLDS, passShare, useReducedMotion } from "../shared";
 import styles from "../Landing.module.css";
 import f from "./Format.module.css";
 
@@ -101,11 +102,17 @@ function armScore(els: Record<ReframePart, HTMLElement | null>): Animation[] {
   return out;
 }
 
-/** The pass starts once the effect is on screen: most of the 9:16 result
- *  and, with it, a good part of the source (phones stack them, so the
- *  source alone in view is not enough). */
+/** The pass starts once the effect is on screen. Side by side: most of
+ *  the 9:16 result and, with it, a good part of the source. Stacked
+ *  (phones, tablets: the source over the result, Format.module.css): the
+ *  whole source (on a screen too short for it, phones held sideways: most
+ *  of the clear area, passShare), so the window leaves the half-face crop
+ *  while it is read; the result below has settled by the time it is
+ *  scrolled to, and Replay plays the pass again. */
 const RES_SHOWN = 0.6;
 const SRC_SHOWN = 0.35;
+const STACKED = "(max-width: 1023px)";
+const SRC_SHOWN_STACKED = 0.9;
 
 export function ReframeSection() {
   const t = useT();
@@ -137,7 +144,11 @@ export function ReframeSection() {
     let started = false;
     let timer = 0;
     const ratio = new Map<Element, number>();
-    const shown = () => (ratio.get(res) ?? 0) >= RES_SHOWN - 0.01 && (ratio.get(src) ?? 0) >= SRC_SHOWN - 0.01;
+    const stacked = window.matchMedia(STACKED);
+    const shown = () =>
+      stacked.matches
+        ? (ratio.get(src) ?? 0) >= SRC_SHOWN_STACKED - 0.01
+        : (ratio.get(res) ?? 0) >= RES_SHOWN - 0.01 && (ratio.get(src) ?? 0) >= SRC_SHOWN - 0.01;
     const arm = () => {
       window.clearTimeout(timer);
       anims.forEach((a) => a.cancel());
@@ -161,10 +172,10 @@ export function ReframeSection() {
     away.observe(fig);
     const near = new IntersectionObserver(
       (entries) => {
-        for (const e of entries) ratio.set(e.target, e.isIntersecting ? e.intersectionRatio : 0);
+        for (const e of entries) ratio.set(e.target, passShare(e));
         if (shown()) play();
       },
-      { threshold: [0, SRC_SHOWN, RES_SHOWN, 1] },
+      { threshold: PASS_THRESHOLDS, rootMargin: PASS_ROOT_MARGIN },
     );
     near.observe(src);
     near.observe(res);

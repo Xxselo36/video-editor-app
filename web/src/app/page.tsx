@@ -64,8 +64,9 @@ export default function Landing() {
         <div className={cx(styles.wrap, styles.headerInner)}>
           {/* The narrowest phones show the mark only (room for "Sign in").
               One LogoWord, not two logos: a hidden copy of the mark would
-              own the SVG gradient ids and blank the visible one. */}
-          <Link href="/" className={cx("shrink-0", styles.logo)} aria-label={t("site.header.homeAria")}>
+              own the SVG gradient ids and blank the visible one. No
+              prefetch: it links to this page. */}
+          <Link href="/" prefetch={false} className={cx("shrink-0", styles.logo)} aria-label={t("site.header.homeAria")}>
             <LogoWord />
           </Link>
           <div className={styles.headerActions}>
@@ -83,8 +84,17 @@ export default function Landing() {
         <section className={styles.hero} aria-labelledby="hero-title">
           <div className={styles.wrap}>
             <div className={styles.heroText}>
+              {/* One line per sentence (the loop's two acts); a one-sentence
+                  title (ko, tr) wraps as usual. The space after a sentence
+                  stays in its line, so the heading still reads as one. */}
               <h1 id="hero-title" className={styles.h1}>
-                {t("site.hero.title")}
+                {t("site.hero.title")
+                  .split(/(?<=[.!?。।]\s*)(?=\S)/)
+                  .map((line, i) => (
+                    <span key={i} className={styles.h1Line}>
+                      {line}
+                    </span>
+                  ))}
               </h1>
               <p className={styles.lead}>{rich(t("site.hero.sub"), cmds)}</p>
               <div className={styles.heroCta}>
@@ -108,32 +118,34 @@ export default function Landing() {
       <footer className={styles.footer}>
         <div className={cx(styles.wrap, styles.footerInner)}>
           <LogoWord size={22} />
+          {/* No prefetch: the closing button's route is the likely next
+              one, and these would compete with the demos' chunks. */}
           <div className={styles.footerLinks}>
-            <Link href="/app" className={styles.footerLink}>
+            <Link href="/app" prefetch={false} className={styles.footerLink}>
               {t("site.footer.editor")}
             </Link>
-            <Link href="/app/library" className={styles.footerLink}>
+            <Link href="/app/library" prefetch={false} className={styles.footerLink}>
               {t("site.footer.library")}
             </Link>
             {billingOn && (
-              <Link href="/pricing" className={styles.footerLink}>
+              <Link href="/pricing" prefetch={false} className={styles.footerLink}>
                 {t("site.footer.pricing")}
               </Link>
             )}
             <nav aria-label={t("common.footer.legalAria")}>
               <ul>
                 <li>
-                  <Link href="/imprint" className={styles.footerLink}>
+                  <Link href="/imprint" prefetch={false} className={styles.footerLink}>
                     {t("site.footer.imprint")}
                   </Link>
                 </li>
                 <li>
-                  <Link href="/privacy" className={styles.footerLink}>
+                  <Link href="/privacy" prefetch={false} className={styles.footerLink}>
                     {t("site.footer.privacy")}
                   </Link>
                 </li>
                 <li>
-                  <Link href="/terms" className={styles.footerLink}>
+                  <Link href="/terms" prefetch={false} className={styles.footerLink}>
                     {t("site.footer.terms")}
                   </Link>
                 </li>

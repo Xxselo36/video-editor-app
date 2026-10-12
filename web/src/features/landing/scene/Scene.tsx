@@ -8,8 +8,8 @@
  *
  * The photos are stills: what moves is the edit around them (captions,
  * the crop window, the tape). While a caption plays the camera pushes in
- * slowly on his face, as edited talking-head videos do; that is video
- * content (brand SKILL.md, Motion).
+ * slowly on his face and holds, as edited talking-head videos do; that is
+ * video content (brand SKILL.md, Motion).
  *
  * Files: public/landing/creator/<shot>-{360,720}.webp (9:16 crops, cropped
  * and graded from the originals) and wide-{800,1400}.webp (the 16:9 take
@@ -79,7 +79,8 @@ export function Scene({
 }: {
   shot?: ShotId;
   crop?: "vertical" | "wide" | "track";
-  /** He is speaking: the camera pushes in on his face. */
+  /** He is speaking: the camera pushes in on his face and holds; when
+   *  false it eases back. */
   talking?: boolean;
   sizes?: string;
   priority?: boolean;

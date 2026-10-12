@@ -1,7 +1,8 @@
 "use client";
 /**
  * Small pieces the landing sections share: the coloured command words,
- * the "{name}" → node helper, the call to action and visibility hooks.
+ * the "{name}" → node helper, the call to action, caption overrides for
+ * small frames, and visibility (hooks and the passes' root margin).
  */
 import Link from "next/link";
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -9,6 +10,7 @@ import { useT } from "@/i18n";
 import { AUTH_ENABLED, BILLING_COPY } from "@/lib/auth";
 import { useAuthState, useBillingEnabled } from "@/lib/account";
 import { track } from "@/lib/analytics";
+import type { PresetId, StyleOverrides } from "@/lib/captions/types";
 import { buttonClass } from "@/components/ui/Button";
 import { cx } from "@/components/ui/cx";
 import styles from "./Landing.module.css";
@@ -37,13 +39,15 @@ export const CMD_COLOR: Record<CmdId, string> = {
   go: "var(--cmd-stopgo)",
 };
 
-/** A command in its colour, in the language's quotation marks.
+/** A command in its colour, in the language's quotation marks. The
+ *  phrase is marked English (it is spoken in English in every language),
+ *  so screen readers say it as the visitor must.
  *  `inherit`: keep the surrounding weight (headings). */
 export function Cmd({ id, inherit = false }: { id: CmdId; inherit?: boolean }) {
   const t = useT();
   return (
     <span className={cx("whitespace-nowrap", !inherit && "font-semibold")} style={{ color: CMD_COLOR[id] }}>
-      {t("site.quote", { text: CMD_PHRASE[id] })}
+      {rich(t("site.quote", { text: "{cmd}" }), { cmd: <span lang="en">{CMD_PHRASE[id]}</span> })}
     </span>
   );
 }
@@ -67,6 +71,15 @@ export function rich(text: string, nodes: Record<string, React.ReactNode>): Reac
     return <Fragment key={i}>{m && m[1] in nodes ? nodes[m[1]] : part}</Fragment>;
   });
 }
+
+/* ── Captions on small frames ── */
+
+/** Karaoke (Hindi) draws at 0.078 of the width: on the small frames (the
+ *  bonus-clip tiles, the hero on phones) it gets 1.6x and two words a
+ *  page, so it stays legible. */
+export const SMALL_FRAME_OVERRIDES: Partial<Record<PresetId, StyleOverrides>> = {
+  karaoke: { sizeScale: 1.6, wordsPerPage: 2 },
+};
 
 /* ── Call to action ── */
 
@@ -112,6 +125,26 @@ export function CtaLink({
 }
 
 /* ── Visibility ── */
+
+/** The demo passes count only what is clear of the fixed chrome: the
+ *  sticky header (64 px + its 1 px border) and the phone CTA bar (about
+ *  73 px). For the observers that start a pass; the ones that re-arm it
+ *  watch the plain viewport. */
+export const PASS_ROOT_MARGIN = "-65px 0px -80px 0px";
+
+/** Thresholds for a figure that can be taller than that clear area
+ *  (short screens, phones held sideways): every 5 %, so it still reports
+ *  as it fills the area (see passShare). */
+export const PASS_THRESHOLDS = Array.from({ length: 21 }, (_, i) => i / 20);
+
+/** How much of an element a pass counts as on screen: its visible share,
+ *  or, for one taller than the clear area (it can never be wholly in
+ *  view there), the share of the area it fills. */
+export function passShare(e: IntersectionObserverEntry): number {
+  if (!e.isIntersecting) return 0;
+  const room = e.rootBounds?.height ?? 0;
+  return room > 0 ? Math.max(e.intersectionRatio, e.intersectionRect.height / room) : e.intersectionRatio;
+}
 
 /** Is the element on screen? `initial` until the first observation. */
 export function useInView<T extends Element>(

@@ -4,11 +4,12 @@
  * with the real caption engine drawing the sample sentence, and a picker
  * of every style the page's language can show.
  *
- * - First entry (the player at least half on screen): a short tour plays
- *   four contrasting styles once each (power, karaoke, clipper, elegant;
- *   unsupported ones replaced by the next supported style). The frame
- *   names the style on screen; its chip carries a progress line. The tour
- *   never moves the selection. Then the language's default style loops.
+ * - First entry (the caption on screen, clear of the sticky header and
+ *   the phone bar): a short tour plays four contrasting styles once each
+ *   (power, karaoke, clipper, elegant; unsupported ones replaced by the
+ *   next supported style). The frame names the style on screen; its chip
+ *   carries a progress line. The tour never moves the selection. Then the
+ *   language's default style loops.
  * - The visitor's first pick (click or arrow key) ends the tour for the
  *   session; the picked style starts from its first word and loops.
  * - Paused by the pause button (on a settled page, never an empty one),
@@ -28,7 +29,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "../CaptionFrame";
 import { Scene } from "../scene/Scene";
-import { useDocumentVisible, useReducedMotion } from "../shared";
+import { PASS_ROOT_MARGIN, useDocumentVisible, useReducedMotion } from "../shared";
 import { loadEngine } from "./engine";
 import { LiveCaption, type LiveCaptionHandle } from "./LiveCaption";
 import { subscribe } from "./ticker";
@@ -93,6 +94,12 @@ function setClock(clock: Clock, handle: LiveCaptionHandle | null, time: number):
   clock.line.currentTime = d > 0 ? Math.min(1, time / d) * 1000 : 0;
 }
 
+/** Data saver or a slower connection than 4G: no speculative downloads. */
+function constrainedNetwork(): boolean {
+  const c = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  return Boolean(c?.saveData || (c?.effectiveType && c.effectiveType !== "4g"));
+}
+
 /** Runs `fn` when the main thread is idle (Safari: shortly). */
 function whenIdle(fn: () => void): void {
   if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(fn, { timeout: 2000 });
@@ -134,18 +141,29 @@ export function CaptionPlayerSection() {
   const firstWord = words.length ? words[0].start : 0;
   const lastWord = spokenUntil(words);
 
-  // On screen at all: run. At least half on screen the first time: the tour.
+  // On screen at all: run.
   const stageRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = stageRef.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => setOnScreen(entries[entries.length - 1].isIntersecting), {
+      threshold: [0],
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  // The caption in view (a line just under it, .capBand), clear of the
+  // fixed chrome, the first time: the tour. A line, not a share of the
+  // stage, so it works on short screens too.
+  const bandRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const el = bandRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(
       (entries) => {
-        const e = entries[entries.length - 1];
-        setOnScreen(e.isIntersecting);
-        if (e.isIntersecting && e.intersectionRatio >= 0.5) dispatch({ type: "enter", tour: tourAllowed() });
+        if (entries[entries.length - 1].isIntersecting) dispatch({ type: "enter", tour: tourAllowed() });
       },
-      { threshold: [0, 0.5] },
+      { rootMargin: PASS_ROOT_MARGIN },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -153,8 +171,9 @@ export function CaptionPlayerSection() {
 
   // Fonts ahead of time, so a style starts the moment it is picked: the
   // next tour step while the current one plays, every other style once
-  // the tour is over or the picker is reached (Latin and Cyrillic faces
-  // are small; CJK and Devanagari are fetched per pick).
+  // the tour is over (not on data saver or a slow connection) or the
+  // picker is reached (Latin and Cyrillic faces are small; CJK and
+  // Devanagari are fetched per pick).
   const warmed = useRef(new Set<string>());
   const warm = useCallback(
     (id: PresetId | undefined): Promise<unknown> => {
@@ -188,7 +207,7 @@ export function CaptionPlayerSection() {
     if (touring) void warm(tour[play.step + 1]);
   }, [touring, tour, play.step, warm]);
   useEffect(() => {
-    if (engineReady && play.phase === "done") warmRest();
+    if (engineReady && play.phase === "done" && !constrainedNetwork()) warmRest();
   }, [engineReady, play.phase, warmRest]);
 
   // A mirror of the caption's clock: the same ticker, the same time
@@ -273,11 +292,15 @@ export function CaptionPlayerSection() {
     setPaused((p) => !p);
   };
 
-  const pick = (id: PresetId) => {
+  // A click, tap or Space is announced. Arrow keys (`quiet`) move focus
+  // to the radio, which the screen reader announces already.
+  const pick = (id: PresetId, quiet = false) => {
     dispatch({ type: "pick", id });
-    const message = t("site.captions.frameAria", { style: name(id) });
-    // the same text again would not be announced
-    setAnnounce((prev) => (prev === message ? `${message} ` : message));
+    if (!quiet) {
+      const message = t("site.captions.frameAria", { style: name(id) });
+      // the same text again would not be announced
+      setAnnounce((prev) => (prev === message ? `${message} ` : message));
+    }
     try {
       sessionStorage.setItem(TOUR_DONE_KEY, "1");
     } catch {
@@ -318,7 +341,7 @@ export function CaptionPlayerSection() {
         return;
     }
     e.preventDefault();
-    pick(supported[next]);
+    pick(supported[next], true);
     groupRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
   };
 
@@ -360,6 +383,7 @@ export function CaptionPlayerSection() {
                   >
                     <CaptionPoster preset={shown} text={text} />
                   </LiveCaption>
+                  <span ref={bandRef} className={s.capBand} aria-hidden="true" />
                   <div className={s.tags}>
                     <span className={cx(L.frameTag, s.tag)}>{t("site.demo.example")}</span>
                     <span className={cx(L.frameTag, s.tag, s.styleTag)} aria-hidden="true">
@@ -379,7 +403,7 @@ export function CaptionPlayerSection() {
                 </p>
                 {!reduced && (
                   <IconButton
-                    label={paused ? t("site.demo.play") : t("site.demo.pause")}
+                    label={paused ? t("site.captions.play") : t("site.captions.pause")}
                     className={s.toggle}
                     onClick={togglePause}
                   >

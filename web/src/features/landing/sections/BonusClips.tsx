@@ -7,15 +7,17 @@
  * stands up out of the tape, and its caption plays once. The three clips
  * are cut from the same captioned video, so they share one caption style:
  * Power, or the language's first native style where Power is unavailable
- * (Hindi: Karaoke).
+ * (Hindi: Karaoke). Each clip says its own line of the video (one of its
+ * three tips).
  *
  * One pass (~2 s, then the captions; under 5 s in every language) once
- * the tape and the tiles are in view in a visible tab; re-armed when the
- * figure is fully out of view, so it plays again on re-entry. Every part
- * takes its timing from `clipsScore` (WAAPI on translate, transform,
- * opacity and clip-path). The base CSS is the settled end state (spans
- * outlined, connectors drawn, tiles upright, captions settled): reduced
- * motion, screenshots and the server HTML.
+ * the tape and the tiles are in view (clear of the sticky header and the
+ * phone bar) in a visible tab; re-armed when the figure is fully out of
+ * view, so it plays again on re-entry. Every part takes its timing from
+ * `clipsScore` (WAAPI on translate, transform, opacity and clip-path).
+ * The base CSS is the settled end state (spans outlined, connectors
+ * drawn, tiles upright, captions settled): reduced motion, screenshots
+ * and the server HTML.
  *
  * The captions run on their own clocks (the page's one ticker), and each
  * starts only once its engine and font are ready: a slow font load
@@ -23,33 +25,30 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useLang, useT } from "@/i18n";
+import type { MessageKey } from "@/i18n/messages/en";
 import { LAUNCH_PRESETS } from "@/lib/captions/presets";
 import { presetSupport } from "@/lib/captions/scripts";
-import type { PresetId, StyleOverrides } from "@/lib/captions/types";
+import type { PresetId } from "@/lib/captions/types";
 import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "../CaptionFrame";
 import { LiveCaption, type LiveCaptionHandle } from "../captions/LiveCaption";
 import { subscribe } from "../captions/ticker";
 import { Scene, type ShotId } from "../scene/Scene";
-import { useReducedMotion } from "../shared";
+import { PASS_ROOT_MARGIN, PASS_THRESHOLDS, SMALL_FRAME_OVERRIDES, passShare, useReducedMotion } from "../shared";
 import styles from "../Landing.module.css";
 import f from "./Format.module.css";
 
 /** Bonus clips: at most this many (backend/llm.py detect_hook_moments). */
 const MAX_HOOK_CLIPS = 3;
 
-/** Karaoke (Hindi) draws at 0.078 of the width: on the small tiles it
- *  gets 1.6x and two words a page, so it stays legible. */
-const CLIP_OVERRIDES: Partial<Record<PresetId, StyleOverrides>> = { karaoke: { sizeScale: 1.6, wordsPerPage: 2 } };
-
 /** The finished video, in seconds. */
 const VIDEO_S = 180;
 /** The picked clips (seconds into the finished video), each its own
- *  moment of the trip video. */
-const CLIPS: readonly { from: number; to: number; shot: ShotId }[] = [
-  { from: 10, to: 34, shot: "globe" },
-  { from: 65, to: 106, shot: "map" },
-  { from: 135, to: 168, shot: "shirt" },
+ *  moment of the trip video, with the line said in it. */
+const CLIPS: readonly { from: number; to: number; shot: ShotId; cap: MessageKey }[] = [
+  { from: 10, to: 34, shot: "globe", cap: "site.clips.cap1" },
+  { from: 65, to: 106, shot: "map", cap: "site.clips.cap2" },
+  { from: 135, to: 168, shot: "shirt", cap: "site.clips.cap3" },
 ];
 /** The ruler: a tick every 30 s, three labels. */
 const TICKS = [0, 30, 60, 90, 120, 150, 180];
@@ -124,9 +123,12 @@ const clipsScore: { captionAt: readonly number[]; cues: readonly Cue[] } = {
 };
 
 /** The pass starts once the tape (the cause) and the tiles (the effect)
- *  are both on screen. */
+ *  are both on screen, the tiles down to their captions and duration
+ *  chips (in their lower third). On a screen too short for both (phones
+ *  held sideways): once the figure fills most of the clear area. */
 const TAPE_SHOWN = 0.75;
-const TILES_SHOWN = 0.5;
+const TILES_SHOWN = 0.8;
+const FIG_SHOWN = 0.9;
 
 /** One caption style for the three clips: Power where the language's
  *  script has it, else the first style that renders it natively. */
@@ -141,7 +143,8 @@ export function BonusClipsSection() {
   const lang = useLang();
   const reduced = useReducedMotion();
   const preset = clipPreset(lang);
-  const caption = t("site.demo.caption");
+  // One string for the effect below: a new line in any clip resets them.
+  const captions = CLIPS.map((c) => t(c.cap)).join("|");
 
   const figRef = useRef<HTMLDivElement>(null);
   const tapeRef = useRef<HTMLDivElement>(null);
@@ -243,7 +246,8 @@ export function BonusClipsSection() {
     arm();
     const ratio = new Map<Element, number>();
     const shown = () =>
-      (ratio.get(tape) ?? 0) >= TAPE_SHOWN - 0.01 && (ratio.get(tiles) ?? 0) >= TILES_SHOWN - 0.01;
+      ((ratio.get(tape) ?? 0) >= TAPE_SHOWN - 0.01 && (ratio.get(tiles) ?? 0) >= TILES_SHOWN - 0.01) ||
+      (ratio.get(fig) ?? 0) >= FIG_SHOWN - 0.01;
     // Fully out of view: back to the first frame for the next entry.
     const away = new IntersectionObserver((entries) => {
       if (!entries[entries.length - 1].isIntersecting && passRef.current === "started") arm();
@@ -251,13 +255,14 @@ export function BonusClipsSection() {
     away.observe(fig);
     const near = new IntersectionObserver(
       (entries) => {
-        for (const e of entries) ratio.set(e.target, e.isIntersecting ? e.intersectionRatio : 0);
+        for (const e of entries) ratio.set(e.target, passShare(e));
         if (shown()) play();
       },
-      { threshold: [0, TILES_SHOWN, TAPE_SHOWN, 1] },
+      { threshold: PASS_THRESHOLDS, rootMargin: PASS_ROOT_MARGIN },
     );
     near.observe(tape);
     near.observe(tiles);
+    near.observe(fig);
     const onVisibility = () => {
       if (shown()) play();
     };
@@ -276,14 +281,14 @@ export function BonusClipsSection() {
     };
   }, [reduced, capHandles]);
 
-  // A new sentence or style (the page language arriving) rebuilds the
-  // renderers and puts each caption on its settled page: while armed, it
+  // New lines or a new style (the page language arriving) rebuild the
+  // renderers and put each caption on its settled page: while armed, it
   // waits on its first frame instead; after a pass, it keeps the end.
   useEffect(() => {
     readyRef.current = CLIPS.map(() => false);
     const armed = passRef.current === "armed";
     capHandles.forEach((h) => h.current?.seek(armed ? 0 : h.current.duration));
-  }, [lang, caption, preset, capHandles]);
+  }, [lang, captions, preset, capHandles]);
 
   return (
     <section className={styles.section} aria-labelledby="clips-title">
@@ -355,12 +360,12 @@ export function BonusClipsSection() {
                 className={cx(styles.frame, f.tile)}
                 style={{ "--i": i, "--c": mid(c) } as React.CSSProperties}
               >
-                <Scene shot={c.shot} sizes="8.5rem" />
+                <Scene shot={c.shot} sizes="(min-width: 1237px) 8.5rem, (min-width: 946px) 11vw, 6.5rem" />
                 {preset && (
                   <LiveCaption
                     preset={preset}
-                    overrides={CLIP_OVERRIDES[preset]}
-                    text={caption}
+                    overrides={SMALL_FRAME_OVERRIDES[preset]}
+                    text={t(c.cap)}
                     lang={lang}
                     playing={false}
                     loop={false}
@@ -368,7 +373,7 @@ export function BonusClipsSection() {
                     onReady={onReady[i]}
                     handle={capHandles[i]}
                   >
-                    <CaptionPoster preset={preset} text={caption} className={preset === "karaoke" ? f.capLarge : undefined} />
+                    <CaptionPoster preset={preset} text={t(c.cap)} className={preset === "karaoke" ? f.capLarge : undefined} />
                   </LiveCaption>
                 )}
                 <span className={f.dur}>{clock(c.to - c.from)}</span>

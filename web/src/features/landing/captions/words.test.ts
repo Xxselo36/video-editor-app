@@ -10,6 +10,11 @@ describe("landing caption words", () => {
     expect(splitWords("フックを良くする3つのコツ", "ja").length).toBeGreaterThan(1);
   });
 
+  it("keeps particles and counters with the word before them", () => {
+    expect(splitWords("良いフックを作る3つの[コツ]", "ja")).toEqual(["良い", "フックを", "作る", "3つの", "コツ"]);
+    expect(splitWords("做好开头的3个[技巧]", "zh")).toEqual(["做好", "开头的", "3个", "技巧"]);
+  });
+
   it("times words back to back with a gap", () => {
     const w = captionWords("a bb", "en");
     expect(w[0].end - w[0].start).toBeCloseTo(wordDuration("a"));

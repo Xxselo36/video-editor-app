@@ -6,9 +6,10 @@
  *
  * "[word]" marks the highlighted word in the CSS posters; it is removed
  * here. Japanese and Chinese have no spaces: they are split into words
- * with Intl.Segmenter (the engine joins them back without spaces).
+ * with Intl.Segmenter (the engine joins them back without spaces), and a
+ * particle or counter is timed with the word before it, as spoken.
  */
-import { segmentsWithoutSpaces } from "@/lib/captions/scripts";
+import { normLang, segmentsWithoutSpaces } from "@/lib/captions/scripts";
 import type { CaptionWord } from "@/lib/captions/types";
 
 export const WORD_GAP = 0.06;
@@ -26,11 +27,22 @@ export function splitWords(text: string, lang: string): string[] {
   const out: string[] = [];
   for (const s of new Intl.Segmenter(lang, { granularity: "word" }).segment(clean)) {
     if (!s.segment.trim()) continue;
-    // punctuation sticks to the word before it
-    if (!s.isWordLike && out.length) out[out.length - 1] += s.segment;
+    const prev = out[out.length - 1];
+    // punctuation, particles and counters stick to the word before it
+    if (prev !== undefined && (!s.isWordLike || joinsPrevious(s.segment, prev, lang))) out[out.length - 1] += s.segment;
     else out.push(s.segment);
   }
   return out;
+}
+
+/**
+ * A fragment the segmenter cuts off: a counter after a number (3|つ, 3|个),
+ * a Japanese particle or verb ending (フック|を, 3つ|の, 始め|よう: one or
+ * two kana) or a Chinese particle (开头|的).
+ */
+function joinsPrevious(segment: string, prev: string, lang: string): boolean {
+  if (/\p{Nd}$/u.test(prev)) return true;
+  return normLang(lang) === "ja" ? /^[ぁ-ゖ]{1,2}$/.test(segment) : /^[的了吗呢吧啊]$/.test(segment);
 }
 
 export function captionWords(text: string, lang: string): CaptionWord[] {

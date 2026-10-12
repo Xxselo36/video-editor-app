@@ -381,3 +381,28 @@
     scale: none;
   }
 }
+
+/* Windows High Contrast drops the hatches and inset edges: the markers
+ * get a real border (so the toggles stay visible), the strike a system
+ * colour, the pause an edge. */
+@media (forced-colors: active) {
+  .marker {
+    border: 2px solid CanvasText;
+    background: none;
+    box-shadow: none;
+  }
+  .marker::after {
+    display: none;
+  }
+  .slot:hover .marker,
+  .slot:focus-visible .marker {
+    border-color: Highlight;
+  }
+  .strike {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .pause {
+    border: 1px solid CanvasText;
+  }
+}

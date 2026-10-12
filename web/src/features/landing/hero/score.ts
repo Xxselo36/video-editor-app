@@ -3,18 +3,19 @@
  * posts, and the steps that tell the headline in two acts.
  *
  * Act 1, "You talk": a playhead records across the tape; each spoken
- * command flags where it was said. Act 2, "Cleo edits": the bad take,
- * a filler word, a pause and the skipped sentence each get marked, lift
- * off and the tape closes behind them, leaving a thin cut marker; then
- * the bits before “Cleo start” and after “Cleo finish” go. The recording
- * is now visibly shorter; the 9:16 video lights up and its captions play.
+ * command flags where it was said and leaves its post there. Act 2,
+ * "Cleo edits": the bad take, a filler word, a pause and the skipped
+ * sentence each get marked, lift off and the tape closes behind them,
+ * leaving a thin cut marker; then the bits before “Cleo start” and after
+ * “Cleo finish” go. The recording is now visibly shorter; the 9:16 video
+ * lights up and its captions play.
  *
  * Widths are in % of the tape (they add up to 100). Every removal is a
  * translate of the pieces after it (never a width change).
  */
 import type { CmdId } from "../shared";
 
-export type PieceId = "pre" | "bad" | "a" | "um" | "b" | "pause" | "skip" | "c" | "post";
+export type PieceId = "pre" | "bad" | "a" | "um" | "b" | "pause" | "c" | "skip" | "d" | "post";
 export type PostId = "start" | "cut" | "stop" | "go" | "finish";
 export type LegendId = "take" | "fillers" | "pauses" | "skip" | "captions";
 export type FlagId = "start" | "cut" | "stop" | "stopgo" | "finish" | "cutTake" | "um" | "pause" | "skip";
@@ -28,15 +29,18 @@ export type Piece = {
   cmd?: CmdId;
 };
 
+/** The recording, left to right. A kept take sits between any two marked
+ *  removals, so each leaves its own cut marker on the finished tape. */
 export const PIECES: Piece[] = [
   { id: "pre", g: 5, kind: "cmd", cmd: "start" },
   { id: "bad", g: 17, kind: "cmd", cmd: "cut" },
-  { id: "a", g: 15, kind: "take" },
+  { id: "a", g: 13, kind: "take" },
   { id: "um", g: 6, kind: "filler" },
-  { id: "b", g: 12, kind: "take" },
+  { id: "b", g: 10, kind: "take" },
   { id: "pause", g: 8, kind: "pause" },
+  { id: "c", g: 10, kind: "take" },
   { id: "skip", g: 13, kind: "cmd", cmd: "stop" },
-  { id: "c", g: 19, kind: "take" },
+  { id: "d", g: 13, kind: "take" },
   { id: "post", g: 5, kind: "cmd", cmd: "finish" },
 ];
 
@@ -56,7 +60,7 @@ export const POSTS: { id: PostId; at: number; cmd: CmdId; leavesWith?: PieceId }
   { id: "start", at: AT.bad, cmd: "start" },
   { id: "cut", at: AT.a, cmd: "cut", leavesWith: "bad" },
   { id: "stop", at: AT.skip, cmd: "stop", leavesWith: "skip" },
-  { id: "go", at: AT.c, cmd: "go", leavesWith: "skip" },
+  { id: "go", at: AT.d, cmd: "go", leavesWith: "skip" },
   { id: "finish", at: AT.post, cmd: "finish" },
 ];
 
@@ -83,6 +87,7 @@ export function keptLength(gone: ReadonlySet<PieceId>): number {
 export type Phase = "talk" | "edit" | "ready";
 
 export type Step = {
+  /** How long the step holds. A play step lasts as long as its sentence instead (TakeStrip). */
   ms: number;
   phase?: Phase;
   /** Fade the whole tape out, swap it back to raw without transitions, fade it in. */
@@ -96,7 +101,7 @@ export type Step = {
   gone: PieceId[];
   /** The 9:16 video: dimmed raw monitor, or lit with its captions. */
   frame: "raw" | "lit";
-  /** Captions play (from their first word) during this step. */
+  /** Captions play from their first word during this step. */
   play?: boolean;
   li?: LegendId;
   done: LegendId[];
@@ -105,7 +110,7 @@ export type Step = {
 const ALL_GONE: PieceId[] = ["pre", "bad", "um", "pause", "skip", "post"];
 const ALL_DONE: LegendId[] = ["take", "fillers", "pauses", "skip", "captions"];
 
-/** The settled result: the first frame, the reduced-motion still, the loop's last hold. */
+/** The settled result: the first frame, the reduced-motion still, where every loop ends. */
 export const FINISHED: Step = { ms: 0, phase: "ready", gone: ALL_GONE, frame: "lit", done: ALL_DONE };
 
 /** When the playhead crosses each post, from the start of Act 1 (ms). */
@@ -124,36 +129,29 @@ const talk = (flag: FlagId, flash: PostId, ms: number): Step => ({
 });
 
 export const STEPS: Step[] = [
-  // The result plays once more, then the loop starts over.
+  // First load only: the result holds, then its captions play.
   { ...FINISHED, ms: 600 },
   { ...FINISHED, ms: 3800, play: true, li: "captions" },
-  { ...FINISHED, ms: 1200 },
+  // The loop: hold the played result, then start over.
+  { ...FINISHED, ms: 600 },
   { ...FINISHED, ms: 260, fade: "out" },
   { ms: 60, fade: "snap", gone: [], frame: "raw", done: [] },
   { ms: 560, fade: "in", phase: "talk", gone: [], frame: "raw", done: [] },
   // Act 1: You talk.
   talk("start", "start", headAt(AT.a) - headAt(AT.bad)),
   talk("cut", "cut", headAt(AT.skip) - headAt(AT.a)),
-  talk("stop", "stop", headAt(AT.c) - headAt(AT.skip)),
-  talk("stopgo", "go", headAt(AT.post) - headAt(AT.c)),
+  talk("stop", "stop", headAt(AT.d) - headAt(AT.skip)),
+  talk("stopgo", "go", headAt(AT.post) - headAt(AT.d)),
   talk("finish", "finish", 700),
   // Act 2: Cleo edits. Mark and hold, then lift and close.
-  { ms: 620, phase: "edit", flag: "cutTake", mark: ["bad"], gone: [], frame: "raw", li: "take", done: [] },
+  // The legend item lands with the lift, not with the mark.
+  { ms: 620, phase: "edit", flag: "cutTake", mark: ["bad"], gone: [], frame: "raw", done: [] },
   { ms: 720, phase: "edit", gone: ["bad"], frame: "raw", li: "take", done: [] },
-  { ms: 620, phase: "edit", flag: "um", mark: ["um"], gone: ["bad"], frame: "raw", li: "fillers", done: ["take"] },
+  { ms: 620, phase: "edit", flag: "um", mark: ["um"], gone: ["bad"], frame: "raw", done: ["take"] },
   { ms: 720, phase: "edit", gone: ["bad", "um"], frame: "raw", li: "fillers", done: ["take"] },
-  { ms: 620, phase: "edit", flag: "pause", mark: ["pause"], gone: ["bad", "um"], frame: "raw", li: "pauses", done: ["take", "fillers"] },
+  { ms: 620, phase: "edit", flag: "pause", mark: ["pause"], gone: ["bad", "um"], frame: "raw", done: ["take", "fillers"] },
   { ms: 720, phase: "edit", gone: ["bad", "um", "pause"], frame: "raw", li: "pauses", done: ["take", "fillers"] },
-  {
-    ms: 620,
-    phase: "edit",
-    flag: "skip",
-    mark: ["skip"],
-    gone: ["bad", "um", "pause"],
-    frame: "raw",
-    li: "skip",
-    done: ["take", "fillers", "pauses"],
-  },
+  { ms: 620, phase: "edit", flag: "skip", mark: ["skip"], gone: ["bad", "um", "pause"], frame: "raw", done: ["take", "fillers", "pauses"] },
   { ms: 720, phase: "edit", gone: ["bad", "um", "pause", "skip"], frame: "raw", li: "skip", done: ["take", "fillers", "pauses"] },
   {
     ms: 620,
@@ -165,9 +163,12 @@ export const STEPS: Step[] = [
     done: ["take", "fillers", "pauses", "skip"],
   },
   { ms: 720, phase: "edit", gone: ALL_GONE, frame: "raw", done: ["take", "fillers", "pauses", "skip"] },
-  // Ready to post: the video lights up (its captions play in the first step).
-  { ...FINISHED, ms: 700, done: ["take", "fillers", "pauses", "skip"], li: "captions" },
+  // Ready to post: the video lights up and its captions play from the first word.
+  { ...FINISHED, ms: 3800, play: true, li: "captions", done: ["take", "fillers", "pauses", "skip"] },
 ];
 
 /** The first step after hydration: the finished frame holds, then its captions play. */
 export const FIRST = 0;
+
+/** Where the loop goes on after its last step: the hold after the captions. */
+export const LOOP_FROM = 2;

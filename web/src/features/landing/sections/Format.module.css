@@ -242,7 +242,8 @@
 .clipsFig {
   /* Tile width: clamp(6.5rem, 11vw, 8.5rem), but never wider than a
      third of the figure (three tiles and two 3 px gaps fit at 320 px:
-     94 px, where Power's caption is 12 px). */
+     94 px, where Power's caption is 12 px). The tiles' image `sizes`
+     (BonusClips.tsx) mirrors the clamp. */
   --tg: 3px;
   --tw: min(8.5rem, (100cqw - 2 * var(--tg)) / 3, max(6.5rem, 11vw));
   position: relative;

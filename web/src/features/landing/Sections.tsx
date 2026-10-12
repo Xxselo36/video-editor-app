@@ -6,6 +6,7 @@
  * today.
  */
 import Link from "next/link";
+import { useSyncExternalStore } from "react";
 import { ChevronDown, FileText, RefreshCw, Share2, Type } from "lucide-react";
 import { useLang, useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
@@ -103,17 +104,23 @@ export function FaqSection() {
 
 /* ── Closing call ── */
 
-/** The finished video once more: it stands up on its last bit of tape
- *  (with the “Cleo finish” post) and plays its captions once. */
+/** Nothing to subscribe to: the value only differs between the server
+ *  (and hydration) and the client. */
+const noSubscription = () => () => {};
+
+/** The finished video once more: it tips up from its bottom edge and
+ *  plays its captions once. Laid down (armed) only once the script runs,
+ *  so without it the frame stands as it ends. */
 function FinalReprise() {
   const t = useT();
   const lang = useLang();
   const reduced = useReducedMotion();
   const [ref, shown] = useInView<HTMLDivElement>({ threshold: 0.5 });
+  const armed = useSyncExternalStore(noSubscription, () => true, () => false);
   const preset = presetSupport("power", lang).level !== "unavailable" ? "power" : (LAUNCH_PRESETS.find((p) => presetSupport(p, lang).level !== "unavailable") ?? "power");
   const caption = t("site.demo.caption");
   return (
-    <div ref={ref} className={styles.reprise} data-shown={shown} aria-hidden="true">
+    <div ref={ref} className={styles.reprise} data-shown={shown} data-armed={armed || undefined} aria-hidden="true">
       <div className={styles.repriseFrame}>
         <Scene shot="passport" talking={shown && !reduced} sizes="10.5rem" />
         <LiveCaption preset={preset} text={caption} lang={lang} playing={shown && !reduced} loop={false} hold={0.4}>
@@ -121,7 +128,6 @@ function FinalReprise() {
         </LiveCaption>
         <span className={styles.frameTag}>{t("site.demo.example")}</span>
       </div>
-      <div className={styles.repriseTape} />
     </div>
   );
 }

@@ -5,7 +5,8 @@
  *
  * "{name}" placeholders are filled at render time; {start} {cut} {keep}
  * {finish} {stop} {go} are the literal commands (“Cleo start” …), and
- * "[word]" in site.demo.caption marks the highlighted caption word.
+ * "[word]" in site.demo.caption and site.clips.cap1-3 marks the
+ * highlighted caption word (the last word spoken, as on the video).
  */
 export const enLanding = {
   "site.quote": "“{text}”",
@@ -15,10 +16,10 @@ export const enLanding = {
   "site.cta.start": "Start free",
   "site.cta.openEditor": "Open editor",
   "site.hero.title": "You talk. Cleo edits.",
-  "site.hero.sub": "Say {start}, then {cut} after any bad take. CleoCuts also removes pauses and filler words and adds captions.",
+  "site.hero.sub": "Say {start} while you film and {cut} after a bad take. CleoCuts also removes pauses and filler words and adds captions.",
   "site.demo.example": "Example",
-  "site.demo.pause": "Pause animation",
-  "site.demo.play": "Play animation",
+  "site.demo.pause": "Pause the demo",
+  "site.demo.play": "Play the demo",
   "site.demo.listAria": "What CleoCuts removes and adds",
   "site.demo.take": "Bad take removed",
   "site.demo.pauses": "Pauses removed",
@@ -32,8 +33,10 @@ export const enLanding = {
   "site.demo.phaseReady": "Ready to post",
   "site.captions.pick": "Caption style",
   "site.captions.frameAria": "Example of the {style} caption style",
-  "site.demo.replay": "Play again",
-  "site.auto.keep": "Keep {text}",
+  "site.captions.pause": "Pause caption preview",
+  "site.captions.play": "Play caption preview",
+  "site.demo.replay": "Replay the reframe",
+  "site.auto.keepNth": "Keep {text}, cut {n} of {total}",
   "site.commands.title": "Talk to Cleo while you film.",
   "site.commands.sub": "Say {start} first, then use the others while you record. After the upload, CleoCuts finds them and edits for you.",
   "site.commands.start": "Starts your video. Everything before it is dropped.",
@@ -53,6 +56,9 @@ export const enLanding = {
   "site.format.body": "Landscape videos are reframed to 9:16 around your face. Already vertical? It stays as you filmed it.",
   "site.clips.title": "Bonus clips from longer videos.",
   "site.clips.body": "When your finished video runs 90 seconds or more, CleoCuts picks up to {count} short clips worth posting on their own.",
+  "site.clips.cap1": "Open with the [payoff]",
+  "site.clips.cap2": "Cut the slow [intro]",
+  "site.clips.cap3": "End on a [question]",
   "site.control.title": "You have the last word.",
   "site.control.restore": "Every cut stays visible. Tap one to bring it back.",
   "site.control.text": "Fix any word, and resize or move each caption.",

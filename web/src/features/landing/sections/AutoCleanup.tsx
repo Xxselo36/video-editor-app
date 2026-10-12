@@ -2,7 +2,7 @@
 /**
  * Automatic cleanup: "Pauses and filler words are cut for you." A spoken
  * sentence with its filler words and a pause, cleaned in two beats when
- * the card is 60% in view:
+ * the card is 60% in view (clear of the sticky header and the phone bar):
  *
  * 1. Mark: each filler word draws a strike line, the pause's edge
  *    brightens (in reading order, 120 ms apart). Hold.
@@ -15,7 +15,8 @@
  * the line breaking stays right; there the swap is instant, no FLIP.
  *
  * The end state is the clean sentence with a marker where each piece was.
- * Every marker is a toggle (aria-pressed: true = the piece is kept):
+ * Every marker is a toggle (aria-pressed: true = the piece is kept),
+ * named by its piece and its place ("Keep “um”, cut 1 of 3"):
  * pressing it brings the piece back in place, pressing again removes it
  * (and pressing during the fade turns the fade back).
  * Screen readers get the clean sentence and the labelled toggles.
@@ -30,7 +31,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLang, useT } from "@/i18n";
 import { segmentsWithoutSpaces } from "@/lib/captions/scripts";
 import { cx } from "@/components/ui/cx";
-import { rich, useReducedMotion } from "../shared";
+import { PASS_ROOT_MARGIN, PASS_THRESHOLDS, passShare, rich, useReducedMotion } from "../shared";
 import styles from "../Landing.module.css";
 import c from "./Cleanup.module.css";
 
@@ -210,6 +211,7 @@ export function AutoCleanupSection() {
   const sample = t("site.auto.sample");
   const parts = useMemo(() => parseSample(sample), [sample]);
   const units = useMemo(() => toUnits(parts, spaced), [parts, spaced]);
+  const cutCount = parts.filter((p) => p.kind === "cut").length;
 
   /** "raw": the pieces are shown (armed or mid-pass); "end": markers. */
   const [phase, setPhase] = useState<"raw" | "end">("end");
@@ -236,7 +238,9 @@ export function AutoCleanupSection() {
   });
 
   // The pass: armed while the card is out of view, played at 60% in view
-  // in a visible tab, re-armed when it is fully out of view again.
+  // (clear of the fixed chrome; a card taller than that area: once it
+  // fills 60% of it) in a visible tab, re-armed when it is fully out of
+  // view again.
   useEffect(() => {
     const card = cardRef.current;
     if (reduced || !card || typeof card.animate !== "function" || typeof IntersectionObserver === "undefined") return;
@@ -314,10 +318,9 @@ export function AutoCleanupSection() {
       later(marked + T.hold, () => collapse(null));
     };
 
-    const io = new IntersectionObserver(
+    const near = new IntersectionObserver(
       (entries) => {
-        const e = entries[entries.length - 1];
-        ratio = e.isIntersecting ? e.intersectionRatio : 0;
+        ratio = passShare(entries[entries.length - 1]);
         if (first) {
           first = false;
           // Already 60% on screen when the page opened: keep the end state.
@@ -327,19 +330,22 @@ export function AutoCleanupSection() {
           arm();
           return;
         }
-        if (!e.isIntersecting) {
-          if (mode !== "armed" && !card.contains(document.activeElement)) arm();
-          return;
-        }
         play();
       },
-      { threshold: [0, 0.6] },
+      { threshold: PASS_THRESHOLDS, rootMargin: PASS_ROOT_MARGIN },
     );
-    io.observe(card);
+    // Fully out of view: back to the first frame for the next entry.
+    const away = new IntersectionObserver((entries) => {
+      if (entries[entries.length - 1].isIntersecting) return;
+      if (mode !== "armed" && !card.contains(document.activeElement)) arm();
+    });
+    near.observe(card);
+    away.observe(card);
     document.addEventListener("visibilitychange", play);
     collapseRef.current = (keep) => collapse(keep);
     return () => {
-      io.disconnect();
+      near.disconnect();
+      away.disconnect();
       document.removeEventListener("visibilitychange", play);
       collapseRef.current = () => {};
       stop();
@@ -417,13 +423,16 @@ export function AutoCleanupSection() {
       </span>
     );
 
-  // Both labels quote the piece as it is shown ("Keep “pause”"): a quoted
-  // label keeps its own form, so the sentence stays grammatical in every
-  // language (no case endings on a bare noun).
-  const keepLabel = {
-    um: t("site.auto.keep", { text: t("site.quote", { text: filler }) }),
-    pause: t("site.auto.keep", { text: t("site.quote", { text: pauseWord }) }),
-  };
+  // The labels quote the piece as it is shown ("Keep “pause”, cut 2 of
+  // 3"): a quoted label keeps its own form, so the sentence stays
+  // grammatical in every language (no case endings on a bare noun). The
+  // place tells the two “um” toggles apart.
+  const keepLabel = (u: Extract<Unit, { k: "cut" }>) =>
+    t("site.auto.keepNth", {
+      text: t("site.quote", { text: u.type === "um" ? filler : pauseWord }),
+      n: u.n + 1,
+      total: cutCount,
+    });
 
   /** One unit of the live sentence (`live`) or of the invisible copy. */
   const unit = (u: Unit, live: boolean): React.ReactNode => {
@@ -456,7 +465,7 @@ export function AutoCleanupSection() {
         data-slot={u.n}
         data-mode={shown ? "token" : "marker"}
         aria-pressed={isKept(u.n)}
-        aria-label={keepLabel[u.type]}
+        aria-label={keepLabel(u)}
         onClick={() => toggle(u.n)}
       >
         {shown ? token(u.type) : <span key="marker" className={c.marker} data-marker />}

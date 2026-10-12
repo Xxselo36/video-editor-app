@@ -271,10 +271,22 @@ lucide-react through `ui/Icon`: on the text baseline, 0.84em by default, decorat
 Sticky header on `surface-0` with a bottom hairline: `LogoWord` left; pricing link, language switcher, account and (desktop, once the hero button has gone) the pill CTA right. Phones narrower than 360px show the mark only. Footer links in `text-muted`, `text-strong` on hover.
 
 ### Take Strip (signature)
-A recording drawn as a tape lying in 3D: a plate (surface-1 to surface-2, lit far edge, a thickness edge in front) carrying surface-2 segments with a waveform texture, separated by thin posts in command colours. A marked piece tints toward its command colour; a removed piece lifts off the tape (translateZ, a small tilt, 360 ms) and then the gap closes (520 ms). Narration chips appear over the piece they describe. A 9:16 caption frame lies on the tape's end and stands up at “Cleo finish” (560 ms); its captions then step word by word while its scrub bar plays. A step machine drives it: transitions only between steps, paused off-screen, in hidden tabs and by a pause button; reduced motion shows one still frame with the removed pieces marked.
+The hero's endless loop, in two acts. A recording drawn as a tape lying in 3D: a plate (surface-1 to surface-2, lit far edge, a thickness edge in front) carrying surface-2 segments with a waveform texture. Act 1, "You talk": a white playhead records across the tape, linear, and each command post (in its command colour) appears with a short flare as the playhead reaches it, under a narration chip ("Cleo start", "Cleo cut", ...). Act 2, "Cleo edits": the bad take, a filler word, a pause and the skipped sentence are each marked (hatched toward their colour, 620 ms), lift off the tape and the tape closes behind them (420 ms), leaving a thin cut marker; then the bits before "Cleo start" and after "Cleo finish" go. The freed end of the tape shows a faint hatch, so the result reads visibly shorter. The 9:16 video then lights up and its captions play once, timed to the sentence. Desktop: the video stands beside the tape the whole time, dimmed under a scrim while raw. Phones and tablets: it rises out of the freed end at the finish. A step machine drives it (transitions only between steps); it stops off screen and in hidden tabs; the pause button (44 px) freezes every moving part in place and resume continues where it stopped; reduced motion shows the finished still. Desktop shows a legend of the five results, phones a status line with ticks.
+
+### Creator Footage (Scene)
+Every video frame on the landing shows one real creator: stock photos of one shoot (Gustavo Fring on Pexels, free to use), a man on his sofa packing for a trip. Five 9:16 moments (talk, globe, map, shirt, passport) and one 16:9 take, cropped and graded (whites pulled down to a cool lavender grey, lifted blacks) in `web/public/landing/creator/` as 360/720 px webp (800/1400 for the wide take), each with an inline 12 px preview so a frame is never empty. A soft vignette sits over every frame. The photos never move on their own; while a caption plays the camera pushes in slowly on his face (to 1.05 over 4 s) and eases back when he stops. Every frame carries the "Example" tag: he is shown as an example, never as a customer or testimonial.
 
 ### Caption Frame
-`2xl` corners, `border-strong` edge, `--shadow-md`, a dark surface-tint to surface-0 gradient; caption text in the real caption fonts and preset values, sized by container width (`cqw`).
+`2xl` corners, `border-strong` edge, `--shadow-md`, the creator footage behind; caption text drawn by the real caption engine on a canvas (the export's own pages, entrances and highlights), with a CSS poster of the settled caption until the engine and font are ready. Small frames enlarge Karaoke (Hindi) to stay legible.
+
+### Caption Player
+The 12 styles as a radio group of chips beside one phone frame. A short tour plays four styles once (a progress line under the playing chip), then the visitor picks; a pause button stops it. The tour starts only once the caption itself is on screen.
+
+### Reframe (16:9 to 9:16)
+The 16:9 take with a 9:16 window on it, beside (desktop) or above (phones) the 9:16 result. The pass: the window starts where a plain centre crop sits, cutting his face in half; a face box (violet corner brackets) closes on his face, the window glides over to it on the filmed curve and the outside settles darker; the result frame moves by exactly as much. Once per entry, with a Replay button.
+
+### Bonus Clips
+The finished 3-minute video as a flat tape with a time ruler. A playhead scans it; each picked span outlines, a connector draws down and its 9:16 tile stands up, then plays its own caption (three tips, three moments of the shoot).
 
 ### Logo
 `LogoMark` (violet-gradient rounded C with a glowing spark, default 28px) and `LogoWord` (mark plus bold "CleoCuts", -0.02em). Use the components only, only on dark surfaces, never recoloured or redrawn.

@@ -95,6 +95,9 @@
   min-height: 100dvh;
   flex-direction: column;
   color: var(--text-strong);
+  /* The buttons, chips and FAQ rows have their own press states (the
+   * footer links one below); no grey flash on top. */
+  -webkit-tap-highlight-color: transparent;
 }
 @media (min-width: 640px) {
   .page { --gutter: 1.5rem; }
@@ -218,9 +221,12 @@
 
 /* ── Hero ───────────────────────────────────────────────────────── */
 
+/* overflow-x: clip, not hidden: nothing in the stage may widen the page,
+ * yet it makes no scroll container and vertical overflow stays visible. */
 .hero {
   position: relative;
   padding-block: 1.5rem 1rem;
+  overflow-x: clip;
 }
 @media (min-width: 768px) {
   .hero { padding-block: 4.5rem 2.5rem; }
@@ -231,7 +237,7 @@
   max-width: 42rem;
 }
 @media (min-width: 1024px) {
-  .heroText { max-width: min(38rem, calc(100% - var(--clip-w) - 4rem)); }
+  .heroText { max-width: calc(100% - var(--clip-w) - 4rem); }
 }
 .h1 {
   margin: 0;
@@ -242,16 +248,21 @@
   color: var(--text-strong);
   text-wrap: balance;
 }
-/* Japanese breaks at phrase boundaries (after 。), Korean between words. */
+.h1Line {
+  display: block;
+}
+/* Japanese breaks at phrase boundaries (after 。) in headings and body
+ * copy (Safari ignores auto-phrase and breaks as before); Korean between
+ * words everywhere on the page, caption posters included. */
 .h1:lang(ja),
 .h2:lang(ja),
-.finalTitle:lang(ja) {
+.finalTitle:lang(ja),
+.page:lang(ja) :is(p, li, summary) {
   word-break: auto-phrase;
 }
-.h1:lang(ko),
-.h2:lang(ko),
-.finalTitle:lang(ko) {
+.page:lang(ko) {
   word-break: keep-all;
+  overflow-wrap: break-word;
 }
 .lead {
   margin-top: 0.875rem;
@@ -304,7 +315,7 @@
   left: 0.5rem;
   top: 0.5rem;
   border-radius: 9999px;
-  background: color-mix(in oklab, var(--surface-0) 70%, transparent);
+  background: color-mix(in oklab, var(--surface-0) 85%, transparent);
   padding: 0.125rem 0.5rem;
   font-size: 0.75rem;
   line-height: 1.4;
@@ -573,7 +584,7 @@
 @media (min-width: 768px) {
   .final { padding-block: 8rem 9rem; }
 }
-/* The finished video once more, standing on its last bit of tape. */
+/* The finished video once more: it tips up from its bottom edge. */
 .reprise {
   position: relative;
   width: 9rem;
@@ -585,6 +596,7 @@
 }
 .repriseFrame {
   position: relative;
+  container-type: inline-size;
   aspect-ratio: 9 / 16;
   overflow: hidden;
   border-radius: 16px;
@@ -593,26 +605,10 @@
   box-shadow: var(--shadow-md);
   transform-origin: 50% 100%;
 }
-.repriseTape {
-  position: relative;
-  height: 0.875rem;
-  margin: -0.25rem -1.75rem 0;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: linear-gradient(to bottom, var(--surface-2), var(--surface-1));
-}
-.repriseTape::after {
-  content: "";
-  position: absolute;
-  right: 1.25rem;
-  top: -0.375rem;
-  bottom: -0.375rem;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--cmd-finish);
-}
+/* Laid down only once the page's script runs (data-armed): without it,
+ * the frame stays upright. */
 @media (prefers-reduced-motion: no-preference) {
-  .reprise[data-shown="false"] .repriseFrame {
+  .reprise[data-shown="false"][data-armed] .repriseFrame {
     opacity: 0;
     transform: rotateX(62deg) translateY(6%);
   }
@@ -714,6 +710,26 @@
 }
 @media (hover: hover) and (pointer: fine) {
   .footerLink:hover { color: var(--text-strong); }
+}
+.footerLink:active {
+  color: var(--text-strong);
+}
+/* Touch: 44 px tall links, and a larger tap area for the language
+ * switcher's invisible select (absolute below 640 px; static, so
+ * unaffected, from there). */
+@media (pointer: coarse) {
+  .footerLink {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
+  .footerLinks,
+  .footerLinks ul {
+    row-gap: 0;
+  }
+  .headerActions select {
+    inset: -0.5rem -0.25rem;
+  }
 }
 .copyright {
   font-size: 0.8125rem;

@@ -3,23 +3,24 @@
  * The hero demo: one recording as a tape lying in 3D, and the finished
  * 9:16 video it becomes. In an endless loop it tells the headline in two
  * acts (hero/score.ts): "You talk" (a playhead records, each command
- * flags where it was said) and "Cleo edits" (the bad take, a filler
- * word, a pause and the skipped sentence lift off, the tape closes
- * behind them and gets visibly shorter), then the video lights up and
- * its captions play, drawn by the real caption engine.
+ * flags where it was said and plants its post) and "Cleo edits" (the bad
+ * take, a filler word, a pause and the skipped sentence lift off, the
+ * tape closes behind them and gets visibly shorter), then the video
+ * lights up and its captions play, drawn by the real caption engine.
  *
  * A step machine: each step is data-* attributes and per-piece
  * translates; CSS transitions move between steps, so the holds cost
  * nothing. It runs while on screen and the tab is visible, unless the
- * visitor paused it (WCAG 2.2.2). Reduced motion shows the finished
- * still. The first frame is the finished video, so a screenshot or a
- * slow start shows the result, and the first motion is the result
- * playing, never an undo.
+ * visitor paused it (WCAG 2.2.2); a stop freezes the stage where it is
+ * and resumes from there. Reduced motion shows the finished still. The
+ * first frame is the finished video, so a screenshot or a slow start
+ * shows the result, and the first motion is the result playing, never
+ * an undo.
  *
  * The stage is decoration for sighted visitors (aria-hidden); the list
  * under it says the same in words.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Pause, Play } from "lucide-react";
 import { useLang, useT } from "@/i18n";
 import { presetSupport } from "@/lib/captions/scripts";
@@ -30,9 +31,10 @@ import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "../CaptionFrame";
 import { LiveCaption } from "../captions/LiveCaption";
+import { captionWords, spokenUntil } from "../captions/words";
 import { Scene } from "../scene/Scene";
-import { CMD_COLOR, Cmd, useDocumentVisible, useInView, useReducedMotion } from "../shared";
-import { AT, FINISHED, FIRST, MARKED, PIECES, POSTS, STEPS, shiftAt, type FlagId, type LegendId, type PieceId, type Step } from "./score";
+import { CMD_COLOR, Cmd, SMALL_FRAME_OVERRIDES, useDocumentVisible, useInView, useReducedMotion } from "../shared";
+import { AT, FINISHED, FIRST, LOOP_FROM, MARKED, PIECES, POSTS, STEPS, keptLength, shiftAt, type FlagId, type LegendId, type PieceId, type Step } from "./score";
 import styles from "./Hero.module.css";
 
 const LEGEND: { id: LegendId; key: "site.demo.take" | "site.demo.fillers" | "site.demo.pauses" | "site.demo.skip" | "site.demo.captions" }[] = [
@@ -57,12 +59,24 @@ const FLAG_TARGET: Record<FlagId, { post?: string; piece?: PieceId }> = {
 };
 
 /** Where the playhead is at the end of each talk step (% of the tape). */
-const HEAD_TO: Partial<Record<FlagId, number>> = { start: AT.a, cut: AT.skip, stop: AT.c, stopgo: AT.post, finish: AT.post };
+const HEAD_TO: Partial<Record<FlagId, number>> = { start: AT.a, cut: AT.skip, stop: AT.d, stopgo: AT.post, finish: AT.post };
+
+/** The caption's hold after its last word (s). */
+const CAPTION_HOLD = 0.4;
 
 /** The caption style the hero's video uses in this language. */
 function heroPreset(lang: string): PresetId {
   if (presetSupport("power", lang).level !== "unavailable") return "power";
   return LAUNCH_PRESETS.find((p) => presetSupport(p, lang).level !== "unavailable") ?? "power";
+}
+
+/** Phones: the frame is about 100 px wide, so a style that draws small
+ *  (Karaoke, for Hindi) draws larger, as on the bonus clips. */
+const SMALL_FRAME = "(max-width: 767px)";
+function subscribeSmallFrame(cb: () => void): () => void {
+  const mq = window.matchMedia(SMALL_FRAME);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
 }
 
 type Chip = { key: number; flag: FlagId; leaving?: boolean };
@@ -77,17 +91,47 @@ export function TakeStrip() {
   const visible = useDocumentVisible();
   const reduced = useReducedMotion();
   const running = !paused && inView && visible && !reduced;
+  const smallFrame = useSyncExternalStore(subscribeSmallFrame, () => window.matchMedia(SMALL_FRAME).matches, () => false);
+  const caption = t("site.demo.caption");
 
+  // A play step lasts as long as the sentence and its hold.
+  const capMs = useMemo(() => Math.round((spokenUntil(captionWords(caption, lang)) + CAPTION_HOLD) * 1000), [caption, lang]);
+  const ms = STEPS[i].play ? capMs : STEPS[i].ms;
+
+  // The step clock. A stop keeps what is left of the step, so the
+  // playhead and the clock resume together.
+  const held = useRef<{ i: number; left: number } | null>(null);
   useEffect(() => {
     if (!running) return;
+    const left = held.current?.i === i ? held.current.left : ms;
+    held.current = null;
+    const t0 = performance.now();
     const id = window.setTimeout(() => {
-      // The loop wraps to the captions step (the first hold plays once).
-      const next = i === STEPS.length - 1 ? 1 : i + 1;
-      if (next === 1) setCycle((c) => c + 1);
+      // The loop goes on from the hold after the captions (the first hold
+      // and play run once); entering the captions step starts them over.
+      const next = i === STEPS.length - 1 ? LOOP_FROM : i + 1;
+      if (next === STEPS.length - 1) setCycle((c) => c + 1);
       setI(next);
-    }, STEPS[i].ms);
-    return () => window.clearTimeout(id);
-  }, [running, i]);
+    }, left);
+    return () => {
+      window.clearTimeout(id);
+      held.current = { i, left: Math.max(0, left - (performance.now() - t0)) };
+    };
+  }, [running, i, ms]);
+
+  // A stop freezes the stage's CSS motion where it is (the playhead, the
+  // scrub, lifting pieces, closing lanes, the push-in) and resumes it.
+  // Only running ones: a finished fill-both entrance is never replayed.
+  const stageRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (running || !stage || typeof stage.getAnimations !== "function") return;
+    const frozen = stage.getAnimations({ subtree: true }).filter((a) => a.playState === "running");
+    for (const a of frozen) a.pause();
+    return () => {
+      for (const a of frozen) if (a.playState === "paused") a.play();
+    };
+  }, [running]);
 
   const s: Step = reduced ? FINISHED : STEPS[i];
   const gone = useMemo(() => new Set<PieceId>(s.gone), [s.gone]);
@@ -97,7 +141,6 @@ export function TakeStrip() {
   // Flags: one at a time, over their post or piece; the previous one
   // fades out where it was. Placed on the screen after each step (the
   // tape is in perspective) and kept inside the rail.
-  const stageRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const postRefs = useRef(new Map<string, HTMLElement>());
   const pieceRefs = useRef(new Map<PieceId, HTMLElement>());
@@ -160,7 +203,9 @@ export function TakeStrip() {
   const phaseText = s.phase === "talk" ? t("site.demo.phaseTalk") : s.phase === "edit" ? t("site.demo.phaseEdit") : t("site.demo.phaseReady");
   const legendNow = LEGEND.find((l) => l.id === s.li);
   const status = s.phase === "edit" && legendNow ? t(legendNow.key) : phaseText;
-  const caption = t("site.demo.caption");
+  // While recording, a post shows once the playhead has reached it.
+  const recording = s.phase === "talk" || s.fade === "snap";
+  const said = recording ? POSTS.findIndex((p) => s.flag !== undefined && FLAG_TARGET[s.flag].post === p.id) : POSTS.length;
 
   return (
     <div
@@ -223,7 +268,7 @@ export function TakeStrip() {
                   </div>
                 ) : null,
               )}
-              {POSTS.map((p) => {
+              {POSTS.map((p, n) => {
                 const left = p.leavesWith && gone.has(p.leavesWith);
                 const flash = s.flash === p.id || (s.flash === "ends" && (p.id === "start" || p.id === "finish"));
                 return (
@@ -234,6 +279,7 @@ export function TakeStrip() {
                         else postRefs.current.delete(p.id);
                       }}
                       className={styles.post}
+                      data-ahead={n > said ? "true" : undefined}
                       data-gone={left ? "true" : undefined}
                       data-flash={flash ? "true" : undefined}
                       style={{ left: `${p.at}%`, "--pc": CMD_COLOR[p.cmd] } as React.CSSProperties}
@@ -241,11 +287,16 @@ export function TakeStrip() {
                   </div>
                 );
               })}
-              <div
-                className={styles.headLane}
-                data-head={s.head ?? ""}
-                style={{ transform: `translateX(${headX}%)`, transitionDuration: s.head === "run" ? `${s.ms}ms` : "0ms" }}
-              />
+              {/* the space the removals freed, hatched once the tape is done */}
+              <span className={styles.freed} style={{ left: `${keptLength(gone)}%` }} />
+              {/* the full-width lane slides; clipped so it never widens the page */}
+              <div className={styles.headClip}>
+                <div
+                  className={styles.headLane}
+                  data-head={s.head ?? ""}
+                  style={{ transform: `translateX(${headX}%)`, transitionDuration: s.head === "run" ? `${s.ms}ms` : "0ms" }}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -255,26 +306,28 @@ export function TakeStrip() {
             <Scene
               priority
               sizes="(min-width: 1024px) 16rem, (min-width: 768px) 9.5rem, 6.75rem"
-              talking={running && !!s.play}
+              talking={!!s.play && !reduced}
               className={styles.scene}
             />
             <div className={styles.captionLayer}>
               <LiveCaption
                 preset={preset}
+                overrides={smallFrame ? SMALL_FRAME_OVERRIDES[preset] : undefined}
                 text={caption}
                 lang={lang}
                 playing={running && !!s.play}
                 loop={false}
-                hold={0.4}
+                hold={CAPTION_HOLD}
                 restartKey={cycle}
               >
-                <CaptionPoster preset={preset} text={caption} />
+                {/* larger on phones via CSS, so the first paint matches */}
+                <CaptionPoster preset={preset} text={caption} className={preset === "karaoke" ? styles.capLarge : undefined} />
               </LiveCaption>
             </div>
             <span className={styles.scrim} />
             <span className={styles.tag}>{t("site.demo.example")}</span>
             <span className={styles.scrub}>
-              <span className={styles.scrubHead} style={{ transitionDuration: s.play ? `${s.ms}ms` : "0ms" }} />
+              <span className={styles.scrubHead} style={{ transitionDuration: s.play ? `${capMs}ms` : "0ms" }} />
             </span>
           </div>
         </div>

@@ -44,6 +44,17 @@
   aspect-ratio: 9 / 16;
   box-shadow: none;
 }
+/* A 1 px line just under where the styles draw (their lines centre at
+   62 to 74 % of the height): once it is in view, so is the caption. The
+   tour starts there (CaptionPlayer.tsx). */
+.capBand {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 80%;
+  height: 1px;
+  pointer-events: none;
+}
 
 /* "Example" and the style on screen, along the frame's top edge; the
    style name drops under "Example" when both don't fit on one line. */
@@ -278,5 +289,33 @@
   }
   .line {
     display: none;
+  }
+}
+
+/* Windows High Contrast: the selection and the tour's chip keep a visible
+   difference (forced colors would flatten the tints and the line). During
+   the tour the selection stays quiet, as above: forced like the others. */
+@media (forced-colors: active) {
+  .chip[aria-checked="true"],
+  .chip[aria-checked="true"]:hover {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+    border-color: Highlight;
+  }
+  .chip[aria-checked="true"]:focus-visible {
+    outline-color: CanvasText;
+  }
+  .chips[data-touring]:not(:focus-within) .chip[aria-checked="true"] {
+    forced-color-adjust: auto;
+  }
+  .chip[data-playing] .line {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+  /* the keyboard in the group: the checked chip is Highlight, so its
+     line takes the text's colour */
+  .chips[data-touring]:focus-within .chip[aria-checked="true"] .line {
+    background: HighlightText;
   }
 }
