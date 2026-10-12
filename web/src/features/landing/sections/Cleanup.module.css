@@ -1,0 +1,383 @@
+/* The command words (sections/CommandRows.tsx) and the automatic cleanup
+ * (sections/AutoCleanup.tsx). One easing curve, the brand's; every motion
+ * is a WAAPI animation on transform, translate, scale or opacity started
+ * from JS. The CSS here is the settled state, so reduced motion,
+ * screenshots and a page without JS show the result. */
+
+/* ── Command words ──────────────────────────────────────────────── */
+
+.note {
+  margin-top: 0.75rem;
+  max-width: 38rem;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--text-body);
+  text-wrap: pretty;
+}
+
+.cmdList {
+  margin: 2.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+/* Phones: the word and its mini share a line when they fit (otherwise
+ * the mini wraps under the word), the description runs below. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: 1rem;
+  row-gap: 0.625rem;
+  padding-block: 1.125rem;
+  border-bottom: 1px solid var(--border);
+}
+/* “Cleo stop” … “Cleo go”: the mini always gets its own line; on the
+ * narrowest phones every mini does (no row-to-row zigzag). */
+.row[data-pair] .word {
+  flex-basis: 100%;
+}
+@media (max-width: 359px) {
+  .row .word { flex-basis: 100%; }
+}
+.word {
+  margin: 0;
+  min-width: 0;
+  font-size: clamp(1.625rem, 1.3rem + 1.3vw, 2.25rem);
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--c);
+}
+/* Each command with the ellipsis after the first one stays whole; the
+ * line may break between the two. */
+.unit {
+  display: inline-block;
+  white-space: nowrap;
+}
+.ellipsis {
+  font-size: 0.6em;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.desc {
+  flex: 1 1 100%;
+  margin: 0;
+  max-width: 34rem;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--text-body);
+  text-wrap: pretty;
+}
+
+/* Tablets: the description under the word, the mini beside both. */
+@media (min-width: 768px) {
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(12rem, 14rem);
+    grid-template-areas:
+      "word mini"
+      "desc mini";
+    align-items: center;
+    column-gap: 2rem;
+    row-gap: 0.5rem;
+    padding-block: 1.75rem;
+  }
+  .word { grid-area: word; }
+  .desc { grid-area: desc; }
+  .row .mini {
+    grid-area: mini;
+    width: 100%;
+    height: 2rem;
+  }
+}
+/* Desktop: word, description and mini in three columns. */
+@media (min-width: 1024px) {
+  .row {
+    grid-template-columns: minmax(0, 18rem) minmax(0, 1fr) minmax(12rem, 16rem);
+    grid-template-areas: "word desc mini";
+    gap: 2rem;
+  }
+}
+
+/* The mini: one command's effect on a flat strip of the recording.
+ * Pieces carry a waveform; posts are the spoken commands; a hatched piece
+ * is what the command removes. */
+.mini {
+  --wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='192' height='32'%3E%3Crect x='0' y='7' width='2' height='18' rx='1'/%3E%3Crect x='4' y='10' width='2' height='12' rx='1'/%3E%3Crect x='8' y='6' width='2' height='20' rx='1'/%3E%3Crect x='12' y='2' width='2' height='28' rx='1'/%3E%3Crect x='16' y='12' width='2' height='8' rx='1'/%3E%3Crect x='20' y='11' width='2' height='10' rx='1'/%3E%3Crect x='24' y='3' width='2' height='26' rx='1'/%3E%3Crect x='28' y='4' width='2' height='24' rx='1'/%3E%3Crect x='32' y='11' width='2' height='10' rx='1'/%3E%3Crect x='36' y='7' width='2' height='18' rx='1'/%3E%3Crect x='40' y='3' width='2' height='26' rx='1'/%3E%3Crect x='44' y='12' width='2' height='8' rx='1'/%3E%3Crect x='48' y='5' width='2' height='22' rx='1'/%3E%3Crect x='52' y='4' width='2' height='24' rx='1'/%3E%3Crect x='56' y='9' width='2' height='14' rx='1'/%3E%3Crect x='60' y='12' width='2' height='8' rx='1'/%3E%3Crect x='64' y='11' width='2' height='10' rx='1'/%3E%3Crect x='68' y='6' width='2' height='20' rx='1'/%3E%3Crect x='72' y='6' width='2' height='20' rx='1'/%3E%3Crect x='76' y='11' width='2' height='10' rx='1'/%3E%3Crect x='80' y='9' width='2' height='14' rx='1'/%3E%3Crect x='84' y='11' width='2' height='10' rx='1'/%3E%3Crect x='88' y='4' width='2' height='24' rx='1'/%3E%3Crect x='92' y='6' width='2' height='20' rx='1'/%3E%3Crect x='96' y='12' width='2' height='8' rx='1'/%3E%3Crect x='100' y='3' width='2' height='26' rx='1'/%3E%3Crect x='104' y='3' width='2' height='26' rx='1'/%3E%3Crect x='108' y='11' width='2' height='10' rx='1'/%3E%3Crect x='112' y='9' width='2' height='14' rx='1'/%3E%3Crect x='116' y='2' width='2' height='28' rx='1'/%3E%3Crect x='120' y='2' width='2' height='28' rx='1'/%3E%3Crect x='124' y='3' width='2' height='26' rx='1'/%3E%3Crect x='128' y='12' width='2' height='8' rx='1'/%3E%3Crect x='132' y='3' width='2' height='26' rx='1'/%3E%3Crect x='136' y='3' width='2' height='26' rx='1'/%3E%3Crect x='140' y='6' width='2' height='20' rx='1'/%3E%3Crect x='144' y='12' width='2' height='8' rx='1'/%3E%3Crect x='148' y='9' width='2' height='14' rx='1'/%3E%3Crect x='152' y='12' width='2' height='8' rx='1'/%3E%3Crect x='156' y='4' width='2' height='24' rx='1'/%3E%3Crect x='160' y='3' width='2' height='26' rx='1'/%3E%3Crect x='164' y='10' width='2' height='12' rx='1'/%3E%3Crect x='168' y='8' width='2' height='16' rx='1'/%3E%3Crect x='172' y='6' width='2' height='20' rx='1'/%3E%3Crect x='176' y='10' width='2' height='12' rx='1'/%3E%3Crect x='180' y='4' width='2' height='24' rx='1'/%3E%3Crect x='184' y='11' width='2' height='10' rx='1'/%3E%3Crect x='188' y='3' width='2' height='26' rx='1'/%3E%3C/svg%3E");
+  position: relative;
+  display: flex;
+  flex: none;
+  gap: 1px;
+  width: 7.5rem;
+  height: 1.75rem;
+  /* the closing translate is sized in cqw of the strip (CommandRows.tsx) */
+  container-type: inline-size;
+}
+.piece,
+.gone {
+  position: relative;
+  flex: var(--g) 1 0px;
+  min-width: 0;
+}
+.piece {
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border-hover);
+}
+.piece::before {
+  content: "";
+  position: absolute;
+  inset: 15% 0.3125rem;
+  background: var(--text-muted);
+  opacity: 0.55;
+  -webkit-mask: var(--wave) repeat-x center / auto 100%;
+  mask: var(--wave) repeat-x center / auto 100%;
+}
+.post {
+  flex: 0 0 3px;
+  border-radius: 9999px;
+  background: var(--c);
+}
+.goneBody {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--c) 55%, transparent) 0 3px, transparent 3px 7px);
+  box-shadow: inset 0 0 0 1.5px var(--c);
+}
+/* Left where the piece was once the gap has closed (hidden at rest), on
+ * the side the strip closes toward (data-close, set with the pass in
+ * CommandRows.tsx: right where the mini sits flush right). */
+.cutMark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  border-radius: 9999px;
+  background: repeating-linear-gradient(135deg, var(--c) 0 2px, transparent 2px 4px);
+  opacity: 0;
+}
+.mini[data-close="right"] .cutMark {
+  left: auto;
+  right: 0;
+}
+
+/* ── Automatic cleanup ──────────────────────────────────────────── */
+
+.auto {
+  display: grid;
+  gap: 2.5rem;
+}
+@media (min-width: 1024px) {
+  .auto {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    align-items: start;
+    gap: 4rem;
+  }
+}
+.em {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.card {
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  padding: 1.5rem;
+}
+@media (min-width: 768px) {
+  .card { padding: 2.5rem; }
+}
+
+/* The raw sentence (invisible) and the live one share one grid cell:
+ * the card keeps the raw sentence's height in every state, so nothing
+ * below it moves when the sentence gets shorter. */
+.sentence {
+  display: grid;
+  margin: 0;
+  font-size: clamp(1.5rem, 1.2rem + 1.3vw, 2.25rem);
+  line-height: 1.45;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+  overflow-wrap: break-word;
+}
+.ghost,
+.live {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+.ghost {
+  visibility: hidden;
+}
+.live {
+  align-self: center;
+}
+/* Kept words are boxes, so FLIP can move them (spaced languages only). */
+.w {
+  display: inline-block;
+}
+/* A word and the piece after it share a line. */
+.glue {
+  white-space: nowrap;
+}
+
+.token {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+}
+.filler {
+  color: var(--text-muted);
+}
+.strike {
+  position: absolute;
+  left: -0.06em;
+  right: -0.06em;
+  top: calc(52% - 0.045em);
+  height: max(2px, 0.09em);
+  border-radius: 999px;
+  background: var(--text-muted);
+  transform-origin: left center;
+}
+.pause {
+  vertical-align: 0.3em;
+  margin-inline: 0.1em;
+  border-radius: 4px;
+  background: repeating-linear-gradient(135deg, var(--surface-tint) 0 4px, transparent 4px 7px);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  padding-inline: 0.4em;
+  font-size: 0.5em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.9;
+  color: var(--text-body);
+}
+/* Marked: a brighter edge and hatch, drawn over the resting ones and
+ * faded in (the same language as a marker's hover). */
+.ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--text-muted) 30%, transparent) 0 4px,
+    transparent 4px 7px
+  );
+  box-shadow: inset 0 0 0 1.5px var(--text-muted);
+}
+/* Armed (before the pass): nothing marked yet. The pass's animations
+ * hold their own values while they run. */
+.live[data-phase="raw"] .strike {
+  transform: scaleX(0);
+}
+.live[data-phase="raw"] .ring {
+  opacity: 0;
+}
+
+/* A removed piece's place: a toggle that brings it back. */
+.slot {
+  position: relative;
+  display: inline-block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  vertical-align: baseline;
+  border-radius: 4px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: scale 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* An invisible hit area of at least 44 x 44 px. */
+.slot::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  translate: -50% -50%;
+}
+.slot:focus-visible {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 3px;
+}
+.slot:active {
+  scale: 0.94;
+}
+.slot[data-mode="marker"] {
+  width: 0.375em;
+  height: 0.9em;
+  margin-inline: -0.04em;
+  vertical-align: -0.1em;
+  line-height: 0;
+}
+/* Japanese breaks by phrase, as the headlines do. */
+.sentence:lang(ja) {
+  word-break: auto-phrase;
+}
+/* Text without spaces: a hair of room on both sides. */
+.sentence[data-inline] .slot[data-mode="marker"] {
+  margin-inline: 0.08em;
+}
+.marker {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  /* The removed-piece hatch; the edge in a text token keeps the control
+   * at 3:1 or more against the card (WCAG 1.4.11). */
+  background: repeating-linear-gradient(135deg, var(--border-strong) 0 2px, transparent 2px 5px);
+  box-shadow: inset 0 0 0 1px var(--text-faint);
+}
+/* Hover and focus: brighter than at rest (an overlay, faded). */
+.marker::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: repeating-linear-gradient(135deg, var(--text-muted) 0 2px, transparent 2px 5px);
+  box-shadow: inset 0 0 0 1.5px var(--text-body);
+  opacity: 0;
+  transition: opacity 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .slot:hover .marker::after {
+    opacity: 1;
+  }
+}
+.slot:focus-visible .marker::after {
+  opacity: 1;
+}
+
+.restore {
+  margin-top: 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slot,
+  .marker::after {
+    transition: none;
+  }
+  .slot:active {
+    scale: none;
+  }
+}
