@@ -8,6 +8,10 @@
  * - The engine and the style's font load once the frame is near the
  *   viewport. Until then (or if they fail) `children` show: a CSS poster
  *   of the settled caption, so a frame is never empty.
+ * - `swapOnPlay`: the poster stays until the caption first plays, and
+ *   fades out during the lead-in before the first word while the canvas
+ *   is still empty, so the poster and the engine's own frame (its last
+ *   page, laid out differently) never show on top of each other.
  * - `playing` advances the caption's clock on the page's one rAF ticker;
  *   when false the current frame holds (first time: the settled last
  *   word). Loops after the last word plus `hold`; with `loop={false}` it
@@ -40,6 +44,7 @@ export function LiveCaption({
   loop = true,
   hold = 1,
   restartKey,
+  swapOnPlay = false,
   onCycle,
   onReady,
   className,
@@ -55,6 +60,8 @@ export function LiveCaption({
   loop?: boolean;
   hold?: number;
   restartKey?: string | number;
+  /** Keep the poster until the caption first plays (see above). */
+  swapOnPlay?: boolean;
   onCycle?: () => void;
   onReady?: () => void;
   className?: string;
@@ -70,9 +77,14 @@ export function LiveCaption({
   const poster = words.length ? Math.max(words[words.length - 1].start + 0.3, lastEnd - 0.02) : 0;
   const overridesKey = JSON.stringify(overrides ?? {});
   const [ready, setReady] = useState(false);
+  // swapOnPlay: the canvas takes over from the poster on the first play.
+  const [played, setPlayed] = useState(false);
+  if (swapOnPlay && ready && playing && !played) setPlayed(true);
+  const shown = ready && (!swapOnPlay || played);
   const live = useRef({
     renderer: null as CaptionRenderer | null,
-    t: poster,
+    // until it takes over, a swapOnPlay canvas waits on its empty lead-in
+    t: swapOnPlay ? 0 : poster,
     started: false,
     done: false,
     end,
@@ -172,7 +184,7 @@ export function LiveCaption({
 
   // A new style or sentence starts from its first word.
   useEffect(() => {
-    live.current.t = playing ? 0 : poster;
+    live.current.t = playing || (swapOnPlay && !played) ? 0 : poster;
     live.current.started = playing;
     live.current.done = false;
     draw(true);
@@ -209,7 +221,7 @@ export function LiveCaption({
   }, [playing, ready, restartKey, preset, words]);
 
   return (
-    <span className={cx(styles.live, className)} data-ready={ready} aria-hidden="true">
+    <span className={cx(styles.live, className)} data-ready={shown} data-swap={swapOnPlay ? "play" : undefined} aria-hidden="true">
       {children && <span className={styles.poster}>{children}</span>}
       <canvas ref={canvasRef} className={styles.canvas} />
     </span>

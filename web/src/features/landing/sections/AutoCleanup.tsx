@@ -6,19 +6,26 @@
  *
  * 1. Mark: each filler word draws a strike line, the pause's edge
  *    brightens (in reading order, 120 ms apart). Hold.
- * 2. Collapse: the marked pieces fade and lift, each is swapped for a slim
- *    cut marker, and the kept words travel from their old places to their
- *    new ones (FLIP on translate). A word that lands on another line does
- *    not cut across the sentence: it comes in at its new place instead.
+ * 2. Collapse: each cut is one object, as on the command strips: the
+ *    marked piece squeezes into its slim cut marker, which grows in out of
+ *    the piece's centre and travels with the kept words to their new
+ *    places (FLIP on translate). A word that lands on another line does
+ *    not cut across the sentence: it comes in at its new place instead,
+ *    as soon as the words or the piece still there have made room.
+ *
+ * Then, once per page view, every marker lights up once (its hover
+ * overlay) and the hint under the card comes up from faint: the markers
+ * can be tapped.
  *
  * Languages written without spaces (Japanese) keep their text inline, so
  * the line breaking stays right; there the swap is instant, no FLIP.
  *
  * The end state is the clean sentence with a marker where each piece was.
  * Every marker is a toggle (aria-pressed: true = the piece is kept),
- * named by its piece and its place ("Keep “um”, cut 1 of 3"):
- * pressing it brings the piece back in place, pressing again removes it
- * (and pressing during the fade turns the fade back).
+ * named by its piece and its place ("Keep “um”, cut 1 of 3"): pressing it
+ * brings the piece back (it grows out of its marker while the words make
+ * room, then its strike retracts), pressing again squeezes it back into
+ * the marker. A press mid-motion carries on from where everything is.
  * Screen readers get the clean sentence and the labelled toggles.
  *
  * Plays once per entry: armed unless the card is already 60% in view when
@@ -31,14 +38,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLang, useT } from "@/i18n";
 import { segmentsWithoutSpaces } from "@/lib/captions/scripts";
 import { cx } from "@/components/ui/cx";
-import { PASS_ROOT_MARGIN, PASS_THRESHOLDS, passShare, rich, useReducedMotion } from "../shared";
+import { EASE, EASE_MOVE, PASS_ROOT_MARGIN, PASS_THRESHOLDS, passShare, rich, useReducedMotion } from "../shared";
 import styles from "../Landing.module.css";
 import c from "./Cleanup.module.css";
 
-/** The brand curve: every UI enter, exit and on-screen travel. */
-const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
-
-/** The pass and the toggles (ms). The pass ends by ~1.7 s. */
+/** The pass and the toggles (ms). The pass ends by ~1.6 s (the first
+ *  one's marker lights by ~2.3 s). */
 const T = {
   /** in view → first mark */
   lead: 300,
@@ -46,29 +51,25 @@ const T = {
   ring: 200,
   stagger: 120,
   hold: 400,
-  lift: 200,
-  /** the swap starts while the lift ends (the curve is front-loaded: the
-   *  pieces are near-invisible by then), so the sentence never stalls */
-  swap: 120,
+  /** the kept words close up; a removed piece squeezes with its gap */
   flip: 420,
-  marker: 200,
-  /** a word that changed line comes in at its new place */
-  wrapIn: 280,
-  /** …once the words around it have mostly moved (share of the FLIP) */
-  wrapDelay: 0.3,
-  /** by hand: restore (reverse FLIP) and remove */
+  /** its marker grows in out of the piece's centre */
+  markerIn: 200,
+  /** a word that changed line comes in at its new place (once it is
+   *  free) */
+  wrapIn: 220,
+  /** by hand: the words make room or close up (the piece with them) */
   toggle: 360,
-  tokenIn: 200,
-  tokenInDelay: 80,
-  tokenOut: 160,
-  tokenSwap: 100,
+  /** a piece brought back: its marker gives way (an exit) */
+  markerOut: 140,
+  /** …and once it has mostly grown back, its strike retracts (the
+   *  pause's edge dims) */
+  retractDelay: 200,
+  retract: 200,
+  /** once, after the first pass: every marker lights up */
+  teach: 500,
+  teachStagger: 90,
 };
-
-/** A removed piece leaves: it fades and lifts. */
-const LIFT: Keyframe[] = [
-  { opacity: 1, translate: "0 0" },
-  { opacity: 0, translate: "0 -0.3em" },
-];
 
 type Part = { kind: "text"; text: string } | { kind: "cut"; type: "um" | "pause"; n: number };
 
@@ -116,89 +117,286 @@ function toUnits(parts: Part[], spaced: boolean): Unit[] {
   return out;
 }
 
+/** The form a slot shows (in flow; the other waits on its centre). */
+const shownPart = (slot: Element) =>
+  slot.querySelector<HTMLElement>(slot.getAttribute("data-mode") === "marker" ? "[data-marker]" : "[data-token]");
+
+/** How one form of a piece looks now (mid-swap too): its width on screen
+ *  and its opacity. */
+type Look = { w: number; o: number };
+
+const look = (el: Element | null): Look =>
+  el ? { w: el.getBoundingClientRect().width, o: Number(getComputedStyle(el).opacity) } : { w: 0, o: 0 };
+
 type FlipJob = {
-  rects: Map<Element, DOMRect>;
+  /** kept words: where they were, and their opacity (one still coming in
+   *  on a new line carries on) */
+  words: Map<Element, { rect: DOMRect; o: number }>;
+  /** slots: which form they showed, where, how both forms looked (a new
+   *  swap carries on from there), and their own opacity */
+  slots: Map<Element, { mode: string | null; rect: DOMRect; o: number; token: Look; marker: Look }>;
   /** where the sentence box was (it re-centres in the card) */
   rootTop: number;
   ms: number;
-  /** slots whose marker fades in */
-  markers: number[];
-  /** a slot whose token fades in */
-  tokenIn: number | null;
+  /** pieces brought back: their strike retracts */
+  restored: number[];
+  /** …from where the pass's mark is now (pressed mid-pass), not drawn */
+  markNow: boolean;
 };
 
-/** First: where every word and slot is now (call before a change). */
-function captureRects(
-  root: HTMLElement | null,
-  spaced: boolean,
-  ms: number,
-  extra: Partial<Pick<FlipJob, "markers" | "tokenIn">> = {},
-): FlipJob {
-  const rects = new Map<Element, DOMRect>();
-  if (root && spaced) root.querySelectorAll("[data-flip]").forEach((el) => rects.set(el, el.getBoundingClientRect()));
-  return {
-    rects,
-    rootTop: root?.getBoundingClientRect().top ?? 0,
-    ms,
-    markers: extra.markers ?? [],
-    tokenIn: extra.tokenIn ?? null,
-  };
+/** First: where every word and slot is now (call before a change). The
+ *  rects are read mid-flight too, so a new move carries on from there. */
+function capture(root: HTMLElement | null, spaced: boolean, ms: number, restored: number[] = [], markNow = false): FlipJob {
+  const words: FlipJob["words"] = new Map();
+  const slots: FlipJob["slots"] = new Map();
+  const opacity = (el: Element) => Number(getComputedStyle(el).opacity);
+  if (root && spaced) {
+    root.querySelectorAll("[data-flip]").forEach((el) => words.set(el, { rect: el.getBoundingClientRect(), o: opacity(el) }));
+    root.querySelectorAll("[data-slot]").forEach((slot) => {
+      const part = shownPart(slot);
+      if (part)
+        slots.set(slot, {
+          mode: slot.getAttribute("data-mode"),
+          rect: part.getBoundingClientRect(),
+          o: opacity(slot),
+          token: look(slot.querySelector("[data-token]")),
+          marker: look(slot.querySelector("[data-marker]")),
+        });
+    });
+  }
+  return { words, slots, rootTop: root?.getBoundingClientRect().top ?? 0, ms, restored, markNow };
 }
 
-/** Last, Invert, Play, batched: every write, then every read, then every
- *  animation (one forced layout, not one per word). */
+const centre = (r: DOMRect) => [r.left + r.width / 2, r.top + r.height / 2] as const;
+
+/** When a cubic-bezier() timing reaches the eased progress `y`, as a share
+ *  of its time. */
+function timeAt(curve: string, y: number): number {
+  const [x1, y1, x2, y2] = (curve.match(/-?[\d.]+/g) ?? []).map(Number);
+  const at = (s: number, p1: number, p2: number) => 3 * (1 - s) * (1 - s) * s * p1 + 3 * (1 - s) * s * s * p2 + s * s * s;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (at(mid, y1, y2) < y) lo = mid;
+    else hi = mid;
+  }
+  return at(hi, x1, x2);
+}
+
+/** The strike's drawn share now (its scaleX). */
+function drawn(el: Element): number {
+  const m = getComputedStyle(el).transform;
+  return !m || m === "none" ? 1 : new DOMMatrixReadOnly(m).a;
+}
+
+/** Last, Invert, Play, batched: every read, then every animation (one
+ *  forced layout, not one per word). A slot moves by its piece's centre:
+ *  the marker starts where the piece was (and the piece where the marker
+ *  was), so the swap reads as one object travelling with the words. */
 function playFlip(job: FlipJob, root: HTMLElement) {
-  const els = Array.from(job.rects.keys()).filter((el) => el.isConnected);
-  // Drop the flips still running: their start points were captured
-  // mid-flight, so the new ones carry on from there.
-  for (const el of els) for (const a of el.getAnimations()) if (a.id === "flip") a.cancel();
+  const words = Array.from(job.words.keys()).filter((el) => el.isConnected);
+  const slots = Array.from(job.slots.keys()).filter((el) => el.isConnected);
+  for (const el of [...words, ...slots]) for (const a of el.getAnimations()) if (a.id === "flip") a.cancel();
+  // A slot that changed form: its last swap gives way to the new one, which
+  // starts from how both forms looked (the job), so both are measured at
+  // rest here.
+  const changed = (el: Element) => job.slots.get(el)!.mode !== el.getAttribute("data-mode");
+  for (const el of slots)
+    if (changed(el))
+      for (const p of el.querySelectorAll("[data-token], [data-marker]"))
+        for (const a of p.getAnimations()) if (a.id === "swap") a.cancel();
 
   const cs = getComputedStyle(root);
   const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
   const dir = cs.direction === "rtl" ? -1 : 1;
   const shift = root.getBoundingClientRect().top - job.rootTop;
-  const moves = els.map((el) => {
-    const first = job.rects.get(el)!;
-    const last = el.getBoundingClientRect();
-    return { el, dx: first.left - last.left, dy: first.top - last.top, lineMove: last.top - first.top - shift };
-  });
+  const moves = [
+    ...words.map((el) => {
+      const { rect: first, o } = job.words.get(el)!;
+      const last = el.getBoundingClientRect();
+      return {
+        el,
+        rect: last,
+        o,
+        dx: first.left - last.left,
+        dy: first.top - last.top,
+        line: last.top - first.top - shift,
+        swap: null,
+      };
+    }),
+    ...slots.map((el) => {
+      const was = job.slots.get(el)!;
+      const part = shownPart(el);
+      const now = part?.getBoundingClientRect() ?? was.rect;
+      const [x0, y0] = centre(was.rect);
+      const [x1, y1] = centre(now);
+      const token = el.querySelector<HTMLElement>("[data-token]");
+      const marker = el.querySelector<HTMLElement>("[data-marker]");
+      return {
+        el,
+        rect: now,
+        o: was.o,
+        dx: x0 - x1,
+        dy: y0 - y1,
+        line: y1 - y0 - shift,
+        swap:
+          changed(el) && token && marker
+            ? {
+                token,
+                marker,
+                was,
+                tokenW: Math.max(1, token.getBoundingClientRect().width),
+                markerW: Math.max(1, marker.getBoundingClientRect().width),
+              }
+            : null,
+      };
+    }),
+  ];
 
-  for (const { el, dx, dy, lineMove } of moves) {
-    if (Math.abs(lineMove) > lh / 2) {
+  // What stays on its line, at a share `e` of the move (eased): its span
+  // [left, right] pushed back by the travel still to go. A swapping piece
+  // is as wide as it is drawn then; one being removed counts until it has
+  // mostly faded (then only its marker).
+  const spans = moves
+    .filter((m) => Math.abs(m.line) <= lh / 2)
+    .map((m) => {
+      const [cx, y] = centre(m.rect);
+      const swap = m.swap;
+      if (!swap) return { y, at: (e: number) => [m.rect.left + m.dx * (1 - e), m.rect.right + m.dx * (1 - e)] };
+      const removed = m.el.getAttribute("data-mode") === "marker";
+      const { was, tokenW, markerW } = swap;
+      const w0 = removed || was.token.o > 0.01 ? was.token.w : was.marker.w;
+      const w1 = removed ? markerW : tokenW;
+      return {
+        y,
+        at: (e: number) => {
+          const c = cx + m.dx * (1 - e);
+          const w = removed && e >= 0.7 ? w1 : w0 + (w1 - w0) * e;
+          return [c - w / 2, c + w / 2];
+        },
+      };
+    });
+  /** A word that changes line waits until its new place is free (ms): the
+   *  words still travelling there, or a piece still squeezing out of it,
+   *  go first. No wait when it is free already. */
+  const wait = (m: (typeof moves)[number]) => {
+    const near = spans.filter((s) => Math.abs(s.y - centre(m.rect)[1]) < lh / 2);
+    for (let i = 0; i <= 50; i++) {
+      const e = i / 50;
+      const free = near.every((s) => {
+        const [l, r] = s.at(e);
+        return r <= m.rect.left + 1 || l >= m.rect.right - 1;
+      });
+      if (free) return i ? Math.round(timeAt(EASE_MOVE, e) * job.ms) : 0;
+    }
+    return job.ms;
+  };
+
+  for (const m of moves) {
+    const { el, dx, dy, line, swap } = m;
+    if (Math.abs(line) > lh / 2) {
       // Changed line: a straight path would run through the other words.
       // It comes in at its new place, from the side the text flows from
-      // (up a line: from after it; down a line: from before it).
-      const from = (lineMove < 0 ? 0.25 : -0.25) * dir;
+      // (up a line: from after it; down a line: from before it), as soon
+      // as that place is free.
+      const from = (line < 0 ? 0.25 : -0.25) * dir;
       el.animate(
         [
           { opacity: 0, translate: `${from}em 0` },
           { opacity: 1, translate: "0 0" },
         ],
-        { id: "flip", duration: T.wrapIn, delay: Math.round(job.ms * T.wrapDelay), easing: EASE, fill: "backwards" },
+        { id: "flip", duration: T.wrapIn, delay: wait(m), easing: EASE, fill: "backwards" },
       );
-    } else if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
-      el.animate([{ translate: `${dx}px ${dy}px` }, { translate: "0 0" }], { id: "flip", duration: job.ms, easing: EASE });
+    } else {
+      // It travels to its new place; one still coming in from an earlier
+      // move (pressed mid-way) carries on from its opacity, no pop.
+      const from: Keyframe = {};
+      const to: Keyframe = {};
+      if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
+        from.translate = `${dx}px ${dy}px`;
+        to.translate = "0 0";
+      }
+      if (m.o < 0.99) {
+        from.opacity = m.o;
+        to.opacity = 1;
+      }
+      if (to.translate || to.opacity) el.animate([from, to], { id: "flip", duration: job.ms, easing: EASE_MOVE });
+    }
+    if (!swap) continue;
+    // Each form starts from how it looked when pressed (at rest: the piece
+    // full width or hidden, the marker hidden or whole), so a press
+    // mid-swap carries on instead of snapping.
+    const { token, marker, was, tokenW, markerW } = swap;
+    const pieceAt = (w: number) => `${w / tokenW} 1`;
+    const markerAt = was.marker.o > 0.01 ? `${was.marker.w / markerW}` : "0.6";
+    // The piece's width rides the words' move (same curve, same time), so
+    // it always fills the gap that opens or closes around it: no hole, no
+    // overlap.
+    const withWords: KeyframeAnimationOptions = { id: "swap", duration: job.ms, easing: EASE_MOVE };
+    if (el.getAttribute("data-mode") === "marker") {
+      // Removed: the marker lands on the piece's centre, the piece
+      // squeezes into it and is gone in the second half.
+      token.animate(
+        [
+          { opacity: was.token.o, scale: pieceAt(was.token.w) },
+          { opacity: was.token.o, offset: 0.4 },
+          { opacity: 0, scale: pieceAt(markerW) },
+        ],
+        withWords,
+      );
+      marker.animate(
+        [
+          { opacity: was.marker.o, scale: markerAt },
+          { opacity: 1, scale: "1" },
+        ],
+        { id: "swap", duration: T.markerIn, easing: EASE },
+      );
+    } else {
+      // Brought back: the piece grows out of its marker (or on from where
+      // its squeeze was), which gives way.
+      token.animate(
+        [
+          { opacity: was.token.o, scale: pieceAt(was.token.o > 0.01 ? was.token.w : was.marker.w) },
+          { opacity: 1, offset: 0.25 },
+          { opacity: 1, scale: "1 1" },
+        ],
+        withWords,
+      );
+      marker.animate(
+        [
+          { opacity: was.marker.o, scale: markerAt },
+          { opacity: 0, scale: "0.6" },
+        ],
+        { id: "swap", duration: T.markerOut, easing: "ease" },
+      );
     }
   }
-  for (const n of job.markers) {
-    root
-      .querySelector(`[data-slot="${n}"] [data-marker]`)
-      ?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: T.marker, easing: EASE, fill: "backwards" });
-  }
-  if (job.tokenIn !== null) {
-    root
-      .querySelector(`[data-slot="${job.tokenIn}"] [data-token]`)
-      ?.animate([{ opacity: 0 }, { opacity: 1 }], {
-        delay: T.tokenInDelay,
-        duration: T.tokenIn,
-        easing: EASE,
-        fill: "backwards",
-      });
+
+  // Brought back: the strike retracts toward its end, the pause's edge
+  // dims (from where the pass's mark is, when pressed mid-pass).
+  for (const n of job.restored) {
+    const token = root.querySelector(`[data-slot="${n}"] [data-token]`);
+    const strike = token?.querySelector("[data-strike]");
+    const ring = token?.querySelector("[data-ring]");
+    const timing: KeyframeAnimationOptions = {
+      delay: T.retractDelay,
+      duration: T.retract,
+      easing: "ease",
+      fill: "backwards",
+    };
+    if (strike) {
+      const from = job.markNow ? drawn(strike) : 1;
+      for (const a of strike.getAnimations()) a.cancel();
+      strike.animate([{ transform: `scaleX(${from})` }, { transform: "scaleX(0)" }], timing);
+    }
+    if (ring) {
+      const from = job.markNow ? Number(getComputedStyle(ring).opacity) : 1;
+      for (const a of ring.getAnimations()) a.cancel();
+      ring.animate([{ opacity: from }, { opacity: 0 }], timing);
+    }
   }
 }
-
-/** A removal by hand: its fade and the timer that swaps in the marker. */
-type Removal = { anim: Animation; timer: number };
 
 export function AutoCleanupSection() {
   const t = useT();
@@ -221,12 +419,13 @@ export function AutoCleanupSection() {
 
   const cardRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<HTMLSpanElement>(null);
+  const hintRef = useRef<HTMLParagraphElement>(null);
   const flipRef = useRef<FlipJob | null>(null);
+  /** The markers have lit up once (per page view). */
+  const taughtRef = useRef(false);
   /** Pressed during the pass: collapses at once, keeping that piece (set
    *  by the pass's effect). */
   const collapseRef = useRef<(keep: number) => void>(() => {});
-  /** Removals waiting for their token to fade out. */
-  const removing = useRef(new Map<number, Removal>());
 
   // Last, Invert, Play: after the change is in the DOM, before paint.
   useLayoutEffect(() => {
@@ -243,12 +442,12 @@ export function AutoCleanupSection() {
   // view again.
   useEffect(() => {
     const card = cardRef.current;
+    const hint = hintRef.current;
     if (reduced || !card || typeof card.animate !== "function" || typeof IntersectionObserver === "undefined") return;
     // The hook's first (hydration) value is false: never arm before it
     // catches up.
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const pending = removing.current;
-    let mode: "end" | "armed" | "playing" | "collapsing" = "end";
+    let mode: "end" | "armed" | "playing" = "end";
     let ratio = 0;
     let first = true;
     let timers: number[] = [];
@@ -259,45 +458,43 @@ export function AutoCleanupSection() {
     };
     const stop = () => {
       clearTimers();
-      for (const r of pending.values()) window.clearTimeout(r.timer);
-      pending.clear();
       liveRef.current?.getAnimations({ subtree: true }).forEach((a) => a.cancel());
     };
     const arm = () => {
       stop();
       mode = "armed";
+      // Nothing to tap yet: the hint waits a step quieter.
+      hint?.setAttribute("data-quiet", "");
       setKept([]);
       setPhase("raw");
     };
-    /** Beat 2: the marked pieces lift and are swapped for markers while
-     *  the kept words close up. `keep`: a piece pressed during the pass. */
+    /** After the collapse: the hint comes up; the first time, every
+     *  marker lights once, in reading order. */
+    const teach = () => {
+      hint?.removeAttribute("data-quiet");
+      const root = liveRef.current;
+      if (taughtRef.current || !root) return;
+      taughtRef.current = true;
+      root.querySelectorAll('[data-mode="marker"] [data-lit]').forEach((el, i) =>
+        el.animate([{ opacity: 0, easing: "ease" }, { opacity: 1, easing: "ease" }, { opacity: 0 }], {
+          duration: T.teach,
+          delay: i * T.teachStagger,
+        }),
+      );
+    };
+    /** Beat 2: the marked pieces squeeze into markers while the kept
+     *  words close up. `keep`: a piece pressed during the pass. */
     const collapse = (keep: number | null) => {
       const root = liveRef.current;
       if ((mode !== "armed" && mode !== "playing") || !root) return;
       clearTimers();
+      mode = "end";
       const kept = keep === null ? [] : [keep];
-      if (!spaced) {
-        // Inline text: an instant swap (no FLIP, never a crossfade).
-        mode = "end";
-        setKept(kept);
-        setPhase("end");
-        return;
-      }
-      mode = "collapsing";
-      const slots = Array.from(root.querySelectorAll<HTMLElement>("[data-slot]"), (el) => Number(el.dataset.slot)).filter(
-        (n) => n !== keep,
-      );
-      for (const n of slots) {
-        root
-          .querySelector(`[data-slot="${n}"] [data-token]`)
-          ?.animate(LIFT, { duration: T.lift, easing: EASE, fill: "forwards" });
-      }
-      later(T.swap, () => {
-        mode = "end";
-        flipRef.current = captureRects(root, true, T.flip, { markers: slots });
-        setKept(kept);
-        setPhase("end");
-      });
+      // Inline text (no spaces): an instant swap, no FLIP.
+      flipRef.current = capture(root, spaced, T.flip, kept, true);
+      setKept(kept);
+      setPhase("end");
+      later(T.flip, teach);
     };
     const play = () => {
       const root = liveRef.current;
@@ -349,6 +546,7 @@ export function AutoCleanupSection() {
       document.removeEventListener("visibilitychange", play);
       collapseRef.current = () => {};
       stop();
+      hint?.removeAttribute("data-quiet");
       setPhase("end");
     };
   }, [reduced, spaced]);
@@ -359,46 +557,16 @@ export function AutoCleanupSection() {
       collapseRef.current(n);
       return;
     }
-    if (reduced || !spaced) {
-      // Instant swap (reduced motion; inline text has no FLIP).
+    if (reduced) {
+      // Instant swap.
       setKept((k) => (k.includes(n) ? k.filter((x) => x !== n) : [...k, n]));
       return;
     }
-    const fading = removing.current.get(n);
-    if (fading) {
-      // Pressed again while it fades out: the fade turns back, it stays.
-      window.clearTimeout(fading.timer);
-      removing.current.delete(n);
-      fading.anim.reverse();
-      return;
-    }
-    if (!isKept(n)) {
-      // Bring it back: the words make room, the piece fades in (struck).
-      flipRef.current = captureRects(liveRef.current, spaced, T.toggle, { tokenIn: n });
-      setKept((k) => [...k, n]);
-      return;
-    }
-    // Remove it again: it fades and lifts (or a fade that was turned back
-    // carries on), and the gap closes before the fade ends.
-    const token = liveRef.current?.querySelector(`[data-slot="${n}"] [data-token]`);
-    if (!token) return;
-    const back = token.getAnimations().find((a) => a.id === "out" && a.playbackRate < 0);
-    let out: Animation;
-    if (back) {
-      back.reverse();
-      out = back;
-    } else out = token.animate(LIFT, { id: "out", duration: T.tokenOut, easing: EASE, fill: "forwards" });
-    const at = Number(out.currentTime) || 0;
-    const timer = window.setTimeout(
-      () => {
-        if (removing.current.get(n)?.anim !== out) return;
-        removing.current.delete(n);
-        flipRef.current = captureRects(liveRef.current, spaced, T.toggle, { markers: [n] });
-        setKept((k) => k.filter((x) => x !== n));
-      },
-      Math.max(0, T.tokenSwap - at),
-    );
-    removing.current.set(n, { anim: out, timer });
+    // Bring it back (it grows out of its marker, the words make room) or
+    // remove it again (it squeezes into the marker, the gap closes).
+    const restoring = !isKept(n);
+    flipRef.current = capture(liveRef.current, spaced, T.toggle, restoring ? [n] : []);
+    setKept((k) => (restoring ? [...k, n] : k.filter((x) => x !== n)));
   };
 
   const body = rich(t("site.auto.body"), {
@@ -408,8 +576,6 @@ export function AutoCleanupSection() {
     none: <strong className={c.em}>{t("app.start.paceNone")}</strong>,
   });
 
-  // Keyed apart from the marker: a token's held fade-out must never stay
-  // on a reused node.
   const token = (type: "um" | "pause") =>
     type === "um" ? (
       <span key="token" className={cx(c.token, c.filler)} data-token>
@@ -455,20 +621,24 @@ export function AutoCleanupSection() {
           {token(u.type)}
         </span>
       );
+    // Both forms stay in the slot (one in flow, one waiting on its
+    // centre), so a swap animates one object.
     const shown = phase === "raw" || isKept(u.n);
     return (
       <button
         key={u.key}
         type="button"
         className={c.slot}
-        data-flip
         data-slot={u.n}
         data-mode={shown ? "token" : "marker"}
         aria-pressed={isKept(u.n)}
         aria-label={keepLabel(u)}
         onClick={() => toggle(u.n)}
       >
-        {shown ? token(u.type) : <span key="marker" className={c.marker} data-marker />}
+        {token(u.type)}
+        <span key="marker" className={c.marker} data-marker>
+          <span className={c.lit} data-lit />
+        </span>
       </button>
     );
   };
@@ -484,7 +654,7 @@ export function AutoCleanupSection() {
         out.push(
           <span key={`g${i}`} className={c.glue}>
             {unit(u, live)}
-            {"\u00a0"}
+            {" "}
             {unit(next, live)}
           </span>,
         );
@@ -511,12 +681,14 @@ export function AutoCleanupSection() {
               <span className={c.ghost} aria-hidden="true">
                 {draw(false)}
               </span>
-              <span ref={liveRef} className={c.live} data-phase={phase}>
+              <span ref={liveRef} className={c.live}>
                 {draw(true)}
               </span>
             </p>
           </div>
-          <p className={c.restore}>{t("site.control.restore")}</p>
+          <p ref={hintRef} className={c.restore}>
+            {t("site.control.restore")}
+          </p>
         </div>
       </div>
     </section>

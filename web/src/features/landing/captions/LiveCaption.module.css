@@ -1,5 +1,7 @@
 /* LiveCaption: the engine's canvas over the frame, a CSS poster under it
- * until the engine has drawn. Both fill the frame. */
+ * until the engine has drawn (or, with swapOnPlay, until it first
+ * plays). Both fill the frame. Curves: the landing's (Landing.module.css
+ * .page). */
 .live {
   position: absolute;
   inset: 0;
@@ -14,10 +16,10 @@
 }
 .canvas {
   opacity: 0;
-  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 200ms var(--ease-out);
 }
 .poster {
-  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 200ms var(--ease-out);
 }
 .live[data-ready="true"] .canvas {
   opacity: 1;
@@ -25,9 +27,17 @@
 .live[data-ready="true"] .poster {
   opacity: 0;
 }
+/* swapOnPlay: the canvas takes over on its empty lead-in, so it shows at
+   once while the poster fades out before the first word */
+.live[data-swap] .canvas {
+  transition: none;
+}
+.live[data-swap] .poster {
+  transition: opacity 140ms ease;
+}
 @media (prefers-reduced-motion: reduce) {
-  .canvas,
-  .poster {
+  .live[data-ready] .canvas,
+  .live[data-ready] .poster {
     transition: none;
   }
 }

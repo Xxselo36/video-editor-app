@@ -36,6 +36,7 @@ export const deLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.keep": "Behält den Take und startet die nächste Szene.",
   "site.commands.stopgo": "Überspringt alles, was du dazwischen sagst.",
   "site.commands.finish": "Beendet dein Video. Alles danach fliegt raus.",
+  "site.commands.replay": "{cmd} noch einmal abspielen",
   "site.commands.note": "Die Befehle sind vorerst für englische und deutsche Videos gemacht.",
   "site.auto.title": "Pausen und Füllwörter fliegen raus.",
   "site.auto.body": "Dafür brauchst du keinen Befehl. CleoCuts entfernt Pausen und Füllwörter wie {um} aus dem ganzen Video. Das Tempo wählst du: {tight}, {natural} oder {none}.",

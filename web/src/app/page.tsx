@@ -10,12 +10,16 @@
  * closing call. Every video frame shows the same recording (scene/).
  *
  * One primary action per view: the hero's button; once it has scrolled
- * away, the header (desktop) or a bottom bar (phones) carries it, until
- * the closing section's own button is on screen.
+ * away, the header (desktop: the pill slides in at the right edge while
+ * the other actions glide aside) or a bottom bar (phones) carries it,
+ * until the closing section's own button is clear of the bottom edge.
+ *
+ * Between the demos the page never sits still: every section below the
+ * hero enters once (useEntrances below).
  */
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LogoWord } from "@/components/Logo";
 import { LanguageSwitcher, registerEnglish, useT } from "@/i18n";
 import { enLanding } from "@/i18n/messages/en/landing";
@@ -25,33 +29,75 @@ import { COPYRIGHT } from "@/lib/legal";
 import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { cx } from "@/components/ui/cx";
 import { TakeStrip } from "@/features/landing/hero/TakeStrip";
-import { ControlSection, FaqSection, FinalSection } from "@/features/landing/Sections";
 
-// The demos below the hero: server-rendered as usual, their code in
+// Everything below the hero: server-rendered as usual, its code in
 // separate chunks, so the first load carries only the hero.
 const CommandRowsSection = dynamic(() => import("@/features/landing/sections/CommandRows").then((m) => m.CommandRowsSection));
 const AutoCleanupSection = dynamic(() => import("@/features/landing/sections/AutoCleanup").then((m) => m.AutoCleanupSection));
 const CaptionPlayerSection = dynamic(() => import("@/features/landing/captions/CaptionPlayer").then((m) => m.CaptionPlayerSection));
 const ReframeSection = dynamic(() => import("@/features/landing/sections/ReframeDemo").then((m) => m.ReframeSection));
 const BonusClipsSection = dynamic(() => import("@/features/landing/sections/BonusClips").then((m) => m.BonusClipsSection));
+const ControlSection = dynamic(() => import("@/features/landing/Sections").then((m) => m.ControlSection));
+const FaqSection = dynamic(() => import("@/features/landing/Sections").then((m) => m.FaqSection));
+const FinalSection = dynamic(() => import("@/features/landing/Sections").then((m) => m.FinalSection));
 import { CtaLink, rich, useCmdNodes, useInView } from "@/features/landing/shared";
 import styles from "@/features/landing/Landing.module.css";
 
 // The landing's English strings live outside the shared `en` bundle.
 registerEnglish(enLanding);
 
+/* ── Section entrances ── */
+
+/** Every section below the hero enters once (features/landing/
+ *  entrances.ts, a lazy chunk: it only moves what is below the fold, so
+ *  it can wait for the page to be up). */
+function useEntrances(mainRef: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main || typeof IntersectionObserver === "undefined" || typeof main.animate !== "function") return;
+    let stop: (() => void) | null = null;
+    let gone = false;
+    void import("@/features/landing/entrances").then((m) => {
+      if (!gone) stop = m.startEntrances(main, styles.hero);
+    });
+    return () => {
+      gone = true;
+      stop?.();
+    };
+  }, [mainRef]);
+}
+
 export default function Landing() {
   const t = useT();
   const billingOn = useBillingEnabled();
   const cmds = useCmdNodes();
   // The hero's button counts as on screen until measured, and as gone
-  // once it is under the sticky header (4rem + its border).
+  // once it is under the sticky header (4rem + its border). The closing
+  // button counts once it is clear of the bottom edge (the phone bar
+  // leaves before it can cover it).
   const [heroCtaRef, heroCtaVisible] = useInView<HTMLAnchorElement>({ rootMargin: "-65px 0px 0px 0px" }, true);
-  const [finalCtaRef, finalCtaVisible] = useInView<HTMLAnchorElement>();
+  // The closing section is a lazy chunk: it reports its button itself.
+  const [finalCtaVisible, setFinalCtaVisible] = useState(false);
   const extraShown = !heroCtaVisible && !finalCtaVisible;
+  const mainRef = useRef<HTMLElement>(null);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  const headerCtaRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
     track("landing_view");
+  }, []);
+
+  useEntrances(mainRef);
+
+  // The header pill's width (it changes with the language and the
+  // label) for the glide of the actions beside it (--cta-w).
+  useEffect(() => {
+    const tools = toolsRef.current;
+    const pill = headerCtaRef.current;
+    if (!tools || !pill || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => tools.style.setProperty("--cta-w", `${pill.offsetWidth}px`));
+    ro.observe(pill);
+    return () => ro.disconnect();
   }, []);
 
   return (
@@ -69,18 +115,21 @@ export default function Landing() {
           <Link href="/" prefetch={false} className={cx("shrink-0", styles.logo)} aria-label={t("site.header.homeAria")}>
             <LogoWord />
           </Link>
-          <div className={styles.headerActions}>
-            <PricingLink className="mr-2 hidden sm:inline" />
-            <LanguageSwitcher />
-            {/* Accounts on: "Sign in" (stays visible on phones) or the avatar. */}
-            <AccountMenu returnHere={false} />
-            {/* Hidden (visibility) while another button is on screen. */}
-            <CtaLink location="header" size="pill" className={styles.headerCta} data-shown={extraShown} />
+          <div className={styles.headerActions} data-cta={extraShown}>
+            <div ref={toolsRef} className={styles.headerTools}>
+              <PricingLink className="mr-2 hidden sm:inline" />
+              <LanguageSwitcher />
+              {/* Accounts on: "Sign in" (stays visible on phones) or the avatar. */}
+              <AccountMenu returnHere={false} />
+            </div>
+            {/* Out of the flow at the right edge; hidden (visibility)
+                while another button is on screen. */}
+            <CtaLink ref={headerCtaRef} location="header" size="pill" className={styles.headerCta} data-shown={extraShown} />
           </div>
         </div>
       </header>
 
-      <main id="main">
+      <main id="main" ref={mainRef}>
         <section className={styles.hero} aria-labelledby="hero-title">
           <div className={styles.wrap}>
             <div className={styles.heroText}>
@@ -112,7 +161,7 @@ export default function Landing() {
         <BonusClipsSection />
         <ControlSection />
         <FaqSection />
-        <FinalSection ctaRef={finalCtaRef} />
+        <FinalSection onCtaInView={setFinalCtaVisible} />
       </main>
 
       <footer className={styles.footer}>

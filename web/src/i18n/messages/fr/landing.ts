@@ -36,6 +36,7 @@ export const frLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.keep": "Garde la prise et lance la scène suivante.",
   "site.commands.stopgo": "Saute tout ce que tu dis entre les deux.",
   "site.commands.finish": "Termine ta vidéo. Tout ce qui suit est coupé.",
+  "site.commands.replay": "Rejouer {cmd}",
   "site.commands.note": "Pour l'instant, les commandes sont prévues pour les vidéos en anglais et en allemand.",
   "site.auto.title": "Pauses et mots de remplissage ? Coupés pour toi.",
   "site.auto.body": "Pas besoin de commande. CleoCuts retire les pauses et les mots de remplissage comme {um}, sur toute la vidéo. Tu choisis le rythme : {tight}, {natural} ou {none}.",

@@ -29,17 +29,36 @@
 .camera {
   position: absolute;
   inset: 0;
+  background-image: var(--lqip);
   background-size: cover;
   background-position: center;
 }
-/* A 9:16 frame cut from the 16:9 clip: the clip at the frame's height,
-   moved so x = --cx (a fraction of the clip's width) is in the middle.
-   The frame is 81/256 of the clip's width, so its middle sits at 81/512
-   (15.82 %); --cx is clamped so the frame never leaves the clip. */
-.scene[data-crop="track"] .camera {
-  right: auto;
-  aspect-ratio: 16 / 9;
-  transform: translateX(calc((0.158203 - clamp(0.158203, var(--cx), 0.841797)) * 100%));
+
+/* Each clip's inline 12 px preview (clips.ts), as --lqip on the element
+   that shows it (Scene.tsx lqipClass). */
+.lqipHero {
+  --lqip: url("data:image/webp;base64,UklGRnQAAABXRUJQVlA4IGgAAAAwBACdASoMABUAPu1kq04ppaQiMAgBMB2JQBdmUABflPMXT+owoX90LmgA/s2DF74P8CnrCkfyIPhF6iMzGs9Z0shFXKva8G+za+TWITkGbU1IWalorQBrEfkm7a2yknjin1g5U6/AAA==");
+}
+.lqipRingCafe {
+  --lqip: url("data:image/webp;base64,UklGRoQAAABXRUJQVlA4IHgAAABQBACdASoMABUAPu1iqU2ppaOiMAgBMB2JYgC7MoACtVqzY4LT27DAzggAAP7Ngxk8zVxO8c7qRJRFOw591eb+15GnZUogfuAytzzs+bXh3zXONzM96J7beRu54SvRQMxgeKmjyizwHlEZJkj+64kQTgzbIjzAAAA=");
+}
+.lqipRingOffice {
+  --lqip: url("data:image/webp;base64,UklGRmoAAABXRUJQVlA4IF4AAACwAwCdASoMABUAPu1iqk2ppaQiMAgBMB2JZQAAUoGlb5H0O2iOAAD8Wk8R8tHsOnjmQ5HOawIqf7FvTBCHhZDeZDdoKCsPDmvZLXARUrtrNF9bpaTR/fRQclMqQAAA");
+}
+.lqipRingRoom {
+  --lqip: url("data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAACwAwCdASoMABUAPu1iqk2ppaQiMAgBMB2JZQC7ABrh8W8xziz3CADvK37+ZB2nwBMNRxDiJTGF4d3ob8Mvz3noe2mBKjlKy5P6RH2D5rfB/K2OLqwV+x/bgAA=");
+}
+.lqipTileCafe {
+  --lqip: url("data:image/webp;base64,UklGRnAAAABXRUJQVlA4IGQAAABwBACdASoMABUAPu1kqU2ppaOiMAgBMB2JZQC06CKKixr2FsjLapIAtefDwAD+fWhlot1YNwouCSUxF6FVyUmdozylW5bawz/mDyuyu64RuExFVCrqJVX4ZGxcoJ0xeotB/LwA");
+}
+.lqipTileOffice {
+  --lqip: url("data:image/webp;base64,UklGRnoAAABXRUJQVlA4IG4AAACQAwCdASoMABUAPu1iqU2ppaQiMAgBMB2JQBAAAPfae6k8N/GgAPxaS+6MepN44Kbo9597g/Rm5O6TwXXrNziacckTI3q/jul3s37ONywbnCSvk1CbgGR8CX56/iD8Dlz87xUjX20ami0dkMfAAA==");
+}
+.lqipTileRoom {
+  --lqip: url("data:image/webp;base64,UklGRmwAAABXRUJQVlA4IGAAAABwAwCdASoMABUAPu1iqk2ppaQiMAgBMB2JZQAASG0RgJPUZ/gA7onRhJ/72uJ7YuUU0p981wkILibrVPccFcZBxP7hwSAl1SB7YxLUXIe/mbUJho7YXxv4NNyW/CuAAAA=");
+}
+.lqipSmartcam {
+  --lqip: url("data:image/webp;base64,UklGRkQAAABXRUJQVlA4IDgAAADQAQCdASoMAAcAA4BaJYgCsADcMHCwAADieyOdtWSCG6IApOQaWXZRwVHLgIKmPhEF+tsQ3AAAAA==");
 }
 
 .poster,

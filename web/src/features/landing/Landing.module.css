@@ -191,6 +191,16 @@
   }
 }
 .headerActions {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+/* Over the pill: as they glide aside they uncover it, and coming back
+ * they cover what is left of it. */
+.headerTools {
+  position: relative;
+  z-index: 1;
   display: flex;
   min-width: 0;
   align-items: center;
@@ -199,20 +209,50 @@
 .headerActions .headerCta {
   display: none;
 }
-/* Shown only while no other main button is on screen; hidden it takes
- * no room, so the header's right edge lines up with the container. */
+/* The pill (desktop) is shown only while no other main button is on
+ * screen. It sits out of the flow at the right edge, so it never pushes
+ * anything: while it shows, the other actions glide aside by its width
+ * plus the gap (--cta-w, measured in page.tsx), and once they have
+ * cleared most of its room (140ms into their 260ms glide) it rises into
+ * it, continuing the hero's button that just went under the header.
+ * Rising any earlier, it would show through the gaps between the moving
+ * actions. Leaving, it fades first and the actions glide back over it a
+ * beat later.
+ * Hidden, the actions line up with the container's right edge. */
 @media (min-width: 768px) {
-  .headerActions .headerCta[data-shown="true"] {
+  .headerActions .headerCta {
+    position: absolute;
+    inset-inline-end: 0;
     display: inline-flex;
+    opacity: 0;
+    translate: 0 6px;
+    visibility: hidden;
+    pointer-events: none;
     transition:
-      opacity 220ms var(--ease-out),
-      transform 220ms var(--ease-out);
+      opacity 150ms ease,
+      translate 0s linear 150ms,
+      visibility 0s linear 150ms,
+      background-color 150ms var(--ease-out),
+      transform 150ms var(--ease-out);
   }
-  @starting-style {
-    .headerActions .headerCta[data-shown="true"] {
-      opacity: 0;
-      transform: translateY(-4px);
-    }
+  .headerActions .headerCta[data-shown="true"] {
+    opacity: 1;
+    translate: 0 0;
+    visibility: visible;
+    pointer-events: auto;
+    transition:
+      opacity 220ms var(--ease-out) 140ms,
+      translate 220ms var(--ease-out) 140ms,
+      visibility 0s,
+      background-color 150ms var(--ease-out),
+      transform 150ms var(--ease-out);
+  }
+  .headerTools {
+    transition: translate 260ms var(--ease-move) 60ms;
+  }
+  .headerActions[data-cta="true"] .headerTools {
+    translate: calc(-1 * (var(--cta-w, 0px) + 0.5rem)) 0;
+    transition: translate 260ms var(--ease-move);
   }
 }
 
@@ -471,14 +511,24 @@
   text-wrap: pretty;
 }
 
-/* You have the last word: what the editor and the result give you. */
+/* Section entrances (page.tsx useEntrances): every heading below the
+ * hero, the lines under it and the units a section marks with
+ * data-entrance rise into place once, as they cross 88 % of the
+ * viewport. The motion is Web Animations from page.tsx (opacity,
+ * translate, scale; the brand curve, 420 ms for a heading, 280 to 480 ms
+ * for the rest; reduced motion: a 200 ms fade). Nothing here hides
+ * anything: the styles are the rest state, which the server HTML and a
+ * page without JS show. */
+
+/* You have the last word: what the editor and the result give you. Each
+ * row is a track: a rule over it (and one under the last row), drawn in
+ * from the start edge as the row enters. */
 .controlList {
   display: grid;
   gap: 0;
   margin: 3rem 0 0;
   padding: 0;
   list-style: none;
-  border-top: 1px solid var(--border);
 }
 @media (min-width: 768px) {
   .controlList {
@@ -487,14 +537,35 @@
   }
 }
 .controlItem {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 1rem;
   padding-block: 1.25rem;
-  border-bottom: 1px solid var(--border);
   font-size: 1.0625rem;
   line-height: 1.55;
   color: var(--text-body);
+}
+.controlRule {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  background: var(--border);
+  transform-origin: 0 50%;
+}
+.controlRuleEnd {
+  display: none;
+  top: auto;
+  bottom: 0;
+}
+.controlItem:last-child .controlRuleEnd {
+  display: block;
+}
+@media (min-width: 768px) {
+  .controlItem:nth-last-child(2):nth-child(odd) .controlRuleEnd {
+    display: block;
+  }
 }
 .controlIcon {
   display: inline-flex;
@@ -529,7 +600,10 @@
   max-width: 46rem;
   border-top: 1px solid var(--border);
 }
-/* Opening and closing glide where the browser can size to auto. */
+/* Opening and closing glide where the browser can size to auto. It
+ * opens on the brand curve; it closes on the move curve, which starts
+ * slowly, so the answer (gone in 120ms, below) has faded before the
+ * closing edge reaches its text. */
 @supports (interpolate-size: allow-keywords) {
   .faqItem {
     interpolate-size: allow-keywords;
@@ -541,20 +615,45 @@
       block-size 240ms var(--ease-out),
       content-visibility 240ms allow-discrete;
   }
+  .faqItem:not([open])::details-content {
+    transition:
+      block-size 200ms var(--ease-move),
+      content-visibility 200ms allow-discrete;
+  }
   .faqItem[open]::details-content {
     block-size: auto;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .faqItem::details-content {
-    transition: none;
+.faqItem {
+  position: relative;
+  isolation: isolate;
+  border-bottom: 1px solid var(--border);
+}
+/* The row's surface: while it is open, on press and, with a mouse, on
+ * hover, in step with the chevron. A layer behind the row, a little
+ * wider than its text, so nothing moves. */
+.faqItem::before {
+  content: "";
+  position: absolute;
+  inset: 0 -0.5rem;
+  z-index: -1;
+  border-radius: 0.5rem;
+  background: var(--surface-1);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+@media (min-width: 640px) {
+  .faqItem::before {
+    inset-inline: -0.75rem;
   }
 }
-.faqItem summary:active {
-  background: var(--surface-1);
+.faqItem[open]::before {
+  opacity: 1;
 }
-.faqItem {
-  border-bottom: 1px solid var(--border);
+.faqItem:has(> summary:active)::before {
+  opacity: 1;
+  transition-duration: 0ms;
 }
 .faqItem summary {
   display: flex;
@@ -577,11 +676,24 @@
 .faqChevron {
   flex: none;
   color: var(--text-muted);
-  transition: transform 200ms var(--ease-out);
+  transition:
+    transform 200ms var(--ease-out),
+    color 150ms ease;
 }
 .faqItem[open] .faqChevron {
   transform: rotate(180deg);
 }
+@media (hover: hover) and (pointer: fine) {
+  .faqItem:hover::before {
+    opacity: 1;
+  }
+  .faqItem:hover .faqChevron {
+    color: var(--text-strong);
+  }
+}
+/* The answer fades in after the row starts to open, dropping the last
+ * 4px into place, and is gone before the row has closed, so the moving
+ * edge never slices through a line of text. */
 .faqItem p {
   margin: 0;
   max-width: 40rem;
@@ -589,6 +701,24 @@
   font-size: 1.0625rem;
   line-height: 1.6;
   color: var(--text-body);
+  opacity: 0;
+  translate: 0 -4px;
+  transition:
+    opacity 120ms ease,
+    translate 0s linear 120ms;
+}
+.faqItem[open] p {
+  opacity: 1;
+  translate: 0 0;
+  transition:
+    opacity 220ms var(--ease-out) 60ms,
+    translate 220ms var(--ease-out) 60ms;
+}
+@starting-style {
+  .faqItem[open] p {
+    opacity: 0;
+    translate: 0 -4px;
+  }
 }
 .inlineLink {
   color: var(--brand-hover);
@@ -596,13 +726,21 @@
   text-underline-offset: 3px;
 }
 
-/* Closing call to action. */
+/* Closing call to action: the page ends like a render finishing. The
+ * finished video tips up once more and plays its line; then (once per
+ * load) a playhead sweeps the title in, the note follows and the
+ * button's glow blooms once (data-sweep, Sections.tsx FinalSection). */
 .final {
   padding-block: 6rem 7rem;
   text-align: center;
 }
 @media (min-width: 768px) {
   .final { padding-block: 8rem 9rem; }
+}
+/* Desktops up to about 960px tall: the last screen holds the whole
+ * reprise under the header. */
+@media (min-width: 768px) and (max-height: 960px) {
+  .final { padding-block: 6rem 5rem; }
 }
 /* The finished video once more: it tips up from its bottom edge. */
 .reprise {
@@ -626,17 +764,29 @@
   transform-origin: 50% 100%;
 }
 /* Laid down only once the page's script runs (data-armed): without it,
- * the frame stays upright. */
+ * the frame stays upright. Up: the hinge on the page's spring (no
+ * overshoot), the fade on the brand curve. Down (once it is out of
+ * view): quickly, on `ease`. */
 @media (prefers-reduced-motion: no-preference) {
+  .repriseFrame {
+    transition:
+      transform 600ms var(--spring-hinge),
+      opacity 200ms var(--ease-out);
+  }
   .reprise[data-shown="false"][data-armed] .repriseFrame {
     opacity: 0;
     transform: rotateX(62deg) translateY(6%);
-  }
-  .repriseFrame {
     transition:
-      transform 600ms var(--ease-out) 120ms,
-      opacity 200ms var(--ease-out) 120ms;
+      transform 200ms ease,
+      opacity 200ms ease;
   }
+}
+/* The title's box, as wide as the title, carries the playhead. */
+.finalTitleBox {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
 }
 .finalTitle {
   margin: 0 auto;
@@ -648,6 +798,24 @@
   color: var(--text-strong);
   text-wrap: balance;
 }
+/* The playhead: a 2px brand line with a soft glow (drawn once, never
+ * animated). It runs from the title's first glyph to its last
+ * (--sweep-from and --sweep-to, px from the box's left edge, measured
+ * in Sections.tsx: balanced lines are narrower than the heading's box),
+ * and it is only 2px wide, so its travel never widens the page. At rest
+ * it is gone. */
+.finalHead {
+  position: absolute;
+  top: -0.375rem;
+  bottom: -0.375rem;
+  left: -1px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--brand);
+  box-shadow: 0 0 10px var(--brand-glow);
+  opacity: 0;
+  pointer-events: none;
+}
 .finalNote {
   margin-top: 1rem;
   font-size: 1.0625rem;
@@ -656,8 +824,91 @@
 .finalCta {
   margin-top: 2rem;
 }
+/* The button's bloom: a wider glow drawn once behind its own, shown
+ * only by its opacity and scale (the shadow itself never animates). */
+.finalCtaLink {
+  position: relative;
+}
+.finalCtaLink::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 48px var(--brand-glow);
+  opacity: 0;
+  pointer-events: none;
+}
+/* The sweep. Armed only when the section was below the fold once the
+ * page had hydrated, and never under reduced motion; the server HTML, a
+ * page without JS and reduced motion show the title, note and button at
+ * rest. The playhead runs at the speed of time (linear, 640 ms) over the
+ * title's ink and the title's clip edge rides it (the same two lengths,
+ * the same timing); the note phase-fades in 80 ms after it, as the
+ * button's glow blooms. */
+@media (prefers-reduced-motion: no-preference) {
+  .final[data-sweep="armed"] .finalTitle {
+    clip-path: inset(-0.25em calc(100% - var(--sweep-from, 0px)) -0.25em -0.25em);
+  }
+  .final[data-sweep="armed"] .finalNote {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  /* Keyframes, not a transition: both ends are explicit, so the clip
+   * starts with the playhead, from the measured first glyph. */
+  .final[data-sweep="run"] .finalTitle {
+    clip-path: inset(-0.25em calc(100% - var(--sweep-to, 100%)) -0.25em -0.25em);
+    animation: final-reveal 640ms linear;
+  }
+  .final[data-sweep="run"] .finalHead {
+    animation: final-sweep 640ms linear;
+  }
+  .final[data-sweep="run"] .finalNote {
+    transition:
+      opacity 280ms var(--ease-out) 720ms,
+      translate 280ms var(--ease-out) 720ms;
+  }
+  .final[data-sweep="run"] .finalCtaLink::after {
+    animation: cta-bloom 600ms var(--ease-out) 640ms both;
+  }
+}
+@keyframes final-reveal {
+  from {
+    clip-path: inset(-0.25em calc(100% - var(--sweep-from, 0px)) -0.25em -0.25em);
+  }
+  to {
+    clip-path: inset(-0.25em calc(100% - var(--sweep-to, 100%)) -0.25em -0.25em);
+  }
+}
+@keyframes final-sweep {
+  from {
+    translate: var(--sweep-from, 0px) 0;
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  to {
+    translate: var(--sweep-to, 0px) 0;
+    opacity: 0;
+  }
+}
+@keyframes cta-bloom {
+  from {
+    opacity: 0;
+    scale: 0.9;
+  }
+  35% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 1;
+  }
+}
 
-/* Phones: the action stays in thumb reach once the hero's is gone. */
+/* Phones: the action stays in thumb reach once the hero's is gone. It
+ * rises on the drawer curve (the visible travel lasts, no snap) and
+ * leaves on the move curve, faster, before it hides. */
 .sticky {
   position: fixed;
   left: 0;
@@ -668,15 +919,15 @@
   background: var(--surface-0);
   padding: 0.5rem var(--gutter) calc(0.5rem + env(safe-area-inset-bottom, 0px));
   transition:
-    transform 240ms var(--ease-out),
+    transform 320ms var(--ease-drawer),
     visibility 0s linear 0s;
 }
 .sticky[data-shown="false"] {
   visibility: hidden;
   transform: translateY(110%);
   transition:
-    transform 200ms var(--ease-out),
-    visibility 0s linear 200ms;
+    transform 220ms var(--ease-move),
+    visibility 0s linear 220ms;
 }
 /* (beats .ctaWide's width: auto from 640 px) */
 .sticky .cta {
@@ -758,14 +1009,60 @@
 
 /* ── Reduced motion ── */
 /* The demos (hero/, sections/, captions/) render their settled frame
- * under reduced motion; here the page's own transitions go. */
+ * under reduced motion; here the page's own transitions go, and what
+ * comes and goes (the header pill, the phone bar, an FAQ answer) only
+ * fades. The section entrances fade in page.tsx; the reprise stands
+ * still and the closing sweep is never armed (their rules above are
+ * for no-preference only). */
 @media (prefers-reduced-motion: reduce) {
   .faqChevron,
   .cta,
   .footerLink,
-  .headerActions .headerCta[data-shown="true"],
+  .headerTools,
+  .headerActions[data-cta="true"] .headerTools {
+    transition: none;
+  }
+  .faqItem::details-content,
+  .faqItem:not([open])::details-content {
+    transition: none;
+  }
+  .headerActions .headerCta,
+  .headerActions .headerCta[data-shown="true"] {
+    translate: none;
+  }
+  .headerActions .headerCta {
+    transition:
+      opacity 150ms ease,
+      visibility 0s linear 150ms;
+  }
+  .headerActions .headerCta[data-shown="true"] {
+    transition:
+      opacity 200ms ease,
+      visibility 0s;
+  }
   .sticky,
   .sticky[data-shown="false"] {
-    transition: none;
+    transform: none;
+  }
+  .sticky {
+    transition:
+      opacity 200ms ease,
+      visibility 0s;
+  }
+  .sticky[data-shown="false"] {
+    opacity: 0;
+    transition:
+      opacity 140ms ease,
+      visibility 0s linear 140ms;
+  }
+  .faqItem p,
+  .faqItem[open] p {
+    translate: none;
+  }
+  .faqItem p {
+    transition: opacity 120ms ease;
+  }
+  .faqItem[open] p {
+    transition: opacity 200ms ease;
   }
 }

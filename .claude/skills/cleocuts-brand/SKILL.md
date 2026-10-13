@@ -101,9 +101,16 @@ Write commands with curly quotes in UI copy: “Cleo cut”.
 - Live/listening indicators: `pulse-dot` (2s soft pulse). Loading: `skeleton` shimmer.
 - Always respect `prefers-reduced-motion` (already wired in `globals.css` — extend it for new animations).
 - Motion is quick and calm; no bouncy or long hero animations.
+- One vocabulary of curves (the landing defines them as custom properties on `.page`, mirrored in `features/landing/shared.tsx` for Web Animations):
+  - `--ease-out` `cubic-bezier(0.16, 1, 0.3, 1)`: the brand curve. Entrances, rises of 12px or less, fades in.
+  - `--ease-move` `cubic-bezier(0.77, 0, 0.175, 1)`: something already on screen travels (a lift, a close, a chip moving on).
+  - `--ease-drawer` `cubic-bezier(0.32, 0.72, 0, 1)`: something rises into place (a phone video, the phone CTA bar).
+  - `--spring-hinge`: a critically damped spring (no overshoot, about 600ms) for hinged 3D folds and tiles standing up, as CSS `linear()`; `--ease-move` where `linear()` is not supported.
+  - `ease` for opacity out and state changes; linear only for playheads, scrub heads and the voice ink.
+- Rule: one thing starts at a time. A demo waits for its section's entrance to finish; rows cascade top to bottom; an exit takes at most 70% of its entrance's duration.
 - Owner-approved exceptions (Oct 2026):
   - The landing hero's take-strip loop runs continuously. It has a pause button, stops off screen and in hidden tabs, and shows one still under reduced motion.
-  - Inside a video frame, motion is video content, not UI. That covers caption animations drawn by the caption engine (its pop and bounce included) and the synthetic creator's movements.
+  - Inside a video frame, motion is video content, not UI. That covers caption animations drawn by the caption engine (its pop and bounce included) and the creator's movements in the footage.
   - Playheads and scrub heads move linearly, at the speed of time.
 
 ## Voice & copy
