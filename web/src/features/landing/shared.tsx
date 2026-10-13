@@ -126,6 +126,24 @@ export function CtaLink({
 
 /* ── Visibility ── */
 
+/* ── Motion vocabulary ──
+ * WAAPI cannot read CSS custom properties, so the page's curves are
+ * mirrored here (Landing.module.css .page has the same values and the
+ * rule for which to use when). */
+
+/** The brand curve: entrances, rises of 12px or less, fades in. */
+export const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
+/** Something already on screen travels. */
+export const EASE_MOVE = "cubic-bezier(0.77, 0, 0.175, 1)";
+/** Something rises into place. */
+export const EASE_DRAWER = "cubic-bezier(0.32, 0.72, 0, 1)";
+/** A critically damped spring (response 0.45 s, no overshoot) for hinged
+ *  3D folds, about 600ms; EASE_MOVE where linear() is not supported. */
+export const SPRING_HINGE =
+  typeof CSS !== "undefined" && CSS.supports?.("transition-timing-function", "linear(0, 1)")
+    ? "linear(0, 0.205 10%, 0.499 20%, 0.715 30%, 0.848 40%, 0.921 50%, 0.96 60%, 0.981 70%, 0.991 80%, 1)"
+    : EASE_MOVE;
+
 /** The demo passes count only what is clear of the fixed chrome: the
  *  sticky header (64 px + its 1 px border) and the phone CTA bar (about
  *  73 px). For the observers that start a pass; the ones that re-arm it

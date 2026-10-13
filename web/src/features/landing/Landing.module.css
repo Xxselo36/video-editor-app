@@ -87,7 +87,22 @@
 /* ── Page frame ─────────────────────────────────────────────────── */
 
 .page {
+  /* Motion vocabulary (brand SKILL.md, Motion):
+   * --ease-out: the brand curve. Entrances, rises of 12px or less, fades in.
+   * --ease-move: something already on screen travels (lifts, closes, a
+   *   chip moving, a video sinking back).
+   * --ease-drawer: something rises into place (the phone video, the phone
+   *   CTA bar).
+   * --spring-hinge: a critically damped spring (response 0.45 s, no
+   *   overshoot) for hinged 3D folds, over about 600ms; --ease-move where
+   *   linear() is not supported.
+   * `ease` for opacity out and state changes; linear only for playheads,
+   * scrub heads and the voice ink. An exit takes at most 70% of its
+   * entrance's duration. */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-move: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --spring-hinge: var(--ease-move);
   --gutter: 1rem;
   position: relative;
   z-index: 1;
@@ -98,6 +113,11 @@
   /* The buttons, chips and FAQ rows have their own press states (the
    * footer links one below); no grey flash on top. */
   -webkit-tap-highlight-color: transparent;
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  .page {
+    --spring-hinge: linear(0, 0.205 10%, 0.499 20%, 0.715 30%, 0.848 40%, 0.921 50%, 0.96 60%, 0.981 70%, 0.991 80%, 1);
+  }
 }
 @media (min-width: 640px) {
   .page { --gutter: 1.5rem; }
