@@ -29,7 +29,7 @@
   --strip-h: 7.5rem;
   position: relative;
   isolation: isolate;
-  margin-top: 0.75rem;
+  margin-top: 1rem;
   height: 13.5rem;
 }
 @media (min-width: 400px) and (max-width: 1023px) {
@@ -38,18 +38,25 @@
 @media (min-width: 768px) and (max-width: 1023px) {
   .stage { --clip-w: 9.5rem; --strip-h: 9rem; height: 19rem; margin-top: 2rem; }
 }
-/* desktop: the video stands upright at the tape's end for the whole loop */
+/* desktop: the video stands upright at the tape's end for the whole loop.
+   The stage is only as tall as the tape and its chips, so the tape starts
+   right under the button; the video, taller, rises out of the stage
+   beside the headline, into the column the headline keeps free on both
+   sides (.hero in Landing.module.css sets --clip-w for both). The tape
+   ends where that column begins. At rest nothing overlaps the button;
+   a removed take lifting off the tape passes behind it (.heroText paints
+   above the stage). */
 @media (min-width: 1024px) {
   .stage {
-    --clip-w: clamp(13rem, 17vw, 16rem);
-    --tape-end: calc(var(--clip-w) + 1.75rem);
-    --strip-h: 9.5rem;
-    margin-top: 1.75rem;
-    height: 12.5rem;
+    --clip-w: inherit;
+    --tape-end: calc(var(--clip-w) + 2.5rem);
+    --strip-h: 12rem;
+    margin-top: 1rem;
+    height: 11rem;
   }
 }
 @media (min-width: 1024px) and (max-height: 820px) {
-  .stage { margin-top: 0.5rem; height: 11.5rem; --strip-h: 8.5rem; }
+  .stage { height: 9.25rem; --strip-h: 9.5rem; }
 }
 
 /* ── Phase label: You talk / Cleo cuts / Ready to post ── */

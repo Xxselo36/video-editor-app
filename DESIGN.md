@@ -205,7 +205,7 @@ Fixed per command and reused for job states (uploading blue, analyzing amber, re
 **Character:** One family, contrast by weight: 800 with tight negative tracking for headlines, regular at 1.55 to 1.6 line height for reading. Fast and native on every phone.
 
 ### Hierarchy
-- **Display** (800, fluid 2.25 to 4.5rem, 1.03, -0.035em): the page headline; balanced wrapping. The closing headline uses the same voice at up to 4rem.
+- **Display** (800, fitted 2 to 6rem per language, 0.98, -0.04em): the page headline, centred, one line per sentence; the word that does the cutting (`site.hero.cutWord`) is inked in the violet-to-magenta brand gradient with a soft violet glow, the only gradient text on the site. The closing headline uses the same voice at up to 4rem.
 - **Headline** (800, fluid 1.875 to 3.25rem, 1.08, -0.03em): section titles, max 22 to 28ch.
 - **Command Word** (800, fluid 1.625 to 2.25rem, 1.1, -0.03em): a command set in its command colour.
 - **Title** (700, 1.25rem, 1.3, -0.015em): feature titles inside a section.
@@ -246,7 +246,7 @@ Soft, consistent corners on a five-step scale: inline pieces and swatches `sm`; 
 ### Buttons
 Confident, filled, one per view.
 - **Shape:** `xl` (12px) by default; `lg` for the inline `sm` size; `full` for the header `pill`.
-- **Primary:** `brand-solid` fill, white semibold text; sizes `lg` (16px 24px, base), `md` (10px 24px), `sm` (6px 12px), `pill` (8px 16px).
+- **Primary:** `brand-solid` fill, white semibold text; sizes `lg` (16px 24px, base), `md` (10px 24px), `sm` (6px 12px), `pill` (8px 16px). The hero's own button is a compact centred pill with an arrow (44px tall on phones, 48px from tablets); the phone bar keeps its full-width button.
 - **Hover / Press:** fill to `brand-solid-hover`; press scales down (0.97 on landing CTAs). Landing CTAs add `--shadow-glow`.
 - **Tint (secondary):** `brand-tint` fill, `brand-strong` text.
 - **Links styled as buttons** use `buttonClass(variant, size)`; never restyle a button's variant or size through `className`.
@@ -292,7 +292,7 @@ The 12 styles as a radio group of chips beside one phone frame. A short tour pla
 The 16:9 take with a 9:16 window on it, beside (desktop) or above (phones) the 9:16 result. The pass: the window starts where a plain centre crop sits, cutting his face in half; a face box (violet corner brackets) closes on his face, the window glides over to it on the filmed curve and the outside settles darker; the result frame moves by exactly as much. Once per entry, with a Replay button.
 
 ### Bonus Clips
-The finished 3-minute video as a flat tape with a time ruler. A playhead scans it; each picked span outlines, a connector draws down and its 9:16 tile stands up. Each tile then loops its clip with its caption, a short whole line that works as a post on its own ("My best tip", "This changes everything", "Try this out"), playing word by word again on every loop of the clip; the line fits on one caption page in every language, so any still shows the whole sentence.
+The finished 3-minute video as a flat tape with a time ruler. A playhead scans it; each picked span outlines, a connector draws down and its 9:16 tile stands up. Each tile then loops its clip with its caption: three short spoken phrases, one caption page each ("My best tip" / "for more views" / "hook them fast"), so the subtitles change twice per loop like a real short, with a breath between phrases and the last phrase held until the clip starts over. Every phrase fits on one page in every language, and every still (poster, reduced motion, pause before the first word) shows the first phrase whole.
 
 ### Logo
 `LogoMark` (violet-gradient rounded C with a glowing spark, default 28px) and `LogoWord` (mark plus bold "CleoCuts", -0.02em). Use the components only, only on dark surfaces, never recoloured or redrawn.

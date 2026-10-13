@@ -17,12 +17,14 @@ import { ptLanding } from "@/i18n/messages/pt/landing";
 import { ruLanding } from "@/i18n/messages/ru/landing";
 import { trLanding } from "@/i18n/messages/tr/landing";
 import { FONTS_DIR, loadRealFonts } from "@/lib/captions/__tests__/helpers";
+import { frameState } from "@/lib/captions/engine";
 import { buildPages } from "@/lib/captions/layout";
 import { getFont } from "@/lib/captions/metrics";
 import { resolveStyle } from "@/lib/captions/presets";
-import { scriptOfLang } from "@/lib/captions/scripts";
+import { scriptOfLang, segmentsWithoutSpaces } from "@/lib/captions/scripts";
 import { hasShapingFont, loadShaper, registerShapingFont } from "@/lib/captions/shape-hb";
-import { captionWords, FIRST_WORD_AT } from "../captions/words";
+import type { Page } from "@/lib/captions/types";
+import { captionWords, FIRST_WORD_AT, splitPhrases, spokenAt, spokenUntil } from "../captions/words";
 import { SMALL_FRAME_OVERRIDES } from "../shared";
 import {
   CLIP_LOOP_S,
@@ -30,8 +32,10 @@ import {
   WAIT_S,
   clipClock,
   clipPreset,
+  firstPhrase,
   pausedAt,
   stepClipCaption,
+  stillAt,
   tickClipClock,
   type ClipCaptionState,
   type ClipVideo,
@@ -60,8 +64,46 @@ const TILES = [
   { W: 188, H: 334 },
   { W: 272, H: 484 },
 ];
+/** The last part of each clip that crossfades into its start (s,
+ *  scene/clips.ts). */
+const CROSSFADE_S = 0.4;
 
-describe("bonus clip captions: one page in every language", () => {
+/** A phrase's or a page's characters, without spaces and brackets. */
+const chars = (s: string) => s.normalize("NFC").replace(/[[\]\s]/g, "");
+/** Where the [marked] word sits in a phrase's characters. */
+function markSpan(phrase: string): [number, number] {
+  const open = phrase.indexOf("[");
+  const close = phrase.indexOf("]", open);
+  const from = chars(phrase.slice(0, open)).length;
+  return [from, from + chars(phrase.slice(open + 1, close)).length];
+}
+/** Each page word's span of the page's characters. */
+function wordSpans(page: Page): [number, number][] {
+  let at = 0;
+  return page.words.map((w) => {
+    const n = chars(w.source).length;
+    at += n;
+    return [at - n, at];
+  });
+}
+
+/** Every line in every language, in its tile's style at both tile sizes. */
+function* everyLine() {
+  for (const lang of Object.keys(LANGS) as Lang[]) {
+    const preset = clipPreset(lang)!;
+    for (const key of CAPS) {
+      const text = MESSAGES[lang][key] ?? "";
+      for (const { W, H } of TILES) {
+        const style = resolveStyle(preset, SMALL_FRAME_OVERRIDES[preset], { W, H })!;
+        const pages = buildPages(captionWords(text, lang), style, { W, H, lang });
+        const shown = pages.map((p) => p.words.map((w) => w.text).join(" ") + (p.oversized ? " (shrunk)" : ""));
+        yield { lang, key, text, style, pages, where: `${lang} ${key} ${W}x${H}: ${text} -> ${shown.join(" / ")}` };
+      }
+    }
+  }
+}
+
+describe("bonus clip captions: three phrases, one page each, in every language", () => {
   beforeAll(async () => {
     loadRealFonts();
     // Hindi is measured by HarfBuzz in the browser (fonts.ts ensureFonts)
@@ -74,26 +116,128 @@ describe("bonus clip captions: one page in every language", () => {
     for (const lang of Object.keys(LANGS)) expect(clipPreset(lang), lang).toBe(lang === "hi" ? "karaoke" : "power");
   });
 
-  it("fits each line on one page in the tile's style and size, so any still shows the whole sentence", () => {
+  it("says each line in three phrases, each with its highlighted word marked", () => {
     for (const lang of Object.keys(LANGS) as Lang[]) {
-      const preset = clipPreset(lang)!;
       for (const key of CAPS) {
         const text = MESSAGES[lang][key];
         expect(text, `${lang} ${key}`).toBeTruthy();
-        // the highlighted word is marked
-        expect(text, `${lang} ${key}`).toMatch(/\[[^\]]+\]/);
-        for (const { W, H } of TILES) {
-          const style = resolveStyle(preset, SMALL_FRAME_OVERRIDES[preset], { W, H })!;
-          const pages = buildPages(captionWords(text!, lang), style, { W, H, lang });
-          const shown = pages.map((p) => p.words.map((w) => w.text).join(" ") + (p.oversized ? " (shrunk)" : ""));
-          expect(shown, `${lang} ${key}: ${text}`).toHaveLength(1);
-          expect(pages[0].oversized, `${lang} ${key}: ${text}`).toBe(false);
-          // measured with the real fonts (CJK by estimate, as on the page:
-          // its font is a per-job subset, fonts.ts deferred)
-          if (scriptOfLang(lang) !== "cjk") expect(pages[0].words.some((w) => w.approximate), `${lang} ${key}`).toBe(false);
-        }
+        const phrases = splitPhrases(text!);
+        expect(phrases, `${lang} ${key}: ${text}`).toHaveLength(3);
+        for (const p of phrases) expect(p, `${lang} ${key}: ${text}`).toMatch(/^[^[\]]*\[[^[\]]+\][^[\]]*$/);
       }
     }
+  });
+
+  it("pages each line into its three phrases in the tile's style and size, none shrunk", () => {
+    for (const { lang, text, pages, where } of everyLine()) {
+      const phrases = splitPhrases(text);
+      expect(pages, where).toHaveLength(3);
+      pages.forEach((page, k) => {
+        // the page is its phrase, whole
+        expect(chars(page.words.map((w) => w.source).join("")), where).toBe(chars(phrases[k]));
+        expect(page.oversized, where).toBe(false);
+        // measured with the real fonts (CJK by estimate, as on the page:
+        // its font is a per-job subset, fonts.ts deferred)
+        if (scriptOfLang(lang) !== "cjk") expect(page.words.some((w) => w.approximate), where).toBe(false);
+      });
+      // the breath between two phrases never blanks the caption
+      for (let k = 1; k < pages.length; k++) expect(pages[k - 1].end, where).toBeCloseTo(pages[k].start, 9);
+    }
+  });
+
+  it("shows the first phrase whole at its still, its highlighted word lit, as the poster does", () => {
+    const partly = new Set<string>();
+    for (const { lang, key, text, style, pages, where } of everyLine()) {
+      const state = frameState(pages, stillAt(text, lang), style);
+      expect(state?.page, where).toBe(0);
+      // at rest: the page's and the word's entrances done
+      expect(state!.pageP, where).toBe(1);
+      expect(state!.wordP, where).toBe(1);
+      // the lit word is the marked one
+      const [from, to] = markSpan(splitPhrases(text)[0]);
+      const [a, b] = wordSpans(pages[0])[state!.active];
+      const lit = pages[0].words[state!.active].source;
+      expect(a, `${where}: lit ${lit}`).toBe(from);
+      if (b !== to) {
+        // unspaced text: the layout may cut it in pieces, its first is lit
+        expect(segmentsWithoutSpaces(lang) && b < to, `${where}: lit ${lit}`).toBe(true);
+        partly.add(`${lang} ${key}: ${lit} of ${chars(splitPhrases(text)[0]).slice(from, to)}`);
+      }
+      // karaoke: filled up to it, as the poster fills it
+      if (state!.sweep !== null) expect(state!.sweep, where).toBe(1);
+    }
+    // the poster lights a marked word whole: no copy may mark a word the
+    // layout lights in pieces (mark one it keeps whole instead)
+    expect([...partly]).toEqual([]);
+  });
+
+  it("is spoken well before its clip loops: the last phrase holds, clear of the crossfade", () => {
+    for (const lang of Object.keys(LANGS) as Lang[]) {
+      for (const key of CAPS) {
+        const spoken = spokenUntil(captionWords(MESSAGES[lang][key]!, lang));
+        expect(CLIP_LOOP_S - CROSSFADE_S - spoken, `${lang} ${key}`).toBeGreaterThanOrEqual(1.1);
+      }
+    }
+  });
+});
+
+describe("bonus clip captions: the still of a line", () => {
+  /** The words of `text` and where its still stands among them. */
+  const at = (text: string, lang = "en") => ({ w: captionWords(text, lang), t: stillAt(text, lang) });
+
+  it("is the first phrase, as the poster draws it", () => {
+    expect(firstPhrase("My best [tip] | for more [views] | hook them [fast]")).toBe("My best [tip]");
+    expect(firstPhrase(" 3 tips for better [hooks] ")).toBe("3 tips for better [hooks]");
+    expect(firstPhrase("")).toBe("");
+  });
+
+  it("stands where a line without '|' always settled: its last word spoken", () => {
+    for (const lang of Object.keys(LANGS) as Lang[]) {
+      const { w, t } = at(MESSAGES[lang]["site.demo.caption"]!, lang);
+      expect(t, lang).toBe(spokenAt(w, w.length - 1));
+    }
+  });
+
+  it("shows the first phrase with its marked word spoken, before the next word", () => {
+    // the mark ends the phrase: the word fully spoken (karaoke: filled to
+    // its end), phrase 2 not yet in
+    const a = at("My best [tip] | for more [views] | hook them [fast]");
+    expect(a.t).toBeGreaterThanOrEqual(a.w[2].end);
+    expect(a.t).toBeLessThan(a.w[3].start);
+    const long = at("Game [changer] | cut every [pause]");
+    expect(long.t).toBe(long.w[1].end);
+    // the mark opens the phrase: lit, its entrance done, "this" not yet
+    const b = at("[Try] this out | add big [captions] | most are on [mute]");
+    expect(b.t).toBeGreaterThanOrEqual(b.w[0].end - 0.02);
+    expect(b.t).toBeGreaterThanOrEqual(b.w[0].start + 0.2);
+    expect(b.t).toBeLessThan(b.w[1].start);
+    // a one-letter mark in the middle (Korean): it stays the lit word
+    const c = at("이걸로 [다] 바뀌어요 | 공백은 [잘라요] | 끝까지 [봐요]", "ko");
+    expect(c.w[1].text).toBe("다");
+    expect(c.t).toBeGreaterThanOrEqual(c.w[1].end - 0.02);
+    expect(c.t).toBeLessThan(c.w[2].start);
+    // a mark inside a joined word (3초에) and in unspaced Japanese
+    const d = at("첫 [3초]에 잡아요", "ko");
+    expect(d.t).toBeGreaterThanOrEqual(d.w[1].end - 0.02);
+    expect(d.t).toBeLessThan(d.w[2].start);
+    const e = at("これで[全部]変わる | 無言を[カット]", "ja");
+    expect(e.w[1].text).toBe("全部");
+    expect(e.t).toBeGreaterThanOrEqual(e.w[1].end - 0.02);
+    expect(e.t).toBeLessThan(e.w[2].start);
+    // a word the layout lights in pieces (試し, then て): its first piece,
+    // its entrance done, before the second (timed by characters)
+    const f = at("ぜひ[試して] | 字幕は[大きく]", "ja");
+    expect(f.w[1].text).toBe("試して");
+    expect(f.t).toBeGreaterThanOrEqual(f.w[1].start + 0.15);
+    expect(f.t).toBeLessThan(f.w[1].start + ((f.w[1].end - f.w[1].start) * 2) / 3);
+  });
+
+  it("falls back to the first phrase's last word without a mark", () => {
+    const { w, t } = at("one two | three");
+    expect(t).toBeGreaterThanOrEqual(w[1].end);
+    expect(t).toBeGreaterThanOrEqual(w[1].start + 0.3);
+    expect(t).toBeLessThan(w[2].start);
+    expect(stillAt("", "en")).toBe(0);
   });
 });
 
@@ -191,20 +335,26 @@ describe("bonus clip captions: the clock", () => {
     expect(c.t).toBeCloseTo(2.1);
   });
 
-  it("paused on its lead-in (between two loops) shows the whole sentence", () => {
-    expect(pausedAt(0, 1.8)).toBe(1.8);
-    expect(pausedAt(FIRST_WORD_AT - 0.01, 1.8)).toBe(1.8);
-    expect(pausedAt(1.2, 1.8)).toBe(1.2);
-    expect(pausedAt(4, 1.8)).toBe(4);
+  it("paused, holds whichever phrase is showing; on its lead-in (between two loops), its still", () => {
+    const still = 0.6;
+    expect(pausedAt(0, still)).toBe(still);
+    expect(pausedAt(FIRST_WORD_AT - 0.01, still)).toBe(still);
+    // in the first phrase, the second, the last one's hold
+    expect(pausedAt(0.4, still)).toBe(0.4);
+    expect(pausedAt(1.9, still)).toBe(1.9);
+    expect(pausedAt(5, still)).toBe(5);
   });
 });
 
-/** A caption 1.8 s long whose clip loops and plays. */
+/** A caption 1.8 s long, its still (the first phrase) at 0.6 s, whose
+ *  clip loops and plays. */
+const STILL = 0.6;
 const state = (o: Partial<ClipCaptionState> = {}): ClipCaptionState => ({
   loops: true,
   paused: false,
   video: video(),
   end: 1.8,
+  still: STILL,
   ...o,
 });
 /** Data saver: the clip is unloaded, its control gone. */
@@ -218,16 +368,16 @@ describe("bonus clip captions: a caption on the section's ticker", () => {
     expect(c.t).toBe(1.2);
   });
 
-  it("plays once and settles where the clips cannot move", () => {
+  it("plays once and settles on its still where the clips cannot move", () => {
     const c = clipClock();
     expect(stepClipCaption(c, 1, state({ loops: false, video: unloaded }))).toEqual({ at: 1, seek: null, busy: true });
-    expect(stepClipCaption(c, 1, state({ loops: false, video: unloaded }))).toEqual({ at: 1.8, seek: null, busy: false });
+    expect(stepClipCaption(c, 1, state({ loops: false, video: unloaded }))).toEqual({ at: STILL, seek: null, busy: false });
     expect(c.done).toBe(true);
-    // settled: it stays on the whole sentence, the ticker can stop
-    expect(stepClipCaption(c, 1, state({ loops: false, video: unloaded }))).toEqual({ at: 1.8, seek: null, busy: false });
+    // settled: it stays on the first phrase, the ticker can stop
+    expect(stepClipCaption(c, 1, state({ loops: false, video: unloaded }))).toEqual({ at: STILL, seek: null, busy: false });
   });
 
-  it("does not hold half a sentence when data saver comes on while paused (no control is left)", () => {
+  it("does not hold half a line when data saver comes on while paused (no control is left)", () => {
     const c = clipClock();
     stepClipCaption(c, 0.016, state({ video: video({ time: 0.9 }) }));
     expect(stepClipCaption(c, 0.016, state({ paused: true })).at).toBe(0.9);
@@ -237,7 +387,7 @@ describe("bonus clip captions: a caption on the section's ticker", () => {
       busy: true,
     });
     expect(stepClipCaption(c, 0.5, state({ loops: false, paused: true, video: unloaded }))).toEqual({
-      at: 1.8,
+      at: STILL,
       seek: null,
       busy: false,
     });
@@ -253,10 +403,10 @@ describe("bonus clip captions: a caption on the section's ticker", () => {
     expect(c.done).toBe(false);
     // it plays from its first frame: the line plays with it, no jump
     expect(stepClipCaption(c, 0.016, state({ video: video({ time: 0.02 }) }))).toEqual({ at: 0.02, seek: null, busy: true });
-    // still paused from before data saver: the whole sentence until resumed
+    // still paused from before data saver: the first phrase until resumed
     const p = clipClock();
     stepClipCaption(p, 2, state({ loops: false, video: unloaded }));
-    expect(stepClipCaption(p, 0.016, state({ paused: true, video: loading }))).toEqual({ at: 1.8, seek: null, busy: false });
+    expect(stepClipCaption(p, 0.016, state({ paused: true, video: loading }))).toEqual({ at: STILL, seek: null, busy: false });
   });
 
   it("joins a line still under way to its clip, which comes back from its first frame", () => {

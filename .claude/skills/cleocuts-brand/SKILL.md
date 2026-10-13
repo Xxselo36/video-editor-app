@@ -51,6 +51,7 @@ Rules:
 - Every text token is WCAG AA on all surfaces — keep it that way; don't introduce dimmer text colors.
 - Dark UI only (`color-scheme: dark` is set).
 - Magenta only as gradient partner to violet (violet → magenta), never as a standalone button color.
+- Gradient text: only the landing headline's cut word (owner-approved, Oct 2026), violet → magenta with a soft violet glow; nowhere else.
 - Text on dark surfaces: `--text-strong` for headings, `--text-body` for paragraphs. Check WCAG AA contrast for anything muted.
 
 ## Voice-command colors
