@@ -28,6 +28,7 @@ import { track } from "@/lib/analytics";
 import { COPYRIGHT } from "@/lib/legal";
 import { AccountMenu, PricingLink } from "@/components/auth/AccountMenu";
 import { cx } from "@/components/ui/cx";
+import { HeroTitle } from "@/features/landing/hero/HeroTitle";
 import { TakeStrip } from "@/features/landing/hero/TakeStrip";
 
 // Everything below the hero: server-rendered as usual, its code in
@@ -132,20 +133,10 @@ export default function Landing() {
         <section className={styles.hero} aria-labelledby="hero-title">
           <div className={styles.wrap}>
             <div className={styles.heroText}>
-              {/* One line per sentence (the loop's two acts); a one-sentence
-                  title (ko, tr) wraps as usual. The space after a sentence
-                  stays in its line, so the heading still reads as one. */}
-              <h1 id="hero-title" className={styles.h1}>
-                {t("site.hero.title")
-                  .split(/(?<=[.!?。।]\s*)(?=\S)/)
-                  .map((line, i) => (
-                    <span key={i} className={styles.h1Line}>
-                      {line}
-                    </span>
-                  ))}
-              </h1>
+              <HeroTitle id="hero-title" />
+              {/* A compact pill; the phone bar keeps the wide button. */}
               <div className={styles.heroCta}>
-                <CtaLink ref={heroCtaRef} location="hero" wide />
+                <CtaLink ref={heroCtaRef} location="hero" size="pillLg" />
               </div>
             </div>
             <TakeStrip />

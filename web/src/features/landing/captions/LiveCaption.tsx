@@ -7,17 +7,22 @@
  *
  * - The engine and the style's font load once the frame is near the
  *   viewport. Until then (or if they fail) `children` show: a CSS poster
- *   of the settled caption, so a frame is never empty.
+ *   of the caption's still, so a frame is never empty.
  * - `swapOnPlay`: the poster stays until the caption first plays, and
  *   fades out during the lead-in before the first word while the canvas
- *   is still empty, so the poster and the engine's own frame (its last
- *   page, laid out differently) never show on top of each other.
+ *   is still empty, so the poster and the engine's own frame (its still,
+ *   laid out differently) never show on top of each other.
+ * - `still`: the moment a frozen caption shows (the server HTML, reduced
+ *   motion, a restart while not playing, the end of a one-pass caption).
+ *   By default the settled last word, so the last page; a caption in
+ *   phrases ("|", words.ts) passes its first phrase's moment instead
+ *   (the bonus clips: clipCaptions.ts stillAt), as its poster shows it.
  * - `playing` advances the caption's clock on the page's one rAF ticker;
- *   when false the current frame holds (first time: the settled last
- *   word). Loops after the last word plus `hold`; with `loop={false}` it
- *   plays once, holds the settled last page and leaves the ticker.
+ *   when false the current frame holds (first time: the still). Loops
+ *   after the last word plus `hold`; with `loop={false}` it plays once,
+ *   holds the still and leaves the ticker.
  * - `restartKey` starts over from the first word (a style switch).
- * - The handle lets a score (the hero) seek the clock.
+ * - The handle lets a score (the hero, the bonus clips) seek the clock.
  */
 import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { PresetId, StyleOverrides } from "@/lib/captions/types";
@@ -25,7 +30,7 @@ import type { CaptionRenderer } from "@/lib/captions/cache";
 import { cx } from "@/components/ui/cx";
 import { loadEngine } from "./engine";
 import { subscribe } from "./ticker";
-import { captionWords, spokenUntil } from "./words";
+import { captionWords, spokenAt, spokenUntil } from "./words";
 import styles from "./LiveCaption.module.css";
 
 export type LiveCaptionHandle = {
@@ -33,6 +38,8 @@ export type LiveCaptionHandle = {
   seek(t: number): void;
   /** The last word's end plus the hold. */
   readonly duration: number;
+  /** The moment a frozen caption shows (the `still` prop). */
+  readonly still: number;
 };
 
 export function LiveCaption({
@@ -44,6 +51,7 @@ export function LiveCaption({
   loop = true,
   hold = 1,
   restartKey,
+  still: stillProp,
   swapOnPlay = false,
   onCycle,
   onReady,
@@ -60,6 +68,9 @@ export function LiveCaption({
   loop?: boolean;
   hold?: number;
   restartKey?: string | number;
+  /** The moment a frozen caption shows (s, see above); default: the
+   *  settled last word. */
+  still?: number;
   /** Keep the poster until the caption first plays (see above). */
   swapOnPlay?: boolean;
   onCycle?: () => void;
@@ -72,9 +83,10 @@ export function LiveCaption({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const words = useMemo(() => captionWords(text, lang), [text, lang]);
   const end = spokenUntil(words) + hold;
-  // The settled frame: the last word fully spoken (karaoke fills it).
   const lastEnd = spokenUntil(words);
-  const poster = words.length ? Math.max(words[words.length - 1].start + 0.3, lastEnd - 0.02) : 0;
+  // By default the settled frame: the last word fully spoken (karaoke
+  // fills it).
+  const still = stillProp ?? (words.length ? spokenAt(words, words.length - 1) : 0);
   const overridesKey = JSON.stringify(overrides ?? {});
   const [ready, setReady] = useState(false);
   // swapOnPlay: the canvas takes over from the poster on the first play.
@@ -84,18 +96,18 @@ export function LiveCaption({
   const live = useRef({
     renderer: null as CaptionRenderer | null,
     // until it takes over, a swapOnPlay canvas waits on its empty lead-in
-    t: swapOnPlay ? 0 : poster,
+    t: swapOnPlay ? 0 : still,
     started: false,
     done: false,
     end,
-    poster,
+    still,
     lastEnd,
     loop,
     onCycle,
   });
   useEffect(() => {
     live.current.end = end;
-    live.current.poster = poster;
+    live.current.still = still;
     live.current.lastEnd = lastEnd;
     live.current.loop = loop;
     live.current.onCycle = onCycle;
@@ -119,6 +131,9 @@ export function LiveCaption({
       },
       get duration() {
         return live.current.end;
+      },
+      get still() {
+        return live.current.still;
       },
     }),
     [],
@@ -184,7 +199,7 @@ export function LiveCaption({
 
   // A new style or sentence starts from its first word.
   useEffect(() => {
-    live.current.t = playing || (swapOnPlay && !played) ? 0 : poster;
+    live.current.t = playing || (swapOnPlay && !played) ? 0 : still;
     live.current.started = playing;
     live.current.done = false;
     draw(true);
@@ -209,8 +224,8 @@ export function LiveCaption({
           L.t = 0;
           L.onCycle?.();
         } else {
-          // one pass: hold the settled last page until restarted
-          L.t = L.poster;
+          // one pass: hold the still until restarted
+          L.t = L.still;
           L.done = true;
           stop();
         }

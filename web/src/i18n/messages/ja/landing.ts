@@ -51,7 +51,7 @@ export const jaLanding: Partial<Record<LandingKey, string>> = {
   "site.clips.body": "完成した動画が90秒以上なら、CleoCutsが単体でも投稿できる短いクリップを最大{count}本選びます。",
   "site.clips.cap1": "最強の[コツ] | 冒頭で[掴む] | これだけで[伸びる]",
   "site.clips.cap2": "これで[全部]変わる | 無言を[カット] | 離脱が[減る]",
-  "site.clips.cap3": "ぜひ[試して] | 字幕は[大きく] | みんな[ミュート]",
+  "site.clips.cap3": "[ぜひ]試して | 字幕は[大きく] | みんな[ミュート]",
   "site.control.title": "最後に決めるのはあなた。",
   "site.control.restore": "カットはすべて表示されます。タップすれば元に戻せます。",
   "site.control.text": "どの単語も修正でき、字幕ごとにサイズや位置も変えられます。",

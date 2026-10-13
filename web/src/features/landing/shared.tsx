@@ -95,6 +95,9 @@ export function useCta(): { href: string; label: string } {
   return { href: "/sign-up", label: t(BILLING_COPY || billingOn ? "site.cta.signup" : "site.cta.signupFree") };
 }
 
+/** The main button. `wide`: full width on phones (the bottom bar). The
+ *  hero's pill gets its arrow from CSS (Landing.module.css .heroCta), so
+ *  the first load carries no icon code for it. */
 export function CtaLink({
   location,
   size = "lg",
@@ -104,7 +107,7 @@ export function CtaLink({
   ...rest
 }: {
   location: string;
-  size?: "lg" | "pill";
+  size?: "lg" | "pill" | "pillLg";
   wide?: boolean;
   className?: string;
   ref?: React.Ref<HTMLAnchorElement>;

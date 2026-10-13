@@ -17,6 +17,9 @@ const SIZE = {
   sm: "rounded-lg px-3 py-1.5 text-sm font-semibold",
   /** Rounded header action (New video). */
   pill: "rounded-full px-4 py-2 text-sm font-semibold",
+  /** Larger rounded action under a big headline (the landing hero's):
+   *  44 px tall on phones, 48 px from tablets. */
+  pillLg: "rounded-full min-h-11 px-[1.375rem] py-2.5 text-[0.9375rem]/6 font-semibold md:min-h-12 md:px-6 md:py-3 md:text-base/6",
 } as const;
 
 /** The classes of a Button, for a link that looks like one (the

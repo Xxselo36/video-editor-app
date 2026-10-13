@@ -25,21 +25,28 @@
  * it plays again on re-entry. Every part takes its timing from
  * `clipsScore` (WAAPI on translate, transform, opacity and clip-path).
  * The base CSS is the settled end state (spans outlined, connectors
- * drawn, tiles upright, slots gone, captions settled): reduced motion,
- * screenshots and the server HTML.
+ * drawn, tiles upright, slots gone, each caption on its first phrase):
+ * reduced motion, screenshots and the server HTML.
  *
  * Each caption runs on its clip's clock, as on a real short: the page's
  * one ticker reads the video's time, so every loop of the clip plays the
- * line again word by word, then the whole sentence holds until the clip
- * loops; the pause control, a hidden tab or a tile off screen hold the
- * two together (clipCaptions.ts stepClipCaption, also for a clip that
- * cannot play). Each line fits on one caption page in every language
- * (clipCaptions.test.ts), so any still shows the whole sentence. Where
- * the clips cannot move (data saver: no pause control, so nothing holds
- * on half a sentence), each caption plays once and settles; once they
- * can again, it loops with its clip again. A caption starts only once
- * its engine and font are ready: a slow font load delays the words, it
- * never leaves a clip blank or frozen mid-sentence.
+ * line again word by word. A line is three short phrases ("|" in the
+ * message, words.ts), one caption page each, so the subtitle changes
+ * twice per loop with a breath between phrases; the last phrase holds
+ * until the clip loops (all speech ends over a second before the clip's
+ * crossfade back to its start). The pause control, a hidden tab or a tile
+ * off screen hold the two together, on whichever phrase is showing
+ * (clipCaptions.ts stepClipCaption, also for a clip that cannot play).
+ * Every phrase fits on its own page in every language
+ * (clipCaptions.test.ts), and every frozen caption (its CSS poster, the
+ * server HTML, reduced motion, a pause before the first word, the
+ * settled section) shows its still: the first phrase whole, with its
+ * highlighted word. Where the clips cannot move (data saver: no pause
+ * control, so nothing holds on half a line), each caption plays once and
+ * settles on its still; once they can again, it loops with its clip
+ * again. A caption starts only once its engine and font are ready: a
+ * slow font load delays the words, it never leaves a clip blank or
+ * frozen mid-phrase.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLang, useT } from "@/i18n";
@@ -61,7 +68,7 @@ import {
   useReducedMotion,
 } from "../shared";
 import styles from "../Landing.module.css";
-import { clipClock, clipPreset, stepClipCaption, type ClipClock, type ClipVideo } from "./clipCaptions";
+import { clipClock, clipPreset, firstPhrase, stepClipCaption, stillAt, type ClipClock, type ClipVideo } from "./clipCaptions";
 import f from "./Format.module.css";
 
 /** Bonus clips: at most this many (backend/llm.py detect_hook_moments). */
@@ -103,8 +110,9 @@ const SLOT_MS = 150;
 /** Once it is up, its duration chip fades in. */
 const DUR_MS = 200;
 /** Where the clips cannot move (data saver), each caption plays once and
- *  settles this long after its last word (s). */
-const CAP_TAIL = 0.1;
+ *  settles on its first phrase this long after its last word (s): a beat
+ *  to read the last phrase before it goes back. */
+const CAP_TAIL = 0.6;
 
 /** When the playhead reaches a clip (ms into the pass). */
 const reached = (c: (typeof CLIPS)[number]) => Math.round((SCAN_MS * c.from) / VIDEO_S);
@@ -216,8 +224,10 @@ export function BonusClipsSection() {
   const passes = useSyncExternalStore(noSubscription, canPass, () => false) && !reduced;
   const up = passes ? landed : UP;
   const preset = clipPreset(lang);
-  // One string for the effect below: a new line in any clip resets them.
-  const captions = CLIPS.map((c) => t(c.cap)).join("|");
+  const lines = CLIPS.map((c) => t(c.cap));
+  // One string for the effect below: a new line in any clip resets them
+  // (not "|": that splits a line into its phrases).
+  const captions = lines.join("\n");
 
   const figRef = useRef<HTMLDivElement>(null);
   const tapeRef = useRef<HTMLDivElement>(null);
@@ -285,9 +295,9 @@ export function BonusClipsSection() {
     };
     // Each caption starts once its tile is up and its renderer is ready,
     // and loops on its clip's clock; a video that started late jumps to
-    // its caption. Paused with the control, it holds (the whole sentence
-    // between two loops); where the clips cannot move, it plays once
-    // (clipCaptions.ts stepClipCaption). The ticker stops while nothing
+    // its caption. Paused with the control, it holds (its still, the first
+    // phrase, between two loops); where the clips cannot move, it plays
+    // once (clipCaptions.ts stepClipCaption). The ticker stops while nothing
     // moves (every caption settled, paused or held with its paused
     // video); a clip that plays again, the control, the clips able to
     // move again or a late renderer starts it again (kick).
@@ -307,6 +317,7 @@ export function BonusClipsSection() {
           paused: pausedRef.current,
           video: v && videoOf(v),
           end: cap.duration,
+          still: cap.still,
         });
         if (v && step.seek !== null) v.currentTime = step.seek;
         if (step.busy) busy = true;
@@ -443,9 +454,9 @@ export function BonusClipsSection() {
       halt();
       anims.forEach((a) => a.cancel());
       kickRef.current = () => {};
-      // Back to the settled state, the captions on their last page too
-      // (hydration arms once before reduced motion is known).
-      capHandles.forEach((h) => h.current?.seek(h.current.duration));
+      // Back to the settled state, the captions on their still too (the
+      // first phrase; hydration arms once before reduced motion is known).
+      capHandles.forEach((h) => h.current?.seek(h.current.still));
       passRef.current = "idle";
       // A pass armed again starts with every tile down.
       setLanded(DOWN);
@@ -463,14 +474,13 @@ export function BonusClipsSection() {
   }, [paused, moves]);
 
   // New lines or a new style (the page language arriving) rebuild the
-  // renderers and put each caption on its settled page: while armed, it
-  // waits on its first frame instead; after a pass has started, it shows
-  // the whole sentence until its renderer is back and goes on with its
-  // clip.
+  // renderers and put each caption on its still: while armed, it waits on
+  // its first frame instead; after a pass has started, it shows its first
+  // phrase until its renderer is back and goes on with its clip.
   useEffect(() => {
     readyRef.current = CLIPS.map(() => false);
     const armed = passRef.current === "armed";
-    capHandles.forEach((h) => h.current?.seek(armed ? 0 : h.current.duration));
+    capHandles.forEach((h) => h.current?.seek(armed ? 0 : h.current.still));
   }, [lang, captions, preset, capHandles]);
 
   return (
@@ -559,14 +569,20 @@ export function BonusClipsSection() {
                   <LiveCaption
                     preset={preset}
                     overrides={SMALL_FRAME_OVERRIDES[preset]}
-                    text={t(c.cap)}
+                    text={lines[i]}
                     lang={lang}
                     playing={false}
                     hold={CAP_TAIL}
+                    still={stillAt(lines[i], lang)}
                     onReady={onReady[i]}
                     handle={capHandles[i]}
                   >
-                    <CaptionPoster preset={preset} text={t(c.cap)} className={preset === "karaoke" ? f.capLarge : undefined} />
+                    {/* The poster is the still: the first phrase alone. */}
+                    <CaptionPoster
+                      preset={preset}
+                      text={firstPhrase(lines[i])}
+                      className={preset === "karaoke" ? f.capLarge : undefined}
+                    />
                   </LiveCaption>
                 )}
                 <span

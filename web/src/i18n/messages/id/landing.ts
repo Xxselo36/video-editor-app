@@ -51,7 +51,7 @@ export const idLanding: Partial<Record<LandingKey, string>> = {
   "site.clips.body": "Kalau video jadimu berdurasi 90 detik atau lebih, CleoCuts memilih hingga {count} klip pendek yang layak diposting terpisah.",
   "site.clips.cap1": "Tips [terbaikku] | biar [viral] | [hook] duluan",
   "site.clips.cap2": "Semuanya [berubah] | potong tiap [jeda] | penonton [bertahan]",
-  "site.clips.cap3": "[Cobain] deh | [subtitle] besar | views [naik]",
+  "site.clips.cap3": "[Cobain] deh | [teks] besar | views [naik]",
   "site.control.title": "Keputusan akhir ada di tanganmu.",
   "site.control.restore": "Setiap potongan tetap terlihat. Ketuk salah satunya untuk mengembalikannya.",
   "site.control.text": "Perbaiki kata apa pun dan ubah ukuran atau pindahkan setiap teks.",
