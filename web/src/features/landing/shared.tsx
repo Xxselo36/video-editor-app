@@ -137,6 +137,10 @@ export const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 export const EASE_MOVE = "cubic-bezier(0.77, 0, 0.175, 1)";
 /** Something rises into place. */
 export const EASE_DRAWER = "cubic-bezier(0.32, 0.72, 0, 1)";
+/** Anything a scroll position drives (the finger is the clock): a
+ *  symmetric sine in-out, so a scrubbed wipe or lift reads the same
+ *  forwards and backwards. */
+export const EASE_SCRUB = "cubic-bezier(0.37, 0, 0.63, 1)";
 /** A critically damped spring (response 0.45 s, no overshoot) for hinged
  *  3D folds, about 600ms; EASE_MOVE where linear() is not supported. */
 export const SPRING_HINGE =

@@ -5,7 +5,7 @@
  * tells the headline in two acts (hero/score.ts): "You talk" (a playhead
  * records, each command flags where it was said and plants its post,
  * “Cleo keep” at the end of the first scene among them, and the playhead
- * lands on “Cleo finish”) and "Cleo edits" (Cleo reads the recording and
+ * lands on “Cleo finish”) and "Cleo cuts" (Cleo reads the recording and
  * marks what goes; the bad take, a filler word, a pause and the skipped
  * sentence lift off, the tape closes behind them and gets visibly
  * shorter; keep's post stays and its scene is sealed as kept), then a

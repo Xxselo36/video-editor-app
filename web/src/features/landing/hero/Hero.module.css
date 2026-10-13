@@ -52,7 +52,7 @@
   .stage { margin-top: 0.5rem; height: 11.5rem; --strip-h: 8.5rem; }
 }
 
-/* ── Phase label: You talk / Cleo edits / Ready to post ── */
+/* ── Phase label: You talk / Cleo cuts / Ready to post ── */
 .phase {
   position: relative;
   flex: none;
@@ -470,7 +470,7 @@
     opacity 180ms var(--ease) calc(var(--close-delay) + var(--close-ms) - 40ms),
     transform 180ms var(--ease) calc(var(--close-delay) + var(--close-ms) - 40ms);
 }
-/* only while Cleo edits (the finished first frame shows them at once) */
+/* only while Cleo cuts (the finished first frame shows them at once) */
 @starting-style {
   .demo[data-phase="edit"] .marker { opacity: 0; transform: scaleY(0.2); }
 }

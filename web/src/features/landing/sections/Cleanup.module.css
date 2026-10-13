@@ -1,11 +1,11 @@
 /* The command words (sections/CommandRows.tsx, "Spoken Cut") and the
  * automatic cleanup (sections/AutoCleanup.tsx). Every motion is a WAAPI
  * animation on transform, translate, scale or opacity started from JS, on
- * the page's curves (Landing.module.css .page); the transitions here are
- * press, hover and icon feedback, and the cleanup hint's one colour step.
- * The CSS is the rest state, so reduced
- * motion, screenshots and a page without JS show the result: every word
- * in its colour, every strip and sentence marked. */
+ * the page's curves (Landing.module.css .page); the command rows' are
+ * driven by the scroll. The transitions here are press, hover and icon
+ * feedback, and the cleanup hint's one colour step. The CSS is the rest
+ * state, so reduced motion, screenshots and a page without JS show the
+ * result: every word in its colour, every strip and sentence marked. */
 
 /* ── Command words ──────────────────────────────────────────────── */
 
@@ -18,11 +18,35 @@
   text-wrap: pretty;
 }
 
+/* The rows' middle line and lane length (commandScroll.ts): the middle of
+ * what the sticky header (65 px) and, on phones, the CTA bar (80 px)
+ * leave clear, in svh so a phone's toolbar never moves it, and a lane a
+ * little shorter than the closest two strips are apart. Where svh is
+ * unknown, vh: the fallback has to be a rule of its own, since a custom
+ * property takes an unknown unit and only fails where it is used. */
 .cmdList {
+  --scrub-mid: calc((100vh - 15px) / 2);
+  --scrub-len: 8.75rem;
   margin: 2.5rem 0 0;
   padding: 0;
   list-style: none;
   border-top: 1px solid var(--border);
+}
+@supports (height: 100svh) {
+  .cmdList {
+    --scrub-mid: calc((100svh - 15px) / 2);
+  }
+}
+@media (min-width: 768px) {
+  .cmdList {
+    --scrub-mid: calc((100vh + 65px) / 2);
+    --scrub-len: 8rem;
+  }
+  @supports (height: 100svh) {
+    .cmdList {
+      --scrub-mid: calc((100svh + 65px) / 2);
+    }
+  }
 }
 
 /* Phones: the word, its strip on a line of its own at full width, then
@@ -76,11 +100,11 @@
   }
 }
 
-/* One spoken command. While the rows can play (data-motion on the list,
- * set from JS) it is said: an aria-hidden copy in full colour (the ink)
- * wipes over the base, which waits in a tint of its colour until then
- * (no data-said), behind a 4-bar voice caret. Without data-motion the
- * copies are not drawn and the word is in full colour. */
+/* One spoken command. While the rows play (data-motion on the list, set
+ * from JS) the base waits in a tint of its colour and an aria-hidden copy
+ * in full colour (the ink) wipes in over it from the left, behind a
+ * 4-bar voice caret. Without data-motion the copies are not drawn and the
+ * word is in full colour. */
 .unit {
   position: relative;
   display: inline-block;
@@ -90,35 +114,38 @@
 .voice {
   display: none;
 }
-.cmdList[data-motion] .ink,
-.cmdList[data-motion] .voice {
-  display: block;
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-.cmdList[data-motion] .ink {
-  overflow: hidden;
-}
 .inkIn {
   display: block;
 }
-/* Not said yet: 30% of the command colour in the muted text (6:1 or more
- * on --surface-0 for all five). <Cmd> colours itself inline from its
- * --cmd-* token, so the tint redefines those tokens for the base only
- * (from the row's --c, which it inherits already resolved). */
-.cmdList[data-motion] .unit:not([data-said]) .say {
-  --unsaid: color-mix(in oklab, var(--c) 30%, var(--text-muted));
-  --cmd-start: var(--unsaid);
-  --cmd-cut: var(--unsaid);
-  --cmd-keep: var(--unsaid);
-  --cmd-finish: var(--unsaid);
-  --cmd-stopgo: var(--unsaid);
+@media (prefers-reduced-motion: no-preference) {
+  .cmdList[data-motion] .ink,
+  .cmdList[data-motion] .voice {
+    display: block;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .cmdList[data-motion] .ink {
+    overflow: hidden;
+    overflow: clip;
+  }
+  /* The tint: 30% of the command colour in the muted text (6:1 or more
+   * on --surface-0 for all five). <Cmd> colours itself inline from its
+   * --cmd-* token, so the tint redefines those tokens for the base only
+   * (from the row's --c, which it inherits already resolved). */
+  .cmdList[data-motion] .say {
+    --unsaid: color-mix(in oklab, var(--c) 30%, var(--text-muted));
+    --cmd-start: var(--unsaid);
+    --cmd-cut: var(--unsaid);
+    --cmd-keep: var(--unsaid);
+    --cmd-finish: var(--unsaid);
+    --cmd-stopgo: var(--unsaid);
+  }
 }
 /* The caret rides 0.12em ahead of the ink edge (its wrapper moves with
- * the ink); each bar steps through its levels (scale). */
+ * the ink): a still glyph of 4 bars at the levels of a voice. */
 .caret {
   position: absolute;
   top: 50%;
@@ -137,13 +164,25 @@
   height: 100%;
   border-radius: 2px;
   background: var(--c);
-  scale: 1 0.3;
+}
+.bar:nth-child(1) {
+  scale: 1 0.45;
+}
+.bar:nth-child(2) {
+  scale: 1 0.9;
+}
+.bar:nth-child(3) {
+  scale: 1 0.65;
+}
+.bar:nth-child(4) {
+  scale: 1 0.35;
 }
 
-/* The strip: the command's effect on a flat strip of the recording, and
- * the button that plays it again. Full width under the word (up to 22rem
- * on phones, the word's column from 768px); its padding makes the target
- * 44px tall. It clips the entrance wipe and the seal. */
+/* The strip: the command's effect on a flat strip of the recording. Full
+ * width under the word (up to 22rem on phones, the word's column from
+ * 768px). overflow: clip, never hidden: a scroll container here would
+ * become the probe's scroller and freeze the row (an engine without clip
+ * takes hidden and runs the script fallback, which does not mind). */
 .strip {
   position: relative;
   display: block;
@@ -151,28 +190,26 @@
   max-width: 22rem;
   margin: 0.5rem 0 -0.25rem;
   padding: 0.375rem 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: inherit;
   overflow: hidden;
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  transition: scale 100ms var(--ease-out);
+  overflow: clip;
 }
 @media (min-width: 768px) {
   .strip {
     max-width: none;
   }
 }
-.strip:active {
-  scale: 0.98;
-}
-.strip:focus-visible {
-  outline: 2px solid var(--brand-hover);
-  outline-offset: 3px;
-  border-radius: 10px;
+/* The row's lane (commandScroll.ts): an invisible probe whose top is on
+ * the middle line when the strip's centre is, one lane tall. Its view
+ * timeline drives the row; where two strips sit closer than a lane, JS
+ * shortens it. */
+.probe {
+  position: absolute;
+  top: calc(50% - var(--scrub-mid));
+  left: 0;
+  width: 1px;
+  height: var(--scrub-len);
+  visibility: hidden;
+  pointer-events: none;
 }
 /* Pieces carry a waveform; posts are the spoken commands; a hatched piece
  * is what the command removes. */
@@ -185,7 +222,7 @@
   height: 2rem;
 }
 /* Where the strip got shorter: a dashed rail over the freed end (its
- * width is set when the row is armed). */
+ * width is set when the row is scored). */
 .rail {
   position: absolute;
   top: 0;
@@ -196,8 +233,10 @@
   border-radius: 8px;
   opacity: 0;
 }
-.cmdList[data-motion] .rail {
-  display: block;
+@media (prefers-reduced-motion: no-preference) {
+  .cmdList[data-motion] .rail {
+    display: block;
+  }
 }
 .piece,
 .gone,
@@ -243,6 +282,7 @@
   position: absolute;
   inset: 0;
   overflow: hidden;
+  overflow: clip;
   border-radius: 8px;
 }
 .hatch {
@@ -261,8 +301,8 @@
   border-radius: 9999px;
   background: var(--c);
 }
-/* “Cleo keep”: the kept take's ring, and the next scene's slot (dashed,
- * only while it is still to come). */
+/* “Cleo keep”: the kept take's ring (it lights as the take is kept), and
+ * the next scene's slot (dashed, only while it is still to come). */
 .keepRing {
   position: absolute;
   inset: 0;
@@ -278,75 +318,9 @@
   border: 1px dashed var(--border-hover);
   border-radius: 8px;
 }
-.cmdList[data-motion] .ghostSlot {
-  display: block;
-}
-
-/* The passes' pause control: under the list at its right edge, as the
- * other demos' controls sit, but out of flow (in the section's bottom
- * padding, 4.5rem and up), so it moves nothing when it appears after
- * hydration. Pause and play are layered and crossfade. Not there under
- * reduced motion. */
-.passBar {
-  position: relative;
-  height: 0;
-}
-.passToggle {
-  position: absolute;
-  top: 0.75rem;
-  inset-inline-end: 0;
-  display: grid;
-  width: 2.75rem;
-  height: 2.75rem;
-  place-items: center;
-  border-radius: 9999px;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  color: var(--text-body);
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  -webkit-user-select: none;
-  user-select: none;
-  transition:
-    transform 120ms var(--ease-out),
-    border-color 150ms ease,
-    color 150ms ease;
-}
-.passToggle svg {
-  grid-area: 1 / 1;
-  transition:
-    opacity 160ms var(--ease-out),
-    scale 160ms var(--ease-out),
-    filter 160ms var(--ease-out);
-}
-.passToggle[data-mode="run"] .icPlay,
-.passToggle:not([data-mode="run"]) .icPause {
-  opacity: 0;
-  scale: 0.9;
-  filter: blur(2px);
-}
-.passToggle:active {
-  transform: scale(0.97);
-}
-@media (hover: hover) and (pointer: fine) {
-  .passToggle:hover {
-    border-color: var(--border-hover);
-    color: var(--text-strong);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .strip,
-  .passToggle,
-  .passToggle svg {
-    transition: none;
-  }
-  .strip:active {
-    scale: none;
-  }
-  .passToggle:active {
-    transform: none;
+@media (prefers-reduced-motion: no-preference) {
+  .cmdList[data-motion] .ghostSlot {
+    display: block;
   }
 }
 
