@@ -23,12 +23,29 @@ import { useT } from "@/i18n";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
-import { CLIPS, CLIP_DIR, SMARTCAM_TRACK, type ClipId } from "./clips";
+import { CLIPS, CLIP_DIR, type ClipId } from "./clips";
 import { useClipPlayback } from "./useClipPlayback";
 import styles from "./Scene.module.css";
 
 /** A 9:16 crop's width as a fraction of a 16:9 frame's width. */
 export const CROP_W = (9 / 16) * (9 / 16);
+
+const LQIP: Record<ClipId, string> = {
+  hero: styles.lqipHero,
+  ringCafe: styles.lqipRingCafe,
+  ringOffice: styles.lqipRingOffice,
+  ringRoom: styles.lqipRingRoom,
+  tileCafe: styles.lqipTileCafe,
+  tileOffice: styles.lqipTileOffice,
+  tileRoom: styles.lqipTileRoom,
+  smartcam: styles.lqipSmartcam,
+};
+
+/** The class that sets a clip's 12 px preview as --lqip (a url() for a
+ *  background-image) on an element and its subtree. */
+export function lqipClass(clip: ClipId): string {
+  return LQIP[clip];
+}
 
 function setRef<T>(ref: React.Ref<T> | undefined, value: T | null): void {
   if (typeof ref === "function") ref(value);
@@ -39,12 +56,6 @@ function setRef<T>(ref: React.Ref<T> | undefined, value: T | null): void {
  * One frame of the footage. The Scene fills its (positioned) parent.
  * - `crop="vertical"` (default): a 9:16 frame filled by a 9:16 clip.
  * - `crop="wide"`: a 16:9 frame filled by the 16:9 clip ("smartcam").
- * - `crop="track"`: a 9:16 frame cut from the 16:9 clip. The clip is the
- *   `cameraRef` element, at the frame's height, moved so x = `--cx` (a
- *   fraction of the clip's width, a custom property on the Scene root)
- *   is in the middle. It starts at the face track's first x; a consumer
- *   may write `--cx` on the root every frame (the subtree is three
- *   elements, so the style recalc stays small).
  * `playing` (default true) lets the clip play; false pauses it on its
  * frame. `priority` loads it eagerly (the hero). `videoRef` hands out the
  * <video> (currentTime, requestVideoFrameCallback, drawing to a canvas).
@@ -55,18 +66,16 @@ export function Scene({
   playing = true,
   priority = false,
   className,
-  cameraRef,
   videoRef,
 }: {
   clip: ClipId;
-  crop?: "vertical" | "wide" | "track";
+  crop?: "vertical" | "wide";
   playing?: boolean;
   priority?: boolean;
   className?: string;
-  cameraRef?: React.Ref<HTMLDivElement>;
   videoRef?: React.Ref<HTMLVideoElement>;
 }) {
-  const { file, w, h, lqip } = CLIPS[clip];
+  const { file, w, h } = CLIPS[clip];
   const rootRef = useRef<HTMLDivElement>(null);
   const ownVideoRef = useRef<HTMLVideoElement>(null);
   const playback = useClipPlayback({ src: `${CLIP_DIR}/${file}.mp4`, playing, priority, rootRef, videoRef: ownVideoRef });
@@ -94,13 +103,12 @@ export function Scene({
   return (
     <div
       ref={rootRef}
-      className={cx(styles.scene, className)}
+      className={cx(styles.scene, LQIP[clip], className)}
       data-crop={crop}
       data-live={playback.live || undefined}
-      style={crop === "track" ? ({ "--cx": SMARTCAM_TRACK.x[0] } as React.CSSProperties) : undefined}
       aria-hidden="true"
     >
-      <div ref={cameraRef} className={styles.camera} style={{ backgroundImage: `url("${lqip}")` }}>
+      <div className={styles.camera}>
         {/* eslint-disable-next-line @next/next/no-img-element -- the clip's pre-sized first frame, no optimizer needed */}
         <img
           className={styles.poster}

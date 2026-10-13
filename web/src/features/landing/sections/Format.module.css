@@ -326,10 +326,10 @@
   overflow: hidden;
   background: var(--surface-1);
 }
-/* Under the canvas: the clip's first frame, cut like Scene crop="track"
-   at the track's first x (the 16:9 frame at the slice's height), on
-   its 12px preview. So the slice is never empty: before the first video
-   frame, and as the still. */
+/* Under the canvas: the clip's first frame, cut as the canvas is at the
+   track's first x (the 16:9 frame at the slice's height), on
+   its 12px preview (--lqip, Scene.tsx lqipClass). So the slice is never
+   empty: before the first video frame, and as the still. */
 .slicePoster {
   position: absolute;
   top: 0;
@@ -338,6 +338,7 @@
   width: calc(100% / var(--rf-c));
   max-width: none;
   height: 100%;
+  background-image: var(--lqip);
   background-size: cover;
   transform: translateX(calc(var(--rf-x0) * var(--rf-c) * -1));
   pointer-events: none;
@@ -607,8 +608,9 @@
   padding-left: 0;
 }
 /* A tile's left edge (each tile under its span, clamped inside the
-   figure), shared by the tile and its connector. */
+   figure), shared by the tile, its slot and its connector. */
 .tile,
+.slot,
 .link {
   --tl: clamp(
     calc(var(--i) * (var(--tw) + var(--tg))),
@@ -649,10 +651,25 @@
 }
 
 /* The tiles. Each stands up with its own perspective (perspective() in
-   its keyframes), so none shears or grows past its final size. */
+   its keyframes), so none shears or grows past its final size, on the
+   page's hinge spring (BonusClips.tsx clipsScore). */
 .tiles {
   position: relative;
   height: calc(var(--tw) * 16 / 9);
+}
+/* A tile's slot, under it: while the tile is still down, a dashed
+   outline holds its place (the pass shows it and fades it as the tile
+   lands), so the band is never empty. Settled: gone. */
+.tiles > .slot {
+  position: absolute;
+  top: 0;
+  left: var(--tl);
+  width: var(--tw);
+  aspect-ratio: 9 / 16;
+  border: 1px dashed var(--border-hover);
+  border-radius: 0.75rem;
+  opacity: 0;
+  pointer-events: none;
 }
 .tiles > .tile {
   position: absolute;

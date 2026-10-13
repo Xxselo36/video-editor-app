@@ -8,8 +8,17 @@
  * --ease-out (Landing.module.css .page), the brand curve. */
 
 .band {
-  background: var(--surface-1);
-  border-block: 1px solid var(--border);
+  /* Soft seams: the band rises out of the page and sinks back into it
+     over 3rem at each edge (a static paint, no hard border), so
+     scrolling in and out reads as a crossfade. The padding keeps every
+     element clear of the fades. */
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--surface-1) 3rem,
+    var(--surface-1) calc(100% - 3rem),
+    transparent
+  );
   padding-block: 6rem;
   /* On phones the side frames reach past the gutters: clipped here
      (clip, not hidden: no scroll container, and it sits outside the 3D

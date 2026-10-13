@@ -23,7 +23,7 @@
  *
  * One decoder: the plate shows the <video> (Scene), and the vertical is a
  * canvas the same element is drawn into on every presented frame
- * (requestVideoFrameCallback), cropped at the face track's x (clips.ts:
+ * (requestVideoFrameCallback), cropped at the face track's x (track.ts:
  * the product's own face model on this clip). The same frame moves the
  * window on the plate, so the two never disagree; at the loop seam both
  * jump on one frame, a cut. Motion inside the frames is video content:
@@ -42,8 +42,9 @@ import { useT } from "@/i18n";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
-import { CLIPS, CLIP_DIR, SMARTCAM_TRACK, faceAt } from "../scene/clips";
-import { CROP_W, Scene } from "../scene/Scene";
+import { CLIPS, CLIP_DIR } from "../scene/clips";
+import { SMARTCAM_TRACK, faceAt } from "../scene/track";
+import { CROP_W, Scene, lqipClass } from "../scene/Scene";
 import { useClipsMove } from "../scene/useClipPlayback";
 import { PASS_ROOT_MARGIN, PASS_THRESHOLDS, passShare } from "../shared";
 import styles from "../Landing.module.css";
@@ -631,7 +632,7 @@ export function ReframeSection() {
     };
   }, [moves]);
 
-  const { file, w, h, lqip } = CLIPS.smartcam;
+  const { file, w, h } = CLIPS.smartcam;
 
   return (
     <section className={styles.section} aria-labelledby="reframe-title">
@@ -669,7 +670,7 @@ export function ReframeSection() {
                     <div className={f.sliceClip}>
                       {/* eslint-disable-next-line @next/next/no-img-element -- the clip's pre-sized first frame (Scene's poster), no optimizer needed */}
                       <img
-                        className={f.slicePoster}
+                        className={cx(f.slicePoster, lqipClass("smartcam"))}
                         src={`${CLIP_DIR}/${file}.webp`}
                         width={w}
                         height={h}
@@ -677,7 +678,6 @@ export function ReframeSection() {
                         draggable={false}
                         loading="lazy"
                         decoding="async"
-                        style={{ backgroundImage: `url("${lqip}")` }}
                       />
                       <canvas ref={canvasRef} className={f.sliceCanvas} />
                       <span className={f.sheen} data-el="sheen" />

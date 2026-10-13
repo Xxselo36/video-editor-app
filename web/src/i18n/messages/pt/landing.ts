@@ -36,6 +36,7 @@ export const ptLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.keep": "Mantém a tomada e começa a próxima cena.",
   "site.commands.stopgo": "Pula tudo o que você diz entre os dois.",
   "site.commands.finish": "Termina seu vídeo. Tudo o que vem depois é descartado.",
+  "site.commands.replay": "Reproduzir {cmd} de novo",
   "site.commands.note": "Por enquanto, os comandos foram feitos para vídeos em inglês e alemão.",
   "site.auto.title": "Pausas e vícios de linguagem somem sozinhos.",
   "site.auto.body": "Não precisa de comando. A CleoCuts remove pausas e vícios de linguagem como {um} em todo o vídeo. Você escolhe o ritmo: {tight}, {natural} ou {none}.",

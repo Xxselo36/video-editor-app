@@ -1,14 +1,22 @@
 /* The hero stage (hero/TakeStrip.tsx, hero/score.ts). A step machine
- * sets data-* on .demo and per-piece translates; CSS transitions move
- * between steps. One easing curve (--ease, the brand's); linear only
- * for the playhead and the scrub head, which move at the speed of time.
- * Removing a piece: it lifts off the tape (420ms), then the lanes after
- * it slide left (420ms, starting 200ms in), leaving a thin cut marker.
- * Posts that stay (start, keep, finish) never lift. The video inside the
- * frame is the real clip (scene/Scene): its motion is video content. */
+ * sets data-* on .demo and per-piece translates; CSS transitions and
+ * keyframes move between steps, timed by the score (its *_MS values are
+ * set on .demo as --lift-ms, --scan-ms, …). Curves are the page's
+ * (Landing.module.css .page): --ease, the brand curve, for entrances and
+ * fades in; --ease-move for what already stands on the stage and
+ * travels (lifts, closes, the chip, the video stepping back);
+ * --ease-drawer for the phone video rising; `ease` for fades out and
+ * colour. Linear only for the playheads (recording, Cleo's scan, the
+ * render head) and the scrub head, which move at the speed of time.
+ * Removing a piece: it lifts off the tape (480ms), the lanes after it
+ * close (440ms, from 220ms in, while it is half gone) and a thin cut
+ * marker draws in as they land. Posts that stay (start, keep, finish)
+ * never lift. The video inside the frame is the real clip
+ * (scene/Scene): its motion is video content. */
 
 .demo {
-  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  /* the brand curve (the page's --ease-out); the others come from .page */
+  --ease: var(--ease-out);
   --wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='192' height='32'%3E%3Crect x='0' y='7' width='2' height='18' rx='1'/%3E%3Crect x='4' y='10' width='2' height='12' rx='1'/%3E%3Crect x='8' y='6' width='2' height='20' rx='1'/%3E%3Crect x='12' y='2' width='2' height='28' rx='1'/%3E%3Crect x='16' y='12' width='2' height='8' rx='1'/%3E%3Crect x='20' y='11' width='2' height='10' rx='1'/%3E%3Crect x='24' y='3' width='2' height='26' rx='1'/%3E%3Crect x='28' y='4' width='2' height='24' rx='1'/%3E%3Crect x='32' y='11' width='2' height='10' rx='1'/%3E%3Crect x='36' y='7' width='2' height='18' rx='1'/%3E%3Crect x='40' y='3' width='2' height='26' rx='1'/%3E%3Crect x='44' y='12' width='2' height='8' rx='1'/%3E%3Crect x='48' y='5' width='2' height='22' rx='1'/%3E%3Crect x='52' y='4' width='2' height='24' rx='1'/%3E%3Crect x='56' y='9' width='2' height='14' rx='1'/%3E%3Crect x='60' y='12' width='2' height='8' rx='1'/%3E%3Crect x='64' y='11' width='2' height='10' rx='1'/%3E%3Crect x='68' y='6' width='2' height='20' rx='1'/%3E%3Crect x='72' y='6' width='2' height='20' rx='1'/%3E%3Crect x='76' y='11' width='2' height='10' rx='1'/%3E%3Crect x='80' y='9' width='2' height='14' rx='1'/%3E%3Crect x='84' y='11' width='2' height='10' rx='1'/%3E%3Crect x='88' y='4' width='2' height='24' rx='1'/%3E%3Crect x='92' y='6' width='2' height='20' rx='1'/%3E%3Crect x='96' y='12' width='2' height='8' rx='1'/%3E%3Crect x='100' y='3' width='2' height='26' rx='1'/%3E%3Crect x='104' y='3' width='2' height='26' rx='1'/%3E%3Crect x='108' y='11' width='2' height='10' rx='1'/%3E%3Crect x='112' y='9' width='2' height='14' rx='1'/%3E%3Crect x='116' y='2' width='2' height='28' rx='1'/%3E%3Crect x='120' y='2' width='2' height='28' rx='1'/%3E%3Crect x='124' y='3' width='2' height='26' rx='1'/%3E%3Crect x='128' y='12' width='2' height='8' rx='1'/%3E%3Crect x='132' y='3' width='2' height='26' rx='1'/%3E%3Crect x='136' y='3' width='2' height='26' rx='1'/%3E%3Crect x='140' y='6' width='2' height='20' rx='1'/%3E%3Crect x='144' y='12' width='2' height='8' rx='1'/%3E%3Crect x='148' y='9' width='2' height='14' rx='1'/%3E%3Crect x='152' y='12' width='2' height='8' rx='1'/%3E%3Crect x='156' y='4' width='2' height='24' rx='1'/%3E%3Crect x='160' y='3' width='2' height='26' rx='1'/%3E%3Crect x='164' y='10' width='2' height='12' rx='1'/%3E%3Crect x='168' y='8' width='2' height='16' rx='1'/%3E%3Crect x='172' y='6' width='2' height='20' rx='1'/%3E%3Crect x='176' y='10' width='2' height='12' rx='1'/%3E%3Crect x='180' y='4' width='2' height='24' rx='1'/%3E%3Crect x='184' y='11' width='2' height='10' rx='1'/%3E%3Crect x='188' y='3' width='2' height='26' rx='1'/%3E%3C/svg%3E");
   position: relative;
 }
@@ -46,6 +54,7 @@
 
 /* ── Phase label: You talk / Cleo edits / Ready to post ── */
 .phase {
+  position: relative;
   flex: none;
   min-width: 7.5rem;
   margin: 0;
@@ -53,18 +62,24 @@
   font-weight: 650;
   color: var(--text-strong);
 }
+/* It swaps like the status line (.swapOut, at the end of the file). */
 .phaseText {
-  display: inline-block;
-  transition: opacity 240ms var(--ease), transform 240ms var(--ease);
+  display: block;
+  white-space: nowrap;
+  transition: opacity 200ms var(--ease) 60ms, translate 200ms var(--ease) 60ms;
 }
 @starting-style {
-  .phaseText { opacity: 0; transform: translateY(4px); }
+  .phaseText { opacity: 0; translate: 0 4px; }
 }
 @media (max-width: 1279px) {
   .phase { display: none; }
 }
 
-/* ── Narration chips above the tape ── */
+/* ── Narration chips above the tape ──
+   One chip per act, travelling from flag to flag on transforms only:
+   its pill is two caps and a middle that morph to the next label's
+   width as it goes, its stem stays on the target (TakeStrip placeChip),
+   and its label crossfades between two stacked slots. */
 .rail {
   position: absolute;
   z-index: 4;
@@ -74,44 +89,116 @@
   height: 2.25rem;
 }
 .chip {
-  --w: 0px;
+  --chip-h: calc(0.875rem * 1.3 + 0.625rem + 2px);
   position: absolute;
+  left: 0;
   bottom: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  border-radius: 9999px;
-  border: 1px solid var(--rc, var(--border-hover));
-  background: color-mix(in oklab, var(--rc, var(--surface-2)) 14%, var(--surface-1));
-  padding: 0.3125rem 0.75rem;
+  width: 0;
+  height: var(--chip-h);
   font-size: 0.875rem;
   font-weight: 650;
   line-height: 1.3;
-  white-space: nowrap;
   color: var(--rc, var(--text-body));
-  translate: -50% 0;
-  transition: opacity 240ms var(--ease), transform 240ms var(--ease);
+  transition: opacity 240ms var(--ease), translate 240ms var(--ease), color 240ms ease;
+}
+/* it rises in where it is first placed… */
+@starting-style {
+  .chip { opacity: 0; translate: 0 6px; }
+}
+/* …and travels from then on */
+.chip[data-placed] {
+  transition:
+    opacity 240ms var(--ease),
+    translate 240ms var(--ease),
+    color 240ms ease,
+    transform 360ms var(--ease-move);
+}
+/* the act is over: it fades out where it is */
+.chip[data-leaving] {
+  opacity: 0;
+  translate: 0 -4px;
+  transition:
+    opacity 160ms ease,
+    translate 160ms ease,
+    transform 360ms var(--ease-move);
+}
+.chipCap,
+.chipMid {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: var(--chip-h);
+  border: 1px solid var(--rc, var(--border-hover));
+  background: color-mix(in oklab, var(--rc, var(--surface-2)) 14%, var(--surface-1));
+}
+.chipCap {
+  width: calc(var(--chip-h) / 2 + 1px);
+  border-right: 0;
+  border-radius: 9999px 0 0 9999px;
+}
+.chipCapR {
+  border-right: 1px solid var(--rc, var(--border-hover));
+  border-left: 0;
+  border-radius: 0 9999px 9999px 0;
+}
+/* 100px wide (TakeStrip MID_BASE), scaled to the label between the caps */
+.chipMid {
+  width: 100px;
+  border-inline: 0;
+  transform-origin: 0 50%;
 }
 /* the stem down to the tape */
-.chip::after {
-  content: "";
+.stem {
   position: absolute;
-  left: 50%;
+  left: -0.5px;
   top: 100%;
   width: 1px;
   height: 0.625rem;
   background: var(--rc, var(--border-strong));
   opacity: 0.7;
 }
-@starting-style {
-  .chip { opacity: 0; transform: translateY(6px); }
+.chip[data-placed] .chipCap,
+.chip[data-placed] .chipMid,
+.chip[data-placed] .stem {
+  transition:
+    transform 360ms var(--ease-move),
+    border-color 240ms ease,
+    background-color 240ms ease;
 }
-/* the handoff: the old chip is gone before the new one fades in */
-.chip[data-leaving] {
+/* the pill's width (its parts, around the travelling centre): it widens
+   at once for a longer label, so text never spills past it; it narrows
+   in step with the travel (same curve and time, so its ends move
+   straight from rest to rest and never pass the rail's edge), and the
+   slow start of that curve keeps the longer label inside while it fades */
+.chip[data-morph="grow"] .chipCap,
+.chip[data-morph="grow"] .chipMid {
+  transition:
+    transform 240ms var(--ease),
+    border-color 240ms ease,
+    background-color 240ms ease;
+}
+/* the label: the old one blurs out, the new one sharpens in just after */
+.chipLabel {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: var(--chip-h);
+  border: 1px solid transparent;
+  padding: 0 0.75rem;
+  white-space: nowrap;
+  translate: -50% 0;
   opacity: 0;
-  transition-duration: 100ms;
+  filter: blur(2px);
+  transition: opacity 140ms ease, filter 140ms ease;
 }
-.chip:not([data-leaving]) { transition-delay: 80ms; }
+.chipLabel[data-on] {
+  opacity: 1;
+  filter: none;
+  transition: opacity 200ms var(--ease) 60ms, filter 200ms var(--ease) 60ms;
+}
 .ellipsis { color: var(--text-muted); }
 .struck {
   text-decoration: line-through;
@@ -178,14 +265,14 @@
   position: absolute;
   inset: 6px;
   transform-style: preserve-3d;
-  transition: opacity 200ms var(--ease);
+  transition: opacity 320ms var(--ease-move), transform 320ms var(--ease-move);
 }
 .lane {
   position: absolute;
   inset: 0;
   transform-style: preserve-3d;
   pointer-events: none;
-  transition: transform 420ms var(--ease) 200ms;
+  transition: transform var(--close-ms) var(--ease-move) var(--close-delay);
 }
 .piece {
   position: absolute;
@@ -195,9 +282,11 @@
   border-radius: 8px;
   border: 1px solid var(--border-hover);
   background-color: var(--surface-2);
+  /* the lift: it rises and tips away, fading over its second half
+     (--lift-delay: the tail of the tape goes just after the head) */
   transition:
-    transform 420ms var(--ease),
-    opacity 240ms var(--ease) 140ms;
+    transform var(--lift-ms) var(--ease-move) var(--lift-delay, 0ms),
+    opacity 300ms ease calc(180ms + var(--lift-delay, 0ms));
 }
 .piece::before {
   content: "";
@@ -233,39 +322,90 @@
 @media (max-width: 767px) {
   .um { display: none; }
 }
-/* marked: a hatch in its colour and an inset ring (no colour transition) */
+/* marked: a hatch in its colour and an inset ring, wiped in from the
+   left just behind Cleo's scan line as it passes (--at: where the
+   piece starts, 0 to 1) */
 .mark {
   position: absolute;
   inset: -1px;
   border-radius: inherit;
   background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--c) 50%, transparent) 0 3px, transparent 3px 7px);
   box-shadow: inset 0 0 0 1.5px var(--c);
-  opacity: 0;
-  transition: opacity 200ms var(--ease);
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path var(--mark-ms) var(--ease-move) calc(var(--at) * var(--scan-ms));
 }
 .piece[data-state="mark"] .mark,
 .piece[data-state="gone"] .mark {
-  opacity: 1;
+  clip-path: inset(0);
 }
 .piece[data-state="gone"] {
   opacity: 0;
-  transform: translate3d(0, -12%, 2.5rem) rotateX(-24deg);
+  transform: translate3d(0, -28%, 3.5rem) rotateX(-24deg);
 }
-/* the pieces fade back in left to right when the loop starts over */
-.demo[data-fade="out"] .track { opacity: 0; }
+/* the render head passes: each kept take glints (pre-drawn; only its
+   opacity moves; --rt: when the head reaches it, 0 to 1) */
+.take::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: var(--surface-tint);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  opacity: 0;
+  pointer-events: none;
+}
+.demo[data-sweep="render"] .take::after {
+  animation: glint var(--glint-ms) ease both;
+  animation-delay: calc(var(--rt) * var(--render-ms));
+}
+@keyframes glint {
+  35% { opacity: 0.6; }
+}
+/* “Cleo keep” answered: the scene after the keep post is sealed as kept
+   as it closes up to the post, the same green seal as the commands'
+   keep row */
+.seal {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1.5px var(--cmd-keep);
+  opacity: 0;
+  pointer-events: none;
+}
+.piece[data-sealed] .seal {
+  animation:
+    sealIn 200ms var(--ease) calc(var(--close-delay) + var(--close-ms) * 0.6) both,
+    sealOut 600ms ease calc(var(--close-delay) + var(--close-ms) * 0.6 + 200ms) forwards;
+}
+@keyframes sealIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sealOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* ── The seam: one event in one direction ──
+   Everything leaves together on one curve (the tape drifts toward the
+   video, the video steps back under its scrim), swaps back to raw while
+   invisible, and the raw pieces slide in from the left. */
+.demo[data-fade="out"] .track { opacity: 0; transform: translateX(4%); }
 .demo[data-fade="snap"] .track { opacity: 0; }
 .demo[data-fade="snap"] .track *,
 .demo[data-fade="snap"] .track {
   transition: none !important;
 }
+.demo[data-fade="in"] .track { transition: none; }
 .demo[data-fade="in"] .piece {
-  animation: pieceIn 280ms var(--ease) both;
-  animation-delay: calc(var(--n) * 40ms);
+  animation: pieceIn var(--piece-in-ms) var(--ease) both;
+  animation-delay: calc(var(--n) * var(--piece-stagger-ms));
 }
 @keyframes pieceIn {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateX(-10px); }
 }
 
+/* ── Command posts ── */
 .post {
   position: absolute;
   top: -3px;
@@ -276,22 +416,47 @@
   background: var(--pc);
   transform-origin: 50% 100%;
   transition:
-    transform 420ms var(--ease),
-    opacity 240ms var(--ease) 140ms;
+    transform var(--lift-ms) var(--ease-move),
+    opacity 300ms ease 180ms;
+}
+/* its flare is light, not length: a pre-drawn glow whose opacity moves */
+.post::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 6px var(--pc), 0 0 2px var(--pc);
+  opacity: 0;
 }
 .post[data-gone] {
   opacity: 0;
-  transform: translate3d(0, -12%, 2rem);
+  transform: translate3d(0, -28%, 3.5rem) rotateX(-24deg);
 }
-/* while recording, a post appears as the playhead reaches it */
-.post[data-ahead] { opacity: 0; }
-.demo[data-phase="talk"] .post { transition: opacity 120ms var(--ease); }
-.post[data-flash] {
-  animation: flare 240ms var(--ease);
+/* while recording, a post is planted as the playhead reaches it: it
+   grows out of the tape from its near edge */
+.post[data-ahead] {
+  opacity: 0;
+  transform: scaleY(0.2);
 }
-@keyframes flare {
-  50% { transform: scaleY(1.25); }
+.demo[data-phase="talk"] .post {
+  transition: opacity 220ms var(--ease), transform 220ms var(--ease);
 }
+.post[data-flash]::after {
+  animation: postGlow 320ms ease both;
+}
+/* Cleo reads: each post pulses as the scan line passes it */
+.demo[data-sweep="read"] .post::after {
+  animation: postPulse var(--pulse-ms) ease both;
+  animation-delay: calc(var(--at) * var(--scan-ms));
+}
+@keyframes postGlow {
+  30% { opacity: 1; }
+}
+@keyframes postPulse {
+  40% { opacity: 0.8; }
+}
+
+/* ── Cut markers ── */
 .marker {
   position: absolute;
   top: 12%;
@@ -300,11 +465,30 @@
   margin-left: -2px;
   border-radius: 2px;
   background: repeating-linear-gradient(135deg, var(--mc) 0 1.5px, transparent 1.5px 3px);
-  opacity: 1;
-  transition: opacity 240ms var(--ease) 420ms;
+  /* drawn in as the lanes land */
+  transition:
+    opacity 180ms var(--ease) calc(var(--close-delay) + var(--close-ms) - 40ms),
+    transform 180ms var(--ease) calc(var(--close-delay) + var(--close-ms) - 40ms);
 }
+/* only while Cleo edits (the finished first frame shows them at once) */
 @starting-style {
-  .marker { opacity: 0; }
+  .demo[data-phase="edit"] .marker { opacity: 0; transform: scaleY(0.2); }
+}
+/* …flashing its tone once as they do */
+.marker::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--mc);
+  box-shadow: 0 0 6px var(--mc);
+  opacity: 0;
+}
+.demo[data-phase="edit"] .marker::after {
+  animation: markerFlash 200ms ease calc(var(--close-delay) + var(--close-ms)) both;
+}
+@keyframes markerFlash {
+  40% { opacity: 1; }
 }
 /* a seam on the same spot as a post that stays (the bad take's at
    “Cleo start”, the pause's at “Cleo keep”) sits just right of it, not
@@ -314,14 +498,15 @@
 .marker[data-tone="stopgo"] { --mc: var(--cmd-stopgo); }
 .marker[data-tone="neutral"] { --mc: var(--text-muted); }
 
-/* the recording playhead lies on the tape */
+/* ── Playheads ── */
+/* the recording playhead lies on the tape (its run is one Web Animation,
+   TakeStrip) */
 .headLane {
   position: absolute;
   inset: 0;
   pointer-events: none;
   opacity: 0;
-  transition-property: transform, opacity;
-  transition-timing-function: linear, var(--ease);
+  transition: opacity 200ms var(--ease);
 }
 .headLane::after {
   content: "";
@@ -333,20 +518,67 @@
   border-radius: 1px;
   background: var(--text-strong);
   box-shadow: 0 0 8px color-mix(in oklab, var(--text-strong) 50%, transparent);
+  transition: transform 260ms var(--ease);
 }
 .headLane[data-head="run"] { opacity: 1; }
-/* the lane is full width and slides up to 95%: clip it to the tape so
-   it never widens the page (room above and below for the line's 6px
-   overhang and its 8px glow) */
+/* it lands on “Cleo finish”: stretches and fades into the post as the
+   post flares */
+.headLane[data-head="end"] { transition-duration: 260ms; }
+.headLane[data-head="end"]::after { transform: scaleY(1.2); }
+/* Cleo's violet sweep: her read across the whole tape, and the render
+   head over the kept tape (--kept), which lights the video as it lands */
+.sweepLane {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+.sweepLane::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -6px;
+  bottom: -6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--brand);
+  box-shadow: 0 0 10px var(--brand-glow);
+}
+.demo[data-sweep="read"] .sweepLane {
+  --sweep-to: 100%;
+  animation:
+    sweepRun var(--scan-ms) linear both,
+    sweepOut 200ms ease var(--scan-ms) forwards;
+}
+.demo[data-sweep="render"] .sweepLane {
+  --sweep-to: var(--kept);
+  animation:
+    sweepRun var(--render-ms) linear both,
+    sweepOut 200ms ease var(--render-ms) forwards;
+}
+@keyframes sweepRun {
+  0% { opacity: 0; transform: translateX(0); }
+  8% { opacity: 1; }
+  100% { opacity: 1; transform: translateX(var(--sweep-to)); }
+}
+@keyframes sweepOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+/* the lanes are full width and slide up to 100%: clip them to the tape
+   so they never widen the page (room above and below for the lines'
+   overhang, the landing's stretch and their glow) */
 .headClip {
   position: absolute;
-  inset: -14px 0;
+  inset: -28px 0;
   overflow: hidden;
   pointer-events: none;
 }
-.headClip > .headLane { inset: 14px 0; }
+.headClip > .headLane,
+.headClip > .sweepLane { inset: 28px 0; }
 
-/* the finished tape: the space the removals freed, hatched ("removed") */
+/* the finished tape: the space the removals freed, hatched ("removed"),
+   fading in as the ends' lift closes the tape */
 .freed {
   position: absolute;
   top: 0;
@@ -356,11 +588,24 @@
   border-radius: 8px;
   background: repeating-linear-gradient(135deg, var(--surface-tint) 0 2px, transparent 2px 7px);
   opacity: 0;
-  transition: opacity 240ms var(--ease) 620ms;
+  transition: opacity 240ms var(--ease) var(--close-delay);
 }
-.demo[data-phase="ready"] .freed { opacity: 1; }
+.freed[data-shown] { opacity: 1; }
 
-/* ── The 9:16 video ── */
+/* where the current chip points, at rest (TakeStrip measures it) */
+.probe {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ── The 9:16 video ──
+   Raw (and on the seam's way out): a dimmed monitor a step back, its
+   captions hidden. Lit: the light comes first, then the words. */
 .video {
   position: absolute;
   z-index: 3;
@@ -382,20 +627,21 @@
   border: 1px solid var(--border);
   background: var(--surface-1);
   box-shadow: var(--shadow-md);
-  transition: border-color 280ms var(--ease), transform 600ms var(--ease);
+  transform: scale(0.965);
+  transition: border-color 320ms ease, transform 320ms var(--ease-move);
 }
 .scene { border-radius: inherit; }
 .captionLayer {
   position: absolute;
   inset: 0;
   opacity: 0;
-  transition: opacity 200ms var(--ease);
+  transition: opacity 320ms var(--ease-move);
 }
 .scrim {
   position: absolute;
   inset: 0;
   background: color-mix(in oklab, var(--surface-0) 50%, transparent);
-  transition: opacity 280ms var(--ease);
+  transition: opacity 320ms var(--ease-move);
 }
 .tag {
   position: absolute;
@@ -424,8 +670,10 @@
   border-radius: 2px;
   background: color-mix(in oklab, var(--text-strong) 25%, transparent);
   opacity: 0;
-  transition: opacity 240ms var(--ease);
+  transition: opacity 320ms var(--ease-move);
 }
+/* it fills with the captions, holds full until the video has gone, and
+   empties only while hidden (on the seam's swap) */
 .scrubHead {
   position: absolute;
   inset: 0;
@@ -436,27 +684,69 @@
   transition-property: transform;
   transition-timing-function: linear;
 }
-.demo[data-play="on"] .scrubHead { transform: none; }
-.demo[data-frame="lit"] .scrub { opacity: 1; }
-.demo[data-frame="lit"] .captionLayer { opacity: 1; }
-.demo[data-frame="lit"] .scrim { opacity: 0; }
-.demo[data-frame="lit"] .screen { border-color: var(--border-strong); }
-.demo[data-frame="raw"] .screen { transform: scale(0.965); }
+.demo[data-scrub="run"] .scrubHead,
+.demo[data-scrub="full"] .scrubHead { transform: none; }
+.demo[data-frame="lit"]:not([data-fade="out"]) .screen {
+  border-color: var(--border-strong);
+  transform: none;
+  transition: border-color 520ms ease, transform 520ms var(--ease-move);
+}
+.demo[data-frame="lit"]:not([data-fade="out"]) .scrim {
+  opacity: 0;
+  transition: opacity 480ms var(--ease-move);
+}
+.demo[data-frame="lit"]:not([data-fade="out"]) .captionLayer {
+  opacity: 1;
+  transition: opacity 160ms var(--ease) 120ms;
+}
+.demo[data-frame="lit"]:not([data-fade="out"]) .scrub {
+  opacity: 1;
+  transition: opacity 240ms var(--ease) 120ms;
+}
+/* desktop: as the render head lands, a glow ring breathes once around
+   the screen (pre-drawn; only its opacity moves; it steps with it) */
+@media (min-width: 1024px) {
+  .video::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 16px;
+    box-shadow: var(--shadow-glow);
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.965);
+    transition: transform 320ms var(--ease-move);
+  }
+  .demo[data-frame="lit"]:not([data-fade="out"]) .video::after {
+    transform: none;
+    transition: transform 520ms var(--ease-move);
+  }
+  .demo[data-reveal="on"] .video::after {
+    animation: glowOnce 700ms ease both;
+  }
+}
+@keyframes glowOnce {
+  35% { opacity: 1; }
+}
 /* phones and tablets: no video until the finish; then it rises out of
-   the freed end of the tape (never lies flat on it) */
+   the freed end of the tape (never lies flat on it), and on the seam it
+   sinks back on the same path, fading late */
 @media (max-width: 1023px) {
   .video {
     opacity: 0;
     transform: perspective(40rem) rotateX(62deg) translateY(6%);
     transition:
-      transform 600ms var(--ease),
-      opacity 200ms var(--ease);
+      transform 420ms var(--ease-move),
+      opacity 240ms ease 180ms;
   }
-  .demo[data-frame="lit"] .video {
+  .demo[data-frame="lit"]:not([data-fade="out"]) .video {
     opacity: 1;
     transform: none;
+    transition:
+      opacity 320ms ease,
+      transform 560ms var(--ease-drawer);
   }
-  .demo[data-frame="raw"] .screen { transform: none; }
+  .screen { transform: none; }
 }
 
 /* ── Under the stage: legend (wide screens), status row (below 1280px,
@@ -534,17 +824,23 @@
     flex-direction: column;
     gap: 0.5rem;
   }
+  .statusLine {
+    position: relative;
+    display: block;
+    min-width: 0;
+  }
   .statusText {
+    display: block;
     font-size: 0.875rem;
     font-weight: 600;
     color: var(--text-body);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: opacity 200ms var(--ease);
+    transition: opacity 200ms var(--ease) 60ms, translate 200ms var(--ease) 60ms;
   }
   @starting-style {
-    .statusText { opacity: 0; }
+    .statusText { opacity: 0; translate: 0 4px; }
   }
   .ticks {
     display: grid;
@@ -563,6 +859,18 @@
   .tick[data-state="current"].li_pauses { background: var(--text-body); }
   .tick[data-state="current"].li_skip { background: var(--cmd-stopgo); }
   .tick[data-state="current"].li_captions { background: var(--text-strong); }
+}
+/* A status or phase line being replaced: it rises out on top of the new
+   one (which rises in from below, @starting-style above), so a swap
+   never shows a blank frame. */
+.swapOut {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  opacity: 0;
+  translate: 0 -4px;
+  transition: opacity 140ms ease, translate 140ms ease;
 }
 .playToggle {
   display: inline-flex;
@@ -586,6 +894,8 @@
 }
 .playToggle:active { transform: scale(0.97); }
 
+/* Reduced motion: the finished still, with nothing moving (TakeStrip
+   shows FINISHED and no chips; the caption keeps its poster). */
 @media (prefers-reduced-motion: reduce) {
   .demo *,
   .demo *::before,

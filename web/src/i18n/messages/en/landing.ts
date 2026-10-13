@@ -44,6 +44,7 @@ export const enLanding = {
   "site.commands.keep": "Keeps the take and starts the next scene.",
   "site.commands.stopgo": "Skips everything you say in between.",
   "site.commands.finish": "Ends your video. Everything after it is dropped.",
+  "site.commands.replay": "Play {cmd} again",
   "site.commands.note": "For now, the commands are made for English and German videos.",
   "site.auto.title": "Pauses and filler words are cut for you.",
   "site.auto.body": "No command needed. CleoCuts removes pauses and filler words like {um} from the whole video. You choose the pace: {tight}, {natural} or {none}.",
