@@ -35,7 +35,6 @@ export const koLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.keep": "촬영분을 남기고 다음 장면을 시작해요.",
   "site.commands.stopgo": "그 사이에 말한 건 모두 건너뛰어요.",
   "site.commands.finish": "영상을 끝내요. 그 뒤에 찍은 건 모두 잘라내요.",
-  "site.commands.replay": "{cmd} 다시 재생",
   "site.commands.note": "지금은 명령어가 영어와 독일어 영상에 맞춰져 있어요.",
   "site.auto.title": "멈춤과 군말은 알아서 잘라 줘요.",
   "site.auto.body": "명령어는 필요 없어요. CleoCuts가 영상 전체에서 멈춤과 {um} 같은 군말을 지워요. 컷 속도는 {tight}, {natural}, {none} 중에서 고르세요.",

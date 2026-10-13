@@ -4,65 +4,59 @@
  * command, in its fixed colour, with a strip of the recording right under
  * the word that shows what the command does ("Spoken Cut"). Each row is
  * said, then edited: the word inks from a tint into its colour behind a
- * small voice caret while its post rises in the strip like a level meter;
- * the hatch marks the span out of the post; the piece folds away on a
- * hinge while the rest of the strip rides its edge shut on one critically
- * damped spring, and one marker in the command colour is left (a dashed
- * rail shows where the video got shorter). “Cleo keep” brings in the next
- * scene instead; “Cleo stop … go” grows its hatch at the speed of speech
- * and lands the go post on the stop post. Timing and contact math:
+ * small voice caret while its post rises in the strip; the hatch marks
+ * the span out of the post; the piece folds away on a hinge while the
+ * rest of the strip rides its edge shut on the hinge spring's shape, and
+ * one marker in the command colour is left (a dashed rail shows where the
+ * video got shorter). “Cleo keep” brings in the next scene instead; “Cleo
+ * stop … go” grows its hatch from one post to the next and lands the go
+ * post on the stop post. The choreography and the contact math:
  * commandScore.ts.
  *
- * The rows cascade at reading pace, top to bottom: a row starts once the
- * one above it hands off (its close at p ≥ 0.92) and its strip's centre is
- * well on screen (6 % of the screen clear of the sticky header above and
- * the phone bar below), after scrolling has rested for 120 ms: a visitor
- * who stops with the list in view sees it play through. A row still visible above that band
- * plays when a later one is in it; a row fully out of the clear area
- * before its turn is finished unseen; a visible row is never finished in
- * place and nothing dims. The first entry per page view: the rows fade up
- * and each strip draws in, then the first row is said.
+ * The scroll plays the rows; nothing here has a clock of its own (a row
+ * playing on its own time while the page moved read as stutter). A row
+ * starts when its strip's centre reaches the middle of the screen and is
+ * edited once its lane, about 140 px of scrolling, is through; the next
+ * lane starts only after that (commandScroll.ts), so one row plays at a
+ * time, top to bottom. Scrolling up plays it backwards; rows above stay
+ * edited, rows below wait unsaid, and a fling or a jump lands every row
+ * where its position puts it. Nothing moves while the page stands still,
+ * so there is no pause control (WCAG 2.2.2 asks for one for motion that
+ * runs by itself) and no replay: scrolling back is the replay.
  *
- * Each strip is a button that plays its row again (tap, click, Enter,
- * Space; with a mouse also a short hover over the word and strip): it
- * fades out, re-arms unseen and fades back in as the pass starts. The
- * sequence runs longer than 5 s, so a pause control sits under the list
- * (WCAG 2.2.2): pause freezes the rows in flight and their clocks, and
- * nothing starts on its own until play (a list left while paused is
- * settled); once every row has played, play replays the list. Hidden tabs
- * hold the same way. When the list is fully out of view everything
- * re-arms unseen; re-entry plays again, without the entrance.
+ * Where the browser has view timelines (Safari 26, Chrome 115, Firefox
+ * 159), each row runs on the timeline of its probe (Cleanup.module.css
+ * .probe), off the main thread, and no script runs while scrolling except
+ * a one-shot check that the engine agrees with the formula. Elsewhere, or
+ * when it does not, one passive scroll listener seeks the same animations
+ * (paused) once a frame while the list is near. The timeline's inset is
+ * always 0px: its default is the scroll padding, which the page sets for
+ * its sticky header and which would start every row 80 px early.
  *
- * At rest (reduced motion, screenshots, no JS, and a list already on
- * screen when the page hydrates) every word is in its colour and every
- * strip shows its mark: no caret, ink copy or rail; play (or a strip)
- * then rewinds softly and plays. Reduced motion: a strip toggles between
- * marked and played by a crossfade (opacity only).
+ * Never give the strip, the lead, the row, the list, the section or the
+ * page overflow hidden, auto or scroll, position: sticky,
+ * content-visibility or display: contents: the probe's timeline then
+ * follows that box instead of the page, or nothing, and the rows freeze
+ * without an error. Clip with overflow: clip.
  *
- * Motion: WAAPI on translate, scale, opacity and a perspective rotateY.
- * A row's animations are created paused when it is armed (unseen) and
- * played on its turn; one empty "cue" animation per row is its clock, so a
- * hold freezes everything together. Nothing re-renders while a row plays:
- * React state is the control's icon only.
+ * At rest (reduced motion, screenshots, no JS) every word is in its
+ * colour and every strip shows its mark; nothing is attached, and turning
+ * reduced motion on detaches everything. Attaching is one long task, so
+ * it waits for an idle moment or for the list to come near, never
+ * hydration; rows already on screen by then fade into their scroll
+ * positions once (320 ms, the only timed motion left). A language change
+ * only swaps the words and attaches nothing anew.
+ *
+ * Motion: WAAPI on translate, scale, opacity and one fixed transform list
+ * (the lift and a perspective rotateY), 61 animations created once and
+ * re-keyed in place when a strip changes width. Nothing re-renders.
  */
-import { useEffect, useRef, useState } from "react";
-import { Pause, Play } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
-import { Icon } from "@/components/ui/Icon";
-import { IconButton } from "@/components/ui/IconButton";
-import {
-  CMD_COLOR,
-  CMD_PHRASE,
-  Cmd,
-  EASE,
-  PASS_ROOT_MARGIN,
-  rich,
-  useCmdNodes,
-  useReducedMotion,
-  type CmdId,
-} from "../shared";
-import { CARET_BARS, scoreRow, type Curve, type Piece, type Target } from "./commandScore";
+import { CMD_COLOR, Cmd, EASE, EASE_SCRUB, rich, useCmdNodes, useReducedMotion, type CmdId } from "../shared";
+import { CARET_BARS, scoreRow, type Curve, type Piece, type Target, type Track } from "./commandScore";
+import { fallbackProgress, laneLengths, progress } from "./commandScroll";
 import styles from "../Landing.module.css";
 import c from "./Cleanup.module.css";
 
@@ -94,37 +88,28 @@ const ROWS: { ids: CmdId[]; desc: MessageKey; mini: Piece[] }[] = [
   },
 ];
 
-/** Between the level meter's steps. */
-const SINE = "cubic-bezier(0.37, 0, 0.63, 1)";
-const CURVE: Record<Curve, string> = { brand: EASE, sine: SINE, ease: "ease", linear: "linear" };
+const CURVE: Record<Curve, string> = { linear: "linear", scrub: EASE_SCRUB, ease: "ease" };
 
-/** The fixed chrome (shared PASS_ROOT_MARGIN): the sticky header above,
- *  the phone CTA bar below (px). */
-const CHROME_TOP = 65;
-const CHROME_BOTTOM = 80;
-/** Scrolling must have rested this long before a row starts (ms). */
-const REST = 120;
-/** A hover replays after this dwell, this long after the last scroll. */
-const DWELL = 180;
-const HOVER_REST = 400;
-
-/** The first entry: rows fade up, then each strip draws in (ms). */
-const ENTER = { row: 280, stagger: 60, strip: 420, stripAfter: 40, firstSay: 300 };
-/** A soft rewind (replay): the ink and the strip fade, the row re-arms
- *  unseen, the strip fades back in and the pass starts into that fade. */
-const REWIND = { ink: 160, strip: 140, stripIn: 220, passIn: 100, stagger: 40 };
-/** Reduced motion: a strip crossfades between marked and played. */
-const SWAP = { out: 120, in: 180 };
-
-/** The start band: a strip's centre between these (px from the top). */
-function band(vh: number): [number, number] {
-  return [CHROME_TOP + 0.06 * vh, vh - CHROME_BOTTOM - 0.06 * vh];
-}
+/** The fallback's animations are this long (ms) and seeked to p × SEEK;
+ *  while scrolling a row stops 0.1 ms short of its end, the settle once
+ *  the list is away lands on it. */
+const SEEK = 1000;
+/** A list on screen at hydration: its visible rows fade out of the rest
+ *  state and back in at their scroll positions (ms). */
+const FADE = { out: 120, in: 200 };
+/** The native path's check: once a row is this far into its lane, every
+ *  row's timeline must agree with the formula within `tolerance`; lanes
+ *  that moved more than `still` px while it waited are looked at again. */
+const CHECK = { from: 0.1, to: 0.9, tolerance: 0.05, still: 1 };
+/** The attach waits for an idle moment (at most `idle` ms) or for the
+ *  list to come within `near` of the viewport, whichever is first. */
+const ATTACH = { idle: 1000, near: "200% 0px" };
 
 const noop = () => {};
 
-/** One spoken command: the base text (a tint until said), its ink copy
- *  and the voice caret (aria-hidden copies, drawn only with motion). */
+/** One spoken command: the base text (a tint while the rows play), its
+ *  ink copy and the voice caret (aria-hidden copies, drawn only with
+ *  motion). */
 function Said({ id }: { id: CmdId }) {
   return (
     <span className={c.unit} data-unit>
@@ -139,7 +124,7 @@ function Said({ id }: { id: CmdId }) {
       <span className={c.voice} aria-hidden="true" data-voice>
         <span className={c.caret} data-caret>
           {Array.from({ length: CARET_BARS }, (_, i) => (
-            <span key={i} className={c.bar} data-bar />
+            <span key={i} className={c.bar} />
           ))}
         </span>
       </span>
@@ -186,60 +171,45 @@ function Strip({ parts }: { parts: readonly Piece[] }) {
   );
 }
 
-/** The control: none (reduced motion, before hydration), the sequence is
- *  on (pause), held by the visitor (play: continue), or played / at rest
- *  (play: replay). */
-type Mode = "off" | "run" | "held" | "done";
-
-/** still: the server's rest state (never armed); armed: on its first
- *  frame, waiting for its turn; rewinding: fading out to re-arm. */
-type Phase = "still" | "armed" | "playing" | "rewinding" | "done";
-
-type RowState = {
-  el: HTMLLIElement;
+type Row = {
   lead: HTMLElement;
-  strip: HTMLElement;
+  probe: HTMLElement;
   mini: HTMLElement;
   rail: HTMLElement;
-  units: HTMLElement[];
   inks: HTMLElement[];
   inkIns: HTMLElement[];
   voices: HTMLElement[];
   carets: HTMLElement[];
-  bars: HTMLElement[][];
   posts: HTMLElement[];
   gone: HTMLElement | null;
   movers: HTMLElement[];
   one: Partial<Record<"hatchClip" | "hatch" | "ring" | "ghost" | "newClip" | "newPiece", HTMLElement>>;
   pieces: readonly Piece[];
-  /** the pass, paused on its first frame while armed */
+  /** its view timeline and range, or the fallback's paused length */
+  timing: KeyframeAnimationOptions;
+  /** one per track and element, in score order (a re-score re-keys them) */
   anims: Animation[];
-  /** fades of a rewind or a crossfade */
-  fx: Animation[];
-  /** the pass's clock: the next row may start when it ends */
-  cue: Animation | null;
-  handoff: number;
-  phase: Phase;
-  /** bumped on every arm: a stale pass never marks its words said */
-  gen: number;
-  /** bumped by every rewind, crossfade or reset: a stale one stops */
-  op: number;
-  /** the strip's width when it was armed (px) */
+  /** the strip's width when it was scored (px) */
   width: number;
+  /** its lane: the probe's top in the list, and its length (px) */
+  off: number;
+  len: number;
+  /** the fallback's last seek (-1: none yet) */
+  p: number;
 };
 
-function collect(el: HTMLLIElement, pieces: readonly Piece[]): RowState | null {
+function collect(el: HTMLLIElement, pieces: readonly Piece[]): Row | null {
   const q = (s: string, root: ParentNode = el) => root.querySelector<HTMLElement>(s);
   const lead = q("[data-lead]");
-  const strip = q("[data-strip]");
+  const probe = q("[data-probe]");
   const mini = q("[data-mini]");
   const rail = q("[data-rail]");
-  if (!lead || !strip || !mini || !rail) return null;
+  if (!lead || !probe || !mini || !rail) return null;
   const units = Array.from(el.querySelectorAll<HTMLElement>("[data-unit]"));
   const all = (s: string) => units.map((u) => q(s, u)).filter((e): e is HTMLElement => !!e);
   const parts = Array.from(mini.children).filter((e) => e !== rail) as HTMLElement[];
   const gi = pieces.findIndex((p) => p.k === "gone");
-  const one: RowState["one"] = {};
+  const one: Row["one"] = {};
   for (const [k, s] of [
     ["hatchClip", "[data-hatch-clip]"],
     ["hatch", "[data-hatch]"],
@@ -252,35 +222,30 @@ function collect(el: HTMLLIElement, pieces: readonly Piece[]): RowState | null {
     if (e) one[k] = e;
   }
   return {
-    el,
     lead,
-    strip,
+    probe,
     mini,
     rail,
-    units,
     inks: all("[data-ink]"),
     inkIns: all("[data-ink-in]"),
     voices: all("[data-voice]"),
     carets: all("[data-caret]"),
-    bars: units.map((u) => Array.from(u.querySelectorAll<HTMLElement>("[data-bar]"))),
     posts: parts.filter((e) => e.hasAttribute("data-post")),
     gone: gi >= 0 ? parts[gi] : null,
     movers: gi >= 0 ? parts.slice(gi + 1) : [],
     one,
     pieces,
+    timing: {},
     anims: [],
-    fx: [],
-    cue: null,
-    handoff: 0,
-    phase: "still",
-    gen: 0,
-    op: 0,
     width: 0,
+    off: 0,
+    len: 1,
+    p: -1,
   };
 }
 
 /** The elements a score track moves. */
-function targets(r: RowState, t: Target): Element[] {
+function targets(r: Row, t: Target): Element[] {
   const list = (e: Element | null | undefined) => (e ? [e] : []);
   switch (t.el) {
     case "ink":
@@ -291,8 +256,6 @@ function targets(r: RowState, t: Target): Element[] {
       return list(r.voices[t.unit]);
     case "caret":
       return list(r.carets[t.unit]);
-    case "bar":
-      return list(r.bars[t.unit]?.[t.bar]);
     case "post":
       return list(r.posts[t.post]);
     case "gone":
@@ -306,577 +269,374 @@ function targets(r: RowState, t: Target): Element[] {
   }
 }
 
-/** Arm a row: its pass, paused on the first frame (every animation holds
- *  its first keyframe until it starts and its last one after). Measures
- *  the removed piece once; call it while the row is unseen or unchanged
- *  to the eye (an armed row looks the same re-armed). */
-function arm(r: RowState) {
-  for (const a of r.anims) a.cancel();
-  for (const a of r.fx) a.cancel();
-  r.cue?.cancel();
-  r.anims = [];
-  r.fx = [];
-  r.cue = null;
-  const gen = ++r.gen;
-  const score = scoreRow(r.pieces, r.gone?.getBoundingClientRect().width ?? 0);
+const keyframes = (t: Track) =>
+  t.frames.map(({ easing, ...rest }) => (easing ? { ...rest, easing: CURVE[easing] } : rest)) as Keyframe[];
+
+/** The row scored at gone width `w`: its rail's width set, and each
+ *  element it moves with its keyframes, in score order. */
+function plan(r: Row, w: number): [Element, Keyframe[]][] {
+  const score = scoreRow(r.pieces, w);
   r.rail.style.width = score.rail ? `${score.rail}px` : "";
-  r.handoff = score.handoff;
-  r.width = r.mini.offsetWidth;
-  for (const u of r.units) u.removeAttribute("data-said");
-  for (const t of score.tracks) {
-    const frames = t.frames.map(({ easing, ...rest }) => (easing ? { ...rest, easing: CURVE[easing] } : rest)) as Keyframe[];
-    for (const el of targets(r, t.target)) {
-      const a = el.animate(frames, { delay: t.delay, duration: t.duration, easing: "linear", fill: "both" });
-      a.pause();
-      a.currentTime = 0;
-      r.anims.push(a);
-      // Said: the base switches to full colour under the finished ink.
-      const unit = t.target.el === "ink" ? r.units[t.target.unit] : null;
-      if (unit)
-        a.finished.then(() => {
-          if (r.gen === gen) unit.setAttribute("data-said", "");
-        }, noop);
-    }
+  return score.tracks.flatMap((t) => {
+    const frames = keyframes(t);
+    return targets(r, t.target).map((el): [Element, Keyframe[]] => [el, frames]);
+  });
+}
+
+/** The removed piece's laid-out width: the fold's transform leaves it
+ *  alone, so it is right at any p. */
+const goneWidth = (r: Row) => (r.gone ? parseFloat(getComputedStyle(r.gone).width) || 0 : 0);
+
+/** The lane as a view timeline range: exit-crossing (the probe's top
+ *  crossing the viewport's top edge, to its bottom crossing it), or exit,
+ *  the same while the probe is shorter than the screen; null without view
+ *  timelines. */
+function nativeRange(): readonly [string, string] | null {
+  if (typeof ViewTimeline !== "function" || typeof CSS === "undefined" || !CSS.supports) return null;
+  for (const name of ["exit-crossing", "exit"]) {
+    const range = [`${name} 0%`, `${name} 100%`] as const;
+    if (CSS.supports("animation-range", range.join(" "))) return range;
   }
-  r.phase = "armed";
+  return null;
 }
 
-/** Straight to the played state, without motion. */
-function settle(r: RowState) {
-  for (const a of r.fx) a.cancel();
-  r.fx = [];
-  for (const a of r.anims) a.finish();
-  r.cue?.cancel();
-  r.cue = null;
-  r.phase = "done";
-}
-
-/** Back to the server's rest state (no pass). */
-function unarm(r: RowState) {
-  for (const a of [...r.anims, ...r.fx]) a.cancel();
-  r.cue?.cancel();
-  r.anims = [];
-  r.fx = [];
-  r.cue = null;
-  r.gen++;
-  r.rail.style.width = "";
-  r.phase = "still";
-}
-
-/** Plays the rows one after another under the start rule; replays a row
- *  from its strip; re-arms everything when the list is fully out of view.
- *  Under reduced motion only the strips' crossfade. */
-function useRowPasses(
-  listRef: React.RefObject<HTMLUListElement | null>,
-  reduced: boolean,
-): { mode: Mode; toggle: () => void; tap: (i: number) => void } {
-  const [mode, setMode] = useState<Mode>("off");
-  const toggleRef = useRef<() => void>(noop);
-  const tapRef = useRef<(i: number) => void>(noop);
-
+/** Plays the rows with the scroll: on view timelines where the browser
+ *  has them and gets them right, else by one scroll listener; nothing
+ *  under reduced motion. Not tied to the language: a new one swaps the
+ *  text inside the spans the animations hold, and the ResizeObserver
+ *  re-fits whatever it moved (re-attaching would flash the rest state,
+ *  and every visitor not reading English would attach twice). */
+function useScrubRows(listRef: React.RefObject<HTMLUListElement | null>, reduced: boolean) {
   useEffect(() => {
     const list = listRef.current;
     if (!list || typeof list.animate !== "function") return;
-    const rows = Array.from(list.querySelectorAll<HTMLLIElement>("[data-row]"), (el, i) => collect(el, ROWS[i].mini));
-    if (rows.some((r) => !r)) return;
-    const R = rows as RowState[];
-    // The hook's first (hydration) value is false: read the setting
-    // itself, before anything is armed.
-    const reduce = reduced || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // The hook's first (hydration) value is false: read the setting itself.
+    if (reduced || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const found = Array.from(list.querySelectorAll<HTMLLIElement>("[data-row]"), (el, i) => collect(el, ROWS[i].mini));
+    if (found.some((r) => !r)) return;
+    const rows = found as Row[];
+    const range = nativeRange();
+    let path: "native" | "js" = range ? "native" : "js";
+    let live = true;
+    /** the list's top in the document when the lanes were measured */
+    let listY = 0;
+    /** stops the running path's listeners and observers */
+    let unpath = noop;
+    let fades: Animation[] = [];
 
-    // A strip whose width changed is re-armed (its fold is measured);
-    // one caught mid-pass is finished, not restarted. Once per frame.
-    let frame = 0;
-    let onResized: (r: RowState) => void = noop;
+    /** The lanes: each probe's top in the list and its length, shortened
+     *  (inline) where the next lane would start too soon. Returns the
+     *  list's top on screen. */
+    const measure = () => {
+      for (const r of rows) r.probe.style.height = "";
+      const top = list.getBoundingClientRect().top;
+      const boxes = rows.map((r) => r.probe.getBoundingClientRect());
+      const lens = laneLengths(boxes.map((b) => b.top), boxes[0].height);
+      listY = top + window.scrollY;
+      rows.forEach((r, i) => {
+        r.off = boxes[i].top - top;
+        r.len = lens[i];
+        if (lens[i] < boxes[i].height) r.probe.style.height = `${lens[i]}px`;
+      });
+      return top;
+    };
+
+    /** The fallback's seek: each row whose p changed since the last one,
+     *  or every row, exactly, when settling. One layout read. */
+    const sync = (settle = false) => {
+      const top = list.getBoundingClientRect().top;
+      for (const r of rows) {
+        const p = fallbackProgress(top, r.off, r.len);
+        if (!settle && Math.abs(p - r.p) <= 1e-4) continue;
+        r.p = p;
+        const t = settle ? p * SEEK : Math.min(p * SEEK, SEEK - 0.1);
+        for (const a of r.anims) a.currentTime = t;
+      }
+    };
+
+    /** Row `r` scored at gone width `w`, its animations made anew. */
+    const animate = (r: Row, w: number) => {
+      for (const a of r.anims) a.cancel();
+      r.p = -1;
+      r.anims = plan(r, w).map(([el, frames]) => el.animate(frames, r.timing));
+      if (!r.timing.timeline) for (const a of r.anims) a.pause();
+    };
+
+    /** A strip changed width: the row re-scored, its animations re-keyed
+     *  in place (timelines and layers stay). */
+    const rescore = (r: Row, w: number) => {
+      if (typeof KeyframeEffect === "undefined" || !("setKeyframes" in KeyframeEffect.prototype)) {
+        animate(r, w);
+        return;
+      }
+      plan(r, w).forEach(([, frames], i) => (r.anims[i]?.effect as KeyframeEffect | null)?.setKeyframes(frames));
+    };
+
+    /** Every animation in the list off: the rows', a fade's. */
+    const cancelAll = () => {
+      for (const r of rows) for (const a of r.anims) a.cancel();
+      for (const a of fades) a.cancel();
+      for (const a of list.getAnimations?.({ subtree: true }) ?? []) a.cancel();
+      for (const r of rows) r.anims = [];
+      fades = [];
+    };
+
+    /** Every row on the current path, then data-motion, in one task: the
+     *  first frame is already the scroll's. */
+    const arm = () => {
+      performance.mark("commands:attach-start");
+      const widths = rows.map((r) => {
+        r.width = r.mini.offsetWidth;
+        return goneWidth(r);
+      });
+      measure();
+      const make = () =>
+        rows.forEach((r, i) => {
+          r.timing =
+            path === "native" && range
+              ? {
+                  timeline: new ViewTimeline({ subject: r.probe, axis: "block", inset: "0px" }),
+                  rangeStart: range[0],
+                  rangeEnd: range[1],
+                  fill: "both",
+                }
+              : { duration: SEEK, fill: "both" };
+          animate(r, widths[i]);
+        });
+      try {
+        make();
+      } catch (e) {
+        if (path === "js") throw e;
+        // View timelines, yet these options throw: the fallback.
+        cancelAll();
+        path = "js";
+        make();
+      }
+      list.setAttribute("data-motion", path);
+      if (path === "js") sync(true);
+      unpath = path === "native" ? check() : drive();
+      performance.mark("commands:attach-end");
+    };
+
+    /** The native path's one check, once some row is well into its lane:
+     *  every row's timeline must agree with the formula (an engine can
+     *  take the options and still get the range or the inset wrong), or
+     *  the rows move to the fallback. Until then a passive scroll
+     *  listener, only while the list is on screen, tests the cached lanes
+     *  (no layout read); a resize re-measures them, since the middle line
+     *  is in svh and moves with the viewport's height while no strip
+     *  changes size. Returns its stop. */
+    const check = () => {
+      let frame = 0;
+      let listening = false;
+      /** the lanes when the wait for the timelines began */
+      let waited: number[] = [];
+      const midLane = (ps: number[]) => ps.some((p) => p >= CHECK.from && p <= CHECK.to);
+      const cached = () => rows.map((r) => progress(window.scrollY, listY + r.off, r.len));
+      const lanes = () => [listY, ...rows.flatMap((r) => [r.off, r.len])];
+      const verify = () => {
+        frame = 0;
+        // The lanes as they are now: the cache may be stale (something
+        // above the list changed height, the viewport did).
+        const top = measure();
+        // Lanes that moved during the wait need not be the ones the
+        // timelines sampled: look again two frames on.
+        if (lanes().some((v, i) => Math.abs(v - waited[i]) > CHECK.still)) {
+          soon();
+          return;
+        }
+        const ps = rows.map((r) => fallbackProgress(top, r.off, r.len));
+        if (!midLane(ps)) return;
+        stop();
+        const agree = rows.every((r, i) => {
+          const got = r.anims[0]?.effect?.getComputedTiming().progress;
+          return typeof got === "number" && Math.abs(got - ps[i]) <= CHECK.tolerance;
+        });
+        if (agree) return;
+        unpath();
+        cancelAll();
+        path = "js";
+        arm();
+      };
+      // Two frames on: the timelines have sampled this scroll position.
+      const soon = () => {
+        if (frame || !midLane(cached())) return;
+        waited = lanes();
+        frame = requestAnimationFrame(() => (frame = requestAnimationFrame(verify)));
+      };
+      const listen = (on: boolean) => {
+        if (on === listening) return;
+        listening = on;
+        if (on) window.addEventListener("scroll", soon, { passive: true });
+        else window.removeEventListener("scroll", soon);
+        if (on) soon();
+      };
+      const onResize = () => {
+        measure();
+      };
+      // The observer's first report starts the listener if the list is on
+      // screen: no scroll read inside the attach, whose style is dirty.
+      const io =
+        typeof IntersectionObserver === "undefined"
+          ? null
+          : new IntersectionObserver((entries) => listen(entries[entries.length - 1].isIntersecting));
+      const stop = () => {
+        io?.disconnect();
+        listen(false);
+        window.removeEventListener("resize", onResize);
+        cancelAnimationFrame(frame);
+        frame = 0;
+      };
+      if (io) io.observe(list);
+      else listen(true);
+      window.addEventListener("resize", onResize);
+      return stop;
+    };
+
+    /** The fallback: while the list is within a screen of the viewport,
+     *  one passive scroll listener seeks the rows once a frame; leaving
+     *  settles every row on 0 or 1. Returns its stop. */
+    const drive = () => {
+      let frame = 0;
+      let listening = false;
+      const onScroll = () => {
+        if (!frame)
+          frame = requestAnimationFrame(() => {
+            frame = 0;
+            sync();
+          });
+      };
+      const listen = (on: boolean) => {
+        if (on === listening) return;
+        listening = on;
+        if (on) window.addEventListener("scroll", onScroll, { passive: true });
+        else {
+          window.removeEventListener("scroll", onScroll);
+          cancelAnimationFrame(frame);
+          frame = 0;
+        }
+        sync(!on);
+      };
+      const onResize = () => {
+        measure();
+        sync(true);
+      };
+      // Back from the bfcache: the scroll may have been restored anywhere.
+      const onShow = (e: PageTransitionEvent) => {
+        if (e.persisted) sync(true);
+      };
+      const io =
+        typeof IntersectionObserver === "undefined"
+          ? null
+          : new IntersectionObserver((entries) => listen(entries[entries.length - 1].isIntersecting), {
+              rootMargin: "100% 0px",
+            });
+      if (io) io.observe(list);
+      else listen(true);
+      window.addEventListener("resize", onResize);
+      window.addEventListener("pageshow", onShow);
+      return () => {
+        io?.disconnect();
+        window.removeEventListener("scroll", onScroll);
+        window.removeEventListener("resize", onResize);
+        window.removeEventListener("pageshow", onShow);
+        cancelAnimationFrame(frame);
+      };
+    };
+
+    // A strip that changed width (resize, rotation, fonts, a language) is
+    // re-scored in place, and the lanes re-measured; once a frame, never
+    // during a plain scroll.
+    let fit = 0;
+    const refit = () => {
+      fit = 0;
+      if (!list.hasAttribute("data-motion")) return;
+      const changed = rows.flatMap((r) => {
+        const width = r.mini.offsetWidth;
+        return Math.abs(width - r.width) >= 1 ? [{ r, width, w: goneWidth(r) }] : [];
+      });
+      measure();
+      for (const { r, width, w } of changed) {
+        r.width = width;
+        rescore(r, w);
+      }
+      if (path === "js") sync(true);
+      else if (changed.length) {
+        // Checked again where the new score is mid-lane.
+        unpath();
+        unpath = check();
+      }
+    };
     const ro =
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(() => {
-            if (frame) return;
-            frame = window.requestAnimationFrame(() => {
-              frame = 0;
-              for (const r of R) if (r.width && Math.abs(r.mini.offsetWidth - r.width) >= 1) onResized(r);
-            });
+            if (!fit) fit = requestAnimationFrame(refit);
           });
-    R.forEach((r) => ro?.observe(r.mini));
-    const teardown = () => {
-      ro?.disconnect();
-      window.cancelAnimationFrame(frame);
-      for (const a of list.getAnimations({ subtree: true })) a.cancel();
-      for (const r of R) {
-        unarm(r);
-        r.op++;
-        for (const u of r.units) u.removeAttribute("data-said");
-      }
-      list.removeAttribute("data-motion");
-      toggleRef.current = noop;
-      tapRef.current = noop;
-      setMode("off");
-    };
+    ro?.observe(list);
+    for (const r of rows) ro?.observe(r.mini);
 
-    if (reduce) {
-      // Gentler, not zero: a strip crossfades between its mark (the rest
-      // state) and the played result (armed and finished while unseen).
-      onResized = (r) => {
-        if (r.phase !== "done") return;
-        arm(r);
-        settle(r);
-      };
-      tapRef.current = (i) => {
-        const r = R[i];
-        if (!r || r.phase === "rewinding") return;
-        const op = ++r.op;
-        const played = r.phase === "done";
-        r.phase = "rewinding";
-        const out = r.mini.animate([{ opacity: 1 }, { opacity: 0 }], { duration: SWAP.out, easing: "ease", fill: "both" });
-        r.fx.push(out);
-        out.finished.then(() => {
-          if (r.op !== op) return;
-          if (played) unarm(r);
-          else {
-            arm(r);
-            settle(r);
-          }
-          r.fx.push(r.mini.animate([{ opacity: 0 }, { opacity: 1 }], { duration: SWAP.in, easing: EASE }));
-        }, noop);
-      };
-      return teardown;
+    // The attach (61 animations, 5 timelines) is one long task: it waits
+    // for an idle moment, or for the list to come near if that is sooner,
+    // so it never lengthens hydration. Without an idle callback (Safari)
+    // the list coming near starts it. Rows on screen by then (a reload
+    // mid-page, a tall screen) fade out of the rest state and back in at
+    // their scroll positions; out of view the swap is unseen.
+    let begun = false;
+    let idle = 0;
+    let near: IntersectionObserver | null = null;
+    const begin = () => {
+      if (begun) return;
+      begun = true;
+      near?.disconnect();
+      if (idle) cancelIdleCallback(idle);
+      const vh = window.innerHeight;
+      const seen = rows.filter((r) => {
+        const b = r.lead.getBoundingClientRect();
+        return b.bottom > 0 && b.top < vh;
+      });
+      if (!seen.length) {
+        arm();
+        return;
+      }
+      fades = seen.map((r) =>
+        r.lead.animate([{ opacity: 1 }, { opacity: 0 }], { duration: FADE.out, easing: "ease", fill: "forwards" }),
+      );
+      Promise.all(fades.map((a) => a.finished)).then(() => {
+        if (!live) return;
+        for (const a of fades) a.cancel();
+        arm();
+        fades = seen.map((r) => r.lead.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FADE.in, easing: EASE }));
+      }, noop);
+    };
+    if (typeof IntersectionObserver !== "undefined") {
+      near = new IntersectionObserver(
+        (entries) => {
+          if (entries[entries.length - 1].isIntersecting) begin();
+        },
+        { rootMargin: ATTACH.near },
+      );
+      near.observe(list);
     }
-    if (typeof IntersectionObserver === "undefined") return teardown;
+    if (typeof requestIdleCallback === "function") idle = requestIdleCallback(begin, { timeout: ATTACH.idle });
+    else if (!near) begin();
 
-    /** data-motion is on: the ink copies, caret, rail and tint are drawn */
-    let motion = false;
-    /** the row whose turn it is (rows above it have played or settled) */
-    let turn = R.length;
-    /** the row the cascade is waiting on (its cue) */
-    let current: RowState | null = null;
-    const running = new Set<RowState>();
-    /** the visitor paused: nothing starts on its own until play */
-    let held = false;
-    /** animations a hold (the visitor, a hidden tab) paused */
-    let frozen: Animation[] = [];
-    /** a replay of the whole list is fading rows out: the cascade waits */
-    let rewinding = false;
-    let replayId = 0;
-    let lastScroll = -Infinity;
-    /** the first row may not start before this (the entrance) */
-    let notBefore = 0;
-    let wake = 0;
-    /** the entrance, paused on its first frame until the list enters */
-    let entrance: Animation[] = [];
-    let shown: Mode = "off";
-
-    const show = (m: Mode) => {
-      if (m === shown) return;
-      shown = m;
-      setMode(m);
-    };
-    const wakeAt = (at: number) => {
-      window.clearTimeout(wake);
-      wake = window.setTimeout(
-        () => {
-          wake = 0;
-          step();
-        },
-        Math.max(0, at - performance.now()) + 4,
-      );
-    };
-    const stopped = () => held || document.hidden;
-    const done = () => {
-      if (shown === "run" && turn >= R.length && !current && !running.size && !rewinding) show("done");
-    };
-
-    const run = (r: RowState, solo: boolean) => {
-      const gen = r.gen;
-      r.phase = "playing";
-      running.add(r);
-      for (const a of r.anims) a.play();
-      const cue = r.el.animate([], { duration: r.handoff });
-      r.cue = cue;
-      if (!solo) current = r;
-      cue.finished.then(() => {
-        if (current !== r) return;
-        current = null;
-        step();
-      }, noop);
-      Promise.all(r.anims.map((a) => a.finished)).then(() => {
-        if (r.gen !== gen) return;
-        r.phase = "done";
-        running.delete(r);
-        done();
-      }, noop);
-    };
-
-    /** The cascade: the row whose turn it is plays once its strip is in
-     *  the band (or it is visible above the band while a later one is in
-     *  it) and scrolling has rested; it is finished unseen once it is
-     *  fully above the clear area; otherwise the turn waits. */
-    const step = () => {
-      if (!motion || stopped() || current || rewinding) return;
-      const now = performance.now();
-      if (now < notBefore) return wakeAt(notBefore);
-      const vh = window.innerHeight;
-      const [top, bottom] = band(vh);
-      const inBand = (b: DOMRect) => {
-        const mid = (b.top + b.bottom) / 2;
-        return mid >= top && mid <= bottom;
-      };
-      while (turn < R.length) {
-        const r = R[turn];
-        if (r.phase !== "armed") {
-          // played on its own (a tap) before its turn
-          turn++;
-          continue;
-        }
-        const box = r.strip.getBoundingClientRect();
-        if (box.bottom <= CHROME_TOP) {
-          settle(r);
-          turn++;
-          continue;
-        }
-        const go =
-          inBand(box) ||
-          (box.top < vh - CHROME_BOTTOM &&
-            R.slice(turn + 1).some((n) => n.phase === "armed" && inBand(n.strip.getBoundingClientRect())));
-        if (!go) return;
-        if (now - lastScroll < REST) return wakeAt(lastScroll + REST);
-        turn++;
-        run(r, false);
-        return;
-      }
-      done();
-    };
-
-    const freeze = () => {
-      for (const r of running)
-        for (const a of r.cue ? [...r.anims, r.cue] : r.anims) {
-          if (a.playState !== "running") continue;
-          a.pause();
-          frozen.push(a);
-        }
-    };
-    /** A hold (the visitor, a hidden tab) freezes the rows in flight and
-     *  their clocks; going on thaws them and takes the next turn. */
-    const sync = () => {
-      if (stopped()) {
-        freeze();
-        return;
-      }
-      for (const a of frozen) if (a.playState === "paused") a.play();
-      frozen = [];
-      step();
-    };
-
-    /** Motion on: the ink copies, caret, rail and tint are drawn. A row
-     *  at rest stays as it is (said, its ink over it) until it is armed. */
-    const motionOn = () => {
-      if (motion) return;
-      motion = true;
-      for (const r of R) if (r.phase === "still") for (const u of r.units) u.setAttribute("data-said", "");
-      list.setAttribute("data-motion", "");
-    };
-    /** Every row on its first frame, the turn back at the top. */
-    const armAll = () => {
-      motionOn();
-      replayId++;
-      rewinding = false;
-      current = null;
-      frozen = [];
-      running.clear();
-      for (const r of R) {
-        r.op++;
-        arm(r);
-      }
-      turn = 0;
-      show("run");
-    };
-
-    /** The first entry: the rows fade up and each strip draws in (a wipe:
-     *  the strip and its content counter-translate). Created paused while
-     *  the list is out of view, played as it enters. */
-    const prepareEntrance = () => {
-      R.forEach((r, i) => {
-        const row = i * ENTER.stagger;
-        const strip = row + ENTER.stripAfter;
-        entrance.push(
-          r.el.animate([{ opacity: 0, translate: "0 8px" }, { opacity: 1, translate: "0 0" }], {
-            duration: ENTER.row,
-            delay: row,
-            easing: EASE,
-            fill: "backwards",
-          }),
-          r.strip.animate([{ translate: "-100% 0" }, { translate: "0 0" }], {
-            duration: ENTER.strip,
-            delay: strip,
-            easing: EASE,
-            fill: "backwards",
-          }),
-          r.mini.animate([{ translate: "100% 0" }, { translate: "0 0" }], {
-            duration: ENTER.strip,
-            delay: strip,
-            easing: EASE,
-            fill: "backwards",
-          }),
-        );
-      });
-      for (const a of entrance) {
-        a.pause();
-        a.currentTime = 0;
-      }
-    };
-    const playEntrance = () => {
-      if (!entrance.length) return;
-      for (const a of entrance) a.play();
-      entrance = [];
-      notBefore = performance.now() + (R.length - 1) * ENTER.stagger + ENTER.stripAfter + ENTER.strip + ENTER.firstSay;
-      wakeAt(notBefore);
-    };
-
-    /** The list is fully out of view: everything back to the first frame
-     *  for the next entry (no entrance then); while paused, settle instead
-     *  (it does not play by itself). */
-    const leave = () => {
-      window.clearTimeout(wake);
-      wake = 0;
-      if (!held) {
-        armAll();
-        return;
-      }
-      replayId++;
-      rewinding = false;
-      current = null;
-      frozen = [];
-      running.clear();
-      for (const r of R) {
-        r.op++;
-        if (r.phase === "still") continue;
-        if (r.phase === "rewinding") arm(r);
-        settle(r);
-      }
-      turn = R.length;
-      show("held");
-    };
-
-    /** One row again: the ink and the strip fade, the row re-arms unseen
-     *  and fades back in; resolves (true) 100 ms into that fade-in, when
-     *  its pass should start. */
-    const rewind = (r: RowState, delay: number): Promise<boolean> => {
-      const op = ++r.op;
-      if (current === r) current = null;
-      running.delete(r);
-      r.cue?.cancel();
-      r.cue = null;
-      r.phase = "rewinding";
-      // Under the ink, unseen: the base waits in its tint again.
-      for (const u of r.units) u.removeAttribute("data-said");
-      const fades = [
-        ...[...r.inks, ...r.voices].map((el) =>
-          el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: REWIND.ink, delay, easing: "ease", fill: "both" }),
-        ),
-        r.mini.animate([{ opacity: 1 }, { opacity: 0 }], { duration: REWIND.strip, delay, easing: "ease", fill: "both" }),
-      ];
-      r.fx.push(...fades);
-      return Promise.all(fades.map((a) => a.finished)).then(
-        () => {
-          if (r.op !== op) return false;
-          // One task: arm drops the fades, the fade-in starts invisible.
-          arm(r);
-          r.phase = "rewinding";
-          r.fx.push(
-            r.mini.animate([{ opacity: 0, translate: "0 3px" }, { opacity: 1, translate: "0 0" }], {
-              duration: REWIND.stripIn,
-              easing: EASE,
-            }),
-          );
-          const lead = r.mini.animate([], { duration: REWIND.passIn });
-          r.fx.push(lead);
-          return lead.finished.then(
-            () => {
-              if (r.op !== op) return false;
-              r.phase = "armed";
-              return true;
-            },
-            () => false,
-          );
-        },
-        () => false,
-      );
-    };
-    /** A played row (or the rest state) plays again, on its own. */
-    const replay = (r: RowState) => {
-      motionOn();
-      rewind(r, 0).then((ok) => {
-        if (ok) run(r, true);
-      });
-    };
-    /** Play after the end (or at rest): the visible rows rewind top to
-     *  bottom, the others re-arm unseen; then the cascade starts again
-     *  under the start rule. */
-    const replayAll = () => {
-      motionOn();
-      held = false;
-      frozen = [];
-      current = null;
-      running.clear();
-      window.clearTimeout(wake);
-      wake = 0;
-      turn = 0;
-      const id = ++replayId;
-      rewinding = true;
-      show("run");
-      const vh = window.innerHeight;
-      let k = 0;
-      const resets = R.map((r) => {
-        if (r.phase === "armed") return Promise.resolve(true);
-        const b = r.el.getBoundingClientRect();
-        if (b.bottom <= 0 || b.top >= vh) {
-          r.op++;
-          arm(r);
-          return Promise.resolve(true);
-        }
-        return rewind(r, k++ * REWIND.stagger);
-      });
-      Promise.all(resets).then(() => {
-        if (id !== replayId) return;
-        rewinding = false;
-        step();
-      });
-    };
-
-    toggleRef.current = () => {
-      if (shown === "run") {
-        held = true;
-        show("held");
-        sync();
-      } else if (shown === "held" && (frozen.length || current || turn < R.length)) {
-        held = false;
-        show("run");
-        sync();
-      } else {
-        replayAll();
-      }
-    };
-    /** A strip pressed: a played row (or the rest state) plays again; the
-     *  row whose turn it is starts now; a later one plays on its own. An
-     *  explicit press plays even while paused. */
-    tapRef.current = (i) => {
-      const r = R[i];
-      if (!r || r.phase === "playing" || r.phase === "rewinding") return;
-      if (r.phase !== "armed") {
-        replay(r);
-        return;
-      }
-      const isTurn = R[turn] === r;
-      if (isTurn) turn++;
-      run(r, !isTurn || !!current || stopped());
-    };
-    onResized = (r) => {
-      if (r.phase === "armed") arm(r);
-      else if (r.phase === "playing" || r.phase === "done") {
-        const wasCurrent = current === r;
-        running.delete(r);
-        arm(r);
-        settle(r);
-        if (wasCurrent) {
-          current = null;
-          step();
-        } else done();
-      }
-    };
-
-    // Hover replays (a mouse over the word and strip): a real move, a
-    // short dwell, the page at rest; once per hover, never while paused or
-    // while that row plays.
-    const fine = window.matchMedia("(hover: hover) and (pointer: fine)");
-    const unhover = R.map((r) => {
-      let dwell = 0;
-      let used = false;
-      const quiet = () => performance.now() - lastScroll >= HOVER_REST;
-      const move = (e: PointerEvent) => {
-        if (e.pointerType !== "mouse" || used || dwell || !fine.matches) return;
-        // A pointer the page scrolled under has not moved.
-        if (!e.movementX && !e.movementY) return;
-        if (!quiet()) return;
-        dwell = window.setTimeout(() => {
-          dwell = 0;
-          if (held || !quiet() || (r.phase !== "done" && r.phase !== "still")) return;
-          used = true;
-          replay(r);
-        }, DWELL);
-      };
-      const out = () => {
-        window.clearTimeout(dwell);
-        dwell = 0;
-        used = false;
-      };
-      r.lead.addEventListener("pointermove", move);
-      r.lead.addEventListener("pointerleave", out);
-      return () => {
-        out();
-        r.lead.removeEventListener("pointermove", move);
-        r.lead.removeEventListener("pointerleave", out);
-      };
-    });
-
-    const onScroll = () => {
-      lastScroll = performance.now();
-      if (motion && !stopped() && turn < R.length) wakeAt(lastScroll + REST);
-    };
-    // Wakes the cascade when a strip crosses the clear area without a
-    // scroll (layout changes); step() itself reads the band.
-    const near = new IntersectionObserver(() => step(), {
-      rootMargin: PASS_ROOT_MARGIN,
-      threshold: [0, 0.5, 1],
-    });
-    const enter = new IntersectionObserver(
-      (entries) => {
-        if (!entries[entries.length - 1].isIntersecting || !motion) return;
-        playEntrance();
-        enter.disconnect();
-      },
-      { rootMargin: "0px 0px -10% 0px" },
-    );
-    let first = true;
-    const away = new IntersectionObserver((entries) => {
-      const on = entries[entries.length - 1].isIntersecting;
-      if (first) {
-        first = false;
-        if (on) {
-          // On screen at hydration: the rest state stays (nothing is
-          // armed in view); play replays it softly. Armed once it leaves.
-          enter.disconnect();
-          show("done");
-          return;
-        }
-        armAll();
-        prepareEntrance();
-        return;
-      }
-      if (!on) leave();
-    });
-    R.forEach((r) => near.observe(r.strip));
-    enter.observe(list);
-    away.observe(list);
-    window.addEventListener("scroll", onScroll, { passive: true });
-    document.addEventListener("visibilitychange", sync);
     return () => {
-      near.disconnect();
-      enter.disconnect();
-      away.disconnect();
-      unhover.forEach((off) => off());
-      window.removeEventListener("scroll", onScroll);
-      document.removeEventListener("visibilitychange", sync);
-      window.clearTimeout(wake);
-      entrance = [];
-      // A replay still settling after this (its fades cancelled) must not
-      // wake the cascade.
-      motion = false;
-      replayId++;
-      teardown();
+      live = false;
+      near?.disconnect();
+      if (idle) cancelIdleCallback(idle);
+      unpath();
+      unpath = noop;
+      ro?.disconnect();
+      cancelAnimationFrame(fit);
+      cancelAll();
+      list.removeAttribute("data-motion");
+      for (const r of rows) {
+        r.rail.style.width = "";
+        r.probe.style.height = "";
+      }
     };
   }, [listRef, reduced]);
-
-  return { mode, toggle: () => toggleRef.current(), tap: (i) => tapRef.current(i) };
 }
 
 export function CommandRowsSection() {
@@ -884,8 +644,7 @@ export function CommandRowsSection() {
   const cmds = useCmdNodes();
   const reduced = useReducedMotion();
   const listRef = useRef<HTMLUListElement>(null);
-  const { mode, toggle, tap } = useRowPasses(listRef, reduced);
-  const quoted = (ids: CmdId[]) => ids.map((id) => t("site.quote", { text: CMD_PHRASE[id] })).join(" … ");
+  useScrubRows(listRef, reduced);
 
   return (
     <section className={styles.section} aria-labelledby="commands-title">
@@ -895,8 +654,8 @@ export function CommandRowsSection() {
         </h2>
         <p className={styles.body}>{rich(t("site.commands.sub"), cmds)}</p>
         <p className={c.note}>{t("site.commands.note")}</p>
-        <ul ref={listRef} className={c.cmdList}>
-          {ROWS.map((row, i) => (
+        <ul ref={listRef} className={c.cmdList} data-testid="command-rows">
+          {ROWS.map((row) => (
             <li
               key={row.ids.join("-")}
               className={c.row}
@@ -909,7 +668,7 @@ export function CommandRowsSection() {
                     <>
                       <span className={c.pairHead}>
                         <Said id={row.ids[0]} />
-                        {" "}
+                        {" "}
                         <small className={c.ellipsis}>…</small>
                       </span>{" "}
                       <Said id={row.ids[1]} />
@@ -918,36 +677,16 @@ export function CommandRowsSection() {
                     <Said id={row.ids[0]} />
                   )}
                 </h3>
-                <button
-                  type="button"
-                  className={c.strip}
-                  data-strip
-                  aria-label={t("site.commands.replay", { cmd: quoted(row.ids) })}
-                  onClick={() => tap(i)}
-                >
+                {/* The probe is the row's lane on the page (commandScroll.ts). */}
+                <div className={c.strip} data-strip>
+                  <span className={c.probe} data-probe aria-hidden="true" />
                   <Strip parts={row.mini} />
-                </button>
+                </div>
               </div>
               <p className={c.desc}>{t(row.desc)}</p>
             </li>
           ))}
         </ul>
-        {/* Only while the passes can run (not in the server HTML, not
-            under reduced motion); out of flow, so it moves nothing. The
-            two icons crossfade. */}
-        {mode !== "off" && (
-          <div className={c.passBar}>
-            <IconButton
-              label={mode === "run" ? t("site.demo.pause") : t("site.demo.play")}
-              className={c.passToggle}
-              data-mode={mode}
-              onClick={toggle}
-            >
-              <Icon icon={Pause} size={16} className={c.icPause} />
-              <Icon icon={Play} size={16} className={c.icPlay} />
-            </IconButton>
-          </div>
-        )}
       </div>
     </section>
   );

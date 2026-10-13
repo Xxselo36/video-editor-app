@@ -6,13 +6,13 @@
  * it: its span outlines, a connector runs down from it, its 9:16 clip
  * stands up out of the tape on the page's hinge spring (no overshoot),
  * comes alive (its clip starts playing, its duration chip fades in) and
- * its caption plays once. The three clips are cut from the same
- * captioned video, so they share one caption style: Power, or the
- * language's first native style where Power is unavailable (Hindi:
- * Karaoke). Each clip says its own line of the video (one of its three
- * tips), and each tile loops its own clip of him (scene/); the control
- * under the figure pauses them (WCAG 2.2.2) and shows once the first
- * tile is up.
+ * its caption starts. The three clips are cut from the same captioned
+ * video, so they share one caption style: Power, or the language's first
+ * native style where Power is unavailable (Hindi: Karaoke). Each clip
+ * says its own line of the video (one of its three tips), and each tile
+ * loops its own clip of him (scene/) with its caption; the control under
+ * the figure pauses both (WCAG 2.2.2) and shows once the first tile is
+ * up.
  *
  * Never an empty band: while a tile is still down, a dashed slot marks
  * where it will stand; the slot fades as its tile lands.
@@ -20,24 +20,30 @@
  * The figure enters with the page's shared entrance (data-entrance,
  * app/page.tsx); the pass starts only once that has finished, and once
  * the tape and the tiles are in view (clear of the sticky header and the
- * phone bar) in a visible tab. One pass (~2 s, then the captions; under
- * 5 s in every language); re-armed when the figure is fully out of view,
- * so it plays again on re-entry. Every part takes its timing from
+ * phone bar) in a visible tab. One pass (~2 s, then the captions loop
+ * with their clips); re-armed when the figure is fully out of view, so
+ * it plays again on re-entry. Every part takes its timing from
  * `clipsScore` (WAAPI on translate, transform, opacity and clip-path).
  * The base CSS is the settled end state (spans outlined, connectors
  * drawn, tiles upright, slots gone, captions settled): reduced motion,
  * screenshots and the server HTML.
  *
- * The captions run on their own clocks (the page's one ticker), and each
- * starts only once its engine and font are ready: a slow font load
- * delays the words, it never leaves a clip blank or frozen mid-sentence.
+ * Each caption runs on its clip's clock, as on a real short: the page's
+ * one ticker reads the video's time, so every loop of the clip plays the
+ * line again word by word, then the whole sentence holds until the clip
+ * loops; the pause control, a hidden tab or a tile off screen hold the
+ * two together (clipCaptions.ts stepClipCaption, also for a clip that
+ * cannot play). Each line fits on one caption page in every language
+ * (clipCaptions.test.ts), so any still shows the whole sentence. Where
+ * the clips cannot move (data saver: no pause control, so nothing holds
+ * on half a sentence), each caption plays once and settles; once they
+ * can again, it loops with its clip again. A caption starts only once
+ * its engine and font are ready: a slow font load delays the words, it
+ * never leaves a clip blank or frozen mid-sentence.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLang, useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
-import { LAUNCH_PRESETS } from "@/lib/captions/presets";
-import { presetSupport } from "@/lib/captions/scripts";
-import type { PresetId } from "@/lib/captions/types";
 import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "../CaptionFrame";
 import { LiveCaption, type LiveCaptionHandle } from "../captions/LiveCaption";
@@ -55,6 +61,7 @@ import {
   useReducedMotion,
 } from "../shared";
 import styles from "../Landing.module.css";
+import { clipClock, clipPreset, stepClipCaption, type ClipClock, type ClipVideo } from "./clipCaptions";
 import f from "./Format.module.css";
 
 /** Bonus clips: at most this many (backend/llm.py detect_hook_moments). */
@@ -95,7 +102,8 @@ const SLOT_AT = 300;
 const SLOT_MS = 150;
 /** Once it is up, its duration chip fades in. */
 const DUR_MS = 200;
-/** Each caption holds its last page this long after the last word (s). */
+/** Where the clips cannot move (data saver), each caption plays once and
+ *  settles this long after its last word (s). */
 const CAP_TAIL = 0.1;
 
 /** When the playhead reaches a clip (ms into the pass). */
@@ -187,13 +195,14 @@ const noSubscription = () => () => {};
 /** Can this browser run the pass? */
 const canPass = () => typeof IntersectionObserver !== "undefined" && typeof Element.prototype.animate === "function";
 
-/** One caption style for the three clips: Power where the language's
- *  script has it, else the first style that renders it natively. */
-function clipPreset(lang: string): PresetId | null {
-  if (presetSupport("power", lang).level !== "unavailable") return "power";
-  const native = LAUNCH_PRESETS.find((p) => presetSupport(p, lang).level === "native");
-  return native ?? LAUNCH_PRESETS.find((p) => presetSupport(p, lang).level !== "unavailable") ?? null;
-}
+/** What a tile's video is doing on this frame, for its caption's clock. */
+const videoOf = (v: HTMLVideoElement): ClipVideo => ({
+  src: v.networkState !== HTMLMediaElement.NETWORK_EMPTY,
+  frame: v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA,
+  playing: !v.paused,
+  time: v.currentTime,
+  duration: v.duration,
+});
 
 export function BonusClipsSection() {
   const t = useT();
@@ -219,8 +228,14 @@ export function BonusClipsSection() {
   const tileRefs = useRef<(HTMLDivElement | null)[]>([]);
   const slotRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const durRefs = useRef<(HTMLSpanElement | null)[]>([]);
-  // Plain ref objects for the captions' handles (stable across renders).
+  // Plain ref objects for the captions' handles and the tiles' videos
+  // (stable across renders).
   const [capHandles] = useState(() => CLIPS.map(() => ({ current: null as LiveCaptionHandle | null })));
+  const [videos] = useState(() => CLIPS.map(() => ({ current: null as HTMLVideoElement | null })));
+  // The pause control and whether the clips can move, for the captions'
+  // ticker (set below).
+  const pausedRef = useRef(paused);
+  const loopsRef = useRef(moves);
   // Which captions have an engine renderer, and the pass's hook to start
   // a caption whose renderer arrives late.
   const readyRef = useRef<boolean[]>(CLIPS.map(() => false));
@@ -260,32 +275,42 @@ export function BonusClipsSection() {
     // Each arming is a new generation: a hinge that finishes reports its
     // tile up only for the pass it belongs to.
     let gen = 0;
-    // The captions' clocks (s) and the pass's start (performance.now()).
-    const capT = CLIPS.map(() => 0);
-    const capDone = CLIPS.map(() => false);
+    // The captions' clocks and the pass's start (performance.now()).
+    const clocks: ClipClock[] = CLIPS.map(clipClock);
     let t0 = 0;
     let stopClock: (() => void) | null = null;
     const halt = () => {
       stopClock?.();
       stopClock = null;
     };
-    // Each caption plays once its tile is up and its renderer is ready;
-    // the ticker stops when nothing is left to play.
+    // Each caption starts once its tile is up and its renderer is ready,
+    // and loops on its clip's clock; a video that started late jumps to
+    // its caption. Paused with the control, it holds (the whole sentence
+    // between two loops); where the clips cannot move, it plays once
+    // (clipCaptions.ts stepClipCaption). The ticker stops while nothing
+    // moves (every caption settled, paused or held with its paused
+    // video); a clip that plays again, the control, the clips able to
+    // move again or a late renderer starts it again (kick).
     const tick = (dt: number) => {
       const now = performance.now() - t0;
       let busy = false;
       capHandles.forEach((h, i) => {
         const cap = h.current;
-        if (!cap || capDone[i] || !readyRef.current[i]) return;
-        busy = true;
-        if (now < clipsScore.captionAt[i]) return;
-        capT[i] += dt;
-        if (capT[i] >= cap.duration) {
-          capDone[i] = true;
-          cap.seek(cap.duration);
-        } else {
-          cap.seek(capT[i]);
+        if (!cap || !readyRef.current[i]) return;
+        if (now < clipsScore.captionAt[i]) {
+          busy = true;
+          return;
         }
+        const v = videos[i].current;
+        const step = stepClipCaption(clocks[i], dt, {
+          loops: loopsRef.current,
+          paused: pausedRef.current,
+          video: v && videoOf(v),
+          end: cap.duration,
+        });
+        if (v && step.seek !== null) v.currentTime = step.seek;
+        if (step.busy) busy = true;
+        cap.seek(step.at);
       });
       if (!busy) halt();
     };
@@ -316,9 +341,15 @@ export function BonusClipsSection() {
           );
         }
       }
-      capT.fill(0);
-      capDone.fill(false);
+      CLIPS.forEach((_, i) => {
+        clocks[i] = clipClock();
+      });
       capHandles.forEach((h) => h.current?.seek(0));
+      // Each clip starts over with its caption (its tile is down, out of
+      // sight; a clip still loading starts at its first frame anyway).
+      videos.forEach(({ current: v }) => {
+        if (v && v.readyState >= HTMLMediaElement.HAVE_METADATA && v.currentTime > 0) v.currentTime = 0;
+      });
       tapeSeen = false;
       passRef.current = "armed";
     };
@@ -400,11 +431,15 @@ export function BonusClipsSection() {
       if (shown()) play();
     };
     document.addEventListener("visibilitychange", onVisibility);
+    // A clip that plays again (back on screen, resumed) takes its caption
+    // along: media events do not bubble, so this listens on the way down.
+    tiles.addEventListener("playing", kick, true);
     return () => {
       alive = false;
       away.disconnect();
       near.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
+      tiles.removeEventListener("playing", kick, true);
       halt();
       anims.forEach((a) => a.cancel());
       kickRef.current = () => {};
@@ -415,11 +450,23 @@ export function BonusClipsSection() {
       // A pass armed again starts with every tile down.
       setLanded(DOWN);
     };
-  }, [reduced, capHandles]);
+  }, [reduced, capHandles, videos]);
+
+  // The pause control holds the captions with their clips, and a resume
+  // goes on with both; data saver switched on lets a looping caption
+  // settle, and switched off again, each caption loops with its clip
+  // again. Either way the captions' ticker runs again to show it.
+  useEffect(() => {
+    pausedRef.current = paused;
+    loopsRef.current = moves;
+    kickRef.current();
+  }, [paused, moves]);
 
   // New lines or a new style (the page language arriving) rebuild the
   // renderers and put each caption on its settled page: while armed, it
-  // waits on its first frame instead; after a pass, it keeps the end.
+  // waits on its first frame instead; after a pass has started, it shows
+  // the whole sentence until its renderer is back and goes on with its
+  // clip.
   useEffect(() => {
     readyRef.current = CLIPS.map(() => false);
     const armed = passRef.current === "armed";
@@ -507,7 +554,7 @@ export function BonusClipsSection() {
                 className={cx(styles.frame, f.tile)}
                 style={{ "--i": i, "--c": mid(c) } as React.CSSProperties}
               >
-                <Scene clip={c.clip} playing={!paused && up[i]} />
+                <Scene clip={c.clip} playing={!paused && up[i]} videoRef={videos[i]} />
                 {preset && (
                   <LiveCaption
                     preset={preset}
@@ -515,7 +562,6 @@ export function BonusClipsSection() {
                     text={t(c.cap)}
                     lang={lang}
                     playing={false}
-                    loop={false}
                     hold={CAP_TAIL}
                     onReady={onReady[i]}
                     handle={capHandles[i]}
