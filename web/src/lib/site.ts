@@ -18,4 +18,4 @@ export const SITE_DESCRIPTION =
   "Film on your phone and talk to Cleo: say “Cleo start”, then “Cleo cut” after a bad take. CleoCuts removes bad takes, pauses and filler words and returns a captioned 9:16 video.";
 
 /** Short line for the share image and the manifest. */
-export const SITE_TAGLINE = "You talk. Cleo edits.";
+export const SITE_TAGLINE = "You talk. Cleo cuts.";

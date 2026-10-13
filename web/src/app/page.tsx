@@ -40,7 +40,7 @@ const BonusClipsSection = dynamic(() => import("@/features/landing/sections/Bonu
 const ControlSection = dynamic(() => import("@/features/landing/Sections").then((m) => m.ControlSection));
 const FaqSection = dynamic(() => import("@/features/landing/Sections").then((m) => m.FaqSection));
 const FinalSection = dynamic(() => import("@/features/landing/Sections").then((m) => m.FinalSection));
-import { CtaLink, rich, useCmdNodes, useInView } from "@/features/landing/shared";
+import { CtaLink, useInView } from "@/features/landing/shared";
 import styles from "@/features/landing/Landing.module.css";
 
 // The landing's English strings live outside the shared `en` bundle.
@@ -70,7 +70,6 @@ function useEntrances(mainRef: React.RefObject<HTMLElement | null>) {
 export default function Landing() {
   const t = useT();
   const billingOn = useBillingEnabled();
-  const cmds = useCmdNodes();
   // The hero's button counts as on screen until measured, and as gone
   // once it is under the sticky header (4rem + its border). The closing
   // button counts once it is clear of the bottom edge (the phone bar
@@ -145,7 +144,6 @@ export default function Landing() {
                     </span>
                   ))}
               </h1>
-              <p className={styles.lead}>{rich(t("site.hero.sub"), cmds)}</p>
               <div className={styles.heroCta}>
                 <CtaLink ref={heroCtaRef} location="hero" wide />
               </div>

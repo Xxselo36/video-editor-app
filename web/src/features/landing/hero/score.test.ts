@@ -262,7 +262,7 @@ describe("hero score", () => {
     expect(read.phase).toBe("edit");
     expect(read.gone).toEqual([]);
     expect(new Set(read.mark)).toEqual(new Set(FINISHED.gone));
-    // the status says Cleo edits while she reads
+    // the status says Cleo cuts while she reads
     expect(statusOf(read)).toBeUndefined();
     // the finish chip stays while she reads
     expect(read.flag).toBe(STEPS[READ - 1].flag);
@@ -366,7 +366,7 @@ describe("hero score", () => {
     let named = false;
     for (let n = 1; n < cycle.length; n++) {
       if (shown(cycle[n]) !== shown(cycle[n - 1])) changes++;
-      // once Act 2 names a removal it never falls back to “Cleo edits”
+      // once Act 2 names a removal it never falls back to “Cleo cuts”
       if (cycle[n].phase === "edit") {
         if (named) expect(statusOf(cycle[n])).toBeDefined();
         if (statusOf(cycle[n])) named = true;

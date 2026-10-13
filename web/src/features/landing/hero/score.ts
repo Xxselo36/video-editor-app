@@ -8,7 +8,7 @@
  * there, left to right: “Cleo start”, “Cleo cut” after the bad take,
  * “Cleo keep” at the end of the first good scene, “Cleo stop” … “Cleo go”
  * around the skipped sentence, “Cleo finish”, where the playhead lands.
- * Act 2, "Cleo edits": Cleo reads the recording once (a scan line runs
+ * Act 2, "Cleo cuts": Cleo reads the recording once (a scan line runs
  * across it, every post it passes pulses and everything that goes is
  * hatched behind it); then the bad take, a filler word, a pause and the
  * skipped sentence lift off one by one, a little faster each time, and
@@ -257,7 +257,7 @@ export const STEPS: Step[] = [
   talk("stop", "stop"),
   talk("stopgo", "go"),
   talk("finish", "finish"),
-  // Act 2: Cleo edits. She reads it once and marks what goes…
+  // Act 2: Cleo cuts. She reads it once and marks what goes…
   { ms: READ_MS, phase: "edit", sweep: "read", flag: "finish", mark: ALL_GONE, gone: [], frame: "raw", done: [] },
   // …then lifts it, faster each time. The legend item lands with the lift.
   lift(620, "cutTake", ["bad"], "take", []),
