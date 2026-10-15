@@ -91,8 +91,7 @@
    * --ease-out: the brand curve. Entrances, rises of 12px or less, fades in.
    * --ease-move: something already on screen travels (lifts, closes, a
    *   chip moving, a video sinking back).
-   * --ease-drawer: something rises into place (the phone video, the phone
-   *   CTA bar).
+   * --ease-drawer: something rises into place (the phone CTA bar).
    * --spring-hinge: a critically damped spring (response 0.45 s, no
    *   overshoot) for hinged 3D folds, over about 600ms; --ease-move where
    *   linear() is not supported.

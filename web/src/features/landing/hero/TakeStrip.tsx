@@ -12,9 +12,14 @@
  * render head runs over the kept tape and, as it lands, the video lights
  * up and its captions play, drawn by the real caption engine.
  *
- * The video is the real clip (scene/, clip "hero"): a dimmed raw monitor
- * while the tape is cut, lit when it is done. It plays while the loop
- * runs and pauses on its frame with it.
+ * The video is the real clip (scene/, clip "hero"), lit when the tape is
+ * done. While the footage is raw, the frame is the tape's monitor
+ * (hero/Monitor.tsx, a lazy chunk): the raw take plays in lockstep with
+ * the playhead, each removal flashes its removed moment and jump-cuts
+ * past it, and the render head wipes the grade across the picture.
+ * Without it (still loading, refused, data saver) the clip plays dimmed
+ * under its scrim, as it always did. It plays while the loop runs and
+ * pauses on its frame with it.
  *
  * A step machine: each step is data-* attributes and per-piece
  * translates; CSS transitions and keyframes move between steps, so the
@@ -32,7 +37,7 @@
  * The stage is decoration for sighted visitors (aria-hidden); the list
  * under it says the same in words.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Pause, Play } from "lucide-react";
 import { useLang, useT } from "@/i18n";
 import { presetSupport } from "@/lib/captions/scripts";
@@ -45,6 +50,7 @@ import { CaptionPoster } from "../CaptionFrame";
 import { LiveCaption } from "../captions/LiveCaption";
 import { captionWords, spokenUntil } from "../captions/words";
 import { Scene } from "../scene/Scene";
+import { useClipsMove } from "../scene/useClipPlayback";
 import { CMD_COLOR, Cmd, SMALL_FRAME_OVERRIDES, useDocumentVisible, useInView, useReducedMotion, type CmdId } from "../shared";
 import {
   AT,
@@ -83,6 +89,7 @@ import {
   type PieceId,
   type Step,
 } from "./score";
+import type { MonitorProps } from "./Monitor";
 import styles from "./Hero.module.css";
 
 const LEGEND: { id: LegendId; key: "site.demo.take" | "site.demo.fillers" | "site.demo.pauses" | "site.demo.skip" | "site.demo.captions" }[] = [
@@ -159,11 +166,15 @@ function mediaStore(query: string) {
   };
 }
 
-/** Phones: the frame is about 100 px wide, so a style that draws small
+/** Phones: the frame is 112 to 152 px wide, so a style that draws small
  *  (Karaoke, for Hindi) draws larger, as on the bonus clips. */
 const SMALL_FRAME = mediaStore("(max-width: 767px)");
-/** Phones and tablets: the video is hidden until the finish (Hero.module.css). */
-const LIT_ONLY = mediaStore("(max-width: 1023px)");
+
+/** The frame as the tape's monitor: first needed at the loop's seam, so
+ *  it loads after hydration; if its chunk fails, the frame stays as is.
+ *  It reads the score from here, never imports it (hero/monitor.ts). */
+const Monitor = lazy<React.ComponentType<MonitorProps>>(() => import("./Monitor").catch(() => ({ default: () => null })));
+const MONITOR_SCORE: MonitorProps["score"] = { AT, PIECES, FINISHED, HEAD_FROM, HEAD_MS, CLOSE_DELAY_MS, RENDER_MS };
 
 /**
  * Places a chip over its target: the pill is drawn as two caps and a
@@ -235,7 +246,14 @@ export function TakeStrip() {
   const reduced = useReducedMotion();
   const running = !paused && inView && visible && !reduced;
   const smallFrame = useSyncExternalStore(SMALL_FRAME.subscribe, SMALL_FRAME.get, SMALL_FRAME.server);
-  const litOnly = useSyncExternalStore(LIT_ONLY.subscribe, LIT_ONLY.get, LIT_ONLY.server);
+  // The monitor: loaded once the loop has run (never in the server HTML),
+  // where clips may move at all (useClipPlayback's gating). Once it has
+  // taken over, the clip under it waits, paused, until the frame lights.
+  const moves = useClipsMove();
+  const [monitorWanted, setMonitorWanted] = useState(false);
+  if (running && !monitorWanted) setMonitorWanted(true);
+  const [monitorOn, setMonitorOn] = useState(false);
+  const sceneRef = useRef<HTMLVideoElement>(null);
   const caption = t("site.demo.caption");
 
   // A play step lasts as long as the sentence and its hold.
@@ -497,15 +515,18 @@ export function TakeStrip() {
 
         <div className={styles.video}>
           <div className={styles.screen}>
-            {/* It plays with the loop; where it is hidden until the
-                finish (phones, tablets), from the render step on, so
-                its first visible frame is already moving. */}
             <Scene
               clip="hero"
               priority
-              playing={running && (s.frame === "lit" || !litOnly || i === STEPS.length - 2)}
+              playing={running && (s.frame === "lit" || !monitorOn)}
               className={styles.scene}
+              videoRef={sceneRef}
             />
+            {monitorWanted && moves && (
+              <Suspense fallback={null}>
+                <Monitor step={s} running={running} score={MONITOR_SCORE} scene={sceneRef} head={headAnim} onLive={setMonitorOn} />
+              </Suspense>
+            )}
             <div className={styles.captionLayer}>
               <LiveCaption
                 preset={preset}

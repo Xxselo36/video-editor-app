@@ -39,6 +39,9 @@
 .lqipHero {
   --lqip: url("data:image/webp;base64,UklGRnQAAABXRUJQVlA4IGgAAAAwBACdASoMABUAPu1kq04ppaQiMAgBMB2JQBdmUABflPMXT+owoX90LmgA/s2DF74P8CnrCkfyIPhF6iMzGs9Z0shFXKva8G+za+TWITkGbU1IWalorQBrEfkm7a2yknjin1g5U6/AAA==");
 }
+.lqipHeroRaw {
+  --lqip: url("data:image/webp;base64,UklGRnYAAABXRUJQVlA4IGoAAAAwBACdASoMABUAPtFWpEuoJKOhsAgBABoJYwC7AB6N1rDm7cDbjKPW5/AA/uQjACF2lV6JyAEVVHfWrqiKlhBwP7RXlfb3P+dJWIXyqmmEN6ExDzt+Ev/vFKNeYAWnQ4T5Amvj9CjkgAAA");
+}
 .lqipRingCafe {
   --lqip: url("data:image/webp;base64,UklGRoQAAABXRUJQVlA4IHgAAABQBACdASoMABUAPu1iqU2ppaOiMAgBMB2JYgC7MoACtVqzY4LT27DAzggAAP7Ngxk8zVxO8c7qRJRFOw591eb+15GnZUogfuAytzzs+bXh3zXONzM96J7beRu54SvRQMxgeKmjyizwHlEZJkj+64kQTgzbIjzAAAA=");
 }
