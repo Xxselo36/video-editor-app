@@ -32,6 +32,7 @@ export const CROP_W = (9 / 16) * (9 / 16);
 
 const LQIP: Record<ClipId, string> = {
   hero: styles.lqipHero,
+  heroRaw: styles.lqipHeroRaw,
   ringCafe: styles.lqipRingCafe,
   ringOffice: styles.lqipRingOffice,
   ringRoom: styles.lqipRingRoom,

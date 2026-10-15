@@ -105,7 +105,7 @@ Write commands with curly quotes in UI copy: “Cleo cut”.
 - One vocabulary of curves (the landing defines them as custom properties on `.page`, mirrored in `features/landing/shared.tsx` for Web Animations):
   - `--ease-out` `cubic-bezier(0.16, 1, 0.3, 1)`: the brand curve. Entrances, rises of 12px or less, fades in.
   - `--ease-move` `cubic-bezier(0.77, 0, 0.175, 1)`: something already on screen travels (a lift, a close, a chip moving on).
-  - `--ease-drawer` `cubic-bezier(0.32, 0.72, 0, 1)`: something rises into place (a phone video, the phone CTA bar).
+  - `--ease-drawer` `cubic-bezier(0.32, 0.72, 0, 1)`: something rises into place (the phone CTA bar, a sheet).
   - `--spring-hinge`: a critically damped spring (no overshoot, about 600ms) for hinged 3D folds and tiles standing up, as CSS `linear()`; `--ease-move` where `linear()` is not supported.
   - `--ease-scrub` `cubic-bezier(0.37, 0, 0.63, 1)`: anything a scroll position drives (the finger is the clock); symmetric, so it reads the same scrolled forwards or back.
   - `ease` for opacity out and state changes; linear only for playheads, scrub heads and the voice ink.

@@ -322,9 +322,10 @@ describe("hero score", () => {
     expect(STEPS.filter((s) => s.reveal)).toEqual([payoff]);
   });
 
-  it("the phone video starts one step before it shows", () => {
-    // TakeStrip plays the clip from STEPS.length - 2 on: that step is the
-    // render, still raw, and the next one shows it
+  it("the finished video plays from the step the frame lights, right after the render", () => {
+    // TakeStrip keeps the clip under the monitor paused while the frame is
+    // raw: the render (the last raw step) wipes the grade across its held
+    // frame, and the payoff plays it on from there
     expect(STEPS[STEPS.length - 2].sweep).toBe("render");
     expect(STEPS[STEPS.length - 2].frame).toBe("raw");
     expect(STEPS[STEPS.length - 1].frame).toBe("lit");

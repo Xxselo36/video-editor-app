@@ -11,15 +11,22 @@
  *
  * Files: public/landing/video/<file>.mp4 and <file>.webp.
  * - hero: the hero's 9:16 video (cafe set); also the closing frame.
+ * - heroRaw: the take hero.mp4 is cut from, ungraded (flat, cooler, less
+ *   saturated), 16.8 s: the hero's monitor plays it once per loop while
+ *   the tape is recorded and cut (hero/Monitor.tsx). hero.mp4 shows its
+ *   frames up to 5.6 s (then hero.mp4 fades into its own start); its
+ *   last frame is hero.mp4's first pose, and its first 0.4 s fade in
+ *   from it. A keyframe every second, so its jump cuts seek cheaply.
  * - ringCafe / ringOffice / ringRoom: the caption carousel's three videos.
  * - tileCafe / tileOffice / tileRoom: the three bonus clips.
  * - smartcam: the 16:9 take the SmartCam section reframes (he sits left
  *   of centre, a whiteboard to his right).
  */
-export type ClipId = "hero" | "ringCafe" | "ringOffice" | "ringRoom" | "tileCafe" | "tileOffice" | "tileRoom" | "smartcam";
+export type ClipId = "hero" | "heroRaw" | "ringCafe" | "ringOffice" | "ringRoom" | "tileCafe" | "tileOffice" | "tileRoom" | "smartcam";
 
 export const CLIPS: Record<ClipId, { file: string; w: number; h: number }> = {
   hero: { file: "hero", w: 540, h: 960 },
+  heroRaw: { file: "hero-raw", w: 540, h: 960 },
   ringCafe: { file: "ring-cafe", w: 540, h: 960 },
   ringOffice: { file: "ring-office", w: 540, h: 960 },
   ringRoom: { file: "ring-room", w: 540, h: 960 },

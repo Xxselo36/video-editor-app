@@ -4,15 +4,16 @@
  * set on .demo as --lift-ms, --scan-ms, …). Curves are the page's
  * (Landing.module.css .page): --ease, the brand curve, for entrances and
  * fades in; --ease-move for what already stands on the stage and
- * travels (lifts, closes, the chip, the video stepping back);
- * --ease-drawer for the phone video rising; `ease` for fades out and
- * colour. Linear only for the playheads (recording, Cleo's scan, the
- * render head) and the scrub head, which move at the speed of time.
+ * travels (lifts, closes, the chip, the video stepping back); `ease`
+ * for fades out and colour. Linear only for the playheads (recording,
+ * Cleo's scan, the render head) and the scrub head, which move at the
+ * speed of time.
  * Removing a piece: it lifts off the tape (480ms), the lanes after it
  * close (440ms, from 220ms in, while it is half gone) and a thin cut
  * marker draws in as they land. Posts that stay (start, keep, finish)
  * never lift. The video inside the frame is the real clip
- * (scene/Scene): its motion is video content. */
+ * (scene/Scene), and while the footage is raw the raw take over it
+ * (hero/Monitor, its own stylesheet): its motion is video content. */
 
 .demo {
   /* the brand curve (the page's --ease-out); the others come from .page */
@@ -22,21 +23,36 @@
 }
 
 .stage {
-  /* phones and tablets: the tape uses the full width; the video rises
-     out of the freed end of the tape at the finish */
-  --clip-w: 6.25rem;
+  /* phones and tablets: the video stands centred under the button the
+     whole loop, the chips and the tape under it, so the picture and the
+     playhead it follows read top to bottom; the tape uses the full
+     width. The frame follows the screen's height (152 px wide on a
+     390x844 phone), so the tape and the status row stay above the fold
+     on a 375x667 one. Stage: the frame, then the chips' rail and the
+     tape (the rail sits at --strip-h * 0.66 + 0.5rem, 2.25rem tall). */
+  --clip-w: clamp(7rem, 18vh, 9.5rem);
   --tape-end: 0rem;
   --strip-h: 7.5rem;
   position: relative;
   isolation: isolate;
   margin-top: 1rem;
-  height: 13.5rem;
-}
-@media (min-width: 400px) and (max-width: 1023px) {
-  .stage { --clip-w: 6.75rem; height: 14rem; }
+  height: calc(var(--clip-w) * 16 / 9 + 8.25rem);
 }
 @media (min-width: 768px) and (max-width: 1023px) {
-  .stage { --clip-w: 9.5rem; --strip-h: 9rem; height: 19rem; margin-top: 2rem; }
+  .stage {
+    --clip-w: clamp(9rem, 22vh, 12rem);
+    --strip-h: 9rem;
+    height: calc(var(--clip-w) * 16 / 9 + 9.25rem);
+    margin-top: 2rem;
+  }
+}
+/* (The small viewport where there is one: the frame never grows as a
+   phone's toolbar hides.) */
+@supports (height: 1svh) {
+  .stage { --clip-w: clamp(7rem, 18svh, 9.5rem); }
+  @media (min-width: 768px) and (max-width: 1023px) {
+    .stage { --clip-w: clamp(9rem, 22svh, 12rem); }
+  }
 }
 /* desktop: the video stands upright at the tape's end for the whole loop.
    The stage is only as tall as the tape and its chips, so the tape starts
@@ -611,8 +627,8 @@
 }
 
 /* ── The 9:16 video ──
-   Raw (and on the seam's way out): a dimmed monitor a step back, its
-   captions hidden. Lit: the light comes first, then the words. */
+   Raw (and on the seam's way out): a monitor a step back under a scrim,
+   its captions hidden. Lit: the light comes first, then the words. */
 .video {
   position: absolute;
   z-index: 3;
@@ -650,6 +666,9 @@
   background: color-mix(in oklab, var(--surface-0) 50%, transparent);
   transition: opacity 320ms var(--ease-move);
 }
+/* raw footage on the monitor (hero/Monitor) reads through: the scrim only
+   takes the edge off, so the lit moment still lands */
+.screen:has(> [data-monitor="live"]) > .scrim { opacity: 0.36; }
 .tag {
   position: absolute;
   left: 0.5rem;
@@ -735,25 +754,14 @@
 @keyframes glowOnce {
   35% { opacity: 1; }
 }
-/* phones and tablets: no video until the finish; then it rises out of
-   the freed end of the tape (never lies flat on it), and on the seam it
-   sinks back on the same path, fading late */
+/* phones and tablets: centred at the top of the stage, under the button */
 @media (max-width: 1023px) {
   .video {
-    opacity: 0;
-    transform: perspective(40rem) rotateX(62deg) translateY(6%);
-    transition:
-      transform 420ms var(--ease-move),
-      opacity 240ms ease 180ms;
+    top: 0;
+    bottom: auto;
+    left: calc(50% - var(--clip-w) / 2);
+    right: auto;
   }
-  .demo[data-frame="lit"]:not([data-fade="out"]) .video {
-    opacity: 1;
-    transform: none;
-    transition:
-      opacity 320ms ease,
-      transform 560ms var(--ease-drawer);
-  }
-  .screen { transform: none; }
 }
 
 /* ── Under the stage: legend (wide screens), status row (below 1280px,
