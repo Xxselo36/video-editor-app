@@ -319,8 +319,9 @@
   color: var(--brand-strong);
 }
 
-/* Time to the next turn: the playing pill's line, drawn left to right by
-   the caption's own clock (linear, a playhead). */
+/* The playing pill's line: its caption's pass, drawn left to right by
+   the caption's own clock (linear, a playhead). A turn comes as it fills;
+   while a hold keeps the ring, the pass and its line play again. */
 .line {
   position: absolute;
   left: 0.625rem;

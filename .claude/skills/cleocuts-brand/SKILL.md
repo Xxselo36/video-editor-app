@@ -112,6 +112,7 @@ Write commands with curly quotes in UI copy: “Cleo cut”.
 - Rule: one thing starts at a time. A demo waits for its section's entrance to finish; command rows play one after another; an exit takes at most 70% of its entrance's duration.
 - Owner-approved exceptions (Oct 2026):
   - The landing hero's take-strip loop runs continuously. It has a pause button, stops off screen and in hidden tabs, and shows one still under reduced motion.
+  - The landing's caption ring turns by itself, round and round: each style plays its caption once, then the next comes to the front; a pick turns it there and the turns go on (nothing remembered). It has a pause button, waits while a mouse the visitor moved onto it stays there or keyboard focus is in its pills, stops off screen and in hidden tabs, and shows three still frames under reduced motion.
   - Inside a video frame, motion is video content, not UI. That covers caption animations drawn by the caption engine (its pop and bounce included) and the creator's movements in the footage.
   - Playheads and scrub heads move linearly, at the speed of time.
   - The landing's command rows are scrubbed by the scroll: each row plays as its strip passes the middle of the screen, one row at a time, and backwards when scrolling up. No time-based play and no pause control there (nothing moves without the visitor's scroll); off under reduced motion.

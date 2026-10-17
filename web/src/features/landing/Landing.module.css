@@ -823,6 +823,7 @@
   font-size: 1.0625rem;
   line-height: 1.6;
   color: var(--text-body);
+  text-wrap: pretty;
   opacity: 0;
   translate: 0 -4px;
   transition:
