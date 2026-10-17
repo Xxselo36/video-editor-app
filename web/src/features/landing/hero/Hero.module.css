@@ -669,23 +669,18 @@
 /* raw footage on the monitor (hero/Monitor) reads through: the scrim only
    takes the edge off, so the lit moment still lands */
 .screen:has(> [data-monitor="live"]) > .scrim { opacity: 0.36; }
-.tag {
-  position: absolute;
-  left: 0.5rem;
-  top: 0.5rem;
-  border-radius: 9999px;
-  background: color-mix(in oklab, var(--surface-0) 85%, transparent);
-  padding: 0.125rem 0.5rem;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  color: var(--text-body);
-}
-@media (max-width: 1023px) {
-  .tag { top: 0.375rem; left: 0.375rem; padding: 0 0.375rem; font-size: 0.6875rem; }
-}
 /* phones: Karaoke's poster (Hindi) at the engine's small-frame 1.6x */
 @media (max-width: 767px) {
   .screen .capLarge { font-size: calc(7.8cqw * 1.6); }
+}
+/* the first load waits half way, on the page before (TakeStrip): it goes
+   at once as the play's first page comes in over it, as a page change
+   does. Under reduced motion, before hydration, the finished still. */
+.captionLayer [data-ready="true"] .posterHalf { visibility: hidden; }
+.posterStill { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .posterHalf { display: none; }
+  .posterStill { display: block; }
 }
 .scrub {
   position: absolute;
@@ -699,7 +694,8 @@
   transition: opacity 320ms var(--ease-move);
 }
 /* it fills with the captions, holds full until the video has gone, and
-   empties only while hidden (on the seam's swap) */
+   empties only while hidden (on the seam's swap); on the first load it
+   waits half way (--half), where the play starts */
 .scrubHead {
   position: absolute;
   inset: 0;
@@ -710,8 +706,13 @@
   transition-property: transform;
   transition-timing-function: linear;
 }
+.demo[data-scrub="half"] .scrubHead { transform: scaleX(var(--half)); }
 .demo[data-scrub="run"] .scrubHead,
 .demo[data-scrub="full"] .scrubHead { transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  /* the finished still, before hydration too */
+  .demo[data-scrub="half"] .scrubHead { transform: scaleX(0); }
+}
 .demo[data-frame="lit"]:not([data-fade="out"]) .screen {
   border-color: var(--border-strong);
   transform: none;
@@ -765,7 +766,7 @@
 }
 
 /* ── Under the stage: legend (wide screens), status row (below 1280px,
-   where the chips would wrap), pause ── */
+   where the chips would wrap) ── */
 .under {
   display: flex;
   align-items: center;
@@ -887,28 +888,6 @@
   translate: 0 -4px;
   transition: opacity 140ms ease, translate 140ms ease;
 }
-.playToggle {
-  display: inline-flex;
-  flex: none;
-  width: 2.75rem;
-  height: 2.75rem;
-  align-items: center;
-  justify-content: center;
-  margin-left: auto;
-  border-radius: 9999px;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  color: var(--text-body);
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  transition: transform 120ms var(--ease), border-color 150ms var(--ease);
-}
-@media (hover: hover) and (pointer: fine) {
-  .playToggle:hover { border-color: var(--border-hover); color: var(--text-strong); }
-}
-.playToggle:active { transform: scale(0.97); }
-
 /* Reduced motion: the finished still, with nothing moving (TakeStrip
    shows FINISHED and no chips; the caption keeps its poster). */
 @media (prefers-reduced-motion: reduce) {

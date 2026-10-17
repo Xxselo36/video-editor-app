@@ -5,8 +5,9 @@
  *
  * "{name}" placeholders are filled at render time; {start} {cut} {keep}
  * {finish} {stop} {go} are the literal commands (“Cleo start” …), and
- * "[word]" in site.demo.caption and site.clips.cap1-3 marks the
- * highlighted caption word (the last word spoken, as on the video).
+ * "[word]" in site.demo.caption, site.captions.line1-3 and
+ * site.clips.cap1-3 marks the highlighted caption word (the last word
+ * spoken, as on the video).
  */
 export const enLanding = {
   "site.quote": "“{text}”",
@@ -17,9 +18,6 @@ export const enLanding = {
   "site.cta.openEditor": "Open editor",
   "site.hero.title": "You talk. Cleo cuts.",
   "site.hero.cutWord": "cuts.",
-  "site.demo.example": "Example",
-  "site.demo.pause": "Pause the demo",
-  "site.demo.play": "Play the demo",
   "site.demo.listAria": "What CleoCuts removes and adds",
   "site.demo.take": "Bad take removed",
   "site.demo.pauses": "Pauses removed",
@@ -33,8 +31,6 @@ export const enLanding = {
   "site.demo.phaseReady": "Ready to post",
   "site.captions.pick": "Caption style",
   "site.captions.frameAria": "Example of the {style} caption style",
-  "site.captions.pause": "Pause caption preview",
-  "site.captions.play": "Play caption preview",
   "site.demo.replay": "Replay the reframe",
   "site.auto.keepNth": "Keep {text}, cut {n} of {total}",
   "site.commands.title": "Talk to Cleo while you film.",
@@ -52,6 +48,9 @@ export const enLanding = {
   "site.auto.cleanup": "CleoCuts also fixes misheard words in your captions.",
   "site.captions.title": "The most viral caption styles.",
   "site.captions.body": "Lots of styles in the editor, always the latest.",
+  "site.captions.line1": "Nobody talks about [this]",
+  "site.captions.line2": "Save this for [later]",
+  "site.captions.line3": "Wait for the [end]",
   "site.format.title": "Vertical, even if you filmed wide.",
   "site.format.body": "SmartCam follows your face and cuts a 9:16 that keeps you in frame. Already vertical? It stays as you filmed it.",
   "site.format.figureAria": "SmartCam example: a wide video becomes a vertical one, framed on his face",

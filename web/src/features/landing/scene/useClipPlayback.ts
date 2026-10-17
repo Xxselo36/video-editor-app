@@ -11,9 +11,9 @@
  * - It plays only while the consumer lets it (`playing`), the frame is
  *   on screen and the tab is visible; otherwise it pauses on its frame.
  * - Under reduced motion, data saver or a 2G-class connection it never
- *   loads: the poster stays (the clip's first frame, a meaningful still).
- *   Switched on while a clip plays, the clip stops, drops what it loaded
- *   and the poster comes back.
+ *   loads: the poster stays (the clip's first frame, or the one it opens
+ *   on: a meaningful still). Switched on while a clip plays, the clip
+ *   stops, drops what it loaded and the poster comes back.
  * - The video is shown only once it has a frame (loadeddata, playing);
  *   until then, and if the browser refuses to play it (iOS Low Power
  *   Mode rejects play() and would draw its own play button), the poster
@@ -57,9 +57,9 @@ export function useSaveData(): boolean {
 }
 
 /** Can the landing's clips move here at all (no reduced motion, no data
- *  saver)? For the loops' pause controls: without motion there is
- *  nothing to pause. True on the server, so the control's room is in
- *  the first HTML. */
+ *  saver)? Without motion a demo shows its still: no pass to replay, no
+ *  caption looping with its clip. True on the server, so the Replay
+ *  control's room is in the first HTML. */
 export function useClipsMove(): boolean {
   const reduced = useReducedMotion();
   const saveData = useSaveData();

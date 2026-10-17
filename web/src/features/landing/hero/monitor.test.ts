@@ -15,9 +15,10 @@ import { ptLanding } from "@/i18n/messages/pt/landing";
 import { ruLanding } from "@/i18n/messages/ru/landing";
 import { trLanding } from "@/i18n/messages/tr/landing";
 import { captionWords, spokenUntil } from "../captions/words";
+import { HERO_HALF } from "../scene/clips";
 import { HERO_S, RAW_S, SEAM_MS, SHARED, drains, steer as steerAt, timecode, timingOf, type Cue } from "./monitor";
 import * as score from "./score";
-import { AT, FINISHED, HEAD_FROM, HEAD_MS, LOOP_FROM, MARKED, PIECES, RENDER_MS, STEPS, headAt, type PieceId } from "./score";
+import { AT, CAPTION_HOLD, FINISHED, HEAD_FROM, HEAD_MS, LOOP_FROM, MARKED, PIECES, RENDER_MS, STEPS, halfway, headAt, type PieceId } from "./score";
 
 const { cuts: CUTS, firstKept: FIRST_KEPT, jumpMs: JUMP_MS, rate: RAW_RATE, cuesAt, rawAt, rawAtHead } = timingOf(score);
 const steer = (target: number, at: number, rate: number) => steerAt(target, at, rate, RAW_RATE);
@@ -89,8 +90,6 @@ const LANDING: Record<Lang, Partial<Record<keyof typeof enLanding, string>>> = {
   id: idLanding,
   hi: hiLanding,
 };
-/** TakeStrip's hold after the caption's last word (s). */
-const CAPTION_HOLD = 0.4;
 const SEAM_S = SEAM_MS / 1000;
 
 describe("hero monitor: the seam", () => {
@@ -125,6 +124,33 @@ describe("hero monitor: the seam", () => {
       if (drains(t)) expect(clean, lang).toBe(true);
       if (!clean) expect(drains(t), lang).toBe(false);
     }
+  });
+
+  it("every language: the first seam, after the first load's play from half way, goes as every later one", () => {
+    // The Scene opens half way (HERO_HALF) and waits there until the first
+    // play starts, then plays the rest of the caption and the hold after
+    // it; from the second loop on it starts at the first kept take.
+    const hold = STEPS[LOOP_FROM].ms / 1000;
+    for (const lang of Object.keys(LANGS) as Lang[]) {
+      const caption = LANDING[lang]["site.demo.caption"] ?? enLanding["site.demo.caption"];
+      const words = captionWords(caption, lang);
+      const half = halfway(words, lang)!;
+      const first = (HERO_HALF.at + Math.round((half.pass - half.at) * 1000) / 1000 + hold) % HERO_S;
+      const steady = (FIRST_KEPT + Math.round((spokenUntil(words) + CAPTION_HOLD) * 1000) / 1000 + hold) % HERO_S;
+      const clean = first >= SHARED[0] && first + SEAM_S <= SHARED[1];
+      if (drains(first)) expect(clean, lang).toBe(true);
+      if (!clean) expect(drains(first), lang).toBe(false);
+      expect(drains(first), `${lang} at ${first.toFixed(2)}s, later at ${steady.toFixed(2)}s`).toBe(drains(steady));
+    }
+  });
+
+  it("the first load opens the video on the frame the loop shows half way through its play (English)", () => {
+    const half = halfway(captionWords(enLanding["site.demo.caption"], "en"), "en")!;
+    const FPS = 25;
+    expect(Math.floor(HERO_HALF.at * FPS)).toBe(Math.floor((FIRST_KEPT + half.at) * FPS));
+    // mid-frame: the seek and the poster (that frame) agree
+    expect((HERO_HALF.at * FPS) % 1).toBeCloseTo(0.5, 6);
+    expect(HERO_HALF.at).toBeLessThan(SHARED[1]);
   });
 });
 

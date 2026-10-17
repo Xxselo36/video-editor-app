@@ -24,7 +24,7 @@ import { resolveStyle } from "@/lib/captions/presets";
 import { scriptOfLang, segmentsWithoutSpaces } from "@/lib/captions/scripts";
 import { hasShapingFont, loadShaper, registerShapingFont } from "@/lib/captions/shape-hb";
 import type { Page } from "@/lib/captions/types";
-import { captionWords, FIRST_WORD_AT, splitPhrases, spokenAt, spokenUntil } from "../captions/words";
+import { captionWords, splitPhrases, spokenAt, spokenUntil } from "../captions/words";
 import { SMALL_FRAME_OVERRIDES } from "../shared";
 import {
   CLIP_LOOP_S,
@@ -33,7 +33,6 @@ import {
   clipClock,
   clipPreset,
   firstPhrase,
-  pausedAt,
   stepClipCaption,
   stillAt,
   tickClipClock,
@@ -334,16 +333,6 @@ describe("bonus clip captions: the clock", () => {
     expect(c.synced).toBe(false);
     expect(c.t).toBeCloseTo(2.1);
   });
-
-  it("paused, holds whichever phrase is showing; on its lead-in (between two loops), its still", () => {
-    const still = 0.6;
-    expect(pausedAt(0, still)).toBe(still);
-    expect(pausedAt(FIRST_WORD_AT - 0.01, still)).toBe(still);
-    // in the first phrase, the second, the last one's hold
-    expect(pausedAt(0.4, still)).toBe(0.4);
-    expect(pausedAt(1.9, still)).toBe(1.9);
-    expect(pausedAt(5, still)).toBe(5);
-  });
 });
 
 /** A caption 1.8 s long, its still (the first phrase) at 0.6 s, whose
@@ -351,20 +340,23 @@ describe("bonus clip captions: the clock", () => {
 const STILL = 0.6;
 const state = (o: Partial<ClipCaptionState> = {}): ClipCaptionState => ({
   loops: true,
-  paused: false,
   video: video(),
   end: 1.8,
   still: STILL,
   ...o,
 });
-/** Data saver: the clip is unloaded, its control gone. */
+/** Data saver: the clip is unloaded. */
 const unloaded = video({ src: false, frame: false, playing: false, time: 0, duration: NaN });
 
 describe("bonus clip captions: a caption on the section's ticker", () => {
-  it("follows its clip and holds with the pause control", () => {
+  it("follows its clip and holds with it (off screen, a hidden tab), on whichever phrase is showing", () => {
     const c = clipClock();
     expect(stepClipCaption(c, 0.016, state({ video: video({ time: 1.2 }) }))).toEqual({ at: 1.2, seek: null, busy: true });
-    expect(stepClipCaption(c, 0.016, state({ paused: true }))).toEqual({ at: 1.2, seek: null, busy: false });
+    expect(stepClipCaption(c, 0.016, state({ video: video({ time: 1.2, playing: false }) }))).toEqual({
+      at: 1.2,
+      seek: null,
+      busy: false,
+    });
     expect(c.t).toBe(1.2);
   });
 
@@ -377,20 +369,11 @@ describe("bonus clip captions: a caption on the section's ticker", () => {
     expect(stepClipCaption(c, 1, state({ loops: false, video: unloaded }))).toEqual({ at: STILL, seek: null, busy: false });
   });
 
-  it("does not hold half a line when data saver comes on while paused (no control is left)", () => {
+  it("plays a line under way to its end when data saver comes on, then settles (never half a line)", () => {
     const c = clipClock();
     stepClipCaption(c, 0.016, state({ video: video({ time: 0.9 }) }));
-    expect(stepClipCaption(c, 0.016, state({ paused: true })).at).toBe(0.9);
-    expect(stepClipCaption(c, 0.5, state({ loops: false, paused: true, video: unloaded }))).toEqual({
-      at: 1.4,
-      seek: null,
-      busy: true,
-    });
-    expect(stepClipCaption(c, 0.5, state({ loops: false, paused: true, video: unloaded }))).toEqual({
-      at: STILL,
-      seek: null,
-      busy: false,
-    });
+    expect(stepClipCaption(c, 0.5, state({ loops: false, video: unloaded }))).toEqual({ at: 1.4, seek: null, busy: true });
+    expect(stepClipCaption(c, 0.5, state({ loops: false, video: unloaded }))).toEqual({ at: STILL, seek: null, busy: false });
   });
 
   it("starts a settled line over with its clip once the clips can move again", () => {
@@ -403,10 +386,6 @@ describe("bonus clip captions: a caption on the section's ticker", () => {
     expect(c.done).toBe(false);
     // it plays from its first frame: the line plays with it, no jump
     expect(stepClipCaption(c, 0.016, state({ video: video({ time: 0.02 }) }))).toEqual({ at: 0.02, seek: null, busy: true });
-    // still paused from before data saver: the first phrase until resumed
-    const p = clipClock();
-    stepClipCaption(p, 2, state({ loops: false, video: unloaded }));
-    expect(stepClipCaption(p, 0.016, state({ paused: true, video: loading }))).toEqual({ at: STILL, seek: null, busy: false });
   });
 
   it("joins a line still under way to its clip, which comes back from its first frame", () => {

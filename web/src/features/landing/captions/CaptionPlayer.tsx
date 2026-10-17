@@ -5,20 +5,22 @@
  * front plays its caption word by word, drawn live by the real caption
  * engine, in three of the most viral looks: Power, Highlight Box and
  * Clipper (a language that can't show one gets the closest style it
- * can). Geometry, timing and the score that runs them: ring.ts.
+ * can). Each frame says its own line. Geometry, timing and the score
+ * that runs them: ring.ts.
  *
  * - As the band scrolls in, the ring stands up (CSS, scroll-driven). Once
  *   the stage is well in view (clear of the sticky header and the phone
  *   bar), the side frames swing out from behind the front one, left,
  *   then right, as the first word lands.
- * - Then each style plays its caption once (its words and the settled
- *   page) and the ring turns one step: the next style comes to the
- *   front, the one that wraps round passes behind the ring, round and
- *   round. A turn waits while a mouse the visitor moved over the ring or
- *   the controls stays there, or keyboard focus (focus-visible) is in
- *   the pills; held, the caption plays its pass again. A cursor the page
- *   scrolls under never holds it, nor does a finger or the focus a click
- *   leaves on a pill.
+ * - Then each style plays its caption once (its own words and the
+ *   settled page, so each stays in front as long as its line) and the
+ *   ring turns one step: the next style comes to the front, the one
+ *   that wraps round passes behind the ring, round and round. A turn
+ *   waits while a mouse the visitor moved over the ring or the controls
+ *   stays there, or keyboard focus (focus-visible) is in the pills;
+ *   held, the caption plays its pass again. A cursor the page scrolls
+ *   under never holds it, nor does a finger or the focus a click leaves
+ *   on a pill.
  * - One clock (the page's ticker) drives the front caption, the pill's
  *   progress line (one pass, full as the turn comes) and the turns, so a
  *   turn never cuts a word.
@@ -28,22 +30,17 @@
  *   ring to that style, which plays its caption from the first word (the
  *   style in front starts over); then the turns go on from there.
  *   Nothing is remembered.
- * - Pause (WCAG 2.2.2) lets a turn in flight land, then holds the video
- *   and the caption where they are (never on an empty page). Off screen
- *   and in hidden tabs everything stops where it is and resumes from
- *   there.
+ * - No pause button (the owner's call): off screen and in hidden tabs
+ *   everything stops where it is and resumes from there.
  * - Reduced motion: the three frames side by side, still (posters), each
- *   with its settled caption and its style's name; no pills, no pause.
+ *   with its own settled caption and its style's name; no pills.
  */
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Pause, Play } from "lucide-react";
 import { useLang, useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
 import { presetSupport } from "@/lib/captions/scripts";
 import { LAUNCH_PRESETS } from "@/lib/captions/presets";
 import type { PresetId } from "@/lib/captions/types";
-import { Icon } from "@/components/ui/Icon";
-import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "../CaptionFrame";
 import type { ClipId } from "../scene/clips";
@@ -75,6 +72,8 @@ const LOOKS: readonly (readonly PresetId[])[] = [
 ];
 /** One set each: the cafe, the office, the room (scene/clips.ts). */
 const CLIPS: readonly ClipId[] = ["ringCafe", "ringOffice", "ringRoom"];
+/** And each its own line ("[word]" is the highlighted one). */
+const LINES: readonly MessageKey[] = ["site.captions.line1", "site.captions.line2", "site.captions.line3"];
 /** How much of the stage must be in the clear area to start the reveal. */
 const START_SHARE = 0.6;
 
@@ -130,9 +129,9 @@ export function CaptionPlayerSection() {
   const lowEnd = useSyncExternalStore(noSubscription, lowEndDevice, () => false);
   const phone = useSyncExternalStore(subscribePhone, isPhone, () => false);
   const labelId = useId();
-  const text = t("site.demo.caption");
+  const texts = useMemo(() => LINES.map((k) => t(k)), [t]);
   const looks = useMemo(() => ringStyles(lang), [lang]);
-  const words = useMemo(() => captionWords(text, lang), [text, lang]);
+  const lines = useMemo(() => texts.map((text) => captionWords(text, lang)), [texts, lang]);
   const name = (id: PresetId) => t(`editor.style.preset.${id}` as MessageKey);
 
   /** The style in front (its slot is the base CSS of every frame). */
@@ -141,7 +140,6 @@ export function CaptionPlayerSection() {
   const [moving, setMoving] = useState<number | null>(null);
   /** A pick waiting for the reveal to land. */
   const [pending, setPending] = useState<number | null>(null);
-  const [paused, setPaused] = useState(false);
   const [started, setStarted] = useState(false);
   const [announce, setAnnounce] = useState("");
   const [stageRef, onScreen] = useInView<HTMLDivElement>();
@@ -151,12 +149,12 @@ export function CaptionPlayerSection() {
   const [score] = useState(() => new RingScore({ setFront, setMoving, setPending }));
 
   const checked = pending ?? front;
-  const running = started && !reduced && !paused && onScreen && docVisible;
+  const running = started && !reduced && onScreen && docVisible;
   const showLine = started && !reduced;
 
   useEffect(() => {
-    score.setWords(words);
-  }, [score, words]);
+    score.setLines(lines);
+  }, [score, lines]);
 
   // The stage well in view, clear of the fixed chrome: the reveal.
   useEffect(() => {
@@ -195,8 +193,8 @@ export function CaptionPlayerSection() {
   }, [score, onScreen, docVisible]);
 
   useEffect(() => {
-    if (started && !reduced) score.start(paused);
-  }, [score, started, reduced, paused]);
+    if (started && !reduced) score.start();
+  }, [score, started, reduced]);
 
   // The clock: one subscriber on the page's ticker.
   useEffect(() => {
@@ -248,11 +246,6 @@ export function CaptionPlayerSection() {
       // the same text again would not be announced
       setAnnounce((prev) => (prev === message ? `${message} ` : message));
     }
-  };
-
-  const togglePause = () => {
-    if (!paused) score.settle();
-    setPaused((p) => !p);
   };
 
   // A mouse moved over the ring or the controls holds the next turn
@@ -309,7 +302,7 @@ export function CaptionPlayerSection() {
                 const isFront = slot === 0;
                 // The front video plays; during a move the leaving one
                 // too, until it lands (and on a low-end device only it).
-                const plays = !paused && (moving === null ? isFront : i === moving || (isFront && !lowEnd));
+                const plays = moving === null ? isFront : i === moving || (isFront && !lowEnd);
                 return (
                   <div
                     key={i}
@@ -328,15 +321,14 @@ export function CaptionPlayerSection() {
                         <LiveCaption
                           preset={id}
                           overrides={reduced && phone ? SMALL_FRAME_OVERRIDES[id] : undefined}
-                          text={text}
+                          text={texts[i]}
                           lang={lang}
                           playing={false}
                           hold={HOLD}
                           handle={score.handleRefs[i]}
                         >
-                          <CaptionPoster preset={id} text={text} />
+                          <CaptionPoster preset={id} text={texts[i]} />
                         </LiveCaption>
-                        <span className={L.frameTag}>{t("site.demo.example")}</span>
                         <span className={s.veil} data-veil="" />
                       </div>
                     </div>
@@ -350,19 +342,13 @@ export function CaptionPlayerSection() {
           </div>
 
           {!reduced && (
-            <div className={s.controls} {...hover("controls")}>
-              <IconButton
-                label={paused ? t("site.captions.play") : t("site.captions.pause")}
-                className={s.toggle}
-                onClick={togglePause}
-              >
-                <Icon icon={paused ? Play : Pause} size={16} />
-              </IconButton>
+            <>
               <div
                 ref={groupRef}
                 role="radiogroup"
                 aria-labelledby={labelId}
-                className={s.pills}
+                className={s.controls}
+                {...hover("controls")}
                 // Keyboard focus holds the next turn; a click's focus
                 // doesn't, and lets go of a keyboard hold.
                 onFocus={(e) => score.hold("focus", keyboardFocus(e.target))}
@@ -391,7 +377,7 @@ export function CaptionPlayerSection() {
               <span id={labelId} className="sr-only">
                 {t("site.captions.pick")}
               </span>
-            </div>
+            </>
           )}
 
           <p className="sr-only" aria-live="polite" aria-atomic="true">

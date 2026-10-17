@@ -2,28 +2,20 @@
 /**
  * The landing's footage: one creator talking to the camera, in muted
  * looping clips (clips.ts: stock video by MART PRODUCTION on Pexels, free
- * to use; every frame that shows him carries the "Example" tag, so he is
- * never presented as a customer). Every frame on the page that shows him
- * is a <Scene>, so they all read as one creator's videos at different
- * stages of the edit.
+ * to use). Every frame on the page that shows him is a <Scene>, so they
+ * all read as one creator's videos at different stages of the edit.
  *
  * His movement is the clip's own: motion inside a video frame is video
  * content (brand SKILL.md, Motion). When it loads and plays is
  * useClipPlayback's: lazily, only on screen in a visible tab, never under
- * reduced motion or data saver (the poster, his first frame, stays).
+ * reduced motion or data saver (the poster, one of his frames, stays).
  * Until the video has a frame the poster shows, and under the poster the
- * clip's inline 12 px preview, so a frame is never empty.
- *
- * A loop longer than five seconds needs a way to stop it (WCAG 2.2.2):
- * the section that shows it renders a LoopToggle and passes `playing`.
+ * clip's inline 12 px preview, so a frame is never empty. A section
+ * holds its clip on its frame (`playing`) while the frame is not up.
  */
 import { useCallback, useRef } from "react";
-import { Pause, Play } from "lucide-react";
-import { useT } from "@/i18n";
-import { Icon } from "@/components/ui/Icon";
-import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
-import { CLIPS, CLIP_DIR, type ClipId } from "./clips";
+import { CLIPS, CLIP_DIR, type ClipId, type ClipStart } from "./clips";
 import { useClipPlayback } from "./useClipPlayback";
 import styles from "./Scene.module.css";
 
@@ -60,6 +52,11 @@ function setRef<T>(ref: React.Ref<T> | undefined, value: T | null): void {
  * `playing` (default true) lets the clip play; false pauses it on its
  * frame. `priority` loads it eagerly (the hero). `videoRef` hands out the
  * <video> (currentTime, requestVideoFrameCallback, drawing to a canvas).
+ * `start` opens it later than its first frame (the hero's first load,
+ * clips.ts HERO_HALF): it loads there (a media fragment, so the first
+ * frame it shows is that one; a loop still goes round from 0) over a
+ * poster of that frame. Under reduced motion nothing starts, so the
+ * first frame's poster stays.
  */
 export function Scene({
   clip,
@@ -68,6 +65,7 @@ export function Scene({
   priority = false,
   className,
   videoRef,
+  start,
 }: {
   clip: ClipId;
   crop?: "vertical" | "wide";
@@ -75,11 +73,13 @@ export function Scene({
   priority?: boolean;
   className?: string;
   videoRef?: React.Ref<HTMLVideoElement>;
+  start?: ClipStart;
 }) {
   const { file, w, h } = CLIPS[clip];
   const rootRef = useRef<HTMLDivElement>(null);
   const ownVideoRef = useRef<HTMLVideoElement>(null);
-  const playback = useClipPlayback({ src: `${CLIP_DIR}/${file}.mp4`, playing, priority, rootRef, videoRef: ownVideoRef });
+  const src = `${CLIP_DIR}/${file}.mp4${start ? `#t=${start.at}` : ""}`;
+  const playback = useClipPlayback({ src, playing, priority, rootRef, videoRef: ownVideoRef });
 
   // Muted and inline as attributes too, before any src: iOS plays a
   // video without a tap only then, and React sets `muted` as a property
@@ -101,6 +101,21 @@ export function Scene({
     [videoRef],
   );
 
+  const poster = (
+    // eslint-disable-next-line @next/next/no-img-element -- the clip's pre-sized frame, no optimizer needed
+    <img
+      className={styles.poster}
+      src={`${CLIP_DIR}/${start ? start.poster : file}.webp`}
+      width={w}
+      height={h}
+      alt=""
+      draggable={false}
+      loading={priority ? "eager" : "lazy"}
+      fetchPriority={priority ? "high" : undefined}
+      decoding="async"
+    />
+  );
+
   return (
     <div
       ref={rootRef}
@@ -110,18 +125,15 @@ export function Scene({
       aria-hidden="true"
     >
       <div className={styles.camera}>
-        {/* eslint-disable-next-line @next/next/no-img-element -- the clip's pre-sized first frame, no optimizer needed */}
-        <img
-          className={styles.poster}
-          src={`${CLIP_DIR}/${file}.webp`}
-          width={w}
-          height={h}
-          alt=""
-          draggable={false}
-          loading={priority ? "eager" : "lazy"}
-          fetchPriority={priority ? "high" : undefined}
-          decoding="async"
-        />
+        {start ? (
+          <picture>
+            {/* reduced motion: nothing starts, the first frame stays */}
+            <source media="(prefers-reduced-motion: reduce)" srcSet={`${CLIP_DIR}/${file}.webp`} />
+            {poster}
+          </picture>
+        ) : (
+          poster
+        )}
         <video
           // A new clip is a new element: it starts on its poster again.
           key={file}
@@ -140,40 +152,4 @@ export function Scene({
       </div>
     </div>
   );
-}
-
-/**
- * The pause control for the clips a section loops (WCAG 2.2.2), as the
- * hero's: a 44 px round button, "Pause the demo" / "Play the demo".
- * Render it only while clips can move (useClipsMove).
- * - `place="row"`: in its own row under a figure, at the right edge.
- * - `place="beside"`: right of a frame, level with its bottom edge; the
- *   positioned parent is the frame's box.
- * `shown={false}` hides it while the frame it controls is not up yet; it
- * stays in the tab order and shows on keyboard focus, so it is never
- * skipped.
- */
-export function LoopToggle({
-  paused,
-  onToggle,
-  place,
-  shown = true,
-}: {
-  paused: boolean;
-  onToggle: () => void;
-  place: "row" | "beside";
-  shown?: boolean;
-}) {
-  const t = useT();
-  const button = (
-    <IconButton
-      label={paused ? t("site.demo.play") : t("site.demo.pause")}
-      className={cx(styles.toggle, place === "beside" && styles.beside)}
-      data-shown={shown}
-      onClick={onToggle}
-    >
-      <Icon icon={paused ? Play : Pause} size={16} />
-    </IconButton>
-  );
-  return place === "row" ? <div className={styles.toggleRow}>{button}</div> : button;
 }

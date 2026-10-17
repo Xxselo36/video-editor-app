@@ -1,6 +1,32 @@
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
+import { LANGS, type Lang } from "@/i18n/langs";
+import { deLanding } from "@/i18n/messages/de/landing";
+import { enLanding } from "@/i18n/messages/en/landing";
+import { esLanding } from "@/i18n/messages/es/landing";
+import { frLanding } from "@/i18n/messages/fr/landing";
+import { hiLanding } from "@/i18n/messages/hi/landing";
+import { idLanding } from "@/i18n/messages/id/landing";
+import { itLanding } from "@/i18n/messages/it/landing";
+import { jaLanding } from "@/i18n/messages/ja/landing";
+import { koLanding } from "@/i18n/messages/ko/landing";
+import { nlLanding } from "@/i18n/messages/nl/landing";
+import { plLanding } from "@/i18n/messages/pl/landing";
+import { ptLanding } from "@/i18n/messages/pt/landing";
+import { ruLanding } from "@/i18n/messages/ru/landing";
+import { trLanding } from "@/i18n/messages/tr/landing";
+import { FONTS_DIR, loadRealFonts } from "@/lib/captions/__tests__/helpers";
+import { frameState } from "@/lib/captions/engine";
+import { buildPages } from "@/lib/captions/layout";
+import { getFont } from "@/lib/captions/metrics";
+import { resolveStyle } from "@/lib/captions/presets";
+import { hasShapingFont, loadShaper, registerShapingFont } from "@/lib/captions/shape-hb";
+import { FIRST_WORD_AT, captionWords, spokenUntil } from "../captions/words";
+import { SMALL_FRAME_OVERRIDES } from "../shared";
 import {
   AT,
+  CAPTION_HOLD,
   CLOSE_DELAY_MS,
   CLOSE_MS,
   FINISHED,
@@ -25,7 +51,9 @@ import {
   chipAct,
   chipsAt,
   flagAt,
+  halfway,
   headAt,
+  heroPreset,
   keptLength,
   renderAt,
   shiftAt,
@@ -349,6 +377,8 @@ describe("hero score", () => {
 
   it("the scrub head fills with the captions and empties only while hidden", () => {
     const order = [...STEPS.map((_, n) => n), ...STEPS.slice(LOOP_FROM).map((_, n) => n + LOOP_FROM)];
+    // the first frame: half way, where the first load's play starts
+    expect(STEPS[order[0]].scrub).toBe("half");
     for (let k = 1; k < order.length; k++) {
       const a: Step = STEPS[order[k - 1]];
       const b: Step = STEPS[order[k]];
@@ -356,8 +386,10 @@ describe("hero score", () => {
       expect(b.scrub === "run").toBe(!!b.play);
       // it never jumps back while it shows: only on the seam's swap
       if (a.scrub && !b.scrub) expect(b.fade).toBe("snap");
-      // it starts each run from empty
-      if (b.scrub === "run") expect(a.scrub).toBeUndefined();
+      // it starts each run from empty, the first load's from where it waited
+      if (b.scrub === "run") expect(a.scrub).toBe(b.half ? "half" : undefined);
+      // it waits half way only before the first load's play
+      if (b.scrub === "half") expect(!!b.half && !b.play).toBe(true);
     }
   });
 
@@ -394,5 +426,136 @@ describe("hero score", () => {
       expect(s).toMatchObject({ frame: "lit", gone: FINISHED.gone });
       expect(s.flag ?? s.sweep ?? s.head ?? s.flash ?? s.fade).toBeUndefined();
     }
+  });
+
+  it("the first load, and only it, plays from half way: it waits there, then plays on", () => {
+    expect(STEPS.filter((s) => s.half)).toEqual(STEPS.slice(FIRST, LOOP_FROM));
+    const [wait, play] = STEPS.slice(FIRST, LOOP_FROM);
+    expect(wait).toMatchObject({ scrub: "half" });
+    expect(wait.play).toBeFalsy();
+    expect(play).toMatchObject({ play: true, scrub: "run", li: "captions" });
+    // the loop's payoff plays its captions from the first word
+    expect(STEPS[STEPS.length - 1].half).toBeUndefined();
+  });
+});
+
+/* ── The first load's play, from half way ── */
+
+const MESSAGES: Record<Lang, Partial<Record<keyof typeof enLanding, string>>> = {
+  en: enLanding,
+  de: deLanding,
+  es: esLanding,
+  fr: frLanding,
+  pt: ptLanding,
+  it: itLanding,
+  tr: trLanding,
+  pl: plLanding,
+  nl: nlLanding,
+  ru: ruLanding,
+  ja: jaLanding,
+  ko: koLanding,
+  id: idLanding,
+  hi: hiLanding,
+};
+/** The hero's frame (Hero.module.css .stage --clip-w, 9:16) on phones,
+ *  where the frame draws small styles larger (SMALL_FRAME_OVERRIDES), and
+ *  on larger screens, at its narrowest and widest at 2x. */
+const FRAMES = [
+  { W: 224, H: 398, small: true },
+  { W: 304, H: 540, small: true },
+  { W: 288, H: 512, small: false },
+  { W: 400, H: 711, small: false },
+];
+/** A caption's characters, without spaces and brackets. */
+const chars = (s: string) => s.replace(/[[\]\s]/g, "");
+
+/** The hero's sentence in every language, and where its first play picks up. */
+function* everySentence() {
+  for (const lang of Object.keys(LANGS) as Lang[]) {
+    const text = MESSAGES[lang]["site.demo.caption"] ?? enLanding["site.demo.caption"];
+    const words = captionWords(text, lang);
+    const half = halfway(words, lang)!;
+    yield { lang, text, words, half, k: words.findIndex((w) => w.start === half.at) };
+  }
+}
+
+describe("hero first load: the result plays from half way", () => {
+  beforeAll(async () => {
+    loadRealFonts();
+    // Hindi is measured by HarfBuzz in the browser (fonts.ts ensureFonts)
+    await loadShaper();
+    const face = getFont("poppins-800")!.face("devanagari")!;
+    if (!hasShapingFont(face.key)) registerShapingFont(face.key, fs.readFileSync(path.join(FONTS_DIR, face.file)));
+  });
+
+  it("picks up at the word that starts nearest the middle of the pass, so it lasts about half as long", () => {
+    for (const { lang, words, half, k } of everySentence()) {
+      expect(half.pass, lang).toBeCloseTo(spokenUntil(words) + CAPTION_HOLD, 9);
+      // on a word, never the first (the result would play whole)
+      expect(k, lang).toBeGreaterThanOrEqual(1);
+      for (let n = 1; n < words.length; n++) {
+        expect(Math.abs(words[n].start - half.pass / 2), `${lang} ${words[n].text}`).toBeGreaterThanOrEqual(Math.abs(half.at - half.pass / 2));
+      }
+      const rest = (half.pass - half.at) / half.pass;
+      expect(rest, lang).toBeGreaterThan(0.35);
+      expect(rest, lang).toBeLessThan(0.65);
+    }
+  });
+
+  it("draws the sentence from there on, timed as it is in the sentence", () => {
+    for (const { lang, words, half, k } of everySentence()) {
+      const from = captionWords(half.text, lang);
+      expect(from.map((w) => w.text), lang).toEqual(words.slice(k).map((w) => w.text));
+      // its first word right after its lead-in, the rest as in the sentence
+      expect(from[0].start, lang).toBe(FIRST_WORD_AT);
+      from.forEach((w, j) => {
+        expect(w.start - FIRST_WORD_AT, `${lang} ${w.text}`).toBeCloseTo(words[k + j].start - half.at, 9);
+        expect(w.end - w.start, `${lang} ${w.text}`).toBeCloseTo(words[k + j].end - words[k + j].start, 9);
+      });
+      // so the play lasts what is left of the pass
+      expect(spokenUntil(from) + CAPTION_HOLD - FIRST_WORD_AT, lang).toBeCloseTo(half.pass - half.at, 9);
+    }
+  });
+
+  it("waits on the page before: the words before, the last one spoken, as the poster marks it", () => {
+    for (const { lang, words, half, k } of everySentence()) {
+      expect(chars(half.before), lang).toBe(chars(words.slice(0, k).map((w) => w.text).join("")));
+      expect(half.before.match(/\[[^[\]]+\]/g), lang).toEqual([`[${words[k - 1].text}]`]);
+      expect(half.before.endsWith("]"), lang).toBe(true);
+    }
+    expect(halfway(captionWords("3 tips for better [hooks]", "en"), "en")).toMatchObject({
+      text: "better hooks",
+      before: "3 tips [for]",
+    });
+    expect(halfway(captionWords("良いフックを作る3つの[コツ]", "ja"), "ja")).toMatchObject({ text: "3つのコツ", before: "良いフックを[作る]" });
+  });
+
+  it("comes in on a page of its own as the play starts, and the caption is never empty after: every language, the hero's style and sizes", () => {
+    for (const { lang, half } of everySentence()) {
+      const preset = heroPreset(lang);
+      const from = captionWords(half.text, lang);
+      const lastEnd = spokenUntil(from);
+      for (const { W, H, small } of FRAMES) {
+        const style = resolveStyle(preset, small ? SMALL_FRAME_OVERRIDES[preset] : undefined, { W, H })!;
+        const pages = buildPages(from, style, { W, H, lang });
+        const where = `${lang} ${preset} ${W}x${H}: ${pages.map((p) => p.words.map((w) => w.text).join(" ")).join(" / ")}`;
+        // its first page starts with its first word, where the play starts:
+        // the page's entrance plays whole, over the page before
+        expect(pages[0].start, where).toBe(FIRST_WORD_AT);
+        const start = frameState(pages, FIRST_WORD_AT, style);
+        expect(start?.page, where).toBe(0);
+        expect(start?.active, where).toBe(0);
+        // a page on screen until the play ends (LiveCaption holds the last
+        // word's page through the hold)
+        for (let t = FIRST_WORD_AT; t < lastEnd + CAPTION_HOLD; t += 0.01) {
+          expect(frameState(pages, Math.min(t, lastEnd - 0.02), style), `${where} at ${t.toFixed(2)}s`).not.toBeNull();
+        }
+      }
+    }
+  });
+
+  it("plays whole a sentence of one word", () => {
+    expect(halfway(captionWords("[Hooks]", "en"), "en")).toBeNull();
+    expect(halfway([], "en")).toBeNull();
   });
 });

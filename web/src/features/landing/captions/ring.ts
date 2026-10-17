@@ -139,8 +139,9 @@ export const FAN_STAGGER_MS = 200;
 /** The settled page after the last word (s). */
 export const HOLD = 0.6;
 
-/** One pass of the caption (s): its words, then the settled page. A
- *  style stays in front for exactly one pass, then the ring turns. */
+/** One pass of a caption (s): its words, then the settled page. A style
+ *  stays in front for exactly one pass of its own line, then the ring
+ *  turns. */
 export function passLength(lastEnd: number): number {
   return lastEnd + HOLD;
 }
@@ -171,7 +172,8 @@ export function slotOf(i: number, front: number): Slot {
 /** The brand curve, var(--ease-out) (WAAPI can't read a custom property). */
 const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 
-/** The sentence's timing in this language (s). */
+/** A frame's line, timed in this language (s): its pass, its first
+ *  word's start and its last word's end. */
 type Timing = { pass: number; lead: number; lastEnd: number };
 
 type Move = {
@@ -214,7 +216,8 @@ export class RingScore {
   handles: (LiveCaptionHandle | null)[] = [null, null, null];
   /** The playing pill's progress line (a paused animation, scrubbed). */
   line: Pick<Animation, "currentTime"> | null = null;
-  timing: Timing = { pass: 1, lead: 0, lastEnd: 0 };
+  /** Per frame: its own line's timing (setLines). */
+  timings: Timing[] = [0, 1, 2].map(() => ({ pass: 1, lead: 0, lastEnd: 0 }));
   front = 0;
   /** The front caption's clock (s); negative while the ring brings it
    *  round, so its first word lands as the ring settles. */
@@ -247,16 +250,21 @@ export class RingScore {
     });
   }
 
-  /** The sentence in this language: a pass is its words plus the hold. */
-  setWords(words: readonly CaptionWord[]): void {
-    const lastEnd = spokenUntil(words);
-    this.timing = { pass: passLength(lastEnd), lead: words.length ? words[0].start : 0, lastEnd };
+  /** Each frame's line in this language: a frame's pass is its own
+   *  words plus the hold. */
+  setLines(lines: readonly (readonly CaptionWord[])[]): void {
+    this.timings = this.timings.map((_, i) => {
+      const words = lines[i] ?? [];
+      const lastEnd = spokenUntil(words);
+      return { pass: passLength(lastEnd), lead: words.length ? words[0].start : 0, lastEnd };
+    });
   }
 
-  /** The playing pill's line, from where the clock is. */
+  /** The playing pill's line, from where the clock is in the front
+   *  frame's pass. */
   setLine(anim: Pick<Animation, "currentTime"> | null): void {
     this.line = anim;
-    if (anim) anim.currentTime = passProgress(this.c, this.timing.pass) * 1000;
+    if (anim) anim.currentTime = passProgress(this.c, this.timings[this.front].pass) * 1000;
   }
 
   dropLine(anim: Pick<Animation, "currentTime">): void {
@@ -343,15 +351,15 @@ export class RingScore {
     this.move = null;
   }
 
-  /** Brings style `k` to the front; its caption starts from the first
+  /** Brings style `k` to the front; its caption starts from its first
    *  word as the ring settles. */
   turnTo(k: number, ms: number): void {
     const prev = this.front;
     const moved = this.animate(k, ms, false);
     this.front = k;
-    this.c = this.timing.lead - ms / 1000;
-    // Every frame shows a settled page until its clock comes round.
-    for (const h of this.handles) h?.seek(this.timing.lastEnd);
+    this.c = this.timings[k].lead - ms / 1000;
+    // Every frame shows its own settled page until its clock comes round.
+    this.settleAll();
     this.ui.setFront(k);
     if (moved) this.ui.setMoving(prev);
   }
@@ -362,20 +370,15 @@ export class RingScore {
   }
 
   /** The stage is in view: the reveal plays and the first caption starts
-   *  as the right frame lands. Paused by the visitor: no reveal, the
-   *  ring is simply up. */
-  start(paused: boolean): void {
+   *  as the right frame lands. */
+  start(): void {
     if (this.started) return;
     this.started = true;
     const m = this.move;
     if (!m?.fan) return;
-    if (paused) {
-      this.land(m.id);
-      return;
-    }
     m.started = true;
     if (this.live) animsOf(m).forEach((a) => a.play());
-    this.c = this.timing.lead - (FAN_STAGGER_MS + FAN_MS) / 1000;
+    this.c = this.timings[this.front].lead - (FAN_STAGGER_MS + FAN_MS) / 1000;
   }
 
   /** The visitor's pick: the ring turns to it (after the reveal, if that
@@ -390,8 +393,9 @@ export class RingScore {
     } else if (i !== this.front) {
       this.turnTo(i, PICK_MS);
     } else if (!this.move) {
-      this.handles[this.front]?.seek(this.timing.lastEnd);
-      this.c = this.timing.lead - HOLD;
+      const { lead, lastEnd } = this.timings[this.front];
+      this.handles[this.front]?.seek(lastEnd);
+      this.c = lead - HOLD;
     }
   }
 
@@ -432,20 +436,15 @@ export class RingScore {
     this.mouseY = y;
   }
 
-  /** Pausing: the caption holds where it is, never on an empty page or a
-   *  first word just popping in. */
-  settle(): void {
-    const { pass, lead, lastEnd } = this.timing;
-    if (this.c < 0) return;
-    const at = this.c % pass;
-    if (at >= lead + 0.1) return;
-    this.c += lastEnd - at;
-    this.handles[this.front]?.seek(lastEnd);
+  /** Every caption on its own settled page. */
+  private settleAll(): void {
+    this.handles.forEach((h, i) => h?.seek(this.timings[i].lastEnd));
   }
 
-  /** One frame of the clock (the page's ticker). */
+  /** One frame of the clock (the page's ticker): the front frame's pass
+   *  decides when the ring turns. */
   tick(dt: number): void {
-    const { pass } = this.timing;
+    const { pass } = this.timings[this.front];
     const prev = this.c;
     this.c += dt;
     this.wait = Math.max(0, this.wait - dt);
@@ -469,7 +468,7 @@ export class RingScore {
       this.ui.setFront(this.queued);
     }
     this.queued = null;
-    for (const h of this.handles) h?.seek(this.timing.lastEnd);
+    this.settleAll();
     this.holds.delete("controls");
     this.holds.delete("focus");
     this.ui.setMoving(null);

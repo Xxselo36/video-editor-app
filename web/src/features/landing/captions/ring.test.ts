@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LANGS, type Lang } from "@/i18n/langs";
+import { segmentsWithoutSpaces } from "@/lib/captions/scripts";
 import { deLanding } from "@/i18n/messages/de/landing";
 import { enLanding } from "@/i18n/messages/en/landing";
 import { esLanding } from "@/i18n/messages/es/landing";
@@ -54,6 +55,10 @@ const LANDING: Record<Lang, Partial<Record<keyof typeof enLanding, string>>> = {
   id: idLanding,
   hi: hiLanding,
 };
+
+/** The ring's lines, one per frame (CaptionPlayer.tsx LINES). */
+const LINE_KEYS = ["site.captions.line1", "site.captions.line2", "site.captions.line3"] as const;
+const ringLines = (lang: Lang) => LINE_KEYS.map((k) => LANDING[lang][k] ?? "");
 
 /** One frame of the page's ticker at 60 fps (s). */
 const TICK = 1 / 60;
@@ -236,29 +241,52 @@ describe("captions ring", () => {
     }
   }
 
+  it("every language gives each frame its own line, its last word [highlighted]", () => {
+    for (const lang of Object.keys(LANGS) as Lang[]) {
+      const lines = ringLines(lang);
+      expect(new Set(lines).size, lang).toBe(3);
+      for (const line of lines) {
+        // one mark, on the last word (the settled page is the last one,
+        // where the engine highlights it), and one phrase (no "|"): the
+        // engine pages it as it does any line
+        expect(line, lang).toMatch(/^[^[\]|]+\[[^[\]|]+\]$/);
+        expect(captionWords(line, lang).length, lang).toBeGreaterThan(1);
+        // without spaces the engine splits the page again into the
+        // segmenter's words (layout.ts segmentChunk) and highlights the
+        // last: the mark must be that word whole (見て would light て)
+        if (segmentsWithoutSpaces(lang)) {
+          const said = [...new Intl.Segmenter(lang, { granularity: "word" }).segment(line.replace(/[[\]]/g, ""))].filter((w) => w.isWordLike);
+          expect(said[said.length - 1].segment, `${lang} ${line}`).toBe(/\[(.+)\]$/.exec(line)![1]);
+        }
+      }
+    }
+  });
+
   // The clock starts below zero after the reveal, a turn or a pick (the
   // lead-in while the ring brings the style round, so its first word
   // lands as the ring settles) or a pick of the style in front (its
   // settled page for the hold first), and at zero on a reload mid-page.
-  it("each style plays its caption once, every word and the hold, then the ring turns (every language)", () => {
+  it("each style plays its own caption once, every word and the hold, then the ring turns (every language)", () => {
     for (const lang of Object.keys(LANGS) as Lang[]) {
-      const words = captionWords(LANDING[lang]["site.demo.caption"] ?? "", lang);
-      expect(words.length, lang).toBeGreaterThan(0);
-      const lastEnd = spokenUntil(words);
-      const pass = passLength(lastEnd);
-      expect(pass, lang).toBeCloseTo(lastEnd + HOLD, 9);
-      const lead = words[0].start;
-      for (const c0 of [lead - (FAN_STAGGER_MS + FAN_MS) / 1000, lead - TURN_MS / 1000, lead - PICK_MS / 1000, lead - HOLD, 0]) {
-        const [first, next] = passEndsFrom(c0, pass, 2);
-        // The turn: one pass on the caption's clock (to the tick), never
-        // as the clock comes up through zero, and after every word and
-        // the settled page.
-        expect(first, lang).toBeGreaterThanOrEqual(pass);
-        expect(first - pass, lang).toBeLessThan(TICK);
-        for (const w of words) expect(first, lang).toBeGreaterThanOrEqual(w.end + HOLD);
-        // Held past it, the caption plays on and the next chance comes a
-        // whole pass later, at its seam: a turn never cuts a word.
-        expect(Math.abs(next - first - pass), lang).toBeLessThan(TICK);
+      for (const line of ringLines(lang)) {
+        const words = captionWords(line, lang);
+        expect(words.length, lang).toBeGreaterThan(0);
+        const lastEnd = spokenUntil(words);
+        const pass = passLength(lastEnd);
+        expect(pass, lang).toBeCloseTo(lastEnd + HOLD, 9);
+        const lead = words[0].start;
+        for (const c0 of [lead - (FAN_STAGGER_MS + FAN_MS) / 1000, lead - TURN_MS / 1000, lead - PICK_MS / 1000, lead - HOLD, 0]) {
+          const [first, next] = passEndsFrom(c0, pass, 2);
+          // The turn: one pass on the caption's clock (to the tick), never
+          // as the clock comes up through zero, and after every word and
+          // the settled page.
+          expect(first, lang).toBeGreaterThanOrEqual(pass);
+          expect(first - pass, lang).toBeLessThan(TICK);
+          for (const w of words) expect(first, lang).toBeGreaterThanOrEqual(w.end + HOLD);
+          // Held past it, the caption plays on and the next chance comes a
+          // whole pass later, at its seam: a turn never cuts a word.
+          expect(Math.abs(next - first - pass), lang).toBeLessThan(TICK);
+        }
       }
     }
   });
@@ -281,8 +309,9 @@ describe("captions ring", () => {
 });
 
 /** A ring with no frames to animate (as where the browser can't): a turn
- *  is the front changing at once, on the same clock and holds. */
-function score(lang: Lang = "en") {
+ *  is the front changing at once, on the same clock and holds. Each frame
+ *  says its own line (`texts`, default: the language's). */
+function score(lang: Lang = "en", texts: readonly string[] = ringLines(lang)) {
   const turns: { at: number; to: number }[] = [];
   let now = 0;
   const ring = new RingScore({
@@ -290,10 +319,14 @@ function score(lang: Lang = "en") {
     setMoving: () => {},
     setPending: () => {},
   });
-  const words = captionWords(LANDING[lang]["site.demo.caption"] ?? "", lang);
-  ring.setWords(words);
-  const pass = passLength(spokenUntil(words));
-  const lead = words[0].start;
+  const lines = texts.map((text) => captionWords(text, lang));
+  ring.setLines(lines);
+  /** Frame i's pass, first word and last word's end. */
+  const pass = (i: number) => passLength(spokenUntil(lines[i]));
+  const lead = (i: number) => lines[i][0].start;
+  const lastEnd = (i: number) => spokenUntil(lines[i]);
+  /** Seconds frame i stays in front after it came by a turn of `ms`. */
+  const dwell = (i: number, ms: number) => pass(i) - (lead(i) - ms / 1000);
   /** Ticks the clock for `s` seconds at 60 fps. */
   const run = (s: number) => {
     for (let k = Math.round(s / TICK); k > 0; k--) {
@@ -301,71 +334,116 @@ function score(lang: Lang = "en") {
       ring.tick(TICK);
     }
   };
-  return { ring, turns, run, pass, lead, now: () => now };
+  return { ring, turns, run, pass, lead, lastEnd, dwell, now: () => now };
 }
 
-/** Seconds a style stays in front after it came by a turn of `ms`. */
-const dwell = (pass: number, lead: number, ms: number) => pass - (lead - ms / 1000);
+/** Three lines far apart in length, so a turn on any other frame's pass
+ *  would show. */
+const UNEVEN = ["Go [now]", "This one runs a good deal longer than the [others]", "Three short [words]"];
 
 describe("the ring's score", () => {
-  it("turns by itself, one pass per style, round and round", () => {
-    const { turns, run, pass, lead } = score();
-    run(pass + 3 * dwell(pass, lead, TURN_MS) + 0.1);
-    expect(turns.map((t) => t.to)).toEqual([1, 2, 0, 1]);
-    expect(turns[0].at).toBeCloseTo(pass, 1);
-    for (let n = 1; n < turns.length; n++) expect(turns[n].at - turns[n - 1].at).toBeCloseTo(dwell(pass, lead, TURN_MS), 1);
+  it("turns by itself, each style after its own pass, round and round (every language)", () => {
+    for (const lang of Object.keys(LANGS) as Lang[]) {
+      expect(ringLines(lang).every(Boolean), lang).toBe(true);
+      const { turns, run, pass, dwell } = score(lang);
+      run(pass(0) + dwell(1, TURN_MS) + dwell(2, TURN_MS) + dwell(0, TURN_MS) + 0.1);
+      const order = turns.map((t) => t.to);
+      expect(order, lang).toEqual([1, 2, 0, 1]);
+      expect(turns[0].at, lang).toBeCloseTo(pass(0), 1);
+      // the gap before each turn is the front frame's own pass
+      [1, 2, 0].forEach((i, n) => expect(turns[n + 1].at - turns[n].at, lang).toBeCloseTo(dwell(i, TURN_MS), 1));
+    }
+  });
+
+  it("the front frame's own pass decides the turn, not another frame's", () => {
+    const { turns, run, pass, dwell } = score("en", UNEVEN);
+    expect(pass(1) - pass(0)).toBeGreaterThan(1);
+    expect(pass(1) - pass(2)).toBeGreaterThan(1);
+    run(pass(0) + dwell(1, TURN_MS) + dwell(2, TURN_MS) + 0.1);
+    expect(turns.map((t) => t.to)).toEqual([1, 2, 0]);
+    expect(turns[0].at).toBeCloseTo(pass(0), 1);
+    expect(turns[1].at - turns[0].at).toBeCloseTo(dwell(1, TURN_MS), 1);
+    expect(turns[2].at - turns[1].at).toBeCloseTo(dwell(2, TURN_MS), 1);
+  });
+
+  it("a turn lands the incoming caption's first word as the ring settles", () => {
+    const { ring, turns, run, pass, lead, now } = score("en", UNEVEN);
+    const seeks: { at: number; t: number }[] = [];
+    ring.handles[1] = { seek: (t) => seeks.push({ at: now(), t }), duration: pass(1), still: 0 };
+    run(pass(0) + 0.05);
+    const turned = turns[0].at;
+    run(TURN_MS / 1000 + 0.2);
+    // on its clock (after the settled page the turn shows), the first word
+    // starts as the turn's time is up
+    const first = seeks.find((x) => x.at > turned && x.t >= lead(1));
+    expect(first!.at - turned).toBeCloseTo(TURN_MS / 1000, 1);
+  });
+
+  it("every frame shows its own settled page until its clock comes round", () => {
+    const { ring, run, pass, lastEnd } = score("en", UNEVEN);
+    const seeks: number[][] = [[], [], []];
+    [0, 1, 2].forEach((i) => (ring.handles[i] = { seek: (t) => seeks[i].push(t), duration: pass(i), still: 0 }));
+    run(pass(0) + 0.05);
+    // the turn: each frame on its own last page, the new front's clock below zero
+    expect(seeks.map((x) => x.at(-1))).toEqual([lastEnd(0), lastEnd(1), lastEnd(2)]);
+    expect(ring.c).toBeLessThan(0);
+    ring.pick(2);
+    ring.reset();
+    expect(seeks.map((x) => x.at(-1))).toEqual([lastEnd(0), lastEnd(1), lastEnd(2)]);
   });
 
   it("after a pick the style plays its one pass, then the turns go on", () => {
-    const { ring, turns, run, pass, lead, now } = score();
+    const { ring, turns, run, dwell, now } = score();
     run(1);
     ring.pick(2);
     const picked = now();
     expect(turns).toEqual([{ at: picked, to: 2 }]);
-    run(dwell(pass, lead, PICK_MS) + dwell(pass, lead, TURN_MS) + 0.1);
+    run(dwell(2, PICK_MS) + dwell(0, TURN_MS) + 0.1);
     expect(turns.map((t) => t.to)).toEqual([2, 0, 1]);
-    expect(turns[1].at - picked).toBeCloseTo(dwell(pass, lead, PICK_MS), 1);
+    expect(turns[1].at - picked).toBeCloseTo(dwell(2, PICK_MS), 1);
     // and again: a second pick doesn't stop them either
     ring.pick(0);
-    run(dwell(pass, lead, PICK_MS) + 0.1);
+    run(dwell(0, PICK_MS) + 0.1);
     expect(turns.map((t) => t.to)).toEqual([2, 0, 1, 0, 1]);
   });
 
   it("the style in front, picked again, starts over from its settled page", () => {
-    const { ring, turns, run, pass, lead, now } = score();
+    const { ring, turns, run, pass, lead, lastEnd, now } = score("en", UNEVEN);
     const seeks: number[] = [];
-    ring.handles[0] = { seek: (t) => seeks.push(t), duration: pass, still: 0 };
-    run(pass - 0.5);
+    ring.handles[0] = { seek: (t) => seeks.push(t), duration: pass(0), still: 0 };
+    run(pass(0) - 0.5);
     ring.pick(0);
     const picked = now();
-    expect(seeks.at(-1)).toBe(spokenUntil(captionWords(enLanding["site.demo.caption"], "en")));
+    expect(seeks.at(-1)).toBe(lastEnd(0));
     expect(turns).toEqual([]);
-    run(pass - lead + HOLD + 0.1);
+    run(pass(0) - lead(0) + HOLD + 0.1);
     expect(turns).toHaveLength(1);
-    expect(turns[0].at - picked).toBeCloseTo(pass - lead + HOLD, 1);
+    expect(turns[0].at - picked).toBeCloseTo(pass(0) - lead(0) + HOLD, 1);
   });
 
   it("a hold keeps the style in front; let go, the turn comes at a pass end after the wait", () => {
     const { ring, turns, run, pass } = score();
+    const p0 = pass(0);
     ring.hold("stage", true);
-    run(3 * pass);
+    run(3 * p0);
     expect(turns).toEqual([]);
-    const released = 3 * pass;
+    const released = 3 * p0;
     ring.hold("stage", false);
-    run(pass + TURN_MS / 1000 + 0.1);
+    run(p0 + TURN_MS / 1000 + 0.1);
     expect(turns).toHaveLength(1);
     const wait = turns[0].at - released;
     expect(wait).toBeGreaterThanOrEqual(TURN_MS / 1000 - TICK);
-    expect(wait).toBeLessThan(TURN_MS / 1000 + pass);
+    expect(wait).toBeLessThan(TURN_MS / 1000 + p0);
     // at a pass end: the caption is never cut
-    expect((turns[0].at / pass) % 1).toBeLessThan(TICK / pass + 1e-9);
+    expect((turns[0].at / p0) % 1).toBeLessThan(TICK / p0 + 1e-9);
   });
 
   it("a mouse holds only once it moves, not when the page scrolls under it", () => {
     const { ring, turns, run, pass } = score();
+    const p0 = pass(0);
     ring.mouse("stage", "enter", 720, 450);
     ring.mouse("stage", "move", 720, 450);
-    run(pass + 0.1);
+    run(p0 + 0.1);
     expect(turns).toHaveLength(1);
     ring.mouse("stage", "move", 724, 452);
     expect(ring.holds.has("stage")).toBe(true);
@@ -379,13 +457,14 @@ describe("the ring's score", () => {
 
   it("a mouse that lands with a single event holds; a cursor the ring scrolls under after moving elsewhere doesn't", () => {
     const { ring, turns, run, pass } = score();
+    const p0 = pass(0);
     // seen elsewhere on the page, then one event lands on the controls and the mouse rests
     ring.seen(5, 5);
     ring.mouse("controls", "enter", 535, 750);
     ring.mouse("controls", "move", 535, 750);
     ring.seen(535, 750);
     expect(ring.holds.has("controls")).toBe(true);
-    run(2 * pass);
+    run(2 * p0);
     expect(turns).toEqual([]);
     ring.mouse("controls", "leave", 535, 750);
     expect(ring.holds.size).toBe(0);
@@ -395,27 +474,33 @@ describe("the ring's score", () => {
     ring.mouse("stage", "enter", 720, 450);
     ring.mouse("stage", "move", 720, 450);
     expect(ring.holds.size).toBe(0);
-    run(pass + TURN_MS / 1000 + 0.1);
+    run(p0 + TURN_MS / 1000 + 0.1);
     expect(turns).toHaveLength(1);
   });
 
   it("no hold outlives the controls (reduced motion, unmount)", () => {
     const { ring, turns, run, pass } = score();
+    const p0 = pass(0);
     ring.hold("controls", true);
     ring.hold("focus", true);
     ring.reset();
-    run(pass + 0.1);
+    run(p0 + 0.1);
     expect(turns).toHaveLength(1);
   });
 
-  it("the line follows the clock, from empty after every turn", () => {
-    const { ring, run, pass } = score();
+  it("the line spans the front frame's own pass, from empty after every turn", () => {
+    const { ring, run, pass, lead } = score("en", UNEVEN);
     const line = { currentTime: null as CSSNumberish | null };
     ring.setLine(line);
-    run(pass / 2);
+    run(pass(0) / 2);
     expect(line.currentTime as number).toBeCloseTo(500, -1);
     ring.pick(1);
     ring.setLine(line);
     expect(line.currentTime).toBe(0);
+    // empty while the ring brings it round, half full half way through its pass
+    run(PICK_MS / 1000 - lead(1) - TICK);
+    expect(line.currentTime).toBe(0);
+    run(TICK + pass(1) / 2);
+    expect(line.currentTime as number).toBeCloseTo(500, -1);
   });
 });

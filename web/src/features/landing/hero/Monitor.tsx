@@ -3,7 +3,7 @@
  * is (hero/monitor.ts has the timing). A lazy chunk: TakeStrip renders it
  * once the loop runs, after hydration, and never under reduced motion,
  * data saver or a 2G-class connection; it first shows at the loop's seam,
- * about 3.5 s in, so nothing of it is in the first load.
+ * about 2.5 s in, so nothing of it is in the first load.
  *
  * It lies over the Scene (the graded take, hero.mp4), which TakeStrip
  * keeps paused while the footage is raw and plays when the frame lights.
@@ -33,8 +33,8 @@
  * frame and was not refused). If the raw take cannot play (an error,
  * autoplay refused, Low Power Mode), before or after it took over, it
  * gives up and takes everything it shows with it, and the Scene plays as
- * it always did (onLive). A stop (pause button, off screen, hidden tab)
- * pauses the take; its Web Animations and transitions sit in the stage,
+ * it always did (onLive). A stop (off screen, hidden tab) pauses the
+ * take; its Web Animations and transitions sit in the stage,
  * so TakeStrip's freeze holds them with the rest. Everything changes on
  * steps and media events; per frame, only Act 1 reads two clocks and
  * steers a playback rate (no React render, no layout read).

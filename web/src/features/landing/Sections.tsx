@@ -21,8 +21,7 @@ import { Icon } from "@/components/ui/Icon";
 import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "./CaptionFrame";
 import { LiveCaption, type LiveCaptionHandle } from "./captions/LiveCaption";
-import { LoopToggle, Scene } from "./scene/Scene";
-import { useClipsMove } from "./scene/useClipPlayback";
+import { Scene } from "./scene/Scene";
 import { presetSupport } from "@/lib/captions/scripts";
 import { LAUNCH_PRESETS } from "@/lib/captions/presets";
 import { CtaLink, PASS_ROOT_MARGIN, PASS_THRESHOLDS, passShare, useInView, useReducedMotion } from "./shared";
@@ -158,16 +157,14 @@ const SWEEP_MS = 1300;
  *  bottom edge on the page's spring once it is clear of the chrome, and
  *  every time it has landed its caption plays the line again from the
  *  first word (it waits, empty, while the frame is down, so the frame
- *  rises clean), then keeps looping under the settled caption, with a
- *  pause control beside it. Laid down (armed) only once the script runs,
- *  so without it the frame stands as it ends. `onLanded` reports each
- *  rise, CUE_MS into the hinge (the closing sweep waits for the first). */
+ *  rises clean), then keeps looping under the settled caption. Laid down
+ *  (armed) only once the script runs, so without it the frame stands as
+ *  it ends. `onLanded` reports each rise, CUE_MS into the hinge (the
+ *  closing sweep waits for the first). */
 function FinalReprise({ onLanded }: { onLanded: () => void }) {
   const t = useT();
   const lang = useLang();
   const reduced = useReducedMotion();
-  const moves = useClipsMove();
-  const [paused, setPaused] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const capRef = useRef<LiveCaptionHandle | null>(null);
@@ -245,7 +242,7 @@ function FinalReprise({ onLanded }: { onLanded: () => void }) {
   return (
     <div ref={ref} className={styles.reprise} data-shown={shown} data-armed={armed || undefined}>
       <div ref={frameRef} className={styles.repriseFrame} aria-hidden="true">
-        <Scene clip="hero" playing={shown && !paused} />
+        <Scene clip="hero" playing={shown} />
         <LiveCaption
           preset={preset}
           text={caption}
@@ -258,9 +255,7 @@ function FinalReprise({ onLanded }: { onLanded: () => void }) {
         >
           <CaptionPoster preset={preset} text={caption} />
         </LiveCaption>
-        <span className={styles.frameTag}>{t("site.demo.example")}</span>
       </div>
-      {moves && <LoopToggle place="beside" paused={paused} onToggle={() => setPaused((p) => !p)} shown={shown} />}
     </div>
   );
 }

@@ -9,7 +9,7 @@
 import { LAUNCH_PRESETS } from "@/lib/captions/presets";
 import { presetSupport, segmentsWithoutSpaces } from "@/lib/captions/scripts";
 import type { PresetId } from "@/lib/captions/types";
-import { captionWords, FIRST_WORD_AT, splitPhrases, splitWords, spokenAt } from "../captions/words";
+import { captionWords, splitPhrases, splitWords, spokenAt } from "../captions/words";
 
 /** One caption style for the three clips: Power where the language's
  *  script has it, else the first style that renders it natively. */
@@ -169,21 +169,10 @@ export function tickClipClock(clock: ClipClock, dt: number, video: ClipVideo | n
   return { seek: null, held: false };
 }
 
-/** Where a paused caption stands: where it stopped (whichever phrase is
- *  on screen, as a paused short holds its subtitle), but on the lead-in
- *  before its first word (nothing drawn yet: between two loops, or its
- *  tile came up while paused) it shows its still, the first phrase whole
- *  (`still`). */
-export function pausedAt(t: number, still: number): number {
-  return t < FIRST_WORD_AT ? still : t;
-}
-
 /** What the section knows about a tile's caption on this frame. */
 export type ClipCaptionState = {
   /** The clips can move (no data saver, no 2G-class connection). */
   loops: boolean;
-  /** The pause control holds them. */
-  paused: boolean;
   video: ClipVideo | null;
   /** The caption's length (s: its last word and hold). */
   end: number;
@@ -197,13 +186,13 @@ export type ClipCaptionState = {
  * it still moves (`busy`: the ticker stops once none does).
  *
  * Where the clips cannot move, the line plays once on its own clock, all
- * three phrases, and settles on its still (the first phrase whole), paused
- * or not: no control is left to resume it, so it must not hold on half a
- * phrase or on a last phrase that makes no sense alone. Once they can
- * move again, a settled line starts over with its clip (which loads again
- * from its first frame) and a line still under way joins it as a late
- * video does. Otherwise the pause control holds it (pausedAt) and its
- * clip leads (tickClipClock).
+ * three phrases, and settles on its still (the first phrase whole): its
+ * clip stays on its poster, so there is nothing to loop with, and it must
+ * not stop on half a phrase or on a last phrase that makes no sense
+ * alone. Once they can move again, a settled line starts over with its
+ * clip (which loads again from its first frame) and a line still under
+ * way joins it as a late video does. Otherwise its clip leads
+ * (tickClipClock).
  */
 export function stepClipCaption(
   clock: ClipClock,
@@ -220,7 +209,6 @@ export function stepClipCaption(
     return { at: clock.done ? now.still : clock.t, seek: null, busy: !clock.done };
   }
   if (clock.done) Object.assign(clock, clipClock());
-  if (now.paused) return { at: pausedAt(clock.t, now.still), seek: null, busy: false };
   const step = tickClipClock(clock, dt, now.video);
   return { at: clock.t, seek: step.seek, busy: !step.held };
 }
