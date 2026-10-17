@@ -32,12 +32,12 @@
  * The pass starts once most of the stage is clear of the sticky chrome
  * (PASS_ROOT_MARGIN, passShare; the share is --rf-pass), the tab is
  * visible and the video has a frame (or after 1 s, over the poster). It
- * re-arms when the figure is fully out of view (unless paused) and
- * replays from the Replay button. Pause stops the clip and any running
- * cue; Play resumes both.
+ * re-arms when the figure is fully out of view and replays from the
+ * Replay button. A hidden tab holds the clip and any running cue where
+ * they are; both go on once it is visible again.
  */
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { useT } from "@/i18n";
 import { Icon } from "@/components/ui/Icon";
 import { IconButton } from "@/components/ui/IconButton";
@@ -329,8 +329,8 @@ const SLOW_MS = 8;
  * write (the window) and one drawImage of the crop into the vertical's
  * canvas. The canvas is sized for the stood 1.35x (at most 2x DPR and the
  * source's own pixels) and halved if drawing proves slow. No layout
- * reads, no React. Off screen and paused, the video presents no frames,
- * so this does nothing.
+ * reads, no React. Off screen or in a hidden tab the video is paused and
+ * presents no frames, so this does nothing.
  */
 function useFollowFace({
   videoRef,
@@ -460,9 +460,8 @@ function useFollowFace({
 export function ReframeSection() {
   const t = useT();
   // No motion (reduced motion, data saver): the settled still, no pass,
-  // no controls.
+  // no Replay.
   const moves = useClipsMove();
-  const [paused, setPaused] = useState(false);
   const [done, setDone] = useState(false);
   const figRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -470,16 +469,9 @@ export function ReframeSection() {
   const trackRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const pausedRef = useRef(false);
-  const passRef = useRef<{ sync: () => void; replay: () => void } | null>(null);
+  const replayRef = useRef<(() => void) | null>(null);
 
   useFollowFace({ videoRef, trackRef, canvasRef, plateRef });
-
-  // Pause and Play reach a running pass too.
-  useEffect(() => {
-    pausedRef.current = paused;
-    passRef.current?.sync();
-  }, [paused]);
 
   useEffect(() => {
     const fig = figRef.current;
@@ -505,7 +497,7 @@ export function ReframeSection() {
     let onWaited: (() => void) | null = null;
 
     const geo = () => readGeo(fig, plate, videoRef.current);
-    const live = () => !pausedRef.current && document.visibilityState !== "hidden";
+    const live = () => document.visibilityState !== "hidden";
     const threshold = () => parseFloat(getComputedStyle(fig).getPropertyValue("--rf-pass")) || 0.6;
 
     const stopWaiting = () => {
@@ -601,11 +593,9 @@ export function ReframeSection() {
 
     arm(geo());
     // Fully out of view: back to the first frame for the next entry (the
-    // Replay button stays while it has focus). Not while paused: the
-    // armed pose has no window and no vertical, and a paused pass would
-    // not start again, so it keeps the pose it was paused in.
+    // Replay button stays while it has focus).
     const away = new IntersectionObserver((entries) => {
-      if (entries[entries.length - 1].isIntersecting || phase === "armed" || pausedRef.current) return;
+      if (entries[entries.length - 1].isIntersecting || phase === "armed") return;
       arm(geo());
       if (!fig.contains(document.activeElement)) setDone(false);
     });
@@ -619,7 +609,7 @@ export function ReframeSection() {
     );
     near.observe(stage);
     document.addEventListener("visibilitychange", sync);
-    passRef.current = { sync, replay: start };
+    replayRef.current = start;
     return () => {
       away.disconnect();
       near.disconnect();
@@ -628,7 +618,7 @@ export function ReframeSection() {
       marks.forEach((m) => m.cancel());
       anims.forEach((a) => a.cancel());
       delete stage.dataset.pass;
-      passRef.current = null;
+      replayRef.current = null;
     };
   }, [moves]);
 
@@ -645,13 +635,13 @@ export function ReframeSection() {
         </div>
         <div className={f.rfBox}>
           <div ref={figRef} className={f.rfFig} style={FIG_VARS}>
-            {/* The picture is one image to assistive tech; the controls
-                below it stay operable. */}
+            {/* The picture is one image to assistive tech; the Replay
+                button below it stays operable. */}
             <div ref={stageRef} className={f.stage} role="img" aria-label={t("site.format.figureAria")}>
               <div className={f.rig} aria-hidden="true">
                 <div ref={plateRef} className={f.plate} data-el="plate">
                   <div className={f.screen}>
-                    <Scene clip="smartcam" crop="wide" playing={!paused} videoRef={videoRef} />
+                    <Scene clip="smartcam" crop="wide" videoRef={videoRef} />
                     <div ref={trackRef} className={f.cropTrack}>
                       <div className={f.dim} data-el="dim" />
                       <div className={f.window} data-el="window" />
@@ -687,9 +677,6 @@ export function ReframeSection() {
                   </div>
                 </div>
               </div>
-              <span className={cx(styles.frameTag, f.tag)} aria-hidden="true">
-                {t("site.demo.example")}
-              </span>
               <span className={cx(f.ratio, f.ratioWide)} aria-hidden="true">
                 16:9
               </span>
@@ -703,21 +690,9 @@ export function ReframeSection() {
                   label={t("site.demo.replay")}
                   className={f.ctl}
                   data-shown={done}
-                  onClick={() => {
-                    // Replaying is asking for the motion: it plays.
-                    pausedRef.current = false;
-                    setPaused(false);
-                    passRef.current?.replay();
-                  }}
+                  onClick={() => replayRef.current?.()}
                 >
                   <Icon icon={RotateCcw} size={16} />
-                </IconButton>
-                <IconButton
-                  label={paused ? t("site.demo.play") : t("site.demo.pause")}
-                  className={f.ctl}
-                  onClick={() => setPaused((p) => !p)}
-                >
-                  <Icon icon={paused ? Play : Pause} size={16} />
                 </IconButton>
               </div>
             )}

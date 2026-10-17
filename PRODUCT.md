@@ -57,4 +57,4 @@ Voice commands spoken during the recording steer the edit. “Cleo start” open
 
 ## Accessibility & Inclusion
 
-WCAG 2.2 AA. All text tokens are AA on every surface. Motion respects `prefers-reduced-motion`; nothing auto-advances without a way to pause. 14 languages, including long German words and CJK; right-to-left captions are not supported yet.
+WCAG 2.2 AA. All text tokens are AA on every surface. Motion respects `prefers-reduced-motion` (every landing demo becomes a still and nothing loops). One known exception to that target: the landing's looping demos have no pause buttons (owner decision, Oct 2026), so they knowingly miss WCAG 2.2.2 Pause, Stop, Hide (Level A); they stop off screen and in hidden tabs and go on from where they were. 14 languages, including long German words and CJK; right-to-left captions are not supported yet.

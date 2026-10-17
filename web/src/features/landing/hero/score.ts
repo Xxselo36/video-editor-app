@@ -17,13 +17,19 @@
  * its post stays as a green seam, and the scene it starts is sealed as
  * kept once the pause after the post has gone. A render head runs over
  * the kept tape, and as it lands on “Cleo finish” the 9:16 video lights
- * up and its captions play.
+ * up and its captions play. The first load opens on that video half way
+ * through its play (halfway), so it ends sooner and the eye goes on to
+ * the tape.
  *
  * Widths are in % of the tape (they add up to 100). Every removal is a
  * translate of the pieces after it (never a width change). The *_MS
  * timings the stage's CSS shares are set on it as custom properties
  * (TakeStrip), so the steps below and the motion cannot drift apart.
  */
+import { LAUNCH_PRESETS } from "@/lib/captions/presets";
+import { presetSupport, segmentsWithoutSpaces } from "@/lib/captions/scripts";
+import type { CaptionWord, PresetId } from "@/lib/captions/types";
+import { spokenUntil } from "../captions/words";
 import type { CmdId } from "../shared";
 
 export type PieceId = "pre" | "bad" | "a" | "um" | "b" | "pause" | "c" | "skip" | "d" | "post";
@@ -153,7 +159,8 @@ export const PIECE_STAGGER_MS = 24;
 export type Phase = "talk" | "edit" | "ready";
 
 export type Step = {
-  /** How long the step holds. A play step lasts as long as its sentence instead (TakeStrip). */
+  /** How long the step holds. A play step lasts as long as its sentence
+   *  instead, the first load's the rest of it from half way (TakeStrip). */
   ms: number;
   phase?: Phase;
   /** The loop's seam, one event in one direction: everything leaves
@@ -180,11 +187,18 @@ export type Step = {
   frame: "raw" | "lit";
   /** The payoff: the video lights up because the edit landed. */
   reveal?: boolean;
-  /** Captions play from their first word during this step. */
+  /** Captions play during this step: from their first word, or on the
+   *  first load from half way (`half`). */
   play?: boolean;
-  /** The video's scrub head: filling with the captions, or held full
-   *  until it is hidden (it goes back to empty only while invisible). */
-  scrub?: "run" | "full";
+  /** First load only: the result plays from half way (halfway). Until
+   *  its play it waits there, still: the video on its frame there
+   *  (scene/clips.ts HERO_HALF), the caption on the page before, the
+   *  scrub head where the play starts. */
+  half?: boolean;
+  /** The video's scrub head: waiting half way (the first load), filling
+   *  with the captions, or held full until it is hidden (it goes back to
+   *  empty only while invisible). */
+  scrub?: "half" | "run" | "full";
   li?: LegendId;
   done: LegendId[];
 };
@@ -242,9 +256,9 @@ function lift(ms: number, flag: FlagId, gone: PieceId[], li: LegendId, done: Leg
 }
 
 export const STEPS: Step[] = [
-  // First load only: the result holds, then its captions play.
-  { ...FINISHED, ms: 600 },
-  { ...FINISHED, ms: 3800, play: true, scrub: "run", li: "captions" },
+  // First load only: the result waits half way through its play, then plays on from there.
+  { ...FINISHED, ms: 600, half: true, scrub: "half" },
+  { ...FINISHED, ms: 3800, half: true, play: true, scrub: "run", li: "captions" },
   // The loop: hold the played result, then start over.
   { ...FINISHED, ms: 600, scrub: "full" },
   { ...FINISHED, ms: 320, fade: "out", scrub: "full" },
@@ -283,11 +297,62 @@ export const STEPS: Step[] = [
   },
 ];
 
-/** The first step after hydration: the finished frame holds, then its captions play. */
+/** The first step after hydration: the finished frame waits half way, then plays on. */
 export const FIRST = 0;
 
 /** Where the loop goes on after its last step: the hold after the captions. */
 export const LOOP_FROM = 2;
+
+/* ── The video's caption ── */
+
+/** The caption's hold after its last word (s). */
+export const CAPTION_HOLD = 0.4;
+
+/** The caption style the hero's video uses in this language. */
+export function heroPreset(lang: string): PresetId {
+  if (presetSupport("power", lang).level !== "unavailable") return "power";
+  return LAUNCH_PRESETS.find((p) => presetSupport(p, lang).level !== "unavailable") ?? "power";
+}
+
+export type Halfway = {
+  /** What the first play draws: the sentence from the word it picks up
+   *  on, so a page starts there whatever the style's pages. */
+  text: string;
+  /** What the result waits on until then: the words before, their last
+   *  one [spoken], as the CSS poster draws a page. */
+  before: string;
+  /** Where it picks up in the whole sentence's pass (s from its lead-in). */
+  at: number;
+  /** The whole pass: the last word's end plus the hold (s). */
+  pass: number;
+};
+
+/**
+ * Where the first load's play picks up: at the word whose start is
+ * nearest the middle of the pass, so it lasts about half as long. The
+ * result waits on the page before, its last word spoken; as it plays,
+ * the page that word starts comes in over it, as a page change does
+ * (the CSS poster goes, the engine's page enters): never an empty page
+ * or one caught half way through its entrance. A sentence of one word
+ * plays whole (null).
+ */
+export function halfway(words: readonly CaptionWord[], lang: string): Halfway | null {
+  if (words.length < 2) return null;
+  const pass = spokenUntil(words) + CAPTION_HOLD;
+  let k = 1;
+  for (let n = 2; n < words.length; n++) {
+    if (Math.abs(words[n].start - pass / 2) < Math.abs(words[k].start - pass / 2)) k = n;
+  }
+  // unspaced scripts (Japanese) join back without spaces (words.ts)
+  const sep = segmentsWithoutSpaces(lang) ? "" : " ";
+  const said = words.map((w) => w.text);
+  return {
+    text: said.slice(k).join(sep),
+    before: [...said.slice(0, k - 1), `[${said[k - 1]}]`].join(sep),
+    at: words[k].start,
+    pass,
+  };
+}
 
 /* ── Chips ── */
 

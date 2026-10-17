@@ -21,8 +21,7 @@
  * time, top to bottom. Scrolling up plays it backwards; rows above stay
  * edited, rows below wait unsaid, and a fling or a jump lands every row
  * where its position puts it. Nothing moves while the page stands still,
- * so there is no pause control (WCAG 2.2.2 asks for one for motion that
- * runs by itself) and no replay: scrolling back is the replay.
+ * so there is no replay: scrolling back is the replay.
  *
  * Where the browser has view timelines (Safari 26, Chrome 115, Firefox
  * 159), each row runs on the timeline of its probe (Cleanup.module.css

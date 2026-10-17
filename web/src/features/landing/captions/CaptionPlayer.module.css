@@ -1,8 +1,8 @@
 /* Captions Ring (CaptionPlayer.tsx; geometry and timing in ring.ts): a
  * full-bleed band with one centred column. Three 9:16 frames stand on a
- * 3D ring over a floor plate, then the pause button and the style pills,
- * then the heading and one line. The base styles are the ring at rest
- * (Power in front): what a page without JS and a screenshot show. Turns
+ * 3D ring over a floor plate, then the style pills, then the heading and
+ * one line. The base styles are the ring at rest (Power in front): what
+ * a page without JS and a screenshot show. Turns
  * are WAAPI on the same transform functions; under reduced motion the
  * three frames stand side by side, flat and still. Easing: the page's
  * --ease-out (Landing.module.css .page), the brand curve. */
@@ -217,10 +217,10 @@
   }
 }
 
-/* ── Controls: [Pause] [Power] [Highlight Box] [Clipper] ──
-   One row (about 310 px on a phone; narrower, or with longer names, the
-   pills wrap under Pause, which stays first). 36 px on a mouse, 44 px
-   wherever a finger can tap. */
+/* ── Controls: [Power] [Highlight Box] [Clipper] ──
+   One row (about 260 px on a phone; narrower, or with longer names, the
+   pills wrap, centred). 36 px on a mouse, 44 px wherever a finger can
+   tap. */
 .controls {
   grid-area: controls;
   display: flex;
@@ -230,37 +230,10 @@
   gap: 0.375rem;
   margin-top: 1.25rem;
 }
-.pills {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.375rem;
-}
 @media (min-width: 768px) {
-  .controls,
-  .pills {
+  .controls {
     gap: 0.5rem;
   }
-}
-
-.toggle {
-  display: inline-flex;
-  flex: none;
-  width: 2.25rem;
-  height: 2.25rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9999px;
-  border: 1px solid var(--border-hover);
-  background: var(--surface-0);
-  color: var(--text-body);
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  transition: transform 120ms var(--ease-out);
-}
-.toggle:active {
-  transform: scale(0.97);
 }
 
 /* The checked pill takes the brand tint as the ring brings its style
@@ -302,10 +275,6 @@
   }
 }
 @media (any-pointer: coarse) {
-  .toggle {
-    width: 2.75rem;
-    height: 2.75rem;
-  }
   .pill {
     min-height: 2.75rem;
   }
@@ -340,7 +309,6 @@
   opacity: 1;
 }
 
-.toggle:focus-visible,
 .pill:focus-visible {
   outline: 2px solid var(--brand-hover);
   outline-offset: 3px;
@@ -353,19 +321,11 @@
   .pill[aria-checked="true"]:hover {
     border-color: var(--brand);
   }
-  .toggle:hover {
-    border-color: var(--border-strong);
-    color: var(--text-strong);
-    transition:
-      border-color 150ms var(--ease-out),
-      color 150ms var(--ease-out),
-      transform 120ms var(--ease-out);
-  }
 }
 
 /* ── Reduced motion: one still ──
    The three frames side by side, flat, each with its settled caption
-   and its style's name under it. Nothing plays, so no pills, no pause. */
+   and its style's name under it. Nothing plays, so no pills. */
 @media (prefers-reduced-motion: reduce) {
   .stage {
     width: min(100%, calc(var(--w) * 3 + 2rem));
@@ -414,9 +374,7 @@
     color: var(--text-body);
     overflow-wrap: anywhere;
   }
-  .pill,
-  .toggle,
-  .toggle:hover {
+  .pill {
     transition: none;
   }
 }

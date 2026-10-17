@@ -1,6 +1,6 @@
 /* The footage (Scene.tsx). Bottom to top: the 12 px preview (the
- * camera's background), the poster (the clip's first frame), the video
- * (shown once it has a frame), the lens. */
+ * camera's background), the poster (the clip's first frame, or the one
+ * it opens on), the video (shown once it has a frame), the lens. */
 
 .scene {
   position: absolute;
@@ -93,64 +93,4 @@
 .video::-webkit-media-controls-start-playback-button {
   display: none !important;
   -webkit-appearance: none;
-}
-
-/* ── The loops' pause control (LoopToggle) ── */
-
-.toggle {
-  display: inline-flex;
-  flex: none;
-  width: 2.75rem;
-  height: 2.75rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9999px;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  color: var(--text-body);
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  -webkit-user-select: none;
-  user-select: none;
-  transition:
-    opacity 200ms var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
-    transform 120ms var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
-    border-color 150ms var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
-    color 150ms var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1));
-}
-/* Not up yet: unseen and untouchable, but still in the tab order and the
-   accessibility tree, so the loop's control is never skipped; keyboard
-   focus shows it. */
-.toggle[data-shown="false"]:not(:focus-visible) {
-  opacity: 0;
-  pointer-events: none;
-}
-.toggle:active {
-  transform: scale(0.97);
-}
-@media (hover: hover) and (pointer: fine) {
-  .toggle:hover {
-    border-color: var(--border-hover);
-    color: var(--text-strong);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .toggle {
-    transition: none;
-  }
-}
-
-/* Under a figure, at its right edge (as the hero's control). */
-.toggleRow {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 0.75rem;
-}
-/* Beside a frame, level with its bottom edge; the frame's box is the
-   positioned parent. */
-.beside {
-  position: absolute;
-  left: calc(100% + 0.75rem);
-  bottom: 0;
 }

@@ -523,7 +523,7 @@
       {
         "name": "press",
         "value": "transform 150ms ease-out; scale(0.97) on :active",
-        "purpose": "Button and toggle press feedback (play toggle 0.94)."
+        "purpose": "Button and toggle press feedback (the cleanup's restore toggles 0.94)."
       },
       {
         "name": "step-chip",
@@ -568,7 +568,7 @@
       {
         "name": "reduced-motion",
         "value": "@media (prefers-reduced-motion: reduce)",
-        "purpose": "phase-fade, skeleton, pulse-dot stop; landing transitions drop to none, the take strip shows one still frame with removed pieces hatched; loops also pause off screen and in hidden tabs."
+        "purpose": "phase-fade, skeleton, pulse-dot stop; landing transitions drop to none, the take strip shows one still frame with removed pieces hatched; loops also stop off screen and in hidden tabs and go on from where they were."
       }
     ],
     "breakpoints": [
@@ -701,7 +701,7 @@
       "Do colour every spoken command with its `--cmd-*` token, in quotation marks.",
       "Do raise surfaces by lightness (surface-0 to 1 to 2) plus a 1px border.",
       "Do enter screens with `phase-fade` (280ms, `cubic-bezier(0.16, 1, 0.3, 1)`, 8px rise) and use the same curve for every transition.",
-      "Do give every new animation a `prefers-reduced-motion` rule; looping demos pause off screen, in hidden tabs, on a pause control, and show one still frame under reduced motion.",
+      "Do give every new animation a `prefers-reduced-motion` rule; looping demos stop off screen and in hidden tabs, go on from where they were, and show one still frame under reduced motion. The landing has no pause buttons (owner, Oct 2026).",
       "Do focus with a 2px `brand-hover` outline at 3px offset."
     ],
     "donts": [

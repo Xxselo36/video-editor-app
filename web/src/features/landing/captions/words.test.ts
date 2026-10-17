@@ -42,8 +42,11 @@ const LANDING: Record<Lang, Partial<Record<keyof typeof enLanding, string>>> = {
   id: idLanding,
   hi: hiLanding,
 };
-/** The hero's, the ring's and the closing reprise's line. */
+/** The hero's and the closing reprise's line. */
 const demoCaption = (lang: Lang) => LANDING[lang]["site.demo.caption"] ?? "";
+/** The lines without "|": that one and the ring's three. */
+const PLAIN_KEYS = ["site.demo.caption", "site.captions.line1", "site.captions.line2", "site.captions.line3"] as const;
+const plainLines = (lang: Lang) => PLAIN_KEYS.map((k) => LANDING[lang][k] ?? "");
 
 /** captionWords as it was before phrases: one run of words, no breaks. */
 function wordsBeforePhrases(text: string, lang: string) {
@@ -79,12 +82,13 @@ describe("landing caption words", () => {
 
   it("times a line without '|' exactly as before (the hero, the ring, the reprise)", () => {
     for (const lang of Object.keys(LANGS) as Lang[]) {
-      const text = demoCaption(lang);
-      expect(text, lang).toBeTruthy();
-      expect(text, lang).not.toContain("|");
-      // the same words, times and ids, and no page break
-      expect(captionWords(text, lang), lang).toStrictEqual(wordsBeforePhrases(text, lang));
-      expect(splitPhrases(text), lang).toEqual([text.trim()]);
+      for (const text of plainLines(lang)) {
+        expect(text, lang).toBeTruthy();
+        expect(text, lang).not.toContain("|");
+        // the same words, times and ids, and no page break
+        expect(captionWords(text, lang), lang).toStrictEqual(wordsBeforePhrases(text, lang));
+        expect(splitPhrases(text), lang).toEqual([text.trim()]);
+      }
     }
   });
 });

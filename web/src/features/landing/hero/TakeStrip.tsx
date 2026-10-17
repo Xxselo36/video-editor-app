@@ -19,7 +19,9 @@
  * past it, and the render head wipes the grade across the picture.
  * Without it (still loading, refused, data saver) the clip plays dimmed
  * under its scrim, as it always did. It plays while the loop runs and
- * pauses on its frame with it.
+ * pauses on its frame with it; on the first load it opens half way
+ * (scene/clips.ts HERO_HALF) and waits there until the result plays on,
+ * so it starts with the caption.
  *
  * A step machine: each step is data-* attributes and per-piece
  * translates; CSS transitions and keyframes move between steps, so the
@@ -27,33 +29,30 @@
  * is one linear Web Animation for the whole recording, and its steps
  * (posts appearing, the chip moving on) follow that clock. Each act has
  * one chip that travels from flag to flag. It runs while on screen and
- * the tab is visible, unless the visitor paused it (WCAG 2.2.2); a stop
- * freezes the stage where it is and resumes from there. Reduced motion
- * shows the finished still (the video's poster and the caption's
- * poster). The first frame is the finished video, so a screenshot or a
- * slow start shows the result, and the first motion is the result
- * playing, never an undo.
+ * the tab is visible; a stop freezes the stage where it is and resumes
+ * from there. Reduced motion shows the finished still (the video's
+ * poster and the caption's poster). The first frame is the finished
+ * video half way through its play (score.ts halfway), so a screenshot
+ * or a slow start shows the result, and the first motion is the result
+ * playing on from there, never an undo; it ends sooner, so the eye goes
+ * on to the tape.
  *
  * The stage is decoration for sighted visitors (aria-hidden); the list
  * under it says the same in words.
  */
 import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Pause, Play } from "lucide-react";
 import { useLang, useT } from "@/i18n";
-import { presetSupport } from "@/lib/captions/scripts";
-import { LAUNCH_PRESETS } from "@/lib/captions/presets";
-import type { PresetId } from "@/lib/captions/types";
-import { Icon } from "@/components/ui/Icon";
-import { IconButton } from "@/components/ui/IconButton";
 import { cx } from "@/components/ui/cx";
 import { CaptionPoster } from "../CaptionFrame";
-import { LiveCaption } from "../captions/LiveCaption";
-import { captionWords, spokenUntil } from "../captions/words";
+import { LiveCaption, type LiveCaptionHandle } from "../captions/LiveCaption";
+import { FIRST_WORD_AT, captionWords, spokenUntil } from "../captions/words";
 import { Scene } from "../scene/Scene";
+import { HERO_HALF } from "../scene/clips";
 import { useClipsMove } from "../scene/useClipPlayback";
 import { CMD_COLOR, Cmd, SMALL_FRAME_OVERRIDES, useDocumentVisible, useInView, useReducedMotion, type CmdId } from "../shared";
 import {
   AT,
+  CAPTION_HOLD,
   CLOSE_DELAY_MS,
   CLOSE_MS,
   FINISHED,
@@ -78,7 +77,9 @@ import {
   STEPS,
   chipsAt,
   flagAt,
+  halfway,
   headAt,
+  heroPreset,
   keptLength,
   renderAt,
   shiftAt,
@@ -144,14 +145,10 @@ const OVERHANG = 8;
 /** The base width the chip's middle is scaled from (px; Hero.module.css .chipMid). */
 const MID_BASE = 100;
 
-/** The caption's hold after its last word (s). */
-const CAPTION_HOLD = 0.4;
-
-/** The caption style the hero's video uses in this language. */
-function heroPreset(lang: string): PresetId {
-  if (presetSupport("power", lang).level !== "unavailable") return "power";
-  return LAUNCH_PRESETS.find((p) => presetSupport(p, lang).level !== "unavailable") ?? "power";
-}
+/** The seam's swap, while the frame is unseen: there the first load's
+ *  caption (the sentence from half way, score.ts halfway) gives way to
+ *  the whole sentence. */
+const SNAP = STEPS.findIndex((s) => s.fade === "snap");
 
 /** A media query as a store for useSyncExternalStore (false on the server). */
 function mediaStore(query: string) {
@@ -238,13 +235,12 @@ function Swap({ text, className }: { text: string; className: string }) {
 export function TakeStrip() {
   const t = useT();
   const lang = useLang();
-  const [paused, setPaused] = useState(false);
   const [i, setI] = useState(FIRST);
   const [cycle, setCycle] = useState(0);
   const [ref, inView] = useInView<HTMLDivElement>({ threshold: 0.1 });
   const visible = useDocumentVisible();
   const reduced = useReducedMotion();
-  const running = !paused && inView && visible && !reduced;
+  const running = inView && visible && !reduced;
   const smallFrame = useSyncExternalStore(SMALL_FRAME.subscribe, SMALL_FRAME.get, SMALL_FRAME.server);
   // The monitor: loaded once the loop has run (never in the server HTML),
   // where clips may move at all (useClipPlayback's gating). Once it has
@@ -255,10 +251,17 @@ export function TakeStrip() {
   const [monitorOn, setMonitorOn] = useState(false);
   const sceneRef = useRef<HTMLVideoElement>(null);
   const caption = t("site.demo.caption");
+  const words = useMemo(() => captionWords(caption, lang), [caption, lang]);
 
-  // A play step lasts as long as the sentence and its hold.
-  const capMs = useMemo(() => Math.round((spokenUntil(captionWords(caption, lang)) + CAPTION_HOLD) * 1000), [caption, lang]);
-  const ms = STEPS[i].play ? capMs : STEPS[i].ms;
+  // The first load plays the result from half way (score.ts halfway):
+  // until the seam hides it, the caption is the sentence from there on.
+  const half = useMemo(() => halfway(words, lang), [words, lang]);
+  const first = !reduced && cycle === 0 && i < SNAP ? half : null;
+
+  // A play step lasts as long as the sentence and its hold; the first
+  // load's, what is left of them from half way.
+  const capMs = Math.round((spokenUntil(words) + CAPTION_HOLD) * 1000);
+  const ms = !STEPS[i].play ? STEPS[i].ms : first ? Math.round((first.pass - first.at) * 1000) : capMs;
 
   const s: Step = reduced ? FINISHED : STEPS[i];
 
@@ -333,6 +336,17 @@ export function TakeStrip() {
   const gone = useMemo(() => new Set<PieceId>(s.gone), [s.gone]);
   const marked = useMemo(() => new Set<PieceId>(s.mark ?? []), [s.mark]);
   const preset = heroPreset(lang);
+  const capLarge = preset === "karaoke" ? styles.capLarge : undefined;
+
+  // The first play picks up as the first page of its half comes in (its
+  // lead-in skipped), over the page before: never an empty page. Again
+  // whenever the caption starts over (new words: a new language, or its
+  // strings arriving after it), until it has played.
+  const capRef = useRef<LiveCaptionHandle | null>(null);
+  const halfWaits = !!first && !!STEPS[i].half;
+  useEffect(() => {
+    if (halfWaits) capRef.current?.seek(FIRST_WORD_AT);
+  }, [halfWaits, first, preset]);
 
   // The chips: one per act, travelling from flag to flag over the tape;
   // the previous act's fades out where it was. Each is placed on the
@@ -515,10 +529,14 @@ export function TakeStrip() {
 
         <div className={styles.video}>
           <div className={styles.screen}>
+            {/* it opens half way, on a poster of that frame, and waits
+                there until the first play starts, so it starts with the
+                caption (always the same start: a new src would reload it) */}
             <Scene
               clip="hero"
               priority
-              playing={running && (s.frame === "lit" || !monitorOn)}
+              start={HERO_HALF}
+              playing={running && !(s.half && !s.play) && (s.frame === "lit" || !monitorOn)}
               className={styles.scene}
               videoRef={sceneRef}
             />
@@ -531,22 +549,41 @@ export function TakeStrip() {
               <LiveCaption
                 preset={preset}
                 overrides={smallFrame ? SMALL_FRAME_OVERRIDES[preset] : undefined}
-                text={caption}
+                text={first ? first.text : caption}
                 lang={lang}
                 playing={running && !!s.play}
                 loop={false}
                 hold={CAPTION_HOLD}
                 restartKey={cycle}
                 swapOnPlay
+                handle={capRef}
               >
                 {/* larger on phones via CSS, so the first paint matches */}
-                <CaptionPoster preset={preset} text={caption} className={preset === "karaoke" ? styles.capLarge : undefined} />
+                {first ? (
+                  <>
+                    {/* the page before half way, until the play's first page
+                        comes in (if the engine never draws, until the seam's
+                        swap, so it never jumps back to the whole sentence) */}
+                    <CaptionPoster preset={preset} text={first.before} className={cx(styles.posterHalf, capLarge)} />
+                    {/* reduced motion, before hydration: the finished still */}
+                    <CaptionPoster preset={preset} text={caption} className={cx(styles.posterStill, capLarge)} />
+                  </>
+                ) : (
+                  <CaptionPoster preset={preset} text={caption} className={capLarge} />
+                )}
               </LiveCaption>
             </div>
             <span className={styles.scrim} />
-            <span className={styles.tag}>{t("site.demo.example")}</span>
             <span className={styles.scrub}>
-              <span className={styles.scrubHead} style={{ transitionDuration: s.scrub === "run" ? `${capMs}ms` : "0ms" }} />
+              <span
+                className={styles.scrubHead}
+                style={
+                  {
+                    "--half": first ? first.at / first.pass : 0,
+                    transitionDuration: s.scrub === "run" ? `${ms}ms` : "0ms",
+                  } as React.CSSProperties
+                }
+              />
             </span>
           </div>
         </div>
@@ -582,15 +619,6 @@ export function TakeStrip() {
             ))}
           </span>
         </div>
-        {!reduced && (
-          <IconButton
-            label={paused ? t("site.demo.play") : t("site.demo.pause")}
-            className={styles.playToggle}
-            onClick={() => setPaused((p) => !p)}
-          >
-            <Icon icon={paused ? Play : Pause} size={16} />
-          </IconButton>
-        )}
       </div>
     </div>
   );

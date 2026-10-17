@@ -118,19 +118,15 @@ export function CaptionPoster({ preset, text, className }: { preset: string; tex
 export function CaptionFrame({
   preset,
   text,
-  tag,
   showText = true,
   active,
   captionClassName,
   className,
   scene,
-  scenePlaying = true,
   children,
 }: {
   preset: FramePreset;
   text: string;
-  /** Small label in the corner ("Example"). */
-  tag?: string;
   /** false: the frame without its caption (fonts not loaded yet). */
   showText?: boolean;
   /** The spoken word's index, instead of the [bracketed] word. */
@@ -139,14 +135,11 @@ export function CaptionFrame({
   className?: string;
   /** The clip of the footage behind the caption (scene/clips.ts). */
   scene?: ClipId;
-  /** false pauses the clip on its frame (the section's pause control). */
-  scenePlaying?: boolean;
   children?: React.ReactNode;
 }) {
   return (
     <div className={cx(styles.frame, className)}>
-      {scene && <Scene clip={scene} playing={scenePlaying} />}
-      {tag && <span className={styles.frameTag}>{tag}</span>}
+      {scene && <Scene clip={scene} />}
       {showText && (
         <p className={cx(styles.caption, PRESET_CLASS[preset], captionClassName)}>
           {active === undefined ? pageNodes(preset, text) : steppedNodes(text, active)}

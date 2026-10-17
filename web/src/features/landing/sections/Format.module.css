@@ -86,9 +86,8 @@
   }
 }
 
-/* The stage: the 3D rig, the "Example" chip over its top-left corner
- * and the format labels under the floor line (all flat, outside the 3D
- * tree, so they stay sharp and readable). */
+/* The stage: the 3D rig and the format labels under the floor line
+ * (flat, outside the 3D tree, so they stay sharp and readable). */
 .stage {
   position: relative;
   isolation: isolate;
@@ -374,14 +373,6 @@
   opacity: 0;
 }
 
-/* On the page, not on video: the tag gets a visible chip surface, at
-   the figure's top-left corner (level with the stood vertical's top). */
-.stage > .tag {
-  top: 0;
-  left: var(--rf-x);
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-}
 /* "16:9" under the plate, "9:16" under the vertical. */
 .ratio {
   position: absolute;
@@ -401,14 +392,12 @@
   left: calc(var(--rf-x) + var(--rf-w) * var(--rf-foot) + var(--rf-gap));
 }
 
-/* Replay (after a pass) and Pause/Play (the loop runs longer than 5 s,
- * WCAG 2.2.2): right-aligned under the row, outside the 3D tree so the
- * focus ring stays square. 44px, as the page's other loop controls.
- * Replay is hidden (and out of the tab order) until the pass ends. */
+/* Replay (after a pass): right-aligned under the row, outside the 3D
+ * tree so the focus ring stays square; 44px. Hidden (and out of the tab
+ * order) until the pass ends. */
 .controls {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
   width: var(--rf-row);
   margin-top: 0.75rem;
   margin-left: var(--rf-x);
@@ -489,17 +478,6 @@
 }
 
 /* The tape: the finished video, flat, in the hero's material. */
-.tapeBox {
-  position: relative;
-  padding-top: 2rem;
-}
-/* On the page, not on video: the tag gets a visible chip surface. */
-.tapeBox > .tapeTag {
-  top: 0;
-  left: 0;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-}
 .tape {
   --bar: color-mix(in oklab, var(--text-strong) 18%, transparent);
   position: relative;
