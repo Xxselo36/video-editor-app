@@ -307,6 +307,26 @@ describe("DocSaver", () => {
     expect(t.srv.words.map((w) => w.text)).toEqual(t.present.words.map((w) => w.text));
   });
 
+  it("hidden (iOS app switch, no pagehide): the pending edit goes at once; after one in flight, no false conflict (save-4)", async () => {
+    const t = setup();
+    t.edit((d) => editWord(d, "w0002", "two"));
+    expect(t.srv.bodies).toHaveLength(0);
+    t.saver.flushHidden();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(t.srv.bodies).toHaveLength(1);
+    expect(t.srv.inits[0].keepalive).toBe(true);
+    expect(t.tm.pending).toEqual([]);
+    expect(t.saver.status).toBe("saved");
+    // the next edit, the page hidden while a save is on the wire
+    t.edit((d) => editWord(d, "w0003", "three"));
+    void t.tm.tick();
+    t.edit((d) => editWord(d, "w0004", "four"));
+    t.saver.flushHidden();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(t.saver.status).toBe("saved");
+    expect(t.srv.words.map((w) => w.text)).toEqual(t.present.words.map((w) => w.text));
+  });
+
   it("unload right after the debounce fired: no double send", async () => {
     const t = setup();
     t.edit((d) => editWord(d, "w0002", "two"));

@@ -81,6 +81,34 @@ export function trimTo(
   });
 }
 
+/**
+ * Where the strip draws each enabled clip (strip seconds): end to end. A
+ * clip whose START is being trimmed (`trim`: its start when the drag
+ * began) is drawn with its left edge under the handle — shifted by the
+ * trimmed amount, its right edge and every other clip where they were —
+ * so the handle follows the finger like the end handle does. The gap (or
+ * overlap) closes up on release.
+ */
+export function stripLayout(
+  segs: readonly EditorSeg[],
+  trim?: { id: string; start0: number } | null,
+): { seg: EditorSeg; i: number; left: number; width: number }[] {
+  const out: { seg: EditorSeg; i: number; left: number; width: number }[] = [];
+  let acc = 0;
+  segs.forEach((seg, i) => {
+    if (seg.disabled) return;
+    const d = seg.end - seg.start;
+    if (trim && seg.id === trim.id) {
+      out.push({ seg, i, left: acc + (seg.start - trim.start0), width: d });
+      acc += seg.end - trim.start0;
+      return;
+    }
+    out.push({ seg, i, left: acc, width: d });
+    acc += d;
+  });
+  return out;
+}
+
 /** Index of the clip a split at source time `at` would cut: inside a clip,
  *  at least 0.1 s from its edges. -1 when it can't split there. */
 export function splittableIndex(segs: EditorSeg[], at: number): number {

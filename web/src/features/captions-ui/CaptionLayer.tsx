@@ -283,9 +283,12 @@ function CaptionLayer(props: CaptionLayerProps) {
     };
     L.draw = () => draw();
 
-    // Fonts that failed (offline) are asked for again once back online.
+    // Fonts that failed are asked for again: once back online, and on a
+    // timer with backoff (a flaky fetch on a phone never fires "online").
     const retry = () => L.prepare();
     let slowTimer = 0;
+    let retryTimer = 0;
+    let retryN = 0;
     const prepare = () => {
       if (!L.W || !L.H) return;
       const s = L.style;
@@ -322,16 +325,31 @@ function CaptionLayer(props: CaptionLayerProps) {
           window.clearTimeout(slowTimer);
           setFontLoading(false);
           if (!ok) {
+            window.removeEventListener("online", retry);
+            window.addEventListener("online", retry, { once: true });
+            window.clearTimeout(retryTimer);
+            retryTimer = window.setTimeout(retry, [2000, 5000, 15_000, 30_000][Math.min(retryN++, 3)]);
+            const r = L.renderer;
+            if (r && L.ready) {
+              // Keep drawing with the fonts already loaded (the renderer's
+              // own style) and the new words — never blank captions for
+              // the rest of playback because one fetch failed (preview-8).
+              r.update({ words, style: r.style, W: L.W, H: L.H, lang, breaks: L.timeline.breaks });
+              L.dirty = true;
+              draw();
+              L.refreshSel();
+              return;
+            }
             // No fallback-font frame: nothing until the fonts are there.
-            L.renderer?.dispose();
+            r?.dispose();
             L.renderer = null;
             L.ready = false;
             ctx.clearRect(0, 0, L.W, L.H);
             placeHit(-1);
-            window.removeEventListener("online", retry);
-            window.addEventListener("online", retry, { once: true });
             return;
           }
+          retryN = 0;
+          window.clearTimeout(retryTimer);
           const input = { words, style: s, W: L.W, H: L.H, lang, breaks: L.timeline.breaks };
           if (L.renderer) L.renderer.update(input);
           else L.renderer = new CaptionRenderer(input);
@@ -408,6 +426,7 @@ function CaptionLayer(props: CaptionLayerProps) {
       if (rvfc) v.cancelVideoFrameCallback?.(frameHandle);
       cancelAnimationFrame(rafHandle);
       window.clearTimeout(slowTimer);
+      window.clearTimeout(retryTimer);
       ro?.disconnect();
       v.removeEventListener("loadedmetadata", layout);
       v.removeEventListener("resize", layout);

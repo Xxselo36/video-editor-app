@@ -205,6 +205,32 @@ def test_doc_get_and_patch(stub):
     assert stub.json("GET", f"/jobs/{old['id']}")["has_doc"] is False
 
 
+def test_whisper_like_times_touch_and_drift():
+    """whisper_times (wordcuts-11): the stub's words had ideal gaps (0 of
+    87 pairs touching; real Whisper: 94 %), so no e2e test ever saw a
+    cut on touching words."""
+    true = [{"text": "a", "start": 0.05, "end": 0.40}, {"text": "b", "start": 0.44, "end": 0.80},
+            {"text": "c", "start": 1.50, "end": 1.90}, {"text": "d", "start": 1.95, "end": 2.30}]
+    got = stub_media.whisper_like(true)
+    assert [(w["start"], w["end"]) for w in got] == [
+        (0.0, 0.34), (0.34, 0.7), (1.4, 1.85), (1.85, 2.2)]
+    assert true[0]["start"] == 0.05            # the input is left alone
+
+
+@pytest.mark.skipif(not stub_media.has_espeak(), reason="the speech clip needs espeak-ng")
+def test_review_speech_with_whisper_times(stub):
+    plain = stub.json("POST", "/_test/seed/review_speech", {})
+    real = stub.json("POST", "/_test/seed/review_speech", {"whisper_times": True})
+
+    def words(job):
+        return stub.json("GET", f"/jobs/{job['id']}/doc")["doc"]["words"]
+    a, b = words(plain), words(real)
+    assert [w["text"] for w in a] == [w["text"] for w in b]
+    touching = sum(1 for x, y in zip(b, b[1:]) if y["start"] - x["end"] < 1e-6)
+    assert touching > len(b) / 2
+    assert all(y["start"] <= x["start"] for x, y in zip(a, b))
+
+
 @pytest.mark.skipif(not stub_media.has_espeak(), reason="the speech clip needs espeak-ng")
 def test_cut_kinds_and_a_cleo_cut_take(stub):
     """UX10: seeded cuts carry their reason; ai_cuts add a Cleo-cut take

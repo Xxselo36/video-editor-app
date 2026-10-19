@@ -126,6 +126,48 @@ describe("ensureFonts", () => {
     expect(calls).toEqual(["anton-400:latin", "anton-400:latin"]);
   });
 
+  it("the browser's loader is made once: every edit's prepare doesn't add the faces again, a failed one is asked for again (preview-8)", async () => {
+    const g = globalThis as unknown as { FontFace?: unknown; fonts?: unknown };
+    const made: string[] = [];
+    const added: unknown[] = [];
+    let failNext = false;
+    class FakeFace {
+      constructor(public family: string) {
+        made.push(family);
+      }
+      async load() {
+        if (failNext) {
+          failNext = false;
+          throw new Error("network");
+        }
+        return this;
+      }
+    }
+    const before = { FontFace: g.FontFace, fonts: g.fonts };
+    g.FontFace = FakeFace;
+    g.fonts = { add: (f: unknown) => added.push(f) };
+    try {
+      for (let i = 0; i < 5; i++) {
+        const st = await ensureFonts(style("power"), { lang: "en", text: `edit ${i}` });
+        expect(st.ok).toBe(true);
+      }
+      expect(made).toHaveLength(1);
+      expect(added).toHaveLength(1);
+      // a face that fails twice (the load and its retry) is reported, and
+      // loaded again on the next call (no cached failure)
+      const other = style("punch");
+      failNext = true;
+      const first = await ensureFonts(other, { lang: "en", text: "HELLO" });
+      expect(first.ok).toBe(true); // its one retry got it
+      expect(made).toHaveLength(3);
+      await ensureFonts(other, { lang: "en", text: "HELLO" });
+      expect(made).toHaveLength(3);
+    } finally {
+      g.FontFace = before.FontFace;
+      g.fonts = before.fonts;
+    }
+  });
+
   it("does nothing for captions off", async () => {
     const { loader, calls } = fakeLoader();
     const st = await ensureFonts({ presetId: "none", font: style("power").font }, { lang: "en", text: "x", loader });

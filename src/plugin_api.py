@@ -167,6 +167,45 @@ def analyze_video(
     # comma or full stop straight back in. These ranges are re-applied
     # after smart cut so it can adjust edges but never undo a cut.
     _intentional_cuts: list[tuple[float, float]] = []
+
+    # Cuts made from Whisper's word times get their edges from the audio
+    # (src/edge_snap.py): Whisper words touch and drift, so a raw edge
+    # clips the kept neighbour or leaves part of the cut word audible.
+    _env_box: list = []
+
+    def _audio_env():
+        if not _env_box:
+            env = None
+            try:
+                from src.edge_snap import frame_db
+                _sr_e, _data_e = analyzer.get_audio_data()
+                env = frame_db(_sr_e, _data_e)
+            except Exception as _e:
+                print(f"[snap] no audio envelope: {_e}", flush=True)
+            _env_box.append(env)
+        return _env_box[0]
+
+    def _whisper_words() -> list[dict]:
+        return [w for _seg in (analyzer._transcription or {}).get("segments") or []
+                for w in (_seg.get("words") or [])]
+
+    def _snapped(ranges, window: float | None = None, dur: float | None = None,
+                 keep_empty: bool = False):
+        """`ranges` on the audio; a range that turns out to hold no sound
+        of its own comes back empty and is dropped (kept, for zipping
+        with the ranges, with keep_empty)."""
+        if not ranges:
+            return list(ranges or [])
+        from src import edge_snap
+        try:
+            out = edge_snap.snap_removals(
+                ranges, _whisper_words(), _audio_env(),
+                window or edge_snap.WINDOW_FILLER_S, duration=dur)
+        except Exception as _e:
+            print(f"[snap] skipped: {_e}", flush=True)
+            out = [(float(a), float(b)) for a, b in ranges]
+        return out if keep_empty else [(a, b) for a, b in out if b > a]
+
     if analyzer._transcription:
         try:
             from src.hallucination_detection import find_hallucination_cuts
@@ -295,6 +334,7 @@ def analyze_video(
     # find these — the audio has real energy, just no meaningful speech.
     if _hallucination_cuts_to_apply:
         from src.filler_detection import FillerDetector
+        _hallucination_cuts_to_apply = _snapped(_hallucination_cuts_to_apply)
         _det = FillerDetector()
         _sb = len(segments)
         _tb = sum(e - s for s, e in segments)
@@ -328,7 +368,7 @@ def analyze_video(
         if fillers:
             from src.filler_detection import FillerDetector
             detector = FillerDetector(sensitivity=filler_sensitivity)
-            filler_segments = [(f.start, f.end) for f in fillers]
+            filler_segments = _snapped([(f.start, f.end) for f in fillers])
             segments_before = len(segments)
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, filler_segments)
@@ -360,6 +400,7 @@ def analyze_video(
                         _hes_cuts.append((_s, _e))
         if _hes_cuts:
             from src.filler_detection import FillerDetector
+            _hes_cuts = _snapped(_hes_cuts)
             _det = FillerDetector()
             _sb = len(segments)
             _tb = sum(e - s for s, e in segments)
@@ -387,7 +428,7 @@ def analyze_video(
         if _gap_cuts_raw:
             from src.filler_detection import FillerDetector
             _det = FillerDetector()
-            _gap_ranges = [(s, e) for (s, e, _g) in _gap_cuts_raw]
+            _gap_ranges = _snapped([(s, e) for (s, e, _g) in _gap_cuts_raw])
             _sb = len(segments)
             _tb = sum(e - s for s, e in segments)
             segments = _det.filter_segments(segments, _gap_ranges)
@@ -517,7 +558,7 @@ def analyze_video(
     # ranges that we apply to the current speech segments.
     if remove_fillers and analyzer._transcription:
         from src.stutter_detection import find_stutter_cuts
-        stutter_ranges = find_stutter_cuts(analyzer._transcription)
+        stutter_ranges = _snapped(find_stutter_cuts(analyzer._transcription))
         if stutter_ranges:
             from src.filler_detection import FillerDetector
             detector = FillerDetector()
@@ -545,7 +586,7 @@ def analyze_video(
         if mumble_data:
             from src.filler_detection import FillerDetector
             detector = FillerDetector()
-            mumble_ranges = [(s, e) for (s, e, _c, _t) in mumble_data]
+            mumble_ranges = _snapped([(s, e) for (s, e, _c, _t) in mumble_data])
             segments_before = len(segments)
             total_before = sum(e - s for s, e in segments)
             segments = detector.filter_segments(segments, mumble_ranges)
@@ -635,7 +676,10 @@ def analyze_video(
                       f"{[(t, round(s,2), round(e,2)) for t,s,e in scene_events]}",
                       flush=True)
             if scene_cuts:
+                from src import edge_snap
                 from src.filler_detection import FillerDetector
+                scene_cuts = _snapped(edge_snap.merge_touching(scene_cuts),
+                                      edge_snap.WINDOW_COMMAND_S, duration)
                 _det = FillerDetector()
                 segments_before = len(segments)
                 total_before = sum(e - s for s, e in segments)
@@ -685,6 +729,16 @@ def analyze_video(
                 clip_duration=duration,
                 silence_ranges=silence_ranges,
             )
+            if detected_trigger_pairs:
+                import dataclasses as _dc
+                from src import edge_snap
+                _edges = _snapped([(p.cut_start, p.continue_end)
+                                   for p in detected_trigger_pairs],
+                                  edge_snap.WINDOW_COMMAND_S, duration,
+                                  keep_empty=True)
+                detected_trigger_pairs = [
+                    _dc.replace(p, cut_start=a, continue_end=b) if b > a else p
+                    for p, (a, b) in zip(detected_trigger_pairs, _edges)]
             # Dump whisper words so we can see exactly what was heard
             print(f"[voice-triggers] whisper heard "
                   f"({len(ww)} words):", flush=True)
@@ -694,7 +748,7 @@ def analyze_video(
             print(f"[voice-triggers] {len(detected_trigger_pairs)} "
                   f"pair(s) detected:", flush=True)
             for p in detected_trigger_pairs:
-                print(f"  '{p.cut_word}' @ {p.cut_start:.2f}s → "
+                print(f"  {p.kind}: '{p.cut_word}' @ {p.cut_start:.2f}s → "
                       f"'{p.continue_word}' @ {p.continue_end:.2f}s "
                       f"(range={p.continue_end - p.cut_start:.2f}s)",
                       flush=True)

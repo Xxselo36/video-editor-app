@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { trackSave } from "@/lib/pendingSaves";
+import { followCaptionKeys } from "@/features/captions-ui/adjusted";
 import {
   captionSource,
   editWord,
@@ -174,7 +175,9 @@ export function useDocSession(
         const pool: IdPool = new Set(res.doc.words.map((w) => w.id));
         // Newer v1 sentence edits go into the doc (saved below), so
         // opening v2 never reverts or overwrites them (state/reconcile.ts).
-        const reconciled = reconcileV1(res.doc, res.rev, v1Ref.current, pool);
+        // A caption's own position / size follows its first word (UT5), as after any text edit.
+        const fromV1 = reconcileV1(res.doc, res.rev, v1Ref.current, pool);
+        const reconciled = fromV1 === res.doc ? res.doc : followCaptionKeys(res.doc, fromV1);
         // A new project made with the saved caption style whose PATCH
         // didn't get through: the style now, unless someone edited it.
         const shown = withRenderStyle(reconciled, res.renderStyle);
@@ -221,16 +224,25 @@ export function useDocSession(
     };
   }, [jobId]);
 
-  // The page goes away: one keepalive PATCH. Back online: send now.
+  // The page goes away: one keepalive PATCH. Hidden (iOS fires no
+  // pagehide on an app switch, and may discard the tab): send now. Back
+  // online: send now.
   useEffect(() => {
     if (!loaded || loaded === "none") return;
     const { saver } = loaded;
     const onHide = () => saver.flushUnload();
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") saver.flushHidden();
+    };
     const onOnline = () => void saver.flush();
     window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onHidden);
+    document.addEventListener("freeze", onHidden);
     window.addEventListener("online", onOnline);
     return () => {
       window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onHidden);
+      document.removeEventListener("freeze", onHidden);
       window.removeEventListener("online", onOnline);
     };
   }, [loaded]);

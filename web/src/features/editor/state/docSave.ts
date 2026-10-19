@@ -294,6 +294,21 @@ export class DocSaver {
   }
 
   /**
+   * The page went to the background (iPhone Safari: an app switch or the
+   * lock screen fire no pagehide, timers freeze, and a hidden tab may be
+   * discarded): what is pending goes now instead of after the debounce.
+   * With nothing on the wire, as one keepalive request (flushUnload);
+   * with a request in flight or waiting for its retry, after it as usual
+   * — a keepalive built on the known rev would read as a conflict once
+   * that one commits (the page stays alive here, unlike an unload).
+   */
+  flushHidden(): void {
+    if (this.inflight || this.retryBody) void this.flush();
+    // the autosave carries on from its answer ("saved" once it is in)
+    else if (this.flushUnload()) void this.run();
+  }
+
+  /**
    * A request that changes the server's doc itself (POST /jobs/{id}/
    * transcribe-span), in line with the PATCHes: it runs once everything
    * sent before has its answer, and nothing is sent while it runs.

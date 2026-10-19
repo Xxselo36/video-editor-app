@@ -55,6 +55,10 @@ Test API (only this script registers it; never part of the backend):
               extra_words ([{text, start, end, nospeech?}, …]: more
                        transcribed words, e.g. one in a pause the speech
                        detection called silence),
+              whisper_times (true: the speech clip's doc words with
+                       Whisper-like times — about 100 ms early, touching
+                       where the pause is short — instead of their true
+                       sound extents; stub_media.whisper_like),
               format_warning (e.g. "smartcam_failed", UX6),
               filmstrip (false: a job from before UX7b — none until GET
                        /jobs/{id}/filmstrip makes it from the stored proxy),
@@ -314,14 +318,15 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             h.update(fh.read(1 << 16))
         return f"{os.path.getsize(path)}-{h.hexdigest()}"
 
-    def chromium_cuts_preview(input_path: str, segments, output_path: str) -> None:
+    def chromium_cuts_preview(input_path: str, segments, output_path: str,
+                              effects=None) -> None:
         segs = [[round(float(s), 3), round(float(e), 3)] for s, e in segments]
-        key = hashlib.sha1(f"{_content_id(input_path)}{segs}".encode()).hexdigest()
+        key = hashlib.sha1(f"{_content_id(input_path)}{segs}{effects}".encode()).hexdigest()
         cached = preview_cache / f"{key}.webm"
         if not cached.exists():
             h264 = preview_cache / f"{key}.{threading.get_ident()}.mp4"
             try:
-                real_cuts_preview(input_path, segments, str(h264))
+                real_cuts_preview(input_path, segments, str(h264), effects)
                 stub_media.webm(h264, preview_cache / f"{key}.{threading.get_ident()}.webm")
                 os.replace(preview_cache / f"{key}.{threading.get_ident()}.webm", cached)
             finally:
@@ -376,10 +381,14 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
     from backend import doc as edit_doc
 
     def clip_doc(clip: str, data: dict[str, Any], settings: dict | None,
-                 extra_words: list | None = None, fillers: list | None = None) -> dict[str, Any]:
+                 extra_words: list | None = None, fillers: list | None = None,
+                 whisper_times: bool = False) -> dict[str, Any]:
         """The edit document of a stub clip, as the analysis builds it."""
         if clip == "speech":
-            raw = stub_media.speech_words() + [dict(w) for w in extra_words or ()]
+            spoken = stub_media.speech_words()
+            if whisper_times:
+                spoken = stub_media.whisper_like(spoken)
+            raw = spoken + [dict(w) for w in extra_words or ()]
             words = edit_doc.words_from_transcript(raw, fillers)
         else:
             words = edit_doc.words_from_units(data["subtitles"])
@@ -412,7 +421,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                         settings: dict | None = None,
                         ai_cuts: list | None = None,
                         extra_words: list | None = None,
-                        filmstrip: bool = True) -> dict[str, Any]:
+                        filmstrip: bool = True,
+                        whisper_times: bool = False) -> dict[str, Any]:
         """What pipeline.analyze_only returns, for a stub clip, with its
         files (normalized, proxy, first preview) in `out_dir`. Every cut
         range gets its kind (backend/cut_kinds.py, UX10) from the
@@ -448,7 +458,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         segs = data["segments"]
         poster_ok = pipeline.make_poster(str(files["proxy"]), float(segs[0][0]) if segs else 0.0,
                                          str(poster))
-        doc = clip_doc(clip, data, settings, extra_words, fillers)
+        doc = clip_doc(clip, data, settings, extra_words, fillers, whisper_times)
         peaks = clip_peaks(files["src"], out_dir)
         cuts = cut_kinds.label(data["cut_ranges"], log=log, words=doc["words"])
         cut_kinds.mark_words(doc["words"], cuts)
@@ -531,11 +541,11 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
     # ── per-job behaviour: slow rebuilds, has_proxy, proxy-video ──────
     real_rebuild = M._rebuild_preview
 
-    def slow_rebuild(job_id: str, source, segments) -> None:
+    def slow_rebuild(job_id: str, source, segments, effects=None) -> None:
         delay = float(cfg(job_id).get("slow_rebuild") or 0)
         if delay:
             time.sleep(delay)
-        return real_rebuild(job_id, source, segments)
+        return real_rebuild(job_id, source, segments, effects)
 
     M._rebuild_preview = slow_rebuild
 
@@ -599,13 +609,14 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
     def seed_review(job, clip: str, orientation: str, warnings: list[str] | None = None,
                     with_doc: bool = True, with_poster: bool = True,
                     ai_cuts: list | None = None,
-                    extra_words: list | None = None, filmstrip: bool = True) -> None:
+                    extra_words: list | None = None, filmstrip: bool = True,
+                    whisper_times: bool = False) -> None:
         where = media.backend()
         ws = M._workspace(job.id, "seed")
         try:
             res = analysis_result(clip, orientation, ws, warnings, settings=job.settings,
                                   ai_cuts=ai_cuts, extra_words=extra_words,
-                                  filmstrip=filmstrip)
+                                  filmstrip=filmstrip, whisper_times=whisper_times)
             if not with_doc:
                 res["doc"] = None
             if not with_poster:
@@ -711,7 +722,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             seed_review(job, clip, orientation, with_doc=opts.get("doc", True) is not False,
                         with_poster=opts.get("poster", True) is not False,
                         ai_cuts=opts.get("ai_cuts"), extra_words=opts.get("extra_words"),
-                        filmstrip=fs)
+                        filmstrip=fs, whisper_times=opts.get("whisper_times") is True)
             if name == "render_failed":
                 store.update(job.id, message="render_failed",
                              error="Render worker unavailable (modal_unavailable)",

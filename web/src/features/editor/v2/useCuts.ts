@@ -22,6 +22,7 @@ import {
   restorePieces,
   restoreRange,
   restoreWord,
+  restoreWords,
   type CutKind,
   type Piece,
   type Range,
@@ -41,11 +42,22 @@ export type CutsApi = {
   cutWords: (words: readonly DocWord[], first: number, last: number) => boolean;
   /** Bring ranges back (a chip, a seam, a selection). */
   restore: (ranges: readonly Range[]) => boolean;
-  /** Bring one struck word back. */
+  /** Bring a struck word (or the struck words from w.start to w.end) back. */
   restoreWord: (w: Pick<DocWord, "start" | "end">) => boolean;
   /** Bulk restore: one kind, or every AI cut. */
   restoreKind: (kind: CutKind | "ai") => boolean;
 };
+
+/** Doc indices of the words a restore of [w.start, w.end] means (the
+ *  word itself, or a selection's first word's start to its last word's
+ *  end); null when they aren't doc words. */
+export function wordSpan(words: readonly DocWord[], w: Pick<DocWord, "start" | "end">): [number, number] | null {
+  const first = words.findIndex((x) => Math.abs(x.start - w.start) < 1e-6);
+  if (first < 0) return null;
+  let last = -1;
+  for (let i = first; i < words.length; i++) if (Math.abs(words[i].end - w.end) < 1e-6) last = i;
+  return last < 0 ? null : [first, last];
+}
 
 /** The removed source ranges of a clip list; none while it's empty
  *  (not seeded yet: nothing is known to be removed). */
@@ -111,7 +123,14 @@ export function useCuts(opts: {
       for (const r of ranges) out = restoreRange(out, r.start, r.end, duration);
       return apply(out, "cuts_restored", { what: "range", n: ranges.length });
     },
-    restoreWord: (w) => apply(restoreWord(segs, w, duration), "cuts_restored", { what: "word", n: 1 }),
+    restoreWord: (w) => {
+      // the doc words: the same edges cutting them takes (useCuts peaks)
+      const span = wordSpan(words, w);
+      const next = span
+        ? restoreWords(segs, words, span[0], span[1], duration, peaks)
+        : restoreWord(segs, w, duration);
+      return apply(next, "cuts_restored", { what: "word", n: span ? span[1] - span[0] + 1 : 1 });
+    },
     restoreKind: (kind) =>
       apply(
         kind === "ai" ? restoreKind(segs, pieces, "ai", duration) : restorePieces(segs, pieces, (p) => p.kind === kind, duration),

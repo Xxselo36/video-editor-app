@@ -347,20 +347,28 @@ def _transcribe_chunked(
 
         # Offset every word/segment back to original timeline. Drop
         # words that fall inside the overlap tail of THIS chunk so
-        # the next chunk's real content wins (except last chunk).
+        # the next chunk's real content wins (except last chunk) — and
+        # this chunk's first words that re-hear the previous chunk's
+        # last word, which ran across the chunk edge.
         keep_until = c_len if i == n_chunks - 1 else CHUNK_MAX_SECONDS
+        prev_last = all_words[-1] if all_words else None
         for s in sub.get("segments") or []:
             words = []
             for w in s.get("words") or []:
                 w_start = float(w.get("start", 0))
                 if w_start > keep_until:
                     continue
-                words.append({
+                entry = {
                     "word": w.get("word", ""),
                     "start": w_start + c_start,
                     "end": float(w.get("end", 0)) + c_start,
                     "probability": float(w.get("probability", 1.0)),
-                })
+                }
+                if (prev_last is not None
+                        and entry["start"] < prev_last["end"] + 0.15
+                        and _same_speech(prev_last, entry)):
+                    continue
+                words.append(entry)
             all_words.extend(words)
             if words:
                 all_segments.append({
@@ -553,32 +561,38 @@ def _drop_boundary_duplicates(
     """Words of the two passes, sorted by start, minus the duplicates a
     pass switch makes at a bucket boundary.
 
-    Buckets go by word START, so a word spoken across a boundary can sit
-    in bucket n of one pass (start 9.98) and bucket n+1 of the other
-    (start 10.01). When the buckets pick different passes, that word was
-    kept twice ("…funktioniert. funktioniert."). Within one pass Whisper's
-    words never overlap, so a word from the OTHER pass that overlaps the
-    previous kept word by more than half of the shorter one — or repeats
-    its text right at it — is the same speech: the earlier one stays.
-    Returns (words, how many were dropped)."""
+    A word spoken across a bucket boundary can sit in bucket n of one
+    pass and bucket n+1 of the other; where the buckets pick different
+    passes, the words of both passes across the boundary are picked
+    (else such a word — a "Cleo" — could be in neither), and one of the
+    two copies must go ("…funktioniert. funktioniert."). Within one pass
+    Whisper's words never overlap, so a word from the OTHER pass that
+    overlaps the previous kept word by more than half of the shorter one
+    — or repeats its text right at it — is the same speech: the earlier
+    one stays. Returns (words, how many were dropped)."""
     picked = sorted(picked, key=lambda p: (p[1]["start"], p[1]["end"]))
     out: list[dict] = []
     last_src: str | None = None
     dropped = 0
     for src, w in picked:
-        if out and src != last_src:
-            prev = out[-1]
-            overlap = min(prev["end"], w["end"]) - max(prev["start"], w["start"])
-            shorter = min(prev["end"] - prev["start"], w["end"] - w["start"])
-            same = (_norm_word(prev["word"]) != ""
-                    and _norm_word(prev["word"]) == _norm_word(w["word"]))
-            if ((shorter > 0 and overlap > 0.5 * shorter)
-                    or (same and w["start"] < prev["end"] + 0.15)):
-                dropped += 1
-                continue
+        if out and src != last_src and _same_speech(out[-1], w):
+            dropped += 1
+            continue
         out.append(w)
         last_src = src
     return out, dropped
+
+
+def _same_speech(prev: dict, w: dict) -> bool:
+    """Is `w` (heard by another pass or chunk) the word `prev` again: it
+    overlaps prev by more than half of the shorter one, or repeats its
+    text right at it?"""
+    overlap = min(prev["end"], w["end"]) - max(prev["start"], w["start"])
+    shorter = min(prev["end"] - prev["start"], w["end"] - w["start"])
+    same = (_norm_word(prev["word"]) != ""
+            and _norm_word(prev["word"]) == _norm_word(w["word"]))
+    return ((shorter > 0 and overlap > 0.5 * shorter)
+            or (same and w["start"] < prev["end"] + 0.15))
 
 
 def transcribe_via_groq_multilang(
@@ -674,9 +688,10 @@ def transcribe_via_groq_multilang(
     n_buckets = int(max_t / bucket_seconds) + 1
 
     def _bucket_stats(words: list[dict]) -> list[dict]:
+        # by the word's middle: the bucket it is mostly spoken in
         stats = [{"n": 0, "sum": 0.0, "words": []} for _ in range(n_buckets)]
         for w in words:
-            bi = int(w["start"] / bucket_seconds)
+            bi = int((w["start"] + w["end"]) / 2 / bucket_seconds)
             if bi < 0 or bi >= n_buckets:
                 continue
             stats[bi]["n"] += 1
@@ -688,6 +703,7 @@ def transcribe_via_groq_multilang(
     stats_en = _bucket_stats(words_en)
 
     picked: list[tuple[str, dict]] = []
+    chosen: list[str] = []
     en_buckets = 0
     for bi in range(n_buckets):
         a = stats_auto[bi]
@@ -698,9 +714,23 @@ def transcribe_via_groq_multilang(
         # Tie-break: prefer auto to avoid over-anglicising DE speech.
         if e["n"] > 0 and e_avg > a_avg + 0.02:
             picked.extend(("en", w) for w in e["words"])
+            chosen.append("en")
             en_buckets += 1
         else:
             picked.extend(("auto", w) for w in a["words"])
+            chosen.append("auto")
+    # Where the pass switches, the words of both passes spoken across the
+    # boundary (a word's two copies can fall on either side of it).
+    seen = {id(w) for _src, w in picked}
+    for bi in range(1, n_buckets):
+        if chosen[bi] == chosen[bi - 1]:
+            continue
+        edge = bi * bucket_seconds
+        for src, words in (("auto", words_auto), ("en", words_en)):
+            for w in words:
+                if w["start"] < edge < w["end"] and id(w) not in seen:
+                    picked.append((src, w))
+                    seen.add(id(w))
 
     merged_words, dropped = _drop_boundary_duplicates(picked)
     print(f"[groq] multi-lang merge: {en_buckets}/{n_buckets} buckets "

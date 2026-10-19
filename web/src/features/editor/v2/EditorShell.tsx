@@ -157,11 +157,12 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
 
   // ── playhead store, fed by the video's presented frames ─────────────
   const store = useMemo(() => createPlayheadStore(), []);
+  const { heldTime } = session;
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    return store.attach(v);
-  }, [store, videoRef]);
+    return store.attach(v, { held: heldTime });
+  }, [store, videoRef, heldTime]);
 
   // ── toast ───────────────────────────────────────────────────────────
   const [toast, setToast] = useState<ToastState>(null);
@@ -373,6 +374,21 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
       live = false;
     };
   }, [session.saveError, props.jobId]);
+
+  // Saves failing (offline, refused): closing the tab now would lose the
+  // edits since the last stored save — the browser asks first (desktop;
+  // iOS ignores it). Not while saves merely wait: leaving flushes those.
+  const docSaveNow = doc.status === "ready" ? doc.saveState : "saved";
+  const unsafeToLeave = session.saveError !== null || docSaveNow === "retrying" || docSaveNow === "failed";
+  useEffect(() => {
+    if (!unsafeToLeave) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [unsafeToLeave]);
 
   // ── actions ─────────────────────────────────────────────────────────
   const split = () => {

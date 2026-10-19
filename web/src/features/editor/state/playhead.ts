@@ -60,8 +60,10 @@ export type PlayheadStore = {
   subscribe: (listener: Listener) => () => void;
   /** Merge a patch; listeners run only when a value changed. */
   set: (patch: Partial<PlayheadState>) => void;
-  /** Follow a video element; returns the detach function. */
-  attach: (video: VideoLike) => () => void;
+  /** Follow a video element; returns the detach function. `held`: while
+   *  it returns a time, that is the media time (a preview swap reloading
+   *  the element: not the 0 of the reload). */
+  attach: (video: VideoLike, opts?: { held?: () => number | null }) => () => void;
 };
 
 export const INITIAL_PLAYHEAD: PlayheadState = {
@@ -102,10 +104,11 @@ export function createPlayheadStore(
     listeners.forEach((l) => l());
   };
 
-  const attach = (video: VideoLike) => {
+  const attach = (video: VideoLike, opts: { held?: () => number | null } = {}) => {
+    const at = (t: number) => opts.held?.() ?? t;
     const sync = () =>
       set({
-        mediaTime: video.currentTime,
+        mediaTime: at(video.currentTime),
         playing: !video.paused && !video.ended,
         muted: video.muted,
         ready: video.readyState >= 1,
@@ -122,7 +125,7 @@ export function createPlayheadStore(
         rafOn = false;
         return;
       }
-      set({ mediaTime: video.currentTime });
+      set({ mediaTime: at(video.currentTime) });
       rafHandle = scheduler.raf(tick);
     };
     const startPolling = () => {
@@ -132,7 +135,7 @@ export function createPlayheadStore(
     };
     if (rvfc) {
       const onFrame = (_now: number, meta: { mediaTime: number }) => {
-        set({ mediaTime: meta.mediaTime });
+        set({ mediaTime: at(meta.mediaTime) });
         frameHandle = video.requestVideoFrameCallback!(onFrame);
       };
       frameHandle = video.requestVideoFrameCallback!(onFrame);
@@ -144,10 +147,10 @@ export function createPlayheadStore(
       set({ playing: true });
       startPolling();
     };
-    const onStop = () => set({ playing: false, buffering: false, mediaTime: video.currentTime });
+    const onStop = () => set({ playing: false, buffering: false, mediaTime: at(video.currentTime) });
     // Seeks while paused present no frame in every browser (rVFC does in
     // Chromium): take the element's time; a frame callback refines it.
-    const onSeeked = () => set({ mediaTime: video.currentTime, buffering: false });
+    const onSeeked = () => set({ mediaTime: at(video.currentTime), buffering: false });
     const onWaiting = () => set({ buffering: !video.paused });
     const onPlaying = () => set({ buffering: false, playing: true });
     // canplay also fires while paused: it ends buffering, not a pause.

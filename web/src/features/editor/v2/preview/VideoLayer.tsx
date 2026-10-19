@@ -136,7 +136,7 @@ export function VideoLayer({
   poster?: string | null;
 }) {
   const t = useT();
-  const { videoRef, fadeRef, videoSrc, mode, onVideoError, togglePlay, editSaving } = session;
+  const { videoRef, fadeRef, videoSrc, mode, onVideoError, togglePlay, previewStale, previewError, retryPreview } = session;
   const buffering = usePlayhead(store, selBuffering);
   // the first frame of the cut, not black, before playback (owner, iPhone)
   const still = useFirstFrame(videoRef, firstFrameTime(mode, session.editSegs), poster);
@@ -172,10 +172,23 @@ export function VideoLayer({
       {/* Clip fades (proxy mode), driven by EditPlayer. Over the captions,
           as the render fades burned-in subtitles too. */}
       <div ref={fadeRef} aria-hidden className={s.fade} />
-      {editSaving && mode !== "proxy" && (
-        <div className={s.stageChip} data-testid="preview-updating">
-          {t("app.review.updatingPreview")}
-        </div>
+      {/* Preview mode: until the file on screen is the edit (not only while
+          a save is open), and a rebuild that failed says so (Retry). */}
+      {mode !== "proxy" && previewError ? (
+        <button
+          type="button"
+          className={`${s.stageChip} ${s.stageChipAction}`}
+          onClick={retryPreview}
+          data-testid="preview-failed"
+        >
+          {t("editor.preview.failed")}
+        </button>
+      ) : (
+        previewStale && (
+          <div className={s.stageChip} data-testid="preview-updating">
+            {t("app.review.updatingPreview")}
+          </div>
+        )
       )}
       {buffering && <div className={s.spinner} aria-hidden data-testid="ed-buffering" />}
       {tapToPlay && (

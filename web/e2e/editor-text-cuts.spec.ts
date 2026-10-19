@@ -476,8 +476,10 @@ test.describe("editor v2: the timeline (owner's iPhone items)", TAG, () => {
     await expect(c0).toHaveAttribute("data-selected", "true");
     const b0 = (await c0.boundingBox())!;
     const h = (await c0.getByTestId("clip-trim-end").boundingBox())!;
-    // the handle's 44 px target reaches only 8 px outside the clip
-    expect(h.width).toBeGreaterThanOrEqual(43.5);
+    // the handle's 44 px target reaches only 8 px outside the clip — and at
+    // most half into it: on a clip under 72 px the end handle (on top) took
+    // the start handle's touches (drag-5)
+    expect(h.width).toBeGreaterThanOrEqual(Math.min(43.5, b0.width / 2 + 8 - 0.5));
     expect(h.x + h.width - (b0.x + b0.width)).toBeLessThanOrEqual(8.5);
     const b1 = (await c1.boundingBox())!;
     const y = b1.y + b1.height / 2;

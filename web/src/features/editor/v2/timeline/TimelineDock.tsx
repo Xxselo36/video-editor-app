@@ -2,7 +2,9 @@
 /**
  * Timeline dock (UX7a, restyle of the v1 TimelineEditor with its
  * mechanics: timeline/mechanics.ts, useTimelineZoom, the shared undo
- * history). Opens fitted; uniform clips, violet only when selected;
+ * history). Opens fitted — an edit longer than a minute opens showing
+ * its first minute (OPEN_SPAN_S, owner: a 10-min video at Fit is a blur
+ * of 2 px clips); uniform clips, violet only when selected;
  * Split / Delete / ⋯ Clip only while a clip is selected; a draggable
  * playhead drawn from the playhead store (no React render per frame).
  * No caption track, no waveform (review G3). Each clip shows the
@@ -18,12 +20,34 @@
  *     the others make room, release drops it (one undo step). A tap still
  *     selects; a swipe that moves before the hold still scrolls;
  *   - trims move the edge on a 0.01 s grid with a readout ("3,47 s");
- *     holding still for 0.5 s while trimming zooms in around the handle
+ *     holding still for 0.5 s while trimming zooms in around the edge
  *     (back on release), and from 4 px per frame the frame grid shows
  *     (the v2 export puts edges on the nearest frame).
+ *
+ * The trim flow round (owner: "Länge anpassen" must feel direct):
+ *   - both handles stay under the finger (a start trim draws its clip
+ *     shifted until release, mechanics.stripLayout), the magnifier zooms
+ *     around the edge (not the pointer), and after release the edge
+ *     stays where it was let go (the strip closes up around it; at Fit
+ *     the zoom is held instead of re-fitting under the finger);
+ *   - near the view's edge a trim scrolls the strip along;
+ *   - a hold or a drag that ends where it started commits nothing (no
+ *     undo step, no save, no preview rebuild);
+ *   - a phone handle reaches at most half into a short clip, so a short
+ *     clip's start handle is never under its end handle.
  */
 import { Ellipsis, Minus, Plus, RotateCcw, Scissors, Trash2, X } from "lucide-react";
-import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { useLang, useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
 import type { PlaybackMode } from "@/features/editor/session/useEditSession";
@@ -44,6 +68,7 @@ import {
   sourceAtCut,
   splittableIndex,
   stripDuration,
+  stripLayout,
   tickShown,
   trimBounds,
   trimToStep,
@@ -117,6 +142,21 @@ function edgeAt(segs: EditorSeg[], id: string, mode: "start" | "end"): number {
   }
   return acc;
 }
+/** An edit longer than this opens showing only its first OPEN_SPAN_S (owner request). */
+export const OPEN_SPAN_S = 60;
+/** Test builds (NEXT_PUBLIC_TEST_PAGES=1): the e2e clips are 30 s, so a
+ *  suite sets a shorter opening span in localStorage. */
+function openSpan(): number {
+  if (process.env.NEXT_PUBLIC_TEST_PAGES !== "1") return OPEN_SPAN_S;
+  try {
+    const v = Number(localStorage.getItem("cleocuts.test.openSpanS"));
+    return v > 0 ? v : OPEN_SPAN_S;
+  } catch {
+    return OPEN_SPAN_S;
+  }
+}
+/** A trim this close to the view's edge scrolls the strip along (px). */
+const EDGE_SCROLL_PX = 24;
 /** Holding a trim handle still this long zooms in (ms). */
 export const MAGNIFY_MS = 500;
 /** Zoom of the trim magnifier: 0.01 s = 10 px. */
@@ -184,7 +224,11 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     /** Removes the trim's window listener. */
     off: () => void;
   } | null>(null);
-  const [trimming, setTrimming] = useState<{ id: string; mode: "start" | "end" } | null>(null);
+  const [trimming, setTrimming] = useState<{ id: string; mode: "start" | "end"; start0: number } | null>(null);
+  /** After a release: keep the trimmed edge at this client x once the strip closes up. */
+  const releaseAnchor = useRef<{ id: string; mode: "start" | "end"; clientX: number } | null>(null);
+  /** The auto-scroll loop of a trim at the view's edge. */
+  const edgeScroll = useRef(0);
   const [boost, setBoost] = useState<number | undefined>(undefined);
   const dragEndedAt = useRef(0);
 
@@ -214,7 +258,8 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   const segs = reorder?.order ?? dragSegs ?? p.segments;
   const totalDur = dragTotal ?? stripDuration(reorder ? reorder.startSegs : segs);
 
-  const zoom = useTimelineZoom(scrollRef, totalDur, p.phone, p.phone ? 358 : 1400, boost);
+  const [span] = useState(openSpan);
+  const zoom = useTimelineZoom(scrollRef, totalDur, p.phone, p.phone ? 358 : 1400, boost, span);
   const { contentW, viewW, effPps, fitPps, maxPps, zoomTo, canZoomOut, lastUserScrollRef } = zoom;
   const pps = contentW / totalDur;
 
@@ -249,15 +294,28 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     },
     [contentW, totalDur, zoomTo],
   );
+  /** Client x where the strip draws the trimmed edge now (stripLayout). */
+  const drawnEdgeX = (d: NonNullable<typeof dragRef.current>): number => {
+    const el = stripRef.current;
+    if (!el) return d.clientX - d.grabPx;
+    const rect = el.getBoundingClientRect();
+    const cur = d.last.find((x) => x.id === d.id);
+    const s0 = d.startSegs.find((x) => x.id === d.id);
+    if (!cur || !s0) return d.clientX - d.grabPx;
+    const sec =
+      d.mode === "start" ? edgeAt(d.startSegs, d.id, "start") + (cur.start - s0.start) : edgeAt(d.last, d.id, "end");
+    return rect.left + (sec * rect.width) / d.total;
+  };
   const magnify = () => {
     const d = dragRef.current;
     if (!d || d.prevPps !== null) return;
     d.prevPps = zoom.pps;
     setBoost(MAGNIFY_PPS);
-    // the next frame has the raised cap
+    // the next frame has the raised cap; zoom around the EDGE, so it stays
+    // put (around the pointer it jumped 140–750 px, review drag-8)
     requestAnimationFrame(() => {
       const cur = dragRef.current;
-      if (cur === d) animateZoom(Math.max(effPps, MAGNIFY_PPS), d.clientX);
+      if (cur === d) animateZoom(Math.max(effPps, MAGNIFY_PPS), drawnEdgeX(d));
     });
   };
   const armMagnify = (d: NonNullable<typeof dragRef.current>) => {
@@ -305,7 +363,61 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     armMagnify(d);
     setDragTotal(totalDur);
     setDragSegs(startSegs);
-    setTrimming({ id, mode });
+    setTrimming({ id, mode, start0: startSegs.find((x) => x.id === id)?.start ?? 0 });
+  };
+  /** The trim at pointer x (the strip as laid out now). */
+  const trimAt = (d: NonNullable<typeof dragRef.current>, clientX: number) => {
+    const el = stripRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const seconds = (clientX - d.grabPx - rect.left) / (rect.width / d.total);
+    d.last = trimToStep(d.startSegs, d.id, d.mode, seconds, d.bounds);
+    setDragSegs(d.last);
+  };
+  /** -1 / 1: the pointer is in the left / right edge zone of the view,
+   *  having moved toward it (a handle grabbed at the edge doesn't scroll). */
+  const edgeDir = (d: NonNullable<typeof dragRef.current>, sc: HTMLElement): -1 | 0 | 1 => {
+    const vr = sc.getBoundingClientRect();
+    if (d.clientX < vr.left + EDGE_SCROLL_PX && d.clientX < d.x0 - 4) return -1;
+    if (d.clientX > vr.right - EDGE_SCROLL_PX && d.clientX > d.x0 + 4) return 1;
+    return 0;
+  };
+  /** Near the view's edge the strip scrolls along (as a reorder does),
+   *  while the pointer stays there; the magnifier waits meanwhile. */
+  const runEdgeScroll = () => {
+    cancelAnimationFrame(edgeScroll.current);
+    const step = () => {
+      const d = dragRef.current;
+      const sc = scrollRef.current;
+      if (!d || !sc) return;
+      const dir = edgeDir(d, sc);
+      const vr = sc.getBoundingClientRect();
+      const max = sc.scrollWidth - sc.clientWidth;
+      // the edge at its limit that way (a neighbour's footage, the 0.1 s minimum): no further
+      const cur = d.last.find((x) => x.id === d.id);
+      const atLimit =
+        !!cur &&
+        (d.mode === "end"
+          ? dir > 0
+            ? cur.end >= d.bounds.next - 1e-6
+            : cur.end <= cur.start + 0.1 + 1e-6
+          : dir < 0
+            ? cur.start <= d.bounds.prev + 1e-6
+            : cur.start >= cur.end - 0.1 - 1e-6);
+      if (!dir || atLimit || (dir < 0 && sc.scrollLeft <= 0) || (dir > 0 && sc.scrollLeft >= max - 0.5)) {
+        edgeScroll.current = 0;
+        return;
+      }
+      if (d.timer) {
+        clearTimeout(d.timer);
+        d.timer = null;
+      }
+      const depth = dir < 0 ? vr.left + EDGE_SCROLL_PX - d.clientX : d.clientX - (vr.right - EDGE_SCROLL_PX);
+      sc.scrollLeft = Math.max(0, Math.min(max, sc.scrollLeft + dir * Math.min(14, 3 + depth / 3)));
+      trimAt(d, d.clientX);
+      edgeScroll.current = requestAnimationFrame(step);
+    };
+    edgeScroll.current = requestAnimationFrame(step);
   };
   const moveTrim = (e: React.PointerEvent) => {
     const d = dragRef.current;
@@ -318,12 +430,12 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     }
     // from the strip as laid out now: the magnifier changes the zoom mid-drag;
     // the edge keeps its distance to the finger (no jump on the first move)
-    const rect = el.getBoundingClientRect();
-    const seconds = (e.clientX - d.grabPx - rect.left) / (rect.width / d.total);
-    d.last = trimToStep(d.startSegs, d.id, d.mode, seconds, d.bounds);
     d.clientX = e.clientX;
-    setDragSegs(d.last);
-    if (Math.abs(e.clientX - d.holdX) > 3) {
+    trimAt(d, e.clientX);
+    const sc = scrollRef.current;
+    if (sc && edgeDir(d, sc) !== 0) {
+      if (!edgeScroll.current) runEdgeScroll();
+    } else if (Math.abs(e.clientX - d.holdX) > 3) {
       d.holdX = e.clientX;
       armMagnify(d);
     }
@@ -331,13 +443,21 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   const endTrim = (e: { type: string; clientX: number; clientY: number; timeStamp: number }) => {
     const d = dragRef.current;
     if (!d) return;
+    const edgeX = drawnEdgeX(d);
     dragRef.current = null;
     d.off();
     if (d.timer) clearTimeout(d.timer);
+    cancelAnimationFrame(edgeScroll.current);
+    edgeScroll.current = 0;
     setDragSegs(null);
     setDragTotal(null);
     setTrimming(null);
     const tap = !d.started && d.prevPps === null;
+    // the edge where it started (a hold, a drag back, a drag against a
+    // bound): a look, not an edit — no undo step, no save (state-5)
+    const a0 = d.startSegs.find((x) => x.id === d.id);
+    const a1 = d.last.find((x) => x.id === d.id);
+    const moved = !!a0 && !!a1 && (d.mode === "start" ? a1.start !== a0.start : a1.end !== a0.end);
     if (tap) {
       // no trim: no undo step; a tap on the part of the handle outside
       // the clip is a tap on what is there (the neighbour) (review 5)
@@ -345,21 +465,39 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     } else {
       dragEndedAt.current = e.timeStamp;
       // the system took the gesture (a scroll): nothing is committed
-      if (e.type !== "pointercancel") {
+      if (e.type !== "pointercancel" && moved) {
+        // the edge stays where it was let go: the strip closes up around it,
+        // and at Fit the zoom holds (no re-fit under the finger)
+        releaseAnchor.current = { id: d.id, mode: d.mode, clientX: edgeX };
+        if (d.prevPps === null && !canZoomOut) zoom.hold(effPps);
         // on release the edge moves to the frame both exports cut at (≤ half a frame)
         if (p.history.commit(snapTrimToFrame(d.last, d.id, d.mode, d.bounds, p.fps))) p.onTrimmed?.();
       }
     }
     if (d.prevPps !== null) {
-      // back to the zoom before the magnifier, around the handle
+      // back to the zoom before the magnifier, around the edge
       const prev = d.prevPps;
-      animateZoom(prev > 0 ? prev : fitPps, e.clientX, () => setBoost(undefined));
+      animateZoom(prev > 0 ? prev : fitPps, edgeX, () => setBoost(undefined));
     }
   };
+  // after a committed trim: the strip closed up (a start trim) or changed
+  // its length — scroll so the trimmed edge is where it was released
+  useLayoutEffect(() => {
+    const a = releaseAnchor.current;
+    const sc = scrollRef.current;
+    const el = stripRef.current;
+    if (!a || !sc || !el || dragSegs) return;
+    releaseAnchor.current = null;
+    if (!p.segments.some((x) => x.id === a.id)) return;
+    const sec = edgeAt(p.segments, a.id, a.mode);
+    const vr = sc.getBoundingClientRect();
+    sc.scrollLeft = Math.max(0, sec * (contentW / totalDur) - (a.clientX - vr.left));
+  }, [p.segments, contentW, totalDur, dragSegs]);
   useEffect(
     () => () => {
       cancelAnimationFrame(zoomAnim.current);
       cancelAnimationFrame(scrollRaf.current);
+      cancelAnimationFrame(edgeScroll.current);
       if (dragRef.current?.timer) clearTimeout(dragRef.current.timer);
       dragRef.current?.off();
       if (holdRef.current) clearTimeout(holdRef.current.timer);
@@ -500,6 +638,20 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     }
   };
 
+  // the clips get stable handlers that call the latest ones, so a trim
+  // re-renders only the clips whose place changes (memo ClipView)
+  const handlers = useRef({ onClip, clipPointerDown, startTrim, moveTrim, endTrim });
+  useLayoutEffect(() => {
+    handlers.current = { onClip, clipPointerDown, startTrim, moveTrim, endTrim };
+  });
+  const [stable] = useState(() => ({
+    onClip: (seg: EditorSeg, fraction: number, timeStamp: number) => handlers.current.onClip(seg, fraction, timeStamp),
+    onPress: (e: React.PointerEvent, seg: EditorSeg) => handlers.current.clipPointerDown(e, seg),
+    onTrimStart: (e: React.PointerEvent, id: string, mode: "start" | "end") => handlers.current.startTrim(e, id, mode),
+    onTrimMove: (e: React.PointerEvent) => handlers.current.moveTrim(e),
+    onTrimEnd: (e: React.PointerEvent) => handlers.current.endTrim(e),
+  }));
+
   // ── seeking ─────────────────────────────────────────────────────────
   const scrubbing = useRef(false);
   const seekAtX = (clientX: number) => {
@@ -532,7 +684,9 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   const playheadRef = useRef<HTMLDivElement>(null);
   const layout = useRef({ segs, pps, contentW, canZoomOut, dragging: false });
   useEffect(() => {
-    layout.current = { segs, pps, contentW, canZoomOut, dragging: dragSegs !== null || reorder !== null };
+    // a start trim draws the other clips where they were: the playhead too
+    const drawn = trimming?.mode === "start" && dragRef.current ? dragRef.current.startSegs : segs;
+    layout.current = { segs: drawn, pps, contentW, canZoomOut, dragging: dragSegs !== null || reorder !== null };
   });
   const { toSource, segments: committed } = p;
   const segId = p.mode === "proxy" ? p.playingSegId : null;
@@ -640,36 +794,32 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   const zoomRange = Math.log(Math.max(maxPps / fitPps, 1.0001));
   const zoomVal = Math.round((Math.log(effPps / fitPps) / zoomRange) * 100) || 0;
 
+  const startTrim0 = trimming?.mode === "start" ? trimming : null;
   const { clips, seamViews } = useMemo(() => {
     const out: { seg: EditorSeg; i: number; left: number; width: number; padL: number; padR: number }[] = [];
     const sv: SeamView[] = [];
-    const act = segs.filter((x) => !x.disabled);
-    let acc = 0;
-    let k = 0;
-    segs.forEach((seg, i) => {
-      if (seg.disabled) return;
-      const d = seg.end - seg.start;
-      const prev = k > 0 ? act[k - 1] : null;
-      const next = act[k + 1] ?? null;
+    // a start trim's clip follows the handle (mechanics.stripLayout)
+    const lay = stripLayout(segs, startTrim0);
+    lay.forEach(({ seg, i, left, width }, k) => {
+      const prev = k > 0 ? lay[k - 1].seg : null;
+      const next = lay[k + 1]?.seg ?? null;
       const cutBefore = !!prev && Math.abs(seg.start - prev.end) > 0.02;
       const cutAfter = !!next && Math.abs(next.start - seg.end) > 0.02;
       out.push({
         seg,
         i,
-        left: acc,
-        width: d,
+        left,
+        width,
         padL: prev ? (cutBefore ? 3 : 1) : 0,
         padR: next ? (cutAfter ? 3 : 1) : 0,
       });
-      acc += d;
       if (next && cutAfter) {
         // a ≥ b: a reordered pair (no footage removed between them)
-        sv.push({ k: sv.length, x: acc, a: seg.end, b: next.start, prev: seg.id, next: next.id });
+        sv.push({ k: sv.length, x: left + width, a: seg.end, b: next.start, prev: seg.id, next: next.id });
       }
-      k++;
     });
     return { clips: out, seamViews: sv };
-  }, [segs]);
+  }, [segs, startTrim0]);
   // drawn width of every clip (px): how far a seam's hit area may reach into it
   const clipPx = useMemo(() => new Map(clips.map((c) => [c.seg.id, c.width * pps - c.padL - c.padR])), [clips, pps]);
   const pieces = p.cuts.pieces;
@@ -820,11 +970,11 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
                 filmH={clipH}
                 filmLo={filmWin.lo}
                 filmHi={filmWin.hi}
-                onClip={onClip}
-                onPress={clipPointerDown}
-                onTrimStart={startTrim}
-                onTrimMove={moveTrim}
-                onTrimEnd={endTrim}
+                onClip={stable.onClip}
+                onPress={stable.onPress}
+                onTrimStart={stable.onTrimStart}
+                onTrimMove={stable.onTrimMove}
+                onTrimEnd={stable.onTrimEnd}
               />
             );
           })}
@@ -981,7 +1131,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   );
 });
 
-function ClipView({
+const ClipView = memo(function ClipView({
   seg,
   index,
   selected,
@@ -1030,9 +1180,11 @@ function ClipView({
       data-seg={seg.id}
       title={title}
       // --hin: how far a phone trim handle reaches into the clip: 36 px (the
-      // 44 px target with the 8 px outside), never past the clip itself; a
-      // tap on it that doesn't trim reaches the clip below (review 5)
-      style={{ left, width, ["--hin" as string]: `${Math.max(4, Math.min(36, width))}px` }}
+      // 44 px target with the 8 px outside), never past the clip's middle —
+      // on a short clip the end handle (on top) covered the start handle,
+      // so dragging the start trimmed the end (drag-5); a tap on it that
+      // doesn't trim reaches the clip below (review 5)
+      style={{ left, width, ["--hin" as string]: `${Math.max(2, Math.min(36, width / 2))}px` }}
       onPointerDown={(e) => onPress(e, seg)}
       onContextMenu={(e) => e.preventDefault()}
       onClick={(e) => {
@@ -1093,7 +1245,7 @@ function ClipView({
         ))}
     </div>
   );
-}
+});
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
 

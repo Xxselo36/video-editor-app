@@ -32,7 +32,7 @@
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import type { CutRange } from "@/features/jobs/types";
 import { captionSource, type CaptionPhrase, type CaptionUnit, type DocWord } from "./doc";
-import { snapEdge, type Peaks } from "./snap";
+import { PEAKS_RATE, SNAP_WINDOW_S, snapEdge, type Peaks } from "./snap";
 
 export type CutKind = "silence" | "filler" | "voice_cmd" | "bad_take";
 export type PieceKind = CutKind | "user";
@@ -46,6 +46,21 @@ export const MIN_REMOVAL_S = 0.12;
 export const MIN_ISLAND_S = 0.25;
 /** Removed time between two words from this long shows as a pause chip. */
 export const PAUSE_CHIP_S = 0.4;
+/**
+ * Whisper stretches a word over the pause it ends in (or starts after):
+ * 69 of the owner's 1001 words are longer than 1.5 s, up to 17.6 s. A
+ * word longer than this has its sound at one end only: it plays when its
+ * head or its tail plays (wordProbes, WORD_SOUND_S), and restoring it
+ * brings back that end only (at most this long), never the whole pause
+ * (restoreWords).
+ */
+export const LONG_WORD_S = 1.2;
+/** A long word's sound at one end: about a word's length (its probe is the middle of it). */
+const WORD_SOUND_S = 0.4;
+/** Words this close (or overlapping) touch: Whisper's contiguous times leave no gap to snap in. */
+const TOUCH_S = 0.015;
+/** How far a cut edge may move into a touching word: this share of it (never up to its middle). */
+const INTO_WORD = 0.4;
 const EPS = 1e-3;
 
 export type Range = { start: number; end: number };
@@ -172,10 +187,16 @@ export function cutRange(segs: EditorSeg[], a: number, b: number, duration: numb
     if (s.end > b + EPS) out.push(withoutKey({ ...s, start: b, id: freshId([...segs, ...out], s.id) }, "fadeIn"));
   }
   if (!changed || !out.some(active)) return segs;
-  return tidy(out, a, b, duration);
+  return tidy(out, a, b, duration, segs);
 }
 
-/** Cut words first..last (doc indices) out of the video, edges snapped. */
+/**
+ * Cut words first..last (doc indices) out of the video, edges snapped. A
+ * removal shorter than MIN_REMOVAL_S (a single short word between
+ * touching neighbours) grows into the neighbours up to INTO_WORD of each,
+ * else nothing is cut (the caller says so: cutting it alone isn't
+ * possible).
+ */
 export function cutWords(
   segs: EditorSeg[],
   words: readonly DocWord[],
@@ -185,16 +206,67 @@ export function cutWords(
   peaks?: Peaks | null,
 ): EditorSeg[] {
   if (first < 0 || last >= words.length || first > last) return segs;
-  const [sa, sb] = cutEdges(words, first, last, peaks);
+  let [sa, sb] = cutEdges(words, first, last, peaks);
+  if (sb - sa < MIN_REMOVAL_S) {
+    // grow evenly, as far as the neighbours allow (never to their middles)
+    const lo = first > 0 ? deepest(words[first - 1], "end") : 0;
+    const hi = last + 1 < words.length ? deepest(words[last + 1], "start") : duration;
+    const need = MIN_REMOVAL_S + 1e-4 - (sb - sa);
+    let left = Math.min(need / 2, Math.max(0, sa - lo));
+    const right = Math.min(need - left, Math.max(0, hi - sb));
+    left = Math.min(need - right, Math.max(0, sa - lo));
+    sa -= left;
+    sb += right;
+  }
   return sb > sa ? cutRange(segs, Math.max(0, sa), Math.min(duration, sb), duration) : segs;
+}
+
+/** How far into word `w` an edge may go from its `side`: INTO_WORD of it. */
+function deepest(w: Pick<DocWord, "start" | "end">, side: "start" | "end"): number {
+  const len = Math.max(0, w.end - w.start);
+  return side === "end" ? w.end - INTO_WORD * len : w.start + INTO_WORD * len;
+}
+
+/**
+ * The edge between touching (or overlapping) words l and r: the quietest
+ * moment within ±120 ms of their join, at most INTO_WORD of either word
+ * away from it — Whisper's boundary between joined words drifts (17–227
+ * ms measured), and its own time left word tails audible or clipped the
+ * neighbour. `fallback` when the words overlap so far no edge parts them.
+ */
+function joinEdge(l: DocWord, r: DocWord, peaks: Peaks | null | undefined, fallback: number): number {
+  const join = (l.end + r.start) / 2;
+  const lo = Math.max(join - SNAP_WINDOW_S, deepest(l, "end"));
+  const hi = Math.min(join + SNAP_WINDOW_S, deepest(r, "start"));
+  if (!(hi >= lo)) return fallback;
+  const t = Math.min(hi, Math.max(lo, join));
+  return snapEdge(t, peaks, SNAP_WINDOW_S, PEAKS_RATE, { min: lo, max: hi });
+}
+
+/** The start edge of a range beginning at word i (source start a). */
+function startEdge(words: readonly DocWord[], i: number, a: number, peaks: Peaks | null | undefined): number {
+  if (i === 0) return snapEdge(a, peaks, undefined, undefined, { min: -Infinity, max: a });
+  const prev = words[i - 1];
+  // a real gap: snap in it, never into the word before (review 14)
+  if (a - prev.end > TOUCH_S) return snapEdge(a, peaks, undefined, undefined, { min: prev.end, max: a });
+  return joinEdge(prev, words[i], peaks, a);
+}
+
+/** The end edge of a range ending at word j (source end b). */
+function endEdge(words: readonly DocWord[], j: number, b: number, peaks: Peaks | null | undefined): number {
+  if (j === words.length - 1) return snapEdge(b, peaks, undefined, undefined, { min: b, max: Infinity });
+  const next = words[j + 1];
+  if (next.start - b > TOUCH_S) return snapEdge(b, peaks, undefined, undefined, { min: b, max: next.start });
+  return joinEdge(words[j], next, peaks, b);
 }
 
 /**
  * The source range cutting words first..last removes: each edge snapped
- * to the quietest moment within ±120 ms (review C10), but only inside
- * the gap to the neighbouring word — never into the word before or
- * after (its sound would be clipped, and a short one struck), never
- * back into the cut words (their tail would stay audible).
+ * to the quietest moment within ±120 ms (review C10). Next to a real gap
+ * only inside that gap — never into the word before or after, never back
+ * into the cut words. Between touching words (94 % of Whisper's pairs,
+ * no gap at all) around their join, at most INTO_WORD into either word,
+ * so a neighbour's middle always stays and the cut words' go.
  */
 export function cutEdges(words: readonly DocWord[], first: number, last: number, peaks?: Peaks | null): [number, number] {
   let a = Infinity;
@@ -203,15 +275,21 @@ export function cutEdges(words: readonly DocWord[], first: number, last: number,
     a = Math.min(a, words[i].start);
     b = Math.max(b, words[i].end);
   }
-  const prevEnd = first > 0 ? Math.min(a, words[first - 1].end) : -Infinity;
-  const nextStart = last + 1 < words.length ? Math.max(b, words[last + 1].start) : Infinity;
-  const sa = snapEdge(a, peaks, undefined, undefined, { min: prevEnd, max: a });
-  const sb = snapEdge(b, peaks, undefined, undefined, { min: b, max: nextStart });
-  return [sa, sb];
+  return [startEdge(words, first, a, peaks), endEdge(words, last, b, peaks)];
 }
 
-/** Bring source [a, b] back: clips grow into it, neighbours merge. */
-export function restoreRange(segs: EditorSeg[], a: number, b: number, duration: number): EditorSeg[] {
+/**
+ * Bring source [a, b] back: clips grow into it, neighbours merge. With
+ * `protect`, a kept island inside that range (a word the user asked
+ * back) is never removed as a micro-clip.
+ */
+export function restoreRange(
+  segs: EditorSeg[],
+  a: number,
+  b: number,
+  duration: number,
+  protect?: Range,
+): EditorSeg[] {
   a = Math.max(0, a);
   b = Math.min(duration, b);
   if (!(b - a > EPS)) return segs;
@@ -243,16 +321,32 @@ export function restoreRange(segs: EditorSeg[], a: number, b: number, duration: 
     } else if (R >= 0) {
       out[R] = { ...out[R], start: h0 };
     } else {
-      // between clips that don't touch it: a clip of its own, in source order
-      const at = out.findIndex((s) => active(s) && s.start > h0);
+      // between clips that don't touch it: a clip of its own, right after
+      // the clip playing the footage before it (its source predecessor —
+      // after a reorder that isn't the list's first later clip), else
+      // before its source successor
       const seg: EditorSeg = { id: freshId(out, `seg-r${Math.round(h0 * 1000)}`), start: h0, end: h1 };
-      out = at < 0 ? [...out, seg] : [...out.slice(0, at), seg, ...out.slice(at)];
+      let pred = -1;
+      out.forEach((s, i) => {
+        if (active(s) && s.end <= h0 + EPS && (pred < 0 || s.end > out[pred].end)) pred = i;
+      });
+      let at: number;
+      if (pred >= 0) at = pred + 1;
+      else {
+        let succ = -1;
+        out.forEach((s, i) => {
+          if (active(s) && s.start >= h1 - EPS && (succ < 0 || s.start < out[succ].start)) succ = i;
+        });
+        at = succ >= 0 ? succ : out.length;
+      }
+      out = [...out.slice(0, at), seg, ...out.slice(at)];
     }
   }
-  return tidy(out, a, b, duration);
+  return tidy(out, a, b, duration, segs, protect);
 }
 
-/** One struck word back (padded to MIN_ISLAND_S, so it can't be an island). */
+/** One struck word back (padded to MIN_ISLAND_S, so it can't be an island) — the
+ *  time range alone; with the doc words, restoreWords. */
 export function restoreWord(segs: EditorSeg[], w: Pick<DocWord, "start" | "end">, duration: number): EditorSeg[] {
   let a = w.start;
   let b = w.end;
@@ -263,6 +357,77 @@ export function restoreWord(segs: EditorSeg[], w: Pick<DocWord, "start" | "end">
     b += pad;
   }
   return restoreRange(segs, a, b, duration);
+}
+
+/** Whether clip list `segs` plays source time t. */
+const plays = (segs: readonly EditorSeg[], t: number) => segs.some((s) => active(s) && s.start <= t + EPS && s.end >= t - EPS);
+
+/**
+ * Where a long word's sound is (LONG_WORD_S): at the end a playing clip
+ * touches, else the louder end (peaks), else its head.
+ */
+function soundAtHead(segs: readonly EditorSeg[], w: DocWord, peaks: Peaks | null | undefined): boolean {
+  const head = plays(segs, w.start - 0.02);
+  const tail = plays(segs, w.end + 0.02);
+  if (head !== tail) return head;
+  if (peaks && peaks.length) {
+    const mean = (a: number, b: number) => {
+      const i0 = Math.max(0, Math.floor(a * PEAKS_RATE));
+      const i1 = Math.min(peaks.length, Math.ceil(b * PEAKS_RATE));
+      let sum = 0;
+      for (let i = i0; i < i1; i++) sum += peaks[i];
+      return i1 > i0 ? sum / (i1 - i0) : 0;
+    };
+    const h = mean(w.start, w.start + LONG_WORD_S);
+    const t = mean(w.end - LONG_WORD_S, w.end);
+    if (h !== t) return h > t;
+  }
+  return true;
+}
+
+/**
+ * Struck words first..last back into the video (a click on a struck word,
+ * Delete on a struck selection): exactly what cutting them removes (the
+ * same snapped edges, so no fragment of a struck neighbour plays and the
+ * restored word keeps its drifted onset), minus the silent part of a long
+ * word (LONG_WORD_S: Whisper stretched it over a pause — only the end its
+ * sound is at comes back, never seconds of removed pause or a Cleo take).
+ * A short restored word may stay a clip of its own (the user asked for it).
+ */
+export function restoreWords(
+  segs: EditorSeg[],
+  words: readonly DocWord[],
+  first: number,
+  last: number,
+  duration: number,
+  peaks?: Peaks | null,
+): EditorSeg[] {
+  if (first < 0 || last >= words.length || first > last) return segs;
+  const [a, b] = cutEdges(words, first, last, peaks);
+  // the silent parts of long words, left out
+  const silent: Range[] = [];
+  for (let i = first; i <= last; i++) {
+    const w = words[i];
+    if (w.end - w.start <= LONG_WORD_S) continue;
+    if (soundAtHead(segs, w, peaks)) {
+      const from = snapEdge(w.start + LONG_WORD_S, peaks);
+      silent.push({ start: Math.max(a, from), end: i === last ? b : w.end });
+    } else {
+      const to = snapEdge(w.end - LONG_WORD_S, peaks);
+      silent.push({ start: i === first ? a : w.start, end: Math.min(b, to) });
+    }
+  }
+  silent.sort((x, y) => x.start - y.start);
+  const ranges: Range[] = [];
+  let cur = a;
+  for (const r of silent) {
+    if (r.start > cur + EPS) ranges.push({ start: cur, end: Math.min(b, r.start) });
+    cur = Math.max(cur, r.end);
+  }
+  if (b > cur + EPS) ranges.push({ start: cur, end: b });
+  let out = segs;
+  for (const r of ranges) out = restoreRange(out, r.start, r.end, duration, r);
+  return out;
 }
 
 /** Every piece in `pieces` that `which` accepts back, as ONE op. */
@@ -284,17 +449,58 @@ export function restoreKind(segs: EditorSeg[], pieces: readonly Piece[], kind: C
 
 // ── no micro-clips (C11) ────────────────────────────────────────────
 
+/** Edges key (0.1 ms) of a gap or a clip, for "was it there before the op". */
+const edgeKey = (x: number, y: number) => `${Math.round(x * 1e4)}:${Math.round(y * 1e4)}`;
+
+/** The short removals and short islands a clip list already has (tidy leaves those alone). */
+function shortShapes(segs: readonly EditorSeg[], duration: number): { gaps: Set<string>; islands: Set<string> } {
+  const gaps = new Set<string>();
+  const islands = new Set<string>();
+  const act = segs.filter(active);
+  for (let i = 0; i + 1 < act.length; i++) {
+    const gap = act[i + 1].start - act[i].end;
+    if (gap > EPS && gap < MIN_REMOVAL_S) gaps.add(edgeKey(act[i].end, act[i + 1].start));
+  }
+  if (act.length) {
+    const first = act.reduce((x, y) => (y.start < x.start ? y : x));
+    if (first.start > EPS && first.start < MIN_REMOVAL_S) gaps.add(edgeKey(0, first.start));
+    const last = act.reduce((x, y) => (y.end > x.end ? y : x));
+    if (duration - last.end > EPS && duration - last.end < MIN_REMOVAL_S) gaps.add(edgeKey(last.end, duration));
+  }
+  for (const s of act) {
+    if (s.end - s.start >= MIN_ISLAND_S) continue;
+    const leftCut = s.start > EPS && !act.some((o) => o !== s && o.end > s.start - EPS && o.start < s.start - EPS);
+    const rightCut = s.end < duration - EPS && !act.some((o) => o !== s && o.start < s.end + EPS && o.end > s.end + EPS);
+    if (leftCut && rightCut) islands.add(edgeKey(s.start, s.end));
+  }
+  return { gaps, islands };
+}
+
 /**
  * Around [a, b] (± MIN_ISLAND_S + MIN_REMOVAL_S): close removals shorter
  * than MIN_REMOVAL_S (the clips meet or merge), then drop kept islands
  * shorter than MIN_ISLAND_S that have a removal on both sides. Never
- * drops the last clip. Clips outside the window are left as they are.
+ * drops the last clip. Clips outside the window are left as they are, and
+ * so is what `before` (the list before the op) already had: a short
+ * removal or a short clip the user trimmed on purpose is not the op's
+ * micro-clip (a breath trimmed 0.08 s off a clip stays cut when the next
+ * words are cut). Nor is an island inside `protect` (a word asked back).
  */
-export function tidy(segs: EditorSeg[], a: number, b: number, duration: number): EditorSeg[] {
+export function tidy(
+  segs: EditorSeg[],
+  a: number,
+  b: number,
+  duration: number,
+  before?: readonly EditorSeg[],
+  protect?: Range,
+): EditorSeg[] {
   const W = MIN_ISLAND_S + MIN_REMOVAL_S;
   const lo = a - W;
   const hi = b + W;
   const near = (s: number, e: number) => e >= lo && s <= hi;
+  const had = before ? shortShapes(before, duration) : { gaps: new Set<string>(), islands: new Set<string>() };
+  const keepIsland = (s: EditorSeg) =>
+    had.islands.has(edgeKey(s.start, s.end)) || (!!protect && s.start < protect.end - EPS && s.end > protect.start + EPS);
   let out = segs.slice();
   for (let pass = 0; pass < 4; pass++) {
     let changed = false;
@@ -306,7 +512,7 @@ export function tidy(segs: EditorSeg[], a: number, b: number, duration: number):
       if (j < 0) break;
       const q = out[j];
       const gap = q.start - p.end;
-      if (gap > EPS && gap < MIN_REMOVAL_S && near(p.end, q.start)) {
+      if (gap > EPS && gap < MIN_REMOVAL_S && near(p.end, q.start) && !had.gaps.has(edgeKey(p.end, q.start))) {
         if (joinable(p, q)) {
           const merged: EditorSeg = { ...p, end: q.end };
           if (q.fadeOut !== undefined) merged.fadeOut = q.fadeOut;
@@ -320,12 +526,22 @@ export function tidy(segs: EditorSeg[], a: number, b: number, duration: number):
     const act = out.filter(active);
     if (act.length) {
       const first = act.reduce((x, y) => (y.start < x.start ? y : x));
-      if (first.start > EPS && first.start < MIN_REMOVAL_S && near(0, first.start)) {
+      if (
+        first.start > EPS &&
+        first.start < MIN_REMOVAL_S &&
+        near(0, first.start) &&
+        !had.gaps.has(edgeKey(0, first.start))
+      ) {
         out = out.map((s) => (s === first ? { ...s, start: 0 } : s));
         changed = true;
       }
       const last = act.reduce((x, y) => (y.end > x.end ? y : x));
-      if (duration - last.end > EPS && duration - last.end < MIN_REMOVAL_S && near(last.end, duration)) {
+      if (
+        duration - last.end > EPS &&
+        duration - last.end < MIN_REMOVAL_S &&
+        near(last.end, duration) &&
+        !had.gaps.has(edgeKey(last.end, duration))
+      ) {
         out = out.map((s) => (s === last ? { ...s, end: duration } : s));
         changed = true;
       }
@@ -333,7 +549,7 @@ export function tidy(segs: EditorSeg[], a: number, b: number, duration: number):
     // 2. short islands with a removal on both sides
     const act2 = out.filter(active);
     for (const s of act2) {
-      if (s.end - s.start >= MIN_ISLAND_S || !near(s.start, s.end)) continue;
+      if (s.end - s.start >= MIN_ISLAND_S || !near(s.start, s.end) || keepIsland(s)) continue;
       if (out.filter(active).length <= 1) break;
       const leftCut = s.start > EPS && !act2.some((o) => o !== s && o.end > s.start - EPS && o.start < s.start - EPS);
       const rightCut = s.end < duration - EPS && !act2.some((o) => o !== s && o.start < s.end + EPS && o.end > s.end + EPS);
@@ -349,21 +565,35 @@ export function tidy(segs: EditorSeg[], a: number, b: number, duration: number):
 
 // ── what the export captions ────────────────────────────────────────
 
-/** A word whose middle lies in one of `ranges` (sorted, disjoint). */
+/**
+ * The source moments that decide whether a word plays: its middle; a
+ * long word (LONG_WORD_S): the middles of a word's length at its head
+ * and at its tail — it plays when either does (Whisper stretched it over
+ * a pause, its sound is at one end). The Text tab's struck words and the export's captions
+ * use the same rule.
+ */
+export function wordProbes(w: Pick<DocWord, "start" | "end">): number[] {
+  if (w.end - w.start > LONG_WORD_S) return [w.start + WORD_SOUND_S / 2, w.end - WORD_SOUND_S / 2];
+  return [(w.start + w.end) / 2];
+}
+
+/** The range of `ranges` (sorted, disjoint) holding t, or -1. */
+function rangeAt(ranges: readonly Range[], t: number): number {
+  let lo = 0;
+  let hi = ranges.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (ranges[mid].end < t) lo = mid + 1;
+    else if (ranges[mid].start > t) hi = mid - 1;
+    else return mid;
+  }
+  return -1;
+}
+
+/** A word cut by `ranges` (sorted, disjoint): every probe of it removed (wordProbes). */
 export function cutBy(ranges: readonly Range[]): ((w: DocWord) => boolean) | undefined {
   if (!ranges.length) return undefined;
-  return (w) => {
-    const m = (w.start + w.end) / 2;
-    let lo = 0;
-    let hi = ranges.length - 1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (ranges[mid].end < m) lo = mid + 1;
-      else if (ranges[mid].start > m) hi = mid - 1;
-      else return true;
-    }
-    return false;
-  };
+  return (w) => wordProbes(w).every((t) => rangeAt(ranges, t) >= 0);
 }
 
 /**
@@ -460,11 +690,18 @@ export function textMarks(words: readonly DocWord[], pieces: readonly Piece[], d
   };
   if (!pieces.length) return { removed, chips };
   const mids = words.map((w) => (w.start + w.end) / 2);
-  let j = 0;
   for (let i = 0; i < n; i++) {
-    while (j < pieces.length && pieces[j].end < mids[i]) j++;
-    const p = pieces[j];
-    if (p && p.start <= mids[i]) removed[i] = TAKE_KINDS.has(p.kind) ? 2 : 1;
+    // struck when every probe is removed (a long word: head and tail)
+    let kind: PieceKind | null = null;
+    for (const t of wordProbes(words[i])) {
+      const k = rangeAt(pieces, t);
+      if (k < 0) {
+        kind = null;
+        break;
+      }
+      kind ??= pieces[k].kind;
+    }
+    if (kind) removed[i] = TAKE_KINDS.has(kind) ? 2 : 1;
   }
   // take chips: where the take starts (its words collapse into it)
   for (const p of pieces) {

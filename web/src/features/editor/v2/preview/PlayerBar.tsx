@@ -7,7 +7,7 @@
  * mute.
  */
 import { Maximize, Pause, Play, Volume2, VolumeX } from "lucide-react";
-import { useCallback, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useLang, useT } from "@/i18n";
 import { cutClockOf, type PlaybackMode } from "@/features/editor/session/useEditSession";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
@@ -63,6 +63,8 @@ export function PlayerBar({
     [editSegs, toSource, playingSegId, mode, dec],
   );
   usePlayheadEffect(store, write);
+  // an edit while paused changes the clock without a new frame (preview-9)
+  useEffect(() => write(store.getState()), [write, store]);
 
   const btn = `${phone ? s.mb : s.gb} ${s.ico}`;
   const icon = phone ? 20 : 18;

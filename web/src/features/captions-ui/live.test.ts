@@ -53,6 +53,19 @@ describe("live captions: words and time (the export's, backend/captions_v2.py)",
     const tl = mapToOutput(clips, [{ id: "x", text: "six", start: 6, end: 6.4 }]);
     expect(tl.words[0].start).toBeCloseTo(outputTime(clips, 6, null)!);
   });
+
+  it("the frame shown right after a cut's jump (10–28 ms before the clip's start) is that clip's start, no caption blink (preview-10)", () => {
+    const clips = clipsOf([
+      { id: "a", start: 0, end: 7.0 },
+      { id: "b", start: 7.322, end: 15 },
+    ]);
+    // measured: mediaTime 7.312 for the jump to 7.322
+    expect(outputTime(clips, 7.312, "b")).toBeCloseTo(7.0, 9);
+    // not for another clip, and not beyond a frame
+    expect(outputTime(clips, 7.25, "b")).toBeNull();
+    expect(outputTime(clips, 7.312, null)).toBeNull();
+    expect(outputTime(clips, 7.312, "a")).toBeNull();
+  });
 });
 
 describe("dragging", () => {

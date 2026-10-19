@@ -113,6 +113,15 @@ class Job:
     # the preview that is really on disk.
     preview_segments: list[list[float]] = field(default_factory=list)
     preview_version: int = 0
+    # The clip effects that preview bakes in ({volume, fadeIn, fadeOut,
+    # speed} per preview segment, pipeline._ffmpeg_cuts_preview); None =
+    # none (every clip as cut — also every preview from before them).
+    preview_effects: list[dict[str, Any]] | None = None
+    # Revision of the timeline (segments + segment_effects): POST
+    # /edit-segments with base_rev / rev follows the edit doc's rule (409
+    # stale_rev: another tab or device saved meanwhile); a save without
+    # them (an older client) still overwrites and gets a server rev.
+    edit_rev: float = 0
     # Transcript phrases as last edited in review (text fixes, deleted
     # lines). None until the user edits — an empty list means every line
     # was deleted. GET /subtitles returns them so edits survive leaving
@@ -385,6 +394,8 @@ class Job:
                 for s, e in (self.preview_segments or self.segments)
             ],
             "preview_version": self.preview_version,
+            # The timeline's revision (POST /edit-segments base_rev).
+            "edit_rev": self.edit_rev,
             "caption_preset": (self.settings or {}).get("caption_preset"),
             "filename": self.filename,
             "preset_id": self.preset_id,

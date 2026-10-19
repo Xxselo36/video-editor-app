@@ -17,11 +17,13 @@ import {
   splitAt,
   splittableIndex,
   stripDuration,
+  stripLayout,
   trimBounds,
   trimTo,
   zoomLimits,
   type EditorSeg,
 } from "./mechanics";
+import { openingPps } from "./useTimelineZoom";
 
 // Two clips with a removed pause (2–3 s) between them.
 const segs: EditorSeg[] = [
@@ -235,3 +237,48 @@ describe("UX10: 0.1 s ruler marks, precise trims, the frame grid, reordering", (
     expect(dropIndex(withOff, "c", 2.4)).toBe(2);
   });
 });
+
+describe("the trim flow round (owner: length changes must feel direct)", () => {
+  const three: EditorSeg[] = [
+    { id: "a", start: 0, end: 4 },
+    { id: "b", start: 6, end: 10 },
+    { id: "c", start: 14, end: 18 },
+  ];
+  const bounds = trimBounds(three, "b", 20);
+
+  it("a start handle stays under the finger; the other clips keep their place (state-2)", () => {
+    for (const finger of [-1, -0.5, 0.5, 1]) {
+      // the finger at strip seconds 4 + finger (clip b starts at strip 4)
+      const next = trimTo(three, "b", "start", 4 + finger, bounds);
+      const lay = stripLayout(next, { id: "b", start0: 6 });
+      const b = lay.find((x) => x.seg.id === "b")!;
+      expect(b.left).toBeCloseTo(4 + finger, 9);
+      // its right edge and clip c stay where they were
+      expect(b.left + b.width).toBeCloseTo(8, 9);
+      expect(lay.find((x) => x.seg.id === "c")!.left).toBeCloseTo(8, 9);
+      expect(lay.find((x) => x.seg.id === "a")!.left).toBe(0);
+    }
+    // without a start trim: end to end, as before
+    expect(stripLayout(three).map((x) => [x.left, x.width])).toEqual([
+      [0, 4],
+      [4, 4],
+      [8, 4],
+    ]);
+    // the end handle was already right: the end edge is at the finger
+    const end = trimTo(three, "b", "end", 7.5, bounds);
+    const lay = stripLayout(end);
+    const b = lay.find((x) => x.seg.id === "b")!;
+    expect(b.left + b.width).toBeCloseTo(7.5, 9);
+  });
+
+  it("a long edit opens showing its first minute; a short one at Fit (owner request)", () => {
+    // desktop strip 1400 px: 60 s fill it
+    expect(openingPps(1400, 218, 60)).toBeCloseTo(1400 / 60, 9);
+    expect(openingPps(358, 610, 60)).toBeCloseTo(358 / 60, 9);
+    // 60 s or less: Fit (0), as before
+    expect(openingPps(1400, 60, 60)).toBe(0);
+    expect(openingPps(1400, 30, 60)).toBe(0);
+    expect(openingPps(1400, 218, null)).toBe(0);
+  });
+});
+

@@ -105,13 +105,22 @@ test.describe("editor v2 layout", TAG, () => {
     test.info().annotations.push({ type: "controls", description: `${controls.length}: ${controls.join(" | ")}` });
     expect(controls.length, controls.join(" | ")).toBeLessThanOrEqual(10);
 
-    // clips 80 px (was 96); a selected clip's trim handles keep a 44 px target
-    const clip = page.getByTestId("ed-timeline").getByTestId("clip-0");
-    expect((await clip.boundingBox())!.height).toBeCloseTo(80, 0);
+    // clips 80 px (was 96); a selected clip's trim handles keep a 44 px
+    // target — on a clip of 72 px and more: a shorter one splits its width
+    // between its two handles (drag-5: the end handle took the start's touches)
+    const clip = page.getByTestId("ed-timeline").getByTestId("clip-4");
+    const cb = (await clip.boundingBox())!;
+    expect(cb.height).toBeCloseTo(80, 0);
+    expect(cb.width).toBeGreaterThanOrEqual(72);
     await clip.click();
     const handle = (await clip.getByTestId("clip-trim-end").boundingBox())!;
     expect(handle.width).toBeGreaterThanOrEqual(44);
     expect(handle.height).toBeGreaterThanOrEqual(44);
+    const short = page.getByTestId("ed-timeline").getByTestId("clip-0");
+    const sb = (await short.boundingBox())!;
+    await short.click();
+    const sh = (await short.getByTestId("clip-trim-end").boundingBox())!;
+    expect(sh.width).toBeGreaterThanOrEqual(Math.min(44, sb.width / 2 + 8) - 0.5);
     await page.keyboard.press("Escape");
 
     // The Text & cuts sheet: preview keeps its size, focus goes in and back.

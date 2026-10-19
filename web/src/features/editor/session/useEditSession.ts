@@ -12,6 +12,22 @@
  * Per-frame time is NOT state here: the v1 screen polls it itself, the v2
  * shell reads the playhead store. Both map the element's time to source
  * time with `sourceTimeOf` / `toSource`.
+ *
+ * The trim flow round (owner: "Vorschau hat gedauert", "Video zeigt was
+ * anderes als Timeline", "Untertitel fielen aus"):
+ *   - saves are serialised only until the previous one is STORED, not
+ *     until its answer (which comes after the server's full preview
+ *     re-encode, 19 s for the owner): the next edit reaches the server at
+ *     once; "Saved" shows only once the server has the timeline on screen;
+ *   - preview mode: while the playing file is older than the edit
+ *     (previewStale, a chip until the matching file is on screen), playing
+ *     skips the footage the edit removed (previewSync.stalePlan); a swap
+ *     lands on the same SOURCE moment (previewSync.swapTime), or on a
+ *     moment the user asked for that the old file didn't have; a failed
+ *     rebuild says so (previewError, Retry) and is retried; reopening
+ *     follows the rebuilds until the preview matches the saved timeline;
+ *   - export stores the timeline once (no extra rebuild to wait for);
+ *   - a hidden page (iOS app switch) sends a pending edit at once.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/i18n";
@@ -21,6 +37,7 @@ import { sameTimeline, saveOutcome, type SaveOutcome, type TimelineSeg } from "@
 import { trackSave } from "@/lib/pendingSaves";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import type { CutRange, JobStatus, SavedSeg } from "@/features/jobs/types";
+import { previewMatches, previewTimeOf, skipTarget, stalePlan, swapTime } from "./previewSync";
 
 export type PlaybackMode = "probing" | "proxy" | "preview";
 export type SaveError = "retrying" | "failed" | null;
@@ -232,23 +249,50 @@ export function useEditSession({
   }, [keptSegments.length]);
 
   // Edits update local state instantly (strip re-renders in the same
-  // frame). A debounced POST rebuilds the server preview 800ms after
-  // the last edit — long enough that rapid trims coalesce into one
-  // rebuild, short enough that the user doesn't wait when they stop.
+  // frame). A debounced POST stores the timeline 800ms after the last
+  // edit — long enough that rapid trims coalesce into one save, short
+  // enough that the user doesn't wait when they stop. In preview mode the
+  // server rebuilds the cut preview from it (its answer comes after that).
   //
   // The src swap that follows is gated: if the video is currently
   // playing we defer until the next pause. That's what killed the
   // 'flow' before — the browser reloaded mid-playback and jumped
-  // back to the start of the clip.
+  // back to the start of the clip. Until then playing skips what the
+  // edit removed (stalePlan below).
   const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRebuildRef = useRef<EditorSeg[] | null>(null);
   const inflightRef = useRef<Promise<void> | null>(null);
+  /** The save on the wire until the server has STORED it (the next one waits for this only). */
+  const storingRef = useRef<Promise<SaveOutcome> | null>(null);
   const swapWhenPausedRef = useRef(false);
   const pendingSwapRef = useRef<{ segs: Segs; version: number } | null>(null);
   // The save on the wire (its request answers only after the preview
-  // rebuild), so proxy mode can wait for it to be STORED instead.
+  // rebuild), so saves and the export can wait for it to be STORED instead.
   const inflightSaveRef = useRef<{ payload: TimelineSeg[]; response: Promise<Response> } | null>(null);
+  /** The last timeline the server is known to have stored. */
+  const storedRef = useRef<TimelineSeg[] | null>(null);
   const applyingRef = useRef(false);
+  /** The latest committed clip list (what "Saved" must match). */
+  const latestRef = useRef(editSegs);
+  /** The preview version on screen (or waiting to be swapped in). */
+  const shownVersionRef = useRef(previewVersion);
+  /** Source time a seek asked for that the playing (stale) preview doesn't have: the swap lands there. */
+  const wantSourceRef = useRef<number | null>(null);
+  /** While a swap loads: the new file's time the playhead shows (not the 0 of the reload). */
+  const swapHoldRef = useRef<number | null>(null);
+  // the segments of the file on screen, for swaps made between renders
+  const videoSegmentsRef = useRef(videoSegments);
+  useEffect(() => {
+    videoSegmentsRef.current = videoSegments;
+  }, [videoSegments]);
+  const putVideoSegments = (segs: Segs) => {
+    videoSegmentsRef.current = segs;
+    setVideoSegments(segs);
+  };
+  // "Preview couldn't update": a rebuild failed (preview_ok false), or a
+  // reopened job's preview never caught up with its saved timeline.
+  const [previewError, setPreviewError] = useState(false);
+  const previewRetry = useRef<{ n: number; timer: ReturnType<typeof setTimeout> | null }>({ n: 0, timer: null });
 
   const editPath = `/jobs/${jobId}/edit-segments`;
   const toPayload = (segs: EditorSeg[]) =>
@@ -263,7 +307,17 @@ export function useEditSession({
         volume: s.volume,
       }));
 
-  const swapPreviewSrc = (version: number) => {
+  /** "Saving" ends only when the server has stored what is on screen —
+   *  not during the debounce, not while queued behind another save. */
+  const settleSaving = () => {
+    if (closedRef.current || rebuildTimerRef.current || pendingRebuildRef.current || storingRef.current) return;
+    const stored = storedRef.current;
+    const want = toPayload(latestRef.current);
+    if (want.length === 0 || (stored && sameTimeline(stored, want, duration))) setEditSaving(false);
+  };
+
+  /** Element time of the new preview for the moment on screen (previewSync.swapTime). */
+  const swapPreviewSrc = (version: number, newSegs: Segs, oldSegs: Segs) => {
     const v = videoRef.current;
     if (!v) return;
     if (!isMediaReady()) {
@@ -271,15 +325,30 @@ export function useEditSession({
       setWaitingVersion(version);
       return;
     }
-    const wasTime = v.currentTime;
+    const target = swapTime(v.currentTime, oldSegs, newSegs, wantSourceRef.current);
+    wantSourceRef.current = null;
+    swapHoldRef.current = target;
     v.src = mediaUrl(jobId, "preview-video", { v: version });
+    // the playhead keeps the target until the new file is there (no 0 flash)
+    let fallback: ReturnType<typeof setTimeout> | null = null;
+    const release = () => {
+      v.removeEventListener("seeked", release);
+      if (fallback) clearTimeout(fallback);
+      if (swapHoldRef.current === target) swapHoldRef.current = null;
+    };
     const restore = () => {
       v.removeEventListener("loadedmetadata", restore);
       try {
         const dur = isFinite(v.duration) ? v.duration : 0;
-        v.currentTime = Math.min(wasTime, Math.max(0, dur - 0.1));
+        const at = Math.min(target, Math.max(0, dur - 0.1));
+        if (Math.abs(v.currentTime - at) < 1e-3) release();
+        else {
+          v.addEventListener("seeked", release, { once: true });
+          fallback = setTimeout(release, 1500);
+          v.currentTime = at;
+        }
       } catch {
-        /* ignore */
+        release();
       }
     };
     v.addEventListener("loadedmetadata", restore, { once: true });
@@ -289,18 +358,26 @@ export function useEditSession({
   // list it was built from (the server's, not ours), so the playhead
   // mapping always matches the file that is playing.
   const applyPreview = (segs: Segs, version: number) => {
+    // never back to an older file (answers of earlier saves, a poll)
+    if (version <= shownVersionRef.current && shownVersionRef.current > 0) return;
+    shownVersionRef.current = version;
+    if (previewMatches(segs, latestRef.current)) {
+      setPreviewError(false);
+      previewRetry.current.n = 0;
+    }
     if (modeRef.current === "proxy") {
       // Proxy: nothing to reload. Only remember the newest preview, in
       // case the player falls back to preview mode. (Probing plays the
       // preview until the probe answers, so it swaps like preview.)
-      setVideoSegments(segs);
+      putVideoSegments(segs);
       setWaitingVersion(version);
       return;
     }
     const v = videoRef.current;
     if (v && v.paused) {
-      setVideoSegments(segs);
-      swapPreviewSrc(version);
+      const old = videoSegmentsRef.current;
+      putVideoSegments(segs);
+      swapPreviewSrc(version, segs, old);
     } else {
       // Defer the src swap until the user pauses — we DO NOT
       // interrupt playback in flight. The pause listener below
@@ -319,34 +396,49 @@ export function useEditSession({
     }, delay);
   };
 
-  // One save at a time, always sending the latest edit (with effects —
-  // sending only start/end used to reset speed/volume/fades on every
-  // autosave). A failed save stays pending and is retried.
-  const doRebuild = async (): Promise<void> => {
-    while (inflightRef.current) await inflightRef.current;
-    const next = pendingRebuildRef.current;
-    if (!next) return;
-    pendingRebuildRef.current = null;
-    const active = toPayload(next);
-    if (active.length === 0) return;
-    const run = (async () => {
-      setEditSaving(true);
-      const request = apiFetch(editPath, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ segments: active }),
-      });
-      inflightSaveRef.current = { payload: active, response: request };
-      if (modeRef.current === "proxy") {
-        // The answer only comes after the preview rebuild, which proxy
-        // mode never uses: end "saving" once the edit is stored (unless a
-        // newer edit is already waiting). Errors are still handled below.
-        void saveOutcome(jobId, active, duration, request).then((o) => {
-          if (o === "stored" && !pendingRebuildRef.current && !closedRef.current) {
-            setEditSaving(false);
-          }
-        });
+  // The rebuild failed on the server (the save itself is stored): say so
+  // and ask for it again, with backoff, then leave it to Retry.
+  const previewFailed = () => {
+    setPreviewError(true);
+    const r = previewRetry.current;
+    if (r.timer || r.n >= 3 || closedRef.current) return;
+    const delay = [3000, 10_000, 30_000][r.n++];
+    r.timer = setTimeout(() => {
+      r.timer = null;
+      if (closedRef.current || pendingRebuildRef.current || inflightRef.current) return;
+      pendingRebuildRef.current = latestRef.current;
+      void doRebuild();
+    }, delay);
+  };
+
+  /** POST the timeline. Resolves with how the save ended; registers it as THE save on the wire. */
+  const send = (active: TimelineSeg[], next: EditorSeg[], keepalive = false) => {
+    setEditSaving(true);
+    const body = JSON.stringify({ segments: active });
+    const request = apiFetch(editPath, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      ...(keepalive && body.length < 60_000 ? { keepalive: true } : {}),
+    });
+    inflightSaveRef.current = { payload: active, response: request };
+    // The next save waits until this one is STORED (or answered): the
+    // order of saves is kept, but nobody waits for the preview re-encode.
+    const storing = saveOutcome(jobId, active, duration, request).then(async (o) => {
+      if (o === "stored") {
+        storedRef.current = active;
+        if (!closedRef.current) setSaveError(null);
       }
+      // not seen stored: wait for the answer, so the next save can't overtake it
+      else await request.catch(() => undefined);
+      return o;
+    });
+    storingRef.current = storing;
+    void storing.then(() => {
+      if (storingRef.current === storing) storingRef.current = null;
+      settleSaving();
+    });
+    const run = (async () => {
       try {
         const r = await request;
         if ([400, 404, 409, 410].includes(r.status)) {
@@ -355,10 +447,15 @@ export function useEditSession({
           return;
         }
         if (!r.ok) throw new Error(`save failed (${r.status})`);
-        const data: JobStatus & { preview_ok?: boolean } = await r.json();
+        const data: JobStatus & { preview_ok?: boolean; superseded?: boolean } = await r.json();
+        storedRef.current = active;
         setSaveError(null);
-        if (data.preview_ok && data.preview_segments && !closedRef.current) {
-          applyPreview(data.preview_segments, data.preview_version ?? Date.now());
+        if (closedRef.current) return;
+        if (data.preview_ok && data.preview_segments) {
+          applyPreview(data.preview_segments, data.preview_version ?? shownVersionRef.current + 1);
+        } else if (!data.superseded && modeRef.current !== "proxy") {
+          // stored, but the server couldn't rebuild the preview from it
+          previewFailed();
         }
       } catch {
         // Apply & render already sent the timeline on screen.
@@ -369,18 +466,33 @@ export function useEditSession({
         scheduleRebuild(3000);
       } finally {
         if (inflightSaveRef.current?.response === request) inflightSaveRef.current = null;
-        setEditSaving(false);
+        settleSaving();
       }
     })();
     inflightRef.current = run;
-    // Reopening the job waits for this save — in proxy mode only until
-    // it is stored, not for the preview rebuild (see flushOnLeave).
-    if (modeRef.current !== "proxy") trackSave(jobId, run);
-    try {
-      await run;
-    } finally {
+    void run.finally(() => {
       if (inflightRef.current === run) inflightRef.current = null;
+    });
+    // Reopening the job waits for this save — until it is stored, not for
+    // the preview rebuild (the reopened editor follows that itself).
+    trackSave(jobId, storing);
+    return storing;
+  };
+
+  // One save at a time, always sending the latest edit (with effects —
+  // sending only start/end used to reset speed/volume/fades on every
+  // autosave). A failed save stays pending and is retried.
+  const doRebuild = async (): Promise<void> => {
+    while (storingRef.current) await storingRef.current;
+    const next = pendingRebuildRef.current;
+    if (!next) return;
+    pendingRebuildRef.current = null;
+    const active = toPayload(next);
+    if (active.length === 0) {
+      settleSaving();
+      return;
     }
+    await send(active, next);
   };
 
   // Leaving the editor (in-app navigation, tab close, reload) must not
@@ -390,7 +502,6 @@ export function useEditSession({
       clearTimeout(rebuildTimerRef.current);
       rebuildTimerRef.current = null;
     }
-    const proxy = modeRef.current === "proxy";
     const inflight = inflightSaveRef.current;
     const next = pendingRebuildRef.current;
     pendingRebuildRef.current = null;
@@ -398,7 +509,7 @@ export function useEditSession({
     // Only when no newer save goes out now: that one replaces the
     // in-flight timeline on the server, so the in-flight one would never
     // be seen stored and reopening would wait for its rebuild.
-    if (proxy && inflight && !unloading && active.length === 0) {
+    if (inflight && !unloading && active.length === 0) {
       trackSave(jobId, saveOutcome(jobId, inflight.payload, duration, inflight.response, { timeoutMs: 10_000 }));
     }
     if (active.length === 0) return;
@@ -414,54 +525,102 @@ export function useEditSession({
     });
     trackSave(
       jobId,
-      proxy && !unloading
-        ? saveOutcome(jobId, active, duration, request, { timeoutMs: 10_000 })
-        : request.catch(() => {}),
+      !unloading ? saveOutcome(jobId, active, duration, request, { timeoutMs: 10_000 }) : request.catch(() => {}),
     );
+  };
+  // The page went to the background (iPhone Safari fires no pagehide on
+  // an app switch or the lock screen; timers freeze and a hidden tab may
+  // be discarded): a pending edit goes NOW, as keepalive, without waiting
+  // for the debounce or for the save on the wire to be stored.
+  const flushHidden = () => {
+    if (closedRef.current || applyingRef.current) return;
+    if (rebuildTimerRef.current) {
+      clearTimeout(rebuildTimerRef.current);
+      rebuildTimerRef.current = null;
+    }
+    const next = pendingRebuildRef.current;
+    if (!next) return;
+    pendingRebuildRef.current = null;
+    const active = toPayload(next);
+    if (active.length) void send(active, next, true);
   };
   useEffect(() => {
     // Re-armed on (re)mount — React dev mode mounts effects twice.
     closedRef.current = false;
     const onHide = () => flushOnLeave(true);
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") flushHidden();
+    };
     window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onHidden);
+    document.addEventListener("freeze", onHidden);
+    const retry = previewRetry.current;
     return () => {
       window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onHidden);
+      document.removeEventListener("freeze", onHidden);
+      if (retry.timer) clearTimeout(retry.timer);
+      retry.timer = null;
       closedRef.current = true;
       flushOnLeave(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reopened while the last save's preview was still rendering: the
-  // saved edit is newer than the preview we loaded. Poll until the
-  // server has the matching preview, then switch to it. (Proxy mode
-  // plays the edit itself and never needs it.)
+  // The file on screen is older than the edit (preview mode): the chip
+  // stays until the matching file is on screen, not just while a save is
+  // open (a deferred swap, a rebuild behind others, a reopened job).
+  const previewStale = mode !== "proxy" && !previewMatches(videoSegments, editSegs);
+
+  // Preview behind with nothing of ours on the wire — reopened while the
+  // last saves were still rendering, or a rebuild queued on the server:
+  // follow the server's rebuilds (intermediate ones too) until its
+  // preview is the stored timeline. Proxy mode plays the edit itself.
+  const busy = editSaving;
   useEffect(() => {
-    if (mode !== "preview") return;
-    const key = (xs: Segs) => JSON.stringify(xs.map(([a, b]) => [+a.toFixed(3), +b.toFixed(3)]));
-    const want = key(savedSegments.map((x) => [x.start, x.end]));
-    if (!savedSegments.length || key(previewSegments) === want) return;
+    if (mode === "proxy" || !previewStale || busy || previewError) return;
     let tries = 0;
-    const id = setInterval(async () => {
-      if (closedRef.current || ++tries > 45) return clearInterval(id);
+    let live = true;
+    let id: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      id = null;
+      if (!live || closedRef.current) return;
+      if (++tries > 150) {
+        // ~5 min without the rebuild catching up: say so (Retry rebuilds)
+        setPreviewError(true);
+        return;
+      }
       try {
-        const r = await apiFetch(`/jobs/${jobId}`);
-        if (!r.ok) return;
-        const j: JobStatus = await r.json();
-        if ((j.preview_version ?? 0) > previewVersion && j.preview_segments) {
-          clearInterval(id);
-          // Only if the user hasn't produced a newer preview meanwhile.
-          if (!inflightRef.current && !pendingRebuildRef.current) {
-            applyPreview(j.preview_segments, j.preview_version ?? Date.now());
+        const r = await apiFetch(`/jobs/${jobId}`, { cache: "no-store" });
+        if (r.ok && live) {
+          const j: JobStatus & { edit_segments?: TimelineSeg[] } = await r.json();
+          if (!live) return;
+          if (j.preview_segments && (j.preview_version ?? 0) > shownVersionRef.current) {
+            applyPreview(j.preview_segments, j.preview_version ?? shownVersionRef.current + 1);
           }
+          // caught up with the stored timeline: nothing more will come
+          const caught =
+            !!j.preview_segments &&
+            !!j.edit_segments &&
+            sameTimeline(
+              j.preview_segments.map(([a, b]) => ({ start: a, end: b })),
+              j.edit_segments.map((x) => ({ start: x.start, end: x.end })),
+              duration,
+            );
+          if (caught) return;
         }
       } catch {
         /* keep polling */
       }
-    }, 2000);
-    return () => clearInterval(id);
+      if (live) id = setTimeout(poll, tries < 30 ? 2000 : 5000);
+    };
+    id = setTimeout(poll, 2000);
+    return () => {
+      live = false;
+      if (id) clearTimeout(id);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [mode, previewStale, busy, previewError, jobId]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -472,19 +631,75 @@ export function useEditSession({
         const sw = pendingSwapRef.current;
         pendingSwapRef.current = null;
         if (sw) {
-          setVideoSegments(sw.segs);
-          swapPreviewSrc(sw.version);
+          const old = videoSegmentsRef.current;
+          putVideoSegments(sw.segs);
+          swapPreviewSrc(sw.version, sw.segs, old);
         }
       }
     };
+    // playing on from where the old file is: a seek request is done with
+    const onPlay = () => {
+      wantSourceRef.current = null;
+    };
     v.addEventListener("pause", onPause);
-    return () => v.removeEventListener("pause", onPause);
+    v.addEventListener("play", onPlay);
+    return () => {
+      v.removeEventListener("pause", onPause);
+      v.removeEventListener("play", onPlay);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Preview mode, the file older than the edit: playing skips what the
+  // edit removed (the old file's parts the edit still plays), so the
+  // video never shows footage the timeline says is cut — with no caption
+  // and no playhead — while the rebuild runs. At its end it pauses
+  // (which swaps the new file in).
+  const plan = useMemo(
+    () => (mode !== "proxy" && previewStale ? stalePlan(videoSegments, editSegs) : null),
+    [mode, previewStale, videoSegments, editSegs],
+  );
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !plan) return;
+    // every animation frame while playing, on the element's own clock —
+    // not on presented frames: a busy phone drops video frames, and a
+    // frame-driven check let removed footage play for a third of a second
+    let raf = 0;
+    const check = () => {
+      if (v.paused || v.seeking || swapHoldRef.current !== null) return;
+      const to = skipTarget(plan, v.currentTime);
+      if (to === "end") v.pause();
+      else if (to !== null) v.currentTime = to;
+    };
+    const tick = () => {
+      check();
+      raf = v.paused ? 0 : requestAnimationFrame(tick);
+    };
+    const onPlay = () => {
+      if (!raf) raf = requestAnimationFrame(tick);
+    };
+    if (!v.paused) onPlay();
+    v.addEventListener("playing", onPlay);
+    v.addEventListener("play", onPlay);
+    // a hidden tab gets no animation frames
+    v.addEventListener("timeupdate", check);
+    return () => {
+      cancelAnimationFrame(raf);
+      v.removeEventListener("playing", onPlay);
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("timeupdate", check);
+    };
+  }, [plan]);
+
   const commitEditSegs = (next: EditorSeg[]) => {
+    latestRef.current = next;
     setEditSegs(next);
     pendingRebuildRef.current = next;
+    setEditSaving(true);
+    // a new edit: a failed preview gets its chances again
+    previewRetry.current.n = 0;
+    setPreviewError(false);
     scheduleRebuild(800);
   };
 
@@ -494,6 +709,17 @@ export function useEditSession({
     pendingRebuildRef.current = editSegs;
     scheduleRebuild(0);
   };
+
+  /** "Preview couldn't update · Retry": ask the server to rebuild it again. */
+  const retryPreview = () => {
+    setPreviewError(false);
+    previewRetry.current.n = 0;
+    pendingRebuildRef.current = latestRef.current;
+    scheduleRebuild(0);
+  };
+
+  /** While a swapped-in preview loads: the time the playhead keeps showing (null: none). */
+  const heldTime = useCallback(() => swapHoldRef.current, []);
 
   // Proxy mode: the player follows the edit list client-side — the
   // timeline shows on the next frame, no preview rebuild involved.
@@ -520,14 +746,32 @@ export function useEditSession({
   }, [editSegs, duration]);
 
   // Source time → time in the playing preview (null if cut out).
-  const previewTimeFor = (time: number): number | null => {
+  const previewTimeFor = (time: number): number | null =>
+    previewTimeOf(time, videoSegments.length ? videoSegments : keptSegments);
+
+  /**
+   * A seek the playing preview can't show (footage an edit just revealed,
+   * not rebuilt in yet): the nearest moment it has, and the swap to the
+   * rebuilt file lands on `time` itself.
+   */
+  const seekNearest = (time: number) => {
+    const v = videoRef.current;
     const src = videoSegments.length ? videoSegments : keptSegments;
+    if (!v || !src.length) return;
+    let best = 0;
+    let bestD = Infinity;
     let acc = 0;
-    for (const [s, e] of src) {
-      if (time >= s && time <= e) return acc + (time - s);
-      acc += e - s;
+    for (const [s0, e0] of src) {
+      const at = Math.min(e0, Math.max(s0, time));
+      const d = Math.abs(at - time);
+      if (d < bestD) {
+        bestD = d;
+        best = acc + (at - s0);
+      }
+      acc += e0 - s0;
     }
-    return null;
+    v.currentTime = best;
+    wantSourceRef.current = time;
   };
 
   /** Jump to a transcript line (and play, unless `play` is false). */
@@ -553,7 +797,12 @@ export function useEditSession({
         acc += e - s;
       }
     }
-    if (time === null) return;
+    if (time === null) {
+      // not in the playing file (revealed by an edit, rebuild pending)
+      if (previewStale) seekNearest(p.original_start);
+      return;
+    }
+    wantSourceRef.current = null;
     videoRef.current.currentTime = time;
     if (play) videoRef.current.play().catch(() => {});
   };
@@ -569,8 +818,9 @@ export function useEditSession({
     // may not be rebuilt into it yet).
     const pt = previewTimeFor(time);
     if (pt !== null && videoRef.current) {
+      wantSourceRef.current = null;
       videoRef.current.currentTime = pt;
-    }
+    } else if (previewStale) seekNearest(time);
   };
 
   const togglePlay = () => {
@@ -594,7 +844,10 @@ export function useEditSession({
   // Apply & render: push the user's edited segments (with effects) to the
   // backend before we hit /render — the render reads them from the job.
   // Cancel the pending autosave and wait for one in flight first, so
-  // neither can land after this save.
+  // neither can land after this save. Both modes render as soon as the
+  // server has STORED the timeline on screen — never after a preview
+  // rebuild nobody watches (preview mode sent it again and waited for one
+  // or two full re-encodes).
   const apply = async () => {
     if (rebuildTimerRef.current) {
       clearTimeout(rebuildTimerRef.current);
@@ -602,58 +855,36 @@ export function useEditSession({
     }
     pendingRebuildRef.current = null;
     setApplying(true);
-    if (modeRef.current === "proxy") {
-      // The player already shows this edit, so render as soon as
-      // the server has STORED it — not after its preview rebuild.
-      applyingRef.current = true;
-      setApplyError(null);
-      const active = toPayload(editSegs);
-      let outcome: SaveOutcome = "stored";
-      // An autosave on the wire lands first, so it can't overwrite
-      // this save; when it already carries this edit, that's it.
-      const prev = inflightSaveRef.current;
-      const prevOutcome = prev
-        ? await saveOutcome(jobId, prev.payload, duration, prev.response, {
-            settleOnAnswer: true,
-            timeoutMs: 8_000,
-          })
-        : null;
-      const covered = prev && prevOutcome === "stored" && sameTimeline(prev.payload, active, duration);
-      if (active.length > 0 && !covered) {
-        const request = apiFetch(editPath, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ segments: active }),
-        });
-        outcome = await saveOutcome(jobId, active, duration, request);
-      }
-      if (outcome !== "stored") {
-        // Never render an older cut than the one on screen.
-        setApplyError(t("app.errors.saveEditsFailed"));
-        pendingRebuildRef.current = editSegs;
-        applyingRef.current = false;
-        setApplying(false);
-        return;
-      }
-      onApply();
-      return;
-    }
-    while (inflightRef.current) await inflightRef.current;
+    applyingRef.current = true;
     setApplyError(null);
-    try {
-      const active = toPayload(editSegs);
-      if (active.length > 0) {
-        const r = await apiFetch(editPath, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ segments: active }),
-        });
-        if (!r.ok) throw new Error(`save failed (${r.status})`);
-      }
-    } catch {
+    const active = toPayload(editSegs);
+    let outcome: SaveOutcome = "stored";
+    // An autosave on the wire lands first, so it can't overwrite
+    // this save; when it already carries this edit, that's it.
+    const prev = inflightSaveRef.current;
+    const prevOutcome = prev
+      ? await saveOutcome(jobId, prev.payload, duration, prev.response, {
+          settleOnAnswer: true,
+          timeoutMs: 8_000,
+        })
+      : null;
+    if (prev && prevOutcome === "stored") storedRef.current = prev.payload;
+    const stored = storedRef.current;
+    const covered = !!stored && sameTimeline(stored, active, duration);
+    if (active.length > 0 && !covered) {
+      const request = apiFetch(editPath, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segments: active }),
+      });
+      outcome = await saveOutcome(jobId, active, duration, request);
+      if (outcome === "stored") storedRef.current = active;
+    }
+    if (outcome !== "stored") {
       // Never render an older cut than the one on screen.
       setApplyError(t("app.errors.saveEditsFailed"));
       pendingRebuildRef.current = editSegs;
+      applyingRef.current = false;
       setApplying(false);
       return;
     }
@@ -682,6 +913,10 @@ export function useEditSession({
     saveError,
     editSaving,
     retrySave,
+    previewStale,
+    previewError,
+    retryPreview,
+    heldTime,
     applying,
     applyError,
     apply,

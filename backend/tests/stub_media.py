@@ -358,6 +358,24 @@ def speech_words() -> list[dict[str, Any]]:
     return [{"text": w["text"], "start": w["start"], "end": w["end"]} for w in words]
 
 
+def whisper_like(words: list[dict[str, Any]], drift: float = 0.1,
+                 join_gap: float = 0.3) -> list[dict[str, Any]]:
+    """`words` (true sound extents) with times as Whisper gives them: real
+    transcripts drift by about 100 ms (faster-whisper small on synthetic
+    speech: starts and ends 83-125 ms early) and their words touch in
+    94 % of the pairs (the owner's job: 942 of 1000). Every time moves
+    `drift` s earlier (not below 0) and a gap shorter than `join_gap` is
+    closed by stretching the word before it — so a cut on these times
+    clips words the way it does on a real recording (seed option
+    whisper_times)."""
+    out = [{**w, "start": round(max(0.0, w["start"] - drift), 3),
+            "end": round(max(0.0, w["end"] - drift), 3)} for w in words]
+    for a, b in zip(out, out[1:]):
+        if 0.0 < b["start"] - a["end"] < join_gap:
+            a["end"] = b["start"]
+    return out
+
+
 def speech_data() -> dict[str, Any]:
     """Analysis result of the speech clip: automatic cuts around the
     speech (fillers and pauses removed) and Whisper-like word subtitles

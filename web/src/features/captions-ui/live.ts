@@ -39,10 +39,17 @@ export function clipsOf(segs: readonly EditorSeg[]): (Clip & { id: string })[] {
     .map((s) => ({ id: s.id, start: s.start, end: s.end, speed: s.speed && s.speed > 0 ? s.speed : 1 }));
 }
 
+/** How far before the playing clip's start a presented frame can be: the
+ *  proxy player seeks to a clip's start and the frame shown is the one
+ *  that holds it (10–28 ms earlier measured; one frame at most). */
+export const CLIP_FRAME_S = 0.05;
+
 /**
  * Output time of source time `src`: in clip `segId` when given (the clip
- * the player is in — a source moment can be in two clips), else the first
- * clip holding it. Null when it is cut away.
+ * the player is in — a source moment can be in two clips; a frame up to
+ * CLIP_FRAME_S before its start counts as its start, so a caption
+ * spanning a clip start doesn't blink, preview-10), else the first clip
+ * holding it. Null when it is cut away.
  */
 export function outputTime(clips: readonly (Clip & { id?: string })[], src: number, segId?: string | null): number | null {
   let acc = 0;
@@ -50,11 +57,12 @@ export function outputTime(clips: readonly (Clip & { id?: string })[], src: numb
   for (const c of clips) {
     const speed = c.speed && c.speed > 0 ? c.speed : 1;
     const d = (c.end - c.start) / speed;
-    const inside = src >= c.start - 1e-6 && src <= c.end + 1e-6;
+    const own = !!segId && c.id === segId;
+    const inside = src >= c.start - (own ? CLIP_FRAME_S : 1e-6) && src <= c.end + 1e-6;
     if (inside) {
       const t = acc + Math.min(d, Math.max(0, (src - c.start) / speed));
-      if (segId && c.id === segId) return t;
-      if (first === null && src < c.end) first = t;
+      if (own) return t;
+      if (first === null && src < c.end && src >= c.start - 1e-6) first = t;
     }
     acc += d;
   }

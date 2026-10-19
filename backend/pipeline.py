@@ -811,8 +811,7 @@ def make_filmstrip(source_path: str, out_path: str,
 
 
 # A segment may start this much before its predecessor ends (float
-# noise in editor values) and still count as "in order": the single-
-# pass build then holds at most that stretch of decoded frames.
+# noise in editor values) and still count as "in order".
 _ORDER_SLACK_S = 0.1
 
 
@@ -835,42 +834,19 @@ def _ascending_runs(
 # inline — 4K MP4s often fail to start on the phone.
 _PREVIEW_SCALE = "scale='if(gt(iw,ih),720,-2)':'if(gt(ih,iw),720,-2)'"
 
-# Ascending timelines up to this many segments take the one-pass trim/
-# concat filter graph. Its cost grows much faster than the segment count
-# (every decoded frame visits every branch): on a 5 min 720p proxy 25
-# segments took 9 s, 100 25 s, 200 60 s and 1000 more than 10 min.
-_FILTER_MAX_SEGMENTS = 24
-
 # The concat demuxer ends a segment at the first packet of ANY stream
 # whose decoding timestamp reaches its outpoint; read this far past the
 # segment end so no frame of it is cut off (the exact end comes from its
 # `duration` + concatdec_select).
 _CONCAT_SLACK_S = 0.1
 
-
-def _preview_filter(
-    segments: list[tuple[float, float]],
-    offset: float = 0.0,
-) -> str:
-    """trim/atrim + concat graph for ascending `segments`; times are
-    shifted by `offset` (the input's -ss). Output pads [outv] [outa]."""
-    filters = []
-    parts = []
-    for i, (s, e) in enumerate(segments):
-        s = max(0.0, s - offset)
-        e = max(0.0, e - offset)
-        filters.append(
-            f"[0:v]trim={s:.3f}:{e:.3f},setpts=PTS-STARTPTS[v{i}]"
-        )
-        filters.append(
-            f"[0:a]atrim={s:.3f}:{e:.3f},asetpts=PTS-STARTPTS[a{i}]"
-        )
-        parts.append(f"[v{i}][a{i}]")
-    filters.append(
-        f"{''.join(parts)}concat=n={len(segments)}:v=1:a=1[outvfull][outa]"
-    )
-    filters.append(f"[outvfull]{_PREVIEW_SCALE}[outv]")
-    return ";".join(filters)
+# The preview's sound: cut sample-exactly from one decode of the source,
+# with the export's fade at every cut (captions_v2.CUT_FADE_S) — no click
+# at a join, no fragment of a cut word, no lost onset.
+_PREVIEW_SR = 48000
+_PREVIEW_CHANNELS = 2
+_PREVIEW_CUT_FADE_S = 0.015
+_PREVIEW_BLOCK = 10 * _PREVIEW_SR   # samples per write
 
 
 def _preview_video_args() -> list[str]:
@@ -909,10 +885,129 @@ def _start_time(path: str) -> float:
     return value if math.isfinite(value) else 0.0
 
 
+def _fx(effects: list[dict] | None, n: int) -> list[dict]:
+    """Per-segment effects (missing → none); a list of another length
+    (a stale one) counts as none."""
+    if not effects or len(effects) != n:
+        return [{} for _ in range(n)]
+    return [e if isinstance(e, dict) else {} for e in effects]
+
+
+def _fx_num(eff: dict, key: str, default: float) -> float:
+    try:
+        v = float(eff.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
+
+
+def _fade_lengths(eff: dict, src_len: float) -> tuple[float, float]:
+    """The clip's fade in / out as SOURCE seconds of the preview, which
+    plays at 1x (the player applies the speed): the export's fade
+    (min(fade, sped length / 2), captions_v2.build_graph) times speed."""
+    speed = _fx_num(eff, "speed", 1.0)
+    speed = speed if speed > 0 else 1.0
+    half = src_len / speed / 2
+    fi = max(0.0, min(_fx_num(eff, "fadeIn", 0.0), half)) * speed
+    fo = max(0.0, min(_fx_num(eff, "fadeOut", 0.0), half)) * speed
+    return fi, fo
+
+
+def _preview_audio(ff: str, input_path: str,
+                   segments: list[tuple[float, float]],
+                   effects: list[dict] | None, work: str,
+                   out_path: str) -> None:
+    """The preview's sound as raw s16le (_PREVIEW_SR, _PREVIEW_CHANNELS)
+    at `out_path`: segment k is source [s_k, e_k) to the sample and lasts
+    exactly as long as the picture's segment k (cumulative rounding, so
+    nothing drifts over hundreds of joins); 15 ms fades at every cut (not
+    at a split's seamless edge) unless the clip fades itself; the clips'
+    volume and fades as the export applies them. A source without sound
+    gives silence. The source is decoded once into `work`."""
+    import numpy as np
+    sr, ch = _PREVIEW_SR, _PREVIEW_CHANNELS
+    src_path = os.path.join(work, "source.raw")
+    r = subprocess.run(
+        [ff, "-y", "-v", "error", *_threads(), "-i", input_path,
+         "-map", "0:a:0", "-vn", "-sn", "-dn",
+         # the stream's own start (if after the container's) as silence
+         "-af", "aresample=async=1:first_pts=0",
+         "-ac", str(ch), "-ar", str(sr), "-f", "s16le", src_path],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        err = (r.stderr or "").lower()
+        if "matches no streams" not in err and "no stream" not in err:
+            raise RuntimeError(f"ffmpeg preview audio failed:\n{(r.stderr or '')[-800:]}")
+        with open(src_path, "wb"):
+            pass
+    if not os.path.exists(src_path):
+        with open(src_path, "wb"):
+            pass
+    frames = os.path.getsize(src_path) // (2 * ch)
+    src = (np.memmap(src_path, dtype="<i2", mode="r", shape=(frames, ch))
+           if frames else np.zeros((0, ch), dtype="<i2"))
+    fade = int(round(_PREVIEW_CUT_FADE_S * sr))
+    fx = _fx(effects, len(segments))
+    with open(out_path, "wb") as out:
+        t_out, pos = 0.0, 0
+        for k, ((s, e), eff) in enumerate(zip(segments, fx)):
+            s, e = float(s), float(e)
+            t_out += e - s
+            n = max(0, int(round(t_out * sr)) - pos)
+            pos += n
+            first = int(round(s * sr))
+            vol = max(0.0, _fx_num(eff, "volume", 1.0))
+            fi_s, fo_s = _fade_lengths(eff, e - s)
+            cut_before = k > 0 and abs(float(segments[k - 1][1]) - s) > 1e-6
+            cut_after = (k + 1 < len(segments)
+                         and abs(e - float(segments[k + 1][0])) > 1e-6)
+            fi = int(round(fi_s * sr)) or (fade if cut_before and n > 4 * fade else 0)
+            fo = int(round(fo_s * sr)) or (fade if cut_after and n > 4 * fade else 0)
+            for b0 in range(0, n, _PREVIEW_BLOCK):
+                b1 = min(n, b0 + _PREVIEW_BLOCK)
+                block = np.zeros((b1 - b0, ch), dtype=np.float32)
+                lo, hi = max(0, first + b0), min(frames, first + b1)
+                if hi > lo:
+                    block[lo - first - b0:hi - first - b0] = src[lo:hi]
+                idx = np.arange(b0, b1, dtype=np.float64)
+                gain = np.full(b1 - b0, vol, dtype=np.float64)
+                if fi:
+                    gain *= np.clip(idx / fi, 0.0, 1.0)
+                if fo:
+                    gain *= np.clip((n - idx) / fo, 0.0, 1.0)
+                block *= gain[:, None].astype(np.float32)
+                out.write(np.clip(np.rint(block), -32768, 32767)
+                          .astype("<i2").tobytes())
+    del src
+    os.remove(src_path)
+
+
+def _preview_fades(segments: list[tuple[float, float]],
+                   effects: list[dict] | None) -> str:
+    """The clips' picture fades (to black, as the export) as filters on
+    the concatenated timeline ('' for none), each enabled only over its
+    own stretch."""
+    parts: list[str] = []
+    t = 0.0
+    for (s, e), eff in zip(segments, _fx(effects, len(segments))):
+        d = float(e) - float(s)
+        fi, fo = _fade_lengths(eff, d)
+        if fi > 0:
+            parts.append(f"fade=t=in:st={t:.6f}:d={fi:.6f}"
+                         f":enable='between(t,{t:.6f},{t + fi:.6f})'")
+        if fo > 0:
+            st = t + d - fo
+            parts.append(f"fade=t=out:st={st:.6f}:d={fo:.6f}"
+                         f":enable='between(t,{st:.6f},{t + d:.6f})'")
+        t += d
+    return "".join(f"{x}," for x in parts)
+
+
 def _ffmpeg_cuts_preview(
     input_path: str,
     segments: list[tuple[float, float]],
     output_path: str,
+    effects: list[dict] | None = None,
 ) -> None:
     """Produce a fast preview MP4 of the source with cut segments concatenated.
 
@@ -921,34 +1016,21 @@ def _ffmpeg_cuts_preview(
     burned in — those will be overlaid live in the UI for the review
     step. Callers pass preview_source(normalized_path) as `input_path`.
 
-    A few segments in ascending source order: one `filter_complex` pass.
-    Out of order (the editor's move-left/right) or overlapping, that
-    pass would buffer every decoded frame between the moved clip's
-    source position and its turn in the concat — ~100 MB per kept
-    second at 1080p (measured 1.7 GB for 14 s, 4.6 GB for 60 s: two
-    clicks could OOM the box) — and with many segments it gets very slow
-    (_FILTER_MAX_SEGMENTS). Those go through _concat_preview instead:
-    one pass, memory of a plain decode + encode, and a cost that grows
-    only by ~15 ms per segment, whatever the order.
+    Every timeline — any order, any count, the analysis' first preview
+    too — takes one pass (_concat_preview): the picture keeps the
+    source's frame rate and each segment starts exactly at the sum of
+    the lengths before it, so the editor's preview_segments mapping
+    holds to the frame (the old trim/concat filter graph for short
+    ascending timelines re-timed 30 fps to 25 fps and drifted up to
+    0.16 s by its 24th segment; it was also twice as slow). `effects`
+    (per segment: volume, fadeIn, fadeOut, speed) are baked in as the
+    export applies them — the volume and the fades of picture and
+    sound; the preview plays at 1x, the player applies the speed.
     """
     if not segments:
         raise ValueError("no segments to preview")
-
-    ff = get_ffmpeg_path()
-    if (len(segments) <= _FILTER_MAX_SEGMENTS
-            and len(_ascending_runs(segments)) == 1):
-        _run_preview_ffmpeg([
-            ff, "-y", *_threads(),
-            "-i", input_path,
-            "-filter_complex", _preview_filter(segments),
-            "-map", "[outv]", "-map", "[outa]",
-            *_preview_video_args(),
-            "-c:a", "aac", "-b:a", "128k",
-            "-movflags", "+faststart",
-            output_path,
-        ])
-        return
-    _concat_preview(ff, input_path, segments, output_path)
+    _concat_preview(get_ffmpeg_path(), input_path, segments, output_path,
+                    effects)
 
 
 def _concat_preview(
@@ -956,18 +1038,17 @@ def _concat_preview(
     input_path: str,
     segments: list[tuple[float, float]],
     output_path: str,
+    effects: list[dict] | None = None,
 ) -> None:
     """One ffmpeg pass over `segments` in timeline order: the concat
     demuxer reads each one from the source (seek to its inpoint, ≤ 1 GOP
     decoded before it), concatdec_select drops the frames around each
     cut, and the result is encoded once. Each segment starts exactly at
     the sum of the lengths before it (its `duration`), so the editor's
-    preview_segments math holds; the audio is re-laid on the timestamps
-    (silence into gaps, overlaps trimmed) so A/V sync resets at every
-    join. The list file sits next to the output (the job folder, on
-    the work volume)."""
-    # inpoints are the container's own timestamps; the filter path's
-    # trim times are relative to its start.
+    preview_segments math holds; the sound comes sample-exact from
+    _preview_audio, on the same lengths. The work files sit next to the
+    output (the job folder, on the work volume)."""
+    # inpoints are the container's own timestamps
     offset = _start_time(input_path)
     source = os.path.abspath(input_path).replace("'", "'\\''")
     out_dir = os.path.dirname(os.path.abspath(output_path))
@@ -981,6 +1062,8 @@ def _concat_preview(
                         f"inpoint {offset + s:.6f}\n"
                         f"outpoint {offset + e + _CONCAT_SLACK_S:.6f}\n"
                         f"duration {e - s:.6f}\n")
+        audio_path = os.path.join(work, "audio.raw")
+        _preview_audio(ff, input_path, segments, effects, work, audio_path)
         _run_preview_ffmpeg([
             ff, "-y", *_threads(),
             # Keep the demuxer's timestamps: concatdec_select compares
@@ -989,10 +1072,15 @@ def _concat_preview(
             "-copyts",
             "-f", "concat", "-safe", "0", "-segment_time_metadata", "1",
             "-i", list_path,
-            "-map", "0:v:0", "-map", "0:a:0",
-            "-vf", f"select=concatdec_select,{_PREVIEW_SCALE}",
-            "-af", ("aselect=concatdec_select,"
-                    "aresample=async=1:min_hard_comp=0.01:first_pts=0"),
+            "-f", "s16le", "-ar", str(_PREVIEW_SR),
+            "-ac", str(_PREVIEW_CHANNELS), "-i", audio_path,
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-vf", (f"select=concatdec_select,"
+                    f"{_preview_fades(segments, effects)}{_PREVIEW_SCALE}"),
+            # Every frame at its own time: a constant-rate output would
+            # shift each segment by up to a frame and a half against
+            # the sound (no frame is added or dropped either way).
+            "-fps_mode", "passthrough",
             *_preview_video_args(),
             "-c:a", "aac", "-b:a", "128k",
             "-movflags", "+faststart",

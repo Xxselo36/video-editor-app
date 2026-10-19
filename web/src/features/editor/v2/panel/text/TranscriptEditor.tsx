@@ -383,11 +383,16 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
 
   // ── cuts (UX10): the selection out of the video, or back in ────────
   const selRemoved = !!selRange && removed.subarray(selRange[0], selRange[1] + 1).every((x) => x !== 0);
+  // a cut that can't be made (one short word between touching words)
+  // says so instead of doing nothing
+  const cutOrSay = (a: number, b: number) => {
+    if (!p.cuts.cutWords(words, a, b)) p.toast(t("editor.cut.tooShort"));
+  };
   const toggleCut = () => {
     if (!selRange) return false;
     const [a, b] = selRange;
     if (selRemoved) p.cuts.restoreWord({ start: words[a].start, end: words[b].end });
-    else p.cuts.cutWords(words, a, b);
+    else cutOrSay(a, b);
     wantFocus.current = !phone;
     return true;
   };
@@ -563,7 +568,7 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
         // ⌫ cuts the selection from the video (or brings it back)
         if (!selRange || i < selRange[0] || i > selRange[1]) setSel({ a: words[i].id, f: words[i].id });
         if (selRange && i >= selRange[0] && i <= selRange[1]) toggleCut();
-        else if (removed[i] === 0) p.cuts.cutWords(words, i, i);
+        else if (removed[i] === 0) cutOrSay(i, i);
         else p.cuts.restoreWord(words[i]);
         break;
       case "ArrowDown":

@@ -425,6 +425,17 @@
   pointer-events: none;
   backdrop-filter: blur(8px);
 }
+/* "Preview couldn't update · Retry": the chip is the button */
+.stageChipAction {
+  pointer-events: auto;
+  border: 0;
+  cursor: pointer;
+  color: var(--ed-text-1);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.stageChipAction:hover {
+  background: rgba(13, 13, 16, 0.86);
+}
 .spinner {
   position: absolute;
   right: 10px;
@@ -2017,7 +2028,7 @@
 }
 /* phone: a 44 px trim target that reaches only 8 px outside the clip (the
    gap to the neighbour, which stays tappable: review 5) and up to 36 px
-   in (--hin, set per clip: never past the clip); a tap that doesn't trim
+   in (--hin, set per clip: never past its middle); a tap that doesn't trim
    reaches what is below; the white bar stays on the edge */
 .phone .handle {
   width: calc(var(--hin, 36px) + 8px);

@@ -6020,10 +6020,29 @@ def _job_preview_source(job: Job) -> str | None:
     return _preview_source(job.normalized_path)
 
 
+def _preview_shows(job: Job | None, segments, effects) -> bool:
+    """Does the job's stored preview already show `segments` with
+    `effects` baked in (_preview_effects)? Then a save of them — a
+    speed change (the player applies it), an undo back to the built
+    cut, the same list again — needs no encode."""
+    if job is None or not job.preview_segments or not (
+            job.preview_key or job.preview_path):
+        return False
+    shown = [[float(a), float(b)] for a, b in job.preview_segments]
+    return (shown == [[float(a), float(b)] for a, b in segments]
+            and (job.preview_effects or None) == (effects or None))
+
+
 async def _rebuild_in_pool(job_id: str, source: str | None, segments,
-                           seq: int | None = None) -> tuple[bool, bool]:
+                           seq: int | None = None,
+                           effects: list[dict] | None = None
+                           ) -> tuple[bool, bool]:
     """_rebuild_preview in _REBUILD_POOL, one at a time per job.
     With `seq`, skipped when a newer /edit-segments save arrived.
+    `effects`: what the preview bakes in (_preview_effects; None: none).
+    No encode when the stored preview already shows exactly this
+    (_preview_shows, checked under the job's lock: a rebuild still
+    running for an older save is waited for first).
     Returns (preview_ok, superseded).
 
     The job's lock is held until the encode really ends, even if the
@@ -6037,8 +6056,13 @@ async def _rebuild_in_pool(job_id: str, source: str | None, segments,
         if seq is not None and _EDIT_SEQ.get(job_id) != seq:
             lock.release()
             return False, True
+        if _preview_shows(await run_in_threadpool(store.get, job_id),
+                          segments, effects):
+            lock.release()
+            return True, False
+        args = (job_id, source, segments) + (() if effects is None else (effects,))
         fut = asyncio.get_running_loop().run_in_executor(
-            _REBUILD_POOL, _rebuild_preview, job_id, source, segments)
+            _REBUILD_POOL, _rebuild_preview, *args)
     except BaseException:
         lock.release()
         raise
@@ -6096,6 +6120,42 @@ def _effect(value, default: float, lo: float, hi: float) -> float:
     if v != v:  # NaN
         return default
     return max(lo, min(hi, v))
+
+
+def _preview_effects(effects: list[dict]) -> list[dict] | None:
+    """What the server preview bakes in of the clips' effects
+    (pipeline._ffmpeg_cuts_preview): volume and fades — with the speed,
+    which sets a fade's length in source time (the preview plays at 1x,
+    the player applies the speed itself). None when every clip plays as
+    cut."""
+    out: list[dict] = []
+    baked = False
+    for e in effects:
+        fades = e["fadeIn"] > 0 or e["fadeOut"] > 0
+        baked = baked or fades or e["volume"] != 1.0
+        out.append({"volume": e["volume"], "fadeIn": e["fadeIn"],
+                    "fadeOut": e["fadeOut"],
+                    "speed": e["speed"] if fades else 1.0})
+    return out if baked else None
+
+
+def _timeline_revs(payload: dict) -> tuple[float, float] | None:
+    """(base_rev, rev) of an /edit-segments save; None for a client that
+    sends neither (it overwrites, as before). 400 bad_rev when one is
+    missing or not a number."""
+    if "base_rev" not in payload and "rev" not in payload:
+        return None
+    revs = (payload.get("base_rev"), payload.get("rev"))
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+               and math.isfinite(v) for v in revs):
+        raise ApiRefusal(400, "bad_rev")
+    return float(revs[0]), float(revs[1])
+
+
+def _server_rev(cur: float) -> float:
+    """A rev for a save that brought none: newer than `cur` and than any
+    rev a client made before now (µs timestamps, docSave.ts uniqueRev)."""
+    return float(max(math.floor(cur) + 1, int(time.time() * 1e6)))
 
 
 # ── Editor preview rebuilds (§9 of WP3: only while /edit-segments still
@@ -6260,12 +6320,14 @@ def _cached_proxy(job: Job) -> str:
     return str(path)
 
 
-def _rebuild_preview(job_id: str, source: str | None, segments) -> None:
+def _rebuild_preview(job_id: str, source: str | None, segments,
+                     effects: list[dict] | None = None) -> None:
     """Render the cut preview from `source` (a local file: the proxy or
     the normalized video of a legacy job; None: the job's stored proxy,
     via the cache) in the job's workspace, store it as
     preview/v{n+1}.mp4 and point the job at it (with the segments it
-    shows). Raises on failure; the old preview stays in that case."""
+    shows and the effects it bakes in, _preview_effects). Raises on
+    failure; the old preview stays in that case."""
     from backend.pipeline import _ffmpeg_cuts_preview
     job = store.get(job_id)
     if job is None:
@@ -6277,7 +6339,10 @@ def _rebuild_preview(job_id: str, source: str | None, segments) -> None:
         with _proxy_in_use(job_id):
             if source is None:
                 source = _cached_proxy(job)
-            _ffmpeg_cuts_preview(source, segments, str(out))
+            if effects is None:
+                _ffmpeg_cuts_preview(source, segments, str(out))
+            else:
+                _ffmpeg_cuts_preview(source, segments, str(out), effects)
         version = (job.preview_version or 0) + 1
         key = f"{media.job_prefix(job_id)}preview/v{version}.mp4"
         where = media.store_of(job)
@@ -6299,6 +6364,7 @@ def _rebuild_preview(job_id: str, source: str | None, segments) -> None:
         sizes[key] = size
         # preview_version + 1 on the stored value, under the row lock.
         return {"preview_key": key, "preview_segments": shown,
+                "preview_effects": effects,
                 "preview_version": (cur.preview_version or 0) + 1,
                 "media_store": cur.media_store or where,
                 "media_bytes": sizes}
@@ -6322,16 +6388,23 @@ async def post_edit_segments(job_id: str, payload: dict,
 
     Payload:
         {"segments": [{"start", "end", "speed"?, "fadeIn"?, "fadeOut"?,
-                       "volume"?}, ...]}
+                       "volume"?}, ...],
+         "base_rev"?, "rev"?}
+    base_rev / rev: the edit doc's revision rule (PATCH /jobs/{id}/doc)
+    for the timeline — base_rev must be the stored edit_rev, rev newer
+    (409 stale_rev {rev}: another tab or device saved meanwhile; nothing
+    is stored). Without them the save overwrites, as before.
 
-    Response: the job dict plus
+    Response: the job dict (edit_rev: this save's rev) plus
         preview_ok  – the preview now shows exactly these segments
+                      (with their volume and fades; the player applies
+                      the speed)
         superseded  – a newer save arrived; its response is authoritative
     """
-    seq, source, cleaned = await run_in_threadpool(
+    seq, source, cleaned, baked = await run_in_threadpool(
         _save_edit_segments, job_id, payload, user)
     preview_ok, superseded = await _rebuild_in_pool(job_id, source, cleaned,
-                                                    seq=seq)
+                                                    seq=seq, effects=baked)
     job = await run_in_threadpool(store.get, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
@@ -6360,9 +6433,11 @@ def _check_timeline_length(segments, duration: float) -> None:
 
 
 def _save_edit_segments(job_id: str, payload: dict, user: User | None
-                        ) -> tuple[int, str, list[tuple[float, float]]]:
+                        ) -> tuple[int, str, list[tuple[float, float]],
+                                   list[dict] | None]:
     """The quick part of /edit-segments (threadpool): validate, store the
-    segments + effects. Returns (seq, preview source, segments)."""
+    segments + effects (with the revision rule). Returns (seq, preview
+    source, segments, the effects the preview bakes in)."""
     job = get_owned_job(job_id, user)
     if job.status != "awaiting_review":
         raise HTTPException(
@@ -6371,6 +6446,7 @@ def _save_edit_segments(job_id: str, payload: dict, user: User | None
     if not job.has_mezz():
         raise HTTPException(410, "normalized video no longer on disk")
 
+    revs = _timeline_revs(payload)
     raw = payload.get("segments") or []
     if not isinstance(raw, list) or not raw:
         raise HTTPException(400, "segments must be a non-empty list")
@@ -6406,13 +6482,20 @@ def _save_edit_segments(job_id: str, payload: dict, user: User | None
         raise HTTPException(400, "no valid segments after cleaning")
     _check_timeline_length(cleaned, dur)
 
-    def _save(cur: Job) -> dict:
+    stale: dict[str, float] = {}
+
+    def _save(cur: Job) -> dict | None:
         # On the stored job, under its row lock: settings merged into
         # what is there now, not into what we read above.
+        cur_rev = float(cur.edit_rev or 0)
+        if revs is not None and (revs[0] != cur_rev or revs[1] <= cur_rev):
+            stale["rev"] = cur_rev
+            return None
         new_settings = dict(cur.settings or {})
         new_settings["segment_effects"] = effects
         out = {"segments": [list(seg) for seg in cleaned],
-               "settings": new_settings}
+               "settings": new_settings,
+               "edit_rev": revs[1] if revs is not None else _server_rev(cur_rev)}
         if not cur.preview_segments:
             # Job from before preview_segments existed: its preview.mp4
             # was built from the segments we are about to replace.
@@ -6423,10 +6506,13 @@ def _save_edit_segments(job_id: str, payload: dict, user: User | None
     # Store under the guard so the request with the highest sequence
     # number is also the one whose segments end up in the store.
     with _EDIT_GUARD:
+        if store.modify(job_id, _save) is None and not stale:
+            raise HTTPException(404, "job not found")
+        if stale:
+            raise ApiRefusal(409, "stale_rev", rev=_plain(stale["rev"]))
         seq = _EDIT_SEQ.get(job_id, 0) + 1
         _EDIT_SEQ[job_id] = seq
-        store.modify(job_id, _save)
-    return seq, _job_preview_source(job), cleaned
+    return seq, _job_preview_source(job), cleaned, _preview_effects(effects)
 
 
 @app.post("/jobs/{job_id}/phrases")
@@ -6546,7 +6632,8 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
         cmd_start = cleo_end + 0.01
         cmd_end = max(end, cmd_start + 0.05)
         fake_words.append({"word": "cleo", "start": cleo_start, "end": cleo_end})
-        fake_words.append({"word": t, "start": cmd_start, "end": cmd_end})
+        # said as a sentence of its own (src/command_gate.py)
+        fake_words.append({"word": t + ".", "start": cmd_start, "end": cmd_end})
     cut_ranges_scene, _events_out = find_scene_cut_ranges(
         fake_words, clip_duration=job.duration or None,
     )
@@ -6590,7 +6677,9 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
             next_id += 1
         out = {"segments": new_segments,
                "cut_ranges": old_cut_ranges + new_cut_range_dicts,
-               "scene_events": scene_events}
+               "scene_events": scene_events,
+               # a new timeline: an editor tab holding the old one is stale
+               "edit_rev": _server_rev(float(cur.edit_rev or 0))}
         # Segment count may have changed, so per-segment effects no
         # longer line up with it — reset them rather than apply them to
         # wrong clips.

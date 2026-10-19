@@ -17,6 +17,8 @@ import {
   restoreKind,
   restoreRange,
   restoreWord,
+  restoreWords,
+  LONG_WORD_S,
   seamIsCut,
   textMarks,
   type Piece,
@@ -251,25 +253,35 @@ describe("cut and restore", () => {
     const removed = [{ start: 1.195, end: 1.615 }];
     const cut = cutBy(removed)!;
     expect(words.map(cut)).toEqual([false, true, false]);
-    // no gap at all (words touch): the edge stays at the word's own time
+    // no gap at all (words touch, 94 % of Whisper's pairs): the quietest
+    // moment around the join, at most 40 % into either word — Whisper's
+    // join drifts, its own time left tails audible (wordcuts-4)
     const touching: DocWord[] = [
       { id: "a", text: "a", start: 1.0, end: 1.2 },
       { id: "b", text: "b", start: 1.2, end: 1.6 },
       { id: "c", text: "c", start: 1.6, end: 2.0 },
     ];
-    expect(cutEdges(touching, 1, 1, peaks)).toEqual([1.2, 1.6]);
+    const [ta, tb] = cutEdges(touching, 1, 1, peaks);
+    expect(ta).toBeCloseTo(1.195, 9);
+    expect(tb).toBeCloseTo(1.655, 9); // 55 ms into "c", far from its middle
+    expect(touching.map(cutBy([{ start: ta, end: tb }])!)).toEqual([false, true, false]);
+    // without peaks: the join itself
+    expect(cutEdges(touching, 1, 1)).toEqual([1.2, 1.6]);
     // the first word: no neighbour before it, so 120 ms back (all equal: the nearest frame)
     expect(cutEdges(words, 0, 0, peaks)[0]).toBeCloseTo(0.995, 9); // (an edge only moves outward)
   });
 
-  it("random words and peaks: an edge never enters a neighbouring word or the cut words", () => {
+  it("random words and peaks: next to a gap an edge stays in it; between touching words it never reaches a middle", () => {
     let seed = 7;
     const r = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
-    for (let n = 0; n < 200; n++) {
+    const mid = (w: DocWord) => (w.start + w.end) / 2;
+    let touchingSeen = 0;
+    for (let n = 0; n < 400; n++) {
       const words: DocWord[] = [];
       let t = 0.2;
       for (let i = 0; i < 8; i++) {
-        const s0 = t + r() * 0.08;
+        // half the pairs touch (Whisper's contiguous times), some overlap
+        const s0 = r() < 0.5 ? t - (r() < 0.2 ? r() * 0.05 : 0) : t + r() * 0.08;
         const e0 = s0 + 0.08 + r() * 0.4;
         words.push({ id: `w${i}`, text: "w", start: +s0.toFixed(3), end: +e0.toFixed(3) });
         t = e0;
@@ -278,12 +290,149 @@ describe("cut and restore", () => {
       const first = 1 + Math.floor(r() * 5);
       const last = first + Math.floor(r() * (6 - first));
       const [a, b] = cutEdges(words, first, last, peaks);
-      expect(a).toBeGreaterThanOrEqual(words[first - 1].end - 1e-9);
-      expect(a).toBeLessThanOrEqual(words[first].start + 1e-9);
-      expect(b).toBeGreaterThanOrEqual(words[last].end - 1e-9);
-      expect(b).toBeLessThanOrEqual(words[last + 1].start + 1e-9);
-      expect(Math.abs(a - words[first].start)).toBeLessThanOrEqual(0.12 + 1e-9);
+      const prev = words[first - 1];
+      const next = words[last + 1];
+      if (words[first].start - prev.end > 0.015) {
+        expect(a).toBeGreaterThanOrEqual(prev.end - 1e-9);
+        expect(a).toBeLessThanOrEqual(words[first].start + 1e-9);
+      } else touchingSeen++;
+      if (next.start - words[last].end > 0.015) {
+        expect(b).toBeGreaterThanOrEqual(words[last].end - 1e-9);
+        expect(b).toBeLessThanOrEqual(next.start + 1e-9);
+      }
+      // what the text strikes: the cut words, never a neighbour
+      expect(a).toBeGreaterThan(mid(prev));
+      expect(a).toBeLessThan(mid(words[first]));
+      expect(b).toBeGreaterThan(mid(words[last]));
+      expect(b).toBeLessThan(mid(next));
+      expect(Math.abs(a - words[first].start)).toBeLessThanOrEqual(0.15 + 1e-9);
     }
+    expect(touchingSeen).toBeGreaterThan(50);
+  });
+});
+
+describe("the owner's flow round: trims, touching words, stretched words", () => {
+  const D = 20;
+  const mid = (w: DocWord) => (w.start + w.end) / 2;
+  const playsAt = (segs: EditorSeg[], t: number) => segs.some((x) => !x.disabled && x.start <= t && x.end >= t);
+
+  it("a later text cut never closes the user's own small trim next to it (state-4)", () => {
+    // clip a trimmed from 10.00 to 9.92 to drop a breath (a 0.08 s gap)
+    const segs = [seg("a", 0, 9.92), seg("b", 10, 20)];
+    const words: DocWord[] = [
+      { id: "w1", text: "eins", start: 9.4, end: 9.9 },
+      { id: "w2", text: "zwei", start: 10.05, end: 10.3 },
+      { id: "w3", text: "drei", start: 10.3, end: 10.8 },
+      { id: "w4", text: "vier", start: 10.8, end: 11.4 },
+    ];
+    const out = cutWords(segs, words, 2, 2, D);
+    expect(spans(out)).toEqual([
+      [0, 9.92],
+      [10, 10.3],
+      [10.8, 20],
+    ]);
+    // a short removal the op itself leaves still closes (C11)
+    expect(spans(restoreRange([seg("a", 0, 5), seg("b", 6, 12)], 5.05, 6, 12))).toEqual([[0, 12]]);
+  });
+
+  it("restoring a struck stretched word brings back its sound, not the pause it spans (state-7)", () => {
+    // Whisper stretched "so" (9.6–16) over a pause that was cut (10–20 removed)
+    const segs = [seg("a", 0, 10), seg("b", 20, 30)];
+    const words: DocWord[] = [
+      { id: "w1", text: "gut", start: 9.0, end: 9.6 },
+      { id: "w2", text: "so", start: 9.6, end: 16.0 },
+      { id: "w3", text: "weiter", start: 20.1, end: 20.6 },
+    ];
+    // its sound is at its head, which plays: it is not struck at all
+    const removed = removedRanges(segs, 30);
+    expect(cutBy(removed)!(words[1])).toBe(false);
+    expect(textMarks(words, labelRemoved(removed, []), 30).removed[1]).toBe(0);
+    // with the head cut too, it is struck; restoring it brings back at most LONG_WORD_S
+    const cut = [seg("a", 0, 9.6), seg("b", 20, 30)];
+    expect(textMarks(words, [{ start: 9.6, end: 20, kind: "user" }], 30).removed[1]).toBe(1);
+    const back = restoreWords(cut, words, 1, 1, 30);
+    expect(spans(back)).toEqual([
+      [0, +(9.6 + LONG_WORD_S).toFixed(3)],
+      [20, 30],
+    ]);
+    // a Cleo take or a pause after it stays removed
+    expect(playsAt(back, 12)).toBe(false);
+    // no clip touches it: the louder end (peaks) is its sound
+    const peaks = new Array(3100).fill(5);
+    for (let i = 1480; i < 1600; i++) peaks[i] = 90; // 14.8–16: the voice
+    const alone = [seg("a", 0, 9), seg("b", 20, 30)];
+    const tail = restoreWords(alone, words, 1, 1, 30, peaks);
+    expect(playsAt(tail, 15.5)).toBe(true);
+    expect(playsAt(tail, 11)).toBe(false);
+  });
+
+  it("cut, then restore, of a word between touching words: the same edges, no fragment of a struck neighbour (wordcuts-4/6)", () => {
+    const words: DocWord[] = [
+      { id: "w1", text: "I", start: 6.3, end: 6.56 },
+      { id: "w2", text: "show", start: 6.56, end: 6.96 },
+      { id: "w3", text: "you", start: 6.96, end: 7.3 },
+    ];
+    // the true sound of "show" is 6.671–7.080: quiet at 6.66, loud before / after
+    const peaks = new Array(1000).fill(70);
+    peaks[666] = 3;
+    peaks[707] = 4;
+    const clips = [seg("a", 0, 20)];
+    const cut = cutWords(clips, words, 1, 1, D, peaks);
+    expect(spans(cut)).toEqual([
+      [0, 6.665],
+      [7.075, 20],
+    ]);
+    expect(restoreWords(cut, words, 1, 1, D, peaks)).toEqual(clips);
+    // all three struck, then the middle one back: its neighbours stay struck
+    const all = cutWords(clips, words, 0, 2, D, peaks);
+    const one = restoreWords(all, words, 1, 1, D, peaks);
+    expect(playsAt(one, mid(words[1]))).toBe(true);
+    expect(playsAt(one, mid(words[0]))).toBe(false);
+    expect(playsAt(one, mid(words[2]))).toBe(false);
+    // a word overlapping the next one: cutting it never strikes that one (state-7)
+    const over: DocWord[] = [
+      { id: "x1", text: "a", start: 1.0, end: 2.0 },
+      { id: "x2", text: "b", start: 2.0, end: 3.5 },
+      { id: "x3", text: "c", start: 3.0, end: 3.6 },
+    ];
+    const [, b] = cutEdges(over, 1, 1);
+    expect(b).toBeLessThan(mid(over[2]));
+    expect(b).toBeGreaterThan(mid(over[1]));
+  });
+
+  it("a single short word between touching words is cut, growing into its neighbours, not silently skipped (wordcuts-8)", () => {
+    const words: DocWord[] = [
+      { id: "w1", text: "und", start: 5.0, end: 5.3 },
+      { id: "w2", text: "ja", start: 5.3, end: 5.38 },
+      { id: "w3", text: "dann", start: 5.38, end: 5.8 },
+    ];
+    const out = cutWords([seg("a", 0, 10)], words, 1, 1, 10);
+    expect(out).not.toEqual([seg("a", 0, 10)]);
+    const gap = removedRanges(out, 10, 1e-6);
+    expect(gap).toHaveLength(1);
+    expect(gap[0].end - gap[0].start).toBeGreaterThanOrEqual(MIN_REMOVAL_S);
+    // its neighbours still play (their middles stay)
+    expect(playsAt(out, mid(words[0]))).toBe(true);
+    expect(playsAt(out, mid(words[2]))).toBe(true);
+    // no room at all (neighbours as short as it): nothing changes, the caller says so
+    const tiny: DocWord[] = [
+      { id: "t1", text: "a", start: 5.0, end: 5.04 },
+      { id: "t2", text: "b", start: 5.04, end: 5.08 },
+      { id: "t3", text: "c", start: 5.08, end: 5.12 },
+    ];
+    const clips = [seg("a", 0, 10)];
+    expect(cutWords(clips, tiny, 1, 1, 10)).toBe(clips);
+  });
+
+  it("after a reorder, restored footage plays after the clip before it in the source (state-10)", () => {
+    // C moved to the front: C, A, B; then a pause 12–18 inside the removed 10–20 comes back
+    const order = [seg("C", 30, 40), seg("A", 0, 10), seg("B", 20, 25)];
+    const out = restoreRange(order, 12, 18, 40);
+    expect(out.map((x) => x.id)).toEqual(["C", "A", out[2].id, "B"]);
+    expect(spans(out)[2]).toEqual([12, 18]);
+    // before every clip in the source: before its source successor
+    const first = restoreRange(order, 0.3 - 0.3, 0, 40);
+    expect(first).toBe(order);
   });
 });
 

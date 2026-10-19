@@ -297,12 +297,13 @@ export function captionSource(
   const flush = () => {
     if (!cur.length) return;
     const a = cur[0];
-    const b = cur[cur.length - 1];
+    // the latest end, not the last unit's: Whisper words can overlap, and
+    // a sentence must hold every word it has (state/reconcile.ts)
     phrases.push({
       start: a.start,
-      end: b.end,
+      end: Math.max(...cur.map((u) => u.end)),
       original_start: a.original_start,
-      original_end: b.original_end,
+      original_end: Math.max(...cur.map((u) => u.original_end)),
       text: cur.map((u) => u.text).join(" "),
       confidence: cur.reduce((x, u) => x + (u.confidence ?? 1), 0) / cur.length,
     });

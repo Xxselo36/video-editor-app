@@ -85,6 +85,7 @@ export function ReviewScreen({
     applying,
     applyError,
     apply,
+    previewStale,
     playingSegId,
     seekToPhrase,
     seekOriginal,
@@ -320,7 +321,7 @@ export function ReviewScreen({
         )}
         <PlaybackDebug videoRef={videoRef} mode={mode} />
         {/* Proxy mode has no preview to update: the edit already plays. */}
-        {editSaving && mode !== "proxy" && (
+        {previewStale && (
           <div
             data-testid="preview-updating"
             className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold backdrop-blur-md"

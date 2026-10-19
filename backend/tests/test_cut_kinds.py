@@ -49,6 +49,18 @@ def test_voice_command_beats_filler_and_needs_a_real_share():
     assert K.kind_of(0.0, 0.4, K.sources_by_kind([("filler", 0.25, 0.4)])) == "filler"
 
 
+def test_a_command_inside_a_pause_is_not_a_pause():
+    # One analysis cut 30.0-33.0: a pause with a short "Cleo keep"
+    # (Whisper 31.2-31.65) inside. As a "silence" cut, "Restore pauses"
+    # would bring the spoken command back (commands-9).
+    log = [("voice_cmd", 31.2, 31.65)]
+    assert K.kind_of(30.0, 33.0, K.sources_by_kind(log)) == "voice_cmd"
+    out = K.label([{"id": 0, "start": 30.0, "end": 33.0}], log=log, words=[])
+    assert out[0]["kind"] == "voice_cmd"
+    # a sliver of a command range's edge in a long pause still is a pause
+    assert K.kind_of(30.0, 33.0, K.sources_by_kind([("voice_cmd", 32.9, 34.0)])) == "silence"
+
+
 def test_words_are_the_fallback():
     words = [{"id": "w1", "text": "So", "start": 0.3, "end": 0.5},
              {"id": "w2", "text": "um", "start": 0.6, "end": 0.9, "filler": True, "hidden": True}]
