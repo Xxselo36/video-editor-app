@@ -94,6 +94,7 @@ export const koEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "전부 자를 수는 없어요 – 영상에 무언가는 남아야 해요",
   "editor.cut.alreadyCut": "이미 영상에서 잘렸어요",
   "editor.conflict.reloaded": "다른 탭이나 다른 기기에서 변경됨 – 최신 버전이에요",
+  "editor.conflict.restoreLast": "마지막 변경 복원",
   "editor.unsaved.restored": "마지막 변경이 서버에 닿지 않았어요 – 다시 가져왔어요",
   "editor.unsaved.found": "지난번 방문에서 저장되지 않은 타임라인 변경",
   "editor.unsaved.restore": "복원",

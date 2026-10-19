@@ -51,7 +51,7 @@ import { trackSave } from "@/lib/pendingSaves";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import type { CutRange, JobStatus, SavedSeg } from "@/features/jobs/types";
 import { JOIN_S, landOf, previewMatches, previewSpeedAt, previewTimeOf, skipTarget, stalePlan, swapTime } from "./previewSync";
-import { TimelineSaver, type TimelineAnswer, type TimelineSaveState } from "./timelineSave";
+import { TimelineSaver, timelinePayload, type TimelineAnswer, type TimelineSaveState } from "./timelineSave";
 import { decideUnsaved, readUnsaved, writeUnsaved, type UnsavedDecision } from "./unsaved";
 
 export type PlaybackMode = "probing" | "proxy" | "preview";
@@ -73,14 +73,20 @@ export type EditSessionInput = {
   seekRampMs?: number;
   /** GET /jobs/{id} edit_rev: the timeline's revision on the server (F3). */
   editRev?: number;
-  /** The video's frame rate (a skip in a stale preview lands a frame in, F11). */
+  /** The video's frame rate (a skip in a stale preview lands a frame in,
+   *  F11; the frame grid proxy playback joins clips on, wordcuts10). */
   fps?: number | null;
+  /** v1: the playing clip also as React state (`playingSegId`, a render
+   *  at every clip change). v2 reads `playingSeg()` instead: a render at
+   *  each join delayed the next join's frame callbacks (wordcuts10). */
+  playingSegState?: boolean;
   /**
    * Another tab or device saved the timeline (409 stale_rev): the server's
-   * timeline is on screen again (the local change dropped); the editor
-   * reloads the doc too and says so.
+   * timeline is on screen again; `mine` is the change of this device the
+   * server refused (null: none), for the editor to offer back (round 3:
+   * never lost). The editor brings the doc in line and says so.
    */
-  onConflict?: () => void;
+  onConflict?: (mine: EditorSeg[] | null) => void;
 };
 
 /**
@@ -157,6 +163,7 @@ export function useEditSession({
   editRev = 0,
   onConflict,
   fps,
+  playingSegState = true,
 }: EditSessionInput) {
   const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -385,7 +392,7 @@ export function useEditSession({
   const [saveState, setSaveState] = useState<TimelineSaveState>("saved");
   const saverRef = useRef<TimelineSaver | null>(null);
   const answerRef = useRef<(d: TimelineAnswer) => void>(() => {});
-  const conflictRef = useRef<() => void>(() => {});
+  const conflictRef = useRef<(refused: EditorSeg[] | null) => void>(() => {});
   // What this device left unsaved on its last visit (save-11), decided
   // against the timeline the server has now; offered by the editor.
   const [unsaved] = useState<UnsavedDecision>(() => {
@@ -401,7 +408,7 @@ export function useEditSession({
       known: unsaved.kind === "none" ? [] : unsaved.known,
       onState: setSaveState,
       onAnswer: (d) => answerRef.current(d),
-      onConflict: () => conflictRef.current(),
+      onConflict: (_rev, refused) => conflictRef.current(refused),
       track: (p) => trackSave(jobId, p),
       backup: (b) => writeUnsaved(jobId, b),
     });
@@ -451,7 +458,9 @@ export function useEditSession({
   };
   // 409 stale_rev: another tab or device saved. Nothing of ours went over
   // it; the server's timeline comes on screen (the editor says so).
-  const onTimelineConflict = () => {
+  const onTimelineConflict = (refused: EditorSeg[] | null) => {
+    // what this device had on screen: the change the server refused
+    const mine = refused ?? latestRef.current;
     void (async () => {
       try {
         const r = await apiFetch(`/jobs/${jobId}`, { cache: "no-store" });
@@ -471,7 +480,8 @@ export function useEditSession({
           latestRef.current = segs;
           setEditSegs(segs);
         }
-        onConflict?.();
+        const theirs = timelinePayload(segs);
+        onConflict?.(mine && !sameTimeline(timelinePayload(mine), theirs, duration) ? mine : null);
       } catch {
         /* offline: the autosave stays stopped; the conflict state shows */
       }
@@ -723,24 +733,36 @@ export function useEditSession({
   const playerRef = useRef<EditPlayer | null>(null);
   const fadeRef = useRef<HTMLDivElement>(null);
   const [playingSegId, setPlayingSegId] = useState<string | null>(null);
+  const playingSegRef = useRef<string | null>(null);
+  /** The clip the proxy player is in now (no render when it changes). */
+  const playingSeg = useCallback(() => playingSegRef.current, []);
   useEffect(() => {
     const v = videoRef.current;
     // Only once the element has its src (the media token may still be
     // loading): loading a src resets the element's rate and position.
     if (mode !== "proxy" || !v || !proxySrc) return;
-    const player = new EditPlayer(v, { onSegment: setPlayingSegId, fadeEl: fadeRef.current, seekRampMs });
+    const onSegment = (id: string | null) => {
+      playingSegRef.current = id;
+      if (playingSegState) setPlayingSegId(id);
+    };
+    const player = new EditPlayer(v, { onSegment, fadeEl: fadeRef.current, seekRampMs, fps });
     player.setPlan(buildPlan(editSegs, duration));
     playerRef.current = player;
     return () => {
       player.destroy();
       playerRef.current = null;
-      setPlayingSegId(null);
+      playingSegRef.current = null;
+      if (playingSegState) setPlayingSegId(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, proxySrc]);
   useEffect(() => {
     playerRef.current?.setPlan(buildPlan(editSegs, duration));
   }, [editSegs, duration]);
+  // the frame grid joins snap to (wordcuts10-flash-frames)
+  useEffect(() => {
+    playerRef.current?.setFps(fps);
+  }, [fps]);
 
   // Source time → time in the playing preview (null if cut out).
   const previewTimeFor = (time: number): number | null =>
@@ -826,6 +848,8 @@ export function useEditSession({
   // nearest one it has (it doesn't have footage a trim reveals). Paused;
   // one seek at a time, the newest edge wins.
   const scrubRef = useRef<{ fromSource: number; want: number | null } | null>(null);
+  /** A trim edge is shown in the video (scrubTo): not playback. */
+  const isScrubbing = useCallback(() => scrubRef.current !== null, []);
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -936,9 +960,11 @@ export function useEditSession({
     apply,
     endApply,
     playingSegId,
+    playingSeg,
     seekToPhrase,
     seekOriginal,
     scrubTo,
+    isScrubbing,
     togglePlay,
     toggleMute,
     /** What this device left unsaved last time (save-11), for the editor to offer (once). */

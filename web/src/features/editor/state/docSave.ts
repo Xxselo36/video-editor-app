@@ -174,6 +174,50 @@ export function renameWords(words: readonly DocWord[], map: ReadonlyMap<string, 
   return words.map((w) => (map.has(w.id) ? { ...w, id: map.get(w.id)! } : w));
 }
 
+/**
+ * This device's unsaved changes (from `base`, what the server was known to
+ * have, to `mine`) on top of a newer doc another tab or device saved
+ * (`theirs`), round 3: word by word, what this device changed or added
+ * wins and what it deleted goes; every other word is theirs. Style and
+ * format are this device's where it changed them, else theirs. A word
+ * this device added under an id the other device used for a word of its
+ * own gets a new id (both stay). Nothing typed here is lost; nothing of
+ * theirs this device didn't touch is replaced. `pool`: ids in use (the
+ * new ones join it).
+ */
+export function rebaseDoc(
+  base: Pick<EditDoc, "words" | "style" | "format">,
+  mine: EditDoc,
+  theirs: EditDoc,
+  pool?: Set<string>,
+): EditDoc {
+  const { upsert, delete: del } = diffWords(base.words, mine.words);
+  const inBase = new Set(base.words.map((w) => w.id));
+  const theirsById = new Map(theirs.words.map((w) => [w.id, w]));
+  const taken = new Set<string>([...(pool ?? []), ...inBase, ...theirsById.keys(), ...mine.words.map((w) => w.id)]);
+  const rename = new Map<string, string>();
+  for (const w of upsert) {
+    const t = theirsById.get(w.id);
+    if (inBase.has(w.id) || !t || JSON.stringify(t) === JSON.stringify(w)) continue;
+    const dot = w.id.lastIndexOf(".");
+    const parent = dot >= 0 ? w.id.slice(0, dot) : w.id;
+    let id = "";
+    for (let k = 1; !id || taken.has(id); k++) id = parent.length + 6 <= MAX_ID ? `${parent}.${k}` : `n${k.toString(36)}`;
+    taken.add(id);
+    pool?.add(id);
+    rename.set(w.id, id);
+  }
+  const ups = upsert.map((w) => (rename.has(w.id) ? { ...w, id: rename.get(w.id)! } : w));
+  const changed = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
+  const style = changed(mine.style, base.style) ? renameCaptionKeys(mine.style, rename) : theirs.style;
+  return {
+    ...theirs,
+    words: mergeWords(theirs.words, ups, del),
+    style,
+    format: changed(mine.format, base.format) ? mine.format : theirs.format,
+  };
+}
+
 /** The server's doc after a body (what it stores; see mergeWords). */
 function after(base: Saved, body: PatchBody): Saved {
   return {
@@ -217,6 +261,14 @@ export class DocSaver {
   }
   get rev(): number {
     return this.saved.rev;
+  }
+  /** What the server is known to have: the base of this device's unsaved changes. */
+  get known(): Readonly<Saved> {
+    return this.saved;
+  }
+  /** The doc as this device has it (unsaved changes included). */
+  get local(): EditDoc {
+    return this.latest;
   }
   /** Something not yet acknowledged by the server. */
   get dirty(): boolean {

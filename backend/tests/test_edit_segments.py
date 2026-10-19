@@ -386,12 +386,18 @@ def test_preview_video_serves_exactly_the_version_asked_for(client, tmp_path):
     if r.status_code == 200:
         assert "immutable" in r.headers["cache-control"]
     # a version not stored (yet / any more): 409, with the current one
-    for v in (3, 0):
-        r = get(v=v)
-        assert r.status_code == 409, v
-        assert r.json()["code"] == "preview_not_ready" and r.json()["preview_version"] == 2
+    r = get(v=3)
+    assert r.status_code == 409
+    assert r.json()["code"] == "preview_not_ready" and r.json()["preview_version"] == 2
+    # v=0, what GET /jobs/{id} names before the first preview exists (an
+    # analysis without one: proxy playback): the first one, v1, for good
+    # (test_first_preview.py)
+    assert _served(get(v=0)) == (b"version-1" if media.backend() != "r2"
+                                 else k1[len("jobs/"):])
     media.delete(k1, store=media.backend())
     assert get(v=1).status_code == 409
+    r = get(v=0)
+    assert r.status_code == 409 and r.json()["preview_version"] == 2
     # an old client's cache-buster that isn't a number: the current one
     assert _served(get(v="x")) == (b"version-2" if media.backend() != "r2" else k2[len("jobs/"):])
 

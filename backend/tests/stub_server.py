@@ -62,6 +62,10 @@ Test API (only this script registers it; never part of the backend):
               format_warning (e.g. "smartcam_failed", UX6),
               filmstrip (false: a job from before UX7b — none until GET
                        /jobs/{id}/filmstrip makes it from the stored proxy),
+              first_preview (false, review seeds: no preview/v1, as
+                       analysed with CLEO_PROXY_VIDEO=1 — preview_version
+                       0 until GET /preview-video or POST /jobs/{id}/preview
+                       builds it),
               proxy: "off"   has_proxy false, proxy-video 404 (today's
                              production default: CLEO_PROXY_VIDEO unset)
                      "on"    has_proxy true, proxy-video plays
@@ -422,12 +426,15 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                         ai_cuts: list | None = None,
                         extra_words: list | None = None,
                         filmstrip: bool = True,
-                        whisper_times: bool = False) -> dict[str, Any]:
+                        whisper_times: bool = False,
+                        first_preview: bool = True) -> dict[str, Any]:
         """What pipeline.analyze_only returns, for a stub clip, with its
         files (normalized, proxy, first preview) in `out_dir`. Every cut
         range gets its kind (backend/cut_kinds.py, UX10) from the
         analysis log and the doc's filler words, and the cut words theirs;
-        `ai_cuts` / `extra_words`: see the seed options."""
+        `ai_cuts` / `extra_words`: see the seed options; `first_preview`
+        False: no first preview, as analysed with CLEO_PROXY_VIDEO=1
+        (pipeline.first_preview_wanted)."""
         files = clip_files(clip, orientation)
         data = dict(clip_data(clip))
         log: list = []
@@ -453,7 +460,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         media._link_or_copy(files["src"], norm)
         media._link_or_copy(files["proxy"], out_dir / pipeline.PROXY_NAME)
         preview = out_dir / "preview.mp4"
-        chromium_cuts_preview(str(files["proxy"]), data["segments"], str(preview))
+        if first_preview:
+            chromium_cuts_preview(str(files["proxy"]), data["segments"], str(preview))
         poster = out_dir / pipeline.POSTER_NAME
         segs = data["segments"]
         poster_ok = pipeline.make_poster(str(files["proxy"]), float(segs[0][0]) if segs else 0.0,
@@ -465,7 +473,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         fs_meta = filmstrip_of(files["proxy"], out_dir) if filmstrip else None
         return {"filmstrip_meta": fs_meta,
                 "filmstrip_path": str(out_dir / pipeline.FILMSTRIP_NAME) if fs_meta else None,
-                "normalized_path": str(norm), "preview_path": str(preview),
+                "normalized_path": str(norm),
+                "preview_path": str(preview) if first_preview else None,
                 "poster_path": str(poster) if poster_ok else None,
                 "segments": [tuple(s) for s in data["segments"]], "subtitles": data["subtitles"],
                 "duration": data["duration"],
@@ -474,11 +483,12 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                 "audio_levels": {}, "scene_events": [],
                 "doc": doc, "peaks_path": peaks}
 
-    def review_fields(res: dict[str, Any]) -> dict[str, Any]:
+    def review_fields(res: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
         """The job fields _run_analyze_inner commits for a finished analysis."""
         return dict(status="awaiting_review", message="Review subtitles", progress=100.0,
-                    segments=res["segments"], preview_segments=[list(s) for s in res["segments"]],
-                    preview_version=1, subtitles=res["subtitles"], duration=res["duration"],
+                    segments=res["segments"],
+                    **pipeline.first_preview_fields(res["segments"], stored),
+                    subtitles=res["subtitles"], duration=res["duration"],
                     cut_ranges=res["cut_ranges"], language=res["language"],
                     audio_warnings=res["audio_warnings"], audio_levels=res["audio_levels"],
                     scene_events=res["scene_events"], doc=res.get("doc"), doc_rev=0,
@@ -623,13 +633,14 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                     with_doc: bool = True, with_poster: bool = True,
                     ai_cuts: list | None = None,
                     extra_words: list | None = None, filmstrip: bool = True,
-                    whisper_times: bool = False) -> None:
+                    whisper_times: bool = False, first_preview: bool = True) -> None:
         where = media.backend()
         ws = M._workspace(job.id, "seed")
         try:
             res = analysis_result(clip, orientation, ws, warnings, settings=job.settings,
                                   ai_cuts=ai_cuts, extra_words=extra_words,
-                                  filmstrip=filmstrip, whisper_times=whisper_times)
+                                  filmstrip=filmstrip, whisper_times=whisper_times,
+                                  first_preview=first_preview)
             if not with_doc:
                 res["doc"] = None
             if not with_poster:
@@ -637,7 +648,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             stored = M._store_analysis(job.id, res, lambda *_a: None, where)
         finally:
             shutil.rmtree(M._workspace(job.id), ignore_errors=True)
-        store.update(job.id, **review_fields(res), **stored,
+        store.update(job.id, **review_fields(res, stored), **stored,
                      analysis_segments_hash=exports.segments_hash(res["segments"]))
 
     def put_render(job_id: str, prefix: str, clip: str, orientation: str
@@ -722,11 +733,12 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         orientation = opts.get("orientation") or "portrait"
         tiktok = ("tiktok", "TikTok / Reels")
         fs = opts.get("filmstrip", True) is not False
+        fp = opts.get("first_preview", True) is not False
         if name == "review":
             clip = clip or "grid"
             job = create(opts, {"caption_preset": "clipper"}, "test.mp4", (None, None))
             seed_review(job, clip, orientation, with_doc=opts.get("doc", True) is not False,
-                        filmstrip=fs)
+                        filmstrip=fs, first_preview=fp)
             proxy = "off"
         elif name in ("review_speech", "render_failed"):
             clip = clip or "speech"
@@ -735,7 +747,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
             seed_review(job, clip, orientation, with_doc=opts.get("doc", True) is not False,
                         with_poster=opts.get("poster", True) is not False,
                         ai_cuts=opts.get("ai_cuts"), extra_words=opts.get("extra_words"),
-                        filmstrip=fs, whisper_times=opts.get("whisper_times") is True)
+                        filmstrip=fs, whisper_times=opts.get("whisper_times") is True,
+                        first_preview=fp)
             if name == "render_failed":
                 store.update(job.id, message="render_failed",
                              error="Render worker unavailable (modal_unavailable)",
@@ -744,7 +757,7 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         elif name == "review_long":
             clip = clip or "speech"
             job = create(opts, TIKTOK, "podcast_ep30_full.mp4", tiktok)
-            seed_review(job, clip, orientation, filmstrip=fs)
+            seed_review(job, clip, orientation, filmstrip=fs, first_preview=fp)
             cur = store.get(job.id)
             words = long_words(int(opts.get("words") or 10_000), float(cur.duration or 30.0))
             store.update(job.id, doc={**cur.doc, "words": words}, doc_rev=0)
@@ -752,7 +765,8 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
         elif name == "review_land":
             clip, orientation = clip or "speech", "landscape"
             job = create(opts, PODCAST, "podcast_ep12_clip.mp4", ("podcast", "Podcast"))
-            seed_review(job, clip, orientation, ["audio_quiet"], filmstrip=fs)
+            seed_review(job, clip, orientation, ["audio_quiet"], filmstrip=fs,
+                        first_preview=fp)
             proxy = "on"
         elif name in ("analyzing", "queued", "rendering", "error", "err_no_speech",
                       "err_unreadable"):

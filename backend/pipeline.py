@@ -431,6 +431,37 @@ def preview_source(normalized_path: str) -> str:
     return str(proxy) if proxy.is_file() else normalized_path
 
 
+def proxy_playback() -> bool:
+    """CLEO_PROXY_VIDEO=1: the editor plays the proxy and follows the
+    edit list itself (GET /jobs/{id}/proxy-video, Job.has_proxy). The
+    Modal analysis gets the API's value (modal_analyze.FORWARD_ENV)."""
+    return os.environ.get("CLEO_PROXY_VIDEO", "").strip() == "1"
+
+
+def first_preview_wanted(proxy_path: str) -> bool:
+    """Does the analysis encode the first cut preview (preview/v1)? Not
+    with proxy playback once the analysis made the proxy: the editor
+    plays the proxy, and nothing else reads the preview (the poster and
+    the filmstrip come from the proxy, renders, bonus clips and the
+    speculative render from the mezz). A player that falls back to the
+    preview gets it built on demand (GET /jobs/{id}/preview-video, POST
+    /jobs/{id}/preview). Without a proxy (its encode failed) the preview
+    is all the editor can play: made as before."""
+    return not (proxy_playback() and Path(proxy_path).is_file())
+
+
+def first_preview_fields(segments: Any, stored: dict[str, Any]
+                         ) -> dict[str, Any]:
+    """The job fields of the analysis' first preview: version 1, showing
+    the analysis' segments, when one was stored (`stored` has its
+    preview_key); else none (version 0, no segments) — the first build
+    on demand is then version 1."""
+    if stored.get("preview_key"):
+        return {"preview_segments": [list(s) for s in segments],
+                "preview_version": 1}
+    return {"preview_segments": [], "preview_version": 0}
+
+
 def _default_streams(input_path: str) -> tuple[int | None, int | None]:
     """(video, audio) stream indexes ffmpeg's automatic stream selection
     picks: the video with the most pixels (cover art excluded), the audio
@@ -1734,7 +1765,8 @@ def analyze_only(
 
     Result keys:
       - normalized_path: where the rotation-fixed MP4 lives
-      - preview_path: the cut preview (built from preview_source())
+      - preview_path: the cut preview (built from preview_source()), or
+        None when the editor plays the proxy (first_preview_wanted)
       - segments: list of (start, end) speech segments after cuts
       - subtitles: list of {start, end, text, original_start, original_end}
       - language: ISO code from Whisper
@@ -2047,9 +2079,17 @@ def analyze_only(
     filmstrip_thread.start()
 
     _stage("analyze.cuts", 95)
-    preview_path = str(Path(output_dir) / "preview.mp4")
-    _ffmpeg_cuts_preview(preview_source(normalized_path), segments,
-                         preview_path)
+    preview_path: str | None = str(Path(output_dir) / "preview.mp4")
+    if first_preview_wanted(proxy_path):
+        _ffmpeg_cuts_preview(preview_source(normalized_path), segments,
+                             preview_path)
+    else:
+        # The editor plays the proxy: no preview encode (a stale one of
+        # a re-run in this folder is never stored either).
+        Path(preview_path).unlink(missing_ok=True)
+        preview_path = None
+        print("[preview] first preview skipped: the editor plays the "
+              "proxy (CLEO_PROXY_VIDEO=1); built on demand", flush=True)
     poster_path = str(Path(output_dir) / POSTER_NAME)
     poster_ok = make_poster(preview_source(normalized_path),
                             float(segments[0][0]) if segments else 0.0,
@@ -2124,9 +2164,10 @@ def store_analysis_outputs(
     progress: Callable[[str, float], None] | None = None,
 ) -> dict[str, Any]:
     """Store everything an analysis made under the job's keys — the mezz,
-    the editor proxy and the first preview (in that order, a "Saving…"
-    tick before each), then store_analysis_extras — with put(path, key,
-    content_type) -> size (the caller's store, fence and error handling).
+    the editor proxy and the first preview when it made one (in that
+    order, a "Saving…" tick before each), then store_analysis_extras —
+    with put(path, key, content_type) -> size (the caller's store, fence
+    and error handling).
     Returns the job fields: the keys, `media_bytes` {key: size} and the
     extras' fields. One function for both places an analysis is stored:
     the task queue's worker (backend/worker.py) and the Modal analysis

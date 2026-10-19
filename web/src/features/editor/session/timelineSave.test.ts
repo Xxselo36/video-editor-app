@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import type { TimelineSeg } from "@/lib/editSave";
 import { TimelineSaver, timelinePayload, type TimelineBackup, type TimelineSaveState } from "./timelineSave";
+import { decideUnsaved } from "./unsaved";
 
 type Body = { segments: TimelineSeg[]; base_rev: number; rev: number; keepalive: boolean };
 
@@ -59,6 +60,7 @@ function saverOf(rev = 100, opts: { known?: number[] } = {}) {
   const states: TimelineSaveState[] = [];
   const backups: (TimelineBackup | null)[] = [];
   const conflicts: (number | null)[] = [];
+  const refused: (EditorSeg[] | null)[] = [];
   const answers: unknown[] = [];
   const saver = new TimelineSaver(rev, timelinePayload(tl(10)), {
     jobId: "j1",
@@ -66,11 +68,14 @@ function saverOf(rev = 100, opts: { known?: number[] } = {}) {
     fetch,
     onState: (s) => states.push(s),
     backup: (b) => backups.push(b),
-    onConflict: (r) => conflicts.push(r),
+    onConflict: (r, mine) => {
+      conflicts.push(r);
+      refused.push(mine);
+    },
     onAnswer: (d) => answers.push(d),
     known: opts.known,
   });
-  return { srv, saver, states, backups, conflicts, answers };
+  return { srv, saver, states, backups, conflicts, refused, answers };
 }
 
 beforeEach(() => {
@@ -145,22 +150,30 @@ describe("TimelineSaver (review F3/F4, save-11)", () => {
     expect(answers).toHaveLength(2);
   });
 
-  it("another tab or device saved: conflict, nothing is overwritten, the local copy goes", async () => {
-    const { srv, saver, conflicts, backups } = saverOf();
+  it("another tab or device saved: conflict, nothing is overwritten, the refused change stays this device's (round 3)", async () => {
+    const { srv, saver, conflicts, refused, backups } = saverOf();
     srv.rev = 555; // someone else saved
     saver.schedule(tl(9));
     expect(backups.at(-1)?.segs).toEqual(tl(9));
     await vi.advanceTimersByTimeAsync(900);
     expect(saver.status).toBe("conflict");
     expect(conflicts).toEqual([555]);
-    expect(backups.at(-1)).toBeNull();
+    // handed to the editor (offered back), and kept in the backup: on the
+    // rev it was made on, with no revs of ours — the next open OFFERS it
+    expect(refused).toEqual([tl(9)]);
+    expect(backups.at(-1)).toMatchObject({ segs: tl(9), base: 100, known: [] });
+    expect(decideUnsaved(backups.at(-1)!, { rev: 555, segments: timelinePayload(tl(10)) }, 30).kind).toBe("offer");
     saver.schedule(tl(8));
     await vi.advanceTimersByTimeAsync(2000);
     expect(srv.posts).toHaveLength(1);
     expect(srv.segs).toEqual(timelinePayload(tl(10)));
-    // the editor reloaded: the server's rev is the base again
+    // the editor reloaded: the server's rev is the base again; the refused
+    // change is still kept (the user hasn't decided yet)
     saver.reset(555, timelinePayload(tl(10)));
+    expect(backups.at(-1)).toMatchObject({ segs: tl(9), base: 100, known: [] });
+    // the next edit (restore, or carrying on from theirs) replaces it
     saver.schedule(tl(8));
+    expect(backups.at(-1)?.segs).toEqual(tl(8));
     await vi.advanceTimersByTimeAsync(900);
     expect(srv.posts.at(-1)!.base_rev).toBe(555);
     expect(saver.status).toBe("saved");

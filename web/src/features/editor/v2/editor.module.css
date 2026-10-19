@@ -1124,6 +1124,10 @@
   right: 0;
   top: 26px;
   height: 52px;
+  /* its own layer: a trim move repaints and re-layerizes the strip, not
+     the rest of the editor with it (drag-12-rest, measured: layerize −40 %
+     on the owner's 103 clips at CPU x4) */
+  will-change: transform;
 }
 .clip {
   position: absolute;
@@ -1229,6 +1233,10 @@
   width: 32px;
   cursor: pointer;
 }
+/* the kind's colour at 35 % as a colour, not an opacity, and the glyph
+   centred by margins, not a transform: no effect or transform node per
+   seam — ~100 fewer paint chunks to layerize on every trim move of the
+   owner's timeline (drag-12-rest) */
 .seamLine {
   position: absolute;
   left: calc(var(--sl, 16px) - 0.5px);
@@ -1238,11 +1246,22 @@
   background: rgba(240, 96, 90, 0.35);
   pointer-events: none;
 }
+.seam[data-seam="filler"] .seamLine {
+  background: rgba(245, 165, 36, 0.35);
+}
+.seam[data-seam="voice_cmd"] .seamLine,
+.seam[data-seam="bad_take"] .seamLine {
+  background: rgba(230, 230, 238, 0.35);
+}
+.seam[data-seam="user"] .seamLine {
+  background: rgba(138, 138, 149, 0.35);
+}
 .seamGlyph {
   position: absolute;
   left: var(--sl, 16px);
   top: 50%;
-  transform: translate(-50%, -50%);
+  /* 8 px glyph + 1 px padding each side */
+  margin: -5px 0 0 -5px;
   display: flex;
   padding: 1px;
   border-radius: 2px;
@@ -1540,6 +1559,14 @@
   font-size: 13px;
   line-height: 18px;
   animation: edFadeIn var(--ed-med) ease-out both;
+}
+/* the toast never blocks the timeline under it (a phone: over the dock,
+   up to 15 s with an action); only its button takes taps */
+.toast {
+  pointer-events: none;
+}
+.toast button {
+  pointer-events: auto;
 }
 .toastAction {
   height: 28px;

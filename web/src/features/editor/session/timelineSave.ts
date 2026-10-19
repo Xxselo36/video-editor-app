@@ -15,7 +15,10 @@
  *     rev an earlier request of ours set (a keepalive flush that overtook
  *     it, the last visit's) → sent again on that one; any other rev →
  *     another tab or device saved: "conflict", nothing more is sent
- *     (never overwrites silently), onConflict reloads.
+ *     (never overwrites silently), onConflict reloads. The refused change
+ *     stays this device's (round 3): onConflict gets it (the editor offers
+ *     it back) and the backup keeps it until the next edit, so leaving now
+ *     still finds it offered on the next open.
  *   - Network errors and 5xx: "retrying", the same body again with
  *     backoff (it may have committed: see the 409 rule); other refusals
  *     (job gone, out of review): "failed".
@@ -76,8 +79,9 @@ export type TimelineSaverDeps = {
   onState?: (s: TimelineSaveState) => void;
   /** A save's OK answer (after the server's preview rebuild). */
   onAnswer?: (data: TimelineAnswer, payload: TimelineSeg[]) => void;
-  /** Another tab or device saved: the autosave stopped (reset() starts it again). */
-  onConflict?: (serverRev: number | null) => void;
+  /** Another tab or device saved: the autosave stopped (reset() starts it
+   *  again). `refused`: this device's newest change the server didn't take. */
+  onConflict?: (serverRev: number | null, refused: EditorSeg[] | null) => void;
   /** Every request's outcome (lib/pendingSaves trackSave). */
   track?: (p: Promise<unknown>) => void;
   /** The unacknowledged state, or null once the server has it. */
@@ -122,6 +126,9 @@ export class TimelineSaver {
   private ack: { rev: number; payload: TimelineSeg[] | null };
   /** The newest committed clip list the server isn't known to have (null: none). */
   private latest: EditorSeg[] | null = null;
+  /** A change a conflict refused (and the rev it was made on): kept in the
+   *  backup until the next edit — offered back, never sent by itself. */
+  private refused: { segs: EditorSeg[]; base: number } | null = null;
   private inflight: Sent | null = null;
   /** A save whose outcome is unknown: sent again as it is. */
   private retry: Sent | null = null;
@@ -182,7 +189,10 @@ export class TimelineSaver {
   private writeBackup() {
     if (!this.d.backup) return;
     if (this.latest === null || this.state === "conflict") {
-      this.d.backup(null);
+      // A refused change stays: the next open offers it (the server moved
+      // on). No revs of ours with it: it must never come back by itself.
+      const r = this.refused;
+      this.d.backup(r ? { segs: r.segs, base: r.base, known: [], at: this.d.now() } : null);
       return;
     }
     this.d.backup({ segs: this.latest, base: this.ack.rev, known: [...this.known].slice(-20), at: this.d.now() });
@@ -192,6 +202,7 @@ export class TimelineSaver {
   schedule(segs: EditorSeg[]): void {
     if (this.state === "conflict") return;
     this.latest = segs;
+    this.refused = null;
     this.writeBackup();
     if (this.state === "saved") this.set("saving");
     if (this.debounce) this.d.clearTimer(this.debounce);
@@ -490,6 +501,8 @@ export class TimelineSaver {
   }
 
   private conflict(serverRev: number | null) {
+    const mine = this.latest;
+    if (mine) this.refused = { segs: mine, base: this.ack.rev };
     this.clearTimers();
     this.inflight = null;
     this.retry = null;
@@ -497,7 +510,7 @@ export class TimelineSaver {
     this.stopped = true;
     this.set("conflict");
     this.writeBackup();
-    if (!this.closing) this.d.onConflict?.(serverRev);
+    if (!this.closing) this.d.onConflict?.(serverRev, mine);
   }
 
   private fail(sent: Sent) {

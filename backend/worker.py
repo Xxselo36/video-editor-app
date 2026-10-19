@@ -1053,8 +1053,9 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
                 **errors.stage("analyze.done"),
                 progress=100.0,
                 segments=res["segments"],
-                preview_segments=[list(s) for s in res["segments"]],
-                preview_version=1,
+                # preview/v1, unless the editor plays the proxy (then
+                # none until a player falls back: GET /preview-video)
+                **_pipeline().first_preview_fields(res["segments"], stored),
                 subtitles=res["subtitles"],
                 duration=res.get("duration", 0.0),
                 cut_ranges=res.get("cut_ranges", []),

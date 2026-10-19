@@ -94,6 +94,7 @@ export const ruEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "Вырезать всё нельзя – что-то должно остаться в видео",
   "editor.cut.alreadyCut": "Уже вырезано из видео",
   "editor.conflict.reloaded": "Изменено в другой вкладке или на другом устройстве – это последняя версия",
+  "editor.conflict.restoreLast": "Вернуть ваше последнее изменение",
   "editor.unsaved.restored": "Последнее изменение не дошло до сервера – оно возвращено",
   "editor.unsaved.found": "Несохранённые изменения таймлайна с прошлого визита",
   "editor.unsaved.restore": "Восстановить",

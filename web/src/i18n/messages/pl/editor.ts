@@ -94,6 +94,7 @@ export const plEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "Nie da się wyciąć wszystkiego – coś musi zostać w wideo",
   "editor.cut.alreadyCut": "Już wycięte z wideo",
   "editor.conflict.reloaded": "Zmieniono w innej karcie lub na innym urządzeniu – to najnowsza wersja",
+  "editor.conflict.restoreLast": "Przywróć swoją ostatnią zmianę",
   "editor.unsaved.restored": "Twoja ostatnia zmiana nie dotarła do serwera – już wróciła",
   "editor.unsaved.found": "Niezapisane zmiany osi czasu z ostatniej wizyty",
   "editor.unsaved.restore": "Przywróć",

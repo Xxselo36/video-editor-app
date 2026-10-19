@@ -27,7 +27,7 @@ import {
   type EditDoc,
   type IdPool,
 } from "@/features/editor/state/doc";
-import { DocSaver, uniqueRev, type DocSaveState } from "@/features/editor/state/docSave";
+import { DocSaver, rebaseDoc, uniqueRev, type DocSaveState } from "@/features/editor/state/docSave";
 import { reconcileV1, type V1Edits } from "@/features/editor/state/reconcile";
 import { createDocStore, type DocStore } from "@/features/editor/state/store";
 import { takePending, type CaptionStyleDefault } from "@/features/start/captionDefault";
@@ -47,6 +47,8 @@ export type DocSession =
       retry: () => void;
       /** Load the server's doc (after a conflict); local changes are dropped. */
       reload: () => Promise<void>;
+      /** Another tab or device saved (the timeline's 409): bring the doc in line, keeping every local edit (see sync). */
+      sync: () => Promise<DocSync>;
       /** Send what's pending now (before an export: the render reads the doc's style). */
       flush: () => Promise<boolean>;
       /** UT5: what the caption layer and the Style panel need (GET /jobs/{id}/doc). */
@@ -68,6 +70,15 @@ export function retryAfterMs(r: Pick<Response, "headers">, fallbackS: number): n
   const s = Number(r.headers.get("Retry-After"));
   return Math.round(Math.min(120, Math.max(1, Number.isFinite(s) && s > 0 ? s : fallbackS)) * 1000);
 }
+
+/**
+ * After another tab or device saved (round 3): "kept" — this device's doc
+ * edits are on the server and nothing else changed there, so nothing was
+ * reloaded; "merged" — the other device changed the doc too: its doc came
+ * in with this device's unsaved edits on top (saved next); "pending" — not
+ * through yet (offline, refused): the autosave keeps them and goes on.
+ */
+export type DocSync = "kept" | "merged" | "pending";
 
 /** A save still waiting for its retry (DocSaver.exclusive "busy"): ask again in this long. */
 const SAVER_BUSY_MS = 3000;
@@ -262,6 +273,26 @@ export function useDocSession(
     captionRef.current?.(src.phrases, src.units, false);
   }, [jobId, loaded]);
 
+  const sync = useCallback(async (): Promise<DocSync> => {
+    if (!loaded || loaded === "none" || loaded.readOnly) return "kept";
+    const { saver, store, pool } = loaded;
+    // this device's edits first, on the doc's own rev rule
+    if (await saver.settle(2)) return "kept";
+    if (saver.status !== "conflict") return "pending";
+    // the other device changed the doc too: theirs, with ours on top
+    const res = await fetchDoc(jobId).catch(() => null);
+    if (!res) return "pending";
+    const merged = rebaseDoc(saver.known, store.getState().present, res.doc, pool);
+    for (const w of res.doc.words) pool.add(w.id);
+    // (the undo steps were made on a doc the server no longer has)
+    store.reset(merged);
+    saver.reset(res.doc, res.rev);
+    saver.schedule(merged);
+    const src = captionSource(merged.words);
+    captionRef.current?.(src.phrases, src.units, true);
+    return "merged";
+  }, [jobId, loaded]);
+
   const transcribeSpan = useCallback(
     async (start: number, end: number): Promise<SpanResult> => {
       if (!loaded || loaded === "none" || loaded.readOnly) return "error";
@@ -318,6 +349,7 @@ export function useDocSession(
     readOnly: loaded.readOnly,
     retry,
     reload,
+    sync,
     flush,
     captions: loaded.captions ?? NO_CAPTIONS,
     transcribeSpan,

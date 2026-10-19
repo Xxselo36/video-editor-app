@@ -160,6 +160,22 @@ def test_done_seed_and_proxy_modes(stub):
     assert "has_proxy" not in stub.json("GET", f"/jobs/{probe['id']}")
 
 
+def test_a_review_without_a_first_preview_builds_it_on_demand(stub):
+    """first_preview false: analysed like CLEO_PROXY_VIDEO=1 does — no
+    preview/v1 until a player that fell back to the preview asks."""
+    job = stub.json("POST", "/_test/seed/review", {"proxy": "on", "first_preview": False})
+    j = stub.json("GET", f"/jobs/{job['id']}")
+    assert (j["has_proxy"], j["preview_version"], j["preview_status"]) == (True, 0, "stale")
+    assert j["preview_segments"] == [[0, 6], [7, 14], [15, 22], [23, 30]]
+    assert stub.json("GET", f"/_test/job/{job['id']}")["preview_key"] is None
+    # the fallback player's first request waits for the build and gets it
+    status, headers, body = stub.call("GET", f"/jobs/{job['id']}/preview-video?v=0")
+    assert status == 200 and body[:4] == WEBM_MAGIC
+    j = stub.json("GET", f"/jobs/{job['id']}")
+    assert (j["preview_version"], j["preview_status"]) == (1, "ready")
+    assert stub.call("GET", f"/jobs/{job['id']}/preview-video?v=0")[2] == body
+
+
 def test_upload_runs_the_fake_analysis(stub):
     name = f"smoke-{uuid.uuid4().hex[:6]}.mp4"
     stub.json("POST", "/_test/config", {"by_filename": {name: {"clip": "grid"}}})

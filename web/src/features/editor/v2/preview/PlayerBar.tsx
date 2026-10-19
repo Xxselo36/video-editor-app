@@ -24,7 +24,7 @@ export function PlayerBar({
   width,
   editSegs,
   toSource,
-  playingSegId,
+  playingSeg,
   mode,
   onTogglePlay,
   onToggleMute,
@@ -36,7 +36,8 @@ export function PlayerBar({
   width?: number;
   editSegs: EditorSeg[];
   toSource: (t: number) => number;
-  playingSegId: string | null;
+  /** The clip the proxy player is in (read per frame, no render). */
+  playingSeg: () => string | null;
   mode: PlaybackMode;
   onTogglePlay: () => void;
   onToggleMute: () => void;
@@ -54,13 +55,13 @@ export function PlayerBar({
 
   const write = useCallback(
     (st: PlayheadState) => {
-      const c = cutClockOf(editSegs, toSource(st.mediaTime), playingSegId, mode);
+      const c = cutClockOf(editSegs, toSource(st.mediaTime), playingSeg(), mode);
       const a = fmtClockTenths(c.at, dec);
       const b = ` / ${fmtClock(c.total)}`;
       if (clockRef.current && clockRef.current.textContent !== a) clockRef.current.textContent = a;
       if (totalRef.current && totalRef.current.textContent !== b) totalRef.current.textContent = b;
     },
-    [editSegs, toSource, playingSegId, mode, dec],
+    [editSegs, toSource, playingSeg, mode, dec],
   );
   usePlayheadEffect(store, write);
   // an edit while paused changes the clock without a new frame (preview-9)

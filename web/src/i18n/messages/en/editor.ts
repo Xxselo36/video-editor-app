@@ -101,6 +101,7 @@ export const enEditor = {
   "editor.cut.everything": "Can't cut all of it – something has to stay in the video",
   "editor.cut.alreadyCut": "Already cut from the video",
   "editor.conflict.reloaded": "Changed in another tab or on another device – this is the newest version",
+  "editor.conflict.restoreLast": "Restore your last change",
   "editor.unsaved.restored": "Your last edit hadn't reached the server – it's back",
   "editor.unsaved.found": "Unsaved timeline changes from your last visit",
   "editor.unsaved.restore": "Restore",

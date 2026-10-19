@@ -94,6 +94,7 @@ export const hiEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "सब कुछ नहीं काट सकते – वीडियो में कुछ रहना चाहिए",
   "editor.cut.alreadyCut": "वीडियो से पहले ही कट चुका है",
   "editor.conflict.reloaded": "दूसरे टैब या दूसरे डिवाइस पर बदला गया – यह सबसे नया वर्ज़न है",
+  "editor.conflict.restoreLast": "अपना पिछला बदलाव वापस लाएँ",
   "editor.unsaved.restored": "आपका पिछला बदलाव सर्वर तक नहीं पहुँचा था – वह वापस आ गया है",
   "editor.unsaved.found": "पिछली बार के बिना सेव किए टाइमलाइन बदलाव",
   "editor.unsaved.restore": "वापस लाएँ",

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  seamTapClip,
   canDelete,
   dropIndex,
   exactFps,
@@ -337,5 +338,27 @@ describe("round 2: trims that remove, a zoom-scaled snap (state-3, drag-13)", ()
   it("a split never leaves a piece under MIN_CLIP_S (v2)", () => {
     expect(splittableIndex(three, 3.12, MIN_CLIP_S)).toBe(-1);
     expect(splittableIndex(three, 3.16, MIN_CLIP_S)).toBe(1);
+  });
+});
+
+describe("seamTapClip (phone-tiny-seam)", () => {
+  it("a tap on the seam next to clips big enough to tap: the seam (Restore)", () => {
+    expect(seamTapClip(100, 102, 40, 60, 24)).toBeNull();
+    expect(seamTapClip(105, 102, 40, 60, 24)).toBeNull();
+  });
+  it("the tiny-clip rule only on the tiny clip's side of the line", () => {
+    // tiny clip after the seam: its 3 px part selects it, the big side is the seam
+    expect(seamTapClip(103.5, 102, 80, 12, 24)).toBe("next");
+    expect(seamTapClip(95, 102, 80, 12, 24)).toBeNull();
+    // tiny clip before it
+    expect(seamTapClip(101, 102, 6, 80, 24)).toBe("prev");
+    expect(seamTapClip(110, 102, 6, 80, 24)).toBeNull();
+    // between two tiny clips: the side the tap is on
+    expect(seamTapClip(101, 102, 6, 9, 24)).toBe("prev");
+    expect(seamTapClip(103, 102, 6, 9, 24)).toBe("next");
+  });
+  it("the desktop's threshold is its own (10 px)", () => {
+    expect(seamTapClip(103, 102, 80, 18, 10)).toBeNull();
+    expect(seamTapClip(103, 102, 80, 8, 10)).toBe("next");
   });
 });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cutRange } from "@/features/editor/state/cuts";
-import { buildPlan, EditPlayer, fadeLevel, locate, nextInSource, seekRampLevel, type PlaySeg } from "@/lib/editPlayback";
+import { buildPlan, clipFrames, EditPlayer, fadeLevel, jumpOnFrame, locate, nextInSource, seekRampLevel, type PlaySeg } from "@/lib/editPlayback";
 
 const seg = (id: string, start: number, end: number, extra: Partial<PlaySeg> = {}): PlaySeg => ({
   id,
@@ -208,7 +208,9 @@ describe("EditPlayer.setPlan keeps the playhead through a cut earlier in its cli
     v.currentTime = 8.1;
     seeks.length = 0;
     p.setPlan(buildPlan(cutRange([{ id: "A", start: 0, end: 20 }], 7.95, 8.4, 20), 20));
-    expect(seeks).toEqual([8.4]);
+    // into the clip's first frame (8.4 s = frame 252 at 30 fps)
+    expect(seeks.length).toBe(1);
+    expect(Math.floor(seeks[0] * 30)).toBe(252);
     p.destroy();
     const b = fakeVideo(0);
     const q = new EditPlayer(b.v);
@@ -232,24 +234,326 @@ describe("EditPlayer.setPlan keeps the playhead through a cut earlier in its cli
         20,
       ),
     );
-    expect(b.seeks).toEqual([10]);
+    expect(b.seeks.length).toBe(1);
+    expect(Math.floor(b.seeks[0] * 30)).toBe(300);
     q.destroy();
   });
 });
 
-describe("EditPlayer at a clip's end (wordcuts-10)", () => {
+describe("the frame grid (wordcuts10-flash-frames)", () => {
+  it("a clip keeps the render's frames: [round(start·fps), round(end·fps)), ties on the safe side", () => {
+    expect(clipFrames({ start: 2, end: 5 }, 30)).toEqual([60, 150]);
+    // ms edges (text cuts) round to the nearest frame, like clip_plan
+    expect(clipFrames({ start: 5.012, end: 7.49 }, 30)).toEqual([150, 225]);
+    // exactly half a frame: starts later, ends earlier
+    expect(clipFrames({ start: 0.05, end: 0.15 }, 30)).toEqual([2, 4]);
+    // float noise on a frame edge
+    expect(clipFrames({ start: 104 / 30, end: 3.4666666666666663 + 1 }, 30)).toEqual([104, 134]);
+  });
+
+  it("jumps on the clip's last frame — the next one would be cut", () => {
+    expect(jumpOnFrame(58, 60)).toBe(false);
+    expect(jumpOnFrame(59, 60)).toBe(true);
+    // a late frame (a cut one already showing): jump at once
+    expect(jumpOnFrame(61, 60)).toBe(true);
+    // 2 frames a presentation (high speed): one frame sooner
+    expect(jumpOnFrame(58, 60, 2)).toBe(true);
+    // callbacks running late: one frame sooner
+    expect(jumpOnFrame(58, 60, 1, 1)).toBe(true);
+    expect(jumpOnFrame(57, 60, 1, 1)).toBe(false);
+  });
+});
+
+type Presented = { k: number; at: number; seeking: boolean };
+
+/**
+ * A playing <video> on the fake clock that presents frames (fps, with a
+ * container offset `phase`): each frame is "on screen" from its time on;
+ * requestVideoFrameCallback callbacks run `cbDelay` ms after a frame was
+ * presented (a busy main thread: more). A seek stops the presentation
+ * `seekLatency` ms after it was asked for (a frame due meanwhile still
+ * shows: the risk this guards), lands 20 ms later on the frame under the
+ * target time.
+ */
+function framedVideo(start: number, o: { fps?: number; phase?: number; cbDelay?: number; seekLatency?: number; rvfc?: boolean; volumeReadOnly?: boolean } = {}) {
+  const fps = o.fps ?? 30;
+  const phase = o.phase ?? 0;
+  // the page's timers may be made late later on (lateTimers): not these
+  const setTimeout = globalThis.setTimeout;
+  const on = new Map<string, Set<() => void>>();
+  const emit = (ev: string) => on.get(ev)?.forEach((f) => f());
+  let pos = start;
+  let since = Date.now();
+  let paused = true;
+  let seeking = false;
+  let frozen = false; // the seek reached the decoder: no frames until it lands
+  let vol = 1;
+  let rate = 1;
+  let presented = 0;
+  let shown = -1;
+  const frames: Presented[] = [];
+  const seeks: { at: number; to: number; pos: number }[] = [];
+  const volumes: { at: number; value: number; pos: number }[] = [];
+  const mutes: boolean[] = [];
+  let cbs: ((now: number, md: { mediaTime: number; presentedFrames: number; expectedDisplayTime: number }) => void)[] = [];
+  let handle = 0;
+  const clock = () => (paused || frozen ? pos : pos + ((Date.now() - since) / 1000) * rate);
+  const frameAt = (t: number) => Math.floor((t - phase) * fps + 1e-9);
+  const present = (k: number) => {
+    if (k === shown) return;
+    shown = k;
+    presented++;
+    frames.push({ k, at: Date.now(), seeking });
+    const md = { mediaTime: Math.round((k / fps + phase) * 1000) / 1000, presentedFrames: presented, expectedDisplayTime: Date.now() };
+    const run = cbs;
+    cbs = [];
+    if (run.length) setTimeout(() => run.forEach((cb) => cb(Date.now(), md)), o.cbDelay ?? 2);
+  };
+  // the compositor: every ms, the frame under the clock
+  const tick = () => {
+    if (!paused && !frozen) present(frameAt(clock()));
+    setTimeout(tick, 1);
+  };
+  setTimeout(tick, 1);
+  const v = {
+    get paused() {
+      return paused;
+    },
+    get seeking() {
+      return seeking;
+    },
+    ended: false,
+    readyState: 4,
+    get playbackRate() {
+      return rate;
+    },
+    set playbackRate(r: number) {
+      pos = clock();
+      since = Date.now();
+      rate = r;
+    },
+    get volume() {
+      return vol;
+    },
+    set volume(x: number) {
+      volumes.push({ at: Date.now(), value: x, pos: clock() });
+      if (!o.volumeReadOnly) vol = x;
+    },
+    muted: false,
+    get currentTime() {
+      return clock();
+    },
+    set currentTime(x: number) {
+      seeks.push({ at: Date.now(), to: x, pos: clock() });
+      seeking = true;
+      emit("seeking");
+      setTimeout(() => {
+        pos = clock();
+        frozen = true;
+      }, o.seekLatency ?? 2);
+      setTimeout(() => {
+        pos = x;
+        frozen = false;
+        seeking = false;
+        since = Date.now();
+        present(frameAt(x));
+        emit("seeked");
+      }, 20);
+    },
+    play() {
+      if (!paused) return Promise.resolve();
+      paused = false;
+      since = Date.now();
+      emit("play");
+      return Promise.resolve();
+    },
+    pause() {
+      pos = clock();
+      paused = true;
+      emit("pause");
+    },
+    addEventListener(ev: string, fn: () => void) {
+      if (!on.has(ev)) on.set(ev, new Set());
+      on.get(ev)!.add(fn);
+    },
+    removeEventListener(ev: string, fn: () => void) {
+      on.get(ev)?.delete(fn);
+    },
+    ...(o.rvfc === false
+      ? {}
+      : {
+          requestVideoFrameCallback(cb: (typeof cbs)[number]) {
+            cbs.push(cb);
+            return ++handle;
+          },
+          cancelVideoFrameCallback() {
+            cbs = [];
+          },
+        }),
+  };
+  Object.defineProperty(v, "muted", {
+    get: () => mutes.at(-1) ?? false,
+    set: (x: boolean) => void mutes.push(x),
+  });
+  return { v: v as unknown as HTMLVideoElement, frames, seeks, volumes, mutes, fps, phase };
+}
+
+describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => setTimeout(() => cb(performance.now()), 16) as unknown as number);
+    vi.stubGlobal("cancelAnimationFrame", (h: number) => clearTimeout(h));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  // A [0, 2) → B [5, 7) → C [3, 4) (reordered: a jump back): frames
+  // [0, 60) [150, 210) [90, 120) at 30 fps.
+  const segs = [
+    { id: "A", start: 0, end: 2 },
+    { id: "B", start: 5, end: 7 },
+    { id: "C", start: 3, end: 4 },
+  ];
+  const kept = (k: number) => (k >= 0 && k < 60) || (k >= 150 && k < 210) || (k >= 90 && k < 120);
+
+  async function playAll(f: ReturnType<typeof framedVideo>, ms = 6000, opts: { seekRampMs?: number } = {}) {
+    const p = new EditPlayer(f.v, { fps: 30, seekRampMs: opts.seekRampMs ?? 15 });
+    p.setPlan(buildPlan(segs, 10));
+    await vi.advanceTimersByTimeAsync(50);
+    void f.v.play();
+    await vi.advanceTimersByTimeAsync(ms);
+    p.destroy();
+    return f.frames;
+  }
+
+  it("frame callbacks: the jump goes on each clip's last frame; no cut frame; the last frames show", async () => {
+    const f = framedVideo(0);
+    const frames = await playAll(f);
+    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+    const ks = new Set(frames.map((x) => x.k));
+    expect(ks.has(59) && ks.has(209) && ks.has(119)).toBe(true);
+    // landed on each clip's first frame
+    expect(ks.has(150) && ks.has(90)).toBe(true);
+    // the timeline's end: paused on C's last frame
+    expect(f.v.paused).toBe(true);
+    expect(Math.floor(f.v.currentTime * 30)).toBe(119);
+  });
+
+  it("a container offset (12 ms, a webm's start): the landing is never the frame before the clip", async () => {
+    const f = framedVideo(0, { phase: 0.012 });
+    const frames = await playAll(f);
+    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+    expect(new Set(frames.map((x) => x.k)).has(150)).toBe(true);
+  });
+
+  it("callbacks running late (a busy phone): one frame early, still no cut frame", async () => {
+    const f = framedVideo(0, { cbDelay: 26 });
+    const frames = await playAll(f);
+    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+  });
+
+  it("the page's timers firing late (8 ms, a busy page): no cut frame — round 2 showed one at about half of all joins", async () => {
+    const f = framedVideo(0);
+    const st = globalThis.setTimeout;
+    vi.stubGlobal("setTimeout", ((fn: () => void, ms?: number) => st(fn, (ms ?? 0) + 8)) as typeof setTimeout);
+    const frames = await playAll(f);
+    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+  });
+
+  it("no frame callbacks (older browsers): the clock jumps one frame early, no cut frame", async () => {
+    const f = framedVideo(0, { rvfc: false });
+    const frames = await playAll(f);
+    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+    const ks = new Set(frames.map((x) => x.k));
+    // at most the last frame dropped
+    expect(ks.has(58) && ks.has(208)).toBe(true);
+  });
+
+  it("clips at 2x: still no cut frame", async () => {
+    const f = framedVideo(0);
+    const p = new EditPlayer(f.v, { fps: 30, seekRampMs: 15 });
+    p.setPlan(buildPlan(segs.map((s) => ({ ...s, speed: 2 })), 10));
+    await vi.advanceTimersByTimeAsync(50);
+    void f.v.play();
+    await vi.advanceTimersByTimeAsync(4000);
+    p.destroy();
+    expect(f.frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+  });
+
+  it("a split (the next clip starts on the frame the last one ends): no seek", async () => {
+    const f = framedVideo(0);
+    const p = new EditPlayer(f.v, { fps: 30 });
+    p.setPlan(
+      buildPlan(
+        [
+          { id: "A", start: 0, end: 1.5 },
+          { id: "A~2", start: 1.5, end: 3 },
+        ],
+        10,
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    const before = f.seeks.length;
+    void f.v.play();
+    await vi.advanceTimersByTimeAsync(2000);
+    p.destroy();
+    expect(f.seeks.length).toBe(before);
+    const ks = f.frames.map((x) => x.k);
+    expect(ks).toContain(44);
+    expect(ks).toContain(45);
+  });
+
+  it("desktop: a short gain ramp into the jump and out of the landing — never a mute", async () => {
+    const f = framedVideo(0);
+    await playAll(f, 2600);
+    expect(f.mutes.some((m) => m)).toBe(false);
+    const jump = f.seeks.find((s) => Math.abs(s.to - 5) < 0.05)!;
+    expect(jump).toBeTruthy();
+    // the jump on the last frame (frame 59: 1.967–2.0 s)
+    expect(jump.pos).toBeGreaterThanOrEqual(59 / 30);
+    expect(jump.pos).toBeLessThan(2);
+    const down = f.volumes.filter((x) => x.at <= jump.at && x.value < 1 && x.value > 0);
+    expect(down.length).toBeGreaterThan(0);
+    // full volume until just before
+    expect(f.volumes.filter((x) => x.at <= jump.at && x.pos < 59 / 30 - 0.02).every((x) => x.value === 1)).toBe(true);
+    expect(f.volumes.filter((x) => x.at > jump.at).at(-1)?.value).toBe(1);
+  });
+
+  it("iOS (volume read-only): never muted at a join", async () => {
+    const f = framedVideo(0, { volumeReadOnly: true });
+    const frames = await playAll(f);
+    expect(f.mutes.some((m) => m)).toBe(false);
+    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+  });
+
+  it("a seek onto a clip's first moment shows its first frame, not the cut one before it", async () => {
+    const f = framedVideo(0, { phase: 0.012 });
+    const p = new EditPlayer(f.v, { fps: 30 });
+    p.setPlan(buildPlan(segs, 10));
+    await vi.advanceTimersByTimeAsync(50);
+    void f.v.play();
+    await vi.advanceTimersByTimeAsync(300); // frames seen: the grid's offset known
+    f.v.pause();
+    p.seek(5, "B");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.frames.at(-1)!.k).toBe(150);
+    p.destroy();
+  });
+});
+
+describe("EditPlayer scrub (drag-9)", () => {
   /** A playing <video> on the fake clock: time runs while not paused or seeking; a seek lands 20 ms later. */
-  function clockVideo(start: number, opts: { volumeReadOnly?: boolean } = {}) {
+  function clockVideo(start: number) {
     const on = new Map<string, Set<() => void>>();
     const emit = (ev: string) => on.get(ev)?.forEach((f) => f());
     let pos = start;
     let since = Date.now();
     let paused = false;
     let seeking = false;
-    let vol = 1;
-    const log: { at: number; type: "seek" | "volume" | "muted"; value: number | boolean; pos: number }[] = [];
+    const log: { at: number; type: "seek"; value: number }[] = [];
     const now = () => (paused || seeking ? pos : pos + (Date.now() - since) / 1000);
-    let muted = false;
     const v = {
       get paused() {
         return paused;
@@ -260,25 +564,13 @@ describe("EditPlayer at a clip's end (wordcuts-10)", () => {
       ended: false,
       readyState: 4,
       playbackRate: 1,
-      get volume() {
-        return vol;
-      },
-      set volume(x: number) {
-        log.push({ at: Date.now(), type: "volume", value: x, pos: now() });
-        if (!opts.volumeReadOnly) vol = x;
-      },
-      get muted() {
-        return muted;
-      },
-      set muted(x: boolean) {
-        log.push({ at: Date.now(), type: "muted", value: x, pos: now() });
-        muted = x;
-      },
+      volume: 1,
+      muted: false,
       get currentTime() {
         return now();
       },
       set currentTime(x: number) {
-        log.push({ at: Date.now(), type: "seek", value: x, pos: now() });
+        log.push({ at: Date.now(), type: "seek", value: x });
         pos = x;
         seeking = true;
         emit("seeking");
@@ -301,7 +593,7 @@ describe("EditPlayer at a clip's end (wordcuts-10)", () => {
         on.get(ev)?.delete(fn);
       },
     };
-    return { v: v as unknown as HTMLVideoElement, log, emit };
+    return { v: v as unknown as HTMLVideoElement, log };
   }
 
   beforeEach(() => {
@@ -322,48 +614,6 @@ describe("EditPlayer at a clip's end (wordcuts-10)", () => {
       ],
       10,
     );
-
-  it("jumps at the end, not a display frame (33–50 ms) early", async () => {
-    const { v, log } = clockVideo(1.5);
-    const p = new EditPlayer(v, { seekRampMs: 15 });
-    p.setPlan(plan()); // starts at clip A's start
-    await vi.advanceTimersByTimeAsync(2300);
-    const jump = log.find((e) => e.type === "seek" && e.value === 5)!;
-    expect(jump).toBeTruthy();
-    // the clip played to (just about) its end: ≤ 5 ms of it skipped, not 33–50 ms
-    expect(jump.pos).toBeGreaterThan(2 - 0.005);
-    expect(jump.pos).toBeLessThanOrEqual(2 + 1e-9);
-    p.destroy();
-  });
-
-  it("a short gain ramp into the end and out of the landing: no mute", async () => {
-    const { v, log } = clockVideo(1.5);
-    const p = new EditPlayer(v, { seekRampMs: 15 });
-    p.setPlan(plan());
-    await vi.advanceTimersByTimeAsync(2300);
-    expect(log.some((e) => e.type === "muted" && e.value === true)).toBe(false);
-    const jumpAt = log.find((e) => e.type === "seek" && e.value === 5)!.at;
-    const before = log.filter((e) => e.type === "volume" && e.at <= jumpAt);
-    // full volume until the ramp (the last 15 ms), a step or more down in it
-    // (after the first landing: the start of clip A)
-    expect(before.filter((e) => e.pos > 1 && e.pos < 2 - 0.02).every((e) => e.value === 1)).toBe(true);
-    expect(before.some((e) => (e.value as number) > 0 && (e.value as number) < 1)).toBe(true);
-    // back up after the landing
-    const after = log.filter((e) => e.type === "volume" && e.at > jumpAt);
-    expect(after.at(-1)?.value).toBe(1);
-    p.destroy();
-  });
-
-  it("iOS (volume read-only): never muted at a join, the jump right at the end", async () => {
-    const { v, log } = clockVideo(1.5, { volumeReadOnly: true });
-    const p = new EditPlayer(v, { seekRampMs: 15 });
-    p.setPlan(plan());
-    await vi.advanceTimersByTimeAsync(2300);
-    expect(log.some((e) => e.type === "muted")).toBe(false);
-    const jump = log.find((e) => e.type === "seek" && e.value === 5)!;
-    expect(jump.pos).toBeGreaterThan(2 - 0.005);
-    p.destroy();
-  });
 
   it("scrub shows a source time the plan cuts and leaves it there until let go", async () => {
     const { v, log } = clockVideo(1.5);

@@ -94,6 +94,7 @@ export const idEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "Tidak bisa memotong semuanya – harus ada yang tersisa di video",
   "editor.cut.alreadyCut": "Sudah dipotong dari video",
   "editor.conflict.reloaded": "Diubah di tab atau perangkat lain – ini versi terbaru",
+  "editor.conflict.restoreLast": "Pulihkan perubahan terakhirmu",
   "editor.unsaved.restored": "Perubahan terakhirmu belum sampai ke server – sekarang sudah kembali",
   "editor.unsaved.found": "Perubahan linimasa yang belum tersimpan dari kunjungan terakhirmu",
   "editor.unsaved.restore": "Pulihkan",

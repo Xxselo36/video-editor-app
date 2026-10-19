@@ -69,7 +69,12 @@ export type CaptionLayerProps = {
   /** Source time of the playing frame (session.toSource). */
   toSource: (mediaTime: number) => number;
   /** The clip the player is in (proxy mode), for a source moment in two clips. */
-  playingSegId: string | null;
+  /** The clip the proxy player is in (null: not proxy mode), read per frame. */
+  playingSeg: () => string | null;
+  /** A dragged trim edge is shown (the video scrubs): no captions meanwhile
+   *  — they belong to the committed edit, and redrawing them on every
+   *  scrubbed frame made each trim move of a long edit slow (drag-12-rest). */
+  scrubbing?: () => boolean;
   /** Source ranges no clip plays (the shell's removedOf): cut words show no caption (preview-11). */
   removed?: readonly { start: number; end: number }[];
   phone: boolean;
@@ -183,7 +188,8 @@ function CaptionLayer(props: CaptionLayerProps) {
   // where the adjust bar goes: the stage's fullscreen wrapper (not clipped by the frame)
   const [barHost, setBarHost] = useState<HTMLElement | null>(null);
   const toSourceRef = useRef(props.toSource);
-  const segIdRef = useRef(props.playingSegId);
+  const segIdRef = useRef(props.playingSeg);
+  const scrubbingRef = useRef(props.scrubbing);
   const [fontLoading, setFontLoading] = useState(false);
   const [sel, setSelState] = useState<Sel | null>(null);
   // the selection for callbacks that run outside a render (the frame loop's refresh)
@@ -223,7 +229,8 @@ function CaptionLayer(props: CaptionLayerProps) {
   });
   useEffect(() => {
     toSourceRef.current = props.toSource;
-    segIdRef.current = props.playingSegId;
+    segIdRef.current = props.playingSeg;
+    scrubbingRef.current = props.scrubbing;
   });
 
   // ── the frame loop and the canvas geometry (mount) ──────────────────
@@ -262,7 +269,7 @@ function CaptionLayer(props: CaptionLayerProps) {
       const r = L.renderer;
       if (!r || !L.ready) return;
       const src = toSourceRef.current(mediaTime ?? v.currentTime);
-      const out = outputTime(L.clips, src, segIdRef.current);
+      const out = scrubbingRef.current?.() ? null : outputTime(L.clips, src, segIdRef.current());
       const tt = out ?? -1;
       if (!L.dirty && tt === L.lastT) return;
       const force = L.dirty;
@@ -901,7 +908,8 @@ export default memo(
     a.apply === b.apply &&
     a.editSegs === b.editSegs &&
     a.toSource === b.toSource &&
-    a.playingSegId === b.playingSegId &&
+    a.playingSeg === b.playingSeg &&
+    a.scrubbing === b.scrubbing &&
     a.phone === b.phone &&
     a.zones === b.zones &&
     a.readOnly === b.readOnly &&

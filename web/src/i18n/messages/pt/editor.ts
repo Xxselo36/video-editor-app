@@ -94,6 +94,7 @@ export const ptEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "Não dá para cortar tudo – algo precisa ficar no vídeo",
   "editor.cut.alreadyCut": "Já foi cortado do vídeo",
   "editor.conflict.reloaded": "Alterado em outra aba ou em outro dispositivo – esta é a versão mais recente",
+  "editor.conflict.restoreLast": "Restaurar sua última alteração",
   "editor.unsaved.restored": "Sua última alteração não tinha chegado ao servidor – ela voltou",
   "editor.unsaved.found": "Alterações não salvas na linha do tempo da sua última visita",
   "editor.unsaved.restore": "Restaurar",

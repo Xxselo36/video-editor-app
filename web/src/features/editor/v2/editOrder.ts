@@ -22,6 +22,12 @@ export class EditOrder {
     this.redos = [];
   }
 
+  /** Forget one area's steps (its history was replaced; the other's stay). */
+  drop(area: Area): void {
+    this.undos = this.undos.filter((a) => a !== area);
+    this.redos = this.redos.filter((a) => a !== area);
+  }
+
   /**
    * The area whose step undo (redo) takes next: the latest recorded one
    * that still has a step (`can`); with nothing recorded (a step the

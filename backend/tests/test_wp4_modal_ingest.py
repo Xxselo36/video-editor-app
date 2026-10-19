@@ -408,6 +408,42 @@ def test_parity_local_and_modal_store_the_same(leader, analysis, r2,
         if k not in ("work_s", "worker", "executor", "modal_timings")}
 
 
+def _without_preview(output_dir):
+    """analyze_only's result with CLEO_PROXY_VIDEO=1: no preview.mp4."""
+    res = _full_result(output_dir)
+    Path(res["preview_path"]).unlink()
+    res["preview_path"] = None
+    return res
+
+
+@pytest.mark.parametrize("executor", ["local", "modal"])
+def test_proxy_playback_stores_no_first_preview(leader, analysis, r2, fake_modal,
+                                                monkeypatch, executor):
+    """CLEO_PROXY_VIDEO=1 reaches the Modal container with the call (the
+    analysis there skips the first preview too), and both executors
+    commit a job without one: version 0, no segments, no preview key."""
+    monkeypatch.setenv("CLEO_PROXY_VIDEO", "1")
+    if executor == "modal":
+        monkeypatch.setenv("CLEO_DISK_FACTOR", "1e9")
+        monkeypatch.setenv("CLEO_EXECUTOR_INGEST", "modal")
+        monkeypatch.setenv("MODAL_TOKEN_ID", "tok")
+    analysis["plan"].append(_without_preview)
+    job, tid = _r2_upload_job(r2)
+    _settle(leader)
+    assert ts().get(tid).executor == executor
+    if executor == "modal":
+        [kw] = fake_modal.spawns
+        assert kw["env"]["CLEO_PROXY_VIDEO"] == "1"
+    got = store.get(job.id)
+    p = f"jobs/{job.id}/"
+    assert got.status == "awaiting_review"
+    assert (got.proxy_key, got.preview_key) == (p + "proxy.mp4", None)
+    assert (got.preview_version, got.preview_segments) == (0, [])
+    assert got._has_proxy()
+    assert _keys(r2, job.id) == ["filmstrip.jpg", "mezz.mp4", "peaks.bin",
+                                 "poster.jpg", "proxy.mp4"]
+
+
 def test_job_outside_r2_is_analysed_here(leader, analysis, modal_on):
     """A job whose upload is a file on this box (from before the switch
     to R2) can't go to Modal: analysed locally, as before."""
@@ -889,6 +925,12 @@ def test_env_forwarding(monkeypatch):
     modal_analyze.apply_env(env)                       # a warm container
     assert os.environ["CLEO_DISFLUENT_PROMPT"] == "0"
     assert "CLEO_SUSTAINED_VOWEL_CUTS" not in os.environ
+    # proxy playback (no first preview at analysis) comes with the call,
+    # and goes with the next one from an API without it
+    monkeypatch.setenv("CLEO_PROXY_VIDEO", "1")
+    assert modal_analyze.forward_env()["CLEO_PROXY_VIDEO"] == "1"
+    modal_analyze.apply_env(env)
+    assert "CLEO_PROXY_VIDEO" not in os.environ
 
 
 def test_rebuilt_errors_classify_like_local_ones():

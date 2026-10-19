@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { diffWords, editWord, hideWords, mergeWords, setBreak, type DocWord, type EditDoc } from "./doc";
-import { DocSaver, PATCH_LIMIT, patchBodies, renameWords, serverIds, type DocSaveState, type PatchBody } from "./docSave";
+import { DocSaver, PATCH_LIMIT, patchBodies, rebaseDoc, renameWords, serverIds, type DocSaveState, type PatchBody } from "./docSave";
 
 function docOf(n: number, text = (i: number) => `word${i}`): EditDoc {
   return {
@@ -390,5 +390,51 @@ describe("serverIds: the server's merge puts every word where the editor has it"
     const d0 = docOf(3);
     const d = editWord(d0, "w0002", "two more");
     expect(serverIds(d0.words, d.words).size).toBe(0);
+  });
+});
+
+describe("rebaseDoc: this device's unsaved edits on top of another device's newer doc (round 3)", () => {
+  const base = docOf(6);
+  const text = (d: EditDoc) => d.words.map((w) => `${w.id}:${w.text}`);
+
+  it("both edits stay: ours where we changed, theirs elsewhere; our deletes go", () => {
+    const mine = { ...base, words: base.words.filter((w) => w.id !== "w0005").map((w) => (w.id === "w0002" ? { ...w, text: "MINE" } : w)) };
+    const theirs = { ...base, rev: 9, words: base.words.map((w) => (w.id === "w0004" ? { ...w, text: "THEIRS" } : w)) };
+    const out = rebaseDoc(base, mine, theirs);
+    expect(text(out)).toEqual(["w0001:word0", "w0002:MINE", "w0003:word2", "w0004:THEIRS", "w0006:word5"]);
+    expect(out.rev).toBe(9);
+  });
+
+  it("the same word edited on both: ours (the newest edit on this screen) wins", () => {
+    const mine = { ...base, words: base.words.map((w) => (w.id === "w0003" ? { ...w, text: "mine" } : w)) };
+    const theirs = { ...base, words: base.words.map((w) => (w.id === "w0003" ? { ...w, text: "theirs" } : w)) };
+    expect(rebaseDoc(base, mine, theirs).words[2].text).toBe("mine");
+  });
+
+  it("a word both added under the same new id: both stay (ours gets a new id)", () => {
+    const add = (d: EditDoc, t: string) => ({ ...d, words: [...d.words.slice(0, 2), { id: "w0002.1", text: t, start: 0.9, end: 0.95 }, ...d.words.slice(2)] });
+    const pool = new Set<string>();
+    const out = rebaseDoc(base, add(base, "ours"), add(base, "theirs"), pool);
+    const texts = out.words.slice(1, 4).map((w) => w.text);
+    expect(texts).toContain("ours");
+    expect(texts).toContain("theirs");
+    const ours = out.words.find((w) => w.text === "ours")!;
+    expect(ours.id).not.toBe("w0002.1");
+    expect(pool.has(ours.id)).toBe(true);
+    expect(new Set(out.words.map((w) => w.id)).size).toBe(out.words.length);
+  });
+
+  it("style / format: ours where we changed them, else theirs", () => {
+    const mine = { ...base, style: { presetId: "clean", overrides: {} } };
+    const theirs = { ...base, format: { aspect: "16:9" } as EditDoc["format"] };
+    const out = rebaseDoc(base, mine, theirs);
+    expect(out.style.presetId).toBe("clean");
+    expect(out.format).toEqual({ aspect: "16:9" });
+    expect(rebaseDoc(base, base, { ...base, style: { presetId: "bold", overrides: {} } }).style.presetId).toBe("bold");
+  });
+
+  it("nothing unsaved here: theirs as it is", () => {
+    const theirs = { ...base, words: base.words.map((w, i) => (i === 0 ? { ...w, text: "x" } : w)) };
+    expect(rebaseDoc(base, base, theirs)).toEqual(theirs);
   });
 });

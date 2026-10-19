@@ -94,6 +94,7 @@ export const itEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "Non puoi tagliare tutto: qualcosa deve restare nel video",
   "editor.cut.alreadyCut": "Già tagliato dal video",
   "editor.conflict.reloaded": "Modificato in un’altra scheda o su un altro dispositivo: questa è la versione più recente",
+  "editor.conflict.restoreLast": "Ripristina la tua ultima modifica",
   "editor.unsaved.restored": "La tua ultima modifica non era arrivata al server: ora è tornata",
   "editor.unsaved.found": "Modifiche non salvate alla timeline dalla tua ultima visita",
   "editor.unsaved.restore": "Ripristina",

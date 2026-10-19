@@ -2552,8 +2552,9 @@ def _store_analysis(job_id: str, res: dict,
                     where: str) -> dict:
     """Upload what the analysis made — the render source (normalized or
     SmartCam output) as mezz.mp4, the editor proxy, the first preview as
-    preview/v1.mp4 — into store `where` (the job's) and return the job
-    fields for them, media_store included ("Saving…", 96–99 %). Raises
+    preview/v1.mp4 (when it made one: pipeline.first_preview_wanted) —
+    into store `where` (the job's) and return the job fields for them,
+    media_store included ("Saving…", 96–99 %). Raises
     MediaTransferError."""
     prefix = media.job_prefix(job_id)
     mezz = Path(res["normalized_path"])
@@ -2709,8 +2710,9 @@ def _run_analyze_inner(job_id: str) -> None:
                 **errors.stage("analyze.done"),
                 progress=100.0,
                 segments=res["segments"],
-                preview_segments=[list(s) for s in res["segments"]],
-                preview_version=1,
+                # preview/v1, unless the editor plays the proxy (then
+                # none until a player falls back: GET /preview-video)
+                **pipeline.first_preview_fields(res["segments"], stored),
                 subtitles=res["subtitles"],
                 duration=res.get("duration", 0.0),
                 cut_ranges=res.get("cut_ranges", []),
@@ -5933,8 +5935,8 @@ def proxy_video(job_id: str, user: User | None = Depends(media_user)):
 
 
 @app.get("/jobs/{job_id}/preview-video")
-def preview_video(job_id: str, v: str | None = None,
-                  user: User | None = Depends(media_user)):
+async def preview_video(job_id: str, v: str | None = None,
+                        user: User | None = Depends(media_user)):
     """The cut preview (segments concatenated, no captions) —
     preview/v{n}.mp4. Range works (FileResponse, or R2 behind the 307).
 
@@ -5949,10 +5951,55 @@ def preview_video(job_id: str, v: str | None = None,
     A preview that doesn't show the stored timeline and isn't being
     built (proxy playback skips the rebuilds, _preview_needed) is built
     now in the background; this request still gets the version asked
-    for (GET /jobs/{id} shows the new one when it is there)."""
-    job = get_owned_job(job_id, user)
-    _build_stored_preview(job)
-    return _preview_response(job, v)
+    for (GET /jobs/{id} shows the new one when it is there) — unless
+    the job has no preview at all (the analysis made none: the editor
+    plays the proxy, pipeline.first_preview_wanted): then the one being
+    built is the first, and this request waits for it and gets it
+    (_await_first_preview), so a player that falls back to the preview
+    has something to play. `?v=0` (the version GET /jobs/{id} names
+    until then) is that first preview, v1, from then on. (Async: a
+    waiting request holds no worker thread.)"""
+    job = await run_in_threadpool(get_owned_job, job_id, user)
+    await run_in_threadpool(_build_stored_preview, job)
+    if (not (job.preview_key or job.preview_path)
+            and _version_of(v) in (None, int(job.preview_version or 0))):
+        job = await _await_first_preview(job)
+    return await run_in_threadpool(_preview_response, job, v)
+
+
+# How long GET /preview-video waits for a job's first preview, and how
+# often it looks.
+_FIRST_PREVIEW_POLL_S = 0.2
+
+
+def _first_preview_wait_s() -> float:
+    """CLEO_FIRST_PREVIEW_WAIT_S (default 120 s; the encode of a 3 min
+    phone clip takes a few seconds)."""
+    return max(0.0, _env_float("CLEO_FIRST_PREVIEW_WAIT_S", 120.0))
+
+
+async def _await_first_preview(job: Job) -> Job:
+    """`job` once it has a preview: one with none at all (its analysis
+    made none) whose player fell back to the preview. Waits while a
+    build is queued or running — starting one when none is and the
+    stored timeline has no preview yet (_build_stored_preview: not
+    after a failure for it) — at most _first_preview_wait_s(). Returns
+    the job as it is then; still without a preview, the answer is 409
+    as before."""
+    end = time.monotonic() + _first_preview_wait_s()
+    cur = job
+    while not (cur.preview_key or cur.preview_path):
+        if not _PREVIEW_BUILDS.get(cur.id) and not await run_in_threadpool(
+                _build_stored_preview, cur):
+            break   # none on its way (it failed, or the job isn't editable)
+        if time.monotonic() >= end:
+            break
+        await asyncio.sleep(_FIRST_PREVIEW_POLL_S)
+        nxt = await run_in_threadpool(store.get, job.id)
+        if nxt is None:
+            raise HTTPException(404, "job not found")
+        cur = nxt
+    return cur
 
 
 def _version_of(v: str | None) -> int | None:
@@ -5967,6 +6014,12 @@ def _preview_response(job: Job, v: str | None):
     cur = int(job.preview_version or 0)
     want = _version_of(v)
     if job.preview_key:
+        if want == 0:
+            # Version 0 is what GET /jobs/{id} names before a job's first
+            # preview exists (its analysis made none: proxy playback). A
+            # player that opened the job then streams the first one, v1:
+            # every range request of that src the same file.
+            want = 1
         if want is None or want == cur:
             # A version's key never changes content: cacheable as such
             # when asked by version (local files; R2 has its 307).

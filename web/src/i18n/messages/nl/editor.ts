@@ -94,6 +94,7 @@ export const nlEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "Alles knippen kan niet – er moet iets in de video blijven",
   "editor.cut.alreadyCut": "Al uit de video geknipt",
   "editor.conflict.reloaded": "Gewijzigd in een ander tabblad of op een ander apparaat – dit is de nieuwste versie",
+  "editor.conflict.restoreLast": "Je laatste wijziging terugzetten",
   "editor.unsaved.restored": "Je laatste wijziging had de server nog niet bereikt – hij is terug",
   "editor.unsaved.found": "Niet-opgeslagen wijzigingen aan de tijdlijn van je vorige bezoek",
   "editor.unsaved.restore": "Herstellen",

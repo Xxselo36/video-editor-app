@@ -94,6 +94,7 @@ export const deEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "Nicht alles schneidbar – etwas muss im Video bleiben",
   "editor.cut.alreadyCut": "Schon aus dem Video geschnitten",
   "editor.conflict.reloaded": "In einem anderen Tab oder auf einem anderen Gerät geändert – das ist der neueste Stand",
+  "editor.conflict.restoreLast": "Deine letzte Änderung wiederherstellen",
   "editor.unsaved.restored": "Deine letzte Änderung war noch nicht gespeichert – sie ist wieder da",
   "editor.unsaved.found": "Ungespeicherte Änderungen an der Zeitleiste von deinem letzten Besuch",
   "editor.unsaved.restore": "Wiederherstellen",

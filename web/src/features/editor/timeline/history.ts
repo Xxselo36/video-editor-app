@@ -130,27 +130,37 @@ export function useTimelineHistory(
     setState(st);
   };
 
+  // The clips a step starts from: the last commit's until a render has
+  // them (a commit in a transition, or two before the next render — the
+  // second must not be diffed against the clips of the first's render).
+  const pending = useRef<{ base: EditorSeg[]; next: EditorSeg[] } | null>(null);
+  const present = () => (pending.current && pending.current.base === segments ? pending.current.next : segments);
+  const apply = (next: EditorSeg[]) => {
+    pending.current = { base: segments, next };
+    onCommit(next);
+  };
+
   // `coalesce` groups rapid changes of the same control (a slider being
   // dragged fires dozens of changes) into ONE undo step.
   const commit = (next: EditorSeg[], coalesce?: string) => {
-    const r = tlCommit(stRef.current, segments, next, coalesce, Date.now());
+    const r = tlCommit(stRef.current, present(), next, coalesce, Date.now());
     if (!r.apply) return false;
     put(r.st);
-    onCommit(next);
+    apply(next);
     return r.added;
   };
   const undo = () => {
-    const r = tlUndo(stRef.current, segments);
+    const r = tlUndo(stRef.current, present());
     if (!r) return;
     track("undo", { area: "timeline" });
     put(r.st);
-    onCommit(r.to);
+    apply(r.to);
   };
   const redo = () => {
-    const r = tlRedo(stRef.current, segments);
+    const r = tlRedo(stRef.current, present());
     if (!r) return;
     put(r.st);
-    onCommit(r.to);
+    apply(r.to);
   };
 
   const reset = () => put(EMPTY_TL_HISTORY);

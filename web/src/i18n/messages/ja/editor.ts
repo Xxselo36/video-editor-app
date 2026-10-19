@@ -94,6 +94,7 @@ export const jaEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "すべてはカットできません。動画に何か残す必要があります",
   "editor.cut.alreadyCut": "すでに動画からカットされています",
   "editor.conflict.reloaded": "別のタブまたは別の端末で変更されました。最新の状態を表示しています",
+  "editor.conflict.restoreLast": "最後の変更を元に戻す",
   "editor.unsaved.restored": "前回の変更はサーバーに届いていませんでした。元に戻しました",
   "editor.unsaved.found": "前回の未保存のタイムライン変更があります",
   "editor.unsaved.restore": "復元",

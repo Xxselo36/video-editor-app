@@ -94,6 +94,7 @@ export const trEditor: Partial<Record<EditorKey, string>> = {
   "editor.cut.everything": "Hepsi kesilemez – videoda bir şey kalmalı",
   "editor.cut.alreadyCut": "Zaten videodan kesildi",
   "editor.conflict.reloaded": "Başka bir sekmede veya cihazda değiştirildi – bu en yeni sürüm",
+  "editor.conflict.restoreLast": "Son değişikliğini geri getir",
   "editor.unsaved.restored": "Son değişikliğin sunucuya ulaşmamıştı – geri geldi",
   "editor.unsaved.found": "Son ziyaretinden kaydedilmemiş zaman çizelgesi değişiklikleri",
   "editor.unsaved.restore": "Geri yükle",
