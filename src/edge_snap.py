@@ -155,6 +155,48 @@ def snap_removals(ranges: Iterable[tuple[float, float]], words: Iterable[dict],
             for a, b in ranges]
 
 
+# word_envelope: a word's middle, its edges, and no word at all (dB).
+_WORD_PEAK_DB = 0.0
+_WORD_EDGE_DB = -60.0
+
+
+def word_envelope(words: Iterable[dict], duration: float | None = None,
+                  rate: int = RATE):
+    """A stand-in envelope from word times alone, for cuts made without
+    the audio (POST /recompute-scenes): loudest at each word's middle,
+    falling to _WORD_EDGE_DB at its edges, FLOOR_DB between words — so
+    snap_removals moves an edge into the gap between two words, or onto
+    the boundary of two touching ones, never into a word."""
+    import numpy as np
+    spans = []
+    for w in words or ():
+        try:
+            s, e = float(w["start"]), float(w["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(s) and math.isfinite(e) and e > s:
+            spans.append((s, e))
+    end = max([duration or 0.0] + [e for _s, e in spans])
+    n = int(math.ceil(end * rate)) + 1
+    env = np.full(n, FLOOR_DB)
+    for s, e in spans:
+        a, b = int(math.floor(s * rate)), min(n, int(math.ceil(e * rate)))
+        c = (np.arange(a, b) + 0.5) / rate
+        mid, half = (s + e) / 2, (e - s) / 2
+        level = _WORD_EDGE_DB + (_WORD_PEAK_DB - _WORD_EDGE_DB) * np.clip(
+            1.0 - np.abs(c - mid) / half, 0.0, 1.0)
+        env[a:b] = np.maximum(env[a:b], level)
+    return env
+
+
+def peaks_envelope(values: Sequence[int], floor_db: float = -96.0):
+    """backend/audio_analysis.py's peaks (0..127 per 10 ms frame, 0 =
+    floor_db) as dB frames for snap_removals."""
+    import numpy as np
+    v = np.asarray(values, dtype=np.float64)
+    return v * (-floor_db / 127.0) + floor_db
+
+
 def merge_touching(ranges: Iterable[tuple[float, float]], gap: float = 1e-6
                    ) -> list[tuple[float, float]]:
     """Sorted ranges with overlapping or touching ones merged (adjacent

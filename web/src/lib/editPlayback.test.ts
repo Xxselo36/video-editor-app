@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cutRange } from "@/features/editor/state/cuts";
 import { buildPlan, EditPlayer, fadeLevel, locate, nextInSource, seekRampLevel, type PlaySeg } from "@/lib/editPlayback";
 
@@ -234,5 +234,153 @@ describe("EditPlayer.setPlan keeps the playhead through a cut earlier in its cli
     );
     expect(b.seeks).toEqual([10]);
     q.destroy();
+  });
+});
+
+describe("EditPlayer at a clip's end (wordcuts-10)", () => {
+  /** A playing <video> on the fake clock: time runs while not paused or seeking; a seek lands 20 ms later. */
+  function clockVideo(start: number, opts: { volumeReadOnly?: boolean } = {}) {
+    const on = new Map<string, Set<() => void>>();
+    const emit = (ev: string) => on.get(ev)?.forEach((f) => f());
+    let pos = start;
+    let since = Date.now();
+    let paused = false;
+    let seeking = false;
+    let vol = 1;
+    const log: { at: number; type: "seek" | "volume" | "muted"; value: number | boolean; pos: number }[] = [];
+    const now = () => (paused || seeking ? pos : pos + (Date.now() - since) / 1000);
+    let muted = false;
+    const v = {
+      get paused() {
+        return paused;
+      },
+      get seeking() {
+        return seeking;
+      },
+      ended: false,
+      readyState: 4,
+      playbackRate: 1,
+      get volume() {
+        return vol;
+      },
+      set volume(x: number) {
+        log.push({ at: Date.now(), type: "volume", value: x, pos: now() });
+        if (!opts.volumeReadOnly) vol = x;
+      },
+      get muted() {
+        return muted;
+      },
+      set muted(x: boolean) {
+        log.push({ at: Date.now(), type: "muted", value: x, pos: now() });
+        muted = x;
+      },
+      get currentTime() {
+        return now();
+      },
+      set currentTime(x: number) {
+        log.push({ at: Date.now(), type: "seek", value: x, pos: now() });
+        pos = x;
+        seeking = true;
+        emit("seeking");
+        setTimeout(() => {
+          seeking = false;
+          since = Date.now();
+          emit("seeked");
+        }, 20);
+      },
+      pause() {
+        pos = now();
+        paused = true;
+        emit("pause");
+      },
+      addEventListener(ev: string, fn: () => void) {
+        if (!on.has(ev)) on.set(ev, new Set());
+        on.get(ev)!.add(fn);
+      },
+      removeEventListener(ev: string, fn: () => void) {
+        on.get(ev)?.delete(fn);
+      },
+    };
+    return { v: v as unknown as HTMLVideoElement, log, emit };
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => setTimeout(() => cb(performance.now()), 16) as unknown as number);
+    vi.stubGlobal("cancelAnimationFrame", (h: number) => clearTimeout(h));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const plan = () =>
+    buildPlan(
+      [
+        { id: "A", start: 0, end: 2 },
+        { id: "B", start: 5, end: 7 },
+      ],
+      10,
+    );
+
+  it("jumps at the end, not a display frame (33–50 ms) early", async () => {
+    const { v, log } = clockVideo(1.5);
+    const p = new EditPlayer(v, { seekRampMs: 15 });
+    p.setPlan(plan()); // starts at clip A's start
+    await vi.advanceTimersByTimeAsync(2300);
+    const jump = log.find((e) => e.type === "seek" && e.value === 5)!;
+    expect(jump).toBeTruthy();
+    // the clip played to (just about) its end: ≤ 5 ms of it skipped, not 33–50 ms
+    expect(jump.pos).toBeGreaterThan(2 - 0.005);
+    expect(jump.pos).toBeLessThanOrEqual(2 + 1e-9);
+    p.destroy();
+  });
+
+  it("a short gain ramp into the end and out of the landing: no mute", async () => {
+    const { v, log } = clockVideo(1.5);
+    const p = new EditPlayer(v, { seekRampMs: 15 });
+    p.setPlan(plan());
+    await vi.advanceTimersByTimeAsync(2300);
+    expect(log.some((e) => e.type === "muted" && e.value === true)).toBe(false);
+    const jumpAt = log.find((e) => e.type === "seek" && e.value === 5)!.at;
+    const before = log.filter((e) => e.type === "volume" && e.at <= jumpAt);
+    // full volume until the ramp (the last 15 ms), a step or more down in it
+    // (after the first landing: the start of clip A)
+    expect(before.filter((e) => e.pos > 1 && e.pos < 2 - 0.02).every((e) => e.value === 1)).toBe(true);
+    expect(before.some((e) => (e.value as number) > 0 && (e.value as number) < 1)).toBe(true);
+    // back up after the landing
+    const after = log.filter((e) => e.type === "volume" && e.at > jumpAt);
+    expect(after.at(-1)?.value).toBe(1);
+    p.destroy();
+  });
+
+  it("iOS (volume read-only): never muted at a join, the jump right at the end", async () => {
+    const { v, log } = clockVideo(1.5, { volumeReadOnly: true });
+    const p = new EditPlayer(v, { seekRampMs: 15 });
+    p.setPlan(plan());
+    await vi.advanceTimersByTimeAsync(2300);
+    expect(log.some((e) => e.type === "muted")).toBe(false);
+    const jump = log.find((e) => e.type === "seek" && e.value === 5)!;
+    expect(jump.pos).toBeGreaterThan(2 - 0.005);
+    p.destroy();
+  });
+
+  it("scrub shows a source time the plan cuts and leaves it there until let go", async () => {
+    const { v, log } = clockVideo(1.5);
+    const p = new EditPlayer(v, { seekRampMs: 15 });
+    p.setPlan(plan());
+    p.scrub(3.2); // inside the cut 2–5: the frame at a trim edge being dragged
+    expect(v.paused).toBe(true);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(v.currentTime).toBeCloseTo(3.2, 6);
+    log.length = 0;
+    p.scrub(3.4);
+    p.scrub(3.5); // while a seek runs: only the newest goes after it
+    p.scrub(3.6);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(v.currentTime).toBeCloseTo(3.6, 6);
+    expect(log.filter((e) => e.type === "seek").map((e) => e.value)).toEqual([3.4, 3.6]);
+    p.scrub(null);
+    p.destroy();
   });
 });

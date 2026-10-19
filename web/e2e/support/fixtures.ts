@@ -94,6 +94,8 @@ export type StubJob = {
   error: string | null;
   has_proxy?: boolean;
   edit_segments: SegmentJson[];
+  /** The timeline's revision (the /edit-segments revision rule). */
+  edit_rev?: number;
   preview_segments: [number, number][];
   preview_version: number;
   outputs: string[];

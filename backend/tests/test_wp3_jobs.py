@@ -495,6 +495,9 @@ def test_legacy_local_jobs_are_still_served(client, r2, tmp_path):
 
 def test_preview_rebuild_uses_the_proxy_cache_and_a_new_key(client, r2,
                                                           monkeypatch):
+    # The editor plays the server preview (no proxy playback): every
+    # save rebuilds it — from the proxy, through the cache.
+    monkeypatch.delenv("CLEO_PROXY_VIDEO")
     job = store.create(None, {})
     p = f"jobs/{job.id}/"
     r2.put_object(Bucket=storage.bucket(), Key=p + "proxy.mp4", Body=b"PROXY")

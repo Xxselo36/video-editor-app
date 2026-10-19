@@ -549,6 +549,19 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
 
     M._rebuild_preview = slow_rebuild
 
+    real_has_proxy = J.Job._has_proxy
+
+    def has_proxy(self) -> bool:
+        # What the editor plays decides whether saves rebuild the server
+        # preview (main._preview_needed): the seed's proxy mode.
+        mode = cfg(self.id).get("proxy")
+        if mode in ("off", "probe-none"):
+            return False
+        if mode in ("on", "probe"):
+            return True
+        return real_has_proxy(self)
+
+    J.Job._has_proxy = has_proxy
     real_to_dict = J.Job.to_dict
 
     def to_dict(self, **kw: Any) -> dict[str, Any]:

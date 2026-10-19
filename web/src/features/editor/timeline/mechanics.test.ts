@@ -5,10 +5,13 @@ import {
   exactFps,
   frameEdge,
   frameTimes,
+  MIN_CLIP_S,
   moveSeg,
   playheadCutOf,
+  releasedTrim,
   roundToStep,
   rulerMarks,
+  snapRadiusS,
   snapTrimToFrame,
   tickShown,
   trimFrameGrid,
@@ -19,6 +22,7 @@ import {
   stripDuration,
   stripLayout,
   trimBounds,
+  trimRemoves,
   trimTo,
   zoomLimits,
   type EditorSeg,
@@ -264,11 +268,18 @@ describe("the trim flow round (owner: length changes must feel direct)", () => {
       [4, 4],
       [8, 4],
     ]);
-    // the end handle was already right: the end edge is at the finger
+    // the end handle: the end edge is at the finger …
     const end = trimTo(three, "b", "end", 7.5, bounds);
     const lay = stripLayout(end);
     const b = lay.find((x) => x.seg.id === "b")!;
     expect(b.left + b.width).toBeCloseTo(7.5, 9);
+    // … and drawn as an end trim, clip c stays where it was (drag-12: one clip re-drawn per move)
+    const held = stripLayout(end, { id: "b", start0: 6, end0: 10, mode: "end" });
+    expect(held.map((x) => [x.seg.id, x.left, x.width])).toEqual([
+      ["a", 0, 4],
+      ["b", 4, 3.5],
+      ["c", 8, 4],
+    ]);
   });
 
   it("a long edit opens showing its first minute; a short one at Fit (owner request)", () => {
@@ -282,3 +293,49 @@ describe("the trim flow round (owner: length changes must feel direct)", () => {
   });
 });
 
+
+describe("round 2: trims that remove, a zoom-scaled snap (state-3, drag-13)", () => {
+  const three: EditorSeg[] = [
+    { id: "a", start: 0, end: 2 },
+    { id: "b", start: 3, end: 6 },
+    { id: "c", start: 7, end: 9 },
+  ];
+
+  it("the neighbour snap is a few px on screen, not a fixed 0.3 s", () => {
+    expect(snapRadiusS(400)).toBeCloseTo(0.02);
+    expect(snapRadiusS(10)).toBe(0.3); // capped
+    const bounds = trimBounds(three, "b", 9);
+    // 400 px/s, b's start pulled back to source 2.25 (strip 1.25): 0.25 s of
+    // the 1 s gap before it stays (the fixed 0.3 s snapped it onto a's end)
+    expect(trimTo(three, "b", "start", 1.25, bounds, { snapS: snapRadiusS(400) })[1].start).toBeCloseTo(2.25);
+    expect(trimTo(three, "b", "start", 1.25, bounds)[1].start).toBe(2);
+    // within a few px of the neighbour's footage: onto it
+    expect(trimTo(three, "b", "start", 1.01, bounds, { snapS: snapRadiusS(400) })[1].start).toBe(2);
+  });
+
+  it("dragged all the way, the clip goes — one commit, no 0.1 s blip", () => {
+    const bounds = trimBounds(three, "b", 9);
+    // the v2 dock lets it shrink to nothing while dragging
+    const dragged = trimToStep(three, "b", "end", 2 + 0.05, bounds, { minLen: 0 });
+    expect(dragged[1].end - dragged[1].start).toBeLessThan(MIN_CLIP_S);
+    expect(trimRemoves(dragged, "b")).toBe(true);
+    expect(releasedTrim(dragged, "b", "end").map((x) => x.id)).toEqual(["a", "c"]);
+    // past the other edge: the same
+    const past = trimToStep(three, "b", "start", 2 + 9, bounds, { minLen: 0 });
+    expect(releasedTrim(past, "b", "start").map((x) => x.id)).toEqual(["a", "c"]);
+    // a clip left at MIN_CLIP_S or more stays as it is
+    const ok = trimToStep(three, "b", "end", 2 + 0.2, bounds, { minLen: 0 });
+    expect(releasedTrim(ok, "b", "end")).toBe(ok);
+    // the last clip never goes: it stays at MIN_CLIP_S
+    const only: EditorSeg[] = [{ id: "x", start: 1, end: 5 }];
+    const tiny = trimToStep(only, "x", "end", 0.02, trimBounds(only, "x", 9), { minLen: 0 });
+    const kept = releasedTrim(tiny, "x", "end");
+    expect(kept).toHaveLength(1);
+    expect(kept[0].end - kept[0].start).toBeCloseTo(MIN_CLIP_S);
+  });
+
+  it("a split never leaves a piece under MIN_CLIP_S (v2)", () => {
+    expect(splittableIndex(three, 3.12, MIN_CLIP_S)).toBe(-1);
+    expect(splittableIndex(three, 3.16, MIN_CLIP_S)).toBe(1);
+  });
+});

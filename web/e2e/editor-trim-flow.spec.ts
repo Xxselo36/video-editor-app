@@ -198,11 +198,17 @@ test.describe("editor v2: the trim flow (owner report)", TAG, () => {
     // the strip scrolled along (it stopped at the view's edge before)
     expect(await strip.evaluate((el) => el.scrollLeft)).toBeLessThan(sl1 - 30);
     await p.up();
-    // shorter than the pointer alone could make it in the view
+    // shorter than the pointer alone could make it in the view — or, on a
+    // phone where the strip scrolled past its start, gone (state-3)
     const total = before.reduce((a, [s0, e0]) => a + e0 - s0, 0);
     const pxPerS = (await strip.evaluate((el) => el.scrollWidth)) / total;
     const dragged = (h.x - (view.x + 6)) / pxPerS;
-    await expect.poll(async () => (await stub.timeline(job.id))[4][1], SAVED).toBeLessThan(before[4][1] - dragged - 0.1);
+    await expect
+      .poll(async () => {
+        const t = await stub.timeline(job.id);
+        return t.length === before.length - 1 ? t[4][0] === before[5][0] : t[4][1] < before[4][1] - dragged - 0.1;
+      }, SAVED)
+      .toBe(true);
   });
 
   test("a second trim reaches the server once the first is stored, not after its preview re-encode; Saved means stored", async ({ page, stub }) => {
@@ -356,20 +362,42 @@ test.describe("editor v2: the trim flow (owner report)", TAG, () => {
     await expect(page.getByTestId("preview-updating")).toBeHidden({ timeout: 10_000 });
   });
 
-  test("at Fit an end trim's edge stays where it was let go (the zoom holds, no re-fit under the finger)", async ({ page, stub }) => {
+  test("at Fit an end trim's edge stays where it was let go, then the strip settles to fill the dock (F7)", async ({ page, stub }) => {
     const job = await stub.seed("review_speech");
     await open(page, job.id);
-    const clip = await select(page, 1);
+    const strip = page.getByTestId("timeline-scroll");
+    const clip = await select(page, 4);
     const handle = clip.getByTestId("clip-trim-end");
     const h = center((await handle.boundingBox())!);
     const p = await press(page, h.x, h.y);
-    await p.to(h.x - 80);
-    const at = (await settledX(handle, 5)) + (await handle.boundingBox())!.width / 2;
+    await p.to(h.x - 50);
+    await page.waitForTimeout(150);
+    const b0 = (await clip.boundingBox())!;
+    const at = b0.x + b0.width;
+    // the clip's right edge two frames after the release
+    await page.evaluate(() => {
+      const w = window as unknown as { __edgeAfterUp: number | null };
+      w.__edgeAfterUp = null;
+      window.addEventListener(
+        "pointerup",
+        () =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => (w.__edgeAfterUp = document.querySelector("[data-selected=true]")!.getBoundingClientRect().right)),
+          ),
+        { capture: true, once: true },
+      );
+    });
     await p.up();
-    await page.waitForTimeout(300);
-    const after = (await settledX(handle)) + (await handle.boundingBox())!.width / 2;
-    // it jumped ~29 px when the strip re-fitted to the shorter edit
-    expect(Math.abs(after - at)).toBeLessThanOrEqual(3);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __edgeAfterUp: number | null }).__edgeAfterUp)).not.toBeNull();
+    const after = await page.evaluate(() => (window as unknown as { __edgeAfterUp: number }).__edgeAfterUp);
+    // it jumped ~29 px when the strip re-fitted under the finger (round 1 held the zoom instead: the dock half empty)
+    expect(Math.abs(after - at)).toBeLessThanOrEqual(2);
+    // then it settles: Fit again, the strip fills the dock
+    await expect
+      .poll(() => strip.evaluate((el) => Math.abs((el.firstElementChild as HTMLElement).getBoundingClientRect().width - el.clientWidth)), {
+        timeout: 3_000,
+      })
+      .toBeLessThanOrEqual(1);
   });
 
   test("paused, a trim updates the player clock at once", async ({ page, stub }) => {

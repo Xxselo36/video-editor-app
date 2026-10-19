@@ -19,8 +19,11 @@ import {
   restoreWord,
   restoreWords,
   LONG_WORD_S,
+  planCutWords,
   seamIsCut,
   textMarks,
+  tidy,
+  wordSafeEdge,
   type Piece,
 } from "./cuts";
 import type { DocWord } from "./doc";
@@ -430,9 +433,13 @@ describe("the owner's flow round: trims, touching words, stretched words", () =>
     const out = restoreRange(order, 12, 18, 40);
     expect(out.map((x) => x.id)).toEqual(["C", "A", out[2].id, "B"]);
     expect(spans(out)[2]).toEqual([12, 18]);
-    // before every clip in the source: before its source successor
-    const first = restoreRange(order, 0.3 - 0.3, 0, 40);
-    expect(first).toBe(order);
+    // footage before every clip in the source (nothing plays before it):
+    // right before its source successor — here A, not at the list's start
+    const late = [seg("C", 30, 40), seg("A", 5, 10), seg("B", 20, 25)];
+    const first = restoreRange(late, 1, 4, 40);
+    expect(first.map((x) => x.id)).toEqual(["C", first[1].id, "A", "B"]);
+    expect(spans(first)[1]).toEqual([1, 4]);
+    expect(first[1].id).not.toMatch(/^[ABC]$/);
   });
 });
 
@@ -598,5 +605,90 @@ describe("textMarks", () => {
     let out = clips;
     for (const r of chip.ranges) out = restoreRange(out, r.start, r.end, D);
     expect(spans(out)[0]).toEqual([0.45, 2]);
+  });
+});
+
+describe("round 2: cuts never take a kept word; refusals say why; trims go between words", () => {
+  const mid = (w: DocWord) => (w.start + w.end) / 2;
+  const playsAt = (segs: EditorSeg[], t: number) => segs.some((x) => !x.disabled && x.start <= t && x.end >= t);
+  // "so" 5.0–5.3 already cut; "a" 5.36–5.5 (short) plays; "big" 5.52–5.9 is cut next
+  const words: DocWord[] = [
+    { id: "w0", text: "so", start: 5.0, end: 5.3 },
+    { id: "w1", text: "a", start: 5.36, end: 5.5 },
+    { id: "w2", text: "big", start: 5.52, end: 5.9 },
+    { id: "w3", text: "one", start: 6.2, end: 6.6 },
+  ];
+
+  it("cutting a word never removes the short kept word next to it (wordcuts-7)", () => {
+    const clips = [seg("a", 0, 5.0), seg("b", 5.33, 10)];
+    const out = cutWords(clips, words, 2, 2, 10);
+    expect(out).not.toBe(clips);
+    // "a" (5.36–5.5) is left as a short piece between two removals: it stays
+    expect(playsAt(out, mid(words[1]))).toBe(true);
+    expect(playsAt(out, mid(words[2]))).toBe(false);
+    expect(playsAt(out, mid(words[3]))).toBe(true);
+  });
+
+  it("tidy drops only the slivers an op made, never a clip that was there as it is (c11-island)", () => {
+    // a user's short clip 7.0–7.2 between two removals: a cut next to the
+    // removal after it leaves it alone
+    const clips = [seg("a", 0, 6.8), seg("u", 7.0, 7.2), seg("b", 7.6, 12)];
+    const out = cutRange(clips, 7.6, 8.0, 12);
+    expect(spans(out)).toEqual([
+      [0, 6.8],
+      [7, 7.2],
+      [8, 12],
+    ]);
+    // a piece the op cut off and that holds no word still goes
+    expect(spans(tidy([seg("a", 0, 5), seg("p", 5.2, 5.35), seg("b", 6, 9)], 5.35, 6, 9, [seg("a", 0, 5), seg("p", 5.2, 9)]))).toEqual([
+      [0, 5],
+      [6, 9],
+    ]);
+  });
+
+  it("a cut that can't be made says why (F9)", () => {
+    const one = [seg("a", 0, 10)];
+    // one short word between touching neighbours as short as it: no room
+    const tiny: DocWord[] = [
+      { id: "t1", text: "a", start: 5.0, end: 5.04 },
+      { id: "t2", text: "b", start: 5.04, end: 5.08 },
+      { id: "t3", text: "c", start: 5.08, end: 5.12 },
+    ];
+    expect(planCutWords(one, tiny, 1, 1, 10)).toEqual({ segs: one, refusal: "too_short" });
+    // everything that plays: nothing would be left
+    const all: DocWord[] = [{ id: "x", text: "all", start: 0, end: 10 }];
+    expect(planCutWords([seg("a", 2, 8)], all, 0, 0, 10).refusal).toBe("everything");
+    // nothing of it plays any more
+    const gone = [seg("a", 0, 5), seg("b", 6, 10)];
+    expect(planCutWords(gone, [{ id: "g", text: "gone", start: 5.2, end: 5.8 }], 0, 0, 10).refusal).toBe("already_cut");
+    // a normal cut: no refusal
+    expect(planCutWords(one, words, 3, 3, 10).refusal).toBeNull();
+  });
+
+  it("a released trim edge inside a word goes to the gap next to it, within the radius (drag-9)", () => {
+    // inside "big" (5.52–5.9), nearer its end: after it, in the gap to "one"
+    const after = wordSafeEdge(5.8, words, 0.25);
+    expect(after).toBeGreaterThanOrEqual(5.9);
+    expect(after).toBeLessThanOrEqual(6.2);
+    // nearer its start: the join with "a" (5.5–5.52), never into "a"'s middle
+    const before = wordSafeEdge(5.6, words, 0.25);
+    expect(before).toBeLessThanOrEqual(5.52);
+    expect(before).toBeGreaterThan(mid(words[1]));
+    // between words: exact
+    expect(wordSafeEdge(6.0, words, 0.25)).toBe(6.0);
+    // zoomed in (a small radius): the user's spot stays
+    expect(wordSafeEdge(5.7, words, 0.01)).toBe(5.7);
+    // a long (stretched) word: its middle is the pause, exact; its head is sound
+    const long: DocWord[] = [{ id: "l", text: "long", start: 10, end: 14 }];
+    expect(wordSafeEdge(12, long, 0.25)).toBe(12);
+    expect(wordSafeEdge(10.3, long, 0.25)).toBeGreaterThanOrEqual(10.4 - 1e-9);
+  });
+
+  it("with peaks the edge lands on the quietest moment of the gap", () => {
+    const peaks = new Uint8Array(1000).fill(60);
+    // the gap 5.9–6.2 is quietest at 6.005 (frame 600, within the ±120 ms snap of its edge)
+    for (let i = 591; i < 620; i++) peaks[i] = 20;
+    peaks[600] = 2;
+    expect(wordSafeEdge(5.85, words, 0.25, peaks)).toBeCloseTo(6.005, 3);
   });
 });

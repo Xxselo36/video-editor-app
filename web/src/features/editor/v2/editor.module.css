@@ -1155,6 +1155,12 @@
   background-size: var(--film-size);
   background-repeat: no-repeat;
 }
+/* nothing to clip (no frames in view, no fades): no rounded overflow clip
+   either — on the owner's 103 clips every one of them was re-layerized
+   on each trim move (drag-12) */
+.clipBody:empty {
+  overflow: visible;
+}
 .clipRing {
   position: absolute;
   inset: 0;
@@ -1214,11 +1220,13 @@
 /* a seam's hit area: left / width inline (TimelineDock seamReach: up to
    16 px each side, less next to a short clip); --sl = where the cut is */
 .seam {
+  /* no z-index: after the clips in the DOM, a seam paints over them anyway
+     (and is no stacking context of its own: a trim move re-layerizes
+     ~100 of them less, drag-12) */
   position: absolute;
   top: 0;
   bottom: 0;
   width: 32px;
-  z-index: 1;
   cursor: pointer;
 }
 .seamLine {
@@ -1342,6 +1350,12 @@
   justify-content: space-between;
   margin: 18px 16px 0;
   flex-shrink: 0;
+}
+/* where the clip tools and the zoom buttons don't fit in one row (a
+   narrow phone, a long language): the tools as icons (drag-6); their
+   names stay their labels */
+.phoneCtx[data-compact] .toolLabel {
+  display: none;
 }
 @container (max-height: 239px) {
   .phoneCtx {
@@ -2012,6 +2026,17 @@
   color: var(--ed-text-1);
   white-space: nowrap;
   pointer-events: none;
+}
+/* state-3: a trim made the clip too short to stay — it goes on release */
+.trimReadout[data-removing] {
+  color: var(--ed-removed);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ed-removed) 45%, transparent);
+}
+.clip[data-removing] .clipBody {
+  opacity: 0.35;
+}
+.clip[data-removing][data-selected="true"] {
+  box-shadow: 0 0 0 2px var(--ed-removed);
 }
 .frameLine {
   position: absolute;

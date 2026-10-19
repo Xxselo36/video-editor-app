@@ -17,11 +17,17 @@
  * the next clip: iOS Safari only lets a media element start unmuted
  * playback from a user gesture (the swap happens mid-playback, without
  * one) and pauses other elements when one starts playing audio; two
- * 720p decoders also double memory and battery on phones. So the jump
- * is started about one frame early (≥ one 30 fps frame / 1.5 display
- * frames of wall time, ≤ 50 ms), which hides the seek on Android Chrome
- * and desktop and keeps it short on iOS. The proxy's keyframe interval
- * bounds the seek cost there (≈ 1 s GOP recommended).
+ * 720p decoders also double memory and battery on phones. The jump is
+ * scheduled ahead (wordcuts-10): from BOUNDARY_AHEAD_S before a clip's
+ * end a timer fires the seek right at the end (it used to start one
+ * display frame early, 33–50 ms, on frame ticks: the tail of every
+ * clip's last word was never heard). Where the element's volume is
+ * writable a short gain ramp (rampMs) runs down into the end and up
+ * after the landing — a ramp, never a mute; iOS Safari (volume read-only)
+ * gets the exact timing only: the cut edges sit on the quietest moment
+ * (state/cuts.ts snapEdge), so jumping right there doesn't click where
+ * jumping 40 ms early, inside the word, did. The proxy's keyframe
+ * interval bounds the seek cost (≈ 1 s GOP recommended).
  * Clips that continue the same footage (a split) need no seek at all.
  *
  * Times are source seconds throughout; "timeline" order is the order of
@@ -56,6 +62,10 @@ const num = (v: unknown, fallback: number) =>
 // A reported position this close before a clip still counts as in it
 // (browsers may report a seek target a hair early).
 const EDGE = 0.02;
+/** A clip end this close (output s) arms the boundary timer. */
+export const BOUNDARY_AHEAD_S = 0.25;
+/** The jump goes this long before the end (output s): the timer's own lateness. */
+export const JUMP_EARLY_S = 0.002;
 
 /** The clips that play, in timeline order, with effects clamped like
  *  the backend does (only clips the save would keep). */
@@ -194,8 +204,6 @@ export class EditPlayer {
   // Stopped at the end of the timeline: the next play starts over.
   private atEnd = false;
   private raf = 0;
-  private lastFrame = 0;
-  private frameDt = 1 / 60;
   private ourSeek: number | null = null;
   // What the user set in the native controls, kept apart from what the
   // clip effects set on the element.
@@ -215,6 +223,12 @@ export class EditPlayer {
   /** When that jump landed (performance.now), while the gain ramps up. */
   private landedAt: number | null = null;
   private rampTimers: ReturnType<typeof setTimeout>[] = [];
+  /** The boundary timers of the playing clip's end (the clip index they are for). */
+  private boundaryFor = -1;
+  private boundaryTimers: ReturnType<typeof setTimeout>[] = [];
+  /** A trim edge is shown (drag-9): the plan doesn't move the element. */
+  private scrubbing = false;
+  private scrubWant: number | null = null;
 
   constructor(video: HTMLVideoElement, opts: EditPlayerOptions = {}) {
     this.v = video;
@@ -244,6 +258,7 @@ export class EditPlayer {
     this.off();
     this.stopLoop();
     this.rampTimers.forEach(clearTimeout);
+    this.disarm();
     this.setFade(0);
     const v = this.v;
     try {
@@ -337,13 +352,95 @@ export class EditPlayer {
     return true;
   }
 
+  /**
+   * Show source time t as it is, edit or not (drag-9: the frame at a trim
+   * edge while it is dragged, also footage the edit cuts): pauses, seeks
+   * there — one seek at a time, the newest wins — and the plan leaves the
+   * element alone until `scrub(null)`.
+   */
+  scrub(t: number | null): void {
+    if (t === null) {
+      this.scrubbing = false;
+      this.scrubWant = null;
+      return;
+    }
+    this.scrubbing = true;
+    this.disarm();
+    if (!this.v.paused) this.v.pause();
+    if (this.v.seeking) {
+      this.scrubWant = t;
+      return;
+    }
+    this.ourSeek = t;
+    try {
+      this.v.currentTime = t;
+    } catch {
+      /* no media yet */
+    }
+  }
+
   // ── internals ────────────────────────────────────────────────────
+
+  private disarm(): void {
+    this.boundaryTimers.forEach(clearTimeout);
+    this.boundaryTimers = [];
+    this.boundaryFor = -1;
+  }
+
+  /**
+   * The playing clip ends in under BOUNDARY_AHEAD_S (output s): timers for
+   * its end — the gain ramp down (volume writable) and the jump itself
+   * JUMP_EARLY_S before the end, re-checked against the element's clock
+   * when they fire. tick() still jumps a late one.
+   */
+  private arm(i: number, left: number): void {
+    if (this.boundaryFor === i) return;
+    this.disarm();
+    this.boundaryFor = i;
+    const ms = (x: number) => Math.max(0, x * 1000);
+    if (this.rampMs > 0 && this.volumeWritable) {
+      for (const k of [3, 2, 1]) {
+        this.boundaryTimers.push(
+          setTimeout(() => {
+            const s = this.plan[this.idx];
+            if (this.idx === i && s && !this.v.paused) this.applyGain(s, this.v.currentTime);
+          }, ms(left - (this.rampMs / 1000) * (k / 3))),
+        );
+      }
+    }
+    const fire = () => {
+      if (this.idx !== i || this.v.paused || this.v.seeking || this.atEnd || this.scrubbing) return;
+      const seg = this.plan[i];
+      if (!seg) return;
+      const rate = this.v.playbackRate > 0 ? this.v.playbackRate : 1;
+      const rest = (seg.end - this.v.currentTime) / rate;
+      // early (the clock lags the timer): wait for the rest
+      if (rest > JUMP_EARLY_S + 0.002) {
+        this.boundaryTimers.push(setTimeout(fire, ms(rest - JUMP_EARLY_S)));
+        return;
+      }
+      this.boundary(i);
+    };
+    this.boundaryTimers.push(setTimeout(fire, ms(left - JUMP_EARLY_S)));
+  }
+
+  /** Clip i ended: on to the next clip (a seek unless it continues the footage), or the end. */
+  private boundary(i: number): void {
+    this.disarm();
+    const seg = this.plan[i];
+    const next = this.plan[i + 1];
+    const joined = !!next && !!seg && Math.abs(next.start - seg.end) < EDGE;
+    if (next) this.enter(i + 1, joined ? null : next.start);
+    else this.finish();
+  }
+
 
   private enter(j: number, seekTo: number | null): void {
     // A speed picked in the native controls whose ratechange hasn't
     // fired yet: take it before the clip's speed overwrites it.
     if (Math.abs(this.v.playbackRate - this.applied.rate) > 1e-3) this.onRate();
     const seg = this.plan[j];
+    if (j !== this.boundaryFor || seekTo !== null) this.disarm();
     this.idx = j;
     if (this.curId !== seg.id) {
       this.curId = seg.id;
@@ -387,7 +484,8 @@ export class EditPlayer {
 
   private tick = (): void => {
     const plan = this.plan;
-    if (!plan.length) return;
+    // a trim edge is on screen: the plan doesn't move the element
+    if (!plan.length || this.scrubbing) return;
     const v = this.v;
     const t = v.currentTime;
     const i = this.idx;
@@ -405,15 +503,14 @@ export class EditPlayer {
       // A split: the next clip continues the same footage — no seek.
       const joined = !!next && Math.abs(next.start - seg.end) < EDGE;
       const rate = v.playbackRate > 0 ? v.playbackRate : 1;
-      // Jump up to a frame early rather than show a frame of the cut:
-      // one video frame (30 fps), more when the display runs slower or
-      // frames arrive late (a late tick must not land past the end).
-      const lead = Math.min(0.05, Math.max(1 / 30, this.frameDt * 1.5));
-      if (joined ? t >= seg.end : (seg.end - t) / rate <= lead) {
-        if (next) this.enter(i + 1, joined ? null : next.start);
-        else this.finish();
+      const left = (seg.end - t) / rate;
+      if (joined ? t >= seg.end : left <= JUMP_EARLY_S) {
+        // at (or a late tick past) the end
+        this.boundary(i);
         return;
       }
+      // the end is near: its timers fire the jump right there (wordcuts-10)
+      if (!joined && left <= BOUNDARY_AHEAD_S) this.arm(i, left);
     }
     this.applyGain(seg, t);
   };
@@ -432,19 +529,13 @@ export class EditPlayer {
     else this.parkAtEnd();
   }
 
-  private loop = (now: number): void => {
-    if (this.lastFrame) {
-      const dt = (now - this.lastFrame) / 1000;
-      this.frameDt = clamp(this.frameDt * 0.8 + dt * 0.2, 1 / 240, 1 / 15);
-    }
-    this.lastFrame = now;
+  private loop = (): void => {
     this.tick();
     this.raf = requestAnimationFrame(this.loop);
   };
 
   private startLoop(): void {
     if (this.raf) return;
-    this.lastFrame = 0;
     this.raf = requestAnimationFrame(this.loop);
   }
 
@@ -454,6 +545,9 @@ export class EditPlayer {
   }
 
   private onPlay = (): void => {
+    // play ends a scrub (the trim was let go, or the user pressed play)
+    this.scrubbing = false;
+    this.scrubWant = null;
     const plan = this.plan;
     if (plan.length) {
       if (this.atEnd) {
@@ -468,6 +562,7 @@ export class EditPlayer {
 
   private onPause = (): void => {
     this.stopLoop();
+    this.disarm();
     this.setFade(0);
   };
 
@@ -487,6 +582,8 @@ export class EditPlayer {
 
   private onSeeking = (): void => {
     const t = this.v.currentTime;
+    if (this.scrubbing) return;
+    this.disarm();
     if (this.ourSeek !== null && Math.abs(t - this.ourSeek) < 0.05) return;
     // The native scrubber (source time) or the browser restarting an
     // ended video: map it onto the edit.
@@ -504,6 +601,16 @@ export class EditPlayer {
 
   private onSeeked = (): void => {
     this.ourSeek = null;
+    if (this.scrubbing) {
+      // the newest edge position asked for meanwhile
+      const w = this.scrubWant;
+      this.scrubWant = null;
+      if (w !== null && Math.abs(w - this.v.currentTime) > 1e-4) {
+        this.ourSeek = w;
+        this.v.currentTime = w;
+      }
+      return;
+    }
     if (this.dipping) {
       // landed: the gain comes back over rampMs (a few steps, not per frame)
       this.dipping = false;
@@ -605,8 +712,8 @@ export class EditPlayer {
     if (since !== null && since >= this.rampMs) this.landedAt = null;
     const next = this.plan[this.idx + 1];
     const jumps = !!next && this.plan[this.idx] === seg && Math.abs(next.start - seg.end) >= EDGE && !this.v.paused;
-    // the jump comes up to a frame before the end (tick's lead)
-    const toJump = jumps ? Math.max(0, (seg.end - t) / (seg.speed || 1) - 1 / 30) : null;
+    // the jump comes JUMP_EARLY_S before the end (the boundary timers)
+    const toJump = jumps ? Math.max(0, (seg.end - t) / (seg.speed || 1) - JUMP_EARLY_S) : null;
     return seekRampLevel(this.rampMs, this.dipping, this.landedAt === null ? null : since, toJump);
   }
 

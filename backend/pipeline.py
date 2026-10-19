@@ -17,7 +17,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 from backend import errors
 from src.ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
@@ -840,13 +840,35 @@ _PREVIEW_SCALE = "scale='if(gt(iw,ih),720,-2)':'if(gt(ih,iw),720,-2)'"
 # `duration` + concatdec_select).
 _CONCAT_SLACK_S = 0.1
 
-# The preview's sound: cut sample-exactly from one decode of the source,
-# with the export's fade at every cut (captions_v2.CUT_FADE_S) — no click
-# at a join, no fragment of a cut word, no lost onset.
+# The preview's sound: cut sample-exactly from the source, with the
+# export's fade at every cut (captions_v2.CUT_FADE_S) — no click at a
+# join, no fragment of a cut word, no lost onset. Only the audio the
+# timeline uses is decoded (one seek per decode span, _preview_spans),
+# and it is streamed into the encode as it is cut: no PCM on disk, and
+# the decode runs alongside the picture's encode instead of before it
+# (F2: decoding the whole source into a file first made every rebuild
+# ~18 % slower than the concat build before it and took ~3x its temp
+# disk: 115 MB of PCM for a 10 min source).
 _PREVIEW_SR = 48000
 _PREVIEW_CHANNELS = 2
 _PREVIEW_CUT_FADE_S = 0.015
 _PREVIEW_BLOCK = 10 * _PREVIEW_SR   # samples per write
+# A decode starts this long before the first sample it needs (on the
+# 10 ms grid, where the seek is exact at 44.1 and 48 kHz) and throws the
+# lead-in away: the AAC decoder's first frame after a seek lacks the
+# overlap of the frame before it.
+_PREVIEW_PREROLL_S = 0.2
+# Clips further apart than this in the source take a decode of their
+# own: one seek (a process start, ~30 ms) costs less than decoding the
+# gap (~400x realtime).
+_PREVIEW_SPAN_GAP_S = 20.0
+# A timeline in more pieces than this (many moved clips) decodes the
+# range it covers once into a work file instead (≤ 192 KB per source
+# second) and is cut from that — a process per piece would cost more.
+_PREVIEW_MAX_SPANS = 16
+# The native AAC encoder's fast coder: ~40 % less CPU than the default
+# two-loop search (2.8 → 1.6 s per 80 s of stereo), plenty for a preview.
+_PREVIEW_AAC = ["-c:a", "aac", "-aac_coder", "fast", "-b:a", "128k"]
 
 
 def _preview_video_args() -> list[str]:
@@ -913,73 +935,256 @@ def _fade_lengths(eff: dict, src_len: float) -> tuple[float, float]:
     return fi, fo
 
 
+class _AudioClip(NamedTuple):
+    """One clip of the preview's sound: source sample `first`, `n`
+    output samples, volume, fade in / out (samples)."""
+    first: int
+    n: int
+    vol: float
+    fi: int
+    fo: int
+
+
+def _preview_audio_clips(segments: list[tuple[float, float]],
+                         effects: list[dict] | None) -> list[_AudioClip]:
+    """Segment k as sound: source [s_k, e_k) to the sample, exactly as
+    long as the picture's segment k (cumulative rounding, so nothing
+    drifts over hundreds of joins); 15 ms fades at every cut (not at a
+    split's seamless edge) unless the clip fades itself; the clips'
+    volume and fades as the export applies them."""
+    sr = _PREVIEW_SR
+    fade = int(round(_PREVIEW_CUT_FADE_S * sr))
+    out: list[_AudioClip] = []
+    t_out, pos = 0.0, 0
+    for k, ((s, e), eff) in enumerate(zip(segments, _fx(effects, len(segments)))):
+        s, e = float(s), float(e)
+        t_out += e - s
+        n = max(0, int(round(t_out * sr)) - pos)
+        pos += n
+        fi_s, fo_s = _fade_lengths(eff, e - s)
+        cut_before = k > 0 and abs(float(segments[k - 1][1]) - s) > 1e-6
+        cut_after = (k + 1 < len(segments)
+                     and abs(e - float(segments[k + 1][0])) > 1e-6)
+        fi = int(round(fi_s * sr)) or (fade if cut_before and n > 4 * fade else 0)
+        fo = int(round(fo_s * sr)) or (fade if cut_after and n > 4 * fade else 0)
+        out.append(_AudioClip(int(round(s * sr)), n,
+                              max(0.0, _fx_num(eff, "volume", 1.0)), fi, fo))
+    return out
+
+
+def _preview_spans(clips: list[_AudioClip]) -> list[list[int]]:
+    """The clips (indices, timeline order) each decode reads: runs of
+    consecutive clips whose source ranges ascend (a clip may start up to
+    _ORDER_SLACK_S before the run's end, as _ascending_runs) with at most
+    _PREVIEW_SPAN_GAP_S between them."""
+    slack = int(_ORDER_SLACK_S * _PREVIEW_SR)
+    gap = int(_PREVIEW_SPAN_GAP_S * _PREVIEW_SR)
+    spans: list[list[int]] = []
+    hi = 0
+    for k, c in enumerate(clips):
+        if c.n <= 0:
+            continue
+        if spans and hi - slack <= c.first <= hi + gap:
+            spans[-1].append(k)
+            hi = max(hi, c.first + c.n)
+            continue
+        spans.append([k])
+        hi = c.first + c.n
+    return spans
+
+
+class _PcmSource:
+    """s16le frames (_PREVIEW_CHANNELS) addressed by absolute source
+    sample: read in order from `fh` (a decode's stdout) whose first
+    frame is sample `start`, or (`frames`) an array holding them. Frames
+    the stream doesn't have read as silence."""
+
+    def __init__(self, start: int, fh=None, frames=None):
+        import numpy as np
+        self._np = np
+        self._fh = fh
+        self._b0 = start
+        if frames is not None:
+            self._buf = frames
+            self._eof = True
+        else:
+            self._buf = np.zeros((0, _PREVIEW_CHANNELS), dtype="<i2")
+            self._eof = fh is None
+
+    def _read(self, frames: int):
+        np = self._np
+        size = 2 * _PREVIEW_CHANNELS
+        raw = self._fh.read(frames * size) if frames > 0 else b""
+        got = len(raw) // size
+        if got < frames:
+            self._eof = True
+        return np.frombuffer(raw[:got * size], dtype="<i2").reshape(-1, _PREVIEW_CHANNELS)
+
+    def take(self, a: int, b: int, keep_from: int):
+        """Frames [a, b); afterwards everything before `keep_from` is
+        dropped (a later take must not ask for it)."""
+        np = self._np
+        end = self._b0 + len(self._buf)
+        if not self._eof and end < b:
+            if not len(self._buf) and end < a:
+                # skip the lead-in / a gap without keeping it
+                while end < a and not self._eof:
+                    end += len(self._read(min(a - end, _PREVIEW_BLOCK)))
+                self._b0 = end
+            if end < b and not self._eof:
+                more = self._read(b - end)
+                self._buf = (np.concatenate([self._buf, more])
+                             if len(self._buf) else more)
+        out = np.zeros((b - a, _PREVIEW_CHANNELS), dtype="<i2")
+        lo, hi = max(a, self._b0), min(b, self._b0 + len(self._buf))
+        if hi > lo:
+            out[lo - a:hi - a] = self._buf[lo - self._b0:hi - self._b0]
+        if self._fh is not None:
+            drop = min(len(self._buf), max(0, keep_from - self._b0))
+            if drop:
+                self._buf = self._buf[drop:]
+                self._b0 += drop
+        return out
+
+    @property
+    def ended(self) -> bool:
+        """The stream has been read to its end."""
+        return self._eof
+
+    def drain(self) -> None:
+        while self._fh is not None and not self._eof:
+            self._read(_PREVIEW_BLOCK)
+
+
+def _emit_clip(c: _AudioClip, src: _PcmSource, sink, keep_after: int) -> None:
+    """Clip `c` from `src` into `sink`, with its volume and fades."""
+    import numpy as np
+    for b0 in range(0, c.n, _PREVIEW_BLOCK):
+        b1 = min(c.n, b0 + _PREVIEW_BLOCK)
+        data = src.take(c.first + b0, c.first + b1,
+                        min(c.first + b1, keep_after))
+        if c.vol == 1.0 and b0 >= c.fi and b1 <= c.n - c.fo:
+            sink.write(data.tobytes())
+            continue
+        idx = np.arange(b0, b1, dtype=np.float64)
+        gain = np.full(b1 - b0, c.vol, dtype=np.float64)
+        if c.fi:
+            gain *= np.clip(idx / c.fi, 0.0, 1.0)
+        if c.fo:
+            gain *= np.clip((c.n - idx) / c.fo, 0.0, 1.0)
+        block = data.astype(np.float32) * gain[:, None].astype(np.float32)
+        sink.write(np.clip(np.rint(block), -32768, 32767).astype("<i2").tobytes())
+
+
+def _no_audio_stream(stderr: str) -> bool:
+    err = (stderr or "").lower()
+    return "matches no streams" in err or "no stream" in err
+
+
+def _audio_decode_cmd(ff: str, input_path: str, lo: int, hi: int,
+                      out: str) -> tuple[list[str], int]:
+    """ffmpeg decoding source samples [lo, hi) (with the preroll before
+    them) as s16le to `out`, and the source sample its output starts at.
+    The seek is on the 10 ms grid (exact in samples); from 0 there is no
+    seek at all (a seek to 0 skips the encoder's priming frame)."""
+    sr = _PREVIEW_SR
+    t0 = math.floor(max(0.0, lo / sr - _PREVIEW_PREROLL_S) * 100) / 100
+    start = int(round(t0 * sr))
+    dur = (hi - start) / sr + 0.05
+    seek = ["-ss", f"{t0:.2f}"] if t0 > 0 else []
+    return ([ff, "-v", "error", "-nostdin", *_threads(), *seek,
+             "-t", f"{dur:.3f}", "-i", input_path,
+             "-map", "0:a:0", "-vn", "-sn", "-dn",
+             # the stream's own start (if after the seek point) as silence
+             "-af", "aresample=async=1:first_pts=0",
+             "-ac", str(_PREVIEW_CHANNELS), "-ar", str(sr), "-f", "s16le", out],
+            start)
+
+
+def _write_preview_audio(ff: str, input_path: str,
+                         segments: list[tuple[float, float]],
+                         effects: list[dict] | None, work: str,
+                         sink) -> None:
+    """The preview's sound as raw s16le (_PREVIEW_SR, _PREVIEW_CHANNELS)
+    written to `sink` in timeline order (_preview_audio_clips), decoded
+    from `input_path` span by span (_preview_spans: only the audio the
+    timeline uses, streamed — nothing on disk). More than
+    _PREVIEW_MAX_SPANS spans: the range they cover is decoded once into
+    `work` and cut from there. A source without sound gives silence."""
+    import numpy as np
+    clips = _preview_audio_clips(segments, effects)
+    spans = _preview_spans(clips)
+    if not spans:
+        return
+    if len(spans) > _PREVIEW_MAX_SPANS:
+        lo = min(clips[k].first for s in spans for k in s)
+        hi = max(clips[k].first + clips[k].n for s in spans for k in s)
+        path = os.path.join(work, "source.raw")
+        cmd, start = _audio_decode_cmd(ff, input_path, lo, hi, path)
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0 and not _no_audio_stream(r.stderr):
+            raise RuntimeError(
+                f"ffmpeg preview audio failed:\n{(r.stderr or '')[-800:]}")
+        size = os.path.getsize(path) if os.path.exists(path) else 0
+        frames = size // (2 * _PREVIEW_CHANNELS)
+        arr = (np.memmap(path, dtype="<i2", mode="r",
+                         shape=(frames, _PREVIEW_CHANNELS))
+               if frames else np.zeros((0, _PREVIEW_CHANNELS), dtype="<i2"))
+        src = _PcmSource(start, frames=arr)
+        try:
+            for c in clips:
+                _emit_clip(c, src, sink, 0)
+        finally:
+            del src, arr
+            with contextlib.suppress(OSError):
+                os.remove(path)
+        return
+    silent = False
+    for n_span, span in enumerate(spans):
+        lo = min(clips[k].first for k in span)
+        hi = max(clips[k].first + clips[k].n for k in span)
+        if silent:
+            src, proc = _PcmSource(lo), None
+        else:
+            cmd, start = _audio_decode_cmd(ff, input_path, lo, hi, "pipe:1")
+            err_path = os.path.join(work, f"decode{n_span}.log")
+            with open(err_path, "wb") as err:
+                proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, stderr=err)
+            src = _PcmSource(start, fh=proc.stdout)
+        # where the clips after each one start: the stream keeps what
+        # they still need (a clip may start a little before the one
+        # ahead of it ends, _ORDER_SLACK_S)
+        keep = [hi] * len(span)
+        for j in range(len(span) - 2, -1, -1):
+            keep[j] = min(keep[j + 1], clips[span[j + 1]].first)
+        try:
+            for j, k in enumerate(span):
+                _emit_clip(clips[k], src, sink, keep[j])
+            if proc is not None:
+                src.drain()
+        finally:
+            if proc is not None:
+                proc.stdout.close()
+                if not src.ended:
+                    proc.kill()   # stopped early (the encode failed)
+                rc = proc.wait()
+        if proc is not None and rc != 0:
+            with open(err_path, errors="replace") as fh:
+                text = fh.read()
+            if not _no_audio_stream(text):
+                raise RuntimeError(
+                    f"ffmpeg preview audio failed:\n{text[-800:]}")
+            silent = True
+
+
 def _preview_audio(ff: str, input_path: str,
                    segments: list[tuple[float, float]],
                    effects: list[dict] | None, work: str,
                    out_path: str) -> None:
-    """The preview's sound as raw s16le (_PREVIEW_SR, _PREVIEW_CHANNELS)
-    at `out_path`: segment k is source [s_k, e_k) to the sample and lasts
-    exactly as long as the picture's segment k (cumulative rounding, so
-    nothing drifts over hundreds of joins); 15 ms fades at every cut (not
-    at a split's seamless edge) unless the clip fades itself; the clips'
-    volume and fades as the export applies them. A source without sound
-    gives silence. The source is decoded once into `work`."""
-    import numpy as np
-    sr, ch = _PREVIEW_SR, _PREVIEW_CHANNELS
-    src_path = os.path.join(work, "source.raw")
-    r = subprocess.run(
-        [ff, "-y", "-v", "error", *_threads(), "-i", input_path,
-         "-map", "0:a:0", "-vn", "-sn", "-dn",
-         # the stream's own start (if after the container's) as silence
-         "-af", "aresample=async=1:first_pts=0",
-         "-ac", str(ch), "-ar", str(sr), "-f", "s16le", src_path],
-        capture_output=True, text=True)
-    if r.returncode != 0:
-        err = (r.stderr or "").lower()
-        if "matches no streams" not in err and "no stream" not in err:
-            raise RuntimeError(f"ffmpeg preview audio failed:\n{(r.stderr or '')[-800:]}")
-        with open(src_path, "wb"):
-            pass
-    if not os.path.exists(src_path):
-        with open(src_path, "wb"):
-            pass
-    frames = os.path.getsize(src_path) // (2 * ch)
-    src = (np.memmap(src_path, dtype="<i2", mode="r", shape=(frames, ch))
-           if frames else np.zeros((0, ch), dtype="<i2"))
-    fade = int(round(_PREVIEW_CUT_FADE_S * sr))
-    fx = _fx(effects, len(segments))
+    """_write_preview_audio into the file `out_path`."""
     with open(out_path, "wb") as out:
-        t_out, pos = 0.0, 0
-        for k, ((s, e), eff) in enumerate(zip(segments, fx)):
-            s, e = float(s), float(e)
-            t_out += e - s
-            n = max(0, int(round(t_out * sr)) - pos)
-            pos += n
-            first = int(round(s * sr))
-            vol = max(0.0, _fx_num(eff, "volume", 1.0))
-            fi_s, fo_s = _fade_lengths(eff, e - s)
-            cut_before = k > 0 and abs(float(segments[k - 1][1]) - s) > 1e-6
-            cut_after = (k + 1 < len(segments)
-                         and abs(e - float(segments[k + 1][0])) > 1e-6)
-            fi = int(round(fi_s * sr)) or (fade if cut_before and n > 4 * fade else 0)
-            fo = int(round(fo_s * sr)) or (fade if cut_after and n > 4 * fade else 0)
-            for b0 in range(0, n, _PREVIEW_BLOCK):
-                b1 = min(n, b0 + _PREVIEW_BLOCK)
-                block = np.zeros((b1 - b0, ch), dtype=np.float32)
-                lo, hi = max(0, first + b0), min(frames, first + b1)
-                if hi > lo:
-                    block[lo - first - b0:hi - first - b0] = src[lo:hi]
-                idx = np.arange(b0, b1, dtype=np.float64)
-                gain = np.full(b1 - b0, vol, dtype=np.float64)
-                if fi:
-                    gain *= np.clip(idx / fi, 0.0, 1.0)
-                if fo:
-                    gain *= np.clip((n - idx) / fo, 0.0, 1.0)
-                block *= gain[:, None].astype(np.float32)
-                out.write(np.clip(np.rint(block), -32768, 32767)
-                          .astype("<i2").tobytes())
-    del src
-    os.remove(src_path)
+        _write_preview_audio(ff, input_path, segments, effects, work, out)
 
 
 def _preview_fades(segments: list[tuple[float, float]],
@@ -1033,6 +1238,48 @@ def _ffmpeg_cuts_preview(
                     effects)
 
 
+def _encode_with_streamed_audio(cmd: list[str], feed: Callable[[Any], None],
+                                work: str) -> None:
+    """Run the preview encode `cmd`, which reads its sound from stdin,
+    while `feed(stdin)` writes it from a thread. Raises on either side's
+    failure — a failed feed stops the encode, so no preview with a short
+    sound is ever left behind."""
+    err_path = os.path.join(work, "encode.log")
+    failed: list[BaseException] = []
+    with open(err_path, "wb") as err:
+        enc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                               stdout=subprocess.DEVNULL, stderr=err)
+
+    def run() -> None:
+        try:
+            feed(enc.stdin)
+        except BrokenPipeError:
+            pass   # the encode ended first: its exit code says why
+        except BaseException as e:  # noqa: BLE001 - re-raised below
+            failed.append(e)
+            enc.kill()
+        finally:
+            with contextlib.suppress(OSError):
+                enc.stdin.close()
+
+    feeder = threading.Thread(target=run, name="preview-audio", daemon=True)
+    feeder.start()
+    try:
+        rc = enc.wait()
+    except BaseException:
+        enc.kill()
+        enc.wait()
+        raise
+    finally:
+        feeder.join()
+    if failed:
+        raise failed[0]
+    if rc != 0:
+        with open(err_path, errors="replace") as fh:
+            tail = fh.read()[-800:] or "(no stderr)"
+        raise RuntimeError(f"ffmpeg preview-cut failed:\n{tail}")
+
+
 def _concat_preview(
     ff: str,
     input_path: str,
@@ -1046,8 +1293,9 @@ def _concat_preview(
     cut, and the result is encoded once. Each segment starts exactly at
     the sum of the lengths before it (its `duration`), so the editor's
     preview_segments math holds; the sound comes sample-exact from
-    _preview_audio, on the same lengths. The work files sit next to the
-    output (the job folder, on the work volume)."""
+    _write_preview_audio, on the same lengths, through the encoder's
+    stdin while it encodes. The work files sit next to the output (the
+    job folder, on the work volume)."""
     # inpoints are the container's own timestamps
     offset = _start_time(input_path)
     source = os.path.abspath(input_path).replace("'", "'\\''")
@@ -1062,9 +1310,7 @@ def _concat_preview(
                         f"inpoint {offset + s:.6f}\n"
                         f"outpoint {offset + e + _CONCAT_SLACK_S:.6f}\n"
                         f"duration {e - s:.6f}\n")
-        audio_path = os.path.join(work, "audio.raw")
-        _preview_audio(ff, input_path, segments, effects, work, audio_path)
-        _run_preview_ffmpeg([
+        _encode_with_streamed_audio([
             ff, "-y", *_threads(),
             # Keep the demuxer's timestamps: concatdec_select compares
             # them with each segment's start (by default the CLI shifts
@@ -1073,7 +1319,7 @@ def _concat_preview(
             "-f", "concat", "-safe", "0", "-segment_time_metadata", "1",
             "-i", list_path,
             "-f", "s16le", "-ar", str(_PREVIEW_SR),
-            "-ac", str(_PREVIEW_CHANNELS), "-i", audio_path,
+            "-ac", str(_PREVIEW_CHANNELS), "-i", "pipe:0",
             "-map", "0:v:0", "-map", "1:a:0",
             "-vf", (f"select=concatdec_select,"
                     f"{_preview_fades(segments, effects)}{_PREVIEW_SCALE}"),
@@ -1082,10 +1328,11 @@ def _concat_preview(
             # the sound (no frame is added or dropped either way).
             "-fps_mode", "passthrough",
             *_preview_video_args(),
-            "-c:a", "aac", "-b:a", "128k",
+            *_PREVIEW_AAC,
             "-movflags", "+faststart",
             output_path,
-        ])
+        ], lambda sink: _write_preview_audio(ff, input_path, segments,
+                                             effects, work, sink), work)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

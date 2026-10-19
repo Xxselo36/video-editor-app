@@ -152,3 +152,24 @@ describe("Escape (review 8)", () => {
     expect(ownsEscape(false, null, inside, bar)).toBe(false);
   });
 });
+
+describe("preview captions follow the Text tab's rule (preview-11)", () => {
+  it("a word shows when its middle plays — no sliver of a cut word", async () => {
+    const { cutBy } = await import("@/features/editor/state/cuts");
+    const { removedRanges } = await import("@/features/editor/v2/model");
+    const words = [W("a", "keep", 1, 1.4), W("b", "cut", 1.5, 2.1), W("c", "this", 2.2, 2.6)];
+    // the clip ends 0.1 s into "cut" (a trim): its middle is removed
+    const segs = [
+      { id: "x", start: 0, end: 1.6 },
+      { id: "y", start: 2.15, end: 5 },
+    ];
+    const removed = removedRanges(segs, 5);
+    const any = mapToOutput(clipsOf(segs), shownWords(words)).words.map((w) => w.id);
+    expect(any).toContain("b"); // the old any-overlap rule: a 0.1 s sliver showed
+    const mid = mapToOutput(clipsOf(segs), shownWords(words, cutBy(removed))).words.map((w) => w.id);
+    expect(mid).toEqual(["a", "c"]);
+    // its forced break carries to the next shown word, as for a hidden one
+    const brk = shownWords([W("a", "keep", 1, 1.4), W("b", "cut", 1.5, 2.1, { breakBefore: true }), W("c", "this", 2.2, 2.6)], cutBy(removed));
+    expect(brk.find((w) => w.id === "c")?.breakBefore).toBe(true);
+  });
+});

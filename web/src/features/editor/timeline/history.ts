@@ -21,6 +21,8 @@ export type TimelineHistory = {
   commit: (next: EditorSeg[], coalesce?: string) => boolean;
   undo: () => void;
   redo: () => void;
+  /** Drop every step (the timeline was replaced by the server's: a conflict reload). */
+  reset: () => void;
   canUndo: boolean;
   canRedo: boolean;
   history: EditorSeg[][];
@@ -151,10 +153,13 @@ export function useTimelineHistory(
     onCommit(r.to);
   };
 
+  const reset = () => put(EMPTY_TL_HISTORY);
+
   return {
     commit,
     undo,
     redo,
+    reset,
     canUndo: state.history.length > 0,
     canRedo: state.future.length > 0,
     history: state.history,

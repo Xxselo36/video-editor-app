@@ -15,8 +15,10 @@
  * its first `initialSpanS` seconds fill the strip (a 10-min video at Fit
  * is a blur of 2 px clips); a shorter one opens at Fit as before. The
  * span holds until the user zooms (pinch, ⌘-wheel, slider, keys, Fit).
- * `hold(pps)` keeps a zoom as it is even where the strip no longer fills
- * the view (after a trim at Fit: no re-fit jump under the finger).
+ * `fit()` is the "Fit" zoom itself (0): it stays Fit while the edit's
+ * length changes (F7: a trim at Fit fills the dock again — zoomTo(fitPps)
+ * would pin the px/s of the moment). `hold(pps)` keeps a zoom as it is
+ * even where the strip no longer fills the view.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { zoomLimits } from "./mechanics";
@@ -32,6 +34,8 @@ export type TimelineZoom = {
   canZoomIn: boolean;
   canZoomOut: boolean;
   zoomTo: (nextPps: number, anchorX: number) => void;
+  /** Fit, and stay Fit while the edit's length changes. */
+  fit: () => void;
   /** Keep this zoom (px/s) as it is, also below Fit, until the next zoom. */
   hold: (pps: number) => void;
   lastUserScrollRef: RefObject<number>;
@@ -108,10 +112,17 @@ export function useTimelineZoom(
     }
     setSpan(null);
     setHeld(null);
-    setPps(clamped);
+    // all the way out is Fit (0): it stays Fit as the edit's length changes
+    setPps(clamped <= z.fitPps * (1 + 1e-6) ? 0 : clamped);
   };
   const hold = (p: number) => {
     if (p > 0 && Number.isFinite(p)) setHeld(p);
+  };
+  const fit = () => {
+    pendingAnchorRef.current = null;
+    setSpan(null);
+    setHeld(null);
+    setPps(0);
   };
   const zoomToRef = useRef(zoomTo);
   useLayoutEffect(() => {
@@ -184,5 +195,5 @@ export function useTimelineZoom(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mountKey]);
 
-  return { viewW, pps: held ?? pps, effPps, fitPps, maxPps, contentW, canZoomIn, canZoomOut, zoomTo, hold, lastUserScrollRef };
+  return { viewW, pps: held ?? pps, effPps, fitPps, maxPps, contentW, canZoomIn, canZoomOut, zoomTo, fit, hold, lastUserScrollRef };
 }

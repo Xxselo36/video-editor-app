@@ -117,6 +117,11 @@ class Job:
     # speed} per preview segment, pipeline._ffmpeg_cuts_preview); None =
     # none (every clip as cut — also every preview from before them).
     preview_effects: list[dict[str, Any]] | None = None
+    # The last preview rebuild that failed: {code, rev (the edit_rev it
+    # was built for), at}; None after a successful one. GET /jobs/{id}
+    # reports it (preview_status "failed", preview_error code) while the
+    # stored timeline is still that rev (backend/main.py _preview_fields).
+    preview_error: dict[str, Any] | None = None
     # Revision of the timeline (segments + segment_effects): POST
     # /edit-segments with base_rev / rev follows the edit doc's rule (409
     # stale_rev: another tab or device saved meanwhile); a save without

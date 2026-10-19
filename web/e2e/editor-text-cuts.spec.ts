@@ -29,8 +29,8 @@ const SAVED = { timeout: 15_000 };
 
 const isPhone = (page: Page) => page.getByTestId("editor-v2").evaluate((el) => el.getAttribute("data-layout") !== "desktop");
 
-async function open(page: Page, jobId: string, text = true) {
-  await openWithStorage(page, `/app/edit/${jobId}`, TOUR_DONE);
+async function open(page: Page, jobId: string, text = true, storage: Record<string, string> = {}) {
+  await openWithStorage(page, `/app/edit/${jobId}`, { ...TOUR_DONE, ...storage });
   await expect(page.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
   await expect(page.getByTestId("ed-timeline").getByTestId(/^clip-\d+$/).first()).toBeVisible({ timeout: 30_000 });
   await expect
@@ -319,9 +319,12 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
     expect(said).toMatch(/\bMost\b/);
   });
 
-  test("a tapped seam names the cut and restores it (one undo step, in the text too)", async ({ page, stub }) => {
+  test("a tapped seam names the cut and restores it (one undo step, in the text too)", async ({ page, stub }, info) => {
     const job = await stub.seed("review_speech");
-    await open(page, job.id, false);
+    // the phone opens zoomed in (a 15 s span): at Fit its 1.4 s clip is
+    // tiny, and a tap on the seam next to a tiny clip selects the clip
+    // (drag-6, editor-trim-flow-2.spec)
+    await open(page, job.id, false, info.project.name === "pixel7" ? { "cleocuts.test.openSpanS": "15" } : {});
     const n = await seams(page).count();
     expect(n).toBeGreaterThanOrEqual(4);
     // one seam per cut between two clips (the stored timeline's gaps: the

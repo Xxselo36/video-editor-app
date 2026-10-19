@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { sourceTimeOf } from "./useEditSession";
-import { previewMatches, previewTimeOf, skipTarget, stalePlan, swapTime, type Segs } from "./previewSync";
+import { landOf, previewMatches, previewSpeedAt, previewTimeOf, skipTarget, stalePlan, swapTime, type Segs } from "./previewSync";
+import { playheadCutOf } from "@/features/editor/timeline/mechanics";
 
 const seg = (id: string, start: number, end: number): EditorSeg => ({ id, start, end });
 
@@ -30,10 +31,11 @@ describe("preview mode follows the edit while the server rebuilds (preview-2/3/6
       [0, 9.6],
       [11, 18],
     ]);
-    // at old-file time 9.7 (source 10.7, now removed): jump to 11 (source 13)
+    // at old-file time 9.7 (source 10.7, now removed): jump to 11 (source 13), a frame in
     const to = skipTarget(plan, 9.7) as number;
-    expect(to).toBeCloseTo(11, 2);
-    expect(sourceTimeOf(to, "preview", OLD, [], 20)).toBeCloseTo(13, 2);
+    expect(to).toBeGreaterThan(11);
+    expect(to).toBeLessThan(11.05);
+    expect(sourceTimeOf(to, "preview", OLD, [], 20)).toBeCloseTo(13 + (to - 11), 6);
     expect(skipTarget(plan, 5)).toBeNull();
     expect(skipTarget(plan, 17.99)).toBe("end");
     // a cut inside clip c: [0, 9.6] stays, c's removed middle is skipped
@@ -71,5 +73,43 @@ describe("preview mode follows the edit while the server rebuilds (preview-2/3/6
     ];
     expect(previewTimeOf(5.5, OLD)).toBeNull();
     expect(sourceTimeOf(swapTime(2, OLD, ext, 5.5), "preview", ext, [], 20)).toBeCloseTo(5.5, 6);
+  });
+});
+
+describe("round 2: the frame after a skip, the speed of a preview segment", () => {
+  it("the frame at a join is the next segment's first frame: playhead and caption after a skip (F11)", () => {
+    // the old file's join at 5 (end of [0,5], start of [6,12])
+    expect(sourceTimeOf(5, "preview", OLD, [], 20)).toBe(6);
+    expect(sourceTimeOf(5 - 0.00005, "preview", OLD, [], 20)).toBe(6);
+    expect(sourceTimeOf(4.99, "preview", OLD, [], 20)).toBeCloseTo(4.99, 6);
+    // the end of the file is the last segment's end
+    expect(sourceTimeOf(18, "preview", OLD, [], 20)).toBe(20);
+    // clip a trimmed to 0–3.6 (3.6–5 removed): playing the old file skips to the join;
+    // the frame there (its timestamp IS the join) has a playhead on the new clips
+    const edit = [seg("a", 0, 3.6), seg("b", 6, 12), seg("c", 13, 20)];
+    const plan = stalePlan(OLD, edit);
+    const to = skipTarget(plan, 3.58, 0.03, landOf(30)) as number;
+    expect(to).toBeGreaterThan(5);
+    // the frame a seek to `to` shows (the last one starting at or before it, a
+    // 30 fps file whose frames don't start at the join) is the next part's
+    const shown = Math.floor(to * 30 + 1e-9) / 30;
+    expect(shown).toBeGreaterThanOrEqual(5 - 1e-9);
+    for (const frame of [5, shown, to]) expect(playheadCutOf(edit, sourceTimeOf(frame, "preview", OLD, [], 20))).not.toBeNull();
+    // a seek to just past the join (what it did) can show the frame before it: cut footage
+    expect(playheadCutOf(edit, sourceTimeOf(Math.floor((5 + 1e-3) * 30 - 0.5) / 30, "preview", OLD, [], 20))).toBeNull();
+  });
+
+  it("previewSpeedAt: each preview segment plays at its clip's speed (the file has none baked in)", () => {
+    const edit = [seg("a", 0, 5), { ...seg("b", 6, 12), speed: 1.5 }, seg("c", 13, 20)];
+    expect(previewSpeedAt(OLD, edit, 2)).toBe(1);
+    expect(previewSpeedAt(OLD, edit, 5)).toBe(1.5); // the join: b's first frame
+    expect(previewSpeedAt(OLD, edit, 10.9)).toBe(1.5);
+    expect(previewSpeedAt(OLD, edit, 11)).toBe(1);
+    // a file older than the edit: the clip that plays that source moment
+    const trimmed = [seg("a", 0, 5), { ...seg("b", 6, 10), speed: 2 }, seg("c", 13, 20)];
+    expect(previewSpeedAt(OLD, trimmed, 6)).toBe(2);
+    expect(previewSpeedAt(OLD, trimmed, 9.5)).toBe(1); // source 10.5: cut, played at 1x
+    // clamped like the export
+    expect(previewSpeedAt(OLD, [seg("a", 0, 5), { ...seg("b", 6, 12), speed: 9 }, seg("c", 13, 20)], 6)).toBe(4);
   });
 });

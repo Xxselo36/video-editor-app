@@ -52,6 +52,7 @@ import {
   type Page,
   type StyleOverrides,
 } from "@/lib/captions";
+import { cutBy } from "@/features/editor/state/cuts";
 import { setStyle, type EditDoc } from "@/features/editor/state/doc";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
@@ -69,6 +70,8 @@ export type CaptionLayerProps = {
   toSource: (mediaTime: number) => number;
   /** The clip the player is in (proxy mode), for a source moment in two clips. */
   playingSegId: string | null;
+  /** Source ranges no clip plays (the shell's removedOf): cut words show no caption (preview-11). */
+  removed?: readonly { start: number; end: number }[];
   phone: boolean;
   /** Show the button-zone silhouettes all the time (Style panel toggle). */
   zones?: boolean;
@@ -165,7 +168,8 @@ function CaptionLayer(props: CaptionLayerProps) {
   const words = useDocStore(doc, selWords);
   const lang = useDocStore(doc, selLang) ?? undefined;
   const clips = useMemo(() => clipsOf(editSegs), [editSegs]);
-  const source = useMemo(() => shownWords(words), [words]);
+  const removed = props.removed;
+  const source = useMemo(() => shownWords(words, removed ? cutBy(removed) : undefined), [words, removed]);
   const overrides = (style.overrides ?? {}) as StyleOverrides;
   const offsetMs = typeof overrides.offsetMs === "number" ? overrides.offsetMs : 0;
   const timeline = useMemo(() => mapToOutput(clips, source, { offsetMs }), [clips, source, offsetMs]);

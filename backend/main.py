@@ -5933,16 +5933,54 @@ def proxy_video(job_id: str, user: User | None = Depends(media_user)):
 
 
 @app.get("/jobs/{job_id}/preview-video")
-def preview_video(job_id: str, user: User | None = Depends(media_user)):
-    """The current cut preview (segments concatenated, no captions) —
-    preview/v{n}.mp4; `?v=` is only the client's cache-buster. Range
-    works (FileResponse, or R2 behind the 307)."""
+def preview_video(job_id: str, v: str | None = None,
+                  user: User | None = Depends(media_user)):
+    """The cut preview (segments concatenated, no captions) —
+    preview/v{n}.mp4. Range works (FileResponse, or R2 behind the 307).
+
+    `?v=n` (the preview_version the client maps through its
+    preview_segments): exactly that version, never another — the current
+    one, or an older one still stored (a superseded version is kept a
+    day, _SUPERSEDED_KEEP_S), so a player keeps streaming the file it
+    has the mapping for while newer versions arrive; 409
+    preview_not_ready {preview_version} when it isn't stored (any more,
+    or not yet). Without `?v=`: the current one.
+
+    A preview that doesn't show the stored timeline and isn't being
+    built (proxy playback skips the rebuilds, _preview_needed) is built
+    now in the background; this request still gets the version asked
+    for (GET /jobs/{id} shows the new one when it is there)."""
     job = get_owned_job(job_id, user)
+    _build_stored_preview(job)
+    return _preview_response(job, v)
+
+
+def _version_of(v: str | None) -> int | None:
+    try:
+        n = int(str(v).strip()) if v is not None else None
+    except ValueError:
+        return None   # a cache-buster of an old client: the current one
+    return n
+
+
+def _preview_response(job: Job, v: str | None):
+    cur = int(job.preview_version or 0)
+    want = _version_of(v)
     if job.preview_key:
-        # A new version gets a new key; the local file is still answered
-        # with no-cache, as before (the URL may be asked without ?v=).
-        return _media(job, job.preview_key, "video/mp4", "preview video not ready",
-                      cache="no-cache")
+        if want is None or want == cur:
+            # A version's key never changes content: cacheable as such
+            # when asked by version (local files; R2 has its 307).
+            return _media(job, job.preview_key, "video/mp4",
+                          "preview video not ready",
+                          cache="no-cache" if want is None
+                          else "private, max-age=86400, immutable")
+        key = f"{media.job_prefix(job.id)}preview/v{want}.mp4"
+        if 0 < want < cur and media.exists(key, store=media.store_of(job)):
+            return _media(job, key, "video/mp4", "preview video not ready",
+                          cache="private, max-age=86400, immutable")
+        raise ApiRefusal(409, "preview_not_ready", preview_version=cur)
+    if want not in (None, cur):
+        raise ApiRefusal(409, "preview_not_ready", preview_version=cur)
     # Legacy job: prefer the cut preview, fall back to the normalized file.
     path = job.preview_path if job.preview_path else job.normalized_path
     if not path or not Path(path).exists():
@@ -5954,6 +5992,31 @@ def preview_video(job_id: str, user: User | None = Depends(media_user)):
         # revalidate instead of reusing a stale copy on re-entry.
         headers={"Accept-Ranges": "bytes", "Cache-Control": "no-cache"},
     )
+
+
+@app.post("/jobs/{job_id}/preview")
+def post_preview(job_id: str, user: User | None = Depends(current_user)):
+    """Build the cut preview of the stored timeline now (the editor's
+    "Retry" after preview_status "failed", or a player that needs the
+    preview while it is "stale"): started in the background unless it is
+    ready or already being built. Answers {preview_status, preview_error,
+    preview_version, preview_segments} at once."""
+    job = get_owned_job(job_id, user)
+    if job.status != "awaiting_review":
+        raise HTTPException(409, f"job not in review state (status={job.status})")
+    if not job.has_mezz():
+        raise HTTPException(410, "normalized video no longer on disk")
+    if _preview_fields(job)["preview_status"] == "failed":
+        # a retry: the failure no longer stops a build
+        store.update(job_id, preview_error=None)
+        job = store.get(job_id)
+        if job is None:
+            raise HTTPException(404, "job not found")
+    _build_stored_preview(job)
+    d = job.to_dict()
+    return {"preview_version": d["preview_version"],
+            "preview_segments": d["preview_segments"],
+            **_preview_fields(job)}
 
 
 # Per-job ordering for timeline saves. Each /edit-segments request gets
@@ -5979,9 +6042,35 @@ _REBUILD_POOL = ThreadPoolExecutor(
 
 
 def _preview_lock(job_id: str) -> asyncio.Lock:
-    """Per-job rebuild lock. Only used on the event loop — no _EDIT_GUARD
-    here, that one is held across DB writes; setdefault is atomic."""
+    """Per-job rebuild lock. Only used on the preview loop — no
+    _EDIT_GUARD here, that one is held across DB writes; setdefault is
+    atomic."""
     return _PREVIEW_LOCKS.setdefault(job_id, asyncio.Lock())
+
+
+# Every preview build runs on this event loop (a thread of its own),
+# not on the request's: a save is answered while its build goes on, a
+# request that is cancelled or ends leaves the build — and the job's
+# lock — to finish there, and the per-job locks never meet a second
+# loop. The encodes themselves run in _REBUILD_POOL.
+_PREVIEW_LOOP: asyncio.AbstractEventLoop | None = None
+_PREVIEW_LOOP_GUARD = threading.Lock()
+
+
+def _preview_loop() -> asyncio.AbstractEventLoop:
+    global _PREVIEW_LOOP
+    with _PREVIEW_LOOP_GUARD:
+        if _PREVIEW_LOOP is None or _PREVIEW_LOOP.is_closed():
+            loop = asyncio.new_event_loop()
+            threading.Thread(target=loop.run_forever, name="preview-loop",
+                             daemon=True).start()
+            _PREVIEW_LOOP = loop
+        return _PREVIEW_LOOP
+
+
+async def _off_loop(fn, *args):
+    """fn(*args) in the default thread pool, from the preview loop."""
+    return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
 
 
 def _preview_source(normalized_path: str | None) -> str | None:
@@ -5998,7 +6087,7 @@ def _preview_source(normalized_path: str | None) -> str | None:
             if src:
                 return str(src)
         except Exception as e:
-            print(f"[preview] preview_source failed: {e}", flush=True)
+            print(f"[preview] preview_source failed: {type(e).__name__}", flush=True)
     return normalized_path
 
 
@@ -6033,17 +6122,46 @@ def _preview_shows(job: Job | None, segments, effects) -> bool:
             and (job.preview_effects or None) == (effects or None))
 
 
+# Why a preview rebuild failed (Job.preview_error["code"], GET /jobs/{id}
+# preview_error): the client says "Preview couldn't update" and offers a
+# retry; the log line has these and numbers only (no ffmpeg text, no
+# paths).
+PREVIEW_ERROR_CODES = ("source_missing", "encode_failed", "storage_failed",
+                       "job_changed", "internal")
+
+
+class PreviewMoved(RuntimeError):
+    """The job is gone, or its media moved to another store, while its
+    preview was being built: nothing was stored."""
+
+
+def _preview_error_code(e: BaseException) -> str:
+    if isinstance(e, PreviewMoved):
+        return "job_changed"
+    if isinstance(e, FileNotFoundError):
+        return "source_missing"
+    if (isinstance(e, (MediaTransferError, ConnectionError, TimeoutError))
+            or type(e).__module__.split(".")[0] in ("botocore", "boto3")):
+        return "storage_failed"
+    if isinstance(e, (RuntimeError, ValueError, subprocess.SubprocessError)):
+        return "encode_failed"
+    if isinstance(e, OSError):
+        return "storage_failed"
+    return "internal"
+
+
 async def _rebuild_in_pool(job_id: str, source: str | None, segments,
                            seq: int | None = None,
                            effects: list[dict] | None = None
-                           ) -> tuple[bool, bool]:
+                           ) -> tuple[bool, bool, str | None]:
     """_rebuild_preview in _REBUILD_POOL, one at a time per job.
     With `seq`, skipped when a newer /edit-segments save arrived.
     `effects`: what the preview bakes in (_preview_effects; None: none).
     No encode when the stored preview already shows exactly this
     (_preview_shows, checked under the job's lock: a rebuild still
     running for an older save is waited for first).
-    Returns (preview_ok, superseded).
+    Returns (built or already shown, superseded, failure code or None);
+    a failure is logged with numbers only.
 
     The job's lock is held until the encode really ends, even if the
     request is cancelled meanwhile: two rebuilds of one job must never
@@ -6055,12 +6173,13 @@ async def _rebuild_in_pool(job_id: str, source: str | None, segments,
         # that increments it after this check rebuilds after us.
         if seq is not None and _EDIT_SEQ.get(job_id) != seq:
             lock.release()
-            return False, True
-        if _preview_shows(await run_in_threadpool(store.get, job_id),
+            return False, True, None
+        if _preview_shows(await _off_loop(store.get, job_id),
                           segments, effects):
             lock.release()
-            return True, False
+            return True, False, None
         args = (job_id, source, segments) + (() if effects is None else (effects,))
+        started = time.monotonic()
         fut = asyncio.get_running_loop().run_in_executor(
             _REBUILD_POOL, _rebuild_preview, *args)
     except BaseException:
@@ -6077,9 +6196,171 @@ async def _rebuild_in_pool(job_id: str, source: str | None, segments,
     except asyncio.CancelledError:
         raise
     except Exception as e:
-        print(f"[preview] rebuild failed for {job_id}: {e}", flush=True)
-        return False, False
-    return True, False
+        code = _preview_error_code(e)
+        seconds = sum(float(b) - float(a) for a, b in segments)
+        print(f"[preview] rebuild failed: job={job_id} code={code} "
+              f"error={type(e).__name__} segments={len(segments)} "
+              f"seconds={seconds:.1f} "
+              f"elapsed={time.monotonic() - started:.1f}", flush=True)
+        return False, False, code
+    return True, False, None
+
+
+def _stored_baked(job: Job) -> list[dict] | None:
+    """What a preview of the job's stored timeline bakes in
+    (_preview_effects of its segment_effects; None: nothing)."""
+    effects = (job.settings or {}).get("segment_effects")
+    if not isinstance(effects, list) or len(effects) != len(job.segments or []):
+        return None
+    try:
+        return _preview_effects([{
+            "speed": _effect(e.get("speed"), 1.0, 0.25, 4.0),
+            "fadeIn": _effect(e.get("fadeIn"), 0.0, 0.0, 2.0),
+            "fadeOut": _effect(e.get("fadeOut"), 0.0, 0.0, 2.0),
+            "volume": _effect(e.get("volume"), 1.0, 0.0, 2.5)}
+            for e in effects])
+    except AttributeError:   # not a list of objects
+        return None
+
+
+# Preview builds this process has queued or running, per job: GET
+# /jobs/{id} says "building" while one is.
+_PREVIEW_BUILDS: dict[str, int] = {}
+_PREVIEW_BUILDS_GUARD = threading.Lock()
+
+
+def _count_build(job_id: str, step: int) -> None:
+    with _PREVIEW_BUILDS_GUARD:
+        n = _PREVIEW_BUILDS.get(job_id, 0) + step
+        if n > 0:
+            _PREVIEW_BUILDS[job_id] = n
+        else:
+            _PREVIEW_BUILDS.pop(job_id, None)
+
+
+def _preview_needed(job: Job) -> bool:
+    """Does anything need the job's cut preview rebuilt after a timeline
+    save? Not when the editor plays the proxy (CLEO_PROXY_VIDEO=1 and the
+    job has one: has_proxy) — it follows the edit list itself, and no
+    export, share or download reads preview.mp4; GET /preview-video
+    builds it then, on the first request for it (a player fallen back to
+    preview mode)."""
+    return not job._has_proxy()
+
+
+def _preview_fields(job: Job) -> dict[str, Any]:
+    """preview_status of GET /jobs/{id} (and the /edit-segments answer):
+    "building" a rebuild is queued or running (for this timeline, or an
+               older one first): poll GET /jobs/{id} — preview_version
+               grows with every one stored
+    "ready"    preview_version shows the stored timeline (preview_segments
+               = the clips, its volume and fades baked; the player applies
+               the speed), and nothing is about to replace it
+    "failed"   the rebuild for the stored timeline failed (preview_error:
+               PREVIEW_ERROR_CODES) — POST /jobs/{id}/preview retries
+    "stale"    none is being built (proxy playback skips it, or the
+               server restarted meanwhile): GET /preview-video or POST
+               /jobs/{id}/preview starts one
+    The preview on screen is always the one preview_segments describe."""
+    if _PREVIEW_BUILDS.get(job.id):
+        status = "building"
+    elif _preview_shows(job, job.segments, _stored_baked(job)):
+        status = "ready"
+    elif (isinstance(job.preview_error, dict)
+          and float(job.preview_error.get("rev") or 0) == float(job.edit_rev or 0)):
+        status = "failed"
+    else:
+        status = "stale"
+    return {"preview_status": status,
+            "preview_error": (job.preview_error or {}).get("code")
+            if status == "failed" else None}
+
+
+def _note_preview_failure(job_id: str, code: str, rev: float | None) -> None:
+    def _set(cur: Job) -> dict:
+        return {"preview_error": {"code": code, "at": round(time.time(), 3),
+                                  "rev": float(cur.edit_rev or 0)
+                                  if rev is None else float(rev)}}
+    try:
+        store.modify(job_id, _set)
+    except Exception as e:  # best effort: the log line has it anyway
+        print(f"[preview] could not record a failure for {job_id}: "
+              f"{type(e).__name__}", flush=True)
+
+
+async def _tracked_rebuild(job_id: str, source: str | None, segments,
+                           seq: int | None = None,
+                           effects: list[dict] | None = None,
+                           rev: float | None = None) -> tuple[bool, bool]:
+    """_rebuild_in_pool on the preview loop, counted in _PREVIEW_BUILDS
+    while it is queued or running; a failure is stored on the job
+    (preview_error, for `rev`: the timeline revision it was built for).
+    (built or already shown, superseded). Awaitable from any loop."""
+    return await asyncio.wrap_future(
+        _submit_build(job_id, source, segments, seq, effects, rev))
+
+
+def _submit_build(job_id: str, source: str | None, segments,
+                  seq: int | None, effects: list[dict] | None,
+                  rev: float | None):
+    """Queue a build on the preview loop; its concurrent.futures.Future
+    (of (ok, superseded))."""
+    _count_build(job_id, +1)   # now: a GET right after already says so
+
+    async def run() -> tuple[bool, bool]:
+        ok, superseded, code = await _rebuild_in_pool(
+            job_id, source, segments, seq=seq, effects=effects)
+        if code is not None:
+            await _off_loop(_note_preview_failure, job_id, code, rev)
+        return ok, superseded
+    try:
+        fut = asyncio.run_coroutine_threadsafe(run(), _preview_loop())
+    except BaseException:
+        _count_build(job_id, -1)
+        raise
+    fut.add_done_callback(lambda _f: _count_build(job_id, -1))
+    return fut
+
+
+def _settle_preview_builds(timeout: float) -> bool:
+    """Wait (up to `timeout` s) until no preview build is queued or
+    running. True when none is."""
+    end = time.monotonic() + timeout
+    while _PREVIEW_BUILDS:
+        if time.monotonic() > end:
+            return False
+        time.sleep(0.01)
+    return True
+
+
+def _start_preview_build(job_id: str, source: str | None, segments,
+                         seq: int | None = None,
+                         effects: list[dict] | None = None,
+                         rev: float | None = None) -> None:
+    """A build in the background: nothing waits for it; GET /jobs/{id}
+    follows it (preview_status)."""
+    fut = _submit_build(job_id, source, segments, seq, effects, rev)
+
+    def done(f) -> None:
+        if not f.cancelled() and f.exception() is not None:
+            print(f"[preview] background build of {job_id} ended: "
+                  f"{type(f.exception()).__name__}", flush=True)
+    fut.add_done_callback(done)
+
+
+def _build_stored_preview(job: Job) -> bool:
+    """Start a background build of the job's stored timeline when its
+    preview is "stale" (not shown, not building, not failed for this
+    rev) and it can be edited. True when one was started."""
+    if (job.status != "awaiting_review" or not job.segments
+            or not job.has_mezz()
+            or _preview_fields(job)["preview_status"] != "stale"):
+        return False
+    segments = [(float(a), float(b)) for a, b in job.segments]
+    _start_preview_build(job.id, _job_preview_source(job), segments,
+                         seq=_EDIT_SEQ.get(job.id), effects=_stored_baked(job),
+                         rev=float(job.edit_rev or 0))
+    return True
 
 
 def _exact_fps(fps: float) -> float:
@@ -6331,7 +6612,7 @@ def _rebuild_preview(job_id: str, source: str | None, segments,
     from backend.pipeline import _ffmpeg_cuts_preview
     job = store.get(job_id)
     if job is None:
-        raise FileNotFoundError(f"job {job_id} is gone")
+        raise PreviewMoved(f"job {job_id} is gone")
     ws = _make_workspace(_workspace(job_id,
                                     f"preview-{threading.get_ident()}"))
     try:
@@ -6366,10 +6647,12 @@ def _rebuild_preview(job_id: str, source: str | None, segments,
         return {"preview_key": key, "preview_segments": shown,
                 "preview_effects": effects,
                 "preview_version": (cur.preview_version or 0) + 1,
+                "preview_error": None,
                 "media_store": cur.media_store or where,
                 "media_bytes": sizes}
     if store.modify(job_id, _point) is None:
-        raise RuntimeError(f"job {job_id} is gone or its media moved "
+        _gc_later([key], 0.0, store_=where)
+        raise PreviewMoved(f"job {job_id} is gone or its media moved "
                            "meanwhile — preview not stored")
     # A player may still stream the previous version for a while.
     _gc_later(old, _SUPERSEDED_KEEP_S, store_=where)
@@ -6378,13 +6661,14 @@ def _rebuild_preview(job_id: str, source: str | None, segments,
 @app.post("/jobs/{job_id}/edit-segments")
 async def post_edit_segments(job_id: str, payload: dict,
                              user: User | None = Depends(current_user)):
-    """Accept a user-edited segment list and rebuild the preview video.
+    """Accept a user-edited segment list (the timeline) and store it.
 
     Frontend sends the segment list (with per-segment effects) after the
     user has trimmed, split, deleted, reordered or changed effects in the
     timeline editor. We clamp against the normalized video duration,
-    keep the user's ORDER, store segments + effects, then re-render the
-    preview MP4 so the player reflects the edit.
+    keep the user's ORDER, store segments + effects, then (when the
+    editor plays the server preview) re-render the preview MP4 so the
+    player can follow the edit.
 
     Payload:
         {"segments": [{"start", "end", "speed"?, "fadeIn"?, "fadeOut"?,
@@ -6395,22 +6679,68 @@ async def post_edit_segments(job_id: str, payload: dict,
     (409 stale_rev {rev}: another tab or device saved meanwhile; nothing
     is stored). Without them the save overwrites, as before.
 
+    A save with base_rev / rev is answered as soon as it is stored — the
+    preview is rebuilt in the background (preview_status "building";
+    GET /jobs/{id} shows the new preview_version once it is there), and
+    not at all while the editor plays the proxy (_preview_needed: built
+    on the first GET /preview-video instead). A save without them (an
+    editor from before) is answered after its rebuild, as before.
+
     Response: the job dict (edit_rev: this save's rev) plus
-        preview_ok  – the preview now shows exactly these segments
-                      (with their volume and fades; the player applies
-                      the speed)
-        superseded  – a newer save arrived; its response is authoritative
+        preview_ok     – the preview in this answer (preview_version /
+                         preview_segments) shows exactly these segments
+                         (with their volume and fades; the player
+                         applies the speed)
+        superseded     – a newer save arrived; its response is
+                         authoritative
+        preview_status – _preview_fields ("ready" / "building" /
+                         "failed" / "stale"), preview_error its code
     """
-    seq, source, cleaned, baked = await run_in_threadpool(
-        _save_edit_segments, job_id, payload, user)
-    preview_ok, superseded = await _rebuild_in_pool(job_id, source, cleaned,
-                                                    seq=seq, effects=baked)
+    saved = await run_in_threadpool(_save_edit_segments, job_id, payload, user)
     job = await run_in_threadpool(store.get, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
+    needed = _preview_needed(job)
+    rebuilt = False
+    if not saved.revs:
+        # An editor from before: answered after the rebuild, with its
+        # outcome (preview_ok / superseded as they always were).
+        ok, superseded = False, False
+        if needed:
+            before = job.preview_version
+            ok, superseded = await _tracked_rebuild(
+                job_id, saved.source, saved.segments, seq=saved.seq,
+                effects=saved.baked, rev=saved.rev)
+            job = await run_in_threadpool(store.get, job_id)
+            if job is None:
+                raise HTTPException(404, "job not found")
+            rebuilt = ok and job.preview_version != before
+        else:
+            ok = _preview_shows(job, saved.segments, saved.baked)
+        fields = _preview_fields(job)
+    else:
+        # Answered now. A rebuild still queued or running for an older
+        # save may replace the stored preview: then this one is built
+        # after it, whatever the stored preview shows now.
+        if needed and (_PREVIEW_BUILDS.get(job_id) or not _preview_shows(
+                job, saved.segments, saved.baked)):
+            _start_preview_build(job_id, saved.source, saved.segments,
+                                 seq=saved.seq, effects=saved.baked,
+                                 rev=saved.rev)
+        fields = _preview_fields(job)
+        superseded = _EDIT_SEQ.get(job_id) != saved.seq
+        # From the same read as preview_version / preview_segments: the
+        # preview this answer names shows exactly this save, and no
+        # rebuild is on its way to replace it.
+        ok = (fields["preview_status"] == "ready" and not superseded
+              and _preview_shows(job, saved.segments, saved.baked))
     out = job.to_dict()
-    out["preview_ok"] = preview_ok
+    out["preview_ok"] = ok
     out["superseded"] = superseded
+    # This save made a new preview_version (False: the stored one already
+    # showed it, a newer save superseded it, or it is built later).
+    out["preview_rebuilt"] = rebuilt
+    out.update(fields)
     return out
 
 
@@ -6432,12 +6762,21 @@ def _check_timeline_length(segments, duration: float) -> None:
                          max_seconds=_plain(round(limit, 3)))
 
 
+class _SavedTimeline:
+    """What _save_edit_segments stored: the save's sequence number, its
+    rev (edit_rev now) and whether the client sent revisions, the preview
+    source, the cleaned segments and what their preview bakes in."""
+    __slots__ = ("seq", "rev", "revs", "source", "segments", "baked")
+
+    def __init__(self, seq, rev, revs, source, segments, baked):
+        self.seq, self.rev, self.revs = seq, rev, revs
+        self.source, self.segments, self.baked = source, segments, baked
+
+
 def _save_edit_segments(job_id: str, payload: dict, user: User | None
-                        ) -> tuple[int, str, list[tuple[float, float]],
-                                   list[dict] | None]:
+                        ) -> _SavedTimeline:
     """The quick part of /edit-segments (threadpool): validate, store the
-    segments + effects (with the revision rule). Returns (seq, preview
-    source, segments, the effects the preview bakes in)."""
+    segments + effects (with the revision rule)."""
     job = get_owned_job(job_id, user)
     if job.status != "awaiting_review":
         raise HTTPException(
@@ -6483,6 +6822,7 @@ def _save_edit_segments(job_id: str, payload: dict, user: User | None
     _check_timeline_length(cleaned, dur)
 
     stale: dict[str, float] = {}
+    stored: dict[str, float] = {}
 
     def _save(cur: Job) -> dict | None:
         # On the stored job, under its row lock: settings merged into
@@ -6493,9 +6833,10 @@ def _save_edit_segments(job_id: str, payload: dict, user: User | None
             return None
         new_settings = dict(cur.settings or {})
         new_settings["segment_effects"] = effects
+        stored["rev"] = revs[1] if revs is not None else _server_rev(cur_rev)
         out = {"segments": [list(seg) for seg in cleaned],
                "settings": new_settings,
-               "edit_rev": revs[1] if revs is not None else _server_rev(cur_rev)}
+               "edit_rev": stored["rev"]}
         if not cur.preview_segments:
             # Job from before preview_segments existed: its preview.mp4
             # was built from the segments we are about to replace.
@@ -6512,7 +6853,9 @@ def _save_edit_segments(job_id: str, payload: dict, user: User | None
             raise ApiRefusal(409, "stale_rev", rev=_plain(stale["rev"]))
         seq = _EDIT_SEQ.get(job_id, 0) + 1
         _EDIT_SEQ[job_id] = seq
-    return seq, _job_preview_source(job), cleaned, _preview_effects(effects)
+    return _SavedTimeline(seq, stored.get("rev"), revs is not None,
+                          _job_preview_source(job), cleaned,
+                          _preview_effects(effects))
 
 
 @app.post("/jobs/{job_id}/phrases")
@@ -6585,12 +6928,66 @@ async def post_recompute_scenes(job_id: str, payload: dict,
     """
     source, new_segments = await run_in_threadpool(
         _save_recomputed_scenes, job_id, payload, user)
-    # Rebuild the preview video so the review UI reflects the new cuts.
-    await _rebuild_in_pool(job_id, source, new_segments)
     job = await run_in_threadpool(store.get, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
-    return job.to_dict()
+    # Rebuild the preview video so the review UI reflects the new cuts
+    # (not while the editor plays the proxy: _preview_needed).
+    if _preview_needed(job):
+        await _tracked_rebuild(job_id, source, new_segments,
+                               rev=float(job.edit_rev or 0))
+        job = await run_in_threadpool(store.get, job_id)
+        if job is None:
+            raise HTTPException(404, "job not found")
+    out = job.to_dict()
+    out.update(_preview_fields(job))
+    return out
+
+
+def _job_peaks(job: Job) -> list[int] | None:
+    """The job's peaks envelope (audio_analysis.decode_peaks), or None."""
+    from backend import audio_analysis
+    if not job.peaks_key:
+        return None
+    try:
+        if media.store_of(job) == "r2":
+            blob = storage.get_bytes(job.peaks_key, PEAKS_MAX_BYTES)
+        else:
+            path = media.local_path(job.peaks_key)
+            blob = path.read_bytes() if path.is_file() else None
+    except Exception as e:
+        print(f"[snap] peaks of {job.id} unavailable: {type(e).__name__}",
+              flush=True)
+        return None
+    return audio_analysis.decode_peaks(blob) if blob else None
+
+
+def _snap_scene_cuts(job: Job, ranges) -> list[tuple[float, float]]:
+    """Recomputed command cuts with their edges in the pauses between the
+    job's words, as the analysis snaps them (src/edge_snap.py, command
+    window): on its peaks envelope when stored, else on an envelope made
+    from the doc's word times — either way never inside a word. Without
+    doc words they stay as computed."""
+    from src import edge_snap
+    if not ranges:
+        return list(ranges or [])
+    words = [{"start": w["start"], "end": w["end"]}
+             for w in ((job.doc or {}).get("words") or [])
+             if isinstance(w, dict) and "start" in w and "end" in w]
+    if not words:
+        return [(float(a), float(b)) for a, b in ranges]
+    peaks = _job_peaks(job)
+    env = (edge_snap.peaks_envelope(peaks) if peaks
+           else edge_snap.word_envelope(words, job.duration or None))
+    try:
+        out = edge_snap.snap_removals(edge_snap.merge_touching(ranges), words,
+                                      env, edge_snap.WINDOW_COMMAND_S,
+                                      duration=job.duration or None)
+    except Exception as e:
+        print(f"[snap] recompute-scenes cuts unsnapped: {type(e).__name__}",
+              flush=True)
+        return [(float(a), float(b)) for a, b in ranges]
+    return [(round(a, 3), round(b, 3)) for a, b in out if b > a]
 
 
 def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
@@ -6637,6 +7034,9 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
     cut_ranges_scene, _events_out = find_scene_cut_ranges(
         fake_words, clip_duration=job.duration or None,
     )
+    # The analysis puts these edges on the audio (src/edge_snap.py); the
+    # events' times alone would cut into the words around a command.
+    cut_ranges_scene = _snap_scene_cuts(job, cut_ranges_scene)
 
     # Merge with the existing full pipeline: start from the original
     # analyze segments then apply the NEW scene cuts.
@@ -6688,7 +7088,11 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
             settings.pop("segment_effects", None)
             out["settings"] = settings
         return out
-    store.modify(job_id, _save)
+    # A new timeline, like a /edit-segments save: preview builds queued
+    # for the one before are skipped (_rebuild_in_pool's seq check).
+    with _EDIT_GUARD:
+        store.modify(job_id, _save)
+        _EDIT_SEQ[job_id] = _EDIT_SEQ.get(job_id, 0) + 1
     return _job_preview_source(job), new_segments
 
 
@@ -6762,6 +7166,7 @@ def _export_fields(job: Job, user: User | None) -> dict[str, Any]:
 def _job_out(job: Job, user: User | None) -> dict[str, Any]:
     out = job.to_dict(admin=_is_admin(user))
     out.update(_export_fields(job, user))
+    out.update(_preview_fields(job))
     return out
 
 

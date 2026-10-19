@@ -184,3 +184,277 @@ def test_the_real_rebuild_stores_what_it_baked(client, r2, monkeypatch):
     # unchanged: no second encode
     assert _save(client, job.id, [{"start": 0, "end": 3, "fadeOut": 0.4}]).json()["preview_ok"]
     assert len(cuts) == 1
+
+
+# ── saves never wait for an encode (save-2, preview-7-queue) ────────
+
+def _wait_status(client, job_id, want, timeout=10.0):
+    import time
+    end = time.monotonic() + timeout
+    while True:
+        j = client.get(f"/jobs/{job_id}").json()
+        if j["preview_status"] == want or time.monotonic() > end:
+            return j
+        time.sleep(0.02)
+
+
+@pytest.fixture
+def slow_builds(monkeypatch):
+    """_rebuild_preview that waits for `release` (stored like the real one)."""
+    import threading
+    state = {"release": threading.Event(), "started": threading.Event(), "calls": []}
+
+    def rebuild(job_id, source, segments, effects=None):
+        state["calls"].append(list(segments))
+        state["started"].set()
+        assert state["release"].wait(10)
+        cur = store.get(job_id)
+        store.update(job_id, preview_key=f"jobs/{job_id}/preview/v{(cur.preview_version or 0) + 1}.mp4",
+                     preview_segments=[[float(a), float(b)] for a, b in segments],
+                     preview_effects=effects, preview_error=None,
+                     preview_version=(cur.preview_version or 0) + 1)
+    monkeypatch.setattr(M, "_rebuild_preview", rebuild)
+    yield state
+    state["release"].set()
+
+
+def test_a_save_is_answered_as_soon_as_it_is_stored(client, tmp_path, slow_builds):
+    import time
+    job = _review_job(tmp_path)
+    t0 = time.monotonic()
+    r = _save(client, job.id, [{"start": 0.5, "end": 4.0}], base_rev=0, rev=10)
+    took = time.monotonic() - t0
+    assert r.status_code == 200 and took < 2.0, took
+    body = r.json()
+    # stored, the encode still to come — and said so
+    assert body["edit_rev"] == 10 and store.get(job.id).segments == [(0.5, 4.0)]
+    assert (body["preview_ok"], body["preview_rebuilt"], body["superseded"],
+            body["preview_status"]) == (False, False, False, "building")
+    assert slow_builds["started"].wait(5)
+    assert client.get(f"/jobs/{job.id}").json()["preview_status"] == "building"
+    # the next save goes at once too, while the first encode runs
+    t0 = time.monotonic()
+    r = _save(client, job.id, [{"start": 0.5, "end": 3.0}], base_rev=10, rev=11)
+    assert r.status_code == 200 and time.monotonic() - t0 < 2.0
+    slow_builds["release"].set()
+    j = _wait_status(client, job.id, "ready")
+    assert j["preview_status"] == "ready" and j["preview_error"] is None
+    assert j["preview_segments"] == [[0.5, 3.0]]
+    # the first save's encode ran (it had started); the second one's after it
+    assert slow_builds["calls"] == [[(0.5, 4.0)], [(0.5, 3.0)]]
+
+
+def test_saves_behind_a_running_encode_build_only_the_newest(client, tmp_path, slow_builds):
+    job = _review_job(tmp_path)
+    _save(client, job.id, [{"start": 0, "end": 4.0}], base_rev=0, rev=1)
+    assert slow_builds["started"].wait(5)
+    for rev, end in ((2, 3.5), (3, 3.0), (4, 2.5)):
+        assert _save(client, job.id, [{"start": 0, "end": end}],
+                     base_rev=rev - 1, rev=rev).status_code == 200
+    slow_builds["release"].set()
+    j = _wait_status(client, job.id, "ready")
+    assert j["preview_segments"] == [[0.0, 2.5]]
+    assert slow_builds["calls"] == [[(0.0, 4.0)], [(0.0, 2.5)]]
+
+
+def _proxy_job(tmp_path, monkeypatch):
+    """A job the editor plays from the proxy (CLEO_PROXY_VIDEO=1, a
+    legacy proxy.mp4 next to the normalized file)."""
+    monkeypatch.setenv("CLEO_PROXY_VIDEO", "1")
+    job = _review_job(tmp_path)
+    (tmp_path / "proxy.mp4").write_bytes(b"proxy")
+    (tmp_path / "preview.mp4").write_bytes(b"preview-1")
+    store.update(job.id, preview_path=str(tmp_path / "preview.mp4"),
+                 preview_segments=[[0.0, 5.0]], preview_version=1)
+    assert store.get(job.id)._has_proxy()
+    return job
+
+
+def test_proxy_playback_skips_the_rebuild_until_the_preview_is_asked_for(
+        client, tmp_path, monkeypatch, builds):
+    job = _proxy_job(tmp_path, monkeypatch)
+    # new client (revisions) and an editor from before: no encode either way
+    r = _save(client, job.id, [{"start": 1, "end": 4}], base_rev=0, rev=5)
+    assert r.json()["preview_status"] == "stale" and r.json()["preview_ok"] is False
+    r = _save(client, job.id, [{"start": 1, "end": 3}])
+    assert r.status_code == 200 and r.json()["preview_status"] == "stale"
+    assert builds == []
+    # a player that falls back to the preview: it gets the version it
+    # asks for at once, and the stored timeline's preview is built
+    r = client.get(f"/jobs/{job.id}/preview-video", params={"v": 1})
+    assert r.status_code == 200 and r.content == b"preview-1"
+    j = _wait_status(client, job.id, "ready")
+    assert j["preview_segments"] == [[1.0, 3.0]] and len(builds) == 1
+    assert j["preview_version"] == 2
+    # asked again: nothing more to build
+    client.get(f"/jobs/{job.id}/preview-video", params={"v": 2})
+    assert len(builds) == 1
+
+
+def test_preview_mode_saves_of_an_old_client_still_wait_for_the_encode(
+        client, tmp_path, builds):
+    job = _review_job(tmp_path)
+    r = _save(client, job.id, [{"start": 1, "end": 4}])
+    body = r.json()
+    assert (body["preview_ok"], body["preview_rebuilt"], body["preview_status"]) == (
+        True, True, "ready")
+    assert body["preview_segments"] == [[1.0, 4.0]] and len(builds) == 1
+
+
+# ── a skipped encode says so (preview-skip-version) ────────────────
+
+def test_a_skipped_encode_names_the_preview_that_shows_the_save(client, tmp_path, builds):
+    job = _review_job(tmp_path)
+    clip = {"start": 0.0, "end": 4.0}
+    assert _save(client, job.id, [clip]).json()["preview_rebuilt"] is True
+    version = store.get(job.id).preview_version
+    rev = store.get(job.id).edit_rev
+    for seg in (clip, {**clip, "speed": 2.0}):
+        body = _save(client, job.id, [seg], base_rev=rev, rev=rev + 1).json()
+        rev += 1
+        assert (body["preview_ok"], body["preview_rebuilt"], body["preview_status"],
+                body["preview_version"], body["preview_segments"]) == (
+            True, False, "ready", version, [[0.0, 4.0]])
+        # an old client's identical save: no new version either
+        body = _save(client, job.id, [seg]).json()
+        rev = store.get(job.id).edit_rev
+        assert (body["preview_ok"], body["preview_rebuilt"],
+                body["preview_version"]) == (True, False, version)
+    assert len(builds) == 1
+
+
+def test_no_ok_for_a_preview_an_older_encode_is_about_to_replace(
+        client, tmp_path, slow_builds):
+    """The stored preview shows this save, but an encode of another
+    timeline is still running: it will replace that preview, so the
+    answer can't call it ok (it is "building", then this save is built
+    again after it)."""
+    job = _review_job(tmp_path)
+    store.update(job.id, preview_key=f"jobs/{job.id}/preview/v1.mp4",
+                 preview_segments=[[0.0, 5.0]], preview_version=1)
+    _save(client, job.id, [{"start": 0, "end": 3}], base_rev=0, rev=1)
+    assert slow_builds["started"].wait(5)
+    body = _save(client, job.id, [{"start": 0, "end": 5}], base_rev=1, rev=2).json()
+    assert (body["preview_ok"], body["preview_status"], body["preview_version"]) == (
+        False, "building", 1)
+    slow_builds["release"].set()
+    j = _wait_status(client, job.id, "ready")
+    assert j["preview_segments"] == [[0.0, 5.0]] and j["preview_version"] == 3
+
+
+# ── GET /preview-video?v= is that version (be-preview-version) ──────
+
+def _put_preview(job, n, body):
+    import tempfile
+    from backend import media
+    key = f"{media.job_prefix(job.id)}preview/v{n}.mp4"
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as fh:
+        fh.write(body)
+        fh.flush()
+        media.put_file(fh.name, key, content_type="video/mp4",
+                       store=media.backend())
+    return key
+
+
+def _served(r) -> bytes | str:
+    """The local file's bytes, or the key an R2 307 points at."""
+    if r.status_code == 307:
+        loc = r.headers["location"]
+        return loc.split("?")[0].split("/jobs/", 1)[1]
+    assert r.status_code == 200, r.text
+    return r.content
+
+
+def test_preview_video_serves_exactly_the_version_asked_for(client, tmp_path):
+    from backend import media
+    job = _review_job(tmp_path)
+    k1 = _put_preview(job, 1, b"version-1")
+    k2 = _put_preview(job, 2, b"version-2")
+    store.update(job.id, preview_key=k2, preview_version=2,
+                 preview_segments=[[0.0, 5.0]], media_store=media.backend())
+
+    def get(**params):
+        return client.get(f"/jobs/{job.id}/preview-video", params=params,
+                          follow_redirects=False)
+
+    for params, key, data in (({}, k2, b"version-2"), ({"v": 2}, k2, b"version-2"),
+                              ({"v": 1}, k1, b"version-1")):
+        got = _served(get(**params))
+        assert got == (data if media.backend() != "r2" else key[len("jobs/"):]), params
+    # versioned answers can be cached for good (a version never changes)
+    r = get(v=1)
+    if r.status_code == 200:
+        assert "immutable" in r.headers["cache-control"]
+    # a version not stored (yet / any more): 409, with the current one
+    for v in (3, 0):
+        r = get(v=v)
+        assert r.status_code == 409, v
+        assert r.json()["code"] == "preview_not_ready" and r.json()["preview_version"] == 2
+    media.delete(k1, store=media.backend())
+    assert get(v=1).status_code == 409
+    # an old client's cache-buster that isn't a number: the current one
+    assert _served(get(v="x")) == (b"version-2" if media.backend() != "r2" else k2[len("jobs/"):])
+
+
+def test_a_legacy_preview_file_is_only_its_own_version(client, tmp_path):
+    job = _review_job(tmp_path)
+    (tmp_path / "preview.mp4").write_bytes(b"legacy")
+    store.update(job.id, preview_path=str(tmp_path / "preview.mp4"),
+                 preview_version=4, preview_segments=[[0.0, 5.0]])
+    url = f"/jobs/{job.id}/preview-video"
+    assert client.get(url, params={"v": 4}).content == b"legacy"
+    assert client.get(url).content == b"legacy"
+    assert client.get(url, params={"v": 3}).status_code == 409
+
+
+# ── failures reach the client, logs have numbers only (be-preview-4) ─
+
+def test_a_failed_rebuild_is_reported_and_logged_without_text(
+        client, tmp_path, monkeypatch, capsys):
+    job = _review_job(tmp_path)
+    fail = {"on": True}
+    calls = []
+
+    def rebuild(job_id, source, segments, effects=None):
+        calls.append(list(segments))
+        if fail["on"]:
+            raise RuntimeError("ffmpeg preview-cut failed:\n/data/jobs/x/secret "
+                               "Hallo das ist mein Text")
+        cur = store.get(job_id)
+        store.update(job_id, preview_key=f"jobs/{job_id}/preview/v9.mp4",
+                     preview_segments=[[float(a), float(b)] for a, b in segments],
+                     preview_effects=effects, preview_error=None,
+                     preview_version=(cur.preview_version or 0) + 1)
+    monkeypatch.setattr(M, "_rebuild_preview", rebuild)
+    # an old client: the answer itself says it
+    body = _save(client, job.id, [{"start": 0, "end": 2}]).json()
+    assert (body["preview_ok"], body["superseded"], body["preview_status"],
+            body["preview_error"]) == (False, False, "failed", "encode_failed")
+    # a new one: GET /jobs/{id} says it once the background build failed
+    rev = store.get(job.id).edit_rev
+    _save(client, job.id, [{"start": 0, "end": 3}], base_rev=rev, rev=rev + 1)
+    j = _wait_status(client, job.id, "failed")
+    assert (j["preview_status"], j["preview_error"]) == ("failed", "encode_failed")
+    log = capsys.readouterr().out
+    assert "code=encode_failed" in log and "segments=1" in log
+    assert "/data/" not in log and "Hallo" not in log and "secret" not in log
+    # the failure doesn't make GET /preview-video build again and again
+    n = len(calls)
+    client.get(f"/jobs/{job.id}/preview-video")
+    assert len(calls) == n
+    # Retry: builds again, and the preview catches up
+    fail["on"] = False
+    r = client.post(f"/jobs/{job.id}/preview")
+    assert r.status_code == 200 and r.json()["preview_status"] in ("building", "ready")
+    j = _wait_status(client, job.id, "ready")
+    assert j["preview_segments"] == [[0.0, 3.0]] and j["preview_error"] is None
+    # a newer timeline is never "failed" for an older one's failure
+    fail["on"] = True
+    rev = store.get(job.id).edit_rev
+    _save(client, job.id, [{"start": 0, "end": 1}], base_rev=rev, rev=rev + 1)
+    _wait_status(client, job.id, "failed")
+    fail["on"] = False
+    rev = store.get(job.id).edit_rev
+    body = _save(client, job.id, [{"start": 0, "end": 1.5}], base_rev=rev, rev=rev + 1).json()
+    assert body["preview_status"] == "building" and body["preview_error"] is None
+    assert _wait_status(client, job.id, "ready")["preview_segments"] == [[0.0, 1.5]]

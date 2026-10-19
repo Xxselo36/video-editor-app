@@ -17,7 +17,15 @@ or the phonetic pass (phonetic_wake_detection) counts only:
   - for the weak forms, also with a break before the wake word: a
     mishearing of "Cleo" ("clear", "kilo", "Chloe", …), a stand-in for
     the command word ("gut", "is that", "noch mal", "startet", …) and
-    every phonetic guess.
+    every phonetic guess;
+  - and a weak form never right after a full sentence of speech
+    (FULL_SENTENCE_WORDS words or more since the sentence before ended,
+    no pause of BREAK_GAP_S in between): "Das war hart. Leo is tough."
+    or "… gemacht. Cleo is tough." read as sentences, not as a "Cleo
+    start" that would throw away everything before it (F8). It still
+    counts at the start of the transcript, after a pause Whisper left in
+    the times, after a short sentence ("Okay. Cleo, ist ab.") or right
+    after another command.
 
 Tokens the LLM command fix rewrote (backend.llm.correct_voice_commands
 marks them `cmd_fix`) count as they are: the model read the context.
@@ -31,6 +39,10 @@ import unicodedata
 # count as a sentence break when Whisper wrote no punctuation.
 BREAK_GAP_S = 0.3
 
+# A sentence this long before a weak form (with no pause after it) makes
+# the weak form part of the speech, not a command (accept).
+FULL_SENTENCE_WORDS = 3
+
 # The wake word as taught and as Whisper spells it most of the time; the
 # other variants in the keyword lists are weak (need breaks both sides).
 PRIMARY_WAKE = frozenset({"cleo", "clio", "kleo", "klio", "cleyo"})
@@ -39,6 +51,7 @@ PRIMARY_WAKE = frozenset({"cleo", "clio", "kleo", "klio", "cleyo"})
 PRODUCT_TOKENS = frozenset({"cleocuts"})
 
 _PUNCT_END = re.compile(r"[.,!?;:…]+[\"'»«“”‘’)\]]*\s*$")
+_SENTENCE_END = re.compile(r"[.!?…]+[\"'»«“”‘’)\]]*\s*$")
 
 
 def fold(text: str) -> str:
@@ -86,6 +99,33 @@ def break_before(words: list[dict], i: int) -> bool:
     return gap >= BREAK_GAP_S - 1e-9
 
 
+def gap_before(words: list[dict], i: int) -> float:
+    """Seconds of silence Whisper left before words[i] (inf at the start)."""
+    if i <= 0:
+        return float("inf")
+    return float(words[i].get("start", 0)) - float(words[i - 1].get("end", 0))
+
+
+def after_full_sentence(words: list[dict], i: int) -> bool:
+    """Do words[i] follow straight on from a full sentence of speech —
+    FULL_SENTENCE_WORDS words or more back to the end of the sentence
+    before them, without a pause of BREAK_GAP_S?"""
+    if gap_before(words, i) >= BREAK_GAP_S - 1e-9:
+        return False
+    n, j = 0, i - 1
+    while j >= 0:
+        n += 1
+        if n >= FULL_SENTENCE_WORDS:
+            return True
+        # does that sentence start at words[j]?
+        if (j == 0 or _SENTENCE_END.search(_text(words[j - 1]))
+                or words[j - 1].get("brk_after") or words[j].get("brk_before")
+                or gap_before(words, j) >= BREAK_GAP_S - 1e-9):
+            return False
+        j -= 1
+    return False
+
+
 def llm_fixed(words: list[dict], i: int, k: int) -> bool:
     return any(words[j].get("cmd_fix") for j in range(i, min(k + 1, len(words))))
 
@@ -96,7 +136,8 @@ def accept(words: list[dict], i: int, k: int, *, weak: bool) -> bool:
         return True
     if not break_after(words, k):
         return False
-    return not weak or break_before(words, i)
+    return not weak or (break_before(words, i)
+                        and not after_full_sentence(words, i))
 
 
 def is_weak(phrase: str, strong_commands: frozenset[str]) -> bool:

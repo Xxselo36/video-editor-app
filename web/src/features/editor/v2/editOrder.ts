@@ -16,6 +16,12 @@ export class EditOrder {
     this.redos = [];
   }
 
+  /** Forget the order (both histories were replaced: a conflict reload). */
+  clear(): void {
+    this.undos = [];
+    this.redos = [];
+  }
+
   /**
    * The area whose step undo (redo) takes next: the latest recorded one
    * that still has a step (`can`); with nothing recorded (a step the

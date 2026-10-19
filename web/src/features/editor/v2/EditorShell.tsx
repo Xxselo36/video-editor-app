@@ -30,6 +30,7 @@ import { createDocStore, useDocStore, type DocState } from "@/features/editor/st
 import { useTimelineHistory, type TimelineHistory } from "@/features/editor/timeline/history";
 import {
   canDelete,
+  MIN_CLIP_S,
   playheadCutOf,
   sourceAtCut,
   splitAt,
@@ -60,6 +61,8 @@ export type EditorShellProps = {
   jobId: string;
   filename: string | null | undefined;
   savedSegments: SavedSeg[];
+  /** GET /jobs/{id} edit_rev: the timeline's revision (its saves' base_rev, review F3). */
+  editRev?: number;
   previewSegments: [number, number][];
   previewVersion: number;
   hasProxy: boolean | undefined;
@@ -140,9 +143,14 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   const t = useT();
   const { phone } = props;
   const root = useEditorRoot();
+  // 409 on a timeline save (another tab or device): set below, once the doc and the histories exist
+  const onTimelineConflict = useRef<() => void>(() => {});
   const session = useEditSession({
     jobId: props.jobId,
     savedSegments: props.savedSegments,
+    editRev: props.editRev,
+    fps: props.fps,
+    onConflict: () => onTimelineConflict.current(),
     previewSegments: props.previewSegments,
     previewVersion: props.previewVersion,
     hasProxy: props.hasProxy,
@@ -288,8 +296,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
       if (ok) noteReveal();
       return ok;
     },
-    restoreWord: (w) => {
-      const ok = rawCuts.restoreWord(w);
+    restoreWord: (w, span) => {
+      const ok = rawCuts.restoreWord(w, span);
       if (ok) noteReveal();
       return ok;
     },
@@ -357,6 +365,38 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     return () => clearTimeout(id);
   }, [toast]);
 
+  // ── another tab or device saved the timeline (409 stale_rev, F3): its
+  // timeline is on screen again (useEditSession); the doc comes from the
+  // server too, both undo histories start over, and one calm toast says
+  // so — nothing was overwritten, the local change is gone (said).
+  useEffect(() => {
+    onTimelineConflict.current = () => {
+      if (doc.status === "ready") void doc.reload();
+      tlHistory.reset();
+      order.clear();
+      showToast(t("editor.conflict.reloaded"));
+    };
+  });
+
+  // ── edits this device left unsaved last time (save-11): nobody saved
+  // since → back by themselves, as an undo step; the server moved on →
+  // offered, the user decides.
+  const unsavedShown = useRef(false);
+  useEffect(() => {
+    const u = session.unsaved;
+    if (unsavedShown.current || u.kind === "none" || !editSegs.length) return;
+    // after this commit (the toast and the restore are state of their own)
+    const id = setTimeout(() => {
+      unsavedShown.current = true;
+      if (u.kind === "auto") {
+        if (history.commit(u.segs)) showToast(t("editor.unsaved.restored"), { label: t("editor.undo"), run: history.undo });
+      } else {
+        showToast(t("editor.unsaved.found"), { label: t("editor.unsaved.restore"), run: () => history.commit(u.segs) });
+      }
+    }, 0);
+    return () => clearTimeout(id);
+  });
+
   // ── states: offline, expired ────────────────────────────────────────
   const online = useOnline();
   const [expired, setExpired] = useState(false);
@@ -393,7 +433,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   // ── actions ─────────────────────────────────────────────────────────
   const split = () => {
     const at = toSource(store.getState().mediaTime);
-    const idx = splittableIndex(editSegs, at);
+    // no piece under MIN_CLIP_S (state-3: no blips)
+    const idx = splittableIndex(editSegs, at, MIN_CLIP_S);
     if (idx === -1) {
       showToast(t("app.timeline.splitUnavailable"));
       return;
@@ -611,6 +652,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         editSegs={editSegs}
         toSource={toSource}
         playingSegId={session.mode === "proxy" ? session.playingSegId : null}
+        removed={removed}
         phone={phone}
         zones={zones}
         readOnly={doc.readOnly}
@@ -734,6 +776,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         playingSegId={session.playingSegId}
         mode={session.mode}
         seekOriginal={session.seekOriginal}
+        onScrub={session.scrubTo}
         onSplit={split}
         onDelete={() => void del()}
         onTrimmed={noteReveal}

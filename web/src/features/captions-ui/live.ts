@@ -15,12 +15,19 @@ import { LAUNCH_PRESETS, presetSupport, type Clip, type PresetId, type SourceWor
 import type { DocWord } from "@/features/editor/state/doc";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 
-/** The doc's captioned words for the engine, with forced breaks of hidden words carried over. */
-export function shownWords(words: readonly DocWord[]): SourceWord[] {
+/**
+ * The doc's captioned words for the engine, with forced breaks of hidden
+ * words carried over. `cut` (state/cuts.ts cutBy of the removed ranges):
+ * words the edit cuts are left out by the rule the Text tab strikes them
+ * and the export drops them with — a word shows when its middle plays
+ * (preview-11: one that only overlaps a kept clip by a sliver showed in
+ * the preview, struck in the text, missing in the export).
+ */
+export function shownWords(words: readonly DocWord[], cut?: (w: DocWord) => boolean): SourceWord[] {
   const out: SourceWord[] = [];
   let carry = false;
   for (const w of words) {
-    if (w.hidden || !w.text.trim()) {
+    if (w.hidden || !w.text.trim() || cut?.(w)) {
       carry ||= !!w.breakBefore;
       continue;
     }

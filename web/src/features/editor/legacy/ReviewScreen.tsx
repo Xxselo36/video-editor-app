@@ -47,9 +47,12 @@ export function ReviewScreen({
   onChange,
   onApply,
   onBack,
+  editRev = 0,
 }: {
   jobId: string;
   savedSegments: SavedSeg[];
+  /** GET /jobs/{id} edit_rev (the timeline save's revision rule). */
+  editRev?: number;
   previewSegments: [number, number][];
   previewVersion: number;
   /** GET /jobs/{id} has_proxy: true / false, undefined = not reported. */
@@ -90,7 +93,7 @@ export function ReviewScreen({
     seekToPhrase,
     seekOriginal,
     togglePlay,
-  } = useEditSession({ jobId, savedSegments, previewSegments, previewVersion, hasProxy, cutRanges, duration, onApply });
+  } = useEditSession({ jobId, savedSegments, previewSegments, previewVersion, hasProxy, cutRanges, duration, onApply, editRev });
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);

@@ -156,6 +156,121 @@ def test_commands_said_as_a_sentence_are_found(cid, cmd, expect):
     assert [t for (t, s, e) in events if s >= 3.9][:1] == [expect], events
 
 
+def _said(*tokens, at=19.0, step=0.25, gap=0.0):
+    """Touching Whisper tokens from `at` on (`gap` s before the last
+    group: see _after)."""
+    out, t = [], at
+    for tok in tokens:
+        out.append((tok, round(t, 3), round(t + step, 3)))
+        t += step
+    return out
+
+
+def _after(sentence, phrase, gap=0.0):
+    """`phrase` said right after `sentence` (touching, or `gap` s later)."""
+    first = _said(*sentence)
+    t = first[-1][2] + gap
+    return first + _said(*phrase, at=t)
+
+
+# F8 (commands-weak-own-sentence): a weak form — a mishearing of "Cleo"
+# or of the command word, a German stand-in, a phonetic guess — said as a
+# sentence of its own straight after a full sentence of speech is speech:
+# Whisper writes a sentence, the speaker goes on. Each of these used to
+# fire ("Cleo is tough." = "Cleo start": everything before it cut).
+WEAK_IN_SPEECH = [
+    ("cleo-is-tough", ["Das", "war", "echt", "hart."], ["Cleo", "is", "tough."]),
+    ("leo-is-tough", ["Ich", "kenne", "ihn", "gut."], ["Leo", "is", "tough."]),
+    ("cleo-ist-ab", ["Also", "das", "ist", "so."], ["Cleo,", "ist", "ab."]),
+    ("cleo-is-auf", ["Das", "Fenster", "geht", "nicht."], ["Cleo", "is", "auf."]),
+    ("clear-gut", ["Das", "Video", "ist", "fertig."], ["Clear,", "gut."]),
+    ("cleo-is-what", ["So", "machen", "wir", "das."], ["Cleo", "is", "what?"]),
+    ("kilo-ende", ["Wir", "sind", "am", "Ziel."], ["Kilo,", "Ende."]),
+    ("chloe-check", ["Das", "hat", "gut", "geklappt."], ["Chloe,", "check."]),
+    ("leo-fertig", ["Er", "ist", "jetzt", "da."], ["Leo,", "fertig!"]),
+    ("clean-cut", ["That", "was", "the", "plan."], ["Clean", "cut."]),
+    # a short breath Whisper left (under BREAK_GAP_S) changes nothing
+    ("cleo-is-tough-0.1s", ["Das", "war", "echt", "hart."], ["Cleo", "is", "tough."], 0.1),
+    # a comma is no new sentence
+    ("comma-clause", ["Und", "dann,", "naja,"], ["Leo,", "gut."]),
+]
+
+
+@pytest.mark.parametrize("case", WEAK_IN_SPEECH, ids=[c[0] for c in WEAK_IN_SPEECH])
+def test_a_weak_form_after_a_full_sentence_is_speech(case):
+    _cid, sentence, phrase, *gap = case
+    words = START + TAKE + _after(sentence, phrase, *gap) + TAIL
+    cuts, events = scene(words, dur=40.0)
+    assert [t for t, *_ in events] == ["start"], events
+    assert lost(cuts, 1.8, 40.0) == 0.0, cuts
+
+
+def test_a_weak_start_after_a_full_sentence_is_no_opening_start():
+    # the scene commands stay off: nothing before it is thrown away
+    words = TAKE + _after(["Das", "war", "echt", "hart."], ["Cleo", "is", "tough."]) + TAIL
+    cuts, events = scene(words, dur=40.0)
+    assert cuts == [] and events == []
+
+
+def test_a_weak_stop_after_a_full_sentence_opens_no_cut():
+    words = (TAKE + _after(["Wir", "warten", "auf", "ihn."], ["Leo,", "stop!"])
+             + [("Er", 21.5, 21.8), ("kommt", 21.8, 22.1), ("gleich.", 22.1, 22.5),
+                ("Cleo", 23.0, 23.3), ("go.", 23.3, 23.6), ("Weiter.", 24.2, 24.6)])
+    pairs = stopgo(words)
+    # no stop … go pair: only the lone "Cleo go." phrase goes, the speech
+    # between stays
+    assert [p.kind for p in pairs] == ["go"], pairs
+    segs = apply_voice_triggers_to_segments([(2.0, 25.0)], pairs)
+    kept = [(a, b) for a, b in segs]
+    assert lost([(b, c) for (_a, b), (c, _d) in zip(kept, kept[1:])], 19.0, 22.5) == 0.0, segs
+    assert not any(a < 23.15 < b for a, b in kept), segs
+
+
+# Real commands keep firing, as said (the owner's are all strong: Groq
+# writes "Cleo keep." straight after the sentence before, no gap).
+STILL_COMMANDS = [
+    # strong forms right after a full sentence, as Groq tokenises them
+    ("cleo-keep", ["Das", "war", "richtig", "gut."], ["Cleo", "keep."], 0.0, "keep"),
+    ("cleo-comma-cut", ["Das", "war", "nix", "jetzt."], ["Cleo,", "cut."], 0.0, "restart"),
+    ("cleostart-glued", ["Ich", "fange", "neu", "an."], ["CleoStart."], 0.0, "start"),
+    ("cleo-hyphen-start", ["Ich", "fange", "neu", "an."], ["Cleo-Start."], 0.0, "start"),
+    ("clio-start", ["Ich", "fange", "neu", "an."], ["Clio", "Start!"], 0.0, "start"),
+    ("kleo-starts", ["Ich", "fange", "neu", "an."], ["Kleo", "starts."], 0.0, "start"),
+    ("cleo-ellipsis-start", ["Ich", "fange", "neu", "an."], ["Cleo", "…", "start."], 0.0, "start"),
+    ("cleo-finish", ["Das", "war", "das", "Video."], ["Cleo", "finish."], 0.0, "finish"),
+    # weak forms with a reason to be commands
+    ("weak-after-pause", ["Das", "war", "echt", "hart."], ["Cleo", "is", "tough."], 0.5, "start"),
+    ("weak-after-short", ["Okay."], ["Cleo,", "ist", "ab."], 0.0, "start"),
+    ("weak-after-two-words", ["Ja,", "genau."], ["Leo,", "cut."], 0.0, "restart"),
+    ("weak-after-a-command", ["Cleo", "keep."], ["Clear", "start."], 0.0, "start"),
+]
+
+
+@pytest.mark.parametrize("case", STILL_COMMANDS, ids=[c[0] for c in STILL_COMMANDS])
+def test_commands_still_fire_after_speech(case):
+    _cid, sentence, phrase, gap, want = case
+    words = START + TAKE + _after(sentence, phrase, gap) + TAIL
+    _cuts, events = scene(words, dur=40.0)
+    assert [t for t, s, e in events if s >= 18.9][-1:] == [want], events
+
+
+def test_a_weak_cleo_start_opens_the_recording():
+    # said first thing (no sentence before it): the opening start
+    words = [("Cleo", 0.0, 0.35), ("is", 0.35, 0.5), ("tough.", 0.5, 0.9)] + TAKE
+    cuts, events = scene(words)
+    assert events[0][0] == "start" and cuts == [(0.0, 0.9)]
+
+
+def test_the_llm_fix_still_counts_after_speech():
+    words = START + TAKE + _after(["Das", "war", "echt", "hart."], ["Cleo", "is", "tough."])
+    ww = collect_whisper_words(W(*words))
+    for w in ww:
+        if w["start"] >= 20.0:
+            w["cmd_fix"] = True
+    _cuts, events = find_scene_cut_ranges(ww, clip_duration=40.0)
+    assert [t for t, *_ in events] == ["start", "start"]
+
+
 def test_a_strong_command_needs_no_pause_before_it():
     # Owner job (his timings): "… <word> Cleo cut." with the word before
     # unpunctuated and touching "Cleo" — still the restart he said.
@@ -388,3 +503,76 @@ def test_recompute_scenes_still_cuts_and_bumps_the_timeline(client, monkeypatch)
     got = store.get(job.id)
     assert [list(s) for s in got.segments] == [[2.6, 10.0], [10.6, 30.0]]
     assert got.edit_rev > 0
+
+
+def _recompute_job(words, **fields):
+    from backend.jobs import store
+    job = store.create("/in.mp4", {})
+    doc = {"v": 2, "words": [{"id": f"w{k:04d}", "text": t, "start": s, "end": e}
+                             for k, (t, s, e) in enumerate(words, 1)]}
+    store.update(job.id, status="awaiting_review", duration=30.0,
+                 segments=[(0.0, 30.0)], mezz_key=f"jobs/{job.id}/mezz.mp4",
+                 doc=doc, **fields)
+    return job
+
+
+# Whisper's words around two commands: touching, drifted against the
+# events' own times ("Cleo start." said 2.0-2.6, but "Hallo" from 2.55).
+RECOMPUTE_WORDS = [("Setup.", 0.4, 1.6), ("Cleo", 2.0, 2.3), ("start.", 2.3, 2.55),
+                   ("Hallo", 2.55, 3.0), ("Leute", 3.0, 3.4), ("und", 9.2, 9.6),
+                   ("weiter.", 9.6, 10.08), ("Cleo", 10.08, 10.35), ("keep.", 10.35, 10.55),
+                   ("Nächster", 10.7, 11.2), ("Satz.", 11.2, 11.6)]
+RECOMPUTE_EVENTS = [{"type": "start", "start": 2.0, "end": 2.6},
+                    {"type": "keep", "start": 10.0, "end": 10.6}]
+
+
+def test_recomputed_cuts_snap_to_the_word_gaps_without_audio(client, monkeypatch):
+    """recompute-scenes-no-snap: the cuts come from the events' times; the
+    edges go to the word boundaries / gaps (src/edge_snap.py on the
+    words' times), so no kept word loses its start and no cut word keeps
+    a tail."""
+    import backend.main as M
+    from backend.jobs import store
+    job = _recompute_job(RECOMPUTE_WORDS)
+    monkeypatch.setattr(M, "_rebuild_preview", lambda *a, **k: None)
+    r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": RECOMPUTE_EVENTS})
+    assert r.status_code == 200, r.text
+    segs = [tuple(s) for s in store.get(job.id).segments]
+    (a0, b0), (a1, b1) = segs
+    # "Hallo" (from 2.55) keeps its start: the cut ends at the boundary,
+    # not at the event's 2.6
+    assert 2.54 <= a0 <= 2.56, segs
+    # the keep phrase "Cleo keep." (10.08-10.55) goes whole, "weiter."
+    # (to 10.08) stays whole, "Nächster" (from 10.7) too
+    assert 10.07 <= b0 <= 10.09, segs
+    assert 10.55 <= a1 <= 10.70, segs
+    assert b1 == 30.0
+    # never inside a word
+    for w, s, e in RECOMPUTE_WORDS:
+        for edge in (a0, b0, a1):
+            assert not (s + 0.011 < edge < e - 0.011), (w, edge)
+
+
+def test_recomputed_cuts_use_the_stored_peaks(client, monkeypatch, tmp_path):
+    """With the job's peaks envelope the edge goes to the real pause: here
+    a quiet dip at 2.7 s that Whisper's times don't show."""
+    import backend.main as M
+    from backend import media
+    from backend.jobs import store
+    words = [("Cleo", 2.0, 2.3), ("start.", 2.3, 2.85), ("Hallo", 2.85, 3.3)]
+    peaks = bytearray([100] * 3100)
+    for i in range(268, 274):           # 2.68-2.74 s: the pause
+        peaks[i] = 5
+    job = _recompute_job(words)
+    path = tmp_path / "peaks.bin"
+    path.write_bytes(bytes(peaks))
+    key = f"{media.job_prefix(job.id)}peaks.bin"
+    media.put_file(path, key, content_type="application/octet-stream",
+                   store=media.backend())
+    store.update(job.id, peaks_key=key, media_store=media.backend())
+    monkeypatch.setattr(M, "_rebuild_preview", lambda *a, **k: None)
+    events = [{"type": "start", "start": 2.0, "end": 2.6}]
+    r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": events})
+    assert r.status_code == 200, r.text
+    (a0, _b0), = [tuple(s) for s in store.get(job.id).segments]
+    assert 2.68 <= a0 <= 2.74, a0
