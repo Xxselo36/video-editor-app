@@ -439,11 +439,13 @@ export function dropIndex(segs: EditorSeg[], id: string, center: number): number
  * A tap on a seam (phone-tiny-seam): the clip it is for, or null for the
  * seam itself (what it removed, and Restore). Only a tap on the seam's part
  * over a clip narrower than `tinyPx` is for that clip (at Fit a 2 px clip
- * is all seam); a tap on the seam line's other side, next to a clip big
- * enough to tap, is for the seam — as on the desktop. `x`: the tap, `line`:
- * the seam line (client px); prevPx / nextPx: the clips' drawn widths.
+ * is all seam); a tap on the line itself (its glyph's middle, within a
+ * px), or on the line's other side next to a clip big enough to tap, is
+ * for the seam — as on the desktop. `x`: the tap, `line`: the seam line
+ * (client px); prevPx / nextPx: the clips' drawn widths.
  */
 export function seamTapClip(x: number, line: number, prevPx: number, nextPx: number, tinyPx: number): "prev" | "next" | null {
+  if (Math.abs(x - line) < 1) return null;
   const side = x < line ? "prev" : "next";
   return (side === "prev" ? prevPx : nextPx) < tinyPx ? side : null;
 }

@@ -11,8 +11,13 @@
  * probe on requestVideoFrameCallback records every presented frame's
  * mediaTime while the edit plays through: no frame may come from a cut
  * range (the render's frame grid: a clip keeps frames
- * [round(start·30), round(end·30))). Desktop and pixel7, a v2 build
- * (E2E_EDITOR_V2=1).
+ * [round(start·30), round(end·30))). A cut frame counts against the
+ * player unless the page could not act (no animation frame for > 40 ms
+ * while the jump was due) or the media pipeline itself leapt two or more
+ * frames past its cadence (one above 1x, and a sped-up clip of two output
+ * frames or less: a CPU-starved machine); those are reported and may be at
+ * most two per run. Desktop and pixel7, a v2 build
+ * (E2E_EDITOR_V2=1); JOINS_DUMP=1 attaches every frame.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
@@ -142,48 +147,66 @@ const phaseOf = (frames: Frame[]) => {
   return ph[Math.floor(ph.length / 2)] ?? 0;
 };
 
-/** The main thread stood still around wall time `at` (no animation frame
- *  for > 40 ms): nothing on the page could act then — the machine (a
- *  parallel run), not the player. */
+/** The main thread stood still (no animation frame for over 40 ms) in
+ *  the refreshes before wall time `at`, while the jump away from a frame
+ *  shown at `at` was due: nothing on the page could act then — the
+ *  machine (a parallel run), not the player. */
 function stalled(raf: number[], at: number): boolean {
-  let i = 0;
-  while (i < raf.length && raf[i] <= at) i++;
-  const before = raf[i - 1] ?? -Infinity;
-  const after = raf[i] ?? Infinity;
-  // the frame before the cut one is when the jump was due
-  return after - before > 40 || at - before > 40;
+  let prev = -Infinity;
+  for (const t of raf) {
+    if (t > at) return at - prev > 40;
+    if (t - prev > 40 && t > at - 70) return true;
+    prev = t;
+  }
+  return at - prev > 40;
 }
 
-function check({ frames, raf }: Run, segs: Seg[]) {
+/** `leapBy`: how many frames past the steps before it a frame must come to
+ *  count as the pipeline's leap (2 at 1x; above 1x, where the time-stretched
+ *  clock moves in uneven steps, 1). */
+function check({ frames, raf }: Run, segs: Seg[], leapBy = 2) {
   const ph = phaseOf(frames);
   const kOf = (m: number) => Math.round((m - ph) * FPS);
   const range = segs.map((s) => [Math.round(s.start * FPS + 1e-6), Math.round(s.end * FPS - 1e-6)] as const);
   const isCut = (m: number) => !range.some(([a, b]) => kOf(m) >= a && kOf(m) < b);
-  // Not the player's: a cut frame while the main thread stood still, or
-  // one the media pipeline leapt to, skipping the clip's last frame
-  // without warning — an overloaded machine,
-  // e.g. a parallel run. The player's part: on the clip's last frame the
-  // jump is in time, and it lands on the next clip's first frame.
+  // A cut frame is the player's unless the main thread stood still when
+  // the jump was due, or the media pipeline leapt: the frame came two or
+  // more frames further on than any step of the few frames before it, the
+  // ones between never shown (a CPU-starved machine — a parallel run — at
+  // a speed above 1: the time-stretched clock catching up in a jump).
+  // Above 1x a clip of two output frames or less (a 0.13 s clip at 2x)
+  // is over before a landing's clock has settled on a starved machine:
+  // counted with those, never at 1x.
   const cut: number[] = [];
   let cutInStall = 0;
+  let cutShort = 0;
   frames.forEach(([m, , at], i) => {
     if (!isCut(m)) return;
     const k = kOf(m);
-    const prev = frames.slice(Math.max(0, i - 5), i).map(([x]) => kOf(x));
+    const prev = frames.slice(Math.max(0, i - 6), i).map(([x]) => kOf(x));
+    const steps = prev.slice(1).map((x, j) => x - prev[j]).filter((d) => d >= 1 && d <= 8);
     const p = prev[prev.length - 1];
-    const steps = prev.slice(1).map((x, j) => x - prev[j]);
-    // (frames had come one by one, or at a speed's steady stride)
-    const leap = p !== undefined && !isCut(frames[i - 1][0]) && steps.length > 0 && k - p > Math.max(...steps);
+    const leap = p !== undefined && !isCut(frames[i - 1][0]) && steps.length >= 3 && k - p >= Math.max(...steps) + leapBy;
+    const from = p === undefined ? -1 : range.findIndex(([a, b]) => p >= a && p < b);
+    const speed = from >= 0 ? (segs[from].speed ?? 1) : 1;
+    const short = from >= 0 && speed > 1 && (range[from][1] - range[from][0]) / speed <= 2;
     if (stalled(raf, at) || leap) cutInStall++;
+    else if (short) cutShort++;
     else cut.push(k);
   });
   let joins = 0;
   for (let i = 1; i < frames.length; i++) if (kOf(frames[i][0]) !== kOf(frames[i - 1][0]) + 1) joins++;
   const shown = new Set(frames.map(([m]) => kOf(m)));
+  // clip ends that jump (not a split, not the timeline's end): how many of
+  // their last kept frames never showed
   const ends = range.filter((r, i) => i + 1 < range.length && range[i + 1][0] !== r[1]);
-  const lastShown = ends.filter(([, b]) => shown.has(b - 1)).length;
-  // at most one kept frame dropped per join
-  const dropped2 = ends.filter(([a, b]) => b - a > 2 && !shown.has(b - 1) && !shown.has(b - 2)).length;
+  const dropsAt = ends.map(([a, b]) => {
+    let n = 0;
+    for (let k = b - 1; k >= a && !shown.has(k); k--) n++;
+    return n;
+  });
+  const lastShown = dropsAt.filter((n) => n === 0).length;
+  const dropped2 = dropsAt.filter((n, i) => n >= 2 && ends[i][1] - ends[i][0] > 2).length;
   // frames the pipeline itself skipped inside a clip (a busy machine)
   let skipped = 0;
   for (let i = 1; i < frames.length; i++) {
@@ -191,7 +214,7 @@ function check({ frames, raf }: Run, segs: Seg[]) {
     const b = kOf(frames[i][0]);
     if (b - a >= 2 && range.some(([s, e]) => a >= s && b < e)) skipped++;
   }
-  return { cut, cutInStall, joins, lastShown, ends: ends.length, dropped2, skipped };
+  return { cut, cutInStall, cutShort, joins, lastShown, ends: ends.length, dropped2, skipped };
 }
 
 async function seedMany(stub: import("./support/fixtures").Stub, segs: Seg[]) {
@@ -229,14 +252,13 @@ test.describe("proxy playback: no cut frame at any join (wordcuts10)", TAG, () =
     test.info().annotations.push({ type: "joins", description: JSON.stringify({ ...r, cut: r.cut.slice(0, 20), frames: run.frames.length }) });
     expect(r.joins).toBeGreaterThanOrEqual(50);
     expect(r.cut, "frames from cut ranges were on screen").toEqual([]);
-    expect(r.cutInStall).toBeLessThanOrEqual(3);
-    // On a quiet machine a join drops at most its last kept frame, and
-    // often none (late callbacks: the last one). A busy one (the pipeline skipping frames by itself)
-    // makes the player jump earlier on purpose: not checked then.
-    if (r.skipped <= 3) {
-      expect(r.dropped2).toBeLessThanOrEqual(2);
-      expect(r.lastShown / r.ends).toBeGreaterThan(0.4);
-    }
+    expect(r.cutShort).toBe(0);
+    expect(r.cutInStall).toBeLessThanOrEqual(2);
+    // A join drops at most its last kept frame, and mostly none. A busy
+    // machine (the pipeline skipping frames by itself) makes the player
+    // jump a frame earlier on purpose: a little slack then.
+    expect(r.dropped2).toBeLessThanOrEqual(r.skipped <= 3 ? 1 : Math.max(4, Math.ceil(r.skipped / 2)));
+    expect(r.lastShown / r.ends).toBeGreaterThan(r.skipped <= 3 ? 0.75 : 0.5);
   });
 
   test("clips at 1.5x and 2x: still no cut frame", async ({ page, stub }) => {
@@ -246,10 +268,10 @@ test.describe("proxy playback: no cut frame at any join (wordcuts10)", TAG, () =
     await routeProxy(page, media);
     await open(page, job.id, segs.length);
     const run = await playThrough(page, segs);
-    const r = check(run, segs);
+    const r = check(run, segs, 1);
     test.info().annotations.push({ type: "joins", description: JSON.stringify({ ...r, cut: r.cut.slice(0, 20), frames: run.frames.length }) });
     expect(r.joins).toBeGreaterThanOrEqual(50);
     expect(r.cut, "frames from cut ranges were on screen").toEqual([]);
-    expect(r.cutInStall).toBeLessThanOrEqual(3);
+    expect(r.cutInStall + r.cutShort).toBeLessThanOrEqual(2);
   });
 });

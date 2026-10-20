@@ -5985,20 +5985,32 @@ async def _await_first_preview(job: Job) -> Job:
     stored timeline has no preview yet (_build_stored_preview: not
     after a failure for it) — at most _first_preview_wait_s(). Returns
     the job as it is then; still without a preview, the answer is 409
-    as before."""
+    as before.
+
+    Whether to start one is decided on the job as stored at that moment
+    (a build that just ended has stored its preview or its failure
+    before it stops counting in _PREVIEW_BUILDS): a stale read never
+    starts a second encode after a failed one. One that a parallel
+    request started meanwhile is waited for like our own."""
+    async def now() -> Job:
+        got = await run_in_threadpool(store.get, job.id)
+        if got is None:
+            raise HTTPException(404, "job not found")
+        return got
     end = time.monotonic() + _first_preview_wait_s()
     cur = job
     while not (cur.preview_key or cur.preview_path):
-        if not _PREVIEW_BUILDS.get(cur.id) and not await run_in_threadpool(
-                _build_stored_preview, cur):
-            break   # none on its way (it failed, or the job isn't editable)
+        if not _PREVIEW_BUILDS.get(job.id):
+            cur = await now()
+            if cur.preview_key or cur.preview_path:
+                break
+            if (not await run_in_threadpool(_build_stored_preview, cur)
+                    and not _PREVIEW_BUILDS.get(job.id)):
+                break   # none on its way (it failed, or the job isn't editable)
         if time.monotonic() >= end:
             break
         await asyncio.sleep(_FIRST_PREVIEW_POLL_S)
-        nxt = await run_in_threadpool(store.get, job.id)
-        if nxt is None:
-            raise HTTPException(404, "job not found")
-        cur = nxt
+        cur = await now()
     return cur
 
 

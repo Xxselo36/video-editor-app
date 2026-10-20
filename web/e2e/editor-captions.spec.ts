@@ -290,7 +290,14 @@ test.describe("editor v2: the first frame before playback", TAG, () => {
     await expect(page.getByTestId("editor-video")).not.toHaveAttribute("poster", /.+/);
     await expect.poll(() => frameState(page), { timeout: 20_000 }).toMatchObject({ ok: true, paused: true });
     expect(await luma(page)).toBeGreaterThan(20);
-    // the caption layer drew that still: output time 0, the start of the cut
-    await expect.poll(async () => (await hook(page))?.t ?? null, { timeout: 15_000 }).toBeCloseTo(0, 2);
+    // the caption layer drew that still: the cut's first frame (round 3:
+    // the player lands inside a clip's first frame on the render's grid,
+    // which ends at most 1.5 frames after the clip's start — wordcuts10)
+    await expect
+      .poll(async () => {
+        const t = (await hook(page))?.t ?? null;
+        return t !== null && t >= 0 && t < 1.5 / 30 + 0.001;
+      }, { timeout: 15_000 })
+      .toBe(true);
   });
 });

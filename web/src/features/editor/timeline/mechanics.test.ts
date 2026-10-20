@@ -357,6 +357,11 @@ describe("seamTapClip (phone-tiny-seam)", () => {
     expect(seamTapClip(101, 102, 6, 9, 24)).toBe("prev");
     expect(seamTapClip(103, 102, 6, 9, 24)).toBe("next");
   });
+  it("a tap on the line itself (a click's whole-px x next to a fractional line) is the seam, even between tiny clips", () => {
+    expect(seamTapClip(77, 77.06, 2, 22, 12)).toBeNull();
+    expect(seamTapClip(102.4, 102, 6, 9, 24)).toBeNull();
+    expect(seamTapClip(103, 102, 6, 9, 24)).toBe("next");
+  });
   it("the desktop's threshold is its own (10 px)", () => {
     expect(seamTapClip(103, 102, 80, 18, 10)).toBeNull();
     expect(seamTapClip(103, 102, 80, 8, 10)).toBe("next");

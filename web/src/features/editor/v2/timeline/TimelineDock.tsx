@@ -192,6 +192,8 @@ const SETTLE_DELAY_MS = 140;
 const SETTLE_MS = 240;
 const SETTLE_EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 const SETTLE_ID = "ed-settle";
+/** Above this many clips only those near the view are drawn (drag-12-rest). */
+const CULL_MIN_CLIPS = 40;
 /** At most this many clips (and as many seams) settle: the nearest to the released edge. */
 const SETTLE_MAX = 24;
 /** Runs `fn` once the next frame has been painted. */
@@ -258,12 +260,14 @@ type ElCtx = {
   removing: boolean;
   film: FilmSource | null;
   clipH: number;
-  /** Drawn at all: around the view, one view width either side (strip px,
-   *  filmWindow) — drag-12-rest: the owner's 103 clips and seams cost every
-   *  trim move its layout, paint and layerize. The trimmed, selected and
-   *  lifted clip always. */
+  /** The window filmstrip tiles are drawn for: around the view, one view
+   *  width either side (strip px, filmWindow) — and, on a long edit
+   *  (`cull`), the clips and seams drawn at all (drag-12-rest: the owner's
+   *  103 clips and seams cost every trim move its layout, paint and
+   *  layerize). The trimmed, selected and lifted clip always. */
   lo: number;
   hi: number;
+  cull: boolean;
   /** Drawn width of every clip (px): how far a seam's hit area may reach into it. */
   clipPx: Map<string, number>;
   t: ReturnType<typeof useT>;
@@ -286,7 +290,7 @@ type ElCtx = {
 
 function clipElement({ seg, i, left, width, padL, padR }: ClipLay, x: ElCtx) {
   const lifted = x.reorder?.id === seg.id;
-  if (!lifted && seg.id !== x.selected && seg.id !== x.trimId && !((left + width) * x.pps >= x.lo && left * x.pps <= x.hi)) return null;
+  if (x.cull && !lifted && seg.id !== x.selected && seg.id !== x.trimId && !((left + width) * x.pps >= x.lo && left * x.pps <= x.hi)) return null;
   return (
     <ClipView
       key={seg.id}
@@ -313,7 +317,7 @@ function clipElement({ seg, i, left, width, padL, padR }: ClipLay, x: ElCtx) {
 
 function seamElement(v: SeamView, kind: PieceKind | null, x: ElCtx) {
   const at = v.x * x.pps;
-  if (at < x.lo || at > x.hi) return null;
+  if (x.cull && (at < x.lo || at > x.hi)) return null;
   if (!kind) {
     // a reordered boundary: no footage removed here
     return <span key={`m${v.prev}>${v.next}`} className={s.seamMoved} style={{ left: at }} data-seam-key={`${v.prev}>${v.next}`} aria-hidden />;
@@ -387,6 +391,11 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     /** The clips at the press: everything but the trimmed clip stays as laid out from them. */
     startSegs: EditorSeg[];
   } | null>(null);
+  /** The drag's clips as last laid out (committed): what a release keeps on screen. */
+  const drawnDrag = useRef<EditorSeg[] | null>(null);
+  useLayoutEffect(() => {
+    drawnDrag.current = dragSegs;
+  }, [dragSegs]);
   /** After a release: keep the trimmed edge at this client x once the strip closes up. */
   const releaseAnchor = useRef<{ id: string; mode: "start" | "end"; clientX: number } | null>(null);
   const playheadRef = useRef<HTMLDivElement>(null);
@@ -407,7 +416,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     for (const a of inner.getAnimations({ subtree: true })) if (a.id === SETTLE_ID) a.finish();
   };
   /** Where clips and seams are drawn (strip px), set with each layout: the settle measures only what is in view. */
-  const drawnRef = useRef<{ clips: { id: string; x0: number; x1: number }[]; seams: { key: string; x: number }[] }>({
+  const drawnRef = useRef<{ clips: { id: string; x0: number; x1: number; padL: number; padR: number }[]; seams: { key: string; x: number }[] }>({
     clips: [],
     seams: [],
   });
@@ -480,6 +489,22 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   const shown = held && held.base === p.segments ? held.segs : p.segments;
   /** The same for the handlers, set at the release (before `held` renders). */
   const releasing = useRef<{ base: EditorSeg[]; segs: EditorSeg[] } | null>(null);
+  /** A released trim waiting for the next paint to be taken in (committed). */
+  const pendingTake = useRef<(() => void) | null>(null);
+  // the page hidden (an app switch) or left before that paint: at once, so
+  // the save on leaving has it (window capture: before the session's own)
+  useEffect(() => {
+    const now = () => {
+      if (document.visibilityState === "hidden") pendingTake.current?.();
+    };
+    const leave = () => pendingTake.current?.();
+    window.addEventListener("visibilitychange", now, true);
+    window.addEventListener("pagehide", leave, true);
+    return () => {
+      window.removeEventListener("visibilitychange", now, true);
+      window.removeEventListener("pagehide", leave, true);
+    };
+  }, []);
   /** The clips a new gesture starts from: a release still being taken in counts. */
   const liveSegs = () => {
     const r = releasing.current;
@@ -542,6 +567,17 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     const sec =
       d.mode === "start" ? edgeAt(d.startSegs, d.id, "start") + (cur.start - s0.start) : edgeAt(d.last, d.id, "end");
     return rect.left + (sec * rect.width) / d.total;
+  };
+  /** Client x of the trimmed edge as on screen (one read, at the release):
+   *  where it stays. A busy page draws behind the drag's state (a move or
+   *  a magnifier frame not rendered yet): anchored on that state, the
+   *  edge jumped 10–40 px at the release (F7, CPU-starved). */
+  const shownEdgeX = (d: NonNullable<typeof dragRef.current>): number => {
+    const n = stripRef.current?.querySelector<HTMLElement>(`[data-seg="${CSS.escape(d.id)}"]`);
+    const c = drawnRef.current.clips.find((x) => x.id === d.id);
+    if (!n || !c) return drawnEdgeX(d);
+    const r = n.getBoundingClientRect();
+    return d.mode === "start" ? r.left - c.padL : r.right + c.padR;
   };
   const magnify = () => {
     const d = dragRef.current;
@@ -726,7 +762,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   const endTrim = (e: { type: string; clientX: number; clientY: number; timeStamp: number }) => {
     const d = dragRef.current;
     if (!d) return;
-    const edgeX = drawnEdgeX(d);
+    const edgeX = shownEdgeX(d);
     const pxs = geo(d).width / d.total;
     dragRef.current = null;
     d.off();
@@ -764,28 +800,53 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
         releaseAnchor.current = { id: d.id, mode: d.mode, clientX: edgeX };
         const next = releaseTrim(d, pxs);
         scrubTo(null);
-        // The strip lays out the released clips as a transition (the drag's
-        // layout stays on screen meanwhile); the rest of the editor
+        // The strip lays out the released clips as a transition (the
+        // drag's layout stays on screen meanwhile); the rest of the editor
         // (captions, text, video, save) takes them in once that is on
-        // screen, also in slices (drag-12-rest: one long task of the whole
-        // editor was the release). Still one undo step.
+        // screen, also as a transition (drag-12-rest: one long task of the
+        // whole editor was the release — 200–300 ms at CPU x4 for the
+        // strip alone). Still one undo step.
+        // Magnified, the zoom back (below) is anchored on the released
+        // layout from its first frame: the strip lays it out at once
+        // (there, few clips are in view to draw).
+        const now = d.prevPps !== null;
         const base = p.segments;
-        releasing.current = { base, segs: next };
         const fit = d.prevPps === null && !canZoomOut;
-        startTransition(() => {
-          endDrag();
-          if (fit) zoom.fit();
-          setHeld({ base, segs: next });
-        });
-        afterPaint(() => {
-          let added = false;
+        releasing.current = { base, segs: next };
+        if (!now) {
+          // what is drawn stays drawn until then: a move not rendered yet
+          // (a busy page) never shows after the release — the edge jumped
+          // to it and back under the finger (F7)
+          setDragSegs(drawnDrag.current);
           startTransition(() => {
+            endDrag();
+            if (fit) zoom.fit();
+            setHeld({ base, segs: next });
+          });
+        } else {
+          endDrag();
+          setHeld({ base, segs: next });
+        }
+        const take = () => {
+          if (pendingTake.current !== take) return;
+          pendingTake.current = null;
+          let added = false;
+          const commit = () => {
             added = p.history.commit(next);
             if (added && !next.some((x) => x.id === d.id)) p.setSelected(null);
-          });
+            // taken in, in the same render: done — an undo back to the very
+            // clip list the release started from must not bring it back
+            setHeld((h) => (h?.segs === next ? null : h));
+          };
+          startTransition(commit);
+          if (releasing.current?.segs === next) releasing.current = null;
           if (added) p.onTrimmed?.();
-          else setHeld((h) => (h?.segs === next ? null : h));
-        });
+        };
+        pendingTake.current = take;
+        // (a page going to the background paints no more: then at once —
+        // the edit is saved before the app switch, never lost)
+        if (document.visibilityState === "hidden") take();
+        else afterPaint(take);
       }
     }
     if (d.prevPps !== null) {
@@ -1100,7 +1161,8 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     const a = releaseAnchor.current;
     const sc = scrollRef.current;
     const el = stripRef.current;
-    if (!a || !sc || !el || dragSegs) return;
+    // (once the drag's layout is gone: all of it, the released clips drawn)
+    if (!a || !sc || !el || dragSegs || trimming) return;
     releaseAnchor.current = null;
     const from = flipFrom.current;
     flipFrom.current = null;
@@ -1175,7 +1237,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
         if (Math.abs(dx) >= 0.5) ph.animate([{ translate: `${dx}px 0` }, { translate: "0 0" }], opts);
       }
     }
-  }, [segs, contentW, totalDur, dragSegs, drawPlayhead, p.store]);
+  }, [segs, contentW, totalDur, dragSegs, trimming, drawPlayhead, p.store]);
 
   // A zoom moved the strip under the view (useTimelineZoom keeps its
   // anchor): the scroll it set, and the window of clips drawn, before the
@@ -1291,7 +1353,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   useLayoutEffect(() => {
     clipPxRef.current = clipPx;
     drawnRef.current = {
-      clips: clips.map((c) => ({ id: c.seg.id, x0: c.left * pps, x1: (c.left + c.width) * pps })),
+      clips: clips.map((c) => ({ id: c.seg.id, x0: c.left * pps, x1: (c.left + c.width) * pps, padL: c.padL, padR: c.padR })),
       seams: seamViews.map((v) => ({ key: `${v.prev}>${v.next}`, x: v.x * pps })),
     };
   }, [clipPx, clips, seamViews, pps]);
@@ -1436,9 +1498,11 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   );
   // (a primitive copy: the compiler can't tell decimalSeparator's result is one)
   const decStr = `${dec}`;
+  // a short edit draws every clip (cheap); a long one only those near the view
+  const cull = clips.length > CULL_MIN_CLIPS;
   const restCtx = useMemo<ElCtx>(
-    () => ({ pps, selected: selId, reorder: null, trimId, removing: false, film, clipH, lo: filmLo, hi: filmHi, clipPx: restPx, t, dec: decStr, stable }),
-    [pps, selId, trimId, film, clipH, filmLo, filmHi, restPx, t, decStr, stable],
+    () => ({ pps, selected: selId, reorder: null, trimId, removing: false, film, clipH, lo: filmLo, hi: filmHi, cull, clipPx: restPx, t, dec: decStr, stable }),
+    [pps, selId, trimId, film, clipH, filmLo, filmHi, cull, restPx, t, decStr, stable],
   );
   const restClipEls = useMemo(() => (rest ? rest.clips.map((c) => clipElement(c, restCtx)) : null), [rest, restCtx]);
   const restSeamEls = useMemo(
@@ -1691,6 +1755,8 @@ const SeamButton = memo(function SeamButton({
 }) {
   const t = useT();
   const label = t("editor.seam.label", { kind: t(KIND_NAME[kind]), len: fmtSeconds(b - a, dec) });
+  // the press's own x: a click's is whole px (the line is fractional)
+  const downX = useRef<number | null>(null);
   return (
     <button
       type="button"
@@ -1708,9 +1774,16 @@ const SeamButton = memo(function SeamButton({
       title={label}
       aria-label={label}
       aria-haspopup="dialog"
-      onPointerDown={onDown}
+      onPointerDown={(e) => {
+        downX.current = e.clientX;
+        onDown();
+      }}
       // a key or a synthetic click (detail 0): no point to go by
-      onClick={(e) => onOpen(e.currentTarget, { a, b, kind, prev, next }, e.timeStamp, e.detail > 0 ? e.clientX : null)}
+      onClick={(e) => {
+        const x = e.detail > 0 ? (downX.current !== null && Math.abs(downX.current - e.clientX) < 2 ? downX.current : e.clientX) : null;
+        downX.current = null;
+        onOpen(e.currentTarget, { a, b, kind, prev, next }, e.timeStamp, x);
+      }}
     >
       <span className={s.seamLine} />
       <span className={s.seamGlyph}>

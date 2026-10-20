@@ -267,17 +267,39 @@ describe("the frame grid (wordcuts10-flash-frames)", () => {
 type Presented = { k: number; at: number; seeking: boolean };
 
 /**
- * A playing <video> on the fake clock that presents frames (fps, with a
- * container offset `phase`): each frame is "on screen" from its time on;
- * requestVideoFrameCallback callbacks run `cbDelay` ms after a frame was
- * presented (a busy main thread: more). A seek stops the presentation
- * `seekLatency` ms after it was asked for (a frame due meanwhile still
- * shows: the risk this guards), lands 20 ms later on the frame under the
- * target time.
+ * A playing <video> on the fake clock, shown the way a browser composites
+ * it: on every display refresh (vsyncMs) the frame picked at the refresh
+ * before goes on screen, and the frame for the next refresh is picked from
+ * the media clock as it will be then — a seek issued after that pick can't
+ * stop that frame any more (the risk this guards). After each refresh the
+ * page's rendering update runs `cbDelay` ms later: requestVideoFrameCallback
+ * callbacks for the frame just shown, then animation frames. A seek reaches
+ * the decoder `seekLatency` ms after it was asked for (no more picks), lands
+ * `landMs` later on the frame under the target time. `drop(k)`: frames the
+ * decoder never presents (a busy device; the next pick leaps past them).
+ * `busy(t)`: the main thread is blocked at wall time t (no rendering
+ * update until it is free). `drawEvery`: the compositor draws only every
+ * n-th refresh (a busy device), picking the frame for its next draw.
  */
-function framedVideo(start: number, o: { fps?: number; phase?: number; cbDelay?: number; seekLatency?: number; rvfc?: boolean; volumeReadOnly?: boolean } = {}) {
+function framedVideo(
+  start: number,
+  o: {
+    fps?: number;
+    phase?: number;
+    vsyncMs?: number;
+    cbDelay?: number;
+    seekLatency?: number;
+    landMs?: number;
+    rvfc?: boolean;
+    volumeReadOnly?: boolean;
+    drop?: (k: number) => boolean;
+    busy?: (t: number) => boolean;
+    drawEvery?: number;
+  } = {},
+) {
   const fps = o.fps ?? 30;
   const phase = o.phase ?? 0;
+  const vsync = o.vsyncMs ?? 1000 / 60;
   // the page's timers may be made late later on (lateTimers): not these
   const setTimeout = globalThis.setTimeout;
   const on = new Map<string, Set<() => void>>();
@@ -286,35 +308,77 @@ function framedVideo(start: number, o: { fps?: number; phase?: number; cbDelay?:
   let since = Date.now();
   let paused = true;
   let seeking = false;
-  let frozen = false; // the seek reached the decoder: no frames until it lands
+  let frozen = false; // the seek reached the decoder: no picks until it lands
   let vol = 1;
   let rate = 1;
   let presented = 0;
   let shown = -1;
+  let picked: number | null = null;
+  let target = 0;
   const frames: Presented[] = [];
   const seeks: { at: number; to: number; pos: number }[] = [];
   const volumes: { at: number; value: number; pos: number }[] = [];
   const mutes: boolean[] = [];
-  let cbs: ((now: number, md: { mediaTime: number; presentedFrames: number; expectedDisplayTime: number }) => void)[] = [];
+  type Md = { mediaTime: number; presentedFrames: number; expectedDisplayTime: number };
+  let cbs: ((now: number, md: Md) => void)[] = [];
+  let rafs = new Map<number, (t: number) => void>();
   let handle = 0;
-  const clock = () => (paused || frozen ? pos : pos + ((Date.now() - since) / 1000) * rate);
+  const clockAt = (t: number) => (paused || frozen ? pos : pos + ((t - since) / 1000) * rate);
+  const clock = () => clockAt(Date.now());
   const frameAt = (t: number) => Math.floor((t - phase) * fps + 1e-9);
-  const present = (k: number) => {
+  let pendingMd: Md | null = null;
+  let updateDue: number | null = null;
+  const present = (k: number, at: number) => {
     if (k === shown) return;
     shown = k;
     presented++;
-    frames.push({ k, at: Date.now(), seeking });
-    const md = { mediaTime: Math.round((k / fps + phase) * 1000) / 1000, presentedFrames: presented, expectedDisplayTime: Date.now() };
-    const run = cbs;
-    cbs = [];
-    if (run.length) setTimeout(() => run.forEach((cb) => cb(Date.now(), md)), o.cbDelay ?? 2);
+    frames.push({ k, at, seeking });
+    pendingMd = { mediaTime: Math.round((k / fps + phase) * 1000) / 1000, presentedFrames: presented, expectedDisplayTime: at };
   };
-  // the compositor: every ms, the frame under the clock
+  // the page's rendering update: frame callbacks, then animation frames
+  const update = () => {
+    const now = Date.now();
+    const md = pendingMd;
+    pendingMd = null;
+    if (md) {
+      const run = cbs;
+      cbs = [];
+      run.forEach((cb) => cb(now, md));
+    }
+    const run = rafs;
+    rafs = new Map();
+    run.forEach((cb) => cb(now));
+  };
+  let nextVsync = Date.now() + vsync;
+  let vsyncs = 0;
+  const every = o.drawEvery ?? 1;
   const tick = () => {
-    if (!paused && !frozen) present(frameAt(clock()));
+    const now = Date.now();
+    if (now >= nextVsync) {
+      const v0 = nextVsync;
+      nextVsync += vsync;
+      if (vsyncs++ % every === 0) {
+        if (picked !== null) present(picked, v0);
+        picked = null;
+        if (!paused && !frozen) {
+          const k = frameAt(clockAt(v0 + vsync * every));
+          if (k !== shown && !o.drop?.(k)) picked = k;
+        }
+      }
+      updateDue = v0 + (o.cbDelay ?? 2);
+    }
+    if (updateDue !== null && now >= updateDue && !o.busy?.(now)) {
+      updateDue = null;
+      update();
+    }
     setTimeout(tick, 1);
   };
   setTimeout(tick, 1);
+  vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => {
+    rafs.set(++handle, cb);
+    return handle;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (h: number) => void rafs.delete(h));
   const v = {
     get paused() {
       return paused;
@@ -340,25 +404,28 @@ function framedVideo(start: number, o: { fps?: number; phase?: number; cbDelay?:
       if (!o.volumeReadOnly) vol = x;
     },
     muted: false,
+    // (while a seek is on its way: its target, as browsers report it)
     get currentTime() {
-      return clock();
+      return seeking ? target : clock();
     },
     set currentTime(x: number) {
       seeks.push({ at: Date.now(), to: x, pos: clock() });
+      target = x;
       seeking = true;
       emit("seeking");
       setTimeout(() => {
         pos = clock();
         frozen = true;
-      }, o.seekLatency ?? 2);
+      }, o.seekLatency ?? 3);
       setTimeout(() => {
         pos = x;
         frozen = false;
         seeking = false;
         since = Date.now();
-        present(frameAt(x));
+        // the decoded target frame goes up at the next refresh
+        picked = frameAt(x);
         emit("seeked");
-      }, 20);
+      }, o.landMs ?? 20);
     },
     play() {
       if (!paused) return Promise.resolve();
@@ -398,10 +465,18 @@ function framedVideo(start: number, o: { fps?: number; phase?: number; cbDelay?:
   return { v: v as unknown as HTMLVideoElement, frames, seeks, volumes, mutes, fps, phase };
 }
 
-describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", () => {
+/** A repeatable pseudo-random sequence (no Math.random in tests). */
+function rng(seed: number) {
+  let x = seed;
+  return () => {
+    x = (x * 1103515245 + 12345) % 2147483648;
+    return x / 2147483648;
+  };
+}
+
+// (tens of simulated seconds at 1 ms steps each: room on a busy machine)
+describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { timeout: 30_000 }, () => {
   beforeEach(() => {
-    vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => setTimeout(() => cb(performance.now()), 16) as unknown as number);
-    vi.stubGlobal("cancelAnimationFrame", (h: number) => clearTimeout(h));
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
   });
   afterEach(() => {
@@ -417,21 +492,45 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", () =>
     { id: "C", start: 3, end: 4 },
   ];
   const kept = (k: number) => (k >= 0 && k < 60) || (k >= 150 && k < 210) || (k >= 90 && k < 120);
+  /** Many short clips (the owner's edit is 103): 0.2–0.6 s, 0.1–0.3 s cuts between. */
+  const many = (() => {
+    const out: { id: string; start: number; end: number }[] = [];
+    const r = rng(7);
+    let t = 0.3;
+    for (let i = 0; t < 33; i++) {
+      const len = Math.round((0.2 + 0.4 * r()) * 1000) / 1000;
+      out.push({ id: `c${i}`, start: t, end: t + len });
+      t = Math.round((t + len + 0.1 + 0.2 * r()) * 1000) / 1000;
+    }
+    return out;
+  })();
+  const keptMany = (k: number, fps = 30) => many.some((s) => k >= Math.round(s.start * fps + 1e-6) && k < Math.round(s.end * fps - 1e-6));
 
-  async function playAll(f: ReturnType<typeof framedVideo>, ms = 6000, opts: { seekRampMs?: number } = {}) {
-    const p = new EditPlayer(f.v, { fps: 30, seekRampMs: opts.seekRampMs ?? 15 });
-    p.setPlan(buildPlan(segs, 10));
+  async function playAll(f: ReturnType<typeof framedVideo>, ms = 6000, opts: { seekRampMs?: number; plan?: typeof segs; fps?: number } = {}) {
+    const p = new EditPlayer(f.v, { fps: opts.fps ?? 30, seekRampMs: opts.seekRampMs ?? 15 });
+    p.setPlan(buildPlan(opts.plan ?? segs, 40));
     await vi.advanceTimersByTimeAsync(50);
     void f.v.play();
     await vi.advanceTimersByTimeAsync(ms);
     p.destroy();
     return f.frames;
   }
+  const cutOf = (frames: Presented[], ok: (k: number) => boolean) => frames.filter((x) => !ok(x.k)).map((x) => x.k);
+  /** Per clip end (not the timeline's): how many of its last frames never showed. */
+  const droppedAtEnds = (frames: Presented[], plan: { start: number; end: number }[], fps = 30) => {
+    const ks = new Set(frames.map((x) => x.k));
+    return plan.slice(0, -1).map((s) => {
+      const [a, b] = clipFrames(s, fps);
+      let n = 0;
+      for (let k = b - 1; k >= a && !ks.has(k); k--) n++;
+      return n;
+    });
+  };
 
   it("frame callbacks: the jump goes on each clip's last frame; no cut frame; the last frames show", async () => {
     const f = framedVideo(0);
     const frames = await playAll(f);
-    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+    expect(cutOf(frames, kept)).toEqual([]);
     const ks = new Set(frames.map((x) => x.k));
     expect(ks.has(59) && ks.has(209) && ks.has(119)).toBe(true);
     // landed on each clip's first frame
@@ -441,45 +540,94 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", () =>
     expect(Math.floor(f.v.currentTime * 30)).toBe(119);
   });
 
+  it("50+ joins of short clips: no cut frame, at most the last kept frame dropped at a join", async () => {
+    const f = framedVideo(0);
+    const frames = await playAll(f, 25_000, { plan: many });
+    expect(many.length).toBeGreaterThan(50);
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+    const drops = droppedAtEnds(frames, many);
+    expect(Math.max(...drops)).toBeLessThanOrEqual(1);
+    // and mostly none
+    expect(drops.filter((n) => n === 0).length / drops.length).toBeGreaterThan(0.5);
+  });
+
   it("a container offset (12 ms, a webm's start): the landing is never the frame before the clip", async () => {
     const f = framedVideo(0, { phase: 0.012 });
     const frames = await playAll(f);
-    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+    expect(cutOf(frames, kept)).toEqual([]);
     expect(new Set(frames.map((x) => x.k)).has(150)).toBe(true);
   });
 
-  it("callbacks running late (a busy phone): one frame early, still no cut frame", async () => {
-    const f = framedVideo(0, { cbDelay: 26 });
-    const frames = await playAll(f);
-    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+  it("callbacks running late (a busy phone, 12 ms into the refresh): still no cut frame", async () => {
+    const f = framedVideo(0, { cbDelay: 12 });
+    const frames = await playAll(f, 25_000, { plan: many });
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
   });
 
   it("the page's timers firing late (8 ms, a busy page): no cut frame — round 2 showed one at about half of all joins", async () => {
     const f = framedVideo(0);
     const st = globalThis.setTimeout;
     vi.stubGlobal("setTimeout", ((fn: () => void, ms?: number) => st(fn, (ms ?? 0) + 8)) as typeof setTimeout);
-    const frames = await playAll(f);
-    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+    const frames = await playAll(f, 25_000, { plan: many });
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+  });
+
+  it("a device whose decoder skips frames (1 in 5, and leaps past them): no cut frame — the clock covers the frames never shown", async () => {
+    const r = rng(3);
+    const skip = new Set<number>();
+    for (let k = 0; k < 1200; k++) if (r() < 0.2) skip.add(k);
+    const f = framedVideo(0, { drop: (k) => skip.has(k) });
+    const frames = await playAll(f, 25_000, { plan: many });
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+  });
+
+  it("the decoder skips a clip's last two kept frames (the next presented one is cut): the clock jumps before it — round 3's first try showed it", async () => {
+    const ends = new Set(many.flatMap((x) => [clipFrames(x, 30)[1] - 1, clipFrames(x, 30)[1] - 2]));
+    const f = framedVideo(0, { drop: (k) => ends.has(k) });
+    const frames = await playAll(f, 25_000, { plan: many });
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+  });
+
+  it("a compositor drawing every other refresh (a busy device), at 1x and 1.5x: no cut frame", async () => {
+    for (const speed of [1, 1.5]) {
+      const f = framedVideo(0, { drawEvery: 2 });
+      const frames = await playAll(f, 25_000, { plan: many.map((s) => ({ ...s, speed })) });
+      expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+    }
+  });
+
+  it("a main thread busy 25 ms of every 120 ms (rendering updates late): no cut frame", async () => {
+    const f = framedVideo(0, { busy: (t) => t % 120 < 25 });
+    const frames = await playAll(f, 25_000, { plan: many });
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
   });
 
   it("no frame callbacks (older browsers): the clock jumps one frame early, no cut frame", async () => {
     const f = framedVideo(0, { rvfc: false });
     const frames = await playAll(f);
-    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+    expect(cutOf(frames, kept)).toEqual([]);
     const ks = new Set(frames.map((x) => x.k));
     // at most the last frame dropped
     expect(ks.has(58) && ks.has(208)).toBe(true);
+    const g = framedVideo(0, { rvfc: false });
+    expect(cutOf(await playAll(g, 25_000, { plan: many }), (k) => keptMany(k))).toEqual([]);
   });
 
-  it("clips at 2x: still no cut frame", async () => {
-    const f = framedVideo(0);
-    const p = new EditPlayer(f.v, { fps: 30, seekRampMs: 15 });
-    p.setPlan(buildPlan(segs.map((s) => ({ ...s, speed: 2 })), 10));
-    await vi.advanceTimersByTimeAsync(50);
-    void f.v.play();
-    await vi.advanceTimersByTimeAsync(4000);
-    p.destroy();
-    expect(f.frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+  it("clips at 1.5x and 2x: still no cut frame", async () => {
+    for (const speed of [1.5, 2]) {
+      const f = framedVideo(0);
+      const frames = await playAll(f, 15_000, { plan: many.map((s) => ({ ...s, speed })) });
+      expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+    }
+  });
+
+  it("a 60 fps video, and a 120 Hz screen: no cut frame", async () => {
+    const f = framedVideo(0, { fps: 60 });
+    expect(cutOf(await playAll(f, 25_000, { plan: many, fps: 60 }), (k) => keptMany(k, 60))).toEqual([]);
+    const g = framedVideo(0, { vsyncMs: 1000 / 120 });
+    const frames = await playAll(g, 25_000, { plan: many });
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+    expect(Math.max(...droppedAtEnds(frames, many))).toBeLessThanOrEqual(1);
   });
 
   it("a split (the next clip starts on the frame the last one ends): no seek", async () => {
@@ -511,13 +659,13 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", () =>
     expect(f.mutes.some((m) => m)).toBe(false);
     const jump = f.seeks.find((s) => Math.abs(s.to - 5) < 0.05)!;
     expect(jump).toBeTruthy();
-    // the jump on the last frame (frame 59: 1.967–2.0 s)
-    expect(jump.pos).toBeGreaterThanOrEqual(59 / 30);
-    expect(jump.pos).toBeLessThan(2);
+    // the jump while the last frame is up (frame 59: 1.967–2.0 s), or just before it
+    expect(jump.pos).toBeGreaterThanOrEqual(58.5 / 30);
+    expect(jump.pos).toBeLessThan(2 - 0.02);
     const down = f.volumes.filter((x) => x.at <= jump.at && x.value < 1 && x.value > 0);
     expect(down.length).toBeGreaterThan(0);
     // full volume until just before
-    expect(f.volumes.filter((x) => x.at <= jump.at && x.pos < 59 / 30 - 0.02).every((x) => x.value === 1)).toBe(true);
+    expect(f.volumes.filter((x) => x.at <= jump.at && x.pos < 59 / 30 - 0.03).every((x) => x.value === 1)).toBe(true);
     expect(f.volumes.filter((x) => x.at > jump.at).at(-1)?.value).toBe(1);
   });
 
@@ -525,7 +673,7 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", () =>
     const f = framedVideo(0, { volumeReadOnly: true });
     const frames = await playAll(f);
     expect(f.mutes.some((m) => m)).toBe(false);
-    expect(frames.filter((x) => !kept(x.k)).map((x) => x.k)).toEqual([]);
+    expect(cutOf(frames, kept)).toEqual([]);
   });
 
   it("a seek onto a clip's first moment shows its first frame, not the cut one before it", async () => {

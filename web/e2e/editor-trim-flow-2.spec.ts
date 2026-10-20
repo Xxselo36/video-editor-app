@@ -467,6 +467,11 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
       await page.keyboard.press("Escape");
       await expect(page.getByTestId("ed-seam-popover")).toHaveCount(0);
     }
+    // the line itself (its glyph's middle): the seam, even next to the tiny clip
+    await page.mouse.click(line, sb.y + sb.height / 2);
+    await expect(page.getByTestId("ed-seam-popover")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("ed-seam-popover")).toHaveCount(0);
     // the part over the tiny clip: that clip
     await page.mouse.click(line + 1.5, sb.y + sb.height / 2);
     await expect(clipsOf(page).nth(i)).toHaveAttribute("data-selected", "true");
@@ -477,15 +482,17 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
     expect(bi.height).toBeGreaterThanOrEqual(44);
     await expect(zout).toBeDisabled();
     const w0 = await strip.evaluate((el) => el.scrollWidth);
-    for (let k = 0; k < 3; k++) await zin.click();
+    for (let k = 0; k < 4; k++) await zin.click();
     await expect.poll(() => strip.evaluate((el) => el.scrollWidth)).toBeGreaterThan(w0 * 3);
-    // the selected clip stayed in view, and is no longer tiny
+    // the selected clip stayed in view, and is no longer tiny (once the
+    // zoom has settled)
+    await expect.poll(async () => (await clipsOf(page).nth(i).boundingBox())!.width).toBeGreaterThan(12);
     const cb = (await clipsOf(page).nth(i).boundingBox())!;
     const vb = (await strip.boundingBox())!;
     expect(cb.x + cb.width / 2).toBeGreaterThan(vb.x);
     expect(cb.x + cb.width / 2).toBeLessThan(vb.x + vb.width);
     expect(cb.width).toBeGreaterThan(12);
-    for (let k = 0; k < 4; k++) if (await zout.isEnabled()) await zout.click();
+    for (let k = 0; k < 6; k++) if (await zout.isEnabled()) await zout.click();
     await expect.poll(() => strip.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
     await expect(zout).toBeDisabled();
   });
@@ -512,6 +519,65 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
     await expect.poll(async () => (await stub.timeline(job.id))[1][1], { timeout: 30_000 }).toBeCloseTo(kept.segs[1].end, 3);
     await expect.poll(() => page.evaluate((k) => localStorage.getItem(k), key), { timeout: 10_000 }).toBeNull();
     await expect(page.locator('[data-testid="ed-undo"]:visible').first()).toBeEnabled();
+  });
+
+  test("a long edit (66 clips), zoomed in: only the clips near the view are drawn, the view is never empty wherever it scrolls, and a trim there lands (drag-12-rest)", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "the desktop zoom slider");
+    const job = await stub.seed("review_speech");
+    const j0 = (await stub.job(job.id))!;
+    const segs = Array.from({ length: 66 }, (_, i) => ({ start: 0.5 + i * 0.5, end: 0.5 + i * 0.5 + 0.3 }));
+    const r = await stub.api.post(`/jobs/${job.id}/edit-segments`, {
+      data: { segments: segs, base_rev: j0.edit_rev ?? 0, rev: Math.floor(Date.now() * 1000) },
+      timeout: 120_000,
+    });
+    expect(r.ok(), await r.text()).toBe(true);
+    await open(page, job.id);
+    // at Fit every clip is in view: all drawn
+    await expect(clipsOf(page)).toHaveCount(66, { timeout: 30_000 });
+    await page.getByTestId("ed-zoom").fill("80");
+    const strip = page.getByTestId("timeline-scroll");
+    await expect.poll(() => strip.evaluate((el) => el.scrollWidth / el.clientWidth), { timeout: 10_000 }).toBeGreaterThan(3);
+    // zoomed in: the far ones are not drawn
+    await expect.poll(() => clipsOf(page).count(), { timeout: 10_000 }).toBeLessThan(66);
+    for (const at of [0.2, 0.5, 0.8, 1]) {
+      await strip.evaluate((el, f) => {
+        el.scrollLeft = (el.scrollWidth - el.clientWidth) * f;
+      }, at);
+      await page.waitForTimeout(250);
+      // clips (or the seams between them) all across the view
+      const hits = await strip.evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        const row = el.querySelector("[data-seg]")!.getBoundingClientRect();
+        const y = row.top + row.height / 2;
+        return [0.1, 0.3, 0.5, 0.7, 0.9].map((f) => {
+          const e = document.elementFromPoint(b.left + b.width * f, y);
+          return !!e?.closest("[data-seg], [data-testid=ed-seam]");
+        });
+      });
+      expect(hits, `scrolled to ${at}`).toEqual([true, true, true, true, true]);
+    }
+    // a trim on a clip drawn there: saved as made
+    const id = await strip.evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      const row = el.querySelector("[data-seg]")!.getBoundingClientRect();
+      for (const f of [0.5, 0.45, 0.55, 0.4, 0.6]) {
+        const c = document.elementFromPoint(b.left + b.width * f, row.top + row.height / 2)?.closest<HTMLElement>("[data-seg]");
+        if (c) return c.dataset.testid!;
+      }
+      return null;
+    });
+    expect(id).toBeTruthy();
+    const i = Number(id!.replace("clip-", ""));
+    const clip = page.getByTestId("ed-timeline").getByTestId(id!);
+    const cb = (await clip.boundingBox())!;
+    await page.mouse.click(cb.x + cb.width / 2, cb.y + cb.height / 2);
+    await expect(clip).toHaveAttribute("data-selected", "true");
+    const h = center((await clip.getByTestId("clip-trim-end").boundingBox())!);
+    const p = await press(page, h.x, h.y);
+    await p.to(h.x - Math.round(cb.width * 0.3));
+    await p.up();
+    await expect.poll(async () => (await stub.timeline(job.id))[i][1], SAVED).toBeLessThan(segs[i].end - 0.03);
+    expect((await stub.timeline(job.id)).length).toBe(66);
   });
 
   test("preview mode: every frame after a skip over trimmed footage has its playhead (F11)", async ({ page, stub }) => {
@@ -566,5 +632,144 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
       old[0][1] - old[0][0] + (old[1][1] - old[1][0]) - 1.6,
     );
     expect(hidden).toEqual([]);
+  });
+
+  test("preview mode: a trim started while playing with a newer preview waiting shows the edge's own frame, and the new file comes in after it (scrub-pending-swap)", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech", { proxy: "off", slow_rebuild: 3 });
+    await open(page, job.id);
+    await expect(video(page)).toHaveAttribute("data-playback", "preview");
+    const j0 = (await stub.job(job.id))!;
+    const versions = new Map<number, [number, number][]>([[j0.preview_version, j0.preview_segments]]);
+    const total = j0.preview_segments.reduce((a, [s0, e0]) => a + e0 - s0, 0);
+    // the source time the element shows, by the file it has loaded
+    const shown = async () => {
+      const v = await video(page).evaluate((el) => {
+        const e = el as HTMLVideoElement;
+        return { t: e.currentTime, paused: e.paused, v: Number(new URL(e.currentSrc || e.src).searchParams.get("v") ?? -1) };
+      });
+      const segs = versions.get(v.v);
+      let src = -1;
+      let acc = 0;
+      for (const [s0, e0] of segs ?? []) {
+        if (v.t < acc + (e0 - s0) + 1e-3) {
+          src = s0 + (v.t - acc);
+          break;
+        }
+        acc += e0 - s0;
+      }
+      return { ...v, src, known: !!segs };
+    };
+    // an edit (its rebuild takes a while), then play: the new preview
+    // arrives while playing (the editor follows the server's rebuild) and
+    // waits for a pause
+    await trimEnd(page, 1, -Math.max(30, Math.round((await ppsOf(page, total)) * 0.6)));
+    await expect.poll(async () => (await stub.timeline(job.id))[1][1], SAVED).toBeLessThan(j0.edit_segments[1].end - 0.1);
+    await video(page).evaluate(async (el) => {
+      const v = el as HTMLVideoElement;
+      v.muted = true;
+      v.currentTime = 0.5;
+      await v.play();
+    });
+    await expect.poll(async () => (await stub.job(job.id))!.preview_version, { timeout: 60_000 }).toBeGreaterThan(j0.preview_version);
+    const j1 = (await stub.job(job.id))!;
+    const ans = { preview_version: j1.preview_version, preview_segments: j1.preview_segments };
+    versions.set(ans.preview_version, ans.preview_segments);
+    // the new file loads slowly (a phone network): a swap in the middle of
+    // the trim would hold the screen on an old edge meanwhile
+    await page.route(new RegExp(`preview-video.*[?&]v=${ans.preview_version}\\b`), async (route) => {
+      await sleep(1500);
+      await route.continue();
+    });
+    // (the editor's poll picks it up within a second or two)
+    await page.waitForTimeout(2500);
+    const playing = await shown();
+    expect(playing.paused).toBe(false);
+    expect(playing.v).toBe(j0.preview_version);
+    // a trim started now: the edge's frame in the file on screen, every time
+    const tl = await stub.timeline(job.id);
+    const clip = clipsOf(page).nth(3);
+    await clip.scrollIntoViewIfNeeded();
+    const cb = (await clip.boundingBox())!;
+    await page.mouse.click(cb.x + cb.width / 2, cb.y + cb.height / 2);
+    await expect(clip).toHaveAttribute("data-selected", "true");
+    const h = center((await clip.getByTestId("clip-trim-end").boundingBox())!);
+    // every frame the video presents once the trim shows its edge (its
+    // first seek, paused, after its readout is up, landed): the file it
+    // came from (?v=) and its time
+    await video(page).evaluate((el) => {
+      const v = el as HTMLVideoElement;
+      const w = window as unknown as { __scrubFrames: [number, number][]; __trimOn: boolean; __scrubbing: boolean };
+      w.__scrubFrames = [];
+      w.__trimOn = w.__scrubbing = false;
+      new MutationObserver(() => {
+        if (document.querySelector("[data-testid=ed-trim-readout]")) w.__trimOn = true;
+      }).observe(document.body, { childList: true, subtree: true });
+      // (from the trim's own first seek, the video paused — not a skip
+      // while it plays — once it landed: no frame from before it)
+      let armed = false;
+      v.addEventListener("seeking", () => {
+        if (w.__trimOn && v.paused) armed = true;
+      });
+      v.addEventListener("seeked", () => {
+        if (armed) w.__scrubbing = true;
+      });
+      const cb: VideoFrameRequestCallback = (_n, md) => {
+        if (w.__scrubbing) w.__scrubFrames.push([md.mediaTime, Number(new URL(v.currentSrc || v.src).searchParams.get("v") ?? -1)]);
+        v.requestVideoFrameCallback(cb);
+      };
+      v.requestVideoFrameCallback(cb);
+    });
+    const srcOf = (t: number, segs: [number, number][]) => {
+      let acc = 0;
+      for (const [s0, e0] of segs) {
+        if (t < acc + (e0 - s0) + 1e-3) return s0 + (t - acc);
+        acc += e0 - s0;
+      }
+      return -1;
+    };
+    const p = await press(page, h.x, h.y);
+    // (past the touch slop, and within the clip: up to half of it)
+    const steps = [0.15, 0.3, 0.45].map((f) => Math.max(12, Math.round(cb.width * f)));
+    let edge = tl[3][1];
+    const edges: number[] = [];
+    for (const px of steps) {
+      await p.to(h.x - px, 4);
+      // (moving on before an edge held still MAGNIFY_MS magnifies the dock)
+      await page.waitForTimeout(220);
+      // where the dock has the edge now (its readout: "17.83 s"), and the
+      // frame on screen: the last one presented, by the file it came from
+      const now = await page.evaluate(() => ({
+        readout: document.querySelector("[data-testid=ed-trim-readout]")?.textContent ?? "",
+        paused: (document.querySelector("[data-testid=editor-video]") as HTMLVideoElement).paused,
+        last: (window as unknown as { __scrubFrames: [number, number][] }).__scrubFrames.at(-1) ?? [-1, -1],
+      }));
+      edge = parseFloat(now.readout.replace(",", "."));
+      edges.push(edge);
+      expect(edge).toBeLessThan(tl[3][1] - 0.05);
+      expect(now.paused).toBe(true);
+      const [mt, ver] = now.last;
+      expect(versions.has(ver), `frame of v=${ver}`).toBe(true);
+      const onScreen = srcOf(mt, versions.get(ver)!);
+      expect(Math.abs(onScreen - edge), `on screen ${onScreen} (v${ver}), edge ${edge}`).toBeLessThan(0.1);
+    }
+    // no frame of anything else meanwhile (a scrub mapped through the
+    // other file's clips, a reload's first frame)
+    const frames = await page.evaluate(() => (window as unknown as { __scrubFrames: [number, number][] }).__scrubFrames);
+    const wrong = frames
+      .map(([t, ver]) => ({ ver, src: versions.has(ver) ? srcOf(t, versions.get(ver)!) : -1 }))
+      .filter((f) => !(f.src >= edge - 0.15 && f.src <= tl[3][1] + 0.05));
+    expect(frames.length).toBeGreaterThan(0);
+    expect(wrong, `frames that were not the dragged edge (${edges.join(", ")}): ${JSON.stringify(frames)}`).toEqual([]);
+    await p.up();
+    // let go: the waiting preview comes in, on the same moment (the edge
+    // shown last, or where the release put it: between words)
+    await expect.poll(async () => (await shown()).v, { timeout: 10_000 }).toBe(ans.preview_version);
+    await expect
+      .poll(async () => {
+        const s2 = await shown();
+        const end = (await stub.timeline(job.id))[3][1];
+        return Math.abs(s2.src - edge) < 0.1 || Math.abs(s2.src - end) < 0.1;
+      }, SAVED)
+      .toBe(true);
   });
 });

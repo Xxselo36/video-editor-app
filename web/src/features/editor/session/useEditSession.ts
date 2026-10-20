@@ -295,6 +295,10 @@ export function useEditSession({
   // edit removed (stalePlan below).
   const swapWhenPausedRef = useRef(false);
   const pendingSwapRef = useRef<{ segs: Segs; version: number } | null>(null);
+  // A trim edge shown in the video (scrubTo, below): the file stays the
+  // one on screen until it is let go — a newer preview waits (the scrub's
+  // times are that file's, scrub-pending-swap).
+  const scrubRef = useRef<{ fromSource: number; want: number | null } | null>(null);
   /** The latest committed clip list (what "Saved" must match). */
   const latestRef = useRef(editSegs);
   /** The preview version on screen (or waiting to be swapped in). */
@@ -375,17 +379,31 @@ export function useEditSession({
       return;
     }
     const v = videoRef.current;
-    if (v && v.paused) {
+    if (v && v.paused && !scrubRef.current) {
       const old = videoSegmentsRef.current;
       putVideoSegments(segs);
       swapPreviewSrc(version, segs, old);
     } else {
       // Defer the src swap until the user pauses — we DO NOT
       // interrupt playback in flight. The pause listener below
-      // performs the swap when they stop.
+      // performs the swap when they stop; a trim edge on screen (a
+      // scrub) swaps when it is let go (scrubTo(null)).
       pendingSwapRef.current = { segs, version };
       swapWhenPausedRef.current = true;
     }
+  };
+  /** A deferred swap, now (paused, no scrub); `atSource`: land there. */
+  const flushSwap = (atSource?: number) => {
+    if (!swapWhenPausedRef.current) return false;
+    swapWhenPausedRef.current = false;
+    const sw = pendingSwapRef.current;
+    pendingSwapRef.current = null;
+    if (!sw) return false;
+    const old = videoSegmentsRef.current;
+    if (atSource !== undefined) wantSourceRef.current = atSource;
+    putVideoSegments(sw.segs);
+    swapPreviewSrc(sw.version, sw.segs, old);
+    return true;
   };
 
   // ── the timeline autosave (timelineSave.ts) ──────────────────────────
@@ -598,16 +616,8 @@ export function useEditSession({
     const v = videoRef.current;
     if (!v) return;
     const onPause = () => {
-      if (swapWhenPausedRef.current) {
-        swapWhenPausedRef.current = false;
-        const sw = pendingSwapRef.current;
-        pendingSwapRef.current = null;
-        if (sw) {
-          const old = videoSegmentsRef.current;
-          putVideoSegments(sw.segs);
-          swapPreviewSrc(sw.version, sw.segs, old);
-        }
-      }
+      // (a scrub's own pause: the swap waits until the edge is let go)
+      if (!scrubRef.current) flushSwap();
     };
     // playing on from where the old file is: a seek request is done with
     const onPlay = () => {
@@ -847,7 +857,6 @@ export function useEditSession({
   // edit cuts too). Preview: the playing file's frame there, or the
   // nearest one it has (it doesn't have footage a trim reveals). Paused;
   // one seek at a time, the newest edge wins.
-  const scrubRef = useRef<{ fromSource: number; want: number | null } | null>(null);
   /** A trim edge is shown in the video (scrubTo): not playback. */
   const isScrubbing = useCallback(() => scrubRef.current !== null, []);
   useEffect(() => {
@@ -871,16 +880,22 @@ export function useEditSession({
       const sc = scrubRef.current;
       scrubRef.current = null;
       if (modeRef.current === "proxy") playerRef.current?.scrub(null);
+      // a newer preview that waited for the scrub: in now, where the video
+      // goes (back to where it was, or the edge shown)
+      if (modeRef.current !== "proxy" && v.paused && flushSwap(sc && opts.restore ? sc.fromSource : undefined)) return;
       if (sc && opts.restore) seekOriginal(sc.fromSource);
       return;
     }
-    if (!scrubRef.current) scrubRef.current = { fromSource: toSource(v.currentTime), want: null };
+    // (by the file on screen: a swap made since the last render included)
+    if (!scrubRef.current) scrubRef.current = { fromSource: sourceTimeOf(v.currentTime, modeRef.current, videoSegmentsRef.current, keptSegments, duration), want: null };
     if (modeRef.current === "proxy") {
       playerRef.current?.scrub(t);
       return;
     }
     if (!v.paused) v.pause();
-    const src = videoSegments.length ? videoSegments : keptSegments;
+    // the file on screen (a swap made since the last render included)
+    const shown = videoSegmentsRef.current;
+    const src = shown.length ? shown : keptSegments;
     let at = previewTimeOf(t, src);
     if (at === null) {
       // the nearest moment the playing file has

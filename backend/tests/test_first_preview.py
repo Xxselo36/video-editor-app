@@ -11,6 +11,7 @@ Without CLEO_PROXY_VIDEO, or when the proxy encode failed, the analysis
 makes the first preview exactly as before."""
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import threading
 import time
@@ -354,6 +355,40 @@ def test_a_failed_first_build_answers_at_once(client, monkeypatch, first_builds)
         time.sleep(0.05)
     assert _is(_get(client, job.id, v=0), 1)
 
+
+def test_a_stale_read_starts_no_second_build_after_a_failure(client, monkeypatch,
+                                                             first_builds):
+    """Whether to start a build is decided on the job as stored then:
+    the request's own read from before a build that failed meanwhile
+    (no preview_error in it yet) starts no second encode."""
+    job = _proxy_job_without_preview(monkeypatch)   # read before the build
+    first_builds["fail"] = True
+    assert client.post(f"/jobs/{job.id}/preview").status_code == 200
+    assert M._settle_preview_builds(10)
+    assert store.get(job.id).preview_error["code"] == "encode_failed"
+    assert job.preview_error is None
+    got = asyncio.run(M._await_first_preview(job))
+    assert got.preview_key is None and got.preview_error["code"] == "encode_failed"
+    assert len(first_builds["calls"]) == 1
+
+
+def test_a_build_a_parallel_request_started_is_waited_for(client, monkeypatch,
+                                                          first_builds):
+    """Another request started the first build between this one's read
+    and its own start (which then finds it "building" and starts none):
+    this request waits for that build too instead of answering 409."""
+    job = _proxy_job_without_preview(monkeypatch)
+    real = M._build_stored_preview
+    asked: list[str] = []
+
+    def raced(j):
+        asked.append(j.id)
+        if len(asked) == 2:          # the other request, just before ours
+            assert real(store.get(j.id))
+        return False
+    monkeypatch.setattr(M, "_build_stored_preview", raced)
+    assert _is(_get(client, job.id, v=0), 1)
+    assert len(first_builds["calls"]) == 1
 
 def test_proxy_saves_still_build_nothing(client, monkeypatch, first_builds):
     """Edits while the editor plays the proxy: no encode; the first one

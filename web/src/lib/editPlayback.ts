@@ -24,13 +24,20 @@
  * round(end·fps))). Where the browser reports presented frames
  * (requestVideoFrameCallback: Chrome, Safari 15.4+) the jump to the next
  * clip goes on the clip's LAST frame — the moment it is on screen, before
- * the next (cut) frame can be — and one frame earlier when those callbacks
- * have been running late. Elsewhere a timer / animation-frame clock jumps
- * one frame early. Landings go a little into the next clip's first frame
- * (a seek shows the frame under the target time: exactly on the edge, a
- * container offset of a few ms showed the cut frame before it). Cut
- * footage is never on screen and never heard; at most the last kept frame
- * (≤ 1/fps of picture and sound) is skipped. Where the element's volume is
+ * the next (cut) frame can be — and a frame or two earlier while the
+ * decoder skips frames (a busy device) or above 1.25x. The clock backs
+ * that up at every animation frame: the compositor picks a frame one
+ * refresh (or, drawing slower, one draw) ahead and a seek takes a few ms
+ * to reach the decoder, so a check jumps once the next check — as late as
+ * animation frames have been coming — could be too late for the first cut
+ * frame. That clock is the element's, or the last shown frame's time plus
+ * the time since, when that is further on (a busy device's clock reads
+ * behind what it shows). Without frame callbacks the clock jumps one frame
+ * early. Landings go a little into the next clip's first frame (a seek
+ * shows the frame under the target time: exactly on the edge, a container
+ * offset of a few ms showed the cut frame before it). Cut footage is never
+ * on screen and never heard; at a join at most the last kept frame (≤
+ * 1/fps of picture and sound) is skipped. Where the element's volume is
  * writable a short gain ramp (rampMs) runs down into the jump and up after
  * the landing — a ramp, never a mute; iOS Safari (volume read-only) gets
  * the timing only. The proxy's keyframe interval bounds the seek cost
@@ -79,20 +86,28 @@ const DEFAULT_FPS = 30;
 const LAND_FRAMES = 0.15;
 const BLIND_FRAMES = 0.5;
 /**
- * The compositor picks a frame for the screen about one display refresh
- * before it shows, and a seek needs a few ms to reach the decoder: a jump
- * issued later than this before the next frame's time can come too late
- * for it (wall ms). Frame callbacks running later than a frame minus this
- * make the jump go one frame earlier.
+ * The compositor picks the frame for the screen one display refresh before
+ * it shows, and a seek needs a few ms (this, wall) to reach the decoder: a
+ * jump later than refresh + SEEK_MS before a frame's time can't stop it.
  */
-export const FRAME_DEADLINE_MS = 16.7 + 4;
+export const SEEK_MS = 8;
 /** The clock fallback (no frame callbacks) jumps this far before the last
  *  kept frame (frames): one frame early, with room for a late timer. */
 export const CLOCK_EARLY_FRAMES = 0.25;
-/** Animation frames come this often (ms; a 60 Hz screen). */
+/** Animation frames come at least this often (ms; a 60 Hz screen): the
+ *  refresh assumed until measured, and the least one assumed. */
 const RAF_MS = 16.7;
-/** Missed or dropped frames within this long (ms) make the jumps go earlier. */
-const STALL_WINDOW_MS = 5000;
+/** The next check is assumed at most this late (ms): a main thread busier
+ *  than that can't be helped by jumping earlier still. */
+const MAX_CHECK_MS = 50;
+/** Above this speed the element's clock (the time-stretched audio's)
+ *  moves in steps of a few frames now and then: one frame more room. */
+const FAST_RATE = 1.25;
+/** The decoder skipped frames within this long (ms): the jumps go a frame earlier. */
+const SKIP_WINDOW_MS = 2000;
+/** The clock read from the frames on screen runs at most this far (frames)
+ *  ahead of the element's own (a device that paused the clock to catch up). */
+const SHOWN_AHEAD_FRAMES = 2;
 
 /**
  * A clip's frames on the render's grid (backend captions_v2.clip_plan):
@@ -302,22 +317,34 @@ export class EditPlayer {
   /** requestVideoFrameCallback: supported, its pending handle. */
   private rvfc: boolean;
   private frameHandle = 0;
-  /** The last presented frame: when (performance.now), its count, index, time. */
+  /** The last presented frame: when its callback ran and when it went on
+   *  screen (performance.now), its count, index, time. */
   private lastFrameAt = -Infinity;
+  private lastShownAt = -Infinity;
   private lastPresented: number | null = null;
   private lastFrameK: number | null = null;
   private lastFrameM = 0;
   /** Frames presented since play or our last seek. */
   private framesSince = 0;
-  /** Recent frame steps between presentations, and how late (ms) the
-   *  frame callbacks ran. */
+  /** A seek on its way: from where (media time of the frame then on
+   *  screen) to where. Frames nearer `from` are from before it. */
+  private landing: { from: number; to: number } | null = null;
+  /** Frames presented since the last seek landed (the landing one is 1). */
+  private shownRun = 0;
+  /** Recent wall gaps (ms) between frames going on screen one after the
+   *  other: how often the compositor draws, when that is slower than the
+   *  video's frames come (a busy device). */
+  private shownGaps: number[] = [];
+  /** Recent frame steps between presentations. */
   private strides: number[] = [];
-  private lates: number[] = [];
-  private cbGaps: number[] = [];
-  /** When (performance.now) the main thread recently missed frames: a
-   *  frame shown without its callback, a callback very late or long after
-   *  the one before. A busy page or device: the jumps go earlier. */
-  private stalls: number[] = [];
+  /** Recent gaps (wall ms) between animation frames while playing: how
+   *  soon the next check comes; and when the last one ran. */
+  private tickGaps: number[] = [];
+  private lastTickAt: number | null = null;
+  /** When (performance.now) the decoder lately skipped frames while
+   *  playing (decoded too late, a busy device): the next presented frame
+   *  may come two or more on, past a clip's last one. */
+  private skips: number[] = [];
 
   constructor(video: HTMLVideoElement, opts: EditPlayerOptions = {}) {
     this.v = video as FrameVideo;
@@ -555,65 +582,100 @@ export class EditPlayer {
     return performance.now() - this.lastFrameAt < Math.max(150, 4 * frameMs);
   }
 
-  /** Frames from one presented frame to the next (2+ at high speeds). */
+  /** Frames from one presented frame to the next, at most (2+ at high
+   *  speeds, or when the decoder skips some). */
   private stride(): number {
     const seen = this.strides.length ? Math.max(...this.strides) : 1;
     return Math.min(8, Math.max(1, seen, this.screenStride()));
   }
 
-  /** A 60 Hz screen shows at most one frame per refresh. */
+  /** The usual step: a screen shows at most one frame per refresh. */
   private screenStride(): number {
-    return Math.max(1, Math.ceil((this.rate() * this.fps()) / 60 - 0.01));
+    const usual = this.strides.length ? [...this.strides].sort((a, b) => a - b)[this.strides.length >> 1] : 1;
+    return Math.max(1, usual, Math.ceil((this.rate() * this.fps() * this.refreshMs()) / 1000 - 0.01));
   }
 
-  /** Frames to jump early by because frame callbacks have been running
-   *  too late to jump on the last frame itself, or the main thread missed
-   *  frames lately (0 normally, ≤ 2). */
+  /** Frames to jump early by at a clip's last frame: one while the decoder
+   *  has lately been skipping frames (the next one shown may be two on),
+   *  two while it keeps doing so, one more above FAST_RATE; else none —
+   *  late frame callbacks are the clock's to cover. */
   private earlyFrames(): number {
     const now = performance.now();
-    while (this.stalls.length && now - this.stalls[0] > STALL_WINDOW_MS) this.stalls.shift();
-    let early = Math.min(2, this.stalls.length);
-    if (this.lates.length >= 4) {
-      const xs = [...this.lates].sort((a, b) => a - b);
-      const p90 = xs[Math.floor(xs.length * 0.9)];
-      const frameMs = 1000 / (this.fps() * this.rate());
-      const over = p90 - (this.stride() * frameMs - FRAME_DEADLINE_MS);
-      if (over > 0) early = Math.max(early, Math.min(2, Math.ceil(over / frameMs)));
-    }
-    return early;
+    while (this.skips.length && now - this.skips[0] > SKIP_WINDOW_MS) this.skips.shift();
+    const n = this.skips.length;
+    return (n >= 3 ? 2 : n > 0 ? 1 : 0) + (this.rate() > FAST_RATE ? 1 : 0);
   }
 
-  /** Media time the jump at seg's end is due: when its last frame is on
-   *  screen (frame callbacks; earlier at speed or running late), else
-   *  CLOCK_EARLY_FRAMES before that frame. */
-  private jumpAtOf(seg: PlaySeg): number {
+  /** Media time the jump at seg's end is due by the clock (animation
+   *  frames, timers): when the next check could come too late for the
+   *  first cut frame; without frame callbacks also CLOCK_EARLY_FRAMES
+   *  before the last kept frame. */
+  private clockDueOf(seg: PlaySeg): number {
+    const byClock = this.dueBy(seg, this.nextCheckMs());
+    if (this.framesLive()) return byClock;
     const [, b] = this.framesOf(seg);
-    if (this.framesLive()) {
-      // the frame whose callback jumps: by the frame rule, or the first one
-      // shown once the clock rule says so
-      const byClock = Math.ceil((this.dueBy(seg, this.cbGapMs()) - (this.phase ?? 0)) * this.fps() - 1e-6);
-      return this.frameAt(Math.min(b - this.stride() - this.earlyFrames(), byClock));
-    }
-    return Math.min(this.frameAt(b - 1 - CLOCK_EARLY_FRAMES), this.dueBy(seg, RAF_MS));
+    return Math.min(this.frameAt(b - 1 - CLOCK_EARLY_FRAMES), byClock);
+  }
+
+  /** Media time the jump at seg's end is expected (the gain ramp's aim):
+   *  its last frame's callback (earlier at speed or running late), or the
+   *  clock's moment, whichever comes first. */
+  private jumpAtOf(seg: PlaySeg): number {
+    const due = this.clockDueOf(seg);
+    if (!this.framesLive()) return due;
+    const [, b] = this.framesOf(seg);
+    return Math.min(this.frameAt(b - this.stride() - this.earlyFrames()), due);
   }
 
   /**
    * The media time by which a check that runs again in `nextMs` (wall)
    * has to jump: after it, the media clock could reach seg's first cut
-   * frame before the next check — and the compositor picks a frame
-   * FRAME_DEADLINE_MS ahead. dueBy(seg, 0): the last moment at all.
+   * frame before the next check — and the compositor picks a frame one
+   * refresh ahead, the seek takes SEEK_MS to reach the decoder (as many
+   * frames sooner as the frame rule goes early: a struggling decoder,
+   * above FAST_RATE).
    */
   private dueBy(seg: PlaySeg, nextMs: number): number {
     const [, b] = this.framesOf(seg);
-    return this.frameAt(b) - ((nextMs + FRAME_DEADLINE_MS) / 1000) * this.rate();
+    return this.frameAt(b - this.earlyFrames()) - ((nextMs + this.refreshMs() + SEEK_MS) / 1000) * this.rate();
   }
 
-  /** How long (wall ms) from one frame callback to the next, lately. */
-  private cbGapMs(): number {
-    const frameMs = (this.stride() * 1000) / (this.fps() * this.rate());
-    if (this.cbGaps.length < 4) return frameMs;
-    const xs = [...this.cbGaps].sort((a, b) => a - b);
-    return Math.max(frameMs, xs[Math.floor(xs.length * 0.75)]);
+  private tickGap(q: number, lo: number): number {
+    if (this.tickGaps.length < 4) return Math.max(lo, RAF_MS);
+    const xs = [...this.tickGaps].sort((a, b) => a - b);
+    return clamp(xs[Math.floor(xs.length * q)], lo, MAX_CHECK_MS);
+  }
+
+  /** The screen's refresh as the animation frames come (ms; ≥ 60 Hz's) —
+   *  or how often the compositor draws, when that is slower than the
+   *  video's frames come (it picks a frame one draw ahead). */
+  private refreshMs(): number {
+    const raf = this.tickGap(0.5, RAF_MS);
+    if (this.shownGaps.length < 4) return raf;
+    const draw = Math.min(...this.shownGaps);
+    const content = 1000 / (this.fps() * this.rate());
+    return draw > content * 1.15 ? Math.max(raf, Math.min(draw, MAX_CHECK_MS)) : raf;
+  }
+
+  /** How long (wall ms) until the next check (an animation frame), as
+   *  late as they have been coming lately. */
+  private nextCheckMs(): number {
+    return this.tickGap(0.9, this.refreshMs());
+  }
+
+  /**
+   * The media position now: the element's clock, or — when that reads
+   * behind the frames being shown (a busy device: the clock catches up in
+   * steps) — the last shown frame's time plus the wall time since it went
+   * on screen, at most SHOWN_AHEAD_FRAMES ahead of the element's clock.
+   * Not from a landing's first frame: the clock often starts a while
+   * after it is up.
+   */
+  private clockNow(): number {
+    const t = this.v.currentTime;
+    if (this.shownRun < 2 || this.lastPresented === null || !this.framesLive() || !isFinite(this.lastShownAt)) return t;
+    const shown = this.lastFrameM + ((performance.now() - this.lastShownAt) / 1000) * this.rate();
+    return Math.max(t, Math.min(shown, t + SHOWN_AHEAD_FRAMES / this.fps()));
   }
 
   private watchFrames(): void {
@@ -629,12 +691,20 @@ export class EditPlayer {
   private onFrame = (_now: number, md: FrameMeta): void => {
     this.frameHandle = 0;
     this.watchFrames();
-    this.frame(md.mediaTime, md.presentedFrames, performance.now() - md.expectedDisplayTime);
+    this.frame(md.mediaTime, md.presentedFrames, md.expectedDisplayTime);
   };
 
-  private frame(m: number, presented: number, lateMs: number): void {
+  private frame(m: number, presented: number, shownAt: number): void {
     const v = this.v;
     const wall = performance.now();
+    // A frame from before a seek landed (ours, or the native controls'):
+    // nothing to learn from it (its step to the landing is no frame
+    // stride), nothing to act on. The first one nearer the target lands.
+    const ld = this.landing;
+    if (ld) {
+      if (Math.abs(m - ld.from) < Math.abs(m - ld.to)) return;
+      this.landing = null;
+    }
     const steady = !v.paused && !v.seeking && this.framesSince > 0;
     const consecutive = steady && this.lastPresented !== null && presented - this.lastPresented === 1;
     if (consecutive && this.fpsOpt === null) {
@@ -648,31 +718,23 @@ export class EditPlayer {
     // the frame grid's offset: what this frame's time is off the grid
     this.phase = m - Math.round(m * f) / f;
     const k = this.frameOf(m);
-    let dropped = false;
     if (consecutive && this.lastFrameK !== null) {
       const d = k - this.lastFrameK;
+      if (this.shownRun >= 2 && isFinite(shownAt) && isFinite(this.lastShownAt) && shownAt > this.lastShownAt) {
+        keep(this.shownGaps, shownAt - this.lastShownAt, 12);
+      }
+      // frames the decoder never presented (decoded too late, a busy
+      // device): the next skip may jump past a clip's last frame
+      if (d > this.screenStride() && d <= 8) keep(this.skips, wall, 8);
       if (d >= 1 && d <= 8) keep(this.strides, d, 8);
-      if (this.framesSince > 1) keep(this.cbGaps, wall - this.lastFrameAt, 16);
-      // a frame the compositor never showed (decoded too late, a busy
-      // device): it may skip a clip's last frame next
-      dropped = this.framesSince > 1 && d > this.screenStride();
     }
-    if (steady && isFinite(lateMs)) keep(this.lates, lateMs, 24);
-    // (not right after a landing: playback takes a few frames to restart)
-    if (steady && this.framesSince > 1 && this.lastPresented !== null) {
-      const stepMs = (this.stride() * 1000) / (f * this.rate());
-      const missed = presented - this.lastPresented > 1;
-      const gap = wall - this.lastFrameAt > 2 * stepMs + 8;
-      const late = lateMs > 0.75 * stepMs;
-      if (missed || gap || late || dropped) keep(this.stalls, wall, 8);
-    }
+    if (this.lastPresented !== presented) this.shownRun++;
     this.lastPresented = presented;
     this.lastFrameK = k;
     this.lastFrameM = m;
     this.lastFrameAt = wall;
+    this.lastShownAt = isFinite(shownAt) ? shownAt : wall;
     if (!this.plan.length || this.scrubbing || v.paused || v.seeking || this.atEnd) return;
-    // a frame from before our jump landed
-    if (this.ourSeek !== null && Math.abs(m - this.ourSeek) > 1.5 / f) return;
     this.framesSince++;
     const i = this.idx;
     const seg = this.plan[i];
@@ -684,13 +746,22 @@ export class EditPlayer {
       return;
     }
     // the frame rule, and the clock: a busy page shows frames late (the
-    // clock runs ahead of them) — would the next callback come too late?
-    const t = Math.max(m, v.currentTime);
-    if (jumpOnFrame(k, b, this.stride(), this.earlyFrames()) || t >= this.dueBy(seg, this.cbGapMs())) this.boundary(i);
+    // clock runs ahead of them) — would the next check come too late?
+    const t = Math.max(m, this.clockNow());
+    if (jumpOnFrame(k, b, this.stride(), this.earlyFrames()) || t >= this.clockDueOf(seg)) this.boundary(i);
     else this.armNear(i, t);
   }
 
   // ── internals ────────────────────────────────────────────────────
+
+  /** A seek to `to` starts: frames until it lands are the old position's. */
+  private seekStarts(to: number): void {
+    this.landing = { from: this.lastPresented === null ? this.v.currentTime : this.lastFrameM, to };
+    this.lastPresented = null;
+    this.lastFrameK = null;
+    this.framesSince = 0;
+    this.shownRun = 0;
+  }
 
   private disarm(): void {
     this.boundaryTimers.forEach(clearTimeout);
@@ -721,9 +792,10 @@ export class EditPlayer {
   /**
    * Clip i's jump is due at media time `at` (under BOUNDARY_AHEAD_S away):
    * the gain ramp down into it (volume writable), and a timer for the jump
-   * — with frame callbacks a backstop at the last safe moment (they jump on
-   * the frame itself), else the jump itself one frame early. Re-checked
-   * against the element's clock when they fire.
+   * — with frame callbacks a backstop at the last safe moment (they and
+   * the animation frames jump on time; a timer between two refreshes
+   * jumping at the clock's moment would drop the last frame for nothing),
+   * else the clock's moment. Re-checked against the clock when they fire.
    */
   private arm(i: number, at: number, t: number): void {
     if (this.boundaryFor === i && Math.abs(this.boundaryAt - at) < 0.001) return;
@@ -747,8 +819,8 @@ export class EditPlayer {
       if (this.idx !== i || this.v.paused || this.v.seeking || this.atEnd || this.scrubbing) return;
       const seg = this.plan[i];
       if (!seg) return;
-      const due = this.framesLive() ? this.dueBy(seg, 0) : this.jumpAtOf(seg);
-      const rest = (due - this.v.currentTime) / this.rate();
+      const due = this.framesLive() ? this.dueBy(seg, 0) : this.clockDueOf(seg);
+      const rest = (due - this.clockNow()) / this.rate();
       // early (the clock lags the timer): wait for the rest
       if (rest > 0.002) {
         this.boundaryTimers.push(setTimeout(fire, ms(rest)));
@@ -756,9 +828,7 @@ export class EditPlayer {
       }
       this.boundary(i);
     };
-    const seg = this.plan[i];
-    const due = this.framesLive() ? this.dueBy(seg, 0) : at;
-    this.boundaryTimers.push(setTimeout(fire, ms((due - t) / rate)));
+    this.boundaryTimers.push(setTimeout(fire, ms(left)));
   }
 
   /** Clip i ended: on to the next clip (a seek unless it continues the footage), or the end. */
@@ -782,8 +852,8 @@ export class EditPlayer {
     }
     this.setRate(seg.speed * this.masterRate);
     if (seekTo !== null) {
+      this.seekStarts(seekTo);
       this.ourSeek = seekTo;
-      this.framesSince = 0;
       if (this.rampMs > 0 && !this.v.paused) {
         this.dipping = true;
         // never stay silent: a seek that reports no "seeked" ends the dip
@@ -815,6 +885,20 @@ export class EditPlayer {
     this.atEnd = true;
     if (!this.v.paused) this.v.pause();
     this.setFade(0);
+    // stopped by the clock a little before the last frame (the jump's
+    // margin): that frame is what the end shows
+    const seg = this.plan[this.idx];
+    if (!seg) return;
+    const last = this.lastOf(seg);
+    if (this.v.currentTime < last - 0.5 / this.fps()) {
+      this.seekStarts(last);
+      this.ourSeek = last;
+      try {
+        this.v.currentTime = last;
+      } catch {
+        /* no media */
+      }
+    }
   }
 
   private tick = (): void => {
@@ -841,10 +925,10 @@ export class EditPlayer {
           return;
         }
       } else {
-        // Frame callbacks jump on the last frame; the clock jumps when
-        // they are missing (one frame early) or missed that frame.
-        const due = this.framesLive() ? this.dueBy(seg, 0) : this.jumpAtOf(seg);
-        if (t >= due - 0.001) {
+        // Frame callbacks jump on the last frame; the clock jumps when the
+        // next animation frame could be too late (frames the decoder
+        // skips, late callbacks), or one frame early without callbacks.
+        if (this.clockNow() >= this.clockDueOf(seg) - 0.001) {
           this.boundary(i);
           return;
         }
@@ -869,6 +953,9 @@ export class EditPlayer {
   }
 
   private loop = (): void => {
+    const now = performance.now();
+    if (this.lastTickAt !== null) keep(this.tickGaps, now - this.lastTickAt, 24);
+    this.lastTickAt = now;
     this.tick();
     this.raf = requestAnimationFrame(this.loop);
   };
@@ -881,6 +968,7 @@ export class EditPlayer {
   private stopLoop(): void {
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.lastTickAt = null;
   }
 
   private onPlay = (): void => {
@@ -888,6 +976,8 @@ export class EditPlayer {
     this.scrubbing = false;
     this.scrubWant = null;
     this.framesSince = 0;
+    // (the clock starts a while after play, like after a landing)
+    this.shownRun = 0;
     this.watchFrames();
     const plan = this.plan;
     if (plan.length) {
@@ -927,9 +1017,11 @@ export class EditPlayer {
   private onSeeking = (): void => {
     const t = this.v.currentTime;
     this.framesSince = 0;
+    const ours = this.ourSeek !== null && Math.abs(t - this.ourSeek) < 0.05;
+    if (!ours) this.seekStarts(t);
     if (this.scrubbing) return;
     this.disarm();
-    if (this.ourSeek !== null && Math.abs(t - this.ourSeek) < 0.05) return;
+    if (ours) return;
     // The native scrubber (source time) or the browser restarting an
     // ended video: map it onto the edit.
     const plan = this.plan;
@@ -1021,6 +1113,7 @@ export class EditPlayer {
       }
       // a new speed: the old frame steps no longer say anything
       this.strides = [];
+      this.shownGaps = [];
     }
   }
 
