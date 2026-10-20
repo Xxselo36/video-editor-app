@@ -294,6 +294,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         formatWarning={job.format_warning ? warningText(job.format_warning, t) : null}
         cutRanges={job.cut_ranges ?? []}
         duration={job.duration ?? 0}
+        fps={job.fps ?? null}
         onChange={(next) => {
           setPhrases(next);
           schedulePhraseSave(job.id, next);

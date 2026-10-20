@@ -44,6 +44,7 @@ export function ReviewScreen({
   formatWarning = null,
   cutRanges,
   duration,
+  fps = null,
   onChange,
   onApply,
   onBack,
@@ -66,6 +67,9 @@ export function ReviewScreen({
   formatWarning?: string | null;
   cutRanges: CutRange[];
   duration: number;
+  /** GET /jobs/{id} fps (the mezzanine's rate): the proxy player's frame
+   *  grid; null: it measures the frames. */
+  fps?: number | null;
   onChange: (p: Phrase[]) => void;
   onApply: () => void;
   onBack: () => void;
@@ -93,7 +97,7 @@ export function ReviewScreen({
     seekToPhrase,
     seekOriginal,
     togglePlay,
-  } = useEditSession({ jobId, savedSegments, previewSegments, previewVersion, hasProxy, cutRanges, duration, onApply, editRev });
+  } = useEditSession({ jobId, savedSegments, previewSegments, previewVersion, hasProxy, cutRanges, duration, fps, onApply, editRev });
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);

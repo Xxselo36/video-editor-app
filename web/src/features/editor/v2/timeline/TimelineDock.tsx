@@ -1112,14 +1112,26 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
    * the 2–5 px clip beside it (phone-tiny-seam). The click goes to what is
    * at the finger's point, and the seam's own rule (seamTapClip) decides
    * from there.
+   * A mouse (or pen) press likewise: a press during the settle after a
+   * released trim (F7) ends the settle at once (settleNow), so the clip
+   * pressed — where it was drawn — moves out from under a pointer that
+   * doesn't; the click then went to the strip and selected nothing (CI,
+   * pixel7: a clip clicked right after a trim at Fit stayed unselected).
+   * It goes to what was pressed, unless the pointer itself moved off it.
    */
-  const pressAt = useRef<{ x: number; y: number; seam: HTMLElement | null; clip: HTMLElement | null } | null>(null);
+  const pressAt = useRef<{ x: number; y: number; seam: HTMLElement | null; clip: HTMLElement | null; touch: boolean } | null>(null);
   const stripPointerDown = (e: React.PointerEvent) => {
     pressAt.current = null;
-    if (e.pointerType !== "touch" || !e.isPrimary) return;
+    if (!e.isPrimary) return;
     const top = document.elementFromPoint(e.clientX, e.clientY);
     if (!top || top.closest("[data-testid^='clip-trim-']")) return;
-    pressAt.current = { x: e.clientX, y: e.clientY, seam: top.closest<HTMLElement>("[data-testid=ed-seam]"), clip: top.closest<HTMLElement>("[data-seg]") };
+    pressAt.current = {
+      x: e.clientX,
+      y: e.clientY,
+      seam: top.closest<HTMLElement>("[data-testid=ed-seam]"),
+      clip: top.closest<HTMLElement>("[data-seg]"),
+      touch: e.pointerType === "touch",
+    };
   };
   const stripClick = (e: React.MouseEvent) => {
     const at = pressAt.current;
@@ -1127,7 +1139,9 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     if (!at || e.detail === 0) return;
     const t = e.target as Element;
     const own = at.seam ?? at.clip;
-    if (!own || own.contains(t)) return;
+    if (!own || own.contains(t) || !own.isConnected) return;
+    // a mouse that moved off what it pressed: no click there (as anywhere)
+    if (!at.touch && Math.hypot(e.clientX - at.x, e.clientY - at.y) > HOLD_SLOP_PX) return;
     if (!at.seam && t.closest("[data-testid^='clip-trim-']")) return;
     // moved off what the finger was on: to it, at the finger's point
     e.stopPropagation();

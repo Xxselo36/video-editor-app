@@ -16,10 +16,10 @@
  * while the jump was due) or the media pipeline itself leapt two or more
  * frames past its cadence (one above 1x, and a sped-up clip of two output
  * frames or less: a CPU-starved machine); those are reported and may be at
- * most two per run. A join mostly shows its clip's last kept frame (the
- * first joins after play, a landing's first frames and seeks that come
- * late go a frame early on purpose; clips of 3 frames or less don't
- * count). Desktop and pixel7, a v2 build (E2E_EDITOR_V2=1); JOINS_DUMP=1
+ * most two per run. A join mostly shows its clip's last kept frame (round
+ * 4: the jump is asked on it; the first frames after play or a landing,
+ * callbacks running late and seeks that came late go a frame early on
+ * purpose; clips of 3 frames or less don't count). Desktop and pixel7, a v2 build (E2E_EDITOR_V2=1); JOINS_DUMP=1
  * attaches every frame, and when the player asked for each jump.
  */
 import { execFileSync } from "node:child_process";

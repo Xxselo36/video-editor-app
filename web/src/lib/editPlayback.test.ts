@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cutRange } from "@/features/editor/state/cuts";
-import { buildPlan, clipFrames, EditPlayer, fadeLevel, jumpOnFrame, locate, nextInSource, seekRampLevel, type PlaySeg } from "@/lib/editPlayback";
+import { buildPlan, clipFrames, EditPlayer, fadeLevel, jumpNow, locate, nextInSource, rateOfGaps, seekRampLevel, type PlaySeg } from "@/lib/editPlayback";
 
 const seg = (id: string, start: number, end: number, extra: Partial<PlaySeg> = {}): PlaySeg => ({
   id,
@@ -251,16 +251,51 @@ describe("the frame grid (wordcuts10-flash-frames)", () => {
     expect(clipFrames({ start: 104 / 30, end: 3.4666666666666663 + 1 }, 30)).toEqual([104, 134]);
   });
 
-  it("jumps on the clip's last frame — the next one would be cut", () => {
-    expect(jumpOnFrame(58, 60)).toBe(false);
-    expect(jumpOnFrame(59, 60)).toBe(true);
+  it("a job without its frame rate: measured over all the steps between presented frames, not one over the shortest (webm keeps ms: 33 and 34 ms by turns)", () => {
+    // presented media times as a webm reports them (ms), 30 fps; one step
+    // of 2 frames (a frame the decoder skipped)
+    const ms = (k: number, f: number) => Math.round((k / f) * 1000) / 1000;
+    const gapsOf = (ks: number[], f: number) => ks.slice(1).map((k, i) => ms(k, f) - ms(ks[i], f));
+    const run = [100, 101, 102, 103, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116];
+    // round 3/4: 1 / the shortest = 30.3 fps — the 2-frame step then read as 3
+    expect(1 / Math.min(...gapsOf(run, 30))).toBeGreaterThan(30.2);
+    expect(rateOfGaps(gapsOf(run, 30))).toBe(30);
+    expect(rateOfGaps(gapsOf(run, 25))).toBe(25);
+    expect(rateOfGaps(gapsOf(run, 24))).toBe(24);
+    // (29.97 and 30 are 0.1 % apart: these few steps can't tell them)
+    expect(rateOfGaps(gapsOf(run, 30000 / 1001))).toBeCloseTo(29.97, 1);
+    expect(rateOfGaps(gapsOf(run, 50))).toBe(50);
+    expect(rateOfGaps(gapsOf(run, 60))).toBe(60);
+    // a rate no container uses: what was measured, from 16 steps on
+    expect(rateOfGaps(gapsOf(run, 27))).toBeNull();
+    expect(rateOfGaps(gapsOf([...run, 117, 118], 27))).toBeCloseTo(27, 1);
+    expect(rateOfGaps([0.033, 0.034, 0.033])).toBeNull();
+  });
+
+  it("the frame rule (round 4): the jump goes on the clip's last kept frame — a frame early only while waiting could be too late", () => {
+    // frames end before 60: 59 is the last kept one
+    expect(jumpNow(58, 60)).toBe(false);
+    expect(jumpNow(59, 60)).toBe(true);
     // a late frame (a cut one already showing): jump at once
-    expect(jumpOnFrame(61, 60)).toBe(true);
-    // 2 frames a presentation (high speed): one frame sooner
-    expect(jumpOnFrame(58, 60, 2)).toBe(true);
-    // callbacks running late: one frame sooner
-    expect(jumpOnFrame(58, 60, 1, 1)).toBe(true);
-    expect(jumpOnFrame(57, 60, 1, 1)).toBe(false);
+    expect(jumpNow(61, 60)).toBe(true);
+    // 30 fps (a pick every 33 ms), callbacks up to 17 ms after their
+    // frame's pick (Chromium: 1 or 17 ms), a seek's reach of 4 ms: the next
+    // frame's callback comes in time — on the last frame, nothing dropped
+    const at30 = { slotMs: 33.3, reachMs: 4 };
+    expect(jumpNow(58, 60, { ...at30, lagMs: 17 })).toBe(false);
+    expect(jumpNow(59, 60, { ...at30, lagMs: 17 })).toBe(true);
+    // the next presentation may step 2 (a decoder that skips): still on
+    // the last frame — the clock's timer guards the pick in between
+    expect(jumpNow(58, 60, { ...at30, lagMs: 17, stride: 2 })).toBe(false);
+    // callbacks 30 ms late: the next one (or a timer as late) could come
+    // after the cut frame's pick — one early
+    expect(jumpNow(58, 60, { ...at30, lagMs: 30 })).toBe(true);
+    expect(jumpNow(57, 60, { ...at30, lagMs: 30 })).toBe(false);
+    // two slots late: two early — never more (MAX_EARLY), however late
+    expect(jumpNow(57, 60, { ...at30, lagMs: 70 })).toBe(true);
+    expect(jumpNow(56, 60, { ...at30, lagMs: 500, reachMs: 70 })).toBe(false);
+    // a slow pipeline (a frame of the old position picked 25 ms after a jump): one early
+    expect(jumpNow(58, 60, { ...at30, lagMs: 10, reachMs: 26 })).toBe(true);
   });
 });
 
@@ -282,6 +317,8 @@ type Presented = { k: number; at: number; seeking: boolean };
  * n-th refresh (a busy device), picking the frame for its next draw.
  * `startLag`: for `forMs` after play starts the element's clock reads `ms`
  * behind the frames it shows (a renderer starting up on a busy device).
+ * `landStartMs`: after a seek lands the clock stands that long on the
+ * landing frame before it runs again (the e2e runs: 50–90 ms).
  */
 function framedVideo(
   start: number,
@@ -299,6 +336,7 @@ function framedVideo(
     drawEvery?: number;
     startLag?: { ms: number; forMs: number };
     busyAfterLand?: [fromMs: number, toMs: number];
+    landStartMs?: number;
   } = {},
 ) {
   const fps = o.fps ?? 30;
@@ -332,7 +370,7 @@ function framedVideo(
   let cbs: ((now: number, md: Md) => void)[] = [];
   let rafs = new Map<number, (t: number) => void>();
   let handle = 0;
-  const clockAt = (t: number) => (paused || frozen ? pos : pos + ((t - since) / 1000) * rate);
+  const clockAt = (t: number) => (paused || frozen ? pos : pos + (Math.max(0, t - since) / 1000) * rate);
   const clock = () => clockAt(Date.now());
   const frameAt = (t: number) => Math.floor((t - phase) * fps + 1e-9);
   let pendingMd: Md | null = null;
@@ -439,7 +477,7 @@ function framedVideo(
         pos = x;
         frozen = false;
         seeking = false;
-        since = Date.now();
+        since = Date.now() + (paused ? 0 : (o.landStartMs ?? 0));
         // the decoded target frame goes up at the next refresh
         picked = frameAt(x);
         landedAt = Date.now();
@@ -555,11 +593,9 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     const frames = await playAll(f, 8000, { plan });
     expect(cutOf(frames, ok)).toEqual([]);
     const ks = new Set(frames.map((x) => x.k));
-    // the first two joins after play (PROBE_JOINS) go a frame early: the
-    // last kept frame at most is skipped there
-    expect(ks.has(58) && ks.has(208)).toBe(true);
-    // from then on the jump goes on each clip's last frame
-    expect(ks.has(119) && ks.has(269)).toBe(true);
+    // the jump goes on each clip's last kept frame, the first joins after
+    // play too (round 3 skipped the last frame of the first two)
+    expect(ks.has(59) && ks.has(209) && ks.has(119) && ks.has(269)).toBe(true);
     // landed on each clip's first frame
     expect(ks.has(150) && ks.has(90) && ks.has(240) && ks.has(300)).toBe(true);
     // the timeline's end: paused on E's last frame
@@ -574,8 +610,32 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
     const drops = droppedAtEnds(frames, many);
     expect(Math.max(...drops)).toBeLessThanOrEqual(1);
-    // and mostly none
-    expect(drops.filter((n) => n === 0).length / drops.length).toBeGreaterThan(0.5);
+    // and none at all but at the odd join (round 4: every clip's last kept frame shows)
+    expect(drops.filter((n) => n === 0).length / drops.length).toBeGreaterThanOrEqual(0.95);
+  });
+
+  it("no frame rate from the job (the v1 editor): measured from the media times (ms, like a webm's) — the joins as exact as with it", async () => {
+    // (round 4 until now: 1 / the shortest step = 30.3 fps — steps read as
+    // 2 frames, taken for a skipping decoder: every join a frame or two
+    // early, the e2e playback run's 5.87 before the cut at 6.0)
+    const frames = await playAll(framedVideo(0), 25_000, { plan: many, fps: 0 });
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+    const drops = droppedAtEnds(frames, many);
+    expect(Math.max(...drops)).toBeLessThanOrEqual(1);
+    expect(drops.filter((n) => n === 0).length / drops.length).toBeGreaterThanOrEqual(0.95);
+  });
+
+  it("a decoder that skips a frame now and then (a busy machine): no cut frame, and the skip is counted once — at most the last kept frame goes at a join", async () => {
+    // a frame skipped every 9 (never one of a clip's last 3: those would be
+    // lost whatever the player did)
+    const ends = many.map((s) => clipFrames(s, 30)[1]);
+    const nearEnd = (k: number) => ends.some((b) => k >= b - 3 && k < b);
+    const f = framedVideo(0, { drop: (k) => k % 9 === 4 && !nearEnd(k) });
+    const frames = await playAll(f, 25_000, { plan: many });
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+    // (counted twice — a step of 2 seen, then 2 + 1 frames assumed for the
+    // next presentation — the jump went two frames early: both lost)
+    expect(Math.max(...droppedAtEnds(frames, many))).toBeLessThanOrEqual(1);
   });
 
   it("play starting on a short clip while the renderer starts up (its clock behind, then a leap past the last kept frame): no cut frame — the e2e run's first join", async () => {
@@ -592,10 +652,14 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
       const f = framedVideo(0.5, { drop: (k) => k === 17, startLag: { ms: 40, forMs: 300 }, cbDelay });
       const frames = await playAll(f, 2500, { plan });
       expect(cutOf(frames, ok)).toEqual([]);
-      // the start skipped at most A's last frame (the first joins go a
-      // frame early, PROBE_JOINS); C's own last frame showed
+      // the start skipped A's last frame (the decoder did: 17); B, C and D
+      // lose at most their last frame (the clock read 40 ms behind the
+      // frames: the pick lead it showed then holds a few frames longer;
+      // callbacks 29 ms after their frame's pick, 12 ms into the refresh,
+      // could come too late for the seek's reach)
       const ks = new Set(frames.map((x) => x.k));
-      expect(ks.has(16) && ks.has(43) && ks.has(77)).toBe(true);
+      expect(ks.has(16)).toBe(true);
+      expect(Math.max(...droppedAtEnds(frames, plan).slice(1))).toBeLessThanOrEqual(1);
     }
   });
 
@@ -617,11 +681,20 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     expect(cutOf(f.frames, (k) => (k >= 0 && k < 30) || (k >= 60 && k < 90))).toEqual([]);
   });
 
-  it("seeks that reach the decoder late (45 ms: a slow media pipeline, the e2e runs under load): no cut frame — the first joins after play find it out on kept frames", async () => {
+  it("seeks that reach the pipeline late (45 ms: a device far slower than any measured): the first join may show its cut frame, then the joins go early enough — none after it", async () => {
+    // (round 3 jumped the first two joins after every play a frame early
+    // to find this out on kept frames — the end of a word lost at every
+    // start; measured in Chromium, idle and under e2e load, a seek stops
+    // the next pick within a few ms: a frame of the old position picked
+    // later was seen at 1 of ~700 joins at 1x, 16 ms after the jump, at
+    // the first join after play)
     for (const lat of [30, 45]) {
       const f = framedVideo(0, { seekLatency: lat });
       const frames = await playAll(f, 25_000, { plan: many });
-      expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+      const cut = frames.filter((x) => !keptMany(x.k));
+      expect(cut.length, `${lat} ms`).toBeLessThanOrEqual(1);
+      // only at the first join (the first clip's end)
+      if (cut.length) expect(cut[0].k).toBeLessThan(clipFrames(many[1], 30)[0]);
       // the price: the last kept frame at a join, no more
       expect(Math.max(...droppedAtEnds(frames, many))).toBeLessThanOrEqual(1);
     }
@@ -731,6 +804,41 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     }
   });
 
+  it("a busy machine (the compositor drawing at 20 Hz, animation frames 30 ms late now and then): the jump comes on the last frames — round 3's clock jumped 3–4 frames early (CI: currentTime 5.864 before the cut at 6.0)", async () => {
+    // the e2e playback suite's shape: [0, 6) [7, 14), play from 5.5 and
+    // sample the element's clock every animation frame; the busy stretch
+    // at every phase of the join
+    for (const ph of [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]) {
+      const t0 = Date.now();
+      const busy = (t: number) => (t - t0 + ph) % 100 < 30;
+      for (const o of [{ drawEvery: 3 }, { drawEvery: 3, busy }, { busy }]) {
+        const f = framedVideo(5.5, o);
+        const p = new EditPlayer(f.v, { fps: 30 });
+        p.setPlan(buildPlan([{ id: "A", start: 0, end: 6 }, { id: "B", start: 7, end: 14 }], 30));
+        await vi.advanceTimersByTimeAsync(50);
+        p.seek(5.5, "A");
+        await vi.advanceTimersByTimeAsync(100);
+        const samples: number[] = [];
+        const tick = () => {
+          samples.push(f.v.currentTime);
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+        void f.v.play();
+        await vi.advanceTimersByTimeAsync(1500);
+        p.destroy();
+        const at = `${ph} ${JSON.stringify(Object.keys(o))}`;
+        expect(cutOf(f.frames, (k) => k < 180 || k >= 210), at).toEqual([]);
+        // the element's clock when the jump was asked: in frame 177 at the
+        // earliest (two frames early: the 20 Hz compositor shows every
+        // other frame), and the last sample before it after 5.88
+        const jumpAt = f.seeks.find((x) => x.to >= 7)!.pos;
+        expect(jumpAt, at).toBeGreaterThan(5.91);
+        expect(samples.filter((t) => t < 6).pop()!, at).toBeGreaterThan(5.88);
+      }
+    }
+  });
+
   it("a 60 fps video, and a 120 Hz screen: no cut frame", async () => {
     const f = framedVideo(0, { fps: 60 });
     expect(cutOf(await playAll(f, 25_000, { plan: many, fps: 60 }), (k) => keptMany(k, 60))).toEqual([]);
@@ -764,17 +872,18 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
   });
 
   it("desktop: a short gain ramp into the jump and out of the landing — never a mute", async () => {
-    // two short clips first (the joins after play that go a frame early,
-    // PROBE_JOINS), then A's end [1.2, 2) → B at 5
+    // two short clips first, then A's end [1.2, 2) → B at 5
     const plan = [{ id: "P", start: 0, end: 0.5 }, { id: "Q", start: 0.6, end: 1 }, { id: "A", start: 1.2, end: 2 }, ...segs.slice(1)];
     const f = framedVideo(0);
-    await playAll(f, 2600, { plan });
+    const frames = await playAll(f, 2600, { plan });
     expect(f.mutes.some((m) => m)).toBe(false);
     const jump = f.seeks.find((s) => Math.abs(s.to - 5) < 0.05)!;
     expect(jump).toBeTruthy();
-    // the jump while the last frame is up (frame 59: 1.967–2.0 s), or just before it
-    expect(jump.pos).toBeGreaterThanOrEqual(58.5 / 30);
-    expect(jump.pos).toBeLessThan(2 - 0.02);
+    // the jump while the last kept frame is up (frame 59: 1.967–2.0 s),
+    // before the compositor picks the next one (a refresh before it is due)
+    expect(frames.some((x) => x.k === 59)).toBe(true);
+    expect(jump.pos).toBeGreaterThanOrEqual(59 / 30);
+    expect(jump.pos).toBeLessThan(2 - 1 / 60);
     const down = f.volumes.filter((x) => x.at <= jump.at && x.value < 1 && x.value > 0);
     expect(down.length).toBeGreaterThan(0);
     // full volume in A (once its landing's ramp is up) until just before

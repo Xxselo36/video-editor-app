@@ -80,8 +80,18 @@ async function tap(page: Page, x: number, y: number) {
   await cdp.detach();
 }
 
+/** The settle after a released trim (TimelineDock SETTLE_ID) has ended:
+ *  the clips are drawn where they are laid out. */
+const settled = (page: Page) =>
+  page
+    .getByTestId("timeline-scroll")
+    .evaluate((el) => !el.getAnimations({ subtree: true }).some((a) => a.id === "ed-settle" && a.playState === "running"));
+
 async function select(page: Page, i: number) {
   const clip = clipsOf(page).nth(i);
+  // where the clip is drawn at rest: a box read while the strip settles is
+  // stale by the click (the click goes to what is drawn there by then)
+  await expect.poll(() => settled(page), { timeout: 3_000 }).toBe(true);
   await clip.scrollIntoViewIfNeeded();
   const b = (await clip.boundingBox())!;
   await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
@@ -409,7 +419,11 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
     expect(Math.abs(await slack())).toBeLessThanOrEqual(1);
     // the trimmed edge of the selected clip as the finger goes up (before the
     // editor handles it) and two frames later (read in the page: a release
-    // right away, before the dock magnifies an edge held still MAGNIFY_MS)
+    // right away, before the dock magnifies an edge held still MAGNIFY_MS).
+    // Only the trim handle's own release: the click that selects the clip
+    // has a pointerup too, and its reads two frames later (the edge before
+    // the trim) landed after the reset and passed for the trim's when the
+    // poll came first (the CI flake: 195.69 → 255.89 is the untrimmed edge)
     await page.evaluate(() => {
       const w = window as unknown as { __atUp: number | null; __afterUp: number | null; __which: string };
       w.__atUp = w.__afterUp = null;
@@ -419,7 +433,8 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
       };
       window.addEventListener(
         "pointerup",
-        () => {
+        (ev) => {
+          if (!(ev.target as Element | null)?.closest?.("[data-testid^='clip-trim-']")) return;
           w.__atUp = edge();
           requestAnimationFrame(() => requestAnimationFrame(() => (w.__afterUp = edge())));
         },
@@ -460,6 +475,61 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
       // then it settles to Fit again: the strip fills the dock, no zooming
       await expect.poll(fills, { timeout: 3_000 }).toBe(true);
     }
+  });
+
+  test("a click on a clip while the strip settles after a trim selects that clip (F7, pixel7 CI)", async ({ page, stub }, info) => {
+    // (CI's pixel7 run: the settle ran when the next clip was clicked, 90 ms
+    // after the release; the phone strip here often releases without one —
+    // the desktop strip always settles, the same press is tested there)
+    test.skip(info.project.name !== "desktop", "the desktop strip settles at every release");
+    const job = await stub.seed("review_speech");
+    await open(page, job.id);
+    const clip = await select(page, 0);
+    // the settle caught where it starts (its beat: everything where it was
+    // let go) and held there, so the click below is pressed on a clip as
+    // drawn — the press ends the settle at once (settleNow), and the clip
+    // moves out from under the pointer before it is released
+    await page.evaluate(() => {
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (this: Element, ...args: Parameters<Element["animate"]>) {
+        const a = animate.apply(this, args);
+        const o = args[1];
+        if (typeof o === "object" && o?.id === "ed-settle") a.pause();
+        return a;
+      };
+    });
+    // most of clip 0 trimmed away: the clips after it move far
+    const w0 = (await clip.boundingBox())!.width;
+    const h = center((await clip.getByTestId("clip-trim-end").boundingBox())!);
+    const p = await press(page, h.x, h.y);
+    await p.to(h.x - (w0 - 20));
+    await page.waitForTimeout(150);
+    await p.up();
+    const settling = () => page.getByTestId("timeline-scroll").evaluate((el) => el.getAnimations({ subtree: true }).some((a) => a.id === "ed-settle"));
+    await expect.poll(settling, { timeout: 3_000 }).toBe(true);
+    // a clip whose middle as drawn now is off its own box as laid out
+    // (where it goes when the settle ends)
+    const i = await clipsOf(page).evaluateAll((els) => {
+      let best = -1;
+      let most = 0;
+      els.forEach((el, n) => {
+        const c = el as HTMLElement;
+        if (n === 0 || !c.offsetParent) return;
+        const drawn = c.getBoundingClientRect();
+        const left = (c.offsetParent as HTMLElement).getBoundingClientRect().left + c.offsetLeft;
+        const mid = drawn.left + drawn.width / 2;
+        const off = mid < left ? left - mid : mid - (left + c.offsetWidth);
+        if (off > most) [best, most] = [n, off];
+      });
+      return best;
+    });
+    expect(i, "no clip moves off its own box in the settle").toBeGreaterThan(0);
+    const clipI = clipsOf(page).nth(i);
+    const drawn = (await clipI.boundingBox())!;
+    await page.mouse.move(drawn.x + drawn.width / 2, drawn.y + drawn.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect(clipI).toHaveAttribute("data-selected", "true");
   });
 
   test("phone at Fit: a tap on the seam glyph next to a short clip (1.4 s, ~23 px) is Restore, not a selection (phone-tiny-seam)", async ({ page, stub }, info) => {
