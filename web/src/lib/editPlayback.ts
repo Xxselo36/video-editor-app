@@ -19,31 +19,41 @@
  * one) and pauses other elements when one starts playing audio; two
  * 720p decoders also double memory and battery on phones.
  *
- * Joins are frame-exact (wordcuts10-flash-frames, round 4): a clip plays
- * the frames the render keeps (the backend's clip_plan grid: frames
- * [round(start·fps), round(end·fps))), its last kept frame included. Where
- * the browser reports presented frames (requestVideoFrameCallback: Chrome,
- * Safari 15.4+) the jump to the next clip is asked on the clip's LAST kept
- * frame, the moment it is presented: the compositor holds that frame while
- * the seek lands (a brief hold of the last kept frame), and the cut frame
- * it would pick next is never picked — measured in Chromium, a seek asked
- * up to ~30 ms after the last kept frame's pick stops the next pick (30
- * fps), idle and under load alike. A frame earlier only while it is
- * measured that waiting could be too late (jumpNow): frame callbacks
- * running a slot late after their frame's pick (a busy main thread), a
- * slow pipeline (a frame of the old position picked after a jump was
- * asked: REACH_MS grows), the first frames after play or a landing, a
- * decoder that lately skipped frames and fast rates (the next presentation
- * may leap a frame) — two kept frames of output at most under heavy load,
- * none in normal conditions. Between frames a timer
- * guards, for frames the decoder skips or presents late: just before the
- * compositor could pick the first cut frame — by the element's clock (a
- * frame is picked up to its measured pick lead ahead of it), or by the
- * cadence of the last presented frame when the next one is late; never
- * while the clock is more than CLOCK_EARLY_FRAMES before the last kept
- * frame (round 3's clock jumped 3–5 frames early on a busy machine: the
- * end of a word lost at every join). Without frame callbacks the clock is
- * all there is, with the same bound. Landings go a little into the next
+ * Joins are frame-exact (wordcuts10-flash-frames): a clip plays the frames
+ * the render keeps (the backend's clip_plan grid: frames [round(start·fps),
+ * round(end·fps))), its last kept frame included. The owner's rule: cut
+ * footage is never on screen; at a join at most one kept frame goes in
+ * normal conditions, two under heavy load. Where the browser reports
+ * presented frames (requestVideoFrameCallback: Chrome, Safari 15.4+) the
+ * jump to the next clip is asked on the clip's LAST kept frame, the moment
+ * it is presented (round 4): the compositor holds that frame while the seek
+ * lands, and the cut frame it would pick next is never picked — measured in
+ * Chromium, a seek asked up to ~30 ms after the last kept frame's pick
+ * stops the next pick (30 fps). Between frames the seam timer guards (a
+ * callback that comes late, a frame the decoder never presents): due by the
+ * frame clock (frames are picked on the media clock's slots — measured from
+ * the presented frames' presentationTime) just before the first cut frame's
+ * slot, its reach and the timers' measured lateness (SEAM_LEAD_MS at
+ * least) before it, never before the last kept frame's slot; the element's
+ * clock backs it up (just before
+ * the compositor could pick the first cut frame, never before the last kept
+ * frame's time). Round 5: the margin follows the load (margin(), fast
+ * attack, slow release) — up to MAX_EARLY frames early, the owner's
+ * allowance, only while measured that waiting could show a cut frame:
+ * frame callbacks late after their pick again and again, past their
+ * cadence (a CPU-starved main thread: the owner probe at 4× CPU, 30–60
+ * ms), a stall in the latest frames, frames leapt past again and again
+ * (two at once: two frames early), a seek's reach that doesn't fit between
+ * two picks, a cut frame at one of the latest joins, and the first join of
+ * a player (the reach unknown: found out on a kept frame). Ordinary jitter — a callback
+ * 26–40 ms late now and then, timers 20–37 ms late while a frame renders on
+ * two busy workers (CI) — is the seam timer's, not a margin: round 4's
+ * frame rule took the latest 8 callbacks' most lag (and its clock the
+ * animation frames' lateness), a frame early at a third to half of the
+ * joins there. Without frame callbacks the clock is all there is,
+ * CLOCK_EARLY_FRAMES before the last kept frame (round 3's clock jumped 3–5
+ * frames early on a busy machine: the end of a word lost at every join).
+ * Landings go a little into the next
  * clip's first frame (a seek shows the frame under the target time:
  * exactly on the edge, a container offset of a few ms showed the cut frame
  * before it). Cut footage is never on screen and never heard. Where the
@@ -98,8 +108,9 @@ const BLIND_FRAMES = 0.5;
  * A jump asked this long (ms) before the compositor's next pick still stops
  * that pick: the seek's way to the media pipeline (Chromium, idle and under
  * load: a few ms). Joins that show a frame of the old position picked after
- * the jump was asked raise it to what they show (REACH_JOINS joins, at most
- * MAX_REACH_MS).
+ * the jump was asked raise it to what they show it takes — less than the
+ * old position's next pick they stopped (REACH_JOINS joins, at most
+ * MAX_REACH_MS; reachMs).
  */
 export const REACH_MS = 4;
 const MAX_REACH_MS = 70;
@@ -112,22 +123,26 @@ const REACH_WARM_FRAMES = 15;
 const REACH_WARM_MS = 12;
 /**
  * The jump goes at most this many frames of output before the clip's last
- * kept frame (above 1x as many more source frames as the speed plays):
- * late callbacks, a slow pipeline and skipping decoders together cost two
- * kept frames at most.
+ * kept frame (above 1x as many more source frames as the speed plays): the
+ * owner's allowance under heavy load — late callbacks, a slow pipeline and
+ * skipping decoders together cost two kept frames at most.
  */
 export const MAX_EARLY = 2;
 /**
  * The clock — a timer at the moment, every animation frame and frame
- * callback; the backstop for frames the pipeline skips (seen in the e2e
- * runs: 30 → 32 at a clip's end) and all there is without frame callbacks
- * — jumps just before the compositor could pick the first cut frame: it
- * picks a frame up to its pick lead ahead of the element's clock (measured
- * per frame: 4–27 ms in the e2e runs, a refresh and a half until then).
- * Never while the clock is more than CLOCK_EARLY_FRAMES before the last
- * kept frame: at most that frame is skipped (round 3's clock had no bound:
- * 3–5 frames early on a busy CI machine, the end of a word lost at every
- * join).
+ * callback; with the seam timer the backstop for frames the pipeline skips
+ * (seen in the e2e runs: 30 → 32 at a clip's end) and all there is without
+ * frame callbacks — jumps just before the compositor could pick the first
+ * cut frame: it picks a frame up to its pick lead ahead of the element's
+ * clock (measured per frame: 4–27 ms in the e2e runs, a refresh and a half
+ * until then), less the reach and the timers' slack. With frame callbacks
+ * never before the last kept frame's time (round 4 took off how late
+ * animation frames came too: then before the last kept frame was picked
+ * at a quarter of the joins on two workers); without them, and above
+ * FAST_RATE (round 4's clock there), never while the clock is more than
+ * CLOCK_EARLY_FRAMES before it: at most that frame is skipped (round 3's
+ * clock had no bound: 3–5 frames early on a busy CI machine, the end of a
+ * word lost at every join).
  */
 export const CLOCK_EARLY_FRAMES = 0.25;
 /** Pick leads kept (ms; the latest frames'); the most assumed. */
@@ -143,17 +158,72 @@ const FAST_RATE = 1.25;
 /** The refresh is assumed at most this slow, and the next check at most
  *  this late (ms). */
 const MAX_REFRESH_MS = 50;
-/** The decoder skipped frames within this long (ms): the next presentation
- *  may leap a frame further (the e2e runs: 200 → 202, then 203 → 206 at a
- *  clip's end). */
-const SKIP_WINDOW_MS = 2000;
-/** Frame callback lags considered: the latest this many frames'. */
-const LAG_FRAMES = 8;
+/**
+ * Load (round 5): the jump goes up to MAX_EARLY frames early only under
+ * heavy load — a CPU-starved device, where waiting for the last kept frame
+ * shows a cut one (the owner probe at 4× CPU: frame callbacks 30–60 ms
+ * after their frame's pick, the decoder leaping 2–4 frames in one
+ * presentation, timers 30 ms late). Measured in the player, fast attack and
+ * slow release (each sign holds the margin for HEAVY_HOLD_MS):
+ *   - frame callbacks later than HEAVY_LAG_MS after their frame's pick —
+ *     and HEAVY_LAG_OVER_MS past the latest frames' least: one always that
+ *     late is a cadence the seam covers — for HEAVY_LAG_COUNT of the latest
+ *     LOAD_FRAMES frames (a free main thread runs them within a refresh:
+ *     0–20 ms; the e2e runs on two workers: now and then 26–40 ms, rarely
+ *     4 in 32);
+ *   - frames a callback came too late for (the decoder leapt past them, or
+ *     their callbacks never ran) HEAVY_LEAPS times within LEAP_WINDOW_MS or
+ *     HEAVY_LEAPS_LONG within LEAP_WINDOW_LONG_MS (per 10 s: idle 0.1–0.4,
+ *     the e2e runs on two workers and at 2× CPU 0.7–2.5, the owner probe at
+ *     4× CPU 8–15 on the desktop, 1.4–3.3 as an iPhone).
+ * Two frames (level 2) while callbacks come more than a presentation late
+ * as often, or under heavy load once frames came late two or more at once
+ * within BIG_LEAP_MS (past a margin of one: the owner probe at 4× CPU, 3–4
+ * frames 1–2 times per 10 s on the desktop, out of the blue; never in the
+ * e2e runs). One frame (no hold) while one of the latest STALL_FRAMES
+ * callbacks came that late: a stall starting, the load's own sign a few
+ * frames away (the seam timer may be held as long). Not a sign by itself:
+ * timers firing late — on two busy workers the timers due while a frame
+ * renders fire 20–37 ms late at half the joins, the callbacks on time (the
+ * seam timer is led by it instead).
+ */
+const HEAVY_LAG_MS = 28;
+const HEAVY_LAG_OVER_MS = 8;
+const HEAVY_LAG_COUNT = 4;
+const STALL_FRAMES = 4;
+const LOAD_FRAMES = 32;
+const HEAVY_LEAPS = 5;
+const LEAP_WINDOW_MS = 8000;
+const HEAVY_LEAPS_LONG = 10;
+const LEAP_WINDOW_LONG_MS = 20_000;
+const HEAVY_HOLD_MS = 3000;
+const BIG_LEAP_MS = 30_000;
 /** Pick gaps kept (the cadence frames are picked at). */
 const SLOT_HISTORY = 16;
-/** Timers fire a little late: the clock's jump runs this much (ms) before
- *  the last safe moment. */
+/** Timers fire a little late: they run at least this much (ms) before the
+ *  last safe moment — more when the player's timers have lately fired later
+ *  than that (the latest TIMER_HISTORY: the seam is led by it). */
 const TIMER_SLACK_MS = 6;
+const TIMER_HISTORY = 8;
+/**
+ * The frame clock (round 5): frames are picked on the media clock's grid —
+ * frame j at `anchor + j·frameMs` (the earliest of the latest ANCHOR_FRAMES
+ * presented since a landing, its first frame left out: the clock stands on
+ * it a while; measured on two workers: within a ms of that, late now and
+ * then, and a decoder that falls behind catches up on the slot of the
+ * frame it leaps to). The seam timer is due by it: the last safe moment
+ * before the first cut frame's slot, never sooner than SEAM_AFTER_MS after
+ * the last kept frame's slot (it is on screen then).
+ */
+const ANCHOR_FRAMES = 8;
+const SEAM_AFTER_MS = 4;
+/** …and at least this long (ms) before the first cut frame's slot: a seek
+ *  now and then takes longer than REACH_MS to stop a pick (the e2e runs: a
+ *  frame of the old position picked 16 ms after a jump at 1 of ~700 joins;
+ *  the owner probe on a Pixel 7: the cut frame picked 6 ms after a jump
+ *  asked 26 ms after the last kept frame's pick, its callback late) — the
+ *  last kept frame is on screen by then, so it costs nothing. */
+const SEAM_LEAD_MS = 16;
 /** The first frames after play start come while the renderer starts up:
  *  a busy device presents them late and then leaps a frame (the e2e run
  *  showed the first join's cut frame then). Until this many have been
@@ -379,7 +449,7 @@ type FrameVideo = HTMLVideoElement & {
   cancelVideoFrameCallback?: (h: number) => void;
 };
 
-const keep = (xs: number[], x: number, n: number) => {
+const keep = <T,>(xs: T[], x: T, n: number) => {
   xs.push(x);
   if (xs.length > n) xs.shift();
 };
@@ -448,15 +518,28 @@ export class EditPlayer {
   /** The jump at a clip end on its way: when it was asked for (wall), and
    *  how long after that a frame of the old position was still picked
    *  (ms; null: none so far). */
-  private jump: { at: number; late: number | null; warm: boolean; end: number; cut: boolean } | null = null;
+  private jump: { at: number; late: number | null; warm: boolean; end: number; cut: boolean; next: number } | null = null;
   /** Per join, newest last: how long after the jump was asked a frame of
    *  the old position was still picked (ms; 0: none) — the seek's reach;
    *  and whether that frame was a cut one (1). */
   private reaches: number[] = [];
+  /** Per join, newest last: how long after the jump was asked the next
+   *  pick of the old position was due by the frame clock — the one the
+   *  seek stopped: the reach is less than that (Infinity: unknown). */
+  private stops: number[] = [];
   private cutJoins: number[] = [];
+  /** The latest join was in the first frames after play (its seek slower
+   *  by up to REACH_WARM_MS) and showed a frame of the old position after
+   *  its jump: the reach afterwards is still unknown. */
+  private reachUnsure = false;
   /** A seek on its way: from where (media time of the frame then on
    *  screen) to where. Frames nearer `from` are from before it. */
   private landing: { from: number; to: number } | null = null;
+  /** Our seek's frames are on screen though the element still says
+   *  seeking (its 'seeked' comes a while after the clock runs again on a
+   *  busy page: a 4-frame clip played through meanwhile, its cut frame on
+   *  screen). */
+  private landedEarly = false;
   /** Frames presented since the last seek landed (the landing one is 1). */
   private shownRun = 0;
   /** Recent wall gaps (ms) between the picks of frames presented one after
@@ -470,8 +553,19 @@ export class EditPlayer {
   private leads: number[] = [];
   /** Recent frame steps between presentations. */
   private strides: number[] = [];
-  /** When (performance.now) the decoder lately skipped frames while playing. */
-  private skips: number[] = [];
+  /** When (performance.now) the decoder lately skipped frames while playing,
+   *  and how many at once. */
+  private skips: { at: number; n: number }[] = [];
+  /** The frame clock: `pickAt − k·frameMs` of the latest frames presented
+   *  since the last landing (its first frame left out). */
+  private anchors: number[] = [];
+  /** How late (ms) the player's latest timers fired. */
+  private timerLates: number[] = [];
+  /** Heavy load: until when (performance.now) the margin holds at level 1
+   *  and at level 2 (HEAVY_HOLD_MS after the latest sign). */
+  private heavyUntil: [number, number] = [-Infinity, -Infinity];
+  /** When (performance.now) frames last came late two or more at once. */
+  private bigLeapAt = -Infinity;
   /** Recent gaps (wall ms) between animation frames while playing (the
    *  screen's refresh); and when the last one ran. */
   private tickGaps: number[] = [];
@@ -740,17 +834,75 @@ export class EditPlayer {
     return Math.max(1, usual, Math.ceil((this.rate() * this.fps() * this.refreshMs()) / 1000 - 0.01));
   }
 
-  /** Frames the next presentation may leap past its step: one while the
-   *  renderer starts up (play: WARM_FRAMES), the clock starts again after
-   *  a landing (LAND_WARM_FRAMES), the decoder has lately been skipping
-   *  frames (SKIP_WINDOW_MS) or one of the latest joins showed a cut frame
-   *  (REACH_JOINS); one more above FAST_RATE. */
+  /**
+   * Output frames the jump goes early by at the moment (0: on the last kept
+   * frame — normal conditions): the load level (heavyUntil: a CPU-starved
+   * device), one while the seek's reach is unknown (no join measured yet:
+   * the first join of a player finds it out on a kept frame — at a slow
+   * pipeline the old frame picked after the jump is the last kept one, not a
+   * cut one; a join in the first frames after play that saw such a frame
+   * says too little: the next one too) or one of the latest joins showed a
+   * cut frame; one when one of
+   * the latest STALL_FRAMES frames' callbacks came as late as heavy load's
+   * (a stall: load starting — the seam timer may be held as long; the
+   * load's own sign takes a few more frames). At most MAX_EARLY. (A slow
+   * pipeline: leap().)
+   */
+  private margin(): number {
+    if (!this.rvfc) return 0;
+    const now = performance.now();
+    // (level 2 while heavy if the frames came late two or more at once in
+    // the latest BIG_LEAP_MS: at 4× CPU a leap of three comes out of the
+    // blue, 17–40 % of the time with none in the 8 s before)
+    const leapt = now - this.bigLeapAt < BIG_LEAP_MS;
+    const heavy = now < this.heavyUntil[1] ? 2 : now < this.heavyUntil[0] ? (leapt ? 2 : 1) : 0;
+    const probe = this.reaches.length === 0 || this.reachUnsure || this.cutJoins.includes(1) ? 1 : 0;
+    const late = this.lateLagMs(HEAVY_LAG_MS);
+    const stall = this.lags.slice(-STALL_FRAMES).some((x) => x > late) ? 1 : 0;
+    return Math.min(MAX_EARLY, Math.max(heavy, probe, stall));
+  }
+
+  /** A frame callback lag (ms) that is a stall's, not the cadence: over
+   *  `t` and HEAVY_LAG_OVER_MS over the least of the latest frames' (a
+   *  callback always that late — a phone rendering 12 ms into the refresh
+   *  — is a cadence the seam timer covers; a starved main thread runs some
+   *  at once, others 30–60 ms late). */
+  private lateLagMs(t: number): number {
+    if (!this.lags.length) return t;
+    return Math.max(t, Math.min(...this.lags) + HEAVY_LAG_OVER_MS);
+  }
+
+  /** Heavy load at the moment (level 1 or 2). */
+  private heavy(): boolean {
+    return performance.now() < this.heavyUntil[0] || performance.now() < this.heavyUntil[1];
+  }
+
+  /** A sign of heavy load (level 1 or 2): the margin holds HEAVY_HOLD_MS. */
+  private loaded(level: 1 | 2, now = performance.now()): void {
+    this.heavyUntil[level - 1] = Math.max(this.heavyUntil[level - 1], now + HEAVY_HOLD_MS);
+  }
+
+  /** Frames (source) the jump goes before the clip's last kept frame: the
+   *  margin (in source frames at the speed playing); as many as the seam
+   *  needs when the seek's reach leaves no room between two frames' picks
+   *  (a slow pipeline; late timers lead the seam timer instead, at most to
+   *  the last kept frame's slot); one while the renderer starts up
+   *  (play: WARM_FRAMES) or the clock starts again after a landing
+   *  (LAND_WARM_FRAMES: the next presentation may leap a frame); one more
+   *  above FAST_RATE. At most MAX_EARLY output frames. */
   private leap(): number {
     if (!this.rvfc) return 0;
     const warm = this.playFrames < WARM_FRAMES || (this.shownRun > 0 && this.shownRun <= LAND_WARM_FRAMES) ? 1 : 0;
-    const now = performance.now();
-    while (this.skips.length && now - this.skips[0] > SKIP_WINDOW_MS) this.skips.shift();
-    return Math.max(warm, this.cutJoins.includes(1) || this.skips.length ? 1 : 0) + (this.rate() > FAST_RATE ? 1 : 0);
+    const m = this.margin();
+    const early = m > 0 ? Math.ceil(m * Math.max(1, this.rate()) - 1e-6) : 0;
+    const fm = 1000 / (this.fps() * this.rate());
+    const seam = Math.max(0, Math.ceil((this.reachMs() + TIMER_SLACK_MS + SEAM_AFTER_MS) / fm - 1e-6) - 1);
+    return Math.min(this.maxEarly(), Math.max(warm, early, seam) + (this.rate() > FAST_RATE ? 1 : 0));
+  }
+
+  /** Wall ms from one presentation to the next at the speed playing. */
+  private presMs(): number {
+    return (1000 / (this.fps() * this.rate())) * this.screenStride();
   }
 
   /** The soonest wall gap (ms) between two presentations: the second
@@ -766,18 +918,50 @@ export class EditPlayer {
     return clamp(xs[1], 4, Math.max(prior, MAX_REFRESH_MS) * 2);
   }
 
-  /** How late after their pick frame callbacks have run lately (ms, the
-   *  latest LAG_FRAMES); a refresh until measured. */
+  /** How late after their pick the next frame callbacks may run (ms), for
+   *  the frame rule: under heavy load the latest frames' 90th percentile,
+   *  or the latest one's if later (a check that late: the next one may be
+   *  too — the owner probe at 4× CPU: a callback 63 ms after its frame's
+   *  pick, two frames shown meanwhile, the cut one picked 4 ms later); in a
+   *  stall (margin()) the latest one's; else none — the seam timer covers
+   *  a callback that comes late (round 4 took the latest 8 frames' most: a
+   *  lag spike now and then, on two busy workers, went a frame early at a
+   *  third of the joins). */
   private lagMs(): number {
-    return this.lags.length ? Math.max(...this.lags) : this.refreshMs();
+    if (!this.lags.length) return 0;
+    const last = this.lags[this.lags.length - 1];
+    if (this.heavy()) {
+      const xs = [...this.lags].sort((a, b) => a - b);
+      return Math.max(xs[Math.floor(xs.length * 0.9)], last);
+    }
+    const late = this.lateLagMs(HEAVY_LAG_MS);
+    return this.lags.slice(-STALL_FRAMES).some((x) => x > late) ? last : 0;
   }
 
-  /** How long before a pick a jump has to be asked to stop it (ms):
-   *  REACH_MS, or what the latest joins showed (a frame of the old
-   *  position picked that long after the jump was asked). */
+  /**
+   * How long before a pick a jump has to be asked to stop it (ms): REACH_MS
+   * — or, where one of the latest joins picked a frame of the old position
+   * after its jump was asked (the seek took longer than that: `reaches`),
+   * the least of what the latest joins showed it takes less than (`stops`:
+   * the old position's next pick the seek did stop) that is still more
+   * than that; a frame more where they disagree. REACH_WARM_MS more in the
+   * first frames after play (the e2e runs: the second join after play
+   * still picked the cut frame 16 ms after the jump).
+   */
   private reachMs(): number {
-    const seen = this.reaches.length ? Math.max(...this.reaches) : 0;
-    return clamp(seen > 0 ? seen + 1 : 0, REACH_MS, MAX_REACH_MS);
+    const warm = this.playFrames < REACH_WARM_FRAMES ? REACH_WARM_MS : 0;
+    const lo = this.reaches.length ? Math.max(...this.reaches) : 0;
+    // (a frame picked within REACH_MS of the jump says nothing new)
+    if (lo <= REACH_MS) return REACH_MS + warm;
+    const hi = Math.min(...this.stops.filter((y) => y > lo));
+    return clamp(isFinite(hi) ? hi : lo + this.presMs(), lo + 1, MAX_REACH_MS) + warm;
+  }
+
+  /** How long before the last safe moment the player's timers are due
+   *  (ms): TIMER_SLACK_MS, more when they lately fired later than that. */
+  private slackMs(): number {
+    const late = this.timerLates.length ? Math.max(...this.timerLates) : 0;
+    return clamp(late + 2, TIMER_SLACK_MS, MAX_REACH_MS);
   }
 
   /** MAX_EARLY in source frames (output frames at the speed playing). */
@@ -785,10 +969,14 @@ export class EditPlayer {
     return Math.ceil(MAX_EARLY * Math.max(1, this.rate()) - 1e-6);
   }
 
-  /** The frame rule for frame k against frames ending before b. */
+  /** The frame rule for frame k against frames ending before b: the
+   *  presentations a frame clock's slot apart (a pick sooner than that is a
+   *  catch-up after a late one: the cut frame's slot doesn't move) — under
+   *  heavy load as soon as they lately came. */
   private ruleNow(k: number, b: number): boolean {
     const leap = this.leap();
-    return jumpNow(k, b, { leap, stride: this.stepOf(leap), slotMs: this.slotMs(), lagMs: this.lagMs(), reachMs: this.reachMs(), maxEarly: this.maxEarly() });
+    const slotMs = this.heavy() ? this.slotMs() : this.presMs();
+    return jumpNow(k, b, { leap, stride: this.stepOf(leap), slotMs, lagMs: this.lagMs(), reachMs: this.reachMs(), maxEarly: this.maxEarly() });
   }
 
   /** How far ahead of the element's clock the compositor picks a frame
@@ -801,63 +989,73 @@ export class EditPlayer {
     return this.rvfc && this.playFrames < WARM_FRAMES ? Math.max(lead, 2000 / (this.fps() * this.rate())) : lead;
   }
 
-  /** The clock's bound: never jump while the element's clock is more than
-   *  CLOCK_EARLY_FRAMES before seg's last kept frame (one presentation's
-   *  step before it at speed). */
+  /** The clock's bound: never jump while the element's clock is before
+   *  seg's last kept frame — without frame callbacks, or above FAST_RATE
+   *  (the time-stretched clock catches up in leaps, a frame lasts a refresh
+   *  or less: the e2e run at 2x, 457 → 463 in one presentation after a
+   *  landing), CLOCK_EARLY_FRAMES before it (one presentation's step at
+   *  speed: round 4's bound). */
   private clockFloorOf(seg: PlaySeg): number {
     const [, b] = this.framesOf(seg);
-    return this.frameAt(b - this.screenStride() - CLOCK_EARLY_FRAMES);
+    const exact = this.framesLive() && this.rate() <= FAST_RATE;
+    return this.frameAt(b - (exact ? 1 : this.screenStride() + CLOCK_EARLY_FRAMES));
   }
 
   /** Media time the clock jumps at seg's end: just before the compositor
-   *  could pick the first cut frame (the pick lead ahead of the clock), less
-   *  the reach and how late the next check may come (a timer's slack, or
-   *  animation frames as late as they have been) — never before the
-   *  clock's bound. */
+   *  could pick the first cut frame (the pick lead ahead of the clock),
+   *  less the reach and the timers' slack — never before the clock's bound.
+   *  (Round 4 also took off how late animation frames came: the bound then,
+   *  before the last kept frame was picked at a quarter of all joins on two
+   *  workers.) */
   private clockDueOf(seg: PlaySeg): number {
     const [, b] = this.framesOf(seg);
-    const lead = (this.leadMs() + this.reachMs() + Math.max(TIMER_SLACK_MS, this.nextCheckMs())) / 1000;
+    // (above FAST_RATE as late as animation frames come too: round 4's)
+    const next = this.rate() > FAST_RATE ? Math.max(this.slackMs(), this.nextCheckMs()) : this.slackMs();
+    const lead = (this.leadMs() + this.reachMs() + next) / 1000;
     return Math.max(this.clockFloorOf(seg), this.frameAt(b) - lead * this.rate());
   }
 
   /**
-   * Wall time (performance.now) by which the jump at seg's end is due by
-   * the frames: the soonest the first cut frame could be picked if the
-   * cadence of the last presented frame holds (a stride a presentation, a
-   * slot apart), less the reach and a timer's slack. For a next frame that
-   * comes late (the e2e runs: the last kept one 59 ms after the one before,
-   * the cut one 7 ms after it): not waiting for it then. Not from a
-   * landing's first frame (the clock starts again a while after it), never
-   * more than MAX_EARLY (output) frames before the last kept one. Infinity: none.
+   * Wall time (performance.now) the seam timer is due at seg's end, by the
+   * frame clock: the last safe moment before the clip's first cut frame
+   * could be picked — its reach and the timers' slack before its slot —
+   * and never sooner than SEAM_AFTER_MS after the last kept frame's slot
+   * (it is on screen then, held while the seek lands). A starved decoder
+   * runs behind and catches up in a leap, but on the clock's slot of the
+   * frame it leaps to (the owner probe at 4× CPU), never ahead of it: the
+   * cut frame comes no sooner; the margin (leap) is the frame rule's — the
+   * callbacks that might come too late. It covers a frame callback that
+   * comes late, a frame the decoder never presents. Infinity: no frame
+   * clock (no frame since the landing yet but its first).
    */
-  private framesDueAt(seg: PlaySeg): number {
-    const k = this.lastFrameK;
-    if (!this.framesLive() || k === null || this.shownRun < 2 || !isFinite(this.lastPickAt)) return Infinity;
+  private seamAt(seg: PlaySeg): number {
+    if (!this.framesLive() || !this.anchors.length) return Infinity;
     const [, b] = this.framesOf(seg);
-    if (k < b - 1 - this.maxEarly()) return Infinity;
-    const leap = this.leap();
-    const n = Math.max(1, Math.ceil((b - k) / (this.stepOf(leap) + leap)));
-    return this.lastPickAt + n * this.slotMs() - this.reachMs() - TIMER_SLACK_MS;
+    const fm = 1000 / (this.fps() * this.rate());
+    const anchor = Math.min(...this.anchors);
+    return Math.max(anchor + b * fm - Math.max(this.reachMs() + this.slackMs(), SEAM_LEAD_MS), anchor + (b - 1) * fm + SEAM_AFTER_MS);
   }
 
   /** The jump at seg's end is due now (animation frames, timers, frame
    *  callbacks): the frame rule for the frame on screen (play starting on
-   *  a clip's last frame: no new frame has come yet), the frames' cadence
-   *  (a frame late), or the clock. */
+   *  a clip's last frame: no new frame has come yet), the seam (by the
+   *  frame clock), or the element's clock. */
   private dueNow(seg: PlaySeg): boolean {
     const [a, b] = this.framesOf(seg);
     const k = this.lastFrameK;
     if (this.rvfc && k !== null && k >= a - 1 && this.ruleNow(k, b)) return true;
-    if (performance.now() >= this.framesDueAt(seg)) return true;
+    if (performance.now() >= this.seamAt(seg)) return true;
     return this.v.currentTime >= this.clockDueOf(seg) - 0.0005;
   }
 
   /** Media time the jump at seg's end is expected (the gain ramp's aim):
-   *  the first frame the rule jumps on as things are, or the clock's
-   *  moment. */
+   *  the first frame the rule jumps on as things are, or the seam's or the
+   *  clock's moment. */
   private jumpAtOf(seg: PlaySeg): number {
-    const due = this.clockDueOf(seg);
+    let due = this.clockDueOf(seg);
     if (!this.framesLive()) return due;
+    const seam = this.seamAt(seg);
+    if (isFinite(seam)) due = Math.min(due, this.v.currentTime + ((seam - performance.now()) / 1000) * this.rate());
     const [a, b] = this.framesOf(seg);
     for (let k = Math.max(a, b - 1 - this.maxEarly()); k < b - 1; k++) if (this.ruleNow(k, b)) return Math.min(due, this.frameAt(k));
     return due;
@@ -915,13 +1113,18 @@ export class EditPlayer {
         if (j && isFinite(submittedAt) && submittedAt > j.at) {
           j.late = Math.max(j.late ?? 0, submittedAt - j.at);
           if (this.frameOf(m) >= j.end) j.cut = true;
+          // (picked after the jump: the one the seek stopped comes after it)
+          j.next = Math.max(j.next, submittedAt + 1000 / (this.fps() * this.rate()));
         }
         return;
       }
       this.landing = null;
+      this.landedEarly = v.seeking && this.ourSeek !== null;
+      // (the new position on screen: the seek had reached the pipeline)
+      if (this.jump && isFinite(submittedAt)) this.jump.next = Math.min(this.jump.next, Math.max(this.jump.at, submittedAt));
       this.landed();
     }
-    const playing = !v.paused && !v.seeking;
+    const playing = !v.paused && !this.seekPending();
     const steady = playing && this.framesSince > 0;
     // presentations since the last one this callback saw (a busy page
     // may run one callback for two)
@@ -939,18 +1142,43 @@ export class EditPlayer {
     this.phase = m - Math.round(m * f) / f;
     const k = this.frameOf(m);
     if (steady && pd >= 1 && pd <= 3 && this.lastFrameK !== null) {
-      const d = k - this.lastFrameK;
+      // (the step from the media times: the grid's offset is taken anew
+      // from every frame)
+      const d = Math.round((m - this.lastFrameM) * f);
       // frame steps per presentation (2+ at speed, or where the decoder
       // skipped frames — the next presented one may then be past a clip's
       // last frame)
       if (d >= 1 && d <= 8 * pd) keep(this.strides, Math.ceil(d / pd), 8);
-      // frames the decoder never presented (decoded too late, a busy device)
-      if (pd === 1 && d > this.screenStride() && d <= 8) keep(this.skips, wall, 8);
+      // frames this callback came too late for (the decoder never
+      // presented them, or their callbacks never ran: a busy device):
+      // heavy load when that keeps happening (one now and then is no sign
+      // of the next), level 2 when it leapt two or more at once meanwhile
+      // (the owner probe at 4× CPU: 3–4 frames at once now and then — past
+      // a margin of one)
+      if (d > this.screenStride() && d <= 8 * pd) {
+        keep(this.skips, { at: wall, n: d - this.screenStride() }, 32);
+        const recent = this.skips.filter((x) => wall - x.at < LEAP_WINDOW_MS);
+        // (and over a longer stretch: at 4× CPU a lull of 8 s now and then)
+        const long = this.skips.filter((x) => wall - x.at < LEAP_WINDOW_LONG_MS);
+        if (recent.length >= HEAVY_LEAPS || long.length >= HEAVY_LEAPS_LONG) this.loaded(1, wall);
+        if (d - this.screenStride() >= 2) this.bigLeapAt = wall;
+      }
       // the cadence of picks (not from a landing's first frames: the
       // clock starts again then)
       if (pd === 1 && d >= 1 && this.shownRun >= 2 && pickAt > this.lastPickAt) keep(this.slots, pickAt - this.lastPickAt, SLOT_HISTORY);
     }
-    if (playing) keep(this.lags, Math.max(0, wall - pickAt), LAG_FRAMES);
+    if (playing) {
+      keep(this.lags, Math.max(0, wall - pickAt), LOAD_FRAMES);
+      // callbacks running late after their frame's pick, again and again,
+      // past their cadence: a starved main thread — level 2 when more than
+      // a presentation late
+      const over = (t: number) => {
+        const late = this.lateLagMs(t);
+        return this.lags.filter((x) => x > late).length >= HEAVY_LAG_COUNT;
+      };
+      if (over(HEAVY_LAG_MS)) this.loaded(1, wall);
+      if (over(this.presMs() - REACH_MS)) this.loaded(2, wall);
+    }
     // how far ahead of the element's clock this frame was picked (not from
     // a landing's first frames: the clock starts again then)
     if (steady && this.shownRun >= 2 && isFinite(submittedAt)) {
@@ -959,12 +1187,15 @@ export class EditPlayer {
       if (lead > -50 && lead < 200) keep(this.leads, clamp(lead, 0, MAX_LEAD_MS), LEAD_FRAMES);
     }
     if (this.lastPresented !== presented) this.shownRun++;
+    // the frame clock (not from a landing's first frame: the clock stands
+    // on it a while)
+    if (playing && this.shownRun >= 2 && isFinite(pickAt)) keep(this.anchors, pickAt - (k * 1000) / (f * this.rate()), ANCHOR_FRAMES);
     this.lastPresented = presented;
     this.lastFrameK = k;
     this.lastFrameM = m;
     this.lastFrameAt = wall;
     this.lastPickAt = pickAt;
-    if (!this.plan.length || this.scrubbing || v.paused || v.seeking || this.atEnd) return;
+    if (!this.plan.length || this.scrubbing || v.paused || this.seekPending() || this.atEnd) return;
     this.framesSince++;
     this.playFrames++;
     const i = this.idx;
@@ -976,9 +1207,9 @@ export class EditPlayer {
       if (k >= b) this.enter(i + 1, null);
       return;
     }
-    // the frame rule: on the last kept frame (a frame early only while
-    // waiting could be too late); the clock (a late frame: the decoder
-    // fell behind) — or a timer for the clock's moment
+    // the frame rule: on the last kept frame (under load the margin's
+    // frames before it); the seam or the clock (a callback come late, a
+    // frame the decoder never presented) — or a timer for their moment
     if (this.ruleNow(k, b) || this.dueNow(seg)) this.boundary(i);
     else this.armNear(i);
   }
@@ -994,17 +1225,28 @@ export class EditPlayer {
     // whatever it measured — it is only a bound: the pick came then, the
     // seek later still)
     const late = j.late ?? 0;
-    keep(this.reaches, Math.max(0, late - (j.warm && !j.cut ? REACH_WARM_MS : 0)), REACH_JOINS);
+    const warmBy = j.warm && !j.cut ? REACH_WARM_MS : 0;
+    keep(this.reaches, Math.max(0, late - warmBy), REACH_JOINS);
+    keep(this.stops, isFinite(j.next) ? Math.max(0, j.next - j.at - warmBy) : Infinity, REACH_JOINS);
+    this.reachUnsure = j.warm && late > REACH_MS;
     keep(this.cutJoins, j.cut ? 1 : 0, REACH_JOINS);
+  }
+
+  /** A seek is on its way (the element seeking, our seek's frames not yet
+   *  on screen). */
+  private seekPending(): boolean {
+    return this.v.seeking && !this.landedEarly;
   }
 
   /** A seek to `to` starts: frames until it lands are the old position's. */
   private seekStarts(to: number): void {
+    this.landedEarly = false;
     this.landing = { from: this.lastPresented === null ? this.v.currentTime : this.lastFrameM, to };
     this.lastPresented = null;
     this.lastFrameK = null;
     this.framesSince = 0;
     this.shownRun = 0;
+    this.anchors = [];
   }
 
   private disarm(): void {
@@ -1014,10 +1256,28 @@ export class EditPlayer {
     this.boundaryAt = NaN;
   }
 
-  /** Wall ms until the frames' or the clock's moment at seg's end. */
+  /** Wall ms until the seam's or the clock's moment at seg's end. */
   private dueInMs(seg: PlaySeg): number {
     const byClock = ((this.clockDueOf(seg) - this.v.currentTime) / this.rate()) * 1000;
-    return Math.max(0, Math.min(byClock, this.framesDueAt(seg) - performance.now()));
+    return Math.max(0, Math.min(byClock, this.seamAt(seg) - performance.now()));
+  }
+
+  /** setTimeout, measuring how late it fires (timerFired). */
+  private later(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+    const wait = Math.max(0, ms);
+    const due = performance.now() + wait;
+    return setTimeout(() => {
+      this.timerFired(due);
+      fn();
+    }, wait);
+  }
+
+  /** A player timer due at `due` (performance.now) fired: how late (the
+   *  seam's slack). Not a sign of heavy load by itself: on two busy
+   *  workers the timers due while a frame is rendered fire 20–37 ms late at
+   *  half the joins, the frame callbacks on time. */
+  private timerFired(due: number): void {
+    keep(this.timerLates, Math.max(0, performance.now() - due), TIMER_HISTORY);
   }
 
   /** Arm clip i's end (a jump; the last clip's: a pause) when it is near. */
@@ -1044,18 +1304,18 @@ export class EditPlayer {
     if (this.rampMs > 0 && this.volumeWritable && this.plan[i + 1]) {
       for (const k of [3, 2, 1]) {
         this.boundaryTimers.push(
-          setTimeout(
+          this.later(
             () => {
               const s = this.plan[this.idx];
               if (this.idx === i && s && !this.v.paused) this.applyGain(s, this.v.currentTime);
             },
-            Math.max(0, jumpIn - this.rampMs * (k / 3)),
+            jumpIn - this.rampMs * (k / 3),
           ),
         );
       }
     }
     const fire = () => {
-      if (this.idx !== i || this.v.paused || this.v.seeking || this.atEnd || this.scrubbing) return;
+      if (this.idx !== i || this.v.paused || this.seekPending() || this.atEnd || this.scrubbing) return;
       const seg = this.plan[i];
       if (!seg) return;
       if (this.dueNow(seg)) {
@@ -1063,9 +1323,9 @@ export class EditPlayer {
         return;
       }
       // early (the clock lags the timer, a newer frame moved the moment): again for the rest
-      this.boundaryTimers.push(setTimeout(fire, clamp(this.dueInMs(seg), 1, BOUNDARY_AHEAD_S * 1000)));
+      this.boundaryTimers.push(this.later(fire, clamp(this.dueInMs(seg), 1, BOUNDARY_AHEAD_S * 1000)));
     };
-    this.boundaryTimers.push(setTimeout(fire, Math.max(0, fireIn)));
+    this.boundaryTimers.push(this.later(fire, fireIn));
   }
 
   /** Clip i ended: on to the next clip (a seek unless it continues the footage), or the end. */
@@ -1074,7 +1334,14 @@ export class EditPlayer {
     const next = this.plan[i + 1];
     if (next && !this.joined(i)) {
       const end = this.framesOf(this.plan[i])[1];
-      this.jump = { at: performance.now(), late: null, warm: this.playFrames < REACH_WARM_FRAMES, end, cut: false };
+      // the old position's next pick by the frame clock (after the frame on
+      // screen): if the seek stops it, the reach is less than the time to it
+      const at = performance.now();
+      const fm = 1000 / (this.fps() * this.rate());
+      const k = this.lastFrameK;
+      let next = this.anchors.length && k !== null ? Math.min(...this.anchors) + (k + 1) * fm : Infinity;
+      while (next <= at) next += fm;
+      this.jump = { at, late: null, warm: this.playFrames < REACH_WARM_FRAMES, end, cut: false, next };
     }
     if (next) this.enter(i + 1, this.joined(i) ? null : this.landOf(next));
     else this.finish();
@@ -1099,7 +1366,7 @@ export class EditPlayer {
         this.dipping = true;
         // never stay silent: a seek that reports no "seeked" ends the dip
         this.rampTimers.push(
-          setTimeout(() => {
+          this.later(() => {
             if (!this.dipping) return;
             this.dipping = false;
             const s = this.plan[this.idx];
@@ -1158,7 +1425,7 @@ export class EditPlayer {
       this.resync(t);
       return;
     }
-    if (!v.paused && !v.seeking && !this.atEnd) {
+    if (!v.paused && !this.seekPending() && !this.atEnd) {
       if (this.joined(i)) {
         // A split: the next clip continues the same footage — no seek.
         if (t >= seg.end) {
@@ -1220,6 +1487,7 @@ export class EditPlayer {
     this.playFrames = 0;
     // (the clock starts a while after play, like after a landing)
     this.shownRun = 0;
+    this.anchors = [];
     this.watchFrames();
     const plan = this.plan;
     if (plan.length) {
@@ -1237,6 +1505,7 @@ export class EditPlayer {
     this.stopLoop();
     this.disarm();
     this.framesSince = 0;
+    this.anchors = [];
     this.setFade(0);
   };
 
@@ -1283,6 +1552,7 @@ export class EditPlayer {
 
   private onSeeked = (): void => {
     this.ourSeek = null;
+    this.landedEarly = false;
     this.watchFrames();
     if (this.scrubbing) {
       // the newest edge position asked for meanwhile
@@ -1300,7 +1570,7 @@ export class EditPlayer {
       this.landedAt = performance.now();
       this.rampTimers.forEach(clearTimeout);
       this.rampTimers = [1, 2, 3].map((k) =>
-        setTimeout(() => {
+        this.later(() => {
           const s = this.plan[this.idx];
           if (s) this.applyGain(s, this.v.currentTime);
         }, (this.rampMs * k) / 3),
@@ -1360,6 +1630,7 @@ export class EditPlayer {
       this.strides = [];
       this.slots = [];
       this.leads = [];
+      this.anchors = [];
     }
   }
 

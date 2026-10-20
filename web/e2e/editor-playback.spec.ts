@@ -35,24 +35,36 @@ import {
 import type { Page, Request } from "@playwright/test";
 
 type Sample = [wall: number, t: number, paused: boolean, rate: number, volume: number, muted: boolean];
+type Shown = [wall: number, mediaTime: number];
 
-/** Record [wall ms, currentTime, paused, rate, volume, muted] every frame. */
+/** Record [wall ms, currentTime, paused, rate, volume, muted] every frame,
+ *  and every frame the video presents ([wall ms, mediaTime]:
+ *  requestVideoFrameCallback — what was on screen, not the clock). */
 async function startSampler(page: Page) {
   await editorVideo(page).evaluate((el) => {
     const v = el as HTMLVideoElement;
-    const w = window as unknown as { __s: Sample[] };
+    const w = window as unknown as { __s: Sample[]; __f: Shown[] };
     w.__s = [];
+    w.__f = [];
     const f = () => {
       w.__s.push([performance.now(), v.currentTime, v.paused, v.playbackRate, v.volume, v.muted]);
       requestAnimationFrame(f);
     };
     requestAnimationFrame(f);
+    const shown: VideoFrameRequestCallback = (_now, md) => {
+      w.__f.push([performance.now(), md.mediaTime]);
+      v.requestVideoFrameCallback(shown);
+    };
+    v.requestVideoFrameCallback(shown);
   });
 }
 const now = (page: Page) => page.evaluate(() => performance.now());
 /** Samples since `from` while playing. */
 const samples = async (page: Page, from: number): Promise<Sample[]> =>
   (await page.evaluate(() => (window as unknown as { __s: Sample[] }).__s)).filter((s) => s[0] >= from && !s[2]);
+/** Frames presented since `from`. */
+const presented = async (page: Page, from: number): Promise<Shown[]> =>
+  (await page.evaluate(() => (window as unknown as { __f: Shown[] }).__f)).filter((s) => s[0] >= from);
 
 async function seekAndPlay(page: Page, t: number) {
   await userSeek(page, t);
@@ -108,8 +120,23 @@ test.describe("proxy playback follows the edit list", () => {
       const after = ss.find((s) => s[1] >= 7.0);
       expect(ss.filter((s) => s[1] > 6.02 && s[1] < 6.98)).toEqual([]);
       expect(before && after).toBeTruthy();
-      expect(before![1]).toBeGreaterThan(5.9); // the jump starts at most ~1 frame early
       expect(after![0] - before![0]).toBeLessThan(400);
+      // The jump starts at most two frames early: the last frame of [0, 6)
+      // on screen before it is frame 177 (5.9 s, 30 fps) or later — at most
+      // 178 and 179 dropped, the owner's allowance under load (one in
+      // normal conditions). Measured on the frames the video presented
+      // (requestVideoFrameCallback mediaTime): round 4 read it from the
+      // last animation-frame sample of the clock before the jump, up to a
+      // refresh and a half stale on two busy workers (5.846, 5.894 with
+      // 178 on screen) — the same bound (> 5.9 s), exact. And no cut frame
+      // presented: none in (6.02, 6.98).
+      const fr = await presented(page, w0);
+      const landed = fr.findIndex(([, m]) => m >= 7.0);
+      expect(landed).toBeGreaterThan(0);
+      expect(fr.filter(([, m]) => m > 6.02 && m < 6.98)).toEqual([]);
+      const lastKept = fr.slice(0, landed).filter(([, m]) => m < 6.0).pop();
+      expect(lastKept).toBeTruthy();
+      expect(Math.round(lastKept![1] * 30)).toBeGreaterThanOrEqual(177);
     });
 
     await test.step("the caption preview follows source time", async () => {

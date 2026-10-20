@@ -477,11 +477,13 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
     }
   });
 
-  test("a click on a clip while the strip settles after a trim selects that clip (F7, pixel7 CI)", async ({ page, stub }, info) => {
-    // (CI's pixel7 run: the settle ran when the next clip was clicked, 90 ms
-    // after the release; the phone strip here often releases without one —
-    // the desktop strip always settles, the same press is tested there)
-    test.skip(info.project.name !== "desktop", "the desktop strip settles at every release");
+  test("a click on a clip while the strip settles after a trim selects that clip (F7, pixel7 CI)", async ({ page, stub }) => {
+    // CI's pixel7 run: the settle ran when the next clip was clicked — the
+    // mouse click select() presses (page.mouse: pointerType "mouse" on the
+    // phone too), 90 ms after the release — and nothing was selected. Here
+    // on both projects: the settle forced at the release and held where it
+    // starts (the phone strip often released without one when let run, so
+    // the CI path wasn't hit there), the press the same mouse press.
     const job = await stub.seed("review_speech");
     await open(page, job.id);
     const clip = await select(page, 0);
