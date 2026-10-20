@@ -6902,9 +6902,13 @@ def _save_edit_segments(job_id: str, payload: dict, user: User | None
         out = {"segments": [list(seg) for seg in cleaned],
                "settings": new_settings,
                "edit_rev": stored["rev"]}
-        if not cur.preview_segments:
+        if not cur.preview_segments and (cur.preview_key
+                                         or cur.preview_path):
             # Job from before preview_segments existed: its preview.mp4
-            # was built from the segments we are about to replace.
+            # was built from the segments we are about to replace. (One
+            # without any preview — its analysis made none: proxy
+            # playback — keeps none: GET /jobs/{id} names the stored
+            # timeline for version 0, what its first build shows.)
             out["preview_segments"] = [[float(a), float(b)]
                                        for a, b in cur.segments]
         return out

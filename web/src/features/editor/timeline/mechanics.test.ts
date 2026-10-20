@@ -362,6 +362,15 @@ describe("seamTapClip (phone-tiny-seam)", () => {
     expect(seamTapClip(102.4, 102, 6, 9, 24)).toBeNull();
     expect(seamTapClip(103, 102, 6, 9, 24)).toBe("next");
   });
+  it("a phone's core: a finger lands a few px off the glyph it aims at — within 2.5 px of the line, the seam whatever its neighbours", () => {
+    // between two 2 px clips (the opening zoom of a long edit)
+    for (const dx of [-2.4, -1.5, 0, 1.5, 2.4]) expect(seamTapClip(102 + dx, 102, 2, 2, 12, 2.5)).toBeNull();
+    // the gap's last half px, right at the tiny clip: the clip
+    expect(seamTapClip(104.7, 102, 80, 2, 12, 2.5)).toBe("next");
+    expect(seamTapClip(99.3, 102, 2, 80, 12, 2.5)).toBe("prev");
+    // a clip big enough to tap: the seam on that side, any distance
+    expect(seamTapClip(110, 102, 2, 80, 12, 2.5)).toBeNull();
+  });
   it("the desktop's threshold is its own (10 px)", () => {
     expect(seamTapClip(103, 102, 80, 18, 10)).toBeNull();
     expect(seamTapClip(103, 102, 80, 8, 10)).toBe("next");

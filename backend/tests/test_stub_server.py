@@ -193,7 +193,12 @@ def test_upload_runs_the_fake_analysis(stub):
     review = stub.wait_status(job["id"], "awaiting_review")
     assert review["filename"] == name
     assert len(review["preview_segments"]) == 4          # the grid clip's analysis
-    assert stub.json("GET", f"/_test/job/{job['id']}")["stub"]["clip"] == "grid"
+    internals = stub.json("GET", f"/_test/job/{job['id']}")
+    assert internals["stub"]["clip"] == "grid"
+    # the editor plays the proxy: no first preview, as CLEO_PROXY_VIDEO=1
+    # analyses (built when a player falls back)
+    assert (review["has_proxy"], review["preview_version"]) == (True, 0)
+    assert internals["preview_key"] is None and internals["proxy_key"]
     # new jobs carry the edit document (UT3)
     assert review["has_doc"] is True
     assert stub.json("GET", f"/jobs/{job['id']}/doc")["doc"]["words"][0]["text"] == "Satz"

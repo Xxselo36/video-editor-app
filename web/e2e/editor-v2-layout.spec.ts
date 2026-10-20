@@ -241,6 +241,9 @@ test.describe("editor v2 behaviour", TAG, () => {
     await clips.first().click({ position: { x: 30, y: 20 } });
     await expect(page.getByTestId("ed-split")).toBeVisible();
     await expect(page.getByTestId("ed-delete")).toBeVisible();
+    // the click's seek has landed: the playhead is inside the clip, not at
+    // its first frame (a busy run lands later; split needs room either side)
+    await expect(page.getByTestId("ed-split")).toHaveAttribute("aria-disabled", "false");
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.keyboard.press("s");
     await expect(clips).toHaveCount(before + 1);

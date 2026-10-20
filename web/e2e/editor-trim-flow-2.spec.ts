@@ -70,6 +70,16 @@ async function press(page: Page, x: number, y: number) {
   };
 }
 
+/** A finger's tap (CDP touch: the phone moves the click onto a small
+ *  target nearby, touch adjustment, as on a real phone). */
+async function tap(page: Page, x: number, y: number) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  await page.waitForTimeout(40);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+}
+
 async function select(page: Page, i: number) {
   const clip = clipsOf(page).nth(i);
   await clip.scrollIntoViewIfNeeded();
@@ -215,6 +225,48 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
       expect(await text()).toContain("Noone");
     });
   }
+
+  test("a timeline conflict brings the other device's text edits in when none of this tab's is pending; the next text edit saves (round 3)", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    await open(page, job.id);
+    const phone = await isPhone(page);
+    const j0 = (await stub.job(job.id))!;
+    // another device: fixes a word, then drops the last clip
+    const d0 = await stub.doc(job.id);
+    const ten = d0.doc.words.find((w) => w.text === "ten")!;
+    const p = await stub.api.patch(`/jobs/${job.id}/doc`, {
+      data: { base_rev: d0.rev, rev: Math.floor(Date.now() * 1000), words: { upsert: [{ ...ten, text: "10" }], delete: [] } },
+    });
+    expect(p.ok(), await p.text()).toBe(true);
+    const theirs = j0.edit_segments.slice(0, -1);
+    const r = await stub.api.post(`/jobs/${job.id}/edit-segments`, {
+      data: { segments: theirs, base_rev: j0.edit_rev ?? 0, rev: Math.floor(Date.now() * 1000) + 7 },
+      timeout: 120_000,
+    });
+    expect(r.ok(), await r.text()).toBe(true);
+    // this tab: a trim only, no text edit pending
+    await trimEnd(page, 1, -30);
+    await expect(page.getByTestId("ed-toast")).toContainText("another tab or on another device", { timeout: 15_000 });
+    // "the newest version": the other device's word fix is on screen too
+    if (phone) await page.getByTestId("ed-tab-text").click();
+    await expect(page.getByTestId("ed-word").filter({ hasText: /^10$/ })).toHaveCount(1);
+    // a text edit now saves (no conflict of the doc's own)
+    const w = page.getByTestId("ed-word").filter({ hasText: /^Nobody$/ }).first();
+    if (phone) {
+      await w.click();
+      await page.getByTestId("ed-word-edit").click();
+      await page.getByTestId("ed-word-input").fill("Noone");
+      await page.getByTestId("ed-word-done").click();
+    } else {
+      await w.dblclick();
+      await page.getByTestId("ed-word-input").fill("Noone");
+      await page.getByTestId("ed-word-input").press("Enter");
+    }
+    const text = async () => (await stub.doc(job.id)).doc.words.map((x) => x.text).join(" ");
+    await expect.poll(text, SAVED).toContain("Noone");
+    expect(await text()).toContain("waits 10 seconds");
+    await expect(page.getByTestId("ed-conflict")).toHaveCount(0);
+  });
 
   test("one timeline save on the wire at a time: edits meanwhile go as one save of the newest state (F4)", async ({ page, stub }) => {
     const job = await stub.seed("review_speech");
@@ -430,13 +482,14 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
     await expect(page.locator("[data-testid=ed-timeline] [data-selected=true]")).toHaveCount(0);
   });
 
-  test("phone: a seam tap is Restore as on the desktop, only its part over a tiny clip selects that clip; zoom buttons with a selected clip (drag-6, phone-tiny-seam)", async ({ page, stub }, info) => {
+  test("phone: a seam tap is Restore as on the desktop — its core a finger's width — only its edge at a tiny clip selects that clip; zoom buttons with a selected clip (drag-6, phone-tiny-seam)", async ({ page, stub }, info) => {
     test.skip(info.project.name !== "pixel7", "the phone dock");
     const job = await stub.seed("review_speech");
-    // a clip with no body left to tap at Fit (0.4 s: ~7 px), after a cut
+    // a tiny clip at Fit (0.8 s: a few px drawn, its seams apart — closer
+    // ones overlap, the next test), after a cut
     const j0 = (await stub.job(job.id))!;
     const segs = j0.edit_segments.map((x) => ({ start: x.start, end: x.end }));
-    segs.splice(2, 0, { start: segs[1].end + 0.6, end: segs[1].end + 1.0 });
+    segs.splice(2, 0, { start: segs[1].end + 0.6, end: segs[1].end + 1.4 });
     segs[3].start = Math.max(segs[3].start, segs[2].end + 0.3);
     const r = await stub.api.post(`/jobs/${job.id}/edit-segments`, {
       data: { segments: segs, base_rev: j0.edit_rev ?? 0, rev: Math.floor(Date.now() * 1000) },
@@ -467,13 +520,22 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
       await page.keyboard.press("Escape");
       await expect(page.getByTestId("ed-seam-popover")).toHaveCount(0);
     }
-    // the line itself (its glyph's middle): the seam, even next to the tiny clip
-    await page.mouse.click(line, sb.y + sb.height / 2);
-    await expect(page.getByTestId("ed-seam-popover")).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(page.getByTestId("ed-seam-popover")).toHaveCount(0);
-    // the part over the tiny clip: that clip
-    await page.mouse.click(line + 1.5, sb.y + sb.height / 2);
+    // the seam's core — the glyph a finger aims at, a few px either side of
+    // its line: the seam, even next to the tiny clip; with a finger too (its
+    // click is moved onto the small clip beside it, touch adjustment: the
+    // editor goes by where the finger was)
+    for (const dx of [0, 2, -2]) {
+      for (const how of ["mouse", "finger"] as const) {
+        if (how === "mouse") await page.mouse.click(line + dx, sb.y + sb.height / 2);
+        else await tap(page, line + dx, sb.y + sb.height / 2);
+        await expect(page.getByTestId("ed-seam-popover"), `${how}, ${dx} px off the line`).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(page.getByTestId("ed-seam-popover")).toHaveCount(0);
+      }
+    }
+    await expect(page.locator("[data-testid=ed-timeline] [data-selected=true]")).toHaveCount(0);
+    // the gap's edge at the tiny clip, past the core: that clip
+    await page.mouse.click(line + 2.8, sb.y + sb.height / 2);
     await expect(clipsOf(page).nth(i)).toHaveAttribute("data-selected", "true");
     await expect(page.getByTestId("ed-seam-popover")).toHaveCount(0);
     // now + / − (44 px), zooming around the selected clip
@@ -495,6 +557,41 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
     for (let k = 0; k < 6; k++) if (await zout.isEnabled()) await zout.click();
     await expect.poll(() => strip.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
     await expect(zout).toBeDisabled();
+  });
+
+  test("phone at Fit: two seams around a clip too short to draw overlap — a tap opens the one whose line is nearest (phone-tiny-seam)", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "pixel7", "the phone dock");
+    const job = await stub.seed("review_speech");
+    // a 0.08 s clip (about a px at Fit) between a 0.6 s and a 0.3 s cut
+    const j0 = (await stub.job(job.id))!;
+    const segs = j0.edit_segments.map((x) => ({ start: x.start, end: x.end }));
+    const a = segs[1].end + 0.6;
+    segs.splice(2, 0, { start: a, end: a + 0.08 });
+    segs[3].start = a + 0.08 + 0.3;
+    segs[3].end = Math.max(segs[3].end, segs[3].start + 0.5);
+    const r = await stub.api.post(`/jobs/${job.id}/edit-segments`, {
+      data: { segments: segs, base_rev: j0.edit_rev ?? 0, rev: Math.floor(Date.now() * 1000) },
+    });
+    expect(r.ok(), await r.text()).toBe(true);
+    await open(page, job.id);
+    const id = await clipsOf(page).nth(2).getAttribute("data-seg");
+    const before = page.locator(`[data-testid=ed-seam][data-seam-key$=">${id}"]`);
+    const after = page.locator(`[data-testid=ed-seam][data-seam-key^="${id}>"]`);
+    const lineOf = async (l: typeof before) => {
+      const b = (await l.boundingBox())!;
+      return { x: b.x + (await l.evaluate((el) => parseFloat((el as HTMLElement).style.getPropertyValue("--sl")))), y: b.y + b.height / 2 };
+    };
+    const l1 = await lineOf(before);
+    const l2 = await lineOf(after);
+    // (their hit areas overlap: the later one covers the earlier one's line)
+    expect(l2.x - l1.x).toBeLessThan(6);
+    for (const [l, len] of [[l1, "0.6"], [l2, "0.3"]] as const) {
+      await page.mouse.click(l.x, l.y);
+      await expect(page.getByTestId("ed-seam-popover")).toBeVisible();
+      await expect(page.getByTestId("ed-seam-popover")).toContainText(`${len} s removed`);
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("ed-seam-popover")).toHaveCount(0);
+    }
   });
 
   test("an edit that never reached the server comes back on the next open (save-11)", async ({ page, stub }) => {
@@ -667,6 +764,9 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
     await video(page).evaluate(async (el) => {
       const v = el as HTMLVideoElement;
       v.muted = true;
+      // (still playing however long the rebuild takes: a run in parallel
+      // can take longer than the old preview plays)
+      v.loop = true;
       v.currentTime = 0.5;
       await v.play();
     });
@@ -771,5 +871,59 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
         return Math.abs(s2.src - edge) < 0.1 || Math.abs(s2.src - end) < 0.1;
       }, SAVED)
       .toBe(true);
+  });
+  test("preview mode: a trim started while a newer preview is still loading (paused) shows the edge once it is in, not the moment the swap left from (scrub-pending-swap)", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech", { proxy: "off", slow_rebuild: 2 });
+    await open(page, job.id);
+    await expect(video(page)).toHaveAttribute("data-playback", "preview");
+    const j0 = (await stub.job(job.id))!;
+    // every newer preview file loads slowly (a phone network)
+    await page.route(/preview-video.*[?&]v=(\d+)/, async (route) => {
+      const v = Number(/[?&]v=(\d+)/.exec(route.request().url())![1]);
+      if (v > j0.preview_version) await sleep(2500);
+      await route.continue();
+    });
+    // an edit; paused, so its preview is swapped in as soon as it is there
+    await trimEnd(page, 1, -40);
+    await expect.poll(async () => (await stub.job(job.id))!.preview_version, { timeout: 60_000 }).toBeGreaterThan(j0.preview_version);
+    const j1 = (await stub.job(job.id))!;
+    // the editor picked it up: the element is loading the new file
+    await expect
+      .poll(() => video(page).evaluate((el) => Number(new URL((el as HTMLVideoElement).src).searchParams.get("v") ?? -1)), { timeout: 10_000 })
+      .toBe(j1.preview_version);
+    // a trim now, while the file loads: the edge's own frame once it is in
+    const tl = await stub.timeline(job.id);
+    const clip = clipsOf(page).nth(3);
+    await clip.scrollIntoViewIfNeeded();
+    const cb = (await clip.boundingBox())!;
+    await page.mouse.click(cb.x + cb.width / 2, cb.y + cb.height / 2);
+    await expect(clip).toHaveAttribute("data-selected", "true");
+    const h = center((await clip.getByTestId("clip-trim-end").boundingBox())!);
+    const p = await press(page, h.x, h.y);
+    await p.to(h.x - Math.max(14, Math.round(cb.width * 0.3)), 4);
+    const edge = parseFloat(((await page.getByTestId("ed-trim-readout").textContent()) ?? "").replace(",", "."));
+    expect(edge).toBeLessThan(tl[3][1] - 0.05);
+    // the new file is in (its metadata loaded), held at the edge
+    const srcOf = (t: number, segs: [number, number][]) => {
+      let acc = 0;
+      for (const [s0, e0] of segs) {
+        if (t < acc + (e0 - s0) + 1e-3) return s0 + (t - acc);
+        acc += e0 - s0;
+      }
+      return -1;
+    };
+    await expect
+      .poll(
+        async () => {
+          const v = await video(page).evaluate((el) => {
+            const e = el as HTMLVideoElement;
+            return { t: e.currentTime, ready: e.readyState, seeking: e.seeking, paused: e.paused };
+          });
+          return v.ready >= 1 && !v.seeking && v.paused ? Math.round(srcOf(v.t, j1.preview_segments) * 100) / 100 : null;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeCloseTo(edge, 1);
+    await p.up();
   });
 });

@@ -16,8 +16,11 @@
  * while the jump was due) or the media pipeline itself leapt two or more
  * frames past its cadence (one above 1x, and a sped-up clip of two output
  * frames or less: a CPU-starved machine); those are reported and may be at
- * most two per run. Desktop and pixel7, a v2 build
- * (E2E_EDITOR_V2=1); JOINS_DUMP=1 attaches every frame.
+ * most two per run. A join mostly shows its clip's last kept frame (the
+ * first joins after play, a landing's first frames and seeks that come
+ * late go a frame early on purpose; clips of 3 frames or less don't
+ * count). Desktop and pixel7, a v2 build (E2E_EDITOR_V2=1); JOINS_DUMP=1
+ * attaches every frame, and when the player asked for each jump.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
@@ -103,8 +106,8 @@ function manyClips(speedAt?: (i: number) => number): Seg[] {
   return out;
 }
 
-type Frame = [mediaTime: number, presented: number, presentationTime: number];
-type Run = { frames: Frame[]; raf: number[] };
+type Frame = [mediaTime: number, presented: number, presentationTime: number, expectedDisplayTime?: number, callbackAt?: number];
+type Run = { frames: Frame[]; raf: number[]; seeks?: [at: number, to: number][] };
 
 /** Plays the whole edit from its start; every presented frame's mediaTime. */
 async function playThrough(page: Page, segs: Seg[]): Promise<Run> {
@@ -113,10 +116,24 @@ async function playThrough(page: Page, segs: Seg[]): Promise<Run> {
     const video = el as HTMLVideoElement;
     const w = window as unknown as { __frames: Frame[] };
     w.__frames = [];
-    const cb: VideoFrameRequestCallback = (_now, md) => {
-      w.__frames.push([md.mediaTime, md.presentedFrames, md.presentationTime]);
+    const cb: VideoFrameRequestCallback = (now, md) => {
+      w.__frames.push([md.mediaTime, md.presentedFrames, md.presentationTime, md.expectedDisplayTime, now]);
       video.requestVideoFrameCallback(cb);
     };
+    // the jumps (seeks) the player made: when it asked, and to where
+    const sk = window as unknown as { __seeks: [number, number][] };
+    sk.__seeks = [];
+    const ct = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime")!;
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      get() {
+        return ct.get!.call(this);
+      },
+      set(x: number) {
+        sk.__seeks.push([performance.now(), x]);
+        ct.set!.call(this, x);
+      },
+    });
     video.requestVideoFrameCallback(cb);
     // the page's own animation frames: when the main thread ran at all
     const r = window as unknown as { __raf: number[] };
@@ -134,8 +151,8 @@ async function playThrough(page: Page, segs: Seg[]): Promise<Run> {
     .poll(() => v.evaluate((el) => (el as HTMLVideoElement).paused), { timeout: (outDur + 20) * 1000, intervals: [500] })
     .toBe(true);
   const run = await page.evaluate(() => {
-    const w = window as unknown as { __frames: Frame[]; __raf: number[] };
-    return { frames: w.__frames, raf: w.__raf };
+    const w = window as unknown as { __frames: Frame[]; __raf: number[]; __seeks: [number, number][] };
+    return { frames: w.__frames, raf: w.__raf, seeks: w.__seeks };
   });
   if (process.env.JOINS_DUMP) await test.info().attach("joins.json", { body: JSON.stringify(run), contentType: "application/json" });
   return run;
@@ -205,7 +222,10 @@ function check({ frames, raf }: Run, segs: Seg[], leapBy = 2) {
     for (let k = b - 1; k >= a && !shown.has(k); k--) n++;
     return n;
   });
-  const lastShown = dropsAt.filter((n) => n === 0).length;
+  // (a clip of 3 frames or less ends on a landing's first frames, where
+  // the player jumps a frame early on purpose: its last frame may go)
+  const longer = dropsAt.filter((_, i) => ends[i][1] - ends[i][0] > 3);
+  const lastShown = longer.filter((n) => n === 0).length;
   const dropped2 = dropsAt.filter((n, i) => n >= 2 && ends[i][1] - ends[i][0] > 2).length;
   // frames the pipeline itself skipped inside a clip (a busy machine)
   let skipped = 0;
@@ -214,7 +234,7 @@ function check({ frames, raf }: Run, segs: Seg[], leapBy = 2) {
     const b = kOf(frames[i][0]);
     if (b - a >= 2 && range.some(([s, e]) => a >= s && b < e)) skipped++;
   }
-  return { cut, cutInStall, cutShort, joins, lastShown, ends: ends.length, dropped2, skipped };
+  return { cut, cutInStall, cutShort, joins, lastShown, ends: longer.length, dropped2, skipped };
 }
 
 async function seedMany(stub: import("./support/fixtures").Stub, segs: Seg[]) {

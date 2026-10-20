@@ -298,7 +298,8 @@ export function useEditSession({
   // A trim edge shown in the video (scrubTo, below): the file stays the
   // one on screen until it is let go — a newer preview waits (the scrub's
   // times are that file's, scrub-pending-swap).
-  const scrubRef = useRef<{ fromSource: number; want: number | null } | null>(null);
+  // (`at`: the element time it last asked for, in that file)
+  const scrubRef = useRef<{ fromSource: number; want: number | null; at: number | null } | null>(null);
   /** The latest committed clip list (what "Saved" must match). */
   const latestRef = useRef(editSegs);
   /** The preview version on screen (or waiting to be swapped in). */
@@ -345,7 +346,10 @@ export function useEditSession({
       v.removeEventListener("loadedmetadata", restore);
       try {
         const dur = isFinite(v.duration) ? v.duration : 0;
-        const at = Math.min(target, Math.max(0, dur - 0.1));
+        // a trim edge shown while the file loaded (scrub-pending-swap):
+        // its frame, not the moment the swap left from
+        const sc = scrubRef.current;
+        const at = Math.min(sc && sc.at !== null ? sc.at : target, Math.max(0, dur - 0.1));
         if (Math.abs(v.currentTime - at) < 1e-3) release();
         else {
           v.addEventListener("seeked", release, { once: true });
@@ -887,7 +891,7 @@ export function useEditSession({
       return;
     }
     // (by the file on screen: a swap made since the last render included)
-    if (!scrubRef.current) scrubRef.current = { fromSource: sourceTimeOf(v.currentTime, modeRef.current, videoSegmentsRef.current, keptSegments, duration), want: null };
+    if (!scrubRef.current) scrubRef.current = { fromSource: sourceTimeOf(v.currentTime, modeRef.current, videoSegmentsRef.current, keptSegments, duration), want: null, at: null };
     if (modeRef.current === "proxy") {
       playerRef.current?.scrub(t);
       return;
@@ -909,6 +913,7 @@ export function useEditSession({
       }
       at = best;
     }
+    scrubRef.current.at = at;
     if (v.seeking) scrubRef.current.want = at;
     else if (Math.abs(v.currentTime - at) > 1e-4) v.currentTime = at;
   };

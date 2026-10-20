@@ -33,7 +33,11 @@
  * frame. That clock is the element's, or the last shown frame's time plus
  * the time since, when that is further on (a busy device's clock reads
  * behind what it shows). Without frame callbacks the clock jumps one frame
- * early. Landings go a little into the next clip's first frame (a seek
+ * early. Round 3: the first frames and the first joins after play go a
+ * frame early (the renderer starting up; a probe of how fast seeks reach
+ * the decoder), and every join measures that: where frames of the old
+ * position still come after a jump (a slow media pipeline), the jumps go
+ * as many frames earlier (WARM_FRAMES, PROBE_JOINS, LAG_JOINS). Landings go a little into the next clip's first frame (a seek
  * shows the frame under the target time: exactly on the edge, a container
  * offset of a few ms showed the cut frame before it). Cut footage is never
  * on screen and never heard; at a join at most the last kept frame (≤
@@ -108,6 +112,35 @@ const SKIP_WINDOW_MS = 2000;
 /** The clock read from the frames on screen runs at most this far (frames)
  *  ahead of the element's own (a device that paused the clock to catch up). */
 const SHOWN_AHEAD_FRAMES = 2;
+/** The first frames after play starts come while the renderer starts up:
+ *  a busy device presents them late and then leaps a frame, the element's
+ *  clock reads behind them, and no cadence is known yet (the e2e run showed
+ *  the first join's cut frame then). Until this many have been presented
+ *  the jumps go one frame earlier (at most the last kept frame of the clip
+ *  playing at the start is skipped). */
+const WARM_FRAMES = 4;
+/**
+ * The frame rule assumes a seek reaches the decoder before the next frame
+ * is handed to the compositor (at 1x ~33 ms after a frame's callback).
+ * Where it takes longer — a busy device, a slow media pipeline; the e2e
+ * runs under load measured 30–60 ms — frames from before a jump are still
+ * presented after it. Every join measures that: frames of the old position
+ * handed over after the jump was asked for (presentationTime; later than
+ * the SEEK_MS a seek may take), counted from the frame on screen then. The frame rule then jumps that many frames
+ * earlier (the most any of the latest LAG_JOINS joins needed, at most
+ * MAX_LAG_FRAMES). The first PROBE_JOINS joins after play start jump a
+ * frame early anyway, so a slow pipeline shows on a kept frame there
+ * before it could on a cut one.
+ */
+const PROBE_JOINS = 2;
+const LAG_JOINS = 8;
+const MAX_LAG_FRAMES = 2;
+/** The frames right after a seek landed come while the clock starts again
+ *  (late, then a few at once): on the landing frame and the one after it
+ *  the frame rule goes a frame early. Only a clip of 3 frames or less
+ *  ends that soon (its last kept frame may go); the full e2e run showed
+ *  the cut frame after such a clip. */
+const LAND_WARM_FRAMES = 2;
 
 /**
  * A clip's frames on the render's grid (backend captions_v2.clip_plan):
@@ -256,7 +289,7 @@ export type EditPlayerOptions = {
   fps?: number | null;
 };
 
-type FrameMeta = { mediaTime: number; presentedFrames: number; expectedDisplayTime: number };
+type FrameMeta = { mediaTime: number; presentedFrames: number; expectedDisplayTime: number; presentationTime?: number };
 type FrameVideo = HTMLVideoElement & {
   requestVideoFrameCallback?: (cb: (now: number, md: FrameMeta) => void) => number;
   cancelVideoFrameCallback?: (h: number) => void;
@@ -326,6 +359,17 @@ export class EditPlayer {
   private lastFrameM = 0;
   /** Frames presented since play or our last seek. */
   private framesSince = 0;
+  /** Frames presented since play started (seeks don't reset it): WARM_FRAMES. */
+  private playFrames = 0;
+  /** Our jumps at clip ends since play started (PROBE_JOINS). */
+  private joinsSincePlay = 0;
+  /** How many frames of the old position the latest joins still showed
+   *  after their jump was asked for (0: none), newest last. */
+  private lags: number[] = [];
+  /** The jump at a clip end on its way: when it was asked for (wall), the
+   *  frame then on screen, the latest frame of the old position presented
+   *  after it (null: none so far). */
+  private jump: { at: number; from: number; late: number | null } | null = null;
   /** A seek on its way: from where (media time of the frame then on
    *  screen) to where. Frames nearer `from` are from before it. */
   private landing: { from: number; to: number } | null = null;
@@ -410,6 +454,7 @@ export class EditPlayer {
     const old = this.plan;
     this.plan = plan;
     this.disarm();
+    this.jump = null;
     if (!plan.length) {
       this.idx = -1;
       return;
@@ -466,6 +511,7 @@ export class EditPlayer {
       t = plan[j].start;
     }
     this.atEnd = false;
+    this.jump = null;
     // On the clip's own frames: not the frame before its first one, not
     // the first cut-out one after its end.
     this.enter(j, this.within(plan[j], t));
@@ -483,6 +529,7 @@ export class EditPlayer {
       t = plan[j].start;
     }
     this.atEnd = false;
+    this.jump = null;
     this.enter(j, this.within(plan[j], t));
     return true;
   }
@@ -501,6 +548,7 @@ export class EditPlayer {
     }
     this.scrubbing = true;
     this.disarm();
+    this.jump = null;
     if (!this.v.paused) this.v.pause();
     if (this.v.seeking) {
       this.scrubWant = t;
@@ -603,7 +651,21 @@ export class EditPlayer {
     const now = performance.now();
     while (this.skips.length && now - this.skips[0] > SKIP_WINDOW_MS) this.skips.shift();
     const n = this.skips.length;
-    return (n >= 3 ? 2 : n > 0 ? 1 : 0) + (this.rate() > FAST_RATE ? 1 : 0);
+    // (without frame callbacks the clock's own margin covers the start,
+    // and nothing tells how late a seek came)
+    const warm = this.rvfc && this.playFrames < WARM_FRAMES ? 1 : 0;
+    return Math.max(n >= 3 ? 2 : n > 0 ? 1 : 0, warm) + (this.rate() > FAST_RATE ? 1 : 0);
+  }
+
+  /** The frame rule's: earlyFrames, a frame on the first joins after play
+   *  (PROBE_JOINS: a late seek shows on a kept frame there, not a cut
+   *  one) and on a landing's first frames (LAND_WARM_FRAMES), and the
+   *  frames late seeks still showed lately. (Not the
+   *  clock's: it is the backstop for missed callbacks, with its own
+   *  margin; shifted too it would jump a frame before the rule.) */
+  private ruleEarly(): number {
+    const probe = this.rvfc && (this.joinsSincePlay < PROBE_JOINS || (this.shownRun > 0 && this.shownRun <= LAND_WARM_FRAMES)) ? 1 : 0;
+    return Math.max(this.earlyFrames(), probe, ...this.lags);
   }
 
   /** Media time the jump at seg's end is due by the clock (animation
@@ -624,7 +686,7 @@ export class EditPlayer {
     const due = this.clockDueOf(seg);
     if (!this.framesLive()) return due;
     const [, b] = this.framesOf(seg);
-    return Math.min(this.frameAt(b - this.stride() - this.earlyFrames()), due);
+    return Math.min(this.frameAt(b - this.stride() - this.ruleEarly()), due);
   }
 
   /**
@@ -691,10 +753,10 @@ export class EditPlayer {
   private onFrame = (_now: number, md: FrameMeta): void => {
     this.frameHandle = 0;
     this.watchFrames();
-    this.frame(md.mediaTime, md.presentedFrames, md.expectedDisplayTime);
+    this.frame(md.mediaTime, md.presentedFrames, md.expectedDisplayTime, md.presentationTime ?? NaN);
   };
 
-  private frame(m: number, presented: number, shownAt: number): void {
+  private frame(m: number, presented: number, shownAt: number, submittedAt = NaN): void {
     const v = this.v;
     const wall = performance.now();
     // A frame from before a seek landed (ours, or the native controls'):
@@ -702,8 +764,16 @@ export class EditPlayer {
     // stride), nothing to act on. The first one nearer the target lands.
     const ld = this.landing;
     if (ld) {
-      if (Math.abs(m - ld.from) < Math.abs(m - ld.to)) return;
+      if (Math.abs(m - ld.from) < Math.abs(m - ld.to)) {
+        // handed over well after our jump was asked for (more than the
+        // SEEK_MS a seek may take): the seek came late (a browser that
+        // doesn't say when a frame was presented: unknown)
+        const j = this.jump;
+        if (j && isFinite(submittedAt) && submittedAt > j.at + SEEK_MS) j.late = Math.max(j.late ?? -Infinity, this.frameOf(m));
+        return;
+      }
       this.landing = null;
+      this.landed();
     }
     const steady = !v.paused && !v.seeking && this.framesSince > 0;
     const consecutive = steady && this.lastPresented !== null && presented - this.lastPresented === 1;
@@ -736,6 +806,7 @@ export class EditPlayer {
     this.lastShownAt = isFinite(shownAt) ? shownAt : wall;
     if (!this.plan.length || this.scrubbing || v.paused || v.seeking || this.atEnd) return;
     this.framesSince++;
+    this.playFrames++;
     const i = this.idx;
     const seg = this.plan[i];
     if (!seg || seg.id !== this.curId) return;
@@ -748,11 +819,19 @@ export class EditPlayer {
     // the frame rule, and the clock: a busy page shows frames late (the
     // clock runs ahead of them) — would the next check come too late?
     const t = Math.max(m, this.clockNow());
-    if (jumpOnFrame(k, b, this.stride(), this.earlyFrames()) || t >= this.clockDueOf(seg)) this.boundary(i);
+    if (jumpOnFrame(k, b, this.stride(), this.ruleEarly()) || t >= this.clockDueOf(seg)) this.boundary(i);
     else this.armNear(i, t);
   }
 
   // ── internals ────────────────────────────────────────────────────
+
+  /** Our jump landed: what its late frames (if any) say about the next ones. */
+  private landed(): void {
+    const j = this.jump;
+    this.jump = null;
+    if (!j) return;
+    keep(this.lags, j.late === null ? 0 : clamp(j.late - j.from, 0, MAX_LAG_FRAMES), LAG_JOINS);
+  }
 
   /** A seek to `to` starts: frames until it lands are the old position's. */
   private seekStarts(to: number): void {
@@ -835,6 +914,11 @@ export class EditPlayer {
   private boundary(i: number): void {
     this.disarm();
     const next = this.plan[i + 1];
+    if (next && !this.joined(i)) {
+      this.joinsSincePlay++;
+      const from = this.lastFrameK;
+      this.jump = from === null ? null : { at: performance.now(), from, late: null };
+    }
     if (next) this.enter(i + 1, this.joined(i) ? null : this.landOf(next));
     else this.finish();
   }
@@ -976,6 +1060,8 @@ export class EditPlayer {
     this.scrubbing = false;
     this.scrubWant = null;
     this.framesSince = 0;
+    this.playFrames = 0;
+    this.joinsSincePlay = 0;
     // (the clock starts a while after play, like after a landing)
     this.shownRun = 0;
     this.watchFrames();
@@ -1018,7 +1104,10 @@ export class EditPlayer {
     const t = this.v.currentTime;
     this.framesSince = 0;
     const ours = this.ourSeek !== null && Math.abs(t - this.ourSeek) < 0.05;
-    if (!ours) this.seekStarts(t);
+    if (!ours) {
+      this.jump = null;
+      this.seekStarts(t);
+    }
     if (this.scrubbing) return;
     this.disarm();
     if (ours) return;

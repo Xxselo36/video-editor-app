@@ -185,6 +185,11 @@ const WORD_SNAP_MAX_S = 0.25;
  */
 export const TINY_CLIP_PX = 12;
 const TINY_CLIP_PX_MOUSE = 10;
+/** How far either side of a seam's line a tap is the seam's (Restore)
+ *  whatever the clips beside it (seamTapClip): a phone's finger, most of
+ *  the 6 px gap (the glyph is 10 px); a mouse, the line itself. */
+export const SEAM_CORE_PX = 2.5;
+const SEAM_CORE_PX_MOUSE = 1;
 /** The settle after a released trim (FLIP from where things were drawn at
  *  the release): a beat with everything where it was let go, then the
  *  brand's ease-out into place. */
@@ -203,6 +208,21 @@ function afterPaint(fn: () => void): void {
 
 /** A dragged trim edge's frame: one seek at most this often (ms). */
 const SCRUB_MS = 90;
+
+/** The seam button under a point whose line (the hit area's --sl px in)
+ *  is nearest it: seams of a clip too short to draw overlap. */
+function nearestSeam(x: number, y: number): HTMLElement | null {
+  let best: HTMLElement | null = null;
+  let bestD = Infinity;
+  for (const n of document.elementsFromPoint(x, y)) {
+    const b = n.closest<HTMLElement>("[data-testid=ed-seam]");
+    if (!b || b === best) continue;
+    const r = b.getBoundingClientRect();
+    const d = Math.abs(x - (r.left + (parseFloat(b.style.getPropertyValue("--sl")) || r.width / 2)));
+    if (d < bestD) [best, bestD] = [b, d];
+  }
+  return best;
+}
 
 const KIND_COLOR: Record<PieceKind, string> = {
   silence: "var(--ed-removed)",
@@ -284,6 +304,7 @@ type ElCtx = {
       v: { a: number; b: number; kind: PieceKind; prev: string; next: string },
       timeStamp: number,
       clientX: number | null,
+      clientY?: number | null,
     ) => void;
   };
 };
@@ -1043,7 +1064,8 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
   /**
    * A seam tapped: what it removed, and Restore — as on the desktop. Only a
    * tap on the part of the seam that lies over a tiny clip (under
-   * TINY_CLIP_PX: at Fit a 2 px clip is all seam, drag-6) is for that clip
+   * TINY_CLIP_PX: at Fit a 2 px clip is all seam, drag-6), outside the
+   * seam's core (SEAM_CORE_PX around its line), is for that clip
    * (phone-tiny-seam: at the phone's opening zoom most clips are tiny, and
    * every seam next to one selected it — Restore was out of reach).
    * `clientX` null: no point (a key, a synthetic click) — the popover.
@@ -1053,13 +1075,26 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     v: { a: number; b: number; kind: PieceKind; prev: string; next: string },
     timeStamp: number,
     clientX: number | null,
+    clientY: number | null = null,
   ) => {
+    if (clientX !== null && clientY !== null) {
+      // seams closer than their hit areas (a clip of a px or two between
+      // two cuts, at Fit): the later one in the strip covers the earlier
+      // one's line — the tap is for the seam whose line is nearest
+      const near = nearestSeam(clientX, clientY);
+      if (near && near !== el) {
+        near.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX, clientY, detail: 1 }));
+        return;
+      }
+    }
     if (clientX !== null) {
       // the seam line: the hit area reaches extL px to its left (--sl)
       const r = el.getBoundingClientRect();
       const line = r.left + (parseFloat(el.style.getPropertyValue("--sl")) || r.width / 2);
       const px = (id: string) => clipPxRef.current.get(id) ?? Infinity;
-      const side = seamTapClip(clientX, line, px(v.prev), px(v.next), p.phone ? TINY_CLIP_PX : TINY_CLIP_PX_MOUSE);
+      const side = p.phone
+        ? seamTapClip(clientX, line, px(v.prev), px(v.next), TINY_CLIP_PX, SEAM_CORE_PX)
+        : seamTapClip(clientX, line, px(v.prev), px(v.next), TINY_CLIP_PX_MOUSE, SEAM_CORE_PX_MOUSE);
       const seg = side ? shown.find((x) => x.id === (side === "prev" ? v.prev : v.next)) : undefined;
       if (seg) {
         onClip(seg, 0.5, timeStamp);
@@ -1068,6 +1103,36 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     }
     seamAnchor.current = el;
     setSeamOpen({ a: v.a, b: v.b, kind: v.kind });
+  };
+  /**
+   * A finger's own point at its last press on the strip. A phone moves the
+   * click that follows a tap onto a small target near the finger (touch
+   * adjustment, Chrome and Safari; the press's own target too, its point
+   * is the finger's): at the opening zoom a tap on a seam's glyph went to
+   * the 2–5 px clip beside it (phone-tiny-seam). The click goes to what is
+   * at the finger's point, and the seam's own rule (seamTapClip) decides
+   * from there.
+   */
+  const pressAt = useRef<{ x: number; y: number; seam: HTMLElement | null; clip: HTMLElement | null } | null>(null);
+  const stripPointerDown = (e: React.PointerEvent) => {
+    pressAt.current = null;
+    if (e.pointerType !== "touch" || !e.isPrimary) return;
+    const top = document.elementFromPoint(e.clientX, e.clientY);
+    if (!top || top.closest("[data-testid^='clip-trim-']")) return;
+    pressAt.current = { x: e.clientX, y: e.clientY, seam: top.closest<HTMLElement>("[data-testid=ed-seam]"), clip: top.closest<HTMLElement>("[data-seg]") };
+  };
+  const stripClick = (e: React.MouseEvent) => {
+    const at = pressAt.current;
+    pressAt.current = null;
+    if (!at || e.detail === 0) return;
+    const t = e.target as Element;
+    const own = at.seam ?? at.clip;
+    if (!own || own.contains(t)) return;
+    if (!at.seam && t.closest("[data-testid^='clip-trim-']")) return;
+    // moved off what the finger was on: to it, at the finger's point
+    e.stopPropagation();
+    e.preventDefault();
+    own.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: at.x, clientY: at.y, detail: 1 }));
   };
   const handlers = useRef({ onClip, clipPointerDown, startTrim, moveTrim, endTrim, seamDown, openSeam });
   useLayoutEffect(() => {
@@ -1085,7 +1150,8 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
       v: { a: number; b: number; kind: PieceKind; prev: string; next: string },
       timeStamp: number,
       clientX: number | null,
-    ) => handlers.current.openSeam(el, v, timeStamp, clientX),
+      clientY?: number | null,
+    ) => handlers.current.openSeam(el, v, timeStamp, clientX, clientY ?? null),
   }));
 
   // ── seeking ─────────────────────────────────────────────────────────
@@ -1524,6 +1590,8 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
       className={s.strip}
       data-testid="timeline-scroll"
       data-magnified={magnified || undefined}
+      onPointerDownCapture={stripPointerDown}
+      onClickCapture={stripClick}
       onScroll={(e) => {
         if (!scrubbing.current) lastUserScrollRef.current = Date.now();
         const x = e.currentTarget.scrollLeft;
@@ -1751,6 +1819,7 @@ const SeamButton = memo(function SeamButton({
     v: { a: number; b: number; kind: PieceKind; prev: string; next: string },
     timeStamp: number,
     clientX: number | null,
+    clientY?: number | null,
   ) => void;
 }) {
   const t = useT();
@@ -1782,7 +1851,7 @@ const SeamButton = memo(function SeamButton({
       onClick={(e) => {
         const x = e.detail > 0 ? (downX.current !== null && Math.abs(downX.current - e.clientX) < 2 ? downX.current : e.clientX) : null;
         downX.current = null;
-        onOpen(e.currentTarget, { a, b, kind, prev, next }, e.timeStamp, x);
+        onOpen(e.currentTarget, { a, b, kind, prev, next }, e.timeStamp, x, x === null ? null : e.clientY);
       }}
     >
       <span className={s.seamLine} />

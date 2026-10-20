@@ -85,9 +85,14 @@ Test API (only this script registers it; never part of the backend):
                              render of the job as analysed: an export
                              without changes is instant
   POST /_test/config        {"analysis_seconds": s, "by_filename":
-                             {name: {analysis_seconds, clip, proxy, render, …}}}
+                             {name: {analysis_seconds, clip, proxy, render,
+                                     first_preview, …}}}
                             (uploads of that file name; clip: the analysis
-                            result, default speech — grid without espeak-ng)
+                            result, default speech — grid without espeak-ng;
+                            an upload's analysis makes no first preview
+                            while its proxy mode is "on" / "real", as with
+                            CLEO_PROXY_VIDEO=1 — first_preview: true makes
+                            one anyway)
   GET  /_test/job/{id}      the job with internals (keys, owner, sizes)
   GET  /_test/media/{name}  a stub clip for uploads: grid.mp4,
                             speech.mp4, speech_land.mp4, long.webm (31 min),
@@ -513,9 +518,18 @@ def main() -> None:  # noqa: C901 - one wiring function, read top to bottom
                      or ("target_aspect" not in s and s.get("smartcam_format") == "landscape"))
         clip = per_file.pop("clip", None) or ("speech" if speech_ready(120) else "grid")
         orientation = "landscape" if landscape else "portrait"
+        # As the analysis does with CLEO_PROXY_VIDEO=1 (production from
+        # round 3): no first preview for a job whose editor plays the
+        # proxy (pipeline.first_preview_wanted) — built on demand when a
+        # player falls back. Made as before for the proxy modes of a
+        # backend without proxy playback (off, probe, probe-none), or
+        # when the file's config says first_preview: true.
+        first_preview = per_file.pop("first_preview",
+                                     per_file.get("proxy", "on") not in ("on", "real"))
         set_cfg(job_id, **{"proxy": "on", "render": "ok", "clip": clip,
                            "orientation": orientation, **per_file})
-        return analysis_result(clip, orientation, Path(output_dir), settings=settings)
+        return analysis_result(clip, orientation, Path(output_dir), settings=settings,
+                               first_preview=first_preview is not False)
 
     M.analyze_only = fake_analyze_only
 

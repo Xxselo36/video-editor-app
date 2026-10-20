@@ -290,6 +290,22 @@ def test_a_fallback_player_gets_the_first_preview_built_and_served(client, monke
     assert len(first_builds["calls"]) == 2
 
 
+def test_a_ranged_first_request_waits_and_gets_its_range(client, monkeypatch,
+                                                         first_builds):
+    """iOS Safari's first request for a media src is a two-byte range:
+    it waits for the first build too and gets that range of it (local
+    media; R2 answers with its 307 to the version's object)."""
+    job = _proxy_job_without_preview(monkeypatch)
+    r = client.get(f"/jobs/{job.id}/preview-video", params={"v": 0},
+                   headers={"Range": "bytes=0-1"}, follow_redirects=False)
+    if r.status_code == 307:
+        assert _served(r) == "v1.mp4"
+    else:
+        assert r.status_code == 206, r.text
+        assert r.content == b"pr" and r.headers["content-range"].startswith("bytes 0-1/")
+    assert len(first_builds["calls"]) == 1
+
+
 def test_the_first_request_waits_for_the_build(client, monkeypatch, first_builds):
     job = _proxy_job_without_preview(monkeypatch)
     gate = first_builds["gate"] = threading.Event()
@@ -418,3 +434,77 @@ def test_an_unknown_version_is_still_refused(client, monkeypatch, first_builds):
     while store.get(job.id).preview_version != 1 and time.monotonic() < end:
         time.sleep(0.05)
     assert len(first_builds["calls"]) == 1
+
+
+def test_a_save_names_no_preview_that_was_never_built(client, monkeypatch,
+                                                      first_builds):
+    """A job without any preview: a save keeps preview_segments empty, so
+    GET /jobs/{id} names the stored timeline for version 0 — what its
+    first build shows. (A save used to store the analysis' segments
+    there, as for a job from before preview_segments: a player that
+    fell back then mapped the first preview through the wrong clips.)"""
+    job = _proxy_job_without_preview(monkeypatch)
+    for rev, segs in ((5, [[1.0, 3.0]]), (6, [[1.0, 3.0], [5.0, 8.0]])):
+        r = client.post(f"/jobs/{job.id}/edit-segments",
+                        json={"segments": [{"start": a, "end": b} for a, b in segs],
+                              "base_rev": rev - 1 if rev > 5 else 0, "rev": rev})
+        assert r.status_code == 200, r.text
+        assert r.json()["preview_segments"] == segs
+        assert store.get(job.id).preview_segments == []
+        j = client.get(f"/jobs/{job.id}").json()
+        assert (j["preview_version"], j["preview_segments"]) == (0, segs)
+    assert first_builds["calls"] == []
+    assert _is(_get(client, job.id, v=0), 1)
+    assert first_builds["calls"] == [[(1.0, 3.0), (5.0, 8.0)]]
+    j = client.get(f"/jobs/{job.id}").json()
+    assert (j["preview_version"], j["preview_status"]) == (1, "ready")
+    assert j["preview_segments"] == [[1.0, 3.0], [5.0, 8.0]]
+
+
+def test_a_legacy_preview_keeps_the_segments_it_was_built_from(client, monkeypatch,
+                                                               first_builds):
+    """A job from before preview_segments existed (a preview, no
+    segments named for it): its preview was built from the segments a
+    first save replaces, so those are kept for it, as before."""
+    monkeypatch.delenv("CLEO_PROXY_VIDEO", raising=False)
+    job = store.create(None, {})
+    p = media.job_prefix(job.id)
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as fh:
+        fh.write(b"preview-1")
+        fh.flush()
+        media.put_file(fh.name, p + "preview/v1.mp4", content_type="video/mp4",
+                       store=media.backend())
+    store.update(job.id, status="awaiting_review", media_store=media.backend(),
+                 mezz_key=p + "mezz.mp4", preview_key=p + "preview/v1.mp4",
+                 preview_version=1, preview_segments=[],
+                 segments=[(0.5, 4.0), (5.0, 9.0)], duration=10.0)
+    gate = first_builds["gate"] = threading.Event()   # the rebuild waits
+    r = client.post(f"/jobs/{job.id}/edit-segments",
+                    json={"segments": [{"start": 1.0, "end": 3.0}], "base_rev": 0, "rev": 5})
+    assert r.status_code == 200, r.text
+    assert store.get(job.id).preview_segments == [[0.5, 4.0], [5.0, 9.0]]
+    assert r.json()["preview_segments"] == [[0.5, 4.0], [5.0, 9.0]]
+    gate.set()
+    assert M._settle_preview_builds(10)
+
+
+def test_switching_proxy_playback_off_again_builds_the_first_preview(
+        client, monkeypatch, first_builds):
+    """CLEO_PROXY_VIDEO switched off again (a rollback): a job analysed
+    without a first preview opens in preview mode — its first request
+    gets the preview built — and its saves rebuild as they always did."""
+    job = _proxy_job_without_preview(monkeypatch)
+    monkeypatch.delenv("CLEO_PROXY_VIDEO")
+    j = client.get(f"/jobs/{job.id}").json()
+    assert (j["has_proxy"], j["preview_version"], j["preview_status"]) == (False, 0, "stale")
+    assert _is(_get(client, job.id, v=0), 1)
+    assert first_builds["calls"] == [[(0.5, 4.0), (5.0, 9.0)]]
+    rev = store.get(job.id).edit_rev
+    r = client.post(f"/jobs/{job.id}/edit-segments",
+                    json={"segments": [{"start": 1.0, "end": 3.0}], "base_rev": rev,
+                          "rev": rev + 1})
+    assert r.status_code == 200, r.text
+    assert M._settle_preview_builds(10)
+    got = store.get(job.id)
+    assert (got.preview_version, got.preview_segments) == (2, [[1.0, 3.0]])
+    assert _is(_get(client, job.id, v=2), 2)

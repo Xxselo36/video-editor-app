@@ -73,10 +73,11 @@ export function retryAfterMs(r: Pick<Response, "headers">, fallbackS: number): n
 
 /**
  * After another tab or device saved (round 3): "kept" — this device's doc
- * edits are on the server and nothing else changed there, so nothing was
- * reloaded; "merged" — the other device changed the doc too: its doc came
- * in with this device's unsaved edits on top (saved next); "pending" — not
- * through yet (offline, refused): the autosave keeps them and goes on.
+ * edits are on the server and nothing else changed there (its rev is
+ * ours), so nothing was reloaded; "merged" — the other device changed the
+ * doc too: its doc came in with this device's unsaved edits (if any) on
+ * top (saved next); "pending" — not through yet (offline, refused): the
+ * autosave keeps them and goes on.
  */
 export type DocSync = "kept" | "merged" | "pending";
 
@@ -277,11 +278,16 @@ export function useDocSession(
     if (!loaded || loaded === "none" || loaded.readOnly) return "kept";
     const { saver, store, pool } = loaded;
     // this device's edits first, on the doc's own rev rule
-    if (await saver.settle(2)) return "kept";
-    if (saver.status !== "conflict") return "pending";
-    // the other device changed the doc too: theirs, with ours on top
+    const saved = await saver.settle(2);
+    if (!saved && saver.status !== "conflict") return "pending";
+    // The server's doc now. Saved with nothing of ours pending, nothing
+    // was sent: the other device may have changed the doc too, and only
+    // this device's next text edit would find out (a 409 — that edit
+    // lost on the reload it offers). Its rev tells.
     const res = await fetchDoc(jobId).catch(() => null);
-    if (!res) return "pending";
+    if (!res) return saved ? "kept" : "pending";
+    if (saved && res.rev === saver.rev) return "kept";
+    // the other device changed the doc too: theirs, with ours on top
     const merged = rebaseDoc(saver.known, store.getState().present, res.doc, pool);
     for (const w of res.doc.words) pool.add(w.id);
     // (the undo steps were made on a doc the server no longer has)
