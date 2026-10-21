@@ -17,7 +17,12 @@
  * UX10: words cut from the video are struck through (a click brings one
  * back); removed pauses (≥ 0.4 s) and Cleo-cut takes are chips (a click
  * brings them back); "Cleo cut: N botched takes removed · Show" heads the
- * text (Show jumps to the first one).
+ * text (Show jumps to the first one; a spoken command removed on its own
+ * is no take: state/cuts.ts realTakes). What a command before any "Cleo
+ * start" would remove beyond a minute isn't cut by the analysis:
+ * "Suggestion: remove 1:12? · Show · Apply" sits under it, why it asks
+ * in a quiet line below (SuggestionNotes; Apply cuts it, focus moves on
+ * to the next one).
  * Cuts are clip edits (useCuts): timeline undo steps.
  *
  * Every change is one pure op of state/doc.ts applied through `apply`
@@ -46,13 +51,14 @@ import {
 import { usePlayheadEffect, type PlayheadStore } from "@/features/editor/state/playhead";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
-import { TAKE_KINDS, textMarks, type Chip, type CutRefusal } from "@/features/editor/state/cuts";
+import { textMarks, type Chip, type CutRefusal, type OpenSuggestion } from "@/features/editor/state/cuts";
 import { cutTimeOfSource, decimalSeparator, fmtClock } from "../../model";
 import type { CutsApi } from "../../useCuts";
 import { CutsHeader, plural } from "../CutsHeader";
 import type { SpanMark } from "../../useSpanFill";
 import { FindReplace } from "./FindReplace";
 import { SelectionBar } from "./SelectionBar";
+import { NOTE_SEP, SuggestionNotes } from "./CutSuggestionNote";
 import { composing, WordRow, type EditKeys, type RowMarks } from "./WordSpan";
 import s from "../../editor.module.css";
 
@@ -97,6 +103,8 @@ export type TranscriptEditorProps = {
 const selWords = (st: DocState) => st.present.words;
 /** A click on a struck word waits this long for a second click (double-click: edit, not restore). */
 const RESTORE_CLICK_MS = 300;
+/** After Apply on a suggestion, focus moves on to what shows up within this long. */
+const FOCUS_AFTER_TAKE_MS = 1000;
 /** What the Text tab says when a cut of words can't be made (F9). */
 const CUT_REFUSAL: Record<CutRefusal, MessageKey> = {
   too_short: "editor.cut.tooShort",
@@ -189,7 +197,8 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     c.rows.set(ri, { sig, m });
     return m;
   };
-  const takes = useMemo(() => pieces.filter((x) => TAKE_KINDS.has(x.kind)), [pieces]);
+  // botched takes: a spoken command removed on its own is none (review R5)
+  const takes = p.cuts.takes;
 
   // ── selection and inline edit (word ids: stable across edits) ──────
   const [sel, setSel] = useState<Sel | null>(null);
@@ -228,6 +237,24 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
   // The notes (captions off, the one-time hint) scroll with the text, above the list.
   const notesRef = useRef<HTMLDivElement>(null);
   const [notesH, setNotesH] = useState(0);
+  // After Apply on a suggestion (its note is gone): when focus moves on.
+  const focusAfterTake = useRef(0);
+  useEffect(() => {
+    const since = focusAfterTake.current;
+    if (!since) return;
+    // the next note can take a render or two to show
+    if (performance.now() - since > FOCUS_AFTER_TAKE_MS) {
+      focusAfterTake.current = 0;
+      return;
+    }
+    const notes = notesRef.current;
+    const next =
+      notes?.querySelector<HTMLElement>('[data-testid="ed-suggestion-take"]') ??
+      notes?.querySelector<HTMLElement>('[data-testid="ed-cleo-show"]');
+    if (!next) return;
+    focusAfterTake.current = 0;
+    next.focus();
+  });
   useLayoutEffect(() => {
     const el = notesRef.current;
     if (!el) return;
@@ -686,13 +713,25 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
   const captionsOff = preset === "none";
   // UX10 (review E3): "Show" — the text scrolls to the first take's chip
   // (before the first word from its start on), the playhead to its cut
-  const showTake = () => {
-    const first = takes[0];
-    if (!first || !words.length) return;
+  const showAt = (start: number) => {
+    if (!words.length) return;
     let at = 0;
-    while (at < words.length - 1 && (words[at].start + words[at].end) / 2 < first.start) at++;
+    while (at < words.length - 1 && (words[at].start + words[at].end) / 2 < start) at++;
     showRow(rowOf[at]);
-    p.seekCut(cutTimeOfSource(p.editSegs, first.start));
+    p.seekCut(cutTimeOfSource(p.editSegs, start));
+  };
+  const showTake = () => {
+    if (takes[0]) showAt(takes[0].start);
+  };
+  // a suggested cut (a command before any "Cleo start"): one tap cuts it;
+  // its note goes, so focus moves on — to the next suggestion's Apply,
+  // else to the "Cleo cut" note's Show (which now counts it)
+  const takeSuggestion = (r: OpenSuggestion) => {
+    if (!p.cuts.takeSuggestion(r)) {
+      p.toast(t(CUT_REFUSAL.everything));
+      return;
+    }
+    focusAfterTake.current = performance.now();
   };
   return (
     <div ref={rootRef} className={s.ted} data-testid="ed-text">
@@ -745,15 +784,24 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
           )}
           {takes.length > 0 && (
             // UX10 (review E3): what Cleo cut, by name
-            <div className={s.note} data-testid="ed-cleo-cut">
+            <div className={`${s.note} ${s.noteFlow}`} data-testid="ed-cleo-cut">
               <Sparkles size={14} strokeWidth={1.75} aria-hidden style={{ color: "var(--ed-cleo)", flexShrink: 0 }} />
               <span>{plural(t, lang, "editor.cuts.cleoOne", "editor.cuts.cleoOther", takes.length)}</span>
-              <span aria-hidden>·</span>
+              <span aria-hidden className={s.noteSep}>
+                {NOTE_SEP}
+              </span>
               <button type="button" className={s.linkBtn} data-testid="ed-cleo-show" onClick={showTake}>
                 {t("editor.cuts.showTake")}
               </button>
             </div>
           )}
+          {/* not cut by the analysis: a command before any "Cleo start" would remove over a minute */}
+          <SuggestionNotes
+            suggestions={p.cuts.suggestions}
+            t={t}
+            onShow={(r) => showAt(r.start)}
+            onTake={takeSuggestion}
+          />
           {p.hint && (
             <div className={s.hint} data-testid="ed-hint">
               <Lightbulb size={14} strokeWidth={1.75} className={s.hintIcon} aria-hidden />

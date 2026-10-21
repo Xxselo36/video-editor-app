@@ -24,7 +24,13 @@ class AnalysisResult:
     style: str
     fillers: list = None  # [{"start", "end", "word"}, ...] detected filler words
     language: str = None  # Whisper-detected ISO-Code (e.g. "de", "en")
-    scene_events: list = None  # [{"type", "start", "end", "source"}, ...]
+    # [{"type", "start", "end", "raw_text", "source", "heard"}, ...]
+    scene_events: list = None
+    # What a command before any "Cleo start" would remove but doesn't
+    # (src/scene_triggers.py ScenePlan.suggestions: a cut, a finish or a
+    # misheard start beyond IMPLICIT_CUT_MAX_S, a guess at "cut"): not
+    # cut, the creator confirms them. [{"start", "end"}, ...] (source s)
+    cut_suggestions: list = None
     all_words: list = None  # Whisper words for user "add missing command"
     # Every transcribed word before the caption-unit gluing, fillers
     # included ({text, start, end, probability}); only with
@@ -46,6 +52,8 @@ class AnalysisResult:
             d["language"] = self.language
         if self.scene_events is not None:
             d["scene_events"] = self.scene_events
+        if self.cut_suggestions is not None:
+            d["cut_suggestions"] = self.cut_suggestions
         return d
 
     def to_json(self, indent=2):
@@ -643,22 +651,34 @@ def analyze_video(
                       f"snapped back in", flush=True)
 
     # Scene triggers — Cleo start / restart / keep / finish workflow
-    # for record-once-and-refine. Opt-in: only activates if the user
-    # actually said "Cleo start". Runs before voice_triggers so scene
-    # boundaries are cut before per-take Cleo cut/go handling.
+    # for record-once-and-refine. No "Cleo start" needed: a take begins
+    # after the command before it (src/scene_triggers.py). Runs before
+    # voice_triggers so scene boundaries are cut before per-take Cleo
+    # cut/go handling.
     scene_events_out: list[dict] = []
+    cut_suggestions_out: list[dict] = []
     if voice_triggers and analyzer._transcription:
         try:
-            from src.scene_triggers import find_scene_cut_ranges
+            from src.scene_triggers import plan_scene_cuts
             from src.voice_triggers import collect_whisper_words as _scw
             ww_scene = _scw(analyzer._transcription)
-            scene_cuts, scene_events = find_scene_cut_ranges(
-                ww_scene, clip_duration=duration,
-            )
+            scene_plan = plan_scene_cuts(ww_scene, clip_duration=duration)
+            scene_cuts, scene_suggestions, scene_events = (
+                scene_plan.cuts, scene_plan.suggestions, scene_plan.events)
+            if scene_suggestions:
+                # Not cut: the creator confirms them in the editor. Their
+                # edges on the audio, as a cut's would be.
+                from src import edge_snap
+                cut_suggestions_out = [
+                    {"start": round(a, 3), "end": round(b, 3)}
+                    for a, b in _snapped(scene_suggestions,
+                                         edge_snap.WINDOW_COMMAND_S, duration)]
+                print(f"[scene-triggers] {len(cut_suggestions_out)} take(s) "
+                      f"suggested, not cut: {cut_suggestions_out}", flush=True)
             # Extract raw text around each event for the review UI so
             # the user can see WHAT Whisper heard when the event was
             # detected. Look up ±0.5s window of words.
-            for (t, s, e) in scene_events:
+            for (t, s, e), how in zip(scene_events, scene_plan.heard):
                 raw_words = [
                     (w.get("word", "") or "").strip()
                     for w in ww_scene
@@ -670,6 +690,11 @@ def analyze_video(
                     "start": round(s, 3),
                     "end": round(e, 3),
                     "raw_text": " ".join(raw_words)[:80],
+                    # found by the analysis, and how it was heard: a
+                    # posted-back one acts as it did here
+                    # (/recompute-scenes)
+                    "source": "analysis",
+                    "heard": how,
                 })
             if scene_events:
                 print(f"[scene-triggers] events: "
@@ -874,6 +899,7 @@ def analyze_video(
         fillers=filler_data,
         language=_detected_lang,
         scene_events=scene_events_out,
+        cut_suggestions=cut_suggestions_out,
         words=(_transcript_words(analyzer._transcription, speech_segments)
                if include_words else None),
     )

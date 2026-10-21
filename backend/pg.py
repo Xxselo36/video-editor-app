@@ -605,7 +605,8 @@ _KEYED_SQL = [
 
 # Left out of list_by_owner(summary=True): the editor's big fields.
 _SUMMARY_DROP = ["settings", "subtitles", "segments", "cut_ranges",
-                 "scene_events", "preview_segments", "edited_phrases",
+                 "scene_events", "cut_suggestions", "preview_segments",
+                 "edited_phrases",
                  "audio_levels", "audio_warnings", "costs", "doc",
                  "audio_loudness", "render_doc", "export_captions"]
 

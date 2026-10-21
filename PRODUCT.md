@@ -26,7 +26,7 @@ Voice commands spoken during the recording steer the edit. “Cleo start” open
 
 ## Capabilities and Constraints
 
-- Voice commands: scene commands need “Cleo start” first; “Cleo cut” and “Cleo finish” do nothing without it. “Cleo stop … Cleo go” works on its own.
+- Voice commands: “Cleo start” is optional (it marks where a take begins); without it a take begins after the command before it (before a “Cleo start” also after a “Cleo stop … Cleo go” pair), or at the start of the video. Until a clear “Cleo start” is said, Cleo removes at most 60 s on its own: a longer “Cleo cut” (its take), “Cleo finish” (the rest) or misheard start, and any guess at “Cleo cut”, is not applied — only the spoken command goes, and the editor offers the cut as a suggestion the creator confirms with one tap. The first clear “Cleo start” drops everything before it, as it always did, except the takes a clear “Cleo keep” kept; a “Cleo stop … Cleo go” pair, a misheard or a guessed command never keeps warm-up from it, and nothing said before it removes or offers to remove what comes after it. After a “Cleo start” every command acts in full. “Cleo stop … Cleo go” works on its own.
 - Automatic removal of pauses and filler words (pace setting).
 - 12 animated caption styles (Power, Mega, Clipper, Karaoke, Highlight Box, One Word, Word by Word, Neon, Sunset, Elegant, Subtitle Bar, Minimal) plus Off. Style availability depends on the script; right-to-left scripts get none yet.
 - Landscape to 9:16 with face tracking; 1080p export.

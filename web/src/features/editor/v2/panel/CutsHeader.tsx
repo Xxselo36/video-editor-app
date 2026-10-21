@@ -5,15 +5,17 @@
  * cuts menu and the visible search button (owner decision, DF round 3).
  *
  * UX10 (review A6, DF menu): with `cuts` the menu restores in bulk —
- * every pause, every "um", every Cleo-cut take, every AI cut — each one
- * op and one undo step; the user's own cuts are never touched. Without
+ * every pause, every "um", every Cleo-cut take (a botched take, not a
+ * command phrase cut on its own: state/cuts.ts bulkPieces), every AI cut
+ * — each one op and one undo step; the user's own cuts are never
+ * touched. Without
  * (the sentence fallback) it lists the cuts to jump to, as before.
  */
 import { ArrowRight, ChevronDown, Search } from "lucide-react";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useLang, useT, type TFn } from "@/i18n";
 import type { MessageKey } from "@/i18n/messages/en";
-import { countKinds, type CutKind } from "@/features/editor/state/cuts";
+import type { CutKind } from "@/features/editor/state/cuts";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { kbd } from "../hooks";
 import { cutDuration, cutTimeOfSource, decimalSeparator, fmtClock, fmtSeconds, removedRanges } from "../model";
@@ -60,8 +62,8 @@ export function CutsHeader({
   const removed = useMemo(() => removedRanges(editSegs, duration), [editSegs, duration]);
   const outDur = cutDuration(editSegs);
   const cutsLabel = plural(t, lang, "editor.cuts.one", "editor.cuts.other", removed.length);
-  const pieces = cuts?.pieces;
-  const counts = useMemo(() => (pieces ? countKinds(pieces) : null), [pieces]);
+  // of a take kind the botched takes ("Cleo cut: N botched takes"), review F4
+  const counts = cuts?.counts ?? null;
   const bulk = (kind: CutKind | "ai") => {
     setMenu(false);
     cuts?.restoreKind(kind);
@@ -146,10 +148,10 @@ const KIND_ITEMS: { kind: CutKind; key: MessageKey; color: string }[] = [
 ];
 
 /** The bulk restore items (DF "N Schnitte ▾" menu): per reason with its count, then all AI cuts. */
-function BulkItems({ counts, onRestore }: { counts: ReturnType<typeof countKinds>; onRestore: (k: CutKind | "ai") => void }) {
+function BulkItems({ counts, onRestore }: { counts: CutsApi["counts"]; onRestore: (k: CutKind | "ai") => void }) {
   const t = useT();
   const items = KIND_ITEMS.filter((x) => counts[x.kind] > 0);
-  const ai = counts.silence + counts.filler + counts.voice_cmd + counts.bad_take;
+  const ai = counts.ai;
   if (!ai) {
     return (
       <button type="button" role="menuitem" className={s.mi} disabled>

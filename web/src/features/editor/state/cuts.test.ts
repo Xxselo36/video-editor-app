@@ -5,6 +5,8 @@ import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { removedRanges } from "@/features/editor/v2/model";
 import {
   aiCutsOf,
+  bulkPieces,
+  commandPhrases,
   countKinds,
   cutBy,
   cutEdges,
@@ -12,6 +14,7 @@ import {
   cutWords,
   gapKind,
   labelRemoved,
+  menuCounts,
   MIN_ISLAND_S,
   MIN_REMOVAL_S,
   restoreKind,
@@ -20,7 +23,10 @@ import {
   restoreWords,
   LONG_WORD_S,
   planCutWords,
+  realTakes,
   seamIsCut,
+  splitSuggestions,
+  SUGGESTION_SLACK_S,
   textMarks,
   tidy,
   wordSafeEdge,
@@ -131,6 +137,127 @@ describe("what was removed and why", () => {
     expect(countKinds(pieces)).toEqual({ silence: 2, filler: 0, voice_cmd: 1, bad_take: 0, user: 2 });
     expect(gapKind(pieces, 4, 8)).toBe("voice_cmd");
     expect(gapKind(pieces, 9, 10)).toBe("user");
+  });
+});
+
+describe("suggested cuts (a command before any “Cleo start” that would remove over a minute)", () => {
+  const D = 100;
+  const sugg = [{ id: 0, start: 10, end: 80, kind: "voice_cmd" }];
+  const pause = aiCutsOf([{ id: 0, start: 30, end: 31, kind: "silence" }], []);
+  const segs = [seg("a", 0, 30), seg("b", 31, D)]; // the pause 30-31 is cut
+
+  it("is offered while it plays; the cuts inside it keep their reason", () => {
+    const removed = removedRanges(segs, D);
+    // what still plays of it: 70 s less the pause cut inside it (review R10)
+    expect(splitSuggestions(sugg, removed)).toEqual({ open: [{ start: 10, end: 80, plays: 69 }], taken: [] });
+    expect(labelRemoved(removed, pause)).toEqual([{ start: 30, end: 31, kind: "silence" }]);
+  });
+
+  it("one tap cuts it: a Cleo-cut take then; the clips before it offer it again (undo)", () => {
+    const next = cutRange(segs, 10, 80, D);
+    expect(spans(next)).toEqual([
+      [0, 10],
+      [80, 100],
+    ]);
+    const removed = removedRanges(next, D);
+    const { open, taken } = splitSuggestions(sugg, removed);
+    expect(open).toEqual([]);
+    expect(taken).toEqual([{ start: 10, end: 80, kind: "voice_cmd" }]);
+    expect(labelRemoved(removed, [...pause, ...taken])).toEqual([{ start: 10, end: 80, kind: "voice_cmd" }]);
+    expect(splitSuggestions(sugg, removedRanges(segs, D)).open).toHaveLength(1);
+  });
+
+  it("counts as taken with no more than SUGGESTION_SLACK_S still playing", () => {
+    const almost = [seg("a", 0, 10), seg("b", 80 - SUGGESTION_SLACK_S / 2, D)];
+    expect(splitSuggestions(sugg, removedRanges(almost, D)).taken).toHaveLength(1);
+    const partly = [seg("a", 0, 40), seg("b", 79, D)];
+    expect(splitSuggestions(sugg, removedRanges(partly, D)).open).toEqual([{ start: 10, end: 80, plays: 31 }]);
+  });
+
+  it("none on old jobs; broken ones are dropped", () => {
+    expect(splitSuggestions(undefined, [])).toEqual({ open: [], taken: [] });
+    expect(splitSuggestions([{ id: 1, start: 5, end: 5 }, { id: 2, start: Number.NaN, end: 9 }], [])).toEqual({
+      open: [],
+      taken: [],
+    });
+  });
+});
+
+describe("which take chips are botched takes (review R5)", () => {
+  const w = (id: string, text: string, start: number, end: number, x: Partial<DocWord> = {}): DocWord => ({
+    id,
+    text,
+    start,
+    end,
+    ...x,
+  });
+  // a take, "Cleo keep." (cut on its own with the pause after it), a
+  // take, "Cleo cut." with its take, the phrase of a suggested cut
+  const words = [
+    w("a", "Hallo", 0.5, 0.9),
+    w("b", "Leute.", 0.9, 1.4),
+    w("c", "Cleo", 2.0, 2.3),
+    w("d", "keep.", 2.3, 2.6),
+    w("e", "Das", 4.0, 4.3),
+    w("f", "war", 4.3, 4.6),
+    w("g", "nix.", 4.6, 5.0),
+    w("h", "Cleo", 5.5, 5.8),
+    w("i", "cut.", 5.8, 6.1),
+    w("j", "Neu.", 7.0, 7.4),
+    w("k", "äh", 8.0, 8.2, { filler: true }),
+    w("l", "Cleo", 8.4, 8.7),
+    w("m", "cut.", 8.7, 9.0),
+  ];
+  const phrases = commandPhrases([
+    { type: "keep", start: 2.0, end: 2.6, raw_text: "x" },
+    { type: "restart", start: 5.5, end: 6.1 },
+    { type: "restart", start: 8.4, end: 9.0 },
+    { type: "bad" },
+    null,
+  ]);
+  const pieces: Piece[] = [
+    { start: 1.9, end: 3.9, kind: "voice_cmd" }, // the keep phrase and the pause after it
+    { start: 3.9, end: 6.2, kind: "voice_cmd" }, // the take "Das war nix." and its "Cleo cut."
+    { start: 7.9, end: 9.1, kind: "voice_cmd" }, // a filler and a suggested cut's phrase
+    { start: 9.5, end: 12.0, kind: "bad_take" }, // no words at all
+    { start: 0.4, end: 1.5, kind: "silence" }, // not a take kind
+  ];
+
+  it("counts a take with a spoken word outside the command phrases, never the phrase alone", () => {
+    expect(phrases).toEqual([
+      { start: 2.0, end: 2.6 },
+      { start: 5.5, end: 6.1 },
+      { start: 8.4, end: 9.0 },
+    ]);
+    expect(realTakes(pieces, words, phrases)).toEqual([pieces[1]]);
+  });
+
+  it("on a job without scene events every take piece with a word counts", () => {
+    expect(realTakes(pieces, words, commandPhrases(undefined))).toEqual([pieces[0], pieces[1], pieces[2]]);
+  });
+
+  it("the cuts menu counts and restores the botched takes only, never a lone command phrase (review F4)", () => {
+    const takes = realTakes(pieces, words, phrases);
+    const user: Piece = { start: 12.5, end: 13, kind: "user" };
+    const all = [...pieces, user];
+    // "Restore Cleo-cut takes 1" (the note's "1 botched take"), not 3
+    expect(menuCounts(all, takes)).toEqual({ silence: 1, filler: 0, voice_cmd: 1, bad_take: 0, user: 1, ai: 5 });
+    expect(bulkPieces(all, takes, "voice_cmd")).toEqual([pieces[1]]);
+    expect(bulkPieces(all, takes, "bad_take")).toEqual([]);
+    expect(bulkPieces(all, takes, "silence")).toEqual([pieces[4]]);
+    // "Restore all AI cuts": every analysis cut, never the user's
+    expect(bulkPieces(all, takes, "ai")).toEqual(pieces);
+    // as one op: the take comes back, the keep's and the suggestion's phrases stay cut
+    const D = 14;
+    const clips = [seg("a", 0, 0.4), seg("b", 1.5, 1.9), seg("c", 6.2, 7.9), seg("d", 9.1, 9.5), seg("e", 12, 12.5), seg("f", 13, D)];
+    const back = removedRanges(restoreKind(clips, bulkPieces(all, takes, "voice_cmd"), "voice_cmd", D), D);
+    expect(back.map((r) => [r.start, r.end])).toEqual([
+      [0.4, 1.5],
+      [1.9, 3.9],
+      [7.9, 9.1],
+      [9.5, 12],
+      [12.5, 13],
+    ]);
   });
 });
 

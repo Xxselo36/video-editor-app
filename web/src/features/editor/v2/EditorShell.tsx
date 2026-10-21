@@ -13,7 +13,7 @@
 import { Captions, History, Palette, TriangleAlert, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useT } from "@/i18n";
+import { useLang, useT } from "@/i18n";
 import { apiFetch, useMediaUrl } from "@/lib/api";
 import { adjustedWordIds, followCaptionKeys } from "@/features/captions-ui/adjusted";
 import { useCaptionsV2 } from "@/features/captions-ui/flag";
@@ -42,6 +42,7 @@ import { useEditorRoot, useMediaQuery, useOnline } from "./hooks";
 import { EditOrder, type Area } from "./editOrder";
 import { cutDuration } from "./model";
 import { BottomSheet } from "./panel/BottomSheet";
+import { plural } from "./panel/CutsHeader";
 import { StylePanel } from "./panel/StylePanel";
 import { TranscriptEditor, type TextApi } from "./panel/text/TranscriptEditor";
 import { TranscriptPanel } from "./panel/TranscriptPanel";
@@ -74,6 +75,10 @@ export type EditorShellProps = {
   /** GET /jobs/{id}/poster answers (UT5: the first frame before playback). */
   hasPoster?: boolean;
   cutRanges: CutRange[];
+  /** GET /jobs/{id} cut_suggestions: what commands before any "Cleo start" would remove beyond a minute, not cut (the Text tab offers them). */
+  cutSuggestions?: CutRange[];
+  /** GET /jobs/{id} scene_events: the spoken command phrases (which take chips are botched takes). */
+  sceneEvents?: readonly unknown[];
   duration: number;
   /** The frame rate of the video (GET /jobs/{id} fps): the trim frame grid. */
   fps?: number | null;
@@ -142,6 +147,7 @@ type ToastState = { msg: string; action?: { label: string; run: () => void }; ke
 
 export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetChange: (open: boolean) => void }) {
   const t = useT();
+  const lang = useLang();
   const { phone } = props;
   const root = useEditorRoot();
   // 409 on a timeline save (another tab or device): set below, once the doc and the histories exist
@@ -286,6 +292,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     segs: editSegs,
     duration: props.duration,
     cutRanges: props.cutRanges,
+    cutSuggestions: props.cutSuggestions,
+    sceneEvents: props.sceneEvents,
     words: docWords,
     removed,
     commit: (next) => history.commit(next),
@@ -314,6 +322,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
       return ok;
     },
   };
+  // the suggested cuts the Text tab offers (its word-level view only)
+  const openSuggestions = doc.status === "ready" ? cuts.suggestions.length : 0;
   const [selected, setSelected] = useState<string | null>(null);
   const selectedLive = selected && editSegs.some((x) => x.id === selected) ? selected : null;
 
@@ -823,8 +833,21 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
             data-testid="ed-tab-text"
             data-tour="text"
           >
-            <Captions size={20} strokeWidth={1.75} aria-hidden />
+            <span className={s.mtabIcon}>
+              <Captions size={20} strokeWidth={1.75} aria-hidden />
+              {openSuggestions > 0 && (
+                // the suggestions wait in the closed sheet (review F6): a quiet count
+                <span className={`${s.badge} ${s.mono}`} aria-hidden data-testid="ed-tab-text-badge">
+                  {openSuggestions}
+                </span>
+              )}
+            </span>
             <span>{t("editor.tab.text")}</span>
+            {openSuggestions > 0 && (
+              <span className={s.sr}>
+                {plural(t, lang, "editor.tab.suggestOne", "editor.tab.suggestOther", openSuggestions)}
+              </span>
+            )}
           </button>
           <button
             ref={styleTabRef}

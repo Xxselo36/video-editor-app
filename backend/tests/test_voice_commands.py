@@ -14,7 +14,7 @@ import types
 
 import pytest
 
-from src.scene_triggers import find_scene_cut_ranges
+from src.scene_triggers import find_scene_cut_ranges, plan_scene_cuts
 from src.voice_triggers import (apply_voice_triggers_to_segments,
                                 collect_whisper_words, detect_voice_triggers)
 
@@ -97,14 +97,14 @@ def test_everyday_speech_is_no_command(cid, words):
     assert lost(cuts, 1.8, 40.0) == 0.0, cuts
 
 
-def test_a_phonetic_guess_never_switches_the_scene_commands_on():
+def test_a_phonetic_start_never_throws_away_what_came_before():
     # "Kleeo, Stard." is only a phonetic guess at "Cleo start": it must
-    # not cut everything before it (commands-5 (4)).
+    # not cut everything before it (commands-5 (4)); only its phrase goes.
     words = TAKE + [("Satz.", 19.0, 19.5), ("Kleeo,", 20.2, 20.5), ("Stard.", 20.6, 20.9),
                     ("Video.", 21.5, 22.0)]
     cuts, events = scene(words, dur=30)
     assert [t for t, *_ in events] == ["start"]
-    assert cuts == []
+    assert cuts == [(20.2, 20.9)]
 
 
 def test_a_phonetic_finish_cuts_only_its_phrase():
@@ -314,13 +314,14 @@ def test_cleo_start_at_time_zero_is_cut():
     assert cuts == [(0.0, 0.8)]
 
 
+@pytest.mark.parametrize("opening", ["start", "no-start"])
 @pytest.mark.parametrize("cmd,gap", [("cut.", 0.6), ("cut.", 0.9), ("keep.", 0.4)])
-def test_a_command_said_twice_cuts_both_copies(cmd, gap):
+def test_a_command_said_twice_cuts_both_copies(cmd, gap, opening):
     # "…Cleo cut. Cleo cut. Heute…" (unsure the first was heard): one
     # command, but the repeat's words must not open the next take
-    # (commands-3).
+    # (commands-3) — with or without a "Cleo start" before.
     second = 4.6 + gap
-    words = START + TAKE + [("Cleo", 4.0, 4.3), (cmd, 4.3, 4.6),
+    words = (START if opening == "start" else []) + TAKE + [("Cleo", 4.0, 4.3), (cmd, 4.3, 4.6),
                             ("Cleo", second, second + 0.3), (cmd, second + 0.3, second + 0.6),
                             ("Heute", second + 1.2, second + 1.5), ("geht's.", second + 1.5, second + 1.9)]
     cuts, events = scene(words)
@@ -340,6 +341,544 @@ def test_a_repeat_whose_times_drift_is_cut_only_up_to_the_next_word():
     cuts, _ = scene(words)
     assert covered(cuts, 4.0, 5.6)
     assert lost(cuts, 5.6, 6.3) == 0.0
+
+
+# ── without "Cleo start" (owner decision: it is optional) ───────────
+# A take begins right after the command before it (start, cut, keep,
+# finish; before a clear start also the go of a stop … go pair), or at
+# the start of the video; a said "Cleo start" still marks it. Until a
+# clear (strong, non-phonetic) "Cleo start" a command that would remove
+# more than IMPLICIT_CUT_MAX_S is only suggested (its phrase is cut), and
+# a phonetic guess cuts its phrase only (a guess at "cut": a suggestion);
+# from a clear start on, every command acts as before (owner O1).
+
+def plan(items, dur=60.0, **kw):
+    return plan_scene_cuts(collect_whisper_words(W(*items)), clip_duration=dur, **kw)
+
+
+def cmd(word, at):
+    """'Cleo <word>' said at `at` (0.6 s, punctuated: a command)."""
+    return [("Cleo", at, round(at + 0.3, 3)), (word, round(at + 0.3, 3), round(at + 0.6, 3))]
+
+
+def talk(a, b):
+    """Speech from a to b: a word every 0.5 s, a sentence every 4."""
+    out, t, k = [], a, 0
+    while t + 0.4 <= b:
+        k += 1
+        out.append(("Satz." if k % 4 == 0 else "Wort", round(t, 3), round(t + 0.4, 3)))
+        t += 0.5
+    return out
+
+
+NEXT = [("Neuer", 0.0, 0.3), ("Satz.", 0.3, 0.7)]
+
+
+def after(at):
+    """Two words from `at` on (kept unless something cuts them)."""
+    return [(w, round(at + s, 3), round(at + e, 3)) for w, s, e in NEXT]
+
+
+def test_without_start_a_cut_throws_away_the_take_from_the_beginning():
+    p = plan(TAKE + cmd("cut.", 4.0) + after(5.5))
+    assert p.cuts == [(0.0, 4.6)] and p.suggestions == []
+    assert [t for t, *_ in p.events] == ["restart"]
+
+
+def test_without_start_a_keep_cuts_only_its_phrase():
+    p = plan(TAKE + cmd("keep.", 4.0) + after(5.5))
+    assert p.cuts == [(4.0, 4.6)] and p.suggestions == []
+    assert lost(p.cuts, 2.0, 3.2) == 0.0 and lost(p.cuts, 5.5, 6.2) == 0.0
+
+
+def test_without_start_finish_cuts_the_rest():
+    p = plan(TAKE + cmd("finish.", 4.0) + after(5.5), dur=10.0)
+    assert p.cuts == [(4.0, 10.0)] and p.suggestions == []
+    assert lost(p.cuts, 0.0, 4.0) == 0.0
+
+
+@pytest.mark.parametrize("before", ["keep.", "cut.", "start."])
+def test_the_take_starts_right_after_the_command_before(before):
+    # a take, a command, a second take, "Cleo cut": only the second take
+    # goes (from the first command's end)
+    words = TAKE + cmd(before, 4.0) + talk(5.5, 8.0) + cmd("cut.", 9.0) + after(10.5)
+    p = plan(words)
+    assert covered(p.cuts, 4.6, 9.6) and p.suggestions == []
+    assert lost(p.cuts, 10.5, 11.2) == 0.0
+    if before == "keep.":
+        assert lost(p.cuts, 2.0, 3.2) == 0.0    # the first take stays
+
+
+def test_an_explicit_start_still_marks_the_take():
+    # a keep, chatter, "Cleo start", a take, "Cleo cut": the chatter goes
+    # with the start, the cut takes the take from the start on — the
+    # take before the keep stays
+    words = (TAKE + cmd("keep.", 4.0) + [("Kurz", 5.0, 5.4), ("Pause.", 5.4, 6.0)]
+             + cmd("start.", 7.0) + talk(8.0, 9.5) + cmd("cut.", 10.0) + after(11.5))
+    p = plan(words)
+    assert p.cuts == [(4.0, 4.6), (4.6, 7.6), (7.6, 10.6)] and p.suggestions == []
+    assert lost(p.cuts, 2.0, 3.2) == 0.0 and lost(p.cuts, 11.5, 12.2) == 0.0
+
+
+@pytest.mark.parametrize("length,suggested", [(30.0, False), (59.5, False), (60.0, False),
+                                              (60.6, True), (150.0, True)])
+def test_a_long_cut_without_start_is_only_a_suggestion(length, suggested):
+    # "Cleo cut." ending `length` s into the video, no command before it
+    at = length - 0.6
+    words = talk(0.5, at - 0.5) + cmd("cut.", at) + after(length + 1.0)
+    p = plan(words, dur=length + 10)
+    if suggested:
+        # the spoken command goes, the take stays: offered in the editor
+        assert p.cuts == [(at, length)]
+        assert p.suggestions == [(0.0, length)]
+        assert lost(p.cuts, 0.5, at - 0.5) == 0.0
+    else:
+        assert p.cuts == [(0.0, length)] and p.suggestions == []
+    assert lost(p.cuts, length + 1.0, length + 1.7) == 0.0
+
+
+def test_a_long_cut_after_a_keep_is_a_suggestion_from_the_keep():
+    words = TAKE + cmd("keep.", 4.0) + talk(5.0, 75.0) + cmd("cut.", 76.0) + after(77.5)
+    p = plan(words, dur=90)
+    assert p.cuts == [(4.0, 4.6), (76.0, 76.6)]
+    assert p.suggestions == [(4.6, 76.6)]
+
+
+def test_after_a_said_start_every_long_take_is_cut_as_before():
+    # owner O1: once "Cleo start" was said the rest of the video is a
+    # started session — the take after a keep, and the one after a cut,
+    # go whatever their length
+    words = (START + talk(2.0, 75.0) + cmd("cut.", 76.0) + talk(77.5, 150.0)
+             + cmd("cut.", 151.0) + after(152.5) + cmd("keep.", 154.0)
+             + talk(155.0, 230.0) + cmd("cut.", 231.0) + after(232.5))
+    p = plan(words, dur=240)
+    assert p.suggestions == []
+    assert p.cuts == [(0.0, 1.7), (1.7, 76.6), (76.6, 151.6), (154.0, 154.6), (154.6, 231.6)]
+    assert lost(p.cuts, 152.5, 153.2) == 0.0 and lost(p.cuts, 232.5, 233.2) == 0.0
+
+
+def test_no_limit_cuts_every_take():
+    words = talk(0.5, 70.0) + cmd("cut.", 71.0) + after(72.5)
+    p = plan(words, dur=80, implicit_cut_max_s=float("inf"))
+    assert p.cuts == [(0.0, 71.6)] and p.suggestions == []
+    # find_scene_cut_ranges: the plan's cuts (a suggestion isn't one)
+    cuts, _events = scene(words, dur=80)
+    assert cuts == [(71.0, 71.6)]
+
+
+@pytest.mark.parametrize("cid,words", NOT_COMMANDS, ids=[c[0] for c in NOT_COMMANDS])
+def test_everyday_speech_is_no_command_without_start(cid, words):
+    p = plan(TAKE + words + TAIL, dur=40.0)
+    assert p.events == [] and p.cuts == [] and p.suggestions == []
+
+
+@pytest.mark.parametrize("case", WEAK_IN_SPEECH, ids=[c[0] for c in WEAK_IN_SPEECH])
+def test_a_weak_form_after_a_full_sentence_is_speech_without_start(case):
+    _cid, sentence, phrase, *gap = case
+    p = plan(TAKE + _after(sentence, phrase, *gap) + TAIL, dur=40.0)
+    assert p.events == [] and p.cuts == [] and p.suggestions == []
+
+
+def test_commands_without_start_still_bound_stop_go():
+    # "Cleo stop … Cleo cut … Cleo go": the scene command ends the open
+    # stop (only its phrase goes) — and now cuts its take itself
+    words = TAKE + cmd("stop.", 4.0) + [("schlecht.", 5.0, 5.5)] + cmd("cut.", 6.0) \
+        + [("Neu.", 7.0, 7.4)] + cmd("go.", 8.0) + [("Gut.", 9.0, 9.4)]
+    assert [p.kind for p in stopgo(words)] == ["stop", "go"]
+    p = plan(words)
+    assert p.cuts == [(0.0, 6.6)]
+    assert lost(p.cuts, 7.0, 9.4) == 0.0
+
+
+def test_a_finish_long_before_the_end_without_start_is_a_suggestion():
+    # "Okay. Leo, fertig?" a minute into a 10-minute video, no start: it
+    # used to delete the nine minutes after it
+    for phrase in (("Leo,", "fertig?"), ("Cleo,", "finish.")):
+        words = talk(0.5, 59.4) + [(phrase[0], 60.0, 60.3), (phrase[1], 60.3, 60.6)] + talk(61.0, 590.0)
+        p = plan(words, dur=600.0)
+        assert [t for t, *_ in p.events] == ["finish"]
+        assert p.cuts == [(60.0, 60.6)]
+        assert p.suggestions == [(60.0, 600.0)]
+
+
+@pytest.mark.parametrize("left,suggested", [(30.0, False), (60.0, False), (60.5, True)])
+def test_a_finish_without_start_removes_at_most_a_minute(left, suggested):
+    at = 200.0
+    words = talk(0.5, at - 0.6) + cmd("finish.", at) + talk(at + 1.0, at + left - 0.5)
+    p = plan(words, dur=at + left)
+    if suggested:
+        assert p.cuts == [(at, at + 0.6)] and p.suggestions == [(at, at + left)]
+    else:
+        assert p.cuts == [(at, at + left)] and p.suggestions == []
+
+
+def test_after_a_suggested_finish_the_commands_go_on():
+    # the early "finish" was not applied: a cut and the real finish near
+    # the end still act (the take of the cut began at the early finish)
+    words = (talk(0.5, 59.4) + cmd("finish.", 60.0) + talk(61.0, 99.4) + cmd("cut.", 100.0)
+             + talk(101.0, 559.4) + cmd("finish.", 560.0) + talk(561.0, 590.0))
+    p = plan(words, dur=600.0)
+    assert p.cuts == [(60.0, 60.6), (60.6, 100.6), (560.0, 600.0)]
+    assert p.suggestions == [(60.0, 600.0)]
+
+
+def test_a_finish_after_a_said_start_ends_the_video_whatever_is_left():
+    words = START + talk(2.0, 59.4) + cmd("finish.", 60.0) + talk(61.0, 590.0)
+    p = plan(words, dur=600.0)
+    assert p.cuts == [(0.0, 1.7), (60.0, 600.0)] and p.suggestions == []
+
+
+PHONETIC = {"keep": ("Kleeo,", "Kip."), "start": ("Kleeo,", "Stard."),
+            "finish": ("Kleeo,", "Finisch."), "restart": ("Kleeo,", "Kat.")}
+
+
+def guess(kind, at):
+    """A phonetic guess at "Cleo <kind>" said at `at` (0.6 s)."""
+    a, b = PHONETIC[kind]
+    return [(a, at, round(at + 0.3, 3)), (b, round(at + 0.3, 3), round(at + 0.6, 3))]
+
+
+@pytest.mark.parametrize("kind", ["keep", "start", "finish"])
+def test_a_guess_before_the_first_start_shields_nothing(kind):
+    # review R2: a guess at 20 s, warm-up, the real "Cleo start" at 40 s —
+    # the start drops everything before it, as before (only the guess's
+    # phrase is cut on its own)
+    words = talk(0.5, 19.4) + guess(kind, 20.0) + talk(21.0, 39.4) + cmd("start.", 40.0) + talk(41.0, 120.0)
+    p = plan(words, dur=130.0)
+    assert [t for t, *_ in p.events] == [kind, "start"]
+    assert p.cuts == [(20.0, 20.6), (0.0, 40.6)] and p.suggestions == []
+    assert lost(p.cuts, 41.0, 130.0) == 0.0
+
+
+@pytest.mark.parametrize("kind", ["keep", "start", "finish"])
+def test_a_guess_without_start_cuts_only_its_phrase_and_anchors_nothing(kind):
+    # …nor before a real "Cleo cut": its take reaches back past the guess
+    words = talk(0.5, 19.4) + guess(kind, 20.0) + talk(21.0, 39.4) + cmd("cut.", 40.0) + after(41.5)
+    p = plan(words, dur=130.0)
+    assert p.cuts == [(20.0, 20.6), (0.0, 40.6)] and p.suggestions == []
+    assert lost(p.cuts, 41.5, 42.2) == 0.0
+
+
+def test_a_guess_at_cut_without_start_is_a_suggestion_whatever_its_length():
+    # review R4: "Kleeo, Kat." 50 s in — under the limit, but only a guess
+    words = talk(0.5, 49.4) + guess("restart", 50.0) + talk(51.0, 590.0)
+    p = plan(words, dur=600.0)
+    assert p.cuts == [(50.0, 50.6)] and p.suggestions == [(0.0, 50.6)]
+    # a real cut from the same anchor later: offered as the longer one…
+    words = talk(0.5, 19.4) + guess("restart", 20.0) + talk(21.0, 99.4) + cmd("cut.", 100.0) + after(101.5)
+    p = plan(words, dur=200.0)
+    assert p.cuts == [(20.0, 20.6), (100.0, 100.6)] and p.suggestions == [(0.0, 100.6)]
+    # …or, within the limit, cut — the guess's suggestion is gone with it
+    words = talk(0.5, 19.4) + guess("restart", 20.0) + talk(21.0, 49.4) + cmd("cut.", 50.0) + after(51.5)
+    p = plan(words, dur=200.0)
+    assert p.cuts == [(20.0, 20.6), (0.0, 50.6)] and p.suggestions == []
+
+
+def test_a_guess_opens_no_session():
+    # a guess at "start" is no said start: the long take after it stays
+    # a suggestion (the limit stays on)
+    words = talk(0.5, 19.4) + guess("start", 20.0) + talk(21.0, 119.4) + cmd("cut.", 120.0) + after(121.5)
+    p = plan(words, dur=200.0)
+    assert p.cuts == [(20.0, 20.6), (120.0, 120.6)] and p.suggestions == [(0.0, 120.6)]
+
+
+def test_a_guess_at_start_after_a_said_start_cuts_its_take_as_before():
+    # in a started session a guess acts as before the start became
+    # optional: the take since the keep goes and the guess is an anchor;
+    # the 100 s take after it is cut on its own (the session, owner O1)
+    words = (START + talk(2.0, 49.4) + cmd("keep.", 50.0) + talk(51.0, 99.4) + guess("start", 100.0)
+             + talk(101.0, 199.4) + cmd("cut.", 200.0) + after(201.5))
+    p = plan(words, dur=210.0)
+    assert [t for t, *_ in p.events] == ["start", "keep", "start", "restart"]
+    assert p.cuts == [(0.0, 1.7), (50.0, 50.6), (50.6, 100.6), (100.6, 200.6)]
+    assert p.suggestions == []
+    assert lost(p.cuts, 2.0, 49.4) == 0.0
+
+
+def weak_start(at):
+    """"Leo, ist ab." (a misheard "Cleo start": weak) after a pause."""
+    return [("Leo,", at, round(at + 0.3, 3)), ("ist", round(at + 0.3, 3), round(at + 0.5, 3)),
+            ("ab.", round(at + 0.5, 3), round(at + 0.8, 3))]
+
+
+def test_a_misheard_start_is_no_said_start():
+    # review R3: it still starts a take (what came before it, under a
+    # minute, goes) but the limit stays on for the takes after it
+    words = talk(0.5, 9.4) + weak_start(10.0) + talk(11.5, 299.4) + cmd("cut.", 300.0) + after(301.5)
+    p = plan(words, dur=400.0)
+    assert [t for t, *_ in p.events] == ["start", "restart"]
+    assert p.cuts == [(0.0, 10.8), (300.0, 300.6)]
+    assert p.suggestions == [(10.8, 300.6)]
+    # and dropping more than a minute before it is only suggested
+    words = talk(0.5, 199.4) + weak_start(200.0) + talk(201.5, 300.0)
+    p = plan(words, dur=400.0)
+    assert p.cuts == [(200.0, 200.8)] and p.suggestions == [(0.0, 200.8)]
+
+
+def test_a_go_starts_a_take_before_the_first_start():
+    # owner O3: "Cleo stop … Cleo go", the take, "Cleo cut": the cut
+    # reaches back to the go, not past the pair to the start of the video
+    words = (talk(0.5, 9.4) + cmd("stop.", 10.0) + talk(11.0, 14.4) + cmd("go.", 15.0)
+             + talk(16.0, 30.4) + cmd("cut.", 31.0) + after(32.5))
+    (pair,) = stopgo(words)
+    assert pair.kind == "pair" and not pair.guessed_go
+    p = plan(words)
+    assert p.cuts == [(pair.continue_end, 31.6)] and p.suggestions == []
+    assert lost(p.cuts, 0.5, 9.4) == 0.0 and covered(p.cuts, 16.0, 31.6)
+    # the 60 s count starts at the go too: a long take before the pair
+    # doesn't make the cut a suggestion
+    words = talk(0.5, 79.4) + cmd("stop.", 80.0) + talk(81.0, 84.4) + cmd("go.", 85.0) \
+        + talk(86.0, 100.4) + cmd("cut.", 101.0) + after(102.5)
+    p = plan(words, dur=120.0)
+    assert p.suggestions == [] and covered(p.cuts, 86.0, 101.6) and lost(p.cuts, 0.5, 79.4) == 0.0
+
+
+def test_a_go_guess_and_a_started_session_set_no_anchor():
+    # a pair closed by a phonetic guess at the go ("Cleo Goo."): no anchor
+    words = (talk(0.5, 9.4) + cmd("stop.", 10.0) + talk(11.0, 14.4) + [("Cleo", 15.0, 15.3), ("Goo.", 15.3, 15.6)]
+             + talk(16.0, 30.4) + cmd("cut.", 31.0) + after(32.5))
+    (pair,) = stopgo(words)
+    assert pair.kind == "pair" and pair.guessed_go
+    assert plan(words).cuts == [(0.0, 31.6)]
+    # in a started session the cut reaches back to the keep, as before
+    # (the owner's job: a stop … go between a keep and a cut)
+    words = (START + talk(2.0, 19.4) + cmd("keep.", 20.0) + talk(21.0, 29.4) + cmd("stop.", 30.0)
+             + talk(31.0, 34.4) + cmd("go.", 35.0) + talk(36.0, 49.4) + cmd("cut.", 50.0) + after(51.5))
+    assert plan(words).cuts == [(0.0, 1.7), (20.0, 20.6), (20.6, 50.6)]
+
+
+def _as_before(events, dur):
+    """The scene cuts before "Cleo start" became optional (4aaef52^),
+    from the commands found: nothing without a start; from the first
+    one, start / cut its take, keep its phrase, finish the rest."""
+    first = next((k for k, (t, *_r) in enumerate(events) if t == "start"), None)
+    if first is None:
+        return []
+    cuts, anchor = [(0.0, events[first][2])], events[first][2]
+    for t, s, e in events[first + 1:]:
+        if t in ("start", "restart"):
+            cuts.append((anchor, e))
+        elif t == "keep":
+            cuts.append((s, e))
+        else:
+            cuts.append((s, dur))
+            break
+        anchor = e
+    return cuts
+
+
+def test_with_an_opening_start_the_owners_commands_cut_as_before():
+    # The owner's 29 scene commands at his timings (strong, punctuated,
+    # touching the word before; speech between them), and his two
+    # "Cleo stop … go" pairs: with his opening "Cleo start" every cut is
+    # what it was before the start became optional, and nothing is
+    # suggested.
+    owner = [("start", 6.14, 9.06), ("keep", 22.66, 23.24), ("restart", 46.04, 47.0),
+             ("restart", 49.96, 53.08), ("keep", 58.92, 59.92), ("keep", 76.876, 79.616),
+             ("keep", 110.616, 113.436), ("stop", 131.08, 132.58), ("go", 143.68, 144.92),
+             ("restart", 148.296, 150.776), ("keep", 152.532, 155.732),
+             ("keep", 176.092, 177.052), ("keep", 192.672, 193.972), ("keep", 206.892, 210.012),
+             ("keep", 225.828, 229.928), ("restart", 244.468, 246.448),
+             ("restart", 256.988, 257.988), ("keep", 275.328, 277.768), ("keep", 293.208, 294.248),
+             ("restart", 302.58, 305.06), ("keep", 329.38, 330.34), ("keep", 350.56, 352.88),
+             ("keep", 402.516, 403.536), ("keep", 427.176, 429.056), ("keep", 450.416, 450.976),
+             ("restart", 456.252, 457.192), ("keep", 497.772, 499.292), ("stop", 524.6, 525.4),
+             ("go", 537.0, 537.6), ("keep", 551.028, 552.468), ("keep", 567.128, 568.108),
+             ("restart", 571.368, 573.168), ("finish", 602.14, 604.28)]
+    word = {"start": "start.", "restart": "cut.", "keep": "keep.", "finish": "finish.",
+            "stop": "stop.", "go": "go."}
+    words, t = [], 0.4
+    for kind, s, e in owner:
+        words += [w for w in talk(t, s - 0.1)]
+        mid = round((s + e) / 2, 3)
+        words += [("Cleo", s, mid), (word[kind], mid, e)]
+        t = e + 0.5
+    words += talk(t, 609.0)
+    dur = 610.63
+    p = plan(words, dur=dur)
+    scene_cmds = [(k, s, e) for k, s, e in owner if k not in ("stop", "go")]
+    assert [(k, round(s, 3), round(e, 3)) for k, s, e in p.events] == scene_cmds
+    assert [k for k in (pp.kind for pp in stopgo(words))] == ["pair", "pair"]
+    assert p.cuts == _as_before(p.events, dur)
+    assert p.suggestions == []
+
+
+# ── the first clear "Cleo start" (re-review F1-F3, F5) ────────────────
+# It acts as before the start became optional: it drops everything
+# before it but what a clear "Cleo keep" kept — a go, a misheard or a
+# guessed command before it keeps nothing from it.
+
+WARM_UP_BEFORE_START = {
+    "stop_go": cmd("stop.", 30.0) + talk(31.0, 34.4) + cmd("go.", 35.0),
+    "weak_stop_go": [("Leo,", 30.0, 30.3), ("stopp.", 30.3, 30.6)] + talk(31.0, 34.4)
+    + [("Leo,", 35.0, 35.3), ("weiter.", 35.3, 35.6)],
+    "weak_keep": [("Leo,", 30.0, 30.3), ("behalten.", 30.3, 30.6)],
+    "weak_keep_kilo": [("Kilo,", 30.0, 30.3), ("keep.", 30.3, 30.6)],
+    "guess_keep": guess("keep", 30.0),
+    "weak_finish": [("Leo,", 30.0, 30.3), ("fertig?", 30.3, 30.6)],
+    "finish": cmd("finish.", 30.0),
+    "weak_cut": [("Leo,", 30.0, 30.3), ("gut.", 30.3, 30.6)],
+}
+
+
+@pytest.mark.parametrize("what", list(WARM_UP_BEFORE_START))
+def test_the_first_clear_start_drops_the_whole_warm_up(what):
+    # F1/F2: whatever was said in the warm-up, the first clear "Cleo
+    # start" at 60 s drops everything from 0 to its phrase end (main:
+    # 0-60.6) — and the session after it is neither cut nor suggested
+    words = (talk(0.5, 29.4) + WARM_UP_BEFORE_START[what] + talk(36.5, 59.4) + cmd("start.", 60.0)
+             + talk(61.0, 120.0))
+    p = plan(words, dur=130.0)
+    assert [t for t, *_ in p.events][-1:] == ["start"]
+    assert covered(p.cuts, 0.0, 60.6), p.cuts
+    assert lost(p.cuts, 60.6, 130.0) == 0.0, p.cuts
+    assert p.suggestions == []
+
+
+def test_a_clear_keep_before_the_first_start_keeps_everything_up_to_it():
+    # O2 stays: the takes up to the last clear keep stay; the stop/go
+    # pair after it keeps nothing from the start (main: 0-100.6; was
+    # 46.0-100.6 with the go as an anchor)
+    words = (talk(0.5, 29.4) + cmd("keep.", 30.0) + talk(31.0, 39.4) + cmd("stop.", 40.0)
+             + talk(41.0, 44.4) + cmd("go.", 45.0) + talk(46.0, 99.4) + cmd("start.", 100.0)
+             + talk(101.0, 200.0))
+    p = plan(words, dur=200.0)
+    assert p.cuts == [(30.0, 30.6), (30.6, 100.6)] and p.suggestions == []
+    # a misheard keep between two clear ones changes nothing
+    words = (talk(0.5, 29.4) + cmd("keep.", 30.0) + talk(31.0, 49.4)
+             + [("Leo,", 50.0, 50.3), ("behalten.", 50.3, 50.6)] + talk(51.0, 69.4)
+             + cmd("keep.", 70.0) + talk(71.0, 89.4) + cmd("start.", 90.0) + talk(91.0, 150.0))
+    p = plan(words, dur=150.0)
+    assert p.cuts == [(30.0, 30.6), (50.0, 50.6), (70.0, 70.6), (70.6, 90.6)]
+    assert lost(p.cuts, 0.5, 29.4) == lost(p.cuts, 31.0, 49.4) == lost(p.cuts, 51.0, 69.4) == 0.0
+
+
+@pytest.mark.parametrize("finish", [("Leo,", "fertig?"), ("Cleo,", "finish.")])
+def test_a_finish_in_the_warm_up_never_removes_the_session(finish):
+    # F2: under a minute before the end of the video a warm-up finish
+    # used to cut the rest — the whole recording after the start
+    words = (talk(0.5, 99.4) + [(finish[0], 100.0, 100.3), (finish[1], 100.3, 100.6)]
+             + talk(101.0, 109.4) + cmd("start.", 110.0) + talk(111.0, 149.0))
+    p = plan(words, dur=150.0)
+    assert p.cuts == [(100.0, 100.6), (0.0, 110.6)] and p.suggestions == []
+    # …and long before it, it offers nothing past the start
+    words = (talk(0.5, 19.4) + [(finish[0], 20.0, 20.3), (finish[1], 20.3, 20.6)]
+             + talk(21.0, 39.4) + cmd("start.", 40.0) + talk(41.0, 590.0))
+    p = plan(words, dur=600.0)
+    assert p.cuts == [(20.0, 20.6), (0.0, 40.6)] and p.suggestions == []
+
+
+def test_a_cut_said_as_the_go_ends_begins_after_the_go():
+    # F3: on a time tie the go comes first — "Cleo cut." right where the
+    # pair's go ends cuts only its phrase, not back past the pair
+    words = (talk(0.5, 29.4) + cmd("stop.", 30.0) + talk(31.0, 34.4) + cmd("go.", 35.0)
+             + cmd("cut.", 35.6) + talk(36.6, 200.0))
+    (pair,) = stopgo(words)
+    assert pair.continue_end == 35.6
+    p = plan(words, dur=200.0)
+    assert [(t, s) for t, s, _e in p.events] == [("restart", 35.6)]
+    assert p.cuts == [(35.6, 36.2)] and p.suggestions == []
+    # the same on plan_commands' own: a go at the command's start
+    from src.scene_triggers import Command, plan_commands
+    cuts, sugg = plan_commands([Command("restart", 10.0, 10.6)], clip_duration=30.0, resumes=[10.0])
+    assert cuts == [(10.0, 10.6)] and sugg == []
+    # re-review N2: Whisper lets the next "Cleo" start 20 ms before the
+    # go ends — the cut still begins after the go
+    cuts, sugg = plan_commands([Command("restart", 9.98, 10.58)], clip_duration=30.0, resumes=[10.0])
+    assert cuts == [(10.0, 10.58)] and sugg == []
+
+
+def test_a_second_clear_start_does_not_move_the_opening():
+    # re-review N1: the FIRST clear start opens the session; a later one
+    # acts as on main (a start after a finish, a start after a guess)
+    words = (cmd("start.", 1.0) + talk(2.0, 99.4) + cmd("finish.", 100.0) + talk(101.0, 299.4)
+             + cmd("start.", 300.0) + talk(301.0, 600.0))
+    p = plan(words, dur=600.0)
+    assert covered(p.cuts, 0.0, 1.6) and covered(p.cuts, 100.0, 600.0), p.cuts
+    assert lost(p.cuts, 2.0, 99.4) == 0.0 and p.suggestions == []
+    words = (cmd("start.", 1.0) + talk(2.0, 49.4) + guess("keep", 50.0) + talk(51.0, 299.4)
+             + cmd("start.", 300.0) + talk(301.0, 400.0))
+    p = plan(words, dur=400.0)
+    assert lost(p.cuts, 2.0, 49.4) == 0.0, p.cuts
+    assert covered(p.cuts, 50.6, 300.6) and lost(p.cuts, 301.0, 400.0) == 0.0, p.cuts
+
+
+def test_a_misheard_start_said_twice_is_still_no_said_start():
+    # F5 (mutation R3e): two copies of a weak start merge into one weak
+    # start — no session, the long take after it is only suggested
+    words = (talk(0.5, 9.4) + weak_start(10.0) + weak_start(11.2) + talk(12.5, 299.4)
+             + cmd("cut.", 300.0) + after(301.5))
+    p = plan(words, dur=400.0)
+    assert [t for t, *_ in p.events] == ["start", "restart"]
+    assert p.heard == ["weak", "clear"]
+    assert p.cuts == [(0.0, 12.0), (300.0, 300.6)]
+    assert p.suggestions == [(12.0, 300.6)]
+    # a misheard copy and a clear one merge into a clear start: it opens
+    # the session, as on main (everything before it, the long take cut)
+    words = (talk(0.5, 9.4) + weak_start(10.0) + cmd("start.", 11.4) + talk(12.5, 299.4)
+             + cmd("cut.", 300.0) + after(301.5))
+    p = plan(words, dur=400.0)
+    assert [t for t, *_ in p.events] == ["start", "restart"]
+    assert p.heard == ["clear", "clear"]
+    assert p.cuts == [(0.0, 12.0), (12.0, 300.6)] and p.suggestions == []
+
+
+@pytest.mark.parametrize("kind", ["start", "restart"])
+def test_a_guess_said_twice_is_still_a_guess(kind):
+    # F5 (mutation R3f): two copies of a phonetic guess merge into one
+    # guess — its phrase goes, nothing before it (a guess at cut: offered)
+    words = talk(0.5, 19.4) + guess(kind, 20.0) + guess(kind, 20.8) + talk(21.8, 120.0)
+    p = plan(words, dur=130.0)
+    assert p.events == [(kind, 20.0, 21.4)] and p.heard == ["guess"]
+    assert p.cuts == [(20.0, 21.4)]
+    assert p.suggestions == ([] if kind == "start" else [(0.0, 21.4)])
+
+
+# ── the suggestion through the analysis to the editor ───────────────
+
+def test_cut_suggestions_of_the_analysis():
+    from backend import pipeline
+    items = [{"start": -0.2, "end": 70.0}, {"start": 80.0, "end": 150.0},
+             {"start": 160.0, "end": 260.0}, {"start": 5, "end": 5}, {"start": "x"}]
+    segs = [(0.0, 75.0), (80.0, 80.05), (155.0, 200.0)]
+    # the second is left out by the timeline already (all but 50 ms),
+    # the third ends at the video's end, broken ones are dropped
+    assert pipeline.cut_suggestions_of(items, segs, 200.0) == [
+        {"id": 0, "start": 0.0, "end": 70.0, "kind": "voice_cmd"},
+        {"id": 1, "start": 160.0, "end": 200.0, "kind": "voice_cmd"}]
+    assert pipeline.cut_suggestions_of(None, segs, 200.0) == []
+
+
+def test_analyze_only_hands_the_suggestion_to_the_job(tmp_path, monkeypatch):
+    from backend import pipeline
+    from test_analysis_doc import _clip
+
+    def analyze_video(video_path, **kw):
+        return types.SimpleNamespace(
+            segments=[(0.2, 5.6)], subtitles=[], duration=6.0, language="de",
+            scene_events=[{"type": "restart", "start": 5.0, "end": 5.6}],
+            cut_suggestions=[{"start": 0.0, "end": 5.6}], words=[], fillers=[])
+    monkeypatch.setattr(pipeline, "analyze_video", analyze_video)
+    import backend.llm as llm
+    monkeypatch.setattr(llm, "cleanup_transcript", lambda subs, language=None: {})
+    res = pipeline.analyze_only(str(_clip(tmp_path / "in.mp4", 6.0)), str(tmp_path / "job"), {})
+    assert res["cut_suggestions"] == [{"id": 0, "start": 0.0, "end": 5.6, "kind": "voice_cmd"}]
+    assert pipeline.analysis_fields(res)["cut_suggestions"] == res["cut_suggestions"]
+    # the segments stay as the analysis made them: a suggestion is not cut
+    assert [tuple(s) for s in res["segments"]] == [(0.2, 5.6)]
+
+
+def test_the_job_serves_its_suggestions(client):
+    from backend.jobs import store
+    job = store.create("/in.mp4", {})
+    sugg = [{"id": 0, "start": 0.0, "end": 70.0, "kind": "voice_cmd"}]
+    store.update(job.id, status="awaiting_review", duration=80.0,
+                 segments=[(0.0, 80.0)], cut_suggestions=sugg)
+    assert store.get(job.id).cut_suggestions == sugg
+    assert client.get(f"/jobs/{job.id}").json()["cut_suggestions"] == sugg
+    # a job from before: none
+    old = store.create("/in.mp4", {})
+    assert client.get(f"/jobs/{old.id}").json()["cut_suggestions"] == []
 
 
 # ── stop … go (voice_triggers) ──────────────────────────────────────
@@ -576,3 +1115,164 @@ def test_recomputed_cuts_use_the_stored_peaks(client, monkeypatch, tmp_path):
     assert r.status_code == 200, r.text
     (a0, _b0), = [tuple(s) for s in store.get(job.id).segments]
     assert 2.68 <= a0 <= 2.74, a0
+
+
+def test_recompute_scenes_cuts_a_long_take_without_start_and_drops_the_suggestions(client, monkeypatch):
+    """The user's own list has no 60 s limit (backend/main.py
+    _save_recomputed_scenes): a "Cleo cut" 100 s into the video with no
+    "Cleo start" cuts its take; the analysis' suggestions (its reading of
+    the commands this list replaces) are gone."""
+    import backend.main as M
+    from backend.jobs import store
+    job = store.create("/in.mp4", {})
+    store.update(job.id, status="awaiting_review", duration=120.0,
+                 segments=[(0.0, 120.0)], mezz_key=f"jobs/{job.id}/mezz.mp4",
+                 cut_suggestions=[{"id": 0, "start": 0.0, "end": 100.6, "kind": "voice_cmd"}])
+    monkeypatch.setattr(M, "_rebuild_preview", lambda *a, **k: None)
+    events = [{"type": "restart", "start": 100.0, "end": 100.6}]
+    r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": events})
+    assert r.status_code == 200, r.text
+    got = store.get(job.id)
+    assert [list(s) for s in got.segments] == [[100.6, 120.0]]
+    assert got.cut_suggestions == []
+    assert client.get(f"/jobs/{job.id}").json()["cut_suggestions"] == []
+
+
+def test_recompute_scenes_starts_a_take_after_a_stop_go_pair(client, monkeypatch):
+    """Before a "Cleo start" the go of a "Cleo stop … go" pair in the
+    job's words starts a take, as in the analysis: the recomputed cut
+    reaches back to it, not to the start of the video."""
+    import backend.main as M
+    from backend.jobs import store
+    words = ([("Hallo", 0.5, 0.9), ("Leute.", 0.9, 1.4), ("Cleo", 4.0, 4.3), ("stop.", 4.3, 4.6),
+              ("schlecht.", 5.0, 5.5), ("Cleo", 8.0, 8.3), ("go.", 8.3, 8.6), ("Neuer", 9.0, 9.4),
+              ("Versuch.", 9.4, 9.9), ("Cleo", 12.0, 12.3), ("cut.", 12.3, 12.6), ("Gut.", 13.0, 13.4)])
+    job = _recompute_job(words)
+    monkeypatch.setattr(M, "_rebuild_preview", lambda *a, **k: None)
+    events = [{"type": "restart", "start": 12.0, "end": 12.6}]
+    r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": events})
+    assert r.status_code == 200, r.text
+    segs = [tuple(s) for s in store.get(job.id).segments]
+    # "Hallo Leute." stays; the take after the go ("Neuer Versuch.") and
+    # the command go
+    assert segs[0][0] == 0.0 and segs[0][1] >= 1.4, segs
+    assert not any(a < 9.6 < b for a, b in segs), segs
+    assert any(a <= 13.0 and b >= 13.4 for a, b in segs), segs
+
+
+def _found_job(duration, segments, scene_events, cut_suggestions=()):
+    from backend.jobs import store
+    job = store.create("/in.mp4", {})
+    store.update(job.id, status="awaiting_review", duration=duration,
+                 segments=segments, mezz_key=f"jobs/{job.id}/mezz.mp4",
+                 scene_events=scene_events, cut_suggestions=list(cut_suggestions))
+    return job
+
+
+@pytest.mark.parametrize("marked", [True, False], ids=["marked", "old_job"])
+def test_recompute_keeps_the_limit_for_the_analysis_own_events(client, monkeypatch, marked):
+    """Review I2: the analysis' own events posted back (GET /jobs/{id}
+    scene_events) act as they did there — its early "Cleo finish" stays a
+    suggestion, also when the stored list is posted back again (and on a
+    job from before the events were marked); "confirmed": true applies it."""
+    import backend.main as M
+    from backend.jobs import store
+    finish = {"type": "finish", "start": 60.0, "end": 60.6, "raw_text": "Cleo, finish."}
+    if marked:
+        finish.update(source="analysis", heard="clear")
+    sugg = [{"id": 0, "start": 60.0, "end": 600.0, "kind": "voice_cmd"}]
+    job = _found_job(600.0, [(0.0, 60.0), (60.6, 600.0)], [finish], sugg)
+    monkeypatch.setattr(M, "_rebuild_preview", lambda *a, **k: None)
+    for _round in range(2):
+        events = client.get(f"/jobs/{job.id}").json()["scene_events"]
+        r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": events})
+        assert r.status_code == 200, r.text
+        got = store.get(job.id)
+        assert [list(s) for s in got.segments] == [[0.0, 60.0], [60.6, 600.0]]
+        assert got.cut_suggestions == sugg
+        assert [(e["source"], e["heard"], e["raw_text"]) for e in got.scene_events] == [
+            ("analysis", "clear", "Cleo, finish.")]
+    events = [dict(e, confirmed=True) for e in got.scene_events]
+    r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": events})
+    assert r.status_code == 200, r.text
+    got = store.get(job.id)
+    assert [list(s) for s in got.segments] == [[0.0, 60.0]]
+    assert got.cut_suggestions == []
+    assert [e["source"] for e in got.scene_events] == ["user"]
+    # the creator's own list posted back stays the creator's own
+    events = client.get(f"/jobs/{job.id}").json()["scene_events"]
+    r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": events})
+    assert r.status_code == 200, r.text
+    got = store.get(job.id)
+    assert [(e["source"], "heard" in e) for e in got.scene_events] == [("user", False)]
+    assert got.cut_suggestions == []
+
+
+def test_recompute_hears_the_analysis_events_as_it_did(client, monkeypatch):
+    """Review I2: a misheard start found by the analysis opens no session
+    when posted back, a guess at "cut" stays a guess: both only offer
+    their takes. Moved by the creator, the same start is the creator's
+    own: a said start that drops what came before it."""
+    import backend.main as M
+    from backend.jobs import store
+    found = [{"type": "start", "start": 200.0, "end": 200.8, "source": "analysis", "heard": "weak"},
+             {"type": "restart", "start": 300.0, "end": 300.6, "source": "analysis", "heard": "guess"}]
+    job = _found_job(400.0, [(0.0, 400.0)], found)
+    monkeypatch.setattr(M, "_rebuild_preview", lambda *a, **k: None)
+    r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": found})
+    assert r.status_code == 200, r.text
+    got = store.get(job.id)
+    assert [list(s) for s in got.segments] == [[0.0, 200.0], [200.8, 300.0], [300.6, 400.0]]
+    assert [(s["start"], s["end"]) for s in got.cut_suggestions] == [(0.0, 200.8), (200.8, 300.6)]
+    assert [(e["source"], e["heard"]) for e in got.scene_events] == [
+        ("analysis", "weak"), ("analysis", "guess")]
+    moved = [dict(found[0], start=201.0, end=201.8)]
+    r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": moved})
+    assert r.status_code == 200, r.text
+    got = store.get(job.id)
+    assert [list(s) for s in got.segments] == [[201.8, 300.0], [300.6, 400.0]]
+    assert got.cut_suggestions == []
+    assert [e["source"] for e in got.scene_events] == ["user"]
+
+
+def test_recompute_an_event_relabelled_by_the_creator_is_the_creators(client, monkeypatch):
+    """Review I2: an event is the analysis' own only as it found it — the
+    same times under another type (the creator relabelled a guess at
+    "cut" as "Cleo start") are the creator's command: clear, not limited."""
+    import backend.main as M
+    from backend.jobs import store
+    found = [{"type": "restart", "start": 300.0, "end": 300.6, "source": "analysis", "heard": "guess"}]
+    job = _found_job(400.0, [(0.0, 400.0)], found)
+    monkeypatch.setattr(M, "_rebuild_preview", lambda *a, **k: None)
+    r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": [dict(found[0], type="start")]})
+    assert r.status_code == 200, r.text
+    got = store.get(job.id)
+    assert [list(s) for s in got.segments] == [[300.6, 400.0]]
+    assert got.cut_suggestions == []
+    assert [(e["type"], e["source"], "heard" in e) for e in got.scene_events] == [("start", "user", False)]
+
+
+def test_recomputed_suggestions_sit_in_the_word_gaps_like_the_cuts(client, monkeypatch):
+    """The suggestion a posted-back event leaves gets its edges on the
+    audio as the analysis put them (_snap_scene_cuts): the "Cleo cut."
+    event (80.0-80.6) runs into "Weiter" (from 80.45) — the suggested
+    take ends where the word begins, never inside it."""
+    import backend.main as M
+    from backend.jobs import store
+    words = ([(f"Wort{k}.", 0.5 + k, 0.9 + k) for k in range(79)]
+             + [("Cleo", 79.9, 80.2), ("cut.", 80.2, 80.45), ("Weiter", 80.45, 80.9), ("so.", 80.9, 81.3)])
+    found = [{"type": "restart", "start": 80.0, "end": 80.6, "source": "analysis", "heard": "clear"}]
+    job = _found_job(120.0, [(0.0, 120.0)], found)
+    store.update(job.id, doc={"v": 2, "words": [{"id": f"w{k:04d}", "text": t, "start": s, "end": e}
+                                                for k, (t, s, e) in enumerate(words, 1)]})
+    monkeypatch.setattr(M, "_rebuild_preview", lambda *a, **k: None)
+    r = client.post(f"/jobs/{job.id}/recompute-scenes", json={"events": found})
+    assert r.status_code == 200, r.text
+    got = store.get(job.id)
+    (sugg,) = got.cut_suggestions
+    assert sugg["start"] == 0.0 and 80.44 <= sugg["end"] <= 80.46, sugg
+    for w, s, e in words:
+        assert not (s + 0.011 < sugg["end"] < e - 0.011), (w, sugg)
+    # the phrase itself is cut, on the same edge
+    (a0, b0), (a1, b1) = [tuple(x) for x in got.segments]
+    assert a0 == 0.0 and a1 == sugg["end"] and b1 == 120.0, got.segments

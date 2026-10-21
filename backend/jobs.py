@@ -103,6 +103,12 @@ class Job:
     audio_warnings: list[str] = field(default_factory=list)
     audio_levels: dict[str, Any] = field(default_factory=dict)
     scene_events: list[dict[str, Any]] = field(default_factory=list)
+    # What a command before any "Cleo start" would remove beyond
+    # src/scene_triggers.py IMPLICIT_CUT_MAX_S (a cut's take, a finish's
+    # rest, …; ScenePlan.suggestions): {id, start, end, kind}, source
+    # seconds, NOT cut — the editor offers each one and a tap cuts it (a
+    # timeline edit, like any other). /recompute-scenes recomputes them.
+    cut_suggestions: list[dict[str, Any]] = field(default_factory=list)
     social_caption: str = ""
     social_hashtags: list[str] = field(default_factory=list)
     hook_clips: list[dict[str, Any]] = field(default_factory=list)
@@ -391,6 +397,7 @@ class Job:
             "duration": self.duration,
             "cut_ranges": self.cut_ranges,
             "scene_events": self.scene_events,
+            "cut_suggestions": self.cut_suggestions,
             "edit_segments": self.edit_segments(),
             # Jobs from before preview_segments existed: their preview
             # was last rebuilt from job.segments, so that's the best guess.
@@ -623,7 +630,7 @@ def gc_store(store: str | None) -> str:
 _JSON_FIELDS = {
     "settings", "subtitles", "segments", "cut_ranges",
     "audio_warnings", "audio_levels", "outputs",
-    "social_hashtags", "hook_clips", "scene_events",
+    "social_hashtags", "hook_clips", "scene_events", "cut_suggestions",
 }
 
 # Statuses of jobs a worker thread is (or was) busy with.
