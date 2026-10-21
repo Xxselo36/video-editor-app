@@ -58,7 +58,7 @@ import { CutsHeader, plural } from "../CutsHeader";
 import type { SpanMark } from "../../useSpanFill";
 import { FindReplace } from "./FindReplace";
 import { SelectionBar } from "./SelectionBar";
-import { SuggestionNotes } from "./CutSuggestionNote";
+import { NOTE_SEP, SuggestionNotes } from "./CutSuggestionNote";
 import { composing, WordRow, type EditKeys, type RowMarks } from "./WordSpan";
 import s from "../../editor.module.css";
 
@@ -784,10 +784,12 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
           )}
           {takes.length > 0 && (
             // UX10 (review E3): what Cleo cut, by name
-            <div className={s.note} data-testid="ed-cleo-cut">
+            <div className={`${s.note} ${s.noteFlow}`} data-testid="ed-cleo-cut">
               <Sparkles size={14} strokeWidth={1.75} aria-hidden style={{ color: "var(--ed-cleo)", flexShrink: 0 }} />
               <span>{plural(t, lang, "editor.cuts.cleoOne", "editor.cuts.cleoOther", takes.length)}</span>
-              <span aria-hidden>·</span>
+              <span aria-hidden className={s.noteSep}>
+                {NOTE_SEP}
+              </span>
               <button type="button" className={s.linkBtn} data-testid="ed-cleo-show" onClick={showTake}>
                 {t("editor.cuts.showTake")}
               </button>

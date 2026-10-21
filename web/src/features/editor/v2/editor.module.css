@@ -1421,6 +1421,12 @@
 .mtab[aria-expanded="true"] {
   color: var(--ed-text-1);
 }
+/* the tab bar sits on the screen's bottom edge, under the dock: a focus
+   ring outside a tab showed as one stray violet edge (focus comes back
+   to the tab when its sheet closes) — drawn inside it */
+.mtab:focus-visible {
+  outline-offset: -2px;
+}
 /* the icon of a tab; a count on it (the Text tab's open suggestions) is
    a clip badge (.badge) at its corner, on the raised surface (the clip
    badge's own dark fill vanishes on the panel) */
@@ -1718,12 +1724,30 @@
   line-height: 18px;
   color: var(--ed-text-2);
 }
+/* a note that wraps like a sentence (German in the 340 px panel, a
+   320 px phone; a flex row squeezed its text into two lines beside the
+   actions): the icon hangs at the first line, the actions flow on under
+   the text, a separator (NOTE_SEP) stays at the end of its line */
+.noteFlow {
+  display: block;
+  position: relative;
+  padding-left: 20px;
+}
+.noteFlow > svg {
+  position: absolute;
+  left: 0;
+  top: 2px;
+}
+.noteFlow .noteSep {
+  margin: 0 6px;
+}
 /* a note's reason, under its text (CutSuggestionNote) */
 .noteWhy {
   margin: -4px 0 6px 20px;
   font-size: 12px;
   line-height: 16px;
   color: var(--ed-text-3);
+  text-wrap: pretty;
 }
 .linkBtn {
   color: var(--ed-text-1);

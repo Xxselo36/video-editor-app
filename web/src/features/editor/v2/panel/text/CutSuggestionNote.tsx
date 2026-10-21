@@ -12,13 +12,20 @@
  * not a hover — phones have none), and describes Apply. Show and Apply
  * name the suggestion they act on (review R7: two suggestions are two
  * different buttons to a screen reader). No hooks: the Text tab owns
- * focus and the actions.
+ * focus and the actions. The row wraps like a sentence (.noteFlow: German
+ * in the 340 px panel, a 320 px phone), its actions flowing on under the
+ * text; a separator keeps to what precedes it (NOTE_SEP).
  */
 import { Sparkles } from "lucide-react";
 import type { TFn } from "@/i18n";
 import type { OpenSuggestion } from "@/features/editor/state/cuts";
 import { fmtClock } from "../../model";
 import s from "../../editor.module.css";
+
+/** A note's "·" between its parts (.noteFlow): U+2060 WORD JOINER keeps it
+ *  on the line of what precedes it, so a wrapped line starts with an
+ *  action, never with a dot. */
+export const NOTE_SEP = "\u2060·";
 
 export function CutSuggestionNote({
   r,
@@ -35,10 +42,12 @@ export function CutSuggestionNote({
   const whyId = `ed-sugg-why-${Math.round(r.start * 1000)}-${Math.round(r.end * 1000)}`;
   return (
     <div data-testid="ed-cut-suggestion">
-      <div className={s.note}>
+      <div className={`${s.note} ${s.noteFlow}`}>
         <Sparkles size={14} strokeWidth={1.75} aria-hidden style={{ color: "var(--ed-cleo)", flexShrink: 0 }} />
         <span>{t("editor.cuts.suggestion", { len })}</span>
-        <span aria-hidden>·</span>
+        <span aria-hidden className={s.noteSep}>
+          {NOTE_SEP}
+        </span>
         <button
           type="button"
           className={s.linkBtn}
@@ -48,7 +57,9 @@ export function CutSuggestionNote({
         >
           {t("editor.cuts.showTake")}
         </button>
-        <span aria-hidden>·</span>
+        <span aria-hidden className={s.noteSep}>
+          {NOTE_SEP}
+        </span>
         <button
           type="button"
           className={s.linkBtn}
