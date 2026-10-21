@@ -2172,9 +2172,13 @@ else:
 
 @app.get("/")
 def root():
+    """`commit`: the git commit this deployment runs (Railway sets
+    RAILWAY_GIT_COMMIT_SHA; the repo is public), so a deploy can be
+    checked from outside; None when not deployed from git."""
     return {
         "service": "cleo-backend",
         "version": app.version,
+        "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "").strip()[:7] or None,
         "status": "ok",
     }
 

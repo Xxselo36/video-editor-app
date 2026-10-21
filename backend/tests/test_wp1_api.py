@@ -529,6 +529,13 @@ def test_batch_status_ownership(client, auth_on, bearer):
 # ── health / ready ───────────────────────────────────────────────────
 
 
+def test_root_names_the_deployed_commit(client, monkeypatch):
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    assert client.get("/").json()["commit"] is None
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "54579234241ffd018b297b1de7d37de13846d530")
+    assert client.get("/").json()["commit"] == "5457923"
+
+
 def test_health_and_ready(client, monkeypatch):
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/ready").json() == {"status": "ready"}
