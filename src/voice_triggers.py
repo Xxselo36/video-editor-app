@@ -94,6 +94,9 @@ class VoiceTriggerPair:
     # "pair" (stop … go), or a lone command phrase cut on its own:
     # "stop" (no go followed in time) or "go" (no stop before it).
     kind: str = "pair"
+    # a pair closed by a phonetic guess at the go (no take begins there:
+    # src/scene_triggers.py stop_go_resumes)
+    guessed_go: bool = False
 
 
 def _normalize(text: str) -> str:
@@ -163,6 +166,7 @@ def detect_voice_triggers(
     continue_keywords: list[str] | None = None,
     clip_duration: float | None = None,
     silence_ranges: list[tuple[float, float]] | None = None,
+    quiet: bool = False,
 ) -> list[VoiceTriggerPair]:
     """Scan a Whisper word-list for cut→continue trigger pairs.
 
@@ -179,6 +183,7 @@ def detect_voice_triggers(
             boundaries snap to actual silence edges instead of trusting
             Whisper's word.end / word.start (which regularly drift into
             silence and cause perceptible pauses in the kept audio).
+        quiet: no log lines (src/scene_triggers.py reads the pairs too).
 
     Only phrases said as commands count (src/command_gate.py). A stop
     pairs with the next go within PAIR_MAX_S (a second stop before it
@@ -194,6 +199,7 @@ def detect_voice_triggers(
     words = gate.split_tokens(whisper_words)
     if not words:
         return []
+    log = (lambda *_a, **_k: None) if quiet else print
     from src.scene_triggers import scene_table
     table = gate.CommandTable([
         ("stop", cut_keywords or DEFAULT_CUT_KEYWORDS, STRONG_STOP),
@@ -203,7 +209,8 @@ def detect_voice_triggers(
     norm = gate.normalized(words)
 
     # 1) Every command phrase, in order: (kind, i, next_idx, start, end,
-    #    phrase, strong and punctuated). Scene commands only bound pairs.
+    #    phrase, strong and punctuated, phonetic guess). Scene commands
+    #    only bound pairs.
     marks: list[tuple[str, int, int, float, float, str, bool]] = []
     i = 0
     while i < len(words):
@@ -218,7 +225,7 @@ def detect_voice_triggers(
         kind, kw, nxt, ps, pe, weak = m
         exact = gate.llm_fixed(words, i, nxt - 1) or (
             not weak and gate.ends_clause(words[nxt - 1].get("word", "")))
-        marks.append((kind, i, nxt, ps, pe, kw, exact))
+        marks.append((kind, i, nxt, ps, pe, kw, exact, False))
         i = nxt
 
     # Phonetic guesses at "Cleo stop" / "Cleo go" ('Cleo Stob.', 'Kleo
@@ -231,15 +238,15 @@ def detect_voice_triggers(
             mi = gate.index_at(words, ps)
             if any(mk[1] <= mi < mk[2] for mk in marks):
                 continue  # inside a phrase the keyword scan found
-            print(f"[phonetic] added {cmd} @ {ps:.2f}s — raw={raw!r}",
-                  flush=True)
-            marks.append((cmd, mi, mi + 2, ps, pe, raw, False))
+            log(f"[phonetic] added {cmd} @ {ps:.2f}s — raw={raw!r}",
+                flush=True)
+            marks.append((cmd, mi, mi + 2, ps, pe, raw, False, True))
         marks.sort(key=lambda mk: mk[3])
     except Exception as _phe:
-        print(f"[phonetic] stop/go skipped: {_phe}", flush=True)
+        log(f"[phonetic] stop/go skipped: {_phe}", flush=True)
 
     def phrase_cut(mk) -> tuple[float, float]:
-        _k, mi, mn, ps, pe, _kw, _x = mk
+        _k, mi, mn, ps, pe, *_r = mk
         return (_cut_side(words, mi, ps, silence_ranges),
                 _resume_side(words, mn, pe, silence_ranges))
 
@@ -254,8 +261,8 @@ def detect_voice_triggers(
             continue
         if kind == "go":
             s, e = phrase_cut(mk)
-            print(f"[voice-triggers] '{mk[5]}' at {mk[3]:.2f}s has no "
-                  f"stop before it — cutting the phrase only", flush=True)
+            log(f"[voice-triggers] '{mk[5]}' at {mk[3]:.2f}s has no "
+                f"stop before it — cutting the phrase only", flush=True)
             pairs.append(VoiceTriggerPair(cut_start=s, continue_end=e,
                                           cut_word=mk[5], continue_word=None,
                                           kind="go"))
@@ -268,17 +275,17 @@ def detect_voice_triggers(
             if nx[3] - mk[4] > PAIR_MAX_S or nx[0] == "scene":
                 break
             if nx[0] == "stop":
-                print(f"[voice-triggers] second '{nx[5]}' at {nx[3]:.2f}s "
-                      f"inside the stop at {mk[3]:.2f}s (nested)", flush=True)
+                log(f"[voice-triggers] second '{nx[5]}' at {nx[3]:.2f}s "
+                    f"inside the stop at {mk[3]:.2f}s (nested)", flush=True)
             elif nx[3] - mk[4] <= LONG_PAIR_S or nx[6]:
                 closing = j
                 break
             j += 1
         if closing is None:
             s, e = phrase_cut(mk)
-            print(f"[voice-triggers] cut-marker '{mk[5]}' at {mk[3]:.2f}s "
-                  f"has no matching continue — cutting the phrase only",
-                  flush=True)
+            log(f"[voice-triggers] cut-marker '{mk[5]}' at {mk[3]:.2f}s "
+                f"has no matching continue — cutting the phrase only",
+                flush=True)
             pairs.append(VoiceTriggerPair(cut_start=s, continue_end=e,
                                           cut_word=mk[5], continue_word=None,
                                           kind="stop"))
@@ -290,6 +297,7 @@ def detect_voice_triggers(
             continue_end=_resume_side(words, go[2], go[4], silence_ranges),
             cut_word=mk[5],
             continue_word=go[5],
+            guessed_go=go[7],
         ))
         # Continue scanning AFTER the matched continue-phrase
         k = closing + 1

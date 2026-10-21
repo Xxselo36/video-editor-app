@@ -1770,9 +1770,9 @@ def analyze_only(
       - segments: list of (start, end) speech segments after cuts
       - subtitles: list of {start, end, text, original_start, original_end}
       - language: ISO code from Whisper
-      - cut_suggestions: takes a "Cleo cut" without "Cleo start" would
-        remove that are too long to cut on their own
-        (cut_suggestions_of): not in the segments, the editor offers them
+      - cut_suggestions: what a command before any "Cleo start" would
+        remove beyond a minute (cut_suggestions_of): not in the
+        segments, the editor offers them
       - doc: the edit document (backend/doc.py; None if it couldn't be
         built — the job then opens like a job from before UT3)
       - mezz_fps, mezz_cfr: the mezz's frame rate, and whether it is
@@ -2110,7 +2110,8 @@ def analyze_only(
         "cut_ranges": cut_ranges,
         "language": result.language,
         "scene_events": getattr(result, "scene_events", None) or [],
-        "cut_suggestions": cut_suggestions_of(result, segments, duration),
+        "cut_suggestions": cut_suggestions_of(
+            getattr(result, "cut_suggestions", None), segments, duration),
         "audio_warnings": audio_precheck.get("warnings", []),
         "audio_levels": {
             "mean_db": audio_precheck.get("mean_db"),
@@ -2167,17 +2168,17 @@ def analysis_fields(res: dict[str, Any]) -> dict[str, Any]:
 _SUGGESTION_SLACK_S = 0.1
 
 
-def cut_suggestions_of(result: Any, segments: list, duration: float
+def cut_suggestions_of(items: list | None, segments: list, duration: float
                        ) -> list[dict[str, Any]]:
-    """The analysis' suggested cuts (src.plugin_api AnalysisResult
-    .cut_suggestions: a take a "Cleo cut" without "Cleo start" would
-    remove, longer than src/scene_triggers.py IMPLICIT_CUT_MAX_S) as job
+    """Suggested cuts (src.plugin_api AnalysisResult.cut_suggestions:
+    what a command before any "Cleo start" would remove beyond
+    src/scene_triggers.py IMPLICIT_CUT_MAX_S, {start, end}) as job
     cut_suggestions: {id, start, end, kind "voice_cmd"} in source
     seconds, within the video; one the segments already leave out (a
     later "Cleo finish", other cuts) is dropped. Not applied — the editor
     offers each one (owner decision: one tap confirms it)."""
     out: list[dict[str, Any]] = []
-    for item in getattr(result, "cut_suggestions", None) or []:
+    for item in items or []:
         try:
             a = max(0.0, float(item["start"]))
             b = float(item["end"])

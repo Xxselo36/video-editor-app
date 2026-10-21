@@ -74,8 +74,10 @@ export type EditorShellProps = {
   /** GET /jobs/{id}/poster answers (UT5: the first frame before playback). */
   hasPoster?: boolean;
   cutRanges: CutRange[];
-  /** GET /jobs/{id} cut_suggestions: long "Cleo cut" takes the analysis didn't cut (the Text tab offers them). */
+  /** GET /jobs/{id} cut_suggestions: what commands before any "Cleo start" would remove beyond a minute, not cut (the Text tab offers them). */
   cutSuggestions?: CutRange[];
+  /** GET /jobs/{id} scene_events: the spoken command phrases (which take chips are botched takes). */
+  sceneEvents?: readonly unknown[];
   duration: number;
   /** The frame rate of the video (GET /jobs/{id} fps): the trim frame grid. */
   fps?: number | null;
@@ -289,6 +291,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     duration: props.duration,
     cutRanges: props.cutRanges,
     cutSuggestions: props.cutSuggestions,
+    sceneEvents: props.sceneEvents,
     words: docWords,
     removed,
     commit: (next) => history.commit(next),

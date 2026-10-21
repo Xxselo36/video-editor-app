@@ -25,8 +25,9 @@ class AnalysisResult:
     fillers: list = None  # [{"start", "end", "word"}, ...] detected filler words
     language: str = None  # Whisper-detected ISO-Code (e.g. "de", "en")
     scene_events: list = None  # [{"type", "start", "end", "source"}, ...]
-    # Takes a "Cleo cut" without "Cleo start" would remove, too long to
-    # cut on their own (src/scene_triggers.py IMPLICIT_CUT_MAX_S): not
+    # What a command before any "Cleo start" would remove but doesn't
+    # (src/scene_triggers.py ScenePlan.suggestions: a cut, a finish or a
+    # misheard start beyond IMPLICIT_CUT_MAX_S, a guess at "cut"): not
     # cut, the creator confirms them. [{"start", "end"}, ...] (source s)
     cut_suggestions: list = None
     all_words: list = None  # Whisper words for user "add missing command"

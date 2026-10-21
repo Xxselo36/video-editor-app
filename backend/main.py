@@ -7059,6 +7059,21 @@ def _snap_scene_cuts(job: Job, ranges) -> list[tuple[float, float]]:
     return [(round(a, 3), round(b, 3)) for a, b in out if b > a]
 
 
+def _job_stop_go_resumes(job: Job) -> list[float]:
+    """Where a take begins after each "Cleo stop … go" pair of the job's
+    words (src/scene_triggers.py stop_go_resumes); none without words."""
+    from src.scene_triggers import stop_go_resumes
+    words = [{"word": str(w.get("text") or ""), "start": w["start"], "end": w["end"]}
+             for w in ((job.doc or {}).get("words") or [])
+             if isinstance(w, dict) and "start" in w and "end" in w]
+    try:
+        return stop_go_resumes(words) if words else []
+    except Exception as e:
+        print(f"[recompute-scenes] stop/go anchors skipped: "
+              f"{type(e).__name__}", flush=True)
+        return []
+
+
 def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
                             ) -> tuple[str, list]:
     """The quick part of /recompute-scenes (threadpool): recompute and
@@ -7101,11 +7116,17 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
         # said as a sentence of its own (src/command_gate.py)
         fake_words.append({"word": t + ".", "start": cmd_start, "end": cmd_end})
     # The user's own list: a long "Cleo cut" without "Cleo start" is
-    # cut, not suggested (the suggestion is for the analysis' guesses).
-    cut_ranges_scene = plan_scene_cuts(
+    # cut, not suggested (the suggestion is for the analysis' guesses) —
+    # so none is left, and the analysis' ones go (they were its reading
+    # of the commands this list replaces). Before a "Cleo start" a take
+    # begins after a "Cleo stop … go" pair, as in the analysis: the
+    # pairs of the job's words.
+    plan = plan_scene_cuts(
         fake_words, clip_duration=job.duration or None,
         implicit_cut_max_s=float("inf"),
-    ).cuts
+        resumes=_job_stop_go_resumes(job),
+    )
+    cut_ranges_scene = plan.cuts
     # The analysis puts these edges on the audio (src/edge_snap.py); the
     # events' times alone would cut into the words around a command.
     cut_ranges_scene = _snap_scene_cuts(job, cut_ranges_scene)
@@ -7125,6 +7146,9 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
     if len(new_segments) > _max_edit_segments():
         raise ApiRefusal(400, "too_many_segments",
                          max_segments=_max_edit_segments())
+    cut_suggestions = pipeline.cut_suggestions_of(
+        [{"start": a, "end": b} for a, b in plan.suggestions],
+        new_segments, job.duration or 0.0)
 
     scene_events = [
         {"type": t, "start": s, "end": end, "source": "user"}
@@ -7150,6 +7174,7 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
         out = {"segments": new_segments,
                "cut_ranges": old_cut_ranges + new_cut_range_dicts,
                "scene_events": scene_events,
+               "cut_suggestions": cut_suggestions,
                # a new timeline: an editor tab holding the old one is stale
                "edit_rev": _server_rev(float(cur.edit_rev or 0))}
         # Segment count may have changed, so per-segment effects no

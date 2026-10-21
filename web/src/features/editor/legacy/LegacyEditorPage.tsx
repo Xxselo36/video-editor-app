@@ -239,6 +239,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         hasPoster={job.has_poster === true}
         cutRanges={job.cut_ranges ?? []}
         cutSuggestions={job.cut_suggestions}
+        sceneEvents={job.scene_events}
         duration={job.duration ?? 0}
         fps={job.fps ?? null}
         filmstrip={job.filmstrip ?? null}

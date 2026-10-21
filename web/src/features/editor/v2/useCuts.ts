@@ -16,6 +16,7 @@ import { mediaUrl, useMediaReady } from "@/lib/api";
 import { track, type AnalyticsEvent } from "@/lib/analytics";
 import {
   aiCutsOf,
+  commandPhrases,
   cutRange,
   labelRemoved,
   planCutWords,
@@ -28,6 +29,7 @@ import {
   wordSafeEdge,
   type CutKind,
   type CutRefusal,
+  type OpenSuggestion,
   type Piece,
   type Range,
 } from "@/features/editor/state/cuts";
@@ -55,14 +57,18 @@ export type CutsApi = {
   /** Where a trim edge released at source time t goes: into the nearest
    *  gap between words within `radius` s (state/cuts.ts wordSafeEdge). */
   safeEdge: (t: number, radius: number) => number;
-  /** The analysis' suggested cuts still playing (job.cut_suggestions: a
-   *  long "Cleo cut" without "Cleo start"; state/cuts.ts splitSuggestions). */
-  suggestions: Range[];
+  /** The analysis' suggested cuts still playing (job.cut_suggestions:
+   *  what a command before any "Cleo start" would remove beyond a minute;
+   *  state/cuts.ts splitSuggestions). */
+  suggestions: OpenSuggestion[];
   /** Cut a suggestion (one undo step): false when nothing changed. */
   takeSuggestion: (r: Range) => boolean;
+  /** The spoken command phrases (job.scene_events): which take chips are
+   *  botched takes (state/cuts.ts realTakes). */
+  phrases: Range[];
 };
 
-const NO_RANGES: Range[] = [];
+const NO_SUGGESTIONS: OpenSuggestion[] = [];
 
 /** Doc indices of the words a restore of [w.start, w.end] means (the
  *  word itself, or a selection's first word's start to its last word's
@@ -113,14 +119,17 @@ export function useCuts(opts: {
   cutRanges: CutRange[];
   /** job.cut_suggestions: not cut by the analysis, offered (none on old jobs). */
   cutSuggestions?: CutRange[];
+  /** job.scene_events: the spoken command phrases. */
+  sceneEvents?: readonly unknown[];
   words: readonly DocWord[];
   /** removedOf(segs, duration), memoised by the shell. */
   removed: Range[];
   /** One timeline undo step (the shell's history.commit). */
   commit: (next: EditorSeg[]) => void;
 }): CutsApi {
-  const { jobId, segs, duration, cutRanges, cutSuggestions, words, removed, commit } = opts;
+  const { jobId, segs, duration, cutRanges, cutSuggestions, sceneEvents, words, removed, commit } = opts;
   const peaks = usePeaks(jobId);
+  const phrases = useMemo(() => commandPhrases(sceneEvents), [sceneEvents]);
   const suggested = useMemo(() => splitSuggestions(cutSuggestions, removed), [cutSuggestions, removed]);
   const analysisCuts = useMemo(() => aiCutsOf(cutRanges, words), [cutRanges, words]);
   // a taken suggestion is a Cleo-cut take like the analysis' own
@@ -172,8 +181,9 @@ export function useCuts(opts: {
       ),
     safeEdge: (t, radius) => wordSafeEdge(t, words, radius, peaks),
     // none while the clips aren't known yet (a taken one would flash)
-    suggestions: segs.some((s) => !s.disabled && s.end > s.start) ? suggested.open : NO_RANGES,
+    suggestions: segs.some((s) => !s.disabled && s.end > s.start) ? suggested.open : NO_SUGGESTIONS,
     // its edges are on the audio already (the analysis snapped them)
     takeSuggestion: (r) => apply(cutRange(segs, r.start, r.end, duration), "words_cut", { what: "suggestion" }),
+    phrases,
   };
 }

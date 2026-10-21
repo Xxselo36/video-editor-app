@@ -5,6 +5,7 @@ import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { removedRanges } from "@/features/editor/v2/model";
 import {
   aiCutsOf,
+  commandPhrases,
   countKinds,
   cutBy,
   cutEdges,
@@ -20,6 +21,7 @@ import {
   restoreWords,
   LONG_WORD_S,
   planCutWords,
+  realTakes,
   seamIsCut,
   splitSuggestions,
   SUGGESTION_SLACK_S,
@@ -136,7 +138,7 @@ describe("what was removed and why", () => {
   });
 });
 
-describe("suggested cuts (a long “Cleo cut” without “Cleo start”)", () => {
+describe("suggested cuts (a command before any “Cleo start” that would remove over a minute)", () => {
   const D = 100;
   const sugg = [{ id: 0, start: 10, end: 80, kind: "voice_cmd" }];
   const pause = aiCutsOf([{ id: 0, start: 30, end: 31, kind: "silence" }], []);
@@ -144,7 +146,8 @@ describe("suggested cuts (a long “Cleo cut” without “Cleo start”)", () =
 
   it("is offered while it plays; the cuts inside it keep their reason", () => {
     const removed = removedRanges(segs, D);
-    expect(splitSuggestions(sugg, removed)).toEqual({ open: [{ start: 10, end: 80 }], taken: [] });
+    // what still plays of it: 70 s less the pause cut inside it (review R10)
+    expect(splitSuggestions(sugg, removed)).toEqual({ open: [{ start: 10, end: 80, plays: 69 }], taken: [] });
     expect(labelRemoved(removed, pause)).toEqual([{ start: 30, end: 31, kind: "silence" }]);
   });
 
@@ -166,7 +169,7 @@ describe("suggested cuts (a long “Cleo cut” without “Cleo start”)", () =
     const almost = [seg("a", 0, 10), seg("b", 80 - SUGGESTION_SLACK_S / 2, D)];
     expect(splitSuggestions(sugg, removedRanges(almost, D)).taken).toHaveLength(1);
     const partly = [seg("a", 0, 40), seg("b", 79, D)];
-    expect(splitSuggestions(sugg, removedRanges(partly, D)).open).toEqual([{ start: 10, end: 80 }]);
+    expect(splitSuggestions(sugg, removedRanges(partly, D)).open).toEqual([{ start: 10, end: 80, plays: 31 }]);
   });
 
   it("none on old jobs; broken ones are dropped", () => {
@@ -175,6 +178,60 @@ describe("suggested cuts (a long “Cleo cut” without “Cleo start”)", () =
       open: [],
       taken: [],
     });
+  });
+});
+
+describe("which take chips are botched takes (review R5)", () => {
+  const w = (id: string, text: string, start: number, end: number, x: Partial<DocWord> = {}): DocWord => ({
+    id,
+    text,
+    start,
+    end,
+    ...x,
+  });
+  // a take, "Cleo keep." (cut on its own with the pause after it), a
+  // take, "Cleo cut." with its take, the phrase of a suggested cut
+  const words = [
+    w("a", "Hallo", 0.5, 0.9),
+    w("b", "Leute.", 0.9, 1.4),
+    w("c", "Cleo", 2.0, 2.3),
+    w("d", "keep.", 2.3, 2.6),
+    w("e", "Das", 4.0, 4.3),
+    w("f", "war", 4.3, 4.6),
+    w("g", "nix.", 4.6, 5.0),
+    w("h", "Cleo", 5.5, 5.8),
+    w("i", "cut.", 5.8, 6.1),
+    w("j", "Neu.", 7.0, 7.4),
+    w("k", "äh", 8.0, 8.2, { filler: true }),
+    w("l", "Cleo", 8.4, 8.7),
+    w("m", "cut.", 8.7, 9.0),
+  ];
+  const phrases = commandPhrases([
+    { type: "keep", start: 2.0, end: 2.6, raw_text: "x" },
+    { type: "restart", start: 5.5, end: 6.1 },
+    { type: "restart", start: 8.4, end: 9.0 },
+    { type: "bad" },
+    null,
+  ]);
+  const pieces: Piece[] = [
+    { start: 1.9, end: 3.9, kind: "voice_cmd" }, // the keep phrase and the pause after it
+    { start: 3.9, end: 6.2, kind: "voice_cmd" }, // the take "Das war nix." and its "Cleo cut."
+    { start: 7.9, end: 9.1, kind: "voice_cmd" }, // a filler and a suggested cut's phrase
+    { start: 9.5, end: 12.0, kind: "bad_take" }, // no words at all
+    { start: 0.4, end: 1.5, kind: "silence" }, // not a take kind
+  ];
+
+  it("counts a take with a spoken word outside the command phrases, never the phrase alone", () => {
+    expect(phrases).toEqual([
+      { start: 2.0, end: 2.6 },
+      { start: 5.5, end: 6.1 },
+      { start: 8.4, end: 9.0 },
+    ]);
+    expect(realTakes(pieces, words, phrases)).toEqual([pieces[1]]);
+  });
+
+  it("on a job without scene events every take piece with a word counts", () => {
+    expect(realTakes(pieces, words, commandPhrases(undefined))).toEqual([pieces[0], pieces[1], pieces[2]]);
   });
 });
 

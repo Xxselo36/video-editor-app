@@ -103,10 +103,11 @@ class Job:
     audio_warnings: list[str] = field(default_factory=list)
     audio_levels: dict[str, Any] = field(default_factory=dict)
     scene_events: list[dict[str, Any]] = field(default_factory=list)
-    # Takes a "Cleo cut" without "Cleo start" would remove that are too
-    # long to cut on their own (src/scene_triggers.py IMPLICIT_CUT_MAX_S):
-    # {id, start, end, kind}, source seconds, NOT cut — the editor offers
-    # each one and a tap cuts it (a timeline edit, like any other).
+    # What a command before any "Cleo start" would remove beyond
+    # src/scene_triggers.py IMPLICIT_CUT_MAX_S (a cut's take, a finish's
+    # rest, …; ScenePlan.suggestions): {id, start, end, kind}, source
+    # seconds, NOT cut — the editor offers each one and a tap cuts it (a
+    # timeline edit, like any other). /recompute-scenes recomputes them.
     cut_suggestions: list[dict[str, Any]] = field(default_factory=list)
     social_caption: str = ""
     social_hashtags: list[str] = field(default_factory=list)

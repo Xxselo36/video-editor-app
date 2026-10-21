@@ -17,9 +17,11 @@
  * UX10: words cut from the video are struck through (a click brings one
  * back); removed pauses (≥ 0.4 s) and Cleo-cut takes are chips (a click
  * brings them back); "Cleo cut: N botched takes removed · Show" heads the
- * text (Show jumps to the first one). A "Cleo cut" without "Cleo start"
- * that would remove over a minute isn't cut by the analysis: "Suggestion:
- * remove 1:12? · Show · Apply" sits under it (Apply cuts it).
+ * text (Show jumps to the first one; a spoken command removed on its own
+ * is no take: state/cuts.ts realTakes). What a command before any "Cleo
+ * start" would remove beyond a minute isn't cut by the analysis:
+ * "Suggestion: remove 1:12? · Show · Apply" sits under it
+ * (CutSuggestionNote; Apply cuts it, focus moves on to the next one).
  * Cuts are clip edits (useCuts): timeline undo steps.
  *
  * Every change is one pure op of state/doc.ts applied through `apply`
@@ -48,13 +50,14 @@ import {
 import { usePlayheadEffect, type PlayheadStore } from "@/features/editor/state/playhead";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
-import { TAKE_KINDS, textMarks, type Chip, type CutRefusal } from "@/features/editor/state/cuts";
+import { realTakes, textMarks, type Chip, type CutRefusal, type OpenSuggestion } from "@/features/editor/state/cuts";
 import { cutTimeOfSource, decimalSeparator, fmtClock } from "../../model";
 import type { CutsApi } from "../../useCuts";
 import { CutsHeader, plural } from "../CutsHeader";
 import type { SpanMark } from "../../useSpanFill";
 import { FindReplace } from "./FindReplace";
 import { SelectionBar } from "./SelectionBar";
+import { CutSuggestionNote } from "./CutSuggestionNote";
 import { composing, WordRow, type EditKeys, type RowMarks } from "./WordSpan";
 import s from "../../editor.module.css";
 
@@ -99,6 +102,8 @@ export type TranscriptEditorProps = {
 const selWords = (st: DocState) => st.present.words;
 /** A click on a struck word waits this long for a second click (double-click: edit, not restore). */
 const RESTORE_CLICK_MS = 300;
+/** After Apply on a suggestion, focus moves on to what shows up within this long. */
+const FOCUS_AFTER_TAKE_MS = 1000;
 /** What the Text tab says when a cut of words can't be made (F9). */
 const CUT_REFUSAL: Record<CutRefusal, MessageKey> = {
   too_short: "editor.cut.tooShort",
@@ -191,7 +196,9 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     c.rows.set(ri, { sig, m });
     return m;
   };
-  const takes = useMemo(() => pieces.filter((x) => TAKE_KINDS.has(x.kind)), [pieces]);
+  // botched takes: a spoken command removed on its own is none (review R5)
+  const phrases = p.cuts.phrases;
+  const takes = useMemo(() => realTakes(pieces, words, phrases), [pieces, words, phrases]);
 
   // ── selection and inline edit (word ids: stable across edits) ──────
   const [sel, setSel] = useState<Sel | null>(null);
@@ -230,6 +237,24 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
   // The notes (captions off, the one-time hint) scroll with the text, above the list.
   const notesRef = useRef<HTMLDivElement>(null);
   const [notesH, setNotesH] = useState(0);
+  // After Apply on a suggestion (its note is gone): when focus moves on.
+  const focusAfterTake = useRef(0);
+  useEffect(() => {
+    const since = focusAfterTake.current;
+    if (!since) return;
+    // the "Cleo cut" note follows the (deferred) cut marks: a few renders
+    if (performance.now() - since > FOCUS_AFTER_TAKE_MS) {
+      focusAfterTake.current = 0;
+      return;
+    }
+    const notes = notesRef.current;
+    const next =
+      notes?.querySelector<HTMLElement>('[data-testid="ed-suggestion-take"]') ??
+      notes?.querySelector<HTMLElement>('[data-testid="ed-cleo-show"]');
+    if (!next) return;
+    focusAfterTake.current = 0;
+    next.focus();
+  });
   useLayoutEffect(() => {
     const el = notesRef.current;
     if (!el) return;
@@ -698,9 +723,15 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
   const showTake = () => {
     if (takes[0]) showAt(takes[0].start);
   };
-  // a long "Cleo cut" without "Cleo start", offered: one tap cuts it
-  const takeSuggestion = (r: { start: number; end: number }) => {
-    if (!p.cuts.takeSuggestion(r)) p.toast(t(CUT_REFUSAL.everything));
+  // a suggested cut (a command before any "Cleo start"): one tap cuts it;
+  // its note goes, so focus moves on — to the next suggestion's Apply,
+  // else to the "Cleo cut" note's Show (which now counts it)
+  const takeSuggestion = (r: OpenSuggestion) => {
+    if (!p.cuts.takeSuggestion(r)) {
+      p.toast(t(CUT_REFUSAL.everything));
+      return;
+    }
+    focusAfterTake.current = performance.now();
   };
   return (
     <div ref={rootRef} className={s.ted} data-testid="ed-text">
@@ -763,19 +794,14 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
             </div>
           )}
           {p.cuts.suggestions.map((r) => (
-            // not cut by the analysis: "Cleo cut" without "Cleo start" would remove over a minute
-            <div key={`${r.start}-${r.end}`} className={s.note} data-testid="ed-cut-suggestion">
-              <Sparkles size={14} strokeWidth={1.75} aria-hidden style={{ color: "var(--ed-cleo)", flexShrink: 0 }} />
-              <span>{t("editor.cuts.suggestion", { len: fmtClock(r.end - r.start) })}</span>
-              <span aria-hidden>·</span>
-              <button type="button" className={s.linkBtn} data-testid="ed-suggestion-show" onClick={() => showAt(r.start)}>
-                {t("editor.cuts.showTake")}
-              </button>
-              <span aria-hidden>·</span>
-              <button type="button" className={s.linkBtn} data-testid="ed-suggestion-take" onClick={() => takeSuggestion(r)}>
-                {t("editor.cuts.takeSuggestion")}
-              </button>
-            </div>
+            // not cut by the analysis: a command before any "Cleo start" would remove over a minute
+            <CutSuggestionNote
+              key={`${r.start}-${r.end}`}
+              r={r}
+              t={t}
+              onShow={() => showAt(r.start)}
+              onTake={() => takeSuggestion(r)}
+            />
           ))}
           {p.hint && (
             <div className={s.hint} data-testid="ed-hint">

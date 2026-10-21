@@ -16,9 +16,13 @@
  *   restorePieces / restoreKind   bulk restore: every pause, every "um",
  *                         every Cleo-cut take or every AI cut — never a
  *                         cut the user made
- *   splitSuggestions      the analysis' suggested cuts (a long "Cleo
- *                         cut" without "Cleo start"): still offered, or
- *                         taken (then labelled as a Cleo-cut take)
+ *   splitSuggestions      the analysis' suggested cuts (what a command
+ *                         before any "Cleo start" would remove beyond a
+ *                         minute): still offered (with the seconds that
+ *                         still play), or taken (then labelled as a
+ *                         Cleo-cut take)
+ *   realTakes             the take pieces that are botched takes, not a
+ *                         spoken command phrase removed on its own
  *
  * No micro-clips (review C11), applied by every op around what it
  * touched, so preview and export agree: a removal shorter than
@@ -91,19 +95,24 @@ export function aiCutsOf(ranges: readonly CutRange[] | null | undefined, words: 
 /** A suggestion with no more than this still playing counts as taken. */
 export const SUGGESTION_SLACK_S = 0.1;
 
+/** A suggestion still offered: its source span and the seconds of it the clips still play. */
+export type OpenSuggestion = Range & { plays: number };
+
 /**
- * The analysis' suggested cuts (job.cut_suggestions: a take a "Cleo cut"
- * without "Cleo start" would remove, too long to cut on its own —
- * src/scene_triggers.py) by whether the clips still play them: `open`
- * ones the Text tab offers, `taken` ones (cut by the user's tap, or
- * otherwise) labelled like the analysis' own Cleo-cut takes. Derived from
- * the clips, so an undo offers a suggestion again. Sorted.
+ * The analysis' suggested cuts (job.cut_suggestions: what a "Cleo cut",
+ * a "Cleo finish" or a guess at one before any "Cleo start" would
+ * remove, not cut on its own — src/scene_triggers.py) by whether the
+ * clips still play them: `open` ones the Text tab offers (`plays`: what
+ * Apply would still take out — the span less what is removed already),
+ * `taken` ones (cut by the user's tap, or otherwise) labelled like the
+ * analysis' own Cleo-cut takes. Derived from the clips, so an undo offers
+ * a suggestion again. Sorted.
  */
 export function splitSuggestions(
   suggestions: readonly CutRange[] | null | undefined,
   removed: readonly Range[],
-): { open: Range[]; taken: AiCut[] } {
-  const open: Range[] = [];
+): { open: OpenSuggestion[]; taken: AiCut[] } {
+  const open: OpenSuggestion[] = [];
   const taken: AiCut[] = [];
   for (const r of suggestions ?? []) {
     const start = Number(r.start);
@@ -111,11 +120,54 @@ export function splitSuggestions(
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
     let cut = 0;
     for (const x of removed) cut += Math.max(0, Math.min(end, x.end) - Math.max(start, x.start));
-    if (end - start - cut > SUGGESTION_SLACK_S) open.push({ start, end });
+    const plays = end - start - cut;
+    if (plays > SUGGESTION_SLACK_S) open.push({ start, end, plays });
     else taken.push({ start, end, kind: isKind(r.kind) ? r.kind : "voice_cmd" });
   }
   const by = (a: Range, b: Range) => a.start - b.start;
   return { open: open.sort(by), taken: taken.sort(by) };
+}
+
+/** The spoken command phrases of a job (job.scene_events: {start, end, …}), sorted; broken ones dropped. */
+export function commandPhrases(events: readonly unknown[] | null | undefined): Range[] {
+  const out: Range[] = [];
+  for (const e of events ?? []) {
+    if (!e || typeof e !== "object") continue;
+    const start = Number((e as { start?: unknown }).start);
+    const end = Number((e as { end?: unknown }).end);
+    if (Number.isFinite(start) && Number.isFinite(end) && end >= start) out.push({ start, end });
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/** A word whose middle lies this close to a command phrase is part of it (s). */
+const PHRASE_PAD_S = 0.15;
+
+/**
+ * The take pieces (TAKE_KINDS) that are botched takes (review R5): ones
+ * that hold a spoken word — not a filler — outside every command phrase.
+ * A "Cleo keep" removed on its own, the phrase of a suggested cut or a
+ * stretch with no words is no take. `phrases`: commandPhrases (none on
+ * old jobs: every piece with a word counts). Words in doc order.
+ */
+export function realTakes(pieces: readonly Piece[], words: readonly DocWord[], phrases: readonly Range[]): Piece[] {
+  const mids = words.map((w) => (w.start + w.end) / 2);
+  const inPhrase = (t: number) => phrases.some((r) => t >= r.start - PHRASE_PAD_S && t <= r.end + PHRASE_PAD_S);
+  return pieces.filter((p) => {
+    if (!TAKE_KINDS.has(p.kind)) return false;
+    let lo = 0;
+    let hi = mids.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (mids[mid] < p.start) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < words.length && mids[i] <= p.end; i++) {
+      const w = words[i];
+      if (!(w.filler || w.cut === "filler") && !inPhrase(mids[i])) return true;
+    }
+    return false;
+  });
 }
 
 /**
