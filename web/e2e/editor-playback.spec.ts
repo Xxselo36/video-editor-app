@@ -92,7 +92,9 @@ const seeksSince = async (page: Page, from: number): Promise<[number, number][]>
  * the landing's counts only when its place is certain: frames are presented
  * in order, on their slot by the frame clock or after it, never before
  * (the slot: the earliest presentationTime − k·frame of the frames played
- * before, one after the other), and the new position presents at most one
+ * before since the play's landing, whichever had a callback — round 6 took
+ * only a run of consecutive ones: one callback for two just before the
+ * jump left too few), and the new position presents at most one
  * a refresh after the jump was asked — those presented before the landing
  * frame less the new position's are the old position's frames after the
  * last kept one, kept ones when the landing came before the first cut
@@ -113,12 +115,13 @@ function oldEnd(fr: Shown[], seeks: [number, number][], cut: number, to: number)
   let why = "";
   const jump = seeks.find(([at, x]) => kOf(x) >= to && at <= fr[landed][0]);
   if (unseen > 0 && jump) {
-    // the frame clock from the frames before it (each one frame and one
-    // presentation after the one before)
+    // the frame clock from the frames before it with a callback, back to
+    // the play's landing (frames in order; its first frame left out: the
+    // clock stands on it a while)
     const run: number[] = [];
-    for (let j = i; j > 0 && run.length < 8; j--) {
+    for (let j = i; j > 0; j--) {
       const [, m, pf, pt] = fr[j];
-      if (kOf(m) - kOf(fr[j - 1][1]) !== 1 || pf - fr[j - 1][2] !== 1) break;
+      if (kOf(m) <= kOf(fr[j - 1][1]) || pf <= fr[j - 1][2]) break;
       run.push(pt - kOf(m) * fm);
     }
     // (the new position's: at most one a refresh — 60 Hz, less jitter)
