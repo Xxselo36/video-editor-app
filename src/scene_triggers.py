@@ -151,6 +151,9 @@ REPEAT_REACH_S = 1.2
 # more is only suggested — one tap in the editor confirms it (owner
 # decision). Its phrase is cut anyway.
 IMPLICIT_CUT_MAX_S = 60.0
+# A command whose "Cleo" Whisper starts up to this much before a go ends
+# still comes after that go (overlapping word times).
+GO_TIE_S = 0.1
 
 
 class Command(NamedTuple):
@@ -383,9 +386,10 @@ def plan_commands(
     opening = next((c for c in commands
                     if c.type == "start" and not c.guess and not c.weak), None)
     # A go is an anchor, not a command; on a tie it comes first (a
-    # command said right as the go ends begins its take after it).
+    # command said right as the go ends begins its take after it) — also
+    # when Whisper lets the next "Cleo" start a few ms before the go ends
     steps = sorted([*commands, *(Command("go", t, t) for t in resumes or [])],
-                   key=lambda c: (c.start, c.type != "go"))
+                   key=lambda c: (c.start - (GO_TIE_S if c.type == "go" else 0.0), c.type != "go"))
 
     cut_ranges: list[tuple[float, float]] = []
     suggestions: list[tuple[float, float]] = []

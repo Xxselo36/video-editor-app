@@ -782,6 +782,25 @@ def test_a_cut_said_as_the_go_ends_begins_after_the_go():
     from src.scene_triggers import Command, plan_commands
     cuts, sugg = plan_commands([Command("restart", 10.0, 10.6)], clip_duration=30.0, resumes=[10.0])
     assert cuts == [(10.0, 10.6)] and sugg == []
+    # re-review N2: Whisper lets the next "Cleo" start 20 ms before the
+    # go ends — the cut still begins after the go
+    cuts, sugg = plan_commands([Command("restart", 9.98, 10.58)], clip_duration=30.0, resumes=[10.0])
+    assert cuts == [(10.0, 10.58)] and sugg == []
+
+
+def test_a_second_clear_start_does_not_move_the_opening():
+    # re-review N1: the FIRST clear start opens the session; a later one
+    # acts as on main (a start after a finish, a start after a guess)
+    words = (cmd("start.", 1.0) + talk(2.0, 99.4) + cmd("finish.", 100.0) + talk(101.0, 299.4)
+             + cmd("start.", 300.0) + talk(301.0, 600.0))
+    p = plan(words, dur=600.0)
+    assert covered(p.cuts, 0.0, 1.6) and covered(p.cuts, 100.0, 600.0), p.cuts
+    assert lost(p.cuts, 2.0, 99.4) == 0.0 and p.suggestions == []
+    words = (cmd("start.", 1.0) + talk(2.0, 49.4) + guess("keep", 50.0) + talk(51.0, 299.4)
+             + cmd("start.", 300.0) + talk(301.0, 400.0))
+    p = plan(words, dur=400.0)
+    assert lost(p.cuts, 2.0, 49.4) == 0.0, p.cuts
+    assert covered(p.cuts, 50.6, 300.6) and lost(p.cuts, 301.0, 400.0) == 0.0, p.cuts
 
 
 def test_a_misheard_start_said_twice_is_still_no_said_start():
