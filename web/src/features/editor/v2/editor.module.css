@@ -1741,6 +1741,14 @@
 .noteFlow .noteSep {
   margin: 0 6px;
 }
+/* a touch screen: the note's links take a taller tap, the line stays
+   18 px (5 px each way keeps clear of the next note's links) */
+@media (pointer: coarse) {
+  .noteFlow .linkBtn {
+    padding: 5px 0;
+    margin: -5px 0;
+  }
+}
 /* a note's reason, under its text (CutSuggestionNote) */
 .noteWhy {
   margin: -4px 0 6px 20px;
