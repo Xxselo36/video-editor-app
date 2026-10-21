@@ -50,11 +50,34 @@ import { sameTimeline, type TimelineSeg } from "@/lib/editSave";
 import { trackSave } from "@/lib/pendingSaves";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import type { CutRange, JobStatus, SavedSeg } from "@/features/jobs/types";
-import { JOIN_S, landOf, previewMatches, previewSpeedAt, previewTimeOf, skipTarget, stalePlan, swapTime } from "./previewSync";
+import {
+  JOIN_S,
+  landOf,
+  previewMatches,
+  previewSpeedAt,
+  previewTimeOf,
+  proxyPlays,
+  skipTarget,
+  stalePlan,
+  swapTime,
+} from "./previewSync";
 import { TimelineSaver, timelinePayload, type TimelineAnswer, type TimelineSaveState } from "./timelineSave";
 import { decideUnsaved, readUnsaved, writeUnsaved, type UnsavedDecision } from "./unsaved";
 
 export type PlaybackMode = "probing" | "proxy" | "preview";
+
+/**
+ * How the session starts to play (see the modes below): the proxy only when
+ * the job says it has one and its frame rate (GET /jobs/{id} fps, the
+ * proxy's too) is known and at most 30 fps (proxyPlays, round 9); a 50 /
+ * 59.94 / 60 fps job, or one without its rate, plays the server's cut
+ * preview, as with CLEO_PROXY_VIDEO off. has_proxy not reported: asked
+ * (GET /proxy-video), the preview loading meanwhile.
+ */
+export function firstMode(hasProxy: boolean | undefined, fps: number | null | undefined): PlaybackMode {
+  if (hasProxy === false || !proxyPlays(fps)) return "preview";
+  return hasProxy === true ? "proxy" : "probing";
+}
 export type SaveError = "retrying" | "failed" | null;
 type Segs = [number, number][];
 
@@ -171,15 +194,14 @@ export function useEditSession({
   //   proxy   — plays the job's full-source proxy and follows the edit
   //             list itself (lib/editPlayback): edits show instantly and
   //             nothing waits for the server's preview rebuild.
-  //   preview — backend without a proxy: plays the server-built cut
-  //             preview.mp4 and swaps in each rebuild.
+  //   preview — backend without a proxy, or a video faster than 30 fps
+  //             or of unknown rate (firstMode): plays the server-built
+  //             cut preview.mp4 and swaps in each rebuild.
   //   probing — has_proxy not reported: one small request decides.
   //             The preview already loads meanwhile (no extra round
   //             trip before the video shows); a "yes" swaps to the proxy
   //             unless the user has already started playing.
-  const [mode, setMode] = useState<PlaybackMode>(
-    hasProxy === true ? "proxy" : hasProxy === false ? "preview" : "probing",
-  );
+  const [mode, setMode] = useState<PlaybackMode>(() => firstMode(hasProxy, fps));
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const mediaReady = useMediaReady();
@@ -193,12 +215,12 @@ export function useEditSession({
       const v = videoRef.current;
       // Already playing (or played) the preview: don't yank the src.
       const started = !!v && (!v.paused || v.played.length > 0);
-      setMode(ok && !started ? "proxy" : "preview");
+      setMode(ok && !started && proxyPlays(fps) ? "proxy" : "preview");
     });
     return () => {
       live = false;
     };
-  }, [mode, mediaReady, jobId]);
+  }, [mode, mediaReady, jobId, fps]);
   // Preview mode — set once: a changing src would restart playback.
   // Later previews are swapped in imperatively (swapPreviewSrc), only
   // while paused. With accounts on, not before the media token is known

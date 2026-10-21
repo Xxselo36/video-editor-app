@@ -527,6 +527,29 @@ test.describe("how the editor picks proxy or preview", () => {
     await expectRebuildSwapsIn(page, stub, job.id);
   });
 
+  // Round 9: the proxy only for a video of known rate up to 30 fps. (The
+  // stub clips are 30 fps: GET /jobs/{id} answers as a 60 fps upload's
+  // job, or one without its rate. has_proxy stays true, so the server
+  // skips the rebuilds — the editor asks for them, as it does today.)
+  for (const fps of [60, null]) {
+    test(`has_proxy: true, fps ${fps} → preview at once, no proxy`, async ({ page, stub }) => {
+      const job = await stub.seed("review", { proxy: "on" });
+      await page.route(new RegExp(`/jobs/${job.id}(\\?.*)?$`), async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        const res = await route.fetch();
+        await route.fulfill({ response: res, json: { ...(await res.json()), fps } });
+      });
+      const { reqs } = collect(page);
+      await page.goto(`/app/edit/${job.id}`);
+      await expect(page.getByTestId("apply-render")).toBeVisible({ timeout: 45_000 });
+      expect(await playbackMode(page)).toBe("preview");
+      await expect(editorVideo(page)).toHaveAttribute("src", /preview-video\?v=\d+/);
+      await waitForMetadata(page);
+      expect(reqs.some((r) => /proxy-video/.test(r.url))).toBe(false);
+      if (fps === 60) await expectRebuildSwapsIn(page, stub, job.id);
+    });
+  }
+
   async function expectRebuildSwapsIn(page: Page, stub: import("./support/fixtures").Stub, jobId: string) {
     const v0 = (await stub.job(jobId))!.preview_version;
     await deleteClip(page, 1);

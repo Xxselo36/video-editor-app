@@ -117,9 +117,8 @@ const DEFAULT_FPS = 30;
  *  (right for any offset under half a frame). */
 const LAND_FRAMES = 0.15;
 const BLIND_FRAMES = 0.5;
-/** Before any frame told the rate: the rates a clip's first frame is
- *  landed in, and how far into it at least (s). */
-const BLIND_FPS = [24, 25, 30, 50, 60];
+/** Before any frame told the rate: how far into a clip's first frame at
+ *  every common rate (COMMON_FPS) a landing goes at least (s). */
 const BLIND_IN_S = 0.002;
 /**
  * A jump asked this long (ms) before the compositor's next pick still stops
@@ -834,7 +833,10 @@ export class EditPlayer {
     const into = this.phase === null ? BLIND_FRAMES : LAND_FRAMES;
     let t = this.frameAt(a) + into / this.fps();
     if (this.fpsOpt === null && this.fpsSeen === null && this.fpsLeast === null) {
-      for (const f of BLIND_FPS) t = Math.max(t, clipFrames(seg, f)[0] / f + BLIND_IN_S);
+      // (every common rate: round 7 left out 23.976, 29.97, 48 and 59.94 —
+      // a first landing showed the cut frame before the clip at 6–9 % of
+      // clip starts at the NTSC rates)
+      for (const f of COMMON_FPS) t = Math.max(t, clipFrames(seg, f)[0] / f + BLIND_IN_S);
     }
     return Math.min(t, this.lastOf(seg));
   }
@@ -1001,7 +1003,15 @@ export class EditPlayer {
     const m = this.margin();
     const early = m > 0 ? Math.ceil(m * Math.max(1, this.rate()) * u - 1e-6) : 0;
     const fm = 1000 / (this.fps() * this.rate());
-    const seam = Math.max(0, Math.ceil((this.reachMs() + TIMER_SLACK_MS + SEAM_AFTER_MS) / fm - 1e-6) - 1);
+    // (frames shorter than two refreshes: the timers' slack as they lately
+    // fired, like the seam's — round 7 took TIMER_SLACK_MS, and at 60 fps
+    // with the timers 15 ms late the seam fired after the cut frame's pick
+    // at most joins, the frame rule on the last kept frame's callback too
+    // late for it. Longer frames leave the frame rule a refresh to spare
+    // there: TIMER_SLACK_MS — the slack took a kept frame at every join at
+    // 30 fps with the timers 30 ms late, for no cut frame less)
+    const slack = this.longFrames() ? TIMER_SLACK_MS : this.slackMs();
+    const seam = Math.max(0, Math.ceil((this.reachMs() + slack + SEAM_AFTER_MS) / fm - 1e-6) - 1);
     return Math.min(this.maxEarly(), Math.max(warm, early, seam) + (this.rate() > FAST_RATE ? u : 0));
   }
 
@@ -1189,12 +1199,34 @@ export class EditPlayer {
     // frame rule's on the last kept frame's callback at 30 fps: 14–15), and
     // never more than a 60 Hz refresh after the slot: a refresh read wrong
     // — 30 Hz animation frames at 4× CPU — never moves it past the cut
-    // frame's slot)
-    if (fm - lead < RAF_MS) {
+    // frame's slot; only where its refresh is measured: floorApplies)
+    if (fm - lead < RAF_MS && this.floorApplies()) {
       const last = Math.min(this.pickOn(anchor + (b - 1) * fm), anchor + (b - 1) * fm + RAF_MS) + SEAM_AFTER_MS;
       if (last <= this.pickOn(anchor + b * fm) - reach) after = Math.max(after, last);
     }
     return Math.max(anchor + b * fm - lead, after);
+  }
+
+  /** The seam's floor (seamAt) only where its refresh is measured: a
+   *  screen both the frames' picks and the animation frames say is 60 Hz,
+   *  frames no faster than it at the speed playing. Round 7 had it
+   *  wherever the lead left less than a refresh after the slot: on a 90 Hz
+   *  screen it read a refresh of 22 ms (picks 11 and 22 ms apart, the
+   *  animation frames' refresh taken as 60 Hz's) and held the seam past
+   *  the cut frame's pick — cut frames at 60 fps with the timers 5 ms late;
+   *  at 50 fps × 1.25 (62.5 frames a second: the compositor skips some)
+   *  and with 30 Hz updates (no picks a refresh apart: the refresh taken
+   *  for the pick gap) cut frames too. On 60 Hz it stays: without it the
+   *  e2e runs showed more cut frames at 1.25x on a 30 fps proxy (7 of 12
+   *  runs against 3 of 12, round 8's A/B). Up to 31 frames a second (proxy
+   *  mode plays at most 30 fps) it applies as in round 7: gated there, it
+   *  was off at jittery desktop picks and the jump came a refresh early —
+   *  the last kept frame dropped at 3× round 7's joins in the owner-shaped
+   *  runs (round 9 verify). */
+  private floorApplies(): boolean {
+    if (this.fps() * this.rate() <= 31) return true;
+    if (this.fps() * this.rate() > 61 || this.slots.length < 4 || this.tickGaps.length < 4) return false;
+    return Math.abs(this.tickGap(0.5, 0) - RAF_MS) < 2 && Math.abs(this.vsyncMs() - RAF_MS) < 2;
   }
 
   /** When (performance.now) the compositor picks the frame due at `t`: the
@@ -1360,9 +1392,14 @@ export class EditPlayer {
       // margin into the 1x clips after). A callback that never ran is a
       // sign only where a frame lasts two refreshes (longFrames): at 60
       // fps on 60 Hz one lands either side of a refresh, one for two now
-      // and then on an idle machine.
+      // and then on an idle machine. Not the first step after a landing
+      // either (shownRun 1: the clock starts again there, its first
+      // presentation a refresh or two after the landed frame's — at a 30
+      // Hz compositor, Chrome's Energy Saver, a step of two at most
+      // landings: round 7 counted them, heavy load at every join, two kept
+      // frames dropped at ~80 % of them).
       const n = this.longFrames() ? d - this.screenStride() : d - pd * this.screenStride();
-      if (n > 0 && d <= 8 * pd && this.rate() <= FAST_RATE) {
+      if (n > 0 && d <= 8 * pd && this.rate() <= FAST_RATE && this.shownRun >= 2) {
         keep(this.skips, { at: wall, n }, 32);
         const recent = this.skips.filter((x) => wall - x.at < LEAP_WINDOW_MS);
         // (and over a longer stretch: at 4× CPU a lull of 8 s now and then)
