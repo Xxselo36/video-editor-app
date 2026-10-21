@@ -114,6 +114,8 @@ export const frEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.cleoOne": "Cleo cut : {count} prise ratée retirée",
   "editor.cuts.cleoOther": "Cleo cut : {count} prises ratées retirées",
   "editor.cuts.showTake": "Afficher",
+  "editor.cuts.suggestion": "Suggestion : retirer {len} ?",
+  "editor.cuts.takeSuggestion": "Appliquer",
   "editor.cuts.restorePauses": "Récupérer les pauses",
   "editor.cuts.restoreFillers": "Récupérer les mots de remplissage",
   "editor.cuts.restoreTakes": "Récupérer les prises Cleo cut",

@@ -180,6 +180,11 @@ def _recording(path, truth: list[tuple], dur: float) -> None:
 
 
 def _analyse(tmp_path, monkeypatch, whisper, truth, style, language):
+    res = _analysis(tmp_path, monkeypatch, whisper, truth, style, language)
+    return [(float(s), float(e)) for s, e in res.segments]
+
+
+def _analysis(tmp_path, monkeypatch, whisper, truth, style, language):
     from src import audio as A
     from src import plugin_api
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -197,15 +202,14 @@ def _analyse(tmp_path, monkeypatch, whisper, truth, style, language):
         self._build_subtitles_from_transcription()
         return self._subtitles
     monkeypatch.setattr(A.AudioAnalyzer, "transcribe", transcribe)
-    res = plugin_api.analyze_video(str(clip), style=style, voice_triggers=True)
-    return [(float(s), float(e)) for s, e in res.segments]
+    return plugin_api.analyze_video(str(clip), style=style, voice_triggers=True)
 
 
-def _defects(segs, truth) -> list[str]:
+def _defects(segs, truth, intent=None) -> list[str]:
     def kept(s, e):
         return sum(max(0.0, min(e, b) - max(s, a)) for a, b in segs)
     out = []
-    for (text, s, e), cut in zip(truth, _intent(truth)):
+    for (text, s, e), cut in zip(truth, intent or _intent(truth)):
         k = kept(s, e)
         if cut and k > 0.015:
             out.append(f"cut word {text!r} {s}-{e}: {k * 1000:.0f} ms audible")
@@ -221,3 +225,33 @@ def test_every_word_comes_out_whole(tmp_path, monkeypatch, rec, style):
                             "rec1b": (REC1B_WHISPER, REC1B_TRUTH, "en")}[rec]
     segs = _analyse(tmp_path, monkeypatch, whisper, truth, style, lang)
     assert _defects(segs, truth) == [], segs
+
+
+def test_a_long_cut_without_start_is_offered_not_cut(tmp_path, monkeypatch):
+    """rec2 without its "Cleo start", the limit at 3 s: the take the
+    "Cleo cut" would remove (4.7 s since the keep before it) is a
+    suggestion on the audio's edges — all its words play, the command's
+    don't; the setup before the first keep stays (no start drops it)."""
+    from src import scene_triggers
+    monkeypatch.setattr(scene_triggers, "IMPLICIT_CUT_MAX_S", 3.0)
+    whisper = ([[w for w in REC2_WHISPER[0] if w[0] not in ("Cleo", "start.")]]
+               + REC2_WHISPER[1:])
+    truth = [w for w in REC2_TRUTH if not 3.5 < w[1] < 4.5]
+    res = _analysis(tmp_path, monkeypatch, whisper, truth, "smooth", "de")
+    (sugg,) = res.cut_suggestions
+    # from the pause after "Cleo keep." to the one after "Cleo cut."
+    assert 12.5 <= sugg["start"] <= 12.57, sugg
+    assert 17.2 <= sugg["end"] <= 17.36, sugg
+    segs = [(float(s), float(e)) for s, e in res.segments]
+
+    def kept(s, e):
+        return sum(max(0.0, min(e, b) - max(s, a)) for a, b in segs)
+    # the take ("Fisch ist gesund. … nochmal.") plays (its last word may
+    # lose a tail to the word-gap pass, as before any kept word)
+    take = [(t, s, e) for t, s, e in truth if 12.5 <= s < 16.4]
+    assert len(take) == 8
+    assert all(kept(s, e) >= 0.5 * (e - s) for _t, s, e in take), segs
+    assert all((e - s) - kept(s, e) <= 0.012 for _t, s, e in take[:-1]), segs
+    # "Cleo cut" doesn't, the setup before the first keep does
+    assert all(kept(s, e) <= 0.015 for _t, s, e in truth if 16.4 < s < 17.3), segs
+    assert all((e - s) - kept(s, e) <= 0.012 for _t, s, e in truth if s < 3.0), segs

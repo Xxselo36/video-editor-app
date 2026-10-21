@@ -114,6 +114,8 @@ export const esEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.cleoOne": "Cleo cut: {count} toma fallida quitada",
   "editor.cuts.cleoOther": "Cleo cut: {count} tomas fallidas quitadas",
   "editor.cuts.showTake": "Mostrar",
+  "editor.cuts.suggestion": "Sugerencia: ¿quitar {len}?",
+  "editor.cuts.takeSuggestion": "Aplicar",
   "editor.cuts.restorePauses": "Recuperar pausas",
   "editor.cuts.restoreFillers": "Recuperar muletillas",
   "editor.cuts.restoreTakes": "Recuperar tomas de Cleo cut",

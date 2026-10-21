@@ -1,11 +1,21 @@
 """Scene-based voice commands: Cleo start / restart / keep / finish.
 
-Enables a record-once-and-refine workflow:
-    'Cleo start'   — anchors a new take. Everything before the FIRST
-                     Cleo start in the video is dropped (setup/warmup).
-    'Cleo restart' — discards the current provisional take (from last
-                     anchor to this restart, inclusive). New anchor
-                     set here.
+Enables a record-once-and-refine workflow. Every take has an anchor,
+where it began: the end of the command before it, or the start of the
+video when there was none — "Cleo start" is not needed (owner
+decision), it marks where a take begins.
+
+    'Cleo start'   — anchors a new take. What came since the anchor is
+                     dropped: everything before it when it is the first
+                     command (setup/warmup), else e.g. the chatter after
+                     a keep.
+    'Cleo restart' — ('Cleo cut') discards the current provisional take
+                     (from the anchor to this restart, inclusive). New
+                     anchor set here. A take that did not begin at a
+                     said 'Cleo start' and is longer than
+                     IMPLICIT_CUT_MAX_S is not cut: only the spoken
+                     phrase goes, and the take is a suggestion the
+                     creator confirms in the editor (job.cut_suggestions).
     'Cleo keep'    — commits the current take. Content up to this
                      keep is preserved (the keep phrase itself is
                      removed). New anchor set here for the next scene.
@@ -20,6 +30,7 @@ inline failures.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import NamedTuple
 
 from src import command_gate as gate
 
@@ -120,6 +131,25 @@ STRONG_COMMANDS = {
 HALLUCINATION_GAP = 1.0
 REPEAT_REACH_S = 1.2
 
+# A "Cleo cut" whose take did not begin at a said "Cleo start" (it began
+# after the command before it, or at the start of the video) removes at
+# most this much on its own; a longer take is only suggested — one tap
+# in the editor confirms it (owner decision). Its phrase is cut anyway.
+IMPLICIT_CUT_MAX_S = 60.0
+
+
+class ScenePlan(NamedTuple):
+    """What the scene commands of a recording do (plan_scene_cuts)."""
+    # (start, end) ranges to cut, Whisper times (the analysis snaps them
+    # to the audio, src/edge_snap.py)
+    cuts: list[tuple[float, float]]
+    # (start, end) takes a "Cleo cut" would throw away, longer than
+    # IMPLICIT_CUT_MAX_S without a "Cleo start": not cut (the phrase
+    # itself is in `cuts`)
+    suggestions: list[tuple[float, float]]
+    # (command_type, phrase_start, phrase_end) for logging / debugging
+    events: list[tuple[str, float, float]]
+
 
 def _normalize(text: str) -> str:
     return gate.normalize(text)
@@ -150,26 +180,40 @@ def find_scene_cut_ranges(
     keep_keywords: list[str] | None = None,
     finish_keywords: list[str] | None = None,
 ) -> tuple[list[tuple[float, float]], list[tuple[str, float, float]]]:
-    """Scan words for scene commands, return (cut_ranges, events).
+    """plan_scene_cuts as (cut_ranges, events): a suggested take is not
+    cut (its "Cleo cut" phrase is)."""
+    plan = plan_scene_cuts(whisper_words, clip_duration, start_keywords,
+                           restart_keywords, keep_keywords, finish_keywords)
+    return plan.cuts, plan.events
+
+
+def plan_scene_cuts(
+    whisper_words: list[dict],
+    clip_duration: float | None = None,
+    start_keywords: list[str] | None = None,
+    restart_keywords: list[str] | None = None,
+    keep_keywords: list[str] | None = None,
+    finish_keywords: list[str] | None = None,
+    implicit_cut_max_s: float | None = None,
+) -> ScenePlan:
+    """Scan words for scene commands: what they cut, what they suggest.
 
     Args:
         whisper_words: list of {"word": str, "start": float, "end": float}
         clip_duration: audio duration in seconds. Used to cap the
             'everything after Cleo finish' cut range.
         *_keywords: overrideable phrase lists per command type.
+        implicit_cut_max_s: the most a "Cleo cut" without a "Cleo start"
+            removes on its own (None: IMPLICIT_CUT_MAX_S; inf: no limit).
 
-    Returns:
-        cut_ranges: list of (start, end) audio ranges to cut (Whisper
-            times; the analysis snaps them to the audio, src/edge_snap.py)
-        events: list of (command_type, phrase_start, phrase_end) for
-            logging / debugging.
-
-    Only phrases said as commands count (src/command_gate.py). Feature is
-    opt-in: if the user never says 'Cleo start' (a phonetic guess at one
-    doesn't count), returns empty ranges — the scene machinery stays out
-    of the pipeline. A phonetic guess at 'finish' cuts only its phrase,
-    never the rest of the video.
+    Only phrases said as commands count (src/command_gate.py). No 'Cleo
+    start' is needed: a take begins after the command before it, or at
+    the start of the video (module doc). A phonetic guess never throws
+    away what came before it: one at 'start' before any said one, or at
+    'finish', cuts only its phrase.
     """
+    if implicit_cut_max_s is None:
+        implicit_cut_max_s = IMPLICIT_CUT_MAX_S
     if start_keywords or restart_keywords or keep_keywords or finish_keywords:
         table = _table(start_keywords, restart_keywords, keep_keywords,
                        finish_keywords)
@@ -178,7 +222,7 @@ def find_scene_cut_ranges(
 
     words = gate.split_tokens(whisper_words)
     if not words:
-        return [], []
+        return ScenePlan([], [], [])
     norm = gate.normalized(words)
 
     # [type, start, end, phonetic, index of the word after the phrase]
@@ -235,41 +279,49 @@ def find_scene_cut_ranges(
         deduped.append(evt)
     events = deduped
 
-    # No start command → feature not used; do nothing.
-    first_start = next((e for e in events if e[0] == "start" and not e[3]),
-                       None)
-    if first_start is None:
-        return [], [(t, s, e) for (t, s, e, *_r) in events]
-
     cut_ranges: list[tuple[float, float]] = []
+    suggestions: list[tuple[float, float]] = []
+    # The take in progress began at `anchor`: the end of the command
+    # before it, or the start of the video. `explicit`: at a said 'Cleo
+    # start' (not a phonetic guess); `started`: one was said before.
+    anchor, explicit, started = 0.0, False, False
 
-    # 1) Drop everything from audio start up to (and including) the
-    #    first 'Cleo start' phrase — also when Whisper puts its first
-    #    word at 0.0.
-    if first_start[2] > 0.0:
-        cut_ranges.append((0.0, first_start[2]))
-
-    anchor_end = first_start[2]
-    idx_start = events.index(first_start) + 1
-
-    for evt in events[idx_start:]:
+    for evt in events:
         cmd_type, phrase_start, phrase_end, phonetic, _next = evt
-        if cmd_type in ("start", "restart"):
-            # Both discard the current provisional and set a fresh
-            # anchor. (Another 'Cleo start' effectively means the user
-            # forgot to say restart and just started over.)
-            cut_ranges.append((anchor_end, phrase_end))
-            anchor_end = phrase_end
-        elif cmd_type == "keep" or (cmd_type == "finish" and phonetic):
-            # Keep the take; only cut the 'Cleo keep' phrase itself.
-            cut_ranges.append((phrase_start, phrase_end))
-            anchor_end = phrase_end
-        elif cmd_type == "finish":
+        if cmd_type == "start" and (started or not phonetic):
+            # Drop what came since the anchor: everything before it as
+            # the first command (also when Whisper puts its first word
+            # at 0.0). A later 'Cleo start' effectively means the user
+            # forgot to say restart and just started over.
+            if phrase_end > anchor:
+                cut_ranges.append((anchor, phrase_end))
+            anchor, explicit = phrase_end, not phonetic
+            started = started or not phonetic
+        elif cmd_type == "restart":
+            # Discard the current provisional take — a long one that
+            # didn't begin at a 'Cleo start' only as a suggestion.
+            if explicit or phrase_end - anchor <= implicit_cut_max_s:
+                cut_ranges.append((anchor, phrase_end))
+            else:
+                cut_ranges.append((phrase_start, phrase_end))
+                suggestions.append((anchor, phrase_end))
+                print(f"[scene-triggers] 'Cleo cut' at {phrase_start:.2f}s "
+                      f"would remove {phrase_end - anchor:.1f}s without "
+                      f"'Cleo start' — suggested, not cut", flush=True)
+            anchor, explicit = phrase_end, False
+        elif cmd_type == "finish" and not phonetic:
             # Cut the 'Cleo finish' phrase, then cut all following audio.
             tail_cap = clip_duration if clip_duration else (
                 float(words[-1].get("end", phrase_end)) + 60.0
             )
             cut_ranges.append((phrase_start, tail_cap))
             break
+        else:
+            # 'Cleo keep' — or a phonetic guess at 'finish', or at
+            # 'start' before any said one: keep the take, cut only the
+            # phrase itself.
+            cut_ranges.append((phrase_start, phrase_end))
+            anchor, explicit = phrase_end, False
 
-    return cut_ranges, [(t, s, e) for (t, s, e, *_r) in events]
+    return ScenePlan(cut_ranges, suggestions,
+                     [(t, s, e) for (t, s, e, *_r) in events])

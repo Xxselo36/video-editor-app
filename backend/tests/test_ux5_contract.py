@@ -122,6 +122,7 @@ JOB_KEYS = sorted([
     "social_hashtags", "hook_clips", "audio_warnings", "audio_warning_codes",
     "audio_levels",
     "duration", "cut_ranges", "scene_events", "edit_segments",
+    "cut_suggestions",  # long "Cleo cut" takes without "Cleo start": offered, not cut
     "preview_segments", "preview_version", "caption_preset", "filename",
     "preset_id", "preset_label", "created_at", "updated_at",
     "queue_position", "has_doc", "font_subsets", "peaks",

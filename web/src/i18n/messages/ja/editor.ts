@@ -114,6 +114,8 @@ export const jaEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.cleoOne": "Cleo cut：失敗テイクを{count}件カットしました",
   "editor.cuts.cleoOther": "Cleo cut：失敗テイクを{count}件カットしました",
   "editor.cuts.showTake": "表示",
+  "editor.cuts.suggestion": "提案：{len}をカットしますか？",
+  "editor.cuts.takeSuggestion": "適用",
   "editor.cuts.restorePauses": "間を元に戻す",
   "editor.cuts.restoreFillers": "フィラーを元に戻す",
   "editor.cuts.restoreTakes": "Cleo cutのテイクを元に戻す",

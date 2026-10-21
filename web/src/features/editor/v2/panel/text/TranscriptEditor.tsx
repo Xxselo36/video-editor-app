@@ -17,7 +17,9 @@
  * UX10: words cut from the video are struck through (a click brings one
  * back); removed pauses (≥ 0.4 s) and Cleo-cut takes are chips (a click
  * brings them back); "Cleo cut: N botched takes removed · Show" heads the
- * text (Show jumps to the first one).
+ * text (Show jumps to the first one). A "Cleo cut" without "Cleo start"
+ * that would remove over a minute isn't cut by the analysis: "Suggestion:
+ * remove 1:12? · Show · Apply" sits under it (Apply cuts it).
  * Cuts are clip edits (useCuts): timeline undo steps.
  *
  * Every change is one pure op of state/doc.ts applied through `apply`
@@ -686,13 +688,19 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
   const captionsOff = preset === "none";
   // UX10 (review E3): "Show" — the text scrolls to the first take's chip
   // (before the first word from its start on), the playhead to its cut
-  const showTake = () => {
-    const first = takes[0];
-    if (!first || !words.length) return;
+  const showAt = (start: number) => {
+    if (!words.length) return;
     let at = 0;
-    while (at < words.length - 1 && (words[at].start + words[at].end) / 2 < first.start) at++;
+    while (at < words.length - 1 && (words[at].start + words[at].end) / 2 < start) at++;
     showRow(rowOf[at]);
-    p.seekCut(cutTimeOfSource(p.editSegs, first.start));
+    p.seekCut(cutTimeOfSource(p.editSegs, start));
+  };
+  const showTake = () => {
+    if (takes[0]) showAt(takes[0].start);
+  };
+  // a long "Cleo cut" without "Cleo start", offered: one tap cuts it
+  const takeSuggestion = (r: { start: number; end: number }) => {
+    if (!p.cuts.takeSuggestion(r)) p.toast(t(CUT_REFUSAL.everything));
   };
   return (
     <div ref={rootRef} className={s.ted} data-testid="ed-text">
@@ -754,6 +762,21 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
               </button>
             </div>
           )}
+          {p.cuts.suggestions.map((r) => (
+            // not cut by the analysis: "Cleo cut" without "Cleo start" would remove over a minute
+            <div key={`${r.start}-${r.end}`} className={s.note} data-testid="ed-cut-suggestion">
+              <Sparkles size={14} strokeWidth={1.75} aria-hidden style={{ color: "var(--ed-cleo)", flexShrink: 0 }} />
+              <span>{t("editor.cuts.suggestion", { len: fmtClock(r.end - r.start) })}</span>
+              <span aria-hidden>·</span>
+              <button type="button" className={s.linkBtn} data-testid="ed-suggestion-show" onClick={() => showAt(r.start)}>
+                {t("editor.cuts.showTake")}
+              </button>
+              <span aria-hidden>·</span>
+              <button type="button" className={s.linkBtn} data-testid="ed-suggestion-take" onClick={() => takeSuggestion(r)}>
+                {t("editor.cuts.takeSuggestion")}
+              </button>
+            </div>
+          ))}
           {p.hint && (
             <div className={s.hint} data-testid="ed-hint">
               <Lightbulb size={14} strokeWidth={1.75} className={s.hintIcon} aria-hidden />

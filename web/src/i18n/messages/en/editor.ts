@@ -121,6 +121,8 @@ export const enEditor = {
   "editor.cuts.cleoOne": "Cleo cut: {count} botched take removed",
   "editor.cuts.cleoOther": "Cleo cut: {count} botched takes removed",
   "editor.cuts.showTake": "Show",
+  "editor.cuts.suggestion": "Suggestion: remove {len}?",
+  "editor.cuts.takeSuggestion": "Apply",
   "editor.cuts.restorePauses": "Restore pauses",
   "editor.cuts.restoreFillers": "Restore filler words",
   "editor.cuts.restoreTakes": "Restore Cleo-cut takes",

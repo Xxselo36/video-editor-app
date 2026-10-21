@@ -50,6 +50,10 @@ export type JobStatus = {
   audio_levels?: { mean_db?: number | null; max_db?: number | null };
   duration?: number;
   cut_ranges?: CutRange[];
+  /** Takes a "Cleo cut" without "Cleo start" would remove, longer than a
+   *  minute: NOT cut by the analysis, the editor offers each one
+   *  (src/scene_triggers.py). Missing on older jobs. */
+  cut_suggestions?: CutRange[];
   // The user's saved timeline (job.segments + effects). Seed the editor
   // from this — cut_ranges only describe the automatic cuts.
   edit_segments?: SavedSeg[];

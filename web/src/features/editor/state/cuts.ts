@@ -16,6 +16,9 @@
  *   restorePieces / restoreKind   bulk restore: every pause, every "um",
  *                         every Cleo-cut take or every AI cut — never a
  *                         cut the user made
+ *   splitSuggestions      the analysis' suggested cuts (a long "Cleo
+ *                         cut" without "Cleo start"): still offered, or
+ *                         taken (then labelled as a Cleo-cut take)
  *
  * No micro-clips (review C11), applied by every op around what it
  * touched, so preview and export agree: a removal shorter than
@@ -83,6 +86,36 @@ export function aiCutsOf(ranges: readonly CutRange[] | null | undefined, words: 
     out.push({ start, end, kind });
   }
   return out.sort((a, b) => a.start - b.start);
+}
+
+/** A suggestion with no more than this still playing counts as taken. */
+export const SUGGESTION_SLACK_S = 0.1;
+
+/**
+ * The analysis' suggested cuts (job.cut_suggestions: a take a "Cleo cut"
+ * without "Cleo start" would remove, too long to cut on its own —
+ * src/scene_triggers.py) by whether the clips still play them: `open`
+ * ones the Text tab offers, `taken` ones (cut by the user's tap, or
+ * otherwise) labelled like the analysis' own Cleo-cut takes. Derived from
+ * the clips, so an undo offers a suggestion again. Sorted.
+ */
+export function splitSuggestions(
+  suggestions: readonly CutRange[] | null | undefined,
+  removed: readonly Range[],
+): { open: Range[]; taken: AiCut[] } {
+  const open: Range[] = [];
+  const taken: AiCut[] = [];
+  for (const r of suggestions ?? []) {
+    const start = Number(r.start);
+    const end = Number(r.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    let cut = 0;
+    for (const x of removed) cut += Math.max(0, Math.min(end, x.end) - Math.max(start, x.start));
+    if (end - start - cut > SUGGESTION_SLACK_S) open.push({ start, end });
+    else taken.push({ start, end, kind: isKind(r.kind) ? r.kind : "voice_cmd" });
+  }
+  const by = (a: Range, b: Range) => a.start - b.start;
+  return { open: open.sort(by), taken: taken.sort(by) };
 }
 
 /**

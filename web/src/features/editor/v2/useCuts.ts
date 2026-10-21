@@ -16,6 +16,7 @@ import { mediaUrl, useMediaReady } from "@/lib/api";
 import { track, type AnalyticsEvent } from "@/lib/analytics";
 import {
   aiCutsOf,
+  cutRange,
   labelRemoved,
   planCutWords,
   restoreKind,
@@ -23,6 +24,7 @@ import {
   restoreRange,
   restoreWord,
   restoreWords,
+  splitSuggestions,
   wordSafeEdge,
   type CutKind,
   type CutRefusal,
@@ -53,7 +55,14 @@ export type CutsApi = {
   /** Where a trim edge released at source time t goes: into the nearest
    *  gap between words within `radius` s (state/cuts.ts wordSafeEdge). */
   safeEdge: (t: number, radius: number) => number;
+  /** The analysis' suggested cuts still playing (job.cut_suggestions: a
+   *  long "Cleo cut" without "Cleo start"; state/cuts.ts splitSuggestions). */
+  suggestions: Range[];
+  /** Cut a suggestion (one undo step): false when nothing changed. */
+  takeSuggestion: (r: Range) => boolean;
 };
+
+const NO_RANGES: Range[] = [];
 
 /** Doc indices of the words a restore of [w.start, w.end] means (the
  *  word itself, or a selection's first word's start to its last word's
@@ -102,15 +111,26 @@ export function useCuts(opts: {
   segs: EditorSeg[];
   duration: number;
   cutRanges: CutRange[];
+  /** job.cut_suggestions: not cut by the analysis, offered (none on old jobs). */
+  cutSuggestions?: CutRange[];
   words: readonly DocWord[];
   /** removedOf(segs, duration), memoised by the shell. */
   removed: Range[];
   /** One timeline undo step (the shell's history.commit). */
   commit: (next: EditorSeg[]) => void;
 }): CutsApi {
-  const { jobId, segs, duration, cutRanges, words, removed, commit } = opts;
+  const { jobId, segs, duration, cutRanges, cutSuggestions, words, removed, commit } = opts;
   const peaks = usePeaks(jobId);
-  const ai = useMemo(() => aiCutsOf(cutRanges, words), [cutRanges, words]);
+  const suggested = useMemo(() => splitSuggestions(cutSuggestions, removed), [cutSuggestions, removed]);
+  const analysisCuts = useMemo(() => aiCutsOf(cutRanges, words), [cutRanges, words]);
+  // a taken suggestion is a Cleo-cut take like the analysis' own
+  const ai = useMemo(
+    () =>
+      suggested.taken.length
+        ? [...analysisCuts, ...suggested.taken].sort((a, b) => a.start - b.start)
+        : analysisCuts,
+    [analysisCuts, suggested.taken],
+  );
   const pieces = useMemo(() => labelRemoved(removed, ai), [removed, ai]);
   const apply = useCallback(
     (next: EditorSeg[], event: AnalyticsEvent, props: Record<string, string | number>) => {
@@ -151,5 +171,9 @@ export function useCuts(opts: {
         { kind },
       ),
     safeEdge: (t, radius) => wordSafeEdge(t, words, radius, peaks),
+    // none while the clips aren't known yet (a taken one would flash)
+    suggestions: segs.some((s) => !s.disabled && s.end > s.start) ? suggested.open : NO_RANGES,
+    // its edges are on the audio already (the analysis snapped them)
+    takeSuggestion: (r) => apply(cutRange(segs, r.start, r.end, duration), "words_cut", { what: "suggestion" }),
   };
 }

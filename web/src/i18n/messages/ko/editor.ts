@@ -114,6 +114,8 @@ export const koEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.cleoOne": "Cleo cut: 실패한 촬영분 {count}개를 잘라냈어요",
   "editor.cuts.cleoOther": "Cleo cut: 실패한 촬영분 {count}개를 잘라냈어요",
   "editor.cuts.showTake": "보기",
+  "editor.cuts.suggestion": "제안: {len} 분량을 잘라낼까요?",
+  "editor.cuts.takeSuggestion": "적용",
   "editor.cuts.restorePauses": "멈춤 구간 되돌리기",
   "editor.cuts.restoreFillers": "군말 되돌리기",
   "editor.cuts.restoreTakes": "Cleo cut 촬영분 되돌리기",

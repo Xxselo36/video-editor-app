@@ -7086,7 +7086,7 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
         raise HTTPException(400, f"invalid events payload: {e}") from e
 
     # Re-apply scene semantics to compute cut ranges + kept segments.
-    from src.scene_triggers import find_scene_cut_ranges
+    from src.scene_triggers import plan_scene_cuts
     # Trick: our scene fn expects whisper-words. We synthesize a
     # minimal word list that matches the requested command phrases so
     # the existing state-machine logic can be re-used unchanged.
@@ -7100,9 +7100,12 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
         fake_words.append({"word": "cleo", "start": cleo_start, "end": cleo_end})
         # said as a sentence of its own (src/command_gate.py)
         fake_words.append({"word": t + ".", "start": cmd_start, "end": cmd_end})
-    cut_ranges_scene, _events_out = find_scene_cut_ranges(
+    # The user's own list: a long "Cleo cut" without "Cleo start" is
+    # cut, not suggested (the suggestion is for the analysis' guesses).
+    cut_ranges_scene = plan_scene_cuts(
         fake_words, clip_duration=job.duration or None,
-    )
+        implicit_cut_max_s=float("inf"),
+    ).cuts
     # The analysis puts these edges on the audio (src/edge_snap.py); the
     # events' times alone would cut into the words around a command.
     cut_ranges_scene = _snap_scene_cuts(job, cut_ranges_scene)

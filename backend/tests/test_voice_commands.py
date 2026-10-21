@@ -14,7 +14,7 @@ import types
 
 import pytest
 
-from src.scene_triggers import find_scene_cut_ranges
+from src.scene_triggers import find_scene_cut_ranges, plan_scene_cuts
 from src.voice_triggers import (apply_voice_triggers_to_segments,
                                 collect_whisper_words, detect_voice_triggers)
 
@@ -97,14 +97,14 @@ def test_everyday_speech_is_no_command(cid, words):
     assert lost(cuts, 1.8, 40.0) == 0.0, cuts
 
 
-def test_a_phonetic_guess_never_switches_the_scene_commands_on():
+def test_a_phonetic_start_never_throws_away_what_came_before():
     # "Kleeo, Stard." is only a phonetic guess at "Cleo start": it must
-    # not cut everything before it (commands-5 (4)).
+    # not cut everything before it (commands-5 (4)); only its phrase goes.
     words = TAKE + [("Satz.", 19.0, 19.5), ("Kleeo,", 20.2, 20.5), ("Stard.", 20.6, 20.9),
                     ("Video.", 21.5, 22.0)]
     cuts, events = scene(words, dur=30)
     assert [t for t, *_ in events] == ["start"]
-    assert cuts == []
+    assert cuts == [(20.2, 20.9)]
 
 
 def test_a_phonetic_finish_cuts_only_its_phrase():
@@ -314,13 +314,14 @@ def test_cleo_start_at_time_zero_is_cut():
     assert cuts == [(0.0, 0.8)]
 
 
+@pytest.mark.parametrize("opening", ["start", "no-start"])
 @pytest.mark.parametrize("cmd,gap", [("cut.", 0.6), ("cut.", 0.9), ("keep.", 0.4)])
-def test_a_command_said_twice_cuts_both_copies(cmd, gap):
+def test_a_command_said_twice_cuts_both_copies(cmd, gap, opening):
     # "…Cleo cut. Cleo cut. Heute…" (unsure the first was heard): one
     # command, but the repeat's words must not open the next take
-    # (commands-3).
+    # (commands-3) — with or without a "Cleo start" before.
     second = 4.6 + gap
-    words = START + TAKE + [("Cleo", 4.0, 4.3), (cmd, 4.3, 4.6),
+    words = (START if opening == "start" else []) + TAKE + [("Cleo", 4.0, 4.3), (cmd, 4.3, 4.6),
                             ("Cleo", second, second + 0.3), (cmd, second + 0.3, second + 0.6),
                             ("Heute", second + 1.2, second + 1.5), ("geht's.", second + 1.5, second + 1.9)]
     cuts, events = scene(words)
@@ -340,6 +341,196 @@ def test_a_repeat_whose_times_drift_is_cut_only_up_to_the_next_word():
     cuts, _ = scene(words)
     assert covered(cuts, 4.0, 5.6)
     assert lost(cuts, 5.6, 6.3) == 0.0
+
+
+# ── without "Cleo start" (owner decision: it is optional) ───────────
+# A take begins right after the command before it (start, cut, keep,
+# finish), or at the start of the video; a said "Cleo start" still marks
+# it. A "Cleo cut" whose take began without one and would remove more
+# than IMPLICIT_CUT_MAX_S is only suggested (its phrase is cut).
+
+def plan(items, dur=60.0, **kw):
+    return plan_scene_cuts(collect_whisper_words(W(*items)), clip_duration=dur, **kw)
+
+
+def cmd(word, at):
+    """'Cleo <word>' said at `at` (0.6 s, punctuated: a command)."""
+    return [("Cleo", at, round(at + 0.3, 3)), (word, round(at + 0.3, 3), round(at + 0.6, 3))]
+
+
+def talk(a, b):
+    """Speech from a to b: a word every 0.5 s, a sentence every 4."""
+    out, t, k = [], a, 0
+    while t + 0.4 <= b:
+        k += 1
+        out.append(("Satz." if k % 4 == 0 else "Wort", round(t, 3), round(t + 0.4, 3)))
+        t += 0.5
+    return out
+
+
+NEXT = [("Neuer", 0.0, 0.3), ("Satz.", 0.3, 0.7)]
+
+
+def after(at):
+    """Two words from `at` on (kept unless something cuts them)."""
+    return [(w, round(at + s, 3), round(at + e, 3)) for w, s, e in NEXT]
+
+
+def test_without_start_a_cut_throws_away_the_take_from_the_beginning():
+    p = plan(TAKE + cmd("cut.", 4.0) + after(5.5))
+    assert p.cuts == [(0.0, 4.6)] and p.suggestions == []
+    assert [t for t, *_ in p.events] == ["restart"]
+
+
+def test_without_start_a_keep_cuts_only_its_phrase():
+    p = plan(TAKE + cmd("keep.", 4.0) + after(5.5))
+    assert p.cuts == [(4.0, 4.6)] and p.suggestions == []
+    assert lost(p.cuts, 2.0, 3.2) == 0.0 and lost(p.cuts, 5.5, 6.2) == 0.0
+
+
+def test_without_start_finish_cuts_the_rest():
+    p = plan(TAKE + cmd("finish.", 4.0) + after(5.5), dur=10.0)
+    assert p.cuts == [(4.0, 10.0)] and p.suggestions == []
+    assert lost(p.cuts, 0.0, 4.0) == 0.0
+
+
+@pytest.mark.parametrize("before", ["keep.", "cut.", "start."])
+def test_the_take_starts_right_after_the_command_before(before):
+    # a take, a command, a second take, "Cleo cut": only the second take
+    # goes (from the first command's end)
+    words = TAKE + cmd(before, 4.0) + talk(5.5, 8.0) + cmd("cut.", 9.0) + after(10.5)
+    p = plan(words)
+    assert covered(p.cuts, 4.6, 9.6) and p.suggestions == []
+    assert lost(p.cuts, 10.5, 11.2) == 0.0
+    if before == "keep.":
+        assert lost(p.cuts, 2.0, 3.2) == 0.0    # the first take stays
+
+
+def test_an_explicit_start_still_marks_the_take():
+    # a keep, chatter, "Cleo start", a take, "Cleo cut": the chatter goes
+    # with the start, the cut takes the take from the start on — the
+    # take before the keep stays
+    words = (TAKE + cmd("keep.", 4.0) + [("Kurz", 5.0, 5.4), ("Pause.", 5.4, 6.0)]
+             + cmd("start.", 7.0) + talk(8.0, 9.5) + cmd("cut.", 10.0) + after(11.5))
+    p = plan(words)
+    assert p.cuts == [(4.0, 4.6), (4.6, 7.6), (7.6, 10.6)] and p.suggestions == []
+    assert lost(p.cuts, 2.0, 3.2) == 0.0 and lost(p.cuts, 11.5, 12.2) == 0.0
+
+
+@pytest.mark.parametrize("length,suggested", [(30.0, False), (59.5, False), (60.0, False),
+                                              (60.6, True), (150.0, True)])
+def test_a_long_cut_without_start_is_only_a_suggestion(length, suggested):
+    # "Cleo cut." ending `length` s into the video, no command before it
+    at = length - 0.6
+    words = talk(0.5, at - 0.5) + cmd("cut.", at) + after(length + 1.0)
+    p = plan(words, dur=length + 10)
+    if suggested:
+        # the spoken command goes, the take stays: offered in the editor
+        assert p.cuts == [(at, length)]
+        assert p.suggestions == [(0.0, length)]
+        assert lost(p.cuts, 0.5, at - 0.5) == 0.0
+    else:
+        assert p.cuts == [(0.0, length)] and p.suggestions == []
+    assert lost(p.cuts, length + 1.0, length + 1.7) == 0.0
+
+
+def test_a_long_cut_after_a_keep_is_a_suggestion_from_the_keep():
+    words = TAKE + cmd("keep.", 4.0) + talk(5.0, 75.0) + cmd("cut.", 76.0) + after(77.5)
+    p = plan(words, dur=90)
+    assert p.cuts == [(4.0, 4.6), (76.0, 76.6)]
+    assert p.suggestions == [(4.6, 76.6)]
+
+
+def test_a_long_cut_after_a_said_start_is_cut_as_before():
+    words = (START + talk(2.0, 75.0) + cmd("cut.", 76.0) + after(77.5)
+             + cmd("keep.", 79.0) + talk(80.0, 150.0) + cmd("cut.", 151.0) + after(152.5))
+    p = plan(words, dur=160)
+    # the take from the start is cut, whatever its length; the one after
+    # the keep began without a start: suggested
+    assert covered(p.cuts, 0.0, 76.6)
+    assert p.suggestions == [(79.6, 151.6)]
+    assert lost(p.cuts, 77.5, 78.2) == 0.0 and lost(p.cuts, 80.0, 150.0) == 0.0
+
+
+def test_no_limit_cuts_every_take():
+    words = talk(0.5, 70.0) + cmd("cut.", 71.0) + after(72.5)
+    p = plan(words, dur=80, implicit_cut_max_s=float("inf"))
+    assert p.cuts == [(0.0, 71.6)] and p.suggestions == []
+    # find_scene_cut_ranges: the plan's cuts (a suggestion isn't one)
+    cuts, _events = scene(words, dur=80)
+    assert cuts == [(71.0, 71.6)]
+
+
+@pytest.mark.parametrize("cid,words", NOT_COMMANDS, ids=[c[0] for c in NOT_COMMANDS])
+def test_everyday_speech_is_no_command_without_start(cid, words):
+    p = plan(TAKE + words + TAIL, dur=40.0)
+    assert p.events == [] and p.cuts == [] and p.suggestions == []
+
+
+@pytest.mark.parametrize("case", WEAK_IN_SPEECH, ids=[c[0] for c in WEAK_IN_SPEECH])
+def test_a_weak_form_after_a_full_sentence_is_speech_without_start(case):
+    _cid, sentence, phrase, *gap = case
+    p = plan(TAKE + _after(sentence, phrase, *gap) + TAIL, dur=40.0)
+    assert p.events == [] and p.cuts == [] and p.suggestions == []
+
+
+def test_commands_without_start_still_bound_stop_go():
+    # "Cleo stop … Cleo cut … Cleo go": the scene command ends the open
+    # stop (only its phrase goes) — and now cuts its take itself
+    words = TAKE + cmd("stop.", 4.0) + [("schlecht.", 5.0, 5.5)] + cmd("cut.", 6.0) \
+        + [("Neu.", 7.0, 7.4)] + cmd("go.", 8.0) + [("Gut.", 9.0, 9.4)]
+    assert [p.kind for p in stopgo(words)] == ["stop", "go"]
+    p = plan(words)
+    assert p.cuts == [(0.0, 6.6)]
+    assert lost(p.cuts, 7.0, 9.4) == 0.0
+
+
+# ── the suggestion through the analysis to the editor ───────────────
+
+def test_cut_suggestions_of_the_analysis():
+    from backend import pipeline
+    res = types.SimpleNamespace(cut_suggestions=[
+        {"start": -0.2, "end": 70.0}, {"start": 80.0, "end": 150.0},
+        {"start": 160.0, "end": 260.0}, {"start": 5, "end": 5}, {"start": "x"}])
+    segs = [(0.0, 75.0), (80.0, 80.05), (155.0, 200.0)]
+    # the second is left out by the timeline already (all but 50 ms),
+    # the third ends at the video's end, broken ones are dropped
+    assert pipeline.cut_suggestions_of(res, segs, 200.0) == [
+        {"id": 0, "start": 0.0, "end": 70.0, "kind": "voice_cmd"},
+        {"id": 1, "start": 160.0, "end": 200.0, "kind": "voice_cmd"}]
+    assert pipeline.cut_suggestions_of(types.SimpleNamespace(), segs, 200.0) == []
+
+
+def test_analyze_only_hands_the_suggestion_to_the_job(tmp_path, monkeypatch):
+    from backend import pipeline
+    from test_analysis_doc import _clip
+
+    def analyze_video(video_path, **kw):
+        return types.SimpleNamespace(
+            segments=[(0.2, 5.6)], subtitles=[], duration=6.0, language="de",
+            scene_events=[{"type": "restart", "start": 5.0, "end": 5.6}],
+            cut_suggestions=[{"start": 0.0, "end": 5.6}], words=[], fillers=[])
+    monkeypatch.setattr(pipeline, "analyze_video", analyze_video)
+    import backend.llm as llm
+    monkeypatch.setattr(llm, "cleanup_transcript", lambda subs, language=None: {})
+    res = pipeline.analyze_only(str(_clip(tmp_path / "in.mp4", 6.0)), str(tmp_path / "job"), {})
+    assert res["cut_suggestions"] == [{"id": 0, "start": 0.0, "end": 5.6, "kind": "voice_cmd"}]
+    assert pipeline.analysis_fields(res)["cut_suggestions"] == res["cut_suggestions"]
+    # the segments stay as the analysis made them: a suggestion is not cut
+    assert [tuple(s) for s in res["segments"]] == [(0.2, 5.6)]
+
+
+def test_the_job_serves_its_suggestions(client):
+    from backend.jobs import store
+    job = store.create("/in.mp4", {})
+    sugg = [{"id": 0, "start": 0.0, "end": 70.0, "kind": "voice_cmd"}]
+    store.update(job.id, status="awaiting_review", duration=80.0,
+                 segments=[(0.0, 80.0)], cut_suggestions=sugg)
+    assert store.get(job.id).cut_suggestions == sugg
+    assert client.get(f"/jobs/{job.id}").json()["cut_suggestions"] == sugg
+    # a job from before: none
+    old = store.create("/in.mp4", {})
+    assert client.get(f"/jobs/{old.id}").json()["cut_suggestions"] == []
 
 
 # ── stop … go (voice_triggers) ──────────────────────────────────────

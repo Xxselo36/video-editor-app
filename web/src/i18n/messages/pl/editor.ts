@@ -114,6 +114,8 @@ export const plEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.cleoOne": "Cleo cut: usunięte nieudane ujęcia: {count}",
   "editor.cuts.cleoOther": "Cleo cut: usunięte nieudane ujęcia: {count}",
   "editor.cuts.showTake": "Pokaż",
+  "editor.cuts.suggestion": "Propozycja: usunąć {len}?",
+  "editor.cuts.takeSuggestion": "Zastosuj",
   "editor.cuts.restorePauses": "Przywróć pauzy",
   "editor.cuts.restoreFillers": "Przywróć wtrącenia",
   "editor.cuts.restoreTakes": "Przywróć ujęcia Cleo cut",

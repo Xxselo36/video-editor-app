@@ -21,6 +21,8 @@ import {
   LONG_WORD_S,
   planCutWords,
   seamIsCut,
+  splitSuggestions,
+  SUGGESTION_SLACK_S,
   textMarks,
   tidy,
   wordSafeEdge,
@@ -131,6 +133,48 @@ describe("what was removed and why", () => {
     expect(countKinds(pieces)).toEqual({ silence: 2, filler: 0, voice_cmd: 1, bad_take: 0, user: 2 });
     expect(gapKind(pieces, 4, 8)).toBe("voice_cmd");
     expect(gapKind(pieces, 9, 10)).toBe("user");
+  });
+});
+
+describe("suggested cuts (a long “Cleo cut” without “Cleo start”)", () => {
+  const D = 100;
+  const sugg = [{ id: 0, start: 10, end: 80, kind: "voice_cmd" }];
+  const pause = aiCutsOf([{ id: 0, start: 30, end: 31, kind: "silence" }], []);
+  const segs = [seg("a", 0, 30), seg("b", 31, D)]; // the pause 30-31 is cut
+
+  it("is offered while it plays; the cuts inside it keep their reason", () => {
+    const removed = removedRanges(segs, D);
+    expect(splitSuggestions(sugg, removed)).toEqual({ open: [{ start: 10, end: 80 }], taken: [] });
+    expect(labelRemoved(removed, pause)).toEqual([{ start: 30, end: 31, kind: "silence" }]);
+  });
+
+  it("one tap cuts it: a Cleo-cut take then; the clips before it offer it again (undo)", () => {
+    const next = cutRange(segs, 10, 80, D);
+    expect(spans(next)).toEqual([
+      [0, 10],
+      [80, 100],
+    ]);
+    const removed = removedRanges(next, D);
+    const { open, taken } = splitSuggestions(sugg, removed);
+    expect(open).toEqual([]);
+    expect(taken).toEqual([{ start: 10, end: 80, kind: "voice_cmd" }]);
+    expect(labelRemoved(removed, [...pause, ...taken])).toEqual([{ start: 10, end: 80, kind: "voice_cmd" }]);
+    expect(splitSuggestions(sugg, removedRanges(segs, D)).open).toHaveLength(1);
+  });
+
+  it("counts as taken with no more than SUGGESTION_SLACK_S still playing", () => {
+    const almost = [seg("a", 0, 10), seg("b", 80 - SUGGESTION_SLACK_S / 2, D)];
+    expect(splitSuggestions(sugg, removedRanges(almost, D)).taken).toHaveLength(1);
+    const partly = [seg("a", 0, 40), seg("b", 79, D)];
+    expect(splitSuggestions(sugg, removedRanges(partly, D)).open).toEqual([{ start: 10, end: 80 }]);
+  });
+
+  it("none on old jobs; broken ones are dropped", () => {
+    expect(splitSuggestions(undefined, [])).toEqual({ open: [], taken: [] });
+    expect(splitSuggestions([{ id: 1, start: 5, end: 5 }, { id: 2, start: Number.NaN, end: 9 }], [])).toEqual({
+      open: [],
+      taken: [],
+    });
   });
 });
 

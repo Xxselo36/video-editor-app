@@ -114,6 +114,8 @@ export const hiEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.cleoOne": "Cleo cut: {count} ख़राब टेक हटाया गया",
   "editor.cuts.cleoOther": "Cleo cut: {count} ख़राब टेक हटाए गए",
   "editor.cuts.showTake": "दिखाएँ",
+  "editor.cuts.suggestion": "सुझाव: {len} हटाएँ?",
+  "editor.cuts.takeSuggestion": "लागू करें",
   "editor.cuts.restorePauses": "ठहराव वापस लाएँ",
   "editor.cuts.restoreFillers": "फ़िलर शब्द वापस लाएँ",
   "editor.cuts.restoreTakes": "Cleo cut वाले टेक वापस लाएँ",

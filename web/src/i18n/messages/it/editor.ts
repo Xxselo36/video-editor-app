@@ -114,6 +114,8 @@ export const itEditor: Partial<Record<EditorKey, string>> = {
   "editor.cuts.cleoOne": "Cleo cut: {count} ripresa sbagliata rimossa",
   "editor.cuts.cleoOther": "Cleo cut: {count} riprese sbagliate rimosse",
   "editor.cuts.showTake": "Mostra",
+  "editor.cuts.suggestion": "Suggerimento: togliere {len}?",
+  "editor.cuts.takeSuggestion": "Applica",
   "editor.cuts.restorePauses": "Recupera le pause",
   "editor.cuts.restoreFillers": "Recupera gli intercalari",
   "editor.cuts.restoreTakes": "Recupera le riprese Cleo cut",
