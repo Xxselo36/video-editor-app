@@ -456,6 +456,19 @@ def test_media_secret_is_persisted(monkeypatch):
     assert auth.media_token("user_a") != first
 
 
+def test_db_keys_ignore_the_first_generation(monkeypatch):
+    # rotated after the 2026-10-21 Railway incident: the old rows stay in
+    # the DB (and in its dumps) but sign nothing any more
+    from backend import accounts
+    monkeypatch.delenv("CLEO_MEDIA_SECRET", raising=False)
+    accounts.meta_set("media_secret", "a" * 64)
+    accounts.meta_set("checkout_secret", "b" * 64)
+    media, checkout = accounts.media_secret(), accounts.checkout_secret()
+    assert len(media) == 64 and media != "a" * 64
+    assert len(checkout) == 64 and checkout != "b" * 64
+    assert accounts.meta_get("media_secret") == "a" * 64  # untouched
+
+
 def test_access_log_redacts_media_tokens():
     f = auth.RedactMediaTokens()
     rec = logging.LogRecord(

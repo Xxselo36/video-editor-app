@@ -296,6 +296,15 @@ def db_identity() -> str:
     return f"pg:{sysid}:{row['d']}:{row['o']}"
 
 
+# The DB-held keys' meta names. Second generation: the first rows
+# ("media_secret", "checkout_secret") are no longer read, so the next
+# start generates fresh keys (rotated after Railway's 2026-10-21
+# environment-variable incident, which exposed the database's
+# credentials). Rotate again by bumping the suffix.
+MEDIA_SECRET_KEY = "media_secret_2"
+CHECKOUT_SECRET_KEY = "checkout_secret_2"
+
+
 def media_secret() -> str:
     """Key for media-URL tokens (backend/auth.py). CLEO_MEDIA_SECRET wins;
     otherwise one is generated once and kept in the DB, so tokens stay
@@ -303,13 +312,13 @@ def media_secret() -> str:
     env = os.environ.get("CLEO_MEDIA_SECRET", "").strip()
     if env:
         return env
-    return meta_get_or_create("media_secret", lambda: secrets.token_hex(32))
+    return meta_get_or_create(MEDIA_SECRET_KEY, lambda: secrets.token_hex(32))
 
 
 def checkout_secret() -> str:
     """Key that signs the user id in our checkouts' custom data
     (backend/billing.py). Generated once, kept in the DB."""
-    return meta_get_or_create("checkout_secret",
+    return meta_get_or_create(CHECKOUT_SECRET_KEY,
                               lambda: secrets.token_hex(32))
 
 
