@@ -482,11 +482,19 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
     // mouse click select() presses (page.mouse: pointerType "mouse" on the
     // phone too), 90 ms after the release — and nothing was selected. Here
     // on both projects: the settle forced at the release and held where it
-    // starts (the phone strip often released without one when let run, so
-    // the CI path wasn't hit there), the press the same mouse press.
+    // starts, the press the same mouse press. A release settles unless the
+    // trim was magnified (held MAGNIFY_MS: the zoom goes back instead):
+    // round 5 trimmed clip 0's end to 25 px on the phone, into the strip's
+    // edge zone (EDGE_SCROLL_PX: the strip at Fit can't scroll, the moves
+    // there don't re-arm the magnifier), and the slow touch moves of a busy
+    // run (60–120 ms each) let it fire before the release now and then —
+    // no settle (1 in 10–20). Clip 1 is trimmed instead, its end handle
+    // well inside the view at the release: every move re-arms the
+    // magnifier, the release comes 150 ms after the last.
+    const T = 1;
     const job = await stub.seed("review_speech");
     await open(page, job.id);
-    const clip = await select(page, 0);
+    const clip = await select(page, T);
     // the settle caught where it starts (its beat: everything where it was
     // let go) and held there, so the click below is pressed on a clip as
     // drawn — the press ends the settle at once (settleNow), and the clip
@@ -500,23 +508,26 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
         return a;
       };
     });
-    // most of clip 0 trimmed away: the clips after it move far
+    // most of clip 1 trimmed away: the clips after it move far
     const w0 = (await clip.boundingBox())!.width;
     const h = center((await clip.getByTestId("clip-trim-end").boundingBox())!);
+    const view = (await page.getByTestId("timeline-scroll").boundingBox())!;
+    const toX = h.x - (w0 - 20);
+    expect(toX, "the release well inside the view (not the edge zone)").toBeGreaterThan(view.x + 48);
     const p = await press(page, h.x, h.y);
-    await p.to(h.x - (w0 - 20));
+    await p.to(toX);
     await page.waitForTimeout(150);
     await p.up();
     const settling = () => page.getByTestId("timeline-scroll").evaluate((el) => el.getAnimations({ subtree: true }).some((a) => a.id === "ed-settle"));
     await expect.poll(settling, { timeout: 3_000 }).toBe(true);
     // a clip whose middle as drawn now is off its own box as laid out
     // (where it goes when the settle ends)
-    const i = await clipsOf(page).evaluateAll((els) => {
+    const i = await clipsOf(page).evaluateAll((els, trimmed) => {
       let best = -1;
       let most = 0;
       els.forEach((el, n) => {
         const c = el as HTMLElement;
-        if (n === 0 || !c.offsetParent) return;
+        if (n === trimmed || !c.offsetParent) return;
         const drawn = c.getBoundingClientRect();
         const left = (c.offsetParent as HTMLElement).getBoundingClientRect().left + c.offsetLeft;
         const mid = drawn.left + drawn.width / 2;
@@ -524,8 +535,8 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
         if (off > most) [best, most] = [n, off];
       });
       return best;
-    });
-    expect(i, "no clip moves off its own box in the settle").toBeGreaterThan(0);
+    }, T);
+    expect(i, "no clip moves off its own box in the settle").toBeGreaterThanOrEqual(0);
     const clipI = clipsOf(page).nth(i);
     const drawn = (await clipI.boundingBox())!;
     await page.mouse.move(drawn.x + drawn.width / 2, drawn.y + drawn.height / 2);

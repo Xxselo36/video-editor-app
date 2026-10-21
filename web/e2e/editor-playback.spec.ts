@@ -35,27 +35,41 @@ import {
 import type { Page, Request } from "@playwright/test";
 
 type Sample = [wall: number, t: number, paused: boolean, rate: number, volume: number, muted: boolean];
-type Shown = [wall: number, mediaTime: number];
+type Shown = [wall: number, mediaTime: number, presentedFrames: number, presentationTime: number];
 
 /** Record [wall ms, currentTime, paused, rate, volume, muted] every frame,
- *  and every frame the video presents ([wall ms, mediaTime]:
- *  requestVideoFrameCallback — what was on screen, not the clock). */
+ *  every frame the video presents ([wall ms, mediaTime, presentedFrames,
+ *  presentationTime]: requestVideoFrameCallback — what was on screen, not
+ *  the clock; a busy page runs one callback for two frames now and then,
+ *  presentedFrames counts both), and every seek asked ([wall ms, to]). */
 async function startSampler(page: Page) {
   await editorVideo(page).evaluate((el) => {
     const v = el as HTMLVideoElement;
-    const w = window as unknown as { __s: Sample[]; __f: Shown[] };
+    const w = window as unknown as { __s: Sample[]; __f: Shown[]; __seeks: [number, number][] };
     w.__s = [];
     w.__f = [];
+    w.__seeks = [];
     const f = () => {
       w.__s.push([performance.now(), v.currentTime, v.paused, v.playbackRate, v.volume, v.muted]);
       requestAnimationFrame(f);
     };
     requestAnimationFrame(f);
     const shown: VideoFrameRequestCallback = (_now, md) => {
-      w.__f.push([performance.now(), md.mediaTime]);
+      w.__f.push([performance.now(), md.mediaTime, md.presentedFrames, md.presentationTime]);
       v.requestVideoFrameCallback(shown);
     };
     v.requestVideoFrameCallback(shown);
+    const ct = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime")!;
+    Object.defineProperty(v, "currentTime", {
+      configurable: true,
+      get() {
+        return ct.get!.call(this);
+      },
+      set(x: number) {
+        w.__seeks.push([performance.now(), x]);
+        ct.set!.call(this, x);
+      },
+    });
   });
 }
 const now = (page: Page) => page.evaluate(() => performance.now());
@@ -65,6 +79,56 @@ const samples = async (page: Page, from: number): Promise<Sample[]> =>
 /** Frames presented since `from`. */
 const presented = async (page: Page, from: number): Promise<Shown[]> =>
   (await page.evaluate(() => (window as unknown as { __f: Shown[] }).__f)).filter((s) => s[0] >= from);
+/** Seeks asked since `from`. */
+const seeksSince = async (page: Page, from: number): Promise<[number, number][]> =>
+  (await page.evaluate(() => (window as unknown as { __seeks: [number, number][] }).__seeks)).filter((s) => s[0] >= from);
+
+/**
+ * The last frame of the old position before a jump to frame `to` that was
+ * on screen, and the frames in [cut, to) presented (cut ones), 30 fps.
+ * Callbacks first: the frames they report (mediaTime). A frame presented
+ * without a callback (presentedFrames counts it: a busy page runs one
+ * callback for two now and then) between the last kept frame's callback and
+ * the landing's counts only when its place is certain: frames are presented
+ * in order, on their slot by the frame clock or after it, never before
+ * (the slot: the earliest presentationTime − k·frame of the frames played
+ * before, one after the other), and the new position presents at most one
+ * a refresh after the jump was asked — those presented before the landing
+ * frame less the new position's are the old position's frames after the
+ * last kept one, kept ones when the landing came before the first cut
+ * frame's slot.
+ */
+function oldEnd(fr: Shown[], seeks: [number, number][], cut: number, to: number) {
+  const fm = 1000 / 30;
+  const kOf = (m: number) => Math.round(m * 30);
+  const cutShown = fr.filter(([, m]) => kOf(m) >= cut && kOf(m) < to).map(([, m]) => kOf(m));
+  const landed = fr.findIndex(([, m]) => kOf(m) >= to);
+  let i = landed - 1;
+  while (i >= 0 && kOf(fr[i][1]) >= cut) i--;
+  if (landed <= 0 || i < 0) return { landed, last: null, cutShown, unseen: 0 };
+  const k = kOf(fr[i][1]);
+  const [, , pfL, ptL] = fr[landed];
+  const unseen = pfL - fr[i][2] - 1;
+  let credited = 0;
+  let why = "";
+  const jump = seeks.find(([at, x]) => kOf(x) >= to && at <= fr[landed][0]);
+  if (unseen > 0 && jump) {
+    // the frame clock from the frames before it (each one frame and one
+    // presentation after the one before)
+    const run: number[] = [];
+    for (let j = i; j > 0 && run.length < 8; j--) {
+      const [, m, pf, pt] = fr[j];
+      if (kOf(m) - kOf(fr[j - 1][1]) !== 1 || pf - fr[j - 1][2] !== 1) break;
+      run.push(pt - kOf(m) * fm);
+    }
+    // (the new position's: at most one a refresh — 60 Hz, less jitter)
+    const fresh = Math.max(0, Math.floor((ptL - jump[0]) / 15));
+    const before = run.length >= 3 ? Math.min(...run) + cut * fm - ptL : NaN;
+    if (before > 4) credited = Math.max(0, unseen - fresh);
+    why = `run ${run.length}, landing ${before.toFixed(1)} ms before the first cut frame's slot, ${(ptL - jump[0]).toFixed(1)} ms after the jump`;
+  }
+  return { landed, last: k + credited, cutShown, unseen, credited, why };
+}
 
 async function seekAndPlay(page: Page, t: number) {
   await userSeek(page, t);
@@ -128,15 +192,23 @@ test.describe("proxy playback follows the edit list", () => {
       // (requestVideoFrameCallback mediaTime): round 4 read it from the
       // last animation-frame sample of the clock before the jump, up to a
       // refresh and a half stale on two busy workers (5.846, 5.894 with
-      // 178 on screen) — the same bound (> 5.9 s), exact. And no cut frame
-      // presented: none in (6.02, 6.98).
+      // 178 on screen) — the same bound (> 5.9 s), exact. Round 5 counted
+      // a frame presented without a callback as dropped (one in 15 runs:
+      // 176's callback, then the landing's with presentedFrames 3 on —
+      // 177 and 178 on screen, 179 alone dropped); now those count where
+      // their place is certain (oldEnd). And no cut frame presented: none
+      // on frames 180–209 (round 5: mediaTime in (6.02, 6.98) — frame 180,
+      // 6.0, passed).
       const fr = await presented(page, w0);
-      const landed = fr.findIndex(([, m]) => m >= 7.0);
-      expect(landed).toBeGreaterThan(0);
-      expect(fr.filter(([, m]) => m > 6.02 && m < 6.98)).toEqual([]);
-      const lastKept = fr.slice(0, landed).filter(([, m]) => m < 6.0).pop();
-      expect(lastKept).toBeTruthy();
-      expect(Math.round(lastKept![1] * 30)).toBeGreaterThanOrEqual(177);
+      const end = oldEnd(fr, await seeksSince(page, w0), 180, 210);
+      test.info().annotations.push({ type: "join 6–7", description: JSON.stringify(end) });
+      expect(end.landed).toBeGreaterThan(0);
+      expect(end.cutShown, "cut frames presented").toEqual([]);
+      expect(end.last, JSON.stringify(end)).not.toBeNull();
+      expect(end.last!, JSON.stringify(end)).toBeGreaterThanOrEqual(177);
+      // (frames presented without a callback before the first cut frame's
+      // slot: never more than the kept ones after the last seen)
+      expect(end.last!, JSON.stringify(end)).toBeLessThanOrEqual(179);
     });
 
     await test.step("the caption preview follows source time", async () => {

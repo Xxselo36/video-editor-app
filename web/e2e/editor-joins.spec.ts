@@ -216,7 +216,8 @@ function check({ frames, raf }: Run, segs: Seg[], leapBy = 2) {
   const shown = new Set(frames.map(([m]) => kOf(m)));
   // clip ends that jump (not a split, not the timeline's end): how many of
   // their last kept frames never showed
-  const ends = range.filter((r, i) => i + 1 < range.length && range[i + 1][0] !== r[1]);
+  const endAt = range.map((_, i) => i).filter((i) => i + 1 < range.length && range[i + 1][0] !== range[i][1]);
+  const ends = endAt.map((i) => range[i]);
   const dropsAt = ends.map(([a, b]) => {
     let n = 0;
     for (let k = b - 1; k >= a && !shown.has(k); k--) n++;
@@ -227,6 +228,11 @@ function check({ frames, raf }: Run, segs: Seg[], leapBy = 2) {
   const longer = dropsAt.filter((_, i) => ends[i][1] - ends[i][0] > 3);
   const lastShown = longer.filter((n) => n === 0).length;
   const dropped2 = dropsAt.filter((n, i) => n >= 2 && ends[i][1] - ends[i][0] > 2).length;
+  // the same at the clips playing at 1x (all of them in a 1x edit)
+  const at1x = (i: number) => (segs[endAt[i]].speed ?? 1) === 1;
+  const longer1x = dropsAt.filter((_, i) => at1x(i) && ends[i][1] - ends[i][0] > 3);
+  const lastShown1x = longer1x.filter((n) => n === 0).length;
+  const dropped2at1x = dropsAt.filter((n, i) => at1x(i) && n >= 2 && ends[i][1] - ends[i][0] > 2).length;
   // frames the pipeline itself skipped inside a clip (a busy machine)
   let skipped = 0;
   for (let i = 1; i < frames.length; i++) {
@@ -234,7 +240,7 @@ function check({ frames, raf }: Run, segs: Seg[], leapBy = 2) {
     const b = kOf(frames[i][0]);
     if (b - a >= 2 && range.some(([s, e]) => a >= s && b < e)) skipped++;
   }
-  return { cut, cutInStall, cutShort, joins, lastShown, ends: longer.length, dropped2, skipped };
+  return { cut, cutInStall, cutShort, joins, lastShown, ends: longer.length, dropped2, skipped, lastShown1x, ends1x: longer1x.length, dropped2at1x };
 }
 
 async function seedMany(stub: import("./support/fixtures").Stub, segs: Seg[]) {
@@ -293,5 +299,11 @@ test.describe("proxy playback: no cut frame at any join (wordcuts10)", TAG, () =
     expect(r.joins).toBeGreaterThanOrEqual(50);
     expect(r.cut, "frames from cut ranges were on screen").toEqual([]);
     expect(r.cutInStall + r.cutShort).toBeLessThanOrEqual(2);
+    // The 1x clips — each after a sped-up one — as in a 1x edit: at most
+    // their last kept frame dropped, mostly none (round 5 dropped two at
+    // 15–18 of their 18 joins: the 2x callbacks read as heavy load, the
+    // margin held into them), the same slack on a busy machine.
+    expect(r.dropped2at1x).toBeLessThanOrEqual(r.skipped <= 3 ? 1 : Math.max(4, Math.ceil(r.skipped / 2)));
+    expect(r.lastShown1x / r.ends1x).toBeGreaterThan(r.skipped <= 3 ? 0.75 : 0.5);
   });
 });
