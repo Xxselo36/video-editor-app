@@ -5,6 +5,7 @@ import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { removedRanges } from "@/features/editor/v2/model";
 import {
   aiCutsOf,
+  bulkPieces,
   commandPhrases,
   countKinds,
   cutBy,
@@ -13,6 +14,7 @@ import {
   cutWords,
   gapKind,
   labelRemoved,
+  menuCounts,
   MIN_ISLAND_S,
   MIN_REMOVAL_S,
   restoreKind,
@@ -232,6 +234,30 @@ describe("which take chips are botched takes (review R5)", () => {
 
   it("on a job without scene events every take piece with a word counts", () => {
     expect(realTakes(pieces, words, commandPhrases(undefined))).toEqual([pieces[0], pieces[1], pieces[2]]);
+  });
+
+  it("the cuts menu counts and restores the botched takes only, never a lone command phrase (review F4)", () => {
+    const takes = realTakes(pieces, words, phrases);
+    const user: Piece = { start: 12.5, end: 13, kind: "user" };
+    const all = [...pieces, user];
+    // "Restore Cleo-cut takes 1" (the note's "1 botched take"), not 3
+    expect(menuCounts(all, takes)).toEqual({ silence: 1, filler: 0, voice_cmd: 1, bad_take: 0, user: 1, ai: 5 });
+    expect(bulkPieces(all, takes, "voice_cmd")).toEqual([pieces[1]]);
+    expect(bulkPieces(all, takes, "bad_take")).toEqual([]);
+    expect(bulkPieces(all, takes, "silence")).toEqual([pieces[4]]);
+    // "Restore all AI cuts": every analysis cut, never the user's
+    expect(bulkPieces(all, takes, "ai")).toEqual(pieces);
+    // as one op: the take comes back, the keep's and the suggestion's phrases stay cut
+    const D = 14;
+    const clips = [seg("a", 0, 0.4), seg("b", 1.5, 1.9), seg("c", 6.2, 7.9), seg("d", 9.1, 9.5), seg("e", 12, 12.5), seg("f", 13, D)];
+    const back = removedRanges(restoreKind(clips, bulkPieces(all, takes, "voice_cmd"), "voice_cmd", D), D);
+    expect(back.map((r) => [r.start, r.end])).toEqual([
+      [0.4, 1.5],
+      [1.9, 3.9],
+      [7.9, 9.1],
+      [9.5, 12],
+      [12.5, 13],
+    ]);
   });
 });
 

@@ -90,6 +90,8 @@ export const hiEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "एडिट",
   "editor.tab.text": "टेक्स्ट और कट",
   "editor.tab.style": "स्टाइल",
+  "editor.tab.suggestOne": "{count} सुझाव बाक़ी",
+  "editor.tab.suggestOther": "{count} सुझाव बाक़ी",
   "editor.cut.tooShort": "अकेले काटने के लिए बहुत छोटा है – बगल वाला शब्द भी चुनें",
   "editor.cut.everything": "सब कुछ नहीं काट सकते – वीडियो में कुछ रहना चाहिए",
   "editor.cut.alreadyCut": "वीडियो से पहले ही कट चुका है",

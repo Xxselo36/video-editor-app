@@ -90,6 +90,8 @@ export const ptEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "Editar",
   "editor.tab.text": "Texto e cortes",
   "editor.tab.style": "Estilo",
+  "editor.tab.suggestOne": "{count} sugestão pendente",
+  "editor.tab.suggestOther": "{count} sugestões pendentes",
   "editor.cut.tooShort": "Curta demais para cortar sozinha – selecione também a palavra ao lado",
   "editor.cut.everything": "Não dá para cortar tudo – algo precisa ficar no vídeo",
   "editor.cut.alreadyCut": "Já foi cortado do vídeo",

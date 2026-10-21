@@ -1421,6 +1421,19 @@
 .mtab[aria-expanded="true"] {
   color: var(--ed-text-1);
 }
+/* the icon of a tab; a count on it (the Text tab's open suggestions) is
+   a clip badge (.badge) at its corner, on the raised surface (the clip
+   badge's own dark fill vanishes on the panel) */
+.mtabIcon {
+  position: relative;
+  display: inline-flex;
+}
+.mtabIcon .badge {
+  position: absolute;
+  left: 12px;
+  top: -8px;
+  background: var(--ed-raised);
+}
 .sheet {
   position: absolute;
   left: 0;
@@ -1704,6 +1717,13 @@
   font-size: 12px;
   line-height: 18px;
   color: var(--ed-text-2);
+}
+/* a note's reason, under its text (CutSuggestionNote) */
+.noteWhy {
+  margin: -4px 0 6px 20px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ed-text-3);
 }
 .linkBtn {
   color: var(--ed-text-1);

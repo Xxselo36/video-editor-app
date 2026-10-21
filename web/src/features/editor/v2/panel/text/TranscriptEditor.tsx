@@ -20,8 +20,9 @@
  * text (Show jumps to the first one; a spoken command removed on its own
  * is no take: state/cuts.ts realTakes). What a command before any "Cleo
  * start" would remove beyond a minute isn't cut by the analysis:
- * "Suggestion: remove 1:12? · Show · Apply" sits under it
- * (CutSuggestionNote; Apply cuts it, focus moves on to the next one).
+ * "Suggestion: remove 1:12? · Show · Apply" sits under it, why it asks
+ * in a quiet line below (SuggestionNotes; Apply cuts it, focus moves on
+ * to the next one).
  * Cuts are clip edits (useCuts): timeline undo steps.
  *
  * Every change is one pure op of state/doc.ts applied through `apply`
@@ -50,14 +51,14 @@ import {
 import { usePlayheadEffect, type PlayheadStore } from "@/features/editor/state/playhead";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
-import { realTakes, textMarks, type Chip, type CutRefusal, type OpenSuggestion } from "@/features/editor/state/cuts";
+import { textMarks, type Chip, type CutRefusal, type OpenSuggestion } from "@/features/editor/state/cuts";
 import { cutTimeOfSource, decimalSeparator, fmtClock } from "../../model";
 import type { CutsApi } from "../../useCuts";
 import { CutsHeader, plural } from "../CutsHeader";
 import type { SpanMark } from "../../useSpanFill";
 import { FindReplace } from "./FindReplace";
 import { SelectionBar } from "./SelectionBar";
-import { CutSuggestionNote } from "./CutSuggestionNote";
+import { SuggestionNotes } from "./CutSuggestionNote";
 import { composing, WordRow, type EditKeys, type RowMarks } from "./WordSpan";
 import s from "../../editor.module.css";
 
@@ -197,8 +198,7 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     return m;
   };
   // botched takes: a spoken command removed on its own is none (review R5)
-  const phrases = p.cuts.phrases;
-  const takes = useMemo(() => realTakes(pieces, words, phrases), [pieces, words, phrases]);
+  const takes = p.cuts.takes;
 
   // ── selection and inline edit (word ids: stable across edits) ──────
   const [sel, setSel] = useState<Sel | null>(null);
@@ -242,7 +242,7 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
   useEffect(() => {
     const since = focusAfterTake.current;
     if (!since) return;
-    // the "Cleo cut" note follows the (deferred) cut marks: a few renders
+    // the next note can take a render or two to show
     if (performance.now() - since > FOCUS_AFTER_TAKE_MS) {
       focusAfterTake.current = 0;
       return;
@@ -793,16 +793,13 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
               </button>
             </div>
           )}
-          {p.cuts.suggestions.map((r) => (
-            // not cut by the analysis: a command before any "Cleo start" would remove over a minute
-            <CutSuggestionNote
-              key={`${r.start}-${r.end}`}
-              r={r}
-              t={t}
-              onShow={() => showAt(r.start)}
-              onTake={() => takeSuggestion(r)}
-            />
-          ))}
+          {/* not cut by the analysis: a command before any "Cleo start" would remove over a minute */}
+          <SuggestionNotes
+            suggestions={p.cuts.suggestions}
+            t={t}
+            onShow={(r) => showAt(r.start)}
+            onTake={takeSuggestion}
+          />
           {p.hint && (
             <div className={s.hint} data-testid="ed-hint">
               <Lightbulb size={14} strokeWidth={1.75} className={s.hintIcon} aria-hidden />

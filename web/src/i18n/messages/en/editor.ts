@@ -97,6 +97,8 @@ export const enEditor = {
   "editor.panel": "Edit",
   "editor.tab.text": "Text & cuts",
   "editor.tab.style": "Style",
+  "editor.tab.suggestOne": "{count} suggestion open",
+  "editor.tab.suggestOther": "{count} suggestions open",
   "editor.cut.tooShort": "Too short to cut on its own – select the word next to it too",
   "editor.cut.everything": "Can't cut all of it – something has to stay in the video",
   "editor.cut.alreadyCut": "Already cut from the video",

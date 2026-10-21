@@ -90,6 +90,8 @@ export const nlEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "Bewerken",
   "editor.tab.text": "Tekst en knips",
   "editor.tab.style": "Stijl",
+  "editor.tab.suggestOne": "{count} suggestie open",
+  "editor.tab.suggestOther": "{count} suggesties open",
   "editor.cut.tooShort": "Te kort om los te knippen – selecteer ook het woord ernaast",
   "editor.cut.everything": "Alles knippen kan niet – er moet iets in de video blijven",
   "editor.cut.alreadyCut": "Al uit de video geknipt",

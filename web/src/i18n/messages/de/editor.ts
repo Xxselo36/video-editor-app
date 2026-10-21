@@ -90,6 +90,8 @@ export const deEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "Bearbeiten",
   "editor.tab.text": "Text & Schnitte",
   "editor.tab.style": "Stil",
+  "editor.tab.suggestOne": "{count} Vorschlag offen",
+  "editor.tab.suggestOther": "{count} Vorschläge offen",
   "editor.cut.tooShort": "Zu kurz, um es allein zu schneiden – markiere das Wort daneben mit",
   "editor.cut.everything": "Nicht alles schneidbar – etwas muss im Video bleiben",
   "editor.cut.alreadyCut": "Schon aus dem Video geschnitten",

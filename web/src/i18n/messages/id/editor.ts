@@ -90,6 +90,8 @@ export const idEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "Edit",
   "editor.tab.text": "Teks & potongan",
   "editor.tab.style": "Gaya",
+  "editor.tab.suggestOne": "{count} saran terbuka",
+  "editor.tab.suggestOther": "{count} saran terbuka",
   "editor.cut.tooShort": "Terlalu pendek untuk dipotong sendiri – pilih juga kata di sebelahnya",
   "editor.cut.everything": "Tidak bisa memotong semuanya – harus ada yang tersisa di video",
   "editor.cut.alreadyCut": "Sudah dipotong dari video",

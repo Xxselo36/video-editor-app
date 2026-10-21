@@ -90,6 +90,8 @@ export const jaEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "編集",
   "editor.tab.text": "テキストとカット",
   "editor.tab.style": "スタイル",
+  "editor.tab.suggestOne": "未確認の提案：{count}件",
+  "editor.tab.suggestOther": "未確認の提案：{count}件",
   "editor.cut.tooShort": "短すぎて単独ではカットできません。隣の単語も一緒に選択してください",
   "editor.cut.everything": "すべてはカットできません。動画に何か残す必要があります",
   "editor.cut.alreadyCut": "すでに動画からカットされています",

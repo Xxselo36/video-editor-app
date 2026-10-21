@@ -239,6 +239,10 @@ def test_a_long_cut_without_start_is_offered_not_cut(tmp_path, monkeypatch):
     truth = [w for w in REC2_TRUTH if not 3.5 < w[1] < 4.5]
     res = _analysis(tmp_path, monkeypatch, whisper, truth, "smooth", "de")
     (sugg,) = res.cut_suggestions
+    # the events as found and heard (a posted-back one acts the same:
+    # /recompute-scenes, review I2)
+    assert res.scene_events and all(
+        e["source"] == "analysis" and e["heard"] == "clear" for e in res.scene_events), res.scene_events
     # from the pause after "Cleo keep." to the one after "Cleo cut."
     assert 12.5 <= sugg["start"] <= 12.57, sugg
     assert 17.2 <= sugg["end"] <= 17.36, sugg

@@ -16,12 +16,14 @@ import { mediaUrl, useMediaReady } from "@/lib/api";
 import { track, type AnalyticsEvent } from "@/lib/analytics";
 import {
   aiCutsOf,
+  bulkPieces,
   commandPhrases,
   cutRange,
   labelRemoved,
+  menuCounts,
   planCutWords,
+  realTakes,
   restoreKind,
-  restorePieces,
   restoreRange,
   restoreWord,
   restoreWords,
@@ -31,6 +33,7 @@ import {
   type CutRefusal,
   type OpenSuggestion,
   type Piece,
+  type PieceKind,
   type Range,
 } from "@/features/editor/state/cuts";
 import type { DocWord } from "@/features/editor/state/doc";
@@ -52,7 +55,8 @@ export type CutsApi = {
   /** Bring a struck word (or the struck words from w.start to w.end) back;
    *  `span`: their doc indices when the caller knows them. */
   restoreWord: (w: Pick<DocWord, "start" | "end">, span?: [number, number]) => boolean;
-  /** Bulk restore: one kind, or every AI cut. */
+  /** Bulk restore: one kind (of a take kind the botched takes only), or
+   *  every AI cut (state/cuts.ts bulkPieces). */
   restoreKind: (kind: CutKind | "ai") => boolean;
   /** Where a trim edge released at source time t goes: into the nearest
    *  gap between words within `radius` s (state/cuts.ts wordSafeEdge). */
@@ -63,12 +67,49 @@ export type CutsApi = {
   suggestions: OpenSuggestion[];
   /** Cut a suggestion (one undo step): false when nothing changed. */
   takeSuggestion: (r: Range) => boolean;
-  /** The spoken command phrases (job.scene_events): which take chips are
-   *  botched takes (state/cuts.ts realTakes). */
-  phrases: Range[];
+  /** The take pieces that are botched takes, not a spoken command phrase
+   *  removed on its own (job.scene_events; state/cuts.ts realTakes): the
+   *  "Cleo cut: N botched takes" note and the cuts menu count these. */
+  takes: Piece[];
+  /** The cuts menu's counts: what each bulk restore brings back
+   *  (state/cuts.ts menuCounts). */
+  counts: Record<PieceKind | "ai", number>;
 };
 
 const NO_SUGGESTIONS: OpenSuggestion[] = [];
+
+/** What useCuts derives from the job and the clips (pure). */
+export type CutsModel = Pick<CutsApi, "pieces" | "takes" | "suggestions" | "counts">;
+
+/**
+ * The cuts by reason, the botched takes and the suggestions to offer,
+ * from the job (its analysis cuts, suggested cuts and command phrases)
+ * and the clips: a taken suggestion is a Cleo-cut take like the
+ * analysis' own; none is offered while the clips aren't known yet (a
+ * taken one would flash).
+ */
+export function cutsModel(o: {
+  segs: readonly EditorSeg[];
+  cutRanges: readonly CutRange[];
+  cutSuggestions?: readonly CutRange[];
+  sceneEvents?: readonly unknown[];
+  words: readonly DocWord[];
+  removed: readonly Range[];
+}): CutsModel {
+  const suggested = splitSuggestions(o.cutSuggestions, o.removed);
+  const analysisCuts = aiCutsOf(o.cutRanges, o.words);
+  const ai = suggested.taken.length
+    ? [...analysisCuts, ...suggested.taken].sort((a, b) => a.start - b.start)
+    : analysisCuts;
+  const pieces = labelRemoved(o.removed, ai);
+  const takes = realTakes(pieces, o.words, commandPhrases(o.sceneEvents));
+  return {
+    pieces,
+    takes,
+    suggestions: o.segs.some((s) => !s.disabled && s.end > s.start) ? suggested.open : NO_SUGGESTIONS,
+    counts: menuCounts(pieces, takes),
+  };
+}
 
 /** Doc indices of the words a restore of [w.start, w.end] means (the
  *  word itself, or a selection's first word's start to its last word's
@@ -80,6 +121,23 @@ export function wordSpan(words: readonly DocWord[], w: Pick<DocWord, "start" | "
   if (first < 0) return null;
   for (let i = first; i < words.length; i++) if (Math.abs(words[i].end - w.end) < 1e-6) return [first, i];
   return null;
+}
+
+/** A bulk restore of the cuts menu (useCuts restoreKind): of a take kind
+ *  the botched takes only, never a lone command phrase (review F4). */
+export function bulkRestoreOp(
+  segs: EditorSeg[],
+  m: Pick<CutsModel, "pieces" | "takes">,
+  kind: CutKind | "ai",
+  duration: number,
+): EditorSeg[] {
+  return restoreKind(segs, bulkPieces(m.pieces, m.takes, kind), kind, duration);
+}
+
+/** Apply on a suggestion (useCuts takeSuggestion): its span cut — its
+ *  edges are on the audio already (the analysis snapped them). */
+export function takeSuggestionOp(segs: EditorSeg[], r: Range, duration: number): EditorSeg[] {
+  return cutRange(segs, r.start, r.end, duration);
 }
 
 /** The removed source ranges of a clip list; none while it's empty
@@ -129,18 +187,11 @@ export function useCuts(opts: {
 }): CutsApi {
   const { jobId, segs, duration, cutRanges, cutSuggestions, sceneEvents, words, removed, commit } = opts;
   const peaks = usePeaks(jobId);
-  const phrases = useMemo(() => commandPhrases(sceneEvents), [sceneEvents]);
-  const suggested = useMemo(() => splitSuggestions(cutSuggestions, removed), [cutSuggestions, removed]);
-  const analysisCuts = useMemo(() => aiCutsOf(cutRanges, words), [cutRanges, words]);
-  // a taken suggestion is a Cleo-cut take like the analysis' own
-  const ai = useMemo(
-    () =>
-      suggested.taken.length
-        ? [...analysisCuts, ...suggested.taken].sort((a, b) => a.start - b.start)
-        : analysisCuts,
-    [analysisCuts, suggested.taken],
+  const model = useMemo(
+    () => cutsModel({ segs, cutRanges, cutSuggestions, sceneEvents, words, removed }),
+    [segs, cutRanges, cutSuggestions, sceneEvents, words, removed],
   );
-  const pieces = useMemo(() => labelRemoved(removed, ai), [removed, ai]);
+  const { pieces, takes, suggestions, counts } = model;
   const apply = useCallback(
     (next: EditorSeg[], event: AnalyticsEvent, props: Record<string, string | number>) => {
       if (next === segs) return false;
@@ -173,17 +224,11 @@ export function useCuts(opts: {
         : restoreWord(segs, w, duration);
       return apply(next, "cuts_restored", { what: "word", n: span ? span[1] - span[0] + 1 : 1 });
     },
-    restoreKind: (kind) =>
-      apply(
-        kind === "ai" ? restoreKind(segs, pieces, "ai", duration) : restorePieces(segs, pieces, (p) => p.kind === kind, duration),
-        "bulk_restore",
-        { kind },
-      ),
+    restoreKind: (kind) => apply(bulkRestoreOp(segs, model, kind, duration), "bulk_restore", { kind }),
     safeEdge: (t, radius) => wordSafeEdge(t, words, radius, peaks),
-    // none while the clips aren't known yet (a taken one would flash)
-    suggestions: segs.some((s) => !s.disabled && s.end > s.start) ? suggested.open : NO_SUGGESTIONS,
-    // its edges are on the audio already (the analysis snapped them)
-    takeSuggestion: (r) => apply(cutRange(segs, r.start, r.end, duration), "words_cut", { what: "suggestion" }),
-    phrases,
+    suggestions,
+    takeSuggestion: (r) => apply(takeSuggestionOp(segs, r, duration), "words_cut", { what: "suggestion" }),
+    takes,
+    counts,
   };
 }

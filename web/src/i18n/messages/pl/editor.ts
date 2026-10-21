@@ -90,6 +90,8 @@ export const plEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "Edycja",
   "editor.tab.text": "Tekst i cięcia",
   "editor.tab.style": "Styl",
+  "editor.tab.suggestOne": "Propozycje do sprawdzenia: {count}",
+  "editor.tab.suggestOther": "Propozycje do sprawdzenia: {count}",
   "editor.cut.tooShort": "Za krótkie, by wyciąć je osobno – zaznacz też sąsiednie słowo",
   "editor.cut.everything": "Nie da się wyciąć wszystkiego – coś musi zostać w wideo",
   "editor.cut.alreadyCut": "Już wycięte z wideo",

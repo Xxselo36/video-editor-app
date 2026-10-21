@@ -24,7 +24,8 @@ class AnalysisResult:
     style: str
     fillers: list = None  # [{"start", "end", "word"}, ...] detected filler words
     language: str = None  # Whisper-detected ISO-Code (e.g. "de", "en")
-    scene_events: list = None  # [{"type", "start", "end", "source"}, ...]
+    # [{"type", "start", "end", "raw_text", "source", "heard"}, ...]
+    scene_events: list = None
     # What a command before any "Cleo start" would remove but doesn't
     # (src/scene_triggers.py ScenePlan.suggestions: a cut, a finish or a
     # misheard start beyond IMPLICIT_CUT_MAX_S, a guess at "cut"): not
@@ -661,9 +662,9 @@ def analyze_video(
             from src.scene_triggers import plan_scene_cuts
             from src.voice_triggers import collect_whisper_words as _scw
             ww_scene = _scw(analyzer._transcription)
-            scene_cuts, scene_suggestions, scene_events = plan_scene_cuts(
-                ww_scene, clip_duration=duration,
-            )
+            scene_plan = plan_scene_cuts(ww_scene, clip_duration=duration)
+            scene_cuts, scene_suggestions, scene_events = (
+                scene_plan.cuts, scene_plan.suggestions, scene_plan.events)
             if scene_suggestions:
                 # Not cut: the creator confirms them in the editor. Their
                 # edges on the audio, as a cut's would be.
@@ -677,7 +678,7 @@ def analyze_video(
             # Extract raw text around each event for the review UI so
             # the user can see WHAT Whisper heard when the event was
             # detected. Look up ±0.5s window of words.
-            for (t, s, e) in scene_events:
+            for (t, s, e), how in zip(scene_events, scene_plan.heard):
                 raw_words = [
                     (w.get("word", "") or "").strip()
                     for w in ww_scene
@@ -689,6 +690,11 @@ def analyze_video(
                     "start": round(s, 3),
                     "end": round(e, 3),
                     "raw_text": " ".join(raw_words)[:80],
+                    # found by the analysis, and how it was heard: a
+                    # posted-back one acts as it did here
+                    # (/recompute-scenes)
+                    "source": "analysis",
+                    "heard": how,
                 })
             if scene_events:
                 print(f"[scene-triggers] events: "

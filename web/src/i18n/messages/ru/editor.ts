@@ -90,6 +90,8 @@ export const ruEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "Редактирование",
   "editor.tab.text": "Текст и вырезки",
   "editor.tab.style": "Стиль",
+  "editor.tab.suggestOne": "Предложений к проверке: {count}",
+  "editor.tab.suggestOther": "Предложений к проверке: {count}",
   "editor.cut.tooShort": "Слишком коротко, чтобы вырезать отдельно – выдели и соседнее слово",
   "editor.cut.everything": "Вырезать всё нельзя – что-то должно остаться в видео",
   "editor.cut.alreadyCut": "Уже вырезано из видео",

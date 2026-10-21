@@ -90,6 +90,8 @@ export const itEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "Modifica",
   "editor.tab.text": "Testo e tagli",
   "editor.tab.style": "Stile",
+  "editor.tab.suggestOne": "{count} suggerimento in sospeso",
+  "editor.tab.suggestOther": "{count} suggerimenti in sospeso",
   "editor.cut.tooShort": "Troppo breve per tagliarla da sola: seleziona anche la parola accanto",
   "editor.cut.everything": "Non puoi tagliare tutto: qualcosa deve restare nel video",
   "editor.cut.alreadyCut": "Già tagliato dal video",

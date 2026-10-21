@@ -90,6 +90,8 @@ export const frEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "Modifier",
   "editor.tab.text": "Texte et coupes",
   "editor.tab.style": "Style",
+  "editor.tab.suggestOne": "{count} suggestion en attente",
+  "editor.tab.suggestOther": "{count} suggestions en attente",
   "editor.cut.tooShort": "Trop court pour être coupé seul – sélectionne aussi le mot voisin",
   "editor.cut.everything": "Impossible de tout couper – il doit rester quelque chose dans la vidéo",
   "editor.cut.alreadyCut": "Déjà coupé de la vidéo",

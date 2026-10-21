@@ -90,6 +90,8 @@ export const koEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "편집",
   "editor.tab.text": "텍스트와 컷",
   "editor.tab.style": "스타일",
+  "editor.tab.suggestOne": "확인할 제안 {count}개",
+  "editor.tab.suggestOther": "확인할 제안 {count}개",
   "editor.cut.tooShort": "너무 짧아서 혼자 자를 수 없어요 – 옆 단어도 함께 선택하세요",
   "editor.cut.everything": "전부 자를 수는 없어요 – 영상에 무언가는 남아야 해요",
   "editor.cut.alreadyCut": "이미 영상에서 잘렸어요",

@@ -4,16 +4,19 @@ Enables a record-once-and-refine workflow. Every take has an anchor,
 where it began: the end of the scene command before it, or the start of
 the video when there was none — "Cleo start" is not needed (owner
 decision), it marks where a take begins. Until a clear "Cleo start" the
-"Cleo go" that closes a "Cleo stop … go" pair is an anchor too (a cut
-never reaches back past the pair).
+"Cleo go" that closes a "Cleo stop … go" pair is an anchor too (a "Cleo
+cut" never reaches back past the pair).
 
     'Cleo start'   — anchors a new take. What came since the anchor is
-                     dropped: everything before it when it is the first
-                     command (setup/warmup), else e.g. the chatter after
-                     a keep. Said clearly (a strong, non-phonetic form)
-                     it opens a started session: from there on every
-                     command acts in full, whatever it removes (as
-                     before the start became optional).
+                     dropped, e.g. the chatter after a keep. The first
+                     one said clearly (a strong, non-phonetic form) acts
+                     as before the start became optional: it drops
+                     everything before it (setup / warm-up) but the
+                     takes a clear 'Cleo keep' kept (everything up to the
+                     last one) — no go, misheard or guessed command
+                     keeps anything from it. It opens a started session:
+                     from there on every command acts in full, whatever
+                     it removes.
     'Cleo restart' — ('Cleo cut') discards the current provisional take
                      (from the anchor to this restart, inclusive). New
                      anchor set here.
@@ -29,7 +32,9 @@ follows it) or a misheard start that would remove more cuts only its
 phrase and becomes a suggestion the creator confirms in the editor
 (job.cut_suggestions). A phonetic guess there never moves the anchor:
 it cuts its phrase only, and a guess at 'cut' is a suggestion whatever
-its length.
+its length. A finish before the first clear start cuts only its phrase,
+and no suggestion reaches past that start: what a started session
+recorded is never removed nor offered for removal by a command before it.
 
 If the user doesn't say 'Cleo finish', the tail (from last anchor to
 audio end) is kept forgivingly — user may have just stopped recording.
@@ -37,6 +42,7 @@ Parallel to voice_triggers.py which handles the 'Cleo stop … go' pairs.
 """
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from typing import NamedTuple
 
@@ -147,6 +153,27 @@ REPEAT_REACH_S = 1.2
 IMPLICIT_CUT_MAX_S = 60.0
 
 
+class Command(NamedTuple):
+    """A scene command as plan_commands reads it: found in the words
+    (plan_scene_cuts) or posted by the creator (/recompute-scenes)."""
+    type: str                # start / restart / keep / finish ("go": a pair's go)
+    start: float             # the phrase, Whisper times
+    end: float
+    # a phonetic guess (src/phonetic_wake_detection.py)
+    guess: bool = False
+    # a misheard wake or command word (src/command_gate.py); a guess is weak
+    weak: bool = False
+    # before a started session it removes at most the limit on its own;
+    # False: the creator's own command (/recompute-scenes), never limited
+    limited: bool = True
+
+
+def heard(c: Command) -> str:
+    """How a command was heard: "clear", "weak" or "guess" (job
+    scene_events: /recompute-scenes reads a posted-back one as heard)."""
+    return "guess" if c.guess else "weak" if c.weak else "clear"
+
+
 class ScenePlan(NamedTuple):
     """What the scene commands of a recording do (plan_scene_cuts)."""
     # (start, end) ranges to cut, Whisper times (the analysis snaps them
@@ -158,6 +185,8 @@ class ScenePlan(NamedTuple):
     suggestions: list[tuple[float, float]]
     # (command_type, phrase_start, phrase_end) for logging / debugging
     events: list[tuple[str, float, float]]
+    # how each event was heard (heard(): "clear", "weak", "guess")
+    heard: list[str] = []
 
 
 def _normalize(text: str) -> str:
@@ -235,11 +264,10 @@ def plan_scene_cuts(
     the start of the video (module doc). Until a clear 'Cleo start' a
     command removes at most `implicit_cut_max_s` on its own, and a
     phonetic guess only its phrase (a guess at 'cut': and a suggestion);
-    after one, every command acts in full, as before the start became
-    optional.
+    the first clear one drops everything before it but what a clear
+    'Cleo keep' kept, and from there every command acts in full, as
+    before the start became optional (plan_commands).
     """
-    if implicit_cut_max_s is None:
-        implicit_cut_max_s = IMPLICIT_CUT_MAX_S
     if start_keywords or restart_keywords or keep_keywords or finish_keywords:
         table = _table(start_keywords, restart_keywords, keep_keywords,
                        finish_keywords)
@@ -248,7 +276,7 @@ def plan_scene_cuts(
 
     words = gate.split_tokens(whisper_words)
     if not words:
-        return ScenePlan([], [], [])
+        return ScenePlan([], [], [], [])
     norm = gate.normalized(words)
 
     # [type, start, end, phonetic, index of the word after the phrase,
@@ -307,8 +335,8 @@ def plan_scene_cuts(
                 deduped[-1][5] = deduped[-1][5] and evt[5]
                 continue
         deduped.append(evt)
-    events = deduped
-    out_events = [(t, s, e) for (t, s, e, *_r) in events]
+    commands = [Command(t, s, e, guess=ph, weak=wk)
+                for (t, s, e, ph, _next, wk) in deduped]
 
     # The go of each "Cleo stop … go" pair starts a take too before a
     # clear start (an anchor, not a scene command: not in the events).
@@ -319,8 +347,45 @@ def plan_scene_cuts(
             print(f"[scene-triggers] stop/go anchors skipped: {_vte}",
                   flush=True)
             resumes = []
-    steps = sorted([*events, *(["go", t, t, False, 0, False] for t in resumes)],
-                   key=lambda e: e[1])
+    cut_ranges, suggestions = plan_commands(
+        commands, clip_duration=clip_duration,
+        last_end=float(words[-1].get("end", 0.0)),
+        implicit_cut_max_s=implicit_cut_max_s, resumes=resumes)
+    return ScenePlan(cut_ranges, suggestions,
+                     [(c.type, c.start, c.end) for c in commands],
+                     [heard(c) for c in commands])
+
+
+def plan_commands(
+    commands: list[Command],
+    clip_duration: float | None = None,
+    last_end: float = 0.0,
+    implicit_cut_max_s: float | None = None,
+    resumes: list[float] | None = None,
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """What scene commands (in time order) cut and suggest (module doc):
+    (cut_ranges, suggestions).
+
+    Args:
+        commands: the scene commands, in time order.
+        clip_duration: audio duration in seconds (None: `last_end` + 60),
+            the end of the 'everything after Cleo finish' cut.
+        last_end: where the last word ends.
+        implicit_cut_max_s: the most a (limited) command removes on its
+            own before a clear "Cleo start" (None: IMPLICIT_CUT_MAX_S).
+        resumes: where a take begins after each "Cleo stop … go" pair.
+    """
+    if implicit_cut_max_s is None:
+        implicit_cut_max_s = IMPLICIT_CUT_MAX_S
+    tail_cap = clip_duration if clip_duration else last_end + 60.0
+    # The first clear "Cleo start" (owner decision, review F1): as before
+    # the start became optional, whatever came before it.
+    opening = next((c for c in commands
+                    if c.type == "start" and not c.guess and not c.weak), None)
+    # A go is an anchor, not a command; on a tie it comes first (a
+    # command said right as the go ends begins its take after it).
+    steps = sorted([*commands, *(Command("go", t, t) for t in resumes or [])],
+                   key=lambda c: (c.start, c.type != "go"))
 
     cut_ranges: list[tuple[float, float]] = []
     suggestions: list[tuple[float, float]] = []
@@ -335,18 +400,19 @@ def plan_scene_cuts(
               flush=True)
 
     # The take in progress began at `anchor`: the end of the command
-    # before it, or the start of the video. `started`: a clear 'Cleo
-    # start' was said (a started session, module doc).
-    anchor, started = 0.0, False
+    # before it, or the start of the video. `kept`: the end of the last
+    # clear 'Cleo keep' (what the first clear start leaves). `started`:
+    # the first clear 'Cleo start' was said (a started session).
+    anchor, kept, started = 0.0, 0.0, False
 
-    for evt in steps:
-        cmd_type, phrase_start, phrase_end, phonetic, _next, weak = evt
-        tail_cap = clip_duration if clip_duration else (
-            float(words[-1].get("end", phrase_end)) + 60.0
-        )
+    for c in steps:
+        cmd_type, phrase_start, phrase_end = c.type, c.start, c.end
+        limit = implicit_cut_max_s if c.limited else math.inf
         if cmd_type == "go":
-            # before a clear start only: a started session stays as
-            # before (a cut there reaches back to the scene command)
+            # before a clear start only, and only for a "Cleo cut": a
+            # started session stays as before (a cut there reaches back
+            # to the scene command), and the first clear start drops
+            # what came before the pair too
             if not started:
                 anchor = max(anchor, phrase_end)
         elif started:
@@ -359,7 +425,7 @@ def plan_scene_cuts(
                 if phrase_end > anchor:
                     cut_ranges.append((anchor, phrase_end))
                 anchor = phrase_end
-            elif cmd_type == "finish" and not phonetic:
+            elif cmd_type == "finish" and not c.guess:
                 # Cut the 'Cleo finish' phrase, then all following audio.
                 cut_ranges.append((phrase_start, tail_cap))
                 break
@@ -368,25 +434,26 @@ def plan_scene_cuts(
                 # take, cut only the phrase itself.
                 cut_ranges.append((phrase_start, phrase_end))
                 anchor = phrase_end
-        elif phonetic:
+        elif c is opening:
+            # The first clear 'Cleo start': drop everything before it, as
+            # before the start became optional (also when Whisper puts
+            # its first word at 0.0) — but what a clear 'Cleo keep' kept
+            # (owner O2): from the last one on. A go, a misheard or a
+            # guessed command keeps nothing from it. Opens the session.
+            if phrase_end > kept:
+                cut_ranges.append((kept, phrase_end))
+            anchor, started = phrase_end, True
+        elif c.guess:
             # Before a clear start a guess never anchors a take (nor
             # shields one from the real command after it): its phrase
             # goes; a guess at 'cut' offers its take.
             cut_ranges.append((phrase_start, phrase_end))
             if cmd_type == "restart" and phrase_end > anchor:
                 suggest(anchor, phrase_end, "cut (guess)", phrase_start)
-        elif cmd_type == "start" and not weak:
-            # The first clear 'Cleo start': drop what came since the
-            # anchor (everything before it as the first command, also
-            # when Whisper puts its first word at 0.0) and open the
-            # session.
-            if phrase_end > anchor:
-                cut_ranges.append((anchor, phrase_end))
-            anchor, started = phrase_end, True
         elif cmd_type in ("start", "restart"):
             # 'Cleo cut' (or a misheard start): discard the take since
             # the anchor, a long one only as a suggestion.
-            if phrase_end - anchor <= implicit_cut_max_s:
+            if phrase_end - anchor <= limit:
                 if phrase_end > anchor:
                     cut_ranges.append((anchor, phrase_end))
             else:
@@ -394,23 +461,39 @@ def plan_scene_cuts(
                 suggest(anchor, phrase_end, cmd_type, phrase_start)
             anchor = phrase_end
         elif cmd_type == "finish":
-            # Everything after it goes — more than the limit only as a
-            # suggestion (a false 'Leo, fertig?' early in a long video).
-            if tail_cap - phrase_start <= implicit_cut_max_s:
+            if opening is not None:
+                # a clear start follows: what its session records is no
+                # finish's rest (review F2) — the phrase goes, the
+                # warm-up around it with the start
+                cut_ranges.append((phrase_start, phrase_end))
+            elif tail_cap - phrase_start <= limit:
+                # Everything after it goes — more than the limit only as
+                # a suggestion (a false 'Leo, fertig?' early in a long
+                # video).
                 cut_ranges.append((phrase_start, tail_cap))
                 break
-            cut_ranges.append((phrase_start, phrase_end))
-            suggest(phrase_start, tail_cap, "finish", phrase_start)
+            else:
+                cut_ranges.append((phrase_start, phrase_end))
+                suggest(phrase_start, tail_cap, "finish", phrase_start)
             anchor = phrase_end
         else:
-            # 'Cleo keep': keep the take, cut only the phrase itself.
+            # 'Cleo keep': keep the take, cut only the phrase itself; a
+            # clear one keeps it from the first clear start too.
             cut_ranges.append((phrase_start, phrase_end))
             anchor = phrase_end
+            if not c.weak:
+                kept = phrase_end
 
+    if opening is not None:
+        # never offer what a started session recorded (review F2). The
+        # branches above already keep to it (a finish before the start
+        # suggests nothing, every other suggestion ends at its command);
+        # this holds the rule should one of them change.
+        suggestions = [s for s in suggestions if s[1] <= opening.end + 1e-6]
     # a suggestion a later command cut after all (a guess at "cut", then
     # the real one within the limit) is no suggestion
     suggestions = [s for s in suggestions if not _covered(cut_ranges, *s)]
-    return ScenePlan(cut_ranges, suggestions, out_events)
+    return cut_ranges, suggestions
 
 
 def _covered(ranges: list[tuple[float, float]], a: float, b: float) -> bool:

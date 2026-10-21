@@ -6993,7 +6993,14 @@ async def post_recompute_scenes(job_id: str, payload: dict,
 
     Payload:
         {"events": [{"type": "start"|"restart"|"keep"|"finish",
-                     "start": float, "end": float}, ...]}
+                     "start": float, "end": float,
+                     "confirmed": bool (optional)}, ...]}
+
+    An event the analysis found (job.scene_events, posted back as it
+    is) acts as it did there — before a "Cleo start" it removes at most
+    a minute on its own, the rest stays a suggestion — unless it is
+    "confirmed": true; every other event is the creator's own and acts
+    in full (_save_recomputed_scenes).
     """
     source, new_segments = await run_in_threadpool(
         _save_recomputed_scenes, job_id, payload, user)
@@ -7059,6 +7066,11 @@ def _snap_scene_cuts(job: Job, ranges) -> list[tuple[float, float]]:
     return [(round(a, 3), round(b, 3)) for a, b in out if b > a]
 
 
+# A posted event this close (s, both ends) to one the analysis found is
+# that one (/recompute-scenes): the analysis rounds its times to 1 ms.
+_SAME_EVENT_S = 0.05
+
+
 def _job_stop_go_resumes(job: Job) -> list[float]:
     """Where a take begins after each "Cleo stop … go" pair of the job's
     words (src/scene_triggers.py stop_go_resumes); none without words."""
@@ -7088,45 +7100,63 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
 
     events_in = payload.get("events") or []
     try:
-        clean: list[tuple[str, float, float, int]] = []
-        for i, e in enumerate(events_in):
+        clean: list[tuple[str, float, float, bool]] = []
+        for e in events_in:
             t = str(e.get("type") or "").lower()
             if t not in ("start", "restart", "keep", "finish"):
                 continue
-            s = float(e.get("start") or 0)
-            end = float(e.get("end") or s)
-            clean.append((t, s, end, i))
+            s = max(0.0, float(e.get("start") or 0))
+            end = max(float(e.get("end") or s), s)
+            clean.append((t, s, end, e.get("confirmed") is True))
         clean.sort(key=lambda x: x[1])
     except Exception as e:
         raise HTTPException(400, f"invalid events payload: {e}") from e
 
     # Re-apply scene semantics to compute cut ranges + kept segments.
-    from src.scene_triggers import plan_scene_cuts
-    # Trick: our scene fn expects whisper-words. We synthesize a
-    # minimal word list that matches the requested command phrases so
-    # the existing state-machine logic can be re-used unchanged.
-    fake_words: list[dict] = []
-    for (t, s, end, _i) in clean:
-        # Two-token phrase: "cleo <type>"
-        cleo_start = max(0.0, s)
-        cleo_end = s + max(0.05, (end - s) / 2)
-        cmd_start = cleo_end + 0.01
-        cmd_end = max(end, cmd_start + 0.05)
-        fake_words.append({"word": "cleo", "start": cleo_start, "end": cleo_end})
-        # said as a sentence of its own (src/command_gate.py)
-        fake_words.append({"word": t + ".", "start": cmd_start, "end": cmd_end})
-    # The user's own list: a long "Cleo cut" without "Cleo start" is
-    # cut, not suggested (the suggestion is for the analysis' guesses) —
-    # so none is left, and the analysis' ones go (they were its reading
-    # of the commands this list replaces). Before a "Cleo start" a take
-    # begins after a "Cleo stop … go" pair, as in the analysis: the
-    # pairs of the job's words.
-    plan = plan_scene_cuts(
-        fake_words, clip_duration=job.duration or None,
-        implicit_cut_max_s=float("inf"),
+    from src.scene_triggers import Command, heard, plan_commands
+    # An event as the analysis found it (posted back unchanged, not
+    # "confirmed": true) acts as it did there (review I2): heard the same
+    # (a misheard start opens no session, a guess stays one) and before a
+    # "Cleo start" limited to src/scene_triggers.py IMPLICIT_CUT_MAX_S —
+    # a suggested finish posted back stays a suggestion. Every other one
+    # is the creator's own: clear and never limited.
+    found = [d for d in (job.scene_events or [])
+             if isinstance(d, dict) and d.get("source") != "user"]
+
+    def as_found(t: str, s: float, end: float) -> dict | None:
+        for d in found:
+            try:
+                if (d.get("type") == t and abs(float(d["start"]) - s) <= _SAME_EVENT_S
+                        and abs(float(d["end"]) - end) <= _SAME_EVENT_S):
+                    return d
+            except (KeyError, TypeError, ValueError):
+                continue
+        return None
+
+    commands: list[Command] = []
+    scene_events: list[dict] = []
+    for (t, s, end, confirmed) in clean:
+        d = None if confirmed else as_found(t, s, end)
+        how = str((d or {}).get("heard") or "clear")
+        c = Command(t, s, end, guess=how == "guess", weak=how != "clear",
+                    limited=d is not None)
+        commands.append(c)
+        ev = {"type": t, "start": s, "end": end,
+              "source": "user" if d is None else "analysis"}
+        if d is not None:
+            ev["heard"] = heard(c)
+            if d.get("raw_text"):
+                ev["raw_text"] = d["raw_text"]
+        scene_events.append(ev)
+    # Before a "Cleo start" a take begins after a "Cleo stop … go" pair,
+    # as in the analysis: the pairs of the job's words. The analysis'
+    # suggestions go (its reading of the commands this list replaces):
+    # what is left to suggest comes from the found events here.
+    cut_ranges_scene, suggested = plan_commands(
+        commands, clip_duration=job.duration or None,
+        last_end=max((c.end for c in commands), default=0.0),
         resumes=_job_stop_go_resumes(job),
     )
-    cut_ranges_scene = plan.cuts
     # The analysis puts these edges on the audio (src/edge_snap.py); the
     # events' times alone would cut into the words around a command.
     cut_ranges_scene = _snap_scene_cuts(job, cut_ranges_scene)
@@ -7146,14 +7176,10 @@ def _save_recomputed_scenes(job_id: str, payload: dict, user: User | None
     if len(new_segments) > _max_edit_segments():
         raise ApiRefusal(400, "too_many_segments",
                          max_segments=_max_edit_segments())
+    # their edges on the audio too, as the analysis puts them
     cut_suggestions = pipeline.cut_suggestions_of(
-        [{"start": a, "end": b} for a, b in plan.suggestions],
+        [{"start": a, "end": b} for a, b in _snap_scene_cuts(job, suggested)],
         new_segments, job.duration or 0.0)
-
-    scene_events = [
-        {"type": t, "start": s, "end": end, "source": "user"}
-        for (t, s, end, _i) in clean
-    ]
 
     def _save(cur: Job) -> dict:
         # On the stored job, under its row lock (store.modify): the new

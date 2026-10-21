@@ -15,7 +15,8 @@
  *   restoreWord           one struck word (at least MIN_ISLAND_S of it)
  *   restorePieces / restoreKind   bulk restore: every pause, every "um",
  *                         every Cleo-cut take or every AI cut — never a
- *                         cut the user made
+ *                         cut the user made (the menu's: bulkPieces,
+ *                         menuCounts)
  *   splitSuggestions      the analysis' suggested cuts (what a command
  *                         before any "Cleo start" would remove beyond a
  *                         minute): still offered (with the seconds that
@@ -203,11 +204,30 @@ export function labelRemoved(removed: readonly Range[], ai: readonly AiCut[]): P
   return out;
 }
 
-/** How many pieces of each kind (the bulk restore menu). */
+/** How many pieces of each kind. */
 export function countKinds(pieces: readonly Piece[]): Record<PieceKind, number> {
   const n: Record<PieceKind, number> = { silence: 0, filler: 0, voice_cmd: 0, bad_take: 0, user: 0 };
   for (const p of pieces) n[p.kind]++;
   return n;
+}
+
+/**
+ * What the cuts menu's bulk restore of `kind` brings back (review F4):
+ * the pieces of that kind — of a take kind only the botched takes
+ * (`takes`: realTakes of the same pieces, the "Cleo cut: N botched
+ * takes" count), never a spoken command phrase removed on its own;
+ * "ai": every analysis cut. Never a user cut.
+ */
+export function bulkPieces(pieces: readonly Piece[], takes: readonly Piece[], kind: CutKind | "ai"): Piece[] {
+  if (kind === "ai") return pieces.filter((p) => p.kind !== "user");
+  return TAKE_KINDS.has(kind) ? takes.filter((p) => p.kind === kind) : pieces.filter((p) => p.kind === kind);
+}
+
+/** The cuts menu's counts: what each bulk restore brings back (bulkPieces), and the user's own cuts. */
+export function menuCounts(pieces: readonly Piece[], takes: readonly Piece[]): Record<PieceKind | "ai", number> {
+  const n = countKinds(pieces);
+  for (const k of TAKE_KINDS) n[k] = takes.filter((p) => p.kind === k).length;
+  return { ...n, ai: pieces.length - n.user };
 }
 
 /** The reason that removed most of [a, b] (a seam's gap), "user" if none. */

@@ -90,6 +90,8 @@ export const trEditor: Partial<Record<EditorKey, string>> = {
   "editor.panel": "Düzenle",
   "editor.tab.text": "Metin ve kesimler",
   "editor.tab.style": "Stil",
+  "editor.tab.suggestOne": "{count} öneri bekliyor",
+  "editor.tab.suggestOther": "{count} öneri bekliyor",
   "editor.cut.tooShort": "Tek başına kesmek için çok kısa – yanındaki kelimeyi de seç",
   "editor.cut.everything": "Hepsi kesilemez – videoda bir şey kalmalı",
   "editor.cut.alreadyCut": "Zaten videodan kesildi",
