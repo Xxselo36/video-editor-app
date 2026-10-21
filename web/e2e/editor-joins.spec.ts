@@ -233,14 +233,20 @@ function check({ frames, raf }: Run, segs: Seg[], leapBy = 2) {
   const longer1x = dropsAt.filter((_, i) => at1x(i) && ends[i][1] - ends[i][0] > 3);
   const lastShown1x = longer1x.filter((n) => n === 0).length;
   const dropped2at1x = dropsAt.filter((n, i) => at1x(i) && n >= 2 && ends[i][1] - ends[i][0] > 2).length;
-  // frames the pipeline itself skipped inside a clip (a busy machine)
+  // frames the pipeline itself skipped inside a clip (a busy machine); and
+  // inside the 1x clips only (a sped-up clip steps unevenly, idle: 60–100
+  // "skips" in the 1.5x test — no sign of a busy machine)
   let skipped = 0;
+  let skipped1x = 0;
   for (let i = 1; i < frames.length; i++) {
     const a = kOf(frames[i - 1][0]);
     const b = kOf(frames[i][0]);
-    if (b - a >= 2 && range.some(([s, e]) => a >= s && b < e)) skipped++;
+    const at = b - a >= 2 ? range.findIndex(([s, e]) => a >= s && b < e) : -1;
+    if (at < 0) continue;
+    skipped++;
+    if ((segs[at].speed ?? 1) === 1) skipped1x++;
   }
-  return { cut, cutInStall, cutShort, joins, lastShown, ends: longer.length, dropped2, skipped, lastShown1x, ends1x: longer1x.length, dropped2at1x };
+  return { cut, cutInStall, cutShort, joins, lastShown, ends: longer.length, dropped2, skipped, skipped1x, lastShown1x, ends1x: longer1x.length, dropped2at1x };
 }
 
 async function seedMany(stub: import("./support/fixtures").Stub, segs: Seg[]) {
@@ -302,8 +308,10 @@ test.describe("proxy playback: no cut frame at any join (wordcuts10)", TAG, () =
     // The 1x clips — each after a sped-up one — as in a 1x edit: at most
     // their last kept frame dropped, mostly none (round 5 dropped two at
     // 15–18 of their 18 joins: the 2x callbacks read as heavy load, the
-    // margin held into them), the same slack on a busy machine.
-    expect(r.dropped2at1x).toBeLessThanOrEqual(r.skipped <= 3 ? 1 : Math.max(4, Math.ceil(r.skipped / 2)));
-    expect(r.lastShown1x / r.ends1x).toBeGreaterThan(r.skipped <= 3 ? 0.75 : 0.5);
+    // margin held into them), the same slack on a busy machine — judged by
+    // the frames skipped inside the 1x clips (round 6 counted the sped-up
+    // clips' uneven steps too: the slack always on, the check vacuous).
+    expect(r.dropped2at1x).toBeLessThanOrEqual(r.skipped1x <= 3 ? 1 : Math.max(4, Math.ceil(r.skipped1x / 2)));
+    expect(r.lastShown1x / r.ends1x).toBeGreaterThan(r.skipped1x <= 3 ? 0.75 : 0.5);
   });
 });

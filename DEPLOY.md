@@ -783,7 +783,7 @@ am besten nachts.
 |---|---|---|---|
 | `CLEO_MEDIA_BACKEND` | `local`: neue Jobs auf dem Volume | `r2`: neue Jobs in R2 (ohne `R2_*` startet das Backend nicht: `[media] NOT STARTING`) | Variable löschen: neue Jobs wieder lokal, R2-Jobs bleiben in R2 |
 | `CLEO_MODAL_RENDER_FN` | `render_burn_concat` (bisheriger Weg) | `render_r2`: Jobs mit Medien in R2 rendern direkt aus R2 (lokale Jobs immer auf dem alten Weg). Fehlt `render_r2` auf Modal, wird automatisch der alte Weg genommen | Variable löschen |
-| `CLEO_PROXY_VIDEO` | aus: `/jobs/{id}/proxy-video` → 404, der Editor spielt wie bisher die Vorschau | `1`: Editor spielt den 720p-Proxy direkt | Variable löschen |
+| `CLEO_PROXY_VIDEO` | aus: `/jobs/{id}/proxy-video` → 404, der Editor spielt wie bisher die Vorschau | `1`: Editor spielt den 720p-Proxy direkt — nur bei Videos bis 30 fps; 50/60-fps-Videos behalten die Vorschau | Variable löschen |
 | `CLEO_UPLOAD_MODE` | `single`: einfacher presigned PUT wie bisher; `init`, `parts`, `sign` antworten 409 `use_single_put`; Uploads höchstens 5 GB (ein PUT nach R2 nimmt nicht mehr als 5 GiB) | `multipart`: fortsetzbare Uploads bis `CLEO_MAX_UPLOAD_GB` | Variable löschen — auch Browser mitten in einem fortgesetzten Upload wechseln dann auf den einfachen PUT (und die 5-GB-Grenze) |
 | `CLEO_MEDIA_PRESIGN` | `day`: R2-Links gleich für den ganzen UTC-Tag (Browser-Cache) | `standard`: normale presigned URLs (falls R2/ein Gerät die tagesgenauen ablehnt) | Variable löschen |
 | `CLEO_TMP_ROOT` | `<CLEO_WORK_ROOT>/tmp`, also **auf dem Volume** (wie bisher) | z. B. `/tmp/cleo` (Container-Platte) — erst nach Prüfung, 10.6 | Variable löschen |
@@ -997,8 +997,18 @@ Log eines Renders: `[modal] render_r2 complete for job …`. Steht dort
 Schritt 3 — die Renders funktionieren trotzdem.
 
 **Schritt 6 — Editor spielt den Proxy:** Railway `CLEO_PROXY_VIDEO=1`.
+Erst wenn das Frontend (Vercel) mit dem Stand läuft, der Proxys nur bis
+30 fps spielt; Tabs, die noch das alte Frontend offen haben, einmal neu
+laden. Die Modal-Analyse bekommt den Wert der Variable mit jedem Aufruf
+von der API.
+Den schnellen Proxy spielt der Editor nur bei Videos bis 30 fps (24, 25,
+29,97, 30); 50/59,94/60-fps-Uploads und Jobs ohne bekannte Bildrate
+behalten die Server-Vorschau wie ohne die Variable (die erste Vorschau
+entsteht dann beim ersten Öffnen, Neuaufbauten nach dem Speichern fordert
+der Editor selbst an).
 Test auf iPhone (Safari) und Android (Chrome): Projekt öffnen, im Editor
-springen und abspielen. Geht es auf einem Gerät nicht: Variable löschen
+springen und abspielen — ein 30-fps- und ein 60-fps-Video (das zweite
+spielt die Vorschau). Geht es auf einem Gerät nicht: Variable löschen
 (der Editor spielt dann wieder die Vorschau) und ggf.
 `CLEO_MEDIA_PRESIGN=standard` probieren.
 

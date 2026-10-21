@@ -344,7 +344,13 @@ type Presented = { k: number; at: number; seeking: boolean };
  * cut frame 18, within 50 ms.
  * `seekedLateMs`: 'seeked' comes this long after the new position's frames
  * play (a busy page: the element says seeking, currentTime stands at the
- * target). `missCb(k)`: frame k is presented without a callback.
+ * target; `mediaStall` may stand the clock meanwhile). `missCb(k)`: frame k
+ * is presented without a callback. `stretchMs`: above 1.25x the media
+ * clock moves in steps that long (a time-stretched clock: Chromium's at
+ * 1.5x and 2x, a presentation two or three frames on after one with none —
+ * idle, no frame skipped). `race`: above 1.25x a landed seek's clock, once
+ * it runs, gains that many frames within a refresh (the e2e runs at 2x:
+ * 458 → 462 → 463 within 34 ms of a landing, 43 → 48 in 50 ms).
  */
 function framedVideo(
   start: number,
@@ -371,6 +377,8 @@ function framedVideo(
     playStart?: { leadMs: number; miss: number };
     seekedLateMs?: number;
     missCb?: (k: number) => boolean;
+    stretchMs?: number;
+    race?: { frames: number };
   } = {},
 ) {
   const fps = o.fps ?? 30;
@@ -415,7 +423,17 @@ function framedVideo(
   let rafs = new Map<number, (t: number) => void>();
   let handle = 0;
   let mstalled = false;
-  const clockAt = (t: number) => (paused || frozen || mstalled ? pos : pos + (Math.max(0, t - since) / 1000) * clockRate);
+  // (a landed seek whose 'seeked' is yet to come: its frames play)
+  let landedLate = false;
+  const run = (t: number) => {
+    const dt = Math.max(0, t - since);
+    return o.stretchMs && clockRate > 1.25 ? Math.floor(dt / o.stretchMs) * o.stretchMs : dt;
+  };
+  // (race: from when the landed clock runs)
+  let raceFrom: number | null = null;
+  const raceOff = (t: number) =>
+    raceFrom !== null && o.race && clockRate > 1.25 ? (Math.min(1, Math.max(0, t - raceFrom) / vsync) * o.race.frames) / fps : 0;
+  const clockAt = (t: number) => (paused || frozen || mstalled ? pos : pos + (run(t) / 1000) * clockRate + raceOff(t));
   const clock = () => clockAt(Date.now());
   const frameAt = (t: number) => Math.floor((t - phase) * fps + 1e-9);
   let pendingMd: Md | null = null;
@@ -467,9 +485,10 @@ function framedVideo(
   const tick = () => {
     const now = Date.now();
     if (o.mediaStall) {
-      const st = !paused && !seeking && o.mediaStall(now, clockAt(now));
+      const st = !paused && (!seeking || landedLate) && o.mediaStall(now, clockAt(now));
       if (st && !mstalled) {
         pos = clockAt(now);
+        raceFrom = null;
         mstalled = true;
       } else if (!st && mstalled) {
         mstalled = false;
@@ -526,10 +545,11 @@ function framedVideo(
     },
     set playbackRate(r: number) {
       rate = r;
-      if (!seeking || frozen) {
+      if (!seeking || frozen || landedLate) {
         pos = clock();
         since = Date.now();
         clockRate = r;
+        raceFrom = null;
       }
       if (o.rateEvents) emit("ratechange");
     },
@@ -554,6 +574,7 @@ function framedVideo(
       const lat = typeof o.seekLatency === "function" ? o.seekLatency() : (o.seekLatency ?? 3);
       setTimeout(() => {
         pos = clock();
+        raceFrom = null;
         frozen = true;
         clockRate = rate;
       }, lat);
@@ -561,16 +582,20 @@ function framedVideo(
         pos = x;
         frozen = false;
         since = Date.now() + (paused ? 0 : (o.landStartMs ?? 0));
+        raceFrom = paused ? null : since;
         // the decoded target frame goes up at the next refresh
         picked = frameAt(x);
         landedAt = Date.now();
         const done = () => {
           if (id !== seekId) return;
+          landedLate = false;
           seeking = false;
           emit("seeked");
         };
-        if (o.seekedLateMs) setTimeout(done, o.seekedLateMs);
-        else done();
+        if (o.seekedLateMs) {
+          landedLate = true;
+          setTimeout(done, o.seekedLateMs);
+        } else done();
       }, Math.max(o.landMs ?? 20, lat + 10));
     },
     play() {
@@ -590,6 +615,7 @@ function framedVideo(
     },
     pause() {
       pos = clock();
+      raceFrom = null;
       paused = true;
       emit("pause");
     },
@@ -1066,6 +1092,49 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     expect(shownShare(frames, tail)).toBeGreaterThanOrEqual(shownShare(base, tail) - 0.1);
   });
 
+  it("a stall's sign a few frames before a clip's end (a callback that never ran at 30 fps, an animation frame 40 ms late, callbacks missed again and again mid-clip), then the page blocked from just after the last kept frame's pick until past the cut frame's (its timers held): no cut frame — round 6's stall signs (a frame early for a few frames) and missed callbacks counted as the decoder's skips (heavy load)", async () => {
+    // (the load's own sign needs a few frames: for the missed callbacks a
+    // 2 s clip first, W)
+    const warm = [{ id: "W", start: 34, end: 36 }, ...many];
+    const ends = warm.map((x) => clipFrames(x, 30)[1]);
+    const near = (k: number, lo: number, hi: number) => ends.some((b) => k >= b - lo && k < b - hi);
+    let clock: HTMLVideoElement | null = null;
+    const signs = [
+      // (b − 3's callback never runs: b − 2's sees two presentations)
+      ["missed", many, { missCb: (k: number) => ends.includes(k + 3) }],
+      // (after a refresh with no frame three frames before the end, the
+      // main thread busy 26 ms: the animation frames 42 ms apart, the next
+      // frame's callback 27 ms after its pick — no lag sign)
+      ["raf", many, { rafBusy: () => (clock && near(clock.currentTime * 30, 3.5, 2.5) ? 26 : 0) }],
+      // (a callback missed every 4 frames mid-clip, never in a clip's last 6)
+      ["skips", warm, { missCb: (k: number) => k % 4 === 1 && !near(k, 6, -1) }],
+    ] as const;
+    for (const [name, plan, o] of signs) {
+      const blocked = () => {
+        const k = clock && !clock.seeking ? clock.currentTime * 30 : -99;
+        return ends.some((b) => k >= b - 1.25 && k < b + 0.1);
+      };
+      const f = framedVideo(0, { ...o, busy: blocked });
+      clock = f.v;
+      const restore = holdTimers(f.busy);
+      const frames = await playAll(f, 25_000, { plan });
+      restore();
+      expect(cutOf(frames, (k) => keptMany(k) || (k >= 1020 && k < 1080)), name).toEqual([]);
+      expect(Math.max(...droppedAtEnds(frames, plan)), name).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it("clips at 1.5x and 2x between 1x ones on a time-stretched clock that steps unevenly (40 ms steps: two or three frames on after none, idle): the 1x clips drop at most their last kept frame, mostly none — those steps are no skipped frames (round 6: none counted above FAST_RATE; round 5 counted them, two frames' margin held into the 1x clips)", async () => {
+    const plan = many.map((s, i) => ({ ...s, speed: [1, 1.5, 2][i % 3] }));
+    const f = framedVideo(0, { stretchMs: 40 });
+    const frames = await playAll(f, 25_000, { plan });
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+    const d = droppedAtEnds(frames, plan);
+    const at1x = d.filter((_, i) => plan[i].speed === 1 && clipFrames(plan[i], 30)[1] - clipFrames(plan[i], 30)[0] > 3);
+    expect(Math.max(...at1x)).toBeLessThanOrEqual(1);
+    expect(at1x.filter((n) => n === 0).length / at1x.length).toBeGreaterThanOrEqual(0.9);
+  });
+
   it("no frame callbacks (older browsers): the clock jumps one frame early, no cut frame", async () => {
     const f = framedVideo(0, { rvfc: false });
     const frames = await playAll(f);
@@ -1092,16 +1161,43 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     }
   });
 
+  it("clips at 1.5x and 2x whose clock races after each landing (stands 60 ms, then two or three frames on within a refresh: the e2e runs' 458 → 462 → 463, 43 → 48): no cut frame — round 6's margin above FAST_RATE (round 5's from the 2x callbacks taken for load); one frame of output let 463 in", async () => {
+    // (short clips — the race reaches their ends: 5–8 frames at 2x, 4–7
+    // at 1.5x, more than two frames of output — a 1x one now and then)
+    const plan: { id: string; start: number; end: number; speed: number }[] = [];
+    for (let i = 0, t = 0.5; i < 48; i++) {
+      const speed = i % 5 === 4 ? 1 : [2, 1.5][i % 2];
+      const n = speed === 2 ? 5 + (i % 4) : 4 + (i % 4) + (speed === 1 ? 6 : 0);
+      plan.push({ id: `r${i}`, start: t, end: t + n / 30, speed });
+      t = Math.round((t + n / 30 + 0.2) * 30) / 30;
+    }
+    const ranges = plan.map((x) => clipFrames(x, 30));
+    const ok = (k: number) => ranges.some(([a, b]) => k >= a && k < b);
+    for (const frames of [2, 3]) {
+      const f = framedVideo(0, { race: { frames }, landStartMs: 60 });
+      const got = await playAll(f, 12_000, { plan });
+      expect(cutOf(got, ok), `race ${frames}`).toEqual([]);
+      const d = droppedAtEnds(got, plan);
+      d.forEach((n, i) => expect(n, `race ${frames} clip ${i}`).toBeLessThanOrEqual(atSpeed(plan[i].speed)));
+    }
+  });
+
   /** Chromium's frame callbacks on an idle machine: now and then in the
    *  rendering update right after the frame's pick (the e2e dumps: now −
    *  presentationTime 0–17 ms), else a refresh later. */
   const chromium = (n: number) => n % 3 === 0;
-  const speeds = (i: number) => [1, 1.5, 2][i % 3];
 
   it("clips at 1.5x and 2x between 1x ones, the frame callbacks as Chromium runs them: no cut frame; the 1x clips drop at most their last kept frame, mostly none — round 5 took those callbacks (a refresh after their pick: more than a presentation at 2x) for two frames' load and held it into the 1x clips after (two kept frames at nearly every one)", async () => {
-    const plan = many.map((s, i) => ({ ...s, speed: speeds(i) }));
-    for (const o of [{ earlyCb: chromium }, {}]) {
-      const at = JSON.stringify(Object.keys(o));
+    // (and with the UI's 1.25x preset among them: round 6 still read its
+    // coalesced callbacks as skips and stalls — R6-A1b)
+    for (const [sp, o] of [
+      [[1, 1.5, 2], { earlyCb: chromium }],
+      [[1, 1.5, 2], {}],
+      [[1, 1.25, 1.5, 2], { earlyCb: chromium }],
+      [[1, 1.25, 1.5, 2], {}],
+    ] as const) {
+      const plan = many.map((s, i) => ({ ...s, speed: sp[i % sp.length] }));
+      const at = `${sp.join("/")} ${JSON.stringify(Object.keys(o))}`;
       const f = framedVideo(0, o);
       const frames = await playAll(f, 25_000, { plan });
       // (with the next clip's speed set before the jump's seek the old
@@ -1117,7 +1213,24 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     }
   });
 
-  it("a 60 fps video (phone footage: 50/59.94/60 fps proxies), the frame callbacks as Chromium runs them: no cut frame, at most the last kept frame at a join, mostly none — round 5 read callbacks a refresh after their pick as two frames' load (two kept frames at every join)", async () => {
+  it("the UI's 1.25x preset between 1x clips (30, 25 and 60 fps), the frame callbacks as Chromium runs them: no cut frame; the 1x clips drop at most their last kept frame, mostly none; the 1.25x ones at most a frame of output — round 6 took a missed callback for a skip and a stall where a presentation lasts a refresh and a half (30 fps × 1.25: 26.7 ms frames; 25 fps: 32 ms; 60 fps: two 13.3 ms frames a presentation): the heavy margin held into the 1x clips after (30 fps: two kept frames at 26 of 28)", async () => {
+    for (const fps of [30, 25, 60]) {
+      const plan = many.map((s, i) => ({ ...s, speed: [1, 1.25][i % 2] }));
+      const f = framedVideo(0, { fps, earlyCb: chromium });
+      const frames = await playAll(f, 25_000, { plan, fps });
+      const at = `${fps} fps`;
+      expect(cutOf(frames, (k) => keptMany(k, fps)), at).toEqual([]);
+      const d = droppedAtEnds(frames, plan, fps);
+      const long = (i: number) => clipFrames(plan[i], fps)[1] - clipFrames(plan[i], fps)[0] > 3;
+      const at1x = d.filter((_, i) => plan[i].speed === 1 && long(i));
+      expect(Math.max(...at1x), at).toBeLessThanOrEqual(1);
+      expect(at1x.filter((n) => n === 0).length / at1x.length, at).toBeGreaterThanOrEqual(0.9);
+      // (a frame of output at 1.25x: two source frames at most)
+      d.forEach((n, i) => plan[i].speed > 1 && expect(n, `${at} clip ${i}`).toBeLessThanOrEqual(Math.ceil(plan[i].speed)));
+    }
+  });
+
+  it("a 60 fps video (phone footage), the frame callbacks as Chromium runs them: no cut frame, at most the last kept frame at a join, mostly none — round 5 read callbacks a refresh after their pick as two frames' load (two kept frames at every join)", async () => {
     // (the harness' clock is ms-grained: at 60 Hz it reads the refresh as
     // 17 ms — round 5 read 60 fps as two frames a refresh then; 61 Hz
     // reads 16)
@@ -1128,6 +1241,52 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
       const d = droppedAtEnds(frames, many, 60);
       expect(Math.max(...d), `${hz} Hz`).toBeLessThanOrEqual(1);
       expect(d.filter((n) => n === 0).length / d.length, `${hz} Hz`).toBeGreaterThanOrEqual(0.9);
+    }
+  });
+
+  it("rendering updates at 30 Hz on a starved device (the main thread free 6 ms after every other refresh, the page's timers held as long — the owner probe at 4× CPU as an iPhone 13), the decoder a frame behind near each clip's end, catching up in one leap past the last kept frame: no cut frame — the 30 Hz cadence's allowance (an idle device's) only while the timers fire on time; taken here, the lags read as the cadence, the heavy margin off: cut frames at nearly every join", async () => {
+    const ends = many.map((x) => clipFrames(x, 30)[1]);
+    let clock: HTMLVideoElement | null = null;
+    const behind = () => {
+      const k = clock && !clock.seeking ? Math.floor(clock.currentTime * 30) : -99;
+      return ends.some((b) => k >= b - 4 && k < b) ? 1 : 0;
+    };
+    const t0 = Date.now();
+    const busy = (t: number) => (t - t0) % (2000 / 60) > 6;
+    const f = framedVideo(0, { behind, busy });
+    clock = f.v;
+    const restore = holdTimers(busy);
+    const frames = await playAll(f, 25_000, { plan: many });
+    restore();
+    expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
+  });
+
+  it("50, 48 and 59.94 fps on 60 Hz (PAL phone footage, 48 fps, NTSC 60), plain and the frame callbacks as Chromium runs them: no cut frame, the last kept frame at 90 % of joins or more — round 6's seam came SEAM_AFTER_MS after the last kept frame's slot, before its pick (picks a refresh apart, up to 16.7 ms after a 20 ms frame's slot) at half the joins", async () => {
+    for (const fps of [50, 48, 59.94])
+      for (const o of [{}, { earlyCb: chromium }]) {
+        const at = `${fps} fps ${JSON.stringify(Object.keys(o))}`;
+        const f = framedVideo(0, { fps, ...o });
+        const frames = await playAll(f, 25_000, { plan: many, fps });
+        expect(cutOf(frames, (k) => keptMany(k, fps)), at).toEqual([]);
+        const d = droppedAtEnds(frames, many, fps);
+        expect(Math.max(...d), at).toBeLessThanOrEqual(1);
+        expect(d.filter((n) => n === 0).length / d.length, at).toBeGreaterThanOrEqual(0.9);
+      }
+  });
+
+  it("rendering updates at 30 Hz on an idle device (iOS Low Power Mode, Chrome's Energy Saver: animation frames and frame callbacks at every other refresh, the timers on time), 30 and 60 fps: no cut frame, at most the last kept frame at a join, mostly none — rounds 5 and 6 took the callbacks a refresh later than at 60 Hz (by the clip's phase) for load: two kept frames at 44 of 55 joins", async () => {
+    for (const fps of [30, 60]) {
+      const t0 = Date.now();
+      // (the page's rendering update can run only in the first 6 ms after
+      // every other refresh)
+      const busy = (t: number) => (t - t0) % (2000 / 60) > 6;
+      const f = framedVideo(0, { fps, busy });
+      const frames = await playAll(f, 25_000, { plan: many, fps });
+      const at = `${fps} fps`;
+      expect(cutOf(frames, (k) => keptMany(k, fps)), at).toEqual([]);
+      const d = droppedAtEnds(frames, many, fps);
+      expect(Math.max(...d), at).toBeLessThanOrEqual(1);
+      expect(d.filter((n) => n === 0).length / d.length, at).toBeGreaterThanOrEqual(0.9);
     }
   });
 
@@ -1176,11 +1335,76 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
       }
   });
 
+  it("'seeked' late and the media clock standing meanwhile (buffering) a few frames before a short clip's end: no cut frame, the clip plays on to its last frames — the seam's guard (round 4's, back in round 6): neither the frames nor the element's clock (at the seek's target while it says seeking) near the end, no seam by the wall clock", async () => {
+    // long, short (10 frames), … after a first join elsewhere; 'seeked'
+    // 400 ms after the landing; the clock stands 130 ms at the short
+    // clip's 4th frame (within the frames' 150 ms of liveness)
+    const plan: { id: string; start: number; end: number }[] = [{ id: "Z", start: 30, end: 31 }];
+    let t = 0;
+    for (let i = 0; i < 10; i++) {
+      plan.push({ id: `L${i}`, start: t, end: t + 0.8 });
+      t += 1;
+      plan.push({ id: `S${i}`, start: t, end: t + 10 / 30 });
+      t += 0.5;
+    }
+    const ranges = plan.map((s) => clipFrames(s, 30));
+    const ok = (k: number) => ranges.some(([a, b]) => k >= a && k < b);
+    const shorts = ranges.filter((_, i) => plan[i].id.startsWith("S"));
+    const stood = new Set<number>();
+    let t0 = 0;
+    const f = framedVideo(30, {
+      seekedLateMs: 400,
+      mediaStall: (now, clock) => {
+        const s = shorts.findIndex(([a]) => clock * 30 >= a + 3 && clock * 30 < a + 4);
+        if (s >= 0 && !stood.has(s)) {
+          stood.add(s);
+          t0 = now;
+        }
+        return now - t0 < 130;
+      },
+    });
+    const frames = await playAll(f, 16_000, { plan });
+    expect(cutOf(frames, ok)).toEqual([]);
+    expect(stood.size).toBeGreaterThanOrEqual(8);
+    // (without the guard the seam fired by the wall clock 4 frames early;
+    // with it two at most: the frame clock from before the stand, the seam
+    // due as soon as the guard opens — buffering, not normal conditions)
+    const d = droppedAtEnds(frames, plan);
+    plan.forEach((s, i) => s.id.startsWith("S") && i < plan.length - 1 && expect(d[i], s.id).toBeLessThanOrEqual(2));
+  });
+
+  it("a speed picked in the native controls just after a short clip's landing, 'seeked' late (the element's clock at the seek's target): the clip plays on to its last frames — round 5 kept the old speed's frame clock (no buffering check while the seek says seeking: the seam due as soon as the guard opened, 3 kept frames early at 1.25x)", async () => {
+    for (const to of [1.25, 0.75]) {
+      const f = framedVideo(0, { rateEvents: true, seekedLateMs: 400 });
+      const p = new EditPlayer(f.v, { fps: 30, seekRampMs: 15 });
+      // (a first join elsewhere: the seek's reach known) Z, A, S (12 frames), B
+      const plan = [
+        { id: "Z", start: 20, end: 21 },
+        { id: "A", start: 0, end: 1 },
+        { id: "S", start: 2, end: 2.4 },
+        { id: "B", start: 5, end: 7 },
+      ];
+      p.setPlan(buildPlan(plan, 40));
+      await vi.advanceTimersByTimeAsync(50);
+      void f.v.play();
+      for (let n = 0; n < 1000 && !f.seeks.some((x) => Math.abs(x.to - 2) < 0.05); n++) await vi.advanceTimersByTimeAsync(5);
+      await vi.advanceTimersByTimeAsync(90);
+      f.v.playbackRate = to;
+      await vi.advanceTimersByTimeAsync(2000);
+      p.destroy();
+      const ok = (k: number) => (k >= 600 && k < 630) || (k >= 0 && k < 30) || (k >= 60 && k < 72) || (k >= 150 && k < 210);
+      expect(cutOf(f.frames, ok), `${to}x`).toEqual([]);
+      expect(droppedAtEnds(f.frames, plan)[2], `${to}x`).toBeLessThanOrEqual(1);
+    }
+  });
+
   it("a speed picked in the native controls mid-clip (1x → 2x, 1x → 4x): the clip plays on to its last frames (the new speed's margin) — round 5 kept the old speed's frame clock (its slots twice as far apart): the seam fired at once, the rest of the clip skipped", async () => {
     for (const [to, afterMs] of [
       [2, 2600],
       [2, 4000],
       [4, 2600],
+      // (in the clip's last 12 frames, to the UI's 1.25x: no margin there)
+      [1.25, 4550],
     ] as const) {
       const at = `${to}x after ${afterMs} ms`;
       const f = framedVideo(0, { rateEvents: true });
@@ -1195,21 +1419,45 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
       await vi.advanceTimersByTimeAsync(4000);
       p.destroy();
       expect(cutOf(f.frames, (k) => (k >= 0 && k < 120) || (k >= 180 && k < 300) || (k >= 600 && k < 630)), at).toEqual([]);
-      // (at the new speed's own margin: atSpeed)
-      expect(f.frames.filter((x) => x.k < 120).at(-1)!.k, at).toBeGreaterThanOrEqual(119 - atSpeed(to));
+      // (at the new speed's own margin: atSpeed; at or below 1.25x none — at
+      // most the last kept frame)
+      expect(f.frames.filter((x) => x.k < 120).at(-1)!.k, at).toBeGreaterThanOrEqual(119 - (to > 1.25 ? atSpeed(to) : 1));
     }
   });
 
-  it("no frame rate from the job, clips sped up: the frames' media-time steps tell it (30 fps at 2x and 1.5x, 24 fps between 1x and 1.5x) — rounds 3–5 divided them by the speed (2x read as 60 fps: its clips' edges a frame off, cut frames at its joins)", async () => {
+  it("no frame rate from the job, clips sped up: the frames' media-time steps tell it (30 fps at 2x and 1.5x, 24 fps between 1x and 1.5x) — rounds 3–5 divided them by the speed (2x read as 60 fps: its clips' edges a frame off, cut frames at its joins); where they can't (60 fps at 2x steps two frames like 30 fps one; 50 fps at 2x, 60 fps at 1.5x faster than the screen) the frames both rates keep — round 6 took 30 fps then: cut frames at a third of the joins; and the first landing, before any frame, inside the clip's first frame at 25 fps too (all rounds: 30 fps' middle of it, the cut frame before it at 25)", async () => {
     for (const [fps, sp] of [
       [30, [2]],
       [30, [1.5]],
       [24, [1, 1.5]],
+      [25, [2]],
+      [25, [1.5]],
+      [50, [2]],
+      [60, [2]],
+      [60, [1.5]],
     ] as const) {
       const at = `${fps} fps at ${sp.join("/")}x`;
       const plan = many.map((s, i) => ({ ...s, speed: sp[i % sp.length] }));
       const frames = await playAll(framedVideo(0, { fps }), 20_000, { plan, fps: 0 });
       expect(cutOf(frames, (k) => keptMany(k, fps)), at).toEqual([]);
+    }
+  });
+
+  it("no frame rate from the job, where the steps only tell 'this rate or twice it' (fpsLeast: 60 fps at 1.5x, 50 fps at 1.5x and 2x on 60 Hz): no cut frame, a join drops two frames of output at most — the clips keep the frames both grids keep, the margins counted in the longer frames; taken for the default 30 fps instead, 4–9 source frames went at a join and a cut frame showed at 50 fps × 1.5 (round 7 left it untested; the editor plays the proxy only with the rate known and at most 30 fps — firstMode — this is the player's own fallback)", async () => {
+    for (const [fps, sp, o] of [
+      [60, 1.5, {}],
+      [60, 1.5, { earlyCb: chromium }],
+      [50, 1.5, {}],
+      [50, 1.5, { earlyCb: chromium }],
+      [50, 2, {}],
+    ] as const) {
+      const at = `${fps} fps at ${sp}x ${JSON.stringify(Object.keys(o))}`;
+      const plan = many.map((s) => ({ ...s, speed: sp }));
+      const frames = await playAll(framedVideo(0, { fps, ...o }), 20_000, { plan, fps: 0 });
+      expect(cutOf(frames, (k) => keptMany(k, fps)), at).toEqual([]);
+      const d = droppedAtEnds(frames, plan, fps);
+      expect(Math.max(...d.filter((_, i) => clipFrames(plan[i], fps)[1] - clipFrames(plan[i], fps)[0] > 3)), at).toBeLessThanOrEqual(atSpeed(sp));
+      vi.clearAllTimers();
     }
   });
 
@@ -1255,6 +1503,70 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
         expect(f.frames.filter((x) => x.k < 180).at(-1)!.k, at).toBeGreaterThanOrEqual(177);
         expect(samples.length, at).toBeGreaterThan(10);
       }
+    }
+  });
+
+  // ── round 8 (round 9: the editor plays the proxy only up to 30 fps —
+  // firstMode; 50 / 59.94 / 60 fps jobs play the server's cut preview) ──
+  it("23.976, 24, 25, 29.97 and 30 fps proxies (the rates the editor plays the proxy at) at 0.75x, 1x, 1.25x, 1.5x and 2x among 1x clips, plain and the frame callbacks as Chromium runs them: no cut frame; the 1x clips drop at most their last kept frame, mostly none; a sped-up clip two frames of output at most, 0.75x one source frame", async () => {
+    for (const fps of [23.976, 24, 25, 29.97, 30])
+      for (const sp of [0.75, 1.25, 1.5, 2])
+        for (const o of [{}, { earlyCb: chromium }]) {
+          const at = `${fps} fps 1x/${sp}x ${JSON.stringify(Object.keys(o))}`;
+          const plan = many.map((s, i) => ({ ...s, speed: [1, sp][i % 2] }));
+          const f = framedVideo(0, { fps, ...o });
+          const frames = await playAll(f, 25_000, { plan, fps });
+          expect(cutOf(frames, (k) => keptMany(k, fps)), at).toEqual([]);
+          const d = droppedAtEnds(frames, plan, fps);
+          const long = (i: number) => clipFrames(plan[i], fps)[1] - clipFrames(plan[i], fps)[0] > 3;
+          const at1x = d.filter((_, i) => plan[i].speed === 1 && long(i));
+          expect(Math.max(...at1x), at).toBeLessThanOrEqual(1);
+          expect(at1x.filter((n) => n === 0).length / at1x.length, at).toBeGreaterThanOrEqual(0.9);
+          d.forEach((n, i) => plan[i].speed !== 1 && expect(n, `${at} clip ${i}`).toBeLessThanOrEqual(sp > 1 ? atSpeed(sp) : 1));
+          vi.clearAllTimers();
+        }
+    // (40 runs of 25 simulated seconds)
+  }, 240_000);
+
+  it("a 60 fps file (the player's own; the editor plays the cut preview there) on a 90 Hz screen, the page's timers 5 ms late, the seek's reach 4 ms: no cut frame, at most the last kept frame at a join — round 7's seam floor read the screen's refresh as 22 ms there (picks 11 and 22 ms apart, the animation frames' refresh taken as 60 Hz's) and held the seam past the cut frame's pick: 4 cut frames", async () => {
+    for (const o of [{}, { earlyCb: chromium }]) {
+      const at = JSON.stringify(Object.keys(o));
+      const f = framedVideo(0, { fps: 60, vsyncMs: 1000 / 90, seekLatency: 4, ...o });
+      const st = globalThis.setTimeout;
+      vi.stubGlobal("setTimeout", ((fn: () => void, ms?: number) => st(fn, (ms ?? 0) + 5)) as typeof setTimeout);
+      const frames = await playAll(f, 25_000, { plan: many, fps: 60 });
+      vi.stubGlobal("setTimeout", st);
+      expect(cutOf(frames, (k) => keptMany(k, 60)), at).toEqual([]);
+      expect(Math.max(...droppedAtEnds(frames, many, 60)), at).toBeLessThanOrEqual(1);
+      vi.clearAllTimers();
+    }
+  });
+
+  it("a 60 fps file (the player's own; the editor plays the cut preview there), the page's timers 15 and 20 ms late (the frame callbacks on time: a busy page), plain and as Chromium runs the callbacks: no cut frame, at most the last kept frame at a join — round 7's frame rule counted TIMER_SLACK_MS for the seam timer's lateness: the seam fired after the cut frame's pick at 14–38 of 55 joins", async () => {
+    for (const late of [15, 20])
+      for (const o of [{}, { earlyCb: chromium }]) {
+        const at = `${late} ms ${JSON.stringify(Object.keys(o))}`;
+        const f = framedVideo(0, { fps: 60, ...o });
+        const st = globalThis.setTimeout;
+        vi.stubGlobal("setTimeout", ((fn: () => void, ms?: number) => st(fn, (ms ?? 0) + late)) as typeof setTimeout);
+        const frames = await playAll(f, 25_000, { plan: many, fps: 60 });
+        vi.stubGlobal("setTimeout", st);
+        expect(cutOf(frames, (k) => keptMany(k, 60)), at).toEqual([]);
+        expect(Math.max(...droppedAtEnds(frames, many, 60)), at).toBeLessThanOrEqual(1);
+        vi.clearAllTimers();
+      }
+  });
+
+  it("Chrome's Energy Saver (the compositor drawing every other refresh, rendering updates right after its draws, the timers on time), 30, 29.97, 25 and 24 fps: no cut frame, at most the last kept frame at a join — round 7 took a landing's first step (two refreshes at a 30 Hz compositor) for a frame the decoder skipped: heavy load at every join, two kept frames at 39–43 of 55 at 30 and 29.97 fps", async () => {
+    for (const fps of [30, 29.97, 25, 24]) {
+      const t0 = Date.now();
+      const V = 1000 / 60;
+      const busy = (t: number) => (((t - t0 - V) % (2 * V)) + 2 * V) % (2 * V) > 6;
+      const f = framedVideo(0, { fps, drawEvery: 2, busy });
+      const frames = await playAll(f, 25_000, { plan: many, fps });
+      expect(cutOf(frames, (k) => keptMany(k, fps)), `${fps} fps`).toEqual([]);
+      expect(Math.max(...droppedAtEnds(frames, many, fps)), `${fps} fps`).toBeLessThanOrEqual(1);
+      vi.clearAllTimers();
     }
   });
 
@@ -1317,6 +1629,30 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     const frames = await playAll(f);
     expect(f.mutes.some((m) => m)).toBe(false);
     expect(cutOf(frames, kept)).toEqual([]);
+  });
+
+  it("the first landing, before any frame, of a job without its frame rate (paused, a click on a clip): on the clip's frames at every common rate, never the cut one before it — round 7 landed past the first frame's start at 24, 25, 30, 50 and 60 fps only: the cut frame before the clip at 6–9 % of the clip starts at 23.976 and 29.97 fps, 1–1.5 % at 48 and 59.94", async () => {
+    for (const fps of [23.976, 29.97, 47.952, 59.94, 25]) {
+      const wrong: string[] = [];
+      for (const s of many) {
+        const f = framedVideo(0, { fps });
+        const p = new EditPlayer(f.v, { fps: 0 });
+        p.setPlan(buildPlan(many, 40));
+        await vi.advanceTimersByTimeAsync(5);
+        p.seek(s.start, s.id);
+        await vi.advanceTimersByTimeAsync(50);
+        // (on the clip's frames: never the cut one before it — 30 fps' middle
+        // of its first frame may be the second one at 23.976)
+        const k = f.frames.at(-1)?.k ?? -1;
+        const [a, b] = clipFrames(s, fps);
+        if (k < a || k >= b) wrong.push(`${s.id}@${s.start}: ${k} not in [${a}, ${b})`);
+        p.destroy();
+        // (each fake video's refresh loop runs on: one at a time)
+        vi.clearAllTimers();
+        vi.unstubAllGlobals();
+      }
+      expect(wrong, `${fps} fps`).toEqual([]);
+    }
   });
 
   it("a seek onto a clip's first moment shows its first frame, not the cut one before it", async () => {

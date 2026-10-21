@@ -171,6 +171,23 @@ export function skipTarget(plan: Segs, t: number, lead = 0.03, land = 0.045): nu
   return "end";
 }
 
+/**
+ * The fastest video the editor plays the proxy of (round 9): 24, 25, 29.97
+ * and 30 fps. A 50 / 59.94 / 60 fps job, and one whose frame rate is not
+ * known, plays the server's cut preview, as with CLEO_PROXY_VIDEO off: the
+ * proxy player's joins showed cut frames at 50 and 60 fps (rounds 7 and 8:
+ * a 90 Hz screen, 1.25x, late timers, the browser's decoder leaping over
+ * kept frames), and without the rate it has no frame grid to join
+ * on (the frame callbacks as Chromium runs them read a 50 fps proxy at 2x
+ * as 25 fps). The proxy has the mezz's frames and rate: GET /jobs/{id} fps.
+ */
+export const PROXY_MAX_FPS = 30.03;
+
+/** Does the editor play the proxy of a video at `fps` (GET /jobs/{id} fps)? */
+export function proxyPlays(fps: number | null | undefined): boolean {
+  return typeof fps === "number" && fps > 0 && fps <= PROXY_MAX_FPS;
+}
+
 /** How far into a part a skip lands: one frame of the file (30 fps when unknown) and a hair. */
 export function landOf(fps: number | null | undefined): number {
   return (fps && fps > 0 ? 1 / fps : 1 / 24) + 0.002;

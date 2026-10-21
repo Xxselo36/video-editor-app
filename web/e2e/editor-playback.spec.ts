@@ -92,7 +92,9 @@ const seeksSince = async (page: Page, from: number): Promise<[number, number][]>
  * the landing's counts only when its place is certain: frames are presented
  * in order, on their slot by the frame clock or after it, never before
  * (the slot: the earliest presentationTime − k·frame of the frames played
- * before, one after the other), and the new position presents at most one
+ * before since the play's landing, whichever had a callback — round 6 took
+ * only a run of consecutive ones: one callback for two just before the
+ * jump left too few), and the new position presents at most one
  * a refresh after the jump was asked — those presented before the landing
  * frame less the new position's are the old position's frames after the
  * last kept one, kept ones when the landing came before the first cut
@@ -113,12 +115,13 @@ function oldEnd(fr: Shown[], seeks: [number, number][], cut: number, to: number)
   let why = "";
   const jump = seeks.find(([at, x]) => kOf(x) >= to && at <= fr[landed][0]);
   if (unseen > 0 && jump) {
-    // the frame clock from the frames before it (each one frame and one
-    // presentation after the one before)
+    // the frame clock from the frames before it with a callback, back to
+    // the play's landing (frames in order; its first frame left out: the
+    // clock stands on it a while)
     const run: number[] = [];
-    for (let j = i; j > 0 && run.length < 8; j--) {
+    for (let j = i; j > 0; j--) {
       const [, m, pf, pt] = fr[j];
-      if (kOf(m) - kOf(fr[j - 1][1]) !== 1 || pf - fr[j - 1][2] !== 1) break;
+      if (kOf(m) <= kOf(fr[j - 1][1]) || pf <= fr[j - 1][2]) break;
       run.push(pt - kOf(m) * fm);
     }
     // (the new position's: at most one a refresh — 60 Hz, less jitter)
@@ -523,6 +526,29 @@ test.describe("how the editor picks proxy or preview", () => {
     expect(probes(reqs)).toEqual([]);
     await expectRebuildSwapsIn(page, stub, job.id);
   });
+
+  // Round 9: the proxy only for a video of known rate up to 30 fps. (The
+  // stub clips are 30 fps: GET /jobs/{id} answers as a 60 fps upload's
+  // job, or one without its rate. has_proxy stays true, so the server
+  // skips the rebuilds — the editor asks for them, as it does today.)
+  for (const fps of [60, null]) {
+    test(`has_proxy: true, fps ${fps} → preview at once, no proxy`, async ({ page, stub }) => {
+      const job = await stub.seed("review", { proxy: "on" });
+      await page.route(new RegExp(`/jobs/${job.id}(\\?.*)?$`), async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        const res = await route.fetch();
+        await route.fulfill({ response: res, json: { ...(await res.json()), fps } });
+      });
+      const { reqs } = collect(page);
+      await page.goto(`/app/edit/${job.id}`);
+      await expect(page.getByTestId("apply-render")).toBeVisible({ timeout: 45_000 });
+      expect(await playbackMode(page)).toBe("preview");
+      await expect(editorVideo(page)).toHaveAttribute("src", /preview-video\?v=\d+/);
+      await waitForMetadata(page);
+      expect(reqs.some((r) => /proxy-video/.test(r.url))).toBe(false);
+      if (fps === 60) await expectRebuildSwapsIn(page, stub, job.id);
+    });
+  }
 
   async function expectRebuildSwapsIn(page: Page, stub: import("./support/fixtures").Stub, jobId: string) {
     const v0 = (await stub.job(jobId))!.preview_version;

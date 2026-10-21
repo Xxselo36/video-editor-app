@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
-import { sourceTimeOf } from "./useEditSession";
-import { landOf, previewMatches, previewSpeedAt, previewTimeOf, skipTarget, stalePlan, swapTime, type Segs } from "./previewSync";
+import { firstMode, sourceTimeOf } from "./useEditSession";
+import {
+  landOf,
+  previewMatches,
+  previewSpeedAt,
+  previewTimeOf,
+  proxyPlays,
+  skipTarget,
+  stalePlan,
+  swapTime,
+  type Segs,
+} from "./previewSync";
 import { playheadCutOf } from "@/features/editor/timeline/mechanics";
 
 const seg = (id: string, start: number, end: number): EditorSeg => ({ id, start, end });
@@ -111,5 +121,28 @@ describe("round 2: the frame after a skip, the speed of a preview segment", () =
     expect(previewSpeedAt(OLD, trimmed, 9.5)).toBe(1); // source 10.5: cut, played at 1x
     // clamped like the export
     expect(previewSpeedAt(OLD, [seg("a", 0, 5), { ...seg("b", 6, 12), speed: 9 }, seg("c", 13, 20)], 6)).toBe(4);
+  });
+});
+
+describe("firstMode (round 9: the proxy only for a known rate up to 30 fps)", () => {
+  it("plays the proxy of a 24, 25, 29.97 or 30 fps job", () => {
+    for (const fps of [23.976, 24, 25, 29.97, 30, 30.03]) expect(firstMode(true, fps), `${fps}`).toBe("proxy");
+    expect(proxyPlays(30)).toBe(true);
+  });
+
+  it("plays the server's cut preview of a 50, 59.94 or 60 fps job, and of one without its frame rate", () => {
+    for (const fps of [50, 59.94, 60, 48, 30.1, 120]) expect(firstMode(true, fps), `${fps}`).toBe("preview");
+    for (const fps of [null, undefined, 0, -30, NaN]) expect(firstMode(true, fps), `${fps}`).toBe("preview");
+    expect(proxyPlays(60)).toBe(false);
+    expect(proxyPlays(null)).toBe(false);
+  });
+
+  it("no proxy: the preview; has_proxy not reported: asked (GET /proxy-video) only where the proxy would play", () => {
+    expect(firstMode(false, 30)).toBe("preview");
+    expect(firstMode(false, null)).toBe("preview");
+    expect(firstMode(undefined, 30)).toBe("probing");
+    expect(firstMode(undefined, 25)).toBe("probing");
+    expect(firstMode(undefined, 60)).toBe("preview");
+    expect(firstMode(undefined, null)).toBe("preview");
   });
 });
