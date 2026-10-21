@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { trackSave } from "@/lib/pendingSaves";
+import { followCaptionKeys } from "@/features/captions-ui/adjusted";
 import {
   captionSource,
   editWord,
@@ -26,7 +27,7 @@ import {
   type EditDoc,
   type IdPool,
 } from "@/features/editor/state/doc";
-import { DocSaver, uniqueRev, type DocSaveState } from "@/features/editor/state/docSave";
+import { DocSaver, rebaseDoc, uniqueRev, type DocSaveState } from "@/features/editor/state/docSave";
 import { reconcileV1, type V1Edits } from "@/features/editor/state/reconcile";
 import { createDocStore, type DocStore } from "@/features/editor/state/store";
 import { takePending, type CaptionStyleDefault } from "@/features/start/captionDefault";
@@ -46,6 +47,8 @@ export type DocSession =
       retry: () => void;
       /** Load the server's doc (after a conflict); local changes are dropped. */
       reload: () => Promise<void>;
+      /** Another tab or device saved (the timeline's 409): bring the doc in line, keeping every local edit (see sync). */
+      sync: () => Promise<DocSync>;
       /** Send what's pending now (before an export: the render reads the doc's style). */
       flush: () => Promise<boolean>;
       /** UT5: what the caption layer and the Style panel need (GET /jobs/{id}/doc). */
@@ -67,6 +70,16 @@ export function retryAfterMs(r: Pick<Response, "headers">, fallbackS: number): n
   const s = Number(r.headers.get("Retry-After"));
   return Math.round(Math.min(120, Math.max(1, Number.isFinite(s) && s > 0 ? s : fallbackS)) * 1000);
 }
+
+/**
+ * After another tab or device saved (round 3): "kept" — this device's doc
+ * edits are on the server and nothing else changed there (its rev is
+ * ours), so nothing was reloaded; "merged" — the other device changed the
+ * doc too: its doc came in with this device's unsaved edits (if any) on
+ * top (saved next); "pending" — not through yet (offline, refused): the
+ * autosave keeps them and goes on.
+ */
+export type DocSync = "kept" | "merged" | "pending";
 
 /** A save still waiting for its retry (DocSaver.exclusive "busy"): ask again in this long. */
 const SAVER_BUSY_MS = 3000;
@@ -174,7 +187,9 @@ export function useDocSession(
         const pool: IdPool = new Set(res.doc.words.map((w) => w.id));
         // Newer v1 sentence edits go into the doc (saved below), so
         // opening v2 never reverts or overwrites them (state/reconcile.ts).
-        const reconciled = reconcileV1(res.doc, res.rev, v1Ref.current, pool);
+        // A caption's own position / size follows its first word (UT5), as after any text edit.
+        const fromV1 = reconcileV1(res.doc, res.rev, v1Ref.current, pool);
+        const reconciled = fromV1 === res.doc ? res.doc : followCaptionKeys(res.doc, fromV1);
         // A new project made with the saved caption style whose PATCH
         // didn't get through: the style now, unless someone edited it.
         const shown = withRenderStyle(reconciled, res.renderStyle);
@@ -221,16 +236,25 @@ export function useDocSession(
     };
   }, [jobId]);
 
-  // The page goes away: one keepalive PATCH. Back online: send now.
+  // The page goes away: one keepalive PATCH. Hidden (iOS fires no
+  // pagehide on an app switch, and may discard the tab): send now. Back
+  // online: send now.
   useEffect(() => {
     if (!loaded || loaded === "none") return;
     const { saver } = loaded;
     const onHide = () => saver.flushUnload();
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") saver.flushHidden();
+    };
     const onOnline = () => void saver.flush();
     window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onHidden);
+    document.addEventListener("freeze", onHidden);
     window.addEventListener("online", onOnline);
     return () => {
       window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onHidden);
+      document.removeEventListener("freeze", onHidden);
       window.removeEventListener("online", onOnline);
     };
   }, [loaded]);
@@ -248,6 +272,31 @@ export function useDocSession(
     for (const w of res.doc.words) loaded.pool.add(w.id);
     const src = captionSource(res.doc.words);
     captionRef.current?.(src.phrases, src.units, false);
+  }, [jobId, loaded]);
+
+  const sync = useCallback(async (): Promise<DocSync> => {
+    if (!loaded || loaded === "none" || loaded.readOnly) return "kept";
+    const { saver, store, pool } = loaded;
+    // this device's edits first, on the doc's own rev rule
+    const saved = await saver.settle(2);
+    if (!saved && saver.status !== "conflict") return "pending";
+    // The server's doc now. Saved with nothing of ours pending, nothing
+    // was sent: the other device may have changed the doc too, and only
+    // this device's next text edit would find out (a 409 — that edit
+    // lost on the reload it offers). Its rev tells.
+    const res = await fetchDoc(jobId).catch(() => null);
+    if (!res) return saved ? "kept" : "pending";
+    if (saved && res.rev === saver.rev) return "kept";
+    // the other device changed the doc too: theirs, with ours on top
+    const merged = rebaseDoc(saver.known, store.getState().present, res.doc, pool);
+    for (const w of res.doc.words) pool.add(w.id);
+    // (the undo steps were made on a doc the server no longer has)
+    store.reset(merged);
+    saver.reset(res.doc, res.rev);
+    saver.schedule(merged);
+    const src = captionSource(merged.words);
+    captionRef.current?.(src.phrases, src.units, true);
+    return "merged";
   }, [jobId, loaded]);
 
   const transcribeSpan = useCallback(
@@ -306,6 +355,7 @@ export function useDocSession(
     readOnly: loaded.readOnly,
     retry,
     reload,
+    sync,
     flush,
     captions: loaded.captions ?? NO_CAPTIONS,
     transcribeSpan,

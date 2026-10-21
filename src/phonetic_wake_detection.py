@@ -12,9 +12,13 @@ Detected via a strict two-word pattern:
 
     <cleo-like> <command-like>
 
-where 'cleo-like' means the word STARTS with a /k/ or /kl/ sound and
-'command-like' means it phonetically matches one of the six command
-words within edit distance 1 on the consonant skeleton.
+where 'cleo-like' means a short word whose consonants are just /kl/
+('Clio', 'Kleo', 'Cléo', 'Clea' — not 'Klaus', 'Klick', 'clean',
+'class', 'close', 'cool') and 'command-like' means it phonetically
+matches one of the six command words within edit distance 1. The pair
+must be said as a command: a break before the wake word and after the
+command word (src/command_gate.py) — a guess never fires inside a
+sentence.
 
 Deterministic, cheap, and can be tuned per command type. Returns
 events in the same shape as `find_scene_cut_ranges` so the caller can
@@ -24,10 +28,12 @@ from __future__ import annotations
 
 import re
 
+from src import command_gate as gate
+
 
 def _clean_word(word: str) -> str:
-    """Lowercase, strip punctuation and diacritics-ish."""
-    return re.sub(r"[^\w]", "", (word or "").lower())
+    """Lowercase, strip punctuation and diacritics ('Cléo' → 'cleo')."""
+    return re.sub(r"[^\w]", "", gate.fold(word or ""))
 
 
 # Consonant skeleton — keep only consonants that carry the identity of
@@ -43,9 +49,9 @@ def _consonant_skel(word: str) -> str:
     return "".join(c for c in w if c not in _VOWELS)
 
 
-# Cleo detection: match the first 2 characters of the CLEAN word (so
-# 'cleo', 'clea', 'klio', 'kleo', 'klick' all pass). Overly-short
-# words like 'k' or 'kx' don't count (guarded by _fuzzy_cleo).
+# Cleo detection: the consonant skeleton of the CLEAN word is exactly
+# /kl/ ('cleo', 'clea', 'klio', 'kleo', 'kilo'); 'klick', 'klaus',
+# 'clean', 'class', 'close' have more consonants and don't count.
 _CLEO_SKELETONS = {"cl", "kl"}
 
 # Target consonant skeletons for each command. Kept as strict, medium-
@@ -107,22 +113,16 @@ def _edit_distance_one(a: str, b: str) -> bool:
 
 
 def _fuzzy_cleo(word: str) -> bool:
-    """True if `word` sounds Cleo-like (starts with kl-, first ~4
-    chars have `cl` or `kl` consonant skeleton).
+    """True if `word` sounds Cleo-like: 3-5 letters, starting with c/k,
+    the /l/ right after (or one vowel after) it, and no other consonant
+    ('cleo', 'clio', 'kleo', 'cleyo', 'cléo', 'kilo'). Longer or
+    consonant-richer words — 'Klaus', 'Klick', 'Klasse', 'Kollege',
+    'clean', 'class', 'close' — and 'cool' are other words.
     """
     w = _clean_word(word)
-    if not w:
+    if not (3 <= len(w) <= 5) or w[0] not in "ck" or w.find("l") not in (1, 2):
         return False
-    # Direct start match: 'cle', 'kle', 'kli', 'clo' etc.
-    if w[:2] in {"cl", "kl"}:
-        return True
-    # Skeleton check on first 4-5 chars — catches 'cleo', 'klick',
-    # 'clear', 'kilo', etc.
-    prefix = w[:5]
-    skel = _consonant_skel(prefix)
-    if skel[:2] in _CLEO_SKELETONS:
-        return True
-    return False
+    return _consonant_skel(w) in _CLEO_SKELETONS
 
 
 # Required first-consonant for each command. Whisper may mangle the
@@ -174,7 +174,7 @@ _COMMAND_FULL_WORDS: dict[str, set[str]] = {
     "keep":   {"keep", "kip", "kiep", "kieb", "kib", "keb", "kep"},
     "finish": {"finish", "finnish", "finnisch", "finished", "fenish"},
     "stop":   {"stop", "stopp", "stopped"},
-    "go":     {"go", "goh", "goes"},
+    "go":     {"go", "goh", "goes", "goo", "geh"},
 }
 
 
@@ -205,10 +205,14 @@ def _fuzzy_command(word: str, cmd: str) -> bool:
     return False
 
 
+_SCENE_COMMANDS = ("start", "cut", "keep", "finish")
+
+
 def find_phonetic_candidates(
     whisper_words: list[dict],
     already_detected: list[tuple[str, float, float]] | None = None,
     dedupe_window: float = 1.5,
+    commands: tuple[str, ...] = _SCENE_COMMANDS,
 ) -> list[tuple[str, float, float, str]]:
     """Scan Whisper words for phonetic Cleo+command patterns.
 
@@ -219,10 +223,14 @@ def find_phonetic_candidates(
             `dedupe_window` seconds of an existing event to avoid
             duplicating what the primary already caught.
         dedupe_window: seconds around existing events to skip.
+        commands: the command words to look for — the scene commands
+            (default; 'cut' is reported as 'restart') or ("stop", "go")
+            for src/voice_triggers.py.
 
     Returns:
         list of (cmd_type, phrase_start, phrase_end, raw_text) tuples.
-        Deduplicated against `already_detected`.
+        Deduplicated against `already_detected`; only pairs with a
+        break before and after them (src/command_gate.py).
     """
     existing = list(already_detected or [])
 
@@ -245,12 +253,14 @@ def find_phonetic_candidates(
 
         if not _fuzzy_cleo(w_text):
             continue
+        if not gate.accept(whisper_words, i, i + 1, weak=True):
+            continue
 
         # Score every command against the next token; pick the best.
         best_cmd: str | None = None
         best_dist = 999
         for cmd, targets in _COMMAND_FULL_WORDS.items():
-            if not _fuzzy_command(n_text, cmd):
+            if cmd not in commands or not _fuzzy_command(n_text, cmd):
                 continue
             n_clean = _clean_word(n_text)
             local = min((_edit_distance(n_clean, t) for t in targets),
@@ -260,14 +270,12 @@ def find_phonetic_candidates(
                 best_cmd = cmd
         if best_cmd is None:
             continue
+        cmd_type = "restart" if best_cmd == "cut" else best_cmd
         phrase_start = float(w.get("start", 0))
         phrase_end = float(w_next.get("end", phrase_start))
-        if _already(best_cmd, phrase_start):
+        if _already(cmd_type, phrase_start):
             continue
         raw = f"{w_text.strip()} {n_text.strip()}"
-        if best_cmd == "cut":
-            candidates.append(("restart", phrase_start, phrase_end, raw))
-        elif best_cmd in ("start", "keep", "finish"):
-            candidates.append((best_cmd, phrase_start, phrase_end, raw))
+        candidates.append((cmd_type, phrase_start, phrase_end, raw))
 
     return candidates

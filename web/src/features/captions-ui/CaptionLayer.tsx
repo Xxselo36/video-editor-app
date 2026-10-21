@@ -52,6 +52,7 @@ import {
   type Page,
   type StyleOverrides,
 } from "@/lib/captions";
+import { cutBy } from "@/features/editor/state/cuts";
 import { setStyle, type EditDoc } from "@/features/editor/state/doc";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
@@ -68,7 +69,14 @@ export type CaptionLayerProps = {
   /** Source time of the playing frame (session.toSource). */
   toSource: (mediaTime: number) => number;
   /** The clip the player is in (proxy mode), for a source moment in two clips. */
-  playingSegId: string | null;
+  /** The clip the proxy player is in (null: not proxy mode), read per frame. */
+  playingSeg: () => string | null;
+  /** A dragged trim edge is shown (the video scrubs): no captions meanwhile
+   *  — they belong to the committed edit, and redrawing them on every
+   *  scrubbed frame made each trim move of a long edit slow (drag-12-rest). */
+  scrubbing?: () => boolean;
+  /** Source ranges no clip plays (the shell's removedOf): cut words show no caption (preview-11). */
+  removed?: readonly { start: number; end: number }[];
   phone: boolean;
   /** Show the button-zone silhouettes all the time (Style panel toggle). */
   zones?: boolean;
@@ -165,7 +173,8 @@ function CaptionLayer(props: CaptionLayerProps) {
   const words = useDocStore(doc, selWords);
   const lang = useDocStore(doc, selLang) ?? undefined;
   const clips = useMemo(() => clipsOf(editSegs), [editSegs]);
-  const source = useMemo(() => shownWords(words), [words]);
+  const removed = props.removed;
+  const source = useMemo(() => shownWords(words, removed ? cutBy(removed) : undefined), [words, removed]);
   const overrides = (style.overrides ?? {}) as StyleOverrides;
   const offsetMs = typeof overrides.offsetMs === "number" ? overrides.offsetMs : 0;
   const timeline = useMemo(() => mapToOutput(clips, source, { offsetMs }), [clips, source, offsetMs]);
@@ -179,7 +188,8 @@ function CaptionLayer(props: CaptionLayerProps) {
   // where the adjust bar goes: the stage's fullscreen wrapper (not clipped by the frame)
   const [barHost, setBarHost] = useState<HTMLElement | null>(null);
   const toSourceRef = useRef(props.toSource);
-  const segIdRef = useRef(props.playingSegId);
+  const segIdRef = useRef(props.playingSeg);
+  const scrubbingRef = useRef(props.scrubbing);
   const [fontLoading, setFontLoading] = useState(false);
   const [sel, setSelState] = useState<Sel | null>(null);
   // the selection for callbacks that run outside a render (the frame loop's refresh)
@@ -219,7 +229,8 @@ function CaptionLayer(props: CaptionLayerProps) {
   });
   useEffect(() => {
     toSourceRef.current = props.toSource;
-    segIdRef.current = props.playingSegId;
+    segIdRef.current = props.playingSeg;
+    scrubbingRef.current = props.scrubbing;
   });
 
   // ── the frame loop and the canvas geometry (mount) ──────────────────
@@ -258,7 +269,7 @@ function CaptionLayer(props: CaptionLayerProps) {
       const r = L.renderer;
       if (!r || !L.ready) return;
       const src = toSourceRef.current(mediaTime ?? v.currentTime);
-      const out = outputTime(L.clips, src, segIdRef.current);
+      const out = scrubbingRef.current?.() ? null : outputTime(L.clips, src, segIdRef.current());
       const tt = out ?? -1;
       if (!L.dirty && tt === L.lastT) return;
       const force = L.dirty;
@@ -283,9 +294,12 @@ function CaptionLayer(props: CaptionLayerProps) {
     };
     L.draw = () => draw();
 
-    // Fonts that failed (offline) are asked for again once back online.
+    // Fonts that failed are asked for again: once back online, and on a
+    // timer with backoff (a flaky fetch on a phone never fires "online").
     const retry = () => L.prepare();
     let slowTimer = 0;
+    let retryTimer = 0;
+    let retryN = 0;
     const prepare = () => {
       if (!L.W || !L.H) return;
       const s = L.style;
@@ -322,16 +336,31 @@ function CaptionLayer(props: CaptionLayerProps) {
           window.clearTimeout(slowTimer);
           setFontLoading(false);
           if (!ok) {
+            window.removeEventListener("online", retry);
+            window.addEventListener("online", retry, { once: true });
+            window.clearTimeout(retryTimer);
+            retryTimer = window.setTimeout(retry, [2000, 5000, 15_000, 30_000][Math.min(retryN++, 3)]);
+            const r = L.renderer;
+            if (r && L.ready) {
+              // Keep drawing with the fonts already loaded (the renderer's
+              // own style) and the new words — never blank captions for
+              // the rest of playback because one fetch failed (preview-8).
+              r.update({ words, style: r.style, W: L.W, H: L.H, lang, breaks: L.timeline.breaks });
+              L.dirty = true;
+              draw();
+              L.refreshSel();
+              return;
+            }
             // No fallback-font frame: nothing until the fonts are there.
-            L.renderer?.dispose();
+            r?.dispose();
             L.renderer = null;
             L.ready = false;
             ctx.clearRect(0, 0, L.W, L.H);
             placeHit(-1);
-            window.removeEventListener("online", retry);
-            window.addEventListener("online", retry, { once: true });
             return;
           }
+          retryN = 0;
+          window.clearTimeout(retryTimer);
           const input = { words, style: s, W: L.W, H: L.H, lang, breaks: L.timeline.breaks };
           if (L.renderer) L.renderer.update(input);
           else L.renderer = new CaptionRenderer(input);
@@ -408,6 +437,7 @@ function CaptionLayer(props: CaptionLayerProps) {
       if (rvfc) v.cancelVideoFrameCallback?.(frameHandle);
       cancelAnimationFrame(rafHandle);
       window.clearTimeout(slowTimer);
+      window.clearTimeout(retryTimer);
       ro?.disconnect();
       v.removeEventListener("loadedmetadata", layout);
       v.removeEventListener("resize", layout);
@@ -878,7 +908,8 @@ export default memo(
     a.apply === b.apply &&
     a.editSegs === b.editSegs &&
     a.toSource === b.toSource &&
-    a.playingSegId === b.playingSegId &&
+    a.playingSeg === b.playingSeg &&
+    a.scrubbing === b.scrubbing &&
     a.phone === b.phone &&
     a.zones === b.zones &&
     a.readOnly === b.readOnly &&

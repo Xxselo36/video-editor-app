@@ -6,7 +6,8 @@ API box (Railway) needs no disk for it.
   1. Fetch the upload (`source_key`, R2) into the container's own disk.
   2. pipeline.analyze_only — the very function the local executor runs:
      normalize (mezz + proxy), SmartCam, loudness / peaks, Groq
-     transcription, the Claude steps, cut preview, poster, CJK font
+     transcription, the Claude steps, cut preview (not with proxy
+     playback: CLEO_PROXY_VIDEO comes with the call), poster, CJK font
      subsets, filmstrip.
   3. Store everything under the job's keys through
      pipeline.store_analysis_outputs (the worker stores through it too:
@@ -62,10 +63,11 @@ from typing import Any, Callable
 CHANNEL = "cleocuts-analyze"
 # Analysis-relevant settings of the API box the container gets too
 # (non-secret, the API sends them per call; the keys come from the
-# Modal secret).
+# Modal secret). CLEO_PROXY_VIDEO: the editor plays the proxy, so the
+# analysis makes no first preview (pipeline.first_preview_wanted).
 FORWARD_ENV = ("CLEO_DISFLUENT_PROMPT", "CLEO_SUSTAINED_VOWEL_CUTS",
                "CLEO_GROQ_MAX_RETRY_WAIT", "CLEO_GROQ_DEBUG",
-               "CLEO_CAPTION_PRESETS_LIVE")
+               "CLEO_CAPTION_PRESETS_LIVE", "CLEO_PROXY_VIDEO")
 # The result keys of analyze_only that are local paths (stored, then
 # gone with the container) — everything else goes back to the API.
 LOCAL_PATH_KEYS = ("normalized_path", "preview_path", "peaks_path",

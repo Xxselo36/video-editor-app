@@ -44,12 +44,16 @@ export function ReviewScreen({
   formatWarning = null,
   cutRanges,
   duration,
+  fps = null,
   onChange,
   onApply,
   onBack,
+  editRev = 0,
 }: {
   jobId: string;
   savedSegments: SavedSeg[];
+  /** GET /jobs/{id} edit_rev (the timeline save's revision rule). */
+  editRev?: number;
   previewSegments: [number, number][];
   previewVersion: number;
   /** GET /jobs/{id} has_proxy: true / false, undefined = not reported. */
@@ -63,6 +67,9 @@ export function ReviewScreen({
   formatWarning?: string | null;
   cutRanges: CutRange[];
   duration: number;
+  /** GET /jobs/{id} fps (the mezzanine's rate): the proxy player's frame
+   *  grid; null: it measures the frames. */
+  fps?: number | null;
   onChange: (p: Phrase[]) => void;
   onApply: () => void;
   onBack: () => void;
@@ -85,11 +92,12 @@ export function ReviewScreen({
     applying,
     applyError,
     apply,
+    previewStale,
     playingSegId,
     seekToPhrase,
     seekOriginal,
     togglePlay,
-  } = useEditSession({ jobId, savedSegments, previewSegments, previewVersion, hasProxy, cutRanges, duration, onApply });
+  } = useEditSession({ jobId, savedSegments, previewSegments, previewVersion, hasProxy, cutRanges, duration, fps, onApply, editRev });
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
@@ -320,7 +328,7 @@ export function ReviewScreen({
         )}
         <PlaybackDebug videoRef={videoRef} mode={mode} />
         {/* Proxy mode has no preview to update: the edit already plays. */}
-        {editSaving && mode !== "proxy" && (
+        {previewStale && (
           <div
             data-testid="preview-updating"
             className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold backdrop-blur-md"

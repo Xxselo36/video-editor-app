@@ -383,6 +383,10 @@ def clean_state(monkeypatch):
     started: list[str] = []
     monkeypatch.setattr(M, "_run_analyze", lambda job_id: started.append(job_id))
     yield _QueuedAnalyses() if TEST_QUEUE else started
+    # A save's preview build runs in the background (main._submit_build):
+    # it ends here, with this test's stand-ins still in place, not in the
+    # next test.
+    M._settle_preview_builds(15)
 
 
 class _QueuedAnalyses:

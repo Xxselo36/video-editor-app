@@ -12,7 +12,7 @@
  */
 import { Captions, History, Palette, TriangleAlert, X } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/i18n";
 import { apiFetch, useMediaUrl } from "@/lib/api";
 import { adjustedWordIds, followCaptionKeys } from "@/features/captions-ui/adjusted";
@@ -30,10 +30,12 @@ import { createDocStore, useDocStore, type DocState } from "@/features/editor/st
 import { useTimelineHistory, type TimelineHistory } from "@/features/editor/timeline/history";
 import {
   canDelete,
+  MIN_CLIP_S,
   playheadCutOf,
   sourceAtCut,
   splitAt,
   splittableIndex,
+  type EditorSeg,
 } from "@/features/editor/timeline/mechanics";
 import type { CutRange, SavedSeg } from "@/features/jobs/types";
 import { useEditorRoot, useMediaQuery, useOnline } from "./hooks";
@@ -60,6 +62,8 @@ export type EditorShellProps = {
   jobId: string;
   filename: string | null | undefined;
   savedSegments: SavedSeg[];
+  /** GET /jobs/{id} edit_rev: the timeline's revision (its saves' base_rev, review F3). */
+  editRev?: number;
   previewSegments: [number, number][];
   previewVersion: number;
   hasProxy: boolean | undefined;
@@ -134,15 +138,20 @@ function initialTitle(jobId: string, filename: string | null | undefined): strin
   return base || "Video";
 }
 
-type ToastState = { msg: string; action?: { label: string; run: () => void }; key: number } | null;
+type ToastState = { msg: string; action?: { label: string; run: () => void }; key: number; ms?: number } | null;
 
 export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetChange: (open: boolean) => void }) {
   const t = useT();
   const { phone } = props;
   const root = useEditorRoot();
+  // 409 on a timeline save (another tab or device): set below, once the doc and the histories exist
+  const onTimelineConflict = useRef<(mine: EditorSeg[] | null) => void>(() => {});
   const session = useEditSession({
     jobId: props.jobId,
     savedSegments: props.savedSegments,
+    editRev: props.editRev,
+    fps: props.fps,
+    onConflict: (mine) => onTimelineConflict.current(mine),
     previewSegments: props.previewSegments,
     previewVersion: props.previewVersion,
     hasProxy: props.hasProxy,
@@ -151,22 +160,28 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     onApply: props.onApply,
     // UX10 (review C9): no click at a cut's jump (not iOS: fixed volume)
     seekRampMs: 15,
+    // read through session.playingSeg(): no render at every join
+    playingSegState: false,
   });
   const { editSegs, toSource, videoRef } = session;
+  const { mode: playMode, playingSeg } = session;
+  /** The clip the proxy player is in (null in preview mode), read per frame. */
+  const proxySeg = useCallback(() => (playMode === "proxy" ? playingSeg() : null), [playMode, playingSeg]);
   const posterUrl = useMediaUrl(props.jobId, "poster");
 
   // ── playhead store, fed by the video's presented frames ─────────────
   const store = useMemo(() => createPlayheadStore(), []);
+  const { heldTime } = session;
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    return store.attach(v);
-  }, [store, videoRef]);
+    return store.attach(v, { held: heldTime });
+  }, [store, videoRef, heldTime]);
 
   // ── toast ───────────────────────────────────────────────────────────
   const [toast, setToast] = useState<ToastState>(null);
-  const showToast = useCallback((msg: string, action?: { label: string; run: () => void }) => {
-    setToast({ msg, action, key: Date.now() });
+  const showToast = useCallback((msg: string, action?: { label: string; run: () => void }, ms?: number) => {
+    setToast({ msg, action, key: Date.now(), ms });
   }, []);
   const tlHistory = useTimelineHistory(editSegs, session.commitEditSegs);
   // UX10: what the clips leave out — struck in the text, not exported.
@@ -230,6 +245,12 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     canUndo: tlHistory.canUndo || docCanUndo,
     canRedo: tlHistory.canRedo || docCanRedo,
   };
+  // the newest one, for actions that run later (a toast's button): its
+  // commit diffs against the clips on screen then, not when it was made
+  const historyRef = useRef(history);
+  useLayoutEffect(() => {
+    historyRef.current = history;
+  });
   const applyDoc = useCallback(
     (op: (d: EditDoc) => EditDoc) => {
       // a caption's own position / size stays with the caption when its
@@ -287,8 +308,8 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
       if (ok) noteReveal();
       return ok;
     },
-    restoreWord: (w) => {
-      const ok = rawCuts.restoreWord(w);
+    restoreWord: (w, span) => {
+      const ok = rawCuts.restoreWord(w, span);
       if (ok) noteReveal();
       return ok;
     },
@@ -352,9 +373,57 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   // ── toast ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!toast) return;
-    const id = setTimeout(() => setToast(null), toast.action ? 6000 : 4000);
+    const id = setTimeout(() => setToast(null), toast.ms ?? (toast.action ? 6000 : 4000));
     return () => clearTimeout(id);
   }, [toast]);
+
+  // ── another tab or device saved the timeline (409 stale_rev, F3): its
+  // timeline is on screen again (useEditSession) and the timeline's undo
+  // history starts over. Round 3, nothing of this device is lost: its doc
+  // edits go to the server first (the doc's own rev rule) — the doc is
+  // replaced only if the other device changed it too, and then with this
+  // device's edits on top (useDocSession sync) — and the refused timeline
+  // change is one tap away in the toast (and offered on the next open:
+  // timelineSave keeps it in the backup until the next edit).
+  useEffect(() => {
+    onTimelineConflict.current = (mine) => {
+      tlHistory.reset();
+      order.drop("tl");
+      const say = () =>
+        showToast(
+          t("editor.conflict.reloaded"),
+          mine ? { label: t("editor.conflict.restoreLast"), run: () => historyRef.current.commit(mine) } : undefined,
+          mine ? 15_000 : undefined,
+        );
+      if (doc.status !== "ready") {
+        say();
+        return;
+      }
+      void doc.sync().then((r) => {
+        if (r === "merged") order.drop("doc");
+        say();
+      });
+    };
+  });
+
+  // ── edits this device left unsaved last time (save-11): nobody saved
+  // since → back by themselves, as an undo step; the server moved on →
+  // offered, the user decides.
+  const unsavedShown = useRef(false);
+  useEffect(() => {
+    const u = session.unsaved;
+    if (unsavedShown.current || u.kind === "none" || !editSegs.length) return;
+    // after this commit (the toast and the restore are state of their own)
+    const id = setTimeout(() => {
+      unsavedShown.current = true;
+      if (u.kind === "auto") {
+        if (history.commit(u.segs)) showToast(t("editor.unsaved.restored"), { label: t("editor.undo"), run: () => historyRef.current.undo() });
+      } else {
+        showToast(t("editor.unsaved.found"), { label: t("editor.unsaved.restore"), run: () => historyRef.current.commit(u.segs) });
+      }
+    }, 0);
+    return () => clearTimeout(id);
+  });
 
   // ── states: offline, expired ────────────────────────────────────────
   const online = useOnline();
@@ -374,10 +443,26 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     };
   }, [session.saveError, props.jobId]);
 
+  // Saves failing (offline, refused): closing the tab now would lose the
+  // edits since the last stored save — the browser asks first (desktop;
+  // iOS ignores it). Not while saves merely wait: leaving flushes those.
+  const docSaveNow = doc.status === "ready" ? doc.saveState : "saved";
+  const unsafeToLeave = session.saveError !== null || docSaveNow === "retrying" || docSaveNow === "failed";
+  useEffect(() => {
+    if (!unsafeToLeave) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [unsafeToLeave]);
+
   // ── actions ─────────────────────────────────────────────────────────
   const split = () => {
     const at = toSource(store.getState().mediaTime);
-    const idx = splittableIndex(editSegs, at);
+    // no piece under MIN_CLIP_S (state-3: no blips)
+    const idx = splittableIndex(editSegs, at, MIN_CLIP_S);
     if (idx === -1) {
       showToast(t("app.timeline.splitUnavailable"));
       return;
@@ -391,7 +476,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     setSelected(null);
   };
   const stepBy = (d: number) => {
-    const segId = session.mode === "proxy" ? session.playingSegId : null;
+    const segId = session.mode === "proxy" ? session.playingSeg() : null;
     const cut = playheadCutOf(editSegs, toSource(store.getState().mediaTime), segId) ?? 0;
     const at = sourceAtCut(editSegs, Math.max(0, Math.min(cutDuration(editSegs) - 0.001, cut + d)));
     if (at) session.seekOriginal(at.t, at.segId);
@@ -594,11 +679,13 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         apply={applyDoc}
         editSegs={editSegs}
         toSource={toSource}
-        playingSegId={session.mode === "proxy" ? session.playingSegId : null}
+        playingSeg={proxySeg}
+        removed={removed}
         phone={phone}
         zones={zones}
         readOnly={doc.readOnly}
         onShowInText={showInText}
+        scrubbing={session.isScrubbing}
       />
     ) : undefined;
   const undoRedo = (
@@ -715,9 +802,10 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
         selected={selectedLive}
         setSelected={setSelected}
         toSource={toSource}
-        playingSegId={session.playingSegId}
+        playingSeg={session.playingSeg}
         mode={session.mode}
         seekOriginal={session.seekOriginal}
+        onScrub={session.scrubTo}
         onSplit={split}
         onDelete={() => void del()}
         onTrimmed={noteReveal}
@@ -781,6 +869,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
           {toast.action && (
             <button
               type="button"
+              data-testid="ed-toast-action"
               className={`${s.gb} ${s.toastAction}`}
               onClick={() => {
                 toast.action!.run();

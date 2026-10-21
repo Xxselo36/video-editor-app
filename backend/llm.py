@@ -38,6 +38,12 @@ _MODEL_COMMAND_FIX = "claude-sonnet-4-6"  # Sonnet handles phonetic mishears
                                           # far better than Haiku. +$0.01/video
                                           # for launch-critical reliability.
 _MAX_TOKENS_CLEANUP = 4000
+# The caption cleanup goes out in chunks of this many phrases, at most
+# _CLEANUP_PARALLEL at a time, and asks back only for the phrases it
+# changed: one call with every unit of a 10-min video (~500 units, ~6k
+# output tokens) never fit _MAX_TOKENS_CLEANUP nor the 30 s timeout.
+_CLEANUP_CHUNK = 100
+_CLEANUP_PARALLEL = 4
 _MAX_TOKENS_COMMAND_FIX = 800
 _MAX_TOKENS_SOCIAL = 800
 
@@ -343,7 +349,10 @@ Empty corrections list is a valid answer.
 
     # Apply corrections IN PLACE: replace the text of the token range
     # with the corrected phrase's tokens. Keep original timestamps —
-    # the LLM only fixes the word text.
+    # the LLM only fixes the word text. Every token of the range is
+    # marked `cmd_fix`: the command scan takes it as said
+    # (src/command_gate.py), and reads a crammed "cleo keep" as two
+    # words (split_tokens).
     applied: list[dict[str, Any]] = []
     for c in corrections:
         try:
@@ -377,6 +386,8 @@ Empty corrections list is a valid answer.
                 all_words[s_i + offset]["word"] = corr_tokens[offset]
             all_words[s_i + span - 1]["word"] = " ".join(corr_tokens[span - 1:])
 
+        for offset in range(span):
+            all_words[s_i + offset]["cmd_fix"] = True
         applied.append({
             "range": [s_i, e_i],
             "from": c.get("original", ""),
@@ -399,6 +410,10 @@ def cleanup_transcript(
     """Text-only cleanup — typos, brand canonicalization, filler removal.
 
     Runs on Haiku (fast + cheap). Does NOT decide anything about cuts.
+    Long transcripts go out in chunks of _CLEANUP_CHUNK phrases (each its
+    own call and timeout, _CLEANUP_PARALLEL at a time); the model answers
+    only the phrases it changed. A chunk that fails or is cut short
+    leaves its phrases as they are.
 
     Returns {phrase_id: cleaned_text}. Empty on failure / no key.
     """
@@ -433,12 +448,42 @@ Clean up each phrase:
 
 {lang_hint}
 
-Respond with ONLY a JSON object in this exact shape:
+Respond with ONLY a JSON object in this exact shape, listing ONLY the
+phrases you changed (an empty list when none needs a fix):
 {{"phrases": [{{"id": 0, "cleaned": "Fixed text."}}, ...]}}
 """
 
-    user_msg = json.dumps({"phrases": payload}, ensure_ascii=False)
+    chunks = [payload[i:i + _CLEANUP_CHUNK]
+              for i in range(0, len(payload), _CLEANUP_CHUNK)]
+    obs = _observer()
+    cleaned: dict[int, str] = {}
+    if len(chunks) == 1:
+        cleaned.update(_cleanup_chunk(client, system, chunks[0]))
+        return cleaned
+    from concurrent.futures import ThreadPoolExecutor
 
+    def run(chunk: list[dict]) -> tuple[dict[int, str], dict[str, float]]:
+        # The worker thread reports to the caller's observer and cost
+        # bucket (both are per thread).
+        usage: dict[str, float] = {}
+        with costs.collecting(usage):
+            if obs is None:
+                return _cleanup_chunk(client, system, chunk), usage
+            with observing(obs):
+                return _cleanup_chunk(client, system, chunk), usage
+
+    with ThreadPoolExecutor(max_workers=min(_CLEANUP_PARALLEL, len(chunks)),
+                            thread_name_prefix="llm-cleanup") as pool:
+        for part, usage in pool.map(run, chunks):
+            cleaned.update(part)
+            costs.merge(usage)
+    return cleaned
+
+
+def _cleanup_chunk(client, system: str, chunk: list[dict]) -> dict[int, str]:
+    """One cleanup call: {phrase_id: cleaned_text} of the phrases of
+    `chunk` the model changed; {} when it fails."""
+    user_msg = json.dumps({"phrases": chunk}, ensure_ascii=False)
     try:
         resp = client.messages.create(
             model=_MODEL_CLEANUP,
@@ -455,17 +500,22 @@ Respond with ONLY a JSON object in this exact shape:
         print(f"[llm] cleanup call failed: {e}", flush=True)
         _note_failure("cleanup", e)
         return {}
+    if getattr(resp, "stop_reason", None) == "max_tokens":
+        print(f"[llm] cleanup answer cut at max_tokens ({len(chunk)} phrases)"
+              " — those phrases stay as transcribed", flush=True)
+        costs.record_event("llm_truncated:cleanup")
 
     parsed = _extract_json(text)
     if not isinstance(parsed, dict):
         return {}
 
+    ids = {p["id"] for p in chunk}
     cleaned: dict[int, str] = {}
     for entry in parsed.get("phrases", []) or []:
         try:
             pid = int(entry["id"])
             txt = str(entry.get("cleaned", "")).strip()
-            if txt:
+            if txt and pid in ids:
                 cleaned[pid] = txt
         except (KeyError, TypeError, ValueError):
             continue

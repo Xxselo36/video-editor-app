@@ -71,4 +71,15 @@ describe("one undo order for text and timeline", () => {
     expect(coalesces({ key: "k", t: 0 }, "j", 10)).toBe(false);
     expect(coalesces({ key: "k", t: 0 }, undefined, 10)).toBe(false);
   });
+
+  it("drop: one area's steps go (its history was replaced), the other's stay in order (round 3)", () => {
+    const o = new EditOrder();
+    o.record("doc");
+    o.record("tl");
+    o.record("doc");
+    o.drop("tl");
+    const can = () => true;
+    expect(o.take("undo", can)).toBe("doc");
+    expect(o.take("undo", can)).toBe("doc");
+  });
 });

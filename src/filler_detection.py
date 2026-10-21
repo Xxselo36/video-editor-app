@@ -29,6 +29,23 @@ _VOCAL_RE = re.compile(
 # Reduplicated forms that mean 'no' — not fillers.
 _NEGATIONS = {"uh-uh", "mm-mm", "m-m", "hm-hm"}
 
+# Real words Whisper writes for an "ähm" / "um" (German "am", "ham";
+# English "am"), per language. They count as a filler only where the
+# word itself can't be (filler-um-heard-am, _am_is_filler): set off by a
+# break on both sides — German "am" always runs on into its noun ("am
+# Ende"), English "am" follows its "I" — and heard like a hesitation.
+_HEARD_AS_WORD: dict[str, frozenset[str]] = {
+    "de": frozenset({"am", "ham", "hamm"}),
+    "en": frozenset({"am"}),
+}
+# Seconds of silence (Whisper's times) that set a word off, before / after.
+_SET_OFF_BEFORE_S = 0.15
+_SET_OFF_AFTER_S = 0.3
+# Heard like a hesitation: drawn out at least this long, or (when the
+# transcript has real word probabilities) below this one.
+_HESITATION_MIN_S = 0.25
+_HESITATION_MAX_PROB = 0.6
+
 
 def _is_vocalisation(text: str) -> bool:
     """True for a pure filler sound, incl. hyphenated 'äh-äh' / 'm-hm'."""
@@ -198,6 +215,12 @@ class FillerDetector:
 
         max_filler_tokens = self._get_max_filler_word_count(filler_set)
         detected: list[FillerWord] = []
+        heard_as_word = _HEARD_AS_WORD.get(language, frozenset()) - filler_set
+        # Groq gives no per-word probability (its words read 1.0): only
+        # a transcript with real ones can tell a low-confidence word.
+        has_probs = any(
+            w.get("probability") is not None and float(w["probability"]) < 0.999
+            for seg in segments for w in (seg.get("words") or []))
 
         for segment in segments:
             words = segment.get("words", [])
@@ -252,7 +275,8 @@ class FillerDetector:
                 if i in consumed:
                     continue
                 vocal = _is_vocalisation(w["text"])
-                if w["text"] not in filler_set and not vocal:
+                if (w["text"] not in filler_set and not vocal
+                        and w["text"] not in heard_as_word):
                     continue
                 if w["text"] == "eh" and not self._eh_is_hesitation(words, i):
                     # 'das ist eh klar' — a real word unless set off by
@@ -261,6 +285,15 @@ class FillerDetector:
                 if (w["text"] in ("mm", "mmm") and i > 0
                         and cleaned[i - 1]["text"].replace(",", ".").replace(".", "", 1).isdigit()):
                     continue  # '5 mm' — millimetres
+                if w["text"] in heard_as_word:
+                    # never by the word list alone: a real "am" ("um"
+                    # in German) unless it can't be one
+                    if not self._am_is_filler(words, i, has_probs):
+                        continue
+                    detected.append(FillerWord(start=w["start"], end=w["end"],
+                                               word=w["text"],
+                                               confidence=w["probability"]))
+                    continue
                 is_always_filler = vocal or w["text"] in always_filler_set
                 if is_always_filler or w["probability"] >= self.confidence_threshold:
                     detected.append(FillerWord(
@@ -272,6 +305,54 @@ class FillerDetector:
 
         detected.sort(key=lambda f: f.start)
         return detected
+
+    @staticmethod
+    def _am_is_filler(words: list[dict], i: int, has_probs: bool) -> bool:
+        """Is words[i] — "am" / "ham" (_HEARD_AS_WORD) — an "ähm"? Only
+        when nothing else fits, and conservatively:
+          - set off on both sides: a break before it (the start,
+            punctuation on the word before, a pause of _SET_OFF_BEFORE_S)
+            and after it (its own punctuation — "am," "Am…" — a hesitation
+            mark, a pause of _SET_OFF_AFTER_S, the end); German "am" runs
+            on into its noun, so it never has one after it;
+          - not English "I am" ("Yes, I am.", "who I am,"), not after a
+            number ("9 am"), not before another filler ("Am, ähm,
+            Montag": a real "am" the speaker hesitated after — or two
+            fillers; left alone);
+          - heard like a hesitation: low confidence when the transcript
+            has real word probabilities (_HESITATION_MAX_PROB), else
+            drawn out (_HESITATION_MIN_S) or a real pause beside it."""
+        def raw(k: int) -> str:
+            return (words[k].get("word") or "").strip()
+
+        def bare(k: int) -> str:
+            return raw(k).lower().strip(".,!?;:\"'()[]…–—-")
+
+        punct = ",.!?;:…"
+        t = raw(i)
+        s = float(words[i].get("start") or 0.0)
+        e = float(words[i].get("end") or s)
+        prev_end = float(words[i - 1].get("end") or s) if i > 0 else None
+        next_start = (float(words[i + 1].get("start") or e)
+                      if i + 1 < len(words) else None)
+        gap_b = s - prev_end if prev_end is not None else None
+        gap_a = next_start - e if next_start is not None else None
+        before = (i == 0 or raw(i - 1)[-1:] in punct or not bare(i - 1)
+                  or t[:1] in ",…" or (gap_b is not None and gap_b >= _SET_OFF_BEFORE_S))
+        after = (i + 1 >= len(words) or t[-1:] in punct or not bare(i + 1)
+                 or (gap_a is not None and gap_a >= _SET_OFF_AFTER_S))
+        if not (before and after):
+            return False
+        if i > 0 and (bare(i - 1) in ("i", "i'm") or bare(i - 1).isdigit()):
+            return False
+        if i + 1 < len(words) and _is_vocalisation(bare(i + 1)):
+            return False
+        if has_probs:
+            p = words[i].get("probability")
+            return p is not None and float(p) < _HESITATION_MAX_PROB
+        return (e - s >= _HESITATION_MIN_S
+                or (gap_b is not None and gap_b >= _SET_OFF_BEFORE_S)
+                or (gap_a is not None and gap_a >= _SET_OFF_AFTER_S))
 
     @staticmethod
     def _eh_is_hesitation(words: list[dict], i: int) -> bool:

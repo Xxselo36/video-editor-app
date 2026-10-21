@@ -53,9 +53,15 @@ export type JobStatus = {
   // The user's saved timeline (job.segments + effects). Seed the editor
   // from this — cut_ranges only describe the automatic cuts.
   edit_segments?: SavedSeg[];
+  // Its revision (the /edit-segments revision rule, review F3): a save's
+  // base_rev. 0 / missing: never saved with one.
+  edit_rev?: number;
   // Segments the served preview.mp4 was built from + its version.
   preview_segments?: [number, number][];
   preview_version?: number;
+  // The rebuild of the preview for the stored timeline (a backend that
+  // builds it in the background): building / ready / failed / stale.
+  preview_status?: "ready" | "building" | "failed" | "stale";
   // GET /jobs/{id}/proxy-video exists: the editor plays it and applies
   // the edit itself (lib/editPlayback). Missing = unknown, probed.
   has_proxy?: boolean;

@@ -156,7 +156,7 @@ export function PreviewStage({
           width={frame.w}
           editSegs={session.editSegs}
           toSource={session.toSource}
-          playingSegId={session.playingSegId}
+          playingSeg={session.playingSeg}
           mode={session.mode}
           onTogglePlay={session.togglePlay}
           onToggleMute={session.toggleMute}

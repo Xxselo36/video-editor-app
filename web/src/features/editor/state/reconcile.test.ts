@@ -68,4 +68,61 @@ describe("v1 sentence edits into the doc", () => {
     const own = { phrases: captionSource(d.words).phrases, rev: MS };
     expect(reconcileV1(d, 0, own)).toBe(d);
   });
+
+  it("v2's own copy of touching sentences is a no-op on every reopen (owner: words re-timed, re-id'd, then lost)", () => {
+    // a sentence ends where a short first word of the next one starts:
+    // its middle is within EPS of the sentence end
+    const d = docOf([
+      W("w1", "Das", 12.9, 13.2),
+      W("w2", "ist", 13.2, 13.6),
+      W("w3", "fertig.", 13.6, 14.2),
+      W("w4", "so", 14.2, 14.28),
+      W("w5", "weiter", 14.28, 14.9),
+      W("w6", "geht's.", 14.9, 15.4),
+    ]);
+    let cur = d;
+    for (let round = 0; round < 3; round++) {
+      const copy = { phrases: captionSource(cur.words).phrases, rev: MS + round };
+      const n = reconcileV1(cur, 0, copy);
+      expect(n).toBe(cur);
+      cur = n;
+    }
+  });
+
+  it("a real v1 edit next to touching sentences: the short first word stays in its own sentence", () => {
+    const d = docOf([
+      W("w1", "Das", 12.9, 13.2),
+      W("w2", "ist", 13.2, 13.6),
+      W("w3", "fertig.", 13.6, 14.2),
+      W("w4", "so", 14.2, 14.28),
+      W("w5", "weiter", 14.28, 14.9),
+      W("w6", "geht's.", 14.9, 15.4),
+    ]);
+    const v1 = { phrases: [P(12.9, 14.2, "Das ist fertig."), P(14.2, 15.4, "so weiter geht es.")], rev: MS };
+    const n = reconcileV1(d, 0, v1);
+    expect(n.words.map((w) => w.text)).toEqual(["Das", "ist", "fertig.", "so", "weiter", "geht", "es."]);
+    // the untouched words keep their ids and times
+    expect(n.words.slice(0, 5)).toEqual(d.words.slice(0, 5));
+    expect(n.words.some((w) => w.hidden)).toBe(false);
+  });
+
+  it("overlapping Whisper words: a sentence ends at its latest word, so the copy covers every word", () => {
+    // "lang" (stretched by Whisper) ends after the sentence's last word
+    const d = docOf([
+      W("w1", "Ein", 1.0, 1.2),
+      W("w2", "lang", 1.2, 4.0),
+      W("w3", "Wort.", 1.5, 1.9),
+      W("w4", "Und", 5.0, 5.3),
+      W("w5", "weiter.", 5.3, 5.8),
+    ]);
+    const src = captionSource(d.words).phrases;
+    expect(src[0].original_end).toBe(4.0);
+    expect(reconcileV1(d, 0, { phrases: src, rev: MS })).toBe(d);
+    // an older copy that ended the sentence at its last word: no word is lost either
+    const old = src.map((p, i) => (i === 0 ? { ...p, original_end: 1.9 } : p));
+    const n = reconcileV1(d, 0, { phrases: old, rev: MS });
+    expect(n.words.filter((w) => w.hidden)).toEqual([]);
+    expect(n.words.map((w) => w.id)).toEqual(d.words.map((w) => w.id));
+  });
 });
+

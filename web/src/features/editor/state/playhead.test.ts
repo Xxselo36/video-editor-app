@@ -244,3 +244,28 @@ describe("activeIndexAt", () => {
     }
   });
 });
+
+describe("a preview swap reloading the element (preview-3)", () => {
+  it("the playhead keeps the held time, not the 0 of the reload, then follows the frames again", () => {
+    const v = new FakeVideo(true);
+    const store = createPlayheadStore();
+    let held: number | null = null;
+    store.attach(v, { held: () => held });
+    v.currentTime = 9.2;
+    v.emit("seeked");
+    expect(store.getState().mediaTime).toBe(9.2);
+    // the new src: emptied / loadedmetadata at 0
+    held = 8.0;
+    v.currentTime = 0;
+    v.emit("emptied");
+    v.emit("loadedmetadata");
+    v.present(0);
+    expect(store.getState().mediaTime).toBe(8.0);
+    // the restore seek landed: released
+    v.currentTime = 8.0;
+    v.emit("seeked");
+    held = null;
+    v.present(8.04);
+    expect(store.getState().mediaTime).toBe(8.04);
+  });
+});

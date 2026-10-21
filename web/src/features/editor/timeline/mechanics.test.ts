@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  seamTapClip,
   canDelete,
   dropIndex,
   exactFps,
   frameEdge,
   frameTimes,
+  MIN_CLIP_S,
   moveSeg,
   playheadCutOf,
+  releasedTrim,
   roundToStep,
   rulerMarks,
+  snapRadiusS,
   snapTrimToFrame,
   tickShown,
   trimFrameGrid,
@@ -17,11 +21,14 @@ import {
   splitAt,
   splittableIndex,
   stripDuration,
+  stripLayout,
   trimBounds,
+  trimRemoves,
   trimTo,
   zoomLimits,
   type EditorSeg,
 } from "./mechanics";
+import { openingPps } from "./useTimelineZoom";
 
 // Two clips with a removed pause (2–3 s) between them.
 const segs: EditorSeg[] = [
@@ -233,5 +240,139 @@ describe("UX10: 0.1 s ruler marks, precise trims, the frame grid, reordering", (
     // a disabled clip has no place in the layout
     const withOff = [...clips.slice(0, 1), { id: "x", start: 9, end: 9.5, disabled: true }, ...clips.slice(1)];
     expect(dropIndex(withOff, "c", 2.4)).toBe(2);
+  });
+});
+
+describe("the trim flow round (owner: length changes must feel direct)", () => {
+  const three: EditorSeg[] = [
+    { id: "a", start: 0, end: 4 },
+    { id: "b", start: 6, end: 10 },
+    { id: "c", start: 14, end: 18 },
+  ];
+  const bounds = trimBounds(three, "b", 20);
+
+  it("a start handle stays under the finger; the other clips keep their place (state-2)", () => {
+    for (const finger of [-1, -0.5, 0.5, 1]) {
+      // the finger at strip seconds 4 + finger (clip b starts at strip 4)
+      const next = trimTo(three, "b", "start", 4 + finger, bounds);
+      const lay = stripLayout(next, { id: "b", start0: 6 });
+      const b = lay.find((x) => x.seg.id === "b")!;
+      expect(b.left).toBeCloseTo(4 + finger, 9);
+      // its right edge and clip c stay where they were
+      expect(b.left + b.width).toBeCloseTo(8, 9);
+      expect(lay.find((x) => x.seg.id === "c")!.left).toBeCloseTo(8, 9);
+      expect(lay.find((x) => x.seg.id === "a")!.left).toBe(0);
+    }
+    // without a start trim: end to end, as before
+    expect(stripLayout(three).map((x) => [x.left, x.width])).toEqual([
+      [0, 4],
+      [4, 4],
+      [8, 4],
+    ]);
+    // the end handle: the end edge is at the finger …
+    const end = trimTo(three, "b", "end", 7.5, bounds);
+    const lay = stripLayout(end);
+    const b = lay.find((x) => x.seg.id === "b")!;
+    expect(b.left + b.width).toBeCloseTo(7.5, 9);
+    // … and drawn as an end trim, clip c stays where it was (drag-12: one clip re-drawn per move)
+    const held = stripLayout(end, { id: "b", start0: 6, end0: 10, mode: "end" });
+    expect(held.map((x) => [x.seg.id, x.left, x.width])).toEqual([
+      ["a", 0, 4],
+      ["b", 4, 3.5],
+      ["c", 8, 4],
+    ]);
+  });
+
+  it("a long edit opens showing its first minute; a short one at Fit (owner request)", () => {
+    // desktop strip 1400 px: 60 s fill it
+    expect(openingPps(1400, 218, 60)).toBeCloseTo(1400 / 60, 9);
+    expect(openingPps(358, 610, 60)).toBeCloseTo(358 / 60, 9);
+    // 60 s or less: Fit (0), as before
+    expect(openingPps(1400, 60, 60)).toBe(0);
+    expect(openingPps(1400, 30, 60)).toBe(0);
+    expect(openingPps(1400, 218, null)).toBe(0);
+  });
+});
+
+
+describe("round 2: trims that remove, a zoom-scaled snap (state-3, drag-13)", () => {
+  const three: EditorSeg[] = [
+    { id: "a", start: 0, end: 2 },
+    { id: "b", start: 3, end: 6 },
+    { id: "c", start: 7, end: 9 },
+  ];
+
+  it("the neighbour snap is a few px on screen, not a fixed 0.3 s", () => {
+    expect(snapRadiusS(400)).toBeCloseTo(0.02);
+    expect(snapRadiusS(10)).toBe(0.3); // capped
+    const bounds = trimBounds(three, "b", 9);
+    // 400 px/s, b's start pulled back to source 2.25 (strip 1.25): 0.25 s of
+    // the 1 s gap before it stays (the fixed 0.3 s snapped it onto a's end)
+    expect(trimTo(three, "b", "start", 1.25, bounds, { snapS: snapRadiusS(400) })[1].start).toBeCloseTo(2.25);
+    expect(trimTo(three, "b", "start", 1.25, bounds)[1].start).toBe(2);
+    // within a few px of the neighbour's footage: onto it
+    expect(trimTo(three, "b", "start", 1.01, bounds, { snapS: snapRadiusS(400) })[1].start).toBe(2);
+  });
+
+  it("dragged all the way, the clip goes — one commit, no 0.1 s blip", () => {
+    const bounds = trimBounds(three, "b", 9);
+    // the v2 dock lets it shrink to nothing while dragging
+    const dragged = trimToStep(three, "b", "end", 2 + 0.05, bounds, { minLen: 0 });
+    expect(dragged[1].end - dragged[1].start).toBeLessThan(MIN_CLIP_S);
+    expect(trimRemoves(dragged, "b")).toBe(true);
+    expect(releasedTrim(dragged, "b", "end").map((x) => x.id)).toEqual(["a", "c"]);
+    // past the other edge: the same
+    const past = trimToStep(three, "b", "start", 2 + 9, bounds, { minLen: 0 });
+    expect(releasedTrim(past, "b", "start").map((x) => x.id)).toEqual(["a", "c"]);
+    // a clip left at MIN_CLIP_S or more stays as it is
+    const ok = trimToStep(three, "b", "end", 2 + 0.2, bounds, { minLen: 0 });
+    expect(releasedTrim(ok, "b", "end")).toBe(ok);
+    // the last clip never goes: it stays at MIN_CLIP_S
+    const only: EditorSeg[] = [{ id: "x", start: 1, end: 5 }];
+    const tiny = trimToStep(only, "x", "end", 0.02, trimBounds(only, "x", 9), { minLen: 0 });
+    const kept = releasedTrim(tiny, "x", "end");
+    expect(kept).toHaveLength(1);
+    expect(kept[0].end - kept[0].start).toBeCloseTo(MIN_CLIP_S);
+  });
+
+  it("a split never leaves a piece under MIN_CLIP_S (v2)", () => {
+    expect(splittableIndex(three, 3.12, MIN_CLIP_S)).toBe(-1);
+    expect(splittableIndex(three, 3.16, MIN_CLIP_S)).toBe(1);
+  });
+});
+
+describe("seamTapClip (phone-tiny-seam)", () => {
+  it("a tap on the seam next to clips big enough to tap: the seam (Restore)", () => {
+    expect(seamTapClip(100, 102, 40, 60, 24)).toBeNull();
+    expect(seamTapClip(105, 102, 40, 60, 24)).toBeNull();
+  });
+  it("the tiny-clip rule only on the tiny clip's side of the line", () => {
+    // tiny clip after the seam: its 3 px part selects it, the big side is the seam
+    expect(seamTapClip(103.5, 102, 80, 12, 24)).toBe("next");
+    expect(seamTapClip(95, 102, 80, 12, 24)).toBeNull();
+    // tiny clip before it
+    expect(seamTapClip(101, 102, 6, 80, 24)).toBe("prev");
+    expect(seamTapClip(110, 102, 6, 80, 24)).toBeNull();
+    // between two tiny clips: the side the tap is on
+    expect(seamTapClip(101, 102, 6, 9, 24)).toBe("prev");
+    expect(seamTapClip(103, 102, 6, 9, 24)).toBe("next");
+  });
+  it("a tap on the line itself (a click's whole-px x next to a fractional line) is the seam, even between tiny clips", () => {
+    expect(seamTapClip(77, 77.06, 2, 22, 12)).toBeNull();
+    expect(seamTapClip(102.4, 102, 6, 9, 24)).toBeNull();
+    expect(seamTapClip(103, 102, 6, 9, 24)).toBe("next");
+  });
+  it("a phone's core: a finger lands a few px off the glyph it aims at — within 2.5 px of the line, the seam whatever its neighbours", () => {
+    // between two 2 px clips (the opening zoom of a long edit)
+    for (const dx of [-2.4, -1.5, 0, 1.5, 2.4]) expect(seamTapClip(102 + dx, 102, 2, 2, 12, 2.5)).toBeNull();
+    // the gap's last half px, right at the tiny clip: the clip
+    expect(seamTapClip(104.7, 102, 80, 2, 12, 2.5)).toBe("next");
+    expect(seamTapClip(99.3, 102, 2, 80, 12, 2.5)).toBe("prev");
+    // a clip big enough to tap: the seam on that side, any distance
+    expect(seamTapClip(110, 102, 2, 80, 12, 2.5)).toBeNull();
+  });
+  it("the desktop's threshold is its own (10 px)", () => {
+    expect(seamTapClip(103, 102, 80, 18, 10)).toBeNull();
+    expect(seamTapClip(103, 102, 80, 8, 10)).toBe("next");
   });
 });

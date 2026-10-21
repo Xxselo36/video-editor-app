@@ -19,22 +19,27 @@ Beispiel im Transkript:
   Wörter selbst, damit sie nicht im finalen Video zu hören sind).
 
 Wenn nach einem cut-Marker kein continue-Marker kommt (z.B. weil der
-User vergessen hat es zu sagen), greift ein Fallback: wir entfernen
-bis zum Ende des Audios / Clips — schlauer wäre "Sentence-Boundary
-Erkennung" aber das ist v1.
+User vergessen hat es zu sagen) — innerhalb von PAIR_MAX_S und vor dem
+nächsten Szenen-Kommando —, wird nur die Kommando-Phrase selbst
+entfernt, nie der Rest des Videos; ein "go" ohne "stop" davor ebenso.
+Als Kommando zählt nur, was als eigener Satz gesagt wurde
+(src/command_gate.py).
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+
+from src import command_gate as gate
 
 
 # Bilingual wake commands — EN and DE both accepted. Every Cleo-
 # mishearing (Clio, Cleyo, Klio, Kleo, Cleo) × every command variant.
 _CLEO_VT_VARIANTS = [
     "cleo", "clio", "cleyo", "klio", "kleo",
+    # weak spellings (src/command_gate.py: breaks before and after)
     "clear", "cleer", "clara", "claro", "clean",
     "kilo", "keo", "kejo", "clea",
+    "chloe", "leo", "cleos",
 ]
 
 
@@ -62,6 +67,18 @@ DEFAULT_CONTINUE_KEYWORDS = _vt_combos([
     "los", "gone",
 ])
 
+# The command words as taught (with a PRIMARY_WAKE "Cleo" they need only
+# a break after them; every other form needs breaks on both sides).
+STRONG_STOP = frozenset({"stop", "stops", "stopped", "stopping", "stopp"})
+STRONG_GO = frozenset({"go"})
+
+# A "Cleo stop" closes on the next "Cleo go" within PAIR_MAX_S, unless a
+# scene command comes first; otherwise only the stop phrase is cut (a
+# forgotten "go" must not delete minutes). A go more than LONG_PAIR_S
+# after its stop has to be a strong, punctuated "Cleo go.".
+PAIR_MAX_S = 60.0
+LONG_PAIR_S = 20.0
+
 
 @dataclass
 class VoiceTriggerPair:
@@ -74,58 +91,70 @@ class VoiceTriggerPair:
     continue_end: float    # End of the continue-marker word
     cut_word: str
     continue_word: str | None  # None if no matching continue found
+    # "pair" (stop … go), or a lone command phrase cut on its own:
+    # "stop" (no go followed in time) or "go" (no stop before it).
+    kind: str = "pair"
 
 
 def _normalize(text: str) -> str:
-    """Lowercase, strip punctuation. Used for matching keywords."""
-    return re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    """Lowercase, strip punctuation and accents. Used for matching
+    keywords (src/command_gate.py normalize)."""
+    return gate.normalize(text)
 
 
-def _match_phrase_at(word_idx: int, whisper_words: list[dict],
-                      phrase: str) -> tuple[int, float, float] | None:
-    """Try to match `phrase` at whisper_words[word_idx]. Two forms:
+# Cut boundaries. Silence snap preferred: a silence range right before
+# "Cleo" (after "go") gives a tight, natural flow and ignores Whisper's
+# stretched word times — but only when no other word lies between the
+# silence and the command, else that word would be cut. Fallback: 20 ms
+# past the previous word's Whisper end, capped 100 ms before "Cleo" so a
+# stretched prev_word.end can't leak a "cle…" fragment; the analysis
+# then snaps every edge to the audio (src/edge_snap.py).
+_BREATH_TRIM = 0.02
+_CUT_LEAD_CAP = 0.10
+_NEXT_LEAD = 0.02
+_SNAP_REACH_S = 0.5
+_WORD_TOL_S = 0.05
 
-    1) Multi-token: phrase tokens map to consecutive Whisper words
-       (e.g. phrase="cleo cut" → words ["cleo", "cut"]).
-    2) Concatenated single-token: phrase with spaces removed matches a
-       single Whisper word (e.g. phrase="cleo cut" → word "cleocut" —
-       happens when the user speaks the trigger fast and Whisper merges
-       the two tokens into one).
 
-    Returns (next_idx, phrase_start_time, phrase_end_time) on success,
-    else None. `next_idx` points to the first word AFTER the match so
-    callers can skip past it.
-    """
-    phrase_tokens = _normalize(phrase).split()
-    if not phrase_tokens or word_idx >= len(whisper_words):
-        return None
+def _cut_side(words: list[dict], i: int, phrase_start: float,
+              silence_ranges: list[tuple[float, float]] | None) -> float:
+    """Where the removal before the command phrase at words[i] begins."""
+    prev = words[i - 1] if i > 0 else None
+    for (sil_start, sil_end) in silence_ranges or ():
+        # a silence that ends within 500 ms of cleo (the gap before it)
+        if not (sil_start < phrase_start and sil_end + _SNAP_REACH_S >= phrase_start):
+            continue
+        if prev is not None and (
+                float(prev.get("end", 0)) > sil_end + _WORD_TOL_S
+                or float(prev.get("start", 0)) >= sil_start - _WORD_TOL_S):
+            continue  # a word between the silence and cleo (or inside it)
+        return max(0.0, sil_start + _BREATH_TRIM)
+    cleo_cap = phrase_start - _CUT_LEAD_CAP
+    if prev is not None:
+        prev_end = float(prev.get("end", cleo_cap))
+        return max(0.0, min(prev_end + _BREATH_TRIM, cleo_cap))
+    return max(0.0, cleo_cap)
 
-    # 1) Multi-token sequence match
-    if word_idx + len(phrase_tokens) <= len(whisper_words):
-        ok = True
-        for i, tok in enumerate(phrase_tokens):
-            w = whisper_words[word_idx + i]
-            ww = _normalize(w.get("word", "") or w.get("text", "")).strip()
-            if ww != tok:
-                ok = False
-                break
-        if ok:
-            start_t = float(whisper_words[word_idx].get("start", 0))
-            last = whisper_words[word_idx + len(phrase_tokens) - 1]
-            end_t = float(last.get("end", start_t))
-            return (word_idx + len(phrase_tokens), start_t, end_t)
 
-    # 2) Concatenated single-token match (only meaningful for multi-word phrases)
-    if len(phrase_tokens) >= 2:
-        concat = "".join(phrase_tokens)
-        w = whisper_words[word_idx]
-        ww = _normalize(w.get("word", "") or w.get("text", "")).strip()
-        if ww == concat:
-            start_t = float(w.get("start", 0))
-            end_t = float(w.get("end", start_t))
-            return (word_idx + 1, start_t, end_t)
-
-    return None
+def _resume_side(words: list[dict], next_idx: int, phrase_end: float,
+                 silence_ranges: list[tuple[float, float]] | None) -> float:
+    """Where the kept audio after the command phrase ending at
+    `phrase_end` (next word: words[next_idx]) resumes."""
+    nxt = words[next_idx] if next_idx < len(words) else None
+    for (sil_start, sil_end) in silence_ranges or ():
+        # a silence that starts within 500 ms of go's end (the gap after it)
+        if not (sil_end > phrase_end and sil_start - _SNAP_REACH_S <= phrase_end):
+            continue
+        if nxt is not None and (
+                float(nxt.get("start", 0)) < sil_start - _WORD_TOL_S
+                or float(nxt.get("end", 0)) <= sil_end + _WORD_TOL_S):
+            continue  # a word between go and the silence (or inside it)
+        return max(phrase_end, sil_end - _NEXT_LEAD)
+    if nxt is not None:
+        next_word_start = float(nxt.get("start", 0))
+    else:
+        next_word_start = float(words[-1].get("end", 0)) + 1.0  # far in the future
+    return max(phrase_end, next_word_start - _NEXT_LEAD)
 
 
 def detect_voice_triggers(
@@ -144,160 +173,126 @@ def detect_voice_triggers(
             back to DEFAULT_CUT_KEYWORDS.
         continue_keywords: phrases that end a "remove this" range and
             mark the next take. Falls back to DEFAULT_CONTINUE_KEYWORDS.
-        clip_duration: if no continue-marker follows a cut-marker,
-            we extend the removal range to this duration (or the end of
-            the last word if not given).
+        clip_duration: unused (kept for callers).
         silence_ranges: optional list of (start, end) audio silence
             ranges from silence detection. If supplied, cut/continue
             boundaries snap to actual silence edges instead of trusting
             Whisper's word.end / word.start (which regularly drift into
             silence and cause perceptible pauses in the kept audio).
 
-    Returns: list of VoiceTriggerPair. Empty list if no triggers found.
+    Only phrases said as commands count (src/command_gate.py). A stop
+    pairs with the next go within PAIR_MAX_S (a second stop before it
+    stays inside the pair: everything from the FIRST stop is the bad
+    part); a scene command first, or no go in time, cuts just the stop
+    phrase; a go with no open stop cuts just its own phrase — so a
+    spoken command never stays in the video, and a forgotten go never
+    deletes minutes.
+
+    Returns: list of VoiceTriggerPair (kind "pair", "stop" or "go").
+    Empty list if no triggers found.
     """
-    cut_keywords = cut_keywords or DEFAULT_CUT_KEYWORDS
-    continue_keywords = continue_keywords or DEFAULT_CONTINUE_KEYWORDS
-
-    if not whisper_words:
+    words = gate.split_tokens(whisper_words)
+    if not words:
         return []
+    from src.scene_triggers import scene_table
+    table = gate.CommandTable([
+        ("stop", cut_keywords or DEFAULT_CUT_KEYWORDS, STRONG_STOP),
+        ("go", continue_keywords or DEFAULT_CONTINUE_KEYWORDS, STRONG_GO),
+    ])
+    scene = scene_table()
+    norm = gate.normalized(words)
 
-    # Pre-sort phrases longest-first so "scrap that" wins over "scrap"
-    cut_keywords = sorted(cut_keywords, key=lambda p: -len(p.split()))
-    continue_keywords = sorted(continue_keywords, key=lambda p: -len(p.split()))
-
-    pairs: list[VoiceTriggerPair] = []
+    # 1) Every command phrase, in order: (kind, i, next_idx, start, end,
+    #    phrase, strong and punctuated). Scene commands only bound pairs.
+    marks: list[tuple[str, int, int, float, float, str, bool]] = []
     i = 0
-    while i < len(whisper_words):
-        # Try to match a cut-keyword starting at word i
-        matched_cut = None
-        cut_next_idx = None
-        cut_phrase_start_t = None
-        for kw in cut_keywords:
-            m = _match_phrase_at(i, whisper_words, kw)
+    while i < len(words):
+        m = table.match(words, norm, i)
+        if m is None:
+            m = scene.match(words, norm, i)
             if m is not None:
-                cut_next_idx, cut_phrase_start_t, _ = m
-                matched_cut = kw
-                break
-
-        if not matched_cut:
+                m = ("scene",) + m[1:]
+        if m is None:
             i += 1
             continue
+        kind, kw, nxt, ps, pe, weak = m
+        exact = gate.llm_fixed(words, i, nxt - 1) or (
+            not weak and gate.ends_clause(words[nxt - 1].get("word", "")))
+        marks.append((kind, i, nxt, ps, pe, kw, exact))
+        i = nxt
 
-        # Cut boundary — two strategies, silence snap preferred:
-        # 1) If audio-silence detection identifies a silence range that
-        #    abuts cleo, snap cut_start to end-of-speech-before-silence
-        #    (silence.start + tiny breath). This gives a tight, natural
-        #    flow because it ignores Whisper's stretched word.end.
-        # 2) Fallback: end kept side ~20ms after Whisper's prev word,
-        #    capped 100ms before cleo starts so a stretched prev_word.end
-        #    can't leak a "cle…" fragment into the kept audio.
-        BREATH_TRIM = 0.02
-        CUT_LEAD_CAP = 0.10
-        cleo_cap = cut_phrase_start_t - CUT_LEAD_CAP
+    # Phonetic guesses at "Cleo stop" / "Cleo go" ('Cleo Stob.', 'Kleo
+    # stoppt.', 'Clio Goo.'): weak, so never closing a long pair.
+    try:
+        from src.phonetic_wake_detection import find_phonetic_candidates
+        found = [(mk[0], mk[3], mk[4]) for mk in marks]
+        for (cmd, ps, pe, raw) in find_phonetic_candidates(
+                words, already_detected=found, commands=("stop", "go")):
+            mi = gate.index_at(words, ps)
+            if any(mk[1] <= mi < mk[2] for mk in marks):
+                continue  # inside a phrase the keyword scan found
+            print(f"[phonetic] added {cmd} @ {ps:.2f}s — raw={raw!r}",
+                  flush=True)
+            marks.append((cmd, mi, mi + 2, ps, pe, raw, False))
+        marks.sort(key=lambda mk: mk[3])
+    except Exception as _phe:
+        print(f"[phonetic] stop/go skipped: {_phe}", flush=True)
 
-        # Strategy 1: silence snap
-        cut_start = None
-        if silence_ranges:
-            for (sil_start, sil_end) in silence_ranges:
-                # silence that ends within 500ms of cleo start (= gap
-                # before cleo). Snap to its start = last speech before
-                # cleo actually ended.
-                if sil_start < cut_phrase_start_t and sil_end + 0.5 >= cut_phrase_start_t:
-                    cut_start = max(0.0, sil_start + BREATH_TRIM)
-                    break
+    def phrase_cut(mk) -> tuple[float, float]:
+        _k, mi, mn, ps, pe, _kw, _x = mk
+        return (_cut_side(words, mi, ps, silence_ranges),
+                _resume_side(words, mn, pe, silence_ranges))
 
-        # Strategy 2: Whisper fallback
-        if cut_start is None:
-            if i > 0:
-                prev_word_end = float(whisper_words[i - 1].get("end", cleo_cap))
-                cut_start = min(prev_word_end + BREATH_TRIM, cleo_cap)
-            else:
-                cut_start = cleo_cap
-            cut_start = max(0.0, cut_start)
-
-        # Search for continue-keyword after the cut-phrase. If a NEW
-        # cut-keyword appears first, the user restarted again without
-        # saying 'go' — abandon this pair and re-anchor to the newer
-        # cut (which is the actual restart point).
-        j = cut_next_idx
-        matched_continue = None
-        cont_next_idx = None
-        restart_from_new_cut = False
-        while j < len(whisper_words):
-            # Check for a new cut before checking for continue
-            for kw in cut_keywords:
-                m = _match_phrase_at(j, whisper_words, kw)
-                if m is not None:
-                    print(f"[voice-triggers] second '{matched_cut}' at "
-                          f"{cut_phrase_start_t:.2f}s superseded by "
-                          f"'{kw}' at {float(whisper_words[j].get('start', 0)):.2f}s "
-                          f"(nested restart)", flush=True)
-                    i = j
-                    restart_from_new_cut = True
-                    break
-            if restart_from_new_cut:
+    # 2) Pair them.
+    pairs: list[VoiceTriggerPair] = []
+    k = 0
+    while k < len(marks):
+        mk = marks[k]
+        kind = mk[0]
+        if kind == "scene":
+            k += 1
+            continue
+        if kind == "go":
+            s, e = phrase_cut(mk)
+            print(f"[voice-triggers] '{mk[5]}' at {mk[3]:.2f}s has no "
+                  f"stop before it — cutting the phrase only", flush=True)
+            pairs.append(VoiceTriggerPair(cut_start=s, continue_end=e,
+                                          cut_word=mk[5], continue_word=None,
+                                          kind="go"))
+            k += 1
+            continue
+        closing = None
+        j = k + 1
+        while j < len(marks):
+            nx = marks[j]
+            if nx[3] - mk[4] > PAIR_MAX_S or nx[0] == "scene":
                 break
-            for kw in continue_keywords:
-                m = _match_phrase_at(j, whisper_words, kw)
-                if m is not None:
-                    cont_next_idx, _, continue_end = m
-                    matched_continue = kw
-                    break
-            if matched_continue is not None:
+            if nx[0] == "stop":
+                print(f"[voice-triggers] second '{nx[5]}' at {nx[3]:.2f}s "
+                      f"inside the stop at {mk[3]:.2f}s (nested)", flush=True)
+            elif nx[3] - mk[4] <= LONG_PAIR_S or nx[6]:
+                closing = j
                 break
             j += 1
-
-        if restart_from_new_cut:
-            continue
-
-        if matched_continue is None:
-            # No continue-marker found — refuse to cut. Falling back to
-            # clip-end would silently delete the rest of the take if the
-            # user said the cut-keyword but forgot the continue-keyword.
-            print(f"[voice-triggers] cut-marker '{matched_cut}' at "
-                  f"{cut_phrase_start_t:.2f}s has no matching continue — skipping",
+        if closing is None:
+            s, e = phrase_cut(mk)
+            print(f"[voice-triggers] cut-marker '{mk[5]}' at {mk[3]:.2f}s "
+                  f"has no matching continue — cutting the phrase only",
                   flush=True)
-            break
-
-        # End boundary: start of the FIRST word AFTER "go" (before buffer)
-        if cont_next_idx < len(whisper_words):
-            next_word_start = float(whisper_words[cont_next_idx].get("start", 0))
-        else:
-            next_word_start = float(
-                whisper_words[cont_next_idx - 1].get("end", 0)
-            ) + 1.0  # far in the future
-
-        # continue_end — mirror of cut side, silence snap preferred:
-        # 1) Silence range that starts near go's reported end → snap
-        #    continue_end to silence.end - tiny lead. Kept side resumes
-        #    right at start-of-next-speech, no dragged silence.
-        # 2) Fallback: 20ms before Whisper's next word start; floored at
-        #    go's reported end so we never leak "…o".
-        NEXT_LEAD = 0.02
-        go_end = continue_end  # Whisper's reported end of "go"
-
-        snapped = None
-        if silence_ranges:
-            for (sil_start, sil_end) in silence_ranges:
-                # silence that starts within 500ms of go's end (= gap
-                # after go). Snap to its end = next speech begins.
-                if sil_end > go_end and sil_start - 0.5 <= go_end:
-                    snapped = max(0.0, sil_end - NEXT_LEAD)
-                    break
-
-        if snapped is not None:
-            continue_end = max(go_end, snapped)
-        else:
-            continue_end = max(continue_end, next_word_start - NEXT_LEAD)
-
+            pairs.append(VoiceTriggerPair(cut_start=s, continue_end=e,
+                                          cut_word=mk[5], continue_word=None,
+                                          kind="stop"))
+            k += 1
+            continue
+        go = marks[closing]
         pairs.append(VoiceTriggerPair(
-            cut_start=cut_start,
-            continue_end=continue_end,
-            cut_word=matched_cut,
-            continue_word=matched_continue,
+            cut_start=_cut_side(words, mk[1], mk[3], silence_ranges),
+            continue_end=_resume_side(words, go[2], go[4], silence_ranges),
+            cut_word=mk[5],
+            continue_word=go[5],
         ))
         # Continue scanning AFTER the matched continue-phrase
-        i = cont_next_idx
+        k = closing + 1
 
     return pairs
 
@@ -366,6 +361,9 @@ def extend_pairs_for_pre_restart(
 
     updated: list[VoiceTriggerPair] = []
     for p in pairs:
+        if p.kind != "pair":
+            updated.append(p)
+            continue
         pre = [
             w for w in whisper_words
             if w.get("end", 0) <= p.cut_start
@@ -502,7 +500,11 @@ def apply_voice_triggers_to_subtitles(
 
 def collect_whisper_words(transcription: dict) -> list[dict]:
     """Flatten Whisper's nested {segments: [{words: [...]}]} structure
-    into a single list of word-dicts for trigger scanning."""
+    into a single list of word-dicts for trigger scanning: tokens glued
+    from several words split, punctuation-only tokens dropped
+    (command_gate.split_tokens), each segment's first / last word marked
+    as a break (brk_before / brk_after), the LLM command fix's mark
+    (cmd_fix) kept."""
     if not transcription:
         return []
     # Filler sounds are skipped so 'Cleo, äh, cut' still reads as the
@@ -511,8 +513,8 @@ def collect_whisper_words(transcription: dict) -> list[dict]:
     from src.filler_detection import _is_vocalisation
     words = []
     for seg in transcription.get("segments", []):
-        seg_words = seg.get("words") or []
-        for w in seg_words:
+        seg_words = []
+        for w in seg.get("words") or []:
             _t = (w.get("word", w.get("text", "")) or "").strip().lower().strip(
                 ".,!?;:\"'()[]…–—-")
             if _t and _is_vocalisation(_t):
@@ -523,5 +525,12 @@ def collect_whisper_words(transcription: dict) -> list[dict]:
                 "start": float(w.get("start", 0)),
                 "end": float(w.get("end", 0)),
             }
-            words.append(entry)
+            if w.get("cmd_fix"):
+                entry["cmd_fix"] = True
+            seg_words.append(entry)
+        seg_words = gate.split_tokens(seg_words)
+        if seg_words:
+            seg_words[0]["brk_before"] = True
+            seg_words[-1]["brk_after"] = True
+        words.extend(seg_words)
     return words

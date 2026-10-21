@@ -225,6 +225,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         jobId={job.id}
         filename={job.filename}
         savedSegments={job.edit_segments ?? []}
+        editRev={job.edit_rev ?? 0}
         previewSegments={job.preview_segments ?? []}
         previewVersion={job.preview_version ?? 0}
         hasProxy={job.has_proxy}
@@ -282,6 +283,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         key={job.id}
         jobId={job.id}
         savedSegments={job.edit_segments ?? []}
+        editRev={job.edit_rev ?? 0}
         previewSegments={job.preview_segments ?? []}
         previewVersion={job.preview_version ?? 0}
         hasProxy={job.has_proxy}
@@ -292,6 +294,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         formatWarning={job.format_warning ? warningText(job.format_warning, t) : null}
         cutRanges={job.cut_ranges ?? []}
         duration={job.duration ?? 0}
+        fps={job.fps ?? null}
         onChange={(next) => {
           setPhrases(next);
           schedulePhraseSave(job.id, next);

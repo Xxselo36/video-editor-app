@@ -29,8 +29,8 @@ const SAVED = { timeout: 15_000 };
 
 const isPhone = (page: Page) => page.getByTestId("editor-v2").evaluate((el) => el.getAttribute("data-layout") !== "desktop");
 
-async function open(page: Page, jobId: string, text = true) {
-  await openWithStorage(page, `/app/edit/${jobId}`, TOUR_DONE);
+async function open(page: Page, jobId: string, text = true, storage: Record<string, string> = {}) {
+  await openWithStorage(page, `/app/edit/${jobId}`, { ...TOUR_DONE, ...storage });
   await expect(page.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
   await expect(page.getByTestId("ed-timeline").getByTestId(/^clip-\d+$/).first()).toBeVisible({ timeout: 30_000 });
   await expect
@@ -319,9 +319,12 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
     expect(said).toMatch(/\bMost\b/);
   });
 
-  test("a tapped seam names the cut and restores it (one undo step, in the text too)", async ({ page, stub }) => {
+  test("a tapped seam names the cut and restores it (one undo step, in the text too)", async ({ page, stub }, info) => {
     const job = await stub.seed("review_speech");
-    await open(page, job.id, false);
+    // the phone opens zoomed in (a 15 s span): at Fit its 1.4 s clip is
+    // tiny, and a tap on the seam next to a tiny clip selects the clip
+    // (drag-6, editor-trim-flow-2.spec)
+    await open(page, job.id, false, info.project.name === "pixel7" ? { "cleocuts.test.openSpanS": "15" } : {});
     const n = await seams(page).count();
     expect(n).toBeGreaterThanOrEqual(4);
     // one seam per cut between two clips (the stored timeline's gaps: the
@@ -476,8 +479,10 @@ test.describe("editor v2: the timeline (owner's iPhone items)", TAG, () => {
     await expect(c0).toHaveAttribute("data-selected", "true");
     const b0 = (await c0.boundingBox())!;
     const h = (await c0.getByTestId("clip-trim-end").boundingBox())!;
-    // the handle's 44 px target reaches only 8 px outside the clip
-    expect(h.width).toBeGreaterThanOrEqual(43.5);
+    // the handle's 44 px target reaches only 8 px outside the clip — and at
+    // most half into it: on a clip under 72 px the end handle (on top) took
+    // the start handle's touches (drag-5)
+    expect(h.width).toBeGreaterThanOrEqual(Math.min(43.5, b0.width / 2 + 8 - 0.5));
     expect(h.x + h.width - (b0.x + b0.width)).toBeLessThanOrEqual(8.5);
     const b1 = (await c1.boundingBox())!;
     const y = b1.y + b1.height / 2;

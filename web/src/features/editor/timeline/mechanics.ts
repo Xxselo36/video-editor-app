@@ -43,6 +43,16 @@ export function trimBounds(startSegs: EditorSeg[], id: string, duration: number)
   };
 }
 
+/** v2 dock (state-3): a clip a trim leaves shorter than this goes (no
+ *  0.1 s blip stays); a split leaves at least this on each side. */
+export const MIN_CLIP_S = 0.15;
+
+/** Trim options: `snapS` the neighbour snap (default TRIM_SNAP_S; the v2
+ *  dock scales it with the zoom, snapRadiusS), `minLen` the shortest the
+ *  clip may get (default 0.1 s; the v2 dock lets it shrink to nothing and
+ *  removes it on release, trimRemoves). */
+export type TrimOpts = { snapS?: number; minLen?: number };
+
 /**
  * The clip list while a trim handle sits at `seconds` of the strip (as laid
  * out when the drag started). Computed from the drag's start snapshot, so
@@ -56,7 +66,10 @@ export function trimTo(
   mode: "start" | "end",
   seconds: number,
   bounds: TrimBounds,
+  opts: TrimOpts = {},
 ): EditorSeg[] {
+  const snapS = opts.snapS ?? TRIM_SNAP_S;
+  const minLen = opts.minLen ?? 0.1;
   let acc = 0;
   return startSegs.map((s) => {
     if (s.disabled) return s;
@@ -64,15 +77,15 @@ export function trimTo(
     if (s.id === id) {
       if (mode === "start") {
         const target = s.start + (seconds - acc);
-        let clamped = Math.max(bounds.prev, Math.min(s.end - 0.1, target));
+        let clamped = Math.max(bounds.prev, Math.min(s.end - minLen, target));
         // Snap onto the neighbouring clip's footage instead of
         // leaving a sliver of the removed gap.
-        if (clamped < s.start && clamped - bounds.prev < TRIM_SNAP_S) clamped = bounds.prev;
+        if (clamped < s.start && clamped - bounds.prev < snapS) clamped = bounds.prev;
         return { ...s, start: clamped };
       } else if (mode === "end") {
-        const target = s.start + Math.max(0.1, seconds - acc);
-        let clamped = Math.min(bounds.next, Math.max(s.start + 0.1, target));
-        if (clamped > s.end && bounds.next - clamped < TRIM_SNAP_S) clamped = bounds.next;
+        const target = s.start + Math.max(minLen, seconds - acc);
+        let clamped = Math.min(bounds.next, Math.max(s.start + minLen, target));
+        if (clamped > s.end && bounds.next - clamped < snapS) clamped = bounds.next;
         return { ...s, end: clamped };
       }
     }
@@ -81,10 +94,72 @@ export function trimTo(
   });
 }
 
+/** Neighbour snap of a trim at `pps` px per second (drag-13): a gap
+ *  narrower than SNAP_PX on screen closes, at most TRIM_SNAP_S. */
+export const SNAP_PX = 8;
+export function snapRadiusS(pps: number, px = SNAP_PX, max = TRIM_SNAP_S): number {
+  return pps > 0 && Number.isFinite(pps) ? Math.min(max, px / pps) : max;
+}
+
+/** The clip a trim made shorter than MIN_CLIP_S goes on release (state-3)
+ *  — never the last clip (that one stays at MIN_CLIP_S). */
+export function trimRemoves(segs: readonly EditorSeg[], id: string): boolean {
+  const s = segs.find((x) => x.id === id);
+  return !!s && s.end - s.start < MIN_CLIP_S - 1e-9 && canDelete(segs as EditorSeg[], id);
+}
+
+/**
+ * The clip list a released trim commits (v2 dock): the trimmed clip gone
+ * when it got shorter than MIN_CLIP_S (state-3: one undo step, no blip),
+ * held at MIN_CLIP_S when it is the last clip.
+ */
+export function releasedTrim(segs: EditorSeg[], id: string, mode: "start" | "end"): EditorSeg[] {
+  if (trimRemoves(segs, id)) return segs.filter((x) => x.id !== id);
+  const s = segs.find((x) => x.id === id);
+  if (!s || s.end - s.start >= MIN_CLIP_S - 1e-9) return segs;
+  return segs.map((x) =>
+    x.id !== id ? x : mode === "start" ? { ...x, start: x.end - MIN_CLIP_S } : { ...x, end: x.start + MIN_CLIP_S },
+  );
+}
+
+/**
+ * Where the strip draws each enabled clip (strip seconds): end to end. A
+ * clip being trimmed (`trim`: its start and end when the drag began) is
+ * drawn with its moving edge under the handle and every other clip where
+ * it was — a start trim shifts its left edge, an end trim its right edge
+ * (drag-12: a move re-draws that one clip, not every clip after it, 50–
+ * 170 ms per move on the owner's 103 clips) — so the handle follows the
+ * finger. The gap (or overlap) closes up on release (the dock settles it).
+ */
+export function stripLayout(
+  segs: readonly EditorSeg[],
+  trim?: { id: string; start0: number; end0?: number; mode?: "start" | "end" } | null,
+): { seg: EditorSeg; i: number; left: number; width: number }[] {
+  const out: { seg: EditorSeg; i: number; left: number; width: number }[] = [];
+  let acc = 0;
+  segs.forEach((seg, i) => {
+    if (seg.disabled) return;
+    const d = seg.end - seg.start;
+    if (trim && seg.id === trim.id) {
+      if (trim.mode === "end" && trim.end0 !== undefined) {
+        out.push({ seg, i, left: acc, width: d });
+        acc += trim.end0 - seg.start;
+        return;
+      }
+      out.push({ seg, i, left: acc + (seg.start - trim.start0), width: d });
+      acc += seg.end - trim.start0;
+      return;
+    }
+    out.push({ seg, i, left: acc, width: d });
+    acc += d;
+  });
+  return out;
+}
+
 /** Index of the clip a split at source time `at` would cut: inside a clip,
- *  at least 0.1 s from its edges. -1 when it can't split there. */
-export function splittableIndex(segs: EditorSeg[], at: number): number {
-  return segs.findIndex((s) => !s.disabled && at > s.start + 0.1 && at < s.end - 0.1);
+ *  at least `margin` s from its edges (v2: MIN_CLIP_S). -1 when it can't split there. */
+export function splittableIndex(segs: EditorSeg[], at: number, margin = 0.1): number {
+  return segs.findIndex((s) => !s.disabled && at > s.start + margin && at < s.end - margin);
 }
 
 /** The clip list with clip `idx` split at `at` (see splittableIndex). */
@@ -215,16 +290,18 @@ export function trimToStep(
   mode: "start" | "end",
   seconds: number,
   bounds: TrimBounds,
+  opts: TrimOpts = {},
 ): EditorSeg[] {
-  return trimTo(startSegs, id, mode, seconds, bounds).map((s) => {
+  const minLen = opts.minLen ?? 0.1;
+  return trimTo(startSegs, id, mode, seconds, bounds, opts).map((s) => {
     if (s.id !== id) return s;
     if (mode === "start") {
       if (s.start === bounds.prev) return s;
-      const v = Math.max(bounds.prev, Math.min(s.end - 0.1, roundToStep(s.start)));
+      const v = Math.max(bounds.prev, Math.min(s.end - minLen, roundToStep(s.start)));
       return v === s.start ? s : { ...s, start: v };
     }
     if (s.end === bounds.next) return s;
-    const v = Math.min(bounds.next, Math.max(s.start + 0.1, roundToStep(s.end)));
+    const v = Math.min(bounds.next, Math.max(s.start + minLen, roundToStep(s.end)));
     return v === s.end ? s : { ...s, end: v };
   });
 }
@@ -277,17 +354,18 @@ export function snapTrimToFrame(
   mode: "start" | "end",
   bounds: TrimBounds,
   fps: number | null | undefined,
+  minLen = 0.1,
 ): EditorSeg[] {
   if (!(fps && fps > 0)) return segs;
   return segs.map((s) => {
     if (s.id !== id) return s;
     if (mode === "start") {
       if (s.start === bounds.prev) return s;
-      const v = Math.max(bounds.prev, Math.min(s.end - 0.1, frameEdge(s.start, fps)));
+      const v = Math.max(bounds.prev, Math.min(s.end - minLen, frameEdge(s.start, fps)));
       return v === s.start ? s : { ...s, start: v };
     }
     if (s.end === bounds.next) return s;
-    const v = Math.min(bounds.next, Math.max(s.start + 0.1, frameEdge(s.end, fps)));
+    const v = Math.min(bounds.next, Math.max(s.start + minLen, frameEdge(s.end, fps)));
     return v === s.end ? s : { ...s, end: v };
   });
 }
@@ -355,4 +433,23 @@ export function dropIndex(segs: EditorSeg[], id: string, center: number): number
     acc += d;
   }
   return rest.length;
+}
+
+/**
+ * A tap on a seam (phone-tiny-seam): the clip it is for, or null for the
+ * seam itself (what it removed, and Restore). Only a tap on the seam's part
+ * over a clip narrower than `tinyPx` is for that clip (at Fit a 2 px clip
+ * is all seam); a tap on the seam's core — within `corePx` of the line,
+ * its glyph's middle — or on the line's other side next to a clip big
+ * enough to tap, is for the seam, as on the desktop. A finger lands a few
+ * px either side of what it aims at: on a phone the core is most of the
+ * 6 px gap between two clips (at the opening zoom of a long edit most
+ * seams sit between clips of a few px; with a 1 px core a tap on the glyph
+ * selected one of them nearly every time). `x`: the tap, `line`: the seam
+ * line (client px); prevPx / nextPx: the clips' drawn widths.
+ */
+export function seamTapClip(x: number, line: number, prevPx: number, nextPx: number, tinyPx: number, corePx = 1): "prev" | "next" | null {
+  if (Math.abs(x - line) < corePx) return null;
+  const side = x < line ? "prev" : "next";
+  return (side === "prev" ? prevPx : nextPx) < tinyPx ? side : null;
 }

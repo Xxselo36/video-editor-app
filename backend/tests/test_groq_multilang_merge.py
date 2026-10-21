@@ -59,3 +59,49 @@ def test_drop_boundary_duplicates_counts():
               ("en", {"word": "b", "start": 0.6, "end": 0.9})]
     words, dropped = wg._drop_boundary_duplicates(picked)
     assert [w["word"] for w in words] == ["a", "b"] and dropped == 1
+
+
+def test_a_word_spoken_across_a_switch_is_in_one_pass_or_the_other(monkeypatch):
+    # Bucket 5-10 s picks English, 10-15 s the auto (German) pass.
+    # "Cleo" starts at 9.98 in the German pass and at 10.02 in the
+    # English one: by start time it was in neither winning bucket, and
+    # the "Cleo keep" after it was lost (commands-10).
+    auto = [("ganz", 8.0, 8.4, 0.4), ("klar.", 8.4, 9.0, 0.4),
+            ("Cleo", 9.98, 10.3, 0.9), ("keep.", 10.3, 10.6, 0.9),
+            ("Weiter", 11.0, 11.4, 0.9), ("geht's.", 11.4, 11.8, 0.9)]
+    en = [("it's", 8.0, 8.4, 0.9), ("obvious.", 8.4, 9.0, 0.9),
+          ("Cleo", 10.02, 10.3, 0.5), ("keep.", 10.3, 10.6, 0.5),
+          ("Whiter", 11.0, 11.4, 0.3), ("gates.", 11.4, 11.8, 0.3)]
+    assert _run(monkeypatch, auto, en) == [
+        "it's", "obvious.", "Cleo", "keep.", "Weiter", "geht's."]
+
+
+def test_a_word_straddling_a_switch_in_both_passes_is_kept_once(monkeypatch):
+    # Both copies have their middle on the side the OTHER pass won.
+    auto = [("eins", 7.0, 7.4, 0.3), ("Cleo", 9.8, 10.1, 0.9),
+            ("cut.", 10.1, 10.5, 0.9), ("neu", 11.0, 11.3, 0.9)]
+    en = [("one", 7.0, 7.4, 0.9), ("Cleo", 9.9, 10.3, 0.5),
+          ("cut.", 10.3, 10.5, 0.2), ("new", 11.0, 11.3, 0.2)]
+    words = _run(monkeypatch, auto, en)
+    assert words.count("Cleo") == 1 and words[-2:] == ["cut.", "neu"]
+
+
+def test_chunks_do_not_double_the_word_across_their_edge(monkeypatch):
+    # 300 s chunks with a 2 s overlap: chunk 1 keeps a word starting
+    # before 300 s that runs past it, chunk 2 hears it again from 0.0
+    # (the owner's doc had such a pair at 300 s and at 600 s).
+    chunks = [
+        {"language": "de", "segments": [{"words": [
+            {"word": "vorher", "start": 298.5, "end": 299.8},
+            {"word": "Wort", "start": 299.888, "end": 300.788}]}]},
+        {"language": "de", "segments": [{"words": [
+            {"word": "Wort", "start": 0.0, "end": 0.74},
+            {"word": "danach", "start": 1.0, "end": 1.5}]}]},
+    ]
+    calls = iter(chunks)
+    monkeypatch.setattr(wg, "_extract_chunk", lambda path, start, length: "c.wav")
+    monkeypatch.setattr(wg, "_transcribe_single",
+                        lambda path, initial_prompt=None, language=None: next(calls))
+    res = wg._transcribe_chunked("x.wav", 302.0, None, None)
+    words = [(w["word"], w["start"]) for s in res["segments"] for w in s["words"]]
+    assert words == [("vorher", 298.5), ("Wort", 299.888), ("danach", 301.0)]

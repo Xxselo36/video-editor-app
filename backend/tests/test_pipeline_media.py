@@ -64,11 +64,30 @@ def _duration(path) -> float:
 class _MeasuredRun:
     """Stands in for subprocess.run: same result, plus each child's own
     peak RSS (wait4) and argv — RUSAGE_CHILDREN would also count every
-    ffmpeg this pytest process ran before."""
+    ffmpeg this pytest process ran before. `Popen` (patched in as
+    subprocess.Popen) records the processes started with it the same way,
+    when they are waited for (the preview's streamed decodes and encode)."""
 
     def __init__(self):
         self.calls: list[tuple[list[str], int]] = []  # (argv, maxrss KiB)
         self._popen = subprocess.Popen
+        calls = self.calls
+
+        class Popen(subprocess.Popen):
+            def _try_wait(self, wait_flags):
+                try:
+                    pid, sts, ru = os.wait4(self.pid, wait_flags)
+                except ChildProcessError:
+                    return (self.pid, 0)
+                if pid == self.pid:
+                    calls.append((list(self.args), ru.ru_maxrss))
+                return (pid, sts)
+        self.Popen = Popen
+
+    def patch(self, monkeypatch) -> "_MeasuredRun":
+        monkeypatch.setattr(pipeline.subprocess, "run", self)
+        monkeypatch.setattr(pipeline.subprocess, "Popen", self.Popen)
+        return self
 
     def __call__(self, cmd, capture_output=False, text=False, timeout=None,
                  check=False, **kw):
@@ -125,24 +144,32 @@ def clip60(tmp_path_factory):
 def test_reordered_preview_memory_is_bounded(clip60, tmp_path, monkeypatch):
     segs = [(i * 4.0, i * 4.0 + 2.9) for i in range(15)]
     moved = [segs[-1]] + segs[:-1]          # last clip to the front
-    run = _MeasuredRun()
-    monkeypatch.setattr(pipeline.subprocess, "run", run)
+    run = _MeasuredRun().patch(monkeypatch)
     out = tmp_path / "preview.mp4"
     pipeline._ffmpeg_cuts_preview(str(clip60), moved, str(out))
     print(f"reordered preview: {len(run.calls)} ffmpeg calls, "
           f"peak child RSS {run.peak_mb:.0f} MB")
     assert run.peak_mb < _PREVIEW_PEAK_MB
-    # One pass through the concat demuxer (+ the start-time probe).
-    assert [Path(c[0]).name.startswith("ffprobe") for c, _ in run.calls] \
-        == [True, False]
+    # One encode through the concat demuxer (+ the start-time probe and
+    # one audio-only decode per ascending piece: the moved clip, the rest).
+    assert [_call_kind(c) for c, _ in run.calls] == ["probe", "audio", "audio",
+                                                       "encode"]
     assert _duration(out) == pytest.approx(15 * 2.9, abs=0.1)
     st = _streams(out)
     assert (int(st["video"]["width"]), int(st["video"]["height"])) == (406, 720)
     assert float(st["audio"]["duration"]) == pytest.approx(15 * 2.9, abs=0.1)
-    # The in-order timeline still takes the single-pass path.
+    # The in-order timeline takes the same one pass, in the same memory.
     run.calls.clear()
     pipeline._ffmpeg_cuts_preview(str(clip60), segs, str(out))
-    assert len(run.calls) == 1 and run.peak_mb < _PREVIEW_PEAK_MB
+    assert [_call_kind(c) for c, _ in run.calls] == ["probe", "audio", "encode"]
+    assert run.peak_mb < _PREVIEW_PEAK_MB
+
+
+def _call_kind(cmd: list[str]) -> str:
+    """probe / audio (decode) / encode, for the preview's child calls."""
+    if Path(cmd[0]).name.startswith("ffprobe"):
+        return "probe"
+    return "encode" if "libx264" in cmd else "audio"
 
 
 def _event_clip(path: Path, seconds: int = 20) -> Path:
@@ -221,18 +248,246 @@ def test_many_reordered_segments_take_one_pass(tmp_path, monkeypatch):
     for minutes), and the preview has exactly the edit's length."""
     src = _make_clip(tmp_path / "src.mp4", "320x240", 90)
     segs = [(i * 0.3, i * 0.3 + 0.2) for i in range(300)][::-1]
-    run = _MeasuredRun()
-    monkeypatch.setattr(pipeline.subprocess, "run", run)
+    run = _MeasuredRun().patch(monkeypatch)
     out = tmp_path / "preview.mp4"
     pipeline._ffmpeg_cuts_preview(str(src), segs, str(out))
-    assert sum(not Path(c[0]).name.startswith("ffprobe")
-               for c, _ in run.calls) == 1
+    assert [_call_kind(c) for c, _ in run.calls] == ["probe", "audio", "encode"]
     st = _streams(out)
     assert _duration(out) == pytest.approx(60.0, abs=0.1)
     assert float(st["audio"]["duration"]) == pytest.approx(60.0, abs=0.1)
     # The segment list is written next to the output and removed.
     assert sorted(p.name for p in tmp_path.iterdir()) == ["preview.mp4",
                                                           "src.mp4"]
+
+
+def _index_clip(path: Path, seconds: float = 12.0) -> Path:
+    """30 fps video whose every frame carries its own index in its pixels
+    (base 16 over the four quadrants, lossless) and a 10 ms 1 kHz beep at
+    every whole second: what the preview shows and plays can be read
+    back exactly."""
+    q = "(gte(X,W/2)+2*gte(Y,H/2))"
+    geq = f"geq=lum='mod(floor(floor(T*30+0.5)/pow(16,{q})),16)*16+8':cb=128:cr=128"
+    _ffmpeg("-f", "lavfi", "-i", f"color=c=black:s=64x112:r=30:d={seconds}",
+            "-f", "lavfi", "-i",
+            f"aevalsrc='if(lt(mod(t,1),0.01),0.8*sin(2*PI*1000*t),0)':s=48000:d={seconds}",
+            "-vf", f"format=yuv444p,{geq},format=yuv420p",
+            "-c:v", "libx264", "-preset", "veryfast", "-qp", "0", "-g", "30",
+            "-keyint_min", "30", "-sc_threshold", "0",
+            "-c:a", "aac", "-b:a", "192k", "-shortest", str(path))
+    return path
+
+
+def _frames(path) -> list[tuple[float, int]]:
+    """[(pts, source frame index)] of every frame of an _index_clip cut."""
+    pts = subprocess.run(
+        [FP, "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "frame=pts_time", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, check=True).stdout.split()
+    raw = subprocess.run(
+        [FF, "-v", "error", "-i", str(path), "-fps_mode", "passthrough",
+         "-vf", "scale=16:16:flags=neighbor,format=yuv420p", "-f", "rawvideo", "-"],
+        capture_output=True, check=True).stdout
+    out = []
+    for i in range(min(len(raw) // 384, len(pts))):
+        fr = raw[i * 384:i * 384 + 256]      # the Y plane
+        quads = [fr[4 * 16 + 4], fr[4 * 16 + 12], fr[12 * 16 + 4], fr[12 * 16 + 12]]
+        out.append((float(pts[i].split(",")[0]),
+                    sum(int(round((v - 8) / 16)) * 16 ** k for k, v in enumerate(quads))))
+    return out
+
+
+def _pcm(path):
+    import numpy as np
+    raw = subprocess.run([FF, "-v", "error", "-i", str(path), "-vn", "-ac", "1",
+                          "-ar", "48000", "-f", "s16le", "-"],
+                         capture_output=True, check=True).stdout
+    return np.frombuffer(raw, dtype=np.int16).astype(np.float64) / 32768
+
+
+@pytest.fixture(scope="module")
+def index_clip(tmp_path_factory):
+    return _index_clip(tmp_path_factory.mktemp("index") / "src.mp4")
+
+
+# Short ascending timelines took a trim/concat filter graph that wrote
+# 25 fps (1 frame in 6 dropped) and drifted 0.16 s by its 24th segment;
+# the concat path's audio was cut on whole AAC frames (up to 31 ms of a
+# cut word at a clip's head) and shifted each segment by up to a frame
+# and a half (preview-7, wordcuts-3).
+@pytest.mark.parametrize("order", ["ascending", "reordered"])
+def test_preview_frames_and_sound_follow_the_timeline_exactly(index_clip, tmp_path, order):
+    import numpy as np
+    # ms edges (an analysis' cut), each clip starting 12 ms after a beep
+    # and ending 2 ms before one: no beep may leak in at a join.
+    segs = [(k + 0.012, k + 0.998 + (0.5 if k % 2 else 0.0)) for k in range(0, 11, 2)]
+    segs = [(s, min(e, 10.998)) for s, e in segs]
+    if order == "reordered":
+        segs = segs[::-1]
+    out = tmp_path / "preview.mp4"
+    pipeline._ffmpeg_cuts_preview(str(index_clip), segs, str(out))
+    st = _streams(out)
+    assert st["video"]["r_frame_rate"] == "30/1"
+    total = sum(e - s for s, e in segs)
+    assert _duration(out) == pytest.approx(total, abs=0.035)
+    frames = _frames(out)
+    starts, acc = [], 0.0
+    for s, e in segs:
+        starts.append(acc)
+        acc += e - s
+    for (s, e), o in zip(segs, starts):
+        for into in (0.1, (e - s) / 2, e - s - 0.05):
+            t = o + into
+            pts, idx = max((f for f in frames if f[0] <= t + 1e-6), key=lambda f: f[0])
+            shown = idx / 30 + (t - pts)
+            assert abs(shown - (s + into)) < 1 / 30 + 1e-3, (s, into, shown)
+    a = _pcm(out)
+    env = np.abs(a)
+    for (s, e), o in zip(segs, starts):
+        head = env[int(o * 48000) + 240:int((o + 0.03) * 48000)]   # skip AAC edge
+        tail = env[int((o + e - s - 0.03) * 48000):int((o + e - s) * 48000) - 240]
+        assert head.max() < 0.02 and tail.max() < 0.02, (s, e)
+        # the beeps inside the clip, where the timeline says
+        for k in range(int(np.ceil(s)), int(np.floor(e)) + 1):
+            if not (s + 0.05 < k < e - 0.05):
+                continue
+            at = o + (k - s)
+            win = env[int((at - 0.01) * 48000):int((at + 0.02) * 48000)]
+            onset = int((at - 0.01) * 48000) + int(np.argmax(win > 0.2))
+            assert abs(onset / 48000 - at) < 0.002, (k, onset / 48000, at)
+
+
+def test_preview_bakes_volume_and_fades(index_clip, tmp_path):
+    """The clips' volume and fades show in the server preview as the
+    export applies them (preview-5): a muted clip is silent, a fade-in
+    rises, a faded picture starts dark."""
+    import numpy as np
+    segs = [(1.5, 3.5), (4.5, 6.5), (7.5, 9.5)]
+    fx = [{"volume": 0.0}, {"fadeIn": 1.0}, {"volume": 0.5}]
+    out = tmp_path / "preview.mp4"
+    pipeline._ffmpeg_cuts_preview(str(index_clip), segs, str(out), fx)
+    env = np.abs(_pcm(out))
+
+    def beep(at):
+        return env[int(at * 48000):int((at + 0.01) * 48000)].max()
+    assert beep(0.5) < 0.005 and beep(1.5) < 0.005     # muted clip
+    # clip 2 starts at 2.0 s: its beeps at 2.5 (half way up the fade)
+    # and 3.5 (after it)
+    assert 0.25 < beep(2.5) / beep(3.5) < 0.75
+    assert beep(4.5) / beep(3.5) == pytest.approx(0.5, rel=0.1)
+    # the picture fades in from black with the sound
+    r = subprocess.run(
+        [FP, "-v", "error", "-f", "lavfi", "-i", f"movie={out},signalstats",
+         "-show_entries", "frame=pts_time:frame_tags=lavfi.signalstats.YAVG",
+         "-of", "csv=p=0"], capture_output=True, text=True, check=True)
+    # (luma above black, Y 16)
+    y = {round(float(t), 2): float(v) - 16 for t, v in
+         (line.split(",")[:2] for line in r.stdout.split())}
+    near = lambda t: min(y.items(), key=lambda kv: abs(kv[0] - t))[1]  # noqa: E731
+    assert near(2.05) < 0.2 * near(1.9) and near(3.2) > 0.8 * near(1.9)
+
+
+def _tone_clip(path: Path, seconds: int = 50, channels: int = 2) -> Path:
+    """Video with a tone whose pitch steps every second (200 + 50 k Hz in
+    second k): a sound cut from the wrong place doesn't match."""
+    layout = "stereo" if channels == 2 else "mono"
+    _ffmpeg("-f", "lavfi", "-i", f"color=c=black:s=64x64:r=30:d={seconds}",
+            "-f", "lavfi", "-i",
+            f"aevalsrc='0.4*sin(2*PI*(200+50*floor(t))*t)':s=48000:d={seconds},"
+            f"aformat=channel_layouts={layout}",
+            "-c:v", "libx264", "-preset", "ultrafast", "-g", "30",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest",
+            str(path))
+    return path
+
+
+def _reference_sound(src, segs, fx=None):
+    """The preview's sound as round 1 made it: the whole source decoded,
+    each clip cut from it (_preview_audio_clips's gains)."""
+    import numpy as np
+    raw = subprocess.run([FF, "-v", "error", "-i", str(src), "-map", "0:a:0", "-vn",
+                          "-af", "aresample=async=1:first_pts=0", "-ac", "2",
+                          "-ar", "48000", "-f", "s16le", "-"],
+                         capture_output=True, check=True).stdout
+    full = np.frombuffer(raw, dtype="<i2").reshape(-1, 2).astype(np.float64)
+    out = []
+    for c in pipeline._preview_audio_clips(segs, fx):
+        part = np.zeros((c.n, 2))
+        hi = min(len(full), c.first + c.n)
+        if hi > c.first:
+            part[:hi - c.first] = full[c.first:hi]
+        idx = np.arange(c.n, dtype=np.float64)
+        gain = np.full(c.n, c.vol)
+        if c.fi:
+            gain *= np.clip(idx / c.fi, 0, 1)
+        if c.fo:
+            gain *= np.clip((c.n - idx) / c.fo, 0, 1)
+        out.append(np.clip(np.rint((part * gain[:, None]).astype(np.float32)), -32768, 32767))
+    return np.concatenate(out).astype(np.int16)
+
+
+@pytest.fixture(scope="module")
+def tone_clip(tmp_path_factory):
+    return _tone_clip(tmp_path_factory.mktemp("tone") / "src.mp4")
+
+
+def test_preview_sound_decodes_only_what_the_timeline_uses(tone_clip, tmp_path,
+                                                           monkeypatch):
+    """F2: the preview's sound comes from one decode per ascending piece
+    of the timeline (a gap over _PREVIEW_SPAN_GAP_S starts another),
+    streamed to the encode — never the whole source into a work file —
+    and it is the very sound the whole-source decode gave."""
+    import numpy as np
+    segs = [(2.0, 4.0), (4.0, 6.5),      # a split: seamless
+            (30.25, 33.0),               # 23.75 s later: its own decode
+            (10.0, 12.0),                # moved back: its own decode
+            (12.04, 14.0)]               # ascending again: same decode
+    fx = [{}, {"volume": 0.5}, {"fadeIn": 0.5}, {}, {"fadeOut": 0.3}]
+    run = _MeasuredRun().patch(monkeypatch)
+    out = tmp_path / "sound.raw"
+    pipeline._preview_audio(FF, str(tone_clip), segs, fx, str(tmp_path), str(out))
+    decodes = [c for c, _ in run.calls]
+    assert len(decodes) == 3
+    assert all(c[-1] == "pipe:1" for c in decodes)       # streamed, no file
+    seconds = [float(c[c.index("-t") + 1]) for c in decodes]
+    needed = [6.5 - 2.0, 33.0 - 30.25, 14.0 - 10.0]
+    for got, need in zip(seconds, needed):
+        assert need < got <= need + pipeline._PREVIEW_PREROLL_S + 0.07, (got, need)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["decode0.log", "decode1.log",
+                                                          "decode2.log", "sound.raw"]
+    got = np.fromfile(out, dtype="<i2").reshape(-1, 2)
+    ref = _reference_sound(tone_clip, segs, fx)
+    assert got.shape == ref.shape
+    assert np.abs(got.astype(np.int32) - ref.astype(np.int32)).max() <= 2
+
+
+def test_a_timeline_in_many_pieces_decodes_its_range_once(tone_clip, tmp_path,
+                                                         monkeypatch):
+    import numpy as np
+    segs = [(float(k) + 0.1, float(k) + 0.6) for k in range(30, 2, -1)]   # reversed
+    run = _MeasuredRun().patch(monkeypatch)
+    out = tmp_path / "sound.raw"
+    pipeline._preview_audio(FF, str(tone_clip), segs, None, str(tmp_path), str(out))
+    assert len(run.calls) == 1                     # > _PREVIEW_MAX_SPANS pieces
+    cmd = run.calls[0][0]
+    assert float(cmd[cmd.index("-ss") + 1]) == pytest.approx(3.1 - 0.2, abs=0.011)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["sound.raw"]   # work file gone
+    got = np.fromfile(out, dtype="<i2").reshape(-1, 2)
+    ref = _reference_sound(tone_clip, segs)
+    assert got.shape == ref.shape
+    assert np.abs(got.astype(np.int32) - ref.astype(np.int32)).max() <= 2
+
+
+def test_preview_sound_of_a_source_without_audio_is_silence(tmp_path):
+    import numpy as np
+    src = tmp_path / "mute.mp4"
+    _ffmpeg("-f", "lavfi", "-i", "color=c=black:s=64x64:r=30:d=8",
+            "-c:v", "libx264", "-preset", "ultrafast", str(src))
+    for segs in ([(1.0, 2.0), (5.0, 6.5)], [(float(k), k + 0.2) for k in range(7, 0, -1)] * 3):
+        out = tmp_path / "sound.raw"
+        pipeline._preview_audio(FF, str(src), segs, None, str(tmp_path), str(out))
+        got = np.fromfile(out, dtype="<i2")
+        total = sum(c.n for c in pipeline._preview_audio_clips(segs, None))
+        assert len(got) == 2 * total and not got.any()
 
 
 def test_source_audio_cuts_ignore_sparse_keyframes(tmp_path):
@@ -457,12 +712,34 @@ def test_smartcam_plugin_default_path_unchanged(tmp_path, monkeypatch, private_t
 
 
 def _record_runs(monkeypatch):
+    """Every ffmpeg the pipeline would run (subprocess.run, and Popen for
+    the preview's streamed decodes and encode), none of them run: each
+    one "succeeds" with no output."""
+    import io
     cmds: list[list[str]] = []
 
     def fake_run(cmd, *a, **kw):
         cmds.append(list(cmd))
         return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    class FakePopen:
+        def __init__(self, cmd, *a, stdin=None, stdout=None, **kw):
+            cmds.append(list(cmd))
+            self.args, self.pid, self.returncode = cmd, 0, None
+            self.stdin = io.BytesIO() if stdin == subprocess.PIPE else None
+            self.stdout = io.BytesIO() if stdout == subprocess.PIPE else None
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            pass
     monkeypatch.setattr(pipeline.subprocess, "run", fake_run)
+    monkeypatch.setattr(pipeline.subprocess, "Popen", FakePopen)
     return cmds
 
 

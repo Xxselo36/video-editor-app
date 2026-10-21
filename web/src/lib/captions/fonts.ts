@@ -182,6 +182,17 @@ export function setDefaultFontLoader(loader: FontLoader | null): void {
   defaultLoader = loader;
 }
 
+// The browser's loader, made once: a new one per call had an empty cache
+// every time, so each edit in the editor loaded every face again (a new
+// FontFace added to document.fonts per prepare) — and one failed fetch of
+// those repeats blanked the captions (preview-8). One loader: a face is
+// loaded and added once; a failed one is asked for again next time.
+let sharedBrowserLoader: FontLoader | null = null;
+function browserDefault(): FontLoader {
+  sharedBrowserLoader ??= browserFontLoader();
+  return sharedBrowserLoader;
+}
+
 /**
  * Loads every face `text` needs in `style` for a transcript in `lang`, plus
  * HarfBuzz when Devanagari appears. Without `text`, loads the faces for the
@@ -195,7 +206,7 @@ export async function ensureFonts(
   await loadFontTables();
   const status: FontStatus = { ok: true, loaded: [], failed: [], uncovered: [], deferred: [] };
   if (style.presetId === "none") return status;
-  const loader = opts.loader ?? defaultLoader ?? browserFontLoader();
+  const loader = opts.loader ?? defaultLoader ?? browserDefault();
   const lang = opts.lang;
   const langScript = scriptOfLang(lang);
   const texts = opts.text === undefined ? [] : typeof opts.text === "string" ? [opts.text] : opts.text;

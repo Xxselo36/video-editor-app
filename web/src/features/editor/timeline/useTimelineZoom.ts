@@ -10,13 +10,22 @@
  *     trackpad pinch zooms, two fingers pinch-zoom on touch screens.
  * `lastUserScrollRef` is when the user last scrolled or zoomed by hand
  * (auto-follow of the playhead waits after that).
+ *
+ * v2 dock (owner): `initialSpanS` opens a long edit zoomed so that only
+ * its first `initialSpanS` seconds fill the strip (a 10-min video at Fit
+ * is a blur of 2 px clips); a shorter one opens at Fit as before. The
+ * span holds until the user zooms (pinch, ⌘-wheel, slider, keys, Fit).
+ * `fit()` is the "Fit" zoom itself (0): it stays Fit while the edit's
+ * length changes (F7: a trim at Fit fills the dock again — zoomTo(fitPps)
+ * would pin the px/s of the moment). `hold(pps)` keeps a zoom as it is
+ * even where the strip no longer fills the view.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { zoomLimits } from "./mechanics";
 
 export type TimelineZoom = {
   viewW: number;
-  /** Requested px/s (0 = fit). */
+  /** Requested px/s (0 = fit; the opening span's zoom while it holds). */
   pps: number;
   effPps: number;
   fitPps: number;
@@ -25,8 +34,20 @@ export type TimelineZoom = {
   canZoomIn: boolean;
   canZoomOut: boolean;
   zoomTo: (nextPps: number, anchorX: number) => void;
+  /** Fit, and stay Fit while the edit's length changes. */
+  fit: () => void;
+  /** Keep this zoom (px/s) as it is, also below Fit, until the next zoom. */
+  hold: (pps: number) => void;
   lastUserScrollRef: RefObject<number>;
 };
+
+/**
+ * The zoom the strip opens at: `span` seconds fill the view when the
+ * strip is longer, else 0 (Fit).
+ */
+export function openingPps(viewW: number, totalDur: number, span: number | null | undefined): number {
+  return span && span > 0 && totalDur > span + 1e-6 ? viewW / span : 0;
+}
 
 /**
  * `mountKey` re-attaches the observers when the scroll container is
@@ -39,10 +60,15 @@ export function useTimelineZoom(
   initialViewW = 640,
   /** A higher zoom cap while it's set (the v2 dock's trim magnifier, UX10). */
   maxBoost?: number,
+  /** Open showing this many seconds (v2 dock: the first minute), see openingPps. */
+  initialSpanS?: number,
 ): TimelineZoom {
   // Zoom as pixels per second. 0 = "Fit" (effPps below never goes under
-  // the fit zoom): the timeline opens showing the whole edit.
-  const [pps, setPps] = useState(0);
+  // the fit zoom): the timeline opens showing the whole edit — or, with
+  // initialSpanS, its first part, until the user zooms.
+  const [explicitPps, setPps] = useState(0);
+  const [span, setSpan] = useState<number | null>(initialSpanS ?? null);
+  const [held, setHeld] = useState<number | null>(null);
 
   // Visible strip width, so ruler density adapts to phone vs desktop.
   const [viewW, setViewW] = useState(initialViewW);
@@ -60,8 +86,9 @@ export function useTimelineZoom(
   const limits = zoomLimits(viewW, totalDur);
   const fitPps = limits.fitPps;
   const maxPps = maxBoost ? Math.max(limits.maxPps, maxBoost) : limits.maxPps;
-  const effPps = Math.min(maxPps, Math.max(fitPps, pps));
-  const contentW = Math.max(viewW, Math.round(totalDur * effPps));
+  const pps = span !== null ? openingPps(viewW, totalDur, span) : explicitPps;
+  const effPps = held ?? Math.min(maxPps, Math.max(fitPps, pps));
+  const contentW = held !== null ? Math.max(1, Math.round(totalDur * held)) : Math.max(viewW, Math.round(totalDur * effPps));
   const canZoomOut = contentW > viewW + 1;
   const canZoomIn = effPps < maxPps - 1e-6;
 
@@ -83,7 +110,19 @@ export function useTimelineZoom(
         x: anchorX,
       };
     }
-    setPps(clamped);
+    setSpan(null);
+    setHeld(null);
+    // all the way out is Fit (0): it stays Fit as the edit's length changes
+    setPps(clamped <= z.fitPps * (1 + 1e-6) ? 0 : clamped);
+  };
+  const hold = (p: number) => {
+    if (p > 0 && Number.isFinite(p)) setHeld(p);
+  };
+  const fit = () => {
+    pendingAnchorRef.current = null;
+    setSpan(null);
+    setHeld(null);
+    setPps(0);
   };
   const zoomToRef = useRef(zoomTo);
   useLayoutEffect(() => {
@@ -156,5 +195,5 @@ export function useTimelineZoom(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mountKey]);
 
-  return { viewW, pps, effPps, fitPps, maxPps, contentW, canZoomIn, canZoomOut, zoomTo, lastUserScrollRef };
+  return { viewW, pps: held ?? pps, effPps, fitPps, maxPps, contentW, canZoomIn, canZoomOut, zoomTo, fit, hold, lastUserScrollRef };
 }

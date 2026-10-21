@@ -19,8 +19,10 @@ Sources, best first:
   2. the edit document's words: a filler-flagged word whose middle lies
      in the cut makes it a filler cut (jobs analysed without the log).
 A cut overlapped by voice / scene command ranges for at least a quarter
-of its length (or half a second) is voice_cmd; else one with a quarter
-of filler ranges or a filler word in it is filler; else silence.
+of its length (or half a second) is voice_cmd — so is one that holds a
+whole command phrase (a short "Cleo keep" inside a long pause: as a pause
+"Restore pauses" would bring the spoken command back); else one with a
+quarter of filler ranges or a filler word in it is filler; else silence.
 
 Additive only: ranges keep their id, start, end and every other key;
 `kind` is added (an existing one is kept). Jobs from before UX10 have no
@@ -38,6 +40,10 @@ DEFAULT_KIND = "silence"
 # share of a cut (or absolute seconds) a source must cover to name it
 _SHARE = 0.25
 _ABS_S = 0.5
+# ... or the share of a command range (a spoken phrase: at least
+# _WHOLE_MIN_S long) the cut holds
+_WHOLE = 0.9
+_WHOLE_MIN_S = 0.25
 
 
 def _span(r: Any) -> tuple[float, float] | None:
@@ -61,6 +67,20 @@ def _merged(ranges: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:
         else:
             out.append([s, e])
     return [(s, e) for s, e in out]
+
+
+def _holds_one(s: float, e: float, ranges: list[tuple[float, float]]) -> bool:
+    """Does [s, e] hold (_WHOLE of) one of `ranges` (_WHOLE_MIN_S or
+    longer)?"""
+    for a, b in ranges:
+        if b <= s:
+            continue
+        if a >= e:
+            break
+        if (b - a >= _WHOLE_MIN_S
+                and min(b, e) - max(a, s) >= _WHOLE * (b - a) - 1e-9):
+            return True
+    return False
 
 
 def _overlap(s: float, e: float, ranges: list[tuple[float, float]]) -> float:
@@ -102,7 +122,9 @@ def kind_of(start: float, end: float,
     need = min(_ABS_S, _SHARE * length)
     src = sources or {}
     for kind in ("voice_cmd", "bad_take"):
-        if _overlap(start, end, src.get(kind, [])) >= need - 1e-9:
+        ranges = src.get(kind, [])
+        if (_overlap(start, end, ranges) >= need - 1e-9
+                or _holds_one(start, end, ranges)):
             return kind
     if _overlap(start, end, src.get("filler", [])) >= need - 1e-9:
         return "filler"

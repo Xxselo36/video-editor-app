@@ -29,6 +29,7 @@ import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/rea
 import { Lightbulb, Sparkles, X } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useLang, useT } from "@/i18n";
+import type { MessageKey } from "@/i18n/messages/en";
 import { track } from "@/lib/analytics";
 import {
   editRange,
@@ -45,7 +46,7 @@ import {
 import { usePlayheadEffect, type PlayheadStore } from "@/features/editor/state/playhead";
 import { useDocStore, type DocState, type DocStore } from "@/features/editor/state/store";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
-import { TAKE_KINDS, textMarks, type Chip } from "@/features/editor/state/cuts";
+import { TAKE_KINDS, textMarks, type Chip, type CutRefusal } from "@/features/editor/state/cuts";
 import { cutTimeOfSource, decimalSeparator, fmtClock } from "../../model";
 import type { CutsApi } from "../../useCuts";
 import { CutsHeader, plural } from "../CutsHeader";
@@ -96,6 +97,12 @@ export type TranscriptEditorProps = {
 const selWords = (st: DocState) => st.present.words;
 /** A click on a struck word waits this long for a second click (double-click: edit, not restore). */
 const RESTORE_CLICK_MS = 300;
+/** What the Text tab says when a cut of words can't be made (F9). */
+const CUT_REFUSAL: Record<CutRefusal, MessageKey> = {
+  too_short: "editor.cut.tooShort",
+  everything: "editor.cut.everything",
+  already_cut: "editor.cut.alreadyCut",
+};
 const selPreset = (st: DocState) => st.present.style?.presetId ?? null;
 
 type Sel = { a: string; f: string };
@@ -383,11 +390,16 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
 
   // ── cuts (UX10): the selection out of the video, or back in ────────
   const selRemoved = !!selRange && removed.subarray(selRange[0], selRange[1] + 1).every((x) => x !== 0);
+  // a cut that can't be made says why instead of doing nothing (F9)
+  const cutOrSay = (a: number, b: number) => {
+    const refused = p.cuts.cutWords(words, a, b);
+    if (refused) p.toast(t(CUT_REFUSAL[refused]));
+  };
   const toggleCut = () => {
     if (!selRange) return false;
     const [a, b] = selRange;
-    if (selRemoved) p.cuts.restoreWord({ start: words[a].start, end: words[b].end });
-    else p.cuts.cutWords(words, a, b);
+    if (selRemoved) p.cuts.restoreWord({ start: words[a].start, end: words[b].end }, [a, b]);
+    else cutOrSay(a, b);
     wantFocus.current = !phone;
     return true;
   };
@@ -530,7 +542,7 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
       const w = words[i];
       restoreTimer.current = setTimeout(() => {
         restoreTimer.current = null;
-        if (cutsRef.current.restoreWord(w)) setSel({ a: w.id, f: w.id });
+        if (cutsRef.current.restoreWord(w, [i, i])) setSel({ a: w.id, f: w.id });
       }, RESTORE_CLICK_MS);
       return;
     }
@@ -563,8 +575,8 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
         // ⌫ cuts the selection from the video (or brings it back)
         if (!selRange || i < selRange[0] || i > selRange[1]) setSel({ a: words[i].id, f: words[i].id });
         if (selRange && i >= selRange[0] && i <= selRange[1]) toggleCut();
-        else if (removed[i] === 0) p.cuts.cutWords(words, i, i);
-        else p.cuts.restoreWord(words[i]);
+        else if (removed[i] === 0) cutOrSay(i, i);
+        else p.cuts.restoreWord(words[i], [i, i]);
         break;
       case "ArrowDown":
       case "ArrowUp": {
