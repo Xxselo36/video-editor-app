@@ -369,7 +369,9 @@ export function ReviewScreen({
           playhead={originalTime}
           playheadSegId={mode === "proxy" ? playingSegId : null}
           open={activeTab === "timeline"}
-          saving={editSaving}
+          // A save waiting to retry counts as saving for the session (#80),
+          // but the timeline shows it as "not saved, retrying".
+          saving={editSaving && !saveError}
           saveError={saveError}
           onToggleOpen={() => {}}
           onCommit={(next) => void commitEditSegs(next)}

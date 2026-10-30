@@ -795,10 +795,14 @@ export async function uploadResumable(opts: UploadOptions): Promise<UploadResult
         // (A /sign answer without this part, again and again.)
         if (rounds > 3) throw new Error(UPLOAD_NETWORK_MSG);
         if (!signing) {
-          // This part and the next ones without a good URL (none yet, or
-          // stale after a long pause), 32 at once.
-          const want = pending().filter((m) => m >= n && !fresh(m)).slice(0, SIGN_BATCH);
-          signing = signBatch(want.length ? want : [n]).finally(() => {
+          // The parts without a good URL (none yet, or stale after a long
+          // pause), 32 at once from the lowest: the parallel parts ask in
+          // any order (each reads its bytes first), so the ones below this
+          // part, still being read, come along in the same batch.
+          const stale = pending().filter((m) => !fresh(m));
+          const from = Math.max(0, stale.indexOf(n) - SIGN_BATCH + 1);
+          const want = stale.slice(from, from + SIGN_BATCH);
+          signing = signBatch(want.includes(n) ? want : [n]).finally(() => {
             signing = null;
           });
         }
