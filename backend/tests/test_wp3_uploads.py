@@ -397,12 +397,53 @@ def test_abort_after_complete_deletes_it_where_r2_answers_success(
     (S3 and moto: NoSuchUpload). The completed object still goes: live,
     it stayed until the lifecycle rule."""
     t, key = _completed(client, r2)
-    monkeypatch.setattr(storage, "mpu_abort", lambda *a, **k: None)
+    real = storage.mpu_abort
+
+    def r2_abort(key, upload_id):
+        try:
+            real(key, upload_id)
+        except Exception as e:
+            if not storage.is_no_such_upload(e):
+                raise
+    monkeypatch.setattr(storage, "mpu_abort", r2_abort)
     r = client.post("/uploads/multipart/abort", json={"ticket": t})
     assert r.status_code == 204
     assert storage.head(key) is None
     assert client.post("/uploads/multipart/parts",
                        json={"ticket": t}).status_code == 410
+
+
+def test_abort_that_fails_still_deletes_a_completed_upload(client, r2,
+                                                          monkeypatch):
+    """An abort R2 refuses (502 storage_error, as before) still lets a
+    completed upload no job holds go."""
+    t, key = _completed(client, r2)
+
+    def broken(key, upload_id):
+        raise RuntimeError("InternalError")
+    monkeypatch.setattr(storage, "mpu_abort", broken)
+    r = client.post("/uploads/multipart/abort", json={"ticket": t})
+    assert (r.status_code, r.json()["detail"]) == (502, "storage_error")
+    assert storage.head(key) is None
+
+
+def test_abort_answers_204_when_its_check_fails(client, r2, monkeypatch,
+                                                capsys):
+    """The abort went through; a check for a completed object that fails
+    (R2 or the database briefly away) leaves any object to the lifecycle
+    rule and still answers 204."""
+    body = _init(client, 10).json()
+
+    def broken(key):
+        raise RuntimeError("SlowDown")
+    monkeypatch.setattr(storage, "head", broken)
+    r = client.post("/uploads/multipart/abort",
+                    json={"ticket": body["ticket"]})
+    assert r.status_code == 204
+    assert not r2.list_multipart_uploads(
+        Bucket=storage.bucket()).get("Uploads")
+    assert "abort: completed upload not checked (ApiRefusal)" in (
+        capsys.readouterr().out)
 
 
 def test_cancel_during_complete_is_not_a_too_big_file(client, r2,
