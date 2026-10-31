@@ -47,9 +47,9 @@ export const nlApp: Partial<Record<AppKey, string>> = {
     "We konden dit videobestand niet lezen. Exporteer het opnieuw als MP4 of MOV en upload het nog een keer.",
   // Upload limits (413 / 429 from the backend, also checked before uploading)
   "app.errors.fileTooLarge":
-    "Dit bestand is groter dan {max} GB. Verklein de video of exporteer hem kleiner.",
+    "Dit bestand is groter dan {max}\u00a0GB. Verklein de video of exporteer hem kleiner.",
   "app.errors.videoTooLong":
-    "Deze video is langer dan {max} minuten. Kort hem in of splits hem op in delen.",
+    "Deze video is langer dan {max}\u00a0minuten. Kort hem in of splits hem op in delen.",
   "app.errors.tooManyJobs":
     "Je hebt al het maximale aantal video's in verwerking. Wacht tot er een klaar is en probeer het dan opnieuw.",
 
@@ -338,7 +338,7 @@ export const nlApp: Partial<Record<AppKey, string>> = {
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
   "app.errors.noVideoTrack": "Dit is een audiobestand. CleoCuts heeft een video met geluid nodig, dus kies een videobestand. Er is niets in rekening gebracht.",
-  "app.errors.videoTooShort": "Deze video is korter dan {min} seconden en dus te kort om te knippen. Er is niets in rekening gebracht.",
+  "app.errors.videoTooShort": "Deze video is korter dan {min}\u00a0seconden en dus te kort om te knippen. Er is niets in rekening gebracht.",
   "app.errors.processingInterrupted": "De verwerking is onderbroken. Upload de video opnieuw.",
   "app.errors.mediaUnavailable": "De originele video is niet meer beschikbaar, dus dit project kan niet opnieuw bewerkt worden.",
   "app.errors.tooManyRenders": "Er lopen te veel exports. Wacht tot er een klaar is.",

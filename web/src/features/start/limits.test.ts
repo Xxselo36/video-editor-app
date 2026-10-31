@@ -1,7 +1,9 @@
 // The limits line under "Video wählen" (MP4 · MOV · WebM · …): a line
 // break never comes before a "·", so a wrapped line never starts with one
 // (Hindi at 320 px did). Every language keeps each "·" with the word
-// before it (a no-break space).
+// before it (a no-break space). And the refusals of a video over or under
+// the limits keep a number with its unit ("3 Sekunden", "30 minutes",
+// "5 GB"): a 320 px phone broke "…kürzer als 3" / "Sekunden…".
 import { describe, expect, it } from "vitest";
 import { deApp } from "@/i18n/messages/de/app";
 import { enApp } from "@/i18n/messages/en/app";
@@ -44,6 +46,22 @@ describe("the limits line", () => {
         expect(v!.includes("·"), key).toBe(true);
         // Only a no-break space (or nothing) before each "·".
         expect(v!.match(/[^\S ]·/g), `${key}: ${v}`).toBeNull();
+      }
+    });
+  }
+});
+
+describe("a limit's number and its unit", () => {
+  const KEYS = ["app.errors.videoTooShort", "app.errors.videoTooLong", "app.errors.fileTooLarge"] as const;
+  for (const [lang, app] of Object.entries(APPS)) {
+    it(`${lang}: never a plain space between them`, () => {
+      for (const key of KEYS) {
+        const v = app[key];
+        expect(v, key).toMatch(/\{(min|max)\}/);
+        // A no-break space, or none (Korean writes the unit on).
+        expect(v!.match(/\{(min|max)\}\u0020/g), `${key}: ${v}`).toBeNull();
+        // Japanese sets no space around a number in its sentence.
+        if (lang === "ja") expect(v!.match(/\u0020\{(min|max)\}/g), `${key}: ${v}`).toBeNull();
       }
     });
   }

@@ -46,7 +46,7 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.errors.unreadableVideo":
     "この動画ファイルを読み込めませんでした。MP4またはMOV形式で書き出し直してから、アップロードしてください。",
   // Upload limits (413 / 429 from the backend, also checked before uploading)
-  "app.errors.fileTooLarge": "このファイルは{max} GBを超えています。動画を短くするか、サイズを小さくして書き出してください。",
+  "app.errors.fileTooLarge": "このファイルは{max}\u00a0GBを超えています。動画を短くするか、サイズを小さくして書き出してください。",
   "app.errors.videoTooLong": "この動画は{max}分を超えています。短くするか、いくつかに分割してください。",
   "app.errors.tooManyJobs": "処理中の動画がすでに上限に達しています。いずれかの動画が完成するまで待ってから、もう一度お試しください。",
 
@@ -335,7 +335,7 @@ export const jaApp: Partial<Record<AppKey, string>> = {
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
   "app.errors.noVideoTrack": "これは音声ファイルです。CleoCuts には音声付きの動画が必要です。動画ファイルを選んでください。料金は発生していません。",
-  "app.errors.videoTooShort": "この動画は {min} 秒未満のため、カットするには短すぎます。料金は発生していません。",
+  "app.errors.videoTooShort": "この動画は{min}秒未満のため、カットするには短すぎます。料金は発生していません。",
   "app.errors.processingInterrupted": "処理が中断されました。動画をもう一度アップロードしてください。",
   "app.errors.mediaUnavailable": "元の動画は利用できなくなったため、このプロジェクトは再編集できません。",
   "app.errors.tooManyRenders": "書き出しが多すぎます。いずれかが終わるまでお待ちください。",

@@ -128,7 +128,9 @@ type CardFailure = { error?: string; errorCode?: string | null; errorParams?: Er
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** An English message template as a regex ("{max}" → a group). */
+/** An English message template as a regex ("{max}" → a group; any space
+ *  matches any: a template may have a no-break space where an older
+ *  sentence has a plain one). */
 function templateRe(tmpl: string): { re: RegExp; names: string[] } {
   const names: string[] = [];
   const src = tmpl
@@ -138,7 +140,7 @@ function templateRe(tmpl: string): { re: RegExp; names: string[] } {
         names.push(part);
         return "(.+?)";
       }
-      return escapeRe(part);
+      return escapeRe(part).replace(/\s/g, "\\s");
     })
     .join("");
   return { re: new RegExp(`^${src}$`), names };

@@ -25,6 +25,7 @@ import { Icon } from "@/components/ui/Icon";
 import { useLang, useT } from "@/i18n";
 import { AUTH_ENABLED } from "@/lib/auth";
 import { plural } from "@/lib/i18n/plural";
+import { runningUploads } from "@/lib/uploadLock";
 import { useAwaitingGoIds } from "@/features/upload/uploadState";
 import { VoiceTeaser } from "@/features/voice-test/VoiceTeaser";
 import { VoiceTestDialog } from "@/features/voice-test/VoiceTestDialog";
@@ -58,6 +59,26 @@ export function ProjectsSkeleton() {
       </div>
     </div>
   );
+}
+
+/** The upload records some tab runs now (lib/uploadLock), asked every
+ *  few seconds while `ask`; null: not asked, or this browser can't tell. */
+function useRunningUploads(ask: boolean): Set<string> | null {
+  const [running, setRunning] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!ask) return;
+    let on = true;
+    // (The same set again: no new render of the page.)
+    const same = (a: Set<string> | null, b: Set<string> | null) => a === b || (!!a && !!b && a.size === b.size && [...a].every((x) => b.has(x)));
+    const check = () => void runningUploads().then((r) => on && setRunning((cur) => (same(cur, r) ? cur : r)));
+    check();
+    const timer = setInterval(check, 5000);
+    return () => {
+      on = false;
+      clearInterval(timer);
+    };
+  }, [ask]);
+  return ask ? running : null;
 }
 
 function RenameDialog({ p, onClose }: { p: Project; onClose: () => void }) {
@@ -222,6 +243,8 @@ export function ProjectsPage() {
   }, []);
 
   const live = useMemo(() => projects.filter((p) => p.state !== "expired"), [projects]);
+  // Which tab runs another tab's waiting upload (none: its page died).
+  const running = useRunningUploads(live.some((p) => p.state === "uploading" && p.upload?.awaitingGo && !awaitingGo.has(p.id)));
   const expired = useMemo(() => projects.filter((p) => p.state === "expired"), [projects]);
   const shown = useMemo(
     () => live.filter((p) => matchesFilter(p, filter) && matchesSearch(p, query)),
@@ -231,12 +254,13 @@ export function ProjectsPage() {
   // Headline counts (T7): working, ready for review and failed apart.
   // An upload waiting for "Let's go" isn't worked on (nothing is until
   // then): its tile says so, the headline doesn't count it (also one
-  // waiting in another tab: its record says so).
+  // waiting in another tab: its record says so, while that tab runs it;
+  // a record whose page died shows as uploading until it is marked).
   const counts = { working: 0, ready: 0, failed: 0 };
   for (const p of live) {
     if (p.state === "failed" || p.state === "upload_failed") counts.failed++;
     else if (p.state === "ready" || p.state === "edited") counts.ready++;
-    else if (p.state === "uploading" && (awaitingGo.has(p.id) || p.upload?.awaitingGo)) continue;
+    else if (p.state === "uploading" && (awaitingGo.has(p.id) || (p.upload?.awaitingGo && running?.has(p.id) !== false))) continue;
     else if (p.state === "uploading" || p.state === "processing" || p.state === "exporting") counts.working++;
   }
   const headline = (

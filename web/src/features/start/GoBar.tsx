@@ -21,8 +21,17 @@ import { useStartActions, useStartView } from "./pendingStart";
 import { REASON_ID, RETRY_ID, STOPPED_ID } from "./UploadStatus";
 import s from "./start.module.css";
 
-/** The stopped upload's way on: "Nochmal versuchen" (brought into view). */
-const toRetry = () => document.getElementById(RETRY_ID)?.focus();
+/** The stopped upload's way on: "Nochmal versuchen", brought into view
+ *  only when it isn't in view. (On a phone the strip it sits in may be
+ *  stuck at the top, where the page's scroll padding lies: focus's own
+ *  scrolling would move the page under the finger, not the button.) */
+const toRetry = () => {
+  const el = document.getElementById(RETRY_ID);
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  el.focus({ preventScroll: Boolean(hit && el.contains(hit)) });
+};
 
 /** Where upload `id` is: its bytes going up, all stored (R2: waiting for
  *  the gate), POST /jobs out, or over. Changes a few times per upload,

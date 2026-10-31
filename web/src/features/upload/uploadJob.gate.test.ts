@@ -121,13 +121,14 @@ const SETTINGS = {
 /** The start screen's choice: the hint and the whole style (D7). */
 const NEON = { caption_style_hint: "neon", caption_style: { presetId: "neon", overrides: {} } };
 
-async function run(opts: { ready?: Promise<void>; duration?: number | null; size?: number } = {}) {
+async function run(opts: { ready?: Promise<void>; duration?: number | null; size?: number; file?: File } = {}) {
   const { uploadJob } = await import("./uploadJob");
   const records = await import("./records");
   const ctl = new AbortController();
   const settings = vi.fn(() => ({ ...SETTINGS, ...NEON }));
   const seen = { uploaded: 0, starting: 0, created: [] as string[], failed: 0 };
-  const done = uploadJob(new File([new Uint8Array(opts.size ?? 8)], "clip.mp4", { type: "video/mp4" }), settings, null, {
+  const file = opts.file ?? new File([new Uint8Array(opts.size ?? 8)], "clip.mp4", { type: "video/mp4" });
+  const done = uploadJob(file, settings, null, {
     tempId: "upl-1",
     signal: ctl.signal,
     ready: opts.ready,
@@ -237,5 +238,97 @@ describe("the gate in uploadJob", () => {
     FakeXhr.sent[0].answer(200, '{"id":"j3"}');
     await done;
     expect(seen.created).toEqual(["j3"]);
+  });
+});
+
+/** Web Locks as the browser keeps them: the names held now. */
+function fakeLocks(): Set<string> {
+  const held = new Set<string>();
+  vi.stubGlobal("navigator", {
+    ...navigator,
+    locks: {
+      async request(name: string, a: unknown, b?: unknown) {
+        const opts = (typeof a === "function" ? {} : a) as { ifAvailable?: boolean };
+        const cb = (typeof a === "function" ? a : b) as (lock: unknown) => Promise<void>;
+        if (held.has(name) && opts.ifAvailable) return cb(null);
+        held.add(name);
+        try {
+          return await cb({ name });
+        } finally {
+          held.delete(name);
+        }
+      },
+      async query() {
+        return { held: [...held].map((name) => ({ name })) };
+      },
+    },
+  });
+  return held;
+}
+
+describe("the stored bytes while the job waits for the gate", () => {
+  /** Bytes of their own (a resume key of their own). */
+  const video = (seed: number) => new File([new Uint8Array(64).fill(seed)], `clip-${seed}.mp4`, { type: "video/mp4" });
+
+  it("stay this page's (another tab picking the same video neither reuses nor discards them) until the job exists", async () => {
+    const held = fakeLocks();
+    const { fingerprint, heldElsewhere } = await import("@/lib/uploadResume");
+    uploadResumable.mockResolvedValue({ storage_key: "uploads/k4", release: async () => {} });
+    const file = video(4);
+    const lock = `cleocuts-upload:${await fingerprint(file)}`;
+    const gate = createGate();
+    const { done, seen } = await run({ ready: gate.promise, file });
+    await vi.waitFor(() => expect(seen.uploaded).toBe(1));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(held.has(lock)).toBe(true);
+    gate.open();
+    await vi.waitFor(() => expect(FakeXhr.sent).toHaveLength(1));
+    expect(held.has(lock)).toBe(true);
+    FakeXhr.sent[0].answer(200, '{"id":"j4"}');
+    await done;
+    await vi.waitFor(() => expect(held.has(lock)).toBe(false));
+    expect(await heldElsewhere(file)).toBe(false);
+  });
+
+  it("Cancel while it waits: they are let go before the abort (which leaves bytes a page holds alone)", async () => {
+    const held = fakeLocks();
+    const { fingerprint } = await import("@/lib/uploadResume");
+    uploadResumable.mockResolvedValue({ storage_key: "uploads/k5", release: async () => {} });
+    const file = video(5);
+    const fp = (await fingerprint(file))!;
+    let heldAtAbort: boolean | null = null;
+    abortResumable.mockImplementationOnce(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      heldAtAbort = held.has(`cleocuts-upload:${fp}`);
+    });
+    const { done, ctl, seen } = await run({ ready: createGate().promise, file });
+    await vi.waitFor(() => expect(seen.uploaded).toBe(1));
+    expect(held.has(`cleocuts-upload:${fp}`)).toBe(true);
+    ctl.abort();
+    await done;
+    expect(heldAtAbort).toBe(false);
+  });
+
+  it("a failure hands them to the caller, who lets them go", async () => {
+    const held = fakeLocks();
+    const { fingerprint } = await import("@/lib/uploadResume");
+    uploadResumable.mockResolvedValue({ storage_key: "uploads/k6", release: async () => {} });
+    const file = video(6);
+    const lock = `cleocuts-upload:${await fingerprint(file)}`;
+    const { uploadJob } = await import("./uploadJob");
+    let unhold: (() => void) | null = null;
+    const done = uploadJob(file, () => ({ ...SETTINGS, ...NEON }), null, {
+      tempId: "upl-6",
+      onPaywall: () => {},
+      onCreated: () => {},
+      onFailed: (u) => (unhold = u),
+    });
+    await vi.waitFor(() => expect(FakeXhr.sent).toHaveLength(1));
+    FakeXhr.sent[0].answer(400, '{"detail":"no_audio","code":"no_audio"}');
+    await done;
+    expect(unhold).not.toBeNull();
+    expect(held.has(lock)).toBe(true);
+    unhold!();
+    await vi.waitFor(() => expect(held.has(lock)).toBe(false));
   });
 });

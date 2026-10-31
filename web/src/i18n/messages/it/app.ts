@@ -47,9 +47,9 @@ export const itApp: Partial<Record<AppKey, string>> = {
     "Non riusciamo a leggere questo file video. Esportalo di nuovo come MP4 o MOV e ricaricalo.",
   // Upload limits (413 / 429 from the backend, also checked before uploading)
   "app.errors.fileTooLarge":
-    "Questo file supera i {max} GB. Taglia il video o esportalo più leggero.",
+    "Questo file supera i {max}\u00a0GB. Taglia il video o esportalo più leggero.",
   "app.errors.videoTooLong":
-    "Questo video dura più di {max} minuti. Taglialo o dividilo in più parti.",
+    "Questo video dura più di {max}\u00a0minuti. Taglialo o dividilo in più parti.",
   "app.errors.tooManyJobs":
     "Hai già il numero massimo di video in elaborazione. Aspetta che uno sia pronto, poi riprova.",
 
@@ -338,7 +338,7 @@ export const itApp: Partial<Record<AppKey, string>> = {
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
   "app.errors.noVideoTrack": "Questo è un file audio. CleoCuts ha bisogno di un video con audio: scegli un file video. Non è stato addebitato nulla.",
-  "app.errors.videoTooShort": "Questo video dura meno di {min} secondi: è troppo corto per essere tagliato. Non è stato addebitato nulla.",
+  "app.errors.videoTooShort": "Questo video dura meno di {min}\u00a0secondi: è troppo corto per essere tagliato. Non è stato addebitato nulla.",
   "app.errors.processingInterrupted": "L'elaborazione è stata interrotta. Carica di nuovo il video.",
   "app.errors.mediaUnavailable": "Il video originale non è più disponibile, quindi questo progetto non può più essere modificato.",
   "app.errors.tooManyRenders": "Ci sono troppe esportazioni in corso. Aspetta che ne finisca una.",

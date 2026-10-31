@@ -48,8 +48,8 @@ export const trApp: Partial<Record<AppKey, string>> = {
     "Bu video dosyasını okuyamadık. Lütfen MP4 veya MOV olarak yeniden dışa aktarıp yükle.",
   // Upload limits (413 / 429 from the backend, also checked before uploading)
   "app.errors.fileTooLarge":
-    "Bu dosya {max} GB sınırını aşıyor. Lütfen videoyu kısalt veya daha küçük dışa aktar.",
-  "app.errors.videoTooLong": "Bu video {max} dakikadan uzun. Lütfen kısalt veya parçalara böl.",
+    "Bu dosya {max}\u00a0GB sınırını aşıyor. Lütfen videoyu kısalt veya daha küçük dışa aktar.",
+  "app.errors.videoTooLong": "Bu video {max}\u00a0dakikadan uzun. Lütfen kısalt veya parçalara böl.",
   "app.errors.tooManyJobs":
     "İşlenmekte olan video sayın zaten azami sınırda. Lütfen biri hazır olana kadar bekle, sonra tekrar dene.",
 
@@ -339,7 +339,7 @@ export const trApp: Partial<Record<AppKey, string>> = {
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
   "app.errors.noVideoTrack": "Bu bir ses dosyası. CleoCuts'ın sesli bir videoya ihtiyacı var; lütfen bir video dosyası seç. Hiçbir ücret alınmadı.",
-  "app.errors.videoTooShort": "Bu video {min} saniyeden kısa; kesmek için çok kısa. Hiçbir ücret alınmadı.",
+  "app.errors.videoTooShort": "Bu video {min}\u00a0saniyeden kısa; kesmek için çok kısa. Hiçbir ücret alınmadı.",
   "app.errors.processingInterrupted": "İşlem yarıda kesildi. Lütfen videoyu tekrar yükle.",
   "app.errors.mediaUnavailable": "Orijinal video artık mevcut değil, bu yüzden bu proje tekrar düzenlenemez.",
   "app.errors.tooManyRenders": "Çok fazla dışa aktarma sürüyor. Lütfen birinin bitmesini bekle.",

@@ -12,13 +12,15 @@ type Cb = {
   ready?: Promise<void>;
   duration?: number | null;
   onCreated: (id: string) => void;
-  onFailed?: () => void;
+  onFailed?: (unhold: () => void) => void;
   onStarting?: () => void;
   onUploaded?: (id: string) => void;
   onEnd?: (id: string) => void;
 };
 const runs: Cb[] = [];
 const ends = new Map<string, (how: How) => void>();
+/** What each upload hands over with its failure: its bytes' hold. */
+const unholds = new Map<string, ReturnType<typeof vi.fn>>();
 /** End the upload `id` the way `how` (cancelled: also by its signal). */
 const end = (id: string, how: How) => ends.get(id)?.(how);
 vi.mock("./uploadJob", () => ({
@@ -34,7 +36,9 @@ vi.mock("./uploadJob", () => ({
       cb.onStarting?.();
       cb.onCreated(`job-${cb.tempId}`);
     } else if (how === "failed") {
-      cb.onFailed?.();
+      const unhold = vi.fn();
+      unholds.set(cb.tempId, unhold);
+      cb.onFailed?.(unhold);
     }
     cb.onEnd?.(cb.tempId);
   }),
@@ -166,5 +170,74 @@ describe("startUpload with a gate", () => {
     end(id, "failed");
     await run;
     expect(attrs.get("data-uploading")).toBe(false);
+  });
+});
+
+/** Web Locks as the browser keeps them (one page's view): the names held. */
+function fakeLocks(): Set<string> {
+  const held = new Set<string>();
+  vi.stubGlobal("navigator", {
+    locks: {
+      async request(name: string, a: unknown, b?: unknown) {
+        const cb = (typeof a === "function" ? a : b) as (lock: unknown) => Promise<void>;
+        held.add(name);
+        try {
+          return await cb({ name });
+        } finally {
+          held.delete(name);
+        }
+      },
+      async query() {
+        return { held: [...held].map((name) => ({ name })) };
+      },
+    },
+  });
+  return held;
+}
+const lockOf = (id: string) => `cleocuts-upload-rec:${id}`;
+
+describe("a start that failed before Let's go stays its own (no other tab takes it on)", () => {
+  it("keeps its record's lock and its bytes until it is given up", async () => {
+    const held = fakeLocks();
+    const { cancelUpload, runsElsewhere } = await import("./uploadControls");
+    const { id, run } = await start({ gate: createGate() });
+    await vi.waitFor(() => expect(held.has(lockOf(id))).toBe(true));
+    end(id, "failed");
+    await run;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(held.has(lockOf(id))).toBe(true);
+    expect(unholds.get(id)).not.toHaveBeenCalled();
+    // This page's own, though: its to try again or give up.
+    expect(await runsElsewhere(id)).toBe(false);
+    await cancelUpload(id);
+    expect(unholds.get(id)).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(held.has(lockOf(id))).toBe(false));
+  });
+
+  it("tried again: the old record's lock and bytes go, the new upload holds its own", async () => {
+    const held = fakeLocks();
+    const { retryUpload } = await import("./uploadControls");
+    const gate = createGate();
+    const { id, run } = await start({ gate });
+    end(id, "failed");
+    await run;
+    let next = "";
+    expect(retryUpload(id, { gate, onCard: (t) => (next = t) })).toBe(true);
+    expect(unholds.get(id)).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(held.has(lockOf(id))).toBe(false));
+    await vi.waitFor(() => expect(held.has(lockOf(next))).toBe(true));
+    gate.open();
+    end(next, "created");
+  });
+
+  it("after Let's go a failure lets them go at once: its tile's Try again is any tab's (D3)", async () => {
+    const held = fakeLocks();
+    const gate = createGate();
+    const { id, run } = await start({ gate });
+    gate.open();
+    end(id, "failed");
+    await run;
+    expect(unholds.get(id)).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(held.has(lockOf(id))).toBe(false));
   });
 });

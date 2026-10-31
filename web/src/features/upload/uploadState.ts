@@ -44,6 +44,10 @@ export type Retry = {
   /** The start screen's choices, gone on without it (uploadManager
    *  StartOpts.lastUsed): remembered when its POST /jobs goes out. */
   lastUsed?: LastUsedPrefs;
+  /** Failed before "Let's go": its start holds the record's lock and the
+   *  bytes (no other tab takes them on) until this is called — when it is
+   *  tried again or given up (uploadControls). */
+  release?: () => void;
 };
 export const retries = new Map<string, Retry>();
 /** Cancel (UX12): the abort of each running upload of this page. */

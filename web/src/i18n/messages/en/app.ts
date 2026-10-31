@@ -51,9 +51,9 @@ export const enApp = {
     "We couldn't read this video file. Please export it again as MP4 or MOV and upload it.",
   // Upload limits (413 / 429 from the backend, also checked before uploading)
   "app.errors.fileTooLarge":
-    "This file is larger than {max} GB. Please trim the video or export it smaller.",
+    "This file is larger than {max}\u00a0GB. Please trim the video or export it smaller.",
   "app.errors.videoTooLong":
-    "This video is longer than {max} minutes. Please trim it or split it into parts.",
+    "This video is longer than {max}\u00a0minutes. Please trim it or split it into parts.",
   "app.errors.tooManyJobs":
     "You already have the maximum number of videos processing. Please wait until one is ready, then try again.",
 
@@ -351,7 +351,7 @@ export const enApp = {
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
   "app.errors.noVideoTrack": "This is an audio file. CleoCuts needs a video with sound, so pick a video file instead. Nothing was charged.",
-  "app.errors.videoTooShort": "This video is shorter than {min} seconds, too short to cut. Nothing was charged.",
+  "app.errors.videoTooShort": "This video is shorter than {min}\u00a0seconds, too short to cut. Nothing was charged.",
   "app.errors.processingInterrupted": "Processing was interrupted. Please upload the video again.",
   "app.errors.mediaUnavailable": "The original video is no longer available, so this project can't be edited again.",
   "app.errors.tooManyRenders": "Too many exports are running. Please wait until one has finished.",

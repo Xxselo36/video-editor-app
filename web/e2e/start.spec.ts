@@ -438,6 +438,17 @@ test("a video over the limits is refused on New video: nothing uploads, nothing 
   expect(await storedJobs(page)).toEqual([]);
 });
 
+test("a refusal on New video follows a switch of the language @editor-v2", async ({ page, stub }) => {
+  await openWithStorage(page, "/app/new");
+  await page.getByTestId("language-switcher").first().selectOption("de");
+  await chooseFile(page, { name: "lang.webm", mimeType: "video/webm", buffer: await stub.media("long.webm") });
+  const error = page.getByTestId("start-pick-error");
+  await expect(error).toHaveText("Dieses Video ist länger als 30 Minuten. Kürze es oder teile es in mehrere Teile auf.");
+  await page.getByTestId("language-switcher").first().selectOption("en");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("New video");
+  await expect(error).toHaveText("This video is longer than 30 minutes. Please trim it or split it into parts.");
+});
+
 test("a failed upload stays on Choose captions with its reason; Try again starts it @editor-v2", async ({ page, stub }) => {
   await openWithStorage(page, "/app/new");
   const posts = await watchJobPosts(page);
@@ -503,6 +514,18 @@ test("a failure before Let’s go: the go button rests until Try again; Projects
   await expect(go).toHaveAttribute("data-state", "idle");
   await expect(go).toHaveText("Let’s go");
   await expect(retry).toBeFocused();
+  // At the end of the page Try again is in view (on a phone in the strip
+  // stuck at the top): a tap on the button focuses it, and the page stays
+  // where it is (no jump under the finger).
+  await page.getByTestId("start-more").click();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect(retry).toBeInViewport();
+  const scrolled = await page.evaluate(() => window.scrollY);
+  const box = (await go.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(retry).toBeFocused();
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
   // A short landscape phone, where nothing sticks: at the end of the page
   // the button is all there is in view, and the tap brings Try again up.
   const size = page.viewportSize()!;
