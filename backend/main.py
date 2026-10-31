@@ -3931,13 +3931,13 @@ async def multipart_abort(payload: dict,
     completed upload no job or claim holds goes too: it was given up
     before POST /jobs (cancelled while it waited for "Let's go"), and R2
     would keep it until the lifecycle rule (which still expires a single
-    PUT's: it has no ticket). The check and the delete take the key's
-    turn like POST /jobs does (_CREATING_KEYS): a request accepting the
-    upload right now keeps it, one arriving meanwhile finds it gone (409
-    upload_incomplete)."""
+    PUT's: it has no ticket). Checked after every abort: R2 answers the
+    abort of a completed upload with success too (S3: NoSuchUpload). The
+    check and the delete take the key's turn like POST /jobs does
+    (_CREATING_KEYS): a request accepting the upload right now keeps it,
+    one arriving meanwhile finds it gone (409 upload_incomplete)."""
     t = await run_in_threadpool(_read_ticket, payload, user)
-    if await run_in_threadpool(_abort_multipart, t):
-        return Response(status_code=204)
+    await run_in_threadpool(_abort_multipart, t)
     key = t["k"]
     while (busy := _CREATING_KEYS.get(key)) is not None:
         await busy.wait()
@@ -3950,9 +3950,9 @@ async def multipart_abort(payload: dict,
     return Response(status_code=204)
 
 
-def _abort_multipart(t: dict) -> bool:
-    """AbortMultipartUpload; False when the upload isn't open any more
-    (completed, or aborted before)."""
+def _abort_multipart(t: dict) -> None:
+    """AbortMultipartUpload. An upload that isn't open any more (completed,
+    or aborted before) is fine: S3 answers NoSuchUpload, R2 success."""
     from backend import storage
     try:
         _storage_call("AbortMultipartUpload", storage.mpu_abort,
@@ -3960,8 +3960,7 @@ def _abort_multipart(t: dict) -> bool:
     except ApiRefusal:
         raise
     except Exception:  # NoSuchUpload
-        return False
-    return True
+        pass
 
 
 def _drop_unclaimed_upload(t: dict) -> None:

@@ -391,6 +391,20 @@ def test_abort_after_complete_deletes_the_unclaimed_object(client, r2,
                        json={"ticket": t}).status_code == 410
 
 
+def test_abort_after_complete_deletes_it_where_r2_answers_success(
+        client, r2, monkeypatch):
+    """R2 answers AbortMultipartUpload of a completed upload with success
+    (S3 and moto: NoSuchUpload). The completed object still goes: live,
+    it stayed until the lifecycle rule."""
+    t, key = _completed(client, r2)
+    monkeypatch.setattr(storage, "mpu_abort", lambda *a, **k: None)
+    r = client.post("/uploads/multipart/abort", json={"ticket": t})
+    assert r.status_code == 204
+    assert storage.head(key) is None
+    assert client.post("/uploads/multipart/parts",
+                       json={"ticket": t}).status_code == 410
+
+
 def test_cancel_during_complete_is_not_a_too_big_file(client, r2,
                                                       monkeypatch):
     """A cancel (abort) landing between CompleteMultipartUpload and
