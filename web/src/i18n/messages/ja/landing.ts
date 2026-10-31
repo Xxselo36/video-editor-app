@@ -33,7 +33,7 @@ export const jaLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.finish": "動画がここで終わります。それより後はすべてカットされます。",
   "site.commands.note": "現在、コマンドは英語とドイツ語の動画向けです。",
   "site.auto.title": "間とフィラーワードは自動でカット。",
-  "site.auto.body": "コマンドは不要です。CleoCutsが{um}などのフィラーワードと間を、動画全体から取り除きます。カットのテンポは「{tight}」「{natural}」「{none}」から選べます。",
+  "site.auto.body": "コマンドは不要です。CleoCutsが{um}などのフィラーワードと間を、動画全体から取り除きます。編集済みの動画なら、アップロード時に「{none}」を選んでください。",
   "site.auto.sample": "じゃあ{um}、良いフックを{pause}作る{um}3つのコツです。",
   "site.auto.pause": "間",
   "site.auto.cleanup": "字幕の聞き取りミスも、CleoCutsが直します。",

@@ -4,6 +4,7 @@
  * glyphs (PLAN_TECH rule 0.9).
  */
 import { expect, type Locator, type Page } from "@playwright/test";
+import { API } from "./env";
 
 // localStorage keys of the current app (anonymous beta): the projects of
 // this device since UX12 (features/jobs/jobsStore) …
@@ -19,7 +20,16 @@ export type StoredJob = {
   timestamp: number;
   filename: string;
   name?: string | null;
-  upload?: { pct?: number; errorCode?: string | null };
+  /** An upload's record: the settings POST /jobs gets after a reload,
+   *  the start screen's choices as wanted (lastUsed), and whether it
+   *  waits for "Let's go" (awaitingGo). */
+  upload?: {
+    pct?: number;
+    errorCode?: string | null;
+    settings?: Record<string, unknown>;
+    lastUsed?: Record<string, unknown>;
+    awaitingGo?: boolean;
+  };
 };
 
 /** A project as the jobs store keeps it. */
@@ -99,12 +109,13 @@ export async function readStorage<T>(page: Page, key: string): Promise<T | null>
   }, key);
 }
 
-// ── start screen (/app/new, UX6) ─────────────────────────────────────
+// ── start screen (/app/new, UX6; PR1: "New video", "Choose captions") ─
 
 export type PickedFile = { name: string; mimeType: string; buffer: Buffer };
 
-/** Choose `file` on the start screen: one click and the file chooser —
- *  the upload starts at once. */
+/** Choose `file` on "New video": one click and the file chooser. The
+ *  upload starts at once and "Choose captions" follows; the job waits
+ *  for "Let's go" (startGo). */
 export async function chooseFile(page: Page, file: PickedFile | string) {
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser", { timeout: 10_000 }),
@@ -113,21 +124,33 @@ export async function chooseFile(page: Page, file: PickedFile | string) {
   await chooser.setFiles(file);
 }
 
-/** Choose `file` and go on to the dashboard while it uploads (the start
- *  screen goes there by itself once the job exists). */
-export async function uploadFromStart(page: Page, file: PickedFile) {
-  await chooseFile(page, file);
-  const dashboard = page.getByTestId("dashboard");
-  await expect(page.getByTestId("start-upload").or(dashboard)).toBeVisible();
-  const toProjects = page.getByTestId("start-to-projects");
-  if (await toProjects.isVisible()) await toProjects.click({ timeout: 5000 }).catch(() => {});
-  await expect(dashboard).toBeVisible();
+/** "Let's go" on "Choose captions": the job starts once the bytes are up
+ *  (the screen then goes on to Projects by itself). */
+export async function startGo(page: Page) {
+  await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
+  await page.getByTestId("start-go").click();
 }
 
 /** The `settings` of the POST /jobs of `request` (multipart form). */
 export function postedSettings(body: string | null): Record<string, unknown> | null {
   const m = /name="settings"\r\n\r\n([^\r]*)\r\n/.exec(body ?? "");
   return m ? (JSON.parse(m[1]) as Record<string, unknown>) : null;
+}
+
+/** Every POST /jobs of the page that reaches the server: its settings.
+ *  Read through a route (a plain request listener doesn't always get an
+ *  XHR's multipart body); a route added later answers before it. */
+export async function watchJobPosts(page: Page): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  await page.route(`${API}/jobs`, async (route) => {
+    const r = route.request();
+    if (r.method() === "POST") {
+      const s = postedSettings(r.postDataBuffer()?.toString("utf8") ?? null);
+      if (s) out.push(s);
+    }
+    await route.fallback();
+  });
+  return out;
 }
 
 // ── Projects (/app) ─────────────────────────────────────────────────

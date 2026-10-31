@@ -29,10 +29,11 @@ describe("caption style default", () => {
     expect(sameCaptionStyle(null, null)).toBe(true);
   });
 
-  it("new uploads send its preset as the hint, instead of Clipper", () => {
-    const s = uploadSettings(DEFAULT_SETTINGS, { returning: true, captionPreset: "karaoke" });
+  it("new uploads send the saved style as the hint and as the whole style", () => {
+    const saved = captionDefaultFromPrefs({ caption_style_default: { presetId: "karaoke", overrides: { wordsPerPage: 2 } } });
+    const s = uploadSettings(DEFAULT_SETTINGS, { captionStyle: saved! });
     expect(s.caption_style_hint).toBe("karaoke");
+    expect(s.caption_style).toEqual({ presetId: "karaoke", overrides: { wordsPerPage: 2 } });
     expect(s.caption_preset).toBeUndefined();
-    expect(uploadSettings(DEFAULT_SETTINGS, { returning: true }).caption_style_hint).toBe("clipper");
   });
 });

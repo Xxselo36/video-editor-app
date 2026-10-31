@@ -33,7 +33,7 @@ export const hiLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.finish": "आपका वीडियो ख़त्म करता है। इसके बाद का सब कुछ हट जाता है।",
   "site.commands.note": "फ़िलहाल ये कमांड्स अंग्रेज़ी और जर्मन वीडियो के लिए बने हैं।",
   "site.auto.title": "ठहराव और फ़िलर शब्द अपने-आप कट जाते हैं।",
-  "site.auto.body": "कोई कमांड नहीं चाहिए। CleoCuts पूरे वीडियो से ठहराव और {um} जैसे फ़िलर शब्द हटाता है। कट की रफ़्तार आप चुनें: {tight}, {natural} या {none}।",
+  "site.auto.body": "कोई कमांड नहीं चाहिए। CleoCuts पूरे वीडियो से ठहराव और {um} जैसे फ़िलर शब्द हटाता है। वीडियो पहले से एडिट है? अपलोड करते समय {none} चुनें।",
   "site.auto.sample": "तो {um} बेहतर हुक्स के लिए {pause} ये रहे {um} तीन टिप्स।",
   "site.auto.pause": "ठहराव",
   "site.auto.cleanup": "CleoCuts आपके कैप्शन में ग़लत सुने गए शब्द भी ठीक करता है।",

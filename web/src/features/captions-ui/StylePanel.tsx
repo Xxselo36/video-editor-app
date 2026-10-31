@@ -6,9 +6,9 @@
  *
  * - Tiles: a static snapshot per style, drawn once by the caption engine
  *   over the video's current frame with the transcript's own first words
- *   (so in its script), cropped to the caption band. A tile draws (and
- *   loads its font) only when it scrolls into view. Static like the
- *   approved mock: no tile animates.
+ *   (so in its script), cropped to the caption band (./snapshot.ts, shared
+ *   with the start screen). A tile draws (and loads its font) only when it
+ *   scrolls into view. Static like the approved mock: no tile animates.
  * - "Recommended for your video" on top (server: script, words per
  *   second, format), then all other live styles; a style that can't
  *   caption the transcript's script is greyed with the reason. "Off".
@@ -26,8 +26,6 @@ import {
   listPresets,
   resolveStyle,
   CaptionRenderer,
-  type CaptionWord,
-  type Ctx2D,
   type PresetId,
   type StyleOverrides,
 } from "@/lib/captions";
@@ -42,6 +40,7 @@ import {
   type CaptionStyleDefault,
 } from "@/features/start/captionDefault";
 import { shownWords, tileOrder, type TileInfo } from "./live";
+import { drawCaptionSnapshot, sampleWords, type SnapshotEngine } from "./snapshot";
 import c from "./captions.module.css";
 
 export type StylePanelProps = {
@@ -62,6 +61,7 @@ const selLang = (st: DocState) => st.present.language;
 
 const COLORS = ["#FFFFFF", "#FFE600", "#22E55B", "#38BDF8", "#FF5CA8", "#FF8A00"] as const;
 const HAS = Object.fromEntries(listPresets().map((p) => [p.id, p])) as Record<PresetId, ReturnType<typeof listPresets>[number]>;
+const ENGINE: SnapshotEngine = { CaptionRenderer, resolveStyle, ensureFonts };
 
 const nameKey = (id: PresetId) => `editor.style.preset.${id}` as MessageKey;
 
@@ -78,19 +78,11 @@ function languageName(code: string | null | undefined, ui: string): string {
 
 // ── one tile ──────────────────────────────────────────────────────────
 
-/** The sample: the transcript's first two shown words (one for One Word), as spoken words. */
-function sampleWords(words: readonly { text: string }[], id: PresetId): CaptionWord[] {
-  const n = id === "punch" ? 1 : 2;
-  const picked = words.slice(0, n).map((w) => w.text);
-  const texts = picked.length ? picked : ["Aa"];
-  return texts.map((text, i) => ({ id: `s${i}`, text, start: i * 0.5, end: i * 0.5 + 0.45 }));
-}
-
 type TileProps = {
   info: TileInfo;
   selected: boolean;
   videoRef: RefObject<HTMLVideoElement | null>;
-  sample: readonly { text: string }[];
+  sample: readonly string[];
   lang: string | undefined;
   why: string;
   disabled: boolean;
@@ -98,70 +90,34 @@ type TileProps = {
   label: string;
 };
 
-const TILE_W = 540;
-
 const PresetTile = memo(function PresetTile({ info, selected, videoRef, sample, lang, why, disabled, onPick, label }: TileProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [state, setState] = useState<"idle" | "loading" | "done">("idle");
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas || !info.available) return;
-    let alive = true;
+    const ac = new AbortController();
     let drawnWithFrame = false;
     let started = false;
     const draw = async () => {
       started = true;
       const v = videoRef.current;
-      const vw = v?.videoWidth || 9;
-      const vh = v?.videoHeight || 16;
-      // a virtual frame of the video's shape, short side 540
-      const k = TILE_W / Math.min(vw, vh);
-      const W = Math.round(vw * k);
-      const H = Math.round(vh * k);
-      const style = resolveStyle(info.id, {}, { W, H });
-      if (!style) return;
-      const words = sampleWords(sample, info.id);
-      setState((s) => (s === "done" ? s : "loading"));
-      const fonts = await ensureFonts(style, { lang, text: words.map((w) => w.text) }).catch(() => null);
-      if (!alive || !fonts?.ok) return;
-      const frame = document.createElement("canvas");
-      frame.width = W;
-      frame.height = H;
-      const fctx = frame.getContext("2d");
-      if (!fctx) return;
-      fctx.fillStyle = "#1B1B21";
-      fctx.fillRect(0, 0, W, H);
-      if (v && v.readyState >= 2 && v.videoWidth) {
-        try {
-          fctx.drawImage(v, 0, 0, W, H);
-          drawnWithFrame = true;
-        } catch {
-          /* not decodable yet */
-        }
-      }
-      const r = new CaptionRenderer({ words, style, W, H, lang });
-      // the last sample word is being spoken, its animation settled
-      const at = words[words.length - 1].start + 0.3;
-      const st = r.state(at);
-      r.draw(fctx as unknown as Ctx2D, at);
-      const box = st ? r.layout(st.page).box : { left: W * 0.3, right: W * 0.7, top: H * 0.6, bottom: H * 0.7 };
-      r.dispose();
-      // crop the caption band: about half the frame wide (the mock's zoom), never cutting the caption
-      const cw = canvas.clientWidth || 100;
-      const ch = canvas.clientHeight || 72;
-      const cropW = Math.min(W, Math.max(W * 0.55, (box.right - box.left) * 1.12));
-      const cropH = (cropW * ch) / cw;
-      const cx = (box.left + box.right) / 2;
-      const cy = (box.top + box.bottom) / 2;
-      const sx = Math.min(Math.max(0, cx - cropW / 2), W - cropW);
-      const sy = Math.min(Math.max(0, cy - cropH / 2), Math.max(0, H - cropH));
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
-      canvas.width = Math.round(cw * dpr);
-      canvas.height = Math.round(ch * dpr);
-      const ctx = canvas.getContext("2d");
-      ctx?.drawImage(frame, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
-      frame.width = 0;
-      setState("done");
+      const drawn = await drawCaptionSnapshot(
+        canvas,
+        {
+          engine: ENGINE,
+          presetId: info.id,
+          frame: v,
+          frameW: v?.videoWidth ?? 0,
+          frameH: v?.videoHeight ?? 0,
+          words: sampleWords(sample, info.id),
+          lang,
+          crop: "band",
+        },
+        { signal: ac.signal, onFontsLoading: () => setState((s) => (s === "done" ? s : "loading")) },
+      );
+      if (drawn.withFrame) drawnWithFrame = true;
+      if (drawn.ok) setState("done");
     };
     // fonts load only when the tile is (nearly) visible
     const io =
@@ -186,7 +142,7 @@ const PresetTile = memo(function PresetTile({ info, selected, videoRef, sample, 
     v?.addEventListener("loadeddata", again);
     v?.addEventListener("seeked", again);
     return () => {
-      alive = false;
+      ac.abort();
       io?.disconnect();
       v?.removeEventListener("loadeddata", again);
       v?.removeEventListener("seeked", again);
@@ -351,8 +307,8 @@ export default function StylePanel(p: StylePanelProps) {
   const lang = useDocStore(p.doc, selLang) ?? undefined;
   const [open, setOpen] = useState(false);
   // the transcript's first words, for the tiles (stable while the first words stay)
-  const first = useMemo(() => shownWords(words).slice(0, 2), [words]);
-  const sampleKey = first.map((w) => w.text).join(" ");
+  const first = useMemo(() => shownWords(words).slice(0, 2).map((w) => w.text), [words]);
+  const sampleKey = first.join(" ");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const sample = useMemo(() => first, [sampleKey]);
   const tiles = useMemo(() => tileOrder(p.presetsLive, p.recommended, lang), [p.presetsLive, p.recommended, lang]);

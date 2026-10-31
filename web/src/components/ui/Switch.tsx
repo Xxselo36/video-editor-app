@@ -1,18 +1,30 @@
 import { cx } from "./cx";
 
+const SIZE = {
+  /** In a settings list (v1 ConfigureScreen). */
+  md: {
+    track: "h-6 w-10 p-0.5",
+    on: "bg-[var(--brand)]",
+    off: "bg-[var(--surface-tint)]",
+    knob: "h-5 w-5 bg-white",
+    knobOn: "translate-x-4",
+  },
+  /** In a 56 px option row (the start screen's "Mehr Optionen"). */
+  lg: {
+    track: "relative h-7 w-12 shrink-0 border",
+    on: "border-[var(--brand-solid)] bg-[var(--brand-solid)]",
+    off: "border-[var(--border-hover)] bg-[var(--surface-tint)]",
+    knob: "absolute left-[3px] top-[3px] h-5 w-5 bg-[var(--text-strong)] shadow-[var(--shadow-sm)] duration-[220ms] ease-[cubic-bezier(.16,1,.3,1)] motion-reduce:transition-none",
+    knobOn: "translate-x-5",
+  },
+} as const;
+
 /** The on/off track. Decorative: the control around it is the switch. */
-export function Switch({ checked }: { checked: boolean }) {
+export function Switch({ checked, size = "md" }: { checked: boolean; size?: keyof typeof SIZE }) {
+  const s = SIZE[size];
   return (
-    <div
-      aria-hidden
-      className={cx(
-        "h-6 w-10 rounded-full p-0.5 transition-colors",
-        checked ? "bg-[var(--brand)]" : "bg-[var(--surface-tint)]",
-      )}
-    >
-      <div
-        className={cx("h-5 w-5 rounded-full bg-white transition-transform", checked && "translate-x-4")}
-      />
+    <div aria-hidden className={cx("rounded-full transition-colors", s.track, checked ? s.on : s.off)}>
+      <div className={cx("rounded-full transition-transform", s.knob, checked && s.knobOn)} />
     </div>
   );
 }

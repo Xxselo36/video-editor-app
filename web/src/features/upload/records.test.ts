@@ -173,3 +173,73 @@ describe("the page comes back (iOS: pagehide for a page that only went to the ba
     expect(await code("upl-ended")).toBe("upload_interrupted");
   });
 });
+
+describe("the start screen's choices (D7)", () => {
+  it("follow on the record, the caption style whole: \"Try again\" after a reload starts with them", async () => {
+    const r = await running("upl-choices");
+    const store = await import("@/features/jobs/jobsStore");
+    const settings = {
+      style: "none",
+      voice_triggers: false,
+      remove_fillers: false,
+      smartcam_enabled: false,
+      smartcam_format: "portrait" as const,
+      resolution: "1080",
+      output_formats: [],
+      caption_style_hint: "karaoke",
+      caption_style: { presetId: "karaoke", overrides: { wordsPerPage: 2 } },
+    };
+    r.recordUploadSettings("upl-choices", settings);
+    await vi.waitFor(() => expect(store.getLocalJob("upl-choices")?.upload?.settings).toEqual(settings));
+    // A record that went (cancelled) doesn't come back with them.
+    r.removeUploadRecord("upl-choices");
+    r.recordUploadSettings("upl-choices", settings);
+    await new Promise((res) => setTimeout(res, 10));
+    expect(store.getLocalJob("upl-choices")).toBeNull();
+    r.liveUploads.delete("upl-choices");
+  });
+});
+
+describe("what the record keeps for later and for other tabs", () => {
+  const lastUsed = { target_aspect: "original" as const, remove_fillers: false, spoken_language: "fr", caption_style_last: "elegant" };
+
+  it("the choices as wanted go with the settings", async () => {
+    const r = await running("upl-wanted");
+    const store = await import("@/features/jobs/jobsStore");
+    r.recordUploadSettings("upl-wanted", info.settings, lastUsed);
+    await vi.waitFor(() => expect(store.getLocalJob("upl-wanted")?.upload).toMatchObject({ settings: info.settings, lastUsed }));
+    r.liveUploads.delete("upl-wanted");
+  });
+
+  it("waiting for Let's go, and all bytes stored: written at once, so another tab shows it", async () => {
+    const r = await running("upl-waits");
+    const store = await import("@/features/jobs/jobsStore");
+    r.recordUploadWaiting("upl-waits", true);
+    r.recordUploadStored("upl-waits");
+    await vi.waitFor(() => expect(store.getLocalJob("upl-waits")?.upload).toMatchObject({ awaitingGo: true, pct: 100 }));
+    r.recordUploadWaiting("upl-waits", false);
+    await vi.waitFor(() => expect(store.getLocalJob("upl-waits")?.upload?.awaitingGo).toBe(false));
+    r.liveUploads.delete("upl-waits");
+  });
+
+  it("the stopped upload a new one of the same file continues: the newest of that size, after the writes before", async () => {
+    const r = await import("./records");
+    const store = await import("@/features/jobs/jobsStore");
+    const add = async (id: string, fileSize: number, extra: object) => {
+      r.addUploadRecord(id, { ...info, fileSize, settings: { style: id } as never, lastUsed });
+      await vi.waitFor(() => expect(store.getLocalJob(id)).not.toBeNull());
+      store.updateUpload(id, extra);
+      await new Promise((res) => setTimeout(res, 5));
+    };
+    await add("upl-old", 777, { errorCode: "upload_interrupted" });
+    await add("upl-new", 777, { errorCode: "upload_interrupted" });
+    await add("upl-runs", 777, {});
+    await add("upl-other", 778, { errorCode: "upload_interrupted" });
+    expect(await r.stoppedUpload(777)).toMatchObject({ settings: { style: "upl-new" }, lastUsed });
+    // Removed just before (X, say): not that one.
+    r.removeUploadRecord("upl-new");
+    expect(await r.stoppedUpload(777)).toMatchObject({ settings: { style: "upl-old" } });
+    expect(await r.stoppedUpload(779)).toBeNull();
+  });
+});
+

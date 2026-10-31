@@ -25,6 +25,7 @@ export type AnalyticsEvent =
   | "cta_click"
   | "sign_up"
   | "file_chosen"
+  | "start_go"
   | "upload_done"
   | "editor_opened"
   | "export_started"

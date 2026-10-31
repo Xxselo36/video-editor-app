@@ -1,9 +1,10 @@
 /**
  * Four owner requests on the v2 editor:
  *   1. "Save as default" in the Style tab: kept in this browser's prefs
- *      (cleocuts.prefs.v1 caption_style_default); new uploads send its
- *      preset as the hint and the whole style once the job exists; a job
- *      whose PATCH didn't get through gets it on first open.
+ *      (cleocuts.prefs.v1 caption_style_default); the start screen
+ *      preselects it as "Your default" and POST /jobs carries it whole
+ *      (PR1 D4, D7); a job from before that whose PATCH didn't get
+ *      through gets it on first open.
  *   2. "Show in text" in a selected caption's bar: the Text tab (the
  *      sheet on a phone) selects that word and the playhead goes there.
  *   3. Phone Back: in the iPhone pseudo-fullscreen it closes the
@@ -13,10 +14,10 @@
  *      "Adding text…", then the words; a failure leaves a retry chip.
  * Desktop and pixel7; a v2 build (NEXT_PUBLIC_EDITOR_V2 unset or 1; E2E_EDITOR_V2=1).
  */
-import { devices, type Page, type Request } from "@playwright/test";
+import { devices, type Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
-import { API, WEB } from "./support/env";
-import { chooseFile, JOBS, openWithStorage, postedSettings, readStorage } from "./support/app";
+import { WEB } from "./support/env";
+import { chooseFile, JOBS, openWithStorage, readStorage, startGo, watchJobPosts } from "./support/app";
 
 const TAG = { tag: "@editor-v2" };
 const TOUR_DONE = { "cleocuts.editor.tourDone.v1": "1" };
@@ -73,24 +74,26 @@ test.describe("editor v2: save the caption style as default", TAG, () => {
     await page.getByTestId("ed-tile-boxed").click();
     await expect(save).toHaveAttribute("data-state", "idle");
 
-    // a new video: the preset as the hint, then the whole style on the job
-    const posts: Record<string, unknown>[] = [];
-    await page.route(`${API}/jobs`, async (route) => {
-      const r: Request = route.request();
-      if (r.method() === "POST") {
-        const s = postedSettings(r.postDataBuffer()?.toString("utf8") ?? null);
-        if (s) posts.push(s);
-      }
-      await route.fallback();
-    });
+    // a new video: preselected as "Your default", POST /jobs carries it
+    // whole (the old pace is ignored: one tight cut)
+    const posts = await watchJobPosts(page);
     await page.goto("/app/new");
     await chooseFile(page, { name: "standard.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
+    const karaoke = page.getByTestId("start-style-karaoke");
+    await expect(karaoke).toHaveAttribute("aria-checked", "true");
+    await expect(karaoke.getByTestId("start-style-tag")).toHaveText("Your default");
+    await startGo(page);
     await expect(page).toHaveURL(`${WEB}/app`, { timeout: 30_000 });
     const id = async () =>
       ((await readStorage<{ jobId: string }[]>(page, JOBS)) ?? []).map((j) => j.jobId).find((j) => !j.startsWith("upl-") && j !== job.id) ??
       null;
     await expect.poll(id, { timeout: 30_000 }).not.toBeNull();
-    expect(posts[0]).toMatchObject({ caption_style_hint: "karaoke", style: "smooth" });
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({
+      caption_style_hint: "karaoke",
+      style: "tight",
+      caption_style: { presetId: "karaoke", overrides: { wordsPerPage: 2 } },
+    });
     expect(posts[0]).not.toHaveProperty("caption_preset");
     await expect
       .poll(async () => (await stub.job((await id())!))?.settings?.caption_style, SAVED)

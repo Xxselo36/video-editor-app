@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Call = { path: string; body: Record<string, unknown> };
 const calls: Call[] = [];
-let answer: (path: string, body: Record<string, unknown>) => Response = () => new Response("{}", { status: 500 });
+let answer: (path: string, body: Record<string, unknown>) => Response | Promise<Response> = () =>
+  new Response("{}", { status: 500 });
 
 vi.mock("@/lib/api", async (orig) => ({
   ...(await orig<typeof import("@/lib/api")>()),
@@ -20,6 +21,7 @@ vi.mock("@/lib/api", async (orig) => ({
 
 import {
   _useMemoryStoreForTests,
+  ABORT_TIMEOUT_MS,
   ACTIVE_MS,
   contentFingerprint,
   discardResumable,
@@ -37,7 +39,7 @@ import {
   recordPct,
   type UploadRecord,
 } from "@/lib/uploadResume";
-import { keepParts, resumableProgress, uploadResumable } from "@/lib/chunkedUpload";
+import { abortResumable, keepParts, resumableProgress, uploadResumable } from "@/lib/chunkedUpload";
 import { stoppedTileShowsError } from "@/features/upload/useResumable";
 import { movie, noise } from "./__tests__/mp4Fixtures";
 
@@ -258,6 +260,113 @@ describe("uploads running in another tab", () => {
     expect((await listResumable(now)).map((r) => r.fp)).toEqual(["old"]);
     expect(await discardResumable("fresh")).toBe(false);
     expect(store.has("fresh")).toBe(true);
+  });
+});
+
+describe("giving an upload up (X, Cancel, Remove, Discard)", () => {
+  const size = 3 * MIB + 5;
+  const part = MIB;
+  const init = (ticket: string, key: string) =>
+    json({
+      ticket,
+      storage_key: key,
+      part_size: part,
+      parts_total: 4,
+      expires_at: Math.floor(Date.now() / 1000) + 86400,
+      parts: [1, 2, 3, 4].map((n) => ({ part_number: n, url: `https://r2/${key}?partNumber=${n}` })),
+    });
+  /** The abort's answer, held until `release()`. */
+  function holdAbort(): () => void {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const before = answer;
+    answer = async (path, body) => {
+      if (path !== "/uploads/multipart/abort") return before(path, body);
+      await held;
+      return new Response(null, { status: 204 });
+    };
+    return release;
+  }
+
+  it("a stored upload: the same bytes picked while its abort is out start a new upload, never the object being deleted", async () => {
+    const bytes = content(size, 41);
+    answer = (path) => {
+      if (path === "/uploads/multipart/init") return init("tk-a", "uploads/a.mov");
+      if (path === "/uploads/multipart/complete") return json({ storage_key: "uploads/a.mov", size });
+      return json({}, 500);
+    };
+    expect((await uploadResumable({ file: fileOf(bytes, "IMG_1.MOV", 1) })).storage_key).toBe("uploads/a.mov");
+    calls.length = 0;
+    const release = holdAbort();
+    const giving = abortResumable({ file: fileOf(bytes, "IMG_1.MOV", 1) });
+    await vi.waitFor(() => expect(calls.map((c) => c.path)).toContain("/uploads/multipart/abort"));
+    // (An iPhone hands over a new File: a new lastModified.)
+    answer = ((before) => async (path: string, body: Record<string, unknown>) => {
+      if (path === "/uploads/multipart/init") return init("tk-b", "uploads/b.mov");
+      if (path === "/uploads/multipart/complete") return json({ storage_key: "uploads/b.mov", size });
+      return before(path, body);
+    })(answer);
+    const again = await uploadResumable({ file: fileOf(bytes, "IMG_1.MOV", 2) });
+    expect(again.storage_key).toBe("uploads/b.mov");
+    expect(calls.map((c) => c.path)).toContain("/uploads/multipart/init");
+    release();
+    await giving;
+  });
+
+  it("an open upload: the same bytes picked while its abort is out don't resume the ticket being aborted", async () => {
+    const bytes = content(size, 42);
+    answer = (path) => (path === "/uploads/multipart/init" ? init("tk-c", "uploads/c.mov") : json({}, 500));
+    // Parts 1 and 2 go up, then X.
+    const ctl = new AbortController();
+    const origSend = FakeXhr.prototype.send;
+    FakeXhr.prototype.send = function (this: FakeXhr, b: Blob) {
+      // Parts 3 and 4 never get an answer.
+      if (Number(new URL((this as unknown as { url: string }).url).searchParams.get("partNumber")) >= 3) return;
+      return origSend.call(this, b);
+    };
+    const up = uploadResumable({ file: fileOf(bytes, "IMG_2.MOV", 1), signal: ctl.signal });
+    up.catch(() => {});
+    try {
+      await vi.waitFor(() => expect([...store.values()][0]?.done.sort()).toEqual([1, 2]), { timeout: 4000 });
+    } finally {
+      ctl.abort();
+      await up.catch(() => {});
+      FakeXhr.prototype.send = origSend;
+    }
+    calls.length = 0;
+    const release = holdAbort();
+    const giving = abortResumable({ file: fileOf(bytes, "IMG_2.MOV", 1) });
+    await vi.waitFor(() => expect(calls.map((c) => c.path)).toContain("/uploads/multipart/abort"));
+    answer = ((before) => async (path: string, body: Record<string, unknown>) => {
+      if (path === "/uploads/multipart/init") return init("tk-d", "uploads/d.mov");
+      if (path === "/uploads/multipart/complete") return json({ storage_key: "uploads/d.mov", size });
+      return before(path, body);
+    })(answer);
+    const again = await uploadResumable({ file: fileOf(bytes, "IMG_2.MOV", 2) });
+    expect(again.storage_key).toBe("uploads/d.mov");
+    expect(calls.filter((c) => c.body.ticket === "tk-c").map((c) => c.path)).toEqual(["/uploads/multipart/abort"]);
+    release();
+    await giving;
+  });
+
+  it("an abort that never answers: the record goes at once, and giving up is over after ABORT_TIMEOUT_MS", async () => {
+    vi.useFakeTimers();
+    try {
+      store.set("hangs", record("hangs"));
+      answer = () => new Promise<Response>(() => {});
+      let over = false;
+      const giving = discardResumable("hangs").then((v) => ((over = true), v));
+      for (let i = 0; i < 50 && !calls.length; i++) await vi.advanceTimersByTimeAsync(1);
+      expect(calls.map((c) => c.path)).toEqual(["/uploads/multipart/abort"]);
+      expect(store.has("hangs")).toBe(false);
+      await vi.advanceTimersByTimeAsync(ABORT_TIMEOUT_MS - 100);
+      expect(over).toBe(false);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(over).toBe(true);
+      await expect(giving).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

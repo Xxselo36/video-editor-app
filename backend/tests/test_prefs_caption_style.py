@@ -1,6 +1,7 @@
-"""The v2 Style tab's "Save as default" in /me/prefs
-(caption_style_default, backend/prefs.py): stored, merged with the other
-keys, validated (no per-caption overrides), size-limited."""
+"""Caption styles in /me/prefs (backend/prefs.py): the v2 Style tab's
+"Save as default" (caption_style_default: stored, merged with the other
+keys, validated (no per-caption overrides), size-limited) and the start
+screen's "Last used" (caption_style_last: a preset id or "none")."""
 from __future__ import annotations
 
 import pytest
@@ -56,3 +57,32 @@ def test_stale_value_is_dropped_on_read():
     import json
     raw = json.dumps({"style": "tight", "caption_style_default": {"presetId": "gone"}})
     assert prefs._parse(raw) == {"style": "tight"}
+
+
+def test_caption_style_last_roundtrip(client, auth_on, bearer):
+    h = bearer("user_last")
+    r = client.put("/me/prefs", headers=h, json={
+        "target_aspect": "original", "caption_style_last": " Karaoke "})
+    assert r.status_code == 200, r.text
+    want = {"target_aspect": "original", "caption_style_last": "karaoke"}
+    assert r.json() == want
+    assert client.get("/me/prefs", headers=h).json() == want
+    # "No captions" is remembered too; null removes it.
+    r = client.put("/me/prefs", headers=h, json={"caption_style_last": "none"})
+    assert r.json() == {**want, "caption_style_last": "none"}
+    r = client.put("/me/prefs", headers=h, json={"caption_style_last": None})
+    assert r.json() == {"target_aspect": "original"}
+
+
+@pytest.mark.parametrize("value", [
+    "bogus", "", 7, True, {"presetId": "power"},
+    "clean",                     # a v1 alias: only v2 presets are offered
+])
+def test_caption_style_last_refused_when_unknown(client, auth_on, bearer,
+                                                 value):
+    h = bearer("user_last_bad")
+    r = client.put("/me/prefs", headers=h, json={"caption_style_last": value})
+    assert r.status_code == 400
+    assert r.json()["code"] == "bad_prefs"
+    assert r.json()["detail"]["field"] == "caption_style_last"
+    assert client.get("/me/prefs", headers=h).json() == {}

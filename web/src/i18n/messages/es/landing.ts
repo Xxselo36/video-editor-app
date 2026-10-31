@@ -33,7 +33,7 @@ export const esLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.finish": "Termina tu video. Todo lo que va después se descarta.",
   "site.commands.note": "Por ahora, los comandos están pensados para videos en inglés y alemán.",
   "site.auto.title": "Las pausas y muletillas se cortan solas.",
-  "site.auto.body": "No necesitas ningún comando. CleoCuts quita pausas y muletillas como {um} de todo el video. Tú eliges el ritmo de corte: {tight}, {natural} o {none}.",
+  "site.auto.body": "No necesitas ningún comando. CleoCuts quita pausas y muletillas como {um} de todo el video. ¿Ya lo editaste? Elige {none} al subirlo.",
   "site.auto.sample": "Bueno, {um} tres trucos {pause} para mejores {um} ganchos.",
   "site.auto.pause": "pausa",
   "site.auto.cleanup": "CleoCuts también corrige palabras mal entendidas en tus subtítulos.",

@@ -1,8 +1,9 @@
 """UX6: the start screen's settings on the server.
 
-- POST /jobs settings allowlist (_clean_settings): target_aspect, cut
-  pace (tight / smooth / none, "balanced" = smooth), spoken_language,
-  caption_style_hint (live preset ids only); the legacy keys still pass.
+- POST /jobs settings allowlist (_clean_settings): target_aspect, the
+  pace as sent (the analysis cuts tight for every pace but none),
+  spoken_language, caption_style_hint, caption_style (a small valid
+  style, else dropped); the legacy keys still pass.
 - target_aspect → SmartCam (pipeline.smartcam_plan); a failed reframe →
   job.format_warning "smartcam_failed" and a centre crop (no bars).
 - "No cuts" (style none): one segment over the video, only silence
@@ -76,6 +77,58 @@ def test_clean_settings_keeps_the_legacy_keys():
               "smartcam_enabled": True, "smartcam_format": "portrait",
               "resolution": "1080", "output_formats": ["9:16", "1:1"]}
     assert M._clean_settings(dict(legacy), None) == legacy
+
+
+def test_clean_settings_caption_style(monkeypatch):
+    """The whole style picked on the start screen ({presetId,
+    overrides}): kept as validate_style normalises it, without one
+    video's caption positions; dropped, never refused, when it isn't a
+    small valid live style. The other settings stay as they are."""
+    monkeypatch.delenv("CLEO_CAPTION_PRESETS_LIVE", raising=False)
+    rest = {"target_aspect": "9:16", "style": "tight", "remove_fillers": True,
+            "voice_triggers": True, "caption_style_hint": "karaoke"}
+
+    def clean(style):
+        return M._clean_settings({**rest, "caption_style": style}, None)
+
+    assert clean({"presetId": " Karaoke ",
+                  "overrides": {"wordsPerPage": 2}}) == {
+        **rest, "caption_style": {"presetId": "karaoke",
+                                  "overrides": {"wordsPerPage": 2}}}
+    assert clean({"presetId": "none", "overrides": {}})["caption_style"] == {
+        "presetId": "none", "overrides": {}}
+    positioned = {"presetId": "power", "overrides": {
+        "sizeScale": 1.2, "captions": {"w0001": {"y": 0.3}}}}
+    assert clean(positioned)["caption_style"] == {
+        "presetId": "power", "overrides": {"sizeScale": 1.2}}
+    # Overrides nested 1000 deep (validate_style can't even copy them).
+    deep: dict = {"a": 1}
+    for _ in range(1000):
+        deep = {"a": deep}
+    for bad in ({"presetId": "bogus"},                            # unknown
+                {"presetId": "power", "overrides": {"sizeScale": 9}},
+                {"presetId": "power", "overrides": {"font": "Arial"}},
+                {"presetId": "power", "overrides": [1]},
+                {"presetId": "power", "extra": 1},
+                # an integer too big for a float (JSON allows it)
+                {"presetId": "power", "overrides": {"sizeScale": 10**400}},
+                {"presetId": "power",
+                 "overrides": {"captions": {"w1": {"y": 10**400}}}},
+                {"presetId": "power", "overrides": {"x": deep}},
+                "neon",                  # a bare preset id: the hint's job
+                None, 7):
+        assert clean(bad) == rest, bad
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "power")
+    assert clean({"presetId": "karaoke"}) == rest                 # not live
+    monkeypatch.delenv("CLEO_CAPTION_PRESETS_LIVE")
+    # Bigger than a saved default may be (the real limit is 1000 bytes,
+    # more than the launch overrides can take).
+    small = {"presetId": "power", "overrides": {}}
+    monkeypatch.setattr(prefs, "CAPTION_STYLE_MAX_BYTES",
+                        len(json.dumps(small, separators=(",", ":"))))
+    assert clean(small)["caption_style"] == small
+    assert clean({"presetId": "power",
+                  "overrides": {"textColor": "#FFFFFF"}}) == rest
 
 
 # ── target_aspect → SmartCam ─────────────────────────────────────────
@@ -221,12 +274,33 @@ def test_no_cuts_analysis(tmp_path, analysis):
                                  "voice_triggers": True})
     kw = analysis["kw"]
     assert kw["remove_fillers"] is False and kw["voice_triggers"] is False
+    assert kw["style"] == "smooth"          # the detection it always had
     # 1.4 s of silence before the first word: trimmed; the end is kept.
     assert res["segments"] == [(1.4, 4.0)]
     assert [s["start"] for s in res["subtitles"]] == [0.1, 1.3]
     assert [(c["start"], c["end"]) for c in res["cut_ranges"]] == [
         (c["start"], c["end"]) for c in pipeline._invert_segments([(1.4, 4.0)], 4.0)]
     assert len(res["cut_ranges"]) == 1
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("settings,no_cuts", [
+    ({}, False), ({"style": "bogus"}, False), ({"style": " None "}, True),
+])
+def test_missing_or_unknown_pace_cuts_tight(tmp_path, analysis, settings,
+                                            no_cuts):
+    """One tight cut for everyone: a missing or unknown pace cuts like
+    "tight"; the pace is read stripped and lowercased (" None " is No
+    cuts)."""
+    src = _clip(tmp_path / "in.mp4", "160x90", seconds=4.0)
+    res = pipeline.analyze_only(str(src), str(tmp_path / "job"),
+                                dict(settings))
+    kw = analysis["kw"]
+    assert kw["style"] == ("smooth" if no_cuts else "fast")
+    cuts = not no_cuts
+    assert (kw["remove_fillers"], kw["voice_triggers"]) == (cuts, cuts)
+    assert res["segments"] == ([(1.4, 4.0)] if no_cuts
+                               else [(1.4, 2.0), (2.6, 3.4)])
 
 
 # ── spoken language ──────────────────────────────────────────────────
@@ -319,6 +393,7 @@ def test_prefs_roundtrip(client, auth_on, bearer):
     ({"target_aspect": "4:3"}, "target_aspect"),
     ({"remove_fillers": "yes"}, "remove_fillers"),
     ({"spoken_language": "xx"}, "spoken_language"),
+    ({"caption_style_last": "bogus"}, "caption_style_last"),
     ({"caption_style_by_aspect": {"9:16": {"presetId": "bogus"}}}, "caption_style_by_aspect"),
     ({"caption_style_by_aspect": {"4:3": {"presetId": "power"}}}, "caption_style_by_aspect"),
     ({"_r2_storage_key": "x"}, "_r2_storage_key"),
@@ -338,7 +413,7 @@ def test_prefs_parse_drops_stale_values():
     assert prefs._parse("not json") is None and prefs._parse(None) is None
 
 
-# ── old payloads: exactly the processing of before UX6 ────────────────
+# ── old payloads: the processing of before UX6, cut tight ─────────────
 
 # What the web sent before UX6 (the workflow presets / Custom).
 OLD_PAYLOADS = [
@@ -375,14 +450,14 @@ def test_old_payload_smartcam_as_before(payload):
 @needs_ffmpeg
 @pytest.mark.parametrize("payload", OLD_PAYLOADS)
 def test_old_payload_analysis_as_before(tmp_path, analysis, payload):
-    """Same analyze_video arguments as before UX6 (style map tight → fast,
-    else smooth; fillers / voice commands as sent), SmartCam with the
-    sent format (16:9 landscape reframe included), and a failed reframe
-    keeps the normalized source — no crop, no warning."""
+    """The analyze_video arguments of before UX6 but one tight cut
+    ("fast", whatever pace they name; fillers / voice commands as sent),
+    SmartCam with the sent format (16:9 landscape reframe included), and
+    a failed reframe keeps the normalized source: no crop, no warning."""
     src = _clip(tmp_path / "in.mp4", "160x90")
     res = pipeline.analyze_only(str(src), str(tmp_path / "job"), dict(payload))
     kw = analysis["kw"]
-    assert kw["style"] == ("fast" if payload["style"] == "tight" else "smooth")
+    assert kw["style"] == "fast"
     assert kw["remove_fillers"] is True and kw["voice_triggers"] is True
     assert analysis["language"] is None                  # two-pass auto
     calls = analysis["smartcam"]

@@ -10,6 +10,7 @@
 import type { ErrorParams } from "@/lib/errors";
 import type { JobStatusRow } from "@/lib/jobStatus";
 import type { UploadSettings } from "@/features/upload/uploadJob";
+import type { LastUsedPrefs } from "@/features/start/lastUsed";
 
 /** An upload that has no job yet (its id is `upl-…`). */
 export type UploadRecord = {
@@ -29,6 +30,14 @@ export type UploadRecord = {
   /** What POST /jobs gets: "Try again" after a reload asks for the file
    *  again and starts it with these. */
   settings?: UploadSettings;
+  /** The start screen's choices as wanted (features/start/choices
+   *  lastUsedPrefs): its POST /jobs remembers them as "Zuletzt benutzt",
+   *  also after a reload ("Try again"), and the same video picked again
+   *  comes back with them. */
+  lastUsed?: LastUsedPrefs;
+  /** Waits for "Los geht's" in the tab that uploads it (another tab of
+   *  the browser shows it so). */
+  awaitingGo?: boolean;
   /** "any": the file came from the unfiltered iOS input ("Pick anyway",
    *  iOS converted it): "Continue upload" opens that one again. */
   source?: "any";

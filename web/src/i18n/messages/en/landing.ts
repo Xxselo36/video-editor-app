@@ -42,7 +42,8 @@ export const enLanding = {
   "site.commands.finish": "Ends your video. Everything after it is dropped.",
   "site.commands.note": "For now, the commands are made for English and German videos.",
   "site.auto.title": "Pauses and filler words are cut for you.",
-  "site.auto.body": "No command needed. CleoCuts removes pauses and filler words like {um} from the whole video. You choose the pace: {tight}, {natural} or {none}.",
+  // {none}: the upload option “Captions only” (app.start.summaryCaptionsOnly)
+  "site.auto.body": "No command needed. CleoCuts removes pauses and filler words like {um} from the whole video. Already cut? Pick {none} when you upload.",
   "site.auto.sample": "So {um} three tips {pause} for better {um} hooks.",
   "site.auto.pause": "pause",
   "site.auto.cleanup": "CleoCuts also fixes misheard words in your captions.",

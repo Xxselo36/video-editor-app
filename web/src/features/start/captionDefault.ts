@@ -2,15 +2,15 @@
  * The saved caption style ("Save as default" in the v2 Style tab): a
  * preset plus the look's overrides — never a caption's own position /
  * size (overrides.captions: one video's captions). Kept with the other
- * upload defaults (usePrefs): prefs key caption_style_default, on the
- * server for a signed-in user (PUT /me/prefs; backend/prefs.py
+ * remembered choices (usePrefs): prefs key caption_style_default, on
+ * the server for a signed-in user (PUT /me/prefs; backend/prefs.py
  * validates it) and always in this browser (localStorage
  * cleocuts.prefs.v1).
  *
- * New uploads from the v2 start screen send it: the preset as the
- * caption_style_hint, and once the job exists the whole style as its
- * caption_style (PATCH /jobs/{id}: the doc built at analysis end has
- * it). A job whose PATCH didn't get through is remembered here
+ * The start screen preselects it as "Dein Standard", drawn with its
+ * look, and sends the style picked there whole with POST /jobs (D4, D7).
+ * Uploads from before that gave the new job the style by PATCH
+ * /jobs/{id}; a job whose PATCH didn't get through is remembered here
  * (PENDING_KEY) and the editor gives its doc the style on first open
  * (rev 0 only: a project someone edited keeps its own style).
  *
@@ -21,9 +21,9 @@ import { apiFetch } from "@/lib/api";
 import { AUTH_ENABLED, getAuthState } from "@/lib/auth";
 
 export const PREFS_KEY = "cleocuts.prefs.v1";
-/** Jobs created with the saved style whose PATCH /jobs/{id} failed. */
+/** Jobs created with the saved style whose PATCH /jobs/{id} failed
+ *  (uploads from before the style went with POST /jobs). */
 export const PENDING_KEY = "cleocuts.captionDefault.pending.v1";
-const PENDING_MAX = 20;
 /** The backend's limit (prefs.CAPTION_STYLE_MAX_BYTES). */
 const MAX_BYTES = 1000;
 
@@ -58,7 +58,8 @@ export function sameCaptionStyle(a: CaptionStyleDefault | null, b: CaptionStyleD
   return ka.length === kb.length && ka.every((k, i) => k === kb[i] && a.overrides[k] === b.overrides[k]);
 }
 
-function readRaw(): Record<string, unknown> {
+/** This browser's prefs object ({} when there is none, or it can't be read). */
+export function readLocalPrefs(): Record<string, unknown> {
   try {
     const v = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "null");
     return v && typeof v === "object" && !Array.isArray(v) ? v : {};
@@ -70,7 +71,7 @@ function readRaw(): Record<string, unknown> {
 /** Merge `patch` into this browser's prefs object (null removes a key). */
 export function writeLocalPrefsPatch(patch: Record<string, unknown>): boolean {
   try {
-    const next: Record<string, unknown> = { ...readRaw() };
+    const next: Record<string, unknown> = { ...readLocalPrefs() };
     for (const [k, v] of Object.entries(patch)) {
       if (v === null) delete next[k];
       else next[k] = v;
@@ -83,7 +84,7 @@ export function writeLocalPrefsPatch(patch: Record<string, unknown>): boolean {
 }
 
 export function readLocalCaptionDefault(): CaptionStyleDefault | null {
-  return captionDefaultFromPrefs(readRaw());
+  return captionDefaultFromPrefs(readLocalPrefs());
 }
 
 /**
@@ -124,7 +125,7 @@ export async function loadCaptionDefault(): Promise<CaptionStyleDefault | null> 
   return local;
 }
 
-// ── jobs created with the default ────────────────────────────────────
+// ── jobs created with the default before POST /jobs carried it ───────
 
 function readPending(): Record<string, CaptionStyleDefault> {
   try {
@@ -137,32 +138,11 @@ function readPending(): Record<string, CaptionStyleDefault> {
 
 function writePending(map: Record<string, CaptionStyleDefault>) {
   try {
-    const ids = Object.keys(map);
-    if (!ids.length) localStorage.removeItem(PENDING_KEY);
-    else localStorage.setItem(PENDING_KEY, JSON.stringify(Object.fromEntries(ids.slice(-PENDING_MAX).map((id) => [id, map[id]]))));
+    if (Object.keys(map).length) localStorage.setItem(PENDING_KEY, JSON.stringify(map));
+    else localStorage.removeItem(PENDING_KEY);
   } catch {
     /* ignore */
   }
-}
-
-/**
- * Job `jobId` was created with the saved style: give it the style now
- * (PATCH /jobs/{id} caption_style — the doc's style at analysis end);
- * when that fails the editor applies it on first open (takePending).
- */
-export async function applyToNewJob(jobId: string, style: CaptionStyleDefault): Promise<boolean> {
-  try {
-    const r = await apiFetch(`/jobs/${jobId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ caption_style: style }),
-    });
-    if (r.ok) return true;
-  } catch {
-    /* below */
-  }
-  writePending({ ...readPending(), [jobId]: style });
-  return false;
 }
 
 /** The style job `jobId` still waits for (and forget it). */

@@ -23,6 +23,10 @@ export type AppConfig = {
   limits: Limits;
   formats: string[];
   caption_presets: { id: string; name_key: string; status: string; scripts: string[] | null }[];
+  /** The v2 caption styles the start screen offers and POST /jobs
+   *  takes ("none" included). Missing from an older backend: all twelve
+   *  (features/start/choices.ts). */
+  caption_styles_live?: string[];
   spoken_languages: string[];
   free_renders: number | null;
   billing: { enabled: boolean };

@@ -3,9 +3,11 @@
  * module: uploadManager needs them without pulling in the upload code
  * (uploadJob.ts is a chunk of its own).
  *
- * UX6: target_aspect, the pace in `style` (tight / smooth / none),
- * spoken_language and the caption-style hint; the SmartCam keys stay for
- * a backend from before UX6.
+ * UX6: target_aspect, the pace in `style` (tight / none; smooth in older
+ * records), spoken_language and the caption-style hint; the SmartCam keys
+ * stay for a backend from before UX6. The caption style picked on the
+ * start screen goes whole in `caption_style` (D7: the server drops one
+ * that isn't valid, the hint stays).
  */
 export type UploadSettings = {
   target_aspect?: "9:16" | "16:9" | "original";
@@ -18,12 +20,13 @@ export type UploadSettings = {
   resolution: string;
   output_formats: string[];
   caption_style_hint?: string;
+  caption_style?: { presetId: string; overrides: Record<string, unknown> };
   caption_preset?: string;
 };
 
 /** The settings of an upload, or how to read them: a function is read
- *  when POST /jobs goes out, after the bytes are up — so a setting
- *  changed during the upload still counts (UX6). */
+ *  when POST /jobs goes out, after the bytes are up and the gate opened
+ *  — so a choice changed meanwhile still counts (UX6, D1). */
 export type SettingsSource = UploadSettings | (() => UploadSettings);
 
 export function readSettings(source: SettingsSource): UploadSettings {

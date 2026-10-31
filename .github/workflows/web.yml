@@ -22,6 +22,8 @@ name: Web
 #             visual   the screenshot suites (e2e/visual, anonymous + auth);
 #                      screenshots only, baselines come in UX18 — kept as
 #                      an artifact
+#             visual-v2  the v2 screens on the default build (s7 editor
+#                      shell, s8 start flow), kept the same way
 #
 # Locally: see web/playwright.config.ts (npm run test:e2e).
 
@@ -226,14 +228,21 @@ jobs:
             mode: auth
             browsers: chromium
             args: e2e/visual --project=desktop --project=pixel7
+          # The @editor-v2 screens: the default (v2) build
+          - name: visual-v2
+            mode: anon
+            browsers: chromium
+            args: e2e/visual/s7-editor-v2.spec.ts e2e/visual/s8-start-flow.spec.ts --project=desktop --project=pixel7
+            editor_v2: '1'
     env:
       E2E_MODE: ${{ matrix.mode }}
       E2E_WEB: start
       E2E_NIGHTLY: '1'
       NEXT_PUBLIC_AUTH_TEST: ${{ matrix.mode == 'auth' && '1' || '' }}
       # The suites without @editor-v2: the v1 editor, set explicitly (the
-      # default is v2).
-      NEXT_PUBLIC_EDITOR_V2: optin
+      # default is v2); empty for visual-v2: the default (v2) build.
+      NEXT_PUBLIC_EDITOR_V2: ${{ matrix.editor_v2 != '1' && 'optin' || '' }}
+      E2E_EDITOR_V2: ${{ matrix.editor_v2 || '' }}
       # UT1 interim captions + their test hook (e2e/captions-interim.spec.ts)
       NEXT_PUBLIC_CAPTIONS_INTERIM: '1'
       NEXT_PUBLIC_TEST_PAGES: '1'

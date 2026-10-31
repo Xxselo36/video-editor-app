@@ -14,6 +14,8 @@ import { addActiveJob, getActiveJobs, liveUploads, removeActiveJob, updateActive
 import { cardError, tEn, toCoded, type CodedError } from "@/lib/errors";
 import { getLibrary } from "@/lib/library";
 import { readChoice } from "@/features/editor/v2/flag";
+import type { LocalJob, UploadRecord } from "@/features/jobs/projects";
+import type { LastUsedPrefs } from "@/features/start/lastUsed";
 type Store = typeof import("@/features/jobs/jobsStore");
 import type { UploadSettings } from "./settings";
 
@@ -44,6 +46,8 @@ export type UploadInfo = {
   settings: UploadSettings;
   /** See features/jobs/projects UploadRecord.source (v2 only). */
   source?: "any";
+  /** See features/jobs/projects UploadRecord.lastUsed (v2 only). */
+  lastUsed?: LastUsedPrefs;
 };
 
 export function addUploadRecord(tempId: string, info: UploadInfo): void {
@@ -52,7 +56,11 @@ export function addUploadRecord(tempId: string, info: UploadInfo): void {
       store.addUpload(
         tempId,
         { filename: info.filename, fileSize: info.fileSize, presetId: info.presetId, presetLabel: info.presetLabel },
-        { settings: info.settings, ...(info.source ? { source: info.source } : {}) },
+        {
+          settings: info.settings,
+          ...(info.source ? { source: info.source } : {}),
+          ...(info.lastUsed ? { lastUsed: info.lastUsed } : {}),
+        },
       ),
     );
     return;
@@ -112,6 +120,24 @@ export function uploadProgress(tempId: string, p: { pct: number; lastProgressAt:
  *  no cancel). */
 export function recordUploadStarting(tempId: string): void {
   writeUpload(tempId, { starting: true, pct: 100, lastProgressAt: Date.now() }, null);
+}
+
+/** The start screen's choices changed (until POST /jobs goes out): "Try
+ *  again" after a reload starts with them and remembers `lastUsed` (the
+ *  choices as wanted) as it goes out (v2; a v1 card keeps none). */
+export function recordUploadSettings(tempId: string, settings: UploadSettings, lastUsed?: LastUsedPrefs): void {
+  writeUpload(tempId, lastUsed ? { settings, lastUsed } : { settings }, null);
+}
+
+/** The upload waits for "Los geht's" (`on`), or no longer does: other
+ *  tabs show it so (v2). */
+export function recordUploadWaiting(tempId: string, on: boolean): void {
+  writeUpload(tempId, { awaitingGo: on }, null);
+}
+
+/** The bytes are all stored (R2): other tabs show it at once (v2). */
+export function recordUploadStored(tempId: string): void {
+  writeUpload(tempId, { pct: 100, lastProgressAt: Date.now() }, null);
 }
 
 /** The upload failed: `e` an error, or a code ({code}). While the page
@@ -220,6 +246,10 @@ export function recordJobCreated(
   });
 }
 
+/** A stopped upload's record of a file of `fileSize` bytes. */
+const stoppedOf = (j: LocalJob, fileSize: number) =>
+  j.jobId.startsWith("upl-") && Boolean(j.upload?.errorCode) && j.fileSize === fileSize;
+
 /** An upload that continues an interrupted one: the stopped tiles of the
  *  same file (same byte count) go — v2 only; the v1 dashboard keeps its
  *  cards exactly as before. */
@@ -227,11 +257,21 @@ export function removeStoppedUploads(fileSize: number, exceptId: string): void {
   if (!projectsV2()) return;
   withStore((store) => {
     for (const j of store.getLocalJobs()) {
-      if (j.jobId !== exceptId && j.jobId.startsWith("upl-") && j.upload?.errorCode && j.fileSize === fileSize) {
-        store.removeJob(j.jobId);
-      }
+      if (j.jobId !== exceptId && stoppedOf(j, fileSize)) store.removeJob(j.jobId);
     }
   });
+}
+
+/** The newest of those stopped uploads' records (the one an upload of
+ *  that file continues), read after every write queued before; null on
+ *  v1 (its cards keep no choices) or when there is none. */
+export function stoppedUpload(fileSize: number): Promise<UploadRecord | null> {
+  if (!projectsV2()) return Promise.resolve(null);
+  const read = chain
+    .then(() => loadStore())
+    .then((store) => store.getLocalJobs().find((j) => stoppedOf(j, fileSize))?.upload ?? null);
+  chain = read.catch(() => {});
+  return read;
 }
 
 export function removeUploadRecord(tempId: string): void {

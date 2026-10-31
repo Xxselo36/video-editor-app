@@ -1,16 +1,17 @@
 /**
- * The settings of a new video (UX6, flows.md §2.3): what the start
- * screen shows and POST /jobs sends. One workflow — the old presets
- * (TikTok, Podcast, …) are these settings with other values.
- *
- * The caption style is not chosen here: the editor owns it. A new
- * browser sends none (the server's default, Power); a browser that has
- * projects already, and no saved defaults, keeps Clipper (review D11).
+ * The settings of a new video (UX6, flows.md §2.3): what POST /jobs
+ * sends. The start screen's choices make them (choices.ts): one tight
+ * cut for everyone, or none with "Nur Untertitel" (D6), and the caption
+ * style picked there goes along whole (D7). Never a v1 caption preset:
+ * the returning-browser Clipper rule is gone (D4).
  */
 import type { UploadSettings } from "@/features/upload/settings";
+import { isPresetId } from "@/lib/captions/presets";
+import type { PresetId } from "@/lib/captions/types";
 
 export type TargetAspect = "9:16" | "16:9" | "original";
-export type Pace = "tight" | "smooth" | "none";
+/** One tight cut, or none ("Nur Untertitel"). */
+export type Pace = "tight" | "none";
 
 export type JobSettings = {
   targetAspect: TargetAspect;
@@ -21,8 +22,11 @@ export type JobSettings = {
   spokenLanguage: string;
 };
 
+/** What the prefs remember of the settings (D5): never the pace or the
+ *  voice commands, as every video starts with cuts and voice commands. */
+export type SavedSettings = Partial<Pick<JobSettings, "targetAspect" | "removeFillers" | "spokenLanguage">>;
+
 export const ASPECTS: readonly TargetAspect[] = ["9:16", "16:9", "original"];
-export const PACES: readonly Pace[] = ["tight", "smooth", "none"];
 
 /** The first-ever defaults: the old TikTok workflow. */
 export const DEFAULT_SETTINGS: JobSettings = {
@@ -33,54 +37,47 @@ export const DEFAULT_SETTINGS: JobSettings = {
   spokenLanguage: "auto",
 };
 
-/** The caption style a browser with earlier projects (and no saved
- *  defaults) keeps (PLAN 2.5). */
-export const RETURNING_STYLE = "clipper";
+function prefsObject(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
 
 /**
- * Settings from a stored or served prefs object (GET /me/prefs, the
- * localStorage copy): each known key that holds a valid value, else
- * null when nothing usable is there.
+ * The remembered settings of a stored or served prefs object (GET
+ * /me/prefs, the localStorage copy): each of target_aspect,
+ * remove_fillers and spoken_language that holds a valid value, else null
+ * when none does. The style and voice_triggers older start screens saved
+ * are ignored.
  */
-export function settingsFromPrefs(v: unknown): Partial<JobSettings> | null {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
-  const p = v as Record<string, unknown>;
-  const out: Partial<JobSettings> = {};
+export function settingsFromPrefs(v: unknown): SavedSettings | null {
+  const p = prefsObject(v);
+  if (!p) return null;
+  const out: SavedSettings = {};
   if (ASPECTS.includes(p.target_aspect as TargetAspect)) out.targetAspect = p.target_aspect as TargetAspect;
-  const style = p.style === "balanced" ? "smooth" : p.style;
-  if (PACES.includes(style as Pace)) out.pace = style as Pace;
   if (typeof p.remove_fillers === "boolean") out.removeFillers = p.remove_fillers;
-  if (typeof p.voice_triggers === "boolean") out.voiceTriggers = p.voice_triggers;
   if (typeof p.spoken_language === "string" && /^(auto|[a-z]{2})$/.test(p.spoken_language)) {
     out.spokenLanguage = p.spoken_language;
   }
   return Object.keys(out).length ? out : null;
 }
 
-/** The prefs object of `s` (GET/PUT /me/prefs keys). */
-export function prefsFromSettings(s: JobSettings): Record<string, string | boolean> {
-  return {
-    target_aspect: s.targetAspect,
-    style: s.pace,
-    remove_fillers: s.removeFillers,
-    voice_triggers: s.voiceTriggers,
-    spoken_language: s.spokenLanguage,
-  };
+/** caption_style_last of a stored or served prefs object: the style the
+ *  last upload started with ("none" included), or null. */
+export function lastStyleFromPrefs(v: unknown): PresetId | null {
+  const last = prefsObject(v)?.caption_style_last;
+  return isPresetId(last) ? last : null;
 }
 
 /**
- * The settings POST /jobs sends. `returning`: the browser has earlier
- * projects and no saved defaults → the Clipper hint (and the same v1
- * preset, which the v1 export engine reads). The legacy SmartCam keys
- * go along for a backend from before UX6 (target_aspect decides on a
- * current one). No extra letterbox formats any more.
- * `captionPreset`: the preset of the caption style saved in the v2
- * Style tab (captionDefault.ts) — the hint instead of Clipper; its
- * overrides follow by PATCH /jobs/{id} once the job exists.
+ * The settings POST /jobs sends. `captionStyle`: the style picked on the
+ * start screen, whole (the server keeps it when it validates; the doc
+ * starts with it) and its preset as the hint (all an older server
+ * reads). The legacy SmartCam keys go along for a backend from before
+ * UX6 (target_aspect decides on a current one). No extra letterbox
+ * formats any more.
  */
 export function uploadSettings(
   s: JobSettings,
-  { returning, captionPreset }: { returning: boolean; captionPreset?: string | null },
+  { captionStyle }: { captionStyle: NonNullable<UploadSettings["caption_style"]> },
 ): UploadSettings {
   // "No cuts" turns both off on the server too.
   const cuts = s.pace !== "none";
@@ -94,21 +91,7 @@ export function uploadSettings(
     smartcam_format: "portrait",
     resolution: "1080",
     output_formats: [],
-    ...(captionPreset
-      ? { caption_style_hint: captionPreset }
-      : returning
-        ? { caption_style_hint: RETURNING_STYLE, caption_preset: RETURNING_STYLE }
-        : {}),
+    caption_style_hint: captionStyle.presetId,
+    caption_style: captionStyle,
   };
-}
-
-/** Is `a` the same as `b`? */
-export function sameSettings(a: JobSettings, b: JobSettings): boolean {
-  return (
-    a.targetAspect === b.targetAspect &&
-    a.pace === b.pace &&
-    a.removeFillers === b.removeFillers &&
-    a.voiceTriggers === b.voiceTriggers &&
-    a.spokenLanguage === b.spokenLanguage
-  );
 }

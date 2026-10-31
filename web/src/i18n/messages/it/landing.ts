@@ -33,7 +33,7 @@ export const itLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.finish": "Chiude il tuo video. Tutto quello che c'è dopo viene tolto.",
   "site.commands.note": "Per ora i comandi sono pensati per video in inglese e tedesco.",
   "site.auto.title": "Pause e intercalari, tagliati per te.",
-  "site.auto.body": "Non serve nessun comando. CleoCuts toglie pause e intercalari come {um} da tutto il video. Il ritmo lo scegli tu: {tight}, {natural} o {none}.",
+  "site.auto.body": "Non serve nessun comando. CleoCuts toglie pause e intercalari come {um} da tutto il video. Video già montato? Scegli {none} quando lo carichi.",
   "site.auto.sample": "Allora {um} tre consigli {pause} per {um} hook migliori.",
   "site.auto.pause": "pausa",
   "site.auto.cleanup": "CleoCuts corregge anche le parole capite male nei tuoi sottotitoli.",

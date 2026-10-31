@@ -21,7 +21,7 @@ import fs from "node:fs";
 import type { Page, Route } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { API, WEB } from "./support/env";
-import { createdJobId, jobCard, openWithStorage, storedJobs } from "./support/app";
+import { createdJobId, jobCard, openWithStorage, startGo, storedJobs } from "./support/app";
 
 const MIB = 1024 * 1024;
 
@@ -101,8 +101,11 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     await expect(page.getByTestId("start-paused")).toContainText("Waiting for connection", { timeout: 30_000 });
     await expect.poll(okParts, { timeout: 60_000 }).toEqual([1, 2]);
 
-    // To Projects meanwhile (a client-side navigation): the live tile.
-    await page.getByTestId("start-to-projects").click();
+    // "Let's go" (it starts once the bytes are up) and to Projects
+    // meanwhile (the header link, a client-side navigation): the live tile.
+    await startGo(page);
+    await expect(page.getByTestId("start-go")).toHaveAttribute("data-state", "waiting");
+    await page.getByRole("link", { name: "Projects", exact: true }).click();
     await expect(page).toHaveURL(`${WEB}/app`);
     const tile = jobCard(page, "IMG_0107.mov");
     await expect(tile).toHaveAttribute("data-state", "uploading");

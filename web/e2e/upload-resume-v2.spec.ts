@@ -18,7 +18,7 @@ import fs from "node:fs";
 import type { Page, Route } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { API, WEB } from "./support/env";
-import { createdJobId, jobCard, openWithStorage, storedJobs } from "./support/app";
+import { createdJobId, jobCard, openWithStorage, startGo, storedJobs } from "./support/app";
 
 const MIB = 1024 * 1024;
 
@@ -100,10 +100,8 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
     await chooser.setFiles(path);
     const before = Array.from({ length: holdFrom - 1 }, (_, i) => i + 1);
     await expect.poll(okParts, { timeout: 90_000 }).toEqual(before);
-    // On phones: the honest hint while it uploads.
-    if (test.info().project.name === "pixel7") {
-      await expect(page.getByTestId("start-keep-open")).toContainText("phone on");
-    }
+    // The honest hint while it uploads.
+    await expect(page.getByTestId("start-keep-open")).toHaveText("Keep this page open until your video has uploaded.");
     await expect.poll(async () => (await records(page)).map((r) => [...r.done].sort()), { timeout: 15_000 }).toEqual([before]);
     expect(api.filter((c) => c === "init")).toHaveLength(1);
     const [rec] = await records(page);
@@ -142,6 +140,8 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
     // The same bytes, renamed and with a new date (what iOS hands over).
     const [chooser] = await Promise.all([page.waitForEvent("filechooser"), card.getByTestId("start-resume-choose").click()]);
     await chooser.setFiles(fileOf("trim.6F1C2D3A.mp4", bytes));
+    // Through "Choose captions", like a new pick.
+    await startGo(page);
     await expect(page).toHaveURL(`${WEB}/app`, { timeout: 120_000 });
     // (The record is written as the start screen leaves: polled.)
     await expect.poll(() => createdJobId(page, "trim.6F1C2D3A.mp4")).not.toBeNull();
@@ -185,6 +185,7 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
     const otherBytes = crypto.randomBytes(17 * MIB);
     const [chooser] = await Promise.all([page.waitForEvent("filechooser"), card.getByTestId("start-resume-choose").click()]);
     await chooser.setFiles({ name: "erstes.mp4", mimeType: "video/mp4", buffer: otherBytes });
+    await startGo(page);
     await expect(page).toHaveURL(`${WEB}/app`, { timeout: 120_000 });
     await expect.poll(() => createdJobId(page, "erstes.mp4")).not.toBeNull();
     expect(api).toContain("init");
