@@ -14,7 +14,6 @@ import { AUTH_ENABLED } from "@/lib/auth";
 import type { PresetId } from "@/lib/captions/types";
 import { captionDefaultFromPrefs, readLocalPrefs, type CaptionStyleDefault } from "./captionDefault";
 import { lastStyleFromPrefs, settingsFromPrefs, type SavedSettings } from "./defaults";
-import { onLastUsed, type LastUsedPrefs } from "./lastUsed";
 
 export type PrefsState = {
   /** The last used format, filler choice and spoken language (null: none). */
@@ -33,22 +32,11 @@ function fromPrefs(v: unknown): Omit<PrefsState, "ready"> {
   return { saved: settingsFromPrefs(v), captionStyle: captionDefaultFromPrefs(v), lastStyle: lastStyleFromPrefs(v) };
 }
 
-/** `s` with the last used choices just saved (lastUsed.ts): over this
- *  browser's copy and the account's alike. */
-export function withLastUsed(s: PrefsState, prefs: LastUsedPrefs): PrefsState {
-  const { saved, lastStyle } = fromPrefs(prefs);
-  return { ...s, saved: saved ? { ...s.saved, ...saved } : s.saved, lastStyle: lastStyle ?? s.lastStyle };
-}
-
 export function usePrefs(): PrefsState {
   const auth = useAuthState();
   const [state, setState] = useState<PrefsState>({ saved: null, captionStyle: null, lastStyle: null, ready: false });
   const signedIn = AUTH_ENABLED && auth.signedIn;
   const authKnown = !AUTH_ENABLED || auth.loaded;
-
-  // Saved as a POST /jobs went out: a video picked next in this visit
-  // (after a failure and X, say) starts with them too.
-  useEffect(() => onLastUsed((prefs) => setState((s) => withLastUsed(s, prefs))), []);
 
   useEffect(() => {
     const local = fromPrefs(readLocalPrefs());

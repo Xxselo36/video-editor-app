@@ -81,32 +81,3 @@ describe("saveLastUsed", () => {
     expect(local()).toEqual(LAST);
   });
 });
-
-describe("the next pick of the same visit", () => {
-  it("hears of every save at once (usePrefs), and starts with it: over this browser's copy and the account's", async () => {
-    const { onLastUsed, saveLastUsed } = await load({ enabled: true, signedIn: true });
-    const heard: LastUsedPrefs[] = [];
-    const off = onLastUsed((p) => heard.push(p));
-    // (Before the PUT is answered.)
-    apiFetch.mockReturnValue(new Promise<Response>(() => {}));
-    void saveLastUsed(LAST);
-    expect(heard).toEqual([LAST]);
-    off();
-    void saveLastUsed({ ...LAST, caption_style_last: "neon" });
-    expect(heard).toHaveLength(1);
-
-    const { withLastUsed } = await import("./usePrefs");
-    const before = {
-      saved: { targetAspect: "9:16" as const, removeFillers: true, spokenLanguage: "auto" },
-      captionStyle: { presetId: "neon", overrides: { wordsPerPage: 2 } },
-      lastStyle: "elegant" as const,
-      ready: true,
-    };
-    expect(withLastUsed(before, LAST)).toEqual({
-      saved: { targetAspect: "original", removeFillers: false, spokenLanguage: "de" },
-      captionStyle: before.captionStyle,
-      lastStyle: "karaoke",
-      ready: true,
-    });
-  });
-});

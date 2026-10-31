@@ -104,9 +104,6 @@ export type ResumableUpload = {
   expiresAt: number;
   /** See UploadRecord.source. */
   source?: "any";
-  /** All its bytes are stored (UploadRecord.completed): picked again, it
-   *  goes straight to POST /jobs. */
-  completed?: true;
 };
 
 const DB_NAME = "cleocuts-uploads";
@@ -630,13 +627,10 @@ export async function getRecord(fp: string): Promise<UploadRecord | null> {
 }
 
 /** The interrupted uploads of this browser, newest first: not expired
- *  (expired ones are deleted), and not running or held in this page or
- *  another tab (uploadJob holds the bytes until the job exists, also
- *  while it waits for "Let's go"). Also one whose bytes are all stored
- *  (`completed`: its page went before POST /jobs did; picked again, it
- *  goes straight there once its bytes match every part: lib/
- *  chunkedUpload), but only where Web Locks tell a page that holds it:
- *  no heartbeat says so. */
+ *  (expired ones are deleted), not running in this page or another tab,
+ *  and not completed (the file is stored: POST /jobs owns it — picking
+ *  the file again still goes straight there, once its bytes match every
+ *  part: lib/chunkedUpload). */
 export async function listResumable(now = Date.now()): Promise<ResumableUpload[]> {
   const out: ResumableUpload[] = [];
   const usable: UploadRecord[] = [];
@@ -649,9 +643,8 @@ export async function listResumable(now = Date.now()): Promise<ResumableUpload[]
     usable.push(r);
   }
   const elsewhere = await activeElsewhere(usable, now);
-  const tell = locks() !== null;
   for (const r of usable) {
-    if ((r.completed && !tell) || active.has(r.fp) || elsewhere.has(r.fp)) continue;
+    if (r.completed || active.has(r.fp) || elsewhere.has(r.fp)) continue;
     out.push({
       fp: r.fp,
       name: r.name,
@@ -660,22 +653,9 @@ export async function listResumable(now = Date.now()): Promise<ResumableUpload[]
       updatedAt: r.updated_at ?? r.created_at,
       expiresAt: recordExpiry(r),
       ...(r.source === "any" ? { source: "any" as const } : {}),
-      ...(r.completed ? { completed: true as const } : {}),
     });
   }
   return out.sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-/** Another tab uploads these bytes now, or holds them (its start waits
- *  for "Let's go", or keeps them after a failure). The file is only read
- *  when another tab holds some upload's bytes. */
-export async function heldElsewhere(file: File): Promise<boolean> {
-  const now = Date.now();
-  const recs = (await backend.all()).filter((r) => recordUsable(r, now) && r.size === file.size);
-  const elsewhere = await activeElsewhere(recs, now);
-  if (!elsewhere.size) return false;
-  const fp = await fingerprint(file);
-  return fp !== null && elsewhere.has(fp);
 }
 
 /** How long giving an upload up waits for the server's answer to its

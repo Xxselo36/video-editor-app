@@ -235,92 +235,11 @@ describe("what the record keeps for later and for other tabs", () => {
     await add("upl-new", 777, { errorCode: "upload_interrupted" });
     await add("upl-runs", 777, {});
     await add("upl-other", 778, { errorCode: "upload_interrupted" });
-    const lauf = { size: 777, name: info.filename };
-    expect(await r.stoppedUpload(lauf)).toMatchObject({ settings: { style: "upl-new" }, lastUsed });
+    expect(await r.stoppedUpload(777)).toMatchObject({ settings: { style: "upl-new" }, lastUsed });
     // Removed just before (X, say): not that one.
     r.removeUploadRecord("upl-new");
-    expect(await r.stoppedUpload(lauf)).toMatchObject({ settings: { style: "upl-old" } });
-    expect(await r.stoppedUpload({ size: 779, name: info.filename })).toBeNull();
-  });
-});
-
-/** Web Locks as another tab holds them: `held` are the upload records some
- *  tab runs (lib/uploadLock). */
-function locksHeld(held: Set<string>) {
-  vi.stubGlobal("navigator", {
-    locks: {
-      request: async () => {},
-      query: async () => ({ held: [...held].map((id) => ({ name: `cleocuts-upload-rec:${id}` })) }),
-    },
-  });
-}
-
-/** A start screen's record waiting for "Let's go", as its page left it:
- *  no mark (the page died without pagehide: a renderer crash, an Android
- *  tab discard), its last heartbeat `ago` ms back. */
-async function waiting(id: string, f: { size: number; name: string }, presetId: string, ago = 0) {
-  const r = await import("./records");
-  const store = await import("@/features/jobs/jobsStore");
-  r.addUploadRecord(id, { ...info, filename: f.name, fileSize: f.size, settings: { style: "tight", caption_style_hint: presetId } as never });
-  await vi.waitFor(() => expect(store.getLocalJob(id)).not.toBeNull());
-  store.updateUpload(id, { awaitingGo: true, pct: 100, lastProgressAt: Date.now() - ago });
-  await new Promise((res) => setTimeout(res, 5));
-  return { r, store };
-}
-
-describe("a stopped upload is one no page runs, marked or not", () => {
-  const video = { size: 3_145_739, name: "absturz.mp4" };
-
-  it("(Web Locks) the page died without pagehide: the same video picked again continues it, and its tile goes", async () => {
-    const held = new Set<string>();
-    locksHeld(held);
-    const { r, store } = await waiting("upl-dead", video, "neon");
-    expect(store.getLocalJob("upl-dead")?.upload?.errorCode).toBeUndefined();
-    expect((await r.stoppedUpload(video))?.settings).toMatchObject({ caption_style_hint: "neon" });
-    r.removeStoppedUploads(video, "upl-next");
-    await vi.waitFor(() => expect(store.getLocalJob("upl-dead")).toBeNull());
-  });
-
-  it("(Web Locks) one a tab still runs, or keeps after a failure before Let's go, is never taken over", async () => {
-    const held = new Set(["upl-alive", "upl-kept"]);
-    locksHeld(held);
-    const { r, store } = await waiting("upl-alive", video, "neon");
-    // Failed before "Let's go", still its start's in the tab that has it.
-    await waiting("upl-kept", video, "karaoke");
-    store.updateUpload("upl-kept", { errorCode: "too_many_uploads" });
-    expect(await r.stoppedUpload(video)).toBeNull();
-    r.removeStoppedUploads(video, "upl-next");
-    await new Promise((res) => setTimeout(res, 20));
-    expect(store.getLocalJob("upl-alive")).not.toBeNull();
-    expect(store.getLocalJob("upl-kept")).not.toBeNull();
-    // That tab went (closed, crashed): the browser lets its locks go.
-    held.clear();
-    expect((await r.stoppedUpload(video))?.settings).toMatchObject({ caption_style_hint: "karaoke" });
-  });
-
-  it("(no Web Locks) a record without a mark is stopped once its heartbeat is old", async () => {
-    vi.stubGlobal("navigator", {});
-    const { r } = await waiting("upl-fresh", video, "neon", 5_000);
-    expect(await r.stoppedUpload(video)).toBeNull();
-    await waiting("upl-old", video, "karaoke", 25_000);
-    expect((await r.stoppedUpload(video))?.settings).toMatchObject({ caption_style_hint: "karaoke" });
-  });
-
-  it("two videos of one byte count: the one of the same name, and only its tile goes", async () => {
-    locksHeld(new Set());
-    const first = { size: video.size, name: "erstes.mp4" };
-    const second = { size: video.size, name: "zweites.mp4" };
-    await waiting("upl-first", first, "neon");
-    const { r, store } = await waiting("upl-second", second, "karaoke");
-    expect((await r.stoppedUpload(first))?.settings).toMatchObject({ caption_style_hint: "neon" });
-    expect((await r.stoppedUpload(second))?.settings).toMatchObject({ caption_style_hint: "karaoke" });
-    r.removeStoppedUploads(first, "upl-next");
-    await vi.waitFor(() => expect(store.getLocalJob("upl-first")).toBeNull());
-    expect(store.getLocalJob("upl-second")).not.toBeNull();
-    // A name neither has (an iPhone's new name for a re-pick): the newest.
-    expect((await r.stoppedUpload({ size: video.size, name: "trim.MOV" }))?.settings).toMatchObject({
-      caption_style_hint: "karaoke",
-    });
+    expect(await r.stoppedUpload(777)).toMatchObject({ settings: { style: "upl-old" } });
+    expect(await r.stoppedUpload(779)).toBeNull();
   });
 });
 

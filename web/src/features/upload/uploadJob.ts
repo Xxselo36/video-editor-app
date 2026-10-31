@@ -24,7 +24,6 @@ import {
 import { getConfig } from "@/lib/config";
 import { REFUSAL_CODES, tEn } from "@/lib/errors";
 import { requestNotificationPermission } from "@/lib/notify";
-import { fingerprint, heldElsewhere, markUploadActive } from "@/lib/uploadResume";
 import type { JobStatus } from "@/features/jobs/types";
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import { isMobile } from "@/features/start/ios";
@@ -50,16 +49,9 @@ export { precheckUpload } from "./precheck";
  *  video with the choices it had (D3, D7). The bytes are only looked at
  *  when such a record exists. */
 export async function stoppedUploadOf(file: File): Promise<UploadRecord | null> {
-  const rec = await stoppedUpload(file);
+  const rec = await stoppedUpload(file.size);
   return rec && (await resumableProgress(file)) !== null ? rec : null;
 }
-
-/** Another tab uploads these bytes, or holds them while its start waits
- *  for "Let's go" (lib/uploadResume): the start screen sends the pick to
- *  Projects, where that video is, instead of starting it a second time
- *  (two starts of one upload: one job, or one start deleting the other's
- *  bytes). */
-export const uploadsElsewhere = (file: File): Promise<boolean> => heldElsewhere(file).catch(() => false);
 
 // POST /jobs after an upload to R2: waits between tries on a network
 // error or a 5xx that isn't a refusal — about 75 s in all, so a backend
@@ -282,11 +274,8 @@ export async function uploadJob(
     onPaywall: (pw: Paywall) => void;
     /** The job exists (its project replaced the upload record). */
     onCreated: (jobId: string) => void;
-    /** The upload failed (not cancelled): its record says why. Its bytes
-     *  are still this page's (see `unhold` below) until the caller lets
-     *  them go with `unhold`: at once, or (a start that keeps the failed
-     *  upload for "Try again") once it is tried again or given up. */
-    onFailed?: (unhold: () => void) => void;
+    /** The upload failed (not cancelled): its record says why. */
+    onFailed?: () => void;
     /** POST /jobs read the settings: a change from now on wouldn't reach
      *  the job. R2: right before onStarting. The legacy upload sends the
      *  bytes with the request, so it comes before they go up. */
@@ -408,22 +397,7 @@ export async function uploadJob(
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
   await lock();
 
-  // These bytes are this page's until the job exists or the upload is
-  // given up, also while the job waits for "Let's go" with all of them
-  // stored (D1): another tab picking the same video neither reuses nor
-  // resumes nor discards them meanwhile, and this page's resume card and
-  // tiles don't offer them (lib/uploadResume: their lock). A failure
-  // hands them to onFailed.
-  let held: string | null = null;
-  let handed = false;
-  const unhold = () => {
-    if (held) markUploadActive(held, false);
-    held = null;
-  };
-
   try {
-    held = await fingerprint(targetFile).catch(() => null);
-    if (held) markUploadActive(held, true);
     // Two upload paths:
     //   - straight to R2 (lib/chunkedUpload: resumable multipart, or
     //     the single presigned PUT where the backend says so), then
@@ -449,7 +423,7 @@ export async function uploadJob(
       lastBeat = Date.now();
       onProgress?.(tempId, resumedPct, true);
       uploadProgress(tempId, { pct: resumedPct, resuming: true, lastProgressAt: lastBeat });
-      removeStoppedUploads(targetFile, tempId);
+      removeStoppedUploads(targetFile.size, tempId);
     }
 
     // An audio file: refused now, not after the upload (the server
@@ -729,10 +703,8 @@ export async function uploadJob(
   } catch (err) {
     if (signal?.aborted && (!started || stoppedWaiting)) {
       // Cancelled (UX12): the multipart upload goes too — the user gave
-      // the file up; nothing is left on the list. (Its hold first: the
-      // abort leaves bytes a page holds alone.)
+      // the file up; nothing is left on the list.
       removeUploadRecord(tempId);
-      unhold();
       try {
         if (!started) await abortResumable({ file: targetFile });
       } catch {
@@ -757,15 +729,11 @@ export async function uploadJob(
       }
     }
     recordUploadFailed(tempId, failure);
-    if (onFailed) {
-      handed = true;
-      onFailed(unhold);
-    }
+    onFailed?.();
   } finally {
     over = true;
     clearInterval(beat);
     if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
-    if (!handed) unhold();
     liveUploads.delete(tempId);
     onEnd?.(tempId);
     // Release wake lock when upload path exits (success OR error).

@@ -55,10 +55,8 @@ export function PickScreen({ status, limits }: { status: PickStatus; limits: Lim
   const lang = useLang();
   const { choose, chooseAny, drop } = useStartActions();
   const billing = useBillingHint();
-  // The newest interrupted upload of this browser with bytes left to send
-  // (one whose bytes are all stored isn't offered here: picked again, it
-  // goes on with its choices all the same).
-  const resume = useResumableUploads()?.find((r) => !r.completed) ?? null;
+  // The newest interrupted upload of this browser.
+  const resume = useResumableUploads()?.[0] ?? null;
   const [discarding, setDiscarding] = useState(false);
   const [over, setOver] = useState(false);
   const { ios, preparing } = status;

@@ -16,7 +16,6 @@ import { getLibrary } from "@/lib/library";
 import { readChoice } from "@/features/editor/v2/flag";
 import type { LocalJob, UploadRecord } from "@/features/jobs/projects";
 import type { LastUsedPrefs } from "@/features/start/lastUsed";
-import { runningUploads } from "@/lib/uploadLock";
 type Store = typeof import("@/features/jobs/jobsStore");
 import type { UploadSettings } from "./settings";
 
@@ -31,14 +30,10 @@ function loadStore(): Promise<Store> {
   storeP ??= import("@/features/jobs/jobsStore");
   return storeP;
 }
-/** Run `fn` on the store, after every call queued before it (and what
- *  it awaits). */
+/** Run `fn` on the store, after every call queued before it. */
 let chain: Promise<unknown> = Promise.resolve();
-function withStore(fn: (s: Store) => void | Promise<void>): void {
-  chain = chain
-    .then(() => loadStore())
-    .then(fn)
-    .catch(() => {});
+function withStore(fn: (s: Store) => void): void {
+  chain = chain.then(() => loadStore()).then(fn, () => {});
 }
 // On the opt-in the store is fetched as the upload code loads.
 if (typeof window !== "undefined" && projectsV2()) void loadStore().catch(() => {});
@@ -251,46 +246,30 @@ export function recordJobCreated(
   });
 }
 
-/** Where Web Locks can't tell, a record no heartbeat touched for this
- *  long has no page uploading it (as jobsStore markStaleUploads). */
-const STALE_MS = 20_000;
+/** A stopped upload's record of a file of `fileSize` bytes. */
+const stoppedOf = (j: LocalJob, fileSize: number) =>
+  j.jobId.startsWith("upl-") && Boolean(j.upload?.errorCode) && j.fileSize === fileSize;
 
-/** The picked file a stopped upload's record may stand for. */
-type Picked = Pick<File, "size" | "name">;
-
-/** The records of the stopped uploads of `f`'s bytes, newest first: no
- *  page runs them (this one: liveUploads; another tab: its upload lock,
- *  else a heartbeat older than STALE_MS), marked or not (a page that died
- *  without pagehide, an Android tab discard, leaves no mark). Of two
- *  videos of one byte count, the one of the same name. */
-async function stoppedOf(store: Store, f: Picked): Promise<LocalJob[]> {
-  const running = await runningUploads();
-  const now = Date.now();
-  const all = store.getLocalJobs().filter((j) => {
-    if (!j.jobId.startsWith("upl-") || j.fileSize !== f.size || liveUploads.has(j.jobId)) return false;
-    if (running) return !running.has(j.jobId);
-    return Boolean(j.upload?.errorCode) || now - (j.upload?.lastProgressAt ?? j.timestamp) >= STALE_MS;
-  });
-  const named = all.filter((j) => j.filename === f.name);
-  return named.length ? named : all;
-}
-
-/** An upload that continues an interrupted one of `f`: the stopped tiles
- *  of that video go — v2 only; the v1 dashboard keeps its cards exactly
- *  as before. */
-export function removeStoppedUploads(f: Picked, exceptId: string): void {
+/** An upload that continues an interrupted one: the stopped tiles of the
+ *  same file (same byte count) go — v2 only; the v1 dashboard keeps its
+ *  cards exactly as before. */
+export function removeStoppedUploads(fileSize: number, exceptId: string): void {
   if (!projectsV2()) return;
-  withStore(async (store) => {
-    for (const j of await stoppedOf(store, f)) if (j.jobId !== exceptId) store.removeJob(j.jobId);
+  withStore((store) => {
+    for (const j of store.getLocalJobs()) {
+      if (j.jobId !== exceptId && stoppedOf(j, fileSize)) store.removeJob(j.jobId);
+    }
   });
 }
 
 /** The newest of those stopped uploads' records (the one an upload of
- *  `f` continues), read after every write queued before; null on v1 (its
- *  cards keep no choices) or when there is none. */
-export function stoppedUpload(f: Picked): Promise<UploadRecord | null> {
+ *  that file continues), read after every write queued before; null on
+ *  v1 (its cards keep no choices) or when there is none. */
+export function stoppedUpload(fileSize: number): Promise<UploadRecord | null> {
   if (!projectsV2()) return Promise.resolve(null);
-  const read = chain.then(() => loadStore()).then(async (store) => (await stoppedOf(store, f))[0]?.upload ?? null);
+  const read = chain
+    .then(() => loadStore())
+    .then((store) => store.getLocalJobs().find((j) => stoppedOf(j, fileSize))?.upload ?? null);
   chain = read.catch(() => {});
   return read;
 }

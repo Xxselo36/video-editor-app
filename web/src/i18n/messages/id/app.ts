@@ -47,9 +47,9 @@ export const idApp: Partial<Record<AppKey, string>> = {
     "Kami tidak bisa membaca file video ini. Ekspor ulang sebagai MP4 atau MOV, lalu unggah lagi.",
   // Upload limits (413 / 429 from the backend, also checked before uploading)
   "app.errors.fileTooLarge":
-    "File ini lebih dari {max}\u00a0GB. Potong videonya atau ekspor dengan ukuran lebih kecil.",
+    "File ini lebih dari {max} GB. Potong videonya atau ekspor dengan ukuran lebih kecil.",
   "app.errors.videoTooLong":
-    "Video ini lebih dari {max}\u00a0menit. Potong videonya atau bagi menjadi beberapa bagian.",
+    "Video ini lebih dari {max} menit. Potong videonya atau bagi menjadi beberapa bagian.",
   "app.errors.tooManyJobs":
     "Kamu sudah mencapai batas maksimum video yang sedang diproses. Tunggu sampai salah satunya selesai, lalu coba lagi.",
 
@@ -338,7 +338,7 @@ export const idApp: Partial<Record<AppKey, string>> = {
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
   "app.errors.noVideoTrack": "Ini file audio. CleoCuts memerlukan video bersuara, jadi pilih file video. Tidak ada yang ditagih.",
-  "app.errors.videoTooShort": "Video ini lebih pendek dari {min}\u00a0detik, jadi terlalu pendek untuk dipotong. Tidak ada yang ditagih.",
+  "app.errors.videoTooShort": "Video ini lebih pendek dari {min} detik, jadi terlalu pendek untuk dipotong. Tidak ada yang ditagih.",
   "app.errors.processingInterrupted": "Pemrosesan terputus. Unggah video lagi.",
   "app.errors.mediaUnavailable": "Video asli sudah tidak tersedia, jadi proyek ini tidak bisa diedit lagi.",
   "app.errors.tooManyRenders": "Terlalu banyak ekspor yang berjalan. Tunggu sampai salah satunya selesai.",

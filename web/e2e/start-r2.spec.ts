@@ -11,11 +11,10 @@
  *             upload"; a style picked meanwhile is the one POST carries
  *   cancel    X on a stored upload: no job, and the server deletes what
  *             was uploaded (no object, no open multipart upload)
- *   reload    a reload while it waits for Let's go: the tile's "Continue
- *             upload" takes the same file straight to POST /jobs with the
+ *   reload    a reload while it waits for Let's go: the tile's "Try
+ *             again" takes the same file straight to POST /jobs with the
  *             latest choices (no new upload, no part sent again), and
- *             remembers them as the last used; its Remove deletes the
- *             stored bytes on the server too
+ *             remembers them as the last used
  *   left      stored, then Projects: the tile says "Uploaded" and that it
  *             waits; the headline doesn't count it as in progress
  *   offline   a waiting upload's connection gone: its tile says so first
@@ -30,15 +29,7 @@
  *             comes back with the choices it had, and POST /jobs carries
  *             them (the last used too)
  *   two tabs  a second tab's Projects shows the video waiting, and
- *             follows once Let's go is pressed in the first; the same
- *             video picked there goes to it (no second start of one
- *             upload); a start that failed before Let's go stays the
- *             first tab's (no Try again or Remove in the second)
- *   crash     the page died without pagehide (an Android tab discard):
- *             the same video picked again continues with its choices,
- *             and its old tile goes
- *   refused   POST /jobs refused, then X: the same video picked again
- *             starts with the choices just remembered (D4)
+ *             follows once Let's go is pressed in the first
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -89,53 +80,6 @@ async function recordOf(page: Page, name: string) {
 async function bucket(page: Page): Promise<{ open: string[]; objects: Record<string, number> }> {
   return (await page.request.get(`${API}/_test/uploads`)).json();
 }
-
-/** The resume records of lib/uploadResume (IndexedDB). */
-const resumeRecords = (page: Page) =>
-  page.evaluate(
-    () =>
-      new Promise<{ name: string; completed?: boolean }[]>((res) => {
-        const r = indexedDB.open("cleocuts-uploads");
-        r.onsuccess = () => {
-          try {
-            const q = r.result.transaction("uploads").objectStore("uploads").getAll();
-            q.onsuccess = () => res(q.result);
-            q.onerror = () => res([]);
-          } catch {
-            res([]);
-          }
-        };
-        r.onerror = () => res([]);
-      }),
-  );
-
-/** The upload API calls (init / parts / sign / complete / abort) and POST
- *  /jobs of a second page. */
-function callsOf(page: Page): string[] {
-  const out: string[] = [];
-  page.on("request", (r) => {
-    const m = /\/uploads\/multipart\/(\w+)$/.exec(r.url());
-    if (r.method() === "POST" && r.url().startsWith(API) && m) out.push(m[1]);
-    if (r.method() === "POST" && r.url() === `${API}/jobs`) out.push("jobs");
-  });
-  return out;
-}
-
-/** Answer the upload API's init 429 (too many uploads) while `on()`. */
-async function refuseInit(page: Page, on: () => boolean) {
-  await page.route(`${API}/uploads/multipart/init`, (r) =>
-    on()
-      ? r.fulfill({
-          status: 429,
-          headers: { "Retry-After": "600" },
-          contentType: "application/json",
-          body: JSON.stringify({ detail: "too_many_uploads", code: "too_many_uploads", params: {} }),
-        })
-      : r.fallback(),
-  );
-}
-
-const TOO_MANY = "Too many uploads in a short time. Wait a few minutes.";
 
 test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
   test.skip(({ browserName }) => browserName !== "chromium", "Chromium only (request interception of the uploads)");
@@ -309,7 +253,7 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     expect(posts).toEqual([]);
   });
 
-  test("a reload while it waits for Let’s go: Continue upload takes the same file straight to POST /jobs with the latest choices", async ({ page }) => {
+  test("a reload while it waits for Let’s go: Try again takes the same file straight to POST /jobs with the latest choices", async ({ page }) => {
     const posts = await watchJobPosts(page);
     const bytes = crypto.randomBytes(3 * MIB);
     await pick(page, fileOf("IMG_0300.mp4", bytes));
@@ -326,13 +270,9 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     await page.goto("/app");
     const tile = jobCard(page, "IMG_0300.mp4");
     await expect(tile).toHaveAttribute("data-state", "upload_failed", { timeout: 45_000 });
-    // All its bytes are stored: it continues from there (D3), no "please
-    // upload it again".
+    // All its bytes are stored: nothing to continue, it goes again.
     const retry = tile.getByTestId("job-card-retry");
-    await expect(retry).toHaveText("Continue upload");
-    await expect(retry).toHaveAttribute("data-resume", "100");
-    await expect(tile.getByTestId("job-card-status")).toHaveCount(0);
-    await expect(tile.getByTestId("job-card-resume")).toBeVisible();
+    await expect(retry).toHaveText("Try again");
     api.length = 0;
     puts.length = 0;
     const [chooser] = await Promise.all([page.waitForEvent("filechooser"), retry.click()]);
@@ -526,203 +466,6 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     await stored(page);
     expect(api.filter((c) => c === "init")).toHaveLength(1);
     expect(posts).toEqual([]);
-  });
-
-  test("Remove on the tile of a video stopped with all its bytes stored (a reload while it waited): the server deletes them, nothing is kept", async ({ page }) => {
-    let key = "";
-    page.on("response", async (r) => {
-      if (r.url() === `${API}/uploads/multipart/init` && r.ok()) key = ((await r.json()) as { storage_key: string }).storage_key;
-    });
-    await pick(page, fileOf("entfernen.mp4", crypto.randomBytes(3 * MIB)));
-    await stored(page);
-    await expect.poll(() => key).not.toBe("");
-    page.on("dialog", (d) => void d.accept());
-    await page.reload();
-
-    await page.goto("/app");
-    const tile = jobCard(page, "entfernen.mp4");
-    await expect(tile).toHaveAttribute("data-state", "upload_failed", { timeout: 45_000 });
-    await expect(tile.getByTestId("job-card-retry")).toHaveAttribute("data-resume", "100");
-    expect(Object.keys((await bucket(page)).objects)).toContain(key);
-    api.length = 0;
-    await tile.getByTestId("job-card-remove").click();
-    await expect(tile).toHaveCount(0);
-    await expect.poll(() => api).toEqual(["abort"]);
-    await expect.poll(async () => Object.keys((await bucket(page)).objects)).not.toContain(key);
-    expect(await resumeRecords(page)).toEqual([]);
-  });
-
-  test("the page died while it waited for Let’s go, without pagehide (an Android tab discard): the same video comes back with its choices, and its old tile goes", async ({ page }) => {
-    const path = fileOf("absturz.mp4", crypto.randomBytes(3 * MIB));
-    await pick(page, path);
-    await stored(page);
-    await page.getByTestId("start-style-neon").click();
-    await page.getByTestId("start-more").click();
-    await page.getByTestId("start-fillers").click();
-    await page.getByTestId("start-language").selectOption("de");
-    await expect.poll(async () => (await recordOf(page, "absturz.mp4"))?.settings?.spoken_language).toBe("de");
-    // The renderer dies: no pagehide, nothing marks the record.
-    const cdp = await page.context().newCDPSession(page);
-    const crashed = new Promise((r) => page.once("crash", r));
-    void cdp.send("Page.crash").catch(() => {});
-    await Promise.race([crashed, new Promise((r) => setTimeout(r, 5000))]);
-
-    const next = await page.context().newPage();
-    const posts = await watchJobPosts(next);
-    const calls = callsOf(next);
-    await next.goto("/app/new");
-    expect((await recordOf(next, "absturz.mp4"))?.errorCode ?? null).toBeNull();
-    const [chooser] = await Promise.all([next.waitForEvent("filechooser"), next.getByTestId("upload-dropzone").click()]);
-    await chooser.setFiles(path);
-    await expect(next.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
-    await expect(next.getByTestId("start-style-neon")).toHaveAttribute("aria-checked", "true");
-    await expect(next.getByTestId("start-more-summary")).toContainText("German");
-    await stored(next);
-    await startGo(next);
-    await expect(next).toHaveURL(`${WEB}/app`, { timeout: 60_000 });
-    await expect.poll(() => createdJobId(next, "absturz.mp4")).not.toBeNull();
-    // Nothing went up again: the stored upload went straight to its job.
-    expect(calls).toEqual(["jobs"]);
-    expect(posts).toHaveLength(1);
-    expect(posts[0]).toMatchObject({
-      remove_fillers: false,
-      spoken_language: "de",
-      caption_style_hint: "neon",
-      caption_style: { presetId: "neon", overrides: {} },
-    });
-    // One tile of the video: the dead record went with the new start.
-    expect((await storedJobs(next)).filter((j) => j.filename === "absturz.mp4")).toHaveLength(1);
-    await expect(jobCard(next, "absturz.mp4")).toHaveCount(1);
-    await expect(jobCard(next, "absturz.mp4").getByTestId("job-card-retry")).toHaveCount(0);
-    await next.close();
-  });
-
-  test("the page died while it waited for Let’s go: no tab runs it now, so the Projects headline counts it", async ({ page }) => {
-    await pick(page, fileOf("tot.mp4", crypto.randomBytes(3 * MIB)));
-    await stored(page);
-    const cdp = await page.context().newCDPSession(page);
-    const crashed = new Promise((r) => page.once("crash", r));
-    void cdp.send("Page.crash").catch(() => {});
-    await Promise.race([crashed, new Promise((r) => setTimeout(r, 5000))]);
-
-    const next = await page.context().newPage();
-    await next.goto("/app");
-    await expect(jobCard(next, "tot.mp4")).toBeVisible();
-    // Not "waiting" (its record's old word): uploading until it is marked
-    // stopped (or stopped already).
-    await expect(next.getByTestId("dashboard").getByRole("heading", { level: 1 })).not.toHaveText("Ready when you are");
-    await next.close();
-  });
-
-  test("the same video picked in a second tab while the first waits for Let’s go: it goes to Projects, where it waits; nothing goes up or away, and the first tab starts it", async ({ page }) => {
-    const posts = await watchJobPosts(page);
-    let key = "";
-    page.on("response", async (r) => {
-      if (r.url() === `${API}/uploads/multipart/init` && r.ok()) key = ((await r.json()) as { storage_key: string }).storage_key;
-    });
-    const bytes = crypto.randomBytes(3 * MIB);
-    await pick(page, fileOf("doppelt.mp4", bytes));
-    await stored(page);
-    await page.getByTestId("start-style-neon").click();
-
-    const other = await page.context().newPage();
-    const calls = callsOf(other);
-    await other.goto("/app/new");
-    // The same bytes as a new File (an iPhone's pick).
-    const [chooser] = await Promise.all([other.waitForEvent("filechooser"), other.getByTestId("upload-dropzone").click()]);
-    await chooser.setFiles({ name: "doppelt.mp4", mimeType: "video/mp4", buffer: bytes });
-    await expect(other).toHaveURL(`${WEB}/app`, { timeout: 30_000 });
-    const tile = jobCard(other, "doppelt.mp4");
-    await expect(tile).toHaveCount(1);
-    await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
-    // Its Cancel is the first tab's.
-    await expect(tile.getByTestId("job-card-cancel")).toHaveCount(0);
-    await other.waitForTimeout(1000);
-    expect(calls).toEqual([]);
-    expect(Object.keys((await bucket(page)).objects)).toContain(key);
-
-    await startGo(page);
-    await expect(page).toHaveURL(`${WEB}/app`, { timeout: 60_000 });
-    await expect.poll(() => createdJobId(page, "doppelt.mp4")).not.toBeNull();
-    expect(posts).toHaveLength(1);
-    expect(posts[0]).toMatchObject({ caption_style_hint: "neon", caption_style: { presetId: "neon", overrides: {} } });
-    expect(calls).toEqual([]);
-    await other.close();
-  });
-
-  test("a start that failed before Let’s go stays the first tab’s: a second tab shows it stopped, with its reason, and no Try again or Remove; the first tab then makes one job", async ({ page }) => {
-    const posts = jobPosts(page);
-    let refuse = true;
-    await refuseInit(page, () => refuse);
-    await pick(page, fileOf("zwei-tabs-fehler.mp4", crypto.randomBytes(3 * MIB)));
-    await expect(page.getByTestId("start-upload-failed")).toContainText(TOO_MANY);
-
-    const other = await page.context().newPage();
-    const calls = callsOf(other);
-    await other.goto("/app");
-    const tile = jobCard(other, "zwei-tabs-fehler.mp4");
-    await expect(tile).toHaveAttribute("data-state", "upload_failed");
-    await expect(tile.getByTestId("job-card-status")).toHaveText(TOO_MANY);
-    // (Asked every few seconds: still the first tab's start after that.)
-    await other.waitForTimeout(6000);
-    await expect(tile.getByTestId("job-card-retry")).toHaveCount(0);
-    await expect(tile.getByTestId("job-card-remove")).toHaveCount(0);
-    await expect(tile.getByTestId("job-card-continue-start")).toHaveCount(0);
-
-    refuse = false;
-    await page.getByTestId("start-retry").click();
-    await stored(page);
-    await startGo(page);
-    await expect(page).toHaveURL(`${WEB}/app`, { timeout: 60_000 });
-    await expect.poll(() => createdJobId(page, "zwei-tabs-fehler.mp4")).not.toBeNull();
-    await expect(tile).not.toHaveAttribute("data-state", /^upload/, { timeout: 30_000 });
-    expect(posts).toHaveLength(1);
-    expect(calls).toEqual([]);
-    await other.close();
-  });
-
-  test("a start that failed before Let’s go, its tab closed: the second tab's tile offers Try again (D3)", async ({ page }) => {
-    const first = await page.context().newPage();
-    await refuseInit(first, () => true);
-    await pick(first, fileOf("geschlossen.mp4", crypto.randomBytes(3 * MIB)));
-    await expect(first.getByTestId("start-upload-failed")).toContainText(TOO_MANY);
-    await page.goto("/app");
-    const tile = jobCard(page, "geschlossen.mp4");
-    await expect(tile).toHaveAttribute("data-state", "upload_failed");
-    await page.waitForTimeout(6000);
-    await expect(tile.getByTestId("job-card-retry")).toHaveCount(0);
-    await first.close();
-    await expect(tile.getByTestId("job-card-retry")).toBeVisible({ timeout: 15_000 });
-    await expect(tile.getByTestId("job-card-remove")).toBeVisible();
-  });
-
-  test("Let’s go, the job refused, X: the same video picked again starts with the choices just remembered", async ({ page }) => {
-    await page.route(`${API}/jobs`, (r) =>
-      r.request().method() !== "POST"
-        ? r.fallback()
-        : r.fulfill({
-            status: 507,
-            contentType: "application/json",
-            body: JSON.stringify({ detail: "server_storage_full", code: "server_storage_full", params: {} }),
-          }),
-    );
-    const path = fileOf("nochmal-gewaehlt.mp4", crypto.randomBytes(3 * MIB));
-    await pick(page, path);
-    await stored(page);
-    await page.getByTestId("start-style-karaoke").click();
-    await startGo(page);
-    await expect(page.getByTestId("start-upload-failed")).toBeVisible({ timeout: 30_000 });
-    // Remembered as its POST /jobs went out (D4).
-    await expect.poll(() => readStorage(page, "cleocuts.prefs.v1")).toMatchObject({ caption_style_last: "karaoke" });
-    await page.getByTestId("start-cancel").click();
-    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "pick");
-    // In the same visit, as in the next one.
-    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
-    await chooser.setFiles(path);
-    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style", { timeout: 30_000 });
-    const karaoke = page.getByTestId("start-style-karaoke");
-    await expect(karaoke).toHaveAttribute("aria-checked", "true");
-    await expect(karaoke.getByTestId("start-style-tag")).toHaveText("Last used");
   });
 
   test("X, then the same file again while the discard hangs here (not on the server): after a while the pick says why", async ({ page }) => {

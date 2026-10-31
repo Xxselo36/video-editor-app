@@ -47,8 +47,8 @@ export const ruApp: Partial<Record<AppKey, string>> = {
     "Не удалось прочитать этот видеофайл. Экспортируй его заново в MP4 или MOV и загрузи снова.",
   // Upload limits (413 / 429 from the backend, also checked before uploading)
   "app.errors.fileTooLarge":
-    "Этот файл больше {max}\u00a0ГБ. Обрежь видео или экспортируй его в меньшем размере.",
-  "app.errors.videoTooLong": "Это видео длиннее {max}\u00a0мин. Обрежь его или раздели на части.",
+    "Этот файл больше {max} ГБ. Обрежь видео или экспортируй его в меньшем размере.",
+  "app.errors.videoTooLong": "Это видео длиннее {max} мин. Обрежь его или раздели на части.",
   "app.errors.tooManyJobs":
     "У тебя уже обрабатывается максимальное количество видео. Дождись, пока одно из них будет готово, и попробуй снова.",
 
@@ -337,7 +337,7 @@ export const ruApp: Partial<Record<AppKey, string>> = {
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
   "app.errors.noVideoTrack": "Это аудиофайл. CleoCuts нужно видео со звуком, так что выбери видеофайл. Ничего не списано.",
-  "app.errors.videoTooShort": "Это видео короче {min}\u00a0секунд, поэтому оно слишком короткое для монтажа. Ничего не списано.",
+  "app.errors.videoTooShort": "Это видео короче {min} секунд, поэтому оно слишком короткое для монтажа. Ничего не списано.",
   "app.errors.processingInterrupted": "Обработка была прервана. Загрузи видео ещё раз.",
   "app.errors.mediaUnavailable": "Исходное видео больше недоступно, поэтому этот проект нельзя снова редактировать.",
   "app.errors.tooManyRenders": "Выполняется слишком много экспортов. Подожди, пока один из них завершится.",

@@ -13,8 +13,7 @@
  * start screen ("Continue"), also once it failed (instead of "Try again").
  * Its bytes all stored, its badge says "Uploaded": nothing goes on until
  * "Let's go". Another tab of the browser shows it waiting too (its
- * record says so), without the way back: that start is the other tab's,
- * also once it failed there (its reason, no "Try again" or "Remove").
+ * record says so), without the way back: that start is the other tab's.
  */
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { ArrowRight, Film, RotateCw, X } from "lucide-react";
@@ -224,17 +223,12 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
   // Picked on the start screen, waiting for "Let's go": the way on is
   // back there.
   const awaitingGo = useAwaitingGo(project.id);
-  // Running in another tab, or kept there by its start after a failure
-  // before "Let's go": nothing to cancel, remove or upload again here.
+  // Running in another tab: shown as running, nothing to cancel, remove
+  // or upload again here.
   const elsewhere = useRunsElsewhere(project.id, !liveUpload && (project.state === "uploading" || project.state === "upload_failed"));
-  // That start's failure: stopped, with its reason (a mark of a stale
-  // page, "interrupted", isn't one).
-  const failedThere =
-    elsewhere && project.state === "upload_failed" && Boolean(project.upload?.awaitingGo) && project.errorCode !== "upload_interrupted";
   // Still running in this page (waiting for the connection, say) or in
   // another tab: never a stopped tile, whatever the record says.
-  const p: Project =
-    (liveUpload || (elsewhere && !failedThere)) && project.state === "upload_failed" ? { ...project, state: "uploading" } : project;
+  const p: Project = (liveUpload || elsewhere) && project.state === "upload_failed" ? { ...project, state: "uploading" } : project;
   // Waiting for "Let's go" here, or in the tab that uploads it.
   const waits = awaitingGo || (elsewhere && Boolean(p.upload?.awaitingGo));
   const fileRef = useRef<HTMLInputElement>(null);
@@ -410,18 +404,6 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
     if (resumable) void discardResumable(resumable.fp);
     upload(mismatch.file, mismatch.source);
   };
-  // Cancel or Remove of an upload no page runs (a reload stopped it, or
-  // its page died): its interrupted upload goes on the server too, also
-  // one whose bytes were all stored (never one a page still holds: lib/
-  // uploadResume). This page's own upload: cancelUpload does that.
-  const giveUp = () => {
-    const r = liveUpload || canRetryInPlace(p.id) ? null : matchResumable(resumables, getLocalJob(p.id)?.fileSize, p.filename);
-    if (r) void discardResumable(r.fp);
-    void cancelUpload(p.id);
-  };
-  const canCancel = uploading && !elsewhere && (!starting || Boolean(liveUpload?.paused));
-  const canRetry = p.state === "upload_failed" && !awaitingGo && !elsewhere;
-  const canRemove = (p.state === "upload_failed" && !elsewhere) || p.state === "expired";
 
   return (
     <article
@@ -589,7 +571,7 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
               />
             )
           ))}
-        {(awaitingGo || canCancel || canRetry || canRemove) && (
+        {(uploading || p.state === "upload_failed" || p.state === "expired") && (
           <div className="pointer-events-auto relative z-10 mt-1 flex flex-wrap gap-1.5">
             {awaitingGo && (
               <button
@@ -603,11 +585,11 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
                 <Icon icon={ArrowRight} />
               </button>
             )}
-            {canCancel && (
+            {uploading && !elsewhere && (!starting || liveUpload?.paused) && (
               <button
                 type="button"
                 data-testid="job-card-cancel"
-                onClick={giveUp}
+                onClick={() => void cancelUpload(p.id)}
                 className="inline-flex min-h-11 items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
                 style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
               >
@@ -615,7 +597,7 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
                 {t("app.projects.cancel")}
               </button>
             )}
-            {canRetry && (
+            {p.state === "upload_failed" && !awaitingGo && (
               <>
                 <button
                   type="button"
@@ -650,11 +632,16 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
                 )}
               </>
             )}
-            {canRemove && (
+            {(p.state === "upload_failed" || p.state === "expired") && (
               <button
                 type="button"
                 data-testid="job-card-remove"
-                onClick={() => (p.state === "expired" ? removeJob(p.id) : giveUp())}
+                onClick={() => {
+                  if (p.state === "expired") return removeJob(p.id);
+                  // Given up: the interrupted upload goes on the server too.
+                  if (resumable) void discardResumable(resumable.fp);
+                  void cancelUpload(p.id);
+                }}
                 // (Beside "Continue" of a waiting upload: as tall as it.)
                 className={cx("inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold", awaitingGo && "min-h-11")}
                 style={{ background: "var(--surface-2)", color: "var(--text-body)" }}

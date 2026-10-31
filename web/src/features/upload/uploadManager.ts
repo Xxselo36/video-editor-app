@@ -274,24 +274,17 @@ export async function startUpload(
     });
   }
   // Other tabs: this record's upload runs (lib/uploadLock), until onEnd.
-  // A start that failed before "Let's go" keeps it, and its bytes
-  // (uploadJob), until it is tried again or given up (Retry.release):
-  // it is still this page's start, not a stopped upload another tab may
-  // take on (which would start the job without "Let's go").
   const unlock = holdUploadLock(tempId);
-  const keeps = () => Boolean(gate && !gate.isOpen);
-  let kept = false;
   onCard?.(tempId);
   // What "Try again" needs, the start screen's part included (its tile's
   // "Try again" goes on with it: same gate, same callbacks).
-  const retry = (release?: () => void): Retry => ({
+  const retry = (): Retry => ({
     file,
     settings,
     preset,
     ...(source ? { source } : {}),
     ...(gate ? { start: { gate, duration, onCard, onSettingsRead, onStarting, onCreated, onEnd } } : {}),
     ...(lastUsed ? { lastUsed } : {}),
-    ...(release ? { release } : {}),
   });
   let created: string | null = null;
   let failed = false;
@@ -311,11 +304,10 @@ export async function startUpload(
     live.delete(tempId);
     free(fk);
     guardUnload();
-    kept = keeps();
-    if (!kept) unlock();
+    unlock();
     controllers.delete(tempId);
     const online = typeof navigator === "undefined" || navigator.onLine !== false;
-    retries.set(tempId, retry(kept ? unlock : undefined));
+    retries.set(tempId, retry());
     recordUploadFailed(tempId, { code: online ? "app_updated" : "connection_lost" });
     emit();
     onEnd?.(null, "failed");
@@ -354,11 +346,9 @@ export async function startUpload(
       recordUploadStored(id);
       emit();
     },
-    onFailed: (unhold) => {
+    onFailed: () => {
       failed = true;
-      kept = keeps();
-      if (!kept) unhold();
-      retries.set(tempId, retry(kept ? () => (unhold(), unlock()) : undefined));
+      retries.set(tempId, retry());
     },
     onProgress: (id, pct, resuming) => {
       const cur = live.get(id);
@@ -381,7 +371,7 @@ export async function startUpload(
     onEnd: (id) => {
       free(fk);
       guardUnload();
-      if (!kept) unlock();
+      unlock();
       controllers.delete(id);
       if (live.delete(id)) emit();
       onEnd?.(created, created !== null ? "created" : failed ? "failed" : "cancelled");

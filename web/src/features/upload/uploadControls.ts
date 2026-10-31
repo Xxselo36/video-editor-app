@@ -11,11 +11,10 @@ import type { LastUsedPrefs } from "@/features/start/lastUsed";
 import type { PresetId } from "@/features/start/presets.legacy";
 import { runningUploads } from "@/lib/uploadLock";
 
-/** The upload of record `id` runs in another tab, or that tab's start
- *  keeps it after a failure before "Let's go" (its Web Lock): its record
- *  is not this tab's to remove or to upload again. */
+/** The upload of record `id` runs in another tab (its Web Lock): its
+ *  record is not this tab's to remove or to upload again. */
 export async function runsElsewhere(id: string): Promise<boolean> {
-  if (controllers.has(id) || live.has(id) || retries.has(id)) return false;
+  if (controllers.has(id) || live.has(id)) return false;
   return Boolean((await runningUploads())?.has(id));
 }
 
@@ -41,7 +40,6 @@ export async function cancelUpload(id: string): Promise<void> {
   const retry = retries.get(id);
   if (!ctl && !retry && (await runsElsewhere(id))) return;
   retries.delete(id);
-  retry?.release?.();
   setThumb(id, null);
   removeUploadRecord(id);
   setAwaitingGo(id, false);
@@ -72,7 +70,6 @@ export function retryUpload(id: string, opts?: StartOpts): boolean {
   const r = retries.get(id);
   if (!r) return false;
   retries.delete(id);
-  r.release?.();
   removeUploadRecord(id);
   setAwaitingGo(id, false);
   const o: StartOpts | undefined = opts ?? r.start;
@@ -92,7 +89,7 @@ export function retryUpload(id: string, opts?: StartOpts): boolean {
  *  "any": with the unfiltered iOS input). `lastUsed`: the start screen's
  *  choices of a video picked there (its record's), remembered when POST
  *  /jobs goes out. False (and nothing happens) while the upload still
- *  runs in another tab, or that tab's start keeps it (runsElsewhere). */
+ *  runs in another tab. */
 export async function retryUploadWith(
   id: string,
   file: File,
@@ -102,7 +99,6 @@ export async function retryUploadWith(
   lastUsed?: LastUsedPrefs,
 ): Promise<boolean> {
   if (await runsElsewhere(id)) return false;
-  retries.get(id)?.release?.();
   retries.delete(id);
   removeUploadRecord(id);
   setThumb(id, null);
