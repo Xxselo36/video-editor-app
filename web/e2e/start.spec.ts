@@ -1049,7 +1049,9 @@ test("the start screens fit a phone @editor-v2", async ({ page, stub, isMobile }
   }
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
   // A 320 px phone: nothing scrolls sideways on either screen, and in
-  // every language each format's label fits its (stacked) button.
+  // every language each format's label fits its (stacked) button, in the
+  // page's font and in a wide one (device fonts differ; DejaVu Sans is
+  // also what CI's Chromium falls back to).
   await page.setViewportSize({ width: 320, height: 568 });
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
   const heading = page.locator("#start-captions-h");
@@ -1058,11 +1060,16 @@ test("the start screens fit a phone @editor-v2", async ({ page, stub, isMobile }
     await page.getByTestId("language-switcher").first().selectOption(lang);
     // (Shown in that language: every language names the screen its way.)
     if (lang !== "en") await expect(heading).not.toHaveText(before!);
-    const clipped = await page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>('[data-testid^="start-format-"]')]
-        .filter((b) => b.scrollWidth > b.clientWidth)
-        .map((b) => `${b.dataset.testid} ${b.innerText.trim()}`),
-    );
+    const clipped = await page.evaluate(() => {
+      const buttons = [...document.querySelectorAll<HTMLElement>('[data-testid^="start-format-"]')];
+      const over = (font: string) => {
+        for (const b of buttons) b.style.fontFamily = font;
+        return buttons
+          .filter((b) => b.scrollWidth > b.clientWidth)
+          .map((b) => `${b.dataset.testid} ${b.innerText.trim()} (${font || "page font"})`);
+      };
+      return [...over('"DejaVu Sans", Verdana, sans-serif'), ...over("")];
+    });
     expect(clipped, `${lang}: format labels wider than their buttons`).toEqual([]);
   }
   await page.getByTestId("language-switcher").first().selectOption("en");

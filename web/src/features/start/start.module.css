@@ -834,13 +834,17 @@ button.orow:active:not([aria-disabled="true"]),
   border-radius: 16px;
 }
 /* Narrow phones: the shapes go above their labels, set a size smaller
- * so the longest ones ("Oryginalny", "Horizontal") fit the button. */
+ * so the longest ones ("Oryginalny", "Horizontal") fit the button. In a
+ * wider device font a label may still not fit: it then breaks inside
+ * the button (hyphenated where the browser can) instead of spilling out
+ * of it. */
 @container (max-width: 319px) {
   .fmt button {
     flex-direction: column;
     min-height: 60px;
     padding: 8px 4px;
     font-size: 12.5px;
+    overflow-wrap: anywhere;
   }
 }
 
