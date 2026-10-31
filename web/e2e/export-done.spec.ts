@@ -7,20 +7,21 @@
  * Apply & render back to the dashboard (also when a speculative render
  * makes the export instant on the server).
  *
- * Editor-v2 build (@editor-v2): the Done view of a finished project —
- * one download per distinct file, SRT / VTT, the post text saved, Save /
- * Share on phones, the survey from the 2nd export — Edit again → export
- * again with the previous export downloadable meanwhile; Export stays in
- * the editor (cost, localized stage, Done view); failures; the instant
- * export.
+ * Editor-v2 build (@editor-v2): the Vorschau of a finished project (PR2,
+ * plan D11, D21) — one download per distinct file (the main one, the
+ * others in "More for this video"), SRT / VTT, the post text saved, Save
+ * video on an iPhone (Download on Android), the survey from the 2nd
+ * export — Fine-tune → export again with the previous export
+ * downloadable meanwhile; Export stays in the editor (cost, localized
+ * stage, Done view); failures; the instant export.
  */
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { ACTIVE_JOBS, card, openWithStorage } from "./support/app";
 import { API, WEB } from "./support/env";
+import { fakeShareSheet, IPHONE_UA, sharedFiles, TOUR_DONE, vorschau } from "./support/vorschau";
 
 const V2 = { tag: "@editor-v2" };
-const TOUR_DONE = { "cleocuts.editor.tourDone.v1": "1" };
 
 type Downloads = { downloads: { format: string; bytes: number | null }[] };
 
@@ -64,19 +65,27 @@ test.describe("v1 export flow unchanged (flag off)", () => {
   });
 });
 
-test.describe("Done view (editor v2)", V2, () => {
-  test("downloads, SRT / VTT, post text, Edit again → export again", async ({ page, stub }) => {
+test.describe("the Vorschau of a finished video (editor v2)", V2, () => {
+  test("Download, More for this video (SRT / VTT, post text, bonus clips), Fine-tune → export again", async ({ page, stub }) => {
     const job = await stub.seed("done", { render_seconds: 3 });
     await openWithStorage(page, `/app/p/${job.id}`, TOUR_DONE);
-    const done = page.getByTestId("done-view");
-    await expect(done).toBeVisible({ timeout: 30_000 });
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+    await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-video", "export");
 
-    // One download per distinct file; bonus clips in their own list.
+    // One download per distinct file: the main one under the video, the
+    // others with the bonus clips in "More for this video", folded.
     const { downloads } = await jobJson(page, job.id);
     await expect(page.getByTestId("done-download")).toHaveCount(downloads.length);
+    const main = page.getByTestId("done-download").first();
+    await expect(main).toHaveText("Download");
+    expect(await main.getAttribute("href")).toContain(`/jobs/${job.id}/download?format=primary`);
+    const more = page.getByTestId("preview-more");
+    await expect(more).toHaveText("More for this video");
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("done-post")).toBeHidden();
+    await more.click();
+    await expect(more).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByTestId("done-hooks")).toBeVisible();
-    const href = await page.getByTestId("done-download").first().getAttribute("href");
-    expect(href).toContain(`/jobs/${job.id}/download?format=primary`);
 
     // The export's captions as files, in output time.
     const srt = await page.request.get((await page.getByTestId("done-srt").getAttribute("href"))!);
@@ -95,8 +104,8 @@ test.describe("Done view (editor v2)", V2, () => {
     await expect.poll(async () => (await stub.job(job.id))!.social_caption_edited).toBe("Mein eigener Text #ux11");
     await expect(page.getByTestId("done-tip")).toBeVisible();
 
-    // Edit again → the editor, with the re-edit note.
-    await page.getByTestId("done-edit-again").click();
+    // Fine-tune → reopened (POST /reopen), the editor with the re-edit note.
+    await page.getByTestId("preview-refine").click();
     await expect(page).toHaveURL(`${WEB}/app/edit/${job.id}`);
     await expect(page.getByTestId("ed-reedit")).toBeVisible({ timeout: 45_000 });
     const before = (await stub.job(job.id))!;
@@ -121,7 +130,7 @@ test.describe("Done view (editor v2)", V2, () => {
     const a = await stub.seed("done");
     const b = await stub.seed("done");
     await openWithStorage(page, `/app/p/${a.id}`);
-    await expect(page.getByTestId("done-view")).toBeVisible({ timeout: 30_000 });
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
     await expect(page.getByTestId("done-survey")).toHaveCount(0);
     await page.goto(`/app/p/${b.id}`);
     await expect(page.getByTestId("done-survey")).toBeVisible({ timeout: 30_000 });
@@ -131,33 +140,43 @@ test.describe("Done view (editor v2)", V2, () => {
     await expect(page.getByTestId("done-survey")).toContainText("Thanks");
     // Answered: not again this week.
     await page.goto(`/app/p/${a.id}`);
-    await expect(page.getByTestId("done-view")).toBeVisible({ timeout: 30_000 });
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
     await expect(page.getByTestId("done-survey")).toHaveCount(0);
   });
 
-  test("Save / Share on a phone: prefetched, shared from the tap", async ({ page, stub }, info) => {
-    test.skip(info.project.name !== "pixel7", "phones only");
-    await page.addInitScript(() => {
-      const w = window as unknown as { __shared: string[] };
-      w.__shared = [];
-      Object.defineProperty(navigator, "canShare", { value: () => true, configurable: true });
-      Object.defineProperty(navigator, "share", {
-        value: (d: ShareData) => {
-          w.__shared.push(d.files?.[0]?.name ?? "");
-          return Promise.resolve();
-        },
-        configurable: true,
-      });
+  test.describe("on an iPhone", () => {
+    test.use({ userAgent: IPHONE_UA });
+    test("Save video: the first tap fetches the file, the share sheet gets it", async ({ page, stub }, info) => {
+      test.skip(info.project.name !== "pixel7", "phones only");
+      await fakeShareSheet(page);
+      const job = await stub.seed("done");
+      await openWithStorage(page, `/app/p/${job.id}`);
+      const save = page.getByTestId("done-share");
+      await expect(save).toHaveText(/Save video/, { timeout: 30_000 });
+      // Exported before this visit: nothing fetched until the tap (D21).
+      await expect(save).toHaveAttribute("data-state", "idle");
+      await save.click();
+      // Fetched, and shared from that tap while the browser still counts
+      // it (a quick fetch); after a slower one a second tap shares.
+      await expect(save).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+      if ((await sharedFiles(page)).length === 0) await save.click();
+      await expect.poll(() => sharedFiles(page)).toEqual(["tiktok_3_mistakes_final_cleocuts_9x16.mp4"]);
     });
+  });
+
+  test("Android: Download, no share sheet", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "pixel7", "phones only");
+    // The browser could share the file: Android still downloads it (D21).
+    await fakeShareSheet(page);
     const job = await stub.seed("done");
     await openWithStorage(page, `/app/p/${job.id}`);
-    const share = page.getByTestId("done-share");
-    await expect(share).toBeEnabled({ timeout: 30_000 });
-    await expect(share).toHaveText(/Save \/ Share/);
-    await share.click();
-    await expect
-      .poll(() => page.evaluate(() => (window as unknown as { __shared: string[] }).__shared))
-      .toEqual(["tiktok_3_mistakes_final_cleocuts_9x16.mp4"]);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+    const main = page.getByTestId("done-download").first();
+    await expect(main).toHaveText("Download");
+    await expect(page.getByTestId("done-share")).toHaveCount(0);
+    const [file] = await Promise.all([page.waitForEvent("download"), main.click()]);
+    expect(file.suggestedFilename()).toBe("tiktok_3_mistakes_final_cleocuts_9x16.mp4");
+    expect(await sharedFiles(page)).toEqual([]);
   });
 });
 

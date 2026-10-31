@@ -2,7 +2,8 @@
  * Saves (timeline / transcript) that may still be running for a job
  * after its editor was left. Re-entering the job waits for them so it
  * loads the state the user actually left, not the one before their
- * last edit.
+ * last edit; Fertigstellen on the Vorschau renders only once they
+ * settled (never an older cut).
  */
 const pending = new Map<string, Set<Promise<unknown>>>();
 
@@ -20,20 +21,22 @@ export function trackSave(jobId: string, p: Promise<unknown>): void {
   p.then(done, done);
 }
 
-/** Resolves once every tracked save for the job settled, or after
- *  `timeoutMs` — a stuck request must not block opening the job. */
-export async function waitForSaves(jobId: string, timeoutMs = 20_000): Promise<void> {
+/** Resolves once every tracked save for the job settled (true), or
+ *  after `timeoutMs` (false): a stuck request must not block opening
+ *  the job, and the caller learns that it is still out. */
+export async function waitForSaves(jobId: string, timeoutMs = 20_000): Promise<boolean> {
   const set = pending.get(jobId);
-  if (!set || set.size === 0) return;
-  await Promise.race([
-    Promise.allSettled([...set]),
-    new Promise((r) => setTimeout(r, timeoutMs)),
+  if (!set || set.size === 0) return true;
+  return Promise.race([
+    Promise.allSettled([...set]).then(() => true),
+    new Promise<boolean>((r) => setTimeout(() => r(false), timeoutMs)),
   ]);
 }
 
-/** Any save still running, for any job? */
-export function hasPendingSaves(): boolean {
-  return pending.size > 0;
+/** Any save still running for the job, or (without one) for any job? */
+export function hasPendingSaves(jobId?: string): boolean {
+  if (jobId === undefined) return pending.size > 0;
+  return (pending.get(jobId)?.size ?? 0) > 0;
 }
 
 /** waitForSaves for every job — the editor's error boundary

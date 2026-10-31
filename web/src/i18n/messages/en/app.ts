@@ -29,8 +29,8 @@ export const enApp = {
   "app.errors.interrupted":
     "The upload was interrupted (page reloaded or app switched). Please upload the video again.",
   "app.errors.tooLarge": "The file is too large. Please trim the video or export it smaller.",
-  "app.errors.noSpeech": "We couldn't find any speech in this video. CleoCuts cuts and captions videos where someone talks — try a clip with a voice.",
-  "app.errors.noSpeechRefunded": "We couldn't find any speech in this video. CleoCuts cuts and captions videos where someone talks — try a clip with a voice. The minutes were credited back.",
+  "app.errors.noSpeech": "We couldn't find any speech in this video. CleoCuts cuts and captions videos where someone talks. Try a clip with a voice.",
+  "app.errors.noSpeechRefunded": "We couldn't find any speech in this video. CleoCuts cuts and captions videos where someone talks. Try a clip with a voice. The minutes were credited back.",
   "app.errors.noAudioTrack": "This video has no sound track, so there's nothing to cut or caption. Nothing was charged.",
   "app.errors.renderFailed":
     "Rendering failed. Your edits are saved — open the project and render again.",
@@ -317,7 +317,7 @@ export const enApp = {
   "app.card.queued.sub": "Lots of videos right now — yours starts automatically. You can leave this page.",
   "app.card.open": "Open",
   "app.card.remove": "Remove",
-  "app.card.renderFailedNote": "Render failed — your edits are saved. Open it and render again.",
+  "app.card.renderFailedNote": "Exporting didn't work. Your edits are saved. Try again.",
 
   // ── Captions tab ────────────────────────────────────────────────────
   "app.captions.styleHeading": "Caption style · {style}",
@@ -383,7 +383,6 @@ export const enApp = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Projects",
   "app.projects.title": "Projects",
-  "app.projects.back": "Projects",
   "app.projects.search": "Search projects",
   "app.projects.filterLabel": "Show",
   "app.projects.filter.all": "All",
@@ -442,23 +441,18 @@ export const enApp = {
   "app.projects.cancelTooLate": "Already processing. It couldn't be cancelled any more.",
   "app.projects.copyManual": "Select the text and copy it.",
   "app.processing.titleAnalyze": "Getting your video ready",
-  "app.processing.titleExport": "Exporting your video",
   "app.processing.step.uploaded": "Uploaded",
   "app.processing.step.listening": "Listening",
   "app.processing.step.cutting": "Cutting pauses and ums",
   "app.processing.step.captions": "Writing captions",
-  "app.processing.step.ready": "Ready to edit",
-  "app.processing.step.prepare": "Preparing",
-  "app.processing.step.addCaptions": "Adding captions",
-  "app.processing.step.encode": "Encoding",
-  "app.processing.step.finish": "Finishing",
+  "app.processing.step.ready": "Ready",
   "app.processing.etaMinutesOne": "About {n} minute left",
   "app.processing.etaMinutesOther": "About {n} minutes left",
   "app.processing.etaUnderMinute": "Less than a minute left",
   "app.processing.etaAlmost": "Almost done",
-  "app.processing.slow": "Taking longer than usual — it's still working.",
-  "app.processing.closeTab": "You can close this tab. Your video keeps processing and waits for you in Projects; the editor opens by itself if you stay.",
-  "app.processing.closeTabExport": "You can close this tab. The export keeps running and waits for you in Projects.",
+  "app.processing.slow": "Taking longer than usual. It's still working.",
+  "app.processing.closeTab": "You can close this page. Your video will be waiting in Projects.",
+  "app.processing.closeTabExport": "You can close this page. Your video will be waiting in Projects.",
   // ── UX11: export sheet, Done view, re-edit ─────────────────────────
   "app.export.title": "Export video",
   "app.export.exportingTitle": "Exporting…",
@@ -466,7 +460,7 @@ export const enApp = {
   "app.export.failedTitle": "Export failed",
   "app.export.saving": "Saving your edit…",
   "app.export.starting": "Starting the export…",
-  "app.export.leave": "Leave – the export continues",
+  "app.export.leave": "Leave (the export continues)",
   "app.export.costLoading": "Checking…",
   "app.export.costHelpLabel": "How free exports count",
   "app.export.costHelp": "Each video includes {free} free exports. After that, every export uses {pct} % of the video's length from your minutes. Failed exports never count.",
@@ -480,7 +474,7 @@ export const enApp = {
   "app.export.previousStays": "Your previous export stays available until this one is done.",
   "app.export.cancel": "Cancel",
   "app.export.exportNow": "Export now",
-  "app.export.canLeave": "You can leave this page – the export continues and shows up in your projects.",
+  "app.export.canLeave": "You can leave this page. The export continues and shows up in your projects.",
   "app.export.queued": "Waiting for a free slot (number {n} in line)",
   "app.export.failedAgain": "The export failed again. We've been notified.",
   "app.export.editsSafe": "Your edits are saved.",
@@ -497,21 +491,41 @@ export const enApp = {
   "app.done.postPlaceholder": "Write the text for your post…",
   "app.done.saving": "Saving…",
   "app.done.saved": "Saved",
-  "app.done.saveFailed": "Couldn't save the text – copy it to keep it.",
+  "app.done.saveFailed": "Couldn't save the text. Copy it to keep it.",
   "app.done.captionFiles": "Caption files:",
   "app.done.editAgain": "Edit again",
   "app.done.newVideo": "New video",
   "app.done.freeLeftOne": "{left} of {total} free export left for this video",
   "app.done.freeLeftOther": "{left} of {total} free exports left for this video",
   "app.done.nextCosts": "The next export uses {cost} of your minutes",
-  "app.done.cleoCutTip": "Tip: say “Cleo cut” while recording to throw away a botched take – CleoCuts removes it for you.",
+  "app.done.cleoCutTip": "Tip: say “Cleo cut” while recording to throw away a botched take. CleoCuts removes it for you.",
   "app.done.dismiss": "Dismiss",
   "app.done.surveyQuestion": "Did you have to edit this video anywhere else?",
   "app.done.surveyYes": "Yes",
   "app.done.surveyNo": "No",
   "app.done.surveyWhat": "What did you change? (optional)",
   "app.done.surveySend": "Send",
-  "app.done.surveyThanks": "Thanks – that helps us a lot.",
+  "app.done.surveyThanks": "Thanks, that helps us a lot.",
   "app.reedit.banner": "You're editing an exported video. The previous export stays available until you export again.",
   "app.reedit.captionsKept": "Its captions keep the look of the first export.",
+
+  // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  // Opens the editor: fix captions, bring back a cut
+  "app.preview.refine": "Fine-tune",
+  "app.preview.more": "More for this video",
+  // The play button while the video plays
+  "app.preview.pause": "Pause",
+  // Projects on the old caption engine: the preview shows no captions
+  "app.preview.captionsAfter": "You'll see the captions once it's exported.",
+  "app.preview.preparing": "The preview is still being prepared.",
+  // iPhone and iPad: the share sheet saves it to Photos
+  "app.preview.save": "Save video",
+  // Changed after an export: the file exported before
+  "app.preview.previousVersion": "Download the previous version",
+  // This browser kept timeline changes the server doesn't have yet; the editor restores them
+  "app.preview.unsavedHere": "This device has changes that aren't saved yet. Open Fine-tune so they're included.",
+  "app.preview.openRefine": "Open Fine-tune",
+  // The export waits until the editor's last changes are saved
+  "app.preview.saving": "Saving changes…",
+  "app.preview.stillSaving": "Your last changes are still being saved. Try again in a moment.",
 };

@@ -1,9 +1,10 @@
 "use client";
 /**
- * The ⋯ menu of a project tile (UX12): Download · Copy post text ·
- * Rename · Edit again · Delete. A menu button (aria-haspopup) and a
- * role="menu" list rendered into <body> (the tile clips its content),
- * placed under the button or above it near the bottom of the window.
+ * The ⋯ menu of a project (UX12; its tile, and the Vorschau's title row
+ * since PR2): Download · Copy post text · Rename · Edit again · Delete.
+ * A menu button (aria-haspopup) and a role="menu" list rendered into
+ * <body> (the tile clips its content), placed under the button or above
+ * it near the bottom of the window.
  * Arrow keys move, Escape / a click outside close it, focus goes back to
  * the button.
  */
@@ -21,10 +22,12 @@ import type { Project } from "./projects";
 const ITEM =
   "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-[var(--surface-2)] focus-visible:bg-[var(--surface-2)]";
 
-export function ProjectMenu({ p, onAction, onOpen }: {
+export function ProjectMenu({ p, onAction, onOpen, size = "sm" }: {
   p: Project;
   onAction: (a: "rename" | "delete") => void;
   onOpen: (href: string) => void;
+  /** The trigger: 32 px on a tile, 44 px on the Vorschau's title row. */
+  size?: "sm" | "lg";
 }) {
   const t = useT();
   const mediaReady = useMediaReady();
@@ -154,10 +157,10 @@ export function ProjectMenu({ p, onAction, onOpen }: {
         aria-expanded={open}
         aria-label={t("app.projects.menuAria", { name })}
         onClick={() => (open ? close() : setOpen(true))}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--surface-2)]"
+        className={`inline-flex items-center justify-center rounded-full transition-colors hover:bg-[var(--surface-2)] ${size === "lg" ? "h-11 w-11" : "h-8 w-8"}`}
         style={{ color: "var(--text-muted)" }}
       >
-        <Icon icon={Ellipsis} size={18} />
+        <Icon icon={Ellipsis} size={size === "lg" ? 20 : 18} />
       </button>
       {copied && (
         <span role="status" className="sr-only">

@@ -18,6 +18,8 @@ Modal too — for:
 - **Instant export** (speculative render, CLEO_SPECULATIVE_RENDER=1):
   what a render of the job as analysed would get — its fingerprint —
   so a later POST /render of exactly that can take the finished result.
+- **Export without the editor** (the Vorschau's "Fertigstellen"): the
+  caption units of the job as stored (stored_units).
 - **Bonus clips** only for an untouched timeline (review G6).
 - **Download names** (review F9) and the **SRT / VTT** caption files
   (review F8) of the latest export.
@@ -387,6 +389,22 @@ def doc_units(words: Iterable[dict] | None,
                         "original_start": g[0]["start"],
                         "original_end": g[-1]["end"]})
     return out
+
+
+def stored_units(job: Any) -> list[dict]:
+    """The caption units of the job as stored, for an export started
+    without the editor (POST /render {"source": "stored"}): what the v2
+    editor sends for it — the edit doc's words that play (doc_units minus
+    the timeline's cuts) — or, without a doc, the analysis' units. Left
+    out, as only an open editor applies them: the forced break where a
+    reordered timeline jumps (cuts.ts reorderBreaks), so a unit there may
+    join words of both places, and transcript edits kept only as
+    sentences (job.edited_phrases: the v1 editor's, or any on a job
+    without a doc)."""
+    words = (job.doc or {}).get("words") if isinstance(job.doc, dict) else None
+    if words:
+        return doc_units(words, removed_ranges(job.segments, job.duration))
+    return analysis_units(job)
 
 
 def spec_unit_digests(job: Any, units: list[dict]) -> list[str]:

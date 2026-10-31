@@ -1,67 +1,66 @@
 "use client";
 /**
  * /app/p/[jobId] (UX5): one project, by its status (PLAN_TECH §1.1).
- * First version from what exists (UX11/UX12 bring the real views):
  *
- *   pending / processing   its job card, enlarged, with the stage — on
- *                          the v2 opt-in (UX12) ProcessingView: the
- *                          analysis or the export as a checklist, time
- *                          left; the editor opens by itself
- *   awaiting_review        → /app/edit/[jobId] (replace)
- *   done                   the Done view: with the v2 editor opt-in
- *                          (useEditorV2) the UX11 one — download, share,
- *                          post text, SRT / VTT, "Edit again" (POST
- *                          /reopen → the editor); else the v1 one
- *                          (DoneView.legacy), unchanged
+ * The v2 editor (useProjectsV2): the Vorschau (PreviewScreen, PR2 plan
+ * D11), its own chunk, in every state of the project: processing, ready,
+ * edited, finishing, done, failed. Its shape (frame, title, two buttons)
+ * while it loads, also while the server can't be reached (useJobPoll
+ * tries again); a project that is gone says so, with the way back to
+ * Projects.
+ *
+ * v1, as before:
+ *   pending / processing   its job card, enlarged, with the stage
+ *   awaiting_review        → /app/edit/[jobId] (replace, useJobPoll)
+ *   done                   the v1 Done view (DoneView.legacy)
  *   error                  ErrorView: the code's message, the refund,
  *                          "Try another video"
  *   404                    the project is gone
  *
- * Polls GET /jobs/{id} while the job runs (every 2 s, paused while the
- * tab is hidden).
+ * The job comes from useJobPoll: GET /jobs/{id}, again every 2 s while it
+ * runs, paused while the tab is hidden.
  */
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { AppPage } from "@/components/AppPage";
 import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import { getActiveJob, type ActiveJobV2 } from "@/lib/activeJobs";
-import { apiFetch } from "@/lib/api";
-import { describeError, jobErrorText, stageText, tEn } from "@/lib/errors";
+import { jobErrorText, stageText, tEn } from "@/lib/errors";
+import { EDITOR_V2 } from "@/features/editor/v2/flag";
 import { ActiveJobCard } from "@/features/jobs/ActiveJobCard";
-import { hasExportHint, readLocalJobs } from "@/features/jobs/localJobs";
 import { useProjectsV2 } from "@/features/jobs/useProjectsV2";
 import type { JobStatus } from "@/features/jobs/types";
 import { DoneView as LegacyDoneView } from "./DoneView.legacy";
-import { reopenJob } from "./projectApi";
 import { ErrorView } from "./ErrorView";
-import { ProcessingView } from "./ProcessingView";
+import { useJobPoll, type JobPoll } from "./useJobPoll";
+import s from "./preview.module.css";
 
-// The UX11 Done view (v2 opt-in): its own chunk, loaded for a finished
-// project only (keeps /app/p within its first-load budget).
-const DoneView = dynamic(() => import("./DoneView").then((m) => m.DoneView), {
-  ssr: false,
-  loading: () => <div className="h-[60vh] animate-pulse rounded-2xl bg-[var(--surface-1)]" />,
-});
-
-const POLL_MS = 2000;
-// After an answer that isn't a job (a 502 / 503 while the backend
-// restarts on a deploy, offline): again after 2 s, doubling to 30 s.
-const RETRY_MAX_MS = 30_000;
-
-/** The wait before the next try after `failures` failed ones in a row. */
-export function retryDelay(failures: number): number {
-  return Math.min(POLL_MS * 2 ** Math.max(0, failures - 1), RETRY_MAX_MS);
+/** The Vorschau's shape while it (or its job) loads: frame, title, buttons. */
+function PreviewSkeleton() {
+  return (
+    <div className={s.root} data-testid="project-loading" aria-busy="true">
+      <div className={s.watch} data-shape="tall">
+        <div className={s.media}>
+          <div className={s.frameSkeleton} />
+        </div>
+        <div className={s.info}>
+          <div className={s.titleSkeleton} />
+          <div className={s.acts}>
+            <div className={s.buttonSkeleton} />
+            <div className={s.buttonSkeleton} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-type Load =
-  | { state: "loading" }
-  | { state: "job"; job: JobStatus }
-  | { state: "gone" }
-  | { state: "failed"; status: number };
+// The Vorschau with its players and the caption engine: a chunk of its
+// own (keeps /app/p within its first-load budget).
+const PreviewScreen = dynamic(() => import("./PreviewScreen"), { ssr: false, loading: PreviewSkeleton });
 
 /** The card of a running job: the stored one, else one from the job. */
 function cardFor(job: JobStatus): ActiveJobV2 {
@@ -79,85 +78,46 @@ function cardFor(job: JobStatus): ActiveJobV2 {
   };
 }
 
-/** A running job is an export (not the analysis). */
-export function isExport(job: Pick<JobStatus, "stage" | "message" | "has_output">, seenInReview: boolean): boolean {
-  if (job.stage?.startsWith("render.")) return true;
-  if (job.stage?.startsWith("analyze.")) return false;
-  return seenInReview || Boolean(job.has_output) || /render/i.test(job.message ?? "");
+export function ProjectPage({ jobId }: { jobId: string }) {
+  const poll = useJobPoll(jobId);
+  // Known after hydration; until then the build's default.
+  const v2 = useProjectsV2() ?? EDITOR_V2;
+  return v2 ? <Vorschau {...poll} /> : <LegacyProject {...poll} />;
 }
 
-export function ProjectPage({ jobId }: { jobId: string }) {
+function Vorschau({ load, setJob }: JobPoll) {
   const t = useT();
   const router = useRouter();
-  const [load, setLoad] = useState<Load>({ state: "loading" });
-  // The v2 opt-in (UX12): the processing view, back to Projects — and
-  // UX11's Done view and re-edit; v1 customers keep their export flow.
-  const v2 = useProjectsV2() === true;
-  // In review (or exported) before: a queued run is an export.
-  const [seenInReview] = useState(() => hasExportHint(jobId));
-  const [reopening, setReopening] = useState(false);
-  const [reopenError, setReopenError] = useState<string | null>(null);
-  const editAgain = async () => {
-    setReopening(true);
-    setReopenError(null);
-    try {
-      await reopenJob(jobId, "done_view");
-      router.push(`/app/edit/${jobId}`);
-    } catch (e) {
-      setReopenError(describeError(e, t));
-      setReopening(false);
-    }
-  };
+  if (load.state === "gone" || load.state === "failed") {
+    return (
+      <AppPage width="5xl">
+        <div data-testid="project" data-status={load.state}>
+          <ErrorView
+            message={t(load.state === "gone" ? "app.errors.expired" : load.status === 401
+              ? "app.errors.signInRequired" : "app.notice.loadFailed")}
+            actionLabel={t(load.state === "gone" ? "editor.expired.back" : "app.picker.backToDashboard")}
+            onReset={() => router.push("/app")}
+          />
+        </div>
+      </AppPage>
+    );
+  }
+  return (
+    <AppPage width="5xl">
+      {load.state === "loading" ? (
+        <PreviewSkeleton />
+      ) : (
+        <div data-testid="project" data-status={load.job.status}>
+          <PreviewScreen job={load.job} setJob={setJob} />
+        </div>
+      )}
+    </AppPage>
+  );
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let failures = 0;
-    const tick = async () => {
-      clearTimeout(timer);
-      if (cancelled) return;
-      let running = false;
-      try {
-        const r = await apiFetch(`/jobs/${jobId}`);
-        if (cancelled) return;
-        if (r.status === 404) setLoad({ state: "gone" });
-        else if (r.status === 401 || r.status === 403) {
-          // Sign-in opens (apiFetch); nothing to poll meanwhile.
-          setLoad((cur) => (cur.state === "job" ? cur : { state: "failed", status: r.status }));
-        } else if (!r.ok) {
-          // A hiccup (5xx, 429): keep what is shown, try again later.
-          failures++;
-          running = true;
-        } else {
-          failures = 0;
-          const job: JobStatus = await r.json();
-          if (cancelled) return;
-          if (job.status === "awaiting_review") {
-            router.replace(`/app/edit/${jobId}`);
-            return;
-          }
-          setLoad({ state: "job", job });
-          running = job.status === "pending" || job.status === "processing";
-        }
-      } catch {
-        failures++;
-        running = true; // offline: try again
-      }
-      if (running && !cancelled && !document.hidden) {
-        timer = setTimeout(() => void tick(), failures ? retryDelay(failures) : POLL_MS);
-      }
-    };
-    const onVisible = () => {
-      if (!document.hidden) void tick();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    void tick();
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [jobId, router]);
+function LegacyProject({ load }: JobPoll) {
+  const t = useT();
+  const router = useRouter();
 
   const back = (
     <Link
@@ -167,7 +127,7 @@ export function ProjectPage({ jobId }: { jobId: string }) {
       style={{ color: "var(--text-muted)" }}
     >
       <Icon icon={ArrowLeft} className="text-base" />
-      {t(v2 ? "app.projects.back" : "app.picker.backToDashboard")}
+      {t("app.picker.backToDashboard")}
     </Link>
   );
 
@@ -213,37 +173,14 @@ export function ProjectPage({ jobId }: { jobId: string }) {
       <AppPage width="md">
         <div data-testid="project" data-status="done" className="flex flex-col">
           {back}
-          {v2 ? (
-          <DoneView
-            job={job}
-            onEditAgain={() => void editAgain()}
-            editAgainBusy={reopening}
-            editAgainError={reopenError}
-            onNewVideo={() => router.push("/app/new")}
+          <LegacyDoneView
+            jobId={job.id}
+            outputs={job.outputs ?? ["primary"]}
+            socialCaption={job.social_caption ?? ""}
+            socialHashtags={job.social_hashtags ?? []}
+            hookClips={job.hook_clips ?? []}
+            onReset={() => router.push("/app/new")}
           />
-          ) : (
-            <LegacyDoneView
-              jobId={job.id}
-              outputs={job.outputs ?? ["primary"]}
-              socialCaption={job.social_caption ?? ""}
-              socialHashtags={job.social_hashtags ?? []}
-              hookClips={job.hook_clips ?? []}
-              onReset={() => router.push("/app/new")}
-            />
-          )}
-        </div>
-      </AppPage>
-    );
-  }
-  if (v2) {
-    const local = readLocalJobs().find((j) => j.jobId === job.id);
-    const name =
-      (job as { title?: string | null }).title || local?.name || local?.filename || job.filename || t("app.library.untitled");
-    return (
-      <AppPage width="md">
-        <div data-testid="project" data-status={job.status} className="flex flex-col">
-          {back}
-          <ProcessingView job={job} exporting={isExport(job, seenInReview)} name={name} />
         </div>
       </AppPage>
     );

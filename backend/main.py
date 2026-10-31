@@ -7805,7 +7805,12 @@ def post_render(job_id: str, payload: dict,
     successful exports each one records its fair-use share (never
     blocking). A matching speculative render is taken at once: the job
     comes back done with "instant": true. The answer carries "gen" and
-    "cost_seconds" (minutes recorded for this export)."""
+    "cost_seconds" (minutes recorded for this export).
+
+    {"client": "v2", "source": "stored"} without subtitles: the export of
+    the job as stored, with the captions the editor would send
+    (exports.stored_units) — the Vorschau's "Fertigstellen", no editor
+    open."""
     job = get_owned_job(job_id, user)
     if job.status != "awaiting_review":
         raise HTTPException(409, f"job not in review state (status={job.status})")
@@ -7814,6 +7819,8 @@ def post_render(job_id: str, payload: dict,
     v2 = payload.get("client") == "v2"
 
     edited = payload.get("subtitles")
+    if edited is None and v2 and payload.get("source") == "stored":
+        edited = exports.stored_units(job)
     if not isinstance(edited, list):
         raise HTTPException(400, "payload.subtitles must be a list")
     disabled_cuts = payload.get("disabled_cuts") or []

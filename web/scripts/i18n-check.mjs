@@ -22,7 +22,7 @@
  *                   dead ones, then this becomes an error
  *     glossary      a message uses a term docs/i18n-glossary.md lists
  *                   under "Avoid" for its language (e.g. "rendern" where
- *                   the glossary says "Exportieren")
+ *                   the glossary says "Fertigstellen")
  *
  * Usage: node scripts/i18n-check.mjs [--strict] [--json]
  *

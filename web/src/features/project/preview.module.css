@@ -1,0 +1,507 @@
+/* The Vorschau, /app/p/[jobId] (PR2, plan D11; approved mockups
+ * docs/mockups/start/4-vorschau, -fertigstellen, -sichern): the video and
+ * what to do with it, in every state of the project. Ported from the
+ * mockup stylesheet ("4: Vorschau") with the app's tokens; the frame is
+ * player.module.css. Phones and desktop switch at 960 px; the frame's
+ * size follows the screen (the root is the "screen" container). Type:
+ * 12.5 notes, 14 notices and links, 15 / 16 the length, 16 buttons,
+ * 22 / 40 the title. */
+
+.root {
+  container: screen / inline-size;
+  /* The frame's height (player.module.css reads it). Phones: the title
+   * row and two buttons stay on screen under it. */
+  --fh: clamp(260px, calc(100svh - 344px), 620px);
+}
+.root :focus-visible {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 3px;
+}
+/* The title takes focus when the page changes in place; no ring then. */
+.root h1:focus-visible {
+  outline: none;
+}
+.root button,
+.root a {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── processing: the title row over the checklist ── */
+.processing {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── the video and its title, length and buttons ── */
+/* Phones: title, length and buttons share the frame's edges (a short
+ * phone keeps 216 px, enough for its longest label). A 16:9 output
+ * takes the column's width (its frame caps itself at 880 px). */
+.watch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(100%, max(calc(var(--fh) * 9 / 16), 216px));
+  margin-inline: auto;
+}
+.watch[data-shape="wide"] {
+  width: 100%;
+}
+.media {
+  display: flex;
+  justify-content: center;
+  max-width: 100%;
+}
+/* (A 16:9 frame is as wide as the column lets it be.) */
+.watch[data-shape="wide"] > .media {
+  align-self: stretch;
+}
+/* The frame while the page loads (the box of player.module.css). */
+.frameSkeleton {
+  height: var(--fh);
+  max-width: 100%;
+  aspect-ratio: 9 / 16;
+  border-radius: 16px;
+  background: var(--surface-1);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+/* The rest of the page while it loads: the title and two buttons. */
+.titleSkeleton,
+.buttonSkeleton {
+  border-radius: 8px;
+  background: var(--surface-1);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.titleSkeleton {
+  width: 60%;
+  height: 27px;
+}
+.buttonSkeleton {
+  height: 56px;
+  border-radius: 12px;
+}
+/* A failed video's frame: its first frame, or the film. On phones it is
+ * smaller (there is nothing to play): the reason and the way on stay in
+ * view. */
+@media (max-width: 959px) {
+  .root[data-state="failed"] .media {
+    --fh: clamp(160px, calc(100svh - 560px), 360px);
+  }
+}
+.still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.blank {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+}
+.info {
+  width: 100%;
+  margin-top: 16px;
+}
+
+/* Title · length · ⋯ */
+.trow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.len {
+  flex: none;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* The 44 px ⋯: its dots on the frame's edge, its height off the row. */
+.menu {
+  display: flex;
+  flex: none;
+  align-self: center;
+  margin: -8px -12px -8px -4px;
+}
+
+.acts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+/* A full-width button of the kit (Button lg) or a link that looks like one. */
+.act {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  text-wrap: balance;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.act[aria-disabled="true"] {
+  cursor: default;
+}
+/* Unavailable for now (offline, preparing, opening): as the kit's
+ * disabled button. The working one keeps its tint. */
+.act[aria-disabled="true"]:not(.working) {
+  opacity: 0.6;
+}
+.act[aria-disabled="true"]:active {
+  scale: none;
+}
+/* Working (Fertigstellen running): a soft shimmer runs through the
+ * tinted button. */
+.working {
+  position: relative;
+  overflow: hidden;
+}
+.working::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, var(--brand-strong) 10%, transparent) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+.note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-align: center;
+  text-wrap: balance;
+}
+.note[data-tone="warn"] {
+  color: var(--warn);
+}
+/* Fertigstellen's live lines (saving first, "you can close this page",
+ * the place in line, offline): the region is there before they are, and
+ * takes no room while it is empty. */
+.status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.status:empty {
+  margin-top: -10px;
+}
+/* A line that changes what the buttons do: a failed export, a reason,
+ * changes kept on this device. */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-body);
+  text-wrap: pretty;
+}
+.notice > svg {
+  margin-top: 0.15em;
+}
+.notice[data-tone="warn"] > svg {
+  color: var(--warn);
+}
+.notice[data-tone="failed"] > svg {
+  color: var(--cmd-cut);
+}
+.error {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--danger);
+  text-align: center;
+  text-wrap: balance;
+}
+/* "Bisherige Version herunterladen": a quiet link, 44 px to tap. */
+.quiet {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-body);
+  text-decoration: none;
+  transition: color 0.15s ease, opacity 0.12s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.quiet:active {
+  opacity: 0.7;
+}
+.quiet > svg {
+  color: var(--text-muted);
+}
+
+/* ── done: "Mehr zum Video" ── */
+.disc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 0 6px 0 2px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-body);
+  transition: color 0.15s ease, opacity 0.12s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.disc:active {
+  opacity: 0.7;
+}
+.disc > svg {
+  color: var(--text-muted);
+  transition: transform 0.2s var(--ease-out);
+}
+.watch[data-more] .disc > svg {
+  transform: rotate(90deg);
+}
+.after {
+  width: 100%;
+}
+.panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.3s var(--ease-out);
+}
+.watch[data-more] .panel {
+  grid-template-rows: 1fr;
+}
+/* Closed: hidden once it has folded away (and inert all along). */
+.panelClip {
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s linear 0.3s;
+}
+.watch[data-more] .panelClip {
+  visibility: visible;
+  transition-delay: 0s;
+}
+.moreBody {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 8px 0 4px;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.2s ease, transform 0.3s var(--ease-out);
+}
+.watch[data-more] .moreBody {
+  opacity: 1;
+  transform: none;
+}
+/* The export's other formats. */
+.files {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 8px;
+}
+.file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border-hover);
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.16s var(--ease-out);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.file:active {
+  transform: scale(0.97);
+}
+.file > svg {
+  color: var(--text-muted);
+}
+.fileMeta {
+  margin-inline-start: auto;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* The survey and the "Cleo cut" tip, when due. */
+.extras {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+.extras:empty {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .quiet:hover,
+  .disc:hover {
+    color: var(--text-strong);
+  }
+  .file:hover {
+    border-color: var(--brand);
+  }
+}
+
+/* Desktop: the frame left, title and buttons right of it, at its foot;
+ * what the done state adds goes on under them. A 16:9 output stacks. */
+@media (min-width: 960px) {
+  .root {
+    --fh: min(680px, calc(100svh - 120px), calc((100cqw - 368px) * 16 / 9));
+  }
+  .processing {
+    max-width: 448px;
+  }
+  .watch {
+    margin-inline: 0;
+  }
+  .watch[data-shape="tall"] {
+    display: grid;
+    grid-template-columns: auto 320px;
+    column-gap: 48px;
+    align-items: end;
+    justify-content: start;
+    width: auto;
+  }
+  .watch[data-shape="tall"] > .media {
+    grid-area: 1 / 1;
+  }
+  .watch[data-shape="tall"] > .info {
+    grid-area: 1 / 2;
+    margin: 0 0 4px;
+  }
+  .watch[data-shape="tall"] > .after {
+    grid-area: 2 / 2;
+  }
+  .watch[data-shape="wide"] > .info,
+  .watch[data-shape="wide"] > .after {
+    max-width: 448px;
+  }
+  .watch[data-shape="wide"] > .info {
+    margin-top: 24px;
+  }
+  .trow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    row-gap: 4px;
+  }
+  .title {
+    display: -webkit-box;
+    font-size: 40px;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+  .len {
+    grid-area: 2 / 1;
+    font-size: 16px;
+  }
+  .menu {
+    grid-area: 1 / 2;
+    align-self: start;
+    margin: 0 -12px 0 0;
+  }
+  /* Next to the video the title has the column's whole width (the
+   * mockup's); the ⋯ ends the length's line, its height off the row. */
+  .watch .title {
+    grid-column: 1 / -1;
+  }
+  .watch .menu {
+    grid-area: 2 / 2;
+    align-self: center;
+    margin: -12px -12px -12px 0;
+  }
+  .acts {
+    margin-top: 24px;
+  }
+  .note,
+  .error {
+    text-align: left;
+  }
+  .quiet {
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frameSkeleton,
+  .titleSkeleton,
+  .buttonSkeleton,
+  .working::after {
+    animation: none;
+  }
+  .working::after {
+    display: none;
+  }
+  .disc > svg,
+  .panel,
+  .moreBody,
+  .file {
+    transition-property: opacity, color, border-color;
+  }
+  .moreBody {
+    transform: none;
+  }
+  .file:active {
+    transform: none;
+  }
+}

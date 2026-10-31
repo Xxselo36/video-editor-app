@@ -50,7 +50,9 @@ export function useVideoAccept(): string {
   return useSyncExternalStore(subscribeNever, () => videoAccept(nav()), () => VIDEO_ACCEPT);
 }
 
-const VIDEO_EXT = /\.(mov|qt|mp4|m4v|hevc|h265|265|3gp|3g2|webm|mkv|avi|mts|m2ts|mpg|mpeg)$/i;
+/** The extensions of the video files an upload takes (also how the
+ *  Vorschau tells a file name's extension from a title's dots). */
+export const VIDEO_EXT = /\.(mov|qt|mp4|m4v|hevc|h265|265|3gp|3g2|webm|mkv|avi|mts|m2ts|mpg|mpeg)$/i;
 
 /** What a pick from the unfiltered input (B) is: a video (as the upload
  *  takes it), an audio file (uploadJob refuses it as no_video), or

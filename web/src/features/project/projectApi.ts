@@ -1,10 +1,36 @@
 /**
- * UX11 calls of a finished project: edit it again, save the post text,
- * answer the survey. Errors come back as codes (lib/errors).
+ * Calls of the project page: Fertigstellen (the Vorschau), and of a
+ * finished project (UX11): edit it again, save the post text, answer the
+ * survey. Errors come back as codes (lib/errors).
  */
 import { apiError, apiFetch } from "@/lib/api";
 import { track } from "@/lib/analytics";
 import type { JobStatus } from "@/features/jobs/types";
+
+/** POST /render from the Vorschau: the server renders the edit as stored
+ *  (its timeline and caption doc), no captions sent along. */
+export type FinishBody = { client: "v2"; source: "stored"; disabled_cuts: []; caption_engine?: "v2" };
+
+/** POST /jobs/{id}/render without the editor (plan D12). "not_in_review"
+ *  (409): already exporting (another tab) or finished. job: the answer
+ *  (`instant: true` and done when a speculative render was taken), null
+ *  for "not_in_review" or an answer that can't be read. Throws ApiError
+ *  for a refusal (429 caps, 503 busy, 400 from a server before PR2) and
+ *  the browser's error offline. */
+export async function finishJob(
+  jobId: string,
+  body: FinishBody,
+): Promise<{ outcome: "started" | "not_in_review"; job: JobStatus | null }> {
+  const r = await apiFetch(`/jobs/${jobId}/render`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (r.status === 409) return { outcome: "not_in_review", job: null };
+  if (!r.ok) throw await apiError(r);
+  const job = (await r.json().catch(() => null)) as JobStatus | null;
+  return { outcome: "started", job };
+}
 
 /** POST /jobs/{id}/reopen: done → in review; the export stays
  *  downloadable until the next one. Throws ApiError (409 busy /

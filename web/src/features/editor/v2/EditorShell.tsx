@@ -94,12 +94,16 @@ export type EditorShellProps = {
    *  doc when newer than it (state/reconcile.ts). */
   v1Edits?: V1Edits;
   onApply: () => void;
+  /** The top bar's back: to the Vorschau (D14). */
   onBack: () => void;
+  /** Out to Projects: the project is gone (ExpiredView). */
+  onExit: () => void;
   /** UX11: Export opens the export sheet (else: apply + leave, as before). */
   exportFlow?: ExportFlow;
   /** UX11: this project was exported before (the re-edit note). */
   reedit?: { captionsKept: boolean } | null;
-  onNewVideo?: () => void;
+  /** The export sheet's "New video". */
+  onNewVideo: () => void;
 };
 
 // UT5: live captions and the Style panel (the caption engine: own chunks).
@@ -570,7 +574,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     if (at) session.seekOriginal(at.t, at.segId);
   };
 
-  if (expired) return <ExpiredView onBack={props.onBack} />;
+  if (expired) return <ExpiredView onExit={props.onExit} />;
 
   const docSave = doc.status === "ready" ? doc.saveState : "saved";
   // 409 stale_rev (review F3): another tab or device saved this project.
@@ -914,7 +918,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
           seconds={cutDuration(editSegs)}
           offline={!online}
           reexport={Boolean(props.reedit)}
-          onNewVideo={props.onNewVideo ?? props.onBack}
+          onNewVideo={props.onNewVideo}
         />
       )}
     </PlayheadContext.Provider>

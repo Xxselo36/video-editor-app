@@ -14,7 +14,7 @@ export function EditorSkeleton({ phone, onBack }: { phone: boolean; onBack?: () 
     <button
       type="button"
       className={`${phone ? s.mb : s.gb} ${s.ico}`}
-      aria-label={t("editor.back")}
+      aria-label={t("editor.backToPreview")}
       onClick={onBack}
       disabled={!onBack}
     >
@@ -58,14 +58,14 @@ export function EditorSkeleton({ phone, onBack }: { phone: boolean; onBack?: () 
   );
 }
 
-export function ExpiredView({ onBack }: { onBack: () => void }) {
+export function ExpiredView({ onExit }: { onExit: () => void }) {
   const t = useT();
   return (
     <div className={s.center} data-testid="ed-expired" role="alert">
       <FileX size={32} strokeWidth={1.5} aria-hidden style={{ color: "var(--ed-text-3)" }} />
       <h1 className={s.centerTitle}>{t("editor.expired.title")}</h1>
       <p className={s.centerText}>{t("editor.expired.text")}</p>
-      <button type="button" className={s.gb} style={{ marginTop: 8, color: "var(--ed-text-1)" }} onClick={onBack}>
+      <button type="button" className={s.gb} style={{ marginTop: 8, color: "var(--ed-text-1)" }} onClick={onExit}>
         <ChevronLeft size={16} strokeWidth={1.75} aria-hidden />
         {t("editor.expired.back")}
       </button>

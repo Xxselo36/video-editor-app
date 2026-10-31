@@ -12,45 +12,23 @@
  *          editor offers it back, the user decides
  *
  * localStorage can be missing or full (private mode): every access is
- * guarded, and the editor works the same without it.
+ * guarded, and the editor works the same without it. The key and when a
+ * copy counts (readUnsaved) live in unsavedKey.ts, which the Vorschau
+ * reads too.
  */
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { sameTimeline, type TimelineSeg } from "@/lib/editSave";
 import { timelinePayload, type TimelineBackup } from "./timelineSave";
+import { unsavedKey } from "./unsavedKey";
 
-const KEY = (jobId: string) => `cleocuts.editor.unsaved.v1.${jobId}`;
-/** A copy older than this is not offered (a week). */
-const MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+export { readUnsaved } from "./unsavedKey";
 
 export function writeUnsaved(jobId: string, b: TimelineBackup | null): void {
   try {
-    if (b) localStorage.setItem(KEY(jobId), JSON.stringify(b));
-    else localStorage.removeItem(KEY(jobId));
+    if (b) localStorage.setItem(unsavedKey(jobId), JSON.stringify(b));
+    else localStorage.removeItem(unsavedKey(jobId));
   } catch {
     /* storage blocked or full */
-  }
-}
-
-const isSeg = (s: unknown): s is EditorSeg => {
-  const x = s as EditorSeg | null;
-  return !!x && typeof x.id === "string" && Number.isFinite(x.start) && Number.isFinite(x.end) && x.end > x.start;
-};
-
-export function readUnsaved(jobId: string, now = Date.now()): TimelineBackup | null {
-  try {
-    const raw = localStorage.getItem(KEY(jobId));
-    if (!raw) return null;
-    const b = JSON.parse(raw) as Partial<TimelineBackup>;
-    if (!Array.isArray(b.segs) || !b.segs.length || !b.segs.every(isSeg) || typeof b.base !== "number") return null;
-    if (typeof b.at === "number" && now - b.at > MAX_AGE_MS) return null;
-    return {
-      segs: b.segs,
-      base: b.base,
-      known: Array.isArray(b.known) ? b.known.filter((r): r is number => typeof r === "number") : [],
-      at: typeof b.at === "number" ? b.at : 0,
-    };
-  } catch {
-    return null;
   }
 }
 

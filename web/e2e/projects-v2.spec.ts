@@ -74,7 +74,7 @@ test("one page: a badge per state, an existing customer's projects, 0 console er
   await expectState("failed.mp4", "failed", "Failed");
   await expect(jobCard(page, "failed.mp4").getByTestId("job-card-status")).toContainText("couldn't find any speech");
   await expectState("exportfehler.mp4", "ready", "Ready to edit");
-  await expect(jobCard(page, "exportfehler.mp4").getByTestId("job-card-status")).toContainText("Render failed");
+  await expect(jobCard(page, "exportfehler.mp4").getByTestId("job-card-status")).toContainText("Exporting didn't work");
   // An upload of an earlier page load: stopped, with Try again.
   await expectState("stopped.mp4", "upload_failed", "Upload stopped");
   await expect(jobCard(page, "stopped.mp4").getByTestId("job-card-retry")).toBeVisible();

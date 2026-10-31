@@ -143,7 +143,7 @@ describe("glossary", () => {
     ]);
   });
 
-  it("docs/i18n-glossary.md stays machine-readable: 8 concepts in every language", () => {
+  it("docs/i18n-glossary.md stays machine-readable: 9 concepts in every language", () => {
     const langs = readLangs(fs.readFileSync(path.join(HERE, "../src/i18n/langs.ts"), "utf8"));
     const g = parseGlossary(fs.readFileSync(path.join(HERE, "../../docs/i18n-glossary.md"), "utf8"));
     expect(Object.keys(g.terms)).toEqual([
@@ -155,6 +155,7 @@ describe("glossary", () => {
       "Project",
       "Preview",
       "Edit again",
+      "Fine-tune",
     ]);
     for (const [concept, byLang] of Object.entries(g.terms)) {
       for (const lang of langs) expect(byLang[lang], `${concept} in ${lang}`).toBeTruthy();

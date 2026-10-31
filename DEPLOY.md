@@ -1561,6 +1561,20 @@ Code: `backend/exports.py` (Regeln), `backend/main.py` (`POST
 /jobs/{id}/reopen`, `POST /jobs/{id}/render`, `_run_spec`),
 `web/src/features/editor/export/`, `web/src/features/project/DoneView.tsx`.
 
+**Fertigstellen aus der Vorschau (PR2):** `/app/p/{id}` exportiert ohne
+Editor: `POST /jobs/{id}/render` mit `{"client": "v2", "source":
+"stored", "disabled_cuts": []}` (bei Opt-in plus `"caption_engine":
+"v2"`) und ohne `subtitles`. Der Server nimmt die gespeicherte
+Bearbeitung: die Wörter des Edit-Docs ohne die geschnittenen Bereiche
+(`exports.stored_units`), ohne Doc die Untertitel der Analyse. Sonst
+gilt alles wie beim Export-Blatt (Schutzgrenzen, Fair Use,
+Sofort-Export). Nicht dabei, weil nur ein offener Editor sie setzt: der
+Untertitel-Umbruch an der Sprungstelle einer umsortierten Timeline und
+Textänderungen, die nur als Sätze gespeichert sind (v1-Editor, Jobs ohne
+Doc). Ein Server vor PR2 antwortet 400; die Vorschau zeigt den Fehler.
+`GET /jobs/{id}` hat dazu `no_cuts` und `captions_off` (die Schritte,
+die die Vorschau beim Bearbeiten auslässt).
+
 | Variable (Railway) | Default | Wirkung |
 |---|---|---|
 | `CLEO_FREE_RENDERS` | `3` | erfolgreiche Exporte pro Video, die nichts kosten |

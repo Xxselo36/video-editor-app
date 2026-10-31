@@ -113,6 +113,8 @@ export type StubJob = {
   /** UX11 */
   renders_ok: number;
   spec_status: string | null;
+  /** The captions an export burns ("v2" once an export asked for them, UT4). */
+  caption_engine?: string | null;
   social_caption: string;
   social_caption_edited: string | null;
   output_keys: Record<string, string>;

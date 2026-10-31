@@ -1,7 +1,8 @@
 "use client";
 /**
- * The v2 editor's edit document (UX8): GET /jobs/{id}/doc, the store
- * with its undo history, and the autosave (state/docSave.ts).
+ * The v2 editor's edit document (UX8): GET /jobs/{id}/doc
+ * (state/docFetch.ts), the store with its undo history, and the
+ * autosave (state/docSave.ts).
  *
  *   loading   the request runs (the Text tab shows a skeleton)
  *   none      no doc: a job analysed before UT3 (404 no_doc) or the
@@ -27,6 +28,7 @@ import {
   type EditDoc,
   type IdPool,
 } from "@/features/editor/state/doc";
+import { fetchDoc, withRenderStyle, type DocCaptions } from "@/features/editor/state/docFetch";
 import { DocSaver, rebaseDoc, uniqueRev, type DocSaveState } from "@/features/editor/state/docSave";
 import { reconcileV1, type V1Edits } from "@/features/editor/state/reconcile";
 import { createDocStore, type DocStore } from "@/features/editor/state/store";
@@ -84,63 +86,9 @@ export type DocSync = "kept" | "merged" | "pending";
 /** A save still waiting for its retry (DocSaver.exclusive "busy"): ask again in this long. */
 const SAVER_BUSY_MS = 3000;
 
-/**
- * UT5 (GET /jobs/{id}/doc): `engine` — the export's caption engine
- * ("optin": the browser's ?captions=v2 decides); `presetsLive` — the
- * presets the Style panel offers; `recommended` — up to three for this
- * transcript. The doc's style starts as the server's `render_style`
- * (what an export draws now: before the first editor save, a v1
- * caption preset decides).
- */
-export type DocCaptions = { engine: "v1" | "v2" | "optin"; presetsLive: string[] | null; recommended: string[] };
-
 const NO_CAPTIONS: DocCaptions = { engine: "v1", presetsLive: null, recommended: [] };
 
-function docCaptions(j: Record<string, unknown>): DocCaptions {
-  const e = j.caption_engine;
-  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : null);
-  return {
-    engine: e === "v2" || e === "optin" ? e : "v1",
-    presetsLive: strings(j.presets_live),
-    recommended: strings(j.recommended) ?? [],
-  };
-}
-
-const isStyle = (v: unknown): v is EditDoc["style"] =>
-  !!v && typeof v === "object" && typeof (v as { presetId?: unknown }).presetId === "string";
-
 type Loaded = { store: DocStore; saver: DocSaver; pool: IdPool; readOnly: boolean; captions: DocCaptions };
-
-type Fetched = { doc: EditDoc; rev: number; read_only: boolean; captions: DocCaptions; renderStyle: EditDoc["style"] | null };
-
-async function fetchDoc(jobId: string): Promise<Fetched | null> {
-  const r = await apiFetch(`/jobs/${jobId}/doc`);
-  if (!r.ok) return null;
-  const j = await r.json();
-  if (!j || !j.doc || !Array.isArray(j.doc.words)) return null;
-  const captions = docCaptions(j);
-  // Only a live style: the first save sends it, and PATCH refuses others.
-  const renderStyle =
-    isStyle(j.render_style) && (!captions.presetsLive || captions.presetsLive.includes(j.render_style.presetId))
-      ? j.render_style
-      : null;
-  return {
-    doc: j.doc as EditDoc,
-    rev: typeof j.rev === "number" ? j.rev : 0,
-    read_only: !!j.read_only,
-    captions,
-    renderStyle,
-  };
-}
-
-/**
- * The doc as the editor shows it (UT5): with the style an export draws now
- * — before the first editor save that can be a v1 caption preset's look,
- * not yet the doc's own style. Saved with the next edit.
- */
-function withRenderStyle(doc: EditDoc, style: EditDoc["style"] | null): EditDoc {
-  return style && JSON.stringify(style) !== JSON.stringify(doc.style) ? { ...doc, style } : doc;
-}
 
 /**
  * `doc` with the saved caption style (start/captionDefault.ts) of a new
