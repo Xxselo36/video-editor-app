@@ -8,7 +8,7 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { API, WEB } from "./support/env";
-import { chooseFile, createdJobId, jobCard, openWithStorage, storedJobs } from "./support/app";
+import { chooseFile, createdJobId, jobCard, openWithStorage, startGo, storedJobs } from "./support/app";
 
 /** A slow upload: the upload API waits a little, the body (the stub has
  *  no R2: it goes with POST /jobs) `ms`. */
@@ -27,6 +27,7 @@ async function throttleUpload(page: Page, ms: number) {
 /** Mark this document: still there after a client-side navigation. */
 const markDocument = (page: Page) => page.evaluate(() => ((window as unknown as { __doc?: number }).__doc = 1));
 const sameDocument = (page: Page) => page.evaluate(() => (window as unknown as { __doc?: number }).__doc === 1);
+const projectsLink = (page: Page) => page.getByRole("link", { name: "Projects", exact: true });
 
 test.describe("an upload while the user moves around the app", { tag: "@editor-v2" }, () => {
   test("Projects mid-upload: live progress, no connection_lost, and the upload finishes", async ({ page, stub }) => {
@@ -37,15 +38,17 @@ test.describe("an upload while the user moves around the app", { tag: "@editor-v
     await expect(page.getByTestId("start-upload")).toBeVisible();
     await markDocument(page);
 
-    // To Projects while it uploads (a client-side navigation).
-    await page.getByTestId("start-to-projects").click();
+    // "Let's go", then to Projects while it uploads (the header link: a
+    // client-side navigation).
+    await startGo(page);
+    await projectsLink(page).click();
     await expect(page).toHaveURL(`${WEB}/app`);
     const tile = jobCard(page, "wandert.mp4");
     await expect(tile).toHaveAttribute("data-state", "uploading");
-    // Back to the start screen and to Projects again (the header link).
+    // Back to the start screen and to Projects again.
     await page.getByTestId("dashboard-new-video").click();
     await expect(page.getByTestId("start-screen")).toBeVisible();
-    await page.getByRole("link", { name: "Projects", exact: true }).click();
+    await projectsLink(page).click();
     await expect(page).toHaveURL(`${WEB}/app`);
     await expect(tile).toHaveAttribute("data-state", "uploading");
     expect(await sameDocument(page)).toBe(true);
@@ -75,7 +78,8 @@ test.describe("an upload while the user moves around the app", { tag: "@editor-v
     await chooseFile(page, { name: "neu-geladen.mp4", mimeType: "video/mp4", buffer: media });
     await expect(page.getByTestId("start-upload")).toBeVisible();
     await markDocument(page);
-    await page.getByTestId("start-to-projects").click();
+    await startGo(page);
+    await projectsLink(page).click();
     await expect(page).toHaveURL(`${WEB}/app`);
     await expect.poll(() => sameDocument(page)).toBe(false);
 

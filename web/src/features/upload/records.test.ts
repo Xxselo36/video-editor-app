@@ -173,3 +173,29 @@ describe("the page comes back (iOS: pagehide for a page that only went to the ba
     expect(await code("upl-ended")).toBe("upload_interrupted");
   });
 });
+
+describe("the start screen's choices (D7)", () => {
+  it("follow on the record, the caption style whole: \"Try again\" after a reload starts with them", async () => {
+    const r = await running("upl-choices");
+    const store = await import("@/features/jobs/jobsStore");
+    const settings = {
+      style: "none",
+      voice_triggers: false,
+      remove_fillers: false,
+      smartcam_enabled: false,
+      smartcam_format: "portrait" as const,
+      resolution: "1080",
+      output_formats: [],
+      caption_style_hint: "karaoke",
+      caption_style: { presetId: "karaoke", overrides: { wordsPerPage: 2 } },
+    };
+    r.recordUploadSettings("upl-choices", settings);
+    await vi.waitFor(() => expect(store.getLocalJob("upl-choices")?.upload?.settings).toEqual(settings));
+    // A record that went (cancelled) doesn't come back with them.
+    r.removeUploadRecord("upl-choices");
+    r.recordUploadSettings("upl-choices", settings);
+    await new Promise((res) => setTimeout(res, 10));
+    expect(store.getLocalJob("upl-choices")).toBeNull();
+    r.liveUploads.delete("upl-choices");
+  });
+});

@@ -127,13 +127,13 @@ describe("upload refusals on the v2 opt-in (Oct 2026: storage full read as 'busy
 
   it("words 507 storage full and 429 too_many_uploads on their own, in every language", () => {
     expect(describeError(storageFull, tEn, { v2: true })).toBe(
-      "This video is too large for our servers right now — try again in a few minutes or shorten it.",
+      "This video is too large for our servers right now. Try again in a few minutes or shorten it.",
     );
     expect(describeError(storageFull, tDe, { v2: true })).toBe(
-      "Dieses Video ist gerade zu groß für unsere Server — versuch es in ein paar Minuten nochmal oder kürze es.",
+      "Dieses Video ist gerade zu groß für unsere Server. Versuch es in ein paar Minuten noch einmal oder kürze es.",
     );
-    expect(describeError(tooMany, tEn, { v2: true })).toBe("Too many uploads in a short time — wait a few minutes.");
-    expect(describeError(tooMany, tDe, { v2: true })).toBe("Zu viele Uploads in kurzer Zeit — warte ein paar Minuten.");
+    expect(describeError(tooMany, tEn, { v2: true })).toBe("Too many uploads in a short time. Wait a few minutes.");
+    expect(describeError(tooMany, tDe, { v2: true })).toBe("Zu viele Uploads in kurzer Zeit. Warte ein paar Minuten.");
     for (const code of ["server_storage_full", "too_many_uploads"]) {
       expect(describeError({ code }, tDe, { v2: true })).not.toBe(tDe("app.errors.serverBusy"));
     }

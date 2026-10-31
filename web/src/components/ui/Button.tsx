@@ -9,8 +9,9 @@ const VARIANT = {
 } as const;
 
 const SIZE = {
-  /** Full-width action at the end of a screen (Apply & render). */
-  lg: "rounded-xl px-6 py-4 text-base font-semibold active:scale-[0.99]",
+  /** Full-width action at the end of a screen (Apply & render, Let's go).
+   *  Pressed it gives a little; not with reduced motion. */
+  lg: "rounded-xl px-6 py-4 text-base font-semibold transition-transform duration-[160ms] ease-[cubic-bezier(.16,1,.3,1)] motion-safe:active:scale-[0.97] motion-reduce:transition-none",
   /** Dialog action. */
   md: "rounded-xl px-6 py-2.5 text-sm font-semibold",
   /** Inline action (Undo). */

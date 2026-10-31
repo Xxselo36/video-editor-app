@@ -33,7 +33,7 @@ export const nlLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.finish": "Beëindigt je video. Alles daarna valt weg.",
   "site.commands.note": "Voorlopig zijn de commando's gemaakt voor Engelse en Duitse video's.",
   "site.auto.title": "Pauzes en stopwoordjes vliegen eruit.",
-  "site.auto.body": "Geen commando nodig. CleoCuts haalt pauzes en stopwoordjes zoals {um} uit de hele video. Jij kiest het tempo: {tight}, {natural} of {none}.",
+  "site.auto.body": "Geen commando nodig. CleoCuts haalt pauzes en stopwoordjes zoals {um} uit de hele video. Al geknipt? Kies {none} bij het uploaden.",
   "site.auto.sample": "Dus {um} drie tips {pause} voor betere {um} hooks.",
   "site.auto.pause": "pauze",
   "site.auto.cleanup": "CleoCuts verbetert ook verkeerd verstane woorden in je ondertitels.",

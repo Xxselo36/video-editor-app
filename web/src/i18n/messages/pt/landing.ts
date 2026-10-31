@@ -33,7 +33,7 @@ export const ptLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.finish": "Termina seu vídeo. Tudo o que vem depois é descartado.",
   "site.commands.note": "Por enquanto, os comandos foram feitos para vídeos em inglês e alemão.",
   "site.auto.title": "Pausas e vícios de linguagem somem sozinhos.",
-  "site.auto.body": "Não precisa de comando. A CleoCuts remove pausas e vícios de linguagem como {um} em todo o vídeo. Você escolhe o ritmo: {tight}, {natural} ou {none}.",
+  "site.auto.body": "Não precisa de comando. A CleoCuts remove pausas e vícios de linguagem como {um} em todo o vídeo. Já editou o vídeo? Escolha {none} ao enviar.",
   "site.auto.sample": "Então {um} três dicas {pause} pra melhorar {um} seus ganchos.",
   "site.auto.pause": "pausa",
   "site.auto.cleanup": "Nas suas legendas, a CleoCuts também corrige palavras que ouviu errado.",

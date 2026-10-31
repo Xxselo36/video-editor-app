@@ -28,10 +28,10 @@ pipeline.render_to_keys):
   its time span takes those words (their own timings and ids); an edited
   unit splits its time over its tokens by length, like the UT1 preview.
 - Style (precedence): a style the user picked for this job
-  (settings.caption_style, PATCH /jobs/{id}) or an editor-saved doc
-  (doc_rev > 0) → doc.style; otherwise the v2 alias of the job's v1
-  caption_preset at the web's export position — the look the UT1 live
-  preview shows for that job; else doc.style.
+  (settings.caption_style: POST /jobs or PATCH /jobs/{id}) or an
+  editor-saved doc (doc_rev > 0) → doc.style; otherwise the v2 alias of
+  the job's v1 caption_preset at the web's export position — the look
+  the UT1 live preview shows for that job; else doc.style.
 
 Worker side (pipeline.render_to_dir with captions=spec):
 

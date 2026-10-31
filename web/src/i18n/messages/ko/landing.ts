@@ -33,7 +33,7 @@ export const koLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.finish": "영상을 끝내요. 그 뒤에 찍은 건 모두 잘라내요.",
   "site.commands.note": "지금은 명령어가 영어와 독일어 영상에 맞춰져 있어요.",
   "site.auto.title": "멈춤과 군말은 알아서 잘라 줘요.",
-  "site.auto.body": "명령어는 필요 없어요. CleoCuts가 영상 전체에서 멈춤과 {um} 같은 군말을 지워요. 컷 속도는 {tight}, {natural}, {none} 중에서 고르세요.",
+  "site.auto.body": "명령어는 필요 없어요. CleoCuts가 영상 전체에서 멈춤과 {um} 같은 군말을 지워요. 이미 편집한 영상이라면 업로드할 때 {none} 옵션을 고르세요.",
   "site.auto.sample": "자, {um} 훅 {pause} 잘 만드는 {um} 팁 세 가지예요.",
   "site.auto.pause": "멈춤",
   "site.auto.cleanup": "CleoCuts는 자막에서 잘못 알아들은 단어도 고쳐 줘요.",

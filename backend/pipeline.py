@@ -1785,16 +1785,19 @@ def analyze_only(
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    style_map = {"tight": "fast", "balanced": "smooth", "smooth": "smooth"}
-    pace = settings.get("style", "balanced")
-    style = style_map.get(pace, "smooth")
+    # One tight cut for everyone (owner, 2026-10): "tight", the old
+    # "smooth" / "balanced" and anything unknown or missing analyse as
+    # "fast". "No cuts" keeps the detection it always had and its own
+    # no-cut plan below.
+    pace = str(settings.get("style") or "").strip().lower()
+    no_cuts = pace == "none"
+    style = "smooth" if no_cuts else "fast"
 
     voice_triggers = settings.get("voice_triggers", True)
     remove_fillers = settings.get("remove_fillers", True)
     # "No cuts" (UX6): the whole video, only long silence at the very
     # start and end trimmed (no_cut_plan below). Transcription and the
     # text cleanup still run — the captions need them.
-    no_cuts = pace == "none"
     if no_cuts:
         voice_triggers = False
         remove_fillers = False

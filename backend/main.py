@@ -1969,13 +1969,28 @@ def _clean_settings(parsed: dict, user: User | None) -> dict:
     and formats. _cost_test (cost_test.py tagging) stays for the service
     user, and while auth is off."""
     out: dict[str, Any] = {}
-    # As before UX6 (additive only): any style string is kept — the
-    # pipeline maps tight / balanced / smooth, and UX6's "none" (no cuts);
-    # anything else analyses as smooth.
+    # As before UX6 (additive only): any style string is kept. The
+    # pipeline cuts tight for every pace but "none" (no cuts).
     for key in ("caption_preset", "style", "caption_style_hint"):
         value = parsed.get(key)
         if isinstance(value, str) and value.strip():
             out[key] = value.strip()[:64]
+    # The whole style picked on the start screen, {presetId, overrides}
+    # (a bare preset id is the hint's job); the doc starts with it. A
+    # live preset with its look, never one video's caption positions, as
+    # small as a saved default. Dropped, never refused: the hint stays.
+    # (Also a style validate_style can't even read: an integer too big
+    # for a float, overrides nested hundreds deep.)
+    style = parsed.get("caption_style")
+    if isinstance(style, dict):
+        try:
+            style = edit_doc.validate_style(style)
+            style["overrides"].pop("captions", None)
+            if (len(json.dumps(style, separators=(",", ":")))
+                    <= user_prefs.CAPTION_STYLE_MAX_BYTES):
+                out["caption_style"] = style
+        except Exception:  # DocError, OverflowError, RecursionError, …
+            pass
     if parsed.get("target_aspect") in edit_doc.ASPECTS:
         out["target_aspect"] = parsed["target_aspect"]
     # The spoken language (ISO 639-1); "auto" = detect it (not stored).
@@ -2211,6 +2226,9 @@ def public_config() -> dict[str, Any]:
              "scripts": None}
             for p in CAPTION_PRESETS
         ],
+        # The v2 presets the start screen offers and POST /jobs
+        # caption_style accepts (CLEO_CAPTION_PRESETS_LIVE); "none" always.
+        "caption_styles_live": edit_doc.live_presets(),
         # What the upload may name as its spoken language (UX6); "auto"
         # = Whisper detects it.
         "spoken_languages": ["auto", *SPOKEN_LANGUAGES],
@@ -3896,6 +3914,10 @@ def _multipart_complete(payload: dict, user: User | None):
             return done
         raise ApiRefusal(410, "upload_expired")
     got = _completed_size(t)
+    if got is None:
+        # Completed, and gone at once: a cancel (multipart_abort) deleted
+        # it in between. Not a file that was too big.
+        raise ApiRefusal(410, "upload_expired")
     if got != t["s"] or _too_big(got):
         _storage_call("DeleteObject", storage.delete, t["k"])
         raise _file_too_large()
@@ -3903,18 +3925,55 @@ def _multipart_complete(payload: dict, user: User | None):
 
 
 @app.post("/uploads/multipart/abort", status_code=204)
-def multipart_abort(payload: dict, user: User | None = Depends(current_user)):
-    """{ticket} → 204. Idempotent (an upload that is gone is fine)."""
+async def multipart_abort(payload: dict,
+                          user: User | None = Depends(current_user)):
+    """{ticket} → 204. Idempotent (an upload that is gone is fine). A
+    completed upload no job or claim holds goes too: it was given up
+    before POST /jobs (cancelled while it waited for "Let's go"), and R2
+    would keep it until the lifecycle rule (which still expires a single
+    PUT's: it has no ticket). The check and the delete take the key's
+    turn like POST /jobs does (_CREATING_KEYS): a request accepting the
+    upload right now keeps it, one arriving meanwhile finds it gone (409
+    upload_incomplete)."""
+    t = await run_in_threadpool(_read_ticket, payload, user)
+    if await run_in_threadpool(_abort_multipart, t):
+        return Response(status_code=204)
+    key = t["k"]
+    while (busy := _CREATING_KEYS.get(key)) is not None:
+        await busy.wait()
+    guard = _CREATING_KEYS[key] = asyncio.Event()
+    try:
+        await run_in_threadpool(_drop_unclaimed_upload, t)
+    finally:
+        _CREATING_KEYS.pop(key, None)
+        guard.set()
+    return Response(status_code=204)
+
+
+def _abort_multipart(t: dict) -> bool:
+    """AbortMultipartUpload; False when the upload isn't open any more
+    (completed, or aborted before)."""
     from backend import storage
-    t = _read_ticket(payload, user)
     try:
         _storage_call("AbortMultipartUpload", storage.mpu_abort,
                       t["k"], t["id"])
     except ApiRefusal:
         raise
     except Exception:  # NoSuchUpload
-        pass
-    return Response(status_code=204)
+        return False
+    return True
+
+
+def _drop_unclaimed_upload(t: dict) -> None:
+    """Delete the completed upload of ticket `t` unless a job, or the
+    claim of a POST /jobs (_claim_upload), holds its key."""
+    from backend import storage
+    size = _completed_size(t)
+    if size is None or store.find_by_key(t["k"]) is not None:
+        return
+    _storage_call("DeleteObject", storage.delete, t["k"])
+    print(f"[upload] abort: deleted a completed upload no job holds "
+          f"({size / 1e6:.0f} MB)", flush=True)
 
 
 _TELEMETRY = upl.RateLimit(30, 60.0)
@@ -4027,7 +4086,8 @@ def _presign_upload(payload: dict, user: User | None):
     return info
 
 
-# POST /jobs requests in progress, per storage key (one at a time).
+# POST /jobs requests in progress, per storage key (one at a time; an
+# abort deleting the completed upload takes its turn too).
 _CREATING_KEYS: dict[str, asyncio.Event] = {}
 
 

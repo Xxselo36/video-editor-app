@@ -21,13 +21,13 @@ Voice commands spoken during the recording steer the edit. “Cleo start” open
 ## Operating Context
 
 - Recording happens in the phone's camera app, not in CleoCuts. The commands are recognised afterwards, on the server (Whisper), not live.
-- The web app at `/app`: upload (resumable, up to 30 min and 4 GB by default), one start screen (aspect 9:16 / 16:9 / original, pace Tight / Natural / No cuts, remove fillers, voice commands on or off, spoken language), processing, then a browser editor (fix caption text, restore any cut, caption style and size) and a done view (download, share on phones, AI post text with hashtags, SRT/VTT, edit again without re-uploading).
+- The web app at `/app`: upload (resumable, up to 30 min and 10 GB by default) in two steps: the video, then the caption style (More options: captions only, remove fillers, format, spoken language); processing, then a browser editor (fix caption text, restore any cut, caption style and size) and a done view (download, share on phones, AI post text with hashtags, SRT/VTT, edit again without re-uploading).
 - Accounts (Clerk) and paid plans (Lemon Squeezy) exist in code behind switches. The site is in an open beta with no users yet.
 
 ## Capabilities and Constraints
 
 - Voice commands: “Cleo start” is optional (it marks where a take begins); without it a take begins after the command before it (before a “Cleo start” also after a “Cleo stop … Cleo go” pair), or at the start of the video. Until a clear “Cleo start” is said, Cleo removes at most 60 s on its own: a longer “Cleo cut” (its take), “Cleo finish” (the rest) or misheard start, and any guess at “Cleo cut”, is not applied — only the spoken command goes, and the editor offers the cut as a suggestion the creator confirms with one tap. The first clear “Cleo start” drops everything before it, as it always did, except the takes a clear “Cleo keep” kept; a “Cleo stop … Cleo go” pair, a misheard or a guessed command never keeps warm-up from it, and nothing said before it removes or offers to remove what comes after it. After a “Cleo start” every command acts in full. “Cleo stop … Cleo go” works on its own.
-- Automatic removal of pauses and filler words (pace setting).
+- Automatic removal of pauses and filler words (one tight cut; captions only skips the cuts).
 - 12 animated caption styles (Power, Mega, Clipper, Karaoke, Highlight Box, One Word, Word by Word, Neon, Sunset, Elegant, Subtitle Bar, Minimal) plus Off. Style availability depends on the script; right-to-left scripts get none yet.
 - Landscape to 9:16 with face tracking; 1080p export.
 - AI caption cleanup fixes misheard words and brand names; it decides no cuts.

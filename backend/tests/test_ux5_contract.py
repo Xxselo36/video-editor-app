@@ -304,12 +304,14 @@ def test_refusal_body_keeps_the_fields_next_to_detail():
 
 
 def test_config(client, monkeypatch):
+    monkeypatch.delenv("CLEO_CAPTION_PRESETS_LIVE", raising=False)
     r = client.get("/config")
     assert r.status_code == 200
     assert r.headers["cache-control"] == "public, max-age=60"
     c = r.json()
-    assert sorted(c) == ["billing", "caption_presets", "formats", "free_renders",
-                         "incident", "limits", "spoken_languages"]
+    assert sorted(c) == ["billing", "caption_presets", "caption_styles_live",
+                         "formats", "free_renders", "incident", "limits",
+                         "spoken_languages"]
     # CLEO_UPLOAD_MODE unset: single PUTs, so 5 GB (R2 takes at most
     # 5 GiB in one PUT), not the 10 GB default.
     assert c["limits"] == {"max_upload_bytes": 5_000_000_000, "max_seconds": 1800,
@@ -317,6 +319,13 @@ def test_config(client, monkeypatch):
     assert c["formats"] == ["9:16", "1:1", "16:9"]
     assert c["caption_presets"][0] == {"id": "clean", "name_key": "app.captions.clean",
                                        "status": "live", "scripts": None}
+    # The start screen's styles: the 12 launch presets, then "none".
+    assert c["caption_styles_live"] == [
+        "power", "mega", "clipper", "karaoke", "boxed", "punch", "reveal",
+        "neon", "gradient", "elegant", "subtitle", "minimal", "none"]
+    monkeypatch.setenv("CLEO_CAPTION_PRESETS_LIVE", "karaoke,power")
+    assert client.get("/config").json()["caption_styles_live"] == [
+        "karaoke", "power", "none"]
     assert c["billing"] == {"enabled": False} and c["incident"] is None
     monkeypatch.setenv("CLEO_UPLOAD_MODE", "multipart")
     assert client.get("/config").json()["limits"]["max_upload_bytes"] == 10_000_000_000

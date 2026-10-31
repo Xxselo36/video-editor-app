@@ -114,6 +114,12 @@ export function recordUploadStarting(tempId: string): void {
   writeUpload(tempId, { starting: true, pct: 100, lastProgressAt: Date.now() }, null);
 }
 
+/** The start screen's choices changed (until POST /jobs goes out): "Try
+ *  again" after a reload starts with them (v2; a v1 card keeps none). */
+export function recordUploadSettings(tempId: string, settings: UploadSettings): void {
+  writeUpload(tempId, { settings }, null);
+}
+
 /** The upload failed: `e` an error, or a code ({code}). While the page
  *  may be going (pagehide), a request the browser cut is "interrupted";
  *  a server's answer (too long, no audio, …) stays what it is. */

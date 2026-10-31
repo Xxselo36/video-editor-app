@@ -4,7 +4,8 @@
  * on the v2 opt-in, a Projects tile — ./records.ts) shows the upload and
  * then the job; a failed upload leaves the record with its error. A
  * cancelled one (UX12, `signal`) aborts the multipart upload and leaves
- * nothing. Never throws.
+ * nothing. With a gate (`ready`, D1) the job waits for "Let's go". Never
+ * throws.
  */
 import { refreshMe, fetchServerJobs, paywallFrom, toMs, type Paywall } from "@/lib/account";
 import { track } from "@/lib/analytics";
@@ -38,6 +39,7 @@ import {
 } from "./records";
 
 export type { UploadSettings } from "./settings";
+export { precheckUpload } from "./precheck";
 
 // POST /jobs after an upload to R2: waits between tries on a network
 // error or a 5xx that isn't a refusal — about 75 s in all, so a backend
@@ -227,23 +229,51 @@ export async function uploadJob(
   targetFile: File,
   settings: SettingsSource,
   selectedPreset: PresetId | null,
-  { tempId, signal, source, onPaywall, onCreated, onFailed, onStarting, onProgress, onPaused, onEnd }: {
+  {
+    tempId,
+    signal,
+    source,
+    ready,
+    duration: pickedDuration,
+    onPaywall,
+    onCreated,
+    onFailed,
+    onSettingsRead,
+    onStarting,
+    onUploaded,
+    onProgress,
+    onPaused,
+    onEnd,
+  }: {
     /** The upload record's temporary id (uploadCard). */
     tempId: string;
     /** "any": picked with the unfiltered iOS input (lib/uploadResume). */
     source?: "any";
     /** Cancel (UX12): stops the upload and aborts it on the server. */
     signal?: AbortSignal;
+    /** The gate ("Let's go", ./gate): POST /jobs waits for it. The bytes
+     *  go up to R2 meanwhile; the legacy upload sends them with POST
+     *  /jobs, so there they wait too. */
+    ready?: Promise<void>;
+    /** The length as read when the file was picked (null: the browser
+     *  couldn't); read here when not given. */
+    duration?: number | null;
     /** Billing refused the upload (402): the dialog with a way to a plan. */
     onPaywall: (pw: Paywall) => void;
     /** The job exists (its project replaced the upload record). */
     onCreated: (jobId: string) => void;
     /** The upload failed (not cancelled): its record says why. */
     onFailed?: () => void;
+    /** POST /jobs read the settings: a change from now on wouldn't reach
+     *  the job. R2: right before onStarting. The legacy upload sends the
+     *  bytes with the request, so it comes before they go up. */
+    onSettingsRead?: () => void;
     /** The file is stored and POST /jobs goes out (UX12): from here on
      *  the job may exist on the server, so Cancel is no longer offered
      *  and `signal` is ignored. */
     onStarting?: () => void;
+    /** The bytes are stored in R2 (before the gate). */
+    onUploaded?: (tempId: string) => void;
     /** Live progress of the upload card (memory only: uploadManager). */
     onProgress?: (tempId: string, pct: number, resuming: boolean) => void;
     /** Waiting for the connection (it continues by itself) / going again. */
@@ -312,16 +342,38 @@ export async function uploadJob(
   type Lock = { release: () => Promise<void>; released?: boolean };
   let _wakeLock: Lock | null = null;
   let over = false;
+  // Nothing moves while it waits for the gate: no wake lock meanwhile
+  // (the screen may sleep), taken again once it opens.
+  let waitingAtGate = false;
+  const releaseWakeLock = async () => {
+    const held = _wakeLock;
+    _wakeLock = null;
+    try {
+      await held?.release();
+    } catch {
+      // ignore
+    }
+  };
   const lock = async () => {
     try {
       const nav = navigator as unknown as { wakeLock?: { request: (t: string) => Promise<Lock> } };
-      if (over || !nav.wakeLock?.request || (_wakeLock && !_wakeLock.released)) return;
+      if (over || waitingAtGate || !nav.wakeLock?.request || (_wakeLock && !_wakeLock.released)) return;
       if (document.visibilityState !== "visible") return;
       _wakeLock = await nav.wakeLock.request("screen");
-      if (over) void _wakeLock.release().catch(() => {});
+      if (over || waitingAtGate) void releaseWakeLock();
     } catch {
       // ignore — unsupported, permission denied, or lost focus
     }
+  };
+  /** POST /jobs waits here until the gate opens (`ready`). The heartbeat
+   *  goes on meanwhile: no other tab takes the upload for a dead one. */
+  const waitForGo = async () => {
+    if (!ready) return;
+    waitingAtGate = true;
+    await releaseWakeLock();
+    await unlessAborted(ready, signal);
+    waitingAtGate = false;
+    await lock();
   };
   // The page was hidden since POST /jobs' last try (iOS: Safari in the
   // background cuts it): a lost connection, not a server bug.
@@ -369,9 +421,9 @@ export async function uploadJob(
     }
     // Over the size / length limits (the deployment's, GET /config): say
     // so now instead of after the upload (the server would refuse it).
-    // The length is read from the file's metadata; when the browser
-    // can't, the server probes.
-    const duration = await readVideoDuration(targetFile);
+    // The length is read from the file's metadata (once: the start screen
+    // read it at the pick); when the browser can't, the server probes.
+    const duration = pickedDuration !== undefined ? pickedDuration : await readVideoDuration(targetFile);
     const { limits } = await getConfig();
     const limit = uploadLimitHit(targetFile.size, duration, limits);
     if (limit) {
@@ -434,6 +486,10 @@ export async function uploadJob(
     // Set when POST /jobs gave no usable answer but created the job.
     let createdJobId: string | null = null;
     if (storageKey) {
+      // Stored. POST /jobs waits for "Let's go" (D1); the settings are
+      // read after it.
+      onUploaded?.(tempId);
+      await waitForGo();
       // Create the job with the completed storage_key. The server
       // answers in about a second whatever the size (it only checks
       // and probes the object; the analysis downloads it), and POST
@@ -451,6 +507,7 @@ export async function uploadJob(
       const postedAt = Date.now();
       // Cancelled as the upload finished: no POST at all.
       if (signal?.aborted) throw new Error("Upload aborted");
+      onSettingsRead?.();
       // From here on the job may be created: no cancel any more.
       started = true;
       onStarting?.();
@@ -517,12 +574,22 @@ export async function uploadJob(
         if (!createdJobId) throw failure;
       }
     } else {
-      // Fetched now, i.e. after the upload attempt: the token is short-lived.
-      const auth = AUTH_ENABLED ? await authHeaders() : {};
-      // Legacy path — direct multipart upload to Railway.
+      // Legacy path — direct multipart upload to Railway. The bytes go
+      // with POST /jobs, so they wait for "Let's go" too.
       const form = new FormData();
       form.append("file", targetFile);
+      await waitForGo();
+      // Fetched now, i.e. after the upload attempt and the gate: the
+      // token is short-lived.
+      const auth = AUTH_ENABLED ? await authHeaders() : {};
+      // Cancelled while the wake lock or the token was being fetched
+      // after "Let's go" (the abort listener below isn't there yet):
+      // nothing goes out. Nothing is awaited from here to xhr.send.
+      if (signal?.aborted) throw new Error("Upload aborted");
       appendJobFields(form);
+      // The settings are read: the bytes go up with them from here on,
+      // and a change meanwhile wouldn't reach the job.
+      onSettingsRead?.();
       res = await new Promise<XMLHttpRequest>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", `${backendUrl()}/jobs`);
@@ -658,10 +725,6 @@ export async function uploadJob(
     liveUploads.delete(tempId);
     onEnd?.(tempId);
     // Release wake lock when upload path exits (success OR error).
-    try {
-      await (_wakeLock as Lock | null)?.release();
-    } catch {
-      // ignore
-    }
+    await releaseWakeLock();
   }
 }

@@ -8,9 +8,15 @@
  * An <article> with real buttons (T16). The whole tile opens the project
  * (a stretched button under the content); the menu and the upload
  * actions sit above it. An expired tile requests no thumbnail.
+ *
+ * An upload waiting for "Let's go" (D3) says so and leads back to the
+ * start screen ("Continue"), also once it failed (instead of "Try again").
+ * Its bytes all stored, its badge says "Uploaded": nothing goes on until
+ * "Let's go".
  */
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { Film, RotateCw, X } from "lucide-react";
+import { ArrowRight, Film, RotateCw, X } from "lucide-react";
+import { cx } from "@/components/ui/cx";
 import { Icon } from "@/components/ui/Icon";
 import { useLang, useT, type TFn } from "@/i18n";
 import { fmtMinutes } from "@/lib/account";
@@ -24,7 +30,7 @@ import { usePickWatch } from "@/features/start/pickWatch";
 import { usePreparing } from "@/features/start/usePreparing";
 import { originalTooBig, overLimitGb, pickedKind, resumeWithAny, useIsIOS, useVideoAccept } from "@/features/start/videoPicker";
 import { canRetryInPlace, cancelUpload, retryUpload, retryUploadWith, runsElsewhere } from "@/features/upload/uploadControls";
-import { useLiveUpload, useLocalThumb } from "@/features/upload/uploadState";
+import { useAwaitingGo, useLiveUpload, useLocalThumb } from "@/features/upload/uploadState";
 import { matchResumable, stoppedTileShowsError, useResumableUploads } from "@/features/upload/useResumable";
 import { discardResumable, findRecord } from "@/lib/uploadResume";
 import type { UploadSettings } from "@/features/upload/uploadJob";
@@ -58,6 +64,9 @@ const BADGE: Record<ProjectState, { key: Parameters<TFn>[0]; tone: "brand" | "bu
   failed: { key: "app.projects.badge.failed", tone: "bad" },
   expired: { key: "app.projects.badge.expired", tone: "muted" },
 };
+
+/** An upload whose bytes are all stored while it waits for "Let's go". */
+const STORED_BADGE: (typeof BADGE)[ProjectState] = { key: "app.processing.step.uploaded", tone: "busy" };
 
 const TONE: Record<string, { bg: string; fg: string }> = {
   brand: { bg: "var(--brand-solid)", fg: "#fff" },
@@ -208,6 +217,9 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
   const t = useT();
   const lang = useLang();
   const liveUpload = useLiveUpload(project.id);
+  // Picked on the start screen, waiting for "Let's go": the way on is
+  // back there.
+  const awaitingGo = useAwaitingGo(project.id);
   // Running in another tab: shown as running, nothing to cancel, remove
   // or upload again here.
   const elsewhere = useRunsElsewhere(project.id, !liveUpload && (project.state === "uploading" || project.state === "upload_failed"));
@@ -243,7 +255,8 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
   const name = p.name || t("app.library.untitled");
   const shown = middleEllipsis(name);
   const href = openHref(p);
-  const badge = BADGE[p.state];
+  // Stored, waiting for "Let's go": not uploading any more.
+  const badge = awaitingGo && p.state === "uploading" && liveUpload?.uploaded ? STORED_BADGE : BADGE[p.state];
   const tone = TONE[badge.tone];
   const left = p.state === "expired" ? null : daysLeft(p.expiresAt, now);
   const expiring = left !== null && left <= 3 && (p.state === "exported" || p.state === "ready" || p.state === "edited");
@@ -260,7 +273,9 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
   const status = (() => {
     switch (p.state) {
       case "uploading":
+        // (Waiting for "Let's go" too: the connection comes first.)
         if (liveUpload?.paused) return t("app.upload.paused");
+        if (awaitingGo) return t("app.start.waitingForGo");
         if (starting) return t("app.projects.starting");
         return resuming ? t("app.upload.resuming") : t(touchDevice() ? "app.projects.uploadKeepOpenPhone" : "app.projects.uploadKeepOpen");
       case "upload_failed":
@@ -552,19 +567,31 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
           ))}
         {(uploading || p.state === "upload_failed" || p.state === "expired") && (
           <div className="pointer-events-auto relative z-10 mt-1 flex flex-wrap gap-1.5">
+            {awaitingGo && (
+              <button
+                type="button"
+                data-testid="job-card-continue-start"
+                onClick={() => onOpen("/app/new")}
+                className="inline-flex min-h-11 items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+                style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
+              >
+                {t("app.start.continueStart")}
+                <Icon icon={ArrowRight} />
+              </button>
+            )}
             {uploading && !elsewhere && (!starting || liveUpload?.paused) && (
               <button
                 type="button"
                 data-testid="job-card-cancel"
                 onClick={() => void cancelUpload(p.id)}
-                className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+                className="inline-flex min-h-11 items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
                 style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
               >
                 <Icon icon={X} />
                 {t("app.projects.cancel")}
               </button>
             )}
-            {p.state === "upload_failed" && (
+            {p.state === "upload_failed" && !awaitingGo && (
               <>
                 <button
                   type="button"
@@ -609,7 +636,8 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
                   if (resumable) void discardResumable(resumable.fp);
                   void cancelUpload(p.id);
                 }}
-                className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+                // (Beside "Continue" of a waiting upload: as tall as it.)
+                className={cx("inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold", awaitingGo && "min-h-11")}
                 style={{ background: "var(--surface-2)", color: "var(--text-body)" }}
               >
                 <Icon icon={X} />

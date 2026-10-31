@@ -1,12 +1,12 @@
 /**
- * Cancel and "Try again" of an upload (UX12, v2 Projects tiles). Its own
- * module: only the Projects page (its own chunk) imports it, so the start
- * screen stays light.
+ * Cancel and "Try again" of an upload (UX12, v2 Projects tiles; the start
+ * screen's X and "Try again", D2). Its own module: only screens with
+ * those controls import it.
  */
 import { removeUploadRecord } from "./records";
 import type { SettingsSource } from "./settings";
-import { startUpload } from "./uploadManager";
-import { controllers, live, retries, setThumb } from "./uploadState";
+import { startUpload, type StartOpts } from "./uploadManager";
+import { controllers, live, retries, setAwaitingGo, setThumb, takeThumb } from "./uploadState";
 import type { PresetId } from "@/features/start/presets.legacy";
 import { runningUploads } from "@/lib/uploadLock";
 
@@ -26,7 +26,8 @@ export function canRetryInPlace(id: string): boolean {
 /**
  * Cancel an upload: the request stops, the multipart upload is aborted on
  * the server (abortResumable) and its record goes. A failed upload is
- * just removed (its resume record too: the user gave it up).
+ * just removed (its resume record too: the user gave it up). Also one
+ * waiting for "Let's go": no job, and the server deletes the stored file.
  */
 export async function cancelUpload(id: string): Promise<void> {
   // POST /jobs went out: the job may exist and can't be stopped — the
@@ -40,6 +41,7 @@ export async function cancelUpload(id: string): Promise<void> {
   retries.delete(id);
   setThumb(id, null);
   removeUploadRecord(id);
+  setAwaitingGo(id, false);
   if (ctl) {
     // uploadJob sees the abort, aborts the multipart upload and forgets
     // the record itself.
@@ -57,15 +59,28 @@ export async function cancelUpload(id: string): Promise<void> {
 }
 
 /** "Try again" with the File this page still has: a new upload of the
- *  same file, which resumes where the failed one stopped. False when the
- *  file isn't here any more (the caller asks for it). */
-export function retryUpload(id: string): boolean {
+ *  same file, which resumes where the failed one stopped. With `opts`
+ *  (the start screen's gate, length and callbacks), or without them for
+ *  an upload the start screen started (its Projects tile: the same gate
+ *  and callbacks go on), the new upload keeps the thumbnail too, unless
+ *  `opts.thumb` brings another. False when the file isn't here any more
+ *  (the caller asks for it). */
+export function retryUpload(id: string, opts?: StartOpts): boolean {
   const r = retries.get(id);
   if (!r) return false;
   retries.delete(id);
   removeUploadRecord(id);
-  setThumb(id, null);
-  void startUpload(r.file, r.settings, r.preset, { source: r.source });
+  setAwaitingGo(id, false);
+  const o: StartOpts | undefined = opts ?? r.start;
+  if (!o) {
+    setThumb(id, null);
+    void startUpload(r.file, r.settings, r.preset, { source: r.source });
+    return true;
+  }
+  // (The start screen draws its tiles with that frame: not revoked.)
+  const thumb = o.thumb ?? takeThumb(id);
+  if (o.thumb) setThumb(id, null);
+  void startUpload(r.file, r.settings, r.preset, { ...o, source: r.source, thumb });
   return true;
 }
 

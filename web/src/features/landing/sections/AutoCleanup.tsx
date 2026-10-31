@@ -571,9 +571,7 @@ export function AutoCleanupSection() {
 
   const body = rich(t("site.auto.body"), {
     um: t("site.quote", { text: filler }),
-    tight: <strong className={c.em}>{t("app.start.paceTight")}</strong>,
-    natural: <strong className={c.em}>{t("app.start.paceSmooth")}</strong>,
-    none: <strong className={c.em}>{t("app.start.paceNone")}</strong>,
+    none: <strong className={c.em}>{t("app.start.summaryCaptionsOnly")}</strong>,
   });
 
   const token = (type: "um" | "pause") =>

@@ -1,0 +1,1077 @@
+/* The start screens, "Neues Video" and "Untertitel wählen" (approved
+ * mockups docs/mockups/start/1-video, 2-untertitel, 2b-optionen). Ported
+ * from the mockup stylesheet with the app's tokens. Phones and desktop
+ * switch at 960 px; widths inside follow container queries (the root is
+ * the "screen" container), so the app shell's sidebar changes nothing
+ * here. Type: 11 chips, 12.5 notes, 14 names and controls, 15 row labels,
+ * 16 buttons. Radii: 8 small, 12 controls, 16 cards and frames. */
+
+.root {
+  container: screen / inline-size;
+}
+.root :focus-visible {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 3px;
+}
+/* The heading takes focus when the screen changes; no ring for that. */
+.root h1:focus-visible {
+  outline: none;
+}
+.root button,
+.root select,
+.root label {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ================= 1: Neues Video ================= */
+
+.pick {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* An interrupted upload of this browser (lib/uploadResume). */
+.resume {
+  padding: 16px;
+  border: 1px solid var(--brand);
+  border-radius: 16px;
+  background: var(--brand-tint);
+}
+.resumeText {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.resumeText svg {
+  margin-top: 0.2em;
+  color: var(--brand-strong);
+}
+.resumeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.resumeDiscard {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-body);
+  transition: background-color 0.15s ease, transform 0.16s var(--ease-out);
+}
+.resumeDiscard:active {
+  transform: scale(0.97);
+}
+.resumeDiscard:disabled {
+  opacity: 0.5;
+}
+
+/* Phones: one big card, the whole of it the chooser's button (nothing to
+ * drop on a phone). Desktop: the dashed drop zone. */
+.drop {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  min-height: max(380px, calc(100svh - var(--app-chrome, 190px)));
+  padding: 28px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-1);
+  text-align: center;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.drop[data-resume] {
+  min-height: 320px;
+}
+.drop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(64% 38% at 50% 42%, color-mix(in srgb, var(--brand) 16%, transparent), transparent 72%);
+}
+.drop[data-over] {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+}
+.drop:has(> .dropButton:focus-visible) {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 3px;
+}
+/* The card's button, stretched over it; the face shows through. */
+.dropButton {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  cursor: pointer;
+}
+.dropButton:focus-visible {
+  outline: none;
+}
+.face {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  pointer-events: none;
+}
+.ghost {
+  display: grid;
+  place-items: center;
+  width: 104px;
+  aspect-ratio: 9 / 16;
+  border-radius: 12px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand) 16%, transparent),
+    color-mix(in srgb, var(--brand) 6%, transparent)
+  );
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--brand) 42%, transparent);
+  color: var(--brand-hover);
+  transition: transform 0.3s var(--ease-out);
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 200px;
+}
+.drop:has(> .dropButton:active) .pill {
+  transform: scale(0.97);
+}
+.or {
+  display: none;
+  margin-top: -10px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+.limits {
+  margin-top: -10px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-wrap: balance;
+}
+/* Above the card's button: only its links and buttons take taps. */
+.extras {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 34rem;
+  pointer-events: none;
+}
+.extras:empty {
+  display: none;
+}
+.extras a,
+.extras button {
+  pointer-events: auto;
+}
+.quiet {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brand-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.minutes {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brand-strong);
+}
+.preparing {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--text-body);
+}
+.note {
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+.pickError {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--danger);
+  text-wrap: pretty;
+}
+.privacy {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  min-height: 44px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .drop:hover {
+    border-color: var(--border-hover);
+  }
+  .drop:hover .ghost {
+    transform: translateY(-3px);
+  }
+  .drop:hover .pill[data-variant="primary"] {
+    background: var(--brand-solid-hover);
+  }
+  .drop:hover .pill[data-variant="tint"] {
+    background: color-mix(in srgb, var(--brand) 19%, transparent);
+  }
+  .quiet:hover,
+  .minutes:hover,
+  .privacy:hover {
+    opacity: 0.8;
+  }
+  .resumeDiscard:hover:not(:disabled) {
+    background: var(--surface-1);
+  }
+}
+
+@media (min-width: 960px) {
+  .pick {
+    gap: 28px;
+    max-width: 820px;
+  }
+  .drop {
+    min-height: 440px;
+    padding: 32px 20px 40px;
+    border: 1.5px dashed color-mix(in srgb, var(--border-strong) 85%, transparent);
+    background: color-mix(in srgb, var(--surface-1) 60%, transparent);
+  }
+  .or {
+    display: block;
+  }
+  .limits {
+    margin-top: 4px;
+  }
+  .privacy {
+    margin-top: -16px;
+  }
+}
+@media (min-width: 960px) and (hover: hover) and (pointer: fine) {
+  .drop:hover {
+    border-color: var(--border-strong);
+  }
+}
+
+/* ================= 2: Untertitel wählen ================= */
+
+.choose > h1 {
+  margin-bottom: 16px;
+}
+
+/* ── the upload: a strip on phones, under the preview on desktop ── */
+/* Where the strip starts: it is stuck once this has gone under the top. */
+.sentinel {
+  height: 1px;
+  margin-bottom: -1px;
+}
+.status {
+  position: sticky;
+  top: var(--app-topbar, 0px);
+  z-index: 19;
+  margin-bottom: 4px;
+  padding: 12px 0;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+.statusRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.statusText {
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text-body);
+}
+.statusText[data-state="failed"] {
+  color: var(--cmd-cut);
+  font-weight: 600;
+}
+.pct {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-strong);
+}
+.statusEnd {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+}
+/* Cancel: a quiet x with a 44 px target that takes no extra room. */
+.x {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -12px -14px -12px -8px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  transition: color 0.15s ease, opacity 0.12s ease;
+}
+.x:active {
+  opacity: 0.6;
+}
+.track {
+  height: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-tint);
+}
+.fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--cmd-start);
+  transform-origin: left;
+  transform: scaleX(var(--p, 0));
+  transition: transform 0.35s var(--ease-out);
+}
+.line {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+.warn {
+  color: var(--warn);
+}
+.uses {
+  color: var(--text-body);
+}
+.reason {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-body);
+  text-wrap: pretty;
+}
+.retry {
+  margin-top: 10px;
+}
+
+/* ── the styles: twelve tiles and "Ohne Untertitel", one radio group ── */
+.styles {
+  container-type: inline-size;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 10px;
+  align-items: start;
+}
+@container (min-width: 320px) {
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@container (min-width: 600px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px 14px;
+  }
+  .off {
+    max-width: calc(50% - 7px);
+  }
+}
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  border-radius: 12px;
+  text-align: left;
+  -webkit-touch-callout: none;
+  transition: transform 0.16s var(--ease-out);
+}
+.tile:active:not([aria-disabled="true"]) {
+  transform: scale(0.97);
+}
+.tile:focus-visible {
+  outline: none;
+}
+.tile:focus-visible .band {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 4px;
+}
+.tile[aria-disabled="true"] {
+  cursor: default;
+}
+/* The caption band, drawn by the caption engine over the video's frame
+ * (a neutral backdrop until there is one). */
+.band {
+  position: relative;
+  display: block;
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 7%, transparent);
+  transition: box-shadow 0.18s ease;
+}
+.band::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 6%, transparent);
+}
+.tile[aria-checked="true"] .band {
+  box-shadow:
+    0 0 0 2px var(--surface-0),
+    0 0 0 4px var(--brand);
+}
+/* Each drawing fades in over the last: the frame arriving crossfades. */
+.band canvas,
+.preview canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.band canvas[data-drawn],
+.preview canvas[data-drawn] {
+  opacity: 1;
+}
+/* Fonts loading: a soft light runs over the band. */
+.shimmer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, var(--text-strong) 7%, transparent) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: sweep 1.6s ease-in-out infinite;
+}
+@keyframes sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+/* Names wrap at their hyphen ("Untertitel-" / "Balken"), never "…". */
+.tname {
+  display: -webkit-box;
+  overflow: hidden;
+  padding: 0 2px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--text-muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  transition: color 0.15s ease;
+}
+.tile[aria-checked="true"] .tname {
+  color: var(--text-strong);
+}
+/* "Zuletzt benutzt" / "Dein Standard": a chip on the band, so every
+ * tile keeps one name line. */
+.tag {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-0) 72%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-strong);
+  pointer-events: none;
+}
+@container (min-width: 320px) and (max-width: 359px) {
+  .tag {
+    top: 5px;
+    left: 5px;
+    padding: 0 5px;
+    font-size: 10.5px;
+  }
+}
+.off {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 0 14px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--text-body);
+  transition: box-shadow 0.16s ease, color 0.16s ease, transform 0.16s var(--ease-out);
+}
+.off:active:not([aria-disabled="true"]) {
+  transform: scale(0.98);
+}
+.off > svg {
+  color: var(--text-muted);
+}
+.off[aria-checked="true"] {
+  box-shadow: inset 0 0 0 2px var(--brand);
+  color: var(--text-strong);
+}
+.off[aria-checked="true"] > svg {
+  color: var(--brand-hover);
+}
+.off[aria-disabled="true"] {
+  cursor: default;
+}
+.offTag {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-tint);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--text-strong);
+}
+
+/* ── "Mehr Optionen" ── */
+.more {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.disc {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 4px 6px 4px 2px;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--text-body);
+  transition: color 0.15s ease, opacity 0.12s ease;
+}
+.disc:active {
+  opacity: 0.7;
+}
+.discRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.discRow > svg {
+  color: var(--text-muted);
+  transition: transform 0.2s var(--ease-out);
+}
+.more[data-open] .discRow > svg {
+  transform: rotate(90deg);
+}
+.discSum {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.3s var(--ease-out);
+}
+.more[data-open] .panel {
+  grid-template-rows: 1fr;
+}
+/* Closed: hidden once it has folded away (and inert all along). */
+.panelClip {
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s linear 0.3s;
+}
+.more[data-open] .panelClip {
+  visibility: visible;
+  transition-delay: 0s;
+}
+.opts {
+  margin: 6px 0 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-1);
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.2s ease, transform 0.3s var(--ease-out);
+}
+.more[data-open] .opts {
+  opacity: 1;
+  transform: none;
+}
+.orow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 16px;
+  text-align: left;
+  transition: background-color 0.14s ease;
+}
+.orow + .orow {
+  border-top: 1px solid var(--border);
+}
+/* Inside the card's clipped edge. */
+.orow:focus-visible {
+  outline-offset: -2px;
+}
+button.orow:active:not([aria-disabled="true"]),
+.langRow:active {
+  background: var(--surface-2);
+}
+.orow[aria-disabled="true"] {
+  cursor: default;
+}
+.lbl {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-strong);
+}
+.rowLabel {
+  display: block;
+}
+.switch {
+  display: flex;
+  flex: none;
+}
+.orow[aria-disabled="true"] .rowLabel,
+.orow[aria-disabled="true"] .switch {
+  opacity: 0.42;
+}
+.sub {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+.cmdCut {
+  font-weight: 600;
+  color: var(--cmd-cut);
+}
+.fmtRow {
+  display: block;
+  padding: 14px 16px 16px;
+}
+.fmt {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+/* A label that doesn't fit beside its shape goes under it. */
+.fmt button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 5px 8px;
+  min-height: 48px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-0);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-body);
+  hyphens: auto;
+  overflow-wrap: break-word;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.16s var(--ease-out);
+}
+.fmt button:active:not([aria-disabled="true"]) {
+  transform: scale(0.98);
+}
+.fmt button[aria-checked="true"] {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+  color: var(--brand-strong);
+}
+.fmt button[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.shape {
+  flex: none;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.9;
+}
+.shapeV {
+  width: 11px;
+  height: 18px;
+}
+.shapeH {
+  width: 19px;
+  height: 12px;
+}
+.shapeO {
+  width: 15px;
+  height: 15px;
+  border-style: dashed;
+}
+.fmtHint {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.langRow {
+  cursor: pointer;
+}
+.val {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.langRow > svg {
+  color: var(--text-muted);
+}
+.langRow select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  font-size: 16px;
+  cursor: pointer;
+}
+.langRow select:disabled {
+  cursor: default;
+}
+.langRow select:focus-visible {
+  outline: none;
+}
+.langRow:has(select:focus-visible) {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: -2px;
+  border-radius: 16px;
+}
+/* Narrow phones: the shapes go above their labels, set a size smaller
+ * so the longest ones ("Oryginalny", "Horizontal") fit the button. */
+@container (max-width: 319px) {
+  .fmt button {
+    flex-direction: column;
+    min-height: 60px;
+    padding: 8px 4px;
+    font-size: 12.5px;
+  }
+}
+
+/* ── "Los geht's": a bar at the bottom on phones, under the preview on
+ * desktop. Sticky, not fixed: at the end of the page it rests above the
+ * footer. ── */
+.go {
+  position: sticky;
+  bottom: var(--app-tabbar, env(safe-area-inset-bottom, 0px));
+  z-index: 25;
+  padding: 16px 0 8px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--surface-0) 94%, transparent) 16px,
+    var(--surface-0)
+  );
+}
+.goBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+/* The check and the label share one line box: on two lines (a long
+ * label on a narrow phone) the check leads the first. */
+.goLabel {
+  text-align: center;
+  text-wrap: balance;
+}
+.goCheck {
+  margin-inline-end: 8px;
+  vertical-align: -0.2em;
+}
+.goBtn[aria-disabled="true"] {
+  cursor: default;
+}
+.goBtn[aria-disabled="true"]:active {
+  scale: none;
+}
+.goNote {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  text-wrap: balance;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .x:hover {
+    color: var(--text-strong);
+  }
+  .tile:hover:not([aria-checked="true"]):not([aria-disabled="true"]) .band {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 7%, transparent),
+      0 0 0 1px var(--border-strong);
+  }
+  .tile:hover:not([aria-disabled="true"]) .tname {
+    color: var(--text-body);
+  }
+  .tile[aria-checked="true"]:hover .tname {
+    color: var(--text-strong);
+  }
+  .off:hover:not([aria-checked="true"]):not([aria-disabled="true"]) {
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+  .disc:hover {
+    color: var(--text-strong);
+  }
+  .fmt button:not([aria-checked="true"]):not([aria-disabled="true"]):hover {
+    border-color: var(--border-hover);
+  }
+}
+
+/* Phones: the strip turns opaque with a line once it sticks, and both
+ * bars reach the screen's edges (a picked tile's ring reaches into the
+ * page's side padding); the go bar's fade stays over the column. Short
+ * landscape screens: nothing sticks. */
+@media (max-width: 959px) and (min-height: 501px) {
+  /* (Clipped stuck or not: the shadow fades out after the strip lets go.) */
+  .status {
+    clip-path: inset(-8px -100vmax -1px);
+  }
+  .status[data-stuck] {
+    background: var(--surface-0);
+    box-shadow:
+      0 0 0 100vmax var(--surface-0),
+      0 1px 0 100vmax var(--border);
+  }
+  .go {
+    box-shadow: 0 0 0 100vmax var(--surface-0);
+    clip-path: polygon(
+      0 0,
+      100% 0,
+      100% 16px,
+      calc(100% + 100vmax) 16px,
+      calc(100% + 100vmax) calc(100% + env(safe-area-inset-bottom, 0px)),
+      -100vmax calc(100% + env(safe-area-inset-bottom, 0px)),
+      -100vmax 16px,
+      0 16px
+    );
+  }
+  /* The waiting button's tint is see-through: on the bar's fade the
+   * captions scrolling under it would show through. */
+  .goBtn[aria-disabled="true"] {
+    background: linear-gradient(var(--brand-tint), var(--brand-tint)), var(--surface-0);
+  }
+}
+@media (max-width: 959px) and (max-height: 500px) {
+  .status,
+  .go {
+    position: static;
+  }
+}
+
+/* Desktop: the choices left, the video and "Los geht's" right. */
+@media (min-width: 960px) {
+  .style {
+    --aside: 240px;
+    --aside-gap: 32px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--aside);
+    gap: var(--aside-gap);
+    align-items: start;
+    max-width: 1120px;
+  }
+  .choose > h1 {
+    margin-bottom: 24px;
+  }
+  .opts {
+    max-width: 520px;
+  }
+  .aside {
+    position: sticky;
+    top: 48px;
+    display: flex;
+    flex-direction: column;
+  }
+  .status {
+    position: static;
+    margin: 16px 0 0;
+    padding: 0;
+  }
+  .statusRow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+  }
+  .statusEnd {
+    order: -1;
+    justify-content: space-between;
+  }
+  .file {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-strong);
+  }
+  .statusText {
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+  .go {
+    position: static;
+    margin-top: 18px;
+    padding: 0;
+    background: none;
+  }
+  .goNote {
+    text-align: left;
+  }
+}
+@container screen (min-width: 960px) {
+  .style {
+    --aside: 300px;
+    --aside-gap: 56px;
+  }
+}
+
+/* The video with the picked style (desktop): the output format's shape,
+ * the frame covering it. */
+.preview {
+  position: relative;
+  width: min(100%, calc((100svh - 280px) * var(--ar)));
+  margin-inline: auto;
+  aspect-ratio: var(--ar);
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+.preview::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 6%, transparent);
+}
+.picture {
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-size: cover;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile,
+  .off,
+  .fmt button,
+  .resumeDiscard,
+  .ghost,
+  .pill,
+  .opts,
+  .discRow > svg,
+  .panel,
+  .fill {
+    transition-property: opacity, color, background-color, border-color, box-shadow;
+  }
+  .tile:active:not([aria-disabled="true"]),
+  .off:active:not([aria-disabled="true"]),
+  .fmt button:active:not([aria-disabled="true"]),
+  .resumeDiscard:active,
+  .drop:has(> .dropButton:active) .pill,
+  .drop:hover .ghost {
+    transform: none;
+  }
+  .opts {
+    transform: none;
+  }
+  .shimmer {
+    display: none;
+  }
+}

@@ -1,21 +1,25 @@
 """WP3: resumable multipart upload (POST /uploads/multipart/*): part
 sizing, the stateless ticket, signing, ListParts reconcile, complete
-(parts check, size check, idempotent), abort, the refusals in presign's
-order, the single-PUT kill switch and the telemetry endpoint. R2 is moto
-in-process (parts go up with boto3 here; the HTTP-PUT flow through
-presigned URLs is in test_wp3_http.py)."""
+(parts check, size check, idempotent), abort (a completed upload no job
+holds goes too), the refusals in presign's order, the single-PUT kill
+switch and the telemetry endpoint. R2 is moto in-process (parts go up
+with boto3 here; the HTTP-PUT flow through presigned URLs is in
+test_wp3_http.py)."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import time
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import pytest
 
 import backend.main as M
 from backend import storage
 from backend import uploads as upl
+from backend.jobs import store
 from conftest import add_sub
 
 MIB = 1024 * 1024
@@ -357,6 +361,113 @@ def test_abort_is_idempotent(client, r2):
     r = client.post("/uploads/multipart/complete",
                     json={"ticket": body["ticket"]})
     assert r.status_code == 410
+
+
+def _completed(client, r2):
+    """A completed 100-byte upload: (ticket, storage key)."""
+    body = _init(client, 100).json()
+    _put(r2, body["ticket"], 1, 100)
+    assert client.post("/uploads/multipart/complete",
+                       json={"ticket": body["ticket"]}).status_code == 200
+    return body["ticket"], body["storage_key"]
+
+
+def test_abort_after_complete_deletes_the_unclaimed_object(client, r2,
+                                                           capsys):
+    """Given up after its bytes went up but before POST /jobs (cancelled
+    while it waited for "Let's go"): the object goes now, not with the
+    bucket's lifecycle rule. Idempotent; POST /jobs then finds nothing."""
+    t, key = _completed(client, r2)
+    for _ in range(2):
+        r = client.post("/uploads/multipart/abort", json={"ticket": t})
+        assert r.status_code == 204
+    assert storage.head(key) is None
+    out = capsys.readouterr().out
+    assert "[upload] abort: deleted" in out
+    assert key.rsplit("/", 1)[-1] not in out      # no object names logged
+    r = client.post("/jobs", data={"settings": "{}", "storage_key": key})
+    assert (r.status_code, r.json()["detail"]) == (409, "upload_incomplete")
+    assert client.post("/uploads/multipart/parts",
+                       json={"ticket": t}).status_code == 410
+
+
+def test_cancel_during_complete_is_not_a_too_big_file(client, r2,
+                                                      monkeypatch):
+    """A cancel (abort) landing between CompleteMultipartUpload and
+    complete's HEAD deletes the object it just completed: complete
+    answers 410 upload_expired, as for a cancel before it, and the
+    refusal statistics count no too-big file that never existed."""
+    body = _init(client, 100).json()
+    t = body["ticket"]
+    _put(r2, t, 1, 100)
+    real = storage.mpu_complete
+
+    def complete_then_abort(key, upload_id, parts):
+        real(key, upload_id, parts)
+        assert client.post("/uploads/multipart/abort",
+                           json={"ticket": t}).status_code == 204
+    monkeypatch.setattr(storage, "mpu_complete", complete_then_abort)
+    r = client.post("/uploads/multipart/complete", json={"ticket": t})
+    assert (r.status_code, r.json()["detail"]) == (410, "upload_expired")
+    assert storage.head(body["storage_key"]) is None
+    codes = [e["data"].get("code")
+             for e in store.events(0, kinds=["upload_refused"])]
+    assert "file_too_large" not in codes
+
+
+def test_post_jobs_drops_a_style_it_cannot_read(client, r2, monkeypatch):
+    """A caption_style no client sends (an integer too big for a float:
+    valid JSON) is dropped like any bad style (D7): POST /jobs answers as
+    it would without it (here 409 upload_incomplete: nothing at that
+    key), never 500."""
+    monkeypatch.delenv("CLEO_CAPTION_PRESETS_LIVE", raising=False)
+    settings = ('{"style":"tight","caption_style_hint":"power",'
+                '"caption_style":{"presetId":"power",'
+                '"overrides":{"sizeScale":1' + "0" * 400 + '}}}')
+    r = client.post("/jobs", data={"settings": settings,
+                                   "storage_key": "uploads/abc.mp4"})
+    assert (r.status_code, r.json()["detail"]) == (409, "upload_incomplete")
+
+
+def test_abort_after_complete_keeps_an_object_a_job_holds(client, r2,
+                                                         monkeypatch):
+    """A job, the claim of a POST /jobs (the job row while its upload is
+    accepted) and a POST /jobs still before its claim all hold the key:
+    the abort leaves the object to them."""
+    for settings in ({}, {"_accepting": True}):          # job, claim
+        t, key = _completed(client, r2)
+        store.create(None, settings, idempotency_key=key)
+        r = client.post("/uploads/multipart/abort", json={"ticket": t})
+        assert r.status_code == 204
+        assert storage.head(key) == 100
+    # POST /jobs is probing the upload (no row yet) when the abort comes:
+    # the abort waits for it, then finds its job.
+    t, key = _completed(client, r2)
+    probing, release = asyncio.Event(), asyncio.Event()
+
+    async def probe(storage_key):
+        probing.set()
+        await release.wait()
+        return 60.0, True, True
+    monkeypatch.setattr(M, "_probe_upload", probe)
+
+    async def main():
+        transport = httpx.ASGITransport(app=M.app)
+        async with httpx.AsyncClient(transport=transport,
+                                     base_url="http://t") as c:
+            post = asyncio.create_task(c.post("/jobs", data={
+                "settings": "{}", "storage_key": key}))
+            await probing.wait()
+            abort = asyncio.create_task(c.post(
+                "/uploads/multipart/abort", json={"ticket": t}))
+            await asyncio.sleep(0.3)
+            assert not abort.done()
+            release.set()
+            return await post, await abort
+    created, aborted = asyncio.run(main())
+    assert (created.status_code, aborted.status_code) == (200, 204)
+    assert store.find_by_key(key).id == created.json()["job_id"]
+    assert storage.head(key) == 100
 
 
 # ── refusals (presign's order) and the kill switch ───────────────────

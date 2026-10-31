@@ -7,15 +7,17 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { API, WEB } from "./support/env";
-import { chooseFile, createdJobId, jobCard, openWithStorage, storedJobs } from "./support/app";
+import { chooseFile, createdJobId, jobCard, openWithStorage, startGo, storedJobs } from "./support/app";
 
-/** Pick `name` on the start screen (UX6) and go on to Projects while it
- *  uploads. */
-async function pickTikTok(page: Page, name: string, buffer: Buffer) {
+/** Pick `name` on the start screen and go on to Projects while it
+ *  uploads; `go` (default): "Let's go" first, else the video waits for
+ *  it there (PR1 D3). */
+async function pickTikTok(page: Page, name: string, buffer: Buffer, { go = true } = {}) {
   await chooseFile(page, { name, mimeType: "video/mp4", buffer });
   // The upload is on this device's list; on to Projects inside the app
   // (the header link: the page — and the upload in it — stay).
   await expect.poll(async () => (await storedJobs(page)).some((j) => j.filename === name), { timeout: 15_000 }).toBe(true);
+  if (go) await startGo(page);
   if (!page.url().endsWith("/app")) {
     await page.getByRole("link", { name: "Projects", exact: true }).click({ timeout: 5000 }).catch(() => {});
   }
@@ -34,15 +36,47 @@ test("cancel: the upload stops and nothing is left", { tag: "@editor-v2" }, asyn
     await new Promise((res) => setTimeout(res, 2500));
     await r.continue().catch(() => {});
   });
-  await pickTikTok(page, "abbrechen.mp4", media);
+  // Left before "Let's go": the tile says what it waits for.
+  await pickTikTok(page, "abbrechen.mp4", media, { go: false });
   const tile = jobCard(page, "abbrechen.mp4");
   await expect(tile).toHaveAttribute("data-state", "uploading");
-  await expect(tile.getByTestId("job-card-status")).toContainText("Keep this tab open");
+  await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
+  await expect(tile.getByTestId("job-card-continue-start")).toHaveText("Continue");
   await tile.getByTestId("job-card-cancel").click();
   await expect(tile).toHaveCount(0);
   await page.waitForTimeout(6000);
   expect(posts).toEqual([]);
   expect((await storedJobs(page)).filter((j) => j.filename === "abbrechen.mp4")).toEqual([]);
+});
+
+test("cancel after Let's go while the bytes still go: no job, nothing left", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  const media = await stub.media("grid.mp4");
+  const posts: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url() === `${API}/jobs`) posts.push(r.url());
+  });
+  await openWithStorage(page, "/app/new");
+  // The upload API answers only once the upload was cancelled: its bytes
+  // are still going (the stub has no R2: they go with POST /jobs, which
+  // would follow at once, the gate open).
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/uploads/**", async (r) => {
+    await held;
+    await r.continue().catch(() => {});
+  });
+  await pickTikTok(page, "danach.mp4", media);
+  const tile = jobCard(page, "danach.mp4");
+  await expect(tile).toHaveAttribute("data-state", "uploading");
+  // (Phones get a longer line that starts the same.)
+  await expect(tile.getByTestId("job-card-status")).toContainText("Keep this tab open");
+  await expect(tile.getByTestId("job-card-continue-start")).toHaveCount(0);
+  await tile.getByTestId("job-card-cancel").click();
+  await expect(tile).toHaveCount(0);
+  release();
+  await page.waitForTimeout(6000);
+  expect(posts).toEqual([]);
+  expect((await storedJobs(page)).filter((j) => j.filename === "danach.mp4")).toEqual([]);
 });
 
 test("a failed upload: its reason, then Try again creates the job", { tag: "@editor-v2" }, async ({ page, stub }) => {
@@ -81,7 +115,7 @@ test("storage full and too many uploads say so — not 'busy' — with their cod
   const tile = jobCard(page, "gross.mp4");
   await expect(tile).toHaveAttribute("data-state", "upload_failed", { timeout: 30_000 });
   await expect(tile.getByTestId("job-card-status")).toHaveText(
-    "This video is too large for our servers right now — try again in a few minutes or shorten it.",
+    "This video is too large for our servers right now. Try again in a few minutes or shorten it.",
   );
   await expect(tile.getByTestId("job-card-code")).toHaveText("Code: server_storage_full");
   await page.unroute(`${API}/jobs`);
@@ -97,10 +131,12 @@ test("storage full and too many uploads say so — not 'busy' — with their cod
   await page.route("**/uploads/multipart/init", tooMany);
   await page.route("**/uploads/presign", tooMany);
   await page.goto("/app/new");
-  await pickTikTok(page, "viele.mp4", media);
+  // (Refused at once, before "Let's go" could count: the button rests and
+  // Projects leads back to the start screen.)
+  await pickTikTok(page, "viele.mp4", media, { go: false });
   const second = jobCard(page, "viele.mp4");
   await expect(second).toHaveAttribute("data-state", "upload_failed", { timeout: 30_000 });
-  await expect(second.getByTestId("job-card-status")).toHaveText("Too many uploads in a short time — wait a few minutes.");
+  await expect(second.getByTestId("job-card-status")).toHaveText("Too many uploads in a short time. Wait a few minutes.");
   await expect(second.getByTestId("job-card-code")).toHaveText("Code: too_many_uploads");
   // The first tile keeps its own reason and code (stored as the code).
   await expect(tile.getByTestId("job-card-code")).toHaveText("Code: server_storage_full");

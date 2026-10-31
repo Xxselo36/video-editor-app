@@ -33,7 +33,7 @@ export const trLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.finish": "Videonu bitirir. Sonrasındaki her şey atılır.",
   "site.commands.note": "Komutlar şimdilik İngilizce ve Almanca videolar için tasarlandı.",
   "site.auto.title": "Duraklamalar ve dolgu kelimeleri otomatik kesilir.",
-  "site.auto.body": "Komut gerekmez. CleoCuts, duraklamaları ve {um} gibi dolgu kelimelerini videonun tamamından kaldırır. Kesim temposunu sen seçersin: {tight}, {natural} ya da {none}.",
+  "site.auto.body": "Komut gerekmez. CleoCuts, duraklamaları ve {um} gibi dolgu kelimelerini videonun tamamından kaldırır. Videon zaten kurgulu mu? Yüklerken {none} seçeneğini seç.",
   "site.auto.sample": "Bugün {um} daha iyi bir {um} hook için {pause} üç ipucum var.",
   "site.auto.pause": "duraklama",
   "site.auto.cleanup": "CleoCuts, altyazılarında yanlış duyulan kelimeleri de düzeltir.",

@@ -1,19 +1,24 @@
 """A signed-in user's remembered upload defaults (UX6, GET/PUT /me/prefs).
 
     {target_aspect, style, remove_fillers, voice_triggers,
-     spoken_language, caption_style_by_aspect: {aspect: {presetId,
-     overrides}}, caption_style_default: {presetId, overrides}}
+     spoken_language, caption_style_last, caption_style_by_aspect:
+     {aspect: {presetId, overrides}}, caption_style_default: {presetId,
+     overrides}}
 
-Every key is optional. The start screen saves the first five ("Save as
-default"); caption_style_by_aspect is the editor's remembered caption
-style per format (review E7), read by backend/doc.py resolve_style when
-an analysis ends. caption_style_default is the v2 Style tab's "Save as
-default": a preset plus the look's overrides — never a caption's own
-position / size (overrides.captions belong to one video's captions) —
-at most CAPTION_STYLE_MAX_BYTES as JSON. The v2 start screen sends it
-with new uploads (caption_style_hint, then PATCH /jobs/{id}
-caption_style). Signed-out users keep the same object in their browser
-(localStorage cleocuts.prefs.v1).
+Every key is optional. The start screen saves what an upload used as it
+starts: target_aspect, remove_fillers, spoken_language and
+caption_style_last (a preset id or "none": "Last used"). style and
+voice_triggers are what older start screens saved ("Save as default");
+STYLES keeps "smooth" for them, though every pace but "none" analyses
+as one tight cut now. caption_style_by_aspect is the editor's
+remembered caption style per format (review E7), read by backend/doc.py
+resolve_style when an analysis ends. caption_style_default is the v2
+Style tab's "Save as default": a preset plus the look's overrides —
+never a caption's own position / size (overrides.captions belong to one
+video's captions) — at most CAPTION_STYLE_MAX_BYTES as JSON. The start
+screen sends it with new uploads (POST /jobs caption_style).
+Signed-out users keep the same object in their browser (localStorage
+cleocuts.prefs.v1).
 
 Stored as JSON in the accounts database's meta table under
 "prefs:<user id>" (SQLite or Postgres, whichever backend/accounts.py
@@ -56,6 +61,10 @@ def _check(key: str, value: Any) -> Any:
         ok = isinstance(value, bool)
     elif key == "spoken_language":
         ok = value == "auto" or value in SPOKEN_LANGUAGES
+    elif key == "caption_style_last":
+        if isinstance(value, str):
+            value = value.strip().lower()
+        ok = value in edit_doc.PRESET_IDS
     elif key == "caption_style_by_aspect":
         if not isinstance(value, dict):
             raise BadPrefs(key)
@@ -118,8 +127,8 @@ def merge(current: dict[str, Any] | None, patch: Any) -> dict[str, Any]:
 
 
 PUBLIC_KEYS = ("target_aspect", "style", "remove_fillers", "voice_triggers",
-               "spoken_language", "caption_style_by_aspect",
-               "caption_style_default")
+               "spoken_language", "caption_style_last",
+               "caption_style_by_aspect", "caption_style_default")
 
 
 def _parse(raw: str | None) -> dict[str, Any] | None:

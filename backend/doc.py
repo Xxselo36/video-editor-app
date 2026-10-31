@@ -14,10 +14,10 @@ for new web jobs (UT3), read and patched by the editor.
 - `clips` stays null until the UX10 deploy (such jobs open in the v1
   editor with the caption layer; rule 0.6: no migrations — old jobs have
   no doc at all). job.subtitles is still written for legacy readers.
-- Style precedence: settings.caption_style (picked while waiting,
-  PATCH /jobs/{id}) → the owner's prefs caption_style_by_aspect[aspect]
-  → settings.caption_style_hint (browsers with local jobs send
-  "clipper") → power. A preset that can't caption the transcript's
+- Style precedence: settings.caption_style (the start screen's pick,
+  sent with POST /jobs; or PATCH /jobs/{id}) → the owner's prefs
+  caption_style_by_aspect[aspect] → settings.caption_style_hint (the
+  picked preset id) → power. A preset that can't caption the transcript's
   script is replaced by the first recommended one. The script table is
   the web's own web/src/lib/captions/script-support.json (one file,
   read by both sides).

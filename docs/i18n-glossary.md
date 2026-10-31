@@ -64,6 +64,22 @@ Notes:
 - pt is Brazilian Portuguese ("legenda", "prévia"), es is neutral Latin
   American ("video").
 
+## Phrases
+
+Fixed UI wording of the upload flow, the same on every screen that shows
+it. A text that names a button quotes the button's own words: "Waiting
+for “Let’s go”" on Projects repeats the start button. The check reads
+only Terms and Avoid.
+
+| Phrase | en | de | es | fr | pt | it | tr | pl | nl | ru | ja | ko | id | hi |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Start button | Let’s go | Los geht’s | ¡Vamos! | C’est parti | Vamos lá | Andiamo | Başlayalım | Zaczynamy | Aan de slag | Поехали | スタート | 시작하기 | Ayo mulai | चलिए शुरू करें |
+| Style step | Choose captions | Untertitel wählen | Elegir subtítulos | Choisir les sous-titres | Escolher legendas | Scegli i sottotitoli | Altyazı seç | Wybierz napisy | Ondertitels kiezen | Выбрать субтитры | 字幕を選ぶ | 자막 선택 | Pilih gaya teks | कैप्शन चुनें |
+| Captions only | Captions only | Nur Untertitel | Solo subtítulos | Sous-titres seulement | Só legendas | Solo sottotitoli | Yalnızca altyazı | Tylko napisy | Alleen ondertitels | Только субтитры | 字幕のみ | 자막만 | Hanya teks | सिर्फ़ कैप्शन |
+| Last used | Last used | Zuletzt benutzt | Último usado | Dernier choix | Último usado | Ultimo usato | Son kullanılan | Ostatnio użyty | Laatst gebruikt | В прошлый раз | 前回使用 | 최근 사용 | Terakhir dipakai | पिछली बार |
+| Your default | Your default | Dein Standard | Predeterminado | Par défaut | Seu padrão | Predefinito | Varsayılan | Twój domyślny | Jouw standaard | По умолчанию | デフォルト | 내 기본값 | Default-mu | आपका डिफ़ॉल्ट |
+| Waiting for go | Waiting for “Let’s go” | Wartet auf „Los geht’s“ | Esperando tu “¡Vamos!” | En attente de « C’est parti » | Aguardando seu “Vamos lá” | In attesa di “Andiamo” | “Başlayalım” bekleniyor | Czeka na „Zaczynamy” | Wacht op “Aan de slag” | Ждёт «Поехали» | 「スタート」待ち | “시작하기” 대기 중 | Menunggu “Ayo mulai” | “चलिए शुरू करें” का इंतज़ार |
+
 ## Avoid
 
 What the check looks for, per language and concept. Comma-separated;

@@ -33,7 +33,7 @@ export const plLanding: Partial<Record<LandingKey, string>> = {
   "site.commands.finish": "Kończy Twój film. Wszystko po tej komendzie zostaje wycięte.",
   "site.commands.note": "Na razie komendy są przeznaczone do filmów po angielsku i niemiecku.",
   "site.auto.title": "Pauzy i wtrącenia znikają same.",
-  "site.auto.body": "Bez żadnej komendy. CleoCuts usuwa pauzy i wtrącenia typu {um} z całego filmu. Ty wybierasz tempo cięć: {tight}, {natural} albo {none}.",
+  "site.auto.body": "Bez żadnej komendy. CleoCuts usuwa pauzy i wtrącenia typu {um} z całego filmu. Film jest już zmontowany? Przy przesyłaniu wybierz {none}.",
   "site.auto.sample": "No to {um} trzy sposoby {pause} na lepsze {um} hooki.",
   "site.auto.pause": "pauza",
   "site.auto.cleanup": "CleoCuts poprawia też źle rozpoznane słowa w Twoich napisach.",
