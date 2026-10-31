@@ -194,6 +194,7 @@ export const esApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "Elegir de todos modos",
   "app.start.pickAnywayNote": "Primero se convierte el video, lo que puede tardar unos minutos. La lista también muestra fotos.",
   "app.start.notVideo": "Eso no es un video. Elige un archivo de video.",
+  "app.start.pickBusy": "Tu subida cancelada todavía se está eliminando. Elige el video de nuevo en un momento.",
   "app.start.pickTooBig": "Este video pesa {size} GB y supera el límite de {max} GB. Elígelo de todos modos para subir una copia convertida más pequeña.",
   "app.start.stillNothing": "¿Todavía nada?",
   "app.start.otherFormats": "Otros formatos de video",

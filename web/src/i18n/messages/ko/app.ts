@@ -190,6 +190,7 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "그래도 선택",
   "app.start.pickAnywayNote": "동영상을 먼저 변환하므로 몇 분 걸릴 수 있어요. 목록에 사진도 함께 표시돼요.",
   "app.start.notVideo": "동영상이 아니에요. 동영상 파일을 선택하세요.",
+  "app.start.pickBusy": "취소한 업로드를 아직 삭제하는 중이에요. 잠시 후 동영상을 다시 선택하세요.",
   "app.start.pickTooBig": "이 동영상은 {size}GB로 {max}GB 한도를 넘어요. 그래도 선택하면 변환된 더 작은 사본을 보내요.",
   "app.start.stillNothing": "아직 아무것도 없나요?",
   "app.start.otherFormats": "다른 동영상 형식",

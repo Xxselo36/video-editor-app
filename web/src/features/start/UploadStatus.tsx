@@ -36,12 +36,22 @@ function clock(seconds: number): string {
 // in bold wherever the language puts it.
 const SLOT = "\u0000";
 
+/** The stopped upload's "Upload gestoppt" and reason (the resting go
+ *  button is described by them) and its "Nochmal versuchen". */
+export const STOPPED_ID = "start-upload-stopped";
+export const REASON_ID = "start-upload-reason";
+export const RETRY_ID = "start-retry";
+
 /** Why the upload stopped: its record's code (the jobs store keeps it). */
 function FailureReason({ tempId }: { tempId: string }) {
   const t = useT();
   const upload = useLocalJobs().find((j) => j.jobId === tempId)?.upload;
   if (!upload?.errorCode) return null;
-  return <p className={s.reason}>{describeError({ code: upload.errorCode, params: upload.errorParams }, t, { v2: true })}</p>;
+  return (
+    <p id={REASON_ID} className={s.reason}>
+      {describeError({ code: upload.errorCode, params: upload.errorParams }, t, { v2: true })}
+    </p>
+  );
 }
 
 export function UploadStatus() {
@@ -102,7 +112,7 @@ export function UploadStatus() {
         {start.failed ? (
           <div role="alert" data-testid="start-upload-failed">
             <div className={s.statusRow}>
-              <span className={s.statusText} data-testid="start-upload-status" data-state="failed">
+              <span id={STOPPED_ID} className={s.statusText} data-testid="start-upload-status" data-state="failed">
                 {t("app.projects.badge.uploadFailed")}
               </span>
               <span className={s.statusEnd}>
@@ -112,6 +122,7 @@ export function UploadStatus() {
             </div>
             <FailureReason tempId={start.tempId} />
             <Button
+              id={RETRY_ID}
               size="sm"
               className={cx("inline-flex min-h-11 items-center gap-1.5", s.retry)}
               onClick={retry}

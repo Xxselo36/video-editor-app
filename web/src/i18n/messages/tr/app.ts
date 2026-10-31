@@ -194,6 +194,7 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "Yine de seç",
   "app.start.pickAnywayNote": "Video önce dönüştürülür, bu birkaç dakika sürebilir. Listede fotoğraflar da görünür.",
   "app.start.notVideo": "Bu bir video değil. Bir video dosyası seç.",
+  "app.start.pickBusy": "İptal ettiğin yükleme hâlâ kaldırılıyor. Videoyu birazdan yeniden seç.",
   "app.start.pickTooBig": "Bu video {size} GB, {max} GB sınırının üzerinde. Yine de seçersen daha küçük, dönüştürülmüş bir kopyası yüklenir.",
   "app.start.stillNothing": "Hâlâ bir şey yok mu?",
   "app.start.otherFormats": "Diğer video biçimleri",
@@ -337,8 +338,8 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.crash.reload": "Sayfayı yenile",
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
-  "app.errors.noVideoTrack": "Bu bir ses dosyası. CleoCuts'ın sesli bir videoya ihtiyacı var — lütfen bir video dosyası seç. Hiçbir ücret alınmadı.",
-  "app.errors.videoTooShort": "Bu video {min} saniyeden kısa — kesmek için çok kısa. Hiçbir ücret alınmadı.",
+  "app.errors.noVideoTrack": "Bu bir ses dosyası. CleoCuts'ın sesli bir videoya ihtiyacı var; lütfen bir video dosyası seç. Hiçbir ücret alınmadı.",
+  "app.errors.videoTooShort": "Bu video {min} saniyeden kısa; kesmek için çok kısa. Hiçbir ücret alınmadı.",
   "app.errors.processingInterrupted": "İşlem yarıda kesildi. Lütfen videoyu tekrar yükle.",
   "app.errors.mediaUnavailable": "Orijinal video artık mevcut değil, bu yüzden bu proje tekrar düzenlenemez.",
   "app.errors.tooManyRenders": "Çok fazla dışa aktarma sürüyor. Lütfen birinin bitmesini bekle.",

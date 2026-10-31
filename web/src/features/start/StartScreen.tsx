@@ -21,6 +21,9 @@
  * - The same file uploading in this page already: its card in Projects.
  *   Unless that upload was just cancelled (X, then the same file again):
  *   the pick waits until it has wound down, then starts anew.
+ * - The same video as a stopped upload (a reload while it waited for
+ *   "Los geht's": the resume card, or the file picked again): it
+ *   continues with the choices it had (its record keeps them).
  */
 import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -31,7 +34,7 @@ import { fmtMinutes, useBillingConfig, useMe } from "@/lib/account";
 import { track } from "@/lib/analytics";
 import { useConfig } from "@/lib/config";
 import { describeError } from "@/lib/errors";
-import { initialChoices, settingsOf, styleTags, styleTiles } from "./choices";
+import { initialChoices, resumedChoices, settingsOf, styleTags, styleTiles } from "./choices";
 import {
   beginStart,
   cancelStart,
@@ -58,7 +61,8 @@ import { originalTooBig, overLimitGb, pickedKind, useIsIOS, useVideoAccept } fro
 import s from "./start.module.css";
 
 /** How long a pick waits for a cancelled upload of the same file to wind
- *  down (the stored parts discarded on the server; usually a second). */
+ *  down (the stored parts discarded on the server; usually a second, at
+ *  most about 10 s: lib/uploadResume ABORT_TIMEOUT_MS). */
 const CANCEL_WAIT_MS = 15_000;
 
 export function StartScreen() {
@@ -173,12 +177,17 @@ export function StartScreen() {
     try {
       // Given up a moment ago (X): a new upload waits until that one has
       // wound down; it would resume the parts being discarded. Still
-      // going after a while (a slow connection): the card again.
-      if (isUploading(f) && !(await whenFree(f, CANCEL_WAIT_MS))) return;
+      // going after a while (a slow connection): the card again, saying
+      // why (picked again a moment later, it starts).
+      if (isUploading(f) && !(await whenFree(f, CANCEL_WAIT_MS))) {
+        if (mounted.current) setRefusal(t("app.start.pickBusy"));
+        return;
+      }
       if (!mounted.current) return;
       const probe = await probeVideo(f);
       if (!mounted.current) return;
-      const no = await (await loadUploadCode()).precheckUpload(f, probe, me, billingOn);
+      const code = await loadUploadCode();
+      const no = await code.precheckUpload(f, probe, me, billingOn);
       if (!mounted.current) return;
       if (no) {
         if ("paywall" in no) setPaywall(no.paywall);
@@ -187,8 +196,17 @@ export function StartScreen() {
       }
       // One 720 px frame: the tiles, the preview and the Projects thumbnail.
       const frame = import("@/features/upload/grabFrame").then((m) => m.grabFrame(f, 6000, 720)).catch(() => null);
-      const choices = initialChoices({ saved: prefs.saved, standard: prefs.captionStyle, lastStyle: prefs.lastStyle, live });
-      if (!beginStart(f, { source, probe, frame, choices })) {
+      // This video's upload stopped (a reload while it waited for "Los
+      // geht's"): it continues with the choices it had (D3, D7).
+      const stopped = await code.stoppedUploadOf(f).catch(() => null);
+      if (!mounted.current) {
+        void frame.then((url) => url && URL.revokeObjectURL(url));
+        return;
+      }
+      const resumed = stopped && resumedChoices(stopped, live);
+      const choices =
+        resumed || initialChoices({ saved: prefs.saved, standard: prefs.captionStyle, lastStyle: prefs.lastStyle, live });
+      if (!beginStart(f, { source, probe, frame, choices, touched: Boolean(resumed) })) {
         router.push("/app");
         return;
       }

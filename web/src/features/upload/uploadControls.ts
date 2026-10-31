@@ -7,6 +7,7 @@ import { removeUploadRecord } from "./records";
 import type { SettingsSource } from "./settings";
 import { startUpload, type StartOpts } from "./uploadManager";
 import { controllers, live, retries, setAwaitingGo, setThumb, takeThumb } from "./uploadState";
+import type { LastUsedPrefs } from "@/features/start/lastUsed";
 import type { PresetId } from "@/features/start/presets.legacy";
 import { runningUploads } from "@/lib/uploadLock";
 
@@ -74,7 +75,7 @@ export function retryUpload(id: string, opts?: StartOpts): boolean {
   const o: StartOpts | undefined = opts ?? r.start;
   if (!o) {
     setThumb(id, null);
-    void startUpload(r.file, r.settings, r.preset, { source: r.source });
+    void startUpload(r.file, r.settings, r.preset, { source: r.source, lastUsed: r.lastUsed });
     return true;
   }
   // (The start screen draws its tiles with that frame: not revoked.)
@@ -85,19 +86,22 @@ export function retryUpload(id: string, opts?: StartOpts): boolean {
 }
 
 /** "Try again" after a reload: the user picked `file` again (`source`
- *  "any": with the unfiltered iOS input). False (and nothing happens)
- *  while the upload still runs in another tab. */
+ *  "any": with the unfiltered iOS input). `lastUsed`: the start screen's
+ *  choices of a video picked there (its record's), remembered when POST
+ *  /jobs goes out. False (and nothing happens) while the upload still
+ *  runs in another tab. */
 export async function retryUploadWith(
   id: string,
   file: File,
   settings: SettingsSource,
   preset: PresetId | null,
   source?: "any",
+  lastUsed?: LastUsedPrefs,
 ): Promise<boolean> {
   if (await runsElsewhere(id)) return false;
   retries.delete(id);
   removeUploadRecord(id);
   setThumb(id, null);
-  void startUpload(file, settings, preset, { source });
+  void startUpload(file, settings, preset, { source, lastUsed });
   return true;
 }

@@ -193,6 +193,7 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "Tetap pilih",
   "app.start.pickAnywayNote": "Videonya dikonversi dulu, ini bisa memakan waktu beberapa menit. Daftarnya juga menampilkan foto.",
   "app.start.notVideo": "Itu bukan video. Pilih file video.",
+  "app.start.pickBusy": "Unggahan yang kamu batalkan masih dihapus. Pilih video lagi sebentar lagi.",
   "app.start.pickTooBig": "Video ini berukuran {size} GB, melebihi batas {max} GB. Tetap pilih untuk mengirim salinan hasil konversi yang lebih kecil.",
   "app.start.stillNothing": "Masih belum ada?",
   "app.start.otherFormats": "Format video lain",
@@ -336,8 +337,8 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.crash.reload": "Muat ulang halaman",
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
-  "app.errors.noVideoTrack": "Ini file audio. CleoCuts memerlukan video bersuara — pilih file video. Tidak ada yang ditagih.",
-  "app.errors.videoTooShort": "Video ini lebih pendek dari {min} detik — terlalu pendek untuk dipotong. Tidak ada yang ditagih.",
+  "app.errors.noVideoTrack": "Ini file audio. CleoCuts memerlukan video bersuara, jadi pilih file video. Tidak ada yang ditagih.",
+  "app.errors.videoTooShort": "Video ini lebih pendek dari {min} detik, jadi terlalu pendek untuk dipotong. Tidak ada yang ditagih.",
   "app.errors.processingInterrupted": "Pemrosesan terputus. Unggah video lagi.",
   "app.errors.mediaUnavailable": "Video asli sudah tidak tersedia, jadi proyek ini tidak bisa diedit lagi.",
   "app.errors.tooManyRenders": "Terlalu banyak ekspor yang berjalan. Tunggu sampai salah satunya selesai.",

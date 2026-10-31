@@ -27,7 +27,7 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.errors.tooLarge": "Die Datei ist zu groß. Kürze das Video oder exportiere es kleiner.",
   "app.errors.noSpeech": "In diesem Video haben wir keine Sprache gefunden. CleoCuts schneidet und untertitelt Videos, in denen jemand spricht – probier's mit einem Clip, in dem geredet wird.",
   "app.errors.noSpeechRefunded": "In diesem Video haben wir keine Sprache gefunden. CleoCuts schneidet und untertitelt Videos, in denen jemand spricht – probier's mit einem Clip, in dem geredet wird. Die Minuten haben wir dir wieder gutgeschrieben.",
-  "app.errors.noAudioTrack": "Dieses Video hat keine Tonspur – da gibt es nichts zu schneiden oder zu untertiteln. Es wurde nichts berechnet.",
+  "app.errors.noAudioTrack": "Dieses Video hat keine Tonspur. Da gibt es nichts zu schneiden oder zu untertiteln. Es wurde nichts berechnet.",
   "app.errors.renderFailed":
     "Rendern fehlgeschlagen. Deine Bearbeitungen sind gespeichert — öffne das Projekt und rendere erneut.",
   "app.errors.serverNoResponse": "Der Server hat nicht geantwortet. Bitte versuch's erneut.",
@@ -193,6 +193,7 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "Trotzdem wählen",
   "app.start.pickAnywayNote": "Das Video wird zuerst umgewandelt, das kann ein paar Minuten dauern. In der Liste stehen auch Fotos.",
   "app.start.notVideo": "Das ist kein Video. Wähle eine Videodatei.",
+  "app.start.pickBusy": "Dein abgebrochener Upload wird noch entfernt. Wähl das Video gleich noch einmal.",
   "app.start.pickTooBig": "Dieses Video ist {size} GB groß, das Limit liegt bei {max} GB. Wähle es trotzdem, dann geht eine kleinere, umgewandelte Kopie hoch.",
   "app.start.stillNothing": "Immer noch nichts?",
   "app.start.otherFormats": "Andere Videoformate",
@@ -336,8 +337,8 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.crash.reload": "Seite neu laden",
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
-  "app.errors.noVideoTrack": "Das ist eine Audiodatei. CleoCuts braucht ein Video mit Ton – wähl bitte eine Videodatei. Es wurde nichts berechnet.",
-  "app.errors.videoTooShort": "Dieses Video ist kürzer als {min} Sekunden – zu kurz zum Schneiden. Es wurde nichts berechnet.",
+  "app.errors.noVideoTrack": "Das ist eine Audiodatei. CleoCuts braucht ein Video mit Ton. Wähl bitte eine Videodatei. Es wurde nichts berechnet.",
+  "app.errors.videoTooShort": "Dieses Video ist kürzer als {min} Sekunden und damit zu kurz zum Schneiden. Es wurde nichts berechnet.",
   "app.errors.processingInterrupted": "Die Verarbeitung wurde unterbrochen. Lade das Video bitte erneut hoch.",
   "app.errors.mediaUnavailable": "Das Originalvideo ist nicht mehr verfügbar, daher lässt sich dieses Projekt nicht mehr bearbeiten.",
   "app.errors.tooManyRenders": "Es laufen zu viele Exporte. Bitte warte, bis einer fertig ist.",

@@ -490,12 +490,29 @@ test("a failure before Let’s go: the go button rests until Try again; Projects
   );
   await chooseFile(page, { name: "gestoppt.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
   await expect(page.getByTestId("start-upload-failed")).toContainText("Too many uploads in a short time. Wait a few minutes.");
-  // Let's go would start nothing: it rests, and a tap changes nothing.
+  // Let's go would start nothing: it rests, plainly unavailable (not the
+  // tint of an action) and described by the alert; a tap starts nothing
+  // and leads to the way on, Try again.
   const go = page.getByTestId("start-go");
+  const retry = page.getByTestId("start-retry");
   await expect(go).toHaveAttribute("aria-disabled", "true");
+  await expect(go).toHaveCSS("color", "rgb(139, 134, 154)");
+  await expect(go).toHaveCSS("background-color", "rgb(19, 18, 23)");
+  await expect(go).toHaveAccessibleDescription("Upload stopped Too many uploads in a short time. Wait a few minutes.");
   await go.click({ force: true });
   await expect(go).toHaveAttribute("data-state", "idle");
   await expect(go).toHaveText("Let’s go");
+  await expect(retry).toBeFocused();
+  // A short landscape phone, where nothing sticks: at the end of the page
+  // the button is all there is in view, and the tap brings Try again up.
+  const size = page.viewportSize()!;
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect(retry).not.toBeInViewport();
+  await go.click({ force: true });
+  await expect(retry).toBeFocused();
+  await expect(retry).toBeInViewport();
+  await page.setViewportSize(size);
 
   // Projects: the reason and the way back ("Continue"), no "Try again"
   // there (it would start the job without "Let's go").
@@ -520,6 +537,36 @@ test("a failure before Let’s go: the go button rests until Try again; Projects
   await expect(page).toHaveURL(`${WEB}/app`, { timeout: 30_000 });
   await jobOf(page, "gestoppt.mp4");
   expect(posts).toHaveLength(1);
+});
+
+test("another tab of the browser shows the video waiting for Let’s go (its bytes wait too), and follows when it goes @editor-v2", async ({ page, stub }) => {
+  await openWithStorage(page, "/app/new");
+  const posts: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url() === `${API}/jobs`) posts.push(r.url());
+  });
+  await chooseFile(page, { name: "zweiter-tab.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
+  await expect(screen(page)).toHaveAttribute("data-screen", "style");
+  // Projects in a second tab: the video waits there too, as it does here.
+  const other = await page.context().newPage();
+  await other.goto("/app");
+  const tile = jobCard(other, "zweiter-tab.mp4");
+  await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
+  await expect(tile.getByTestId("job-card-badge")).toHaveText("Uploading");
+  await expect(other.getByTestId("dashboard").getByRole("heading", { level: 1 })).toHaveText("Ready when you are");
+  // Its way back and its Cancel are the first tab's.
+  await expect(tile.getByTestId("job-card-continue-start")).toHaveCount(0);
+  await expect(tile.getByTestId("job-card-cancel")).toHaveCount(0);
+  await other.waitForTimeout(1000);
+  expect(posts).toEqual([]);
+
+  await startGo(page);
+  await expect(page).toHaveURL(`${WEB}/app`, { timeout: 30_000 });
+  await jobOf(page, "zweiter-tab.mp4");
+  await expect(tile).not.toHaveAttribute("data-state", /^upload/, { timeout: 30_000 });
+  await expect(tile.getByTestId("job-card-status")).not.toHaveText("Waiting for “Let’s go”");
+  expect(posts).toHaveLength(1);
+  await other.close();
 });
 
 test("Let’s go, then the upload stops: Try again on its Projects tile starts it with the choices, and remembers them @editor-v2", async ({ page, stub }) => {

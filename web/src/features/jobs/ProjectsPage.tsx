@@ -230,12 +230,13 @@ export function ProjectsPage() {
 
   // Headline counts (T7): working, ready for review and failed apart.
   // An upload waiting for "Let's go" isn't worked on (nothing is until
-  // then): its tile says so, the headline doesn't count it.
+  // then): its tile says so, the headline doesn't count it (also one
+  // waiting in another tab: its record says so).
   const counts = { working: 0, ready: 0, failed: 0 };
   for (const p of live) {
     if (p.state === "failed" || p.state === "upload_failed") counts.failed++;
     else if (p.state === "ready" || p.state === "edited") counts.ready++;
-    else if (p.state === "uploading" && awaitingGo.has(p.id)) continue;
+    else if (p.state === "uploading" && (awaitingGo.has(p.id) || p.upload?.awaitingGo)) continue;
     else if (p.state === "uploading" || p.state === "processing" || p.state === "exporting") counts.working++;
   }
   const headline = (

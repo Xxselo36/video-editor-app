@@ -199,3 +199,47 @@ describe("the start screen's choices (D7)", () => {
     r.liveUploads.delete("upl-choices");
   });
 });
+
+describe("what the record keeps for later and for other tabs", () => {
+  const lastUsed = { target_aspect: "original" as const, remove_fillers: false, spoken_language: "fr", caption_style_last: "elegant" };
+
+  it("the choices as wanted go with the settings", async () => {
+    const r = await running("upl-wanted");
+    const store = await import("@/features/jobs/jobsStore");
+    r.recordUploadSettings("upl-wanted", info.settings, lastUsed);
+    await vi.waitFor(() => expect(store.getLocalJob("upl-wanted")?.upload).toMatchObject({ settings: info.settings, lastUsed }));
+    r.liveUploads.delete("upl-wanted");
+  });
+
+  it("waiting for Let's go, and all bytes stored: written at once, so another tab shows it", async () => {
+    const r = await running("upl-waits");
+    const store = await import("@/features/jobs/jobsStore");
+    r.recordUploadWaiting("upl-waits", true);
+    r.recordUploadStored("upl-waits");
+    await vi.waitFor(() => expect(store.getLocalJob("upl-waits")?.upload).toMatchObject({ awaitingGo: true, pct: 100 }));
+    r.recordUploadWaiting("upl-waits", false);
+    await vi.waitFor(() => expect(store.getLocalJob("upl-waits")?.upload?.awaitingGo).toBe(false));
+    r.liveUploads.delete("upl-waits");
+  });
+
+  it("the stopped upload a new one of the same file continues: the newest of that size, after the writes before", async () => {
+    const r = await import("./records");
+    const store = await import("@/features/jobs/jobsStore");
+    const add = async (id: string, fileSize: number, extra: object) => {
+      r.addUploadRecord(id, { ...info, fileSize, settings: { style: id } as never, lastUsed });
+      await vi.waitFor(() => expect(store.getLocalJob(id)).not.toBeNull());
+      store.updateUpload(id, extra);
+      await new Promise((res) => setTimeout(res, 5));
+    };
+    await add("upl-old", 777, { errorCode: "upload_interrupted" });
+    await add("upl-new", 777, { errorCode: "upload_interrupted" });
+    await add("upl-runs", 777, {});
+    await add("upl-other", 778, { errorCode: "upload_interrupted" });
+    expect(await r.stoppedUpload(777)).toMatchObject({ settings: { style: "upl-new" }, lastUsed });
+    // Removed just before (X, say): not that one.
+    r.removeUploadRecord("upl-new");
+    expect(await r.stoppedUpload(777)).toMatchObject({ settings: { style: "upl-old" } });
+    expect(await r.stoppedUpload(779)).toBeNull();
+  });
+});
+

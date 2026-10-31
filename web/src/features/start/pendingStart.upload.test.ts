@@ -5,7 +5,8 @@
 // tile goes on with (D2 to D4).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StyleChoice } from "./choices";
-import { initialChoices } from "./choices";
+import { initialChoices, settingsOf } from "./choices";
+import { uploadSettings } from "./defaults";
 
 vi.mock("@/lib/account", () => ({
   fetchServerJobs: vi.fn(async () => null),
@@ -36,10 +37,13 @@ vi.mock("@/features/upload/records", () => ({
   addUploadRecord: vi.fn(),
   recordUploadSettings: vi.fn(),
   recordUploadStarting: vi.fn(),
+  recordUploadStored: vi.fn(),
+  recordUploadWaiting: vi.fn(),
   recordJobCreated: (t: string, j: string) => rec.created.push([t, j]),
   recordUploadFailed: vi.fn(),
   removeStoppedUploads: vi.fn(),
   removeUploadRecord: (id: string) => rec.removed.push(id),
+  stoppedUpload: async () => null,
   uploadProgress: vi.fn(),
 }));
 const saveLastUsed = vi.fn<(p: unknown) => Promise<void>>(async () => {});
@@ -107,6 +111,8 @@ const probe = { width: 1080, height: 1920, duration: 20 };
 const first = () => initialChoices({ saved: null, standard: null, lastStyle: null, live: undefined });
 const POWER: StyleChoice = { presetId: "power", overrides: {} };
 const NEON: StyleChoice = { presetId: "neon", overrides: {} };
+/** What the start screen sends for the first visit's choices with `style`. */
+const sentSettingsOf = (style: StyleChoice) => uploadSettings(settingsOf({ ...first(), style }, probe), { captionStyle: style });
 let n = 0;
 const video = () => new File([new Uint8Array(8)], `clip-${++n}.mp4`, { type: "video/mp4", lastModified: n });
 
@@ -193,5 +199,70 @@ describe("the pending start with the upload code", () => {
     // Picked again now: a new upload.
     const again = await pick(file);
     expect(again.tempId).not.toBe(tempId);
+  });
+
+  it("the waiting tile's Cancel, then New video while the abort is still out: the given-up video isn't shown again", async () => {
+    uploadResumable.mockResolvedValue({ storage_key: "uploads/k", release: async () => {} });
+    let finishAbort!: () => void;
+    abortGate = new Promise<void>((r) => (finishAbort = r));
+    const { ps, tempId } = await pick();
+    const manager = await import("@/features/upload/uploadManager");
+    await vi.waitFor(() => expect(manager.getLiveUpload(tempId)?.uploaded).toBe(true));
+    const { cancelUpload } = await import("@/features/upload/uploadControls");
+    await cancelUpload(tempId);
+    await vi.waitFor(() => expect(abortResumable).toHaveBeenCalledOnce());
+    // Neues Video opens (the Projects pill, Back) before the abort is answered.
+    ps.restoreStart();
+    expect(ps.getPendingStart()).toBeNull();
+    finishAbort();
+    await vi.waitFor(() => expect(manager.getLiveUpload(tempId)).toBeNull());
+    expect(ps.getPendingStart()).toBeNull();
+    expect(FakeXhr.sent).toHaveLength(0);
+  });
+
+  it("a failed start, waiting for Let's go still, is shown again, and so is its Try again", async () => {
+    uploadResumable.mockRejectedValueOnce(new Error("Network error"));
+    const { ps, tempId } = await pick();
+    await vi.waitFor(() => expect(ps.getPendingStart()!.failed).toBe(true));
+    ps.restoreStart();
+    expect(ps.getPendingStart()?.tempId).toBe(tempId);
+    uploadResumable.mockResolvedValue({ storage_key: "uploads/k", release: async () => {} });
+    expect(ps.retryStart()).toBe(true);
+    const again = ps.getPendingStart()!.tempId;
+    expect(again).not.toBe(tempId);
+    ps.restoreStart();
+    expect(ps.getPendingStart()?.tempId).toBe(again);
+    // (A running one too.)
+    const manager = await import("@/features/upload/uploadManager");
+    await vi.waitFor(() => expect(manager.getLiveUpload(again)?.uploaded).toBe(true));
+    ps.restoreStart();
+    expect(ps.getPendingStart()?.tempId).toBe(again);
+    ps.cancelStart();
+  });
+
+  it("after a reload, its tile's Try again: POST /jobs goes out with the record's choices and remembers them as the last used", async () => {
+    // The record a start screen left (a reload took the page and its start).
+    const settings = { ...sentSettingsOf(NEON), target_aspect: "original" as const };
+    const lastUsed = { target_aspect: "16:9" as const, remove_fillers: false, spoken_language: "de", caption_style_last: "neon" };
+    uploadResumable.mockResolvedValue({ storage_key: "uploads/k", release: async () => {} });
+    const { retryUploadWith } = await import("@/features/upload/uploadControls");
+    expect(await retryUploadWith("upl-stopped", video(), settings, null, undefined, lastUsed)).toBe(true);
+    await vi.waitFor(() => expect(FakeXhr.sent).toHaveLength(1));
+    expect(sentSettings(FakeXhr.sent[0])).toEqual(settings);
+    // D4: as POST /jobs goes out, exactly the record's wishes.
+    await vi.waitFor(() => expect(saveLastUsed).toHaveBeenCalledExactlyOnceWith(lastUsed));
+    FakeXhr.sent[0].answer(200, '{"id":"j3"}');
+    await vi.waitFor(() => expect(rec.created).toEqual([[expect.any(String), "j3"]]));
+    expect(saveLastUsed).toHaveBeenCalledOnce();
+  });
+
+  it("after a reload, Try again of an upload that didn't start on the start screen remembers nothing", async () => {
+    uploadResumable.mockResolvedValue({ storage_key: "uploads/k", release: async () => {} });
+    const { retryUploadWith } = await import("@/features/upload/uploadControls");
+    expect(await retryUploadWith("upl-v1", video(), sentSettingsOf(POWER), null)).toBe(true);
+    await vi.waitFor(() => expect(FakeXhr.sent).toHaveLength(1));
+    FakeXhr.sent[0].answer(200, '{"id":"j4"}');
+    await vi.waitFor(() => expect(rec.created).toEqual([[expect.any(String), "j4"]]));
+    expect(saveLastUsed).not.toHaveBeenCalled();
   });
 });

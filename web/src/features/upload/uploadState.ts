@@ -7,6 +7,7 @@
  */
 import { useSyncExternalStore } from "react";
 import type { Paywall } from "@/lib/account";
+import type { LastUsedPrefs } from "@/features/start/lastUsed";
 import type { PresetId } from "@/features/start/presets.legacy";
 import type { Gate } from "./gate";
 import type { SettingsSource } from "./settings";
@@ -40,6 +41,9 @@ export type Retry = {
    *  on with the same gate and callbacks (the last used choices are
    *  written when its POST /jobs goes out) and keeps the frame. */
   start?: StartPart;
+  /** The start screen's choices, gone on without it (uploadManager
+   *  StartOpts.lastUsed): remembered when its POST /jobs goes out. */
+  lastUsed?: LastUsedPrefs;
 };
 export const retries = new Map<string, Retry>();
 /** Cancel (UX12): the abort of each running upload of this page. */

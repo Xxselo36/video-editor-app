@@ -191,6 +191,7 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "Escolher mesmo assim",
   "app.start.pickAnywayNote": "O vídeo é convertido primeiro, o que pode levar alguns minutos. A lista também mostra fotos.",
   "app.start.notVideo": "Isso não é um vídeo. Escolha um arquivo de vídeo.",
+  "app.start.pickBusy": "Seu envio cancelado ainda está sendo removido. Escolha o vídeo de novo em instantes.",
   "app.start.pickTooBig": "Este vídeo tem {size} GB, acima do limite de {max} GB. Escolha mesmo assim para enviar uma cópia convertida menor.",
   "app.start.stillNothing": "Ainda nada?",
   "app.start.otherFormats": "Outros formatos de vídeo",
@@ -334,8 +335,8 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.crash.reload": "Recarregar a página",
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
-  "app.errors.noVideoTrack": "Isto é um arquivo de áudio. O CleoCuts precisa de um vídeo com som — escolha um arquivo de vídeo. Nada foi cobrado.",
-  "app.errors.videoTooShort": "Este vídeo tem menos de {min} segundos — curto demais para cortar. Nada foi cobrado.",
+  "app.errors.noVideoTrack": "Isto é um arquivo de áudio. O CleoCuts precisa de um vídeo com som, então escolha um arquivo de vídeo. Nada foi cobrado.",
+  "app.errors.videoTooShort": "Este vídeo tem menos de {min} segundos e é curto demais para cortar. Nada foi cobrado.",
   "app.errors.processingInterrupted": "O processamento foi interrompido. Envie o vídeo novamente.",
   "app.errors.mediaUnavailable": "O vídeo original não está mais disponível, então este projeto não pode ser editado de novo.",
   "app.errors.tooManyRenders": "Há exportações demais em andamento. Aguarde até que uma termine.",

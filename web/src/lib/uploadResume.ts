@@ -658,23 +658,37 @@ export async function listResumable(now = Date.now()): Promise<ResumableUpload[]
   return out.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/** How long giving an upload up waits for the server's answer to its
+ *  abort (a request hanging on a bad connection): a pick of the same file
+ *  waits for that (the start screen's CANCEL_WAIT_MS). */
+export const ABORT_TIMEOUT_MS = 10_000;
+
 /** Give up an interrupted upload for good: abort it on the server and
  *  forget it here (the start screen's "Discard", a tile's "Remove").
- *  Never one that is running — here or in another tab: false then. */
+ *  Never one that is running — here or in another tab: false then.
+ *  Forgotten first: an upload of the same bytes that starts meanwhile
+ *  starts anew, instead of resuming (or reusing) what the server is
+ *  about to delete. */
 export async function discardResumable(fp: string): Promise<boolean> {
   const rec = await backend.get(fp);
   if (!rec) return true;
   if (active.has(fp) || (await activeElsewhere([rec], Date.now())).has(fp)) return false;
+  await dropRecord(fp);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const { apiFetch } = await import("@/lib/api");
-    await apiFetch("/uploads/multipart/abort", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticket: rec.ticket }),
-    });
+    await Promise.race([
+      apiFetch("/uploads/multipart/abort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticket: rec.ticket }),
+      }),
+      new Promise((resolve) => (timer = setTimeout(resolve, ABORT_TIMEOUT_MS))),
+    ]);
   } catch {
     /* the bucket's lifecycle rule aborts it anyway */
+  } finally {
+    clearTimeout(timer);
   }
-  await dropRecord(fp);
   return true;
 }

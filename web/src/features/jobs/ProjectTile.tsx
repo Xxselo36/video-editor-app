@@ -12,7 +12,8 @@
  * An upload waiting for "Let's go" (D3) says so and leads back to the
  * start screen ("Continue"), also once it failed (instead of "Try again").
  * Its bytes all stored, its badge says "Uploaded": nothing goes on until
- * "Let's go".
+ * "Let's go". Another tab of the browser shows it waiting too (its
+ * record says so), without the way back: that start is the other tab's.
  */
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { ArrowRight, Film, RotateCw, X } from "lucide-react";
@@ -34,6 +35,7 @@ import { useAwaitingGo, useLiveUpload, useLocalThumb } from "@/features/upload/u
 import { matchResumable, stoppedTileShowsError, useResumableUploads } from "@/features/upload/useResumable";
 import { discardResumable, findRecord } from "@/lib/uploadResume";
 import type { UploadSettings } from "@/features/upload/uploadJob";
+import type { LastUsedPrefs } from "@/features/start/lastUsed";
 import { getLocalJob, removeJob } from "./jobsStore";
 import { daysLeft, middleEllipsis, type Project, type ProjectState } from "./projects";
 import { ProjectMenu } from "./ProjectMenu";
@@ -126,11 +128,12 @@ function touchDevice(): boolean {
 }
 
 /** The settings to upload a picked file again with (the record's, else
- *  its workflow's), or null — then the user starts over. */
-function retrySettings(id: string): { settings: UploadSettings; preset: PresetId | null } | null {
+ *  its workflow's), or null — then the user starts over. `lastUsed`: the
+ *  start screen's choices of a video picked there. */
+function retrySettings(id: string): { settings: UploadSettings; preset: PresetId | null; lastUsed?: LastUsedPrefs } | null {
   const local = getLocalJob(id);
   const preset = local?.presetId && local.presetId in PRESETS ? (local.presetId as PresetId) : null;
-  if (local?.upload?.settings) return { settings: local.upload.settings, preset };
+  if (local?.upload?.settings) return { settings: local.upload.settings, preset, lastUsed: local.upload.lastUsed };
   if (!preset) return null;
   const p = PRESETS[preset].settings;
   return {
@@ -226,6 +229,8 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
   // Still running in this page (waiting for the connection, say) or in
   // another tab: never a stopped tile, whatever the record says.
   const p: Project = (liveUpload || elsewhere) && project.state === "upload_failed" ? { ...project, state: "uploading" } : project;
+  // Waiting for "Let's go" here, or in the tab that uploads it.
+  const waits = awaitingGo || (elsewhere && Boolean(p.upload?.awaitingGo));
   const fileRef = useRef<HTMLInputElement>(null);
   // iPhone/iPad: the original-formats chooser, and "Pick anyway" (no
   // filter) when iOS gives up on a very large video (features/start/
@@ -256,7 +261,8 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
   const shown = middleEllipsis(name);
   const href = openHref(p);
   // Stored, waiting for "Let's go": not uploading any more.
-  const badge = awaitingGo && p.state === "uploading" && liveUpload?.uploaded ? STORED_BADGE : BADGE[p.state];
+  const stored = liveUpload ? liveUpload.uploaded : p.upload?.pct === 100;
+  const badge = waits && p.state === "uploading" && stored ? STORED_BADGE : BADGE[p.state];
   const tone = TONE[badge.tone];
   const left = p.state === "expired" ? null : daysLeft(p.expiresAt, now);
   const expiring = left !== null && left <= 3 && (p.state === "exported" || p.state === "ready" || p.state === "edited");
@@ -275,7 +281,7 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
       case "uploading":
         // (Waiting for "Let's go" too: the connection comes first.)
         if (liveUpload?.paused) return t("app.upload.paused");
-        if (awaitingGo) return t("app.start.waitingForGo");
+        if (waits) return t("app.start.waitingForGo");
         if (starting) return t("app.projects.starting");
         return resuming ? t("app.upload.resuming") : t(touchDevice() ? "app.projects.uploadKeepOpenPhone" : "app.projects.uploadKeepOpen");
       case "upload_failed":
@@ -354,7 +360,7 @@ export function ProjectTile({ p: project, onOpen, onMenuAction }: {
       onOpen("/app/new");
       return;
     }
-    void retryUploadWith(p.id, file, s.settings, s.preset, source);
+    void retryUploadWith(p.id, file, s.settings, s.preset, source, s.lastUsed);
   };
   const onPicked = async (e: ChangeEvent<HTMLInputElement>, anyway = false) => {
     const file = e.target.files?.[0];

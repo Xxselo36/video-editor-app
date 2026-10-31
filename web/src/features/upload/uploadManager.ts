@@ -27,6 +27,7 @@
  * Projects shows with a way back to the start screen.
  */
 import { tEn } from "@/lib/errors";
+import type { LastUsedPrefs } from "@/features/start/lastUsed";
 import type { Gate } from "./gate";
 import {
   addUploadRecord,
@@ -35,6 +36,8 @@ import {
   recordUploadFailed,
   recordUploadSettings,
   recordUploadStarting,
+  recordUploadStored,
+  recordUploadWaiting,
 } from "./records";
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import { readSettings, type SettingsSource, type UploadSettings } from "./settings";
@@ -85,6 +88,11 @@ export type StartOpts = {
   /** The length as read when the file was picked (null: the browser
    *  couldn't); read again when not given. */
   duration?: number | null;
+  /** The start screen's choices as wanted, for an upload of its video
+   *  that goes on without the screen (the Projects tile's "Try again"
+   *  after a reload): kept with the record, and remembered as "Zuletzt
+   *  benutzt" when POST /jobs goes out (D4). */
+  lastUsed?: LastUsedPrefs;
   /** The upload's card is up (its temporary id: useLiveUpload). */
   onCard?(tempId: string): void;
   /** POST /jobs read the settings: a change from now on wouldn't reach
@@ -107,6 +115,7 @@ export function uploadCard(
   preset: PresetId | null,
   source?: "any",
   thumb?: Promise<string | null>,
+  lastUsed?: LastUsedPrefs,
 ): string {
   const tempId = `upl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const info = preset ? PRESETS[preset] : null;
@@ -119,6 +128,7 @@ export function uploadCard(
     // (Read now for the record: a later change still reaches POST /jobs.)
     settings: readSettings(settings),
     ...(source ? { source } : {}),
+    ...(lastUsed ? { lastUsed } : {}),
   });
   live.set(tempId, { id: tempId, pct: 0, resuming: false });
   emit();
@@ -130,9 +140,11 @@ export function uploadCard(
 }
 
 /** The start screen's choices changed (D7): the upload's record follows
- *  (POST /jobs reads the settings source itself, when it goes out). */
-export function updateUploadSettings(tempId: string, settings: UploadSettings): void {
-  recordUploadSettings(tempId, settings);
+ *  (POST /jobs reads the settings source itself, when it goes out), with
+ *  the choices as wanted (`lastUsed`: "Try again" after a reload
+ *  remembers them). */
+export function updateUploadSettings(tempId: string, settings: UploadSettings, lastUsed?: LastUsedPrefs): void {
+  recordUploadSettings(tempId, settings, lastUsed);
 }
 
 let uploadCode: Promise<typeof import("./uploadJob")> | null = null;
@@ -241,20 +253,25 @@ export async function startUpload(
   file: File,
   settings: SettingsSource,
   preset: PresetId | null,
-  { source, gate, thumb, duration, onCard, onSettingsRead, onStarting, onCreated, onEnd }: StartOpts = {},
+  { source, gate, thumb, duration, lastUsed, onCard, onSettingsRead, onStarting, onCreated, onEnd }: StartOpts = {},
 ): Promise<void> {
   const fk = fileKey(file);
   if (running.has(fk)) return;
   // The tile goes up now, before anything is awaited: Projects shows it
   // the moment it opens.
-  const tempId = uploadCard(file, settings, preset, source, thumb);
+  const tempId = uploadCard(file, settings, preset, source, thumb, lastUsed);
   running.set(fk, tempId);
   guardUnload();
-  // Awaiting go until the gate opens. A failure keeps the mark; giving
-  // the upload up drops it (uploadControls).
+  // Awaiting go until the gate opens (the record says so too: other
+  // tabs). A failure keeps the mark; giving the upload up drops it
+  // (uploadControls).
   if (gate && !gate.isOpen) {
     setAwaitingGo(tempId, true);
-    void gate.promise.then(() => setAwaitingGo(tempId, false));
+    recordUploadWaiting(tempId, true);
+    void gate.promise.then(() => {
+      setAwaitingGo(tempId, false);
+      recordUploadWaiting(tempId, false);
+    });
   }
   // Other tabs: this record's upload runs (lib/uploadLock), until onEnd.
   const unlock = holdUploadLock(tempId);
@@ -267,6 +284,7 @@ export async function startUpload(
     preset,
     ...(source ? { source } : {}),
     ...(gate ? { start: { gate, duration, onCard, onSettingsRead, onStarting, onCreated, onEnd } } : {}),
+    ...(lastUsed ? { lastUsed } : {}),
   });
   let created: string | null = null;
   let failed = false;
@@ -318,10 +336,14 @@ export async function startUpload(
       recordUploadStarting(tempId);
       emit();
       onStarting?.();
+      // (Its own chunk: only an upload that went on without the start
+      // screen needs it.)
+      if (lastUsed) void import("@/features/start/lastUsed").then((m) => m.saveLastUsed(lastUsed)).catch(() => {});
     },
     onUploaded: (id) => {
       const cur = live.get(id);
       live.set(id, { id, resuming: false, ...cur, pct: 100, uploaded: true });
+      recordUploadStored(id);
       emit();
     },
     onFailed: () => {

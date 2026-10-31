@@ -193,6 +193,7 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "फिर भी चुनें",
   "app.start.pickAnywayNote": "वीडियो पहले कन्वर्ट होता है, इसमें कुछ मिनट लग सकते हैं। सूची में फ़ोटो भी दिखेंगी।",
   "app.start.notVideo": "यह वीडियो नहीं है। कोई वीडियो फ़ाइल चुनें।",
+  "app.start.pickBusy": "आपका रद्द किया गया अपलोड अभी हटाया जा रहा है। थोड़ी देर में वीडियो फिर से चुनें।",
   "app.start.pickTooBig": "यह वीडियो {size} GB का है, जो {max} GB की सीमा से ज़्यादा है। फिर भी चुनें, तो इसकी छोटी, कन्वर्ट की हुई कॉपी अपलोड होगी।",
   "app.start.stillNothing": "अब भी कुछ नहीं आया?",
   "app.start.otherFormats": "दूसरे वीडियो फ़ॉर्मैट",
@@ -336,8 +337,8 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.crash.reload": "पेज रीलोड करें",
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
-  "app.errors.noVideoTrack": "यह एक ऑडियो फ़ाइल है। CleoCuts को आवाज़ वाला वीडियो चाहिए — कृपया कोई वीडियो फ़ाइल चुनें। कोई शुल्क नहीं लिया गया।",
-  "app.errors.videoTooShort": "यह वीडियो {min} सेकंड से छोटा है — काटने के लिए बहुत छोटा। कोई शुल्क नहीं लिया गया।",
+  "app.errors.noVideoTrack": "यह एक ऑडियो फ़ाइल है। CleoCuts को आवाज़ वाला वीडियो चाहिए, इसलिए कृपया कोई वीडियो फ़ाइल चुनें। कोई शुल्क नहीं लिया गया।",
+  "app.errors.videoTooShort": "यह वीडियो {min} सेकंड से छोटा है, इसलिए काटने के लिए बहुत छोटा है। कोई शुल्क नहीं लिया गया।",
   "app.errors.processingInterrupted": "प्रोसेसिंग बीच में रुक गई। कृपया वीडियो फिर से अपलोड करें।",
   "app.errors.mediaUnavailable": "मूल वीडियो अब उपलब्ध नहीं है, इसलिए यह प्रोजेक्ट दोबारा एडिट नहीं हो सकता।",
   "app.errors.tooManyRenders": "बहुत सारे एक्सपोर्ट चल रहे हैं। कृपया किसी एक के पूरा होने तक रुकें।",

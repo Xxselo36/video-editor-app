@@ -13,20 +13,30 @@
  *             was uploaded (no object, no open multipart upload)
  *   reload    a reload while it waits for Let's go: the tile's "Try
  *             again" takes the same file straight to POST /jobs with the
- *             latest choices (no new upload, no part sent again)
+ *             latest choices (no new upload, no part sent again), and
+ *             remembers them as the last used
  *   left      stored, then Projects: the tile says "Uploaded" and that it
  *             waits; the headline doesn't count it as in progress
  *   offline   a waiting upload's connection gone: its tile says so first
  *   again     X, then the same file at once: it waits until the stored
  *             upload is discarded, then uploads anew (not an empty
- *             Projects page)
+ *             Projects page); the same bytes as a new File (an iPhone's
+ *             pick) start a new upload at once, never the one being
+ *             deleted; a discard that hangs holds a pick up for a while
+ *             at most, then the pick goes on or says why it can't yet
+ *   resume    a reload before Let's go: the same video picked again
+ *             (the resume card, or New video once all bytes were stored)
+ *             comes back with the choices it had, and POST /jobs carries
+ *             them (the last used too)
+ *   two tabs  a second tab's Projects shows the video waiting, and
+ *             follows once Let's go is pressed in the first
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { API, WEB } from "./support/env";
-import { createdJobId, jobCard, openWithStorage, startGo, storedJobs, watchJobPosts } from "./support/app";
+import { createdJobId, jobCard, openWithStorage, readStorage, startGo, storedJobs, watchJobPosts } from "./support/app";
 
 /** POST /jobs requests of the page (none may go out before Let's go). */
 function jobPosts(page: Page): string[] {
@@ -59,6 +69,11 @@ async function stored(page: Page) {
   const status = page.getByTestId("start-upload-status");
   await expect(status).toHaveAttribute("data-state", "uploaded", { timeout: 90_000 });
   await expect(status).toHaveText("Uploaded");
+}
+
+/** The record of the upload of `name` (the jobs store). */
+async function recordOf(page: Page, name: string) {
+  return (await storedJobs(page)).find((j) => j.filename === name)?.upload;
 }
 
 /** What the bucket holds (GET /_test/uploads). */
@@ -268,5 +283,209 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     expect(puts).toEqual([]);
     expect(posts).toHaveLength(1);
     expect(posts[0]).toMatchObject({ caption_style_hint: "neon", caption_style: { presetId: "neon", overrides: {} } });
+    // Remembered as it went out (D4), also on this way after a reload.
+    await expect
+      .poll(() => readStorage(page, "cleocuts.prefs.v1"))
+      .toEqual({ target_aspect: "9:16", remove_fillers: true, spoken_language: "auto", caption_style_last: "neon" });
+  });
+
+  // (Titles end in plain ASCII: the test's files live in a folder named
+  // after its end, and Chromium can't read a picked file from a path with
+  // a curly apostrophe.)
+  test("a reload while it uploads, before Let’s go: the resume card brings the video back with its choices, and POST /jobs sends them", async ({ page }) => {
+    const posts = await watchJobPosts(page);
+    // The second part waits (the page reloads meanwhile).
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    await page.route(`${moto}/**`, async (route) => {
+      const n = Number(new URL(route.request().url()).searchParams.get("partNumber"));
+      if (route.request().method() === "PUT" && n === 2) await held;
+      await route.continue().catch(() => {});
+    });
+    const path = fileOf("weiter.mp4", crypto.randomBytes(17 * MIB));
+    await pick(page, path);
+    await page.getByTestId("start-style-neon").click();
+    await page.getByTestId("start-more").click();
+    await page.getByTestId("start-fillers").click();
+    await page.getByTestId("start-format-original").click();
+    await page.getByTestId("start-language").selectOption("de");
+    // (The record follows every choice.)
+    await expect.poll(async () => (await recordOf(page, "weiter.mp4"))?.settings?.spoken_language).toBe("de");
+    await expect.poll(() => puts).toContain(2);
+    page.on("dialog", (d) => void d.accept());
+    await page.reload();
+    release();
+
+    await expect(page.getByTestId("start-resume")).toBeVisible({ timeout: 30_000 });
+    api.length = 0;
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("start-resume-choose").click()]);
+    await chooser.setFiles(path);
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
+    await expect(page.getByTestId("start-style-neon")).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByTestId("start-more-summary")).toHaveText("“Um” stays in · Original · German");
+    // (Prefs that answer late don't change them.)
+    await page.waitForTimeout(1000);
+    await expect(page.getByTestId("start-style-neon")).toHaveAttribute("aria-checked", "true");
+    await startGo(page);
+    await expect(page).toHaveURL(`${WEB}/app`, { timeout: 60_000 });
+    await expect.poll(() => createdJobId(page, "weiter.mp4")).not.toBeNull();
+    // It went on where it stopped: no new upload.
+    expect(api).not.toContain("init");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({
+      target_aspect: "original",
+      style: "tight",
+      remove_fillers: false,
+      spoken_language: "de",
+      caption_style_hint: "neon",
+      caption_style: { presetId: "neon", overrides: {} },
+    });
+    expect(await readStorage(page, "cleocuts.prefs.v1")).toEqual({
+      target_aspect: "original",
+      remove_fillers: false,
+      spoken_language: "de",
+      caption_style_last: "neon",
+    });
+  });
+
+  test("a reload once all its bytes are stored: the same file picked on New video comes back with its choices, straight to POST /jobs", async ({ page }) => {
+    const posts = await watchJobPosts(page);
+    const path = fileOf("gespeichert.mp4", crypto.randomBytes(3 * MIB));
+    await pick(page, path);
+    await stored(page);
+    await page.getByTestId("start-style-karaoke").click();
+    await page.getByTestId("start-more").click();
+    await page.getByTestId("start-captions-only").click();
+    await page.getByTestId("start-language").selectOption("fr");
+    // (The record follows every choice.)
+    await expect.poll(async () => (await recordOf(page, "gespeichert.mp4"))?.settings?.spoken_language).toBe("fr");
+    page.on("dialog", (d) => void d.accept());
+    await page.reload();
+
+    // Nothing left to upload: no resume card, the video is just picked again.
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "pick");
+    await expect(page.getByTestId("start-resume")).toHaveCount(0);
+    api.length = 0;
+    puts.length = 0;
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await chooser.setFiles(path);
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
+    await expect(page.getByTestId("start-style-karaoke")).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByTestId("start-more-summary")).toHaveText("Captions only · French");
+    await stored(page);
+    await startGo(page);
+    await expect(page).toHaveURL(`${WEB}/app`, { timeout: 60_000 });
+    await expect.poll(() => createdJobId(page, "gespeichert.mp4")).not.toBeNull();
+    expect(api).toEqual([]);
+    expect(puts).toEqual([]);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({
+      target_aspect: "9:16",
+      style: "none",
+      remove_fillers: false,
+      voice_triggers: false,
+      spoken_language: "fr",
+      caption_style: { presetId: "karaoke", overrides: {} },
+    });
+    // Only one tile: the stopped one went.
+    expect((await storedJobs(page)).filter((j) => j.filename === "gespeichert.mp4")).toHaveLength(1);
+  });
+
+  test("a second tab of the browser shows the video waiting for Let’s go, and follows when it goes", async ({ page }) => {
+    const posts = jobPosts(page);
+    await pick(page, fileOf("zwei-tabs.mp4", crypto.randomBytes(3 * MIB)));
+    await stored(page);
+    const other = await page.context().newPage();
+    await other.goto("/app");
+    const tile = jobCard(other, "zwei-tabs.mp4");
+    await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
+    await expect(tile.getByTestId("job-card-badge")).toHaveText("Uploaded");
+    await expect(other.getByTestId("dashboard").getByRole("heading", { level: 1 })).toHaveText("Ready when you are");
+    // Its way back and its Cancel are the first tab's.
+    await expect(tile.getByTestId("job-card-continue-start")).toHaveCount(0);
+    await expect(tile.getByTestId("job-card-cancel")).toHaveCount(0);
+    await other.waitForTimeout(1000);
+    expect(posts).toEqual([]);
+
+    await startGo(page);
+    await expect(page).toHaveURL(`${WEB}/app`, { timeout: 60_000 });
+    await expect.poll(() => createdJobId(page, "zwei-tabs.mp4")).not.toBeNull();
+    await expect(tile).not.toHaveAttribute("data-state", /^upload/, { timeout: 30_000 });
+    await expect(tile.getByTestId("job-card-status")).not.toHaveText("Waiting for “Let’s go”");
+    expect(posts).toHaveLength(1);
+    await other.close();
+  });
+
+  test("X, then the same video as a new File (an iPhone's pick) while the discard is still out: a new upload, and the job starts from it", async ({ page }) => {
+    const posts = await watchJobPosts(page);
+    const bytes = crypto.randomBytes(3 * MIB);
+    await pick(page, fileOf("neu-gewaehlt.mp4", bytes));
+    await stored(page);
+    // The abort reaches the server; its answer comes late (a slow connection).
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    await page.route(`${API}/uploads/multipart/abort`, async (route) => {
+      const answer = await route.fetch();
+      await held;
+      await route.fulfill({ response: answer }).catch(() => {});
+    });
+    await page.getByTestId("start-cancel").click();
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "pick");
+    await expect.poll(() => api).toContain("abort");
+    api.length = 0;
+    puts.length = 0;
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await chooser.setFiles({ name: "neu-gewaehlt.mp4", mimeType: "video/mp4", buffer: bytes });
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
+    await stored(page);
+    expect(api).toContain("init");
+    expect(puts.length).toBeGreaterThan(0);
+    await startGo(page);
+    await expect(page).toHaveURL(`${WEB}/app`, { timeout: 60_000 });
+    await expect.poll(() => createdJobId(page, "neu-gewaehlt.mp4")).not.toBeNull();
+    expect(posts).toHaveLength(1);
+    release();
+  });
+
+  test("X, then the same file again while the discard hangs: the pick waits a while at most, then the video uploads anew", async ({ page }) => {
+    const posts = jobPosts(page);
+    const path = fileOf("haengt.mp4", crypto.randomBytes(3 * MIB));
+    await pick(page, path);
+    await stored(page);
+    // The abort never gets an answer.
+    await page.route(`${API}/uploads/multipart/abort`, () => new Promise<void>(() => {}));
+    await page.getByTestId("start-cancel").click();
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "pick");
+    await expect.poll(() => api).toContain("abort");
+    api.length = 0;
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await chooser.setFiles(path);
+    await expect(page.getByTestId("start-preparing")).toBeVisible();
+    // (Within the 15 s a pick waits for a discard.)
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style", { timeout: 15_000 });
+    await stored(page);
+    expect(api.filter((c) => c === "init")).toHaveLength(1);
+    expect(posts).toEqual([]);
+  });
+
+  test("X, then the same file again while the discard hangs here (not on the server): after a while the pick says why", async ({ page }) => {
+    const path = fileOf("steckt.mp4", crypto.randomBytes(3 * MIB));
+    await pick(page, path);
+    await stored(page);
+    // Winding down never ends (the discard's look at other tabs hangs).
+    await page.evaluate(() => {
+      Object.defineProperty(navigator.locks, "query", { value: () => new Promise(() => {}), configurable: true });
+    });
+    await page.getByTestId("start-cancel").click();
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "pick");
+    api.length = 0;
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await chooser.setFiles(path);
+    await expect(page.getByTestId("start-preparing")).toBeVisible();
+    const error = page.getByTestId("start-pick-error");
+    await expect(error).toHaveText("Your cancelled upload is still being removed. Pick the video again in a moment.", { timeout: 20_000 });
+    await expect(page.getByTestId("start-preparing")).toHaveCount(0);
+    expect(api).toEqual([]);
   });
 });
+

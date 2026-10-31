@@ -198,6 +198,8 @@ export const enApp = {
   "app.start.pickAnyway": "Pick anyway",
   "app.start.pickAnywayNote": "The video is converted first, which can take a few minutes. The list shows photos too.",
   "app.start.notVideo": "That's not a video. Pick a video file.",
+  // A pick of a video whose cancelled upload still winds down after a while (features/start/StartScreen CANCEL_WAIT_MS)
+  "app.start.pickBusy": "Your cancelled upload is still being removed. Pick the video again in a moment.",
   // iOS: an original over the upload cap (features/start/videoPicker originalTooBig)
   "app.start.pickTooBig": "This video is {size} GB, over the {max} GB limit. Pick it anyway to send a smaller, converted copy.",
   // No word from iOS for a long while (features/start/pickWatch STALL_MS), then "Pick anyway"
@@ -348,8 +350,8 @@ export const enApp = {
   "app.crash.reload": "Reload page",
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
-  "app.errors.noVideoTrack": "This is an audio file. CleoCuts needs a video with sound — pick a video file instead. Nothing was charged.",
-  "app.errors.videoTooShort": "This video is shorter than {min} seconds — too short to cut. Nothing was charged.",
+  "app.errors.noVideoTrack": "This is an audio file. CleoCuts needs a video with sound, so pick a video file instead. Nothing was charged.",
+  "app.errors.videoTooShort": "This video is shorter than {min} seconds, too short to cut. Nothing was charged.",
   "app.errors.processingInterrupted": "Processing was interrupted. Please upload the video again.",
   "app.errors.mediaUnavailable": "The original video is no longer available, so this project can't be edited again.",
   "app.errors.tooManyRenders": "Too many exports are running. Please wait until one has finished.",

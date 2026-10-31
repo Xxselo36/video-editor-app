@@ -194,6 +194,7 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "Choisir quand même",
   "app.start.pickAnywayNote": "La vidéo est d’abord convertie, ce qui peut prendre quelques minutes. La liste affiche aussi des photos.",
   "app.start.notVideo": "Ce n’est pas une vidéo. Choisis un fichier vidéo.",
+  "app.start.pickBusy": "Ton envoi annulé est encore en cours de suppression. Choisis à nouveau la vidéo dans un instant.",
   "app.start.pickTooBig": "Cette vidéo fait {size} Go, au-delà de la limite de {max} Go. Choisis-la quand même pour envoyer une copie convertie plus légère.",
   "app.start.stillNothing": "Toujours rien ?",
   "app.start.otherFormats": "Autres formats vidéo",
@@ -337,8 +338,8 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.crash.reload": "Recharger la page",
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
-  "app.errors.noVideoTrack": "C'est un fichier audio. CleoCuts a besoin d'une vidéo avec du son — choisis plutôt un fichier vidéo. Rien n'a été facturé.",
-  "app.errors.videoTooShort": "Cette vidéo dure moins de {min} secondes — trop courte pour être montée. Rien n'a été facturé.",
+  "app.errors.noVideoTrack": "C'est un fichier audio. CleoCuts a besoin d'une vidéo avec du son : choisis plutôt un fichier vidéo. Rien n'a été facturé.",
+  "app.errors.videoTooShort": "Cette vidéo dure moins de {min} secondes : elle est trop courte pour être montée. Rien n'a été facturé.",
   "app.errors.processingInterrupted": "Le traitement a été interrompu. Importe à nouveau la vidéo.",
   "app.errors.mediaUnavailable": "La vidéo d'origine n'est plus disponible, ce projet ne peut donc plus être modifié.",
   "app.errors.tooManyRenders": "Trop d'exports sont en cours. Attends qu'un export soit terminé.",

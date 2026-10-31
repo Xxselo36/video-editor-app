@@ -193,6 +193,7 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "Scegli comunque",
   "app.start.pickAnywayNote": "Il video viene prima convertito e può volerci qualche minuto. Nell’elenco compaiono anche le foto.",
   "app.start.notVideo": "Questo non è un video. Scegli un file video.",
+  "app.start.pickBusy": "Il caricamento annullato è ancora in fase di rimozione. Scegli di nuovo il video tra un attimo.",
   "app.start.pickTooBig": "Questo video pesa {size} GB, oltre il limite di {max} GB. Sceglilo comunque per inviare una copia convertita più leggera.",
   "app.start.stillNothing": "Ancora niente?",
   "app.start.otherFormats": "Altri formati video",

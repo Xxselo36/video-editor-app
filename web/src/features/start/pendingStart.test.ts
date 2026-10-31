@@ -92,7 +92,16 @@ describe("pendingStart", () => {
     expect(now).toMatchObject({ style: { presetId: "neon" }, captionsOnly: true });
     expect(settings()).toEqual(sent(now));
     expect(settings()).toMatchObject({ style: "none", caption_style: { presetId: "neon", overrides: {} } });
-    expect(updateUploadSettings).toHaveBeenCalledWith("upl-1", sent(now));
+    expect(updateUploadSettings).toHaveBeenLastCalledWith("upl-1", sent(now), lastUsedPrefs(now));
+  });
+
+  it("the record keeps the choices as wanted from the pick on, and so does the new upload of Try again", async () => {
+    const { store, opts } = await pick();
+    // ("Try again" after a reload remembers them as the last used.)
+    expect(updateUploadSettings).toHaveBeenCalledWith("upl-1", sent(first()), lastUsedPrefs(first()));
+    opts!.onEnd!(null, "failed");
+    expect(store.retryStart()).toBe(true);
+    expect(updateUploadSettings).toHaveBeenLastCalledWith("upl-2", sent(first()), lastUsedPrefs(first()));
   });
 
   it("after Let's go a new visit starts fresh, and the choices it went with are still remembered", async () => {
@@ -169,6 +178,14 @@ describe("pendingStart", () => {
     expect(store.getPendingStart()).toBeNull();
   });
 
+  it("given up on its tile while its upload still winds down (the abort's answer still out): let go too, never shown again", async () => {
+    const { store } = await pick();
+    // The tile's Cancel: no longer waiting for Let's go; onEnd comes later.
+    awaiting = false;
+    store.restoreStart();
+    expect(store.getPendingStart()).toBeNull();
+  });
+
   it("Try again without the File: let go, so the video is picked again", async () => {
     const { store, opts } = await pick();
     opts!.onEnd!(null, "failed");
@@ -207,6 +224,7 @@ describe("pendingStart", () => {
 
   it("shown again after leaving, a waiting start keeps its choices: prefs read on the way back don't replace them", async () => {
     const { store } = await pick();
+    updateUploadSettings.mockClear();
     const chosen = store.getPendingStart()!.choices;
     // Left before "Let's go", back on Neues Video: its prefs are read
     // anew (another video's POST wrote Karaoke as the last used meanwhile).
@@ -214,6 +232,15 @@ describe("pendingStart", () => {
     store.offerChoices({ ...first(), style: { presetId: "karaoke", overrides: {} } });
     expect(store.getPendingStart()!.choices).toEqual(chosen);
     expect(updateUploadSettings).not.toHaveBeenCalled();
+  });
+
+  it("a pick that continues its stopped upload comes with that video's choices: prefs that answer later leave them", async () => {
+    const store = await import("./pendingStart");
+    const resumed: Choices = { ...first(), style: { presetId: "elegant", overrides: {} }, fillers: false, aspect: "original", language: "fr" };
+    expect(store.beginStart(new File([], "r.mp4"), { probe, frame: Promise.resolve(null), choices: resumed, touched: true })).toBe(true);
+    store.offerChoices(first());
+    expect(store.getPendingStart()!.choices).toEqual(resumed);
+    expect(started[0].settings()).toEqual(sent(resumed));
   });
 
   it("prefs that answer later apply only to untouched choices", async () => {

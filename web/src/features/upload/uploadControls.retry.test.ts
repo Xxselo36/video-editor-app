@@ -99,4 +99,24 @@ describe("retryUpload", () => {
     expect(revoked).toEqual([]);
     expect(s.isAwaitingGo("upl-e")).toBe(false);
   });
+
+  it("from a tile (no options), the upload of a start screen's video that went on without it: its wishes go along (Last used)", async () => {
+    const lastUsed = { target_aspect: "original" as const, remove_fillers: false, spoken_language: "fr", caption_style_last: "elegant" };
+    const s = await failed("upl-f", "blob:f");
+    s.retries.set("upl-f", { ...s.retries.get("upl-f")!, lastUsed });
+    const { retryUpload } = await import("./uploadControls");
+    expect(retryUpload("upl-f")).toBe(true);
+    expect(started[0].opts).toMatchObject({ lastUsed });
+  });
 });
+
+describe("retryUploadWith (after a reload)", () => {
+  it("hands the record's wishes on: remembered as Last used when POST /jobs goes out", async () => {
+    const lastUsed = { target_aspect: "9:16" as const, remove_fillers: true, spoken_language: "auto", caption_style_last: "neon" };
+    const { retryUploadWith } = await import("./uploadControls");
+    expect(await retryUploadWith("upl-g", new File([], "g.mp4"), settings, null, undefined, lastUsed)).toBe(true);
+    expect(removed).toEqual(["upl-g"]);
+    expect(started).toEqual([{ name: "g.mp4", opts: { source: undefined, lastUsed } }]);
+  });
+});
+

@@ -190,6 +190,7 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "それでも選ぶ",
   "app.start.pickAnywayNote": "先に動画が変換されるため、数分かかることがあります。一覧には写真も表示されます。",
   "app.start.notVideo": "動画ではありません。動画ファイルを選んでください。",
+  "app.start.pickBusy": "キャンセルしたアップロードをまだ削除しています。少ししてからもう一度動画を選んでください。",
   "app.start.pickTooBig": "この動画は{size} GBで、上限の{max} GBを超えています。「それでも選ぶ」を使うと、変換された小さいコピーを送れます。",
   "app.start.stillNothing": "まだ届きませんか？",
   "app.start.otherFormats": "その他の動画形式",

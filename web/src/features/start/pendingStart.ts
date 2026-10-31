@@ -16,9 +16,10 @@
  * - failed: kept, for "Nochmal versuchen" (its record says why; "Try
  *   again" on its Projects tile goes on with the same callbacks);
  * - a screen mounting lets go of one that already went ("Los geht's":
- *   Projects shows it now) or that was given up on its tile, and shows
- *   the one still waiting as it was left (prefs read again on the way
- *   back don't change its choices).
+ *   Projects shows it now) or that was given up on its tile (also while
+ *   that upload still winds down), and shows the one still waiting as it
+ *   was left (prefs read again on the way back don't change its
+ *   choices).
  *
  * Also the screens' two contexts: what they can do (StartScreen's
  * actions, stable) and what they show (no upload progress: UploadStatus
@@ -95,14 +96,19 @@ function settingsSource(slot: Slot): () => UploadSettings {
 }
 
 /** The record follows every choice: "Try again" after a reload starts
- *  with them. */
+ *  with them (and remembers them as wanted), and the same video picked
+ *  again comes back with them. */
 function recordChoices(slot: Slot): void {
-  updateUploadSettings(slot.state.tempId, settingsSource(slot)());
+  updateUploadSettings(slot.state.tempId, settingsSource(slot)(), lastUsedPrefs(slot.state.choices));
 }
 
 function callbacks(slot: Slot): Pick<StartOpts, "onCard" | "onSettingsRead" | "onStarting" | "onEnd"> {
   return {
-    onCard: (tempId) => patch(slot, { tempId, failed: false }),
+    onCard: (tempId) => {
+      patch(slot, { tempId, failed: false });
+      // (A new record: its choices as wanted too.)
+      recordChoices(slot);
+    },
     // From here on a change wouldn't reach the job: locked.
     onSettingsRead: () => patch(slot, { sent: true }),
     onStarting: () => {
@@ -128,12 +134,14 @@ function callbacks(slot: Slot): Pick<StartOpts, "onCard" | "onSettingsRead" | "o
 
 /**
  * Start uploading `file` for "Untertitel wählen": its POST /jobs waits
- * for "Los geht's". False (nothing started) when this very file already
- * uploads in this page.
+ * for "Los geht's". `touched`: the choices are this video's already (it
+ * continues its stopped upload), prefs that answer later leave them be.
+ * False (nothing started) when this very file already uploads in this
+ * page.
  */
 export function beginStart(
   file: File,
-  init: { source?: "any"; probe: VideoProbe | null; frame: Promise<string | null>; choices: Choices },
+  init: { source?: "any"; probe: VideoProbe | null; frame: Promise<string | null>; choices: Choices; touched?: boolean },
 ): boolean {
   const slot: Slot = {
     state: {
@@ -143,7 +151,7 @@ export function beginStart(
       choices: init.choices,
       probe: init.probe,
       frame: init.frame,
-      touched: false,
+      touched: init.touched ?? false,
       committed: false,
       sent: false,
       starting: false,
@@ -228,14 +236,15 @@ export function retryStart(): boolean {
 }
 
 /** A screen mounts: it shows the pending start, unless that one went
- *  already (Projects has it) or was given up on its tile (a failed one
- *  no longer waiting for "Los geht's"). Shown again, it keeps its
- *  choices: the prefs the new screen reads don't replace them (D3). */
+ *  already (Projects has it) or was given up on its tile (no longer
+ *  waiting for "Los geht's": Cancel or Remove, also while the upload
+ *  still winds down). Shown again, it keeps its choices: the prefs the
+ *  new screen reads don't replace them (D3). */
 export function restoreStart(): void {
   const slot = current;
   if (!slot) return;
-  const { committed, failed, tempId, touched } = slot.state;
-  if (committed || (failed && !isAwaitingGo(tempId))) release(slot);
+  const { committed, tempId, touched } = slot.state;
+  if (committed || !isAwaitingGo(tempId)) release(slot);
   else if (!touched) patch(slot, { touched: true });
 }
 

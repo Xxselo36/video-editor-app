@@ -10,6 +10,7 @@ import {
   lastUsedPrefs,
   moreSummary,
   outputShape,
+  resumedChoices,
   settingsOf,
   styleTags,
   styleTiles,
@@ -248,5 +249,54 @@ describe("last used", () => {
       spoken_language: "de",
       caption_style_last: "neon",
     });
+  });
+});
+
+describe("a stopped upload picked again (a reload while it waited for Los geht's)", () => {
+  /** The stopped upload's record as the start screen wrote it for `c`. */
+  const recordOf = (c: Choices, probe: VideoProbe | null) => ({ settings: payload(c, probe), lastUsed: lastUsedPrefs(c) });
+  const first = () => initialChoices(FIRST_VISIT);
+
+  it("comes back with its choices: POST /jobs then sends what it would have (payload rows 1 to 3)", () => {
+    const rows: [Choices, VideoProbe | null][] = [
+      // 1: first visit.
+      [first(), UPRIGHT],
+      // 2: Nur Untertitel + Original + de + Karaoke.
+      [{ ...pick(first(), "karaoke"), captionsOnly: true, aspect: "original", language: "de" }, LANDSCAPE],
+      // 3: Ohne Untertitel.
+      [pick(first(), "none"), UPRIGHT],
+      // Elegant, fillers kept, Original, French (the review's journey).
+      [{ ...pick(first(), "elegant"), fillers: false, aspect: "original", language: "fr" }, LANDSCAPE],
+    ];
+    for (const [c, probe] of rows) {
+      const back = resumedChoices(recordOf(c, probe), undefined);
+      expect(back).toEqual(c);
+      expect(payload(back!, probe)).toEqual(payload(c, probe));
+    }
+  });
+
+  it("keeps the wishes the record's settings can't hold: fillers under Nur Untertitel, Quer for an upright video", () => {
+    const c: Choices = { ...pick(first(), "neon"), captionsOnly: true, fillers: true, aspect: "16:9", language: "es" };
+    expect(resumedChoices(recordOf(c, UPRIGHT), undefined)).toEqual(c);
+    // A record without them (older): what the settings say, filler removal as at first.
+    expect(resumedChoices({ settings: payload(c, UPRIGHT) }, undefined)).toEqual({ ...c, aspect: "original" });
+  });
+
+  it("keeps a saved default's look", () => {
+    const std = { presetId: "karaoke", overrides: { wordsPerPage: 2 } };
+    const c = initialChoices({ ...FIRST_VISIT, standard: std });
+    expect(resumedChoices(recordOf(c, UPRIGHT), undefined)?.style).toEqual(std);
+  });
+
+  it("none for a record the screen can't show: no caption style, a broken one, one no longer live", () => {
+    const older = payload(first(), UPRIGHT);
+    delete older.caption_style;
+    expect(resumedChoices({ settings: older }, undefined)).toBeNull();
+    expect(resumedChoices({}, undefined)).toBeNull();
+    const broken = { ...payload(first(), UPRIGHT), caption_style: { presetId: "power", overrides: null } };
+    expect(resumedChoices({ settings: broken as never }, undefined)).toBeNull();
+    const neon = recordOf(pick(first(), "neon"), UPRIGHT);
+    expect(resumedChoices(neon, ["power", "karaoke"])).toBeNull();
+    expect(resumedChoices(recordOf(pick(first(), "none"), UPRIGHT), ["power"])?.style.presetId).toBe("none");
   });
 });

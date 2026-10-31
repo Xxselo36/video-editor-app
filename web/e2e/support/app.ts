@@ -20,8 +20,16 @@ export type StoredJob = {
   timestamp: number;
   filename: string;
   name?: string | null;
-  /** An upload's record: the settings POST /jobs gets after a reload. */
-  upload?: { pct?: number; errorCode?: string | null; settings?: Record<string, unknown> };
+  /** An upload's record: the settings POST /jobs gets after a reload,
+   *  the start screen's choices as wanted (lastUsed), and whether it
+   *  waits for "Let's go" (awaitingGo). */
+  upload?: {
+    pct?: number;
+    errorCode?: string | null;
+    settings?: Record<string, unknown>;
+    lastUsed?: Record<string, unknown>;
+    awaitingGo?: boolean;
+  };
 };
 
 /** A project as the jobs store keeps it. */

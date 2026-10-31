@@ -9,11 +9,14 @@ import {
   cardNoteText,
   describeError,
   errorFromApi,
+  errorKey,
   jobErrorText,
   legacyCardCode,
+  REFUSAL_CODES,
   renderFailedNote,
   stageText,
 } from "@/lib/errors";
+import { CLIENT_ERROR_KEYS } from "@/lib/errorKeys";
 import { plural, pluralCategory } from "@/lib/i18n/plural";
 
 const tEn: TFn = (key, vars) => translate("en", key, vars);
@@ -145,6 +148,31 @@ describe("upload refusals on the v2 opt-in (Oct 2026: storage full read as 'busy
     expect(describeError(storageFull, tEn)).toBe(tEn("app.errors.serverBusy"));
     expect(describeError(tooMany, tDe)).toBe(tDe("app.errors.serverBusy"));
     expect(cardErrorText(cardError(storageFull), tDe)).toBe(tDe("app.errors.serverBusy"));
+  });
+});
+
+describe("the reasons the start screens give (PR1 §0: no dashes on a redesigned screen)", () => {
+  // Neues Video's refusals (the pick-time check, D9) and the stopped
+  // upload's reason on Untertitel wählen (the strip, any code the upload
+  // or POST /jobs answers with, an unknown one as the generic message).
+  const codes = [
+    ...REFUSAL_CODES,
+    ...Object.keys(CLIENT_ERROR_KEYS),
+    "auth_required",
+    "subscription_required",
+    "quota_exceeded",
+    "upload_incomplete",
+  ];
+
+  it("words every one of them without a dash, in German and English", () => {
+    const dashed: string[] = [];
+    for (const code of codes) {
+      for (const [lang, t] of [["de", tDe], ["en", tEn]] as const) {
+        const text = t(errorKey(code, { v2: true }), { min: 3, max: 30 });
+        if (/[\u2013\u2014]/.test(text)) dashed.push(`${lang} ${code}: ${text}`);
+      }
+    }
+    expect(dashed).toEqual([]);
   });
 });
 

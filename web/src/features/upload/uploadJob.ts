@@ -28,6 +28,7 @@ import type { JobStatus } from "@/features/jobs/types";
 import { PRESETS, type PresetId } from "@/features/start/presets.legacy";
 import { isMobile } from "@/features/start/ios";
 import { readSettings, type SettingsSource } from "./settings";
+import type { UploadRecord } from "@/features/jobs/projects";
 import {
   knownJobIds,
   liveUploads,
@@ -35,11 +36,22 @@ import {
   recordUploadFailed,
   removeStoppedUploads,
   removeUploadRecord,
+  stoppedUpload,
   uploadProgress,
 } from "./records";
 
 export type { UploadSettings } from "./settings";
 export { precheckUpload } from "./precheck";
+
+/** The record of the stopped upload an upload of `file` would continue
+ *  (an interrupted upload of these bytes, its tile still listed: the one
+ *  removeStoppedUploads lets go), or null. The start screen shows that
+ *  video with the choices it had (D3, D7). The bytes are only looked at
+ *  when such a record exists. */
+export async function stoppedUploadOf(file: File): Promise<UploadRecord | null> {
+  const rec = await stoppedUpload(file.size);
+  return rec && (await resumableProgress(file)) !== null ? rec : null;
+}
 
 // POST /jobs after an upload to R2: waits between tries on a network
 // error or a 5xx that isn't a refusal — about 75 s in all, so a backend

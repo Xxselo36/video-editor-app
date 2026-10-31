@@ -886,6 +886,13 @@ button.orow:active:not([aria-disabled="true"]),
 .goBtn[aria-disabled="true"]:active {
   scale: none;
 }
+/* Resting while the upload is stopped: plainly unavailable, not a
+ * secondary action (the waiting one keeps its tint, its label says why). */
+.goBtn[data-state="idle"][aria-disabled="true"] {
+  background: var(--surface-1);
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
 .goNote {
   margin-top: 6px;
   font-size: 12.5px;

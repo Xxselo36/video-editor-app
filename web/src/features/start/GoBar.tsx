@@ -4,9 +4,10 @@
  * uploads the button turns into "Startet nach dem Hochladen" (the choices
  * stay open until POST /jobs reads them); with the bytes up the job
  * starts at once, "Wird gestartet…". While the upload is stopped nothing
- * would start from here: the button rests (the alert's "Nochmal
- * versuchen" is the way on; after "Los geht's" the job then starts by
- * itself). Under it, while the upload runs, the note to keep the page
+ * would start from here: the button rests, plainly unavailable and
+ * described by the alert (whose "Nochmal versuchen" is the way on, and
+ * a tap on the button goes there; after "Los geht's" the job then starts
+ * by itself). Under it, while the upload runs, the note to keep the page
  * open.
  */
 import { Check } from "lucide-react";
@@ -17,7 +18,11 @@ import { getLiveUpload, subscribe } from "@/features/upload/uploadState";
 import { useT } from "@/i18n";
 import { useBarHeight } from "./barHeight";
 import { useStartActions, useStartView } from "./pendingStart";
+import { REASON_ID, RETRY_ID, STOPPED_ID } from "./UploadStatus";
 import s from "./start.module.css";
+
+/** The stopped upload's way on: "Nochmal versuchen" (brought into view). */
+const toRetry = () => document.getElementById(RETRY_ID)?.focus();
 
 /** Where upload `id` is: its bytes going up, all stored (R2: waiting for
  *  the gate), POST /jobs out, or over. Changes a few times per upload,
@@ -59,7 +64,8 @@ export function GoBar() {
         data-testid="start-go"
         data-state={state}
         aria-disabled={!ready || undefined}
-        onClick={ready ? go : undefined}
+        aria-describedby={start.failed ? `${STOPPED_ID} ${REASON_ID}` : undefined}
+        onClick={ready ? go : start.failed ? toRetry : undefined}
       >
         {/* One line box: wrapped, the check leads the first line. */}
         <span className={s.goLabel}>

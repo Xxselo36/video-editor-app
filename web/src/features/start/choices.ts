@@ -14,12 +14,15 @@
  *   wanted, for when it can again.
  * - The format is kept as wanted. An upright video can't be made 16:9:
  *   it goes as original (the server would do the same).
+ * - A video picked again to continue its stopped upload (a reload while
+ *   it waited for "Los geht's") comes back with the choices it had, from
+ *   its record: they are this video's, "Nur Untertitel" included.
  */
 import type { UploadSettings } from "@/features/upload/settings";
 import type { MessageKey } from "@/i18n/messages/en";
 import { DEFAULT_PRESET, LAUNCH_PRESETS } from "@/lib/captions/presets";
 import type { PresetId } from "@/lib/captions/types";
-import { DEFAULT_SETTINGS, type JobSettings, type SavedSettings, type TargetAspect } from "./defaults";
+import { DEFAULT_SETTINGS, settingsFromPrefs, type JobSettings, type SavedSettings, type TargetAspect } from "./defaults";
 import type { LastUsedPrefs } from "./lastUsed";
 import { isPortrait, type VideoProbe } from "./probe";
 
@@ -76,6 +79,35 @@ export function initialChoices({ saved, standard, lastStyle, live }: ChoiceSourc
     fillers: saved?.removeFillers ?? DEFAULT_SETTINGS.removeFillers,
     aspect: saved?.targetAspect ?? DEFAULT_SETTINGS.targetAspect,
     language: saved?.spokenLanguage ?? DEFAULT_SETTINGS.spokenLanguage,
+  };
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * The choices of a stopped upload that a new pick continues (its record:
+ * the settings its POST /jobs would have sent, and `lastUsed`, the
+ * choices as wanted), or null when the record holds none this screen can
+ * show (an upload from elsewhere, a style no longer offered).
+ */
+export function resumedChoices(
+  rec: { settings?: UploadSettings; lastUsed?: LastUsedPrefs },
+  live: readonly string[] | undefined,
+): Choices | null {
+  const s = rec.settings;
+  const style: unknown = s?.caption_style;
+  if (!s || !isObject(style) || typeof style.presetId !== "string" || !isObject(style.overrides)) return null;
+  if (!offered(style.presetId, live)) return null;
+  const captionsOnly = s.style === "none" && style.presetId !== "none";
+  const wanted = settingsFromPrefs(rec.lastUsed) ?? {};
+  const sent = settingsFromPrefs(s) ?? {};
+  return {
+    style: { presetId: style.presetId, overrides: style.overrides },
+    captionsOnly,
+    // (With "Nur Untertitel" the filler switch went off, it wasn't chosen.)
+    fillers: wanted.removeFillers ?? (captionsOnly ? undefined : sent.removeFillers) ?? DEFAULT_SETTINGS.removeFillers,
+    aspect: wanted.targetAspect ?? sent.targetAspect ?? DEFAULT_SETTINGS.targetAspect,
+    language: wanted.spokenLanguage ?? sent.spokenLanguage ?? DEFAULT_SETTINGS.spokenLanguage,
   };
 }
 

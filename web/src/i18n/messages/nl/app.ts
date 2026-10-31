@@ -193,6 +193,7 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.start.pickAnyway": "Toch kiezen",
   "app.start.pickAnywayNote": "De video wordt eerst omgezet, dat kan een paar minuten duren. In de lijst staan ook foto’s.",
   "app.start.notVideo": "Dat is geen video. Kies een videobestand.",
+  "app.start.pickBusy": "Je geannuleerde upload wordt nog verwijderd. Kies de video zo opnieuw.",
   "app.start.pickTooBig": "Deze video is {size} GB, meer dan de limiet van {max} GB. Kies hem toch, dan wordt een kleinere, omgezette kopie geüpload.",
   "app.start.stillNothing": "Nog steeds niets?",
   "app.start.otherFormats": "Andere videoformaten",
@@ -336,8 +337,8 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.crash.reload": "Pagina opnieuw laden",
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
-  "app.errors.noVideoTrack": "Dit is een audiobestand. CleoCuts heeft een video met geluid nodig — kies een videobestand. Er is niets in rekening gebracht.",
-  "app.errors.videoTooShort": "Deze video is korter dan {min} seconden — te kort om te knippen. Er is niets in rekening gebracht.",
+  "app.errors.noVideoTrack": "Dit is een audiobestand. CleoCuts heeft een video met geluid nodig, dus kies een videobestand. Er is niets in rekening gebracht.",
+  "app.errors.videoTooShort": "Deze video is korter dan {min} seconden en dus te kort om te knippen. Er is niets in rekening gebracht.",
   "app.errors.processingInterrupted": "De verwerking is onderbroken. Upload de video opnieuw.",
   "app.errors.mediaUnavailable": "De originele video is niet meer beschikbaar, dus dit project kan niet opnieuw bewerkt worden.",
   "app.errors.tooManyRenders": "Er lopen te veel exports. Wacht tot er een klaar is.",
