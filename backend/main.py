@@ -3931,28 +3931,41 @@ async def multipart_abort(payload: dict,
     completed upload no job or claim holds goes too: it was given up
     before POST /jobs (cancelled while it waited for "Let's go"), and R2
     would keep it until the lifecycle rule (which still expires a single
-    PUT's: it has no ticket). The check and the delete take the key's
-    turn like POST /jobs does (_CREATING_KEYS): a request accepting the
-    upload right now keeps it, one arriving meanwhile finds it gone (409
-    upload_incomplete)."""
+    PUT's: it has no ticket). Checked after every abort, also one that
+    failed: R2 answers the abort of a completed upload with success (S3:
+    NoSuchUpload). A check that fails leaves the object to the lifecycle
+    rule and still answers 204. The check and the delete take the key's
+    turn like POST /jobs does (_CREATING_KEYS, in this process; a second
+    API process needs a turn across processes first): a request
+    accepting the upload right now keeps it, one arriving meanwhile
+    finds it gone (409 upload_incomplete)."""
     t = await run_in_threadpool(_read_ticket, payload, user)
-    if await run_in_threadpool(_abort_multipart, t):
-        return Response(status_code=204)
+    failed: ApiRefusal | None = None
+    try:
+        await run_in_threadpool(_abort_multipart, t)
+    except ApiRefusal as e:
+        failed = e
     key = t["k"]
     while (busy := _CREATING_KEYS.get(key)) is not None:
         await busy.wait()
     guard = _CREATING_KEYS[key] = asyncio.Event()
     try:
         await run_in_threadpool(_drop_unclaimed_upload, t)
+    except Exception as e:
+        print(f"[upload] abort: completed upload not checked "
+              f"({type(e).__name__})", flush=True)
     finally:
         _CREATING_KEYS.pop(key, None)
         guard.set()
+    if failed is not None:
+        raise failed
     return Response(status_code=204)
 
 
-def _abort_multipart(t: dict) -> bool:
-    """AbortMultipartUpload; False when the upload isn't open any more
-    (completed, or aborted before)."""
+def _abort_multipart(t: dict) -> None:
+    """AbortMultipartUpload. An upload that isn't open any more is fine:
+    S3 answers NoSuchUpload; R2 answers success for a completed one (seen
+    live; an aborted one not checked)."""
     from backend import storage
     try:
         _storage_call("AbortMultipartUpload", storage.mpu_abort,
@@ -3960,8 +3973,7 @@ def _abort_multipart(t: dict) -> bool:
     except ApiRefusal:
         raise
     except Exception:  # NoSuchUpload
-        return False
-    return True
+        pass
 
 
 def _drop_unclaimed_upload(t: dict) -> None:
