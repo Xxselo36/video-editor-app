@@ -14,11 +14,21 @@
  * captionSource: units and sentences without hidden words) to the
  * editor page, which feeds the preview and — until UT4 renders from the
  * doc — the render payload and the legacy /phrases save.
+ *
+ * Changes the server doesn't have stay on this device
+ * (session/unsavedDoc.ts, journeys-2): written when a save turns
+ * retrying, failed or conflict, when the editor closes with some unsent
+ * (before reopening or the Vorschau's Fertigstellen go on, pendingSaves)
+ * and when the page hides or goes away; dropped once the server has
+ * everything. On load the copy of the last visit is decided against the
+ * server's doc: back by itself as one undo step ("restored"), or the
+ * server moved on and its doc stays ("moved"); the editor says which.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { trackSave } from "@/lib/pendingSaves";
 import { followCaptionKeys } from "@/features/captions-ui/adjusted";
+import { applyDocCopy, decideDocCopy, docCopyOf, readDocCopy, writeDocCopy } from "@/features/editor/session/unsavedDoc";
 import {
   captionSource,
   editWord,
@@ -57,7 +67,13 @@ export type DocSession =
       captions: DocCaptions;
       /** Backlog #20: transcribe a span the doc has no words for (useSpanFill). */
       transcribeSpan: (start: number, end: number) => Promise<SpanResult>;
+      /** What became of the doc changes this device kept from its last
+       *  visit (session/unsavedDoc.ts): back as one undo step, or the
+       *  server's newer doc stayed; null: none. For the editor to say (once). */
+      copy: DocCopyOutcome;
     };
+
+export type DocCopyOutcome = "restored" | "moved" | null;
 
 /**
  * words: the span got words; empty: Whisper heard none there; error:
@@ -88,7 +104,14 @@ const SAVER_BUSY_MS = 3000;
 
 const NO_CAPTIONS: DocCaptions = { engine: "v1", presetsLive: null, recommended: [] };
 
-type Loaded = { store: DocStore; saver: DocSaver; pool: IdPool; readOnly: boolean; captions: DocCaptions };
+type Loaded = {
+  store: DocStore;
+  saver: DocSaver;
+  pool: IdPool;
+  readOnly: boolean;
+  captions: DocCaptions;
+  copy: DocCopyOutcome;
+};
 
 /**
  * `doc` with the saved caption style (start/captionDefault.ts) of a new
@@ -103,6 +126,11 @@ function withPendingStyle(doc: EditDoc, style: CaptionStyleDefault, live: string
 
 /** A word the server refused was adjusted (its old text). */
 export type WordFixedHandler = (text: string) => void;
+
+/** What the server may not have stays on this device (session/unsavedDoc.ts); nothing once it has all. */
+function keepCopy(jobId: string, saver: DocSaver): void {
+  writeDocCopy(jobId, docCopyOf(saver));
+}
 
 export function useDocSession(
   jobId: string,
@@ -144,11 +172,16 @@ export function useDocSession(
         const pending = takePending(jobId);
         const start = res.rev === 0 && pending ? withPendingStyle(shown, pending, res.captions.presetsLive) : shown;
         const store = createDocStore(start);
-        const saver = new DocSaver(res.doc, res.rev, {
+        const saver: DocSaver = new DocSaver(res.doc, res.rev, {
           jobId,
           fetch: apiFetch,
           pool,
-          onState: setSaveState,
+          onState: (s) => {
+            setSaveState(s);
+            // the device copy when a save didn't get through; gone once all is saved
+            if (s === "retrying" || s === "failed" || s === "conflict") keepCopy(jobId, saver);
+            else if (s === "saved" && !saver.dirty) writeDocCopy(jobId, null);
+          },
           onRename: (map) => store.rename(map),
           // The server refused a word: cut it to what it accepts (or drop
           // it when it already looks valid) and tell the user.
@@ -169,7 +202,28 @@ export function useDocSession(
         if (reconciled !== res.doc || start !== shown) saver.schedule(store.getState().present);
         const src = captionSource(start.words);
         captionRef.current?.(src.phrases, src.units, false);
-        made = { store, saver, pool, readOnly: res.read_only, captions: res.captions };
+        // Changes this device kept from its last visit (session/unsavedDoc.ts):
+        // the server has them (the copy goes), nobody saved since (back by
+        // themselves, one undo step, saved with the next save), or the
+        // server moved on (its doc stays; the copy goes).
+        let copy: DocCopyOutcome = null;
+        const kept = res.read_only ? null : readDocCopy(jobId);
+        if (kept) {
+          const decided = decideDocCopy(kept, { doc: res.doc, rev: res.rev });
+          if (decided.kind !== "auto") writeDocCopy(jobId, null);
+          if (decided.kind === "moved") copy = "moved";
+          else if (decided.kind === "auto") {
+            const restore = (d: EditDoc) => {
+              const n = applyDocCopy(d, decided.copy);
+              return n === d ? d : followCaptionKeys(d, n);
+            };
+            if (store.apply(restore)) copy = "restored";
+            // already in the doc shown (a v1 sentence save, its style):
+            // saved as it is, then the copy goes
+            else saver.schedule(store.getState().present);
+          }
+        }
+        made = { store, saver, pool, readOnly: res.read_only, captions: res.captions, copy };
         setLoaded(made);
       });
     return () => {
@@ -177,9 +231,12 @@ export function useDocSession(
       // Leaving the editor (back, a link): the last edit goes now, with
       // a few retries, then this saver stops; re-entering the job waits
       // for it (pendingSaves), so no stale saver races the next session.
+      // What still didn't get through stays on this device before that
+      // wait ends (the Vorschau's Fertigstellen reads it then).
       if (made) {
+        const { saver } = made;
         made.store.onEdit = null;
-        trackSave(jobId, made.saver.close());
+        trackSave(jobId, saver.close().finally(() => keepCopy(jobId, saver)));
       }
     };
   }, [jobId]);
@@ -187,12 +244,19 @@ export function useDocSession(
   // The page goes away: one keepalive PATCH. Hidden (iOS fires no
   // pagehide on an app switch, and may discard the tab): send now. Back
   // online: send now.
+  // Either may never be answered (a closed tab, a discarded one): what it
+  // carries stays on this device until the next open finds it stored.
   useEffect(() => {
     if (!loaded || loaded === "none") return;
     const { saver } = loaded;
-    const onHide = () => saver.flushUnload();
+    const onHide = () => {
+      saver.flushUnload();
+      keepCopy(jobId, saver);
+    };
     const onHidden = () => {
-      if (document.visibilityState === "hidden") saver.flushHidden();
+      if (document.visibilityState !== "hidden") return;
+      saver.flushHidden();
+      keepCopy(jobId, saver);
     };
     const onOnline = () => void saver.flush();
     window.addEventListener("pagehide", onHide);
@@ -205,7 +269,7 @@ export function useDocSession(
       document.removeEventListener("freeze", onHidden);
       window.removeEventListener("online", onOnline);
     };
-  }, [loaded]);
+  }, [jobId, loaded]);
 
   const retry = useCallback(() => {
     if (loaded && loaded !== "none") void loaded.saver.flush();
@@ -307,5 +371,6 @@ export function useDocSession(
     flush,
     captions: loaded.captions ?? NO_CAPTIONS,
     transcribeSpan,
+    copy: loaded.copy,
   };
 }

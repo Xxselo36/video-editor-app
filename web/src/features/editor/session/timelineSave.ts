@@ -35,6 +35,7 @@
 import { uniqueRev } from "@/features/editor/state/docSave";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { sameTimeline, type TimelineSeg } from "@/lib/editSave";
+import { timelinePayload } from "./unsavedKey";
 
 export const TL_DEBOUNCE_MS = 800;
 const BACKOFF_MS = [1000, 3000, 5000, 10_000, 20_000];
@@ -96,19 +97,9 @@ export type TimelineSaverDeps = {
   poll?: { firstMs: number; everyMs: number; timeoutMs: number };
 };
 
-/** The clips a save sends: enabled, over 0.05 s (the backend drops shorter), with effects. */
-export function timelinePayload(segs: readonly EditorSeg[]): TimelineSeg[] {
-  return segs
-    .filter((s) => !s.disabled && s.end - s.start > 0.05)
-    .map((s) => ({
-      start: s.start,
-      end: s.end,
-      speed: s.speed,
-      fadeIn: s.fadeIn,
-      fadeOut: s.fadeOut,
-      volume: s.volume,
-    }));
-}
+// The clips a save sends (in unsavedKey.ts, which the Vorschau reads
+// without the save code).
+export { timelinePayload };
 
 type Sent = {
   rev: number;

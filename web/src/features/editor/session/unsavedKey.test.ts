@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { writeUnsaved } from "./unsaved";
-import { hasUnsavedTimeline, readUnsaved, unsavedKey } from "./unsavedKey";
+import { copyIsStored, hasUnsavedTimeline, readUnsaved, timelinePayload, unsavedKey, unsavedTimeline } from "./unsavedKey";
 
 const store = new Map<string, string>();
 const NOW = 1_800_000_000_000;
@@ -74,5 +74,36 @@ describe("hasUnsavedTimeline", () => {
     expect(hasUnsavedTimeline("j1", NOW)).toBe(false);
     vi.stubGlobal("localStorage", undefined);
     expect(hasUnsavedTimeline("j1", NOW)).toBe(false);
+  });
+});
+
+describe("unsavedTimeline (the Vorschau, Fertigstellen): a copy counts only while the server lacks its timeline", () => {
+  const stored = timelinePayload(backup.segs);
+
+  it("the server has it (a keepalive save that landed after the tab closed): it doesn't count, and it goes", () => {
+    writeUnsaved("j1", backup);
+    expect(copyIsStored(backup, stored, 30)).toBe(true);
+    expect(unsavedTimeline("j1", stored, 30, NOW)).toBeNull();
+    expect(store.has(unsavedKey("j1"))).toBe(false);
+  });
+
+  it("the server has another timeline: the copy counts and stays", () => {
+    writeUnsaved("j1", backup);
+    const other = [{ start: 0, end: 5 }, { start: 6, end: 10 }];
+    expect(copyIsStored(backup, other, 30)).toBe(false);
+    expect(unsavedTimeline("j1", other, 30, NOW)).toEqual(backup);
+    expect(unsavedTimeline("j1", undefined, 30, NOW)).toEqual(backup);
+    expect(store.has(unsavedKey("j1"))).toBe(true);
+  });
+
+  it("no copy, or one with no clip a save would send: nothing", () => {
+    expect(unsavedTimeline("j1", stored, 30, NOW)).toBeNull();
+    const off = { ...backup, segs: backup.segs.map((x) => ({ ...x, disabled: true })) };
+    expect(copyIsStored(off, [], 30)).toBe(true);
+  });
+
+  it("storage blocked: nothing, never a throw", () => {
+    vi.stubGlobal("localStorage", undefined);
+    expect(unsavedTimeline("j1", stored, 30, NOW)).toBeNull();
   });
 });

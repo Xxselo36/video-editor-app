@@ -24,10 +24,11 @@ export function CaptionFiles({ job }: { job: Pick<JobStatus, "id" | "has_caption
           download
           onClick={() => track("srt_downloaded", { kind })}
           // The tap area reaches 44 px high (::after); the chip stays small.
-          className="relative rounded-md border border-[var(--border-hover)] px-2 py-0.5 font-semibold uppercase text-[var(--text-strong)] after:absolute after:-inset-x-1 after:-inset-y-3 after:content-[''] hover:border-[var(--brand)]"
+          className="relative rounded-md border border-[var(--border-hover)] px-2 py-0.5 font-semibold text-[var(--text-strong)] after:absolute after:-inset-x-1 after:-inset-y-3 after:content-[''] hover:border-[var(--brand)]"
           data-testid={`done-${kind}`}
         >
-          {kind}
+          {/* "SRT", not "srt": a screen reader spells the format out. */}
+          {kind.toUpperCase()}
         </a>
       ))}
     </div>

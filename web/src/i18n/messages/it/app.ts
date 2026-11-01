@@ -502,10 +502,12 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.preview.pause": "Pausa",
   "app.preview.captionsAfter": "Vedrai i sottotitoli dopo l’esportazione.",
   "app.preview.preparing": "L’anteprima è ancora in preparazione.",
+  "app.preview.unavailable": "Impossibile creare l’anteprima. Le tue modifiche sono salvate.",
   "app.preview.save": "Salva video",
   "app.preview.previousVersion": "Scarica la versione precedente",
   "app.preview.unsavedHere": "Su questo dispositivo ci sono modifiche non ancora salvate. Apri i ritocchi per includerle.",
   "app.preview.openRefine": "Apri i ritocchi",
   "app.preview.saving": "Salvataggio delle modifiche…",
   "app.preview.stillSaving": "Le ultime modifiche sono ancora in fase di salvataggio. Riprova tra un attimo.",
+  "app.preview.needsEditor": "Esporta le modifiche al testo dai ritocchi.",
 };

@@ -502,10 +502,12 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.preview.pause": "Wstrzymaj",
   "app.preview.captionsAfter": "Napisy zobaczysz po eksporcie.",
   "app.preview.preparing": "Podgląd jest jeszcze przygotowywany.",
+  "app.preview.unavailable": "Nie udało się utworzyć podglądu. Twoje zmiany są zapisane.",
   "app.preview.save": "Zapisz wideo",
   "app.preview.previousVersion": "Pobierz poprzednią wersję",
   "app.preview.unsavedHere": "Na tym urządzeniu są zmiany, które nie zostały jeszcze zapisane. Otwórz poprawki, żeby je uwzględnić.",
   "app.preview.openRefine": "Otwórz poprawki",
   "app.preview.saving": "Zapisywanie zmian…",
   "app.preview.stillSaving": "Twoje ostatnie zmiany wciąż się zapisują. Spróbuj ponownie za chwilę.",
+  "app.preview.needsEditor": "Zmiany w tekście wyeksportujesz w poprawkach.",
 };

@@ -1,10 +1,11 @@
-// The Vorschau player's logic (player.ts): when it waits for the file
-// (spinner, aria-busy) and when it has none of it yet (after 10 s "the
-// preview is still being prepared"), the scrub line, the clips the
-// preview's captions map through, and what it shows of the captions.
+// The Vorschau player's logic (player.ts): the frame's shape, when it
+// waits for the file (spinner, aria-busy) and when it has none of it yet
+// (after 10 s "the preview is still being prepared"), the scrub line,
+// the clips the preview's captions map through, and what it shows of
+// the captions.
 import { describe, expect, it } from "vitest";
 import type { Fetched } from "@/features/editor/state/docFetch";
-import { BUSY, EMPTY, PLAYING, editSegsOf, playbackOf, previewCaptions, progressOf } from "./player";
+import { BUSY, EMPTY, PLAYING, editSegsOf, isWide, playbackOf, previewCaptions, progressOf } from "./player";
 
 // HTMLMediaElement: networkState IDLE 1, LOADING 2, NO_SOURCE 3;
 // readyState HAVE_NOTHING 0 … HAVE_ENOUGH_DATA 4.
@@ -115,5 +116,33 @@ describe("previewCaptions", () => {
   it("no doc (analysed before it existed, or it didn't load): the note, unless the project has no captions", () => {
     expect(previewCaptions("none", true, false)).toBe("after");
     expect(previewCaptions("none", true, true)).toBeNull();
+  });
+});
+
+describe("isWide", () => {
+  // The filmstrip's tiles: the source scaled to 90 px high.
+  const strip = (tileW: number, tileH = 90) => ({ n: 30, interval: 1, tileW, tileH });
+
+  it("a 16:9 output is wide, a 9:16 one tall, whatever the source", () => {
+    expect(isWide({ output_aspect: "16:9", filmstrip: strip(50) })).toBe(true);
+    expect(isWide({ output_aspect: "9:16", filmstrip: strip(160) })).toBe(false);
+  });
+
+  it("an original keeps the source's frame: landscape wide, portrait and square tall", () => {
+    expect(isWide({ output_aspect: "original", filmstrip: strip(160) })).toBe(true);
+    // 4:3, and a very wide source (its tiles cropped to 320 px)
+    expect(isWide({ output_aspect: "original", filmstrip: strip(120) })).toBe(true);
+    expect(isWide({ output_aspect: "original", filmstrip: strip(320) })).toBe(true);
+    expect(isWide({ output_aspect: "original", filmstrip: strip(50) })).toBe(false);
+    expect(isWide({ output_aspect: "original", filmstrip: strip(72) })).toBe(false);
+    expect(isWide({ output_aspect: "original", filmstrip: strip(90) })).toBe(false);
+  });
+
+  it("tall while the source's shape is unknown: no filmstrip, no aspect (a server before it)", () => {
+    expect(isWide({ output_aspect: "original", filmstrip: null })).toBe(false);
+    expect(isWide({ output_aspect: "original" })).toBe(false);
+    expect(isWide({ output_aspect: "original", filmstrip: strip(160, 0) })).toBe(false);
+    expect(isWide({ filmstrip: strip(160) })).toBe(false);
+    expect(isWide({ output_aspect: null, filmstrip: strip(160) })).toBe(false);
   });
 });

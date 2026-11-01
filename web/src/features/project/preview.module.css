@@ -21,10 +21,15 @@
 .root h1:focus-visible {
   outline: none;
 }
+/* Controls: no double-tap zoom, no tap flash; a long press neither
+ * selects their label nor opens a link's callout. */
 .root button,
 .root a {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* ── processing: the title row over the checklist ── */
@@ -265,13 +270,15 @@
   font-weight: 600;
   color: var(--text-body);
   text-decoration: none;
-  transition: color 0.15s ease, opacity 0.12s ease;
+  transition:
+    color 0.15s ease,
+    transform 0.16s var(--ease-out);
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
 .quiet:active {
-  opacity: 0.7;
+  transform: scale(0.97);
 }
 .quiet > svg {
   color: var(--text-muted);
@@ -289,12 +296,14 @@
   font-size: 14px;
   font-weight: 600;
   color: var(--text-body);
-  transition: color 0.15s ease, opacity 0.12s ease;
+  transition:
+    color 0.15s ease,
+    transform 0.16s var(--ease-out);
   user-select: none;
   -webkit-user-select: none;
 }
 .disc:active {
-  opacity: 0.7;
+  transform: scale(0.97);
 }
 .disc > svg {
   color: var(--text-muted);
@@ -426,6 +435,18 @@
   .watch[data-shape="tall"] > .after {
     grid-area: 2 / 2;
   }
+  /* A 16:9 frame stacks over the title and the buttons: on a short
+   * screen (a 768 px laptop) it gives up height so that the title, the
+   * buttons and what else is under it stay in view, 16 px off the edge:
+   * its top (--above: the header, 95 px) and the height of what is
+   * under it (--below: the note, the title on one line or more, a
+   * notice, the buttons; 271 px with the note, one line and two
+   * buttons), as laid out (PreviewScreen measures them). From about
+   * 880 px of height it is 880 x 495, as tall as it gets; it never
+   * goes under 200 px (the page scrolls). */
+  .watch[data-shape="wide"] {
+    --fh: clamp(200px, calc(100svh - var(--above, 95px) - var(--below, 271px) - 16px), 495px);
+  }
   .watch[data-shape="wide"] > .info,
   .watch[data-shape="wide"] > .after {
     max-width: 448px;
@@ -445,11 +466,27 @@
     line-height: 1.1;
     letter-spacing: -0.03em;
     white-space: normal;
-    overflow-wrap: anywhere;
+    /* Lines break between words; a long word (10 letters or more, 4
+     * on each side of the break) may be hyphenated in the page's
+     * language (<html lang>), and is broken anywhere only where the
+     * language has no hyphenation. A shorter word never splits. */
+    overflow-wrap: break-word;
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    hyphenate-limit-chars: 10 4 4;
     text-wrap: balance;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
     line-clamp: 3;
+  }
+  /* A file name's separator after a long word (PreviewScreen breakable):
+   * a box, so that the word before it can be hyphenated, on one line
+   * with the word's last two letters (no line starts with it). */
+  .tail {
+    white-space: nowrap;
+  }
+  .sep {
+    display: inline-block;
   }
   .len {
     grid-area: 2 / 1;
@@ -495,7 +532,9 @@
   .disc > svg,
   .panel,
   .moreBody,
-  .file {
+  .file,
+  .quiet,
+  .disc {
     transition-property: opacity, color, border-color;
   }
   .moreBody {
@@ -503,5 +542,11 @@
   }
   .file:active {
     transform: none;
+  }
+  /* pressed: a dim instead of the scale */
+  .quiet:active,
+  .disc:active {
+    transform: none;
+    opacity: 0.7;
   }
 }

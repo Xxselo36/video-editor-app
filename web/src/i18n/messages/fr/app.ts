@@ -499,14 +499,16 @@ export const frApp: Partial<Record<AppKey, string>> = {
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
   "app.preview.refine": "Retouches",
-  "app.preview.more": "Plus pour cette vidéo",
+  "app.preview.more": "Plus d’options pour cette vidéo",
   "app.preview.pause": "Pause",
   "app.preview.captionsAfter": "Tu verras les sous-titres une fois la vidéo exportée.",
   "app.preview.preparing": "L’aperçu est encore en préparation.",
+  "app.preview.unavailable": "Impossible de créer l’aperçu. Tes modifications sont enregistrées.",
   "app.preview.save": "Enregistrer la vidéo",
   "app.preview.previousVersion": "Télécharger la version précédente",
   "app.preview.unsavedHere": "Cet appareil a des modifications qui ne sont pas encore enregistrées. Ouvre les retouches pour les inclure.",
   "app.preview.openRefine": "Ouvrir les retouches",
   "app.preview.saving": "Enregistrement des modifications…",
   "app.preview.stillSaving": "Tes dernières modifications sont encore en cours d’enregistrement. Réessaie dans un instant.",
+  "app.preview.needsEditor": "Exporte tes modifications de texte depuis les retouches.",
 };

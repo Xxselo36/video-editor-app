@@ -444,7 +444,8 @@ export function replaceMatches(doc: EditDoc, matches: readonly Match[], replacem
 
 // ── PATCH diff (autosave) ───────────────────────────────────────────
 
-const sameWord = (a: DocWord, b: DocWord) =>
+/** The same word as far as a save goes (what diffWords compares). */
+export const sameWord = (a: DocWord, b: DocWord) =>
   a === b ||
   (a.id === b.id &&
     a.text === b.text &&

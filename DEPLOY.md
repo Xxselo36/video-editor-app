@@ -1565,15 +1565,28 @@ Code: `backend/exports.py` (Regeln), `backend/main.py` (`POST
 Editor: `POST /jobs/{id}/render` mit `{"client": "v2", "source":
 "stored", "disabled_cuts": []}` (bei Opt-in plus `"caption_engine":
 "v2"`) und ohne `subtitles`. Der Server nimmt die gespeicherte
-Bearbeitung: die Wörter des Edit-Docs ohne die geschnittenen Bereiche
-(`exports.stored_units`), ohne Doc die Untertitel der Analyse. Sonst
-gilt alles wie beim Export-Blatt (Schutzgrenzen, Fair Use,
-Sofort-Export). Nicht dabei, weil nur ein offener Editor sie setzt: der
-Untertitel-Umbruch an der Sprungstelle einer umsortierten Timeline und
-Textänderungen, die nur als Sätze gespeichert sind (v1-Editor, Jobs ohne
-Doc). Ein Server vor PR2 antwortet 400; die Vorschau zeigt den Fehler.
+Bearbeitung, gelesen im selben Schritt, der den Export startet (eine
+Speicherung aus einem anderen Tab kurz davor ist also dabei): die Wörter
+des Edit-Docs ohne die geschnittenen Bereiche (`exports.stored_units`),
+keine Untertitel, wenn alle Wörter gelöscht sind, ohne Doc die
+Untertitel der Analyse. Ein Wort gilt als geschnitten wie im Editor und
+in der Vorschau: ein Wort über 1,2 s (Whisper zieht Wörter über eine
+Pause) bleibt, solange sein Anfang oder sein Ende zu hören ist
+(`testdata/cut_words_vectors.json` prüft Server und Web gegeneinander).
+Ein Job ohne Doc mit Textänderungen, die nur als Sätze gespeichert sind
+(`/phrases`), bekommt 422 `needs_editor`: nichts startet, nichts wird
+abgebucht, die Vorschau schickt in den Feinschliff (dessen Export nimmt
+die Sätze mit). Sonst gilt alles wie beim Export-Blatt (Schutzgrenzen,
+Fair Use, Sofort-Export). Nicht dabei, weil nur ein offener Editor sie
+setzt: der Untertitel-Umbruch an der Sprungstelle einer umsortierten
+Timeline und Satz-Änderungen aus dem v1-Editor, die neuer sind als das
+Doc. Ein Server vor PR2 antwortet 400; die Vorschau zeigt den Fehler.
 `GET /jobs/{id}` hat dazu `no_cuts` und `captions_off` (die Schritte,
-die die Vorschau beim Bearbeiten auslässt).
+die die Vorschau beim Bearbeiten auslässt). Bei `captions_off` („Ohne
+Untertitel“) ohne eigenes v1-`caption_preset` rendern Exporte mit
+`"client": "v2"` (Vorschau, Export-Blatt des Editors) und der Vorab-Render
+mit `caption_preset` `none`: so brennt auch der v1-Weg keine Untertitel
+ein (vorher sein Standard „clean“); am Job selbst ändert sich nichts.
 
 | Variable (Railway) | Default | Wirkung |
 |---|---|---|

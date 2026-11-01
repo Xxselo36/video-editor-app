@@ -498,10 +498,12 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.preview.pause": "일시정지",
   "app.preview.captionsAfter": "자막은 내보낸 후에 볼 수 있어요.",
   "app.preview.preparing": "미리보기를 아직 준비하고 있어요.",
+  "app.preview.unavailable": "미리보기를 만들지 못했어요. 편집 내용은 저장돼 있어요.",
   "app.preview.save": "영상 저장",
   "app.preview.previousVersion": "이전 버전 다운로드",
   "app.preview.unsavedHere": "이 기기에 아직 저장되지 않은 변경 사항이 있어요. 반영하려면 다듬기를 열어 주세요.",
   "app.preview.openRefine": "다듬기 열기",
   "app.preview.saving": "변경 사항을 저장하는 중…",
   "app.preview.stillSaving": "마지막 변경 사항을 아직 저장하고 있어요. 잠시 후 다시 시도해 주세요.",
+  "app.preview.needsEditor": "텍스트 변경 사항은 다듬기에서 내보내 주세요.",
 };

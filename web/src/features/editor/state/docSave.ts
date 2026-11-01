@@ -21,6 +21,9 @@
  *   reloads it (review F3) — nothing is overwritten silently.
  * - Network errors and 5xx: "retrying" with backoff (and at once when
  *   the browser is back online); other refusals: "failed".
+ * - What the server isn't known to have (known, local and the requests
+ *   whose answer never came, unacked) is what the editor's session keeps
+ *   on the device when a save doesn't get through (session/unsavedDoc.ts).
  *
  * Framework-free (fetch and timers injected) so it is unit-tested; the
  * editor's useDocSession wires it to the store.
@@ -239,6 +242,9 @@ export class DocSaver {
   private chain: Promise<void> = Promise.resolve();
   /** A body whose answer never came: resent as it is (same rev). */
   private retryBody: PatchBody | null = null;
+  /** Bodies sent without an answer yet, or whose answer never came: the
+   *  server may have stored them (unacked). */
+  private sent = new Set<PatchBody>();
   /** Words the server refused once (onRejected). */
   private rejected = new Set<string>();
   private readonly d: Required<Omit<DocSaverDeps, "onState" | "track" | "onRename" | "pool" | "onRejected">> &
@@ -273,6 +279,11 @@ export class DocSaver {
   /** Something not yet acknowledged by the server. */
   get dirty(): boolean {
     return this.inflight !== null || patchBodies(this.saved, this.latest).length > 0;
+  }
+  /** Requests sent whose answer never came: the server may be at one of
+   *  their revs (the device copy, session/unsavedDoc.ts). */
+  get unacked(): readonly PatchBody[] {
+    return [...this.sent];
   }
 
   private set(s: DocSaveState) {
@@ -335,6 +346,7 @@ export class DocSaver {
     if (!bodies.length) return false;
     const body: PatchBody = { ...bodies[0], base_rev: base.rev, rev: this.d.nextRev(base.rev) };
     const text = JSON.stringify(body);
+    this.sent.add(body);
     const res = this.request(text, new TextEncoder().encode(text).length < PATCH_LIMIT);
     // Its answer is applied after the one in flight (page restored from
     // the back/forward cache: the autosave carries on from there).
@@ -416,6 +428,7 @@ export class DocSaver {
     this.latest = doc;
     this.attempt = 0;
     this.retryBody = null;
+    this.sent.clear();
     this.set("saved");
   }
 
@@ -492,6 +505,7 @@ export class DocSaver {
         body = { ...bodies[0], base_rev: this.saved.rev, rev: this.d.nextRev(this.saved.rev) };
       }
       if (this.state === "saved") this.set("saving");
+      this.sent.add(body);
       const done = this.handle(body, this.request(JSON.stringify(body), false));
       this.inflight = { body, done };
       this.d.track?.(done);
@@ -522,6 +536,7 @@ export class DocSaver {
     }
     const ok = () => {
       this.saved = { ...after(this.saved, body), rev: body.rev };
+      this.sent.delete(body);
       if (this.retryBody === body) this.retryBody = null;
       this.attempt = 0;
       if (this.state === "retrying") this.set("saving");
@@ -548,6 +563,7 @@ export class DocSaver {
         ok();
         return;
       }
+      this.sent.delete(body);
       if (this.retryBody === body) this.retryBody = null;
       this.clear();
       this.set("conflict");
@@ -557,6 +573,8 @@ export class DocSaver {
       this.retryLater(body);
       return;
     }
+    // refused: not stored
+    this.sent.delete(body);
     if (this.retryBody === body) this.retryBody = null;
     if (r.status === 400 && code === "bad_word" && wordId && this.d.onRejected && !this.rejected.has(wordId)) {
       // Don't wedge the autosave on one word: repair it and carry on.

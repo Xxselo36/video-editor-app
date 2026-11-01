@@ -502,10 +502,12 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.preview.pause": "Pauzeren",
   "app.preview.captionsAfter": "Je ziet de ondertitels zodra de video is geëxporteerd.",
   "app.preview.preparing": "Het voorbeeld wordt nog voorbereid.",
+  "app.preview.unavailable": "Het voorbeeld kon niet worden gemaakt. Je bewerkingen zijn opgeslagen.",
   "app.preview.save": "Video bewaren",
   "app.preview.previousVersion": "Vorige versie downloaden",
   "app.preview.unsavedHere": "Op dit apparaat staan wijzigingen die nog niet zijn opgeslagen. Open Verfijnen, dan worden ze meegenomen.",
   "app.preview.openRefine": "Verfijnen openen",
   "app.preview.saving": "Wijzigingen worden opgeslagen…",
   "app.preview.stillSaving": "Je laatste wijzigingen worden nog opgeslagen. Probeer het zo opnieuw.",
+  "app.preview.needsEditor": "Exporteer je tekstwijzigingen vanuit Verfijnen.",
 };

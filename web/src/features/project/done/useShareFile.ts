@@ -50,8 +50,13 @@ export function downloadHref(jobId: string, format: string): string {
 export type Connection = { saveData?: boolean; type?: string };
 
 /** Whether the Vorschau fetches the export before the tap (D21): only one
- *  that finished while the page was open, and not on a metered
- *  connection (Data Saver, mobile data): the file can be large. */
+ *  that finished while the page was open, and not on a connection that
+ *  says it is metered (Data Saver, mobile data): the file can be large.
+ *  A browser that says nothing about its connection still fetches it:
+ *  Safari and every iOS browser have no navigator.connection, and the
+ *  share path runs only there. The share sheet must open inside the tap
+ *  with the file ready, and the creator just finished this video to save
+ *  it. */
 export function prefetchAhead(finishedHere: boolean, connection: Connection | undefined): boolean {
   return finishedHere && !connection?.saveData && connection?.type !== "cellular";
 }

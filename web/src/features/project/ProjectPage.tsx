@@ -85,7 +85,7 @@ export function ProjectPage({ jobId }: { jobId: string }) {
   return v2 ? <Vorschau {...poll} /> : <LegacyProject {...poll} />;
 }
 
-function Vorschau({ load, setJob }: JobPoll) {
+function Vorschau({ load, setJob, settled, previewFailed }: JobPoll) {
   const t = useT();
   const router = useRouter();
   if (load.state === "gone" || load.state === "failed") {
@@ -108,7 +108,7 @@ function Vorschau({ load, setJob }: JobPoll) {
         <PreviewSkeleton />
       ) : (
         <div data-testid="project" data-status={load.job.status}>
-          <PreviewScreen job={load.job} setJob={setJob} />
+          <PreviewScreen job={load.job} setJob={setJob} settled={settled} previewFailed={previewFailed} />
         </div>
       )}
     </AppPage>

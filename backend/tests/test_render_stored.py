@@ -3,12 +3,16 @@ editor open, and the job tells which analysis steps it skips.
 
   - POST /jobs/{id}/render {"client": "v2", "source": "stored"} without
     subtitles renders the captions the v2 editor would send for the job
-    as stored (exports.stored_units): the edit doc's words that play,
-    without a doc the analysis' units. Everything around it is the
-    export as before: the instant export of a finished speculative
-    render, the opt-in to the v2 captions, a v1 export's own payload.
+    as stored (exports.stored_units), read in the compare-and-set that
+    starts the render: the edit doc's words that play (by the editor's
+    rule for long words; none once every word is deleted), without a
+    doc the analysis' units — or 422 needs_editor when the job's
+    sentence edits need the editor. Everything around it is the export
+    as before: the instant export of a finished speculative render, the
+    opt-in to the v2 captions, a v1 export's own payload.
   - GET /jobs/{id} no_cuts ("Nur Untertitel") and captions_off ("Ohne
-    Untertitel"): the steps the processing list leaves out.
+    Untertitel"): the steps the processing list leaves out; a job with
+    captions off burns none with the v1 engine either.
 
 Renders are faked at pipeline.render_to_keys (test_ux11_exports'
 FakeRender) around the real render paths."""
@@ -17,10 +21,11 @@ from __future__ import annotations
 import pytest
 
 import backend.main as M
-from backend import captions_v2, exports
+from backend import captions_v2, exports, llm
 from backend.jobs import store
 from test_ux11_exports import (  # noqa: F401  (fixtures)
-    UNITS, _env, _review_job, _settled, _spec_done, render, spec_on)
+    UNITS, _env, _fairuse_job, _review_job, _settled, _spec_done,
+    _usage_rows, paying, render, spec_on)
 
 STORED = {"client": "v2", "source": "stored", "disabled_cuts": []}
 
@@ -124,6 +129,168 @@ def test_the_stored_source_needs_the_review_state(client, render):
     assert r.status_code == 409 and render.calls == []
 
 
+# Whisper stretched "Okay." over the pause the tight cut takes out
+# (3.5–5.9 s): its sound is at its head, which plays.
+LONG = [
+    {"id": "w1", "text": "Okay.", "start": 3.0, "end": 6.0},
+    {"id": "w2", "text": "Next", "start": 6.0, "end": 6.4},
+    {"id": "w3", "text": "part", "start": 6.4, "end": 6.8},
+]
+
+
+def test_a_long_word_plays_while_its_head_plays(client, render, monkeypatch):
+    """The rule of the editor's Text tab, its export and the Vorschau
+    (cuts.ts wordProbes; test_ux11_exports.test_cut_words_match_the_web):
+    a word longer than 1.2 s is captioned while its head or its tail
+    plays — in the video, its SRT / VTT files and the post text."""
+    told: list[str] = []
+    monkeypatch.setattr(llm, "generate_social_caption",
+                        lambda text, language=None: told.append(text) or {
+                            "caption": "from render", "hashtags": []})
+    segs = [(0.0, 3.5), (5.9, 10.0)]
+    job = _review_job(doc={**_doc(), "words": [dict(w) for w in LONG]},
+                      segments=segs,
+                      analysis_segments_hash=exports.segments_hash(segs))
+    _finish(client, job.id)
+    assert _settled(job.id, "done")
+    [call] = render.calls
+    assert _texts(call["subtitles"]) == ["Okay.", "Next", "part"]
+    assert [w["text"] for w in call["captions"]["words"]] == ["Okay.", "Next",
+                                                             "part"]
+    cur = store.get(job.id)
+    assert [u[0] for u in cur.export_captions["units"]] == ["Okay.", "Next",
+                                                           "part"]
+    # its head, before the cut: 3.0–3.5 s of the video
+    srt = client.get(f"/jobs/{job.id}/captions.srt").text
+    assert "00:00:03,000 --> 00:00:03,500\nOkay." in srt
+    assert told == ["Okay. Next part"]
+
+
+def test_a_doc_without_words_has_no_captions(client, render):
+    """Every word deleted in Feinschliff: no captions, as in the editor's
+    export (exportCaptionSource of no words) and the Vorschau — never the
+    analysis' transcript again."""
+    job = _review_job(doc=_doc())
+    r = client.patch(f"/jobs/{job.id}/doc", json={
+        "base_rev": 0, "rev": 5,
+        "words": {"upsert": [], "delete": [w["id"] for w in WORDS]}})
+    assert r.status_code == 200, r.text
+    assert store.get(job.id).doc["words"] == []
+    _finish(client, job.id)
+    assert _settled(job.id, "done")
+    [call] = render.calls
+    assert call["subtitles"] == []
+    assert not (call.get("captions") or {}).get("words")
+    assert store.get(job.id).export_captions["units"] == []
+
+
+# The no-doc job's sentences (UNITS) as the editor saves them: the first
+# changed, the second deleted.
+PHRASES = [
+    {"start": 0.2, "end": 1.0, "original_start": 0.2, "original_end": 1.0,
+     "text": "Hallo Welt."},
+    {"start": 2.2, "end": 3.1, "original_start": 2.2, "original_end": 3.1,
+     "text": ""},
+    {"start": 6.0, "end": 6.5, "original_start": 6.0, "original_end": 6.5,
+     "text": "cut"},
+]
+
+
+def test_sentence_edits_without_a_doc_need_the_editor(client, render, paying):
+    """A job without an edit doc whose transcript was edited as sentences
+    (POST /phrases, the editor's sentence view): only the editor makes
+    captions of those (phrasesToUnits), so Fertigstellen answers 422
+    needs_editor — never 409, which reads as "already exporting" — and
+    nothing starts, nothing is charged. The editor's own export renders
+    them."""
+    h = paying()
+    job = _fairuse_job(60)                    # no edit doc
+    store.update(job.id, renders_ok=5)        # the next export is a paid one
+    r = client.post(f"/jobs/{job.id}/phrases", headers=h,
+                    json={"rev": 1, "phrases": PHRASES})
+    assert r.status_code == 200, r.text
+    before = store.get(job.id)
+    r = client.post(f"/jobs/{job.id}/render", json=STORED, headers=h)
+    assert r.status_code == 422, r.text
+    assert r.json()["code"] == "needs_editor"
+    cur = store.get(job.id)
+    assert (cur.status, cur.render_gen, cur.renders_ok, cur.render_times,
+            cur.export_client) == ("awaiting_review", 0, 5,
+                                   before.render_times, before.export_client)
+    assert render.calls == [] and _usage_rows(job.id) == {}
+    # Every sentence deleted is an edit too (GET /subtitles hands back []).
+    store.update(job.id, edited_phrases=[])
+    r = client.post(f"/jobs/{job.id}/render", json=STORED, headers=h)
+    assert r.status_code == 422, r.text
+    assert r.json()["code"] == "needs_editor"
+    # The editor's export sends the edited captions.
+    units = [dict(UNITS[0], text="Hallo"), dict(UNITS[1], text="Welt.")]
+    r = client.post(f"/jobs/{job.id}/render", headers=h,
+                    json={**STORED, "subtitles": units})
+    assert r.status_code == 200, r.text
+    assert _settled(job.id, "done")
+    assert _texts(render.calls[0]["subtitles"]) == ["Hallo", "Welt."]
+
+
+def test_sentence_edits_saved_before_the_render_starts(client, render,
+                                                       monkeypatch):
+    """Saved from another tab or device between the request's read and
+    the compare-and-set that starts the render: 422 too, nothing starts."""
+    job = _review_job()                        # no doc, no edits yet
+    real = M._render_caps
+
+    def caps_then_save(j, user):
+        real(j, user)
+        r = client.post(f"/jobs/{job.id}/phrases",
+                        json={"rev": 1, "phrases": PHRASES})
+        assert r.status_code == 200, r.text
+    monkeypatch.setattr(M, "_render_caps", caps_then_save)
+    r = client.post(f"/jobs/{job.id}/render", json=STORED)
+    assert r.status_code == 422, r.text
+    assert r.json()["code"] == "needs_editor"
+    cur = store.get(job.id)
+    assert (cur.status, cur.render_gen, render.calls) == ("awaiting_review",
+                                                          0, [])
+
+
+def test_a_doc_job_with_saved_sentences_renders_its_doc(client, render):
+    """The editor keeps a sentence copy of a doc job's transcript (for the
+    v1 editor): the doc's words are the captions."""
+    job = _review_job(doc=_doc())
+    r = client.post(f"/jobs/{job.id}/phrases",
+                    json={"rev": 1, "phrases": PHRASES})
+    assert r.status_code == 200, r.text
+    _finish(client, job.id)
+    assert _settled(job.id, "done")
+    assert _texts(render.calls[0]["subtitles"]) == ["Hello", "world.", "So",
+                                                    "great"]
+
+
+def test_a_save_before_the_render_starts_is_in_it(client, render,
+                                                  monkeypatch):
+    """A doc save from another tab or device that lands between the
+    request's read and the compare-and-set that starts the render: the
+    render draws the saved text (from then on the job takes no saves)."""
+    job = _review_job(doc=_doc())
+    real = M._render_caps
+
+    def caps_then_save(j, user):
+        real(j, user)
+        r = client.patch(f"/jobs/{job.id}/doc", json={
+            "base_rev": 0, "rev": 7,
+            "words": {"upsert": [dict(WORDS[5], text="brilliant")],
+                      "delete": []}})
+        assert r.status_code == 200, r.text
+    monkeypatch.setattr(M, "_render_caps", caps_then_save)
+    _finish(client, job.id)
+    assert _settled(job.id, "done")
+    [call] = render.calls
+    want = ["Hello", "world.", "So", "brilliant"]
+    assert _texts(call["subtitles"]) == want
+    assert [w["text"] for w in call["captions"]["words"]] == want
+    assert store.get(job.id).doc["words"][5]["text"] == "brilliant"
+
+
 # ── what stays as it was around it ──────────────────────────────────
 
 
@@ -219,3 +386,54 @@ def test_captions_off_follows_the_style_once_analysed():
     # a v1 upload: its caption preset, whatever the doc started with
     v1 = _review_job(settings={"caption_preset": "none"}, doc=_doc())
     assert v1.to_dict()["captions_off"] is True
+
+
+# The start screen's "Ohne Untertitel": a caption style, never a v1
+# caption_preset (the v1 burn's default is "clean").
+OFF = {"style": "tight", "caption_style": NONE, "caption_style_hint": "none"}
+
+
+@pytest.mark.parametrize("body", [STORED,
+                                  {"client": "v2", "subtitles": UNITS}])
+def test_captions_off_burns_no_v1_captions(client, render, body):
+    """A v1-engine render (here: a job without a doc) of a job with its
+    captions off gets caption_preset "none", from the Vorschau and from
+    the editor's export alike; the job's settings stay as they are."""
+    job = _review_job(settings=dict(OFF))
+    assert client.get(f"/jobs/{job.id}").json()["captions_off"] is True
+    r = client.post(f"/jobs/{job.id}/render", json=body)
+    assert r.status_code == 200, r.text
+    assert _settled(job.id, "done")
+    [call] = render.calls
+    assert "captions" not in call
+    assert call["settings"].get("caption_preset") == "none"
+    assert store.get(job.id).settings == OFF
+
+
+def test_captions_off_without_the_opt_in(client, render, monkeypatch):
+    """CLEO_CAPTION_ENGINE=optin, a browser without the opt-in: the v1
+    engine, and no captions for the doc's style "none"."""
+    monkeypatch.setenv("CLEO_CAPTION_ENGINE", "optin")
+    job = _review_job(settings={"caption_style": NONE,
+                                "caption_style_hint": "none"},
+                      doc=_doc(preset="none"))
+    _finish(client, job.id)
+    assert _settled(job.id, "done")
+    [call] = render.calls
+    assert store.get(job.id).caption_engine == "v1" and "captions" not in call
+    assert call["settings"].get("caption_preset") == "none"
+    assert "caption_preset" not in store.get(job.id).settings
+
+
+@pytest.mark.parametrize("settings, preset", [
+    ({"style": "tight", "caption_style": POWER, "caption_style_hint": "power"},
+     None),
+    ({"caption_preset": "classic"}, "classic"),           # a v1 upload's own
+    ({"caption_preset": "clean", "caption_style_hint": "none"}, "clean"),
+])
+def test_a_job_with_captions_keeps_its_preset(client, render, settings,
+                                              preset):
+    job = _review_job(settings=settings)
+    _finish(client, job.id)
+    assert _settled(job.id, "done")
+    assert render.calls[0]["settings"].get("caption_preset") == preset

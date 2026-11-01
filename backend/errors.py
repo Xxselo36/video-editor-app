@@ -223,6 +223,9 @@ PROTOCOL_CODES: frozenset[str] = frozenset({
     "thumbnail_not_ready", "timeline_too_long", "too_many_segments",
     "invalid_segments", "invalid_payload", "too_many_ids",
     "unknown_caption_preset", "busy", "invalid_title", "not_editable",
+    # POST /render {"source": "stored"} (the Vorschau's Fertigstellen):
+    # only the editor can export this job's captions
+    "needs_editor",
     # the edit document (UT3, backend/doc.py)
     "no_doc", "doc_read_only", "doc_patch_too_large", "peaks_not_ready",
     "poster_not_ready",

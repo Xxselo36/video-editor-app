@@ -9,17 +9,22 @@
  *   auto   the server is still at the rev the edit was made on: nobody
  *          saved since, so it comes back by itself (as an undo step)
  *   offer  the server moved on since (another tab or device saved): the
- *          editor offers it back, the user decides
+ *          editor offers it back, the user decides. Left alone until the
+ *          editor is left in the app (no Restore, no edit), it goes
+ *          (dropOffered): the user kept the newer timeline, and the
+ *          Vorschau, which holds Fertigstellen for a copy, lets it be. A
+ *          reload or a closed tab keeps it for the next open.
  *
  * localStorage can be missing or full (private mode): every access is
  * guarded, and the editor works the same without it. The key and when a
- * copy counts (readUnsaved) live in unsavedKey.ts, which the Vorschau
- * reads too.
+ * copy counts (readUnsaved, copyIsStored) live in unsavedKey.ts, which
+ * the Vorschau reads too: a copy the server has counts there as nothing
+ * unsaved, as here. The edit document's twin: unsavedDoc.ts.
  */
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
-import { sameTimeline, type TimelineSeg } from "@/lib/editSave";
-import { timelinePayload, type TimelineBackup } from "./timelineSave";
-import { unsavedKey } from "./unsavedKey";
+import type { TimelineSeg } from "@/lib/editSave";
+import type { TimelineBackup } from "./timelineSave";
+import { copyIsStored, readUnsaved, unsavedKey } from "./unsavedKey";
 
 export { readUnsaved } from "./unsavedKey";
 
@@ -32,7 +37,9 @@ export function writeUnsaved(jobId: string, b: TimelineBackup | null): void {
   }
 }
 
-export type UnsavedDecision = { kind: "none" } | { kind: "auto" | "offer"; segs: EditorSeg[]; known: number[] };
+export type UnsavedDecision =
+  | { kind: "none" }
+  | { kind: "auto" | "offer"; segs: EditorSeg[]; known: number[]; copy: TimelineBackup };
 
 /** What to do with a left-behind copy, given the timeline the server has (see the header). */
 export function decideUnsaved(
@@ -40,10 +47,16 @@ export function decideUnsaved(
   server: { rev: number; segments: TimelineSeg[] },
   duration: number,
 ): UnsavedDecision {
-  if (!b) return { kind: "none" };
-  const mine = timelinePayload(b.segs);
-  if (!mine.length || sameTimeline(server.segments, mine, duration)) return { kind: "none" };
+  if (!b || copyIsStored(b, server.segments, duration)) return { kind: "none" };
   // nobody saved since the edit was made (or only this device: a rev of its own)
   const ours = server.rev === b.base || b.known.includes(server.rev);
-  return { kind: ours ? "auto" : "offer", segs: b.segs, known: b.known };
+  return { kind: ours ? "auto" : "offer", segs: b.segs, known: b.known, copy: b };
+}
+
+/** An offered copy the user left alone: removed while it is still that
+ *  copy (`copy`, as read at the editor's open). One written since (an
+ *  edit, Restore: the autosave's) stays. */
+export function dropOffered(jobId: string, copy: TimelineBackup): void {
+  const now = readUnsaved(jobId);
+  if (now && JSON.stringify(now) === JSON.stringify(copy)) writeUnsaved(jobId, null);
 }

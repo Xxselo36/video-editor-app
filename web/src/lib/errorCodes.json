@@ -87,6 +87,7 @@
     "invalid_segments",
     "invalid_title",
     "method_not_allowed",
+    "needs_editor",
     "no_doc",
     "no_subscription",
     "not_available",

@@ -501,10 +501,12 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.preview.pause": "Пауза",
   "app.preview.captionsAfter": "Субтитры будут видны после экспорта.",
   "app.preview.preparing": "Превью ещё готовится.",
+  "app.preview.unavailable": "Не удалось создать превью. Твои изменения сохранены.",
   "app.preview.save": "Сохранить видео",
   "app.preview.previousVersion": "Скачать предыдущую версию",
   "app.preview.unsavedHere": "На этом устройстве есть изменения, которые ещё не сохранены. Открой доработку, чтобы они вошли в видео.",
   "app.preview.openRefine": "Открыть доработку",
   "app.preview.saving": "Сохраняем изменения…",
   "app.preview.stillSaving": "Последние изменения ещё сохраняются. Попробуй ещё раз чуть позже.",
+  "app.preview.needsEditor": "Изменения текста экспортируй из доработки.",
 };

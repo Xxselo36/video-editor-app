@@ -2,11 +2,14 @@
 // -fertigstellen, -sichern), in German like them, at 390×844 (pixel7:
 // touch, Android) and 1440×900 (desktop): every state of plan §5.2 the
 // stub can reach. Loading; processing; ready with the live captions, a
-// v1 project's note, a failed export, changes only this device has,
-// saves still out (and still out after 8 s), a preview the server still
-// builds; edited; finishing; done with "Herunterladen" ("Video sichern"
-// on an iPhone), "Mehr zum Video" open with the survey and the tip, the
-// ⋯ menu; failed; gone. Screenshots only (UX18 adds baselines). Needs
+// v1 project's note, a failed export, a landscape video exported as
+// "Original" (a wide frame), changes only this device has, saves still
+// out (and still out after 8 s), sentence edits only Feinschliff
+// exports, a preview the server still builds (its file asked for, or
+// none built yet), a preview that can't be built; edited; finishing;
+// done with "Herunterladen" ("Video sichern" on an iPhone), "Mehr zum
+// Video" open with the survey and the tip, the ⋯ menu, a wide frame;
+// failed; gone. Screenshots only (UX18 adds baselines). Needs
 // E2E_EDITOR_V2=1.
 import type { Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
@@ -114,6 +117,18 @@ for (const size of [PHONE, DESKTOP]) {
       await snap(page, size, "3-bereit-fertigstellen-fehlgeschlagen");
     });
 
+    test("ready and done: a landscape video exported as Original (a wide frame)", async ({ page, stub }) => {
+      const ready = await stub.seed("review_land", { filename: NAME });
+      await open(page, ready.id);
+      await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+      await expect(vorschau(page).locator("[data-shape]").first()).toHaveAttribute("data-shape", "wide");
+      await snap(page, size, "3-bereit-original-quer");
+      const done = await stub.seed("done_land", { filename: NAME });
+      await open(page, done.id);
+      await expect(vorschau(page)).toHaveAttribute("data-state", "done");
+      await snap(page, size, "8-fertig-original-quer");
+    });
+
     test("ready: changes only on this device; saves still out", async ({ page, stub }) => {
       const job = await stub.seed("review_speech", { filename: NAME });
       await open(page, job.id, { storage: unsavedTimeline(job.id) });
@@ -127,12 +142,26 @@ for (const size of [PHONE, DESKTOP]) {
       await openRefine(page, other.id);
       await fixWord(page, "ten", "zehn");
       await page.getByTestId("editor-back").click();
-      await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+      // (its first answer waits up to 8 s for the editor's saves)
+      await expect(vorschau(page)).toHaveAttribute("data-state", "ready", { timeout: 20_000 });
       await page.getByTestId("preview-finish").click();
       await expect(page.getByTestId("preview-saving")).toBeVisible();
       await snap(page, size, "4-aenderungen-werden-gespeichert");
       await expect(page.getByTestId("preview-error")).toBeVisible({ timeout: 15_000 });
       await snap(page, size, "4-noch-nicht-gespeichert");
+    });
+
+    test("ready: sentence edits that only Feinschliff exports", async ({ page, stub }) => {
+      // A project from before the edit document whose sentences were edited (POST /phrases).
+      const job = await stub.seed("review_speech", { filename: NAME, doc: false });
+      const saved = await stub.api.post(`/jobs/${job.id}/phrases`, {
+        data: { rev: Date.now(), phrases: [{ start: 0.2, end: 1, original_start: 0.2, original_end: 1, text: "Hallo Welt." }] },
+      });
+      expect(saved.ok()).toBe(true);
+      await open(page, job.id);
+      await page.getByTestId("preview-finish").click();
+      await expect(page.getByTestId("preview-needs-editor")).toBeVisible();
+      await snap(page, size, "4-im-feinschliff-fertigstellen");
     });
 
     test("ready: the preview still being built", async ({ page, stub }) => {
@@ -141,6 +170,31 @@ for (const size of [PHONE, DESKTOP]) {
       await open(page, job.id);
       await expect(page.getByTestId("preview-preparing")).toBeVisible({ timeout: 15_000 });
       await snap(page, size, "5-vorschau-wird-vorbereitet");
+    });
+
+    test("ready: no preview of the stored edit yet (none of the old cut meanwhile); one that can't be built", async ({ page, stub }) => {
+      // The editor played the proxy: no preview built yet; its build takes a minute here.
+      const job = await stub.seed("review_speech", { filename: NAME, proxy: "on", first_preview: false, slow_rebuild: 60 });
+      await open(page, job.id);
+      await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-held", "building");
+      await expect(page.getByTestId("preview-preparing")).toBeVisible({ timeout: 15_000 });
+      await snap(page, size, "5-vorschau-wird-erstellt");
+
+      // Every build of it fails: asked once more, then the note.
+      const failing = await stub.seed("review_speech", { filename: NAME });
+      await page.route(`${API}/jobs/${failing.id}/preview`, (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ preview_status: "building" }) }),
+      );
+      await page.route(`${API}/jobs/${failing.id}`, async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        const res = await route.fetch();
+        const body = await res.json();
+        Object.assign(body, { preview_status: "failed", preview_error: "encode_failed" });
+        return route.fulfill({ response: res, body: JSON.stringify(body) });
+      });
+      await open(page, failing.id);
+      await expect(page.getByTestId("preview-unavailable")).toBeVisible({ timeout: 20_000 });
+      await snap(page, size, "5-vorschau-nicht-erstellt");
     });
 
     test("edited, finishing", async ({ page, stub }) => {

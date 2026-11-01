@@ -135,6 +135,11 @@
     opacity: 1;
   }
 }
+/* A preview that couldn't be made: nothing to play, the note says why. */
+.frame[data-held="failed"] .play {
+  opacity: 0.5;
+  cursor: default;
+}
 /* Waiting for data: an arc runs round the button (after a moment, so a
  * quick start shows none). */
 .play::after {

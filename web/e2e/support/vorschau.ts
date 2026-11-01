@@ -119,3 +119,59 @@ export async function fixWord(page: Page, from: string, to: string) {
     await expect(sheet).toBeHidden();
   }
 }
+
+/** Cut the words first..last in the editor's Text tab (click, ⇧-click,
+ *  Cut; the sheet on phones, closed again): the timeline and the doc
+ *  are saved. */
+export async function cutWords(page: Page, first: string, last: string) {
+  const phone = await isPhone(page);
+  const sheet = page.getByTestId("ed-sheet-text");
+  if (phone && !(await sheet.isVisible())) await page.getByTestId("ed-tab-text").click();
+  const word = (text: string) => page.getByTestId("ed-word").filter({ hasText: new RegExp(`^${text}$`) }).first();
+  await expect(word(first)).toBeVisible({ timeout: 30_000 });
+  await word(first).click();
+  // the word menu opens over the next lines: the ⇧-click goes to the word itself
+  await word(last).dispatchEvent("click", { shiftKey: true });
+  await expect(page.getByTestId("ed-wordbar")).toBeVisible();
+  await page.getByTestId("ed-word-cut").first().click();
+  await expect(word(first)).toHaveAttribute("data-rm", "true");
+  if (phone) {
+    // Escape first clears the selection, then closes the sheet
+    for (let i = 0; i < 3 && (await sheet.isVisible()); i++) {
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(200);
+    }
+    await expect(sheet).toBeHidden();
+  }
+}
+
+/** Pick a caption style in the editor's Style tab (the sheet on phones, closed again). */
+export async function pickStyle(page: Page, presetId: string) {
+  const phone = await isPhone(page);
+  await page.getByTestId("ed-tab-style").click();
+  await expect(page.getByTestId("ed-style")).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId(`ed-tile-${presetId}`).click();
+  await expect(page.getByTestId(`ed-tile-${presetId}`)).toHaveAttribute("aria-pressed", "true");
+  if (phone) {
+    await page.getByRole("button", { name: /^(Close|Schließen)$/ }).first().click();
+    await expect(page.getByTestId("ed-sheet-style")).toBeHidden();
+  }
+}
+
+/** The times the page asked for the preview of the stored timeline
+ *  (POST /jobs/{id}/preview), as they are sent. A listener, not a route:
+ *  the HTTP cache stays on. */
+export function previewPosts(page: Page, jobId: string): number[] {
+  const out: number[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url() === `${API}/jobs/${jobId}/preview`) out.push(Date.now());
+  });
+  return out;
+}
+
+/** m:ss of a stored timeline's length (its clips at their speed), the
+ *  seconds rounded down as the editor shows them. */
+export function lengthOf(segs: { start: number; end: number; speed?: number }[]): string {
+  const s = Math.floor(segs.reduce((a, x) => a + (x.end - x.start) / (x.speed || 1), 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}

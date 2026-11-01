@@ -502,10 +502,12 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.preview.pause": "रोकें",
   "app.preview.captionsAfter": "कैप्शन एक्सपोर्ट के बाद दिखेंगे।",
   "app.preview.preparing": "प्रीव्यू अभी तैयार हो रहा है।",
+  "app.preview.unavailable": "प्रीव्यू नहीं बन सका। आपके एडिट्स सेव हैं।",
   "app.preview.save": "वीडियो सेव करें",
   "app.preview.previousVersion": "पिछला वर्शन डाउनलोड करें",
   "app.preview.unsavedHere": "इस डिवाइस पर कुछ बदलाव अभी सेव नहीं हुए हैं। उन्हें शामिल करने के लिए फ़ाइन-ट्यून खोलें।",
   "app.preview.openRefine": "फ़ाइन-ट्यून खोलें",
   "app.preview.saving": "बदलाव सेव हो रहे हैं…",
   "app.preview.stillSaving": "आपके आखिरी बदलाव अभी सेव हो रहे हैं। थोड़ी देर में फिर से कोशिश करें।",
+  "app.preview.needsEditor": "अपने टेक्स्ट के बदलाव फ़ाइन-ट्यून से एक्सपोर्ट करें।",
 };

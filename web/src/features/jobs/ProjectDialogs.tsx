@@ -112,12 +112,13 @@ export function DeleteDialog({ p, onClose, onDeleted }: { p: Project; onClose: (
           <Button variant="tint" size="sm" onClick={onClose}>
             {t("app.projects.cancel")}
           </Button>
+          {/* Dark text on the red: white on --danger is 3.0:1, --surface-0 6.5:1 (AA). */}
           <Button
             size="sm"
             disabled={busy}
             onClick={() => void remove()}
             data-testid="delete-confirm"
-            className="!bg-[var(--danger)]"
+            className="!bg-[var(--danger)] !text-[var(--surface-0)]"
           >
             {t("app.projects.delete")}
           </Button>

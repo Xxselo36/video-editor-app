@@ -499,10 +499,12 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.preview.pause": "一時停止",
   "app.preview.captionsAfter": "字幕は書き出し後に表示されます。",
   "app.preview.preparing": "プレビューはまだ準備中です。",
+  "app.preview.unavailable": "プレビューを作成できませんでした。編集内容は保存されています。",
   "app.preview.save": "動画を保存",
   "app.preview.previousVersion": "前のバージョンをダウンロード",
   "app.preview.unsavedHere": "この端末に、まだ保存されていない変更があります。反映するには微調整を開いてください。",
   "app.preview.openRefine": "微調整を開く",
   "app.preview.saving": "変更を保存中…",
   "app.preview.stillSaving": "最後の変更をまだ保存しています。少し待ってからもう一度お試しください。",
+  "app.preview.needsEditor": "テキストの変更は微調整から書き出してください。",
 };

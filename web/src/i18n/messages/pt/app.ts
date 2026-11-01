@@ -496,14 +496,16 @@ export const ptApp: Partial<Record<AppKey, string>> = {
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
   "app.preview.refine": "Ajuste fino",
-  "app.preview.more": "Mais para este vídeo",
+  "app.preview.more": "Mais opções para este vídeo",
   "app.preview.pause": "Pausar",
   "app.preview.captionsAfter": "Você verá as legendas depois que o vídeo for exportado.",
   "app.preview.preparing": "A prévia ainda está sendo preparada.",
+  "app.preview.unavailable": "Não foi possível criar a prévia. Suas edições estão salvas.",
   "app.preview.save": "Salvar vídeo",
   "app.preview.previousVersion": "Baixar a versão anterior",
   "app.preview.unsavedHere": "Este dispositivo tem alterações que ainda não foram salvas. Abra o ajuste fino para incluí-las.",
   "app.preview.openRefine": "Abrir ajuste fino",
   "app.preview.saving": "Salvando alterações…",
   "app.preview.stillSaving": "Suas últimas alterações ainda estão sendo salvas. Tente de novo em instantes.",
+  "app.preview.needsEditor": "Exporte suas alterações de texto pelo ajuste fino.",
 };

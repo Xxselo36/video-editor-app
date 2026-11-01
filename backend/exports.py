@@ -19,13 +19,15 @@ Modal too — for:
   what a render of the job as analysed would get — its fingerprint —
   so a later POST /render of exactly that can take the finished result.
 - **Export without the editor** (the Vorschau's "Fertigstellen"): the
-  caption units of the job as stored (stored_units).
+  caption units of the job as stored (stored_units), unless only the
+  editor can make them (needs_editor).
 - **Bonus clips** only for an untouched timeline (review G6).
 - **Download names** (review F9) and the **SRT / VTT** caption files
   (review F8) of the latest export.
 """
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import math
@@ -33,7 +35,7 @@ import os
 import re
 import time
 import unicodedata
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 DAY_S = 86400.0
 # Bonus clips only from videos at least this long (output seconds).
@@ -219,11 +221,19 @@ def keep_social(job: Any, subtitles: Iterable[Any] | None) -> bool:
 
 
 def render_settings(job: Any, output_s: float) -> dict[str, Any]:
-    """job.settings as a render gets them: bonus clips switched off
-    unless hooks_allowed (the job itself is not changed)."""
+    """job.settings as a render gets them (the job itself is not
+    changed): bonus clips switched off unless hooks_allowed; and for a
+    job whose captions are off ("Ohne Untertitel", Job._captions_off)
+    without a v1 caption_preset of its own — the start screen sends only
+    the caption style — caption_preset "none", so a v1-engine render
+    burns no captions instead of the burn's default "clean". A job with
+    captions keeps its preset."""
     settings = dict(job.settings or {})
     if not hooks_allowed(job, output_s):
         settings["hook_clips_enabled"] = False
+    off = getattr(job, "_captions_off", None)
+    if not settings.get("caption_preset") and callable(off) and off():
+        settings["caption_preset"] = "none"
     return settings
 
 
@@ -320,6 +330,48 @@ def removed_ranges(segments: Iterable[Any] | None, duration: float | None,
     return out
 
 
+# web/src/features/editor/state/cuts.ts: Whisper stretches a word over
+# the pause it ends in (or starts after), so a word longer than
+# LONG_WORD_S has its sound at one end — about WORD_SOUND_S of it.
+LONG_WORD_S = 1.2
+WORD_SOUND_S = 0.4
+
+
+def word_probes(w: dict) -> tuple[float, ...]:
+    """The source moments that decide whether a word plays — cuts.ts
+    wordProbes: its middle; for a word longer than LONG_WORD_S the
+    middles of a word's length (WORD_SOUND_S) at its head and at its
+    tail: it plays when either does."""
+    s, e = float(w["start"]), float(w["end"])
+    if e - s > LONG_WORD_S:
+        return (s + WORD_SOUND_S / 2, e - WORD_SOUND_S / 2)
+    return ((s + e) / 2,)
+
+
+def cut_by(removed: Iterable[Any] | None) -> Callable[[dict], bool] | None:
+    """A word cut by the `removed` source ranges — cuts.ts cutBy: every
+    probe of it (word_probes) lies in one of them, ends included. None
+    without ranges. (Searched like the web's rangeAt; the ranges are
+    sorted and merged first, so any list gives its union.)"""
+    spans: list[list[float]] = []
+    for a, b in sorted((float(r[0]), float(r[1])) for r in removed or ()):
+        if spans and a <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], b)
+        else:
+            spans.append([a, b])
+    if not spans:
+        return None
+    starts = [a for a, _ in spans]
+
+    def cut(w: dict) -> bool:
+        for t in word_probes(w):
+            i = bisect.bisect_right(starts, t) - 1
+            if i < 0 or t > spans[i][1]:
+                return False
+        return True
+    return cut
+
+
 def doc_units(words: Iterable[dict] | None,
               removed: list[tuple[float, float]] | None = None) -> list[dict]:
     """The caption units the v2 editor sends for an unedited doc — the
@@ -330,23 +382,24 @@ def doc_units(words: Iterable[dict] | None,
     takes the next one with it; a unit of ≤ 0.05 s joins a neighbour.
     For the v2 engine both shapes draw the same words (build_spec maps
     units onto the doc's words), so an instant export accepts either.
-    `removed` (UX10 exportCaptionSource): words whose middle lies in a
-    cut range are left out and end the segment — no unit glues across a
-    cut."""
+    `removed` (UX10 exportCaptionSource): the words cut from the video
+    (cut_by: by the same rule as the editor's Text tab, its export and
+    the Vorschau — a long word plays when its head or its tail does) are
+    left out and end the segment — no unit glues across a cut.
+    testdata/cut_words_vectors.json holds both sides to that rule."""
     segs: list[list[dict]] = []
     seg: list[dict] = []
     forced = False
+    cut = cut_by(removed)
     for w in words or ():
         if not isinstance(w, dict):
             continue
-        if removed:
-            m = (float(w["start"]) + float(w["end"])) / 2
-            if any(a <= m <= b for a, b in removed):
-                forced = forced or bool(w.get("breakBefore"))
-                if seg:
-                    segs.append(seg)
-                seg = []
-                continue
+        if cut is not None and cut(w):
+            forced = forced or bool(w.get("breakBefore"))
+            if seg:
+                segs.append(seg)
+            seg = []
+            continue
         if w.get("hidden"):
             forced = forced or bool(w.get("breakBefore"))
             continue
@@ -395,16 +448,29 @@ def stored_units(job: Any) -> list[dict]:
     """The caption units of the job as stored, for an export started
     without the editor (POST /render {"source": "stored"}): what the v2
     editor sends for it — the edit doc's words that play (doc_units minus
-    the timeline's cuts) — or, without a doc, the analysis' units. Left
-    out, as only an open editor applies them: the forced break where a
-    reordered timeline jumps (cuts.ts reorderBreaks), so a unit there may
-    join words of both places, and transcript edits kept only as
-    sentences (job.edited_phrases: the v1 editor's, or any on a job
-    without a doc)."""
-    words = (job.doc or {}).get("words") if isinstance(job.doc, dict) else None
-    if words:
-        return doc_units(words, removed_ranges(job.segments, job.duration))
+    the timeline's cuts; none when every word was deleted) — or, for a
+    job without a doc, the analysis' units (one with sentence edits needs
+    the editor: needs_editor). Left out, as only an open editor applies
+    them: the forced break where a reordered timeline jumps (cuts.ts
+    reorderBreaks), so a unit there may join words of both places, and
+    v1-editor sentence edits newer than the doc (state/reconcile.ts)."""
+    if isinstance(job.doc, dict):
+        words = job.doc.get("words")
+        return doc_units(words if isinstance(words, list) else None,
+                         removed_ranges(job.segments, job.duration))
     return analysis_units(job)
+
+
+def needs_editor(job: Any) -> bool:
+    """A job without an edit doc whose transcript was edited as
+    sentences (job.edited_phrases, saved by the editor's sentence view:
+    an empty list when every sentence was deleted, as GET /subtitles
+    hands it back): only the editor turns those into caption units
+    (phraseUnits.ts phrasesToUnits), so an export without it (POST
+    /render {"source": "stored"}) is refused (422 needs_editor) instead
+    of drawing the analysis' captions."""
+    return (not isinstance(job.doc, dict)
+            and isinstance(getattr(job, "edited_phrases", None), list))
 
 
 def spec_unit_digests(job: Any, units: list[dict]) -> list[str]:

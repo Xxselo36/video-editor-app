@@ -18,6 +18,7 @@ import { apiFetch, useMediaUrl } from "@/lib/api";
 import { adjustedWordIds, followCaptionKeys } from "@/features/captions-ui/adjusted";
 import { useCaptionsV2 } from "@/features/captions-ui/flag";
 import type { Phrase, Subtitle } from "@/features/editor/legacy/buildPhrases";
+import { dropOffered } from "@/features/editor/session/unsaved";
 import { useEditSession } from "@/features/editor/session/useEditSession";
 import { ExportSheet } from "@/features/editor/export/ExportSheet";
 import type { ExportFlow } from "@/features/editor/export/useExportFlow";
@@ -438,6 +439,30 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
     }, 0);
     return () => clearTimeout(id);
   });
+  // Offered and left alone until the editor is left (in the app): the
+  // user kept the newer timeline, the copy goes (unsaved.ts dropOffered).
+  // Kept, it would hold the Vorschau's Fertigstellen on every return.
+  const offered = session.unsaved;
+  const jobId = props.jobId;
+  useEffect(() => {
+    if (offered.kind !== "offer") return;
+    return () => {
+      if (unsavedShown.current) dropOffered(jobId, offered.copy);
+    };
+  }, [offered, jobId]);
+  // The doc's twin (journeys-2, session/unsavedDoc.ts): back already, as
+  // one undo step of the text (useDocSession), or the server's newer doc
+  // stayed: said once.
+  const docCopyShown = useRef(false);
+  const docCopy = doc.status === "ready" ? doc.copy : null;
+  useEffect(() => {
+    if (docCopyShown.current || !docCopy) return;
+    docCopyShown.current = true;
+    if (docCopy === "restored") {
+      order.record("doc");
+      showToast(t("editor.unsaved.restored"), { label: t("editor.undo"), run: () => historyRef.current.undo() });
+    } else showToast(t("editor.conflict.reloaded"));
+  }, [docCopy, order, showToast, t]);
 
   // ── states: offline, expired ────────────────────────────────────────
   const online = useOnline();

@@ -503,10 +503,12 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.preview.pause": "Duraklat",
   "app.preview.captionsAfter": "Altyazıları video dışa aktarıldıktan sonra göreceksin.",
   "app.preview.preparing": "Önizleme hâlâ hazırlanıyor.",
+  "app.preview.unavailable": "Önizleme oluşturulamadı. Düzenlemelerin kaydedildi.",
   "app.preview.save": "Videoyu kaydet",
   "app.preview.previousVersion": "Önceki sürümü indir",
   "app.preview.unsavedHere": "Bu cihazda henüz kaydedilmemiş değişiklikler var. Dahil olmaları için ince ayarı aç.",
   "app.preview.openRefine": "İnce ayarı aç",
   "app.preview.saving": "Değişiklikler kaydediliyor…",
   "app.preview.stillSaving": "Son değişikliklerin hâlâ kaydediliyor. Birazdan tekrar dene.",
+  "app.preview.needsEditor": "Metin değişikliklerini ince ayardan dışa aktar.",
 };

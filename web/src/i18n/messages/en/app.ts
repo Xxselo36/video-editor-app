@@ -518,14 +518,18 @@ export const enApp = {
   // Projects on the old caption engine: the preview shows no captions
   "app.preview.captionsAfter": "You'll see the captions once it's exported.",
   "app.preview.preparing": "The preview is still being prepared.",
+  // In the frame: the server couldn't build the preview of the edit (asked twice); Export still renders it
+  "app.preview.unavailable": "The preview couldn't be made. Your edits are saved.",
   // iPhone and iPad: the share sheet saves it to Photos
   "app.preview.save": "Save video",
   // Changed after an export: the file exported before
   "app.preview.previousVersion": "Download the previous version",
-  // This browser kept timeline changes the server doesn't have yet; the editor restores them
+  // This browser kept changes (timeline or text) the server doesn't have yet; the editor restores them
   "app.preview.unsavedHere": "This device has changes that aren't saved yet. Open Fine-tune so they're included.",
   "app.preview.openRefine": "Open Fine-tune",
   // The export waits until the editor's last changes are saved
   "app.preview.saving": "Saving changes…",
   "app.preview.stillSaving": "Your last changes are still being saved. Try again in a moment.",
+  // Fertigstellen refused (422 needs_editor): sentence edits of a project without an edit document; only Fine-tune's export has them
+  "app.preview.needsEditor": "Export your text edits from Fine-tune.",
 };

@@ -55,7 +55,7 @@ export const enSite = {
   "library.count.one": "{count} project",
   "library.count.other": "{count} projects",
   "library.confirmDelete": "Delete this project permanently? The video and all edits are removed from our servers.",
-  "library.deleteFailed": "Couldn't delete right now — if the video is still processing, try again in a moment.",
+  "library.deleteFailed": "Couldn't delete it right now. If the video is still processing, try again in a moment.",
 
   /* ── Library: empty state ── */
   "library.empty.title": "Your library is empty",

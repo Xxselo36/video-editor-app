@@ -502,10 +502,12 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.preview.pause": "Jeda",
   "app.preview.captionsAfter": "Teks akan terlihat setelah video diekspor.",
   "app.preview.preparing": "Pratinjau masih disiapkan.",
+  "app.preview.unavailable": "Pratinjau gagal dibuat. Editanmu sudah tersimpan.",
   "app.preview.save": "Simpan video",
   "app.preview.previousVersion": "Unduh versi sebelumnya",
   "app.preview.unsavedHere": "Ada perubahan di perangkat ini yang belum tersimpan. Buka Sempurnakan agar perubahan itu ikut masuk.",
   "app.preview.openRefine": "Buka Sempurnakan",
   "app.preview.saving": "Menyimpan perubahan…",
   "app.preview.stillSaving": "Perubahan terakhirmu masih disimpan. Coba lagi sebentar lagi.",
+  "app.preview.needsEditor": "Ekspor perubahan teksmu dari Sempurnakan.",
 };

@@ -46,6 +46,9 @@ export type SeedOptions = {
   render_seconds?: number;
   /** Seconds every /edit-segments waits before its preview rebuild. */
   slow_rebuild?: number;
+  /** false (review seeds): no first preview, as analysed with
+   *  CLEO_PROXY_VIDEO=1 — preview_version 0 until one is built. */
+  first_preview?: boolean;
   /** review_long: words in the doc (default 10 000). */
   words?: number;
   /** job.format_warning (UX6), e.g. "smartcam_failed". */

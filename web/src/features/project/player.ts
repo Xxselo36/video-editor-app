@@ -7,7 +7,24 @@
 import { useCallback, useSyncExternalStore, type RefObject } from "react";
 import type { Fetched } from "@/features/editor/state/docFetch";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
-import type { SavedSeg } from "@/features/jobs/types";
+import type { JobStatus, SavedSeg } from "@/features/jobs/types";
+
+/**
+ * The frame of the job's video, in every player of the Vorschau (the
+ * preview, the export, a failed video's still, a preview still being
+ * built): 16:9 (true) or 9:16. A 16:9 output is wide; "original" keeps
+ * the source's frame, whose shape the filmstrip's tiles have (each the
+ * source scaled to 90 px high, pipeline.make_filmstrip), so a landscape
+ * original is wide from the first answer, without a jump. Without a
+ * filmstrip (it failed, or a job from before it) and for a square
+ * source: the 9:16 frame, the picture letterboxed.
+ */
+export function isWide(job: Pick<JobStatus, "output_aspect" | "filmstrip">): boolean {
+  if (job.output_aspect === "16:9") return true;
+  if (job.output_aspect !== "original") return false;
+  const tile = job.filmstrip;
+  return !!tile && tile.tileH > 0 && tile.tileW > tile.tileH;
+}
 
 // HTMLMediaElement's networkState and readyState values.
 const NETWORK_LOADING = 2;
