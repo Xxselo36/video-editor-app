@@ -135,10 +135,15 @@
     opacity: 1;
   }
 }
-/* A preview that couldn't be made: nothing to play, the note says why. */
+/* A preview that couldn't be made: nothing to play, no play button; the
+ * note says why in the middle of the frame (all of it fits there, also
+ * in a small phone's 146 x 260 frame, where it runs to seven lines). */
 .frame[data-held="failed"] .play {
-  opacity: 0.5;
-  cursor: default;
+  display: none;
+}
+.frame[data-held="failed"] .status {
+  top: 50%;
+  translate: 0 -50%;
 }
 /* Waiting for data: an arc runs round the button (after a moment, so a
  * quick start shows none). */
@@ -169,7 +174,8 @@
 }
 
 /* "Die Vorschau wird noch vorbereitet.": under the button, after 10 s
- * without any of the file. The wrapper is the live region. */
+ * without any of the file. The wrapper is the live region. (A preview
+ * that couldn't be made: see above.) */
 .status {
   position: absolute;
   z-index: 3;

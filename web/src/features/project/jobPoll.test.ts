@@ -1,6 +1,8 @@
 // The Vorschau's poll (useJobPoll → jobPoll.ts): the editor's last saves
 // before the first answer and after it, and the preview of the stored
-// timeline (asked for when nothing builds it, once more after a failure).
+// timeline (asked for when nothing builds it, once more after a failure;
+// given up on one the server keeps refusing or that never ends);
+// requests without an answer.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JobStatus } from "@/features/jobs/types";
 
@@ -8,7 +10,9 @@ const apiFetch = vi.fn<(path: string, init?: RequestInit) => Promise<Response>>(
 vi.mock("@/lib/api", () => ({ apiFetch: (path: string, init?: RequestInit) => apiFetch(path, init) }));
 vi.mock("@/features/jobs/localJobs", () => ({ setExportHint: () => {} }));
 
-const { previewBehind, previewOutdated, startJobPoll, SAVES_WAIT_MS } = await import("./jobPoll");
+const { previewBehind, previewOutdated, startJobPoll, BUILD_MAX_MS, PREVIEW_ERRORS, REQUEST_MS, SAVES_WAIT_MS } = await import(
+  "./jobPoll"
+);
 const { trackSave } = await import("@/lib/pendingSaves");
 type Load = import("./jobPoll").Load;
 
@@ -182,6 +186,40 @@ describe("the editor's last saves", () => {
     expect(ev.settled).toEqual([ev.loads.length]);
   });
 
+  it("they land while the first GET after the wait is out, read before them: asked again at once, the stored cut, settled", async () => {
+    const s = save();
+    trackSave("j-m", s.p);
+    let job = ready();
+    let gets = 0;
+    let answerFirst!: () => void;
+    apiFetch.mockImplementation(async () => {
+      gets++;
+      // the first GET is read on the server now, its answer comes later (a slow link)
+      if (gets === 1) {
+        const asRead = job;
+        return new Promise<Response>((r) => (answerFirst = () => r(json(asRead))));
+      }
+      return json(job);
+    });
+    const { ev, on } = events();
+    stop = startJobPoll("j-m", on).stop;
+    await vi.advanceTimersByTimeAsync(SAVES_WAIT_MS);
+    await flush();
+    expect(gets).toBe(1);
+    // the save lands (the server has the cut, its preview built) before that GET's answer
+    job = cut("ready", { preview_segments: [[0, 5], [8, 12]], preview_version: 2 });
+    s.resolve();
+    await flush();
+    answerFirst();
+    await flush();
+    expect(gets).toBe(2);
+    expect(lastJob(ev.loads)?.edit_rev).toBe(2);
+    expect(lastJob(ev.loads)?.preview_version).toBe(2);
+    expect(ev.settled).toEqual([ev.loads.length]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(gets).toBe(2);
+  });
+
   it("nothing out: asked at once, nothing settled", async () => {
     const srv = backend(ready());
     const { ev, on } = events();
@@ -301,6 +339,69 @@ describe("the preview of the stored timeline", () => {
     expect(ev.failed).toEqual([]);
   });
 
+  it(`POST /preview refused for good (500, 503): given up after ${PREVIEW_ERRORS} answers in a row, nothing more asked`, async () => {
+    for (const status of [500, 503]) {
+      const srv = backend(cut("stale"));
+      srv.post = () => json({ detail: "server_error" }, status);
+      const { ev, on } = events();
+      const poll = startJobPoll(`j-n${status}`, on);
+      await flush();
+      expect(srv.posts).toBe(1);
+      expect(ev.failed).toEqual([]);
+      // asked again with each later answer (2, 4, 8, 16 s apart: about half a minute)
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(srv.posts).toBe(PREVIEW_ERRORS);
+      expect(ev.failed).toEqual([true]);
+      const gets = srv.gets;
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(srv.posts).toBe(PREVIEW_ERRORS);
+      expect(srv.gets).toBe(gets);
+      poll.stop();
+    }
+  });
+
+  it("one refusal in a deploy (503), then it builds: asked again, never given up", async () => {
+    const srv = backend(cut("stale"));
+    srv.post = () => json({ detail: "unavailable" }, 503);
+    const { ev, on } = events();
+    stop = startJobPoll("j-o", on).stop;
+    await flush();
+    expect(srv.posts).toBe(1);
+    srv.post = () => json({ preview_status: "building" });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(srv.posts).toBe(2);
+    srv.job = cut("building");
+    await vi.advanceTimersByTimeAsync(2000);
+    srv.job = cut("ready", { preview_segments: [[0, 5], [8, 12]], preview_version: 2 });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(lastJob(ev.loads)?.preview_version).toBe(2);
+    expect(ev.failed).toEqual([]);
+  });
+
+  it("building that never ends (a hung encode): followed, given up after BUILD_MAX_MS; a newer revision starts over", async () => {
+    const srv = backend(cut("building"));
+    const { ev, on } = events();
+    const poll = startJobPoll("j-p", on);
+    stop = poll.stop;
+    await flush();
+    await vi.advanceTimersByTimeAsync(BUILD_MAX_MS - 10_000);
+    expect(ev.failed).toEqual([]);
+    expect(srv.gets).toBeGreaterThan(400);
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(ev.failed).toEqual([true]);
+    const gets = srv.gets;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(srv.gets).toBe(gets);
+    expect(srv.posts).toBe(0);
+    // a newer cut: followed again
+    srv.job = cut("building", { edit_rev: 5 });
+    poll.refresh();
+    await flush();
+    expect(ev.failed).toEqual([true, false]);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(srv.gets).toBe(gets + 2);
+  });
+
   it("given up on a revision, a newer one starts over", async () => {
     const srv = backend(cut("failed"));
     srv.post = () => json({ preview_status: "failed" });
@@ -316,6 +417,53 @@ describe("the preview of the stored timeline", () => {
     await flush();
     expect(srv.posts).toBe(2);
     expect(ev.failed).toEqual([true, false]);
+  });
+});
+
+describe("requests without an answer (a stalled connection)", () => {
+  /** A request that never answers; it fails once its signal aborts. */
+  const never = (init?: RequestInit) =>
+    new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+
+  it("a GET: given up after REQUEST_MS, asked again; showing the tab meanwhile only queues", async () => {
+    let gets = 0;
+    apiFetch.mockImplementation(async (_path, init) => {
+      gets++;
+      if (gets === 1) return never(init);
+      return json(ready({ status: "processing" }));
+    });
+    const { ev, on } = events();
+    const poll = startJobPoll("j-q", on);
+    stop = poll.stop;
+    await flush();
+    poll.refresh();
+    await flush();
+    expect(gets).toBe(1);
+    await vi.advanceTimersByTimeAsync(REQUEST_MS + 2000);
+    expect(gets).toBeGreaterThanOrEqual(2);
+    expect(lastJob(ev.loads)?.status).toBe("processing");
+  });
+
+  it("a POST /preview: given up after REQUEST_MS, asked again with a later answer", async () => {
+    const srv = backend(cut("stale"));
+    let posts = 0;
+    apiFetch.mockImplementation(async (path, init) => {
+      if (init?.method === "POST") {
+        posts++;
+        if (posts === 1) return never(init);
+        return json({ preview_status: "building" });
+      }
+      srv.gets++;
+      return json(srv.job);
+    });
+    const { ev, on } = events();
+    stop = startJobPoll("j-r", on).stop;
+    await flush();
+    expect(posts).toBe(1);
+    await vi.advanceTimersByTimeAsync(REQUEST_MS);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(posts).toBe(2);
+    expect(ev.failed).toEqual([]);
   });
 });
 

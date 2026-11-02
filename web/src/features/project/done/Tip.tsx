@@ -6,6 +6,8 @@
  */
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { PRESS } from "@/components/ui/Button";
+import { cx } from "@/components/ui/cx";
 import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import type { JobStatus } from "@/features/jobs/types";
@@ -30,7 +32,7 @@ export function Tip({ job }: { job: Pick<JobStatus, "scene_events"> }) {
         type="button"
         aria-label={t("app.done.dismiss")}
         // The tap area reaches 44 px (::after); the cross stays small.
-        className="relative text-[var(--text-muted)] after:absolute after:-inset-[15px] after:content-[''] hover:text-[var(--text-strong)]"
+        className={cx("relative text-[var(--text-muted)] after:absolute after:-inset-[15px] after:content-[''] hover:text-[var(--text-strong)]", PRESS)}
         onClick={() => {
           dismissTip();
           setTip(false);

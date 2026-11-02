@@ -21,7 +21,8 @@
  * request still out touched, as they are now), the deleted ids, style
  * and format when they changed; never the whole transcript.
  * localStorage can be missing, blocked or full: every access is guarded,
- * and the editor works as before without it.
+ * and a copy storage refuses (or one too big for it) stays in this
+ * document (deviceCopy.ts), where the Vorschau still sees it.
  */
 import type { PatchBody } from "@/features/editor/state/docSave";
 import {
@@ -33,6 +34,9 @@ import {
   type DocWord,
   type EditDoc,
 } from "@/features/editor/state/doc";
+import { dropCopy, readCopy, unsavedDocKey, writeCopy } from "./deviceCopy";
+
+export { unsavedDocKey };
 
 export type DocCopy = {
   /** The server rev the changes were made on. */
@@ -48,14 +52,10 @@ export type DocCopy = {
   at: number;
 };
 
-export function unsavedDocKey(jobId: string): string {
-  return `cleocuts.editor.unsavedDoc.v1.${jobId}`;
-}
-
 /** A copy older than this no longer counts (a week, as the timeline's). */
 const MAX_AGE_MS = 7 * 24 * 3600 * 1000;
-/** A bigger copy isn't kept: the storage is shared with the rest of the
- *  app (a replace-all over a very long transcript). */
+/** A bigger copy isn't stored: the storage is shared with the rest of the
+ *  app (a replace-all over a very long transcript). This document keeps it. */
 const MAX_CHARS = 1_000_000;
 
 const isWord = (w: unknown): w is DocWord => {
@@ -66,11 +66,9 @@ const isStyle = (s: unknown): s is DocStyle =>
   !!s && typeof (s as DocStyle).presetId === "string" && !!(s as DocStyle).overrides && typeof (s as DocStyle).overrides === "object";
 const isFormat = (f: unknown): f is DocFormat => !!f && typeof (f as DocFormat).aspect === "string";
 
-/** The job's copy on this device; null without one, or when it is unreadable, invalid or too old. */
-export function readDocCopy(jobId: string, now = Date.now()): DocCopy | null {
+/** A stored copy as text: null when it is unreadable, invalid or too old. */
+function parseDocCopy(raw: string, now: number): DocCopy | null {
   try {
-    const raw = localStorage.getItem(unsavedDocKey(jobId));
-    if (!raw) return null;
     const c = JSON.parse(raw) as Partial<DocCopy> | null;
     if (!c || typeof c.base !== "number" || typeof c.at !== "number" || now - c.at > MAX_AGE_MS) return null;
     if (!Array.isArray(c.upsert) || !c.upsert.every(isWord)) return null;
@@ -91,27 +89,26 @@ export function readDocCopy(jobId: string, now = Date.now()): DocCopy | null {
   }
 }
 
-/** Keep `c` (null: drop the copy). Full or blocked storage: no copy
- *  rather than an older one. */
+/** The job's copy on this device; null without one, or when it is
+ *  unreadable, invalid or too old (such a one goes). */
+export function readDocCopy(jobId: string, now = Date.now()): DocCopy | null {
+  return readCopy(unsavedDocKey(jobId), (raw) => parseDocCopy(raw, now));
+}
+
+/** Keep `c` (null: drop the copy). Storage that refuses it (full,
+ *  blocked, too big): this document keeps it, no older one stays stored. */
 export function writeDocCopy(jobId: string, c: DocCopy | null): void {
-  const key = unsavedDocKey(jobId);
-  try {
-    const text = c ? JSON.stringify(c) : null;
-    if (text && text.length <= MAX_CHARS) localStorage.setItem(key, text);
-    else localStorage.removeItem(key);
-  } catch {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      /* storage blocked */
-    }
-  }
+  const text = c ? JSON.stringify(c) : null;
+  writeCopy(unsavedDocKey(jobId), text, text === null || text.length <= MAX_CHARS);
 }
 
 /** Drop the copy if it is still `c` (a newer one written meanwhile stays). */
 export function dropDocCopy(jobId: string, c: DocCopy): void {
-  const now = readDocCopy(jobId, c.at);
-  if (now && JSON.stringify(now) === JSON.stringify(c)) writeDocCopy(jobId, null);
+  const want = JSON.stringify(c);
+  dropCopy(unsavedDocKey(jobId), (raw) => {
+    const now = parseDocCopy(raw, c.at);
+    return !!now && JSON.stringify(now) === want;
+  });
 }
 
 /** Key order doesn't matter (the server stores a style it checked). */
@@ -207,4 +204,24 @@ export function decideDocCopy(c: DocCopy | null, server: { doc: Pick<EditDoc, "w
   // nobody saved since the changes were made (or only this device: a rev of its own)
   if (server.rev === c.base || c.known.includes(server.rev)) return { kind: "auto", copy: c };
   return { kind: "moved" };
+}
+
+/**
+ * decideDocCopy at the editor's open, after the sentence edits of the v1
+ * editor it applied to the server's doc (state/reconcile.ts): `shown` is
+ * that doc, `sentencesAt` when they were saved (ms; null: none applied).
+ * Sentence saves never move the doc's rev, so the rev can't tell: a copy
+ * the doc shown has already is nothing to bring back (the sentence save
+ * carried it), and sentence edits saved after the copy was made are the
+ * newer change, kept as another device's save would be (moved).
+ */
+export function decideDocCopyOnOpen(
+  c: DocCopy | null,
+  server: { doc: Pick<EditDoc, "words" | "style" | "format">; rev: number },
+  shown: Pick<EditDoc, "words" | "style" | "format">,
+  sentencesAt: number | null,
+): DocCopyDecision {
+  if (!c || docHasCopy(shown, c)) return { kind: "none" };
+  if (sentencesAt !== null && sentencesAt > c.at) return { kind: "moved" };
+  return decideDocCopy(c, server);
 }

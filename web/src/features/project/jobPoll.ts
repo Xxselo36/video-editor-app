@@ -8,8 +8,10 @@
  * - the first GET waits for this job's saves still out (SAVES_WAIT_MS,
  *   as the editor's own load does); while any are out the poll goes on,
  *   and once they settle it asks again at once (also when that first
- *   wait ran out). `settled` comes with the first job asked for after
- *   them: the Vorschau reads the doc again then.
+ *   wait ran out, and when they settle while a GET is out: its answer
+ *   may have been read before they landed). `settled` comes with the
+ *   first job asked for after them: the Vorschau reads the doc again
+ *   then.
  * - in review, a preview that doesn't show the stored timeline yet
  *   (previewBehind) is followed until it does: "building" every 2 s.
  *   "stale" (none being built: an editor on the proxy skips the
@@ -19,14 +21,18 @@
  *   answers that from its cache. "stale" again after its build started
  *   (the POST said so, or a GET said "building"): the build was lost (a
  *   backend restart or deploy keeps none) and is asked for again, at
- *   most LOST_ASKS times. "failed" asks once more. Failed again, or
- *   lost too often, the poll gives up on that revision
- *   (`previewFailed`: the Vorschau says so).
+ *   most LOST_ASKS times. "failed" asks once more. Failed again, lost
+ *   too often, the POST refused PREVIEW_ERRORS times in a row (409,
+ *   429, 5xx) or "building" for BUILD_MAX_MS (a build that hangs), the
+ *   poll gives up on that revision (`previewFailed`: the Vorschau says
+ *   so).
  *
  * setJob(job): a newer job than the last answer (POST /render's): shown
  * at once, polled again from there; an answer to a request sent before
  * it is dropped. One GET at a time: one asked for while another is out
- * goes when it is back.
+ * goes when it is back. A request the server doesn't answer within
+ * REQUEST_MS (a stalled connection: fetch has no limit of its own) is
+ * given up and asked again later, so it never holds the poll.
  *
  * A job seen in review or exported marks this tab's export hint
  * (features/jobs/localJobs): a later queued run of it can only be an
@@ -47,6 +53,12 @@ const RETRY_MAX_MS = 30_000;
 export const SAVES_WAIT_MS = 8000;
 /** How often a revision's preview is asked for again after its build was lost. */
 export const LOST_ASKS = 2;
+/** POST /jobs/{id}/preview answered with an error (not 410) this often in a row for one revision: given up on it. */
+export const PREVIEW_ERRORS = 5;
+/** A revision whose preview has been "building" this long (since this page saw it so): given up on it (a build that hangs). */
+export const BUILD_MAX_MS = 15 * 60_000;
+/** A request without an answer after this long is given up (and asked again later). */
+export const REQUEST_MS = 20_000;
 // Saves still out after that are waited for this long at a time.
 const SAVES_WATCH_MS = 60_000;
 
@@ -125,8 +137,18 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
   let watching = false;
   // The preview of the stored timeline, per revision: asked for
   // ("stale"), its build started, asked again after a lost build (how
-  // often), asked once more after a failure, given up.
-  const forRev = (rev: number) => ({ rev, asked: false, started: false, lost: 0, retried: false, gaveUp: false });
+  // often), asked once more after a failure, the POST's errors in a row,
+  // "building" since (this page's clock), given up.
+  const forRev = (rev: number) => ({
+    rev,
+    asked: false,
+    started: false,
+    lost: 0,
+    retried: false,
+    errors: 0,
+    buildingSince: null as number | null,
+    gaveUp: false,
+  });
   let rebuild = forRev(NaN);
   let failedNow = false;
 
@@ -152,14 +174,19 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
     if (fresh) on.settled();
   };
 
+  /** No preview of this revision to come: the Vorschau says so. */
+  const giveUp = () => {
+    rebuild.gaveUp = true;
+    setFailed(true);
+  };
+
   /** A build of this revision failed (the job says so, or the server refused one): asked once more, then given up. */
   const failedBuild = (): "retry" | null => {
     if (!rebuild.retried) {
       rebuild.retried = true;
       return "retry";
     }
-    rebuild.gaveUp = true;
-    setFailed(true);
+    giveUp();
     return null;
   };
 
@@ -176,7 +203,15 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
       setFailed(false);
     }
     if (rebuild.gaveUp) return null;
-    if (job.preview_status === "building") rebuild.started = true;
+    if (job.preview_status === "building") {
+      rebuild.started = true;
+      const now = Date.now();
+      rebuild.buildingSince ??= now;
+      // a build that never ends (a hung encode)
+      if (now - rebuild.buildingSince >= BUILD_MAX_MS) giveUp();
+      return null;
+    }
+    rebuild.buildingSince = null;
     if (job.preview_status === "stale") {
       if (!rebuild.asked) {
         rebuild.asked = true;
@@ -189,8 +224,7 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
           rebuild.lost++;
           return "ask";
         }
-        rebuild.gaveUp = true;
-        setFailed(true);
+        giveUp();
       }
       return null;
     }
@@ -199,16 +233,21 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
 
   /** POST /jobs/{id}/preview: "started" (building, or ready already),
    *  "refused" (410: nothing to build from, or the server started none),
-   *  null (no answer: asked again with a later "stale" or "failed"). */
-  const askForPreview = async (): Promise<"started" | "refused" | null> => {
+   *  "error" (another refusal: 409, 429, 5xx), null (no answer). Both
+   *  are asked again with a later "stale" or "failed". */
+  const askForPreview = async (): Promise<"started" | "refused" | "error" | null> => {
+    const limit = new AbortController();
+    const timer = setTimeout(() => limit.abort(), REQUEST_MS);
     try {
-      const r = await apiFetch(`/jobs/${jobId}/preview`, { method: "POST" });
+      const r = await apiFetch(`/jobs/${jobId}/preview`, { method: "POST", signal: limit.signal });
       if (r.status === 410) return "refused";
-      if (!r.ok) return null;
+      if (!r.ok) return "error";
       const a = (await r.json()) as { preview_status?: string };
       return a.preview_status === "building" || a.preview_status === "ready" ? "started" : "refused";
     } catch {
       return null;
+    } finally {
+      clearTimeout(timer);
     }
   };
 
@@ -223,12 +262,15 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
       if (res === "started") {
         // something builds it now: followed every 2 s
         rebuild.started = true;
+        rebuild.errors = 0;
         idle = 0;
         break;
       }
-      if (res === null) {
+      if (res === null || res === "error") {
         if (want === "ask") rebuild.asked = false;
         else rebuild.retried = false;
+        // a server that keeps refusing (not a connection that comes and goes)
+        if (res === "error" && ++rebuild.errors >= PREVIEW_ERRORS) giveUp();
         break;
       }
       want = failedBuild();
@@ -240,8 +282,10 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
   const poll = async (): Promise<boolean | null> => {
     const asked = shown;
     const settledBefore = settles;
+    const limit = new AbortController();
+    const timer = setTimeout(() => limit.abort(), REQUEST_MS);
     try {
-      const r = await apiFetch(`/jobs/${jobId}`);
+      const r = await apiFetch(`/jobs/${jobId}`, { signal: limit.signal });
       if (stopped || asked !== shown) return null;
       if (r.status === 404) {
         on.load({ state: "gone" });
@@ -259,6 +303,7 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
       }
       failures = 0;
       const job: JobStatus = await r.json();
+      clearTimeout(timer);
       if (stopped || asked !== shown) return null;
       if (!on.v2 && job.status === "awaiting_review") {
         on.toEditor();
@@ -268,9 +313,12 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
       if (fresh) reported = settledBefore;
       return await settle(job, asked, fresh);
     } catch {
+      // offline, or no answer in time: try again
       if (stopped || asked !== shown) return null;
       failures++;
-      return true; // offline: try again
+      return true;
+    } finally {
+      clearTimeout(timer);
     }
   };
 
@@ -281,6 +329,9 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
       queued = true;
       return;
     }
+    // A save that settles while this GET is out: its answer may have been
+    // read before the save landed, so it is asked again then.
+    if (hasPendingSaves(jobId)) watch();
     busy = true;
     let again: boolean | null = null;
     try {

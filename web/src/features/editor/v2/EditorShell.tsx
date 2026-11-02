@@ -191,9 +191,30 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
 
   // ── toast ───────────────────────────────────────────────────────────
   const [toast, setToast] = useState<ToastState>(null);
-  const showToast = useCallback((msg: string, action?: { label: string; run: () => void }, ms?: number) => {
-    setToast({ msg, action, key: Date.now(), ms });
+  // The toast on screen (set with it: a new one may replace it), and the
+  // key of the next one.
+  const toastNow = useRef<ToastState>(null);
+  const toastSeq = useRef(0);
+  // The offer of a timeline change left on this device (save-11): its
+  // toast's key, and whether another toast took its place before it ran
+  // out (then it was hardly seen: the change stays offered, see below).
+  const offerKey = useRef<number | null>(null);
+  const offerCut = useRef(false);
+  const putToast = useCallback((next: ToastState) => {
+    const cur = toastNow.current;
+    if (next && cur && cur.key === offerKey.current) offerCut.current = true;
+    toastNow.current = next;
+    setToast(next);
   }, []);
+  /** Show a toast (it replaces the one on screen); its key. */
+  const showToast = useCallback(
+    (msg: string, action?: { label: string; run: () => void }, ms?: number) => {
+      const key = ++toastSeq.current;
+      putToast({ msg, action, key, ms });
+      return key;
+    },
+    [putToast],
+  );
   const tlHistory = useTimelineHistory(editSegs, session.commitEditSegs);
   // UX10: what the clips leave out — struck in the text, not exported.
   const removed = useMemo(() => removedOf(editSegs, props.duration), [editSegs, props.duration]);
@@ -388,9 +409,9 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   // ── toast ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!toast) return;
-    const id = setTimeout(() => setToast(null), toast.ms ?? (toast.action ? 6000 : 4000));
+    const id = setTimeout(() => putToast(null), toast.ms ?? (toast.action ? 6000 : 4000));
     return () => clearTimeout(id);
-  }, [toast]);
+  }, [toast, putToast]);
 
   // ── another tab or device saved the timeline (409 stale_rev, F3): its
   // timeline is on screen again (useEditSession) and the timeline's undo
@@ -434,7 +455,10 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
       if (u.kind === "auto") {
         if (history.commit(u.segs)) showToast(t("editor.unsaved.restored"), { label: t("editor.undo"), run: () => historyRef.current.undo() });
       } else {
-        showToast(t("editor.unsaved.found"), { label: t("editor.unsaved.restore"), run: () => historyRef.current.commit(u.segs) });
+        offerKey.current = showToast(t("editor.unsaved.found"), {
+          label: t("editor.unsaved.restore"),
+          run: () => historyRef.current.commit(u.segs),
+        });
       }
     }, 0);
     return () => clearTimeout(id);
@@ -442,27 +466,36 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
   // Offered and left alone until the editor is left (in the app): the
   // user kept the newer timeline, the copy goes (unsaved.ts dropOffered).
   // Kept, it would hold the Vorschau's Fertigstellen on every return.
+  // Not when another toast took the offer's place before it ran out: it
+  // stays, offered again on the next open.
   const offered = session.unsaved;
   const jobId = props.jobId;
   useEffect(() => {
     if (offered.kind !== "offer") return;
     return () => {
-      if (unsavedShown.current) dropOffered(jobId, offered.copy);
+      if (unsavedShown.current && !offerCut.current) dropOffered(jobId, offered.copy);
     };
   }, [offered, jobId]);
   // The doc's twin (journeys-2, session/unsavedDoc.ts): back already, as
   // one undo step of the text (useDocSession), or the server's newer doc
-  // stayed: said once.
-  const docCopyShown = useRef(false);
+  // stayed: said once, after the timeline's offer (its toast keeps its
+  // time). The step counts in the undo order at once.
   const docCopy = doc.status === "ready" ? doc.copy : null;
+  const docCopyRecorded = useRef(false);
+  useEffect(() => {
+    if (docCopy !== "restored" || docCopyRecorded.current) return;
+    docCopyRecorded.current = true;
+    order.record("doc");
+  }, [docCopy, order]);
+  const docCopyShown = useRef(false);
   useEffect(() => {
     if (docCopyShown.current || !docCopy) return;
+    if (toast && toast.key === offerKey.current) return;
     docCopyShown.current = true;
     if (docCopy === "restored") {
-      order.record("doc");
       showToast(t("editor.unsaved.restored"), { label: t("editor.undo"), run: () => historyRef.current.undo() });
     } else showToast(t("editor.conflict.reloaded"));
-  }, [docCopy, order, showToast, t]);
+  }, [docCopy, toast, showToast, t]);
 
   // ── states: offline, expired ────────────────────────────────────────
   const online = useOnline();
@@ -925,7 +958,7 @@ export function EditorShell(props: EditorShellProps & { phone: boolean; onSheetC
               className={`${s.gb} ${s.toastAction}`}
               onClick={() => {
                 toast.action!.run();
-                setToast(null);
+                putToast(null);
               }}
             >
               {toast.action.label}

@@ -32,6 +32,7 @@ import { legacyCardCode, type CodedError } from "@/lib/errors";
 import { JobStatusPoller, STATUS_BATCH_MAX } from "@/lib/jobStatus";
 import { LIBRARY_KEY } from "@/lib/library";
 import { foldScopedKeys, JOBS_KEY } from "@/lib/scopedStorage";
+import { forgetCopies } from "@/features/editor/session/deviceCopy";
 import { claimLocalJobs } from "./claim";
 import { hasExportHint, setExportHint } from "./localJobs";
 import {
@@ -274,7 +275,9 @@ export function updateLocalJob(id: string, patch: Partial<LocalJob>): void {
   setLocals(locals.map((j) => (j.jobId === id ? { ...j, ...patch } : j)));
 }
 
-/** Off this device's list (deleted, cancelled, or not this account's). */
+/** Off this device's list (deleted, cancelled, or not this account's);
+ *  what the editor kept of it on this device (unsaved changes, the
+ *  title it showed) goes too. */
 export function forgetJobs(ids: string[]): void {
   ensureLoaded();
   const drop = new Set(ids);
@@ -282,6 +285,7 @@ export function forgetJobs(ids: string[]): void {
   for (const id of ids) {
     remotes.delete(id);
     exportHints.delete(id);
+    if (!isUploadId(id)) forgetCopies(id);
   }
   if (serverIds) serverIds = serverIds.filter((id) => !drop.has(id));
   setLocals(locals.filter((j) => !drop.has(j.jobId)));

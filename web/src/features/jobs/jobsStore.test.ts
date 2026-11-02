@@ -83,6 +83,21 @@ describe("old-build tabs", () => {
   });
 });
 
+describe("a project gone from this device", () => {
+  it("takes what the editor kept of it along (unsaved timeline and text, the title); other projects keep theirs", async () => {
+    storage.setItem(V2, JSON.stringify([{ jobId: "a1", timestamp: 2, filename: "a.mp4" }, { jobId: "b1", timestamp: 1, filename: "b.mp4" }]));
+    const kept = ["cleocuts.editor.unsaved.v1.", "cleocuts.editor.unsavedDoc.v1.", "cleocuts.editor.title."];
+    for (const id of ["a1", "b1"]) for (const k of kept) storage.setItem(k + id, "{}");
+    const s = await import("./jobsStore");
+    expect(s.getLocalJobs().map((j) => j.jobId)).toEqual(["a1", "b1"]);
+    s.forgetJobs(["a1"]);
+    for (const k of kept) {
+      expect(storage.getItem(k + "a1"), k).toBeNull();
+      expect(storage.getItem(k + "b1"), k).toBe("{}");
+    }
+  });
+});
+
 describe("uploads", () => {
   it("a cancel that came too late keeps the upload's name and says so", async () => {
     const s = await import("./jobsStore");

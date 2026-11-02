@@ -59,7 +59,8 @@ import { fmtClock } from "@/lib/clock";
 import { describeError, jobErrorText } from "@/lib/errors";
 import { hasPendingSaves } from "@/lib/pendingSaves";
 import { useIsDesktop } from "@/lib/useIsDesktop";
-import { unsavedDocKey } from "@/features/editor/session/unsavedDoc";
+import { readDocCopy, unsavedDocKey } from "@/features/editor/session/unsavedDoc";
+import { fetchDoc, type Fetched } from "@/features/editor/state/docFetch";
 import { copyIsStored, readUnsaved, unsavedKey } from "@/features/editor/session/unsavedKey";
 import { useOnline } from "@/features/editor/v2/hooks";
 import { hasExportHint, readLocalJobs } from "@/features/jobs/localJobs";
@@ -97,6 +98,9 @@ const WHY_ID = "preview-open-why";
 // another code says what it is (the rule of the editor's export sheet).
 const RENDER_FAILURES = new Set(["render_failed", "render_unavailable", "render_timeout"]);
 
+/** Another tab's copies (the storage event): read once they stop changing for this long. */
+const STORAGE_CHECK_MS = 250;
+
 /** An upload runs in this page: closing it would stop the upload. */
 function useUploadsHere(): boolean {
   return useSyncExternalStore(subscribeUploads, () => getLiveUploads().length > 0, () => false);
@@ -110,9 +114,15 @@ function useUploadsHere(): boolean {
  * Read again once they settle (useJobPoll's `settled`, with the job
  * asked for after them), when the stored timeline changes, and when an
  * editor of this job in another tab writes or drops a copy (the storage
- * event); `check` reads them right before Fertigstellen's POST.
+ * event); `check` reads them right before Fertigstellen's POST. A copy
+ * of the text needs the server's doc to tell: `checking` until that
+ * answer (Fertigstellen waits, it never shows for a moment and goes);
+ * checks while one read of it is out share it.
  */
-function useUnsavedHere(job: JobStatus, settled: number): { unsaved: boolean; check: () => Promise<boolean | null> } {
+function useUnsavedHere(
+  job: JobStatus,
+  settled: number,
+): { unsaved: boolean; checking: boolean; check: () => Promise<boolean | null> } {
   const id = job.id;
   const latest = useRef(job);
   useEffect(() => {
@@ -124,28 +134,69 @@ function useUnsavedHere(job: JobStatus, settled: number): { unsaved: boolean; ch
     const b = hasPendingSaves(id) ? null : readUnsaved(id);
     return !!b && !copyIsStored(b, job.edit_segments, job.duration ?? 0);
   });
+  // Reads of the text's copy whose answer is still to come (the first one
+  // from the first frame on).
+  const [checking, setChecking] = useState(() => !hasPendingSaves(id) && readDocCopy(id) !== null);
+  // The server's doc while it is being read: a check meanwhile takes its
+  // answer (one a save overtook can only say "unsaved": nothing renders).
+  const docRead = useRef<Promise<Fetched | null> | null>(null);
+  const readDoc = useCallback((jobId: string) => {
+    if (docRead.current) return docRead.current;
+    const read = fetchDoc(jobId).catch(() => null);
+    docRead.current = read;
+    void read.then(() => {
+      if (docRead.current === read) docRead.current = null;
+    });
+    return read;
+  }, []);
   // The answer of the last read only.
   const reads = useRef(0);
   const check = useCallback(async () => {
     const n = ++reads.current;
-    const u = await unsavedOnDevice(latest.current);
-    if (n === reads.current && u !== null) setUnsaved(u);
+    const withText = readDocCopy(latest.current.id) !== null;
+    if (withText) setChecking(true);
+    const u = await unsavedOnDevice(latest.current, readDoc);
+    if (n === reads.current) {
+      setChecking(false);
+      if (u !== null) setUnsaved(u);
+    }
     return u;
-  }, []);
+  }, [readDoc]);
   const stored = `${job.edit_rev ?? 0}:${JSON.stringify(job.edit_segments ?? [])}`;
   useEffect(() => {
     if (!hasPendingSaves(id)) void check();
   }, [check, id, settled, stored]);
   useEffect(() => {
     const keys = [unsavedKey(id), unsavedDocKey(id)];
+    // An editor writes its copy while edits come (at most twice a
+    // second): one check for a burst, and none while this page is hidden
+    // (it checks when it shows: nothing can be tapped meanwhile).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let missed = false;
+    const run = () => {
+      if (document.hidden) missed = true;
+      else if (!hasPendingSaves(id)) void check();
+    };
     const onStorage = (e: StorageEvent) => {
-      if ((e.key === null || keys.includes(e.key)) && !hasPendingSaves(id)) void check();
+      if (e.key !== null && !keys.includes(e.key)) return;
+      clearTimeout(timer);
+      timer = setTimeout(run, STORAGE_CHECK_MS);
+    };
+    const onShow = () => {
+      if (document.hidden || !missed) return;
+      missed = false;
+      run();
     };
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("storage", onStorage);
+      document.removeEventListener("visibilitychange", onShow);
+    };
   }, [check, id]);
   // (the poll's answers and `settled` render again when they settle)
-  return { unsaved: unsaved && !hasPendingSaves(id), check };
+  return { unsaved: unsaved && !hasPendingSaves(id), checking: checking && !hasPendingSaves(id), check };
 }
 
 /** A failed video's frame: its first frame, else the film. */
@@ -176,36 +227,57 @@ function longTail(text: string): string | null {
   return word.length >= LONG_WORD ? word.slice(-2).join("") : null;
 }
 
+/** A "." or "-" between two digits belongs to a number, a date or a
+ *  time ("31.10.2026", "12.00.00", "2.10"): no break of ours there. A
+ *  "_" still breaks: camera names run their date and time together
+ *  ("VID_20261031_123456"). */
+const DIGIT_LAST = /\d$/;
+const DIGIT_FIRST = /^\d/;
+const inNumber = (sep: string, before: string, after: string) => sep !== "_" && DIGIT_LAST.test(before) && DIGIT_FIRST.test(after);
+
 /** A file name is one long word: the desktop title (40 px, it wraps)
  *  breaks it at its parts ("_", "-", "."), not anywhere, and hyphenates a
  *  word too long for the line (preview.module.css). After such a word the
  *  separator is a box of its own: Chromium hyphenates no word that runs
  *  into a "_", "." or "-". The box stays on the line of the word's last
  *  two letters (a line never starts with a "-" that reads like a minus).
+ *  Numbers keep their dots and hyphens (inNumber), as plain text.
  *  (Not on phones: Chrome breaks at <wbr> even in a nowrap line.) */
 function breakable(name: string): ReactNode[] {
   const parts = name.split(/([_.-])/);
-  return parts.map((part, i) => {
+  const out: ReactNode[] = [];
+  // plain text runs as one text node
+  let text = "";
+  const breaksAfter = (i: number) => i < parts.length && !inNumber(parts[i], parts[i - 1], parts[i + 1] ?? "");
+  parts.forEach((part, i) => {
     if (i % 2 === 0) {
       // a long word's last two letters go with the separator after it
-      const tail = i + 1 < parts.length ? longTail(part) : null;
-      return tail ? part.slice(0, part.length - tail.length) : part;
+      const tail = breaksAfter(i + 1) ? longTail(part) : null;
+      text += tail ? part.slice(0, part.length - tail.length) : part;
+      return;
+    }
+    if (!breaksAfter(i)) {
+      text += part;
+      return;
     }
     const tail = longTail(parts[i - 1]);
-    return (
+    if (!tail) text += part;
+    out.push(text);
+    text = "";
+    out.push(
       <Fragment key={i}>
         {tail ? (
           <span className={s.tail}>
             {tail}
             <span className={s.sep}>{part}</span>
           </span>
-        ) : (
-          part
-        )}
+        ) : null}
         <wbr />
-      </Fragment>
+      </Fragment>,
     );
   });
+  if (text) out.push(text);
+  return out;
 }
 
 /**
@@ -215,11 +287,18 @@ function breakable(name: string): ReactNode[] {
  * (--below), as laid out, go to its cap (preview.module.css). Measured
  * at each render and when they change size (a title on two lines, a
  * notice, the note), then a frame later: a cap changed in the
- * observer's own callback would change a size it watches.
+ * observer's own callback would change a size it watches. `hold`: from
+ * the tap on Fertigstellen until it is done or didn't start, the frame
+ * keeps its size while the buttons under it come and go (the pressed
+ * one would move under the pointer); measured once if it never was (a
+ * page opened while it runs).
  */
-function useRoomForInfo(watch: RefObject<HTMLDivElement | null>, on: boolean) {
+function useRoomForInfo(watch: RefObject<HTMLDivElement | null>, on: boolean, hold: boolean) {
+  const held = useRef(hold);
   useLayoutEffect(() => {
-    if (on && watch.current) measureRoom(watch.current);
+    held.current = hold;
+    const w = watch.current;
+    if (on && w && !(hold && measured(w))) measureRoom(w);
   });
   useEffect(() => {
     const w = watch.current;
@@ -227,7 +306,9 @@ function useRoomForInfo(watch: RefObject<HTMLDivElement | null>, on: boolean) {
     let raf = 0;
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => measureRoom(w));
+      raf = requestAnimationFrame(() => {
+        if (!(held.current && measured(w))) measureRoom(w);
+      });
     });
     for (const el of Array.from(w.children)) ro.observe(el);
     return () => {
@@ -236,6 +317,9 @@ function useRoomForInfo(watch: RefObject<HTMLDivElement | null>, on: boolean) {
     };
   }, [on, watch]);
 }
+
+/** useRoomForInfo measured the .watch box `w` already. */
+const measured = (w: HTMLElement) => w.style.getPropertyValue("--below") !== "";
 
 /** useRoomForInfo's measure of the .watch box `w`. */
 function measureRoom(w: HTMLElement) {
@@ -319,7 +403,7 @@ export default function PreviewScreen({
 
   const wide = isWide(job);
   const watch = useRef<HTMLDivElement>(null);
-  useRoomForInfo(watch, useIsDesktop() && wide && state !== "processing");
+  useRoomForInfo(watch, useIsDesktop() && wide && state !== "processing", finish.busy || state === "finishing");
   const local = useMemo(() => readLocalJobs().find((j) => j.jobId === job.id), [job.id]);
   // The name as the title shows it (no file extension; "" untitled): the
   // ⋯ menu, rename and delete say it too.
@@ -452,7 +536,8 @@ export default function PreviewScreen({
     // before that (waiting for the editor's saves, reading this device's
     // copies) the button keeps its name, unavailable, the wait said under it.
     const working = state === "finishing" || finish.starting;
-    const waiting = !working && finish.busy;
+    // (also while this device's copy of the text is checked: it may hold Fertigstellen)
+    const waiting = !working && (finish.busy || here.checking);
     const off = !working && !waiting && !online;
     actions = (
       <>

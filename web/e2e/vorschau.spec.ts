@@ -14,8 +14,11 @@
  * preview is built (the Vorschau asks for it, again when the server lost
  * the build), a preview that can't be built. Changes the server doesn't
  * have yet (a save that failed or is slow, another tab's editor, copies
- * left by a closed tab): never exported without them, Fine-tune brings
- * them back (or offers them, and they go when left alone); sentence
+ * left by a closed tab, storage that refuses the copies): never exported
+ * without them, Fine-tune brings them back (or offers them, and they go
+ * when left alone; the offer keeps its time on screen), an idle editor
+ * leaves another tab's copies alone, newer v1 sentence edits win over an
+ * older copy, Export waits while the server's doc is read; sentence
  * edits only Fine-tune's export has.
  * Desktop and pixel7, a v2 build (E2E_EDITOR_V2=1). The stub runs
  * CLEO_CAPTION_ENGINE=optin: ?captions=v2 opts the browser in to the v2
@@ -853,6 +856,258 @@ test.describe("the Vorschau and changes the server doesn't have yet", TAG, () =>
     await expect(page.getByTestId("preview-unsaved")).toHaveCount(0);
     expect(await readStorage(page, timelineKey(job.id))).toBeNull();
     expect(await stub.timeline(job.id)).toHaveLength(stored.edit_segments.length);
+    expect(renders).toEqual([]);
+  });
+
+  test("a timeline change only offered and a text change back by itself: the offer keeps its time, then the text's toast", async ({
+    page,
+    stub,
+  }) => {
+    const job = await stub.seed("review_speech");
+    const stored = (await stub.job(job.id))!;
+    const doc = await stub.doc(job.id);
+    const ten = doc.doc.words.find((w) => w.text === "ten")!;
+    const segs = stored.edit_segments.slice(0, 2).map((x, i) => ({ id: `seg-${i}`, ...x }));
+    await openVorschau(page, job.id, {
+      storage: {
+        // made on a rev the server has moved on from: only offered
+        [timelineKey(job.id)]: { segs, base: 999, known: [], at: Date.now() },
+        // made on the doc's rev: back by itself
+        [docKey(job.id)]: { base: doc.rev, known: [], upsert: [{ ...ten, text: "zehn" }], delete: [], at: Date.now() },
+      },
+    });
+    await expect(page.getByTestId("preview-unsaved")).toHaveText(UNSAVED);
+    await page.getByTestId("preview-refine").click();
+    await expect(page.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
+    const toast = page.getByTestId("ed-toast");
+    await expect(toast).toContainText("Unsaved timeline changes from your last visit", { timeout: 30_000 });
+    // (the text's change is back meanwhile, and saved)
+    await expect.poll(() => docText(stub, job.id), { timeout: 15_000 }).toContain("zehn");
+    await page.waitForTimeout(3000);
+    await expect(toast).toContainText("Unsaved timeline changes from your last visit");
+    await expect(toast.getByTestId("ed-toast-action")).toHaveText("Restore");
+    // then the text's toast
+    await expect(toast).toContainText("Your last edit hadn't reached the server", { timeout: 15_000 });
+    expect(await readStorage(page, timelineKey(job.id))).not.toBeNull();
+    // Left alone after its full time: the newer timeline stays, the copy goes with the editor.
+    await page.getByTestId("editor-back").click();
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+    await expect(page.getByTestId("preview-finish")).toHaveText("Export");
+    expect(await readStorage(page, timelineKey(job.id))).toBeNull();
+    expect(await readStorage(page, docKey(job.id))).toBeNull();
+  });
+
+  test("another toast takes the offer's place before it ran out: the timeline change stays offered", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "a keyboard shortcut makes the other toast");
+    const job = await stub.seed("review_speech");
+    const stored = (await stub.job(job.id))!;
+    const renders = renderPosts(page, job.id);
+    const segs = stored.edit_segments.slice(0, 2).map((x, i) => ({ id: `seg-${i}`, ...x }));
+    await openVorschau(page, job.id, { storage: { [timelineKey(job.id)]: { segs, base: 999, known: [], at: Date.now() } } });
+    await page.getByTestId("preview-refine").click();
+    await expect(page.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
+    const toast = page.getByTestId("ed-toast");
+    await expect(toast).toContainText("Unsaved timeline changes from your last visit", { timeout: 30_000 });
+    // Split at the very start: nothing to split, it says so (in the offer's place)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("s");
+    await expect(toast).toContainText("Move the playhead into a clip");
+    await page.getByTestId("editor-back").click();
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+    await expect(page.getByTestId("preview-unsaved")).toHaveText(UNSAVED);
+    expect(await readStorage(page, timelineKey(job.id))).not.toBeNull();
+    expect(await stub.timeline(job.id)).toHaveLength(stored.edit_segments.length);
+    expect(renders).toEqual([]);
+  });
+
+  test("storage that refuses the copies (full): this page keeps them; Open Fine-tune, nothing rendered", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech", { render_seconds: 1 });
+    const renders = renderPosts(page, job.id);
+    await page.addInitScript(() => {
+      const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key: string, value: string) {
+        if (key.startsWith("cleocuts.editor.unsaved")) throw new DOMException("full", "QuotaExceededError");
+        return set.call(this, key, value);
+      };
+    });
+    await openVorschau(page, job.id);
+    await openRefine(page, job.id);
+    await failTextSaves(page, job.id);
+    await fixWord(page, "ten", "zehn");
+    await expect(page.getByTestId("ed-save-status")).toHaveAttribute("data-state", "retrying", { timeout: 15_000 });
+    await page.getByTestId("editor-back").click();
+    await expect(page).toHaveURL(`${WEB}/app/p/${job.id}`);
+    // The editor's tries end: the fix is only in this page (never in storage). Never exported without it.
+    await expect(page.getByTestId("preview-unsaved")).toHaveText(UNSAVED, { timeout: 30_000 });
+    await expect(page.getByTestId("preview-finish")).toHaveCount(0);
+    expect(await readStorage(page, docKey(job.id))).toBeNull();
+    await page.waitForTimeout(1000);
+    expect(renders).toEqual([]);
+    expect(await docText(stub, job.id)).not.toContain("zehn");
+  });
+
+  test("an idle editor of this job leaves another tab's copies alone: hidden, closed, or left for the Vorschau", async ({
+    page,
+    stub,
+    context,
+  }) => {
+    const job = await stub.seed("review_speech");
+    const doc = await stub.doc(job.id);
+    const ten = doc.doc.words.find((w) => w.text === "ten")!;
+    const renders = renderPosts(page, job.id);
+    /** The editor in `p` has read the doc (and decided about the copies there were then: none). */
+    const docRead = (p: Page) =>
+      p.waitForResponse((r) => r.url() === `${API}/jobs/${job.id}/doc` && r.request().method() === "GET", { timeout: 45_000 });
+    // two editors of the job, open before the copies come (the second one's back leads to the Vorschau)
+    const read = docRead(page);
+    await openWithStorage(page, `/app/edit/${job.id}`, TOUR_DONE);
+    await expect(page.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
+    await read;
+    const idle = await context.newPage();
+    const idleRead = docRead(idle);
+    await idle.goto(`${WEB}/app/edit/${job.id}`);
+    await expect(idle.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
+    await idleRead;
+    await page.waitForTimeout(500);
+    // Another tab's editor kept a text and a timeline change (its saves failed; it is gone).
+    const copies: Record<string, unknown> = {
+      [docKey(job.id)]: { base: doc.rev, known: [], upsert: [{ ...ten, text: "zehn" }], delete: [], at: Date.now() },
+      ...unsavedTimeline(job.id),
+    };
+    await page.evaluate((kv) => {
+      for (const [k, v] of Object.entries(kv)) localStorage.setItem(k, JSON.stringify(v));
+    }, copies);
+    const hideAndShow = (p: Page) =>
+      p.evaluate(() => {
+        const set = (hidden: boolean) => {
+          Object.defineProperty(document, "visibilityState", { value: hidden ? "hidden" : "visible", configurable: true });
+          Object.defineProperty(document, "hidden", { value: hidden, configurable: true });
+          document.dispatchEvent(new Event("visibilitychange"));
+        };
+        set(true);
+        set(false);
+      });
+    const kept = async () => [await readStorage(page, docKey(job.id)), await readStorage(page, timelineKey(job.id))];
+    const both = [copies[docKey(job.id)], copies[timelineKey(job.id)]];
+    await hideAndShow(idle);
+    await idle.close({ runBeforeUnload: true });
+    expect(await kept()).toEqual(both);
+    await hideAndShow(page);
+    await page.getByTestId("editor-back").click();
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+    await expect(page.getByTestId("preview-unsaved")).toHaveText(UNSAVED, { timeout: 15_000 });
+    expect(await kept()).toEqual(both);
+    expect(renders).toEqual([]);
+  });
+
+  test("a text change on its way in another window: this Vorschau holds Export until it is saved there", async ({
+    page,
+    stub,
+    context,
+  }) => {
+    const job = await stub.seed("review_speech");
+    const renders = renderPosts(page, job.id);
+    await openVorschau(page, job.id);
+    await expect(page.getByTestId("preview-finish")).toHaveText("Export");
+    const other = await context.newPage();
+    const patch = await holdRequests(other, `${API}/jobs/${job.id}/doc`, "PATCH");
+    await other.goto(`${WEB}/app/edit/${job.id}`);
+    await expect(other.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
+    await fixWord(other, "ten", "zehn");
+    await patch.held;
+    await expect(page.getByTestId("preview-unsaved")).toHaveText(UNSAVED, { timeout: 5000 });
+    await expect(page.getByTestId("preview-finish")).toHaveCount(0);
+    await patch.release();
+    await expect(page.getByTestId("preview-finish")).toHaveText("Export", { timeout: 30_000 });
+    await expect(page.getByTestId("preview-unsaved")).toHaveCount(0);
+    await expect.poll(() => docText(stub, job.id), { timeout: 15_000 }).toContain("zehn");
+    expect(renders).toEqual([]);
+    await other.close();
+  });
+
+  test("an older text copy and newer sentence edits (the v1 editor): those stay and the editor says so; a copy they carry is no news", async ({
+    page,
+    stub,
+  }, info) => {
+    test.skip(info.project.name !== "desktop", "the editor's decision, once");
+    /** The doc's sentences as the v1 editor saves them, "waits ten" as `waits`. */
+    const sentences = async (id: string, waits: string) => {
+      const words = (await stub.doc(id)).doc.words.filter((w) => !w.hidden);
+      const out: { start: number; end: number; original_start: number; original_end: number; text: string }[] = [];
+      let cur: typeof words = [];
+      for (const w of words) {
+        cur.push(w);
+        if (!/[.!?]$/.test(w.text)) continue;
+        const [a, b] = [cur[0].start, cur[cur.length - 1].end];
+        out.push({ start: a, end: b, original_start: a, original_end: b, text: cur.map((x) => x.text).join(" ").replace("waits ten", waits) });
+        cur = [];
+      }
+      return out;
+    };
+    for (const [waits, after] of [
+      // the v1 editor saved "10" an hour after this device kept "zehn": "10" stays
+      ["waits 10", "10"],
+      // the sentence save carried the kept change itself (its PATCH failed, /phrases didn't): nothing to say
+      ["waits zehn", "zehn"],
+    ] as const) {
+      const job = await stub.seed("review_speech");
+      const doc = await stub.doc(job.id);
+      const ten = doc.doc.words.find((w) => w.text === "ten")!;
+      const copy = { base: doc.rev, known: [], upsert: [{ ...ten, text: "zehn" }], delete: [], at: Date.now() - 3_600_000 };
+      const saved = await stub.api.post(`/jobs/${job.id}/phrases`, { data: { phrases: await sentences(job.id, waits), rev: Date.now() } });
+      expect(saved.ok()).toBe(true);
+      await openVorschau(page, job.id, { storage: { [docKey(job.id)]: copy } });
+      await expect(page.getByTestId("preview-unsaved")).toHaveText(UNSAVED);
+      await page.getByTestId("preview-refine").click();
+      await expect(page.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
+      await expect.poll(() => docText(stub, job.id), { timeout: 30_000 }).toContain(`waits ${after} seconds`);
+      await expect.poll(() => readStorage(page, docKey(job.id)), { timeout: 15_000 }).toBeNull();
+      if (after === "10") {
+        await expect(page.getByTestId("ed-toast")).toContainText("Changed in another tab or on another device");
+        expect(await docText(stub, job.id)).not.toContain("zehn");
+      } else {
+        await page.waitForTimeout(1500);
+        await expect(page.getByTestId("ed-toast")).toHaveCount(0);
+      }
+    }
+  });
+
+  test("a text copy: Export never shows while the server's doc is read; the page's checks share one read", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    const doc = await stub.doc(job.id);
+    const ten = doc.doc.words.find((w) => w.text === "ten")!;
+    const renders = renderPosts(page, job.id);
+    const docReads: number[] = [];
+    await page.route(`${API}/jobs/${job.id}/doc`, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      docReads.push(Date.now());
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.fallback().catch(() => undefined);
+    });
+    // Every look of the button, from the first frame on.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __finish: string[] };
+      w.__finish = [];
+      const look = () => {
+        const b = document.querySelector('[data-testid="preview-finish"]');
+        const now = b ? `${b.getAttribute("data-state")}|${b.getAttribute("aria-disabled")}` : "none";
+        if (w.__finish[w.__finish.length - 1] !== now) w.__finish.push(now);
+      };
+      new MutationObserver(look).observe(document, { subtree: true, childList: true, attributes: true });
+    });
+    await openVorschau(page, job.id, {
+      storage: { [docKey(job.id)]: { base: doc.rev, known: [], upsert: [{ ...ten, text: "zehn" }], delete: [], at: Date.now() } },
+    });
+    const finish = page.getByTestId("preview-finish");
+    // tapped while the doc is read: nothing (it waits)
+    await expect(finish).toHaveAttribute("data-state", "waiting");
+    await finish.click({ force: true });
+    await expect(page.getByTestId("preview-unsaved")).toHaveText(UNSAVED, { timeout: 15_000 });
+    const looks = await page.evaluate(() => (window as unknown as { __finish: string[] }).__finish);
+    expect(looks.filter((l) => l !== "none")).toEqual(["waiting|true"]);
+    // the preview's captions read it once, the checks once
+    expect(docReads.length).toBeLessThanOrEqual(2);
+    await page.waitForTimeout(1000);
     expect(renders).toEqual([]);
   });
 

@@ -23,7 +23,10 @@ function server() {
     storeMs: 0,
     /** Per request (in order), instead of storeMs. */
     storeDelays: [] as number[],
-    fail: [] as ("net" | "lost" | 500)[],
+    /** Per request (in order): "net" offline, "lost" stored but no answer,
+     *  500 stored but its rebuild failed, 503 refused before it is stored
+     *  (a deploy). */
+    fail: [] as ("net" | "lost" | 500 | 503)[],
   };
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   const json = (status: number, body: unknown) =>
@@ -37,6 +40,7 @@ function server() {
     srv.posts.push({ ...body, keepalive: !!init.keepalive });
     const f = srv.fail.shift();
     if (f === "net") throw new TypeError("offline");
+    if (f === 503) return json(503, { detail: "unavailable" });
     const wait = srv.storeDelays.length ? srv.storeDelays.shift()! : srv.storeMs;
     if (wait) await sleep(wait);
     if (body.base_rev !== srv.rev || body.rev <= srv.rev) return json(409, { detail: "stale_rev", rev: srv.rev });
@@ -282,6 +286,25 @@ describe("TimelineSaver (review F3/F4, save-11)", () => {
     await vi.advanceTimersByTimeAsync(900);
     expect(srv.posts).toHaveLength(0);
     expect(saver.status).toBe("saved");
+  });
+
+  it("close() that gave up stops: no retry after it, the backup keeps the edit (the next open brings it back)", async () => {
+    const { srv, saver, backups } = saverOf();
+    srv.fail = Array(40).fill(503);
+    saver.schedule(tl(9));
+    let closed = false;
+    void saver.close().then(() => (closed = true));
+    for (let i = 0; i < 200 && !closed; i++) await vi.advanceTimersByTimeAsync(500);
+    expect(closed).toBe(true);
+    const tried = srv.posts.length;
+    expect(tried).toBeGreaterThan(1);
+    // the server is back: nothing goes out any more
+    srv.fail = [];
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(srv.posts).toHaveLength(tried);
+    expect(srv.segs).toEqual(timelinePayload(tl(10)));
+    expect(backups.at(-1)?.segs).toEqual(tl(9));
+    expect(saver.dirty).toBe(true);
   });
 
   it("close() sends the pending edit now and keeps going after the editor is gone", async () => {

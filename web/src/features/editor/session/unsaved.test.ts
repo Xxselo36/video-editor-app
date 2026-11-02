@@ -74,5 +74,10 @@ describe("an offered copy left alone (the editor left in the app, no Restore, no
       },
     });
     expect(() => dropOffered("j1", copy)).not.toThrow();
+    // (the copy this document kept instead goes the same way)
+    writeUnsaved("j1", copy);
+    expect(readUnsaved("j1")).toEqual(copy);
+    dropOffered("j1", copy);
+    expect(readUnsaved("j1")).toBeNull();
   });
 });

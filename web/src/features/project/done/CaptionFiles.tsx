@@ -4,6 +4,8 @@
  * time. The editor's Done view and the Vorschau's "Mehr zum Video".
  */
 import { FileText } from "lucide-react";
+import { PRESS } from "@/components/ui/Button";
+import { cx } from "@/components/ui/cx";
 import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import { track } from "@/lib/analytics";
@@ -24,7 +26,10 @@ export function CaptionFiles({ job }: { job: Pick<JobStatus, "id" | "has_caption
           download
           onClick={() => track("srt_downloaded", { kind })}
           // The tap area reaches 44 px high (::after); the chip stays small.
-          className="relative rounded-md border border-[var(--border-hover)] px-2 py-0.5 font-semibold text-[var(--text-strong)] after:absolute after:-inset-x-1 after:-inset-y-3 after:content-[''] hover:border-[var(--brand)]"
+          className={cx(
+            "relative rounded-md border border-[var(--border-hover)] px-2 py-0.5 font-semibold text-[var(--text-strong)] after:absolute after:-inset-x-1 after:-inset-y-3 after:content-[''] hover:border-[var(--brand)]",
+            PRESS,
+          )}
           data-testid={`done-${kind}`}
         >
           {/* "SRT", not "srt": a screen reader spells the format out. */}

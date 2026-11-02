@@ -23,6 +23,11 @@ const SIZE = {
   pillLg: "rounded-full min-h-11 px-[1.375rem] py-2.5 text-[0.9375rem]/6 font-semibold md:min-h-12 md:px-6 md:py-3 md:text-base/6",
 } as const;
 
+/** Pressed, a control gives a little (plan 0, the interaction floor:
+ *  .97, 160 ms, ease-out); not with reduced motion. For controls that
+ *  aren't a Button lg (which has it): add it to their classes. */
+export const PRESS = "transition-[scale] duration-[160ms] ease-[cubic-bezier(.16,1,.3,1)] motion-safe:active:scale-[.97]";
+
 /** The classes of a Button, for a link that looks like one (the
  *  landing's calls to action are links to other pages). */
 export function buttonClass(variant: keyof typeof VARIANT = "primary", size: keyof typeof SIZE = "md"): string {

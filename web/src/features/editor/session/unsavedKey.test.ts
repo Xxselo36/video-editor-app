@@ -21,6 +21,9 @@ beforeEach(() => {
     setItem: (k: string, v: string) => void store.set(k, v),
     removeItem: (k: string) => void store.delete(k),
   });
+  // (nothing this document kept from the test before)
+  writeUnsaved("j1", null);
+  writeUnsaved("j2", null);
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -42,11 +45,12 @@ describe("hasUnsavedTimeline", () => {
     expect(hasUnsavedTimeline("j1", NOW)).toBe(false);
   });
 
-  it("a copy older than a week no longer counts", () => {
+  it("a copy older than a week no longer counts, and goes when it is read (nothing else would remove it)", () => {
     put({ ...backup, at: NOW - WEEK + 60_000 });
     expect(hasUnsavedTimeline("j1", NOW)).toBe(true);
     put({ ...backup, at: NOW - WEEK - 60_000 });
     expect(hasUnsavedTimeline("j1", NOW)).toBe(false);
+    expect(store.has(unsavedKey("j1"))).toBe(false);
   });
 
   it("counts valid clips only: none, empty or broken ones, no rev, not JSON", () => {
@@ -60,6 +64,7 @@ describe("hasUnsavedTimeline", () => {
     ]) {
       put(bad);
       expect(hasUnsavedTimeline("j1", NOW)).toBe(false);
+      expect(store.has(unsavedKey("j1"))).toBe(false);
     }
     store.set(unsavedKey("j1"), "{");
     expect(hasUnsavedTimeline("j1", NOW)).toBe(false);
@@ -105,5 +110,40 @@ describe("unsavedTimeline (the Vorschau, Fertigstellen): a copy counts only whil
   it("storage blocked: nothing, never a throw", () => {
     vi.stubGlobal("localStorage", undefined);
     expect(unsavedTimeline("j1", stored, 30, NOW)).toBeNull();
+  });
+
+  it("storage full or blocked: this document keeps the copy (the Vorschau and Fertigstellen see it); no older one stays stored", () => {
+    put(backup);
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: () => {
+        throw new DOMException("full", "QuotaExceededError");
+      },
+      removeItem: (k: string) => void store.delete(k),
+    });
+    const newer = { ...backup, segs: [clip("a", 0, 4), clip("b", 6, 8)], at: NOW };
+    writeUnsaved("j1", newer);
+    expect(store.has(unsavedKey("j1"))).toBe(false);
+    expect(readUnsaved("j1", NOW)).toEqual(newer);
+    expect(unsavedTimeline("j1", stored, 30, NOW)).toEqual(newer);
+    // the server has it: it goes from here too
+    expect(unsavedTimeline("j1", timelinePayload(newer.segs), 30, NOW)).toBeNull();
+    expect(readUnsaved("j1", NOW)).toBeNull();
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new DOMException("blocked", "SecurityError");
+      },
+      setItem: () => {
+        throw new DOMException("blocked", "SecurityError");
+      },
+      removeItem: () => {
+        throw new DOMException("blocked", "SecurityError");
+      },
+    });
+    writeUnsaved("j1", newer);
+    expect(hasUnsavedTimeline("j1", NOW)).toBe(true);
+    expect(hasUnsavedTimeline("j2", NOW)).toBe(false);
+    writeUnsaved("j1", null);
+    expect(hasUnsavedTimeline("j1", NOW)).toBe(false);
   });
 });

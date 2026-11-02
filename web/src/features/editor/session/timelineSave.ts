@@ -26,8 +26,11 @@
  *     job, save-11): the next open offers it back when the server doesn't
  *     have it (session/unsaved.ts).
  *   - Leaving: close() sends what is pending now and keeps going (a few
- *     retries) after the editor is gone; a hidden or unloading page sends
- *     it at once with keepalive, on top of a save still on the wire.
+ *     retries) after the editor is gone, then stops: what still didn't
+ *     get through stays in the backup (the next open brings it back),
+ *     and nothing goes out behind the user's back after that (DocSaver
+ *     close() does the same). A hidden or unloading page sends it at
+ *     once with keepalive, on top of a save still on the wire.
  *
  * Framework-free (fetch and timers injected) so it is unit-tested;
  * useEditSession wires it to the editor.
@@ -304,7 +307,10 @@ export class TimelineSaver {
   /**
    * The editor goes (unmount): the pending state goes now, retried a few
    * times; no state reaches the editor any more. Resolves when the server
-   * has it, or it gave up (reopening waits for this, pendingSaves).
+   * has it, or it gave up (reopening waits for this, pendingSaves). Given
+   * up, it stops: no retry after it (the Vorschau that waited for it
+   * would never hear of one); the backup keeps the change, and a request
+   * still on the wire finishes (tracked till then).
    */
   close(tries = 4): Promise<void> {
     this.closing = true;
@@ -314,9 +320,9 @@ export class TimelineSaver {
       while (this.dirty && !this.stopped && this.state !== "conflict") {
         const ok = await this.settle(12_000);
         if (ok || !this.dirty) return;
-        if (--left <= 0) return;
-        if (this.state === "failed") return;
+        if (--left <= 0 || this.state === "failed") break;
       }
+      if (this.dirty) this.stop();
     };
     return run();
   }

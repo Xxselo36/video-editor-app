@@ -5,7 +5,8 @@
  * (The Vorschau's has no "Edit again": its Feinschliff is that action.)
  * A menu button (aria-haspopup) and a role="menu" list rendered into
  * <body> (the tile clips its content), placed under the button or above
- * it near the bottom of the window.
+ * it near the bottom of the window; beside it when it fits neither (a
+ * landscape phone: it never covers the button).
  * Arrow keys move, Escape / a click outside close it, focus goes back to
  * the button; also when the dialog that Rename or Delete opened closes
  * (the dialog returns the focus to where it was when it opened).
@@ -21,9 +22,9 @@ import { fetchJob } from "./jobsStore";
 import { postTextEntry, postTextKey, type PostTextEntry } from "./postText";
 import type { Project } from "./projects";
 
-// 44 px tall to a finger (pointer-coarse).
+// 44 px tall to a finger (pointer-coarse); pressed, it lights up.
 const ITEM =
-  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-[var(--surface-2)] focus-visible:bg-[var(--surface-2)] pointer-coarse:min-h-11";
+  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-[var(--surface-2)] focus-visible:bg-[var(--surface-2)] active:bg-[var(--surface-2)] pointer-coarse:min-h-11";
 
 export function ProjectMenu({ p, onAction, onOpen, size = "sm" }: {
   p: Project;
@@ -58,10 +59,18 @@ export function ProjectMenu({ p, onAction, onOpen, size = "sm" }: {
     if (!a || !el) return;
     const w = el.offsetWidth;
     const h = el.offsetHeight;
-    const left = Math.max(8, Math.min(a.right - w, window.innerWidth - w - 8));
+    const vh = window.innerHeight;
     const below = a.bottom + 4;
-    const top = below + h <= window.innerHeight - 8 ? below : Math.max(8, a.top - 4 - h);
-    setPos({ left, top });
+    const above = a.top - 4 - h;
+    if (below + h <= vh - 8 || above >= 8) {
+      setPos({ left: Math.max(8, Math.min(a.right - w, window.innerWidth - w - 8)), top: below + h <= vh - 8 ? below : above });
+      return;
+    }
+    // Neither under nor over it (a landscape phone): beside it, left (or
+    // right, near the left edge), level with it as far as it fits.
+    const mid = a.top + a.height / 2 - h / 2;
+    const left = a.left - 4 - w >= 8 ? a.left - 4 - w : Math.min(a.right + 4, window.innerWidth - w - 8);
+    setPos({ left, top: Math.max(8, Math.min(mid, vh - 8 - h)) });
   }, [open]);
 
   useEffect(() => {

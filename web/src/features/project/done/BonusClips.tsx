@@ -6,6 +6,8 @@
  * zum Video" (under the page's h1: `level` 2).
  */
 import { Download, Sparkles } from "lucide-react";
+import { PRESS } from "@/components/ui/Button";
+import { cx } from "@/components/ui/cx";
 import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import type { JobStatus } from "@/features/jobs/types";
@@ -40,7 +42,7 @@ export function BonusClips({
             key={h.key}
             href={downloadHref(job.id, h.key)}
             download={names[h.key] ?? true}
-            className="block rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:border-[var(--brand)]"
+            className={cx("block rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:border-[var(--brand)]", PRESS)}
           >
             <div className="mb-0.5 flex items-center justify-between gap-2">
               <span className="text-sm font-semibold text-[var(--text-strong)]">{h.title}</span>

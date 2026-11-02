@@ -5,14 +5,15 @@
  * Done view and the Vorschau's done state.
  */
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/Button";
+import { Button, PRESS } from "@/components/ui/Button";
 import { useT } from "@/i18n";
 import type { JobStatus } from "@/features/jobs/types";
 import { noteExport, surveyAnswered } from "../exportsInfo";
 import { sendSurvey } from "../projectApi";
 
 // The buttons' tap area reaches 44 px high (::after); they stay small.
-const TAP = "relative after:absolute after:inset-x-0 after:-inset-y-1.5 after:content-['']";
+// Pressed, they give a little.
+const TAP = `relative after:absolute after:inset-x-0 after:-inset-y-1.5 after:content-[''] ${PRESS}`;
 
 export function Survey({ job }: { job: Pick<JobStatus, "id" | "renders_ok"> }) {
   const t = useT();

@@ -3,16 +3,19 @@
  * 4-vorschau, -fertigstellen, -sichern): the frame has the video's shape
  * (a landscape video exported as "Original" plays wide); the desktop
  * title breaks between words and hyphenates a long one (never a short
- * one; a line never starts with a long word's separator); a 16:9 frame
- * leaves the title and both buttons in view on a laptop screen (also
- * under a two-line title or a notice); an export finished during the
- * visit is announced. The ⋯ menu and its
- * dialogs: the focus goes back to ⋯ when they close (also on a tile of
- * Projects), they name the video as its title does, its items are 44 px
- * tall to a finger, no "Edit again" next to Fine-tune; pressed, ⋯ and
- * the quiet buttons give a little; a long press selects no control's
- * label. The done state's structure (Bonus clips under the title, SRT /
- * VTT spelled out). German: deleting and the refusals of Fertigstellen
+ * one; a line never starts with a long word's separator; a date, time
+ * or number stays whole); a 16:9 frame leaves the title and both buttons
+ * in view on a laptop screen (also under a two-line title or a notice)
+ * and keeps its size from the tap on Export on; a preview that couldn't
+ * be made says so inside its frame on any phone; an export finished
+ * during the visit is announced. The ⋯ menu and its dialogs: the focus
+ * goes back to ⋯ when they close (also on a tile of Projects), they name
+ * the video as its title does, its items and the dialogs' buttons are
+ * 44 px tall to a finger, the menu never covers ⋯ (a landscape phone),
+ * no "Edit again" next to Fine-tune; pressed, ⋯, the quiet buttons, the
+ * done state's small controls and the dialogs' buttons give a little; a
+ * long press selects no control's label. The done state's structure
+ * (Bonus clips under the title, SRT / VTT spelled out). German: deleting and the refusals of Fertigstellen
  * say it without "Export", dashes or "verarbeitet"; the delete button's
  * text reaches AA on its red.
  * Desktop and pixel7, a v2 build (E2E_EDITOR_V2=1).
@@ -21,7 +24,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { job as storedJob, jobCard, JOBS, LANG_KEY, openWithStorage } from "./support/app";
 import { API } from "./support/env";
-import { openVorschau, TOUR_DONE, vorschau } from "./support/vorschau";
+import { holdRequests, openVorschau, TOUR_DONE, vorschau } from "./support/vorschau";
 
 const TAG = { tag: "@editor-v2" };
 const DE = { [LANG_KEY]: "de" };
@@ -51,6 +54,38 @@ async function letterTops(el: Locator, word: string): Promise<number[]> {
     return [];
   }, word);
 }
+
+/** The tops of the lines the characters of `text` are on, in the
+ *  element's text across its nodes (the title's name runs over several). */
+async function textTops(el: Locator, text: string): Promise<number[]> {
+  return el.evaluate((root, needle) => {
+    const nodes: Text[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
+    const at = nodes.map((n) => n.data).join("").indexOf(needle);
+    if (at < 0) return [];
+    const tops = new Set<number>();
+    for (let k = at; k < at + needle.length; k++) {
+      let rest = k;
+      const node = nodes.find((n) => {
+        if (rest < n.data.length) return true;
+        rest -= n.data.length;
+        return false;
+      })!;
+      const r = document.createRange();
+      r.setStart(node, rest);
+      r.setEnd(node, rest + 1);
+      tops.add(Math.round(r.getBoundingClientRect().top));
+    }
+    return [...tops];
+  }, text);
+}
+
+/** A box, rounded to whole pixels. */
+const box = async (el: Locator) => {
+  const b = (await el.boundingBox())!;
+  return [b.x, b.y, b.width, b.height].map(Math.round);
+};
 
 /** A movie's settings exported as "Original" (a landscape upload keeps its frame). */
 const ORIGINAL = {
@@ -179,6 +214,93 @@ test.describe("the Vorschau's screen", TAG, () => {
         }
         expect((await frameShape(page)).wide).toBe(true);
       }
+    }
+  });
+
+  test("a 16:9 frame keeps its size from the tap on Export until it is done (the pressed button never moves)", async ({
+    page,
+    stub,
+  }, info) => {
+    test.skip(info.project.name !== "desktop", "desktop sizes");
+    const job = await stub.seed("review_land", { filename: "Interview.mp4", render_seconds: 3 });
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openVorschau(page, job.id, { query: "?captions=v2" });
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+    const frame = page.getByTestId("preview-frame");
+    await expect(page.getByTestId("preview-video")).toHaveAttribute("src", /preview-video/);
+    await page.getByTestId("preview-play").click();
+    await page.waitForTimeout(500);
+    const ready = await box(frame);
+    const post = await holdRequests(page, `${API}/jobs/${job.id}/render`, "POST");
+    await page.getByTestId("preview-finish").click();
+    await post.held;
+    // no Fine-tune from the tap on: the frame doesn't take its place
+    await expect(page.getByTestId("preview-finish")).toHaveAttribute("data-state", "working");
+    await expect(page.getByTestId("preview-refine")).toHaveCount(0);
+    await page.waitForTimeout(300);
+    expect(await box(frame)).toEqual(ready);
+    await post.release();
+    await expect(vorschau(page)).toHaveAttribute("data-state", "finishing");
+    await expect(page.getByTestId("preview-note")).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await box(frame)).toEqual(ready);
+  });
+
+  test("phones: a preview that couldn't be made says so inside its frame, also on a small phone (no play button then)", async ({
+    page,
+    stub,
+  }, info) => {
+    test.skip(info.project.name !== "pixel7", "phone sizes");
+    for (const [seed, size] of [
+      ["review_speech", { width: 320, height: 568 }],
+      // an iPhone SE's Safari: the frame at its smallest too
+      ["review_speech", { width: 375, height: 553 }],
+      ["review_speech", { width: 844, height: 390 }],
+      // landscape "Original" on a narrow phone: the wide frame
+      ["review_land", { width: 320, height: 568 }],
+    ] as const) {
+      const job = await stub.seed(seed);
+      // Exporting, and the preview of the stored edit failed: nothing to play.
+      await page.route(`${API}/jobs/${job.id}`, async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        const res = await route.fetch();
+        const body = await res.json();
+        Object.assign(body, { status: "processing", stage: "render.encode", preview_status: "failed", preview_error: "encode_failed" });
+        return route.fulfill({ response: res, body: JSON.stringify(body) });
+      });
+      await page.setViewportSize(size);
+      await openVorschau(page, job.id, { storage: DE });
+      await expect(vorschau(page)).toHaveAttribute("data-state", "finishing");
+      const chip = page.getByTestId("preview-unavailable");
+      await expect(chip).toHaveText("Die Vorschau konnte nicht erstellt werden. Deine Änderungen sind gespeichert.");
+      await expect(page.getByTestId("preview-play")).toBeHidden();
+      const [, fy, , fh] = await box(page.getByTestId("preview-frame"));
+      const [, cy, , ch] = await box(chip);
+      const where = `${seed} at ${size.width}x${size.height}`;
+      expect(cy, where).toBeGreaterThanOrEqual(fy);
+      expect(cy + ch, where).toBeLessThanOrEqual(fy + fh);
+    }
+  });
+
+  test("desktop: a date, a time or a number in the title stays whole; a camera name still breaks at its parts", async ({
+    page,
+    stub,
+  }, info) => {
+    test.skip(info.project.name !== "desktop", "the desktop title wraps (phones: one line)");
+    const title = page.getByTestId("preview-title");
+    for (const [name, whole, wraps] of [
+      ["Interview vom 31.10.2026 mit Anna", ["31.10.2026"], true],
+      ["Bildschirmaufnahme 2026-10-31 um 12.00.00", ["12.00.00"], true],
+      ["Folge 2.10 Finale", ["2.10"], false],
+      ["VID_20261031_123456", ["20261031", "123456"], true],
+    ] as const) {
+      const job = await stub.seed("review_speech", { filename: `${name}.mp4` });
+      await openVorschau(page, job.id, { storage: DE });
+      await expect(title).toHaveText(name);
+      await page.evaluate(() => document.fonts.ready);
+      // (more than one line)
+      if (wraps) expect((await title.boundingBox())!.height, name).toBeGreaterThan(60);
+      for (const part of whole) expect(await textTops(title, part), `${name}: ${part}`).toHaveLength(1);
     }
   });
 
@@ -360,6 +482,93 @@ test.describe("the Vorschau's screen", TAG, () => {
     await page.getByTestId("preview-more").click();
     for (const id of ["done-copy", "done-srt", "done-vtt", "preview-more", "preview-refine", "job-card-menu"]) {
       expect(await page.getByTestId(id).first().evaluate((el) => getComputedStyle(el).userSelect), id).toBe("none");
+    }
+  });
+
+  test("a landscape phone: ⋯'s menu never opens over ⋯ itself", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "pixel7", "a touch screen");
+    const job = await stub.seed("done");
+    await page.setViewportSize({ width: 844, height: 390 });
+    await openVorschau(page, job.id);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done");
+    const menu = page.getByTestId("job-card-menu");
+    // ⋯ where its menu (four 44 px items) fits neither under nor over it
+    await menu.evaluate((el) => window.scrollTo({ top: window.scrollY + el.getBoundingClientRect().top - 173, behavior: "instant" }));
+    const [bx, by, bw, bh] = await box(menu);
+    expect(by).toBe(173);
+    await menu.click();
+    const list = page.getByTestId("job-card-menu-list");
+    await expect(list.getByRole("menuitem")).toHaveCount(4);
+    const [lx, ly, lw, lh] = await box(list);
+    const apart = lx + lw <= bx || bx + bw <= lx || ly + lh <= by || by + bh <= ly;
+    expect(apart, `menu ${[lx, ly, lw, lh]} over ⋯ ${[bx, by, bw, bh]}`).toBe(true);
+    expect(ly).toBeGreaterThanOrEqual(8);
+    expect(ly + lh).toBeLessThanOrEqual(390 - 8);
+    expect(lx).toBeGreaterThanOrEqual(8);
+    await page.keyboard.press("Escape");
+    await expect(list).toHaveCount(0);
+  });
+
+  test("phones: the rename and delete dialogs' buttons are 44 px tall", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "pixel7", "a touch screen");
+    const job = await stub.seed("review_speech");
+    await openVorschau(page, job.id, { storage: DE });
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+    for (const item of ["rename", "delete"] as const) {
+      await page.getByTestId("job-card-menu").click();
+      await page.getByTestId(`job-card-${item}`).click();
+      const dialog = page.getByTestId(`dialog-${item}`);
+      await expect(dialog).toBeVisible();
+      const heights = await dialog.getByRole("button").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+      expect(heights, item).toHaveLength(2);
+      for (const h of heights) expect(h, item).toBeGreaterThanOrEqual(44);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+    }
+  });
+
+  test("pressed, the done state's small controls and the dialogs' buttons give a little too; not with reduced motion", async ({
+    page,
+    stub,
+  }, info) => {
+    test.skip(info.project.name !== "desktop", "a mouse");
+    const job = await stub.seed("done");
+    await openVorschau(page, job.id);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done");
+    await page.getByTestId("preview-more").click();
+    const small = [
+      page.getByTestId("done-copy"),
+      page.getByTestId("done-srt"),
+      page.getByTestId("done-vtt"),
+      page.getByTestId("done-hooks").getByRole("link").first(),
+    ];
+    for (const el of small) await expect(el).toBeVisible();
+    /** Held down on a dialog's button: its scale (then released on the dialog's title: no click). */
+    const pressedInDialog = async (button: Locator, title: Locator) => {
+      const b = (await button.boundingBox())!;
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(400);
+      const scale = await button.evaluate((n) => getComputedStyle(n).scale);
+      const t = (await title.boundingBox())!;
+      await page.mouse.move(t.x + 4, t.y + t.height / 2);
+      await page.mouse.up();
+      return scale;
+    };
+    // the scale while held: .97 (a frame of its transition may still be on its way), none with reduced motion
+    const given = (scale: string) => (scale === "none" ? "none" : Math.abs(parseFloat(scale) - 0.97) < 0.002 ? "0.97" : scale);
+    for (const motion of ["no-preference", "reduce"] as const) {
+      await page.emulateMedia({ reducedMotion: motion });
+      const want = motion === "reduce" ? "none" : "0.97";
+      for (const el of small) expect(given((await pressed(page, el)).scale), `${motion}: ${await el.textContent()}`).toBe(want);
+      await page.getByTestId("job-card-menu").click();
+      await page.getByTestId("job-card-rename").click();
+      const dialog = page.getByTestId("dialog-rename");
+      for (const name of ["Cancel", "Save"]) {
+        expect(given(await pressedInDialog(dialog.getByRole("button", { name }), dialog.getByRole("heading"))), `${motion}: ${name}`).toBe(want);
+      }
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
     }
   });
 

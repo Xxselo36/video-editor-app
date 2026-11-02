@@ -7,6 +7,7 @@ import { DocSaver, type PatchBody } from "@/features/editor/state/docSave";
 import {
   applyDocCopy,
   decideDocCopy,
+  decideDocCopyOnOpen,
   docCopyOf,
   docHasCopy,
   dropDocCopy,
@@ -42,6 +43,9 @@ beforeEach(() => {
     setItem: (k: string, v: string) => void store.set(k, v),
     removeItem: (k: string) => void store.delete(k),
   });
+  // (nothing this document kept from the test before)
+  writeDocCopy("j1", null);
+  writeDocCopy("j2", null);
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -117,11 +121,12 @@ describe("readDocCopy / writeDocCopy", () => {
     expect(readDocCopy("j1", NOW)).toBeNull();
   });
 
-  it("at most a week old", () => {
+  it("at most a week old; an older one goes when it is read (nothing else would remove it)", () => {
     writeDocCopy("j1", { ...copy, at: NOW - WEEK + 60_000 });
     expect(readDocCopy("j1", NOW)).not.toBeNull();
     writeDocCopy("j1", { ...copy, at: NOW - WEEK - 60_000 });
     expect(readDocCopy("j1", NOW)).toBeNull();
+    expect(store.has(unsavedDocKey("j1"))).toBe(false);
   });
 
   it("only a valid copy that changes something counts", () => {
@@ -136,12 +141,14 @@ describe("readDocCopy / writeDocCopy", () => {
     ]) {
       store.set(unsavedDocKey("j1"), JSON.stringify(bad));
       expect(readDocCopy("j1", NOW)).toBeNull();
+      expect(store.has(unsavedDocKey("j1"))).toBe(false);
     }
     store.set(unsavedDocKey("j1"), "{");
     expect(readDocCopy("j1", NOW)).toBeNull();
+    expect(store.has(unsavedDocKey("j1"))).toBe(false);
   });
 
-  it("storage blocked: no throw, nothing kept; full: no copy rather than an older one", () => {
+  it("storage blocked or full: never a throw; this document keeps the copy (the Vorschau sees it), no older one stays stored", () => {
     vi.stubGlobal("localStorage", {
       getItem: () => {
         throw new DOMException("blocked", "SecurityError");
@@ -154,7 +161,11 @@ describe("readDocCopy / writeDocCopy", () => {
       },
     });
     expect(() => writeDocCopy("j1", copy)).not.toThrow();
+    expect(readDocCopy("j1", NOW)).toEqual(copy);
+    expect(readDocCopy("j2", NOW)).toBeNull();
+    writeDocCopy("j1", null);
     expect(readDocCopy("j1", NOW)).toBeNull();
+    // full: the older stored copy goes, the newer one is kept here
     vi.stubGlobal("localStorage", {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: () => {
@@ -163,17 +174,33 @@ describe("readDocCopy / writeDocCopy", () => {
       removeItem: (k: string) => void store.delete(k),
     });
     store.set(unsavedDocKey("j1"), JSON.stringify(copy));
-    writeDocCopy("j1", { ...copy, upsert: [{ ...fixed.words[2], text: "elf" }] });
+    const newer = { ...copy, upsert: [{ ...fixed.words[2], text: "elf" }] };
+    writeDocCopy("j1", newer);
     expect(store.has(unsavedDocKey("j1"))).toBe(false);
+    expect(readDocCopy("j1", NOW)).toEqual(newer);
+    // dropped once the server has it (only while it is that copy)
+    dropDocCopy("j1", copy);
+    expect(readDocCopy("j1", NOW)).toEqual(newer);
+    dropDocCopy("j1", newer);
+    expect(readDocCopy("j1", NOW)).toBeNull();
+    // no storage at all: nothing thrown, kept here all the same
     vi.stubGlobal("localStorage", undefined);
     expect(() => writeDocCopy("j1", copy)).not.toThrow();
+    expect(readDocCopy("j1", NOW)).toEqual(copy);
+    writeDocCopy("j1", null);
     expect(readDocCopy("j1", NOW)).toBeNull();
   });
 
-  it("a copy too big for the shared storage isn't kept", () => {
+  it("a copy too big for the shared storage isn't stored: this document keeps it until a smaller one is", () => {
     const words = Array.from({ length: 12_000 }, (_, i) => ({ id: `n${i}`, text: "x".repeat(60), start: i, end: i + 0.5 }));
     writeDocCopy("j1", { ...copy, upsert: words });
     expect(store.has(unsavedDocKey("j1"))).toBe(false);
+    expect(readDocCopy("j1", NOW)?.upsert).toHaveLength(12_000);
+    writeDocCopy("j1", copy);
+    expect(store.has(unsavedDocKey("j1"))).toBe(true);
+    expect(readDocCopy("j1", NOW)).toEqual(copy);
+    writeDocCopy("j1", null);
+    expect(readDocCopy("j1", NOW)).toBeNull();
   });
 
   it("dropDocCopy drops it only while it is the same copy", () => {
@@ -208,6 +235,22 @@ describe("the next open: decideDocCopy", () => {
   it("another tab or device saved since: the server's doc stays (moved), nothing applied by itself", () => {
     const theirs = editWord(base, "w4", "vier");
     expect(decideDocCopy(copy, { doc: theirs, rev: 12 })).toEqual({ kind: "moved" });
+  });
+
+  it("at the open, after newer v1 sentence edits (they don't move the rev): those win over an older copy; one they carry is nothing to bring back", () => {
+    // "zehn" kept here an hour ago; the v1 editor saved the sentence with "10" since
+    const old = { ...copy, at: NOW - 3_600_000 };
+    const v1 = editWord(base, "w3", "10");
+    expect(decideDocCopy(old, { doc: base, rev: 7 }).kind).toBe("auto");
+    expect(decideDocCopyOnOpen(old, { doc: base, rev: 7 }, v1, NOW)).toEqual({ kind: "moved" });
+    // the sentence save carried the copy's change (its PATCH failed, /phrases didn't)
+    expect(decideDocCopyOnOpen(old, { doc: base, rev: 7 }, fixed, NOW)).toEqual({ kind: "none" });
+    // sentence edits saved before the copy was made: the copy is the newer change
+    expect(decideDocCopyOnOpen(old, { doc: base, rev: 7 }, v1, old.at - 60_000)).toEqual({ kind: "auto", copy: old });
+    // none applied: as before
+    expect(decideDocCopyOnOpen(old, { doc: base, rev: 7 }, base, null)).toEqual({ kind: "auto", copy: old });
+    expect(decideDocCopyOnOpen(old, { doc: base, rev: 12 }, base, null)).toEqual({ kind: "moved" });
+    expect(decideDocCopyOnOpen(null, { doc: base, rev: 7 }, v1, NOW)).toEqual({ kind: "none" });
   });
 
   it("a style the server checked (keys in another order) is the same style", () => {

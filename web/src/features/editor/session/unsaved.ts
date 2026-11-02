@@ -15,8 +15,9 @@
  *          Vorschau, which holds Fertigstellen for a copy, lets it be. A
  *          reload or a closed tab keeps it for the next open.
  *
- * localStorage can be missing or full (private mode): every access is
- * guarded, and the editor works the same without it. The key and when a
+ * localStorage can be missing, blocked or full (private mode): every
+ * access is guarded, and a copy storage refuses stays in this document
+ * (deviceCopy.ts), where the Vorschau still sees it. The key and when a
  * copy counts (readUnsaved, copyIsStored) live in unsavedKey.ts, which
  * the Vorschau reads too: a copy the server has counts there as nothing
  * unsaved, as here. The edit document's twin: unsavedDoc.ts.
@@ -24,17 +25,12 @@
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import type { TimelineSeg } from "@/lib/editSave";
 import type { TimelineBackup } from "./timelineSave";
-import { copyIsStored, readUnsaved, unsavedKey } from "./unsavedKey";
+import { copyIsStored, dropUnsaved, putUnsaved } from "./unsavedKey";
 
-export { readUnsaved } from "./unsavedKey";
+export { dropUnsaved, readUnsaved } from "./unsavedKey";
 
 export function writeUnsaved(jobId: string, b: TimelineBackup | null): void {
-  try {
-    if (b) localStorage.setItem(unsavedKey(jobId), JSON.stringify(b));
-    else localStorage.removeItem(unsavedKey(jobId));
-  } catch {
-    /* storage blocked or full */
-  }
+  putUnsaved(jobId, b);
 }
 
 export type UnsavedDecision =
@@ -57,6 +53,5 @@ export function decideUnsaved(
  *  copy (`copy`, as read at the editor's open). One written since (an
  *  edit, Restore: the autosave's) stays. */
 export function dropOffered(jobId: string, copy: TimelineBackup): void {
-  const now = readUnsaved(jobId);
-  if (now && JSON.stringify(now) === JSON.stringify(copy)) writeUnsaved(jobId, null);
+  dropUnsaved(jobId, copy);
 }

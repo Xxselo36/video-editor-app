@@ -3,15 +3,15 @@
  * acknowledged (save-11, unsaved.ts), and when such a copy counts: valid
  * clips, the rev they were made on, at most a week old, and a timeline
  * the server doesn't have. Apart from the editor's save code, so the
- * Vorschau can ask (unsavedTimeline) without loading it.
+ * Vorschau can ask (unsavedTimeline) without loading it. Storage that
+ * refuses a copy keeps it in this document (deviceCopy.ts).
  */
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { sameTimeline, type TimelineSeg } from "@/lib/editSave";
+import { dropCopy, readCopy, unsavedKey, writeCopy } from "./deviceCopy";
 import type { TimelineBackup } from "./timelineSave";
 
-export function unsavedKey(jobId: string): string {
-  return `cleocuts.editor.unsaved.v1.${jobId}`;
-}
+export { unsavedKey };
 
 /** A copy older than this is not offered (a week). */
 const MAX_AGE_MS = 7 * 24 * 3600 * 1000;
@@ -21,13 +21,11 @@ const isSeg = (s: unknown): s is EditorSeg => {
   return !!x && typeof x.id === "string" && Number.isFinite(x.start) && Number.isFinite(x.end) && x.end > x.start;
 };
 
-/** The job's copy on this device; null without one, or when it is unreadable, invalid or too old. */
-export function readUnsaved(jobId: string, now = Date.now()): TimelineBackup | null {
+/** A stored copy as text: null when it is unreadable, invalid or too old. */
+function parseBackup(raw: string, now: number): TimelineBackup | null {
   try {
-    const raw = localStorage.getItem(unsavedKey(jobId));
-    if (!raw) return null;
-    const b = JSON.parse(raw) as Partial<TimelineBackup>;
-    if (!Array.isArray(b.segs) || !b.segs.length || !b.segs.every(isSeg) || typeof b.base !== "number") return null;
+    const b = JSON.parse(raw) as Partial<TimelineBackup> | null;
+    if (!b || !Array.isArray(b.segs) || !b.segs.length || !b.segs.every(isSeg) || typeof b.base !== "number") return null;
     if (typeof b.at === "number" && now - b.at > MAX_AGE_MS) return null;
     return {
       segs: b.segs,
@@ -38,6 +36,26 @@ export function readUnsaved(jobId: string, now = Date.now()): TimelineBackup | n
   } catch {
     return null;
   }
+}
+
+/** The job's copy on this device; null without one, or when it is
+ *  unreadable, invalid or too old (such a one goes). */
+export function readUnsaved(jobId: string, now = Date.now()): TimelineBackup | null {
+  return readCopy(unsavedKey(jobId), (raw) => parseBackup(raw, now));
+}
+
+/** Keep `b` as the job's copy (null: none). */
+export function putUnsaved(jobId: string, b: TimelineBackup | null): void {
+  writeCopy(unsavedKey(jobId), b ? JSON.stringify(b) : null);
+}
+
+/** Remove the job's copy while it is still `b` (one written since stays). */
+export function dropUnsaved(jobId: string, b: TimelineBackup): void {
+  const want = JSON.stringify(b);
+  dropCopy(unsavedKey(jobId), (raw) => {
+    const now = parseBackup(raw, b.at);
+    return !!now && JSON.stringify(now) === want;
+  });
 }
 
 /** Edits of this job on this device the server may not have: the editor
@@ -82,12 +100,6 @@ export function unsavedTimeline(
 ): TimelineBackup | null {
   const b = readUnsaved(jobId, now);
   if (!b || !copyIsStored(b, server, duration)) return b;
-  try {
-    const key = unsavedKey(jobId);
-    const again = readUnsaved(jobId, now);
-    if (again && JSON.stringify(again) === JSON.stringify(b)) localStorage.removeItem(key);
-  } catch {
-    /* storage blocked */
-  }
+  dropUnsaved(jobId, b);
   return null;
 }

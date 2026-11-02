@@ -6,6 +6,8 @@
  */
 import { Check, Copy } from "lucide-react";
 import { useRef, useState } from "react";
+import { PRESS } from "@/components/ui/Button";
+import { cx } from "@/components/ui/cx";
 import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import type { JobStatus } from "@/features/jobs/types";
@@ -52,7 +54,10 @@ export function PostText({ job }: { job: JobStatus }) {
           onClick={copyPost}
           disabled={!post}
           // The tap area reaches 44 px high (::after).
-          className="relative inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-[var(--brand-hover)] after:absolute after:inset-x-0 after:-inset-y-2.5 after:content-[''] hover:bg-[var(--brand-tint)] disabled:opacity-50"
+          className={cx(
+            "relative inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-[var(--brand-hover)] after:absolute after:inset-x-0 after:-inset-y-2.5 after:content-[''] hover:bg-[var(--brand-tint)] disabled:opacity-50",
+            PRESS,
+          )}
           data-testid="done-copy"
         >
           <Icon icon={postState === "copied" ? Check : Copy} size={13} />

@@ -5,11 +5,18 @@
  * (./jobsStore) changes on the server and on this device.
  */
 import { useId, useRef, useState } from "react";
-import { Button } from "@/components/ui/Button";
+import { Button, PRESS } from "@/components/ui/Button";
+import { cx } from "@/components/ui/cx";
 import { Dialog } from "@/components/ui/Dialog";
 import { useT } from "@/i18n";
 import { deleteProject, renameProject } from "./jobsStore";
 import type { Project } from "./projects";
+
+// The dialogs' actions: compact (both fit one row on a 320 px phone in
+// every language), 44 px tall to a finger, pressed they give a little; a
+// row that wraps rather than overflows in a wider font.
+const ACTION = cx(PRESS, "pointer-coarse:min-h-11");
+const ACTIONS = "flex flex-wrap justify-end gap-2";
 
 /** `onRenamed`: the name the server took (the Vorschau shows it at once). */
 export function RenameDialog({ p, onClose, onRenamed }: { p: Project; onClose: () => void; onRenamed?: (name: string) => void }) {
@@ -63,11 +70,11 @@ export function RenameDialog({ p, onClose, onRenamed }: { p: Project; onClose: (
             {t("app.projects.renameFailed")}
           </p>
         )}
-        <div className="flex justify-end gap-2">
-          <Button variant="tint" size="sm" onClick={onClose}>
+        <div className={ACTIONS}>
+          <Button variant="tint" size="sm" className={ACTION} onClick={onClose}>
             {t("app.projects.cancel")}
           </Button>
-          <Button type="submit" size="sm" disabled={busy} data-testid="rename-save">
+          <Button type="submit" size="sm" className={ACTION} disabled={busy} data-testid="rename-save">
             {t("app.projects.save")}
           </Button>
         </div>
@@ -108,8 +115,8 @@ export function DeleteDialog({ p, onClose, onDeleted }: { p: Project; onClose: (
             {t(error === "busy" ? "app.projects.deleteBusy" : "library.deleteFailed")}
           </p>
         )}
-        <div className="mt-1 flex justify-end gap-2">
-          <Button variant="tint" size="sm" onClick={onClose}>
+        <div className={cx("mt-1", ACTIONS)}>
+          <Button variant="tint" size="sm" className={ACTION} onClick={onClose}>
             {t("app.projects.cancel")}
           </Button>
           {/* Dark text on the red: white on --danger is 3.0:1, --surface-0 6.5:1 (AA). */}
@@ -118,7 +125,7 @@ export function DeleteDialog({ p, onClose, onDeleted }: { p: Project; onClose: (
             disabled={busy}
             onClick={() => void remove()}
             data-testid="delete-confirm"
-            className="!bg-[var(--danger)] !text-[var(--surface-0)]"
+            className={cx(ACTION, "!bg-[var(--danger)] !text-[var(--surface-0)]")}
           >
             {t("app.projects.delete")}
           </Button>
