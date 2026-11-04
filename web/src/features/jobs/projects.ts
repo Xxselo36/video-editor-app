@@ -89,6 +89,8 @@ export type RemoteJob = {
   renderFailed: boolean;
   /** ms; changes with every edit, export and rename (a revision). */
   updatedAt: number | null;
+  /** The export's generation (renders_ok): in its download link. */
+  rendersOk: number;
 };
 
 /** The server doesn't know the job (deleted after its retention, or not
@@ -132,6 +134,8 @@ export type Project = {
   renderFailed: boolean;
   /** The server's updated_at (ms): the project's revision. */
   updatedAt: number | null;
+  /** RemoteJob.rendersOk (0 until the server said). */
+  rendersOk: number;
   /** LocalJob.note. */
   note: string | null;
   upload: UploadRecord | null;
@@ -177,6 +181,7 @@ export function remoteFrom(raw: Record<string, unknown> | JobStatusRow): RemoteJ
     presetLabel: str(r.preset_label),
     renderFailed: status === "awaiting_review" && Boolean(errorCode || str(r.error)),
     updatedAt: toMsTime(r.updated_at),
+    rendersOk: num(r.renders_ok) ?? 0,
   };
 }
 
@@ -250,6 +255,7 @@ export function buildProject(
     expiresAt: r?.expiresAt ?? null,
     renderFailed: r?.renderFailed ?? false,
     updatedAt: r?.updatedAt ?? null,
+    rendersOk: r?.rendersOk ?? 0,
     note: local?.note ?? null,
     upload: local?.upload ?? (local && isUploadId(local.jobId) ? {} : null),
     local: Boolean(local),

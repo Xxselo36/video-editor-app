@@ -598,12 +598,14 @@ export default function PreviewScreen({
             {t("app.preview.refine")}
           </Button>
         )}
+        {/* The export the server keeps until the new one is done: the
+            job's current output, its generation still renders_ok. */}
         {state === "edited" && (
           <>
             <a
               key="previous"
               className={s.quiet}
-              href={mediaReady ? downloadHref(job.id, "primary") : undefined}
+              href={mediaReady ? downloadHref(job, "primary") : undefined}
               download={job.download_names?.primary ?? true}
               data-testid="done-download-previous"
             >
@@ -641,7 +643,7 @@ export default function PreviewScreen({
             key="save"
             id={SAVE_ID}
             className={cx(buttonClass("primary", "lg"), s.act)}
-            href={mediaReady ? downloadHref(job.id, files.primary?.format ?? "primary") : undefined}
+            href={mediaReady ? downloadHref(job, files.primary?.format ?? "primary") : undefined}
             download={job.download_names?.[files.primary?.format ?? "primary"] ?? true}
             data-testid="done-download"
             data-format={files.primary?.format ?? "primary"}
@@ -736,7 +738,7 @@ export default function PreviewScreen({
                           <a
                             key={d.format}
                             className={s.file}
-                            href={mediaReady ? downloadHref(job.id, d.format) : undefined}
+                            href={mediaReady ? downloadHref(job, d.format) : undefined}
                             download={job.download_names?.[d.format] ?? true}
                             data-testid="done-download"
                             data-format={d.format}

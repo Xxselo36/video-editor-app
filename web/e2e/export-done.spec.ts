@@ -20,25 +20,18 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { ACTIVE_JOBS, card, openWithStorage } from "./support/app";
 import { API, WEB } from "./support/env";
-import { fakeShareSheet, IPHONE_UA, openVorschau, sharedFiles, TOUR_DONE, vorschau } from "./support/vorschau";
+import {
+  fakeShareSheet,
+  IPHONE_UA,
+  openVorschau,
+  sharedFiles,
+  sharedOnce,
+  tapStillActive,
+  TOUR_DONE,
+  vorschau,
+} from "./support/vorschau";
 
 const V2 = { tag: "@editor-v2" };
-
-/** When the fetch a tap started is done, the browser still counts that
- *  tap (true: a quick fetch) or no longer (false: a slow one), whatever
- *  the machine's load (navigator.userActivation). */
-async function tapStillActive(page: Page, isActive: boolean) {
-  await page.addInitScript((active) => {
-    Object.defineProperty(navigator, "userActivation", { value: { isActive: active, hasBeenActive: true }, configurable: true });
-  }, isActive);
-}
-
-/** One share and no second one a moment later. */
-async function sharedOnce(page: Page, name: string) {
-  await expect.poll(() => sharedFiles(page)).toEqual([name]);
-  await page.waitForTimeout(1000);
-  expect(await sharedFiles(page)).toEqual([name]);
-}
 
 type Downloads = { downloads: { format: string; bytes: number | null }[] };
 

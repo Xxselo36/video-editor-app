@@ -79,6 +79,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlencode
 
 from contextlib import asynccontextmanager, contextmanager
 import time
@@ -4738,12 +4739,13 @@ def _owner_jobs(owner_id: str) -> list[Job]:
 
 
 # GET /jobs?fields=summary (UX12): what a Projects tile shows — no
-# outputs or hook clips (the tile's menu asks GET /jobs/{id} for those).
+# outputs or hook clips (the tile's menu asks GET /jobs/{id} for those);
+# renders_ok: the export's generation in the menu's download link.
 _SUMMARY_FIELDS = (
     "id", "status", "message", "progress", "error_code", "error_params",
     "refunded", "stage", "stage_params", "queue_position", "filename",
     "title", "preset_id", "preset_label", "created_at", "updated_at",
-    "expires_at", "has_output", "duration",
+    "expires_at", "has_output", "duration", "renders_ok",
 )
 
 
@@ -4847,6 +4849,8 @@ def _status_rows(ids: list[str], user: User | None) -> dict:
             "duration": row.get("duration") or None,
             "created_at": row.get("created_at") or None,
             "expires_at": expiry_time(row.get("plan"), row["updated_at"]),
+            # The export's generation: the tile menu's download link.
+            "renders_ok": int(row.get("renders_ok") or 0),
         })
     return {"jobs": jobs, "missing": missing}
 
@@ -4868,7 +4872,7 @@ async def jobs_status(request: Request, ids: str = "",
     `?ids=a,b,c` (at most 50) → {"jobs": [{id, status, message, progress,
     queue_position, error (its code unless admin), error_code,
     error_params, refunded, stage, stage_params, has_output, updated_at,
-    preview_version, title, duration, created_at, expires_at}],
+    preview_version, title, duration, created_at, expires_at, renders_ok}],
     "missing": [ids that don't exist or aren't the caller's]}. With a
     weak ETag: send it back as If-None-Match and an unchanged answer is
     an empty 304."""
@@ -5976,18 +5980,24 @@ def get_subtitles(job_id: str, user: User | None = Depends(current_user)):
 # files.
 
 
-def _media(job: Job, key: str, media_type: str, not_ready: str,
-           download_name: str | None = None,
-           cache: str | None = None):
-    """`key` of `job`, from the job's store (media.store_of)."""
+def _media_store(job: Job) -> str:
+    """The job's store (media.store_of); 503 storage_unavailable when its
+    media is in R2 but R2_* are missing / incomplete: never answer from
+    the local disk instead."""
     where = media.store_of(job)
     if where == "r2" and not storage.r2_available():
-        # The job's media is in R2 but R2_* are missing / incomplete:
-        # never answer from the local disk instead.
         print(f"[media] job {job.id} has its media in R2, but R2 is not "
               "configured (R2_* env vars)", flush=True)
         raise ApiRefusal(503, "storage_unavailable",
                          headers={"Retry-After": "60"})
+    return where
+
+
+def _media(job: Job, key: str, media_type: str, not_ready: str,
+           download_name: str | None = None,
+           cache: str | None = None):
+    """`key` of `job`, from the job's store (media.store_of)."""
+    where = _media_store(job)
     try:
         return media.media_response(key, media_type=media_type,
                                     download_name=download_name, cache=cache,
@@ -8075,13 +8085,24 @@ def post_feedback(payload: dict, user: User | None = Depends(current_user)):
 
 
 @app.get("/jobs/{job_id}/download")
-def download_job(job_id: str, format: str = "primary",
+def download_job(request: Request, job_id: str, format: str = "primary",
                  name: str | None = None,
                  user: User | None = Depends(media_user)):
     """A rendered format as an attachment (cleo_{id}_{format}.mp4). With
     name=v2 (the v2 Done view, UX11 review F9) named after the project:
-    {slug}_cleocuts_{aspect}.mp4 — exports.download_name."""
+    {slug}_cleocuts_{aspect}.mp4 — exports.download_name. Never stored,
+    its 307 to R2 neither (no-store): the same link names the next export
+    once there is one. Other query parameters are ignored (the web adds
+    the export's generation, v=).
+
+    as=url: {"url", "name"} (no-store) instead of the file, for a page
+    that fetch()es it: a fetch() that follows the 307 to R2 is
+    redirect-tainted (Origin: null), which the bucket's CORS rules refuse
+    (the iPhone's "Video sichern"). `url`: the presigned R2 GET itself;
+    with local media this route's own URL, relative to the API, without
+    `as` and the media token (fetched like any API call)."""
     job = get_owned_job(job_id, user)
+    as_url = request.query_params.get("as") == "url"
     safe = "".join(c if c.isalnum() or c in "_-" else "-"
                    for c in format.replace(":", "-"))
     v2_name = _download_name(job, format) if name == "v2" else None
@@ -8089,19 +8110,46 @@ def download_job(job_id: str, format: str = "primary",
         key = job.output_keys.get(format)
         if not key:
             raise HTTPException(409, "requested format not ready")
-        return _media(job, key, "video/mp4", "requested format not ready",
-                      download_name=v2_name or f"cleo_{job_id}_{safe}.mp4")
+        filename = v2_name or f"cleo_{job_id}_{safe}.mp4"
+        if not as_url:
+            return _media(job, key, "video/mp4", "requested format not ready",
+                          download_name=filename)
+        try:
+            url = media.direct_url(key, media_type="video/mp4",
+                                   download_name=filename,
+                                   store=_media_store(job))
+        except FileNotFoundError:
+            raise HTTPException(409, "requested format not ready")
+        return _download_url(url or _this_url(request, "as", "t"), filename)
     path = job.outputs.get(format) or (
         job.output_path if format == "primary" else None
     )
     if not path or not Path(path).exists():
         raise HTTPException(409, "requested format not ready")
     safe = format.replace(":", "-")
+    filename = v2_name or f"cleo_{job_id}_{safe}.mp4"
+    if as_url:
+        return _download_url(_this_url(request, "as", "t"), filename)
     return FileResponse(
         path=path,
         media_type="video/mp4",
-        filename=v2_name or f"cleo_{job_id}_{safe}.mp4",
+        filename=filename,
+        headers={"Cache-Control": media.NO_STORE},
     )
+
+
+def _this_url(request: Request, *drop: str) -> str:
+    """This request's path and query without the parameters `drop`,
+    relative to the API (the page puts the API's origin before it)."""
+    query = [(k, v) for k, v in request.query_params.multi_items()
+             if k not in drop]
+    return request.url.path + (f"?{urlencode(query)}" if query else "")
+
+
+def _download_url(url: str, name: str) -> JSONResponse:
+    """/download?as=url's answer: where the file is, and its name."""
+    return JSONResponse({"url": url, "name": name},
+                        headers={"Cache-Control": media.NO_STORE})
 
 
 def _output_aspect(job: Job) -> str:

@@ -18,7 +18,7 @@ export function BonusClips({
   job,
   level = 3,
 }: {
-  job: Pick<JobStatus, "id" | "hook_clips" | "download_names">;
+  job: Pick<JobStatus, "id" | "renders_ok" | "hook_clips" | "download_names">;
   /** The heading's level under the page's or the sheet's own heading. */
   level?: 2 | 3;
 }) {
@@ -40,7 +40,7 @@ export function BonusClips({
         {hooks.map((h) => (
           <a
             key={h.key}
-            href={downloadHref(job.id, h.key)}
+            href={downloadHref(job, h.key)}
             download={names[h.key] ?? true}
             className={cx("block rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:border-[var(--brand)]", PRESS)}
           >

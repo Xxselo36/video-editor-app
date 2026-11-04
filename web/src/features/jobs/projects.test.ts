@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { legacyCardCode } from "@/lib/errors";
 import {
   analysisEta,
+  buildProject,
   emptyListAction,
   capLocal,
   daysLeft,
@@ -57,6 +58,15 @@ describe("stateOf", () => {
     const r = row({ status: "awaiting_review", error_code: "render_failed" });
     expect(r.renderFailed).toBe(true);
     expect(row({ status: "awaiting_review" }).renderFailed).toBe(false);
+  });
+});
+
+describe("the export's generation (the ⋯ menu's download link)", () => {
+  it("comes from the server's row, 0 until it says", () => {
+    expect(row({ status: "done", has_output: true, renders_ok: 3 }).rendersOk).toBe(3);
+    expect(row({ status: "done", has_output: true }).rendersOk).toBe(0);
+    expect(buildProject("j1", local("j1"), row({ status: "done", has_output: true, renders_ok: 2 }), { now: NOW }).rendersOk).toBe(2);
+    expect(buildProject("j1", local("j1"), undefined, { now: NOW }).rendersOk).toBe(0);
   });
 });
 

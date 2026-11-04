@@ -1,7 +1,9 @@
 """backend/r2_setup.py --apply / --roundtrip (R2 on moto, in-process),
-.github/scripts/modal_r2_secret.py (a stub `modal` CLI on PATH) and the
-workflow that runs them, .github/workflows/r2-setup.yml. Its log is
-public: nothing here may print a credential, the bucket or the account."""
+--check --origin's CORS requests (a moto server answering CORS as R2
+does), .github/scripts/modal_r2_secret.py (a stub `modal` CLI on PATH)
+and the workflow that runs them, .github/workflows/r2-setup.yml. Its log
+is public: nothing here may print a credential, the bucket or the
+account."""
 from __future__ import annotations
 
 import importlib.util
@@ -11,6 +13,7 @@ import re
 import stat
 import sys
 import textwrap
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -192,6 +195,70 @@ def test_r2_setup_roundtrip_fails_cleanly(r2, capsys, monkeypatch):
            "(NoSuchBucket)" in out
     assert "cleo-no-such-bucket" not in out
     _assert_no_secrets(out)
+
+
+# ── --check --origin: CORS, asked as the browser asks ────────────────
+
+
+def test_r2_setup_check_asks_for_cors_as_the_page_does(strict_r2_http,
+                                                       capsys, monkeypatch):
+    """--check --origin (the workflow's check) asks the bucket what the
+    page does from that origin: the preflight of an upload's part PUT,
+    and the GET of "Video sichern" (PR2 live test D2: the page fetch()es
+    the export from its presigned download URL, sending its Origin). A
+    rule without GET passes the preflight; the GET then fails the
+    check."""
+    s3, origin = strict_r2_http, "https://cleocuts.com"
+    # No waits between tries of a refused CORS request, no 70 MiB.
+    monkeypatch.setattr(r2_setup, "CORS_RETRY_S", 0.0)
+    monkeypatch.setattr(r2_setup, "BIG_BYTES", 1024)
+    gets: list[tuple[str, dict]] = []
+    send = r2_setup._http
+
+    def spy(method, url, data=None, headers=None):
+        if method == "GET" and "Origin" in (headers or {}):
+            gets.append((url, dict(headers)))
+        if data:
+            # moto's server parses urllib's default body type (a form)
+            # and hangs on a 5 MiB part: a byte stream here.
+            headers = {"Content-Type": "application/octet-stream", **(headers or {})}
+        return send(method, url, data=data, headers=headers)
+    monkeypatch.setattr(r2_setup, "_http", spy)
+
+    def cors_lines() -> list[str]:
+        # moto checks no signatures: the wrong-length part PUT's line
+        # fails here whatever the CORS rules (the staging check has it).
+        r2_setup.main(["--check", "--origin", origin, "--skip-lifecycle"])
+        out = capsys.readouterr().out
+        assert "X-Amz-Signature" not in out
+        assert "Contents" not in s3.list_objects_v2(
+            Bucket=R2_BUCKET, Prefix="uploads/_r2check/")   # all deleted
+        return [line for line in out.splitlines() if "CORS" in line]
+
+    preflight = f"PASS  CORS preflight from {origin}  (HTTP 200, allow-origin={origin})"
+    # The bucket as DEPLOY.md sets it up (r2_setup.cors_config).
+    s3.put_bucket_cors(Bucket=R2_BUCKET, CORSConfiguration=r2_setup.cors_config(
+        r2_setup.DEFAULT_ORIGINS))
+    assert cors_lines() == [preflight, f"PASS  CORS GET from {origin} (Video "
+                            f"sichern)  (HTTP 200, allow-origin={origin})"]
+    # The page's request: a presigned download of an MP4, with only its
+    # Origin (no Range, no credentials).
+    ((url, headers),) = gets
+    assert headers == {"Origin": origin}
+    q = parse_qs(urlsplit(url).query)
+    assert q["response-content-disposition"] == [
+        'attachment; filename="cleo_check.mp4"']
+    assert q["response-content-type"] == ["video/mp4"]
+
+    # A rule without GET: uploads work, "Video sichern" falls back to a
+    # plain download. The check says so.
+    rules = r2_setup.cors_config(r2_setup.DEFAULT_ORIGINS)
+    rules["CORSRules"][0]["AllowedMethods"] = ["HEAD", "PUT"]
+    s3.put_bucket_cors(Bucket=R2_BUCKET, CORSConfiguration=rules)
+    gets.clear()
+    assert cors_lines() == [preflight, f"FAIL  CORS GET from {origin} (Video "
+                            "sichern)  (HTTP 200, allow-origin=None)"]
+    assert len(gets) == r2_setup.CORS_TRIES       # tried again, as the preflight
 
 
 # ── the Modal secret (stub modal CLI) ────────────────────────────────

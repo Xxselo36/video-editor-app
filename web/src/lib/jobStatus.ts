@@ -31,6 +31,8 @@ export type JobStatusRow = {
   has_output?: boolean;
   updated_at?: number | null;
   preview_version?: number | null;
+  /** The export's generation (the tile menu's download link). */
+  renders_ok?: number;
   /** The full job dict — only on the per-job fallback path. */
   full?: Record<string, unknown>;
 };
@@ -72,6 +74,7 @@ function toRow(id: string, raw: Record<string, unknown>): JobStatusRow {
     has_output: Boolean(raw.has_output),
     updated_at: typeof raw.updated_at === "number" ? raw.updated_at : null,
     preview_version: typeof raw.preview_version === "number" ? raw.preview_version : null,
+    renders_ok: num(raw.renders_ok, 0),
   };
 }
 

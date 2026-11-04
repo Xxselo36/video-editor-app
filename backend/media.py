@@ -65,6 +65,10 @@ IMMUTABLE = storage.IMMUTABLE
 # How long a browser may reuse a 307 to R2: far below the >= 24 h the
 # presigned target stays valid.
 REDIRECT_CACHE = "private, max-age=3600"
+# A download (an attachment) is never stored, its 307 neither: the link
+# names the job's current export, and a new export replaces it (a reused
+# 307 hands out the previous file, the PR2 live test's stale download).
+NO_STORE = "no-store"
 
 _JOB_ID = re.compile(r"^[0-9a-f]{12}$")
 
@@ -386,8 +390,9 @@ def media_response(key: str, *, media_type: str,
                    cache: str | None = None, store: str | None = None):
     """What a media route answers for `key` in `store`: r2 → 307 to a
     presigned GET (Cache-Control: private, max-age=3600); local →
-    FileResponse (Range, `cache` as its Cache-Control, an attachment
-    when `download_name`). Raises FileNotFoundError when a local object
+    FileResponse (Range, `cache` as its Cache-Control). A download
+    (`download_name`: an attachment of that name) is never stored,
+    either way (NO_STORE). Raises FileNotFoundError when a local object
     is missing."""
     from fastapi.responses import FileResponse, RedirectResponse
     check_key(key)
@@ -395,16 +400,34 @@ def media_response(key: str, *, media_type: str,
         url = presign_get(key, filename=download_name,
                           attachment=bool(download_name),
                           content_type=media_type)
-        return RedirectResponse(url, status_code=307,
-                                headers={"Cache-Control": REDIRECT_CACHE})
+        return RedirectResponse(url, status_code=307, headers={
+            "Cache-Control": NO_STORE if download_name else REDIRECT_CACHE})
     path = local_path(key)
     if not path.is_file():
         raise FileNotFoundError(f"media object {key} not found")
     headers = {"Accept-Ranges": "bytes"}
+    cache = NO_STORE if download_name else cache
     if cache:
         headers["Cache-Control"] = cache
     return FileResponse(path=str(path), media_type=media_type,
                         filename=download_name, headers=headers)
+
+
+def direct_url(key: str, *, media_type: str,
+               download_name: str | None = None,
+               store: str | None = None) -> str | None:
+    """Where a page fetch()es `key` itself, with no redirect between: r2 →
+    the presigned GET that media_response redirects to; local → None
+    (the API serves the file: the media route's own URL). Raises
+    FileNotFoundError when a local object is missing."""
+    check_key(key)
+    if _where(key, store) == "r2":
+        return presign_get(key, filename=download_name,
+                           attachment=bool(download_name),
+                           content_type=media_type)
+    if not local_path(key).is_file():
+        raise FileNotFoundError(f"media object {key} not found")
+    return None
 
 
 # Account deletion: backend.main.delete_user_media (each job the way

@@ -110,7 +110,8 @@ Run from the repo root (web: NEXT_PUBLIC_BACKEND_URL=http://localhost:8501):
       [--web-origin http://localhost:3501]   # CORS (also CLEO_ALLOWED_ORIGINS)
       [--auth]   # test auth: CLEO_AUTH_TEST=1, requests carry X-Test-User
       [--r2]     # media + uploads in R2, faked by a moto server on a free
-                 # port (CLEO_UPLOAD_MODE=multipart, CLEO_PROXY_VIDEO=1)
+                 # port (CLEO_UPLOAD_MODE=multipart, CLEO_PROXY_VIDEO=1);
+                 # CORS by the bucket's rules only, as R2 answers it
 
 Needs the backend requirements (+ moto for --r2), ffmpeg and espeak-ng.
 """
@@ -212,8 +213,14 @@ def _prepare_env(args: argparse.Namespace, tmp: Path) -> None:
 
 
 def _start_moto(web_origins: list[str]) -> tuple[Any, str, Any]:
-    """A moto S3 server on a free port as the R2 of this stub."""
+    """A moto S3 server on a free port as the R2 of this stub. CORS as R2
+    answers it, by the bucket's rules only: moto's server otherwise
+    allows every origin itself (flask-cors), so a fetch() the bucket
+    refuses passed here (PR2 live test D2: one that followed a redirect
+    into the bucket, Origin: null)."""
     import logging
+    # Read when moto.settings is first imported (just below).
+    os.environ["MOTO_DISABLE_GLOBAL_CORS"] = "1"
 
     import boto3
     from moto.server import ThreadedMotoServer

@@ -39,7 +39,8 @@ media in R2 (R2_* set and CLEO_MEDIA_BACKEND=r2), faked in-process by moto (pip 
 backend/requirements-dev.txt): R2_* env vars point at a moto bucket for
 every test. Tests of local-disk internals are marked local_media_only
 and skipped there. The fixture `r2` gives a single test R2 on moto in
-either mode (an emptied bucket).
+either mode (an emptied bucket); `strict_r2_http` R2 over real HTTP on a
+moto server that answers CORS by the bucket's rules, as R2 does.
 """
 from __future__ import annotations
 
@@ -460,6 +461,54 @@ def r2(monkeypatch):
     from moto import mock_aws
     with mock_aws():
         yield _moto_bucket()
+
+
+@pytest.fixture
+def strict_r2_http(monkeypatch):
+    """R2 over real HTTP, as the browser sees it: a moto server of its own
+    (R2_* env and R2_ENDPOINT_URL point at it, new jobs' media in R2)
+    that answers CORS as R2 does, by the bucket's rules only. moto's
+    server otherwise allows every origin itself (flask-cors, unless
+    MOTO_DISABLE_GLOBAL_CORS), also a redirect-tainted fetch's Origin:
+    null; and it matches a request (not a preflight) to a rule by its
+    Origin alone, where R2 also needs the request's method in that rule.
+    Returns a boto3 client on it. The bucket's CORS rules go again
+    afterwards (moto's server and its in-process mock share their state:
+    under CLEO_TEST_MEDIA=r2 the bucket is the session's)."""
+    import boto3
+    from moto.moto_server import werkzeug_app
+    from moto.s3.responses import S3Response
+    from moto.server import ThreadedMotoServer
+    monkeypatch.setattr(werkzeug_app, "DISABLE_GLOBAL_CORS", True)
+    by_origin = S3Response._get_cors_headers_other
+
+    def by_origin_and_method(self):
+        headers = by_origin(self)
+        methods = str(headers.get("Access-Control-Allow-Methods", ""))
+        return headers if self.method in [m.strip() for m in methods.split(",")] else {}
+    monkeypatch.setattr(S3Response, "_get_cors_headers_other", by_origin_and_method)
+    srv = ThreadedMotoServer(ip_address="127.0.0.1", port=0, verbose=False)
+    srv.start()
+    endpoint = f"http://127.0.0.1:{srv.get_host_and_port()[1]}"
+    for k, v in R2_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("R2_ENDPOINT_URL", endpoint)
+    monkeypatch.setenv("CLEO_MEDIA_BACKEND", "r2")
+    s3 = boto3.session.Session().client(
+        "s3", endpoint_url=endpoint, region_name="us-east-1",
+        aws_access_key_id="AK", aws_secret_access_key="SK")
+    try:
+        # The server's S3 app is made by its first request: now, patched.
+        try:
+            s3.create_bucket(Bucket=R2_BUCKET)
+        except s3.exceptions.BucketAlreadyOwnedByYou:
+            pass
+        yield s3
+    finally:
+        try:
+            s3.delete_bucket_cors(Bucket=R2_BUCKET)
+        finally:
+            srv.stop()
 
 
 # ── auth ─────────────────────────────────────────────────────────────

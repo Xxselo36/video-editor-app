@@ -16,8 +16,10 @@
         (the multipart path every mezz and render output takes), the
         lifecycle rules for uploads/ (--skip-lifecycle when the token
         may not read them — then check them in the dashboard), and with
-        --origin the CORS preflight for a part PUT. Exit status 0 when
-        everything passed.
+        --origin what the browser asks of the bucket from that origin:
+        the CORS preflight for a part PUT, and a GET of a presigned
+        download with that Origin only ("Video sichern" fetch()es the
+        export so). Exit status 0 when everything passed.
 
     python -m backend.r2_setup --apply [--origins https://a,https://b]
         With an R2 token that has "Admin Read & Write" (R2_* env vars):
@@ -124,9 +126,28 @@ class Checks:
 # threshold (CreateMultipartUpload + UploadPart + Complete, like every
 # mezz and render output).
 BIG_BYTES = 70 * 1024 * 1024
-# --check's CORS preflight: tries, seconds between them.
+# --check's CORS requests (the preflight, the GET): tries, seconds
+# between them.
 CORS_TRIES = 4
 CORS_RETRY_S = 10.0
+
+
+def _cors(method: str, url: str, origin: str, statuses: tuple[int, ...],
+          headers: dict | None = None) -> tuple[int, str | None, bytes]:
+    """`method` on `url` with the Origin `origin`, as a browser sends it:
+    again until the answer has one of `statuses` and allows `origin`
+    (rules just set by --apply may take a moment to be served: about
+    half a minute). The last answer's status, Access-Control-Allow-Origin
+    and body."""
+    for attempt in range(CORS_TRIES):
+        if attempt:
+            time.sleep(CORS_RETRY_S)
+        st, hd, data = _http(method, url,
+                             headers={"Origin": origin, **(headers or {})})
+        allow = hd.get("access-control-allow-origin")
+        if st in statuses and allow in (origin, "*"):
+            break
+    return st, allow, data
 
 
 def _error(e: BaseException) -> str:
@@ -346,19 +367,39 @@ def check(origin: str | None = None, lifecycle: bool = True) -> int:
                 pass
 
     if origin:
-        # Rules just set (--apply) may take a moment to be served: a
-        # failing preflight is retried for about half a minute.
-        for attempt in range(CORS_TRIES):
-            st, hd, _ = _http("OPTIONS",
-                              f"{storage.endpoint_url()}/{bucket}/{key}",
-                              headers={"Origin": origin,
-                                       "Access-Control-Request-Method": "PUT"})
-            allowed = hd.get("access-control-allow-origin") in (origin, "*")
-            if (st in (200, 204) and allowed) or attempt == CORS_TRIES - 1:
-                break
-            time.sleep(CORS_RETRY_S)
-        ok(f"CORS preflight from {origin}", st in (200, 204) and allowed,
-           f"HTTP {st}, allow-origin={hd.get('access-control-allow-origin')}")
+        # The browser's upload: a part PUT, preflighted.
+        st, allow, _ = _cors("OPTIONS",
+                             f"{storage.endpoint_url()}/{bucket}/{key}",
+                             origin, (200, 204),
+                             {"Access-Control-Request-Method": "PUT"})
+        ok(f"CORS preflight from {origin}",
+           st in (200, 204) and allow in (origin, "*"),
+           f"HTTP {st}, allow-origin={allow}")
+        # "Video sichern" (the Vorschau, iPhone/iPad) and the editor's
+        # "In Fotos sichern / Teilen…" (touch devices) fetch() the export
+        # from the presigned URL GET /jobs/{id}/download?as=url names:
+        # a GET with the page's Origin, no Range, no credentials. The
+        # bucket's rule must allow GET from the origin, or they fall back
+        # to a plain download (PR2 live test D2).
+        name = f"CORS GET from {origin} (Video sichern)"
+        key = base + ".cors"
+        body = os.urandom(1024)
+        try:
+            client.put_object(Bucket=bucket, Key=key, Body=body,
+                              ContentType="video/mp4")
+            url = storage.presign_get(key, filename="cleo_check.mp4",
+                                      attachment=True,
+                                      content_type="video/mp4")
+            st, allow, data = _cors("GET", url, origin, (200,))
+            ok(name, st == 200 and allow in (origin, "*") and data == body,
+               f"HTTP {st}, allow-origin={allow}")
+        except Exception as e:
+            ok(name, False, _error(e))
+        finally:
+            try:
+                storage.delete(key)
+            except Exception:
+                pass
     print(f"{'all checks passed' if not ok.failed else f'{ok.failed} FAILED'}",
           flush=True)
     return 1 if ok.failed else 0
@@ -490,7 +531,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m backend.r2_setup")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--origin", default=None,
-                    help="also check the CORS preflight from this origin")
+                    help="also check CORS from this origin (a part PUT's "
+                         "preflight, a download's GET)")
     ap.add_argument("--skip-lifecycle", action="store_true",
                     help="don't read the bucket's lifecycle rules (a token "
                          "without that right; check them in the dashboard)")

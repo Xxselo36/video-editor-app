@@ -10,6 +10,7 @@
  * Above SHARE_MAX_BYTES (memory), without file sharing, or when sharing
  * fails (anything but the user's own cancel) the video is downloaded.
  */
+import { apiFetch } from "@/lib/api";
 
 export const SHARE_MAX_BYTES = 250 * 1024 * 1024;
 
@@ -36,9 +37,21 @@ export function shareMode(
   return "share";
 }
 
-/** The rendered file as a File, for shareFile. */
-export async function prefetchFile(url: string, name: string, signal?: AbortSignal): Promise<File> {
-  const r = await fetch(url, { signal });
+/**
+ * The rendered file as a File, for shareFile. `href`: its GET /download
+ * (done/useShareFile downloadHref). The API says where the file is first
+ * (as=url): a fetch() of /download itself follows its redirect to the
+ * storage, redirect-tainted (Origin: null), which the bucket's CORS
+ * rules refuse (the PR2 live test's iPhone). From the storage straight,
+ * without credentials (the page's own Origin, which the bucket allows);
+ * a URL of the API itself (local storage) like any API call.
+ */
+export async function prefetchFile(href: string, name: string, signal?: AbortSignal): Promise<File> {
+  const asked = await fetch(`${href}${href.includes("?") ? "&" : "?"}as=url`, { signal, cache: "no-store" });
+  if (!asked.ok) throw new Error(`prefetch failed (${asked.status})`);
+  const { url } = (await asked.json()) as { url?: unknown };
+  if (typeof url !== "string" || !url) throw new Error("prefetch failed (no url)");
+  const r = /^\/(?!\/)/.test(url) ? await apiFetch(url, { signal }) : await fetch(url, { signal, credentials: "omit" });
   if (!r.ok) throw new Error(`prefetch failed (${r.status})`);
   const blob = await r.blob();
   return new File([blob], name, { type: blob.type || "video/mp4" });

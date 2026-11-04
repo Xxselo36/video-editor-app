@@ -1,7 +1,7 @@
 // UX11 Save / Share (review C13): navigator.share runs in the same task
 // as the tap — no await before it, or iOS refuses to open the sheet.
-import { describe, expect, it, vi } from "vitest";
-import { SHARE_MAX_BYTES, canShareFiles, shareFile, shareMode } from "./share";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SHARE_MAX_BYTES, canShareFiles, prefetchFile, shareFile, shareMode } from "./share";
 
 const file = () => new File([new Uint8Array([1, 2, 3])], "talk_cleocuts_9x16.mp4", { type: "video/mp4" });
 
@@ -45,5 +45,76 @@ describe("shareMode", () => {
     expect(shareMode(12_000_000, nav(async () => {}, false))).toBe("download");
     expect(shareMode(12_000_000, {})).toBe("download");
     expect(shareMode(12_000_000, undefined)).toBe("download");
+  });
+});
+
+// PR2 live test (D2): "Video sichern" on an iPhone shared nothing. A
+// fetch() of /download follows its 307 to the bucket redirect-tainted
+// (Origin: null), which the bucket's CORS rules refuse, so the page
+// asks the API where the file is and fetches it there.
+describe("prefetchFile", () => {
+  const HREF = "https://api.test/jobs/j1/download?format=primary&name=v2&v=2";
+  const STORAGE = "https://acct.r2.cloudflarestorage.com/media/jobs/j1/r2/primary.mp4?X-Amz-Signature=abc";
+  const mp4 = (n: number) => new Response(new Blob([new Uint8Array(n)], { type: "video/mp4" }));
+
+  /** fetch() answering `answers` in turn; the calls as they were made. */
+  function fakeFetch(answers: Response[]): [string, RequestInit | undefined][] {
+    const calls: [string, RequestInit | undefined][] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        calls.push([String(url), init]);
+        const next = answers.shift();
+        if (!next) throw new TypeError("Failed to fetch");
+        return next;
+      }),
+    );
+    return calls;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("asks the API where the file is first, then fetches it from the storage, without credentials", async () => {
+    const calls = fakeFetch([Response.json({ url: STORAGE, name: "talk_cleocuts_9x16.mp4" }), mp4(3)]);
+    const ctrl = new AbortController();
+    const f = await prefetchFile(HREF, "talk_cleocuts_9x16.mp4", ctrl.signal);
+    expect(calls.map(([url]) => url)).toEqual([`${HREF}&as=url`, STORAGE]);
+    // never the HTTP cache's answer to the question (a deploy's old 307)
+    expect(calls[0][1]).toMatchObject({ cache: "no-store", signal: ctrl.signal });
+    // straight, with the page's Origin: no redirect, no credentials
+    expect(calls[1][1]).toMatchObject({ credentials: "omit", signal: ctrl.signal });
+    expect([f.name, f.type, f.size]).toEqual(["talk_cleocuts_9x16.mp4", "video/mp4", 3]);
+  });
+
+  it("local storage: the API's own /download, fetched like any API call", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BACKEND_URL", "https://api.test");
+    const local = "/jobs/j1/download?format=primary&name=v2&v=2";
+    const calls = fakeFetch([Response.json({ url: local, name: "talk.mp4" }), mp4(2)]);
+    const f = await prefetchFile(HREF, "talk.mp4");
+    expect(calls.map(([url]) => url)).toEqual([`${HREF}&as=url`, `https://api.test${local}`]);
+    expect(calls[1][1]?.credentials).toBeUndefined();
+    expect(f.size).toBe(2);
+  });
+
+  it("fails without fetching a file when the API doesn't say where it is (the caller downloads it)", async () => {
+    // not ready (409)
+    let calls = fakeFetch([new Response('{"detail":"requested format not ready"}', { status: 409 })]);
+    await expect(prefetchFile(HREF, "x.mp4")).rejects.toThrow("409");
+    expect(calls).toHaveLength(1);
+    // an API from before as=url: the file itself (local), not its URL
+    calls = fakeFetch([mp4(4)]);
+    await expect(prefetchFile(HREF, "x.mp4")).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+    // no url in the answer
+    calls = fakeFetch([Response.json({ name: "x.mp4" })]);
+    await expect(prefetchFile(HREF, "x.mp4")).rejects.toThrow("no url");
+    expect(calls).toHaveLength(1);
+    // the storage refuses the file
+    calls = fakeFetch([Response.json({ url: STORAGE }), new Response("", { status: 403 })]);
+    await expect(prefetchFile(HREF, "x.mp4")).rejects.toThrow("403");
+    expect(calls).toHaveLength(2);
   });
 });
