@@ -104,8 +104,8 @@ export function TopBar({
     <button
       type="button"
       className={`${phone ? s.mb : s.gb} ${s.ico}`}
-      aria-label={t("editor.back")}
-      title={t("editor.back")}
+      aria-label={t("editor.backToPreview")}
+      title={t("editor.backToPreview")}
       onClick={onBack}
       data-testid="editor-back"
     >

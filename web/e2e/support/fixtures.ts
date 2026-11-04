@@ -46,6 +46,9 @@ export type SeedOptions = {
   render_seconds?: number;
   /** Seconds every /edit-segments waits before its preview rebuild. */
   slow_rebuild?: number;
+  /** false (review seeds): no first preview, as analysed with
+   *  CLEO_PROXY_VIDEO=1 — preview_version 0 until one is built. */
+  first_preview?: boolean;
   /** review_long: words in the doc (default 10 000). */
   words?: number;
   /** job.format_warning (UX6), e.g. "smartcam_failed". */
@@ -113,6 +116,8 @@ export type StubJob = {
   /** UX11 */
   renders_ok: number;
   spec_status: string | null;
+  /** The captions an export burns ("v2" once an export asked for them, UT4). */
+  caption_engine?: string | null;
   social_caption: string;
   social_caption_edited: string | null;
   output_keys: Record<string, string>;

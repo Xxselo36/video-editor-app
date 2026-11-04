@@ -87,6 +87,15 @@ export type JobStatus = {
   hook_clips?: { key: string; title: string; reason: string; start: number; end: number }[];
   /** The uploaded file's name (the v2 editor's default title). */
   filename?: string | null;
+  /** The name the user gave the project (rename); wins over the file name. */
+  title?: string | null;
+  /** Created (Unix seconds). */
+  created_at?: number | null;
+  /** "Nur Untertitel": the analysis cuts nothing (the Vorschau hides its
+   *  cutting step). Missing on servers before PR2. */
+  no_cuts?: boolean;
+  /** "Ohne Untertitel": no captions (the Vorschau hides its captions step). */
+  captions_off?: boolean;
   preset_id?: string | null;
   preset_label?: string | null;
   /** UT4: the caption engine pinned at the first export (v1 / v2). */

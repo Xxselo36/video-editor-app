@@ -23,7 +23,7 @@ name: Web
 #                      screenshots only, baselines come in UX18 — kept as
 #                      an artifact
 #             visual-v2  the v2 screens on the default build (s7 editor
-#                      shell, s8 start flow), kept the same way
+#                      shell, s8 start flow, s9 Vorschau), kept the same way
 #
 # Locally: see web/playwright.config.ts (npm run test:e2e).
 
@@ -232,7 +232,7 @@ jobs:
           - name: visual-v2
             mode: anon
             browsers: chromium
-            args: e2e/visual/s7-editor-v2.spec.ts e2e/visual/s8-start-flow.spec.ts --project=desktop --project=pixel7
+            args: e2e/visual/s7-editor-v2.spec.ts e2e/visual/s8-start-flow.spec.ts e2e/visual/s9-vorschau.spec.ts --project=desktop --project=pixel7
             editor_v2: '1'
     env:
       E2E_MODE: ${{ matrix.mode }}

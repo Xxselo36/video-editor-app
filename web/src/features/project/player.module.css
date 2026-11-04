@@ -1,0 +1,267 @@
+/* The Vorschau's player (PR2, approved mockup docs/mockups/start/
+ * 4-vorschau): the video frame with its play button and scrub line, for
+ * the preview (PreviewVideo) and the finished video (ExportedVideo).
+ * Ported from the mockup stylesheet ("4: Vorschau") with the app's tokens.
+ *
+ * The frame's size comes from the page (PreviewScreen sets it on its
+ * root):
+ *   --fh  the frame's height. A 9:16 frame is this tall (and at most as
+ *         wide as its column); a 16:9 one (data-shape="wide") is as wide
+ *         as its column allows, at most 880 px and 16/9 of --fh.
+ */
+
+.player {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 100%;
+}
+.player[data-shape="wide"] {
+  width: 100%;
+}
+
+.frame {
+  position: relative;
+  /* the corners clip the video in Safari too */
+  isolation: isolate;
+  overflow: hidden;
+  max-width: 100%;
+  height: var(--fh, 480px);
+  aspect-ratio: 9 / 16;
+  border-radius: 16px;
+  background: var(--surface-1);
+}
+.player[data-shape="wide"] .frame {
+  width: min(100%, 880px, calc(var(--fh, 480px) * 16 / 9));
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+/* Over the picture: a soft shade at the foot, where the scrub line runs,
+ * and the frame's hairline. */
+.frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, transparent 50%, color-mix(in srgb, var(--surface-0) 26%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 6%, transparent);
+  pointer-events: none;
+}
+
+/* A tap on the picture plays and pauses. The caption layer draws over
+ * the picture's box: "contain", as the export pads a video it doesn't
+ * reframe. */
+.video {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The preview's captions (CaptionLayer, read-only): never take a tap. */
+.captions {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Play / pause: a round button over the picture, above the captions. */
+.play {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: 40%;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text-strong);
+  background: color-mix(in srgb, var(--surface-0) 42%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 16%, transparent);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    transform 0.16s var(--ease-out),
+    opacity 0.2s ease,
+    background-color 0.15s ease;
+}
+.play:active {
+  transform: scale(0.97);
+}
+.play:focus-visible {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 3px;
+}
+.play svg {
+  fill: currentColor;
+  stroke: none;
+}
+/* The triangle's weight sits left of its box: centred by eye. */
+.nudge {
+  translate: 2px 0;
+}
+/* While it plays the button steps back: on hover (a mouse) or keyboard
+ * focus it shows, and while the video waits for data (the spinner). */
+.frame[data-playing] .play {
+  opacity: 0;
+}
+.frame[data-playing] .play:focus-visible,
+.frame[aria-busy="true"] .play {
+  opacity: 1;
+}
+@media (hover: hover) and (pointer: fine) {
+  .play:hover {
+    background: color-mix(in srgb, var(--surface-0) 56%, transparent);
+  }
+  .frame[data-playing]:hover .play {
+    opacity: 1;
+  }
+}
+/* A preview that couldn't be made: nothing to play, no play button; the
+ * note says why in the middle of the frame (all of it fits there, also
+ * in a small phone's 146 x 260 frame, where it runs to seven lines). */
+.frame[data-held="failed"] .play {
+  display: none;
+}
+.frame[data-held="failed"] .status {
+  top: 50%;
+  translate: 0 -50%;
+}
+/* Waiting for data: an arc runs round the button (after a moment, so a
+ * quick start shows none). */
+.play::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid transparent;
+  border-top-color: var(--text-strong);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+}
+.frame[aria-busy="true"] .play::after {
+  animation:
+    spin 0.8s linear infinite,
+    appear 0.2s ease-out 0.35s both;
+}
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@keyframes appear {
+  to {
+    opacity: 1;
+  }
+}
+
+/* "Die Vorschau wird noch vorbereitet.": under the button, after 10 s
+ * without any of the file. The wrapper is the live region. (A preview
+ * that couldn't be made: see above.) */
+.status {
+  position: absolute;
+  z-index: 3;
+  top: calc(40% + 44px);
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.chip {
+  max-width: 100%;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-0) 72%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-strong);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: center;
+  text-wrap: balance;
+  animation: rise 0.28s var(--ease-out) both;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* How far it has played: a 3 px line at the foot while it plays. */
+.scrub {
+  position: absolute;
+  z-index: 3;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text-strong) 22%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.fill {
+  display: block;
+  height: 100%;
+  background: var(--text-strong);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+.frame[data-playing] .scrub {
+  opacity: 1;
+}
+
+/* A line under the frame (the captions of a v1 project come with the export). */
+.note {
+  width: 0;
+  min-width: 100%;
+  margin-top: 12px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-align: center;
+  text-wrap: balance;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .play {
+    transition:
+      opacity 0.2s ease,
+      background-color 0.15s ease;
+  }
+  .play:active {
+    transform: none;
+  }
+  /* waiting: the whole ring, still */
+  .frame[aria-busy="true"] .play::after {
+    border-color: color-mix(in srgb, var(--text-strong) 60%, transparent);
+    animation: appear 0.2s ease-out 0.35s both;
+  }
+  .chip {
+    animation-name: appear;
+    opacity: 0;
+  }
+}

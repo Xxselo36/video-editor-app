@@ -127,6 +127,7 @@ JOB_KEYS = sorted([
     "preset_id", "preset_label", "created_at", "updated_at",
     "queue_position", "has_doc", "font_subsets", "peaks",
     "caption_engine",   # UT4: v1 / v2 / None, no content
+    "no_cuts", "captions_off",   # the analysis steps the job skips (Vorschau)
     "has_poster",       # UT5: GET /jobs/{id}/poster answers
     "fps",              # UX10: the editor's trim frame grid (mezz_fps)
     "format_warning",   # UX6: e.g. smartcam_failed

@@ -1163,7 +1163,7 @@ def test_analysis_image_has_what_the_api_image_has_for_an_analysis():
             == set(re.findall(r"fonts-[a-z0-9-]+", docker)))
     reqs = (REPO / "backend" / "requirements.txt").read_text()
     for pin in ("fonttools==4.66.0", "brotli==1.2.0", "anthropic==0.111.0",
-                "moviepy==1.0.3"):
+                "moviepy==1.0.3", "imageio_ffmpeg>=0.4.9,<0.8"):
         assert pin in reqs and f'"{pin}"' in image, pin
     assert '"CLEO_LOCAL_WHISPER": "0"' in image
 

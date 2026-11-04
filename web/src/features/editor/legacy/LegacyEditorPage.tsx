@@ -13,6 +13,12 @@
  *
  * UX11: the v2 editor exports in its export sheet (useExportFlow) and
  * stays on the page; the v1 editor goes to the dashboard as before.
+ *
+ * Back (D14): the v2 editor returns to the Vorschau, as the history entry
+ * before it when its Feinschliff opened the editor (no second Vorschau
+ * entry), else pushed; so does leaving its export sheet while the export
+ * runs or once it is done. A project deleted meanwhile leads to Projects.
+ * The v1 editor goes to the dashboard as before.
  */
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -28,6 +34,7 @@ import { audioWarningText, cardError, describeError, warningText } from "@/lib/e
 import { waitForSaves } from "@/lib/pendingSaves";
 import type { JobStatus } from "@/features/jobs/types";
 import { ErrorView } from "@/features/project/ErrorView";
+import { takeRefine } from "@/features/project/nav";
 import { useCaptionsV2 } from "@/features/captions-ui/flag";
 import { applyRender, startRender } from "./applyRender";
 import { useExportFlow } from "@/features/editor/export/useExportFlow";
@@ -54,6 +61,9 @@ type Load =
 export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: boolean }) {
   const t = useT();
   const router = useRouter();
+  // Opened by the Vorschau's Feinschliff: taken once at mount (a reload
+  // or the next visit pushes the Vorschau).
+  const [fromRefine] = useState(() => takeRefine(jobId));
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [phrases, setPhrases] = useState<Phrase[]>([]);
   const [captionPreset, setCaptionPreset] = useState("clean");
@@ -74,6 +84,12 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
   useEffect(() => {
     flushRef.current = flushPhraseSave;
   });
+  // v2: the top bar's back, and the export sheet's leave (D14).
+  const backToPreview = () => {
+    flushPhraseSave();
+    if (fromRefine) router.back();
+    else router.push(`/app/p/${jobId}`);
+  };
   const [attempt, setAttempt] = useState(0);
   // UT4 opt-in: this browser asks for the v2 export captions.
   const captionsV2 = useCaptionsV2();
@@ -88,7 +104,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
         client: "v2",
       });
     },
-    onLeave: () => router.push(`/app/p/${jobId}`),
+    onLeave: backToPreview,
     onReopened: () => {
       setLoad({ state: "loading" });
       setAttempt((n) => n + 1);
@@ -161,6 +177,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
   // Leaving the route (back, a link): the last edit goes now.
   useEffect(() => () => flushRef.current(), []);
 
+  // v1, and a v2 project that is gone: Projects.
   const leave = () => {
     flushPhraseSave();
     router.push("/app");
@@ -207,7 +224,7 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
     );
   }
   if (load.state === "loading") {
-    if (v2) return <EditorV2 loading onBack={leave} />;
+    if (v2) return <EditorV2 loading onBack={backToPreview} />;
     return (
       <AppPage width="3xl">
         <Toast compact>{t("app.header.opening")}</Toast>
@@ -261,7 +278,8 @@ export function LegacyEditorPage({ jobId, v2 = false }: { jobId: string; v2?: bo
           if (edited) schedulePhraseSave(job.id, next, { keepalive: false });
         }}
         onApply={onApply}
-        onBack={leave}
+        onBack={backToPreview}
+        onExit={leave}
         exportFlow={exportFlow}
         // A project pinned to the v1 burn keeps that look (UT4 F11): the
         // v2 Style tab doesn't change its export.

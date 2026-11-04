@@ -12,6 +12,7 @@ import {
   cutEdges,
   cutRange,
   cutWords,
+  exportCaptionSource,
   gapKind,
   labelRemoved,
   menuCounts,
@@ -94,6 +95,29 @@ describe("snapEdge (testdata/snap_vectors.json, twin of audio_analysis.snap_edge
         if (Math.abs((f + 0.5) / 100 - t) <= 0.12 + 1e-9) expect(peaks[i]).toBeLessThanOrEqual(peaks[f]);
       }
     }
+  });
+});
+
+// ── the words an export leaves out (testdata/cut_words_vectors.json, shared with the backend) ──
+
+type CutWordsVector = {
+  name: string;
+  words: DocWord[];
+  removed: [number, number][];
+  cut: string[];
+  units: [string, number, number][];
+};
+const CUT_WORDS = JSON.parse(
+  fs.readFileSync(fileURLToPath(new URL("../../../../../testdata/cut_words_vectors.json", import.meta.url)), "utf8"),
+) as { vectors: CutWordsVector[] };
+
+describe("cut words (testdata/cut_words_vectors.json, twin of exports.cut_by and doc_units)", () => {
+  it.each(CUT_WORDS.vectors.map((v) => [v.name, v] as const))("%s", (_n, v) => {
+    const removed = v.removed.map(([start, end]) => ({ start, end }));
+    const cut = cutBy(removed);
+    expect(v.words.filter((w) => cut?.(w) ?? false).map((w) => w.id)).toEqual(v.cut);
+    const { units } = exportCaptionSource(v.words, removed);
+    expect(units.map((u) => [u.text, u.original_start, u.original_end])).toEqual(v.units);
   });
 });
 

@@ -3157,16 +3157,28 @@ _RENDER_STARTED = errors.stage_fields(
     errors.stage_message("render.prepare", "Rendering…"))
 
 
-def _queue_start_render(job_id: str, edited: list, disabled_cuts: list,
+def _queue_start_render(job_id: str, edited: list | None, disabled_cuts: list,
                         owner_id: str | None, plan: str | None,
                         before: dict | None = None,
-                        v2: bool = False) -> int | None:
+                        v2: bool = False,
+                        units_of: Callable[[Job], list | None] | None = None
+                        ) -> int | None:
     """POST /render: the compare-and-set to processing and the render
-    task, in one transaction. None: not in review (409). `before` gets
-    the job as it was ("job")."""
+    task, in one transaction. None: not in review (409), or `units_of`
+    declined. `before` gets the job as it was ("job"). `units_of(job)`:
+    the render's captions taken from the job the compare-and-set reads,
+    instead of `edited` (the stored source); None leaves the job as it
+    is."""
+    sent: dict[str, Any] = {"subtitles": edited}
+
     def _start(cur: Job) -> dict | None:
         if cur.status != "awaiting_review":
             return None
+        if units_of is not None:
+            units = units_of(cur)
+            if units is None:
+                return None
+            sent["subtitles"] = units
         if before is not None:
             before["job"] = copy.deepcopy(cur)
         return dict(status="processing", **_RENDER_STARTED, progress=1.0,
@@ -3177,7 +3189,8 @@ def _queue_start_render(job_id: str, edited: list, disabled_cuts: list,
     def _payload(written: dict | None) -> dict:
         return {"v": taskq.WORKER_PROTOCOL, "job_id": job_id,
                 "gen": int((written or {}).get("render_gen") or 1),
-                "subtitles": edited, "disabled_cuts": disabled_cuts}
+                "subtitles": sent["subtitles"],
+                "disabled_cuts": disabled_cuts}
     try:
         task_id, written = _tasks().enqueue(
             job_id, "render", _payload, owner_id=owner_id, plan=plan,
@@ -7805,7 +7818,15 @@ def post_render(job_id: str, payload: dict,
     successful exports each one records its fair-use share (never
     blocking). A matching speculative render is taken at once: the job
     comes back done with "instant": true. The answer carries "gen" and
-    "cost_seconds" (minutes recorded for this export)."""
+    "cost_seconds" (minutes recorded for this export).
+
+    {"client": "v2", "source": "stored"} without subtitles: the export of
+    the job as stored, with the captions the editor would send
+    (exports.stored_units, taken from the job the compare-and-set that
+    starts the render reads) — the Vorschau's "Fertigstellen", no editor
+    open. 422 needs_editor (nothing starts) when only the editor can make
+    those captions (exports.needs_editor: sentence edits without an edit
+    doc)."""
     job = get_owned_job(job_id, user)
     if job.status != "awaiting_review":
         raise HTTPException(409, f"job not in review state (status={job.status})")
@@ -7814,15 +7835,21 @@ def post_render(job_id: str, payload: dict,
     v2 = payload.get("client") == "v2"
 
     edited = payload.get("subtitles")
-    if not isinstance(edited, list):
+    stored = edited is None and v2 and payload.get("source") == "stored"
+    if stored and exports.needs_editor(job):
+        raise ApiRefusal(422, "needs_editor")
+    if not stored and not isinstance(edited, list):
         raise HTTPException(400, "payload.subtitles must be a list")
     disabled_cuts = payload.get("disabled_cuts") or []
     if not isinstance(disabled_cuts, list):
         raise HTTPException(400, "payload.disabled_cuts must be a list")
 
+    # The instant export compares the captions with the speculative
+    # render's (its own compare-and-set re-checks every revision).
     if (v2 and isinstance(job.spec, dict) and job.spec.get("status") == "done"
             and not disabled_cuts
-            and _promote_spec(job_id, exports.units_hash(edited))):
+            and _promote_spec(job_id, exports.units_hash(
+                exports.stored_units(job) if stored else edited))):
         out = _job_out(store.get(job_id), user)
         out.update(instant=True, cost_seconds=0, gen=job.spec.get("gen"))
         return out
@@ -7838,13 +7865,26 @@ def post_render(job_id: str, payload: dict,
         store.modify(job_id, lambda cur: captions_v2.optin_fields(cur, requested)
                      if cur.status == "awaiting_review" else None)
     before: dict[str, Job] = {}
+    # The stored source's captions come from the job as the compare-and-
+    # set reads it: a save another tab or device made since the read
+    # above is in them (from then on the job takes no saves).
+    refused: list[str] = []
+
+    def units_of(cur: Job) -> list | None:
+        if exports.needs_editor(cur):
+            refused.append("needs_editor")
+            return None
+        return exports.stored_units(cur)
 
     if taskq.enabled():
         # The compare-and-set and the render task in one transaction
         # (the unique active-task index guards it too, across replicas).
         task_id = _queue_start_render(job_id, edited, disabled_cuts,
-                                      job.owner_id, job.plan, before, v2)
+                                      job.owner_id, job.plan, before, v2,
+                                      units_of if stored else None)
         if task_id is None:
+            if refused:
+                raise ApiRefusal(422, "needs_editor")
             cur = store.get(job_id)
             raise HTTPException(
                 409, "job not in review state "
@@ -7865,21 +7905,30 @@ def post_render(job_id: str, payload: dict,
     # the old 'awaiting_review + error' state — as a compare-and-set, so
     # only one request gets to start the render. The same write takes
     # the render's generation (its outputs go under jobs/{id}/r{gen}/).
+    sent: dict[str, Any] = {"subtitles": edited}
+
     def _start(cur: Job) -> dict | None:
         if cur.status != "awaiting_review":
             return None
+        if stored:
+            units = units_of(cur)
+            if units is None:
+                return None
+            sent["subtitles"] = units
         before["job"] = copy.deepcopy(cur)
         return dict(status="processing", **_RENDER_STARTED, progress=1.0,
                     **errors.no_error(), queue_position=None,
                     render_gen=int(cur.render_gen or 0) + 1,
                     **_render_start_fields(cur, v2))
     if not store.modify(job_id, _start):
+        if refused:
+            raise ApiRefusal(422, "needs_editor")
         cur = store.get(job_id)
         raise HTTPException(
             409, f"job not in review state (status={cur.status if cur else None})")
     thread = threading.Thread(
         target=_run_render,
-        args=(job_id, edited, disabled_cuts),
+        args=(job_id, sent["subtitles"], disabled_cuts),
         daemon=True,
     )
     # Only the winner of the compare-and-set takes a place in line.

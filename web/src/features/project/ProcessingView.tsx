@@ -1,11 +1,11 @@
 "use client";
 /**
- * The processing view of /app/p/[jobId] (UX12, flows.md §3.4): what
- * happens to the video while it is analysed — or exported — as a
- * checklist from the job's stage codes (backend/errors.py STAGES), an
- * estimate of the time left, and what the user may do meanwhile. When the
- * analysis ends while this view is visible, ProjectPage opens the editor
- * by itself. No "Notify me" button (review G9).
+ * The Vorschau of a video being analysed (UX12, flows.md §3.4; PR2 plan
+ * D11): what happens to it as a checklist from the job's stage codes
+ * (backend/errors.py STAGES; only the steps it goes through, ./steps),
+ * an estimate of the time left, and what the user may do meanwhile. When
+ * the analysis ends the Vorschau shows the video in its place
+ * (PreviewScreen). No "Notify me" button (review G9).
  */
 import { useEffect, useState } from "react";
 import { Check, Film, LoaderCircle } from "lucide-react";
@@ -14,29 +14,10 @@ import { Progress } from "@/components/ui/Progress";
 import { useLang, useT, type TFn } from "@/i18n";
 import { stageText } from "@/lib/errors";
 import { plural } from "@/lib/i18n/plural";
-import type { MessageKey } from "@/i18n/messages/en";
 import type { JobStatus } from "@/features/jobs/types";
 import { analysisEta, toMsTime } from "@/features/jobs/projects";
 import { useLocalThumb } from "@/features/upload/uploadState";
-
-export type Step = { id: string; key: MessageKey; stages: string[] };
-
-/** The analysis: Uploaded ✓ → Listening → Cutting → Captions → Ready. */
-export const ANALYSIS_STEPS: Step[] = [
-  { id: "uploaded", key: "app.processing.step.uploaded", stages: [] },
-  { id: "listening", key: "app.processing.step.listening", stages: ["queued", "analyze.normalize", "analyze.smartcam", "analyze.transcribe"] },
-  { id: "cutting", key: "app.processing.step.cutting", stages: ["analyze.cleanup", "analyze.cuts"] },
-  { id: "captions", key: "app.processing.step.captions", stages: ["analyze.captions"] },
-  { id: "ready", key: "app.processing.step.ready", stages: ["analyze.done"] },
-];
-
-/** The export: Preparing → Captions → Encoding → Finishing. */
-export const EXPORT_STEPS: Step[] = [
-  { id: "prepare", key: "app.processing.step.prepare", stages: ["queued", "render.prepare"] },
-  { id: "addCaptions", key: "app.processing.step.addCaptions", stages: ["render.captions"] },
-  { id: "encode", key: "app.processing.step.encode", stages: ["render.encode"] },
-  { id: "finish", key: "app.processing.step.finish", stages: ["render.hooks", "render.finish"] },
-];
+import { stepsFor, type Step } from "./steps";
 
 /** Index of the step the job is in (a stage nobody knows: the first one
  *  after "Uploaded"). */
@@ -74,7 +55,9 @@ function etaText(e: NonNullable<ReturnType<typeof etaLine>>, t: TFn, lang: strin
   }
 }
 
-export function ProcessingView({ job, exporting, name }: { job: JobStatus; exporting: boolean; name: string }) {
+/** `canLeave`: no upload runs in this page, so closing it loses nothing
+ *  (the line that says so shows only then). */
+export function ProcessingView({ job, canLeave }: { job: JobStatus; canLeave: boolean }) {
   const t = useT();
   const lang = useLang();
   const thumb = useLocalThumb(job.id);
@@ -83,7 +66,7 @@ export function ProcessingView({ job, exporting, name }: { job: JobStatus; expor
     const id = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(id);
   }, []);
-  const steps = exporting ? EXPORT_STEPS : ANALYSIS_STEPS;
+  const steps = stepsFor(job);
   const at = currentStep(steps, job.stage);
   const queued = job.stage === "queued" || job.message === "queued";
   const detail = queued
@@ -91,13 +74,12 @@ export function ProcessingView({ job, exporting, name }: { job: JobStatus; expor
       ? t("app.card.queued.title", { n: job.queue_position })
       : t("app.card.queued.titleNoPos")
     : stageText(job.stage, job.stage_params, t);
-  const createdAt = toMsTime((job as { created_at?: unknown }).created_at);
-  const eta = exporting ? null : etaLine({ duration: job.duration, createdAt, now });
+  const eta = etaLine({ duration: job.duration, createdAt: toMsTime(job.created_at), now });
 
   return (
     <section
       data-testid="processing"
-      data-phase={exporting ? "rendering" : "analyzing"}
+      data-phase="analyzing"
       data-step={steps[at]?.id}
       aria-labelledby="processing-title"
       className="flex flex-col gap-6"
@@ -114,14 +96,9 @@ export function ProcessingView({ job, exporting, name }: { job: JobStatus; expor
             <Icon icon={Film} size={24} strokeWidth={1.5} />
           )}
         </div>
-        <div className="min-w-0">
-          <h1 id="processing-title" className="text-xl font-bold tracking-tight" style={{ color: "var(--text-strong)" }}>
-            {t(exporting ? "app.processing.titleExport" : "app.processing.titleAnalyze")}
-          </h1>
-          <p className="truncate text-sm" style={{ color: "var(--text-muted)" }} title={name}>
-            {name}
-          </p>
-        </div>
+        <h2 id="processing-title" className="min-w-0 text-xl font-bold tracking-tight" style={{ color: "var(--text-strong)" }}>
+          {t("app.processing.titleAnalyze")}
+        </h2>
       </div>
 
       <ol className="flex flex-col gap-1" data-testid="processing-steps">
@@ -176,9 +153,11 @@ export function ProcessingView({ job, exporting, name }: { job: JobStatus; expor
         </div>
       </div>
 
-      <p className="rounded-xl px-4 py-3 text-sm" style={{ background: "var(--surface-1)", color: "var(--text-body)" }}>
-        {t(exporting ? "app.processing.closeTabExport" : "app.processing.closeTab")}
-      </p>
+      {canLeave && (
+        <p className="rounded-xl px-4 py-3 text-sm" style={{ background: "var(--surface-1)", color: "var(--text-body)" }}>
+          {t("app.processing.closeTab")}
+        </p>
+      )}
     </section>
   );
 }

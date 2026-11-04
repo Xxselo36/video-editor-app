@@ -179,7 +179,8 @@ test("a first visit goes from /app to the picker; back from its steps stays in t
   expect(again).toBeTruthy();
   await page.reload();
   await expect(page.getByTestId("picker")).toBeVisible();
-  expect(page.url()).toBe(`${WEB}/app/new`);
+  // (The page drops ?step= after its first paint: wait for it.)
+  await expect(page).toHaveURL(`${WEB}/app/new`);
 });
 
 test("an upload keeps going while the user changes routes", async ({ page, stub }) => {

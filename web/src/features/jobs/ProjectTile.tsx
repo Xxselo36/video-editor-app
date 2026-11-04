@@ -78,13 +78,13 @@ const TONE: Record<string, { bg: string; fg: string }> = {
   muted: { bg: "rgba(0,0,0,0.6)", fg: "#d4d4d8" },
 };
 
-/** Where a tile click goes (null: nothing to open). */
+/** Where a tile click goes (null: nothing to open): the Vorschau, which
+ *  opens the editor through its Feinschliff. */
 export function openHref(p: Project): string | null {
   switch (p.state) {
+    case "processing":
     case "ready":
     case "edited":
-      return `/app/edit/${p.id}`;
-    case "processing":
     case "exporting":
     case "exported":
     case "failed":

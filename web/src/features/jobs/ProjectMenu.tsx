@@ -1,11 +1,15 @@
 "use client";
 /**
- * The ⋯ menu of a project tile (UX12): Download · Copy post text ·
- * Rename · Edit again · Delete. A menu button (aria-haspopup) and a
- * role="menu" list rendered into <body> (the tile clips its content),
- * placed under the button or above it near the bottom of the window.
+ * The ⋯ menu of a project (UX12; its tile, and the Vorschau's title row
+ * since PR2): Download · Copy post text · Rename · Edit again · Delete.
+ * (The Vorschau's has no "Edit again": its Feinschliff is that action.)
+ * A menu button (aria-haspopup) and a role="menu" list rendered into
+ * <body> (the tile clips its content), placed under the button or above
+ * it near the bottom of the window; beside it when it fits neither (a
+ * landscape phone: it never covers the button).
  * Arrow keys move, Escape / a click outside close it, focus goes back to
- * the button.
+ * the button; also when the dialog that Rename or Delete opened closes
+ * (the dialog returns the focus to where it was when it opened).
  */
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Dialog } from "@/components/ui/Dialog";
@@ -18,13 +22,16 @@ import { fetchJob } from "./jobsStore";
 import { postTextEntry, postTextKey, type PostTextEntry } from "./postText";
 import type { Project } from "./projects";
 
+// 44 px tall to a finger (pointer-coarse); pressed, it lights up.
 const ITEM =
-  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-[var(--surface-2)] focus-visible:bg-[var(--surface-2)]";
+  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-[var(--surface-2)] focus-visible:bg-[var(--surface-2)] active:bg-[var(--surface-2)] pointer-coarse:min-h-11";
 
-export function ProjectMenu({ p, onAction, onOpen }: {
+export function ProjectMenu({ p, onAction, onOpen, size = "sm" }: {
   p: Project;
   onAction: (a: "rename" | "delete") => void;
   onOpen: (href: string) => void;
+  /** The trigger: 32 px on a tile, 44 px on the Vorschau's title row. */
+  size?: "sm" | "lg";
 }) {
   const t = useT();
   const mediaReady = useMediaReady();
@@ -37,7 +44,7 @@ export function ProjectMenu({ p, onAction, onOpen }: {
   const live = p.state !== "expired";
   const canDownload = live && p.hasOutput && mediaReady;
   const canCopy = live && p.hasOutput;
-  const canEditAgain = p.state === "edited";
+  const canEditAgain = p.state === "edited" && size !== "lg";
 
   const close = (refocus = true) => {
     setOpen(false);
@@ -52,10 +59,18 @@ export function ProjectMenu({ p, onAction, onOpen }: {
     if (!a || !el) return;
     const w = el.offsetWidth;
     const h = el.offsetHeight;
-    const left = Math.max(8, Math.min(a.right - w, window.innerWidth - w - 8));
+    const vh = window.innerHeight;
     const below = a.bottom + 4;
-    const top = below + h <= window.innerHeight - 8 ? below : Math.max(8, a.top - 4 - h);
-    setPos({ left, top });
+    const above = a.top - 4 - h;
+    if (below + h <= vh - 8 || above >= 8) {
+      setPos({ left: Math.max(8, Math.min(a.right - w, window.innerWidth - w - 8)), top: below + h <= vh - 8 ? below : above });
+      return;
+    }
+    // Neither under nor over it (a landscape phone): beside it, left (or
+    // right, near the left edge), level with it as far as it fits.
+    const mid = a.top + a.height / 2 - h / 2;
+    const left = a.left - 4 - w >= 8 ? a.left - 4 - w : Math.min(a.right + 4, window.innerWidth - w - 8);
+    setPos({ left, top: Math.max(8, Math.min(mid, vh - 8 - h)) });
   }, [open]);
 
   useEffect(() => {
@@ -154,10 +169,15 @@ export function ProjectMenu({ p, onAction, onOpen }: {
         aria-expanded={open}
         aria-label={t("app.projects.menuAria", { name })}
         onClick={() => (open ? close() : setOpen(true))}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--surface-2)]"
+        className={`inline-flex items-center justify-center rounded-full hover:bg-[var(--surface-2)] ${
+          // the Vorschau's gives a little when pressed (not with reduced motion)
+          size === "lg"
+            ? "h-11 w-11 transition-[background-color,scale] duration-[160ms] ease-[cubic-bezier(.16,1,.3,1)] motion-safe:active:scale-[.97]"
+            : "h-8 w-8 transition-colors"
+        }`}
         style={{ color: "var(--text-muted)" }}
       >
-        <Icon icon={Ellipsis} size={18} />
+        <Icon icon={Ellipsis} size={size === "lg" ? 20 : 18} />
       </button>
       {copied && (
         <span role="status" className="sr-only">
@@ -225,7 +245,7 @@ export function ProjectMenu({ p, onAction, onOpen }: {
                 className={ITEM}
                 data-testid="job-card-rename"
                 onClick={() => {
-                  close(false);
+                  close();
                   onAction("rename");
                 }}
               >
@@ -241,7 +261,7 @@ export function ProjectMenu({ p, onAction, onOpen }: {
               style={{ color: "var(--danger)" }}
               data-testid="job-card-delete"
               onClick={() => {
-                close(false);
+                close();
                 onAction("delete");
               }}
             >

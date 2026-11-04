@@ -276,6 +276,30 @@ describe("DocSaver", () => {
     expect(t.srv.rev).toBe(1);
   });
 
+  it("unacked: a request whose answer never came stays (it may be stored); answered, refused or refused as a conflict, it goes", async () => {
+    const t = setup(docOf(8), null);
+    t.srv.fail = "net";
+    t.edit((d) => editWord(d, "w0002", "two"));
+    await t.tm.tick();
+    expect(t.saver.status).toBe("retrying");
+    expect(t.saver.unacked.map((b) => b.rev)).toEqual([t.srv.bodies[0].rev]);
+    t.srv.fail = null;
+    await t.tm.tick();
+    expect(t.saver.status).toBe("saved");
+    expect(t.saver.unacked).toEqual([]);
+    t.srv.fail = 400;
+    t.edit((d) => editWord(d, "w0003", "three"));
+    await t.tm.tick();
+    expect(t.saver.status).toBe("failed");
+    expect(t.saver.unacked).toEqual([]);
+    const c = setup();
+    c.srv.rev = 5; // another tab saved
+    c.edit((d) => editWord(d, "w0002", "two"));
+    await c.tm.tick();
+    expect(c.saver.status).toBe("conflict");
+    expect(c.saver.unacked).toEqual([]);
+  });
+
   it("other refusals: failed; Retry (flush) sends again", async () => {
     const t = setup();
     t.srv.fail = 400;

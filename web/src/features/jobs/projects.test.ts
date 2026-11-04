@@ -8,6 +8,7 @@ import {
   emptyListAction,
   capLocal,
   daysLeft,
+  displayName,
   matchesFilter,
   matchesSearch,
   MAX_LOCAL,
@@ -19,6 +20,7 @@ import {
   parseLocal,
   remoteFrom,
   stateOf,
+  timelineSeconds,
   type LocalJob,
   type Remote,
 } from "./projects";
@@ -170,5 +172,26 @@ describe("page helpers", () => {
     expect(analysisEta(null)).toBeNull();
     expect(analysisEta(5)).toBe(20);
     expect(analysisEta(60)).toBe(72);
+  });
+
+  it("displayName drops a video file's extension, never a title's dots", () => {
+    expect(displayName("Morgenroutine.mov")).toBe("Morgenroutine");
+    expect(displayName("IMG_4711.MOV")).toBe("IMG_4711");
+    expect(displayName("clip.final.mp4")).toBe("clip.final");
+    expect(displayName("Folge 2.10")).toBe("Folge 2.10");
+    expect(displayName("Mein Podcast")).toBe("Mein Podcast");
+    expect(displayName("notes.txt")).toBe("notes.txt");
+    expect(displayName(".mp4")).toBe(".mp4");
+    expect(displayName("")).toBe("");
+  });
+
+  it("timelineSeconds sums the clips at their speed", () => {
+    expect(timelineSeconds()).toBe(0);
+    expect(timelineSeconds([])).toBe(0);
+    expect(timelineSeconds([{ start: 0, end: 10, speed: 1 }, { start: 20, end: 30, speed: 2 }])).toBe(15);
+    // No speed (or a broken one): normal speed.
+    expect(timelineSeconds([{ start: 1, end: 4 }, { start: 5, end: 6, speed: 0 }])).toBe(4);
+    expect(timelineSeconds([{ start: 3, end: 2 }])).toBe(0);
+    expect(timelineSeconds([{ start: 0, end: 3, speed: 1.5 }])).toBeCloseTo(2);
   });
 });

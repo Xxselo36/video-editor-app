@@ -355,6 +355,28 @@ class Job:
         return bool(self.normalized_path) and (
             Path(self.normalized_path).with_name(LEGACY_PROXY_NAME).is_file())
 
+    def _no_cuts(self) -> bool:
+        """"Nur Untertitel": the analysis cuts nothing (settings.style
+        "none", read the way pipeline.analyze_only reads the pace)."""
+        pace = str((self.settings or {}).get("style") or "")
+        return pace.strip().lower() == "none"
+
+    def _captions_off(self) -> bool:
+        """"Ohne Untertitel": the job's captions have the style "none" —
+        the style its export draws (captions_v2.style_for) once the
+        analysis wrote the edit doc (the editor may change it), without
+        one the style picked for the upload."""
+        from backend import captions_v2
+        from backend import doc as edit_doc
+        if isinstance(self.doc, dict):
+            return captions_v2.style_for(self)["presetId"] == "none"
+        settings = self.settings or {}
+        for key in ("caption_style", "caption_preset", "caption_style_hint"):
+            ref = edit_doc.style_ref(settings.get(key))
+            if ref is not None:
+                return ref["presetId"] == "none"
+        return False
+
     def to_dict(self, *, admin: bool = False) -> dict[str, Any]:
         """The job as the API serves it. The raw failure text (paths,
         provider answers, transcript words) only to admins: everyone else
@@ -422,6 +444,10 @@ class Job:
             # UT4: the caption engine pinned at the first render ("v1" /
             # "v2"; None before it). No content.
             "caption_engine": self.caption_engine,
+            # The analysis steps the job skips (the Vorschau's processing
+            # list leaves them out): no cuts, no captions.
+            "no_cuts": self._no_cuts(),
+            "captions_off": self._captions_off(),
             # UX11: exports. The fair-use numbers that depend on who
             # asks (billing) are added by the API (main._export_fields).
             "renders_ok": int(self.renders_ok or 0),

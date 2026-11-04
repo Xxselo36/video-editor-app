@@ -65,7 +65,7 @@ test.describe("dashboard", () => {
         return `${j.status}/${j.message}`;
       }, { timeout: 30_000 })
       .toBe("awaiting_review/render_failed");
-    await expect(jobCard(page, "echt.mp4").getByTestId("job-card-status")).toContainText("Render failed", {
+    await expect(jobCard(page, "echt.mp4").getByTestId("job-card-status")).toContainText("Exporting didn't work", {
       timeout: 20_000,
     });
     await jobCard(page, "echt.mp4").click();

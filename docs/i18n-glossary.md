@@ -35,6 +35,7 @@ then the messages.
 | Project | One uploaded video with its edits and exports (Library today, Projects page from UX12). |
 | Preview | Playing the edit in the browser before exporting. |
 | Edit again | Reopening a finished export in the editor to change it (UX11). |
+| Fine-tune | Opening the editor from the Vorschau to adjust the edit: fix a caption, bring back a cut (PR2). One word for the button, "Open …" and the notes that name it. |
 
 ## Terms
 
@@ -47,10 +48,11 @@ uses both.
 | Cut | cut | Schnitt | corte | coupe | corte | taglio | kesim | cięcie | knip | вырезка | カット | 컷 | potongan | कट |
 | Caption style | caption style | Untertitel-Stil | estilo de subtítulos | style de sous-titres | estilo de legenda | stile sottotitoli | altyazı stili | styl napisów | ondertitelstijl | стиль субтитров | 字幕スタイル | 자막 스타일 | gaya teks | कैप्शन स्टाइल |
 | Minutes | minutes | Minuten | minutos | minutes | minutos | minuti | dakika | minuty | minuten | минуты | 利用時間（分） | 이용 시간(분) | menit | मिनट |
-| Export | export | Export (exportieren) | exportación (exportar) | export (exporter) | exportação (exportar) | esportazione (esportare) | dışa aktarma (dışa aktar) | eksport (eksportuj) | export (exporteren) | экспорт (экспортировать) | 書き出し | 내보내기 | ekspor | एक्सपोर्ट |
+| Export | export | Fertigstellen (fertigstellen) | exportación (exportar) | export (exporter) | exportação (exportar) | esportazione (esportare) | dışa aktarma (dışa aktar) | eksport (eksportuj) | export (exporteren) | экспорт (экспортировать) | 書き出し | 내보내기 | ekspor | एक्सपोर्ट |
 | Project | project | Projekt | proyecto | projet | projeto | progetto | proje | projekt | project | проект | プロジェクト | 프로젝트 | proyek | प्रोजेक्ट |
 | Preview | preview | Vorschau | vista previa | aperçu | prévia | anteprima | önizleme | podgląd | voorbeeld | превью | プレビュー | 미리보기 | pratinjau | प्रीव्यू |
 | Edit again | edit again | erneut bearbeiten | editar de nuevo | modifier à nouveau | editar de novo | modifica di nuovo | yeniden düzenle | edytuj ponownie | opnieuw bewerken | редактировать снова | 再編集 | 다시 편집 | edit lagi | फिर से एडिट करें |
+| Fine-tune | Fine-tune | Feinschliff | ajuste fino | retouches | ajuste fino | ritocchi | ince ayar | poprawki | verfijnen | доработка | 微調整 | 다듬기 | Sempurnakan | फ़ाइन-ट्यून |
 
 Notes:
 
@@ -63,6 +65,12 @@ Notes:
   social-media caption, a different concept from the caption style.
 - pt is Brazilian Portuguese ("legenda", "prévia"), es is neutral Latin
   American ("video").
+- de "Fertigstellen (fertigstellen)" replaced "Exportieren" (2026-10):
+  the button "Fertigstellen", the status "Wird fertiggestellt…", the
+  result "Fertig". The noun "Export(e)" stays only for counted exports
+  in billing texts ("Gratis-Exporte"); exporting in another app
+  ("exportiere es kleiner") is a different concept. The other languages
+  keep their export term.
 
 ## Phrases
 
@@ -92,7 +100,7 @@ Japanese, Korean and Hindi match anywhere in the text.
 | en | Export | `render*` |
 | de | Cut | `Cut` |
 | de | Caption style | `Caption-Stil`, `Captions-Stil`, `Untertitelstil*` |
-| de | Export | `render*`, `gerendert` |
+| de | Export | `render*`, `gerendert`, `exportieren` |
 | de | Preview | `Preview` |
 | es | Export | `renderiz*` |
 | es | Preview | `previsualizaci*` |

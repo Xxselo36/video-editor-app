@@ -61,8 +61,14 @@ import {
   stalePlan,
   swapTime,
 } from "./previewSync";
-import { TimelineSaver, timelinePayload, type TimelineAnswer, type TimelineSaveState } from "./timelineSave";
-import { decideUnsaved, readUnsaved, writeUnsaved, type UnsavedDecision } from "./unsaved";
+import {
+  TimelineSaver,
+  timelinePayload,
+  type TimelineAnswer,
+  type TimelineBackup,
+  type TimelineSaveState,
+} from "./timelineSave";
+import { decideUnsaved, dropUnsaved, readUnsaved, writeUnsaved, type UnsavedDecision } from "./unsaved";
 
 export type PlaybackMode = "probing" | "proxy" | "preview";
 
@@ -444,8 +450,11 @@ export function useEditSession({
     if (d.kind === "none") writeUnsaved(jobId, null);
     return d;
   });
-  const makeSaver = () =>
-    new TimelineSaver(editRev, savedSegments.length ? (savedSegments as TimelineSeg[]) : null, {
+  const makeSaver = () => {
+    // The copy this autosave wrote: the only one it drops once the server
+    // has everything (another tab's, or one only offered, stays).
+    let mine: TimelineBackup | null = null;
+    return new TimelineSaver(editRev, savedSegments.length ? (savedSegments as TimelineSeg[]) : null, {
       jobId,
       duration,
       fetch: apiFetch,
@@ -454,8 +463,17 @@ export function useEditSession({
       onAnswer: (d) => answerRef.current(d),
       onConflict: (_rev, refused) => conflictRef.current(refused),
       track: (p) => trackSave(jobId, p),
-      backup: (b) => writeUnsaved(jobId, b),
+      backup: (b) => {
+        if (b) {
+          writeUnsaved(jobId, b);
+          mine = b;
+        } else if (mine) {
+          dropUnsaved(jobId, mine);
+          mine = null;
+        }
+      },
     });
+  };
   /** The autosave of this mount (a new one after a remount: React dev mode). */
   const getSaver = () => (saverRef.current ??= makeSaver());
 

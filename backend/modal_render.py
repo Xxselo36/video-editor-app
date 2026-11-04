@@ -83,7 +83,7 @@ image = (
         "numpy>=1.21.0",
         "Pillow>=9.0.0",
         "opencv-python-headless>=4.8.0",
-        "imageio_ffmpeg>=0.4.9",
+        "imageio_ffmpeg>=0.4.9,<0.8",  # as backend/requirements.txt: ffmpeg 7
         "scipy>=1.9.0",
         # No faster-whisper / ultralytics (torch): the render path never
         # uses them (src/audio.py imports faster_whisper lazily now;
@@ -380,7 +380,7 @@ analyze_image = (
         "numpy>=1.21.0",
         "Pillow>=9.0.0",
         "opencv-python-headless>=4.8.0",
-        "imageio_ffmpeg>=0.4.9",
+        "imageio_ffmpeg>=0.4.9,<0.8",  # as backend/requirements.txt: ffmpeg 7
         "scipy>=1.9.0",
         "pydub>=0.25.1",
         "anthropic==0.111.0",

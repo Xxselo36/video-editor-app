@@ -26,8 +26,11 @@
  *     job, save-11): the next open offers it back when the server doesn't
  *     have it (session/unsaved.ts).
  *   - Leaving: close() sends what is pending now and keeps going (a few
- *     retries) after the editor is gone; a hidden or unloading page sends
- *     it at once with keepalive, on top of a save still on the wire.
+ *     retries) after the editor is gone, then stops: what still didn't
+ *     get through stays in the backup (the next open brings it back),
+ *     and nothing goes out behind the user's back after that (DocSaver
+ *     close() does the same). A hidden or unloading page sends it at
+ *     once with keepalive, on top of a save still on the wire.
  *
  * Framework-free (fetch and timers injected) so it is unit-tested;
  * useEditSession wires it to the editor.
@@ -35,6 +38,7 @@
 import { uniqueRev } from "@/features/editor/state/docSave";
 import type { EditorSeg } from "@/features/editor/timeline/mechanics";
 import { sameTimeline, type TimelineSeg } from "@/lib/editSave";
+import { timelinePayload } from "./unsavedKey";
 
 export const TL_DEBOUNCE_MS = 800;
 const BACKOFF_MS = [1000, 3000, 5000, 10_000, 20_000];
@@ -96,19 +100,9 @@ export type TimelineSaverDeps = {
   poll?: { firstMs: number; everyMs: number; timeoutMs: number };
 };
 
-/** The clips a save sends: enabled, over 0.05 s (the backend drops shorter), with effects. */
-export function timelinePayload(segs: readonly EditorSeg[]): TimelineSeg[] {
-  return segs
-    .filter((s) => !s.disabled && s.end - s.start > 0.05)
-    .map((s) => ({
-      start: s.start,
-      end: s.end,
-      speed: s.speed,
-      fadeIn: s.fadeIn,
-      fadeOut: s.fadeOut,
-      volume: s.volume,
-    }));
-}
+// The clips a save sends (in unsavedKey.ts, which the Vorschau reads
+// without the save code).
+export { timelinePayload };
 
 type Sent = {
   rev: number;
@@ -313,7 +307,10 @@ export class TimelineSaver {
   /**
    * The editor goes (unmount): the pending state goes now, retried a few
    * times; no state reaches the editor any more. Resolves when the server
-   * has it, or it gave up (reopening waits for this, pendingSaves).
+   * has it, or it gave up (reopening waits for this, pendingSaves). Given
+   * up, it stops: no retry after it (the Vorschau that waited for it
+   * would never hear of one); the backup keeps the change, and a request
+   * still on the wire finishes (tracked till then).
    */
   close(tries = 4): Promise<void> {
     this.closing = true;
@@ -323,9 +320,9 @@ export class TimelineSaver {
       while (this.dirty && !this.stopped && this.state !== "conflict") {
         const ok = await this.settle(12_000);
         if (ok || !this.dirty) return;
-        if (--left <= 0) return;
-        if (this.state === "failed") return;
+        if (--left <= 0 || this.state === "failed") break;
       }
+      if (this.dirty) this.stop();
     };
     return run();
   }

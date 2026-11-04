@@ -1,0 +1,159 @@
+{
+ "comment": "Which doc words an export leaves out as cut from the video, and the caption units that leaves: web/src/features/editor/state/cuts.ts cutBy / wordProbes and exportCaptionSource, backend/exports.py cut_by / word_probes and doc_units. A word plays when its middle plays; a word longer than LONG_WORD_S (1.2 s) when its head or its tail plays (WORD_SOUND_S 0.4). removed: sorted source ranges [start, end], ends included; cut: the ids of the cut words; units: [text, start, end] in source seconds.",
+ "vectors": [
+  {
+   "name": "a long word plays while its head plays (Whisper stretched it over the cut pause)",
+   "words": [
+    {"id": "w1", "text": "Okay.", "start": 3.0, "end": 6.0},
+    {"id": "w2", "text": "Next", "start": 6.0, "end": 6.4},
+    {"id": "w3", "text": "part", "start": 6.4, "end": 6.8}
+   ],
+   "removed": [[3.5, 5.9]],
+   "cut": [],
+   "units": [
+    ["Okay.", 3.0, 6.0],
+    ["Next", 6.0, 6.4],
+    ["part", 6.4, 6.8]
+   ]
+  },
+  {
+   "name": "a long word plays while its tail plays",
+   "words": [
+    {"id": "w1", "text": "So", "start": 1.0, "end": 1.3},
+    {"id": "w2", "text": "well", "start": 1.4, "end": 4.0},
+    {"id": "w3", "text": "fine.", "start": 4.0, "end": 4.4}
+   ],
+   "removed": [[1.45, 3.6]],
+   "cut": [],
+   "units": [
+    ["So well", 1.0, 4.0],
+    ["fine.", 4.0, 4.4]
+   ]
+  },
+  {
+   "name": "a long word with its head and its tail cut is cut",
+   "words": [
+    {"id": "w1", "text": "Hello", "start": 0.5, "end": 0.9},
+    {"id": "w2", "text": "uhm", "start": 1.0, "end": 3.0},
+    {"id": "w3", "text": "there.", "start": 3.1, "end": 3.5}
+   ],
+   "removed": [[0.95, 3.05]],
+   "cut": ["w2"],
+   "units": [
+    ["Hello", 0.5, 0.9],
+    ["there.", 3.1, 3.5]
+   ]
+  },
+  {
+   "name": "both ends of a long word in two cuts: cut, though its middle plays",
+   "words": [
+    {"id": "w1", "text": "Right", "start": 0.0, "end": 0.5},
+    {"id": "w2", "text": "sooo", "start": 1.0, "end": 4.0},
+    {"id": "w3", "text": "yes.", "start": 4.5, "end": 5.0}
+   ],
+   "removed": [[1.0, 1.5], [3.5, 4.25]],
+   "cut": ["w2"],
+   "units": [
+    ["Right", 0.0, 0.5],
+    ["yes.", 4.5, 5.0]
+   ]
+  },
+  {
+   "name": "a word of LONG_WORD_S or shorter: its middle decides",
+   "words": [
+    {"id": "w1", "text": "hmm", "start": 0.5, "end": 1.7},
+    {"id": "w2", "text": "right.", "start": 1.75, "end": 2.25}
+   ],
+   "removed": [[1.0, 1.2]],
+   "cut": ["w1"],
+   "units": [
+    ["right.", 1.75, 2.25]
+   ]
+  },
+  {
+   "name": "a word just over LONG_WORD_S: its head and its tail decide",
+   "words": [
+    {"id": "w1", "text": "hmm", "start": 0.0, "end": 1.3},
+    {"id": "w2", "text": "right.", "start": 1.35, "end": 1.85}
+   ],
+   "removed": [[0.5, 0.8]],
+   "cut": [],
+   "units": [
+    ["hmm right.", 0.0, 1.85]
+   ]
+  },
+  {
+   "name": "a long word's probes lie WORD_SOUND_S / 2 inside its ends",
+   "words": [
+    {"id": "w1", "text": "Look", "start": 2.0, "end": 4.0},
+    {"id": "w2", "text": "here", "start": 5.0, "end": 7.0},
+    {"id": "w3", "text": "now.", "start": 7.1, "end": 7.5}
+   ],
+   "removed": [[1.9, 2.25], [3.75, 4.1], [4.9, 5.15], [6.75, 7.05]],
+   "cut": ["w1"],
+   "units": [
+    ["here", 5.0, 7.0],
+    ["now.", 7.1, 7.5]
+   ]
+  },
+  {
+   "name": "a range's ends count",
+   "words": [
+    {"id": "w1", "text": "one", "start": 0.0, "end": 0.5},
+    {"id": "w2", "text": "two", "start": 0.5, "end": 1.0},
+    {"id": "w3", "text": "three", "start": 1.0, "end": 1.5},
+    {"id": "w4", "text": "four", "start": 1.5, "end": 2.0},
+    {"id": "w5", "text": "five.", "start": 2.0, "end": 2.5}
+   ],
+   "removed": [[0.25, 0.375], [0.875, 1.25], [2.5, 3.0]],
+   "cut": ["w1", "w3"],
+   "units": [
+    ["two", 0.5, 1.0],
+    ["four", 1.5, 2.0],
+    ["five.", 2.0, 2.5]
+   ]
+  },
+  {
+   "name": "many ranges; a hidden filler and a forced break in a cut",
+   "words": [
+    {"id": "w1", "text": "We", "start": 0.0, "end": 0.25},
+    {"id": "w2", "text": "um", "start": 0.25, "end": 0.5, "filler": true, "hidden": true},
+    {"id": "w3", "text": "start", "start": 0.5, "end": 1.0},
+    {"id": "w4", "text": "the", "start": 1.0, "end": 1.25},
+    {"id": "w5", "text": "show", "start": 1.25, "end": 1.75},
+    {"id": "w6", "text": "right", "start": 1.75, "end": 2.0, "breakBefore": true},
+    {"id": "w7", "text": "now.", "start": 2.0, "end": 2.5},
+    {"id": "w8", "text": "It", "start": 3.0, "end": 3.25},
+    {"id": "w9", "text": "is", "start": 3.25, "end": 3.5},
+    {"id": "w10", "text": "live.", "start": 3.5, "end": 4.0}
+   ],
+   "removed": [[0.25, 0.5], [1.0, 1.3], [1.8, 2.0], [3.2, 3.4]],
+   "cut": ["w2", "w4", "w6", "w9"],
+   "units": [
+    ["We", 0.0, 0.25],
+    ["start", 0.5, 1.0],
+    ["show", 1.25, 1.75],
+    ["now.", 2.0, 2.5],
+    ["It", 3.0, 3.25],
+    ["live.", 3.5, 4.0]
+   ]
+  },
+  {
+   "name": "no cuts",
+   "words": [
+    {"id": "w1", "text": "I", "start": 0.0, "end": 0.25},
+    {"id": "w2", "text": "am", "start": 0.25, "end": 0.5},
+    {"id": "w3", "text": "here", "start": 0.5, "end": 1.0},
+    {"id": "w4", "text": "for", "start": 1.0, "end": 1.25},
+    {"id": "w5", "text": "you.", "start": 1.25, "end": 3.0}
+   ],
+   "removed": [],
+   "cut": [],
+   "units": [
+    ["I am", 0.0, 0.5],
+    ["here", 0.5, 1.0],
+    ["for you.", 1.0, 3.0]
+   ]
+  }
+ ]
+}

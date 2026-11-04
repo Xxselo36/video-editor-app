@@ -11,6 +11,8 @@ import type { ErrorParams } from "@/lib/errors";
 import type { JobStatusRow } from "@/lib/jobStatus";
 import type { UploadSettings } from "@/features/upload/uploadJob";
 import type { LastUsedPrefs } from "@/features/start/lastUsed";
+import { VIDEO_EXT } from "@/features/start/videoPicker";
+import type { SavedSeg } from "./types";
 
 /** An upload that has no job yet (its id is `upl-…`). */
 export type UploadRecord = {
@@ -460,6 +462,22 @@ export function middleEllipsis(name: string, max = 34): string {
   const tail = Math.max(8, Math.floor((max - 1) * 0.4));
   const head = max - 1 - tail;
   return `${chars.slice(0, head).join("")}…${chars.slice(chars.length - tail).join("")}`;
+}
+
+/** A project's name as the Vorschau shows it: "Morgenroutine.mov" →
+ *  "Morgenroutine". Only a video file's extension goes (the ones the
+ *  uploads take), so a title keeps its dots ("Folge 2.10"); a name that
+ *  is only an extension stays as it is. */
+export function displayName(name: string): string {
+  const base = name.replace(VIDEO_EXT, "");
+  return base.trim() ? base : name;
+}
+
+/** How long the edit plays (s): its clips at their speed. */
+export function timelineSeconds(segments: readonly SavedSeg[] = []): number {
+  let total = 0;
+  for (const s of segments) total += Math.max(0, s.end - s.start) / (s.speed && s.speed > 0 ? s.speed : 1);
+  return total;
 }
 
 /** Whole days until `expiresAt` (≥ 0), or null. */

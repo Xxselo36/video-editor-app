@@ -47,7 +47,7 @@ export const deSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "{count} Projekt",
   "library.count.other": "{count} Projekte",
   "library.confirmDelete": "Dieses Projekt endgültig löschen? Das Video und alle Änderungen werden von unseren Servern entfernt.",
-  "library.deleteFailed": "Löschen gerade nicht möglich – falls das Video noch verarbeitet wird, versuch es gleich nochmal.",
+  "library.deleteFailed": "Löschen hat gerade nicht geklappt. Wird das Video noch bearbeitet, versuch es gleich noch einmal.",
 
   "library.empty.title": "Deine Bibliothek ist leer",
   "library.empty.body":

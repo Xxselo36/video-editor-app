@@ -15,12 +15,11 @@
  * /app/edit/<id>.
  */
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Plus, Search } from "lucide-react";
 import { AppPage } from "@/components/AppPage";
 import { Button } from "@/components/ui/Button";
 import { SectionLabel } from "@/components/ui/Card";
-import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
 import { useLang, useT } from "@/i18n";
 import { AUTH_ENABLED } from "@/lib/auth";
@@ -28,8 +27,9 @@ import { plural } from "@/lib/i18n/plural";
 import { useAwaitingGoIds } from "@/features/upload/uploadState";
 import { VoiceTeaser } from "@/features/voice-test/VoiceTeaser";
 import { VoiceTestDialog } from "@/features/voice-test/VoiceTestDialog";
-import { deleteProject, getLocalJobs, markStaleUploads, refreshProjects, renameProject, useProjects } from "./jobsStore";
+import { getLocalJobs, markStaleUploads, refreshProjects, useProjects } from "./jobsStore";
 import { emptyListAction, matchesFilter, matchesSearch, type Filter, type Project } from "./projects";
+import { DeleteDialog, RenameDialog } from "./ProjectDialogs";
 import { ProjectTile } from "./ProjectTile";
 
 /** /app?job=<id> (the editor's URL before UX5) → /app/edit/<id>; an
@@ -57,117 +57,6 @@ export function ProjectsSkeleton() {
         ))}
       </div>
     </div>
-  );
-}
-
-function RenameDialog({ p, onClose }: { p: Project; onClose: () => void }) {
-  const t = useT();
-  const titleId = useId();
-  const input = useRef<HTMLInputElement>(null);
-  const [value, setValue] = useState(p.name);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
-  const save = async () => {
-    const v = value.trim();
-    if (!v || v === p.name) return onClose();
-    setBusy(true);
-    setError(false);
-    const ok = await renameProject(p.id, v);
-    setBusy(false);
-    if (ok) onClose();
-    else setError(true);
-  };
-  return (
-    <Dialog onClose={onClose} labelledBy={titleId} testId="dialog-rename" initialFocus={input}
-      panelClassName="w-full max-w-sm rounded-2xl p-5"
-      panelStyle={{ background: "var(--surface-1)", border: "1px solid var(--border-hover)" }}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save();
-        }}
-        className="flex flex-col gap-4"
-      >
-        <h2 id={titleId} className="text-base font-semibold" style={{ color: "var(--text-strong)" }}>
-          {t("app.projects.renameTitle")}
-        </h2>
-        <label className="flex flex-col gap-1.5 text-xs" style={{ color: "var(--text-muted)" }}>
-          {t("app.projects.renameLabel")}
-          <input
-            ref={input}
-            value={value}
-            maxLength={120}
-            onChange={(e) => setValue(e.target.value)}
-            onFocus={(e) => e.currentTarget.select()}
-            data-testid="rename-input"
-            className="rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]"
-            style={{ background: "var(--surface-2)", color: "var(--text-strong)", border: "1px solid var(--border)" }}
-          />
-        </label>
-        {error && (
-          <p role="alert" className="text-xs" style={{ color: "var(--danger)" }}>
-            {t("app.projects.renameFailed")}
-          </p>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button variant="tint" size="sm" onClick={onClose}>
-            {t("app.projects.cancel")}
-          </Button>
-          <Button type="submit" size="sm" disabled={busy} data-testid="rename-save">
-            {t("app.projects.save")}
-          </Button>
-        </div>
-      </form>
-    </Dialog>
-  );
-}
-
-function DeleteDialog({ p, onClose }: { p: Project; onClose: () => void }) {
-  const t = useT();
-  const titleId = useId();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<"busy" | "failed" | null>(null);
-  const name = p.name || t("app.library.untitled");
-  const remove = async () => {
-    setBusy(true);
-    setError(null);
-    const r = await deleteProject(p.id);
-    setBusy(false);
-    if (r === "ok") onClose();
-    else setError(r);
-  };
-  return (
-    <Dialog onClose={onClose} labelledBy={titleId} testId="dialog-delete"
-      panelClassName="w-full max-w-sm rounded-2xl p-5"
-      panelStyle={{ background: "var(--surface-1)", border: "1px solid var(--border-hover)" }}>
-      <div className="flex flex-col gap-3">
-        <h2 id={titleId} className="break-words text-base font-semibold" style={{ color: "var(--text-strong)" }}>
-          {t("app.projects.deleteTitle", { name })}
-        </h2>
-        <p className="text-sm" style={{ color: "var(--text-body)" }}>
-          {t("app.projects.deleteBody")}
-        </p>
-        {error && (
-          <p role="alert" className="text-xs" style={{ color: "var(--danger)" }}>
-            {t(error === "busy" ? "app.projects.deleteBusy" : "library.deleteFailed")}
-          </p>
-        )}
-        <div className="mt-1 flex justify-end gap-2">
-          <Button variant="tint" size="sm" onClick={onClose}>
-            {t("app.projects.cancel")}
-          </Button>
-          <Button
-            size="sm"
-            disabled={busy}
-            onClick={() => void remove()}
-            data-testid="delete-confirm"
-            className="!bg-[var(--danger)]"
-          >
-            {t("app.projects.delete")}
-          </Button>
-        </div>
-      </div>
-    </Dialog>
   );
 }
 

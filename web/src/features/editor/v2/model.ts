@@ -79,13 +79,8 @@ export function cutTimeOfSource(segs: EditorSeg[], t: number): number {
   return next ?? acc;
 }
 
-/** m:ss for labels. */
-export function fmtClock(s: number): string {
-  const v = Math.max(0, s);
-  const m = Math.floor(v / 60);
-  const sec = Math.floor(v % 60);
-  return `${m}:${sec.toString().padStart(2, "0")}`;
-}
+/** m:ss for labels (shared with the Vorschau's length). */
+export { fmtClock } from "@/lib/clock";
 
 /** m:ss,t / m:ss.t with the language's decimal separator (player clock). */
 export function fmtClockTenths(s: number, decimal: string): string {

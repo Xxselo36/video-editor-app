@@ -64,7 +64,7 @@ export const enEditor = {
   "app.timeline.fadeOut": "Fade out",
   "app.timeline.resetEffects": "Reset effects",
   // ── Top bar ─────────────────────────────────────────────────────────
-  "editor.back": "Back to projects",
+  "editor.backToPreview": "Back to preview",
   "editor.rename": "Rename",
   "editor.titleLabel": "Project name",
   "editor.save.saved": "Saved",
@@ -77,8 +77,8 @@ export const enEditor = {
   "editor.redo": "Redo",
   "editor.formatTip": "The format is set at upload",
   "editor.export": "Export",
-  "editor.exporting": "Preparing…",
-  "editor.exportOffline": "You're offline – you can export once you're back online.",
+  "editor.exporting": "Exporting…",
+  "editor.exportOffline": "You're offline. You can export again once you're back online.",
   "editor.exportUnsaved": "Your latest changes aren't saved yet – check your connection and export again.",
 
   // ── Preview and player ──────────────────────────────────────────────

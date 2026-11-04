@@ -673,6 +673,27 @@ def test_doc_units_match_the_shared_vectors():
         assert got == want, v["name"]
 
 
+def test_cut_words_match_the_web():
+    """The words cut from the video are the web's (cuts.ts cutBy,
+    exportCaptionSource): testdata/cut_words_vectors.json, which
+    web/src/features/editor/state/cuts.test.ts runs too. A word longer
+    than LONG_WORD_S plays while its head or its tail plays (Whisper
+    stretches a word over the pause the cut removes)."""
+    import json
+    from conftest import REPO
+    vectors = json.loads((REPO / "testdata" / "cut_words_vectors.json")
+                         .read_text())["vectors"]
+    assert len(vectors) >= 8
+    for v in vectors:
+        removed = [tuple(r) for r in v["removed"]]
+        got = [[u["text"], u["original_start"], u["original_end"]]
+               for u in exports.doc_units(v["words"], removed)]
+        assert got == v["units"], v["name"]
+        cut = exports.cut_by(removed)
+        assert [w["id"] for w in v["words"]
+                if cut is not None and cut(w)] == v["cut"], v["name"]
+
+
 def test_instant_export_takes_the_v2_editors_payload(client, render, spec_on):
     words = [{"id": "w1", "text": "Hello", "start": 0.2, "end": 0.6},
              {"id": "w2", "text": "um", "start": 0.6, "end": 0.8, "hidden": True},
