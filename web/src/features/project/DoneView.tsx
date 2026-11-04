@@ -145,7 +145,7 @@ export function DoneView({
           return (
             <a
               key={d.format}
-              href={downloadHref(job.id, d.format)}
+              href={downloadHref(job, d.format)}
               download={names[d.format] ?? true}
               className={`flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold ${
                 main

@@ -515,8 +515,9 @@ _STATUS_FIELDS = ("id", "status", "message", "progress", "queue_position",
                   "stage", "stage_params", "output_path",
                   "updated_at", "preview_version", "owner_id", "output_keys",
                   # UX12: what a project tile shows (the anonymous
-                  # Projects page has no GET /jobs list).
-                  "plan", "title", "duration", "created_at")
+                  # Projects page has no GET /jobs list); renders_ok:
+                  # the export's generation in its menu's download link.
+                  "plan", "title", "duration", "created_at", "renders_ok")
 
 
 def status_defaults() -> dict[str, Any]:

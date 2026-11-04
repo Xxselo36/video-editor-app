@@ -202,11 +202,14 @@ export function ProjectMenu({ p, onAction, onOpen, size = "sm" }: {
               color: "var(--text-strong)",
             }}
           >
+            {/* As the Vorschau's Download (done/useShareFile downloadHref):
+                name=v2, the file named after the project; v, the export's
+                generation, so each export's link is its own. */}
             {canDownload && (
               <a
                 role="menuitem"
                 tabIndex={-1}
-                href={mediaUrl(p.id, "download", { format: "primary" })}
+                href={mediaUrl(p.id, "download", { format: "primary", name: "v2", v: p.rendersOk })}
                 download
                 data-testid="job-card-download"
                 className={ITEM}

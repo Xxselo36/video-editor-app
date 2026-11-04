@@ -61,6 +61,22 @@ export async function fakeShareSheet(page: Page) {
 
 export const sharedFiles = (page: Page) => page.evaluate(() => (window as unknown as { __shared: string[] }).__shared);
 
+/** One share of `name`, and no second one a moment later. */
+export async function sharedOnce(page: Page, name: string) {
+  await expect.poll(() => sharedFiles(page)).toEqual([name]);
+  await page.waitForTimeout(1000);
+  expect(await sharedFiles(page)).toEqual([name]);
+}
+
+/** When the fetch a tap started is done, the browser still counts that
+ *  tap (true: a quick fetch) or no longer (false: a slow one), whatever
+ *  the machine's load (navigator.userActivation). */
+export async function tapStillActive(page: Page, isActive: boolean) {
+  await page.addInitScript((active) => {
+    Object.defineProperty(navigator, "userActivation", { value: { isActive: active, hasBeenActive: true }, configurable: true });
+  }, isActive);
+}
+
 /**
  * Hold the page's requests to `url` (glob; only `method` if given) until
  * release(): they stay out, as on a slow connection. `held` resolves

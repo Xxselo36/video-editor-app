@@ -379,7 +379,10 @@ def test_media_routes_redirect_to_presigned_gets(client, r2, auth_on,
         r = client.get(f"/jobs/{job.id}/{route}", params={**params, "t": token},
                        follow_redirects=False)
         assert r.status_code == 307, (route, r.text)
-        assert r.headers["cache-control"] == "private, max-age=3600"
+        # A download's redirect is never stored (its link names the next
+        # export too: test_download_links); the others keep their hour.
+        assert r.headers["cache-control"] == (
+            "no-store" if route == "download" else "private, max-age=3600")
         u, q = _target(r)
         assert f"{u.scheme}://{u.netloc}" == R2_ENDPOINT
         assert unquote(u.path) == f"/{storage.bucket()}/{key}"

@@ -41,9 +41,12 @@ export function exportFiles(job: Pick<JobStatus, "downloads" | "outputs">): {
 }
 
 /** GET /download of one of the export's files; name=v2: the backend
- *  names it after the project (UX11). */
-export function downloadHref(jobId: string, format: string): string {
-  return mediaUrl(jobId, "download", { format, name: "v2" });
+ *  names it after the project (UX11). v: the export's generation
+ *  (renders_ok, as /watch?v=): every export's link is its own, so no
+ *  browser answers it with an earlier export's from its cache (the
+ *  backend ignores it). */
+export function downloadHref(job: Pick<JobStatus, "id" | "renders_ok">, format: string): string {
+  return mediaUrl(job.id, "download", { format, name: "v2", v: job.renders_ok ?? 0 });
 }
 
 /** navigator.connection's hints (Chromium only). */
@@ -70,10 +73,11 @@ export function useShareFile(
 ): { state: ShareState; share: () => void } {
   const mediaReady = useMediaReady();
   const jobId = job.id;
+  const gen = job.renders_ok ?? 0;
   const format = file?.format ?? "primary";
   const name = job.download_names?.[format] ?? "video.mp4";
   // One fetch per export and format (a new export starts over).
-  const key = `${jobId}:${job.renders_ok ?? 0}:${format}`;
+  const key = `${jobId}:${gen}:${format}`;
   const usable = on && file !== undefined && shareMode(file.bytes) === "share";
   // The export a tap asked to fetch.
   const [tapped, setTapped] = useState<string | null>(null);
@@ -90,18 +94,19 @@ export function useShareFile(
         if (outcome === "shared") track("share_used", { bytes: f.size });
         if (outcome === "failed") {
           track("share_failed", {});
-          downloadUrl(downloadHref(jobId, format), name);
+          downloadUrl(downloadHref({ id: jobId, renders_ok: gen }, format), name);
         }
       });
     },
-    [jobId, format, name],
+    [jobId, gen, format, name],
   );
 
   useEffect(() => {
     if (!want) return;
     const byTap = !prefetch;
     const ctrl = new AbortController();
-    prefetchFile(downloadHref(jobId, format), name, ctrl.signal)
+    const href = downloadHref({ id: jobId, renders_ok: gen }, format);
+    prefetchFile(href, name, ctrl.signal)
       .then((f) => {
         fileRef.current = { key, file: f };
         setFetched({ key, state: "ready" });
@@ -111,10 +116,10 @@ export function useShareFile(
       .catch(() => {
         if (ctrl.signal.aborted) return;
         setFetched({ key, state: "failed" });
-        if (byTap) downloadUrl(downloadHref(jobId, format), name);
+        if (byTap) downloadUrl(href, name);
       });
     return () => ctrl.abort();
-  }, [want, prefetch, key, jobId, format, name, send]);
+  }, [want, prefetch, key, jobId, gen, format, name, send]);
 
   const share = () => {
     const ready = fileRef.current?.key === key ? fileRef.current.file : null;

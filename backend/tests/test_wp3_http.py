@@ -227,3 +227,41 @@ def test_307_targets_serve_ranges_and_the_download_name(client, r2_http,
     assert st == 206
     assert hd["content-disposition"] == \
         f'attachment; filename="cleo_{job.id}_primary.mp4"'
+
+
+def test_the_page_fetches_the_export_from_the_bucket_by_its_url(
+        client, strict_r2_http, auth_on, tmp_path):
+    """The iPhone's "Video sichern" (PR2 live test D2): the page fetch()es
+    the export. Behind the 307 it reaches the bucket redirect-tainted
+    (Origin: null), which the bucket's CORS rules don't allow; the
+    presigned GET of ?as=url, asked for with the page's own Origin, they
+    do (r2_setup.cors_config, as DEPLOY.md sets up the real bucket)."""
+    from backend import r2_setup
+    s3, bucket = strict_r2_http, R2_ENV["R2_BUCKET"]
+    s3.put_bucket_cors(Bucket=bucket, CORSConfiguration=r2_setup.cors_config(
+        ["https://cleocuts.com", "https://www.cleocuts.com"]))
+    job = store.create(None, {}, owner_id="user_a")
+    key = f"jobs/{job.id}/r1/primary.mp4"
+    body = bytes(range(256)) * 8
+    src = tmp_path / "export.mp4"
+    src.write_bytes(body)
+    storage.put_file(str(src), key, content_type="video/mp4")
+    store.update(job.id, status="done", renders_ok=1,
+                 output_keys={"primary": key})
+    token = auth.media_token("user_a")
+    r = client.get(f"/jobs/{job.id}/download",
+                   params={"name": "v2", "v": 1, "as": "url", "t": token})
+    assert r.status_code == 200
+    url = r.json()["url"]
+    st, hd, data = _http("GET", url, headers={"Origin": "https://cleocuts.com"})
+    assert (st, data) == (200, body)
+    assert hd["access-control-allow-origin"] == "https://cleocuts.com"
+    assert hd["content-type"] == "video/mp4"
+    # The 307's target is that URL; asked for redirect-tainted, the
+    # bucket answers without CORS headers: the browser refuses it.
+    loc = client.get(f"/jobs/{job.id}/download",
+                     params={"name": "v2", "v": 1, "t": token},
+                     follow_redirects=False).headers["location"]
+    assert loc == url
+    st, hd, _ = _http("GET", loc, headers={"Origin": "null"})
+    assert st == 200 and "access-control-allow-origin" not in hd

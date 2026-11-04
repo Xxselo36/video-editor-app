@@ -190,7 +190,9 @@ def test_status_rows_snapshot(client):
         "error_code", "error_params", "refunded", "stage", "stage_params",
         "has_output", "updated_at", "preview_version",
         # UX12: the Projects tile
-        "title", "duration", "created_at", "expires_at"])
+        "title", "duration", "created_at", "expires_at",
+        # PR2 live test D1: the export's generation (the tile's download link)
+        "renders_ok"])
     assert (rows[job.id]["stage"], rows[job.id]["stage_params"],
             rows[job.id]["message"]) == ("analyze.transcribe", {},
                                          "Transcribing (35%)…")

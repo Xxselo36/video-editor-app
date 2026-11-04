@@ -940,7 +940,15 @@ der Weg von Hand.
    ```
    Staging zusätzlich die Vercel-Preview-Origin(s), `http://localhost:3000`,
    `http://localhost:3123`. `<video>`, `<img>` und Download-Links brauchen
-   kein CORS — nur die Upload-PUTs.
+   kein CORS. CORS brauchen die Upload-PUTs und das Sichern über das
+   Teilen-Menü: „Video sichern“ in der Vorschau (iPhone/iPad) und „In
+   Fotos sichern / Teilen…“ im Export-Blatt des Editors (Touch-Geräte,
+   deren Browser Dateien teilen kann, auch Android). Beide holen die
+   Datei per `fetch()` direkt von der presigned URL, die
+   `GET /jobs/{id}/download?as=url` nennt (einem `fetch()` durch die 307
+   von `/download` schickt der Browser `Origin: null`, das der Bucket
+   ablehnt). `GET` muss deshalb in `AllowedMethods` bleiben;
+   `--check --origin` prüft es (Punkt 5).
 4. **Lifecycle** (Bucket → Settings → Object lifecycle rules, oder
    `aws s3api put-bucket-lifecycle-configuration … --lifecycle-configuration
    file://lifecycle.json`):
@@ -967,7 +975,10 @@ der Weg von Hand.
    jede Mezzanine und jeder Render nimmt), Multipart über presigned
    Part-URLs (ein PUT mit falscher Länge muss abgelehnt werden),
    presigned GET von heute und gestern 00:00Z, die Lifecycle-Regeln für
-   `uploads/` und der CORS-Preflight. Darf der Token die Lifecycle-Regeln
+   `uploads/`, der CORS-Preflight der Upload-PUTs und ein `GET` mit
+   dieser `Origin` auf eine presigned Download-URL (so holen „Video
+   sichern“ und „In Fotos sichern / Teilen…“ die Datei: `CORS GET from …
+   (Video sichern)`). Darf der Token die Lifecycle-Regeln
    nicht lesen: im Dashboard nachsehen und mit `--skip-lifecycle`
    wiederholen.
 
@@ -1555,7 +1566,12 @@ Timeline, Post-Text behalten. Ein v1-Export (ohne Marker) verhält sich
 genau wie vor UX11 (inkl. Warteschlange statt 429 beim zweiten Export,
 Post-Text bei jedem Export neu, Dateiname `cleo_{id}_{format}.mp4`).
 Neue Dateinamen nur mit `GET /jobs/{id}/download?name=v2` (die
-v2-Fertig-Ansicht). Fair Use und Schutzgrenzen pro Konto nur mit Konten
+v2-Fertig-Ansicht, die Vorschau und das ⋯-Menü).
+`/download` antwortet mit `Cache-Control: no-store`, auch seine 307 nach R2: derselbe Link meint nach einem neuen Export die
+neue Datei. Die Web-App hängt außerdem die Export-Generation an (`v=`,
+`renders_ok`, wie bei `/watch`), der Server ignoriert sie.
+`?as=url` antwortet statt der Datei mit `{"url", "name"}` (für
+„Video sichern“, siehe CORS in 10.2). Fair Use und Schutzgrenzen pro Konto nur mit Konten
 bzw. Abrechnung.
 Code: `backend/exports.py` (Regeln), `backend/main.py` (`POST
 /jobs/{id}/reopen`, `POST /jobs/{id}/render`, `_run_spec`),
