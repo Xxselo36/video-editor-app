@@ -19,6 +19,7 @@ import {
   progressOf,
   stillCandidates,
   type StillImage,
+  type StillPage,
 } from "./player";
 
 // HTMLMediaElement: networkState IDLE 1, LOADING 2, NO_SOURCE 3;
@@ -277,5 +278,50 @@ describe("decodeStill", () => {
     expect(outcome).toBe("pending");
     await vi.advanceTimersByTimeAsync(1);
     expect(outcome).toBe("rejected");
+  });
+
+  // Review of the review fixes (frame-1): Chromium decodes for a hidden
+  // page only once it shows; the limit ran anyway, and a tab in the
+  // background lost both stills for the video's first frame.
+  it("the wait counts only while the page is in view, from the start each time it shows", async () => {
+    vi.useFakeTimers();
+    const page = Object.assign(new EventTarget(), { hidden: true });
+    const set = (hidden: boolean) => {
+      page.hidden = hidden;
+      page.dispatchEvent(new Event("visibilitychange"));
+    };
+    const x = image(() => new Promise<void>(() => {}));
+    let outcome = "pending";
+    void decodeStill("/d", () => x.img, DECODE_WAIT_MS, page as unknown as StillPage).then(
+      () => (outcome = "decoded"),
+      () => (outcome = "rejected"),
+    );
+    x.load();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(outcome).toBe("pending");
+    set(false);
+    await vi.advanceTimersByTimeAsync(DECODE_WAIT_MS - 500);
+    set(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(outcome).toBe("pending");
+    set(false);
+    await vi.advanceTimersByTimeAsync(DECODE_WAIT_MS - 1);
+    expect(outcome).toBe("pending");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toBe("rejected");
+  });
+
+  it("a decode that settles once the page shows: the still", async () => {
+    vi.useFakeTimers();
+    const page = Object.assign(new EventTarget(), { hidden: true });
+    let decoded: () => void = () => {};
+    const x = image(() => new Promise<void>((r) => (decoded = r)));
+    const p = decodeStill("/e", () => x.img, DECODE_WAIT_MS, page as unknown as StillPage);
+    x.load();
+    await vi.advanceTimersByTimeAsync(30_000);
+    page.hidden = false;
+    page.dispatchEvent(new Event("visibilitychange"));
+    decoded();
+    await expect(p).resolves.toBeUndefined();
   });
 });

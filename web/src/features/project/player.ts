@@ -123,26 +123,51 @@ export const DECODE_WAIT_MS = 2_000;
 /** The parts of an <img> decodeStill uses (tests pass their own). */
 export type StillImage = Pick<HTMLImageElement, "decode" | "onload" | "onerror" | "src">;
 
+/** Whether the page is in view (document; tests pass their own). */
+export type StillPage = Pick<Document, "hidden" | "addEventListener" | "removeEventListener">;
+
 /**
  * Loads `url` in a detached image, then decodes it: rejects on a 404 or
  * a body that isn't an image (the load fails), on a frame the browser
  * can't decode (where a poster would stay empty), and when that decode
- * hasn't settled DECODE_WAIT_MS after the load. The load itself has no
- * limit (a slow link): the Vorschau's fetch ahead waits for the frame
- * at most PICTURE_WAIT_MS anyway (PreviewScreen).
+ * hasn't settled DECODE_WAIT_MS of the page being in view after the
+ * load (Chromium decodes for a hidden page only once it shows: a tab in
+ * the background keeps its stills). The load itself has no limit (a
+ * slow link): the Vorschau's fetch ahead waits for the frame at most
+ * PICTURE_WAIT_MS anyway (PreviewScreen).
  */
-export function decodeStill(url: string, make: () => StillImage = () => new Image(), waitMs = DECODE_WAIT_MS): Promise<void> {
+export function decodeStill(
+  url: string,
+  make: () => StillImage = () => new Image(),
+  waitMs = DECODE_WAIT_MS,
+  page: StillPage | undefined = globalThis.document,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const img = make();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settle = () => {
+      clearTimeout(timer);
+      page?.removeEventListener("visibilitychange", count);
+    };
+    // The wait counts while the page is in view, from the start each time it shows.
+    function count() {
+      clearTimeout(timer);
+      if (page?.hidden) return;
+      timer = setTimeout(() => {
+        settle();
+        reject(new Error("still: its decode didn't settle"));
+      }, waitMs);
+    }
     img.onload = () => {
-      const timer = setTimeout(() => reject(new Error("still: its decode didn't settle")), waitMs);
+      page?.addEventListener("visibilitychange", count);
+      count();
       img.decode().then(
         () => {
-          clearTimeout(timer);
+          settle();
           resolve();
         },
         (e: unknown) => {
-          clearTimeout(timer);
+          settle();
           reject(e);
         },
       );

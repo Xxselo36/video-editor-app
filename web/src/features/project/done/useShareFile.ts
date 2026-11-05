@@ -147,6 +147,9 @@ export class ShareSession {
   }
 
   private set(p: Prepared) {
+    // An ended session tells nothing more (a share still open as it ended
+    // settles later): the page may run a new one for the same export.
+    if (this.o.signal.aborted) return;
     if (p.state === this.now.state && p.progress === this.now.progress) return;
     this.now = p;
     this.o.onChange(p);

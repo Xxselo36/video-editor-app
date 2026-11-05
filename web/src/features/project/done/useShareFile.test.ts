@@ -87,14 +87,25 @@ describe("ShareSession", () => {
     vi.unstubAllGlobals();
   });
 
-  /** A page whose visibility the test sets. */
+  /** A page whose visibility the test sets; `listening()`: its visibilitychange listeners now. */
   function fakePage(hidden = false) {
     const page = Object.assign(new EventTarget(), { hidden });
-    const show = () => {
-      page.hidden = false;
+    const live = new Set<unknown>();
+    const add = page.addEventListener.bind(page);
+    const remove = page.removeEventListener.bind(page);
+    page.addEventListener = (type: string, l: EventListenerOrEventListenerObject | null, o?: AddEventListenerOptions | boolean) => {
+      if (type === "visibilitychange") live.add(l);
+      add(type, l, o);
+    };
+    page.removeEventListener = (type: string, l: EventListenerOrEventListenerObject | null, o?: EventListenerOptions | boolean) => {
+      if (type === "visibilitychange") live.delete(l);
+      remove(type, l, o);
+    };
+    const set = (h: boolean) => {
+      page.hidden = h;
       page.dispatchEvent(new Event("visibilitychange"));
     };
-    return { page, show };
+    return { page, show: () => set(false), hide: () => set(true), listening: () => live.size };
   }
 
   /**
@@ -114,13 +125,15 @@ describe("ShareSession", () => {
       hang?: boolean;
       /** each try: the page goes out of view, then the try fails (the first `fails`) */
       hideOnTry?: boolean;
+      /** each try: the page goes out of view and back, then the try fails, nothing brought */
+      blinkOnTry?: boolean;
       /** a failed try's file starts over (FileFetch restart: nothing kept) */
       restarts?: boolean;
       /** ms on the session's clock a try takes */
       took?: number;
     } = {},
   ) {
-    const { page, show } = fakePage(o.hidden);
+    const { page, show, hide, listening } = fakePage(o.hidden);
     const ctrl = new AbortController();
     const states: Prepared[] = [];
     const signals: AbortSignal[] = [];
@@ -135,9 +148,10 @@ describe("ShareSession", () => {
       if (o.hang)
         await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("stopped", "AbortError"))));
       if (tries <= (o.fails ?? 0)) {
-        if (o.hideOnTry) {
-          page.hidden = true;
-          page.dispatchEvent(new Event("visibilitychange"));
+        if (o.hideOnTry) hide();
+        if (o.blinkOnTry) {
+          hide();
+          show();
         }
         if (o.restarts) loaded = 0;
         throw new TypeError(`Load failed ${tries}`);
@@ -156,7 +170,7 @@ describe("ShareSession", () => {
       waits: RETRY_WAITS_MS,
       now: () => clock,
     });
-    return { s, load, share, states, signals, ctrl, page, show, last: () => states.at(-1)?.state ?? "preparing" };
+    return { s, load, share, states, signals, ctrl, page, show, hide, listening, last: () => states.at(-1)?.state ?? "preparing" };
   }
 
   /** document.createElement watched: a download link would be made with it. */
@@ -225,14 +239,29 @@ describe("ShareSession", () => {
   // sichern gave way to Download (Files) for good.
   it("a try cut short isn't counted: one that brought part of the file, or that the page went out of view in", async () => {
     vi.useFakeTimers();
-    // five tries, each bringing 100 bytes, then cut: on with the sixth
+    // five tries, each bringing 100 bytes, then cut: on with the sixth,
+    // each 2 s after the last
     const parts = session({ fails: 5, pieces: [100] });
     const a = parts.s.start(false);
-    await vi.advanceTimersByTimeAsync(5 * 2_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(parts.load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(parts.load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(parts.load).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(4 * 2_000);
     await a;
     expect(parts.load).toHaveBeenCalledTimes(6);
     expect(parts.states.map((p) => p.state)).not.toContain("failed");
     expect(parts.last()).toBe("ready");
+    // iOS: back in view before the cut try's error came, nothing brought
+    // (the address question was cut): not counted either
+    const blink = session({ fails: 4, blinkOnTry: true });
+    const c = blink.s.start(false);
+    await vi.advanceTimersByTimeAsync(4 * 2_000);
+    await c;
+    expect(blink.load).toHaveBeenCalledTimes(5);
+    expect(blink.last()).toBe("ready");
     // four tries the page went out of view in, nothing brought: each next
     // one once it shows again
     const away = session({ fails: 4, hideOnTry: true });
@@ -246,6 +275,51 @@ describe("ShareSession", () => {
     await b;
     expect(away.load).toHaveBeenCalledTimes(5);
     expect(away.last()).toBe("ready");
+  });
+
+  // Review of the review fixes (session-2): a hold that starts while the
+  // try waits for the page to show; no listener left behind.
+  it("a hold while waiting for the page: no try when it shows, one when the hold ends; no listener left", async () => {
+    vi.useFakeTimers();
+    const x = session({ hidden: true });
+    const done = x.s.start(false);
+    await vi.advanceTimersByTimeAsync(0);
+    x.s.hold(true);
+    x.show();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(x.load).not.toHaveBeenCalled();
+    x.s.hold(false);
+    await done;
+    expect(x.load).toHaveBeenCalledTimes(1);
+    expect(x.last()).toBe("ready");
+    expect(x.listening()).toBe(0);
+    // also after three failures, and after an abort mid-wait
+    const failed = session({ fails: 3 });
+    const f = failed.s.start(false);
+    await vi.advanceTimersByTimeAsync(8_000);
+    await f;
+    expect(failed.last()).toBe("failed");
+    expect(failed.listening()).toBe(0);
+    const away = session({ hidden: true });
+    const g = away.s.start(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    away.ctrl.abort();
+    await g;
+    expect(away.listening()).toBe(0);
+  });
+
+  // (session-4) A share still open as its session ended settles later: it
+  // tells nothing (the page may run a new session for the same export).
+  it("an ended session tells nothing more, not even a share's late refusal", async () => {
+    let refuse: (e: unknown) => void = () => {};
+    const x = session({ answer: () => new Promise<void>((_, r) => (refuse = r)) });
+    await x.s.start(false);
+    x.s.tap();
+    expect(x.share).toHaveBeenCalledTimes(1);
+    x.ctrl.abort();
+    refuse(named("AbortError", "Abort due to error while reading files."));
+    await settle();
+    expect(x.states.map((p) => p.state)).toEqual(["ready"]);
   });
 
   it("still counted: tries that bring nothing, and ones whose file starts over (nothing kept)", async () => {
