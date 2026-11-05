@@ -91,7 +91,11 @@ jobs:
   checks:
     name: typecheck · lint · unit · i18n
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: that is ubuntu 26.04 now, for which Playwright
+    # 1.56 has no Chromium ("does not support chromium on
+    # ubuntu26.04-x64"), so the caption parity step below can't install
+    # it. (The e2e jobs get theirs from the cache: e2e-setup.)
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -105,13 +109,8 @@ jobs:
       # Chromium for the preview side, and the backend's fontTools for the
       # ja cells' job font subset (backend/font_subset.py). With CI set the
       # suite fails instead of skipping when either is missing.
-      # The browser, then its system packages: on a runner image this
-      # Playwright doesn't know yet (ubuntu-latest = 26.04, Playwright
-      # 1.56) "install --with-deps" fails outright, while install-deps
-      # only says it can't and the image's own libraries run Chromium,
-      # as in the e2e jobs (.github/actions/e2e-setup).
       - name: Playwright Chromium (caption parity)
-        run: npx playwright install chromium && npx playwright install-deps chromium
+        run: npx playwright install --with-deps chromium
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
