@@ -1,8 +1,8 @@
 /**
  * The Vorschau player's logic (PreviewVideo, ExportedVideo): what its
- * <video> is doing, the editor's clips of the stored timeline, and what
- * the preview shows of the export's captions. Pure, but usePlayback,
- * which reads the element.
+ * <video> is doing, the editor's clips of the stored timeline, what the
+ * preview shows of the export's captions, and which still the done
+ * frame shows. Pure, but usePlayback, which reads the element.
  */
 import { useCallback, useSyncExternalStore, type RefObject } from "react";
 import type { Fetched } from "@/features/editor/state/docFetch";
@@ -93,6 +93,48 @@ export function usePlayback(videoRef: RefObject<HTMLVideoElement | null>): Playb
     () => 0,
   );
   return { playing: (bits & PLAYING) !== 0, busy: (bits & BUSY) !== 0, empty: (bits & EMPTY) !== 0 };
+}
+
+/**
+ * What the done frame shows before a tap (ExportedVideo; data-still):
+ * the export's thumbnail, else the analysis' first-frame poster, else
+ * the video's own first frame; "none" until one of those is settled.
+ */
+export type Still = "thumbnail" | "poster" | "frame" | "none";
+
+export type StillCandidate = { kind: "thumbnail" | "poster"; url: string };
+
+/** The stills to try, in order: the export's thumbnail, then the
+ *  analysis' poster (null: the job has none). Each null while media URLs
+ *  can't be built yet. */
+export function stillCandidates(thumbnail: string | null, poster: string | null): StillCandidate[] {
+  const out: StillCandidate[] = [];
+  if (thumbnail) out.push({ kind: "thumbnail", url: thumbnail });
+  if (poster) out.push({ kind: "poster", url: poster });
+  return out;
+}
+
+/**
+ * The first of `candidates` that really decodes (`decode`: a detached
+ * image's decode(), which rejects on a 404 and on a file the browser
+ * can't decode), tried in turn; null when none does. Stops, with null,
+ * once `live()` says the frame is gone.
+ */
+export async function pickStill(
+  candidates: readonly StillCandidate[],
+  decode: (url: string) => Promise<unknown>,
+  live: () => boolean = () => true,
+): Promise<StillCandidate | null> {
+  for (const c of candidates) {
+    if (!live()) return null;
+    try {
+      await decode(c.url);
+      return live() ? c : null;
+    } catch {
+      // on to the next one
+    }
+  }
+  return null;
 }
 
 /** How far the video has played (0..1; 0 while its length is unknown). */

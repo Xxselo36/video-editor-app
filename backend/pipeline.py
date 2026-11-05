@@ -1368,13 +1368,31 @@ def _concat_preview(
         shutil.rmtree(work, ignore_errors=True)
 
 
+# The export's thumbnail (thumb.jpg): the Projekte tile, the editor's
+# done view and the Vorschau's finished frame show it — on iOS Safari it
+# is all the finished frame shows before a tap (no frame is drawn before
+# playback, UT5). At most this wide, like the poster (make_poster), never
+# upscaled; a baseline JPEG with 4:2:0 chroma (yuvj420p), the layout
+# every decoder takes. (Given an RGB frame, ffmpeg's mjpeg picks 4:4:4
+# with 1x2 sampling on every component — what the thumbnails were.) The
+# frame goes through RGB on its way (format=rgb24): read with the
+# video's own colour matrix (an export is BT.709), written as JFIF's
+# (BT.601), which is how every decoder reads a JPEG. Straight from the
+# video's YUV to yuvj420p the scaler converts the range but keeps the
+# BT.709 values: saturated colours came out off by up to 35 levels.
+THUMB_WIDTH = 540
+
+
 def _generate_thumbnail(input_path: str, output_path: str, at_seconds: float = 1.0) -> None:
     """Extract a JPG poster frame from the rendered video.
 
     Instead of dumb "grab frame at 1s" (often black/blur/loading screen),
     scan candidate frames and pick the one with the highest visual
-    interest score: brightness (not black) × edge density (not blur).
-    Falls back to the simple 1s grab on any error.
+    interest score: brightness (not black) × edge density (not blur),
+    then take that frame from the video at the thumbnail's size
+    (_grab_thumbnail). Whenever that leaves no JPEG (any error), the
+    simple grab at `at_seconds` makes it instead. Never raises: the
+    thumbnail is best effort.
     """
     # Probe duration; if too short (<3s) just grab frame 0.
     try:
@@ -1392,59 +1410,74 @@ def _generate_thumbnail(input_path: str, output_path: str, at_seconds: float = 1
         _generate_thumbnail_simple(input_path, output_path, at_seconds=0.5)
         return
 
-    best_path = _pick_best_frame(input_path, duration)
-    if best_path is None:
-        _generate_thumbnail_simple(input_path, output_path, at_seconds=at_seconds)
-        return
+    best_at = _pick_best_frame(input_path, duration)
+    if best_at is not None:
+        failed = _grab_thumbnail(input_path, output_path, best_at)
+        if not failed:
+            return
+        print(f"[thumbnail] best frame not made ({failed}), simple grab",
+              flush=True)
+    _generate_thumbnail_simple(input_path, output_path, at_seconds=at_seconds)
 
-    # Rescale + JPG-encode the chosen frame at the same size as before
+
+def _grab_thumbnail(input_path: str, output_path: str, at: float) -> str | None:
+    """The frame at `at` s of `input_path` as the thumbnail JPEG at
+    `output_path` (THUMB_WIDTH, 4:2:0). None when it is there; else a
+    short code for the log (no paths: they name the job) and no file at
+    `output_path` — a file already there is removed first, so it is never
+    taken for this frame (ffmpeg exits 0 without writing one when `at` is
+    past the end)."""
+    out = Path(output_path)
     cmd = [
-        get_ffmpeg_path(), "-y",
-        "-i", best_path,
-        "-vf", "scale=320:-2",
+        get_ffmpeg_path(), "-y", "-v", "error",
+        *_threads(),
+        "-ss", f"{max(0.0, at):.3f}",
+        "-i", input_path,
+        "-frames:v", "1",
+        "-vf", f"scale='min({THUMB_WIDTH},iw)':-2,format=rgb24",
+        "-pix_fmt", "yuvj420p",
         "-q:v", "3",
         *_threads(),
         output_path,
     ]
     try:
-        subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-    finally:
-        try:
-            Path(best_path).unlink()
-        except Exception:
-            pass
+        out.unlink(missing_ok=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if result.returncode != 0:
+            failed = f"exit {result.returncode}"
+        elif not out.is_file():
+            failed = "no frame"
+        elif out.stat().st_size == 0:
+            failed = "empty"
+        else:
+            return None
+    except Exception as e:  # not started, timed out
+        failed = type(e).__name__
+    with contextlib.suppress(OSError):
+        out.unlink(missing_ok=True)
+    return failed
 
 
 def _generate_thumbnail_simple(
     input_path: str, output_path: str, at_seconds: float = 1.0,
 ) -> None:
-    """Fallback: grab a single frame at the given timestamp."""
-    cmd = [
-        get_ffmpeg_path(), "-y",
-        *_threads(),
-        "-ss", str(at_seconds),
-        "-i", input_path,
-        "-frames:v", "1",
-        "-vf", "scale=320:-2",
-        "-q:v", "3",
-        *_threads(),
-        output_path,
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-        if result.returncode != 0 and at_seconds > 0:
-            _generate_thumbnail_simple(input_path, output_path, at_seconds=0.0)
-    except Exception as e:
-        print(f"[thumbnail] extract failed: {e}", flush=True)
+    """Fallback: grab a single frame at the given timestamp — the first
+    frame when that leaves no JPEG (e.g. a video shorter than that)."""
+    failed = _grab_thumbnail(input_path, output_path, at_seconds)
+    if failed and at_seconds > 0:
+        failed = _grab_thumbnail(input_path, output_path, 0.0)
+    if failed:
+        print(f"[thumbnail] not made ({failed})", flush=True)
 
 
 def _pick_best_frame(
     input_path: str, duration: float, num_candidates: int = 8,
-) -> str | None:
+) -> float | None:
     """Sample `num_candidates` frames spread across the video's middle
-    60%, score each on brightness × sharpness, return the path to the
-    best. Skips the first 15% (often loading / talking-head intro) and
-    the last 25% (outro / hand-in-frame reaching for phone).
+    60%, score each on brightness × sharpness, return the time (s) of the
+    best — None when no candidate could be extracted. Skips the first 15%
+    (often loading / talking-head intro) and the last 25% (outro /
+    hand-in-frame reaching for phone).
     """
     start = duration * 0.15
     end = duration * 0.75
@@ -1452,16 +1485,19 @@ def _pick_best_frame(
         return None
     spacing = (end - start) / max(1, num_candidates - 1)
 
-    tmp_dir = tempfile.mkdtemp(prefix="cleo_thumb_")
+    tmp_dir: str | None = None
     best_score = -1.0
-    best_path: str | None = None
+    best_at: float | None = None
 
     try:
+        tmp_dir = tempfile.mkdtemp(prefix="cleo_thumb_")
         for i in range(num_candidates):
             t = start + i * spacing
             candidate = str(Path(tmp_dir) / f"cand_{i:02d}.png")
-            # Scale down for cheap analysis + always yuv420p so tone-
-            # mapped HDR sources don't blow up the encode.
+            # Scaled down for a cheap score (_score_frame is tuned on
+            # 320 px frames), as 8-bit RGB, a format PNG takes — 10-bit
+            # / HDR sources too. (ffmpeg chose it anyway when this asked
+            # for yuv420p, which PNG doesn't take: the same frames.)
             extract_cmd = [
                 get_ffmpeg_path(), "-y",
                 *_threads(),
@@ -1469,7 +1505,7 @@ def _pick_best_frame(
                 "-i", input_path,
                 "-frames:v", "1",
                 "-vf", "scale=320:-2",
-                "-pix_fmt", "yuv420p",
+                "-pix_fmt", "rgb24",
                 *_threads(),
                 candidate,
             ]
@@ -1479,24 +1515,17 @@ def _pick_best_frame(
             if r.returncode != 0 or not Path(candidate).exists():
                 continue
             score = _score_frame(candidate)
+            Path(candidate).unlink(missing_ok=True)
             if score > best_score:
                 best_score = score
-                # If we already had a best_path, drop the old file
-                if best_path and best_path != candidate:
-                    try:
-                        Path(best_path).unlink()
-                    except Exception:
-                        pass
-                best_path = candidate
-            else:
-                try:
-                    Path(candidate).unlink()
-                except Exception:
-                    pass
-        return best_path
+                best_at = t
+        return best_at
     except Exception as e:
-        print(f"[thumbnail] frame-pick failed: {e}", flush=True)
-        return best_path
+        print(f"[thumbnail] frame-pick failed ({type(e).__name__})", flush=True)
+        return best_at
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _score_frame(image_path: str) -> float:

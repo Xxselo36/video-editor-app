@@ -1,11 +1,22 @@
 // The Vorschau player's logic (player.ts): the frame's shape, when it
 // waits for the file (spinner, aria-busy) and when it has none of it yet
 // (after 10 s "the preview is still being prepared"), the scrub line,
-// the clips the preview's captions map through, and what it shows of
-// the captions.
-import { describe, expect, it } from "vitest";
+// the clips the preview's captions map through, what it shows of the
+// captions, and the done frame's still.
+import { describe, expect, it, vi } from "vitest";
 import type { Fetched } from "@/features/editor/state/docFetch";
-import { BUSY, EMPTY, PLAYING, editSegsOf, isWide, playbackOf, previewCaptions, progressOf } from "./player";
+import {
+  BUSY,
+  EMPTY,
+  PLAYING,
+  editSegsOf,
+  isWide,
+  pickStill,
+  playbackOf,
+  previewCaptions,
+  progressOf,
+  stillCandidates,
+} from "./player";
 
 // HTMLMediaElement: networkState IDLE 1, LOADING 2, NO_SOURCE 3;
 // readyState HAVE_NOTHING 0 … HAVE_ENOUGH_DATA 4.
@@ -144,5 +155,66 @@ describe("isWide", () => {
     expect(isWide({ output_aspect: "original", filmstrip: strip(160, 0) })).toBe(false);
     expect(isWide({ filmstrip: strip(160) })).toBe(false);
     expect(isWide({ output_aspect: null, filmstrip: strip(160) })).toBe(false);
+  });
+});
+
+// The owner's iPhone (2026-11): the done frame was empty before a tap.
+// iOS paints only the poster there, and the thumbnail it got didn't show.
+describe("the done frame's still", () => {
+  const THUMB = "https://api.test/jobs/j1/thumbnail?v=2";
+  const POSTER = "https://api.test/jobs/j1/poster";
+
+  /** decode() of a detached image: `broken` URLs reject (a 404, a file the browser can't decode). */
+  const decoder = (...broken: string[]) =>
+    vi.fn(async (url: string) => {
+      if (broken.includes(url)) throw new DOMException("The source image cannot be decoded.", "EncodingError");
+    });
+
+  it("tries the export's thumbnail, then the analysis' poster when the job has one", () => {
+    expect(stillCandidates(THUMB, POSTER)).toEqual([
+      { kind: "thumbnail", url: THUMB },
+      { kind: "poster", url: POSTER },
+    ]);
+    expect(stillCandidates(THUMB, null)).toEqual([{ kind: "thumbnail", url: THUMB }]);
+    // media URLs not ready yet
+    expect(stillCandidates(null, null)).toEqual([]);
+  });
+
+  it("a thumbnail that decodes: that one, the poster never asked for", async () => {
+    const decode = decoder();
+    const got = await pickStill(stillCandidates(THUMB, POSTER), decode);
+    expect(got).toEqual({ kind: "thumbnail", url: THUMB });
+    expect(decode.mock.calls.map(([url]) => url)).toEqual([THUMB]);
+  });
+
+  it("a thumbnail that doesn't decode: the poster, each tried in turn", async () => {
+    const decode = decoder(THUMB);
+    const got = await pickStill(stillCandidates(THUMB, POSTER), decode);
+    expect(got).toEqual({ kind: "poster", url: POSTER });
+    expect(decode.mock.calls.map(([url]) => url)).toEqual([THUMB, POSTER]);
+  });
+
+  it("none decodes, or there is none: null (the video's own first frame)", async () => {
+    const decode = decoder(THUMB, POSTER);
+    expect(await pickStill(stillCandidates(THUMB, POSTER), decode)).toBeNull();
+    expect(decode).toHaveBeenCalledTimes(2);
+    expect(await pickStill(stillCandidates(THUMB, null), decoder(THUMB))).toBeNull();
+    expect(await pickStill([], decoder())).toBeNull();
+  });
+
+  it("the frame gone (a new export): stops, nothing more tried", async () => {
+    let live = true;
+    const decode = vi.fn(async (url: string) => {
+      live = false;
+      throw new Error(`broken ${url}`);
+    });
+    expect(await pickStill(stillCandidates(THUMB, POSTER), decode, () => live)).toBeNull();
+    expect(decode.mock.calls.map(([url]) => url)).toEqual([THUMB]);
+    // one that decodes after the frame went: not taken either
+    live = true;
+    const late = vi.fn(async () => {
+      live = false;
+    });
+    expect(await pickStill(stillCandidates(THUMB, POSTER), late, () => live)).toBeNull();
   });
 });

@@ -482,8 +482,13 @@ export const enApp = {
   "app.export.instantDone": "Ready instantly – nothing changed since the analysis.",
   "app.done.play": "Play",
   "app.done.preparing": "Preparing…",
+  // {pct}: formatted for the language, percent sign included ("42%", "42 %")
+  "app.done.preparingPct": "Preparing… {pct}",
   "app.done.saveShare": "Save / Share…",
   "app.done.download": "Download",
+  // The editor's Done view on a phone: the file couldn't be fetched (three tries) or the share sheet
+  // refused it; this line under the downloads, the main one in the button's place
+  "app.done.shareFailed": "Couldn't get the video ready to share. Download it instead.",
   "app.done.video": "Video",
   "app.done.postText": "Text for your post",
   "app.done.copyText": "Copy",
@@ -522,6 +527,10 @@ export const enApp = {
   "app.preview.unavailable": "The preview couldn't be made. Your edits are saved.",
   // iPhone and iPad: the share sheet saves it to Photos
   "app.preview.save": "Save video",
+  // iPhone / iPad, under "Download" when "Save video" gave up (the file couldn't be fetched in three
+  // tries, or the share sheet refused it): Download saves to Files, not Photos. Photos and Files are
+  // the iOS apps' names in the language
+  "app.preview.saveFailed": "Couldn't get the video ready for Photos. Download saves it to Files instead.",
   // Changed after an export: the file exported before
   "app.preview.previousVersion": "Download the previous version",
   // This browser kept changes (timeline or text) the server doesn't have yet; the editor restores them

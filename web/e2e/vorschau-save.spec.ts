@@ -14,9 +14,10 @@
  *       the bucket itself, with the page's Origin, never through
  *       /download (its redirect into the bucket is redirect-tainted,
  *       which the bucket's CORS refuses); with local media the API's own
- *       /download. A question the API can't answer: Download instead.
- *       A second export in the same visit: asked and fetched again, its
- *       own file shared
+ *       /download. A question the API can't answer: asked three times,
+ *       then Download with a note, never a download by itself (more in
+ *       vorschau-done.spec.ts). A second export in the same visit: asked
+ *       and fetched again, its own file shared
  *
  * Desktop and pixel7 of a v2 build (E2E_EDITOR_V2=1), once with local
  * media (the anonymous run) and once on R2 (E2E_MODE=r2: moto as R2,
@@ -262,25 +263,44 @@ function saveTests(store: Store) {
       }
     });
 
-    test("Save video when the API can't say where the file is: Download instead, nothing shared", async ({ page, stub }, info) => {
+    // Changed on purpose (the owner's iPhone, 2026-11): this used to
+    // download the file by itself, which iOS saves to Files, not Photos.
+    test("Save video when the API can't say where the file is: asked three times, then Download with a note; nothing downloaded or shared by itself", async ({
+      page,
+      stub,
+    }, info) => {
       test.skip(info.project.name !== "pixel7", "phones only");
       await storageOf(stub, store);
       await fakeShareSheet(page);
       await tapStillActive(page, true);
       const job = await stub.seed("done");
+      let asked = 0;
       await page.route(
         (u) => u.pathname === `/jobs/${job.id}/download` && u.searchParams.get("as") === "url",
-        (r) => r.fulfill({ status: 503, headers: { "Access-Control-Allow-Origin": WEB }, body: "" }),
+        (r) => {
+          asked++;
+          return r.fulfill({ status: 503, headers: { "Access-Control-Allow-Origin": WEB }, body: "" });
+        },
       );
+      const downloads: string[] = [];
+      page.on("download", (d) => downloads.push(d.suggestedFilename()));
       await openWithStorage(page, `/app/p/${job.id}`);
       const save = page.getByTestId("done-share");
       await expect(save).toHaveAttribute("data-state", "idle", { timeout: 30_000 });
-      const [file] = await Promise.all([page.waitForEvent("download"), save.click()]);
-      expect(file.suggestedFilename()).toBe("tiktok_3_mistakes_final_cleocuts_9x16.mp4");
-      // The page offers the download from now on.
+      await save.click();
+      // Tried again 2 s and 6 s later; then the page offers the download, and says why.
+      const download = page.getByTestId("done-download").first();
+      await expect(download).toHaveText("Download", { timeout: 30_000 });
       await expect(page.getByTestId("done-share")).toHaveCount(0);
-      await expect(page.getByTestId("done-download").first()).toHaveText("Download");
+      await expect(page.getByTestId("done-share-failed")).toHaveText(
+        "Couldn't get the video ready for Photos. Download saves it to Files instead.",
+      );
+      expect(asked).toBe(3);
+      await page.waitForTimeout(1000);
+      expect(downloads).toEqual([]);
       expect(await sharedFiles(page)).toEqual([]);
+      const [file] = await Promise.all([page.waitForEvent("download"), download.click()]);
+      expect(file.suggestedFilename()).toBe("tiktok_3_mistakes_final_cleocuts_9x16.mp4");
     });
   });
 
