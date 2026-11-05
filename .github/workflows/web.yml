@@ -92,9 +92,11 @@ jobs:
     name: typecheck · lint · unit · i18n
     if: github.event_name != 'schedule'
     # Not ubuntu-latest: that is ubuntu 26.04 now, for which Playwright
-    # 1.56 has no Chromium ("does not support chromium on
+    # 1.56 has no browsers ("does not support chromium on
     # ubuntu26.04-x64"), so the caption parity step below can't install
-    # it. (The e2e jobs get theirs from the cache: e2e-setup.)
+    # Chromium. The same for the e2e and nightly jobs below (there only a
+    # restored browser cache kept them going), until Playwright knows
+    # 26.04.
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -129,8 +131,10 @@ jobs:
   e2e:
     name: e2e (${{ matrix.name }})
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # ubuntu-24.04: see the checks job.
+    runs-on: ubuntu-24.04
+    # editor-v2 takes about 22 min (the done page's tests, Nov 2026).
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -202,7 +206,8 @@ jobs:
   nightly:
     name: nightly (${{ matrix.name }})
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.nightly)
-    runs-on: ubuntu-latest
+    # ubuntu-24.04: see the checks job.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # WebKit has never run against these suites yet: report its results
     # without failing the nightly run (no failure mail every night) until

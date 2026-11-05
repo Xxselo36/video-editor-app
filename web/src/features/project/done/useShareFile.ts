@@ -14,9 +14,11 @@
  *              video plays: a tap fetches it (on from where it stopped)
  *   preparing  fetching ("Preparing… 42 %": `progress`, null while the
  *              size is unknown); a failed try is followed by two more
- *              (2 s, then 6 s later; a hidden page's try waits until it
- *              shows again: iOS cuts its requests), each going on from
- *              where the last one stopped (FileFetch)
+ *              (2 s, then 6 s later), each going on from where the last
+ *              one stopped (FileFetch). A try only starts while the page
+ *              is in view (iOS cuts a hidden page's requests), and one
+ *              that brought part of the file, or that the page went out
+ *              of view in, isn't counted: it goes on
  *   ready      fetched: a tap opens the share sheet
  *   failed     the fetch failed three times, or the browser can't share
  *              this file: the caller offers Download with a note
@@ -24,11 +26,12 @@
  * `prefetch`: fetch as soon as media URLs work (the Done view; the
  * Vorschau as prefetchAhead says, once its frame has its picture, and
  * not while its video plays: a fetch ahead that started holds then, the
- * video comes first). A tap on "idle" fetches, then shares if the
- * browser still counts the tap (a quick fetch; else the next tap
- * shares). Nothing downloads by itself (the owner's iPhone, 2026-11: the
- * download landed in Files instead of Photos): a share the user closed,
- * or one while a sheet is open, leaves the file ready for the next tap;
+ * video comes first). A tap on "idle" fetches, then shares if the file
+ * is in while the browser still counts that tap (TAP_COUNTS_MS; else
+ * the next tap shares). Nothing downloads by itself (the owner's
+ * iPhone, 2026-11: the download landed in Files instead of Photos): a
+ * share the user closed, or one while a sheet is open, leaves the file
+ * ready for the next tap;
  * one the browser refused although it counted the tap (Chromium over
  * its 50 MiB), or couldn't read, fails; a tap while a share is still
  * open does nothing.
@@ -89,6 +92,8 @@ export type Prepared = { state: "preparing" | "ready" | "failed"; progress: numb
 export type ShareSessionOptions = {
   /** One try at the file, on from where the last one stopped (FileFetch.next of the export's link). */
   load: (signal: AbortSignal, onProgress: OnProgress) => Promise<File>;
+  /** Bytes of the file kept for the next try (FileFetch.progress.loaded). */
+  kept?: () => number;
   /** Ends the session and its tries (the export changed, the page went). */
   signal: AbortSignal;
   onChange: (p: Prepared) => void;
@@ -98,15 +103,24 @@ export type ShareSessionOptions = {
   page?: PageVisibility;
   /** The waits before the second and third try. */
   waits?: readonly number[];
+  /** The clock of ask() (performance.now()); tests pass their own. */
+  now?: () => number;
 };
+
+/** How long after a tap the browser still counts it (transient user
+ *  activation: 5 s in WebKit and Chromium): a tap's fetch shares the
+ *  file by itself only when it is in by then. */
+export const TAP_COUNTS_MS = 5_000;
 
 /** Why a try was stopped by hold(): a pause, not a failure. */
 const HELD = "held";
 
 /**
  * One export's file for the share sheet (useShareFile, plain TS so the
- * tests drive it): fetched by `load` in tries, three at most (a try
- * stopped by hold() doesn't count: it goes on when the hold ends), its
+ * tests drive it): fetched by `load` in tries, three failed ones at most
+ * (not counted: a try stopped by hold(), which goes on when the hold
+ * ends, and one cut short — it brought part of the file, or the page
+ * went out of view — which goes on once the page is in view), its
  * progress told in whole percent (onChange at most once each); then
  * shared from a tap. While a share is open a tap does nothing: a second
  * navigator.share() would cancel the first one's reading of the file in
@@ -117,7 +131,8 @@ export class ShareSession {
   private file: File | null = null;
   private sharing = false;
   private now: Prepared = { state: "preparing", progress: null };
-  private byTap = false;
+  /** When a tap asked for the file (ask), by the clock; null: none did. */
+  private askedAt: number | null = null;
   private held = false;
   private attempt: AbortController | null = null;
   private resume: (() => void) | null = null;
@@ -149,10 +164,23 @@ export class ShareSession {
     }
   }
 
-  /** A tap asked for the file (it fetches): shared at once if the browser
-   *  still counts that tap when the file is in (a quick fetch). */
-  ask(): void {
-    this.byTap = true;
+  /** A tap asked for the file at `at` (it fetches): shared at once if it
+   *  is in within TAP_COUNTS_MS of that tap and the browser still counts
+   *  it (a quick fetch; a later gesture, a play or a key, doesn't). */
+  ask(at: number = this.clock()): void {
+    this.askedAt = at;
+  }
+
+  private clock(): number {
+    return (this.o.now ?? (() => performance.now()))();
+  }
+
+  /** Until the page is in view (iOS cuts the requests of a page in the
+   *  background); rejects when the session ends. */
+  private visible(): Promise<void> {
+    const page = this.o.page ?? globalThis.document;
+    if (!page?.hidden) return Promise.resolve();
+    return waitToRetry(0, this.o.signal, page);
   }
 
   /** Until no hold is on; rejects when the session ends. */
@@ -171,9 +199,10 @@ export class ShareSession {
   }
 
   /** Fetch the file. `byTap`: a tap asked for it (ask()). */
-  async start(byTap: boolean): Promise<void> {
+  async start(byTap = false): Promise<void> {
     if (byTap) this.ask();
-    const { load, signal, nav = globalThis.navigator, waits = RETRY_WAITS_MS } = this.o;
+    const { load, signal, nav = globalThis.navigator, waits = RETRY_WAITS_MS, kept = () => 0 } = this.o;
+    const page = this.o.page ?? globalThis.document;
     const onProgress: OnProgress = (loaded, total) => {
       const pct = total ? Math.min(100, Math.floor((loaded / total) * 100)) : null;
       this.set({ state: "preparing", progress: pct === null ? null : pct / 100 });
@@ -181,25 +210,39 @@ export class ShareSession {
     for (let failures = 0; ; ) {
       try {
         await this.unheld();
+        await this.visible();
       } catch {
         return;
       }
       if (signal.aborted) return;
+      if (this.held) continue;
       const ctrl = new AbortController();
       const end = () => ctrl.abort(signal.reason);
       signal.addEventListener("abort", end, { once: true });
       this.attempt = ctrl;
+      // Cut short: the page went out of view during the try (iOS cuts its
+      // requests), or the try brought part of the file (kept for the next).
+      let hid = false;
+      const seen = () => {
+        if (page?.hidden) hid = true;
+      };
+      page?.addEventListener("visibilitychange", seen);
+      const before = kept();
+      let cut = false;
       try {
         this.file = await load(ctrl.signal, onProgress);
         this.set({ state: "ready", progress: null });
-        if (this.byTap && nav?.userActivation?.isActive) this.tap();
+        const at = this.askedAt;
+        if (at !== null && this.clock() - at < TAP_COUNTS_MS && nav?.userActivation?.isActive) this.tap();
         return;
       } catch {
         if (signal.aborted) return;
         if (ctrl.signal.reason === HELD) continue;
-        failures++;
+        cut = hid || !!page?.hidden || kept() > before;
+        if (!cut) failures++;
       } finally {
         signal.removeEventListener("abort", end);
+        page?.removeEventListener("visibilitychange", seen);
         this.attempt = null;
       }
       if (failures > waits.length) {
@@ -208,7 +251,7 @@ export class ShareSession {
         return;
       }
       try {
-        await waitToRetry(waits[failures - 1], signal, this.o.page);
+        await waitToRetry(cut ? waits[0] ?? 0 : waits[failures - 1], signal, this.o.page);
       } catch {
         return;
       }
@@ -256,9 +299,11 @@ export function useShareFile(
   // One fetch per export and format (a new export starts over).
   const key = `${jobId}:${gen}:${format}`;
   const usable = on && file !== undefined && shareMode(file.bytes) === "share";
-  // The export a tap asked to fetch.
-  const [tapped, setTapped] = useState<string | null>(null);
-  const asked = tapped === key;
+  // The export a tap asked to fetch, and when (performance.now(): the
+  // share sheet opens by itself only while the browser counts that tap).
+  const [tap, setTap] = useState<{ key: string; at: number } | null>(null);
+  const askedAt = tap?.key === key ? tap.at : null;
+  const asked = askedAt !== null;
   const live = usable && mediaReady;
   // Fetch now; else not yet, or held where it is (`prefetch` turned off
   // again: the Vorschau's video plays). A tap's fetch is never held.
@@ -271,7 +316,9 @@ export function useShareFile(
   const state: ShareState = !usable ? "off" : (result ?? (want ? "preparing" : "idle"));
   const progress = state === "preparing" && mine ? mine.progress : null;
 
-  // The session ends with its export, when sharing goes off, and with the page.
+  // The session ends with its export, when sharing goes off, and with the
+  // page; what it fetched goes with it (a new one for the same export
+  // starts from "preparing", not from the old one's ready or failed).
   useEffect(() => {
     if (!live) return;
     return () => {
@@ -279,6 +326,7 @@ export function useShareFile(
       if (cur?.key !== key) return;
       cur.ctrl.abort();
       session.current = null;
+      setPrep((p) => (p?.key === key ? null : p));
     };
   }, [live, key]);
 
@@ -291,7 +339,7 @@ export function useShareFile(
       return;
     }
     if (cur) {
-      if (asked) cur.s.ask();
+      if (askedAt !== null) cur.s.ask(askedAt);
       cur.s.hold(false);
       return;
     }
@@ -299,17 +347,19 @@ export function useShareFile(
     const fetcher = new FileFetch(downloadHref({ id: jobId, renders_ok: gen }, format), name, bytes);
     const s = new ShareSession({
       load: (signal, onProgress) => fetcher.next(signal, onProgress),
+      kept: () => fetcher.progress.loaded,
       signal: ctrl.signal,
       onChange: (p) => setPrep({ ...p, key }),
     });
     session.current = { key, s, ctrl };
-    void s.start(asked);
-  }, [live, go, asked, key, jobId, gen, format, name, bytes]);
+    if (askedAt !== null) s.ask(askedAt);
+    void s.start();
+  }, [live, go, askedAt, key, jobId, gen, format, name, bytes]);
 
   const share = () => {
     if (state === "ready") {
       if (session.current?.key === key) session.current.s.tap();
-    } else if (state === "idle") setTapped(key);
+    } else if (state === "idle") setTap({ key, at: performance.now() });
   };
 
   return { state, progress, share };

@@ -20,11 +20,13 @@
  */
 import { Pause, Play } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { flushSync } from "react-dom";
 import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import { useMediaUrl } from "@/lib/api";
 import type { JobStatus } from "@/features/jobs/types";
 import {
+  decodeStill,
   isWide,
   pickStill,
   progressOf,
@@ -175,16 +177,11 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
  *  the e2e runs, vorschau-done.spec.ts). */
 const FIRST_FRAME = "#t=0.001";
 
-/** Loads and decodes `url` in a detached image: rejects on a 404 and on
- *  a file the browser can't decode, where a poster stays empty. */
-function decodeImage(url: string): Promise<void> {
-  const img = new Image();
-  img.src = url;
-  return img.decode();
-}
-
 /** Played or playing: a new src would reload it. */
 const started = (v: HTMLVideoElement | null) => !!v && (!v.paused || v.played.length > 0 || v.currentTime > 0);
+
+/** HTMLMediaElement.readyState: a frame to show. */
+const HAVE_CURRENT_DATA = 2;
 
 /**
  * The exported video (done): GET /watch of this export. Before a tap
@@ -196,11 +193,13 @@ const started = (v: HTMLVideoElement | null) => !!v && (!v.paused || v.played.le
  * only clears the failed image while it is in error: Safari 17 to 26),
  * so a failing thumbnail set as the poster would keep the frame empty.
  * None decodes: the video's own first frame, through FIRST_FRAME, and
- * only while the video hasn't played (never reloaded once started).
- * `onPicture`: the still is settled (the share's fetch ahead waits for
- * it); `onPlaying`: the video plays, or stopped (that fetch holds while
- * it plays). PreviewScreen keys this by the export's generation: a new
- * export starts over.
+ * only while the video hasn't played (never reloaded once started: that
+ * is decided and committed in one task, flushSync, so a tap can't come
+ * in between). `onPicture`: the frame has its picture — a still that
+ * decoded, or the video's first frame once it is drawn — the share's
+ * fetch ahead waits for it; `onPlaying`: the video plays, or stopped
+ * (that fetch holds while it plays). PreviewScreen keys this by the
+ * export's generation: a new export starts over.
  */
 export default function ExportedVideo({
   job,
@@ -234,16 +233,41 @@ export default function ExportedVideo({
     if (!src) return;
     let live = true;
     const candidates = stillCandidates(thumbnail, hasPoster ? poster : null);
-    void pickStill(candidates, decodeImage, () => live).then((c) => {
+    void pickStill(candidates, (url) => decodeStill(url), () => live).then((c) => {
       if (!live) return;
       const firstFrame = !c && !started(videoRef.current);
-      setChain((cur) => ({ still: c ? c.kind : "frame", url: c?.url ?? null, firstFrame: cur.firstFrame || firstFrame }));
-      told.current.onPicture?.();
+      flushSync(() =>
+        setChain((cur) => ({ still: c ? c.kind : "frame", url: c?.url ?? null, firstFrame: cur.firstFrame || firstFrame })),
+      );
+      // A still is the picture now; the first frame once it is drawn (below).
+      if (c) told.current.onPicture?.();
     });
     return () => {
       live = false;
     };
   }, [src, thumbnail, poster, hasPoster]);
+
+  // The video's own first frame: there once drawn (loadeddata, and seeked
+  // for FIRST_FRAME's seek), at once for a video that already played; a
+  // load error doesn't hold the fetch ahead either.
+  const frameStill = chain.still === "frame";
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!frameStill || !v) return;
+    if (started(v) || v.readyState >= HAVE_CURRENT_DATA) {
+      told.current.onPicture?.();
+      return;
+    }
+    const events = ["loadeddata", "seeked", "error"] as const;
+    const drawn = () => {
+      for (const e of events) v.removeEventListener(e, drawn);
+      told.current.onPicture?.();
+    };
+    for (const e of events) v.addEventListener(e, drawn);
+    return () => {
+      for (const e of events) v.removeEventListener(e, drawn);
+    };
+  }, [frameStill]);
 
   const { playing } = playback;
   useEffect(() => {

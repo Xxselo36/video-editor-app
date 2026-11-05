@@ -231,6 +231,25 @@ def test_the_thumbnail_has_the_videos_colours(tmp_path):
         assert worst <= 6, (name, got, want)
 
 
+def test_the_poster_has_the_videos_colours(tmp_path):
+    """The analysis' poster (make_poster) stands in for the thumbnail on
+    the finished frame (GET /thumbnail without one, or a thumbnail that
+    doesn't decode): the same 4:2:0 layout and the video's colours. (The
+    proxy straight to yuvj420p kept BT.709 values: green 31 levels off.)"""
+    clip = _patches(tmp_path / "proxy.mp4")
+    ref = tmp_path / "ref.png"
+    subprocess.run([FF, "-y", "-v", "error", "-ss", "3", "-i", str(clip),
+                    "-frames:v", "1", "-vf",
+                    "scale=in_color_matrix=bt709:in_range=tv,format=rgb24",
+                    str(ref)], check=True)
+    out = tmp_path / pipeline.POSTER_NAME
+    assert pipeline.make_poster(str(clip), 3.0, str(out))
+    _assert_thumb(out, (540, 960))
+    got, want = _patch_means(out), _patch_means(ref)
+    worst = max(abs(a - b) for g, w in zip(got, want) for a, b in zip(g, w))
+    assert worst <= 6, (got, want)
+
+
 # ── GET /jobs/{id}/thumbnail ──────────────────────────────────────────
 
 POSTER = b"\xff\xd8poster\xff\xd9"

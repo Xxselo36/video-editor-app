@@ -402,11 +402,15 @@ def make_poster(source_path: str, at: float, poster_path: str,
                 width: int = 540) -> bool:
     """A small JPEG of the frame at `at` seconds (the start of the first
     kept clip): the editor shows it until its <video> has a frame of its
-    own (iOS Safari decodes none before playback, UT5). At most `width`
-    px wide. False (logged) when it can't be made."""
+    own (iOS Safari decodes none before playback, UT5), and the
+    Vorschau's finished frame when the export's thumbnail doesn't show.
+    At most `width` px wide; like the thumbnail (THUMB_WIDTH) a baseline
+    4:2:0 JPEG in the video's own colours, through RGB. False (logged)
+    when it can't be made."""
     cmd = [get_ffmpeg_path(), "-y", "-v", "error", "-ss", f"{max(0.0, at):.3f}",
            "-i", source_path, "-frames:v", "1",
-           "-vf", f"scale='min({int(width)},iw)':-2", "-q:v", "5", poster_path]
+           "-vf", f"scale='min({int(width)},iw)':-2,format=rgb24",
+           "-pix_fmt", "yuvj420p", "-q:v", "5", poster_path]
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=60)
     except Exception as e:
@@ -1376,8 +1380,10 @@ def _concat_preview(
 # every decoder takes. (Given an RGB frame, ffmpeg's mjpeg picks 4:4:4
 # with 1x2 sampling on every component — what the thumbnails were.) The
 # frame goes through RGB on its way (format=rgb24): read with the
-# video's own colour matrix (an export is BT.709), written as JFIF's
-# (BT.601), which is how every decoder reads a JPEG. Straight from the
+# video's own colour matrix (a v2 export is tagged BT.709; a v1 export
+# is untagged BT.601, which is what ffmpeg assumes for untagged video:
+# keep the input matrix on auto), written as JFIF's (BT.601), which is
+# how every decoder reads a JPEG. Straight from the
 # video's YUV to yuvj420p the scaler converts the range but keeps the
 # BT.709 values: saturated colours came out off by up to 35 levels.
 THUMB_WIDTH = 540

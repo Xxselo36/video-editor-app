@@ -3,12 +3,14 @@
 // (after 10 s "the preview is still being prepared"), the scrub line,
 // the clips the preview's captions map through, what it shows of the
 // captions, and the done frame's still.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Fetched } from "@/features/editor/state/docFetch";
 import {
   BUSY,
+  DECODE_WAIT_MS,
   EMPTY,
   PLAYING,
+  decodeStill,
   editSegsOf,
   isWide,
   pickStill,
@@ -16,6 +18,7 @@ import {
   previewCaptions,
   progressOf,
   stillCandidates,
+  type StillImage,
 } from "./player";
 
 // HTMLMediaElement: networkState IDLE 1, LOADING 2, NO_SOURCE 3;
@@ -216,5 +219,63 @@ describe("the done frame's still", () => {
       live = false;
     });
     expect(await pickStill(stillCandidates(THUMB, POSTER), late, () => live)).toBeNull();
+  });
+});
+
+// Review (picture-1): Safari 17 and older never settle decode() for a
+// still that loads but doesn't decode (the old 4:4:4 thumbnails, not
+// redone): the chain stopped there, no poster, no first frame.
+describe("decodeStill", () => {
+  afterEach(() => vi.useRealTimers());
+
+  /** A detached image whose load the test fires, and whose decode answers with `decode`. */
+  function image(decode: () => Promise<void>) {
+    const img = { decode: vi.fn(decode), onload: null, onerror: null, src: "" };
+    return {
+      img: img as unknown as StillImage,
+      load: () => (img.onload as unknown as () => void)(),
+      fail: () => (img.onerror as unknown as () => void)(),
+      src: () => img.src,
+      decoded: () => img.decode.mock.calls.length,
+    };
+  }
+
+  it("decodes once it loaded: resolves", async () => {
+    const x = image(() => Promise.resolve());
+    const p = decodeStill("/jobs/j1/thumbnail?v=1", () => x.img);
+    expect(x.src()).toBe("/jobs/j1/thumbnail?v=1");
+    expect(x.decoded()).toBe(0);
+    x.load();
+    await expect(p).resolves.toBeUndefined();
+    expect(x.decoded()).toBe(1);
+  });
+
+  it("rejects a still that doesn't load (a 404, a body that is no image) and one the browser can't decode", async () => {
+    const missing = image(() => Promise.resolve());
+    const p = decodeStill("/a", () => missing.img);
+    missing.fail();
+    await expect(p).rejects.toThrow();
+    const broken = image(() => Promise.reject(new DOMException("Decoding error.", "EncodingError")));
+    const q = decodeStill("/b", () => broken.img);
+    broken.load();
+    await expect(q).rejects.toThrow("Decoding error.");
+  });
+
+  it("a decode that never settles: rejected DECODE_WAIT_MS after the load, and no limit on the load itself", async () => {
+    vi.useFakeTimers();
+    const x = image(() => new Promise<void>(() => {}));
+    let outcome = "pending";
+    void decodeStill("/c", () => x.img).then(
+      () => (outcome = "decoded"),
+      () => (outcome = "rejected"),
+    );
+    // a slow link: the still takes 30 s to come
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(outcome).toBe("pending");
+    x.load();
+    await vi.advanceTimersByTimeAsync(DECODE_WAIT_MS - 1);
+    expect(outcome).toBe("pending");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toBe("rejected");
   });
 });

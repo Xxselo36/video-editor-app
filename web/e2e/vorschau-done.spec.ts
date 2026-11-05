@@ -11,7 +11,9 @@
  *             frame through #t=0.001 (iOS paints none before play, nor
  *             does Chromium on a phone), never once the video was started
  *   start     "Video sichern" of an export finished during the visit is
- *             fetched once the frame has its picture, or 2.5 s after done
+ *             fetched once the frame has its picture (a still that
+ *             decoded, or the video's first frame once drawn), or 2.5 s
+ *             after done
  *   playing   that fetch holds while the video plays ("Save video" again)
  *             and goes on from where it stopped (Range) once it stops
  *   retries   a file fetch that fails is tried twice more, each going on
@@ -494,7 +496,9 @@ function doneTests(store: Store) {
       const thumbnail = await holdRequests(page, `${API}/jobs/${job.id}/thumbnail**`);
       await openVorschau(page, job.id);
       await page.getByTestId("preview-finish").click();
-      await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 60_000 });
+      // done, seen within 50 ms (expect's own checks come up to 1 s apart,
+      // which would eat this test's slack against the 2.5 s timer)
+      await expect.poll(() => vorschau(page).getAttribute("data-state"), { timeout: 60_000, intervals: [50] }).toBe("done");
       const done = Date.now();
       // The thumbnail is still on its way: no question yet.
       await page.waitForTimeout(1_500);
@@ -537,6 +541,52 @@ function doneTests(store: Store) {
       // Opened by the picture (onPicture), not by the 2.5 s timer after done.
       expect(asked[0] - thumbnailIn).toBeLessThan(1_500);
       expect(asked[0] - thumbnailAsked).toBeLessThan(2_000);
+      await expect(page.getByTestId("done-share")).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+    });
+
+    // Review (picture-2): with neither still the question went as the
+    // stills gave up, before the video's first frame was there: the
+    // fetch ahead competed with it.
+    test("finished during the visit, neither still decodes: the question goes once the video's first frame is drawn", async ({
+      page,
+      stub,
+    }, info) => {
+      test.skip(info.project.name !== "pixel7", "phones only");
+      await storageOf(stub, store);
+      await fakeShareSheet(page);
+      const job = await stub.seed("review_speech", { render_seconds: 1 });
+      const asked = askedWhere(page, job.id);
+      await breakStill(page, job.id, "thumbnail", "garbage");
+      await breakStill(page, job.id, "poster", "404");
+      // The export's video comes 1 s late (each load of it).
+      await page.route(
+        (u) => u.pathname === `/jobs/${job.id}/watch`,
+        async (r) => {
+          await new Promise((res) => setTimeout(res, 1_000));
+          await r.fallback();
+        },
+      );
+      // When the export's first frame (the #t=0.001 load) was there.
+      await page.addInitScript(() => {
+        const w = window as unknown as { __frameAt?: number };
+        document.addEventListener(
+          "loadeddata",
+          (e) => {
+            const v = e.target as HTMLVideoElement;
+            if (w.__frameAt === undefined && v.closest?.('[data-video="export"]') && v.currentSrc.includes("#t=")) w.__frameAt = Date.now();
+          },
+          true,
+        );
+      });
+      await openVorschau(page, job.id);
+      await page.getByTestId("preview-finish").click();
+      await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 60_000 });
+      await expect(frame(page)).toHaveAttribute("data-still", "frame", { timeout: 15_000 });
+      const frameAt = () => page.evaluate(() => (window as unknown as { __frameAt?: number }).__frameAt ?? 0);
+      await expect.poll(frameAt, { timeout: 15_000 }).toBeGreaterThan(0);
+      await expect.poll(() => asked.length, { timeout: 10_000 }).toBe(1);
+      // the first frame came, then the question
+      expect(asked[0]).toBeGreaterThanOrEqual((await frameAt()) - 100);
       await expect(page.getByTestId("done-share")).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
     });
 

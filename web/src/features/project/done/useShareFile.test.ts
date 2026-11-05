@@ -3,7 +3,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TFn } from "@/i18n";
 import { RETRY_WAITS_MS, type OnProgress } from "../share";
-import { downloadHref, exportFiles, prefetchAhead, preparingLabel, ShareSession, type Prepared } from "./useShareFile";
+import {
+  downloadHref,
+  exportFiles,
+  prefetchAhead,
+  preparingLabel,
+  ShareSession,
+  TAP_COUNTS_MS,
+  type Prepared,
+} from "./useShareFile";
 
 describe("exportFiles", () => {
   it("lists one file per format, the primary first in line", () => {
@@ -97,7 +105,20 @@ describe("ShareSession", () => {
    * every onChange, in turn; `signals`: each try's.
    */
   function session(
-    o: { fails?: number; pieces?: number[]; hidden?: boolean; answer?: () => Promise<void>; active?: boolean | null; hang?: boolean } = {},
+    o: {
+      fails?: number;
+      pieces?: number[];
+      hidden?: boolean;
+      answer?: () => Promise<void>;
+      active?: boolean | null;
+      hang?: boolean;
+      /** each try: the page goes out of view, then the try fails (the first `fails`) */
+      hideOnTry?: boolean;
+      /** a failed try's file starts over (FileFetch restart: nothing kept) */
+      restarts?: boolean;
+      /** ms on the session's clock a try takes */
+      took?: number;
+    } = {},
   ) {
     const { page, show } = fakePage(o.hidden);
     const ctrl = new AbortController();
@@ -105,26 +126,37 @@ describe("ShareSession", () => {
     const signals: AbortSignal[] = [];
     let tries = 0;
     let loaded = 0;
+    let clock = 0;
     const load = vi.fn(async (signal: AbortSignal, onProgress: OnProgress) => {
       signals.push(signal);
       tries++;
+      clock += o.took ?? 0;
       for (const n of o.pieces ?? []) onProgress((loaded += n), 1000);
       if (o.hang)
         await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("stopped", "AbortError"))));
-      if (tries <= (o.fails ?? 0)) throw new TypeError(`Load failed ${tries}`);
+      if (tries <= (o.fails ?? 0)) {
+        if (o.hideOnTry) {
+          page.hidden = true;
+          page.dispatchEvent(new Event("visibilitychange"));
+        }
+        if (o.restarts) loaded = 0;
+        throw new TypeError(`Load failed ${tries}`);
+      }
       return video();
     });
     const share = vi.fn(o.answer ?? (async () => {}));
     const activation = o.active === null ? undefined : ({ isActive: o.active ?? false, hasBeenActive: true } as UserActivation);
     const s = new ShareSession({
       load,
+      kept: () => loaded,
       signal: ctrl.signal,
       onChange: (p) => states.push(p),
       nav: { share, userActivation: activation },
       page,
       waits: RETRY_WAITS_MS,
+      now: () => clock,
     });
-    return { s, load, share, states, signals, ctrl, show, last: () => states.at(-1)?.state ?? "preparing" };
+    return { s, load, share, states, signals, ctrl, page, show, last: () => states.at(-1)?.state ?? "preparing" };
   }
 
   /** document.createElement watched: a download link would be made with it. */
@@ -174,17 +206,56 @@ describe("ShareSession", () => {
     expect(links).not.toHaveBeenCalled();
   });
 
-  it("a hidden page: the next try waits for visibilitychange", async () => {
+  it("a hidden page: no try until it shows (iOS cuts its requests)", async () => {
     vi.useFakeTimers();
-    const x = session({ fails: 1, hidden: true });
+    const x = session({ hidden: true });
     const done = x.s.start(false);
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(x.load).toHaveBeenCalledTimes(1);
+    expect(x.load).not.toHaveBeenCalled();
     expect(x.last()).toBe("preparing");
     x.show();
+    await vi.advanceTimersByTimeAsync(0);
     await done;
-    expect(x.load).toHaveBeenCalledTimes(2);
+    expect(x.load).toHaveBeenCalledTimes(1);
     expect(x.last()).toBe("ready");
+  });
+
+  // Review (share-1): leaving the app three times while the file came in
+  // used up the three tries, though each try had kept its part: Video
+  // sichern gave way to Download (Files) for good.
+  it("a try cut short isn't counted: one that brought part of the file, or that the page went out of view in", async () => {
+    vi.useFakeTimers();
+    // five tries, each bringing 100 bytes, then cut: on with the sixth
+    const parts = session({ fails: 5, pieces: [100] });
+    const a = parts.s.start(false);
+    await vi.advanceTimersByTimeAsync(5 * 2_000);
+    await a;
+    expect(parts.load).toHaveBeenCalledTimes(6);
+    expect(parts.states.map((p) => p.state)).not.toContain("failed");
+    expect(parts.last()).toBe("ready");
+    // four tries the page went out of view in, nothing brought: each next
+    // one once it shows again
+    const away = session({ fails: 4, hideOnTry: true });
+    const b = away.s.start(false);
+    for (let i = 1; i <= 4; i++) {
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(away.load).toHaveBeenCalledTimes(i);
+      away.show();
+    }
+    await vi.advanceTimersByTimeAsync(2_000);
+    await b;
+    expect(away.load).toHaveBeenCalledTimes(5);
+    expect(away.last()).toBe("ready");
+  });
+
+  it("still counted: tries that bring nothing, and ones whose file starts over (nothing kept)", async () => {
+    vi.useFakeTimers();
+    const x = session({ fails: 3, pieces: [100], restarts: true });
+    const done = x.s.start(false);
+    await vi.advanceTimersByTimeAsync(8_000);
+    await done;
+    expect(x.load).toHaveBeenCalledTimes(3);
+    expect(x.last()).toBe("failed");
   });
 
   // Review F2 and F5: a refusal the next tap would repeat failed silently
@@ -241,6 +312,20 @@ describe("ShareSession", () => {
     const ahead = session({ active: true });
     await ahead.s.start(false);
     expect(ahead.share).not.toHaveBeenCalled();
+  });
+
+  // Review (share-2): a tap's 40 s fetch opened the sheet by itself after
+  // any later gesture (a play, a key in the post text).
+  it("a tap's fetch shares by itself only within 5 s of that tap, whatever the browser counts later", async () => {
+    const quick = session({ active: true, took: TAP_COUNTS_MS - 1 });
+    await quick.s.start(true);
+    expect(quick.share).toHaveBeenCalledTimes(1);
+    const late = session({ active: true, took: TAP_COUNTS_MS });
+    await late.s.start(true);
+    expect(late.share).not.toHaveBeenCalled();
+    expect(late.last()).toBe("ready");
+    late.s.tap();
+    expect(late.share).toHaveBeenCalledTimes(1);
   });
 
   // Review F4: each try started from 0 again ("90 %", "Preparing…", "5 %").
