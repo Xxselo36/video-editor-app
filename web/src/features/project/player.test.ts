@@ -1,11 +1,26 @@
 // The Vorschau player's logic (player.ts): the frame's shape, when it
 // waits for the file (spinner, aria-busy) and when it has none of it yet
 // (after 10 s "the preview is still being prepared"), the scrub line,
-// the clips the preview's captions map through, and what it shows of
-// the captions.
-import { describe, expect, it } from "vitest";
+// the clips the preview's captions map through, what it shows of the
+// captions, and the done frame's still.
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Fetched } from "@/features/editor/state/docFetch";
-import { BUSY, EMPTY, PLAYING, editSegsOf, isWide, playbackOf, previewCaptions, progressOf } from "./player";
+import {
+  BUSY,
+  DECODE_WAIT_MS,
+  EMPTY,
+  PLAYING,
+  decodeStill,
+  editSegsOf,
+  isWide,
+  pickStill,
+  playbackOf,
+  previewCaptions,
+  progressOf,
+  stillCandidates,
+  type StillImage,
+  type StillPage,
+} from "./player";
 
 // HTMLMediaElement: networkState IDLE 1, LOADING 2, NO_SOURCE 3;
 // readyState HAVE_NOTHING 0 … HAVE_ENOUGH_DATA 4.
@@ -144,5 +159,169 @@ describe("isWide", () => {
     expect(isWide({ output_aspect: "original", filmstrip: strip(160, 0) })).toBe(false);
     expect(isWide({ filmstrip: strip(160) })).toBe(false);
     expect(isWide({ output_aspect: null, filmstrip: strip(160) })).toBe(false);
+  });
+});
+
+// The owner's iPhone (2026-11): the done frame was empty before a tap.
+// iOS paints only the poster there, and the thumbnail it got didn't show.
+describe("the done frame's still", () => {
+  const THUMB = "https://api.test/jobs/j1/thumbnail?v=2";
+  const POSTER = "https://api.test/jobs/j1/poster";
+
+  /** decode() of a detached image: `broken` URLs reject (a 404, a file the browser can't decode). */
+  const decoder = (...broken: string[]) =>
+    vi.fn(async (url: string) => {
+      if (broken.includes(url)) throw new DOMException("The source image cannot be decoded.", "EncodingError");
+    });
+
+  it("tries the export's thumbnail, then the analysis' poster when the job has one", () => {
+    expect(stillCandidates(THUMB, POSTER)).toEqual([
+      { kind: "thumbnail", url: THUMB },
+      { kind: "poster", url: POSTER },
+    ]);
+    expect(stillCandidates(THUMB, null)).toEqual([{ kind: "thumbnail", url: THUMB }]);
+    // media URLs not ready yet
+    expect(stillCandidates(null, null)).toEqual([]);
+  });
+
+  it("a thumbnail that decodes: that one, the poster never asked for", async () => {
+    const decode = decoder();
+    const got = await pickStill(stillCandidates(THUMB, POSTER), decode);
+    expect(got).toEqual({ kind: "thumbnail", url: THUMB });
+    expect(decode.mock.calls.map(([url]) => url)).toEqual([THUMB]);
+  });
+
+  it("a thumbnail that doesn't decode: the poster, each tried in turn", async () => {
+    const decode = decoder(THUMB);
+    const got = await pickStill(stillCandidates(THUMB, POSTER), decode);
+    expect(got).toEqual({ kind: "poster", url: POSTER });
+    expect(decode.mock.calls.map(([url]) => url)).toEqual([THUMB, POSTER]);
+  });
+
+  it("none decodes, or there is none: null (the video's own first frame)", async () => {
+    const decode = decoder(THUMB, POSTER);
+    expect(await pickStill(stillCandidates(THUMB, POSTER), decode)).toBeNull();
+    expect(decode).toHaveBeenCalledTimes(2);
+    expect(await pickStill(stillCandidates(THUMB, null), decoder(THUMB))).toBeNull();
+    expect(await pickStill([], decoder())).toBeNull();
+  });
+
+  it("the frame gone (a new export): stops, nothing more tried", async () => {
+    let live = true;
+    const decode = vi.fn(async (url: string) => {
+      live = false;
+      throw new Error(`broken ${url}`);
+    });
+    expect(await pickStill(stillCandidates(THUMB, POSTER), decode, () => live)).toBeNull();
+    expect(decode.mock.calls.map(([url]) => url)).toEqual([THUMB]);
+    // one that decodes after the frame went: not taken either
+    live = true;
+    const late = vi.fn(async () => {
+      live = false;
+    });
+    expect(await pickStill(stillCandidates(THUMB, POSTER), late, () => live)).toBeNull();
+  });
+});
+
+// Review (picture-1): Safari 17 and older never settle decode() for a
+// still that loads but doesn't decode (the old 4:4:4 thumbnails, not
+// redone): the chain stopped there, no poster, no first frame.
+describe("decodeStill", () => {
+  afterEach(() => vi.useRealTimers());
+
+  /** A detached image whose load the test fires, and whose decode answers with `decode`. */
+  function image(decode: () => Promise<void>) {
+    const img = { decode: vi.fn(decode), onload: null, onerror: null, src: "" };
+    return {
+      img: img as unknown as StillImage,
+      load: () => (img.onload as unknown as () => void)(),
+      fail: () => (img.onerror as unknown as () => void)(),
+      src: () => img.src,
+      decoded: () => img.decode.mock.calls.length,
+    };
+  }
+
+  it("decodes once it loaded: resolves", async () => {
+    const x = image(() => Promise.resolve());
+    const p = decodeStill("/jobs/j1/thumbnail?v=1", () => x.img);
+    expect(x.src()).toBe("/jobs/j1/thumbnail?v=1");
+    expect(x.decoded()).toBe(0);
+    x.load();
+    await expect(p).resolves.toBeUndefined();
+    expect(x.decoded()).toBe(1);
+  });
+
+  it("rejects a still that doesn't load (a 404, a body that is no image) and one the browser can't decode", async () => {
+    const missing = image(() => Promise.resolve());
+    const p = decodeStill("/a", () => missing.img);
+    missing.fail();
+    await expect(p).rejects.toThrow();
+    const broken = image(() => Promise.reject(new DOMException("Decoding error.", "EncodingError")));
+    const q = decodeStill("/b", () => broken.img);
+    broken.load();
+    await expect(q).rejects.toThrow("Decoding error.");
+  });
+
+  it("a decode that never settles: rejected DECODE_WAIT_MS after the load, and no limit on the load itself", async () => {
+    vi.useFakeTimers();
+    const x = image(() => new Promise<void>(() => {}));
+    let outcome = "pending";
+    void decodeStill("/c", () => x.img).then(
+      () => (outcome = "decoded"),
+      () => (outcome = "rejected"),
+    );
+    // a slow link: the still takes 30 s to come
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(outcome).toBe("pending");
+    x.load();
+    await vi.advanceTimersByTimeAsync(DECODE_WAIT_MS - 1);
+    expect(outcome).toBe("pending");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toBe("rejected");
+  });
+
+  // Review of the review fixes (frame-1): Chromium decodes for a hidden
+  // page only once it shows; the limit ran anyway, and a tab in the
+  // background lost both stills for the video's first frame.
+  it("the wait counts only while the page is in view, from the start each time it shows", async () => {
+    vi.useFakeTimers();
+    const page = Object.assign(new EventTarget(), { hidden: true });
+    const set = (hidden: boolean) => {
+      page.hidden = hidden;
+      page.dispatchEvent(new Event("visibilitychange"));
+    };
+    const x = image(() => new Promise<void>(() => {}));
+    let outcome = "pending";
+    void decodeStill("/d", () => x.img, DECODE_WAIT_MS, page as unknown as StillPage).then(
+      () => (outcome = "decoded"),
+      () => (outcome = "rejected"),
+    );
+    x.load();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(outcome).toBe("pending");
+    set(false);
+    await vi.advanceTimersByTimeAsync(DECODE_WAIT_MS - 500);
+    set(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(outcome).toBe("pending");
+    set(false);
+    await vi.advanceTimersByTimeAsync(DECODE_WAIT_MS - 1);
+    expect(outcome).toBe("pending");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toBe("rejected");
+  });
+
+  it("a decode that settles once the page shows: the still", async () => {
+    vi.useFakeTimers();
+    const page = Object.assign(new EventTarget(), { hidden: true });
+    let decoded: () => void = () => {};
+    const x = image(() => new Promise<void>((r) => (decoded = r)));
+    const p = decodeStill("/e", () => x.img, DECODE_WAIT_MS, page as unknown as StillPage);
+    x.load();
+    await vi.advanceTimersByTimeAsync(30_000);
+    page.hidden = false;
+    page.dispatchEvent(new Event("visibilitychange"));
+    decoded();
+    await expect(p).resolves.toBeUndefined();
   });
 });

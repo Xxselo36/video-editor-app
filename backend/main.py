@@ -8193,6 +8193,14 @@ def job_thumbnail(job_id: str, user: User | None = Depends(media_user)):
     lives next to the primary output at a fixed filename so we can
     derive the path without storing it on the Job.
 
+    An export stored without its thumbnail (made best effort at render
+    time): the analysis' poster (GET /jobs/{id}/poster) — a frame of the
+    source without captions, where the first kept clip started at
+    analysis time; after the first clip was edited it may be one the
+    export cut (job_poster). Still better than a dark frame: on iOS
+    Safari the finished page's frame shows nothing but this image
+    before a tap. An export with its thumbnail always gets that.
+
     No thumbnail (an expired or unknown project, none rendered yet): the
     status with an EMPTY body (UX12) — an <img> that gets a JSON error
     body is blocked by the browser (ERR_BLOCKED_BY_ORB) and logged."""
@@ -8213,6 +8221,9 @@ def _thumbnail(job_id: str, user: User | None):
         return _media(job, job.thumb_key, "image/jpeg", "thumbnail not ready",
                       cache=cache)
     if job.output_keys:
+        if job.poster_key:
+            return _media(job, job.poster_key, "image/jpeg",
+                          "thumbnail not ready", cache=cache)
         raise HTTPException(404, "thumbnail not ready")
     if not job.output_path:
         raise HTTPException(409, "thumbnail not ready")

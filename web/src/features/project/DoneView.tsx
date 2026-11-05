@@ -8,9 +8,11 @@
  *   preview          autoplay, muted, loop; a play button when the
  *                    browser refuses autoplay
  *   Save / Share…    phones with file sharing: the file is fetched when
- *                    the view opens ("Preparing…") and shared from the
- *                    tap itself (done/useShareFile); else / above 250 MB
- *                    Download
+ *                    the view opens ("Preparing… 42 %") and shared from
+ *                    the tap itself (done/useShareFile); else / above
+ *                    250 MB (50 MiB off iOS: Chromium shares no more)
+ *                    Download. A file that can't be fetched or shared:
+ *                    Download, with a note why
  *   downloads        one per distinct file ("9:16 · 12 MB"), named after
  *                    the project by the backend
  *   post text        editable (saved on blur), Copy; no regenerate (G7)
@@ -35,7 +37,7 @@ import { CaptionFiles } from "./done/CaptionFiles";
 import { PostText } from "./done/PostText";
 import { Survey } from "./done/Survey";
 import { Tip } from "./done/Tip";
-import { downloadHref, exportFiles, useShareFile } from "./done/useShareFile";
+import { downloadHref, exportFiles, preparingLabel, useShareFile } from "./done/useShareFile";
 import { downloadLabel, editAgainNote } from "./exportsInfo";
 
 export function DoneView({
@@ -131,13 +133,14 @@ export function DoneView({
         {shareFirst && (
           <Button
             size="md"
-            className="flex w-full items-center justify-center gap-2 py-3"
+            className="flex w-full items-center justify-center gap-2 py-3 tabular-nums"
             onClick={share.share}
             disabled={share.state === "preparing"}
             data-testid="done-share"
+            data-state={share.state}
           >
             <Icon icon={Share2} size={16} />
-            {share.state === "preparing" ? t("app.done.preparing") : t("app.done.saveShare")}
+            {share.state === "preparing" ? preparingLabel(t, lang, share.progress) : t("app.done.saveShare")}
           </Button>
         )}
         {downloads.map((d) => {
@@ -161,6 +164,15 @@ export function DoneView({
             </a>
           );
         })}
+        {/* Why Save / Share… gave way to Download (there before it is
+            filled, so it is announced; no room while empty). */}
+        <div role="status" className="empty:-mt-2">
+          {share.state === "failed" && (
+            <p className="text-center text-xs text-[var(--text-muted)]" data-testid="done-share-failed">
+              {t("app.done.shareFailed")}
+            </p>
+          )}
+        </div>
       </div>
 
       <PostText job={job} />

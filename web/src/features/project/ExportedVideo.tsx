@@ -1,7 +1,8 @@
 "use client";
 /**
  * The Vorschau's player (PR2, mockup docs/mockups/start/4-vorschau) and
- * the finished video in it (done: GET /watch, captions burned in).
+ * the finished video in it (done: GET /watch, captions burned in; before
+ * a tap a still that really decodes, ExportedVideo).
  *
  * Player: the frame (9:16, or 16:9 for a landscape output), the video
  * (no native controls; the first tap plays it with sound), a round
@@ -19,11 +20,21 @@
  */
 import { Pause, Play } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { flushSync } from "react-dom";
 import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import { useMediaUrl } from "@/lib/api";
 import type { JobStatus } from "@/features/jobs/types";
-import { isWide, progressOf, usePlayback, type Playback } from "./player";
+import {
+  decodeStill,
+  isWide,
+  pickStill,
+  progressOf,
+  stillCandidates,
+  usePlayback,
+  type Playback,
+  type Still,
+} from "./player";
 import s from "./player.module.css";
 
 /** No file after this long: "the preview is still being prepared". */
@@ -46,9 +57,11 @@ export type PlayerProps = {
   note?: ReactNode;
   /** No file to play yet: "building" (busy), "failed" (it couldn't be made). */
   held?: "building" | "failed";
+  /** What the frame shows before a tap (data-still, for the tests): ExportedVideo. */
+  still?: Still;
 };
 
-export function Player({ videoRef, playback, src, poster, wide, kind, overlay, note, held }: PlayerProps) {
+export function Player({ videoRef, playback, src, poster, wide, kind, overlay, note, held, still }: PlayerProps) {
   const t = useT();
   const fillRef = useRef<HTMLSpanElement>(null);
   const { playing, busy, empty } = playback;
@@ -108,6 +121,7 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
         data-playing={playing || undefined}
         aria-busy={busy || building || undefined}
         data-held={held}
+        data-still={still}
         data-testid="preview-frame"
       >
         <video
@@ -156,21 +170,119 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
   );
 }
 
-/** The exported video (done): GET /watch of this export, its thumbnail as the poster. */
-export default function ExportedVideo({ job }: { job: JobStatus }) {
+/** A media fragment: the browser loads the video and seeks there once
+ *  its metadata is in, which paints that frame (WebKit's
+ *  applyMediaFragmentURI). Without it iOS paints none before play, nor
+ *  does Chromium on a phone (an empty frame with the whole file loaded:
+ *  the e2e runs, vorschau-done.spec.ts). */
+const FIRST_FRAME = "#t=0.001";
+
+/** Played or playing: a new src would reload it. */
+const started = (v: HTMLVideoElement | null) => !!v && (!v.paused || v.played.length > 0 || v.currentTime > 0);
+
+/** HTMLMediaElement.readyState: a frame to show. */
+const HAVE_CURRENT_DATA = 2;
+
+/**
+ * The exported video (done): GET /watch of this export. Before a tap
+ * iOS paints only the poster (preload="metadata" draws no frame there),
+ * so the poster is the first still that really decodes: the export's
+ * thumbnail, else the analysis' poster (the owner's iPhone, 2026-11: an
+ * empty frame). Only a still that decoded ever becomes the poster: once
+ * a poster failed, WebKit loads no other one (a new poster attribute
+ * only clears the failed image while it is in error: Safari 17 to 26),
+ * so a failing thumbnail set as the poster would keep the frame empty.
+ * None decodes: the video's own first frame, through FIRST_FRAME, and
+ * only while the video hasn't played (never reloaded once started: that
+ * is decided and committed in one task, flushSync, so a tap can't come
+ * in between). `onPicture`: the frame has its picture — a still that
+ * decoded, or the video's first frame once it is drawn — the share's
+ * fetch ahead waits for it; `onPlaying`: the video plays, or stopped
+ * (that fetch holds while it plays). PreviewScreen keys this by the
+ * export's generation: a new export starts over.
+ */
+export default function ExportedVideo({
+  job,
+  onPicture,
+  onPlaying,
+}: {
+  job: JobStatus;
+  onPicture?: () => void;
+  onPlaying?: (playing: boolean) => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playback = usePlayback(videoRef);
   const v = job.renders_ok ?? 0;
   const src = useMediaUrl(job.id, "watch", { v });
-  const poster = useMediaUrl(job.id, "thumbnail", { v });
+  const thumbnail = useMediaUrl(job.id, "thumbnail", { v });
+  const poster = useMediaUrl(job.id, "poster");
+  const hasPoster = !!job.has_poster;
+  // The still that decoded (`url`: the poster), and whether the src has
+  // FIRST_FRAME. Once on that stays: taking it off would reload the video.
+  const [chain, setChain] = useState<{ still: Still; url: string | null; firstFrame: boolean }>({
+    still: "none",
+    url: null,
+    firstFrame: false,
+  });
+  const told = useRef({ onPicture, onPlaying });
+  useEffect(() => {
+    told.current = { onPicture, onPlaying };
+  });
+
+  useEffect(() => {
+    if (!src) return;
+    let live = true;
+    const candidates = stillCandidates(thumbnail, hasPoster ? poster : null);
+    void pickStill(candidates, (url) => decodeStill(url), () => live).then((c) => {
+      if (!live) return;
+      const firstFrame = !c && !started(videoRef.current);
+      flushSync(() =>
+        setChain((cur) => ({ still: c ? c.kind : "frame", url: c?.url ?? null, firstFrame: cur.firstFrame || firstFrame })),
+      );
+      // A still is the picture now; the first frame once it is drawn (below).
+      if (c) told.current.onPicture?.();
+    });
+    return () => {
+      live = false;
+    };
+  }, [src, thumbnail, poster, hasPoster]);
+
+  // The video's own first frame: there once drawn (loadeddata, and seeked
+  // for FIRST_FRAME's seek), at once for a video that already played; a
+  // load error doesn't hold the fetch ahead either.
+  const frameStill = chain.still === "frame";
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!frameStill || !v) return;
+    if (started(v) || v.readyState >= HAVE_CURRENT_DATA) {
+      told.current.onPicture?.();
+      return;
+    }
+    const events = ["loadeddata", "seeked", "error"] as const;
+    const drawn = () => {
+      for (const e of events) v.removeEventListener(e, drawn);
+      told.current.onPicture?.();
+    };
+    for (const e of events) v.addEventListener(e, drawn);
+    return () => {
+      for (const e of events) v.removeEventListener(e, drawn);
+    };
+  }, [frameStill]);
+
+  const { playing } = playback;
+  useEffect(() => {
+    told.current.onPlaying?.(playing);
+  }, [playing]);
+
   return (
     <Player
       videoRef={videoRef}
       playback={playback}
-      src={src}
-      poster={poster ?? undefined}
+      src={src && chain.firstFrame ? `${src}${FIRST_FRAME}` : src}
+      poster={chain.url ?? undefined}
       wide={isWide(job)}
       kind="export"
+      still={src ? chain.still : "none"}
     />
   );
 }

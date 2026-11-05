@@ -13,10 +13,13 @@
  *               downloadable until the new one is done
  *   finishing   Fertigstellen runs: the working button, "you can close
  *               this page", the place in line
- *   done        the export: "Video sichern" on an iPhone or iPad (the
- *               share sheet saves it to Photos), else "Herunterladen";
- *               Feinschliff (POST /reopen); "Mehr zum Video" (post text,
- *               SRT / VTT, bonus clips, other formats); survey and tip
+ *   done        the export (its frame always has a picture: ExportedVideo):
+ *               "Video sichern" on an iPhone or iPad (the share sheet
+ *               saves it to Photos; "Wird vorbereitet… 42 %" while the
+ *               file comes in), else, or when that fails, "Herunterladen"
+ *               (with a note why: it goes to Files); Feinschliff (POST
+ *               /reopen); "Mehr zum Video" (post text, SRT / VTT, bonus
+ *               clips, other formats); survey and tip
  *   failed      the reason, "Anderes Video probieren"
  *
  * Ready and edited also say when an export failed (Fertigstellen tries
@@ -75,7 +78,14 @@ import { CaptionFiles } from "./done/CaptionFiles";
 import { PostText } from "./done/PostText";
 import { Survey } from "./done/Survey";
 import { Tip } from "./done/Tip";
-import { downloadHref, exportFiles, prefetchAhead, useShareFile, type Connection } from "./done/useShareFile";
+import {
+  downloadHref,
+  exportFiles,
+  prefetchAhead,
+  preparingLabel,
+  useShareFile,
+  type Connection,
+} from "./done/useShareFile";
 import { costLine, downloadLabel } from "./exportsInfo";
 import ExportedVideo from "./ExportedVideo";
 import { unsavedOnDevice } from "./finish";
@@ -100,6 +110,9 @@ const RENDER_FAILURES = new Set(["render_failed", "render_unavailable", "render_
 
 /** Another tab's copies (the storage event): read once they stop changing for this long. */
 const STORAGE_CHECK_MS = 250;
+
+/** "Video sichern" fetches ahead once the frame has its picture, or this long after done. */
+const PICTURE_WAIT_MS = 2_500;
 
 /** An upload runs in this page: closing it would stop the upload. */
 function useUploadsHere(): boolean {
@@ -415,12 +428,26 @@ export default function PreviewScreen({
     name: shownName,
   };
 
-  // Saving the export (D21): the share sheet on an iPhone / iPad.
+  // Saving the export (D21): the share sheet on an iPhone / iPad. An
+  // export finished during the visit is fetched ahead, at low priority,
+  // once the frame has its picture (ExportedVideo onPicture) or
+  // PICTURE_WAIT_MS after done, whichever comes first, and never while
+  // the video plays: a fetch that started holds where it is and goes on
+  // once the video stops. The still and the video come first; the file
+  // is 50 to 120 MB from a phone camera.
+  const gen = job.renders_ok ?? 0;
+  const [pictured, setPictured] = useState<number | null>(null);
+  useEffect(() => {
+    if (state !== "done") return;
+    const timer = window.setTimeout(() => setPictured(gen), PICTURE_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [state, gen]);
+  const [playing, setPlaying] = useState(false);
   const files = exportFiles(job);
   const connection = (navigator as Navigator & { connection?: Connection }).connection;
   const share = useShareFile(job, files.primary, {
     on: ios && state === "done",
-    prefetch: prefetchAhead(finishedHere, connection),
+    prefetch: prefetchAhead(finishedHere, connection) && pictured === gen && !playing,
   });
 
   // The page changed in place: focus that was on a control that went
@@ -433,6 +460,12 @@ export default function PreviewScreen({
     if (document.activeElement && document.activeElement !== document.body) return;
     document.getElementById(state === "done" ? SAVE_ID : TITLE_ID)?.focus({ preventScroll: true });
   }, [state]);
+  // "Video sichern" gave up: the focus it had goes on to the Download in its place.
+  const shareFailed = share.state === "failed";
+  useEffect(() => {
+    if (!shareFailed || (document.activeElement && document.activeElement !== document.body)) return;
+    document.getElementById(SAVE_ID)?.focus({ preventScroll: true });
+  }, [shareFailed]);
 
   // Changes only Feinschliff can bring into the video (this device's, or
   // edits the server can't render as stored): only "Feinschliff öffnen".
@@ -492,7 +525,8 @@ export default function PreviewScreen({
   );
 
   let frame: ReactNode;
-  if (state === "done") frame = <ExportedVideo job={job} />;
+  if (state === "done")
+    frame = <ExportedVideo key={gen} job={job} onPicture={() => setPictured(gen)} onPlaying={setPlaying} />;
   else if (state === "failed") frame = <FailedFrame job={job} wide={wide} />;
   else frame = <PreviewVideo job={job} settled={settled} failed={previewFailed} />;
 
@@ -636,7 +670,7 @@ export default function PreviewScreen({
             data-state={share.state}
           >
             <Icon icon={Download} size={19} />
-            {t(preparing ? "app.done.preparing" : "app.preview.save")}
+            {preparing ? preparingLabel(t, lang, share.progress) : t("app.preview.save")}
           </Button>
         ) : (
           <a
@@ -652,6 +686,13 @@ export default function PreviewScreen({
             {t("app.done.download")}
           </a>
         )}
+        <div key="saveStatus" className={s.status} role="status">
+          {shareFailed && (
+            <p className={s.note} data-testid="done-share-failed">
+              {t("app.preview.saveFailed")}
+            </p>
+          )}
+        </div>
         <Button
           key="refine"
           size="lg"
