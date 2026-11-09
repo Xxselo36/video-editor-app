@@ -165,6 +165,14 @@ jobs:
             mode: r2
             projects: --project=desktop --project=pixel7
             editor_v2: '1'
+          # Safari's engine (WebKit) as an iPhone: e2e/safari.spec.ts
+          # (@safari). Chromium alone let a WebKit-only bug through (the
+          # Vorschau's frame 0 px wide on the owner's iPhone, 2026-11).
+          - name: safari-iphone
+            mode: anon
+            projects: --project=iphone
+            editor_v2: '1'
+            browsers: webkit
     env:
       E2E_MODE: ${{ matrix.mode }}
       E2E_WEB: start
@@ -181,7 +189,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
-          browsers: chromium
+          browsers: ${{ matrix.browsers || 'chromium' }}
       - name: Build (next build)
         run: npm run build
       # First-load JS per route, gzipped (scripts/bundle-budget.mjs; /app

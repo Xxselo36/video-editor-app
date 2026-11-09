@@ -62,8 +62,10 @@
 .watch[data-shape="wide"] > .media {
   align-self: stretch;
 }
-/* The frame while the page loads (the box of player.module.css). */
+/* The frame while the page loads (the box of player.module.css; its
+ * width said, as there: WebKit sizes an auto one to 0 here). */
 .frameSkeleton {
+  width: calc(var(--fh) * 9 / 16);
   height: var(--fh);
   max-width: 100%;
   aspect-ratio: 9 / 16;
