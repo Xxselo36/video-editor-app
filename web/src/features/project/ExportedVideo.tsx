@@ -179,16 +179,16 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
     }
     fs.toggle();
   };
-  // Full screen: Space and Enter play and pause (focus on the play
-  // button, not on the one that leaves; Space also once a click on the
-  // picture left the focus on the page), and Tab goes round the two.
+  // Full screen: the focus on the frame (a modal dialog then), so no
+  // control's ring sits on the picture; Space plays and pauses (on a
+  // button, the button), Tab goes round the two buttons that show.
   const toggleRef = useRef(toggle);
   useEffect(() => {
     toggleRef.current = toggle;
   });
   useEffect(() => {
     if (!fs.active) return;
-    playRef.current?.focus({ preventScroll: true });
+    frameRef.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === " " && !(e.target instanceof HTMLButtonElement)) {
         e.preventDefault();
@@ -196,7 +196,9 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
         return;
       }
       if (e.key !== "Tab") return;
-      const items = [playRef.current, fsRef.current].filter((b): b is HTMLButtonElement => !!b);
+      const items = [playRef.current, fsRef.current].filter(
+        (b): b is HTMLButtonElement => !!b && b.getClientRects().length > 0,
+      );
       if (!items.length) return;
       const i = items.indexOf(document.activeElement as HTMLButtonElement);
       const n = items.length;
@@ -215,6 +217,7 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
       <div
         ref={frameRef}
         className={s.frame}
+        tabIndex={fs.active ? -1 : undefined}
         role={fs.active ? "dialog" : undefined}
         aria-modal={fs.active || undefined}
         aria-label={fs.active ? t("app.preview.fullscreen") : undefined}

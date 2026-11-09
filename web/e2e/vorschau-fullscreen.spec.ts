@@ -7,10 +7,11 @@
  *                     blurred; there while the video plays (a mouse: while
  *                     over the frame)
  *   Fullscreen API    (desktop, Android, iPad) the frame fills the
- *                     screen with the captions drawn over it; Space plays
- *                     (also after a click on the picture), Tab stays in
- *                     it; a still mouse hides the controls; the button
- *                     leaves
+ *                     screen with the captions drawn over it, a modal
+ *                     dialog with the focus; Space plays (also after a
+ *                     click on the picture), Tab stays in it; a still
+ *                     mouse hides the controls but the one the keyboard
+ *                     is on; the button leaves, the focus back on it
  *   16:9              the play button 40 % down the letterboxed picture
  *   an iPhone         no element Fullscreen API (removed by hand, as in
  *                     editor-v2-mobile): the preview (its captions drawn,
@@ -162,18 +163,24 @@ test.describe("the Vorschau in full screen", TAG, () => {
     expect(await box(frame(page))).toMatchObject({ x: 0, y: 0, width: vp.width, height: vp.height });
     await expect(button(page)).toHaveAttribute("aria-label", "Exit full screen");
     await expect(frame(page)).toHaveAttribute("role", "dialog");
+    await expect(page.getByRole("dialog", { name: "Full screen" })).toHaveAttribute("aria-modal", "true");
     // the captions are drawn over it, bigger with the picture
     await expect.poll(async () => (await box(canvas)).width).toBeGreaterThan(captionsInline * 1.2);
 
-    // Space and Enter play and pause; Tab goes round its two buttons
-    await expect(page.getByTestId("preview-play")).toBeFocused();
+    // the focus on the frame (the dialog), no ring on the picture: Space
+    // plays and pauses; Tab goes round its two buttons, both ways
+    await expect(frame(page)).toBeFocused();
     await page.keyboard.press("Space");
     await expect.poll(() => paused(page)).toBe(false);
+    await page.keyboard.press("Tab");
+    await expect(page.getByTestId("preview-play")).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(button(page)).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.getByTestId("preview-play")).toBeFocused();
-    // a click on the picture pauses and leaves the focus on the page: Space still plays
+    await page.keyboard.press("Shift+Tab");
+    await expect(button(page)).toBeFocused();
+    // a click on the picture pauses; Space plays again
     await press(page, video(page));
     await expect.poll(() => paused(page)).toBe(true);
     await page.keyboard.press("Space");
@@ -189,10 +196,19 @@ test.describe("the Vorschau in full screen", TAG, () => {
       await page.mouse.move(vp.width / 2 + 40, vp.height / 2 + 40);
       await expect(frame(page)).not.toHaveAttribute("data-idle");
       await expect.poll(() => opacity(button(page))).toBe(1);
+      // a control the keyboard is on stays (and its ring), the rest goes
+      await page.keyboard.press("Tab");
+      await expect(page.getByTestId("preview-play")).toBeFocused();
+      await expect(frame(page)).toHaveAttribute("data-idle", "true", { timeout: 6_000 });
+      await expect.poll(() => opacity(button(page))).toBe(0);
+      expect(await opacity(page.getByTestId("preview-play"))).toBe(1);
     }
 
-    await press(page, button(page));
+    // out with the keyboard: the focus back on the button that went in
+    await button(page).focus();
+    await page.keyboard.press("Enter");
     await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
+    await expect(button(page)).toBeFocused();
     expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
     await expect(frame(page)).not.toHaveAttribute("role");
     await expect(button(page)).toHaveAttribute("aria-label", "Full screen");
@@ -243,6 +259,9 @@ test.describe("the Vorschau in full screen", TAG, () => {
     await expect(frame(page)).toHaveAttribute("data-fullscreen", "pseudo");
     // not the phone's own player: it would drop the drawn captions
     expect(await ownPlayerOpened(page)).toBe(0);
+    // a modal dialog with the focus in it (VoiceOver stays in it)
+    await expect(page.getByRole("dialog", { name: "Full screen" })).toHaveAttribute("aria-modal", "true");
+    await expect(frame(page)).toBeFocused();
     const vp = page.viewportSize()!;
     expect(await box(frame(page))).toMatchObject({ x: 0, y: 0, width: vp.width, height: vp.height });
     expect(await frame(page).evaluate((e) => getComputedStyle(e).position)).toBe("fixed");
@@ -293,6 +312,7 @@ test.describe("the Vorschau in full screen", TAG, () => {
     await expect(frame(page)).toHaveAttribute("data-fullscreen", "pseudo");
     await page.keyboard.press("Escape");
     await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
+    await expect(button(page)).toBeFocused();
     // no entry of the full screen left over: the next Back leaves the page, as before
     expect(await ownEntry(page)).toBe(false);
   });
