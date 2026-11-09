@@ -66,7 +66,9 @@ const HAVE_METADATA = 1;
 /** Android Chrome lets a page in full screen turn the screen. */
 type Turnable = ScreenOrientation & { lock?: (o: "landscape") => Promise<void>; unlock?: () => void };
 
-/** `on` and nothing moved for IDLE_MS (any pointer, any key). */
+/** `on` and nothing moved for IDLE_MS (any pointer, any key). A press
+ *  doesn't wake it: a click with a still pointer acts on the picture, not
+ *  on a control it can't see (which would take the release only). */
 function useIdle(on: boolean): boolean {
   const [idle, setIdle] = useState(false);
   if (!on && idle) setIdle(false);
@@ -78,7 +80,7 @@ function useIdle(on: boolean): boolean {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => setIdle(true), IDLE_MS);
     };
-    const events = ["pointermove", "pointerdown", "keydown"] as const;
+    const events = ["pointermove", "keydown"] as const;
     for (const e of events) window.addEventListener(e, wake, { passive: true });
     return () => {
       window.clearTimeout(timer);

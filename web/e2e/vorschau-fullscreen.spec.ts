@@ -10,8 +10,11 @@
  *                     screen with the captions drawn over it, a modal
  *                     dialog with the focus; Space plays (also after a
  *                     click on the picture), Tab stays in it; a still
- *                     mouse hides the controls but the one the keyboard
- *                     is on; the button leaves, the focus back on it
+ *                     mouse hides the controls and the pointer but the
+ *                     control the keyboard is on (a move or a key brings
+ *                     them back, a click acts on the picture); the page
+ *                     under it keeps its place; the button leaves, the
+ *                     focus back on it; the export too
  *   16:9              the screen turned to landscape (Android), the play
  *                     button 40 % down the letterboxed picture
  *   an iPhone         no element Fullscreen API (removed by hand, as in
@@ -159,9 +162,11 @@ test.describe("the Vorschau in full screen", TAG, () => {
     const inline = await box(frame(page));
     const canvas = frame(page).getByTestId("caption-canvas");
     const captionsInline = (await box(canvas)).width;
+    const under = await box(page.getByTestId("preview-finish"));
 
     await press(page, button(page));
     await expect(frame(page)).toHaveAttribute("data-fullscreen", "real");
+    expect(await box(page.getByTestId("preview-finish")), "the page under it keeps its place").toEqual(under);
     expect(await page.evaluate(() => document.fullscreenElement?.getAttribute("data-testid") ?? null)).toBe("preview-frame");
     const vp = page.viewportSize()!;
     expect(await box(frame(page))).toMatchObject({ x: 0, y: 0, width: vp.width, height: vp.height });
@@ -191,13 +196,33 @@ test.describe("the Vorschau in full screen", TAG, () => {
     await expect.poll(() => paused(page)).toBe(false);
 
     if (await mouse(page)) {
-      // playing and the mouse still: the controls and the pointer go; a move brings them back
-      await page.mouse.move(vp.width / 2, vp.height / 2);
+      // playing and the mouse still (on the play button's spot): the controls
+      // and the pointer go
+      const pb = await box(page.getByTestId("preview-play"));
+      const at = { x: pb.x + pb.width / 2, y: pb.y + pb.height / 2 };
+      await page.mouse.move(at.x, at.y);
       await expect(frame(page)).toHaveAttribute("data-idle", "true", { timeout: 6_000 });
       await expect.poll(() => opacity(page.getByTestId("preview-play"))).toBe(0);
       await expect.poll(() => opacity(button(page))).toBe(0);
-      expect(await frame(page).evaluate((e) => getComputedStyle(e).cursor)).toBe("none");
-      await page.mouse.move(vp.width / 2 + 40, vp.height / 2 + 40);
+      const cursorAt = () => page.evaluate(({ x, y }) => getComputedStyle(document.elementFromPoint(x, y)!).cursor, at);
+      expect(await cursorAt(), "no pointer over the picture").toBe("none");
+      // a key brings them back
+      await page.keyboard.press("Shift");
+      await expect(frame(page)).not.toHaveAttribute("data-idle");
+      await expect.poll(() => opacity(button(page))).toBe(1);
+      // still again: a click without a move acts on the picture (pauses),
+      // never on a control it can't see
+      await expect(frame(page)).toHaveAttribute("data-idle", "true", { timeout: 6_000 });
+      await page.mouse.down();
+      await page.mouse.up();
+      await expect.poll(() => paused(page)).toBe(true);
+      await expect(frame(page)).not.toHaveAttribute("data-idle");
+      await expect.poll(() => opacity(page.getByTestId("preview-play"))).toBe(1);
+      await page.keyboard.press("Space");
+      await expect.poll(() => paused(page)).toBe(false);
+      // a move brings them back
+      await expect(frame(page)).toHaveAttribute("data-idle", "true", { timeout: 6_000 });
+      await page.mouse.move(at.x + 40, at.y + 40);
       await expect(frame(page)).not.toHaveAttribute("data-idle");
       await expect.poll(() => opacity(button(page))).toBe(1);
       // a control the keyboard is on stays (and its ring), the rest goes
@@ -263,7 +288,7 @@ test.describe("the Vorschau in full screen", TAG, () => {
     page,
     stub,
   }, info) => {
-    test.skip(info.project.name === "desktop", "a phone");
+    test.skip(!info.project.use.hasTouch, "a phone (taps)");
     await asIPhone(page, { supported: true });
     const job = await stub.seed("review_speech");
     await openVorschau(page, job.id, { query: "?captions=v2" });
@@ -275,12 +300,14 @@ test.describe("the Vorschau in full screen", TAG, () => {
     const inline = await box(frame(page));
     const canvas = frame(page).getByTestId("caption-canvas");
     const captionsInline = (await box(canvas)).width;
+    const under = await box(page.getByTestId("preview-finish"));
     await page.evaluate(() => {
       (window as unknown as { __samePage: boolean }).__samePage = true;
     });
 
     await button(page).tap();
     await expect(frame(page)).toHaveAttribute("data-fullscreen", "pseudo");
+    expect(await box(page.getByTestId("preview-finish")), "the page under it keeps its place").toEqual(under);
     // not the phone's own player: it would drop the drawn captions
     expect(await ownPlayerOpened(page)).toBe(0);
     // a modal dialog with the focus in it (VoiceOver stays in it)
@@ -341,8 +368,43 @@ test.describe("the Vorschau in full screen", TAG, () => {
     expect(await ownEntry(page)).toBe(false);
   });
 
+  test("an iPhone: a 16:9 preview lies over the page too, the play button in its letterboxed picture", async ({ page, stub }, info) => {
+    test.skip(!info.project.use.hasTouch, "a phone (taps)");
+    await asIPhone(page, { supported: true });
+    const job = await stub.seed("review_land", { settings: ORIGINAL });
+    await openVorschau(page, job.id);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+    await button(page).tap();
+    await expect(frame(page)).toHaveAttribute("data-fullscreen", "pseudo");
+    const vp = page.viewportSize()!;
+    expect(await box(frame(page))).toMatchObject({ x: 0, y: 0, width: vp.width, height: vp.height });
+    const h = Math.min(vp.height, (vp.width * 9) / 16);
+    const top = (vp.height - h) / 2;
+    const p = await box(page.getByTestId("preview-play"));
+    expect(p.y - top, "inside the picture, clear of its edge").toBeGreaterThan(16);
+    expect(p.y + p.height, "inside the picture").toBeLessThan(top + h);
+  });
+
+  test("the export through the Fullscreen API: the frame fills the screen and comes back", async ({ page, stub }, info) => {
+    test.skip(info.project.name === "iphone", "an iPhone: the phone's own player (below)");
+    const job = await stub.seed("done");
+    await openVorschau(page, job.id);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done");
+    await expect(frame(page)).not.toHaveAttribute("data-still", "none", { timeout: 15_000 });
+    const inline = await box(frame(page));
+    await press(page, button(page));
+    await expect(frame(page)).toHaveAttribute("data-fullscreen", "real");
+    const vp = page.viewportSize()!;
+    expect(await box(frame(page))).toMatchObject({ x: 0, y: 0, width: vp.width, height: vp.height });
+    await press(page, button(page));
+    await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
+    const back = await box(frame(page));
+    expect(Math.round(back.width)).toBe(Math.round(inline.width));
+    expect(Math.round(back.height)).toBe(Math.round(inline.height));
+  });
+
   test("an iPhone: a preview without drawn captions lies over the page too, never in the phone's own player", async ({ page, stub }, info) => {
-    test.skip(info.project.name === "desktop", "a phone");
+    test.skip(!info.project.use.hasTouch, "a phone (taps)");
     await asIPhone(page, { supported: true });
     const job = await stub.seed("review_speech");
     // no ?captions=v2: no captions drawn (yet); a preview gets them once its doc is in
@@ -354,7 +416,7 @@ test.describe("the Vorschau in full screen", TAG, () => {
   });
 
   test("an iPhone: the export finishing while the preview lies over the page ends it, its history entry with it", async ({ page, stub }, info) => {
-    test.skip(info.project.name === "desktop", "a phone");
+    test.skip(!info.project.use.hasTouch, "a phone (taps)");
     await asIPhone(page, { supported: true });
     const job = await stub.seed("review_speech", { render_seconds: 4 });
     await openVorschau(page, job.id, { query: "?captions=v2" });
@@ -372,7 +434,7 @@ test.describe("the Vorschau in full screen", TAG, () => {
   });
 
   test("an iPhone: the export, its captions burned in, opens in the phone's own player", async ({ page, stub }, info) => {
-    test.skip(info.project.name === "desktop", "a phone");
+    test.skip(!info.project.use.hasTouch, "a phone (taps)");
     await asIPhone(page, { supported: true });
     const job = await stub.seed("done");
     await openVorschau(page, job.id);
@@ -388,7 +450,7 @@ test.describe("the Vorschau in full screen", TAG, () => {
     page,
     stub,
   }, info) => {
-    test.skip(info.project.name === "desktop", "a phone");
+    test.skip(!info.project.use.hasTouch, "a phone (taps)");
     // iOS offers its player from the start of the load
     await asIPhone(page, { supported: true });
     const job = await stub.seed("done");
@@ -406,7 +468,7 @@ test.describe("the Vorschau in full screen", TAG, () => {
   });
 
   test("an iPhone: a reload while the frame lies over the page leaves no history entry behind", async ({ page, stub }, info) => {
-    test.skip(info.project.name === "desktop", "a phone");
+    test.skip(!info.project.use.hasTouch, "a phone (taps)");
     await asIPhone(page, { supported: true });
     const job = await stub.seed("review_speech");
     await openVorschau(page, job.id, { query: "?captions=v2" });
@@ -429,7 +491,7 @@ test.describe("the Vorschau in full screen", TAG, () => {
     page,
     stub,
   }, info) => {
-    test.skip(info.project.name === "desktop", "a phone");
+    test.skip(!info.project.use.hasTouch, "a phone (taps)");
     await asIPhone(page, { supported: true });
     const job = await stub.seed("review_speech");
     await openVorschau(page, job.id, { query: "?captions=v2" });
