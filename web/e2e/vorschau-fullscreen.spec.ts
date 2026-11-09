@@ -22,7 +22,9 @@
  *                     or to be drawn) lies over the page, the captions
  *                     kept; the button, Back and Escape leave, on the same
  *                     page, and so does the export finishing (its history
- *                     entry with it, and a reload); also where a size
+ *                     entry with it, a reload, Forward after leaving;
+ *                     the focus back on the button, also where a tap
+ *                     focuses none); also where a size
  *                     container contained layout (iOS 16 to 18.3); the
  *                     export (captions burned in) opens in the phone's
  *                     own player once it is loaded, else lies over the
@@ -483,6 +485,34 @@ test.describe("the Vorschau in full screen", TAG, () => {
     await expect.poll(() => ownEntry(page)).toBe(false);
     expect(page.url()).toBe(url);
     // one Back leaves the page, as before
+    await page.goBack();
+    await expect(page).not.toHaveURL(url);
+  });
+
+  test("an iPhone: Forward after leaving lands on no dead entry; the focus comes back to the button though a tap focused nothing", async ({
+    page,
+    stub,
+  }, info) => {
+    test.skip(!info.project.use.hasTouch, "a phone (taps)");
+    await asIPhone(page, { supported: true });
+    const job = await stub.seed("review_speech");
+    await openVorschau(page, job.id, { query: "?captions=v2" });
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+    const url = page.url();
+    // Safari focuses no button on a tap: another control keeps the focus
+    await page.getByTestId("preview-finish").focus();
+    await button(page).evaluate((b) => (b as HTMLButtonElement).click());
+    await expect(frame(page)).toHaveAttribute("data-fullscreen", "pseudo");
+    await page.keyboard.press("Escape");
+    await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
+    await expect(button(page), "back on the button that went in").toBeFocused();
+    await expect.poll(() => ownEntry(page)).toBe(false);
+    // Forward onto the full screen's entry: stepped off, the page stays as it is
+    await page.goForward();
+    await expect.poll(() => ownEntry(page)).toBe(false);
+    await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
+    expect(page.url()).toBe(url);
+    // one Back leaves the page
     await page.goBack();
     await expect(page).not.toHaveURL(url);
   });

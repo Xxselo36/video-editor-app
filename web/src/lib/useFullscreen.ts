@@ -22,9 +22,29 @@ function isOurEntry(): boolean {
   return Boolean((window.history.state as Record<string, unknown> | null)?.[PSEUDO_FS_STATE]);
 }
 
-/** A reload (or a restored tab) while the element lay over the page keeps
- *  its entry the current one: stepped off once per page load. */
-let staleEntryChecked = false;
+/**
+ * The entry is only ever the current one while an element lies over the
+ * page. Anywhere else (a reload or a restored tab over the page; Forward
+ * after leaving it; Back onto it from a page that a navigation put on top
+ * of it) it would make the next Back do nothing: whenever the page lands
+ * on it with no element over the page, it is stepped off. The entry before
+ * it is the same page without the flag, so this never repeats.
+ */
+let overPage = 0;
+let watching = false;
+function stepOffOurEntry() {
+  try {
+    if (overPage === 0 && isOurEntry()) window.history.back();
+  } catch {
+    /* no history */
+  }
+}
+function watchOurEntry() {
+  if (watching) return;
+  watching = true;
+  window.addEventListener("popstate", stepOffOurEntry);
+  stepOffOurEntry();
+}
 
 export function fullscreenApi(el: HTMLElement | null): boolean {
   const e = el as FsElement | null;
@@ -84,14 +104,15 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
   // Back would only take it off. A navigation that unmounts the page has
   // pushed its own entry by then, not ours: nothing is taken off.
   useEffect(() => {
-    if (staleEntryChecked) return;
-    staleEntryChecked = true;
-    try {
-      if (isOurEntry()) window.history.back();
-    } catch {
-      /* no history */
-    }
+    watchOurEntry();
   }, []);
+  useEffect(() => {
+    if (!pseudo) return;
+    overPage += 1;
+    return () => {
+      overPage -= 1;
+    };
+  }, [pseudo]);
   const pseudoOn = useRef(false);
   useEffect(() => {
     pseudoOn.current = pseudo;

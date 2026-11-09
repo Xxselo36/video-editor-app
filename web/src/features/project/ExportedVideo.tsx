@@ -193,6 +193,9 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
         /* the player can't take it after all: the frame over the page */
       }
     }
+    // The focus comes back to this button when it leaves: Safari focuses
+    // no button on a click or tap, so name it (no ring after a pointer).
+    if (!fs.active) fsRef.current?.focus({ preventScroll: true });
     fs.toggle();
   };
   // A 16:9 video in full screen on a phone held upright: turned to
