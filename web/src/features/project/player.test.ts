@@ -2,7 +2,7 @@
 // waits for the file (spinner, aria-busy) and when it has none of it yet
 // (after 10 s "the preview is still being prepared"), the scrub line,
 // the clips the preview's captions map through, what it shows of the
-// captions, and the done frame's still.
+// captions, the done frame's still, and how the frame goes full screen.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Fetched } from "@/features/editor/state/docFetch";
 import {
@@ -12,6 +12,7 @@ import {
   PLAYING,
   decodeStill,
   editSegsOf,
+  fullscreenWay,
   isWide,
   pickStill,
   playbackOf,
@@ -53,6 +54,24 @@ describe("playbackOf", () => {
   it("a load that failed waits for nothing", () => {
     expect(playbackOf(media(true, 3, 0))).toBe(0);
     expect(playbackOf(media(false, 3, 0))).toBe(PLAYING);
+  });
+});
+
+describe("fullscreenWay", () => {
+  it("the Fullscreen API where the browser has it for the frame (desktop, Android, iPad): the frame, with what is drawn over it", () => {
+    expect(fullscreenWay(true, true, true)).toBe("frame");
+    expect(fullscreenWay(true, true, false)).toBe("frame");
+    expect(fullscreenWay(true, false, false)).toBe("frame");
+  });
+
+  it("an iPhone: the video's own player for a video with nothing drawn over it (the export), once it can take it", () => {
+    expect(fullscreenWay(false, true, false)).toBe("video");
+  });
+
+  it("an iPhone: the frame over the page for drawn captions (the preview), and while the video's own player can't take it yet", () => {
+    expect(fullscreenWay(false, true, true)).toBe("pseudo");
+    expect(fullscreenWay(false, false, false)).toBe("pseudo");
+    expect(fullscreenWay(false, false, true)).toBe("pseudo");
   });
 });
 

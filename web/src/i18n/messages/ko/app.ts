@@ -498,6 +498,8 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "다듬기",
   "app.preview.more": "이 영상의 추가 기능",
   "app.preview.pause": "일시정지",
+  "app.preview.fullscreen": "전체 화면",
+  "app.preview.exitFullscreen": "전체 화면 종료",
   "app.preview.captionsAfter": "자막은 내보낸 후에 볼 수 있어요.",
   "app.preview.preparing": "미리보기를 아직 준비하고 있어요.",
   "app.preview.unavailable": "미리보기를 만들지 못했어요. 편집 내용은 저장돼 있어요.",

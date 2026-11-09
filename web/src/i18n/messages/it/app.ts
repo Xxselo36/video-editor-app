@@ -502,6 +502,8 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "Ritocchi",
   "app.preview.more": "Altro per questo video",
   "app.preview.pause": "Pausa",
+  "app.preview.fullscreen": "Schermo intero",
+  "app.preview.exitFullscreen": "Esci da schermo intero",
   "app.preview.captionsAfter": "Vedrai i sottotitoli dopo l’esportazione.",
   "app.preview.preparing": "L’anteprima è ancora in preparazione.",
   "app.preview.unavailable": "Impossibile creare l’anteprima. Le tue modifiche sono salvate.",

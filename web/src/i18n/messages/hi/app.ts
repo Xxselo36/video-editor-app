@@ -502,6 +502,8 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "फ़ाइन-ट्यून",
   "app.preview.more": "इस वीडियो के लिए और भी",
   "app.preview.pause": "रोकें",
+  "app.preview.fullscreen": "फ़ुल स्क्रीन",
+  "app.preview.exitFullscreen": "फ़ुल स्क्रीन से बाहर निकलें",
   "app.preview.captionsAfter": "कैप्शन एक्सपोर्ट के बाद दिखेंगे।",
   "app.preview.preparing": "प्रीव्यू अभी तैयार हो रहा है।",
   "app.preview.unavailable": "प्रीव्यू नहीं बन सका। आपके एडिट्स सेव हैं।",

@@ -1,10 +1,12 @@
 "use client";
 /**
- * Fullscreen of the preview (review C12): the Element Fullscreen API where
- * it exists (desktop, Android, iPad). iPhone Safari has none, and its
- * native video fullscreen drops the canvas captions, so there the stage
- * gets a CSS pseudo-fullscreen instead (fixed, 100dvh, safe-area insets,
- * captions kept). Escape leaves the pseudo mode too, and so does the
+ * Full screen for a video with what is drawn over it: the editor's stage
+ * (review C12) and the Vorschau's frame (features/project/ExportedVideo
+ * Player). The Element Fullscreen API where it exists (desktop, Android,
+ * iPad). iPhone Safari has none, and its native video fullscreen drops
+ * the canvas captions, so there the element gets a CSS pseudo-fullscreen
+ * instead (fixed over the page, captions kept; the caller styles it by
+ * `pseudo`). Escape leaves the pseudo mode too, and so does the
  * browser's Back (a history entry while it is on).
  */
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";

@@ -9,7 +9,7 @@
  * their options.
  */
 import { test as base, expect, type APIRequestContext, type Page } from "@playwright/test";
-import { API } from "./env";
+import { API, WEB } from "./env";
 
 export type SeedName =
   | "review"
@@ -228,6 +228,20 @@ export async function signedIn(
   return { id, plan, header: plan ? `${id};plan=${plan}` : id };
 }
 
+/**
+ * WebKit logs a fetch that a page being left still runs ("Fetch API
+ * cannot load <url> due to access control checks.") as a console error,
+ * and Playwright's WebKit reports that as a page error: Next's
+ * prefetches of the links in view when a test navigates away (from
+ * /imprint in openWithStorage, timing-dependent). Chromium drops them
+ * silently, and the page's own error listeners never see them. Our
+ * origin's RSC requests only: a real CORS failure still counts.
+ */
+function prefetchCut(e: Error): boolean {
+  const first = (e.stack ?? e.message).split("\n")[0];
+  return first.startsWith(`Fetch API cannot load ${WEB}/`) && /[?&]_rsc=/.test(first) && first.endsWith("due to access control checks.");
+}
+
 type Fixtures = { stub: Stub; pageErrors: string[] };
 
 export const test = base.extend<Fixtures>({
@@ -239,7 +253,10 @@ export const test = base.extend<Fixtures>({
   pageErrors: [
     async ({ page }, use) => {
       const errors: string[] = [];
-      page.on("pageerror", (e) => errors.push(e.message));
+      page.on("pageerror", (e) => {
+        if (prefetchCut(e)) return;
+        errors.push(e.message);
+      });
       await use(errors);
       expect(errors, "uncaught errors on the page").toEqual([]);
     },

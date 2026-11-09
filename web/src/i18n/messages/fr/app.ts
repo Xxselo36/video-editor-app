@@ -503,6 +503,8 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "Retouches",
   "app.preview.more": "Plus d’options pour cette vidéo",
   "app.preview.pause": "Pause",
+  "app.preview.fullscreen": "Plein écran",
+  "app.preview.exitFullscreen": "Quitter le plein écran",
   "app.preview.captionsAfter": "Tu verras les sous-titres une fois la vidéo exportée.",
   "app.preview.preparing": "L’aperçu est encore en préparation.",
   "app.preview.unavailable": "Impossible de créer l’aperçu. Tes modifications sont enregistrées.",

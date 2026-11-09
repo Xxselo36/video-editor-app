@@ -1,8 +1,9 @@
 /**
  * The Vorschau player's logic (PreviewVideo, ExportedVideo): what its
  * <video> is doing, the editor's clips of the stored timeline, what the
- * preview shows of the export's captions, and which still the done
- * frame shows. Pure, but usePlayback, which reads the element.
+ * preview shows of the export's captions, which still the done frame
+ * shows, and how it goes full screen. Pure, but usePlayback, which reads
+ * the element.
  */
 import { useCallback, useSyncExternalStore, type RefObject } from "react";
 import type { Fetched } from "@/features/editor/state/docFetch";
@@ -198,6 +199,20 @@ export async function pickStill(
     }
   }
   return null;
+}
+
+/**
+ * How the frame goes full screen. "frame": the Fullscreen API on the
+ * frame, with all that is drawn over its video (desktop, Android, iPad).
+ * An iPhone has that API only for a video, and the video's own player
+ * shows nothing drawn over it: "video" for a video with nothing over it
+ * (the export, its captions burned in) once that player can take it
+ * (`videoOwn`: iOS says so from its metadata on); else "pseudo", the
+ * frame laid over the page, so the preview's drawn captions stay.
+ */
+export function fullscreenWay(frameApi: boolean, videoOwn: boolean, drawnOver: boolean): "frame" | "video" | "pseudo" {
+  if (frameApi) return "frame";
+  return videoOwn && !drawnOver ? "video" : "pseudo";
 }
 
 /** How far the video has played (0..1; 0 while its length is unknown). */

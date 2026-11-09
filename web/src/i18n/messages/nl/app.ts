@@ -502,6 +502,8 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "Verfijnen",
   "app.preview.more": "Meer voor deze video",
   "app.preview.pause": "Pauzeren",
+  "app.preview.fullscreen": "Volledig scherm",
+  "app.preview.exitFullscreen": "Volledig scherm sluiten",
   "app.preview.captionsAfter": "Je ziet de ondertitels zodra de video is geëxporteerd.",
   "app.preview.preparing": "Het voorbeeld wordt nog voorbereid.",
   "app.preview.unavailable": "Het voorbeeld kon niet worden gemaakt. Je bewerkingen zijn opgeslagen.",

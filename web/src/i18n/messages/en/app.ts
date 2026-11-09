@@ -520,6 +520,8 @@ export const enApp = {
   "app.preview.more": "More for this video",
   // The play button while the video plays
   "app.preview.pause": "Pause",
+  "app.preview.fullscreen": "Full screen",
+  "app.preview.exitFullscreen": "Exit full screen",
   // Projects on the old caption engine: the preview shows no captions
   "app.preview.captionsAfter": "You'll see the captions once it's exported.",
   "app.preview.preparing": "The preview is still being prepared.",

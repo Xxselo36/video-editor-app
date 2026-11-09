@@ -502,6 +502,8 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "Feinschliff",
   "app.preview.more": "Mehr zum Video",
   "app.preview.pause": "Pause",
+  "app.preview.fullscreen": "Vollbild",
+  "app.preview.exitFullscreen": "Vollbild beenden",
   "app.preview.captionsAfter": "Die Untertitel siehst du nach dem Fertigstellen.",
   "app.preview.preparing": "Die Vorschau wird noch vorbereitet.",
   "app.preview.unavailable": "Die Vorschau konnte nicht erstellt werden. Deine Änderungen sind gespeichert.",
