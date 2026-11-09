@@ -25,6 +25,11 @@
   /* the corners clip the video in Safari too */
   isolation: isolate;
   overflow: hidden;
+  /* Its width said, not left to the aspect ratio: WebKit (Safari, every
+   * iOS browser) sizes an auto width with max-width: 100% inside these
+   * shrink-to-fit boxes to 0, and the frame, its picture and its play
+   * button were gone (the owner's iPhone, 2026-11). */
+  width: calc(var(--fh, 480px) * 9 / 16);
   max-width: 100%;
   height: var(--fh, 480px);
   aspect-ratio: 9 / 16;

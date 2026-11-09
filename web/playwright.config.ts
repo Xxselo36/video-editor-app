@@ -3,7 +3,8 @@
  * (backend/tests/stub_server.py): `npm run test:e2e`.
  *
  * Projects: desktop (Chromium 1440×900) and pixel7 (mobile emulation) on
- * every PR; webkit nightly (required for release from UX18).
+ * every PR, and iphone (WebKit as an iPhone 15, the @safari suite only);
+ * webkit nightly (required for release from UX18).
  * E2E_MODE (e2e/support/env.ts) picks the backend flavour of the run:
  *   anon (default) · auth (@auth suites, test auth) · r2 (@r2 suites, moto).
  * @nightly suites (R2 uploads, the visual screens) need E2E_NIGHTLY=1.
@@ -105,6 +106,15 @@ const config: PlaywrightTestConfig = {
       // Nightly only (`--project=webkit`); required for release from UX18.
       name: "webkit",
       use: { ...devices["Desktop Safari"], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      // Safari's engine as an iPhone, on every PR (the safari-iphone
+      // entry): e2e/safari.spec.ts (@safari). The owner works on an
+      // iPhone, and Chromium alone let a WebKit-only bug through (the
+      // Vorschau's frame 0 px wide there, 2026-11).
+      name: "iphone",
+      grep: /@safari\b/,
+      use: { ...devices["iPhone 15"] },
     },
   ],
   webServer: [
