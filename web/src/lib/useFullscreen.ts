@@ -75,6 +75,24 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [pseudo]);
+  // Gone while on (another video took the element's place: the Vorschau's
+  // preview when the export finishes): its entry goes too, or the next
+  // Back would only take it off. A navigation that unmounts the page has
+  // pushed its own entry by then, not ours: nothing is taken off.
+  const pseudoOn = useRef(false);
+  useEffect(() => {
+    pseudoOn.current = pseudo;
+  }, [pseudo]);
+  useEffect(
+    () => () => {
+      try {
+        if (pseudoOn.current && isOurEntry()) window.history.back();
+      } catch {
+        /* no history */
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!pseudo) return;

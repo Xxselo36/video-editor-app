@@ -3,17 +3,22 @@
  * Seite kein Vollbild machen?"): a round button in the frame's top
  * corner (ExportedVideo.tsx Player, player.ts fullscreenWay).
  *
- *   the button        in the corner, a 44 px target, on top; there while
- *                     the video plays (a mouse: while over the frame)
+ *   the button        in the corner, a 44 px target, on top, its glass
+ *                     blurred; there while the video plays (a mouse: while
+ *                     over the frame)
  *   Fullscreen API    (desktop, Android, iPad) the frame fills the
- *                     screen with the captions drawn over it; Space plays,
- *                     Tab stays in it; a still mouse hides the controls;
- *                     the button leaves
+ *                     screen with the captions drawn over it; Space plays
+ *                     (also after a click on the picture), Tab stays in
+ *                     it; a still mouse hides the controls; the button
+ *                     leaves
+ *   16:9              the play button 40 % down the letterboxed picture
  *   an iPhone         no element Fullscreen API (removed by hand, as in
- *                     editor-v2-mobile): the preview, its captions drawn,
- *                     lies over the page, the captions kept; the button,
- *                     Back and Escape leave, on the same page; the export
- *                     (captions burned in) opens in the phone's own player
+ *                     editor-v2-mobile): the preview (its captions drawn,
+ *                     or to be drawn) lies over the page, the captions
+ *                     kept; the button, Back and Escape leave, on the same
+ *                     page, and so does the export finishing (its history
+ *                     entry with it); the export (captions burned in) opens
+ *                     in the phone's own player
  *
  * CI: the iphone project (WebKit as an iPhone, @safari) and the
  * editor-v2 entries (desktop and pixel7, Chromium).
@@ -23,6 +28,18 @@ import { expect, test } from "./support/fixtures";
 import { openVorschau, vorschau } from "./support/vorschau";
 
 const TAG = { tag: ["@editor-v2", "@safari"] };
+
+/** A movie's settings exported as "Original" (a landscape upload keeps its 16:9 frame). */
+const ORIGINAL = {
+  caption_preset: "clean",
+  style: "smooth",
+  voice_triggers: true,
+  remove_fillers: true,
+  smartcam_enabled: false,
+  smartcam_format: "landscape",
+  resolution: "1080",
+  output_formats: [],
+};
 
 type Hook = { ready: boolean };
 const captionsReady = (page: Page) =>
@@ -99,6 +116,16 @@ test.describe("the Vorschau in full screen", TAG, () => {
       { x: b.x + b.width / 2, y: b.y + b.height / 2 },
     );
     expect(hit, "the topmost thing at its centre").toBe(true);
+    // its glass is blurred in every engine (the build dropped the unprefixed
+    // property when the -webkit- one followed it: no blur in Chromium)
+    const blur = await button(page)
+      .locator("span")
+      .first()
+      .evaluate((e) => {
+        const cs = getComputedStyle(e);
+        return cs.getPropertyValue("backdrop-filter") || cs.getPropertyValue("-webkit-backdrop-filter");
+      });
+    expect(blur).toBe("blur(10px)");
 
     await press(page, page.getByTestId("preview-play"));
     await expect(frame(page)).toHaveAttribute("data-playing", "true");
@@ -146,6 +173,11 @@ test.describe("the Vorschau in full screen", TAG, () => {
     await expect(button(page)).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.getByTestId("preview-play")).toBeFocused();
+    // a click on the picture pauses and leaves the focus on the page: Space still plays
+    await press(page, video(page));
+    await expect.poll(() => paused(page)).toBe(true);
+    await page.keyboard.press("Space");
+    await expect.poll(() => paused(page)).toBe(false);
 
     if (await mouse(page)) {
       // playing and the mouse still: the controls and the pointer go; a move brings them back
@@ -169,6 +201,22 @@ test.describe("the Vorschau in full screen", TAG, () => {
     expect(Math.round(back.height)).toBe(Math.round(inline.height));
     // still playing: going in and out doesn't stop the video
     expect(await paused(page)).toBe(false);
+  });
+
+  test("a 16:9 video in full screen: the play button 40 % down the picture, not on its edge", async ({ page, stub }, info) => {
+    test.skip(info.project.name === "iphone", "the Fullscreen API (an iPhone: below)");
+    const job = await stub.seed("review_land", { settings: ORIGINAL });
+    await openVorschau(page, job.id);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+    await press(page, button(page));
+    await expect(frame(page)).toHaveAttribute("data-fullscreen", "real");
+    const vp = page.viewportSize()!;
+    // the picture: as wide as the screen or as tall, 16:9, in the middle
+    const h = Math.min(vp.height, (vp.width * 9) / 16);
+    const top = (vp.height - h) / 2;
+    const p = await box(page.getByTestId("preview-play"));
+    expect(p.y - top, "inside the picture, clear of its edge").toBeGreaterThan(16);
+    expect(Math.abs(p.y + p.height / 2 - (top + 0.4 * h)), "40 % down the picture").toBeLessThan(2);
   });
 
   test("an iPhone: the preview, its captions drawn, lies over the page; the button, Back and Escape leave, on the same page", async ({
@@ -247,6 +295,36 @@ test.describe("the Vorschau in full screen", TAG, () => {
     await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
     // no entry of the full screen left over: the next Back leaves the page, as before
     expect(await ownEntry(page)).toBe(false);
+  });
+
+  test("an iPhone: a preview without drawn captions lies over the page too, never in the phone's own player", async ({ page, stub }, info) => {
+    test.skip(info.project.name === "desktop", "a phone");
+    await asIPhone(page, { supported: true });
+    const job = await stub.seed("review_speech");
+    // no ?captions=v2: no captions drawn (yet); a preview gets them once its doc is in
+    await openVorschau(page, job.id);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+    await button(page).tap();
+    await expect(frame(page)).toHaveAttribute("data-fullscreen", "pseudo");
+    expect(await ownPlayerOpened(page)).toBe(0);
+  });
+
+  test("an iPhone: the export finishing while the preview lies over the page ends it, its history entry with it", async ({ page, stub }, info) => {
+    test.skip(info.project.name === "desktop", "a phone");
+    await asIPhone(page, { supported: true });
+    const job = await stub.seed("review_speech", { render_seconds: 4 });
+    await openVorschau(page, job.id, { query: "?captions=v2" });
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+    await page.getByTestId("preview-finish").tap();
+    await expect(vorschau(page)).toHaveAttribute("data-state", "finishing");
+    await button(page).tap();
+    await expect(frame(page)).toHaveAttribute("data-fullscreen", "pseudo");
+    expect(await ownEntry(page)).toBe(true);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 60_000 });
+    await expect(frame(page)).toHaveAttribute("data-video", "export");
+    await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
+    // the next Back leaves the page, as before: no entry of the full screen left over
+    await expect.poll(() => ownEntry(page)).toBe(false);
   });
 
   test("an iPhone: the export, its captions burned in, opens in the phone's own player", async ({ page, stub }, info) => {

@@ -123,7 +123,6 @@
   color: var(--text-strong);
   background: color-mix(in srgb, var(--surface-0) 42%, transparent);
   backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 16%, transparent);
   cursor: pointer;
   touch-action: manipulation;
@@ -183,7 +182,6 @@
   border-radius: 50%;
   background: color-mix(in srgb, var(--surface-0) 42%, transparent);
   backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 16%, transparent);
   transition:
     transform 0.16s var(--ease-out),
@@ -203,6 +201,21 @@
 .frame[data-fullscreen] .fs {
   top: calc(8px + env(safe-area-inset-top, 0px));
   right: calc(8px + env(safe-area-inset-right, 0px));
+}
+/* The play button and the note under it 40 % down the picture, as in
+ * the page: the picture is as wide as the screen or as tall, and a 16:9
+ * one on a tall screen sits letterboxed in the middle. */
+.frame[data-fullscreen] .play {
+  top: calc(50% - 0.1 * min(100%, 100vw * 16 / 9));
+}
+.player[data-shape="wide"] .frame[data-fullscreen] .play {
+  top: calc(50% - 0.1 * min(100%, 100vw * 9 / 16));
+}
+.frame[data-fullscreen]:not([data-held="failed"]) .status {
+  top: calc(50% - 0.1 * min(100%, 100vw * 16 / 9) + 44px);
+}
+.player[data-shape="wide"] .frame[data-fullscreen]:not([data-held="failed"]) .status {
+  top: calc(50% - 0.1 * min(100%, 100vw * 9 / 16) + 44px);
 }
 .frame[data-fullscreen] .scrub {
   left: calc(16px + env(safe-area-inset-left, 0px));
@@ -303,7 +316,6 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-0) 72%, transparent);
   backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   color: var(--text-strong);
   font-size: 12.5px;
   font-weight: 500;

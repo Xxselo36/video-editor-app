@@ -109,45 +109,6 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
   const { playing, busy, empty } = playback;
   const building = held === "building";
 
-  // Full screen: the frame, or on an iPhone the export's own player.
-  const frameRef = useRef<HTMLDivElement>(null);
-  const playRef = useRef<HTMLButtonElement>(null);
-  const fsRef = useRef<HTMLButtonElement>(null);
-  const fs = useFullscreen(frameRef);
-  const idle = useIdle(fs.active && playing);
-  // Nothing to show yet: no button (but one to leave it, whatever came).
-  const fullscreenable = fs.active || (!!src && !held);
-  const fullscreen = () => {
-    const v = videoRef.current as OwnFullscreen | null;
-    const own = !!v?.webkitSupportsFullscreen && typeof v.webkitEnterFullscreen === "function";
-    if (!fs.active && v && fullscreenWay(fullscreenApi(frameRef.current), own, !!overlay) === "video") {
-      try {
-        v.webkitEnterFullscreen!();
-        return;
-      } catch {
-        /* the player can't take it after all: the frame over the page */
-      }
-    }
-    fs.toggle();
-  };
-  // Full screen: Space and Enter play and pause (focus on the play
-  // button, not on the one that leaves), and Tab goes round the two.
-  useEffect(() => {
-    if (!fs.active) return;
-    playRef.current?.focus({ preventScroll: true });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") return;
-      const items = [playRef.current, fsRef.current].filter((b): b is HTMLButtonElement => !!b);
-      if (!items.length) return;
-      const i = items.indexOf(document.activeElement as HTMLButtonElement);
-      const n = items.length;
-      e.preventDefault();
-      items[e.shiftKey ? (i <= 0 ? n - 1 : i - 1) : (i + 1) % n].focus();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [fs.active]);
-
   // Nothing of the file for PREPARING_MS (a preview being built, or the
   // request for it waits): the note shows until the file starts coming.
   const waiting = empty || building;
@@ -193,6 +154,58 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
       /* interrupted by a pause or a new source */
     });
   };
+
+  // Full screen: the frame, or on an iPhone the export's own player.
+  const frameRef = useRef<HTMLDivElement>(null);
+  const playRef = useRef<HTMLButtonElement>(null);
+  const fsRef = useRef<HTMLButtonElement>(null);
+  const fs = useFullscreen(frameRef);
+  const idle = useIdle(fs.active && playing);
+  // Nothing to show yet: no button (but one to leave it, whatever came).
+  const fullscreenable = fs.active || (!!src && !held);
+  // The preview's captions are drawn over it (or will be, once its doc is
+  // in): the phone's own player would show it without them.
+  const drawsOver = kind === "preview" || !!overlay;
+  const fullscreen = () => {
+    const v = videoRef.current as OwnFullscreen | null;
+    const own = !!v?.webkitSupportsFullscreen && typeof v.webkitEnterFullscreen === "function";
+    if (!fs.active && v && fullscreenWay(fullscreenApi(frameRef.current), own, drawsOver) === "video") {
+      try {
+        v.webkitEnterFullscreen!();
+        return;
+      } catch {
+        /* the player can't take it after all: the frame over the page */
+      }
+    }
+    fs.toggle();
+  };
+  // Full screen: Space and Enter play and pause (focus on the play
+  // button, not on the one that leaves; Space also once a click on the
+  // picture left the focus on the page), and Tab goes round the two.
+  const toggleRef = useRef(toggle);
+  useEffect(() => {
+    toggleRef.current = toggle;
+  });
+  useEffect(() => {
+    if (!fs.active) return;
+    playRef.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === " " && !(e.target instanceof HTMLButtonElement)) {
+        e.preventDefault();
+        toggleRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = [playRef.current, fsRef.current].filter((b): b is HTMLButtonElement => !!b);
+      if (!items.length) return;
+      const i = items.indexOf(document.activeElement as HTMLButtonElement);
+      const n = items.length;
+      e.preventDefault();
+      items[e.shiftKey ? (i <= 0 ? n - 1 : i - 1) : (i + 1) % n].focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fs.active]);
 
   return (
     <div className={s.player} data-shape={wide ? "wide" : "tall"}>
