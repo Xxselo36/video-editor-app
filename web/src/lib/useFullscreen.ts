@@ -22,6 +22,10 @@ function isOurEntry(): boolean {
   return Boolean((window.history.state as Record<string, unknown> | null)?.[PSEUDO_FS_STATE]);
 }
 
+/** A reload (or a restored tab) while the element lay over the page keeps
+ *  its entry the current one: stepped off once per page load. */
+let staleEntryChecked = false;
+
 export function fullscreenApi(el: HTMLElement | null): boolean {
   const e = el as FsElement | null;
   return !!e && (typeof e.requestFullscreen === "function" || typeof e.webkitRequestFullscreen === "function");
@@ -79,6 +83,15 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
   // preview when the export finishes): its entry goes too, or the next
   // Back would only take it off. A navigation that unmounts the page has
   // pushed its own entry by then, not ours: nothing is taken off.
+  useEffect(() => {
+    if (staleEntryChecked) return;
+    staleEntryChecked = true;
+    try {
+      if (isOurEntry()) window.history.back();
+    } catch {
+      /* no history */
+    }
+  }, []);
   const pseudoOn = useRef(false);
   useEffect(() => {
     pseudoOn.current = pseudo;

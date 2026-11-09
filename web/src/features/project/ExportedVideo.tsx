@@ -57,8 +57,14 @@ const PREPARING_MS = 10_000;
  *  fills the screen is always over it). */
 const IDLE_MS = 2_500;
 
-/** iOS: a video's own full-screen player (supported once its metadata is in). */
+/** iOS: a video's own full-screen player. */
 type OwnFullscreen = HTMLVideoElement & { webkitSupportsFullscreen?: boolean; webkitEnterFullscreen?: () => void };
+
+/** HTMLMediaElement.readyState: its length and size are known. */
+const HAVE_METADATA = 1;
+
+/** Android Chrome lets a page in full screen turn the screen. */
+type Turnable = ScreenOrientation & { lock?: (o: "landscape") => Promise<void>; unlock?: () => void };
 
 /** `on` and nothing moved for IDLE_MS (any pointer, any key). */
 function useIdle(on: boolean): boolean {
@@ -168,7 +174,15 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
   const drawsOver = kind === "preview" || !!overlay;
   const fullscreen = () => {
     const v = videoRef.current as OwnFullscreen | null;
-    const own = !!v?.webkitSupportsFullscreen && typeof v.webkitEnterFullscreen === "function";
+    // The phone's player only for a video it can show: iOS offers it from
+    // the start of the load, and a stalled or failed one would open black
+    // (the frame over the page shows the still and retries on play).
+    const own =
+      !!v &&
+      v.readyState >= HAVE_METADATA &&
+      !v.error &&
+      !!v.webkitSupportsFullscreen &&
+      typeof v.webkitEnterFullscreen === "function";
     if (!fs.active && v && fullscreenWay(fullscreenApi(frameRef.current), own, drawsOver) === "video") {
       try {
         v.webkitEnterFullscreen!();
@@ -179,6 +193,24 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
     }
     fs.toggle();
   };
+  // A 16:9 video in full screen on a phone held upright: turned to
+  // landscape, as a video player does (Android Chrome; the lock is
+  // refused elsewhere and nothing changes).
+  useEffect(() => {
+    if (!fs.real || !wide) return;
+    const o = (typeof screen !== "undefined" ? screen.orientation : undefined) as Turnable | undefined;
+    o?.lock?.("landscape").catch(() => {
+      /* not a phone, or not allowed */
+    });
+    return () => {
+      try {
+        o?.unlock?.();
+      } catch {
+        /* nothing locked */
+      }
+    };
+  }, [fs.real, wide]);
+
   // Full screen: the focus on the frame (a modal dialog then), so no
   // control's ring sits on the picture; Space plays and pauses (on a
   // button, the button), Tab goes round the two buttons that show.

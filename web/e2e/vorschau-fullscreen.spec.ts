@@ -12,14 +12,18 @@
  *                     click on the picture), Tab stays in it; a still
  *                     mouse hides the controls but the one the keyboard
  *                     is on; the button leaves, the focus back on it
- *   16:9              the play button 40 % down the letterboxed picture
+ *   16:9              the screen turned to landscape (Android), the play
+ *                     button 40 % down the letterboxed picture
  *   an iPhone         no element Fullscreen API (removed by hand, as in
  *                     editor-v2-mobile): the preview (its captions drawn,
  *                     or to be drawn) lies over the page, the captions
  *                     kept; the button, Back and Escape leave, on the same
  *                     page, and so does the export finishing (its history
- *                     entry with it); the export (captions burned in) opens
- *                     in the phone's own player
+ *                     entry with it, and a reload); also where a size
+ *                     container contained layout (iOS 16 to 18.3); the
+ *                     export (captions burned in) opens in the phone's
+ *                     own player once it is loaded, else lies over the
+ *                     page with its still
  *
  * CI: the iphone project (WebKit as an iPhone, @safari) and the
  * editor-v2 entries (desktop and pixel7, Chromium).
@@ -219,13 +223,29 @@ test.describe("the Vorschau in full screen", TAG, () => {
     expect(await paused(page)).toBe(false);
   });
 
-  test("a 16:9 video in full screen: the play button 40 % down the picture, not on its edge", async ({ page, stub }, info) => {
+  test("a 16:9 video in full screen: landscape, the play button 40 % down the picture, not on its edge", async ({ page, stub }, info) => {
     test.skip(info.project.name === "iphone", "the Fullscreen API (an iPhone: below)");
+    // the screen's turns, as Android Chrome allows them in full screen
+    await page.addInitScript(() => {
+      const w = window as unknown as { __turns: string[] };
+      w.__turns = [];
+      const o = screen.orientation as unknown as Record<string, unknown>;
+      o.lock = (to: string) => {
+        w.__turns.push(`lock ${to}`);
+        return Promise.resolve();
+      };
+      o.unlock = () => {
+        w.__turns.push("unlock");
+      };
+    });
+    const turns = () => page.evaluate(() => (window as unknown as { __turns: string[] }).__turns);
     const job = await stub.seed("review_land", { settings: ORIGINAL });
     await openVorschau(page, job.id);
     await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
     await press(page, button(page));
     await expect(frame(page)).toHaveAttribute("data-fullscreen", "real");
+    // a phone held upright turns to landscape for it
+    await expect.poll(turns).toEqual(["lock landscape"]);
     const vp = page.viewportSize()!;
     // the picture: as wide as the screen or as tall, 16:9, in the middle
     const h = Math.min(vp.height, (vp.width * 9) / 16);
@@ -233,6 +253,10 @@ test.describe("the Vorschau in full screen", TAG, () => {
     const p = await box(page.getByTestId("preview-play"));
     expect(p.y - top, "inside the picture, clear of its edge").toBeGreaterThan(16);
     expect(Math.abs(p.y + p.height / 2 - (top + 0.4 * h)), "40 % down the picture").toBeLessThan(2);
+    // and back as it was when it leaves
+    await press(page, button(page));
+    await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
+    await expect.poll(turns).toEqual(["lock landscape", "unlock"]);
   });
 
   test("an iPhone: the preview, its captions drawn, lies over the page; the button, Back and Escape leave, on the same page", async ({
@@ -354,21 +378,69 @@ test.describe("the Vorschau in full screen", TAG, () => {
     await openVorschau(page, job.id);
     await expect(vorschau(page)).toHaveAttribute("data-state", "done");
     await expect(frame(page)).not.toHaveAttribute("data-still", "none", { timeout: 15_000 });
+    await expect.poll(() => video(page).evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
     await button(page).tap();
     await expect.poll(() => ownPlayerOpened(page)).toBe(1);
     await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
   });
 
-  test("an iPhone whose own player can't take the video yet: the frame over the page instead", async ({ page, stub }, info) => {
+  test("an iPhone with the export not loaded (a stalled connection): the frame over the page with its still, not a black player", async ({
+    page,
+    stub,
+  }, info) => {
     test.skip(info.project.name === "desktop", "a phone");
-    await asIPhone(page, { supported: false });
+    // iOS offers its player from the start of the load
+    await asIPhone(page, { supported: true });
     const job = await stub.seed("done");
+    await page.route(/\/jobs\/[^/]+\/watch/, () => {
+      /* never answered */
+    });
     await openVorschau(page, job.id);
     await expect(vorschau(page)).toHaveAttribute("data-state", "done");
+    expect(await video(page).evaluate((v) => (v as HTMLVideoElement).readyState)).toBe(0);
     await button(page).tap();
     await expect(frame(page)).toHaveAttribute("data-fullscreen", "pseudo");
     expect(await ownPlayerOpened(page)).toBe(0);
     await button(page).tap();
     await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
+  });
+
+  test("an iPhone: a reload while the frame lies over the page leaves no history entry behind", async ({ page, stub }, info) => {
+    test.skip(info.project.name === "desktop", "a phone");
+    await asIPhone(page, { supported: true });
+    const job = await stub.seed("review_speech");
+    await openVorschau(page, job.id, { query: "?captions=v2" });
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+    const url = page.url();
+    await button(page).tap();
+    await expect(frame(page)).toHaveAttribute("data-fullscreen", "pseudo");
+    expect(await ownEntry(page)).toBe(true);
+    await page.reload();
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready", { timeout: 45_000 });
+    await expect(frame(page)).not.toHaveAttribute("data-fullscreen");
+    await expect.poll(() => ownEntry(page)).toBe(false);
+    expect(page.url()).toBe(url);
+    // one Back leaves the page, as before
+    await page.goBack();
+    await expect(page).not.toHaveURL(url);
+  });
+
+  test("an iPhone up to iOS 18.3 (a size container contained layout then): the frame still covers the screen", async ({
+    page,
+    stub,
+  }, info) => {
+    test.skip(info.project.name === "desktop", "a phone");
+    await asIPhone(page, { supported: true });
+    const job = await stub.seed("review_speech");
+    await openVorschau(page, job.id, { query: "?captions=v2" });
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+    // what those engines added to the Vorschau's container
+    await page.addStyleTag({ content: 'section[data-testid="preview"] { contain: layout; }' });
+    await page.evaluate(() => window.scrollTo(0, 60));
+    await button(page).tap();
+    await expect(frame(page)).toHaveAttribute("data-fullscreen", "pseudo");
+    const vp = page.viewportSize()!;
+    expect(await box(frame(page))).toMatchObject({ x: 0, y: 0, width: vp.width, height: vp.height });
+    expect(await frameOnTopAt(page, vp.width / 2, 8), "over the site's header too").toBe(true);
   });
 });

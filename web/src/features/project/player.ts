@@ -206,9 +206,10 @@ export async function pickStill(
  * frame, with all that is drawn over its video (desktop, Android, iPad).
  * An iPhone has that API only for a video, and the video's own player
  * shows nothing drawn over it: "video" for a video with nothing over it
- * (the export, its captions burned in) once that player can take it
- * (`videoOwn`: iOS says so from its metadata on); else "pseudo", the
- * frame laid over the page, so the preview's drawn captions stay.
+ * (the export, its captions burned in) once that player can show it
+ * (`videoOwn`: iOS offers it and the video's metadata is in, no error);
+ * else "pseudo", the frame laid over the page, so the preview's drawn
+ * captions stay (and a video not loaded yet shows its still there).
  */
 export function fullscreenWay(frameApi: boolean, videoOwn: boolean, drawnOver: boolean): "frame" | "video" | "pseudo" {
   if (frameApi) return "frame";

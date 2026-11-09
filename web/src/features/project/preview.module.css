@@ -13,6 +13,14 @@
    * row and two buttons stay on screen under it. */
   --fh: clamp(260px, calc(100svh - 344px), 620px);
 }
+/* The frame over the page (an iPhone's full screen, player.module.css):
+ * up to Safari 18.3 a size container also contained layout, which made
+ * it the frame's box instead of the screen; it is no container then
+ * (on a phone nothing under the frame reads it, and its place keeps). */
+.root:has([data-fullscreen="pseudo"]) {
+  container-type: normal;
+  contain: none;
+}
 .root :focus-visible {
   outline: 2px solid var(--brand-hover);
   outline-offset: 3px;
