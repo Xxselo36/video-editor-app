@@ -499,6 +499,8 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "微調整",
   "app.preview.more": "この動画のその他の機能",
   "app.preview.pause": "一時停止",
+  "app.preview.fullscreen": "全画面",
+  "app.preview.exitFullscreen": "全画面を終了",
   "app.preview.captionsAfter": "字幕は書き出し後に表示されます。",
   "app.preview.preparing": "プレビューはまだ準備中です。",
   "app.preview.unavailable": "プレビューを作成できませんでした。編集内容は保存されています。",

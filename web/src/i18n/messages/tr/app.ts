@@ -503,6 +503,8 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "İnce ayar",
   "app.preview.more": "Bu video için daha fazlası",
   "app.preview.pause": "Duraklat",
+  "app.preview.fullscreen": "Tam ekran",
+  "app.preview.exitFullscreen": "Tam ekrandan çık",
   "app.preview.captionsAfter": "Altyazıları video dışa aktarıldıktan sonra göreceksin.",
   "app.preview.preparing": "Önizleme hâlâ hazırlanıyor.",
   "app.preview.unavailable": "Önizleme oluşturulamadı. Düzenlemelerin kaydedildi.",

@@ -1,10 +1,12 @@
 "use client";
 /**
- * Fullscreen of the preview (review C12): the Element Fullscreen API where
- * it exists (desktop, Android, iPad). iPhone Safari has none, and its
- * native video fullscreen drops the canvas captions, so there the stage
- * gets a CSS pseudo-fullscreen instead (fixed, 100dvh, safe-area insets,
- * captions kept). Escape leaves the pseudo mode too, and so does the
+ * Full screen for a video with what is drawn over it: the editor's stage
+ * (review C12) and the Vorschau's frame (features/project/ExportedVideo
+ * Player). The Element Fullscreen API where it exists (desktop, Android,
+ * iPad). iPhone Safari has none, and its native video fullscreen drops
+ * the canvas captions, so there the element gets a CSS pseudo-fullscreen
+ * instead (fixed over the page, captions kept; the caller styles it by
+ * `pseudo`). Escape leaves the pseudo mode too, and so does the
  * browser's Back (a history entry while it is on).
  */
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
@@ -18,6 +20,30 @@ export const PSEUDO_FS_STATE = "cleoPseudoFs";
 /** Is the current history entry the one the pseudo-fullscreen pushed? */
 function isOurEntry(): boolean {
   return Boolean((window.history.state as Record<string, unknown> | null)?.[PSEUDO_FS_STATE]);
+}
+
+/**
+ * The entry is only ever the current one while an element lies over the
+ * page. Anywhere else (a reload or a restored tab over the page; Forward
+ * after leaving it; Back onto it from a page that a navigation put on top
+ * of it) it would make the next Back do nothing: whenever the page lands
+ * on it with no element over the page, it is stepped off. The entry before
+ * it is the same page without the flag, so this never repeats.
+ */
+let overPage = 0;
+let watching = false;
+function stepOffOurEntry() {
+  try {
+    if (overPage === 0 && isOurEntry()) window.history.back();
+  } catch {
+    /* no history */
+  }
+}
+function watchOurEntry() {
+  if (watching) return;
+  watching = true;
+  window.addEventListener("popstate", stepOffOurEntry);
+  stepOffOurEntry();
 }
 
 export function fullscreenApi(el: HTMLElement | null): boolean {
@@ -73,6 +99,34 @@ export function useFullscreen(ref: RefObject<HTMLElement | null>) {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [pseudo]);
+  // Gone while on (another video took the element's place: the Vorschau's
+  // preview when the export finishes): its entry goes too, or the next
+  // Back would only take it off. A navigation that unmounts the page has
+  // pushed its own entry by then, not ours: nothing is taken off.
+  useEffect(() => {
+    watchOurEntry();
+  }, []);
+  useEffect(() => {
+    if (!pseudo) return;
+    overPage += 1;
+    return () => {
+      overPage -= 1;
+    };
+  }, [pseudo]);
+  const pseudoOn = useRef(false);
+  useEffect(() => {
+    pseudoOn.current = pseudo;
+  }, [pseudo]);
+  useEffect(
+    () => () => {
+      try {
+        if (pseudoOn.current && isOurEntry()) window.history.back();
+      } catch {
+        /* no history */
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!pseudo) return;

@@ -53,6 +53,33 @@
   pointer-events: none;
 }
 
+/* Full screen (ExportedVideo.tsx Player): the frame fills the screen,
+ * its picture letterboxed on the page's black, no corners or hairline.
+ * "real": the Fullscreen API sizes and places it. "pseudo" (an iPhone,
+ * where only a video has that API): the frame lies over the page; a
+ * swipe on it doesn't scroll the page under it. */
+.frame[data-fullscreen] {
+  border-radius: 0;
+  background: var(--surface-0);
+}
+.frame[data-fullscreen]::after {
+  box-shadow: none;
+}
+/* The frame's place in the page while it is full screen. */
+.standIn {
+  visibility: hidden;
+}
+.player[data-shape] .frame[data-fullscreen="pseudo"] {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  width: auto;
+  height: auto;
+  max-width: none;
+  aspect-ratio: auto;
+  touch-action: none;
+}
+
 /* A tap on the picture plays and pauses. The caption layer draws over
  * the picture's box: "contain", as the export pads a video it doesn't
  * reframe. */
@@ -94,9 +121,9 @@
   border: 0;
   border-radius: 50%;
   color: var(--text-strong);
-  background: color-mix(in srgb, var(--surface-0) 42%, transparent);
+  /* its white triangle stays 3:1 or more over a white picture */
+  background: color-mix(in srgb, var(--surface-0) 52%, transparent);
   backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 16%, transparent);
   cursor: pointer;
   touch-action: manipulation;
@@ -111,9 +138,13 @@
 .play:active {
   transform: scale(0.97);
 }
-.play:focus-visible {
+/* The ring on a dark halo: it shows over any picture. */
+.frame .play:focus-visible {
   outline: 2px solid var(--brand-hover);
   outline-offset: 3px;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 16%, transparent),
+    0 0 0 3px var(--surface-0);
 }
 .play svg {
   fill: currentColor;
@@ -123,6 +154,88 @@
 .nudge {
   translate: 2px 0;
 }
+/* Full screen and back: a 32 px disc of the play button's glass in the
+ * frame's top corner, in a 44 px target. It stays while the video plays
+ * (on a phone it is the way in without a pause); a mouse sees it on
+ * hover, as the play button. */
+.fs {
+  position: absolute;
+  z-index: 3;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-strong);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: opacity 0.2s ease;
+}
+.disc {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  /* denser than the play button's: its thin icon stays 3:1 over white */
+  background: color-mix(in srgb, var(--surface-0) 60%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 16%, transparent);
+  transition:
+    transform 0.16s var(--ease-out),
+    background-color 0.15s ease;
+}
+.fs:active .disc {
+  transform: scale(0.94);
+}
+/* The ring round the disc, not the target. */
+.frame .fs:focus-visible {
+  outline: none;
+}
+.frame .fs:focus-visible .disc {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 2px;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--text-strong) 16%, transparent),
+    0 0 0 2px var(--surface-0);
+}
+/* Full screen: the focus is on the frame itself (a modal dialog then). */
+.player .frame:focus-visible {
+  outline: none;
+}
+.frame[data-fullscreen] .fs {
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  right: calc(8px + env(safe-area-inset-right, 0px));
+}
+/* The play button and the note under it 40 % down the picture, as in
+ * the page: the picture is as wide as the screen or as tall, and a 16:9
+ * one on a tall screen sits letterboxed in the middle. */
+.frame[data-fullscreen] .play {
+  top: calc(50% - 0.1 * min(100%, 100vw * 16 / 9));
+}
+.player[data-shape="wide"] .frame[data-fullscreen] .play {
+  top: calc(50% - 0.1 * min(100%, 100vw * 9 / 16));
+}
+.frame[data-fullscreen]:not([data-held="failed"]) .status {
+  top: calc(50% - 0.1 * min(100%, 100vw * 16 / 9) + 44px);
+}
+.player[data-shape="wide"] .frame[data-fullscreen]:not([data-held="failed"]) .status {
+  top: calc(50% - 0.1 * min(100%, 100vw * 9 / 16) + 44px);
+}
+.frame[data-fullscreen] .scrub {
+  left: calc(16px + env(safe-area-inset-left, 0px));
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+
 /* While it plays the button steps back: on hover (a mouse) or keyboard
  * focus it shows, and while the video waits for data (the spinner). */
 .frame[data-playing] .play {
@@ -134,10 +247,31 @@
 }
 @media (hover: hover) and (pointer: fine) {
   .play:hover {
-    background: color-mix(in srgb, var(--surface-0) 56%, transparent);
+    background: color-mix(in srgb, var(--surface-0) 64%, transparent);
+  }
+  .fs:hover .disc {
+    background: color-mix(in srgb, var(--surface-0) 72%, transparent);
   }
   .frame[data-playing]:hover .play {
     opacity: 1;
+  }
+  .frame[data-playing]:not(:hover) .fs:not(:focus-visible) {
+    opacity: 0;
+  }
+  /* Full screen, playing, the mouse still (data-idle): the controls and
+   * the pointer go; a move or a key brings them back. A control the
+   * keyboard is on stays, and so does the arc of a wait for data. */
+  .frame[data-idle][data-playing] .play:not(:focus-visible),
+  .frame[data-idle] .fs:not(:focus-visible) {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .frame[data-idle][data-playing][aria-busy="true"] .play {
+    opacity: 1;
+  }
+  .frame[data-idle],
+  .frame[data-idle] .video {
+    cursor: none;
   }
 }
 /* A preview that couldn't be made: nothing to play, no play button; the
@@ -197,7 +331,6 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-0) 72%, transparent);
   backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   color: var(--text-strong);
   font-size: 12.5px;
   font-weight: 500;
@@ -258,6 +391,12 @@
       background-color 0.15s ease;
   }
   .play:active {
+    transform: none;
+  }
+  .disc {
+    transition: background-color 0.15s ease;
+  }
+  .fs:active .disc {
     transform: none;
   }
   /* waiting: the whole ring, still */

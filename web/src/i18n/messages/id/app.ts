@@ -502,6 +502,8 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "Sempurnakan",
   "app.preview.more": "Lainnya untuk video ini",
   "app.preview.pause": "Jeda",
+  "app.preview.fullscreen": "Layar penuh",
+  "app.preview.exitFullscreen": "Keluar dari layar penuh",
   "app.preview.captionsAfter": "Teks akan terlihat setelah video diekspor.",
   "app.preview.preparing": "Pratinjau masih disiapkan.",
   "app.preview.unavailable": "Pratinjau gagal dibuat. Editanmu sudah tersimpan.",

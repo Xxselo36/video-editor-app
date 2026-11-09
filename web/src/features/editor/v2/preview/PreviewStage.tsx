@@ -13,7 +13,7 @@ import { useT } from "@/i18n";
 import { usePlayhead, type PlayheadState } from "@/features/editor/state/playhead";
 import { fitFrame, phoneFrame, PHONE_FRAME_MAX } from "../model";
 import { PlayerBar } from "./PlayerBar";
-import { useFullscreen } from "./useFullscreen";
+import { useFullscreen } from "@/lib/useFullscreen";
 import { VideoLayer, type CaptionSlotProps } from "./VideoLayer";
 import s from "../editor.module.css";
 

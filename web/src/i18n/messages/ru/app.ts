@@ -501,6 +501,8 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "Доработка",
   "app.preview.more": "Ещё для этого видео",
   "app.preview.pause": "Пауза",
+  "app.preview.fullscreen": "Во весь экран",
+  "app.preview.exitFullscreen": "Выйти из полноэкранного режима",
   "app.preview.captionsAfter": "Субтитры будут видны после экспорта.",
   "app.preview.preparing": "Превью ещё готовится.",
   "app.preview.unavailable": "Не удалось создать превью. Твои изменения сохранены.",

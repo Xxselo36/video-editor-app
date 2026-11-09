@@ -500,6 +500,8 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "Ajuste fino",
   "app.preview.more": "Mais opções para este vídeo",
   "app.preview.pause": "Pausar",
+  "app.preview.fullscreen": "Tela cheia",
+  "app.preview.exitFullscreen": "Sair da tela cheia",
   "app.preview.captionsAfter": "Você verá as legendas depois que o vídeo for exportado.",
   "app.preview.preparing": "A prévia ainda está sendo preparada.",
   "app.preview.unavailable": "Não foi possível criar a prévia. Suas edições estão salvas.",

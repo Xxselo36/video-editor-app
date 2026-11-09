@@ -503,6 +503,8 @@ export const esApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "Ajuste fino",
   "app.preview.more": "Más opciones para este video",
   "app.preview.pause": "Pausar",
+  "app.preview.fullscreen": "Pantalla completa",
+  "app.preview.exitFullscreen": "Salir de pantalla completa",
   "app.preview.captionsAfter": "Verás los subtítulos cuando se exporte el video.",
   "app.preview.preparing": "La vista previa todavía se está preparando.",
   "app.preview.unavailable": "No se pudo crear la vista previa. Tus ediciones están guardadas.",

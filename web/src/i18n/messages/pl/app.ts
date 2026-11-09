@@ -502,6 +502,8 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.preview.refine": "Poprawki",
   "app.preview.more": "Więcej do tego wideo",
   "app.preview.pause": "Wstrzymaj",
+  "app.preview.fullscreen": "Pełny ekran",
+  "app.preview.exitFullscreen": "Zamknij pełny ekran",
   "app.preview.captionsAfter": "Napisy zobaczysz po eksporcie.",
   "app.preview.preparing": "Podgląd jest jeszcze przygotowywany.",
   "app.preview.unavailable": "Nie udało się utworzyć podglądu. Twoje zmiany są zapisane.",

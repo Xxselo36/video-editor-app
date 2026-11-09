@@ -13,20 +13,32 @@
  * the file (a preview the server still builds) also says so in words.
  * PreviewVideo draws its captions into the same player.
  *
+ * Full screen (the owner, 2026-11): a small round button in the frame's
+ * top corner, there while it plays too (a mouse: on hover, as the play
+ * button). The frame goes full screen with what is drawn over it
+ * (player.ts fullscreenWay; lib/useFullscreen): the Fullscreen API on
+ * desktop, Android and iPad; on an iPhone the export opens in the
+ * phone's own player, the preview's frame lies over the page (its
+ * captions are drawn, that player would drop them). The same button,
+ * Escape and (over the page) Back leave it. Full screen and playing, a
+ * still mouse hides the controls and the pointer after IDLE_MS.
+ *
  * `held`: no file to play yet (a preview that doesn't show the stored
  * edit, PreviewVideo). "building": busy as above, play does nothing;
  * "failed": a note that it couldn't be made, at once. A file loaded
  * before goes off the frame.
  */
-import { Pause, Play } from "lucide-react";
+import { Maximize, Minimize, Pause, Play } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { Icon } from "@/components/ui/Icon";
 import { useT } from "@/i18n";
 import { useMediaUrl } from "@/lib/api";
+import { fullscreenApi, useFullscreen } from "@/lib/useFullscreen";
 import type { JobStatus } from "@/features/jobs/types";
 import {
   decodeStill,
+  fullscreenWay,
   isWide,
   pickStill,
   progressOf,
@@ -39,6 +51,44 @@ import s from "./player.module.css";
 
 /** No file after this long: "the preview is still being prepared". */
 const PREPARING_MS = 10_000;
+
+/** Full screen and playing: the controls and a mouse's pointer go after
+ *  this long without the pointer moving or a key (a mouse in a frame that
+ *  fills the screen is always over it). */
+const IDLE_MS = 2_500;
+
+/** iOS: a video's own full-screen player. */
+type OwnFullscreen = HTMLVideoElement & { webkitSupportsFullscreen?: boolean; webkitEnterFullscreen?: () => void };
+
+/** HTMLMediaElement.readyState: its length and size are known. */
+const HAVE_METADATA = 1;
+
+/** Android Chrome lets a page in full screen turn the screen. */
+type Turnable = ScreenOrientation & { lock?: (o: "landscape") => Promise<void>; unlock?: () => void };
+
+/** `on` and nothing moved for IDLE_MS (any pointer, any key). A press
+ *  doesn't wake it: a click with a still pointer acts on the picture, not
+ *  on a control it can't see (which would take the release only). */
+function useIdle(on: boolean): boolean {
+  const [idle, setIdle] = useState(false);
+  if (!on && idle) setIdle(false);
+  useEffect(() => {
+    if (!on) return;
+    let timer = window.setTimeout(() => setIdle(true), IDLE_MS);
+    const wake = () => {
+      setIdle(false);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setIdle(true), IDLE_MS);
+    };
+    const events = ["pointermove", "keydown"] as const;
+    for (const e of events) window.addEventListener(e, wake, { passive: true });
+    return () => {
+      window.clearTimeout(timer);
+      for (const e of events) window.removeEventListener(e, wake);
+    };
+  }, [on]);
+  return on && idle;
+}
 
 export type PlayerProps = {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -113,15 +163,108 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
     });
   };
 
+  // Full screen: the frame, or on an iPhone the export's own player.
+  const frameRef = useRef<HTMLDivElement>(null);
+  const playRef = useRef<HTMLButtonElement>(null);
+  const fsRef = useRef<HTMLButtonElement>(null);
+  const fs = useFullscreen(frameRef);
+  const idle = useIdle(fs.active && playing);
+  // Nothing to show yet: no button (but one to leave it, whatever came).
+  const fullscreenable = fs.active || (!!src && !held);
+  // The preview's captions are drawn over it (or will be, once its doc is
+  // in): the phone's own player would show it without them.
+  const drawsOver = kind === "preview" || !!overlay;
+  const fullscreen = () => {
+    const v = videoRef.current as OwnFullscreen | null;
+    // The phone's player only for a video it can show: iOS offers it from
+    // the start of the load, and a stalled or failed one would open black
+    // (the frame over the page shows the still and retries on play).
+    const own =
+      !!v &&
+      v.readyState >= HAVE_METADATA &&
+      !v.error &&
+      !!v.webkitSupportsFullscreen &&
+      typeof v.webkitEnterFullscreen === "function";
+    if (!fs.active && v && fullscreenWay(fullscreenApi(frameRef.current), own, drawsOver) === "video") {
+      try {
+        v.webkitEnterFullscreen!();
+        return;
+      } catch {
+        /* the player can't take it after all: the frame over the page */
+      }
+    }
+    // The focus comes back to this button when it leaves: Safari focuses
+    // no button on a click or tap, so name it (no ring after a pointer).
+    if (!fs.active) fsRef.current?.focus({ preventScroll: true });
+    fs.toggle();
+  };
+  // A 16:9 video in full screen on a phone held upright: turned to
+  // landscape, as a video player does (Android Chrome; the lock is
+  // refused elsewhere and nothing changes).
+  useEffect(() => {
+    if (!fs.real || !wide) return;
+    const o = (typeof screen !== "undefined" ? screen.orientation : undefined) as Turnable | undefined;
+    o?.lock?.("landscape").catch(() => {
+      /* not a phone, or not allowed */
+    });
+    return () => {
+      try {
+        o?.unlock?.();
+      } catch {
+        /* nothing locked */
+      }
+    };
+  }, [fs.real, wide]);
+
+  // Full screen: the focus on the frame (a modal dialog then), so no
+  // control's ring sits on the picture; Space plays and pauses (on a
+  // button, the button), Tab goes round the two buttons that show.
+  const toggleRef = useRef(toggle);
+  useEffect(() => {
+    toggleRef.current = toggle;
+  });
+  useEffect(() => {
+    if (!fs.active) return;
+    frameRef.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === " " && !(e.target instanceof HTMLButtonElement)) {
+        e.preventDefault();
+        toggleRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = [playRef.current, fsRef.current].filter(
+        (b): b is HTMLButtonElement => !!b && b.getClientRects().length > 0,
+      );
+      if (!items.length) return;
+      const i = items.indexOf(document.activeElement as HTMLButtonElement);
+      const n = items.length;
+      e.preventDefault();
+      items[e.shiftKey ? (i <= 0 ? n - 1 : i - 1) : (i + 1) % n].focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fs.active]);
+
   return (
     <div className={s.player} data-shape={wide ? "wide" : "tall"}>
+      {/* Full screen takes the frame out of the page: its place stays
+          (the page under it doesn't move, nor does its scroll). */}
+      {fs.active && <div className={`${s.frame} ${s.standIn}`} aria-hidden />}
       <div
+        ref={frameRef}
         className={s.frame}
+        tabIndex={fs.active ? -1 : undefined}
+        role={fs.active ? "dialog" : undefined}
+        aria-modal={fs.active || undefined}
+        aria-label={fs.active ? t("app.preview.fullscreen") : undefined}
         data-video={kind}
         data-playing={playing || undefined}
         aria-busy={busy || building || undefined}
         data-held={held}
         data-still={still}
+        data-fullscreen={fs.real ? "real" : fs.pseudo ? "pseudo" : undefined}
+        data-idle={idle || undefined}
         data-testid="preview-frame"
       >
         <video
@@ -140,6 +283,7 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
           </div>
         )}
         <button
+          ref={playRef}
           type="button"
           className={s.play}
           aria-label={playing ? t("app.preview.pause") : t("app.done.play")}
@@ -149,6 +293,21 @@ export function Player({ videoRef, playback, src, poster, wide, kind, overlay, n
         >
           {playing ? <Icon icon={Pause} size={26} /> : <Icon icon={Play} size={26} className={s.nudge} />}
         </button>
+        {fullscreenable && (
+          <button
+            ref={fsRef}
+            type="button"
+            className={s.fs}
+            aria-label={fs.active ? t("app.preview.exitFullscreen") : t("app.preview.fullscreen")}
+            title={fs.active ? t("app.preview.exitFullscreen") : t("app.preview.fullscreen")}
+            onClick={fullscreen}
+            data-testid="preview-fullscreen"
+          >
+            <span className={s.disc}>
+              <Icon icon={fs.active ? Minimize : Maximize} size={16} />
+            </span>
+          </button>
+        )}
         <span className={s.scrub} aria-hidden>
           <span ref={fillRef} className={s.fill} />
         </span>
