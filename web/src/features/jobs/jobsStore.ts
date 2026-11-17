@@ -336,6 +336,7 @@ export function uploadCreated(
     ...(cur?.name ? { name: cur.name } : {}),
     jobId,
     timestamp: cur?.timestamp || Date.now(),
+    startedAt: Date.now(),
     ...(cancelTooLate ? { note: "cancel_too_late" } : {}),
   };
   remotes.set(jobId, pendingRemote(jobId));

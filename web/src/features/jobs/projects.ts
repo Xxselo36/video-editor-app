@@ -50,6 +50,9 @@ export type LocalJob = {
   jobId: string;
   /** Created (ms epoch). */
   timestamp: number;
+  /** Picked here as an upload: when POST /jobs made the job of it (ms
+   *  epoch; `timestamp` is the pick). */
+  startedAt?: number;
   /** The uploaded file's name. */
   filename: string;
   fileSize?: number;
@@ -122,6 +125,8 @@ export type Project = {
   filename: string;
   /** ms epoch. */
   createdAt: number;
+  /** An upload picked here: when its job was made (LocalJob). */
+  startedAt: number | null;
   duration: number | null;
   presetId: string | null;
   presetLabel: string | null;
@@ -252,6 +257,7 @@ export function buildProject(
     name: r?.title ?? local?.name ?? (local?.filename || r?.filename || ""),
     filename: local?.filename || r?.filename || "",
     createdAt: local?.timestamp ?? r?.createdAt ?? 0,
+    startedAt: local?.startedAt ?? null,
     duration: r?.duration ?? null,
     presetId: local?.presetId ?? r?.presetId ?? null,
     presetLabel: local?.presetLabel ?? r?.presetLabel ?? null,

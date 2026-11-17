@@ -38,10 +38,14 @@ export function PreviewRoute() {
 
   const title = t("editor.preview");
   const upload = projects.find((p) => p.state === "uploading");
+  // Projects whose state the server hasn't told (no answer yet, offline,
+  // a 5xx): one of them may have something to show.
+  const unchecked = projects.some((p) => p.state === "unknown");
   let body;
   if (!v2 || !ready || target) {
     body = <PreviewSkeleton testId="preview-resolving" />;
-  } else if (upload && (awaiting.has(upload.id) || upload.upload?.awaitingGo)) {
+  } else if (upload && awaiting.has(upload.id)) {
+    // Waiting for "Los geht's" in this page: Continue brings it back.
     body = (
       <EmptyState testId="preview-uploading" title={t("app.start.waitingForGo")}>
         <Link href="/app/new" className={EMPTY_PRIMARY}>
@@ -50,15 +54,17 @@ export function PreviewRoute() {
       </EmptyState>
     );
   } else if (upload) {
+    // Uploading, or waiting in the tab that uploads it (its way back is
+    // there).
     body = (
-      <EmptyState testId="preview-uploading" title={t("app.preview.uploading")}>
+      <EmptyState testId="preview-uploading" title={t(upload.upload?.awaitingGo ? "app.start.waitingForGo" : "app.preview.uploading")}>
         <Link href="/app" className={EMPTY_TINT}>
           {t("editor.expired.back")}
         </Link>
       </EmptyState>
     );
-  } else if (AUTH_ENABLED && !serverLoaded) {
-    // The account's list didn't load: not "nothing yet".
+  } else if ((AUTH_ENABLED && !serverLoaded) || unchecked) {
+    // The list or the states didn't load: not "nothing yet".
     body = (
       <EmptyState testId="preview-load-failed" alert title={t("app.projects.loadFailed")}>
         <Button size="md" variant="tint" onClick={() => refreshProjects()} data-testid="preview-retry" className={cx(PRESS, "min-h-11")}>

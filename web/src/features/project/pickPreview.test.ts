@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { ProjectState } from "@/features/jobs/projects";
 import { parseLastPreview, pickPreview } from "./pickPreview";
 
-const p = (id: string, state: ProjectState, createdAt: number) => ({ id, state, createdAt });
+const p = (id: string, state: ProjectState, createdAt: number, startedAt: number | null = null) => ({ id, state, createdAt, startedAt });
 
 describe("pickPreview", () => {
   it("opens the newest project with something to show", () => {
@@ -31,6 +31,17 @@ describe("pickPreview", () => {
     // The last one is gone (deleted, expired) or has nothing to show.
     expect(pickPreview(list, { id: "x", at: 400 })).toBe("b");
     expect(pickPreview([p("a", "failed", 100), p("b", "ready", 50)], { id: "a", at: 400 })).toBe("b");
+  });
+
+  it("a video picked before that Vorschau was opened came when its job was made", () => {
+    // b picked at 150, a's Vorschau opened at 300, "Los geht's" at 500.
+    const list = [p("a", "exported", 100), p("b", "processing", 150, 500)];
+    expect(pickPreview(list, { id: "a", at: 300 })).toBe("b");
+    // Made before it was opened: a stays.
+    expect(pickPreview([p("a", "exported", 100), p("b", "ready", 150, 250)], { id: "a", at: 300 })).toBe("a");
+    // Several came since: the one that came last, not the one picked last.
+    const two = [p("a", "exported", 100), p("b", "ready", 150, 700), p("c", "processing", 400, 600)];
+    expect(pickPreview(two, { id: "a", at: 300 })).toBe("b");
   });
 
   it("reads only a stored entry of its own shape", () => {
