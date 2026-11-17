@@ -1114,6 +1114,8 @@ test("the start screens fit a phone @editor-v2", async ({ page, stub, isMobile }
     // The language is in Settings; Upload brings the waiting video back.
     await tab("/app/settings").click();
     await page.getByTestId("language-switcher").selectOption(lang);
+    // (Its messages load on demand: measured once they're in.)
+    if (lang !== "en") await expect(page.locator(`html[data-i18n~="${lang}"]`)).toHaveCount(1);
     await tab("/app/new").click();
     await expect(screen(page)).toHaveAttribute("data-screen", "style");
     // (Shown in that language: every language names the screen its way.)

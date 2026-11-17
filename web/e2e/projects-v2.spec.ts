@@ -11,7 +11,7 @@
  * or 1); v1 browsers keep the dashboard and library (projects.spec.ts,
  * the v1 run's NEXT_PUBLIC_EDITOR_V2=optin build).
  */
-import type { Page, Route } from "@playwright/test";
+import type { Locator, Page, Route } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import {
   ACTIVE_JOBS,
@@ -227,7 +227,18 @@ test("busy rows don't open, finished rows do; ready during the visit says Ready 
   // The same line, in place, not a new row; screen readers hear which.
   expect(await meta.evaluate((el) => (window as unknown as { __metaNode: Element }).__metaNode === el)).toBe(true);
   await expect(announce).toHaveText("“frisch.mp4” is ready");
-  await row.getByTestId("job-card-open").click();
+  // A tap on its frame opens it, and one on its name (nothing over the
+  // row's link there: Playwright's hit check would fail).
+  const open = row.getByTestId("job-card-open");
+  const at = async (part: Locator) => {
+    const [l, p] = [(await open.boundingBox())!, (await part.boundingBox())!];
+    return { x: p.x - l.x + p.width / 2, y: p.y - l.y + p.height / 2 };
+  };
+  await open.click({ position: await at(row.getByTestId("job-card-thumb").or(row.getByTestId("job-card-nothumb"))) });
+  await expect(page).toHaveURL(`${WEB}/app/p/${busy.id}`);
+  await page.goBack();
+  await expect(row).toHaveAttribute("data-state", "ready");
+  await open.click({ position: await at(row.locator("h3")) });
   await expect(page).toHaveURL(`${WEB}/app/p/${busy.id}`);
 });
 

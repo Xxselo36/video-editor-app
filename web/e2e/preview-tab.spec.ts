@@ -66,6 +66,9 @@ test("the states didn't load: it says so, with a retry (not 'nothing yet')", { t
   await openWithStorage(page, "/app/preview", { [JOBS]: [job(done.id, "alt.mp4", 3_600_000)] });
   await expect(page.getByTestId("preview-load-failed")).toContainText("Couldn't load your projects");
   await expect(page.getByTestId("preview-empty")).toHaveCount(0);
+  // Only Retry may load them now: the page's own poll pauses in a hidden
+  // tab (Retry asks whatever the tab's visibility).
+  await page.evaluate(() => Object.defineProperty(document, "hidden", { configurable: true, get: () => true }));
   down.on = false;
   await page.getByTestId("preview-retry").click();
   await expect(page).toHaveURL(`${WEB}/app/p/${done.id}`);

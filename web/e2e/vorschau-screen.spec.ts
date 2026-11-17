@@ -496,6 +496,41 @@ test.describe("the Vorschau's screen", TAG, () => {
     await expect(list).toHaveCount(0);
   });
 
+  test("a short window: ⋯'s menu goes beside ⋯ where it fits neither under nor over it", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "the title row's ⋯ (from 960 px)");
+    const job = await stub.seed("done");
+    await page.setViewportSize({ width: 1024, height: 700 });
+    await openVorschau(page, job.id);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done");
+    const menu = page.getByTestId("job-card-menu");
+    const list = page.getByTestId("job-card-menu-list");
+    await menu.click();
+    await expect(list.getByRole("menuitem")).toHaveCount(4);
+    const height = (await box(list))[3];
+    await page.keyboard.press("Escape");
+    await expect(list).toHaveCount(0);
+    // A window too short for it above or below ⋯ in its middle.
+    const H = Math.round(height * 1.6) + 40;
+    await page.setViewportSize({ width: 1024, height: H });
+    await menu.evaluate((el, h) => {
+      const r = el.getBoundingClientRect();
+      window.scrollTo({ top: window.scrollY + r.top + r.height / 2 - h / 2, behavior: "instant" });
+    }, H);
+    const [bx, by, bw, bh] = await box(menu);
+    expect(by, "⋯ in the window's middle").toBeLessThan(height);
+    expect(H - (by + bh), "⋯ in the window's middle").toBeLessThan(height);
+    await menu.click();
+    await expect(list.getByRole("menuitem")).toHaveCount(4);
+    const [lx, ly, lw, lh] = await box(list);
+    const apart = lx + lw <= bx || bx + bw <= lx || ly + lh <= by || by + bh <= ly;
+    expect(apart, `menu ${[lx, ly, lw, lh]} over ⋯ ${[bx, by, bw, bh]}`).toBe(true);
+    expect(ly).toBeGreaterThanOrEqual(8);
+    expect(ly + lh).toBeLessThanOrEqual(H - 8);
+    expect(lx).toBeGreaterThanOrEqual(8);
+    expect(lx + lw).toBeLessThanOrEqual(1024 - 8);
+    await page.keyboard.press("Escape");
+  });
+
   test("phones: the rename and delete dialogs' buttons are 44 px tall", async ({ page, stub }, info) => {
     test.skip(info.project.name !== "pixel7", "a touch screen");
     const job = await stub.seed("review_speech");

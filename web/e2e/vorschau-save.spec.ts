@@ -4,8 +4,8 @@
  *
  *   D1  every export's download link is its own (its generation, v=):
  *       after Fine-tune and a second export, Download and ⋯ → Download
- *       (on the Vorschau and on the project's tile) ask for the new
- *       export, and the browser never answers them from its cache (a
+ *       on the Vorschau (the Projekte rows have no menu since PR3) ask
+ *       for the new export, and the browser never answers them from its cache (a
  *       download is no-store, its redirect to R2 too); while the project
  *       is edited, the previous version keeps the first export's link.
  *       Every one of them names the file after the project (name=v2)
