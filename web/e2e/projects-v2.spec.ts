@@ -280,6 +280,59 @@ test("a row Cleo works on: Delete asks first, says Cleo stops, then it is gone h
   expect((await storedJobs(page)).map((j) => j.jobId)).toEqual([other.id]);
 });
 
+test("two deleted with the same name: each one is said", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  const a = await stub.seed("analyzing");
+  const b = await stub.seed("analyzing");
+  await openWithStorage(page, "/app", { [JOBS]: [job(a.id, "doppelt.mp4", 5_000), job(b.id, "doppelt.mp4", 6_000)] });
+  const rows = jobCard(page, "doppelt.mp4");
+  await expect(rows).toHaveCount(2);
+  const announce = page.getByTestId("projects-announce");
+  await rows.first().getByTestId("job-card-delete").click();
+  await page.getByTestId("delete-confirm").click();
+  await expect(rows).toHaveCount(1);
+  await expect(announce).toHaveText("“doppelt.mp4” deleted");
+  await announce.evaluate((el) => {
+    (window as unknown as { __said: Element | null }).__said = el.firstElementChild;
+  });
+  await rows.first().getByTestId("job-card-delete").click();
+  await page.getByTestId("delete-confirm").click();
+  await expect(rows).toHaveCount(0);
+  await expect(announce).toHaveText("“doppelt.mp4” deleted");
+  // The same words, a new line: screen readers hear it again.
+  expect(await announce.evaluate((el) => el.firstElementChild !== (window as unknown as { __said: Element | null }).__said)).toBe(true);
+});
+
+test("Delete cancelled after Cleo finished meanwhile: the focus goes to the row's way in", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  const busy = await stub.seed("review");
+  // The job as the page sees it: analysed until `ready`.
+  const state = { ready: false };
+  await page.route(`${API}/jobs/status*`, async (route: Route) => {
+    const res = await route.fetch();
+    const headers = { ...res.headers() };
+    delete headers.etag;
+    if (res.status() !== 200) return route.fulfill({ response: res, headers });
+    const body = (await res.json()) as { jobs: Record<string, unknown>[] };
+    if (!state.ready) {
+      for (const j of body.jobs) {
+        if (j.id === busy.id) Object.assign(j, { status: "processing", stage: "analyze.transcribe", progress: 40, message: "…" });
+      }
+    }
+    return route.fulfill({ response: res, headers, body: JSON.stringify(body) });
+  });
+  await openWithStorage(page, "/app", { [JOBS]: [job(busy.id, "gleich.mp4", 5_000)] });
+  const row = jobCard(page, "gleich.mp4");
+  await expect(row).toHaveAttribute("data-state", "processing");
+  await row.getByTestId("job-card-delete").click();
+  const dialog = page.getByTestId("dialog-delete");
+  await expect(dialog).toBeVisible();
+  state.ready = true;
+  await expect(row).toHaveAttribute("data-state", "ready", { timeout: 15_000 });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(row.getByTestId("job-card-open")).toBeFocused();
+  expect(await stub.job(busy.id)).not.toBeNull();
+});
+
 test("a mouse over a row whose name is cut shows the whole name; no title otherwise", { tag: "@editor-v2" }, async ({ page, stub }, info) => {
   test.skip(Boolean(info.project.use.isMobile), "a mouse");
   const cut = await stub.seed("done");

@@ -68,7 +68,7 @@ export const deLanding: Partial<Record<LandingKey, string>> = {
   "site.faq.price.plans": "Monatliche Tarife, jeder mit einer festen Zahl an Videominuten. Alle Details stehen auf der Preisseite.",
   "site.faq.price.link": "Preise ansehen",
   "site.faq.delete.q": "Kann ich meine Videos löschen?",
-  "site.faq.delete.a": "Ja. Sobald ein Video fertig verarbeitet ist, kannst du sein Projekt löschen. Dann werden das Video und alle Änderungen von unseren Servern entfernt.",
+  "site.faq.delete.a": "Ja. Du kannst sein Projekt jederzeit löschen, auch während Cleo noch daran arbeitet. Dann werden das Video und alle Änderungen von unseren Servern entfernt.",
   "site.final.title": "Filme dein nächstes Video mit Cleo.",
   "site.final.beta": "Kostenlos während der offenen Beta.",
 };

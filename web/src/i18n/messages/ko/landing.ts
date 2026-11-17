@@ -68,7 +68,7 @@ export const koLanding: Partial<Record<LandingKey, string>> = {
   "site.faq.price.plans": "월간 요금제마다 정해진 영상 이용 시간(분)이 있어요. 자세한 내용은 요금제 페이지에서 확인하세요.",
   "site.faq.price.link": "요금제 보기",
   "site.faq.delete.q": "내 영상을 삭제할 수 있나요?",
-  "site.faq.delete.a": "네. 영상 처리가 끝나면 프로젝트를 삭제할 수 있고, 삭제하면 영상과 모든 편집 내용이 서버에서 지워져요.",
+  "site.faq.delete.a": "네. 프로젝트는 언제든 삭제할 수 있어요. Cleo가 아직 작업 중이어도 괜찮아요. 삭제하면 영상과 모든 편집 내용이 서버에서 지워져요.",
   "site.final.title": "다음 영상은 Cleo와 함께 찍어 보세요.",
   "site.final.beta": "오픈 베타 기간에는 무료예요.",
 };

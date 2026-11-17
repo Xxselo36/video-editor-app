@@ -240,6 +240,18 @@ export function ProjectRow({
   // Delete, asked first (DeleteDialog): a row Cleo works on can't be
   // opened, so its Vorschau's ⋯ is out of reach from here.
   const [deleting, setDeleting] = useState(false);
+  const rowRef = useRef<HTMLElement>(null);
+  // Cancelled after Cleo finished meanwhile (its Delete went with the
+  // busy state, the row opens now): the focus to the row's way in, not
+  // lost to the page.
+  const closeDelete = () => {
+    setDeleting(false);
+    requestAnimationFrame(() => {
+      const at = document.activeElement;
+      if (at && at !== document.body) return;
+      rowRef.current?.querySelector<HTMLElement>("[data-testid=job-card-open]")?.focus({ preventScroll: true });
+    });
+  };
   // iPhone/iPad: the original-formats chooser, and "Pick anyway" (no
   // filter) when iOS gives up on a very large video (features/start/
   // videoPicker, pickWatch).
@@ -458,6 +470,7 @@ export function ProjectRow({
   const actions = uploading || busy || p.state === "upload_failed" || p.state === "expired";
   return (
     <article
+      ref={rowRef}
       data-testid="job-card"
       data-phase={PHASE[p.state]}
       data-state={p.state}
@@ -648,7 +661,7 @@ export function ProjectRow({
       </div>
       {href && <Icon icon={ChevronRight} className={s.chev} />}
       {/* Named as the row shows it (no file extension), as the Vorschau's. */}
-      {deleting && <DeleteDialog p={{ ...p, name: shown }} onClose={() => setDeleting(false)} onDeleted={() => onDeleted?.(name)} />}
+      {deleting && <DeleteDialog p={{ ...p, name: shown }} onClose={closeDelete} onDeleted={() => onDeleted?.(name)} />}
     </article>
   );
 }

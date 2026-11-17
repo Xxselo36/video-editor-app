@@ -68,7 +68,7 @@ export const itLanding: Partial<Record<LandingKey, string>> = {
   "site.faq.price.plans": "Piani mensili, ognuno con un numero fisso di minuti di video. Tutti i dettagli sono nella pagina dei prezzi.",
   "site.faq.price.link": "Vedi i prezzi",
   "site.faq.delete.q": "Posso eliminare i miei video?",
-  "site.faq.delete.a": "Sì. Quando il video ha finito l'elaborazione, elimina il progetto: il video e tutte le modifiche vengono rimossi dai nostri server.",
+  "site.faq.delete.a": "Sì. Elimina il progetto quando vuoi, anche mentre Cleo ci sta ancora lavorando: il video e tutte le modifiche vengono rimossi dai nostri server.",
   "site.final.title": "Gira il tuo prossimo video con Cleo.",
   "site.final.beta": "Gratis durante la beta aperta.",
 };

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import backend.main as M
 from backend.jobs import store
-from conftest import analysis_result
+from conftest import REAL_RUN_ANALYZE, analysis_result
 
 
 def _upload_job():
@@ -126,3 +126,108 @@ def test_settled_job_has_no_second_pass(client):
     store.update(job.id, status="done")
     assert client.delete(f"/jobs/{job.id}").status_code == 200
     assert _late_pass(store.get(job.id) or job) == []
+
+
+def _start_analysis(job, owner):
+    """POST /jobs' WP1 start: a place in the analysis line, the thread,
+    its _INFLIGHT entry."""
+    th = threading.Thread(target=REAL_RUN_ANALYZE, args=(job.id,),
+                          daemon=True)
+    M._ANALYZE_SLOTS.enqueue(job.id, th)
+    th.start()
+    M._INFLIGHT.track(job.id, owner, "analyze", th)
+    return th
+
+
+def _in_flight(owner: str) -> int:
+    """What admission counts for `owner` (its live _INFLIGHT entries)."""
+    with M._INFLIGHT._lock:
+        return sum(e["owner"] == owner for e in M._INFLIGHT._live())
+
+
+def test_deleted_while_waiting_in_line_leaves_it_at_once(client,
+                                                         monkeypatch):
+    """WP1: deleted while its analysis waits for a slot: it leaves the
+    line now, not when its turn comes — its thread ends without
+    analysing, and what it held for admission (its owner's jobs in
+    flight, the queue, its disk reservation) is free again."""
+    monkeypatch.setenv("CLEO_MAX_ANALYZE", "1")
+    gate = threading.Event()
+    analysed: list[str] = []
+
+    def analyze(input_path, output_dir, settings, progress_cb,
+                on_normalized=None, cancel_check=None):
+        analysed.append(output_dir)
+        assert gate.wait(20)
+        return analysis_result(output_dir)
+    monkeypatch.setattr(M, "analyze_only", analyze)
+    monkeypatch.setattr(M.media, "put_file", lambda path, key, **kw: 1)
+    first, _ = _upload_job()
+    th1 = _start_analysis(first, "user_x")
+    try:
+        deadline = time.monotonic() + 5
+        while not analysed and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert analysed, "the first analysis holds the only slot"
+        job, _ = _upload_job()
+        th2 = _start_analysis(job, "user_a")
+        deadline = time.monotonic() + 5
+        while (M._ANALYZE_SLOTS.position(job.id) != 1
+               and time.monotonic() < deadline):
+            time.sleep(0.01)
+        assert M._ANALYZE_SLOTS.position(job.id) == 1
+        assert _in_flight("user_a") == 1
+        assert client.delete(f"/jobs/{job.id}").status_code == 200
+        # Free at once, before its thread got round to it.
+        assert _in_flight("user_a") == 0
+        assert job.id not in M._INFLIGHT.job_ids()
+        th2.join(5)
+        assert not th2.is_alive()
+        assert M._ANALYZE_SLOTS.position(job.id) is None
+        assert len(analysed) == 1          # never analysed
+        # A place given up for good: a worker that comes round later
+        # (or this one, again) gets none.
+        assert not M._ANALYZE_SLOTS.withdraw(job.id)
+    finally:
+        gate.set()
+        th1.join(10)
+    assert store.get(first.id).status == "awaiting_review"
+
+
+def test_guard_stops_a_deleted_jobs_ffmpeg(tmp_path):
+    """The analysis' guard asks `halt` (the job deleted) on its beat:
+    this job's child processes (ffmpeg, SmartCam: a long encode checks
+    nothing) are killed, and its checks say stop — as a cancel, not as
+    a full disk."""
+    import subprocess
+    import sys
+
+    from backend import worker
+    ws = tmp_path / "jobs" / "abc123"
+    ws.mkdir(parents=True)
+    other = tmp_path / "jobs" / "other"
+    other.mkdir(parents=True)
+    sleep = "import time; time.sleep(30)"
+    mine = subprocess.Popen([sys.executable, "-c", sleep, str(ws / "x")])
+    theirs = subprocess.Popen([sys.executable, "-c", sleep, str(other)])
+    gone = {"v": False}
+    try:
+        with worker.DiskGuard("abc123", ws, tmp_path, 0, interval=0.02,
+                              halt=lambda: gone["v"]) as guard:
+            check = guard.cancel_check()
+            assert not check()
+            gone["v"] = True
+            assert mine.wait(5) is not None
+            assert check()
+            try:
+                guard.progress(lambda msg, pct: None)("x", 1)
+            except InterruptedError:
+                pass
+            else:
+                raise AssertionError("the progress callback goes on")
+            assert not guard.tripped          # not a disk failure
+            assert theirs.poll() is None      # another job's: left alone
+    finally:
+        for p in (mine, theirs):
+            p.kill()
+            p.wait(5)

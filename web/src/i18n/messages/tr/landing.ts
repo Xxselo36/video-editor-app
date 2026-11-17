@@ -68,7 +68,7 @@ export const trLanding: Partial<Record<LandingKey, string>> = {
   "site.faq.price.plans": "Her birinde belirli sayıda video dakikası olan aylık planlar. Tüm ayrıntılar fiyatlandırma sayfasında.",
   "site.faq.price.link": "Fiyatları gör",
   "site.faq.delete.q": "Videolarımı silebilir miyim?",
-  "site.faq.delete.a": "Evet. Video işlendikten sonra projesini sil; video ve tüm düzenlemeler sunucularımızdan kaldırılır.",
+  "site.faq.delete.a": "Evet. Projesini istediğin zaman sil, Cleo hâlâ üzerinde çalışırken bile; video ve tüm düzenlemeler sunucularımızdan kaldırılır.",
   "site.final.title": "Sonraki videonu Cleo'yla çek.",
   "site.final.beta": "Açık beta boyunca ücretsiz.",
 };

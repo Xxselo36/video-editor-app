@@ -140,6 +140,29 @@ def test_headerless_upload_is_charged_in_the_worker(client, enforce, bearer,
     assert headerless.analysed == [{"_max_seconds": cap}]
 
 
+def test_headerless_upload_deleted_while_measured_is_not_charged(
+        client, enforce, bearer, headerless, monkeypatch):
+    """Deleted while the worker scans its length (minutes for a long
+    upload): not charged, nothing transcribed, no refusal on record."""
+    add_sub(plan="starter", period_start=time.time() - 60)
+    job_id = _post(client, bearer()).json()["job_id"]
+    scan = M._probe_duration                      # the fixture's
+
+    def scan_then_delete(path):
+        seconds = scan(path)
+        r = client.delete(f"/jobs/{job_id}", headers=bearer())
+        assert r.status_code == 200
+        return seconds
+    monkeypatch.setattr(M, "_probe_duration", scan_then_delete)
+    headerless.seconds = 61.2
+    M._run_analyze_inner(job_id)
+    assert store.get(job_id) is None
+    assert accounts.get_usage(job_id) is None
+    assert headerless.analysed == []
+    assert [e for e in store.events(0) if e["job_id"] == job_id
+            and e["kind"].startswith("analysis_")] == []
+
+
 def test_headerless_upload_over_the_quota_is_refused_cleanly(
         client, enforce, bearer, headerless):
     add_sub(plan="starter", period_start=time.time() - 60)

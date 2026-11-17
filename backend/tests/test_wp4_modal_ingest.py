@@ -27,7 +27,7 @@ import pytest
 import backend.main as M
 from backend import (accounts, costs, executor_modal, jobs, leader as
                      task_leader, media, modal_analyze, pipeline, storage,
-                     taskq)
+                     taskq, worker)
 from backend import doc as edit_doc
 from backend.jobs import store
 from conftest import REPO
@@ -650,6 +650,41 @@ def test_boot_pass_stops_orphans(modal_on, r2, monkeypatch):
                                                      call2.object_id])
     assert modal_on.data[modal_analyze.fence_key(job.id)] == f"{tid}:1:stop"
     assert modal_on.data[modal_analyze.fence_key(job2.id)] == f"{tid2}:stop"
+
+
+def test_delete_while_the_modal_analysis_runs_is_quiet(client, modal_on, r2,
+                                                      analysis, monkeypatch,
+                                                      caplog):
+    """DELETE while the worker waits for its Modal call: the call is
+    stopped (stop_job) and what the cancelled call raises reaches the
+    worker before its heartbeat fences it — nobody's failure: no alert,
+    no modal_failed, no error report, nothing reported to the leader."""
+    import logging
+    reports: list[str] = []
+    monkeypatch.setattr(M.observability, "capture",
+                        lambda exc, **kw: reports.append(type(exc).__name__))
+    failed: list[str] = []
+    real_event = costs.record_event
+    monkeypatch.setattr(costs, "record_event", lambda name: (
+        failed.append(name) if name == "modal_failed" else None,
+        real_event(name))[1])
+    job, tid = _r2_upload_job(r2)
+    modal_on.plan = ["hang"]          # runs until cancelled
+    [t] = ts().claim_for_dispatch("ingest", 1, "L", 300, "modal")
+    out: list[dict] = []
+    th = threading.Thread(target=lambda: out.append(
+        worker.run("ingest", tid, job.id, t.attempts, V)))
+    th.start()
+    assert _wait_for(lambda: len(modal_on.spawns) == 1)
+    caplog.set_level(logging.ERROR)
+    assert client.delete(f"/jobs/{job.id}").status_code == 200
+    th.join(20)
+    assert not th.is_alive()
+    assert out == [{"skipped": "fenced"}]
+    assert modal_on.cancelled_ids, "the call was stopped"
+    assert reports == [] and failed == []
+    assert [r.getMessage() for r in caplog.records
+            if r.levelno >= logging.ERROR] == []
 
 
 def test_job_without_modal_calls_is_deleted_as_before(client, r2):

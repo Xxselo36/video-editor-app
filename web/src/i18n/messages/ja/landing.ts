@@ -68,7 +68,7 @@ export const jaLanding: Partial<Record<LandingKey, string>> = {
   "site.faq.price.plans": "月額プランごとに、決まった利用時間（分）が含まれます。詳細はすべて料金ページにあります。",
   "site.faq.price.link": "料金を見る",
   "site.faq.delete.q": "動画は削除できますか？",
-  "site.faq.delete.a": "はい。動画の処理が終わったら、プロジェクトを削除できます。動画とすべての編集内容がサーバーから削除されます。",
+  "site.faq.delete.a": "はい。プロジェクトはいつでも削除できます。Cleoが処理中でも大丈夫です。動画とすべての編集内容がサーバーから削除されます。",
   "site.final.title": "次の動画は、Cleoと撮ろう。",
   "site.final.beta": "オープンベータ期間中は無料。",
 };

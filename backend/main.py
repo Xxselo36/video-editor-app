@@ -163,6 +163,12 @@ def _note_deleted(job_id: str) -> None:
         _DELETED_HERE[job_id] = now
 
 
+def _forget_deleted(job_id: str) -> None:
+    """The delete didn't go through: its work goes on."""
+    with _active_lock:
+        _DELETED_HERE.pop(job_id, None)
+
+
 def _deleted_meanwhile(job_id: str) -> bool:
     """Was the job deleted while this process worked on it?"""
     return job_id in _DELETED_HERE
@@ -321,6 +327,9 @@ class _SlotQueue:
         # Winners still writing their start status (on_start).
         self._starting = 0
         self._closed = False
+        # Places given up (withdraw: the job was deleted) whose worker
+        # still has to learn it: its acquire() returns False.
+        self._withdrawn: set[str] = set()
 
     def limit(self) -> int:
         return max(1, self._limit())
@@ -383,6 +392,9 @@ class _SlotQueue:
         (unless enqueue()d for this thread), and once the queue is
         closed (shutdown)."""
         with self._cond:
+            if job_id in self._withdrawn:
+                self._withdrawn.discard(job_id)
+                return False
             if self._owners.get(job_id) is threading.current_thread():
                 del self._owners[job_id]
             elif (self._closed or job_id in self._running
@@ -396,6 +408,9 @@ class _SlotQueue:
                 with self._cond:
                     while True:
                         if self._closed:
+                            return False
+                        if job_id in self._withdrawn:
+                            self._withdrawn.discard(job_id)
                             return False
                         pos = self._position(job_id)
                         if pos is None:
@@ -436,9 +451,27 @@ class _SlotQueue:
                 self._cond.notify_all()
         return True
 
+    def withdraw(self, job_id: str) -> bool:
+        """The job was deleted while it waits in line (or before its
+        worker took its place): the place goes now — the others move up
+        — and its worker's acquire() returns False. True if it waited
+        (not for a job that holds a slot: its work stops at its next
+        check)."""
+        with self._cond:
+            if job_id not in self._waiting and job_id not in self._owners:
+                return False
+            self._withdrawn.add(job_id)
+            self._owners.pop(job_id, None)
+            self._published.pop(job_id, None)
+            if job_id in self._waiting:
+                self._waiting.remove(job_id)
+            self._cond.notify_all()
+            return True
+
     def cancel(self, job_id: str) -> None:
         """Give up an enqueue()d place whose worker never started."""
         with self._cond:
+            self._withdrawn.discard(job_id)
             if self._owners.pop(job_id, None) is not None:
                 self._published.pop(job_id, None)
                 if job_id in self._waiting:
@@ -2529,6 +2562,9 @@ def _length_gate(job: Job, input_path: str,
                 email = (accounts.get_user(job.owner_id) or {}).get("email")
             except Exception:
                 pass
+            # Deleted while it was measured (the probe can take minutes):
+            # not charged.
+            _stop_if_deleted(job.id)
             try:
                 # Once (usage is keyed by the job): not through _db_retry.
                 ent = accounts.charge(job.id, job.owner_id, seconds or 0.0,
@@ -2564,17 +2600,21 @@ def _analysis_refused(job_id: str, job_dir: Path, exc: AnalysisRefused,
     """_length_gate refused the upload: whatever was charged back, the
     error state, the upload and the workspace freed (nothing was
     transcribed; like a refused POST /jobs). Raises like
-    _analysis_failed when the database won't take it."""
+    _analysis_failed when the database won't take it. A job deleted
+    meanwhile: no error state and no event, its files in every store
+    (the delete's second pass, in the job's own, stays where it is)."""
     print(f"[job {job_id}] refused before analysis: {exc.text}", flush=True)
+    deleted = _deleted_meanwhile(job_id)
     refunded: bool | None = None
     if auth.auth_enabled():
         if _db_retry(job_id, "refunding", accounts.refund, job_id, exc.code):
             refunded = True
-    _db_retry(job_id, "saving the refusal", store.update, job_id,
-              status="error", error=exc.text[:2000],
-              **errors.job_error(exc.code, **exc.params), refunded=refunded,
-              progress=0.0, input_path=None)
-    _record_event("analysis_refused", job_id, code=exc.code)
+    if not deleted:
+        _db_retry(job_id, "saving the refusal", store.update, job_id,
+                  status="error", error=exc.text[:2000],
+                  **errors.job_error(exc.code, **exc.params),
+                  refunded=refunded, progress=0.0, input_path=None)
+        _record_event("analysis_refused", job_id, code=exc.code)
     drop_upload()
     shutil.rmtree(job_dir, ignore_errors=True)
     if source_key:
@@ -2582,7 +2622,7 @@ def _analysis_refused(job_id: str, job_dir: Path, exc: AnalysisRefused,
         _discard_upload(None, source_key, where)
     if media_entries:
         _gc_later([e for e in media_entries if e != source_key],
-                  store_=where)
+                  store_=None if deleted else where)
 
 
 def _render_failed(job_id: str, exc: Exception, gen: int | None = None,
@@ -2690,7 +2730,9 @@ def _run_analyze_inner(job_id: str) -> None:
     ws = _workspace(job_id)
     # Under the floor mid-analysis: this job stops (its ffmpeg killed) as
     # server_storage_full instead of filling the volume for every job.
-    guard = task_worker.DiskGuard(job_id, ws, _TMP_ROOT, _MIN_FREE_BYTES)
+    # ... and deleted meanwhile: its ffmpeg (normalize, SmartCam) goes too.
+    guard = task_worker.DiskGuard(job_id, ws, _TMP_ROOT, _MIN_FREE_BYTES,
+                                  halt=lambda: _deleted_meanwhile(job_id))
     work_started = time.time()
     try:
         job = _db_retry(job_id, "reading the job", store.get, job_id)
@@ -6060,7 +6102,17 @@ def delete_job(job_id: str, user: User | None = Depends(current_user)):
     job = get_owned_job(job_id, user)
     late = _may_be_worked_on(job)
     _note_deleted(job_id)
-    _delete_job(job, late=late)
+    try:
+        _delete_job(job, late=late)
+    except BaseException:
+        _forget_deleted(job_id)   # the row is still there
+        raise
+    # Waiting in line here (WP1): it leaves the line now, not when its
+    # turn comes, and with it what it holds for admission (_INFLIGHT:
+    # its owner's jobs in flight, the queue cap, its disk reservation).
+    # (Its worker's own release follows; it is idempotent.)
+    if _ANALYZE_SLOTS.withdraw(job_id) | _RENDER_SLOTS.withdraw(job_id):
+        _INFLIGHT.release(job_id)
     return {"deleted": job_id}
 
 

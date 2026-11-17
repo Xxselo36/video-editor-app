@@ -461,6 +461,11 @@ let lastChange = Date.now();
 const poller = new JobStatusPoller();
 let listEtag: string | null = null;
 let listBody: Record<string, unknown>[] | null = null;
+/** A job of the account's list came back missing: deleted elsewhere (in
+ *  another window or on another device — also while Cleo worked on
+ *  it). The list is asked again (it, not one status answer, says what
+ *  the account has); until then the row stays as it was. */
+let listStale = false;
 
 function projectsNow(): Project[] {
   return mergeProjects(locals, remotes, serverIds, { now: Date.now(), exportHints });
@@ -497,8 +502,11 @@ async function loadServerList(): Promise<boolean> {
       listEtag = r.headers.get("ETag");
       listBody = rows;
     }
-    let changed = serverIds === null;
-    serverIds = rows.map((x) => String(x.id ?? "")).filter(Boolean);
+    const before = serverIds;
+    const ids = rows.map((x) => String(x.id ?? "")).filter(Boolean);
+    serverIds = ids;
+    // A project gone from the list (deleted elsewhere) is a change too.
+    let changed = before === null || before.length !== ids.length || before.some((id, i) => id !== ids[i]);
     for (const row of rows) changed = setRemote(row) || changed;
     return changed;
   } catch {
@@ -527,8 +535,10 @@ async function loadStatuses(ids: string[], p: JobStatusPoller | null): Promise<b
     for (const id of chunk) changed = failedIds.delete(id) || changed;
     for (const row of res.rows) changed = setRemote(row as unknown as Record<string, unknown>) || changed;
     for (const id of res.missing) {
-      // Accounts on, a job of the account's list can't be "missing".
-      if (serverIds?.includes(id)) continue;
+      if (serverIds?.includes(id)) {
+        listStale = true;
+        continue;
+      }
       if (remotes.get(id) !== MISSING) {
         remotes.set(id, MISSING);
         changed = true;
@@ -584,7 +594,11 @@ async function tick(): Promise<void> {
   if (ids.length) {
     running = true;
     try {
-      const changed = await loadStatuses(ids.slice(0, STATUS_BATCH_MAX), poller);
+      let changed = await loadStatuses(ids.slice(0, STATUS_BATCH_MAX), poller);
+      if (listStale && AUTH_ENABLED && getAuthState().signedIn) {
+        listStale = false;
+        changed = (await loadServerList()) || changed;
+      }
       if (changed) {
         lastChange = Date.now();
         emit();
@@ -707,5 +721,6 @@ export function _resetForTests(): void {
   refreshed = false;
   listEtag = null;
   listBody = null;
+  listStale = false;
   version++;
 }

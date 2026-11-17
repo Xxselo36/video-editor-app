@@ -541,6 +541,30 @@ def test_job_deleted_while_its_task_runs(analysis, client):
     assert ts().unfinalized() == []
 
 
+def test_job_deleted_while_its_task_runs_reports_nothing(analysis, client,
+                                                       monkeypatch):
+    """What the stopped work raises once its job is gone (here: the
+    workspace the delete removed) is nobody's failure: no error report,
+    no ANALYZE FAILED, no failure reported to the leader."""
+    reports: list[str] = []
+    monkeypatch.setattr(M.observability, "capture",
+                        lambda exc, **kw: reports.append(type(exc).__name__))
+    job, tid = _upload_job()
+    ts().claim_for_dispatch("ingest", 1, "L", 300, "local")
+    analysis["gate"] = threading.Event()
+    analysis["plan"] = [FileNotFoundError("its workspace went with the job")]
+    out: list[dict] = []
+    th = threading.Thread(target=lambda: out.append(
+        worker.run("ingest", tid, job.id, 1, V)))
+    th.start()
+    assert _wait_for(lambda: analysis["calls"] == 1)
+    assert client.delete(f"/jobs/{job.id}").status_code == 200
+    analysis["gate"].set()
+    th.join(20)
+    assert out == [{"skipped": "fenced"}] and reports == []
+    assert _events("analysis_failed") == []
+
+
 def test_shutdown_interrupts_and_the_next_leader_reruns(analysis):
     job, tid = _upload_job()
     first = task_leader.Leader(M._QueueOps(periodic=False))

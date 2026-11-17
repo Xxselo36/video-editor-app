@@ -17,7 +17,7 @@
  */
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AppPage } from "@/components/AppPage";
 import { CONTROL_TOUCH, EMPTY_PRIMARY, EmptyState } from "@/components/EmptyState";
@@ -85,11 +85,12 @@ export function ProjectsPage() {
   const emptyAction = AUTH_ENABLED ? emptyListAction({ ready, serverLoaded, count: projects.length }) : "show";
   const [mounted, setMounted] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  // A row deleted here: said once, and the focus (its Delete is gone)
-  // goes to the title.
-  const [deleted, setDeleted] = useState<string | null>(null);
+  // A row deleted here: said once — each time, the same name again too
+  // (n: a new line for screen readers) — and the focus (its Delete is
+  // gone) goes to the title.
+  const [deleted, setDeleted] = useState<{ name: string; n: number } | null>(null);
   const onDeleted = (name: string) => {
-    setDeleted(name);
+    setDeleted((d) => ({ name, n: (d?.n ?? 0) + 1 }));
     document.getElementById(TITLE_ID)?.focus({ preventScroll: true });
   };
 
@@ -112,11 +113,16 @@ export function ProjectsPage() {
     setMounted(true);
   }, [router]);
 
+  // Rows were shown: a list emptied on the page (the last one deleted
+  // here, or elsewhere) stays and says it is empty.
+  const hadRows = useRef(false);
   useEffect(() => {
-    // Only when the account's list really is empty (not on an error), and
-    // not when the menu led here.
-    if (emptyAction === "redirect" && !navigatedInApp()) {
-      /* eslint-disable-next-line react-hooks/set-state-in-effect */
+    if (projects.length > 0) hadRows.current = true;
+  }, [projects.length]);
+  useEffect(() => {
+    // Only when the account's list really is empty (not on an error), not
+    // when the menu led here, and only for a visit that starts with it.
+    if (emptyAction === "redirect" && !navigatedInApp() && !hadRows.current) {
       setLeaving(true);
       router.replace("/app/new");
     }
@@ -182,7 +188,7 @@ export function ProjectsPage() {
           {title}
         </PageTitle>
         <p role="status" className="sr-only" data-testid="projects-announce">
-          {deleted ? t("app.projects.announceDeleted", { name: deleted }) : ""}
+          {deleted && <span key={deleted.n}>{t("app.projects.announceDeleted", { name: deleted.name })}</span>}
         </p>
         {body}
       </div>
