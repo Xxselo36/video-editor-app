@@ -79,8 +79,8 @@ export function LibraryPage() {
   const remove = async (jobId: string) => {
     if (!confirm(t("library.confirmDelete"))) return;
     // Delete on the server first (video, edits, renders). 404 = already
-    // gone, fine; anything else (e.g. 409 still processing) keeps the
-    // entry so the user can retry.
+    // gone, fine; anything else (a 5xx, the network) keeps the entry so
+    // the user can retry.
     try {
       const r = await apiFetch(`/jobs/${jobId}`, { method: "DELETE" });
       if (!r.ok && r.status !== 404) {

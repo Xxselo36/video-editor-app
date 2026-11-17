@@ -68,7 +68,7 @@ export const idLanding: Partial<Record<LandingKey, string>> = {
   "site.faq.price.plans": "Paket bulanan, masing-masing dengan jumlah menit video tertentu. Semua detailnya ada di halaman harga.",
   "site.faq.price.link": "Lihat harga",
   "site.faq.delete.q": "Bisakah aku menghapus videoku?",
-  "site.faq.delete.a": "Bisa. Setelah video selesai diproses, hapus proyeknya, dan video serta semua editannya dihapus dari server kami.",
+  "site.faq.delete.a": "Bisa. Hapus proyek sebuah video kapan saja, bahkan saat Cleo masih mengerjakannya, dan video serta semua editannya dihapus dari server kami.",
   "site.final.title": "Rekam video berikutnya bareng Cleo.",
   "site.final.beta": "Gratis selama beta terbuka.",
 };

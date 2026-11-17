@@ -47,7 +47,7 @@ export const idSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "{count} proyek",
   "library.count.other": "{count} proyek",
   "library.confirmDelete": "Hapus proyek ini secara permanen? Video dan semua editan akan dihapus dari server kami.",
-  "library.deleteFailed": "Belum bisa dihapus — kalau video masih diproses, coba lagi sebentar lagi.",
+  "library.deleteFailed": "Belum bisa dihapus. Coba lagi sebentar lagi.",
 
   "library.empty.title": "Perpustakaanmu masih kosong",
   "library.empty.body":

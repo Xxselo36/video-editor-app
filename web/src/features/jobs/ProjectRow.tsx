@@ -21,7 +21,7 @@
  */
 import Link from "next/link";
 import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent } from "react";
-import { ArrowRight, ChevronRight, RotateCw, X } from "lucide-react";
+import { ArrowRight, ChevronRight, RotateCw, Trash2, X } from "lucide-react";
 import { cx } from "@/components/ui/cx";
 import { Icon } from "@/components/ui/Icon";
 import { useLang, useT } from "@/i18n";
@@ -44,6 +44,7 @@ import { discardResumable, findRecord } from "@/lib/uploadResume";
 import type { UploadSettings } from "@/features/upload/uploadJob";
 import type { LastUsedPrefs } from "@/features/start/lastUsed";
 import { forgetArriving, isArriving } from "./arrive";
+import { DeleteDialog } from "./ProjectDialogs";
 import { getLocalJob, removeJob } from "./jobsStore";
 import { daysLeft, displayName, formatDuration, relativeTime, type Project, type ProjectState } from "./projects";
 import s from "./projects.module.css";
@@ -204,7 +205,16 @@ function useFresh(state: ProjectState): boolean {
   return fresh;
 }
 
-export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: string) => void }) {
+export function ProjectRow({
+  p: project,
+  onOpen,
+  onDeleted,
+}: {
+  p: Project;
+  onOpen: (href: string) => void;
+  /** After the server removed it (the row's Delete, while Cleo works on it). */
+  onDeleted?: (name: string) => void;
+}) {
   const t = useT();
   const lang = useLang();
   const liveUpload = useLiveUpload(project.id);
@@ -227,6 +237,21 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
   const [arrives] = useState(() => isArriving(p.id));
   useEffect(() => forgetArriving(p.id), [p.id]);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Delete, asked first (DeleteDialog): a row Cleo works on can't be
+  // opened, so its Vorschau's ⋯ is out of reach from here.
+  const [deleting, setDeleting] = useState(false);
+  const rowRef = useRef<HTMLElement>(null);
+  // Cancelled after Cleo finished meanwhile (its Delete went with the
+  // busy state, the row opens now): the focus to the row's way in, not
+  // lost to the page.
+  const closeDelete = () => {
+    setDeleting(false);
+    requestAnimationFrame(() => {
+      const at = document.activeElement;
+      if (at && at !== document.body) return;
+      rowRef.current?.querySelector<HTMLElement>("[data-testid=job-card-open]")?.focus({ preventScroll: true });
+    });
+  };
   // iPhone/iPad: the original-formats chooser, and "Pick anyway" (no
   // filter) when iOS gives up on a very large video (features/start/
   // videoPicker, pickWatch).
@@ -442,9 +467,10 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
     upload(mismatch.file, mismatch.source);
   };
 
-  const actions = uploading || p.state === "upload_failed" || p.state === "expired";
+  const actions = uploading || busy || p.state === "upload_failed" || p.state === "expired";
   return (
     <article
+      ref={rowRef}
       data-testid="job-card"
       data-phase={PHASE[p.state]}
       data-state={p.state}
@@ -608,6 +634,12 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
                 )}
               </>
             )}
+            {busy && (
+              <button type="button" data-testid="job-card-delete" onClick={() => setDeleting(true)} className={s.action}>
+                <Icon icon={Trash2} />
+                {t("app.projects.delete")}
+              </button>
+            )}
             {(p.state === "upload_failed" || p.state === "expired") && (
               <button
                 type="button"
@@ -628,6 +660,8 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
         )}
       </div>
       {href && <Icon icon={ChevronRight} className={s.chev} />}
+      {/* Named as the row shows it (no file extension), as the Vorschau's. */}
+      {deleting && <DeleteDialog p={{ ...p, name: shown }} onClose={closeDelete} onDeleted={() => onDeleted?.(name)} />}
     </article>
   );
 }

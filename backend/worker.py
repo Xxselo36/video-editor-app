@@ -270,6 +270,11 @@ class DiskGuardTripped(OSError):
     (server_storage_full, ours: refunded)."""
 
 
+# How often a guard asks `halt` when its disk check is off
+# (CLEO_DISK_GUARD_S=0): a stop never depends on that setting.
+_HALT_BEAT_S = 2.0
+
+
 class DiskGuard:
     """Defence in depth under the disk reservation (backend/main.py
     _disk_need): while an analysis runs, a thread checks the free space
@@ -280,10 +285,23 @@ class DiskGuard:
     analysis stop at its next step — the job fails with
     server_storage_full instead of filling the volume for every other
     job. `with DiskGuard(...) as guard:`; error(exc) is the exception to
-    report for a failure (DiskGuardTripped once tripped)."""
+    report for a failure (DiskGuardTripped once tripped).
+
+    `halt` (optional): another reason to stop, asked on the same beat —
+    the job was deleted, its task taken away. Once it says so, this
+    job's ffmpeg processes are killed the same way (a long normalize
+    encode checks nothing) and cancel_check() / the progress callback
+    stop it (InterruptedError: not a disk failure). SmartCam's own
+    passes run in this process: they ask cancel_check() on every
+    frame. Watched with the disk check off too (every _HALT_BEAT_S).
+
+    Tripped or halted is for good: from then on every beat kills this
+    job's ffmpeg processes again — what it starts after the first kill
+    (a fallback encode, the proxy) until stop()."""
 
     def __init__(self, job_id: str, ws: Path | str, root: Path | str,
-                 floor: float, interval: float | None = None) -> None:
+                 floor: float, interval: float | None = None,
+                 halt: Callable[[], bool] | None = None) -> None:
         self.job_id = job_id
         self.ws = str(ws)
         self.root = str(root)
@@ -292,11 +310,20 @@ class DiskGuard:
                          if interval is None else interval)
         self.free_at_trip: float | None = None
         self._tripped = threading.Event()
+        self._halt = halt
+        self._halted = threading.Event()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
+    def _beat(self) -> float:
+        """The watcher's beat: the disk check's, else the halt's own
+        (0: no watcher)."""
+        if self.interval > 0:
+            return self.interval
+        return _HALT_BEAT_S if self._halt is not None else 0.0
+
     def start(self) -> "DiskGuard":
-        if self.interval > 0 and self._thread is None:
+        if self._beat() > 0 and self._thread is None:
             self._thread = threading.Thread(
                 target=self._loop, name=f"disk-guard-{self.job_id}",
                 daemon=True)
@@ -316,10 +343,36 @@ class DiskGuard:
         self.stop()
 
     def _loop(self) -> None:
-        while not self._tripped.is_set():
-            self.poll()
-            if self._stop.wait(self.interval):
+        beat = self._beat()
+        stopped = False
+        while True:
+            if stopped:
+                self._kill_children("disk guard" if self._tripped.is_set()
+                                    else "stopped")
+            else:
+                # (the first kill is halt_due's / poll's own)
+                stopped = (self.halt_due()
+                           or (self.interval > 0 and self.poll()))
+            if self._stop.wait(beat):
                 return
+
+    def halt_due(self) -> bool:
+        """`halt` asked once more; True (for good) once it said so — this
+        job's ffmpeg processes are killed then."""
+        if self._halted.is_set():
+            return True
+        if self._halt is None:
+            return False
+        try:
+            due = bool(self._halt())
+        except Exception:
+            return False
+        if due:
+            self._halted.set()
+            _log(f"[job {self.job_id}] stopping this analysis: its job "
+                 "was deleted or its task taken over")
+            self._kill_children("stopped")
+        return due
 
     @property
     def tripped(self) -> bool:
@@ -340,10 +393,10 @@ class DiskGuard:
         _log_error(f"[job {self.job_id}] disk guard: {free / 1e9:.2f} GB "
                    f"free on {self.root}, under the {self.floor / 1e9:.2f} "
                    "GB floor — stopping this analysis")
-        self._kill_children()
+        self._kill_children("disk guard")
         return True
 
-    def _kill_children(self) -> None:
+    def _kill_children(self, why: str) -> None:
         try:
             import psutil
         except ImportError:
@@ -356,7 +409,7 @@ class DiskGuard:
             try:
                 if self.ws in " ".join(p.cmdline()):
                     p.kill()
-                    _log(f"[job {self.job_id}] disk guard: killed "
+                    _log(f"[job {self.job_id}] {why}: killed "
                          f"{p.name()} ({p.pid})")
             except Exception:
                 pass
@@ -379,14 +432,18 @@ class DiskGuard:
 
     def cancel_check(self, other: Callable[[], bool] | None = None
                      ) -> Callable[[], bool]:
-        """A cancel_check for analyze_only: tripped, or `other`."""
-        return lambda: self._tripped.is_set() or bool(other and other())
+        """A cancel_check for analyze_only: tripped, halted, or `other`."""
+        return lambda: (self._tripped.is_set() or self._halted.is_set()
+                        or bool(other and other()))
 
     def progress(self, cb: Callable[[Any, float], None]
                  ) -> Callable[[Any, float], None]:
-        """`cb`, raising DiskGuardTripped first once tripped."""
+        """`cb`, raising DiskGuardTripped first once tripped
+        (InterruptedError once halted)."""
         def wrapped(msg: Any, pct: float) -> None:
             self.check()
+            if self._halted.is_set():
+                raise InterruptedError("Cancelled")
             cb(msg, pct)
         return wrapped
 
@@ -701,6 +758,10 @@ def _length_gate(ctx: Attempt, job: Any, input_path: str,
                     email = (accounts.get_user(job.owner_id) or {}).get("email")
                 except Exception:
                     pass
+                # Still ours (the probe can take minutes): a job deleted
+                # meanwhile is not charged.
+                if not ctx.fence_ok():
+                    raise InterruptedError("fenced out before charging")
                 try:
                     ent = accounts.charge(job.id, job.owner_id, seconds or 0.0,
                                           email=email, enforce=enforce)
@@ -772,10 +833,22 @@ def _processed_s(ws: Path) -> float | None:
     return None
 
 
+def _taken_away(ctx: Attempt, exc: BaseException) -> bool:
+    """Before a failure is reported: is the task still ours? Not when
+    its Modal call was stopped on purpose (taskq.Stopped); else asked
+    once more (a heartbeat) — the job deleted or the task taken over a
+    moment ago, the stopped work's own error (ffmpeg killed, a workspace
+    the delete removed) is nobody's failure."""
+    return (isinstance(exc, taskq.Stopped) or ctx.fenced.is_set()
+            or not ctx.beat())
+
+
 def _ingest_failure(ctx: Attempt, exc: BaseException,
                     ws: Path) -> dict[str, Any]:
     t = ctx.task
     job_id = t.job_id
+    if _taken_away(ctx, exc):
+        return {"skipped": "fenced"}
     if isinstance(exc, InterruptedError) and ctx.cancelled():
         if ctx.fenced.is_set():
             return {"skipped": "fenced"}
@@ -997,7 +1070,8 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
     # (interval 0 = no watcher thread, never trips).
     guard = DiskGuard(job_id, ws, _get("tmp_root"),
                       _env_float("CLEO_MIN_FREE_GB", 1.0) * 1e9,
-                      interval=0 if remote else None)
+                      interval=0 if remote else None,
+                      halt=None if remote else ctx.fenced.is_set)
     try:
         with costs.tracking(job_id, "analyze"), guard:
             try:
@@ -1218,6 +1292,8 @@ _render_error_code = errors.render_error_code
 def _render_failure(ctx: Attempt, exc: BaseException, gen: int,
                     out_prefix: str, where: str) -> dict[str, Any]:
     t = ctx.task
+    if _taken_away(ctx, exc):
+        return {"skipped": "fenced"}
     if isinstance(exc, InterruptedError) and ctx.cancelled():
         if ctx.fenced.is_set():
             return {"skipped": "fenced"}

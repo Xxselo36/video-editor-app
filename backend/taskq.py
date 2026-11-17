@@ -350,6 +350,13 @@ def task_from_row(row: dict[str, Any]) -> Task:
     return Task(**d)
 
 
+class Stopped(InterruptedError):
+    """A remote call of an attempt was stopped on purpose — a later fence:
+    its job deleted, its task settled or taken over. Whoever stopped it
+    settles the task; the attempt reports nothing (its call's error is
+    nobody's failure), whether or not its heartbeat has seen it yet."""
+
+
 class TaskActive(Exception):
     """An active task of this (job, kind) exists already (the unique
     index tasks_one_active)."""

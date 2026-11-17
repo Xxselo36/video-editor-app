@@ -257,7 +257,6 @@ _TEXT_CODES: tuple[tuple[str, str], ...] = (
     ("job not found", "not_found"),
     ("job not in review state", "not_in_review"),
     ("job not ready for review", "not_in_review"),
-    ("job is still processing", "busy"),
     ("normalized video no longer on disk", "media_expired"),
     ("preview video not ready", "preview_not_ready"),
     ("requested format not ready", "format_not_ready"),

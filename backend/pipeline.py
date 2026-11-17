@@ -1943,9 +1943,15 @@ def analyze_only(
         # keeps the normalized source).
         targeted = settings.get("target_aspect") in ("9:16", "16:9", "original")
         try:
+            # cancel_check reaches the tracking and reframe passes (every
+            # frame): they run in this process (OpenCV), so a stop (the
+            # job deleted, the disk full, the attempt fenced out) has no
+            # ffmpeg to kill there, and SmartCam swallows the progress
+            # callback's interrupt.
             sc_out = _smartcam_reframe(
                 normalized_path, sc_dest, sc_format, sc_resolution,
-                progress_cb=progress_cb, same_aspect_zoom=sc_zoom,
+                progress_cb=progress_cb, cancel_check=cancel_check,
+                same_aspect_zoom=sc_zoom,
             )
         except InterruptedError:
             raise
@@ -1955,6 +1961,10 @@ def analyze_only(
             print(f"[smartcam] reframe failed: {type(e).__name__}: {e}",
                   flush=True)
             sc_out = None
+        if cancel_check and cancel_check():
+            # Stopped, not failed: no centre crop (a full re-encode).
+            Path(sc_dest).unlink(missing_ok=True)
+            raise InterruptedError("Cancelled")
         if sc_out and Path(sc_out).exists():
             if os.path.abspath(sc_out) != os.path.abspath(sc_dest):
                 shutil.move(sc_out, sc_dest)

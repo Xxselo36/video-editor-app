@@ -68,7 +68,7 @@ export const nlLanding: Partial<Record<LandingKey, string>> = {
   "site.faq.price.plans": "Maandabonnementen, elk met een vast aantal videominuten. Alle details staan op de prijzenpagina.",
   "site.faq.price.link": "Prijzen bekijken",
   "site.faq.delete.q": "Kan ik mijn video's verwijderen?",
-  "site.faq.delete.a": "Ja. Zodra een video klaar is met verwerken, verwijder je het project en worden de video en alle bewerkingen van onze servers verwijderd.",
+  "site.faq.delete.a": "Ja. Verwijder het project wanneer je wilt, ook terwijl Cleo er nog mee bezig is, en de video en alle bewerkingen worden van onze servers verwijderd.",
   "site.final.title": "Film je volgende video met Cleo.",
   "site.final.beta": "Gratis tijdens de open beta.",
 };

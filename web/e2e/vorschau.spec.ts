@@ -289,7 +289,7 @@ test.describe("the Vorschau", TAG, () => {
     await expect.poll(() => stub.job(job.id)).toBeNull();
   });
 
-  test("while it is analysed: ⋯ renames it; delete says it is still processing", async ({ page, stub }) => {
+  test("while it is analysed: ⋯ renames it, and deletes it (Cleo stops)", async ({ page, stub }) => {
     const job = await stub.seed("analyzing");
     await openVorschau(page, job.id);
     await expect(vorschau(page)).toHaveAttribute("data-state", "processing");
@@ -304,10 +304,12 @@ test.describe("the Vorschau", TAG, () => {
 
     await page.getByTestId("job-card-menu").click();
     await page.getByTestId("job-card-delete").click();
+    await expect(page.getByTestId("delete-body")).toHaveText(
+      "Cleo stops working on it. The video, its edits and exports are removed from our servers. This can't be undone.",
+    );
     await page.getByTestId("delete-confirm").click();
-    await expect(page.getByTestId("dialog-delete")).toContainText("It's still processing. You can delete it once it's done.");
-    expect(await stub.job(job.id)).not.toBeNull();
-    await expect(vorschau(page)).toHaveAttribute("data-state", "processing");
+    await expect(page).toHaveURL(`${WEB}/app`);
+    await expect.poll(() => stub.job(job.id)).toBeNull();
   });
 
   test("a preview the server still builds: busy at once, a note after 10 s, then it plays", async ({ page, stub }) => {

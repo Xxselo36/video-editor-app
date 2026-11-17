@@ -49,7 +49,7 @@ export const itSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "{count} progetto",
   "library.count.other": "{count} progetti",
   "library.confirmDelete": "Eliminare definitivamente questo progetto? Il video e tutte le modifiche vengono rimossi dai nostri server.",
-  "library.deleteFailed": "Impossibile eliminare ora — se il video è ancora in elaborazione, riprova tra un attimo.",
+  "library.deleteFailed": "Impossibile eliminare ora. Riprova tra un attimo.",
 
   // ── Library: empty state ── */
   "library.empty.title": "La tua libreria è vuota",

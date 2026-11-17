@@ -144,6 +144,42 @@ def _release_active(job_id: str) -> None:
         _active_jobs.discard(job_id)
 
 
+# Jobs deleted by their owner (DELETE /jobs/{id}) while a thread of this
+# process may still work on them (the WP1 path): their analysis or
+# render stops at its next check, stores nothing more and settles
+# nothing — no error state, refund, event or error report. (The task
+# queue's workers learn it from their heartbeat: fenced out.) Kept a
+# day, longer than any analysis or render runs.
+_DELETED_HERE: dict[str, float] = {}
+_DELETED_KEEP_S = 86400.0
+
+
+def _note_deleted(job_id: str) -> None:
+    now = time.time()
+    with _active_lock:
+        for old in [k for k, at in _DELETED_HERE.items()
+                    if now - at > _DELETED_KEEP_S]:
+            del _DELETED_HERE[old]
+        _DELETED_HERE[job_id] = now
+
+
+def _forget_deleted(job_id: str) -> None:
+    """The delete didn't go through: its work goes on."""
+    with _active_lock:
+        _DELETED_HERE.pop(job_id, None)
+
+
+def _deleted_meanwhile(job_id: str) -> bool:
+    """Was the job deleted while this process worked on it?"""
+    return job_id in _DELETED_HERE
+
+
+def _stop_if_deleted(job_id: str) -> None:
+    """Before a worker stores a file: none for a deleted job."""
+    if _deleted_meanwhile(job_id):
+        raise InterruptedError("the job was deleted")
+
+
 # ── Admission control ────────────────────────────────────────────────
 # Overload becomes a visible queue instead of a crash. At most
 # CLEO_MAX_ANALYZE analyses and CLEO_MAX_RENDER renders run at once; the
@@ -291,6 +327,9 @@ class _SlotQueue:
         # Winners still writing their start status (on_start).
         self._starting = 0
         self._closed = False
+        # Places given up (withdraw: the job was deleted) whose worker
+        # still has to learn it: its acquire() returns False.
+        self._withdrawn: set[str] = set()
 
     def limit(self) -> int:
         return max(1, self._limit())
@@ -353,6 +392,9 @@ class _SlotQueue:
         (unless enqueue()d for this thread), and once the queue is
         closed (shutdown)."""
         with self._cond:
+            if job_id in self._withdrawn:
+                self._withdrawn.discard(job_id)
+                return False
             if self._owners.get(job_id) is threading.current_thread():
                 del self._owners[job_id]
             elif (self._closed or job_id in self._running
@@ -366,6 +408,9 @@ class _SlotQueue:
                 with self._cond:
                     while True:
                         if self._closed:
+                            return False
+                        if job_id in self._withdrawn:
+                            self._withdrawn.discard(job_id)
                             return False
                         pos = self._position(job_id)
                         if pos is None:
@@ -406,9 +451,27 @@ class _SlotQueue:
                 self._cond.notify_all()
         return True
 
+    def withdraw(self, job_id: str) -> bool:
+        """The job was deleted while it waits in line (or before its
+        worker took its place): the place goes now — the others move up
+        — and its worker's acquire() returns False. True if it waited
+        (not for a job that holds a slot: its work stops at its next
+        check)."""
+        with self._cond:
+            if job_id not in self._waiting and job_id not in self._owners:
+                return False
+            self._withdrawn.add(job_id)
+            self._owners.pop(job_id, None)
+            self._published.pop(job_id, None)
+            if job_id in self._waiting:
+                self._waiting.remove(job_id)
+            self._cond.notify_all()
+            return True
+
     def cancel(self, job_id: str) -> None:
         """Give up an enqueue()d place whose worker never started."""
         with self._cond:
+            self._withdrawn.discard(job_id)
             if self._owners.pop(job_id, None) is not None:
                 self._published.pop(job_id, None)
                 if job_id in self._waiting:
@@ -1058,7 +1121,7 @@ def _media_of(job: Job) -> list[str]:
     return entries
 
 
-def _delete_job(job) -> None:
+def _delete_job(job, late: bool = False) -> None:
     """Remove a job: in one transaction its row goes and its media
     (jobs/{id}/ + the upload) are queued in media_gc — in EVERY store
     (store "": local, and R2 when configured), not only the job's: a
@@ -1067,26 +1130,39 @@ def _delete_job(job) -> None:
     in the other store that nothing else would delete (a missing prefix
     costs one LIST). Then that GC is tried right away (best effort — the
     GC loop retries). Legacy local files (work dir, upload) are removed
-    directly."""
-    if job.id and job.id not in _WORK_ROOT_RESERVED and "/" not in job.id:
-        shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
-        shutil.rmtree(_workspace(job.id), ignore_errors=True)
-    _remove_upload(job.input_path)
+    directly.
+
+    `late` (DELETE /jobs/{id}: maybe while an analysis or a render runs)
+    — and always after an analysis on Modal was stopped — jobs/{id}/
+    goes once more after _late_write_gc_delay_s: a put already under way
+    lands after the GC above (one on Modal can't be stopped; a worker
+    here stops at its next check, a task queue worker at its next
+    heartbeat). That pass is in the job's own store, where they write:
+    its own media_gc row, which the one above (every store) can't
+    swallow while a retry of it waits (an entry keeps its earliest
+    time).
+
+    The row (with its tasks) goes before the local files: a task worker
+    here whose workspace or upload then vanishes finds its task gone at
+    its next heartbeat and stops quietly — the delete's own doing is
+    never reported as its failure."""
     entries = _media_of(job)
     where = None  # every store (media.gc_stores)
     remote = _stop_remote_analysis(job.id)
     store.delete(job.id, gc=entries, gc_store=where)
+    if job.id and job.id not in _WORK_ROOT_RESERVED and "/" not in job.id:
+        shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
+        shutil.rmtree(_workspace(job.id), ignore_errors=True)
+    _remove_upload(job.input_path)
     _proxy_cache_drop(job.id)
     with _EDIT_GUARD:
         _EDIT_SEQ.pop(job.id, None)
         _PREVIEW_LOCKS.pop(job.id, None)
     for entry in entries:
         _gc_one(entry, where)
-    if remote and media.valid_job_id(job.id):
-        # A put already under way on Modal can't be stopped: once more
-        # after Modal's function timeout.
-        _gc_later([media.job_prefix(job.id)], _ingest_gc_delay_s(),
-                  store_=where)
+    if (late or remote) and media.valid_job_id(job.id):
+        _gc_later([media.job_prefix(job.id)], _late_write_gc_delay_s(),
+                  store_=media.store_of(job))
 
 
 def _ingest_gc_delay_s() -> float:
@@ -1094,6 +1170,15 @@ def _ingest_gc_delay_s() -> float:
     longer function timeout)."""
     from backend import executor_modal
     return executor_modal.FUNCTION_TIMEOUT_S + 300.0
+
+
+def _late_write_gc_delay_s() -> float:
+    """After a delete while the job may still be worked on: past the
+    longest a write of it can still land (Modal's function timeouts —
+    an analysis there, a render's call — far beyond a worker here, which
+    stops at its next check or heartbeat once its upload under way is
+    done)."""
+    return max(_ingest_gc_delay_s(), _render_gc_delay_s())
 
 
 def _stop_remote_analysis(job_id: str) -> bool:
@@ -2381,7 +2466,21 @@ def _analysis_failed(job_id: str, job_dir: Path, exc: Exception,
     jobs/{id}/ and the upload object — into media_gc). Raises when the
     refund or the error state can't be written — then the job stays
     running, nothing is deleted, and _sweep_orphaned_jobs (or the next
-    boot) refunds and settles it later."""
+    boot) refunds and settles it later.
+
+    A job deleted meanwhile (_note_deleted: its owner deleted it while
+    this ran) has nothing to settle: only the files go — no refund, no
+    error report, no event."""
+    if _deleted_meanwhile(job_id):
+        print(f"[job {job_id}] analysis stopped: the job was deleted",
+              flush=True)
+        drop_upload()
+        shutil.rmtree(job_dir, ignore_errors=True)
+        # Every store: an entry in the job's own would pull the delete's
+        # second pass (_delete_job `late`) forward to now.
+        if media_entries:
+            _gc_later(media_entries)
+        return
     tb = traceback.format_exc()
     print(f"[job {job_id}] ANALYZE FAILED: {exc}\n{tb}", flush=True)
     observability.capture(exc, job_id=job_id, phase="analyze")
@@ -2468,6 +2567,9 @@ def _length_gate(job: Job, input_path: str,
                 email = (accounts.get_user(job.owner_id) or {}).get("email")
             except Exception:
                 pass
+            # Deleted while it was measured (the probe can take minutes):
+            # not charged.
+            _stop_if_deleted(job.id)
             try:
                 # Once (usage is keyed by the job): not through _db_retry.
                 ent = accounts.charge(job.id, job.owner_id, seconds or 0.0,
@@ -2503,17 +2605,21 @@ def _analysis_refused(job_id: str, job_dir: Path, exc: AnalysisRefused,
     """_length_gate refused the upload: whatever was charged back, the
     error state, the upload and the workspace freed (nothing was
     transcribed; like a refused POST /jobs). Raises like
-    _analysis_failed when the database won't take it."""
+    _analysis_failed when the database won't take it. A job deleted
+    meanwhile: no error state and no event, its files in every store
+    (the delete's second pass, in the job's own, stays where it is)."""
     print(f"[job {job_id}] refused before analysis: {exc.text}", flush=True)
+    deleted = _deleted_meanwhile(job_id)
     refunded: bool | None = None
     if auth.auth_enabled():
         if _db_retry(job_id, "refunding", accounts.refund, job_id, exc.code):
             refunded = True
-    _db_retry(job_id, "saving the refusal", store.update, job_id,
-              status="error", error=exc.text[:2000],
-              **errors.job_error(exc.code, **exc.params), refunded=refunded,
-              progress=0.0, input_path=None)
-    _record_event("analysis_refused", job_id, code=exc.code)
+    if not deleted:
+        _db_retry(job_id, "saving the refusal", store.update, job_id,
+                  status="error", error=exc.text[:2000],
+                  **errors.job_error(exc.code, **exc.params),
+                  refunded=refunded, progress=0.0, input_path=None)
+        _record_event("analysis_refused", job_id, code=exc.code)
     drop_upload()
     shutil.rmtree(job_dir, ignore_errors=True)
     if source_key:
@@ -2521,7 +2627,7 @@ def _analysis_refused(job_id: str, job_dir: Path, exc: AnalysisRefused,
         _discard_upload(None, source_key, where)
     if media_entries:
         _gc_later([e for e in media_entries if e != source_key],
-                  store_=where)
+                  store_=None if deleted else where)
 
 
 def _render_failed(job_id: str, exc: Exception, gen: int | None = None,
@@ -2531,7 +2637,12 @@ def _render_failed(job_id: str, exc: Exception, gen: int | None = None,
     still on disk, so they can open the editor and render again without
     re-uploading. Raises when that can't be written (the sweep settles
     the job later). `gen` / `started_at` (time.time() of the request)
-    only go into the render_failed event."""
+    only go into the render_failed event. A job deleted meanwhile
+    (_note_deleted) has nothing to settle."""
+    if _deleted_meanwhile(job_id):
+        print(f"[job {job_id}] render stopped: the job was deleted",
+              flush=True)
+        return
     tb = traceback.format_exc()
     print(f"[job {job_id}] RENDER FAILED: {exc}\n{tb}", flush=True)
     observability.capture(exc, job_id=job_id, phase="render")
@@ -2573,7 +2684,8 @@ def _store_analysis(job_id: str, res: dict,
     preview/v1.mp4 (when it made one: pipeline.first_preview_wanted) —
     into store `where` (the job's) and return the job fields for them,
     media_store included ("Saving…", 96–99 %). Raises
-    MediaTransferError."""
+    MediaTransferError; InterruptedError before a file once the job was
+    deleted (_note_deleted)."""
     prefix = media.job_prefix(job_id)
     mezz = Path(res["normalized_path"])
     items = [(mezz, prefix + "mezz.mp4", "mezz_key")]
@@ -2587,6 +2699,7 @@ def _store_analysis(job_id: str, res: dict,
     fields: dict[str, Any] = {"media_bytes": {}, "media_store": where}
     for i, (path, key, field_name) in enumerate(items):
         progress(errors.stage_message("analyze.cuts", "Saving…"), 96 + i)
+        _stop_if_deleted(job_id)
         try:
             size = media.put_file(path, key, content_type="video/mp4",
                                   store=where)
@@ -2597,6 +2710,7 @@ def _store_analysis(job_id: str, res: dict,
         fields["media_bytes"][key] = size
 
     def put(path: str, key: str, ctype: str) -> int:
+        _stop_if_deleted(job_id)
         try:
             return media.put_file(path, key, content_type=ctype, store=where)
         except Exception as e:
@@ -2621,7 +2735,10 @@ def _run_analyze_inner(job_id: str) -> None:
     ws = _workspace(job_id)
     # Under the floor mid-analysis: this job stops (its ffmpeg killed) as
     # server_storage_full instead of filling the volume for every job.
-    guard = task_worker.DiskGuard(job_id, ws, _TMP_ROOT, _MIN_FREE_BYTES)
+    # ... and deleted meanwhile: its ffmpeg (normalize, the proxy) goes
+    # too, and SmartCam stops at its next frame (cancel_check).
+    guard = task_worker.DiskGuard(job_id, ws, _TMP_ROOT, _MIN_FREE_BYTES,
+                                  halt=lambda: _deleted_meanwhile(job_id))
     work_started = time.time()
     try:
         job = _db_retry(job_id, "reading the job", store.get, job_id)
@@ -2671,7 +2788,9 @@ def _run_analyze_inner(job_id: str) -> None:
         if _accepts(analyze_only, "on_normalized"):
             extra["on_normalized"] = _drop_upload
         if _accepts(analyze_only, "cancel_check"):
-            extra["cancel_check"] = guard.cancel_check()
+            # Under the disk floor, or deleted meanwhile: it stops.
+            extra["cancel_check"] = guard.cancel_check(
+                lambda: _deleted_meanwhile(job_id))
         try:
             guard.start()
             input_path = job.input_path
@@ -2687,6 +2806,8 @@ def _run_analyze_inner(job_id: str) -> None:
                         f"{type(e).__name__}: {e}") from e
                 input_path = str(local_copy)
             guard.check()
+            # (Before the length gate, which may charge the minutes.)
+            _stop_if_deleted(job_id)
             settings = _length_gate(job, input_path, progress)
             res = analyze_only(
                 input_path=input_path,
@@ -2775,7 +2896,10 @@ def _run_analyze_inner(job_id: str) -> None:
                                     "deletion" if gone else ""), flush=True)
             _drop_upload()
             if gone and media.valid_job_id(job_id):
-                _gc_later([media.job_prefix(job_id)], store_=where)
+                # Deleted: in every store, which leaves the delete's
+                # second pass (the job's store) where it is.
+                _gc_later([media.job_prefix(job_id)],
+                          store_=None if _deleted_meanwhile(job_id) else where)
             return
         _true_up(job_id, res.get("duration", 0.0))
         _after_analysis(job_id)
@@ -2909,6 +3033,10 @@ def _run_render_inner(
             # a v2 spec only when captions_v2.decide() says so.
             captions = captions_v2.prepare_render(store, job_id, job,
                                                   edited_subtitles)
+            # Deleted meanwhile: it stops (a call on Modal is cancelled).
+            stop = ({"cancel_check": lambda: _deleted_meanwhile(job_id)}
+                    if _accepts(pipeline.render_to_keys, "cancel_check")
+                    else {})
             result = pipeline.render_to_keys(
                 job_id=job_id, gen=gen, mezz_key=mezz_key,
                 out_prefix=out_prefix, store=where,
@@ -2923,6 +3051,7 @@ def _run_render_inner(
                 workspace=str(ws),
                 progress_cb=progress,
                 **({"captions": captions} if captions else {}),
+                **stop,
             )
         except Exception as e:
             progress.close()
@@ -5967,17 +6096,55 @@ def admin_sentry_test(x_admin_token: str = Header(default="")):
 
 @app.delete("/jobs/{job_id}")
 def delete_job(job_id: str, user: User | None = Depends(current_user)):
-    """Delete a project and all its files right away (user request)."""
+    """Delete a project and all its files right away (user request) — in
+    every state, also while Cleo works on it: its analysis or render
+    stops and stores nothing more. A thread of this process (WP1) stops
+    at its next check (_note_deleted), a task queue worker on its next
+    heartbeat (its task goes with the row: fenced out), an analysis on
+    Modal is cancelled; one waiting in line leaves it once its turn
+    comes (no job any more). What a put already under way stores after
+    the GC goes in a second pass (_delete_job `late`). The minutes stay
+    charged, as for any delete."""
     job = get_owned_job(job_id, user)
-    # (With the task queue every job with a task in flight is
-    # processing; a stale task of a settled job goes with the job — its
-    # worker is fenced out.)
-    with _active_lock:
-        busy = job_id in _active_jobs
-    if busy or job.status in ("processing", "pending"):
-        raise HTTPException(409, "job is still processing")
-    _delete_job(job)
+    late = _may_be_worked_on(job)
+    _note_deleted(job_id)
+    try:
+        _delete_job(job, late=late)
+    except BaseException:
+        _forget_deleted(job_id)   # the row is still there
+        raise
+    # Waiting in line here (WP1): it leaves the line now, not when its
+    # turn comes, and with it what it holds for admission (_INFLIGHT:
+    # its owner's jobs in flight, the queue cap, its disk reservation).
+    # (Its worker's own release follows; it is idempotent.)
+    if _ANALYZE_SLOTS.withdraw(job_id) | _RENDER_SLOTS.withdraw(job_id):
+        _INFLIGHT.release(job_id)
     return {"deleted": job_id}
+
+
+def _may_be_worked_on(job: Job) -> bool:
+    """Might something still store files of `job`: an analysis or a
+    render (running or in line; a thread here, a task queue worker), a
+    speculative render? Can't tell (the database): yes — the second GC
+    pass of a delete costs one LIST."""
+    if job.status in RUNNING_STATUSES:
+        return True
+    if isinstance(job.spec, dict) and job.spec.get("status") == "running":
+        return True
+    with _active_lock:
+        if job.id in _active_jobs:
+            return True
+    if job.id in _INFLIGHT.job_ids():
+        return True
+    if not taskq.enabled():
+        return False
+    try:
+        return any(t.state in taskq.ACTIVE_STATES
+                   for t in _tasks().for_job(job.id))
+    except Exception as e:
+        print(f"[job {job.id}] its tasks unknown ({e}): deleting it as "
+              "if one ran", flush=True)
+        return True
 
 
 @app.get("/jobs/{job_id}/subtitles")
@@ -7723,7 +7890,11 @@ def _run_spec(job_id: str, gen: int, units: list[dict]) -> None:
                 settings=exports.render_settings(job, _output_seconds(job)),
                 language=job.language, cut_ranges=job.cut_ranges,
                 disabled_cuts=[], duration=job.duration,
-                workspace=str(ws), captions=captions)
+                workspace=str(ws), captions=captions,
+                # The job deleted meanwhile: it stops.
+                **({"cancel_check": lambda: _deleted_meanwhile(job_id)}
+                   if _accepts(pipeline.render_to_keys, "cancel_check")
+                   else {}))
         output_keys, sizes, hook_clips, thumb = _render_files(result)
 
         def done(cur: Job) -> dict | None:
@@ -7746,6 +7917,8 @@ def _run_spec(job_id: str, gen: int, units: list[dict]) -> None:
               f"{type(e).__name__}: {e}", flush=True)
         if where:
             _gc_later([out_prefix], _render_gc_delay_s(), store_=where)
+        if _deleted_meanwhile(job_id):
+            return
         _spec_failed(job_id, gen)
         _record_event("spec_render_failed", job_id, gen=gen,
                       error=type(e).__name__)

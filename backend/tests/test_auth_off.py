@@ -73,8 +73,7 @@ def test_anonymous_flow(client, no_accounts_db, clean_state):
     assert client.get(f"/jobs/{job_id}/preview-video").status_code == 409
     assert client.get(f"/jobs/{job_id}/watch").status_code == 409
     assert client.get(f"/jobs/{job_id}/thumbnail").status_code == 409
-    assert client.delete(f"/jobs/{job_id}").status_code == 409  # pending
-    store.update(job_id, status="done")
+    # Deleted while it waits for its analysis (pending), like any time.
     assert client.delete(f"/jobs/{job_id}").status_code == 200
     assert client.get(f"/jobs/{job_id}").status_code == 404
 

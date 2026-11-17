@@ -17,7 +17,7 @@
  */
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AppPage } from "@/components/AppPage";
 import { CONTROL_TOUCH, EMPTY_PRIMARY, EmptyState } from "@/components/EmptyState";
@@ -64,17 +64,19 @@ export function ProjectsSkeleton() {
   );
 }
 
-function Rows({ list, onOpen }: { list: Project[]; onOpen: (href: string) => void }) {
+function Rows({ list, onOpen, onDeleted }: { list: Project[]; onOpen: (href: string) => void; onDeleted?: (name: string) => void }) {
   return (
     <ul className={s.list}>
       {list.map((p) => (
         <li key={p.id}>
-          <ProjectRow p={p} onOpen={onOpen} />
+          <ProjectRow p={p} onOpen={onOpen} onDeleted={onDeleted} />
         </li>
       ))}
     </ul>
   );
 }
+
+const TITLE_ID = "projects-title";
 
 export function ProjectsPage() {
   const t = useT();
@@ -83,6 +85,14 @@ export function ProjectsPage() {
   const emptyAction = AUTH_ENABLED ? emptyListAction({ ready, serverLoaded, count: projects.length }) : "show";
   const [mounted, setMounted] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  // A row deleted here: said once — each time, the same name again too
+  // (n: a new line for screen readers) — and the focus (its Delete is
+  // gone) goes to the title.
+  const [deleted, setDeleted] = useState<{ name: string; n: number } | null>(null);
+  const onDeleted = (name: string) => {
+    setDeleted((d) => ({ name, n: (d?.n ?? 0) + 1 }));
+    document.getElementById(TITLE_ID)?.focus({ preventScroll: true });
+  };
 
   useEffect(() => {
     const legacy = legacyJobRedirect(window.location.search);
@@ -103,11 +113,16 @@ export function ProjectsPage() {
     setMounted(true);
   }, [router]);
 
+  // Rows were shown: a list emptied on the page (the last one deleted
+  // here, or elsewhere) stays and says it is empty.
+  const hadRows = useRef(false);
   useEffect(() => {
-    // Only when the account's list really is empty (not on an error), and
-    // not when the menu led here.
-    if (emptyAction === "redirect" && !navigatedInApp()) {
-      /* eslint-disable-next-line react-hooks/set-state-in-effect */
+    if (projects.length > 0) hadRows.current = true;
+  }, [projects.length]);
+  useEffect(() => {
+    // Only when the account's list really is empty (not on an error), not
+    // when the menu led here, and only for a visit that starts with it.
+    if (emptyAction === "redirect" && !navigatedInApp() && !hadRows.current) {
       setLeaving(true);
       router.replace("/app/new");
     }
@@ -134,7 +149,7 @@ export function ProjectsPage() {
     ) : (
       <div data-testid="dashboard">
         {live.length > 0 ? (
-          <Rows list={live} onOpen={open} />
+          <Rows list={live} onOpen={open} onDeleted={onDeleted} />
         ) : emptyAction === "retry" ? (
           <EmptyState testId="projects-load-failed" alert title={t("app.projects.loadFailed")}>
             <Button size="md" variant="tint" onClick={() => refreshProjects()} data-testid="projects-retry" className={cx(PRESS, CONTROL_TOUCH, "min-h-11")}>
@@ -169,7 +184,12 @@ export function ProjectsPage() {
   return (
     <AppPage width="3xl">
       <div className={s.page}>
-        <PageTitle bar={title}>{title}</PageTitle>
+        <PageTitle bar={title} id={TITLE_ID}>
+          {title}
+        </PageTitle>
+        <p role="status" className="sr-only" data-testid="projects-announce">
+          {deleted && <span key={deleted.n}>{t("app.projects.announceDeleted", { name: deleted.name })}</span>}
+        </p>
         {body}
       </div>
     </AppPage>

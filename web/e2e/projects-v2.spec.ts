@@ -5,8 +5,9 @@
  * time and length), the existing customer's cards and library entries
  * carried over, expired projects collapsed without frame requests. Rows
  * with something to show open their Vorschau, where rename and delete
- * are; a row Cleo still works on is grey and opens nothing, and once it
- * is ready it says so in place. /app/library redirects to /app.
+ * are; a row Cleo still works on is grey and opens nothing — its own
+ * Delete asks first (Cleo stops) — and once it is ready it says so in
+ * place. /app/library redirects to /app.
  * The v2 editor only (@editor-v2: a v2 build, NEXT_PUBLIC_EDITOR_V2 unset
  * or 1); v1 browsers keep the dashboard and library (projects.spec.ts,
  * the v1 run's NEXT_PUBLIC_EDITOR_V2=optin build).
@@ -205,8 +206,10 @@ test("busy rows don't open, finished rows do; ready during the visit says Ready 
   await expect(row.getByTestId("job-card-open")).toHaveCount(0);
   // Its note: the work runs on the server.
   await expect(row.getByTestId("job-card-status")).toHaveText("You can close this page.");
-  // A click on the busy row goes nowhere.
-  await row.click();
+  // Its own Delete (the Vorschau's ⋯ is out of reach from here).
+  await expect(row.getByTestId("job-card-delete")).toBeVisible();
+  // A click on the busy row goes nowhere (on its frame: not the Delete).
+  await row.click({ position: { x: 12, y: 12 } });
   await expect(page).toHaveURL(`${WEB}/app`);
   await expect(jobCard(page, "alt.mp4").getByTestId("job-card-open")).toHaveAttribute("href", `/app/p/${done.id}`);
   const meta = row.getByTestId("job-card-meta");
@@ -223,6 +226,7 @@ test("busy rows don't open, finished rows do; ready during the visit says Ready 
   await expect(row).toHaveAttribute("data-state", "ready", { timeout: 15_000 });
   await expect(row).toHaveAttribute("data-fresh", "true");
   await expect(row).not.toHaveAttribute("data-busy", "true");
+  await expect(row.getByTestId("job-card-delete")).toHaveCount(0);
   await expect(meta).toHaveText(/^Ready · \d+:\d\d$/);
   // The same line, in place, not a new row; screen readers hear which.
   expect(await meta.evaluate((el) => (window as unknown as { __metaNode: Element }).__metaNode === el)).toBe(true);
@@ -240,6 +244,94 @@ test("busy rows don't open, finished rows do; ready during the visit says Ready 
   await expect(row).toHaveAttribute("data-state", "ready");
   await open.click({ position: await at(row.locator("h3")) });
   await expect(page).toHaveURL(`${WEB}/app/p/${busy.id}`);
+});
+
+test("a row Cleo works on: Delete asks first, says Cleo stops, then it is gone here and on the server", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  const busy = await stub.seed("analyzing");
+  const other = await stub.seed("done");
+  await openWithStorage(page, "/app", { [JOBS]: [job(busy.id, "falsch.mp4", 5_000), job(other.id, "alt.mp4", 3_600_000)] });
+  const row = jobCard(page, "falsch.mp4");
+  await expect(row).toHaveAttribute("data-state", "processing");
+  const del = row.getByTestId("job-card-delete");
+  await expect(del).toHaveText("Delete");
+  // 44 px to a finger: its layout height (the box on screen can read
+  // 43.99998 at a phone's device pixel ratio while the page moves in).
+  expect(await del.evaluate((el) => (el as HTMLElement).offsetHeight)).toBeGreaterThanOrEqual(44);
+  await del.click();
+  const dialog = page.getByTestId("dialog-delete");
+  // Named as the row shows it.
+  await expect(dialog.getByRole("heading")).toHaveText("Delete “falsch”?");
+  await expect(dialog.getByTestId("delete-body")).toHaveText(
+    "Cleo stops working on it. The video, its edits and exports are removed from our servers. This can't be undone.",
+  );
+  // Cancel keeps it (Cleo goes on); the focus is back on its Delete.
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(del).toBeFocused();
+  expect(await stub.job(busy.id)).not.toBeNull();
+
+  await del.click();
+  await page.getByTestId("delete-confirm").click();
+  await expect(row).toHaveCount(0);
+  await expect.poll(() => stub.job(busy.id)).toBeNull();
+  // Said once; the focus (its Delete is gone) on the page's title.
+  await expect(page.getByTestId("projects-announce")).toHaveText("“falsch.mp4” deleted");
+  await expect(page.locator("#projects-title")).toBeFocused();
+  await expect(jobCard(page, "alt.mp4")).toBeVisible();
+  expect((await storedJobs(page)).map((j) => j.jobId)).toEqual([other.id]);
+});
+
+test("two deleted with the same name: each one is said", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  const a = await stub.seed("analyzing");
+  const b = await stub.seed("analyzing");
+  await openWithStorage(page, "/app", { [JOBS]: [job(a.id, "doppelt.mp4", 5_000), job(b.id, "doppelt.mp4", 6_000)] });
+  const rows = jobCard(page, "doppelt.mp4");
+  await expect(rows).toHaveCount(2);
+  const announce = page.getByTestId("projects-announce");
+  await rows.first().getByTestId("job-card-delete").click();
+  await page.getByTestId("delete-confirm").click();
+  await expect(rows).toHaveCount(1);
+  await expect(announce).toHaveText("“doppelt.mp4” deleted");
+  await announce.evaluate((el) => {
+    (window as unknown as { __said: Element | null }).__said = el.firstElementChild;
+  });
+  await rows.first().getByTestId("job-card-delete").click();
+  await page.getByTestId("delete-confirm").click();
+  await expect(rows).toHaveCount(0);
+  await expect(announce).toHaveText("“doppelt.mp4” deleted");
+  // The same words, a new line: screen readers hear it again.
+  expect(await announce.evaluate((el) => el.firstElementChild !== (window as unknown as { __said: Element | null }).__said)).toBe(true);
+});
+
+test("Delete cancelled after Cleo finished meanwhile: the focus goes to the row's way in", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  const busy = await stub.seed("review");
+  // The job as the page sees it: analysed until `ready`.
+  const state = { ready: false };
+  await page.route(`${API}/jobs/status*`, async (route: Route) => {
+    const res = await route.fetch();
+    const headers = { ...res.headers() };
+    delete headers.etag;
+    if (res.status() !== 200) return route.fulfill({ response: res, headers });
+    const body = (await res.json()) as { jobs: Record<string, unknown>[] };
+    if (!state.ready) {
+      for (const j of body.jobs) {
+        if (j.id === busy.id) Object.assign(j, { status: "processing", stage: "analyze.transcribe", progress: 40, message: "…" });
+      }
+    }
+    return route.fulfill({ response: res, headers, body: JSON.stringify(body) });
+  });
+  await openWithStorage(page, "/app", { [JOBS]: [job(busy.id, "gleich.mp4", 5_000)] });
+  const row = jobCard(page, "gleich.mp4");
+  await expect(row).toHaveAttribute("data-state", "processing");
+  await row.getByTestId("job-card-delete").click();
+  const dialog = page.getByTestId("dialog-delete");
+  await expect(dialog).toBeVisible();
+  state.ready = true;
+  await expect(row).toHaveAttribute("data-state", "ready", { timeout: 15_000 });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(row.getByTestId("job-card-open")).toBeFocused();
+  expect(await stub.job(busy.id)).not.toBeNull();
 });
 
 test("a mouse over a row whose name is cut shows the whole name; no title otherwise", { tag: "@editor-v2" }, async ({ page, stub }, info) => {

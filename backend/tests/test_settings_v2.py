@@ -234,6 +234,34 @@ def test_smartcam_exception_is_a_warning_too(tmp_path, analysis, monkeypatch):
     assert res["format_warning"] == "smartcam_failed"
 
 
+@needs_ffmpeg
+def test_smartcam_stops_when_the_analysis_is_stopped(tmp_path, analysis,
+                                                     monkeypatch):
+    """A stop (the job deleted, the disk full, the attempt fenced out)
+    reaches SmartCam's own passes, which check it on every frame — they
+    run in this process, so there is no ffmpeg to kill — and the analysis
+    ends right after them: no centre crop (a full re-encode)."""
+    stop = {"now": False}
+
+    def smartcam(**kw):
+        check = kw["cancel_check"]
+        assert check is not None and not check()
+        stop["now"] = True          # deleted while it tracks faces …
+        assert check()              # … which its next frame asks
+        return None                 # and it gives up (no file)
+    monkeypatch.setattr(pipeline, "_run_smartcam_preprocess", smartcam)
+    crops: list = []
+    monkeypatch.setattr(pipeline, "centre_crop",
+                        lambda *a, **kw: crops.append(a) or False)
+    src = _clip(tmp_path / "land.mp4", "320x180")
+    with pytest.raises(InterruptedError):
+        pipeline.analyze_only(str(src), str(tmp_path / "job"),
+                              {"target_aspect": "9:16"},
+                              cancel_check=lambda: stop["now"])
+    assert crops == []
+    assert "kw" not in analysis     # never transcribed
+
+
 def test_format_warning_is_public():
     from backend.jobs import store
     job = store.create(None, {})

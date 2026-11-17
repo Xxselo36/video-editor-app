@@ -474,8 +474,9 @@ async def list_jobs(session, base: str, ident: Identity) -> list[dict] | None:
 
 async def delete_jobs(session, base: str, ident: Identity, ids: list[str],
                       timeout: float = 900.0, log=print) -> list[str]:
-    """DELETE each job; a job still processing (409), a 5xx or a network
-    error is retried until `timeout`. Returns the ids not deleted."""
+    """DELETE each job; a 409 (a backend from before deleting while a
+    job is processed), a 5xx or a network error is retried until
+    `timeout`. Returns the ids not deleted."""
     pending = list(dict.fromkeys(ids))
     failed: list[str] = []
     deadline = time.time() + timeout

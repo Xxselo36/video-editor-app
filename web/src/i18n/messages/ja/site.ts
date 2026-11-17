@@ -46,7 +46,7 @@ export const jaSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "{count} 件のプロジェクト",
   "library.count.other": "{count} 件のプロジェクト",
   "library.confirmDelete": "このプロジェクトを完全に削除しますか?動画とすべての編集内容がサーバーから削除されます。",
-  "library.deleteFailed": "今は削除できませんでした。動画を処理中の場合は、少し待ってからもう一度お試しください。",
+  "library.deleteFailed": "今は削除できませんでした。少し待ってからもう一度お試しください。",
 
   "library.empty.title": "ライブラリは空です",
   "library.empty.body":

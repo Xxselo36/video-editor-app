@@ -47,7 +47,7 @@ export const plSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "{count} projekt",
   "library.count.other": "{count} projektów",
   "library.confirmDelete": "Usunąć ten projekt na stałe? Film i wszystkie zmiany zostaną usunięte z naszych serwerów.",
-  "library.deleteFailed": "Nie udało się teraz usunąć — jeśli film jest jeszcze przetwarzany, spróbuj za chwilę.",
+  "library.deleteFailed": "Nie udało się teraz usunąć. Spróbuj za chwilę.",
 
   "library.empty.title": "Twoja biblioteka jest pusta",
   "library.empty.body":

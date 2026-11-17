@@ -46,7 +46,7 @@ export const hiSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "{count} प्रोजेक्ट",
   "library.count.other": "{count} प्रोजेक्ट्स",
   "library.confirmDelete": "क्या इस प्रोजेक्ट को हमेशा के लिए डिलीट करें? वीडियो और सभी एडिट्स हमारे सर्वर से हटा दिए जाएंगे।",
-  "library.deleteFailed": "अभी डिलीट नहीं हो सका — अगर वीडियो अभी प्रोसेस हो रहा है, तो थोड़ी देर में फिर कोशिश करें।",
+  "library.deleteFailed": "अभी डिलीट नहीं हो सका। थोड़ी देर में फिर कोशिश करें।",
 
   "library.empty.title": "आपकी लाइब्रेरी खाली है",
   "library.empty.body":

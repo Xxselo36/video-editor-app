@@ -49,7 +49,7 @@ export const frSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "{count} projet",
   "library.count.other": "{count} projets",
   "library.confirmDelete": "Supprimer ce projet définitivement ? La vidéo et toutes les modifications sont effacées de nos serveurs.",
-  "library.deleteFailed": "Suppression impossible pour le moment — si la vidéo est encore en traitement, réessaie dans un instant.",
+  "library.deleteFailed": "Suppression impossible pour le moment. Réessaie dans un instant.",
 
   // ── Library: empty state ── //
   "library.empty.title": "Ta bibliothèque est vide",

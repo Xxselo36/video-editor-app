@@ -359,13 +359,28 @@ def test_service_user_yields_in_order(monkeypatch):
         studio.id, user.id, svc.id]
 
 
-def test_delete_refused_while_processing_and_takes_stale_tasks_along(
-        client):
+def test_delete_while_processing_takes_its_task_along(client):
+    """Deleted while its analysis waits in line: the task goes with the
+    row (a worker of it is fenced out), and jobs/{id}/ goes once more in
+    the job's own store after the longest write that may still land."""
     job, _tid = _upload_job()
-    assert client.delete(f"/jobs/{job.id}").status_code == 409
+    t0 = time.time()
+    assert client.delete(f"/jobs/{job.id}").json() == {"deleted": job.id}
+    assert store.get(job.id) is None and ts().for_job(job.id) == []
+    late = [r for r in store.gc_all() if r["prefix"] == f"jobs/{job.id}/"
+            and r["store"] == M.media.store_of(job)]
+    assert len(late) == 1
+    assert late[0]["not_before"] >= t0 + M._late_write_gc_delay_s()
+
+
+def test_delete_takes_a_stale_task_of_a_settled_job_along(client):
+    job, _tid = _upload_job()
     store.update(job.id, status="error")      # settled elsewhere
     assert client.delete(f"/jobs/{job.id}").status_code == 200
     assert ts().for_job(job.id) == []
+    # Its worker may still be storing: the second pass is queued too.
+    assert (f"jobs/{job.id}/", M.media.store_of(job)) in {
+        (r["prefix"], r["store"]) for r in store.gc_all()}
 
 
 def test_presign_per_user_limit_from_the_database(client, auth_on, bearer,
@@ -507,7 +522,7 @@ def test_zombie_commit_after_reclaim_changes_nothing(analysis):
     assert (got.status, got.mezz_key) == ("awaiting_review", "WINNER")
 
 
-def test_job_deleted_while_its_task_runs(analysis):
+def test_job_deleted_while_its_task_runs(analysis, client):
     job, tid = _upload_job()
     ts().claim_for_dispatch("ingest", 1, "L", 300, "local")
     analysis["gate"] = threading.Event()
@@ -516,13 +531,78 @@ def test_job_deleted_while_its_task_runs(analysis):
         worker.run("ingest", tid, job.id, 1, V)))
     th.start()
     assert _wait_for(lambda: analysis["calls"] == 1)
-    M._delete_job(store.get(job.id))
+    # The user deletes it meanwhile (DELETE /jobs/{id} — no 409 any more).
+    assert client.delete(f"/jobs/{job.id}").status_code == 200
     assert ts().for_job(job.id) == []
     analysis["gate"].set()
     th.join(20)
     assert out == [{"skipped": "fenced"}]
     assert store.get(job.id) is None
     assert ts().unfinalized() == []
+
+
+def test_job_deleted_while_its_task_runs_reports_nothing(analysis, client,
+                                                       monkeypatch):
+    """What the stopped work raises once its job is gone (here: the
+    workspace the delete removed) is nobody's failure: no error report,
+    no ANALYZE FAILED, no failure reported to the leader."""
+    reports: list[str] = []
+    monkeypatch.setattr(M.observability, "capture",
+                        lambda exc, **kw: reports.append(type(exc).__name__))
+    job, tid = _upload_job()
+    ts().claim_for_dispatch("ingest", 1, "L", 300, "local")
+    analysis["gate"] = threading.Event()
+    analysis["plan"] = [FileNotFoundError("its workspace went with the job")]
+    out: list[dict] = []
+    th = threading.Thread(target=lambda: out.append(
+        worker.run("ingest", tid, job.id, 1, V)))
+    th.start()
+    assert _wait_for(lambda: analysis["calls"] == 1)
+    assert client.delete(f"/jobs/{job.id}").status_code == 200
+    analysis["gate"].set()
+    th.join(20)
+    assert out == [{"skipped": "fenced"}] and reports == []
+    assert _events("analysis_failed") == []
+
+
+def test_delete_takes_the_task_before_the_workspace(analysis, client,
+                                                   monkeypatch):
+    """The row (with its task) goes before the workspace: the analysis
+    still finds its files while the delete's transaction runs (here a
+    slow one), and the error their removal causes afterwards finds its
+    task gone — nothing is reported."""
+    reports: list[str] = []
+    monkeypatch.setattr(M.observability, "capture",
+                        lambda exc, **kw: reports.append(type(exc).__name__))
+    job, tid = _upload_job()
+    ts().claim_for_dispatch("ingest", 1, "L", 300, "local")
+    ready = threading.Event()
+
+    def reads_its_workspace(output_dir):
+        f = Path(output_dir) / "normalized.mp4"
+        f.write_bytes(b"n")
+        ready.set()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            f.read_bytes()          # FileNotFoundError once it's gone
+            time.sleep(0.002)
+        raise AssertionError("never deleted")
+    analysis["plan"] = [reads_its_workspace]
+    real_delete = store.delete
+
+    def slow_delete(*a, **kw):
+        time.sleep(0.3)             # a slow transaction
+        return real_delete(*a, **kw)
+    monkeypatch.setattr(store, "delete", slow_delete)
+    out: list[dict] = []
+    th = threading.Thread(target=lambda: out.append(
+        worker.run("ingest", tid, job.id, 1, V)))
+    th.start()
+    assert ready.wait(10)
+    assert client.delete(f"/jobs/{job.id}").status_code == 200
+    th.join(20)
+    assert out == [{"skipped": "fenced"}] and reports == []
+    assert _events("analysis_failed") == []
 
 
 def test_shutdown_interrupts_and_the_next_leader_reruns(analysis):

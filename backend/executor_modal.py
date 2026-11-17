@@ -50,7 +50,7 @@ import os
 import time
 from typing import Any, Callable
 
-from backend import costs, errors, media, modal_analyze, storage
+from backend import costs, errors, media, modal_analyze, storage, taskq
 
 KINDS = ("ingest",)
 APP = "cleocuts-render"
@@ -324,6 +324,18 @@ class _Channel:
         except Exception as e:
             _log(f"[modal] fence write for job {self.job_id} failed: {e}")
 
+    def superseded(self) -> bool:
+        """Is a later fence there: this call stopped on purpose
+        (stop_call: the job deleted, its task settled, its lease lost) or
+        a newer attempt owning the job?"""
+        if self.d is None:
+            return False
+        try:
+            cur = self.d.get(modal_analyze.fence_key(self.job_id))
+        except Exception:
+            return False
+        return modal_analyze.newer(cur, self.token)
+
     def relay(self, progress: Callable[[Any, float], None] | None) -> None:
         if self.d is None or progress is None:
             return
@@ -485,6 +497,13 @@ def analyze(*, job_id: str, source_key: str, settings: dict[str, Any],
     except Exception as e:
         if gate_exc is not None and e is gate_exc:
             raise
+        if ch.superseded():
+            # What the stopped call raised (cancelled: the job deleted
+            # meanwhile, say) is nobody's failure: no alert, no
+            # modal_failed — the caller sees it was taken away (also
+            # before its heartbeat does: the delete stops the call before
+            # its row goes).
+            raise taskq.Stopped("Cancelled: stopped") from e
         no_bill = getattr(e, "started", None) is False
         code, reason = _give_up_reason(e)
         costs.record_event("modal_failed")
