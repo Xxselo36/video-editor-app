@@ -1140,15 +1140,20 @@ def _delete_job(job, late: bool = False) -> None:
     heartbeat). That pass is in the job's own store, where they write:
     its own media_gc row, which the one above (every store) can't
     swallow while a retry of it waits (an entry keeps its earliest
-    time)."""
-    if job.id and job.id not in _WORK_ROOT_RESERVED and "/" not in job.id:
-        shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
-        shutil.rmtree(_workspace(job.id), ignore_errors=True)
-    _remove_upload(job.input_path)
+    time).
+
+    The row (with its tasks) goes before the local files: a task worker
+    here whose workspace or upload then vanishes finds its task gone at
+    its next heartbeat and stops quietly — the delete's own doing is
+    never reported as its failure."""
     entries = _media_of(job)
     where = None  # every store (media.gc_stores)
     remote = _stop_remote_analysis(job.id)
     store.delete(job.id, gc=entries, gc_store=where)
+    if job.id and job.id not in _WORK_ROOT_RESERVED and "/" not in job.id:
+        shutil.rmtree(_WORK_ROOT / job.id, ignore_errors=True)
+        shutil.rmtree(_workspace(job.id), ignore_errors=True)
+    _remove_upload(job.input_path)
     _proxy_cache_drop(job.id)
     with _EDIT_GUARD:
         _EDIT_SEQ.pop(job.id, None)
@@ -2730,7 +2735,8 @@ def _run_analyze_inner(job_id: str) -> None:
     ws = _workspace(job_id)
     # Under the floor mid-analysis: this job stops (its ffmpeg killed) as
     # server_storage_full instead of filling the volume for every job.
-    # ... and deleted meanwhile: its ffmpeg (normalize, SmartCam) goes too.
+    # ... and deleted meanwhile: its ffmpeg (normalize, the proxy) goes
+    # too, and SmartCam stops at its next frame (cancel_check).
     guard = task_worker.DiskGuard(job_id, ws, _TMP_ROOT, _MIN_FREE_BYTES,
                                   halt=lambda: _deleted_meanwhile(job_id))
     work_started = time.time()

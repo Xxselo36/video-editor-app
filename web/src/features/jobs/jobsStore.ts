@@ -466,15 +466,26 @@ let listBody: Record<string, unknown>[] | null = null;
  *  it). The list is asked again (it, not one status answer, says what
  *  the account has); until then the row stays as it was. */
 let listStale = false;
+/** Those ids (the poll asks only for jobs Cleo works on). */
+const goneFromList = new Set<string>();
 
 function projectsNow(): Project[] {
   return mergeProjects(locals, remotes, serverIds, { now: Date.now(), exportHints });
 }
 
 function setRemote(row: Record<string, unknown>): boolean {
-  const next = remoteFrom(row);
+  let next = remoteFrom(row);
   const prev = remotes.get(next.id);
   if (prev && prev !== MISSING) {
+    // A status row has no file name or preset (the account's list has):
+    // kept, or another device's project would turn "Untitled" at its
+    // first poll.
+    next = {
+      ...next,
+      filename: next.filename ?? prev.filename,
+      presetId: next.presetId ?? prev.presetId,
+      presetLabel: next.presetLabel ?? prev.presetLabel,
+    };
     if (prev.status === "awaiting_review" || prev.status === "done") exportHints.add(next.id);
     // An export finished while the page watched it.
     if (prev.status === "processing" && next.status === "done") track("export_done", { outputs: 1, hooks: 0 });
@@ -537,6 +548,7 @@ async function loadStatuses(ids: string[], p: JobStatusPoller | null): Promise<b
     for (const id of res.missing) {
       if (serverIds?.includes(id)) {
         listStale = true;
+        goneFromList.add(id);
         continue;
       }
       if (remotes.get(id) !== MISSING) {
@@ -597,7 +609,18 @@ async function tick(): Promise<void> {
       let changed = await loadStatuses(ids.slice(0, STATUS_BATCH_MAX), poller);
       if (listStale && AUTH_ENABLED && getAuthState().signedIn) {
         listStale = false;
+        const gone = [...goneFromList];
+        goneFromList.clear();
         changed = (await loadServerList()) || changed;
+        // Out of the list while Cleo worked on them (a running job never
+        // goes for its age): deleted elsewhere, so gone from this
+        // device's list too — not an "expired" row on the device that
+        // uploaded it.
+        const deleted = gone.filter((id) => serverIds !== null && !serverIds.includes(id));
+        if (deleted.length) {
+          forgetJobs(deleted);
+          changed = true;
+        }
       }
       if (changed) {
         lastChange = Date.now();
@@ -722,5 +745,6 @@ export function _resetForTests(): void {
   listEtag = null;
   listBody = null;
   listStale = false;
+  goneFromList.clear();
   version++;
 }

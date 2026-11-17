@@ -196,9 +196,9 @@ def test_deleted_while_waiting_in_line_leaves_it_at_once(client,
 
 def test_guard_stops_a_deleted_jobs_ffmpeg(tmp_path):
     """The analysis' guard asks `halt` (the job deleted) on its beat:
-    this job's child processes (ffmpeg, SmartCam: a long encode checks
-    nothing) are killed, and its checks say stop — as a cancel, not as
-    a full disk."""
+    this job's child processes (ffmpeg: a long encode checks nothing)
+    are killed, and its checks say stop — as a cancel, not as a full
+    disk."""
     import subprocess
     import sys
 
@@ -229,5 +229,38 @@ def test_guard_stops_a_deleted_jobs_ffmpeg(tmp_path):
             assert theirs.poll() is None      # another job's: left alone
     finally:
         for p in (mine, theirs):
+            p.kill()
+            p.wait(5)
+
+
+def test_guard_keeps_stopping_what_the_job_starts_later(tmp_path,
+                                                         monkeypatch):
+    """Halted is for good: what the job starts after the first kill (a
+    fallback encode, the proxy) is killed too, every beat until stop() —
+    and the halt is watched with the disk check off as well
+    (CLEO_DISK_GUARD_S=0)."""
+    import subprocess
+    import sys
+
+    from backend import worker
+    monkeypatch.setenv("CLEO_DISK_GUARD_S", "0")
+    monkeypatch.setattr(worker, "_HALT_BEAT_S", 0.02)
+    ws = tmp_path / "jobs" / "abc123"
+    ws.mkdir(parents=True)
+    sleep = "import time; time.sleep(30)"
+    gone = {"v": False}
+    procs: list = []
+    try:
+        with worker.DiskGuard("abc123", ws, tmp_path, 0,
+                              halt=lambda: gone["v"]) as guard:
+            gone["v"] = True
+            for step in ("normalize", "fallback", "proxy"):
+                p = subprocess.Popen([sys.executable, "-c", sleep,
+                                      str(ws / step)])
+                procs.append(p)
+                assert p.wait(5) is not None, step
+            assert guard.cancel_check()() and not guard.tripped
+    finally:
+        for p in procs:
             p.kill()
             p.wait(5)

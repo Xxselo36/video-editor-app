@@ -78,7 +78,7 @@ export const enLanding = {
   "site.faq.price.plans": "Monthly plans, each with a set number of video minutes. All details are on the pricing page.",
   "site.faq.price.link": "See pricing",
   "site.faq.delete.q": "Can I delete my videos?",
-  "site.faq.delete.a": "Yes. Delete its project at any time, even while Cleo is still working on it, and the video and all edits are removed from our servers.",
+  "site.faq.delete.a": "Yes. Delete a video's project at any time, even while Cleo is still working on it, and the video and all its edits are removed from our servers.",
   "site.final.title": "Film your next video with Cleo.",
   "site.final.beta": "Free during the open beta.",
 };

@@ -565,6 +565,46 @@ def test_job_deleted_while_its_task_runs_reports_nothing(analysis, client,
     assert _events("analysis_failed") == []
 
 
+def test_delete_takes_the_task_before_the_workspace(analysis, client,
+                                                   monkeypatch):
+    """The row (with its task) goes before the workspace: the analysis
+    still finds its files while the delete's transaction runs (here a
+    slow one), and the error their removal causes afterwards finds its
+    task gone — nothing is reported."""
+    reports: list[str] = []
+    monkeypatch.setattr(M.observability, "capture",
+                        lambda exc, **kw: reports.append(type(exc).__name__))
+    job, tid = _upload_job()
+    ts().claim_for_dispatch("ingest", 1, "L", 300, "local")
+    ready = threading.Event()
+
+    def reads_its_workspace(output_dir):
+        f = Path(output_dir) / "normalized.mp4"
+        f.write_bytes(b"n")
+        ready.set()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            f.read_bytes()          # FileNotFoundError once it's gone
+            time.sleep(0.002)
+        raise AssertionError("never deleted")
+    analysis["plan"] = [reads_its_workspace]
+    real_delete = store.delete
+
+    def slow_delete(*a, **kw):
+        time.sleep(0.3)             # a slow transaction
+        return real_delete(*a, **kw)
+    monkeypatch.setattr(store, "delete", slow_delete)
+    out: list[dict] = []
+    th = threading.Thread(target=lambda: out.append(
+        worker.run("ingest", tid, job.id, 1, V)))
+    th.start()
+    assert ready.wait(10)
+    assert client.delete(f"/jobs/{job.id}").status_code == 200
+    th.join(20)
+    assert out == [{"skipped": "fenced"}] and reports == []
+    assert _events("analysis_failed") == []
+
+
 def test_shutdown_interrupts_and_the_next_leader_reruns(analysis):
     job, tid = _upload_job()
     first = task_leader.Leader(M._QueueOps(periodic=False))

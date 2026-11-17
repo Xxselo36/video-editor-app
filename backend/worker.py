@@ -270,6 +270,11 @@ class DiskGuardTripped(OSError):
     (server_storage_full, ours: refunded)."""
 
 
+# How often a guard asks `halt` when its disk check is off
+# (CLEO_DISK_GUARD_S=0): a stop never depends on that setting.
+_HALT_BEAT_S = 2.0
+
+
 class DiskGuard:
     """Defence in depth under the disk reservation (backend/main.py
     _disk_need): while an analysis runs, a thread checks the free space
@@ -284,9 +289,15 @@ class DiskGuard:
 
     `halt` (optional): another reason to stop, asked on the same beat —
     the job was deleted, its task taken away. Once it says so, this
-    job's ffmpeg processes are killed the same way (a long normalize or
-    SmartCam encode checks nothing) and cancel_check() / the progress
-    callback stop it (InterruptedError: not a disk failure)."""
+    job's ffmpeg processes are killed the same way (a long normalize
+    encode checks nothing) and cancel_check() / the progress callback
+    stop it (InterruptedError: not a disk failure). SmartCam's own
+    passes run in this process: they ask cancel_check() on every
+    frame. Watched with the disk check off too (every _HALT_BEAT_S).
+
+    Tripped or halted is for good: from then on every beat kills this
+    job's ffmpeg processes again — what it starts after the first kill
+    (a fallback encode, the proxy) until stop()."""
 
     def __init__(self, job_id: str, ws: Path | str, root: Path | str,
                  floor: float, interval: float | None = None,
@@ -304,8 +315,15 @@ class DiskGuard:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
+    def _beat(self) -> float:
+        """The watcher's beat: the disk check's, else the halt's own
+        (0: no watcher)."""
+        if self.interval > 0:
+            return self.interval
+        return _HALT_BEAT_S if self._halt is not None else 0.0
+
     def start(self) -> "DiskGuard":
-        if self.interval > 0 and self._thread is None:
+        if self._beat() > 0 and self._thread is None:
             self._thread = threading.Thread(
                 target=self._loop, name=f"disk-guard-{self.job_id}",
                 daemon=True)
@@ -325,9 +343,17 @@ class DiskGuard:
         self.stop()
 
     def _loop(self) -> None:
-        while not self._tripped.is_set() and not self.halt_due():
-            self.poll()
-            if self._stop.wait(self.interval):
+        beat = self._beat()
+        stopped = False
+        while True:
+            if stopped:
+                self._kill_children("disk guard" if self._tripped.is_set()
+                                    else "stopped")
+            else:
+                # (the first kill is halt_due's / poll's own)
+                stopped = (self.halt_due()
+                           or (self.interval > 0 and self.poll()))
+            if self._stop.wait(beat):
                 return
 
     def halt_due(self) -> bool:
@@ -343,8 +369,8 @@ class DiskGuard:
             return False
         if due:
             self._halted.set()
-            _log(f"[job {self.job_id}] stopping this analysis: its job is "
-                 "gone")
+            _log(f"[job {self.job_id}] stopping this analysis: its job "
+                 "was deleted or its task taken over")
             self._kill_children("stopped")
         return due
 
@@ -1045,7 +1071,7 @@ def _ingest(ctx: Attempt) -> dict[str, Any]:
     guard = DiskGuard(job_id, ws, _get("tmp_root"),
                       _env_float("CLEO_MIN_FREE_GB", 1.0) * 1e9,
                       interval=0 if remote else None,
-                      halt=ctx.fenced.is_set)
+                      halt=None if remote else ctx.fenced.is_set)
     try:
         with costs.tracking(job_id, "analyze"), guard:
             try:
