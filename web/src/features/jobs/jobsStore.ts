@@ -205,7 +205,6 @@ function ensureLoaded(): void {
     refreshed = false;
     listStale = false;
     goneFromList.clear();
-    listMisses = 0;
   }
   maybeClaim();
   if (switched) {
@@ -472,10 +471,6 @@ let listBody: Record<string, unknown>[] | null = null;
 let listStale = false;
 /** Those ids (the poll asks only for jobs Cleo works on). */
 const goneFromList = new Set<string>();
-/** Ticks in a row whose list didn't answer; at LIST_TRIES the ids are
- *  decided without it. */
-let listMisses = 0;
-const LIST_TRIES = 3;
 /** Last seen running and not past the expiry the server gave it: it
  *  can't have gone for its age (the server never purges a running job)
  *  — missing now, it was deleted, not expired. Whether or not this
@@ -571,7 +566,11 @@ async function loadStatuses(ids: string[], p: JobStatusPoller | null): Promise<b
       continue;
     }
     for (const id of chunk) changed = failedIds.delete(id) || changed;
-    for (const row of res.rows) changed = setRemote(row as unknown as Record<string, unknown>) || changed;
+    for (const row of res.rows) {
+      // (Back in an answer: not gone after all.)
+      goneFromList.delete(String(row.id));
+      changed = setRemote(row as unknown as Record<string, unknown>) || changed;
+    }
     const signedIn = AUTH_ENABLED && getAuthState().signedIn;
     for (const id of res.missing) {
       if (serverIds?.includes(id) || (signedIn && seenRunning(remotes.get(id), Date.now()))) {
@@ -596,13 +595,16 @@ async function refreshAll(): Promise<void> {
     return;
   }
   running = true;
+  const scope = storageScope();
   try {
     let changed = false;
     if (AUTH_ENABLED && getAuthState().signedIn) changed = (await loadServerList()) || changed;
     const covered = new Set(serverIds ?? []);
     const ids = locals.map((j) => j.jobId).filter((id) => !isUploadId(id) && !covered.has(id));
     if (ids.length) changed = (await loadStatuses(ids, null)) || changed;
-    if (!refreshed) {
+    // (Another account signed in meanwhile: its own refresh is still
+    // to come — its list wasn't asked yet.)
+    if (!refreshed && storageScope() === scope) {
       refreshed = true;
       changed = true;
     }
@@ -615,7 +617,7 @@ async function refreshAll(): Promise<void> {
   }
   if (again) {
     again = false;
-    return tick();
+    return refreshed ? tick() : refreshAll();
   }
   schedule();
 }
@@ -640,27 +642,17 @@ async function tick(): Promise<void> {
         listStale = false;
         const gone = [...goneFromList];
         goneFromList.clear();
-        const listed = await loadServerList();
+        // (None left: their status came back meanwhile.)
+        const listed = gone.length ? await loadServerList() : false;
         if (listed === null) {
-          if (storageScope() !== scope) {
-            // Another account meanwhile: nothing of this one carries over.
-          } else if (++listMisses < LIST_TRIES) {
-            // No answer: asked again at the next tick, nothing decided.
+          // No answer: asked again at the next tick, nothing decided —
+          // for this account only (another one meanwhile: nothing of
+          // this one carries over).
+          if (storageScope() === scope) {
             listStale = true;
             gone.forEach((id) => goneFromList.add(id));
-          } else {
-            // The list keeps failing: the status answers decide, as
-            // without it — expired rows, no more polls for them.
-            listMisses = 0;
-            for (const id of gone) {
-              if (remotes.get(id) !== MISSING) {
-                remotes.set(id, MISSING);
-                changed = true;
-              }
-            }
           }
         } else {
-          listMisses = 0;
           changed = listed || changed;
           // Out of the list while Cleo worked on them (a running job
           // never goes for its age): deleted elsewhere, so gone from this
@@ -687,7 +679,7 @@ async function tick(): Promise<void> {
   }
   if (again) {
     again = false;
-    return tick();
+    return refreshed ? tick() : refreshAll();
   }
   schedule();
 }
@@ -799,6 +791,5 @@ export function _resetForTests(): void {
   listBody = null;
   listStale = false;
   goneFromList.clear();
-  listMisses = 0;
   version++;
 }

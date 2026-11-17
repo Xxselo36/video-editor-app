@@ -7,17 +7,18 @@
 // without the list's answer, nor after an account switch meanwhile.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-// The hook runs outside React here: its effect (the poll) at once, the
-// snapshot read directly.
+// The hook runs outside React here: its effect (the poll) at once, its
+// cleanup kept (a remount releases it), the snapshot read directly.
 vi.mock("react", async (importOriginal) => {
   const orig = await importOriginal<typeof import("react")>();
   const useEffect = (fn: () => unknown) => {
-    if (effects) fn();
+    if (effects) cleanups.push(fn() as (() => void) | undefined);
   };
   const useSyncExternalStore = <T,>(_sub: unknown, get: () => T) => get();
   return { ...orig, default: { ...orig, useEffect, useSyncExternalStore }, useEffect, useSyncExternalStore };
 });
 let effects = false;
+const cleanups: ((() => void) | undefined)[] = [];
 
 type Row = Record<string, unknown>;
 const SUMMARY = ["id", "status", "message", "progress", "stage", "filename", "title", "created_at", "updated_at", "expires_at", "has_output"];
@@ -135,6 +136,7 @@ beforeEach(() => {
   statusHides.clear();
 });
 afterEach(() => {
+  cleanups.splice(0).forEach((f) => f?.());
   store._resetForTests();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -195,13 +197,12 @@ it("made while the list was shown (not in it), deleted elsewhere: gone", async (
   expect(stored()).toEqual([]);
 });
 
-it("the list doesn't answer: nothing is forgotten until it does", async () => {
+it("the list doesn't answer: nothing is decided until it does", async () => {
   await open([LOCAL_A]);
   await tick();
   server.delete("A");
   listFails = 503;
-  await tick();
-  await tick();
+  for (let i = 0; i < 5; i++) await tick();
   expect(stored()).toEqual(["A"]);
   expect(rows()).toContain("A:processing:anderswo.mp4");
   listFails = 0;
@@ -227,6 +228,25 @@ it("made while the list was shown, then the list doesn't answer: kept until it d
   listFails = 0;
   await tick();
   expect(stored()).toEqual([]);
+});
+
+it("left out once while the list fails, then back in the status answer: the list isn't asked for it any more", async () => {
+  await open([LOCAL_A]);
+  await tick();
+  statusHides.add("A");
+  listFails = 503;
+  await tick();
+  statusHides.clear();
+  const real = globalThis.fetch;
+  let lists = 0;
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+    if (url.includes("/jobs?fields=summary")) lists++;
+    return real(url, init);
+  });
+  for (let i = 0; i < 3; i++) await tick();
+  expect(lists).toBe(0);
+  expect(rows()).toContain("A:processing:anderswo.mp4");
+  expect(stored()).toEqual(["A"]);
 });
 
 it("one status answer without it while the list still has it: kept", async () => {
@@ -380,24 +400,98 @@ it("left over from a failed list, then another account signs in: nothing of the 
   aKept();
 });
 
-it("the list keeps failing: after three tries the row is expired and its poll stops", async () => {
-  server.delete("A");
-  await open();
-  store.addUpload("upl-1", { filename: "anderswo.mp4" }, {});
-  server.set("A", { ...RUNNING });
-  store.uploadCreated("upl-1", "A", { filename: "anderswo.mp4" });
-  await flush();
-  await tick();
-  listFails = 500;
-  server.delete("A");
+/** Clerk switches to `user`: lib/auth publishes, the app's keyed page
+ *  unmounts (its poll released) and mounts again. */
+function remountAs(user: string) {
+  asUser = user;
+  auth.publishAuthState({ userId: user });
+  cleanups.splice(0).forEach((f) => f?.());
+  effects = true;
+  store.useProjects();
+  effects = false;
+}
+/** The next request for `part` is answered for u1; then u2 signs in. */
+function remountDuring(part: string): () => boolean {
   const real = globalThis.fetch;
-  const asked = { list: 0, status: 0 };
+  let switched = false;
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
-    if (url.includes("/jobs?fields=summary")) asked.list++;
-    if (url.includes("/jobs/status")) asked.status++;
-    return real(url, init);
+    if (switched || !url.includes(part)) return real(url, init);
+    switched = true;
+    const res = await real(url, init);
+    remountAs("u2");
+    await vi.advanceTimersByTimeAsync(1);
+    return res;
   });
-  for (let i = 0; i < 30; i++) await tick();
-  expect(rows()).toContain("A:expired:anderswo.mp4");
-  expect(asked).toEqual({ list: 3, status: 3 });
+  return () => switched;
+}
+const OWN_E = { id: "E", owner: "u2", status: "awaiting_review", progress: 100, filename: "eigen.mp4", created_at: NOW - 200, updated_at: NOW - 100 };
+const page = () => {
+  const p = store.useProjects();
+  return { ready: p.ready, serverLoaded: p.serverLoaded, rows: rows() };
+};
+
+it("another account signs in while the list is asked as the tab comes back: its own list is asked and shown", async () => {
+  server.set("E", { ...OWN_E });
+  await open();
+  await tick();
+  await setHidden(true);
+  const switched = remountDuring("/jobs?fields=summary");
+  await setHidden(false);
+  for (let i = 0; i < 3; i++) await tick();
+  expect(switched()).toBe(true);
+  expect(page()).toEqual({ ready: true, serverLoaded: true, rows: ["E:ready:eigen.mp4"] });
+});
+
+it("another account signs in while a poll asks the list: its own list is asked and shown", async () => {
+  server.set("E", { ...OWN_E });
+  await open([LOCAL_A]);
+  await tick();
+  server.delete("A");
+  const switched = remountDuring("/jobs?fields=summary");
+  for (let i = 0; i < 3; i++) await tick();
+  expect(switched()).toBe(true);
+  expect(page()).toEqual({ ready: true, serverLoaded: true, rows: ["E:ready:eigen.mp4"] });
+});
+
+it("another account signs in while a status answer is read: its own list is asked and shown", async () => {
+  server.set("E", { ...OWN_E });
+  await open();
+  await tick();
+  const switched = remountDuring("/jobs/status");
+  for (let i = 0; i < 3; i++) await tick();
+  expect(switched()).toBe(true);
+  expect(page()).toEqual({ ready: true, serverLoaded: true, rows: ["E:ready:eigen.mp4"] });
+});
+
+it("another account signs in while the list's body is read: none of it lands, also when its own list fails first", async () => {
+  server.set("E", { ...OWN_E });
+  server.set("C", { ...RUN_C });
+  await open([LOCAL_A], { keys: KEYS });
+  await tick();
+  await setHidden(true);
+  const real = globalThis.fetch;
+  let switched = false;
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+    const res = await real(url, init);
+    if (switched || !url.includes("/jobs?fields=summary") || res.status !== 200) return res;
+    switched = true;
+    const body = res.json.bind(res);
+    res.json = async () => {
+      remountAs("u2");
+      listFails = 503;
+      await vi.advanceTimersByTimeAsync(1);
+      return body();
+    };
+    return res;
+  });
+  // (Changed meanwhile: a full answer, not a 304.)
+  server.set("B", { ...READY, title: "Neu" });
+  await setHidden(false);
+  for (let i = 0; i < 3; i++) await tick();
+  expect(switched).toBe(true);
+  listFails = 0;
+  store.refreshProjects(); // the page's Try again
+  for (let i = 0; i < 3; i++) await tick();
+  expect(page()).toEqual({ ready: true, serverLoaded: true, rows: ["C:processing:zwei.mp4", "E:ready:eigen.mp4"] });
+  aKept();
 });
