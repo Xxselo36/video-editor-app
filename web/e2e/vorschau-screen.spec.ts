@@ -22,7 +22,7 @@
  */
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
-import { job as storedJob, jobCard, JOBS, LANG_KEY, openWithStorage } from "./support/app";
+import { job as storedJob, JOBS, LANG_KEY, openWithStorage } from "./support/app";
 import { API } from "./support/env";
 import { holdRequests, openVorschau, TOUR_DONE, vorschau } from "./support/vorschau";
 
@@ -413,19 +413,12 @@ test.describe("the Vorschau's screen", TAG, () => {
     await expect(page.getByTestId("preview-title")).toHaveText("Morgenroutine");
     await expect(menu, "after a rename").toBeFocused();
 
-    // Projects with this one project: its tile.
+    // Projects with this one project: its row has no menu of its own (PR3:
+    // the ⋯ is the Vorschau's), it leads there.
     await openWithStorage(page, "/app", { ...TOUR_DONE, [JOBS]: [storedJob(job.id, "tiktok_3_mistakes.mp4")] });
-    const tileMenu = page.getByTestId("job-card").getByTestId("job-card-menu");
-    await expect(tileMenu).toBeVisible({ timeout: 30_000 });
-    await tileMenu.click();
-    await page.getByTestId("job-card-rename").click();
-    await expect(page.getByTestId("rename-input")).toBeFocused();
-    await page.keyboard.press("Escape");
-    await expect(tileMenu, "tile: after rename, Escape").toBeFocused();
-    await tileMenu.click();
-    await page.getByTestId("job-card-delete").click();
-    await page.getByTestId("dialog-delete").getByRole("button", { name: "Cancel" }).click();
-    await expect(tileMenu, "tile: after delete, Cancel").toBeFocused();
+    const row = page.getByTestId("job-card");
+    await expect(row.getByTestId("job-card-open")).toHaveAttribute("href", `/app/p/${job.id}`, { timeout: 30_000 });
+    await expect(row.getByTestId("job-card-menu")).toHaveCount(0);
   });
 
   test("⋯, rename and delete name the video as its title does; an unchanged name renames nothing", async ({ page, stub }) => {
@@ -449,7 +442,7 @@ test.describe("the Vorschau's screen", TAG, () => {
     await expect(page.getByTestId("dialog-delete").getByRole("heading")).toHaveText("Delete “tiktok_3_mistakes”?");
   });
 
-  test("an edited project: the Vorschau's ⋯ has no Edit again next to Fine-tune; its tile has", async ({ page, stub }) => {
+  test("an edited project: the Vorschau's ⋯ has no Edit again next to Fine-tune", async ({ page, stub }) => {
     const job = await stub.seed("edited");
     await openVorschau(page, job.id);
     await expect(vorschau(page)).toHaveAttribute("data-state", "edited");
@@ -459,12 +452,7 @@ test.describe("the Vorschau's screen", TAG, () => {
     await expect(list.getByRole("menuitem", { name: "Rename" })).toBeVisible();
     await expect(list.getByRole("menuitem", { name: "Edit again" })).toHaveCount(0);
     await page.keyboard.press("Escape");
-
-    await openWithStorage(page, "/app", { ...TOUR_DONE, [JOBS]: [storedJob(job.id, "tiktok_3_mistakes_v2.mp4")] });
-    const tileMenu = jobCard(page, "tiktok_3_mistakes_v2").getByTestId("job-card-menu");
-    await expect(tileMenu).toBeVisible({ timeout: 30_000 });
-    await tileMenu.click();
-    await expect(list.getByRole("menuitem", { name: "Edit again" })).toBeVisible();
+    await expect(list).toHaveCount(0);
   });
 
   test("phones: ⋯'s items are 44 px tall; a long press selects no control's label", async ({ page, stub }, info) => {

@@ -91,7 +91,12 @@ function TopBar({ pathname, slot }: { pathname: string; slot: (el: HTMLElement |
   return (
     <>
       <div ref={sentinel} className={s.sentinel} aria-hidden="true" />
-      <div className={s.topbar} data-scrolled={scrolled || undefined} data-edge={asked?.edge ?? "line"}>
+      <div
+        className={s.topbar}
+        data-testid="topbar"
+        data-scrolled={scrolled || undefined}
+        data-edge={asked?.edge ?? "line"}
+      >
         <LogoMark size={26} idPrefix="cleoTop" />
         <span className={s.barTitle} aria-hidden="true">
           {asked?.title ?? routeTitle(pathname, t)}

@@ -83,7 +83,10 @@
   flex: 1;
   min-width: 0;
 }
+/* Positioned: the full name for screen readers (sr-only, absolute) stays
+   inside it; at its place after a long name it would widen the page. */
 .title {
+  position: relative;
   margin: 0;
   overflow: hidden;
   font-size: 16px;

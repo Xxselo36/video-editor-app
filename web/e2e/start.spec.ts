@@ -371,7 +371,7 @@ test("the browser's Back neither starts nor discards the video @editor-v2", asyn
   const done = await stub.seed("done");
   await openWithStorage(page, "/app", { [JOBS]: [job(done.id, "alt.mp4")] });
   const posts = await watchJobPosts(page);
-  await page.getByTestId("dashboard-new-video").click();
+  await page.getByRole("link", { name: /^Upload( video)?$/ }).click();
   await expect(page).toHaveURL(`${WEB}/app/new`);
   await chooseFile(page, { name: "zurueck.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
   await expect(screen(page)).toHaveAttribute("data-screen", "style");
@@ -417,7 +417,7 @@ test("leaving while the picked video is checked starts nothing @editor-v2", asyn
   expect((await storedJobs(page)).map((j) => j.filename)).toEqual(["alt.mp4"]);
   await expect(jobCard(page, "geprueft.mp4")).toHaveCount(0);
   // New video again: nothing waits there either.
-  await page.getByTestId("dashboard-new-video").click();
+  await page.getByRole("link", { name: /^Upload( video)?$/ }).click();
   await expect(screen(page)).toHaveAttribute("data-screen", "pick");
 });
 
@@ -552,7 +552,7 @@ test("another tab of the browser shows the video waiting for Let’s go (its byt
   await other.goto("/app");
   const tile = jobCard(other, "zweiter-tab.mp4");
   await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
-  await expect(tile.getByTestId("job-card-badge")).toHaveText("Uploading");
+  await expect(tile.getByTestId("job-card-meta")).toContainText("Uploading");
   await expect(other.getByTestId("dashboard").getByRole("heading", { level: 1 })).toHaveText("Ready when you are");
   // Its way back and its Cancel are the first tab's.
   await expect(tile.getByTestId("job-card-continue-start")).toHaveCount(0);
@@ -1139,7 +1139,7 @@ test("picking a file that is still uploading goes to its card, not a stuck 0 % @
   await page.getByRole("link", { name: "Projects", exact: true }).click();
   await expect(page.getByTestId("dashboard")).toBeVisible();
   // Back on New video (a fresh one: that video went) and the same file.
-  await page.getByTestId("dashboard-new-video").click();
+  await page.getByRole("link", { name: /^Upload( video)?$/ }).click();
   await expect(screen(page)).toHaveAttribute("data-screen", "pick");
   await chooseFile(page, file);
   await expect(page).toHaveURL(`${WEB}/app`);

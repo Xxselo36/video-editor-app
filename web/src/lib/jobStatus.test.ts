@@ -26,4 +26,48 @@ describe("JobStatusPoller", () => {
       ["b", 0],
     ]);
   });
+
+  it("keeps what a Projekte row shows: name, lengths, poster flag, lifetime", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          jobs: [
+            {
+              id: "a", status: "awaiting_review", message: "", progress: 100, title: "Morgenroutine", duration: 134.2,
+              output_seconds: 104.5, has_poster: true, created_at: 1_800_000_000, expires_at: 1_801_209_600,
+            },
+            { id: "b", status: "processing", message: "", progress: 10 },
+          ],
+          missing: [],
+        }),
+      ),
+    );
+    const res = await new JobStatusPoller().poll(["a", "b"]);
+    const [a, b] = res!.rows;
+    expect(a).toMatchObject({
+      title: "Morgenroutine", duration: 134.2, output_seconds: 104.5, has_poster: true,
+      created_at: 1_800_000_000, expires_at: 1_801_209_600,
+    });
+    // A server from before (or a job still being analysed) says less.
+    expect(b).toMatchObject({ title: null, duration: null, output_seconds: null, has_poster: false, created_at: null, expires_at: null });
+  });
+
+  it("an unchanged answer (304) hands out the rows of before, the row fields too", async () => {
+    const answers = [
+      Response.json(
+        { jobs: [{ id: "a", status: "done", message: "", progress: 100, title: "Clip", output_seconds: 52, has_poster: true }], missing: [] },
+        { headers: { ETag: 'W/"1"' } },
+      ),
+      new Response(null, { status: 304, headers: { ETag: 'W/"1"' } }),
+    ];
+    const fetchMock = vi.fn(async () => answers.shift()!);
+    vi.stubGlobal("fetch", fetchMock);
+    const poller = new JobStatusPoller();
+    const first = await poller.poll(["a"]);
+    const second = await poller.poll(["a"]);
+    expect(second?.changed).toBe(false);
+    expect(second?.rows).toEqual(first?.rows);
+    expect(second?.rows[0]).toMatchObject({ title: "Clip", output_seconds: 52, has_poster: true });
+  });
 });

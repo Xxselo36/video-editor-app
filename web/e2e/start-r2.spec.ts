@@ -200,7 +200,7 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     await expect(page).toHaveURL(`${WEB}/app`);
     const tile = jobCard(page, "wartet.mp4");
-    await expect(tile.getByTestId("job-card-badge")).toHaveText("Uploaded");
+    await expect(tile.getByTestId("job-card-meta")).toHaveText("Uploaded");
     await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
     await expect(tile.getByTestId("job-card-continue-start")).toBeVisible();
     await expect(page.getByTestId("dashboard").getByRole("heading", { level: 1 })).toHaveText("Ready when you are");
@@ -399,7 +399,7 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     await other.goto("/app");
     const tile = jobCard(other, "zwei-tabs.mp4");
     await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
-    await expect(tile.getByTestId("job-card-badge")).toHaveText("Uploaded");
+    await expect(tile.getByTestId("job-card-meta")).toHaveText("Uploaded");
     await expect(other.getByTestId("dashboard").getByRole("heading", { level: 1 })).toHaveText("Ready when you are");
     // Its way back and its Cancel are the first tab's.
     await expect(tile.getByTestId("job-card-continue-start")).toHaveCount(0);
