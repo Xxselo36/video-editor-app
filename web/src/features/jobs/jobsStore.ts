@@ -203,6 +203,8 @@ function ensureLoaded(): void {
     remotes.clear();
     serverIds = null;
     refreshed = false;
+    listStale = false;
+    goneFromList.clear();
   }
   maybeClaim();
   if (switched) {
@@ -461,13 +463,27 @@ let lastChange = Date.now();
 const poller = new JobStatusPoller();
 let listEtag: string | null = null;
 let listBody: Record<string, unknown>[] | null = null;
-/** A job of the account's list came back missing: deleted elsewhere (in
- *  another window or on another device — also while Cleo worked on
- *  it). The list is asked again (it, not one status answer, says what
- *  the account has); until then the row stays as it was. */
+/** A job of the account's list came back missing — or one this page
+ *  last saw running (accounts on): deleted elsewhere (in another window
+ *  or on another device — also while Cleo worked on it). The list is
+ *  asked again (it, not one status answer, says what the account has);
+ *  until then the row stays as it was. */
 let listStale = false;
 /** Those ids (the poll asks only for jobs Cleo works on). */
 const goneFromList = new Set<string>();
+/** Last seen running and not past the expiry the server gave it: it
+ *  can't have gone for its age (the server never purges a running job)
+ *  — missing now, it was deleted, not expired. Whether or not this
+ *  page's copy of the account's list held it (a job made while the list
+ *  was shown, a tab that comes back). */
+function seenRunning(prev: Remote | undefined, now: number): boolean {
+  return (
+    prev !== undefined &&
+    prev !== MISSING &&
+    (prev.status === "pending" || prev.status === "processing") &&
+    (prev.expiresAt === null || prev.expiresAt > now)
+  );
+}
 
 function projectsNow(): Project[] {
   return mergeProjects(locals, remotes, serverIds, { now: Date.now(), exportHints });
@@ -498,15 +514,16 @@ function setRemote(row: Record<string, unknown>): boolean {
   return true;
 }
 
-/** Accounts on: the account's list (304 = as before). */
-async function loadServerList(): Promise<boolean> {
+/** Accounts on: the account's list (304 = as before). Whether anything
+ *  changed; null: the list didn't answer (serverIds as they were). */
+async function loadServerList(): Promise<boolean | null> {
   try {
     const headers: Record<string, string> = {};
     if (listEtag && listBody) headers["If-None-Match"] = listEtag;
     const r = await apiFetch("/jobs?fields=summary", { headers, cache: "no-store" });
     let rows: Record<string, unknown>[];
     if (r.status === 304 && listBody) rows = listBody;
-    else if (!r.ok) return false;
+    else if (!r.ok) return null;
     else {
       const body = (await r.json()) as unknown;
       rows = Array.isArray(body) ? (body as Record<string, unknown>[]) : [];
@@ -521,7 +538,7 @@ async function loadServerList(): Promise<boolean> {
     for (const row of rows) changed = setRemote(row) || changed;
     return changed;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -545,8 +562,9 @@ async function loadStatuses(ids: string[], p: JobStatusPoller | null): Promise<b
     }
     for (const id of chunk) changed = failedIds.delete(id) || changed;
     for (const row of res.rows) changed = setRemote(row as unknown as Record<string, unknown>) || changed;
+    const signedIn = AUTH_ENABLED && getAuthState().signedIn;
     for (const id of res.missing) {
-      if (serverIds?.includes(id)) {
+      if (serverIds?.includes(id) || (signedIn && seenRunning(remotes.get(id), Date.now()))) {
         listStale = true;
         goneFromList.add(id);
         continue;
@@ -605,21 +623,31 @@ async function tick(): Promise<void> {
   const ids = polledIds();
   if (ids.length) {
     running = true;
+    const scope = storageScope();
     try {
       let changed = await loadStatuses(ids.slice(0, STATUS_BATCH_MAX), poller);
       if (listStale && AUTH_ENABLED && getAuthState().signedIn) {
         listStale = false;
         const gone = [...goneFromList];
         goneFromList.clear();
-        changed = (await loadServerList()) || changed;
-        // Out of the list while Cleo worked on them (a running job never
-        // goes for its age): deleted elsewhere, so gone from this
-        // device's list too — not an "expired" row on the device that
-        // uploaded it.
-        const deleted = gone.filter((id) => serverIds !== null && !serverIds.includes(id));
-        if (deleted.length) {
-          forgetJobs(deleted);
-          changed = true;
+        const listed = await loadServerList();
+        if (listed === null) {
+          // No answer: asked again at the next tick, nothing decided.
+          listStale = true;
+          gone.forEach((id) => goneFromList.add(id));
+        } else {
+          changed = listed || changed;
+          // Out of the list while Cleo worked on them (a running job
+          // never goes for its age): deleted elsewhere, so gone from this
+          // device's list too — not an "expired" row on the device that
+          // uploaded it.
+          // (Another account meanwhile: these answers aren't its list's.)
+          const deleted =
+            storageScope() === scope ? gone.filter((id) => serverIds !== null && !serverIds.includes(id)) : [];
+          if (deleted.length) {
+            forgetJobs(deleted);
+            changed = true;
+          }
         }
       }
       if (changed) {
