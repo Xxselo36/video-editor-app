@@ -9,10 +9,18 @@
 export function LogoMark({
   size = 28,
   className = "",
+  idPrefix = "cleo",
 }: {
   size?: number;
   className?: string;
+  /** Of its gradients' ids: two marks on one page (the app shell's
+   *  sidebar and top bar, one of them hidden) need their own, or the
+   *  visible one paints with the hidden one's gradients (none). */
+  idPrefix?: string;
 }) {
+  const brand = `${idPrefix}Brand`;
+  const spark = `${idPrefix}Spark`;
+  const glow = `${idPrefix}SparkGlow`;
   return (
     <svg
       width={size}
@@ -25,32 +33,32 @@ export function LogoMark({
     >
       <defs>
         {/* Main stroke gradient — 3-stop for a slight highlight bend */}
-        <linearGradient id="cleoBrand" x1="4" y1="4" x2="28" y2="28">
+        <linearGradient id={brand} x1="4" y1="4" x2="28" y2="28">
           <stop offset="0%" stopColor="#e9d5ff" />
           <stop offset="50%" stopColor="#a78bfa" />
           <stop offset="100%" stopColor="#6d28d9" />
         </linearGradient>
         {/* Spark — radial glow gradient for that "light source" feel */}
-        <radialGradient id="cleoSpark" cx="0.35" cy="0.35" r="0.75">
+        <radialGradient id={spark} cx="0.35" cy="0.35" r="0.75">
           <stop offset="0%" stopColor="#faf5ff" />
           <stop offset="40%" stopColor="#d8b4fe" />
           <stop offset="100%" stopColor="#7c3aed" />
         </radialGradient>
         {/* Soft outer glow around the spark for depth */}
-        <radialGradient id="cleoSparkGlow" cx="0.5" cy="0.5" r="0.5">
+        <radialGradient id={glow} cx="0.5" cy="0.5" r="0.5">
           <stop offset="0%" stopColor="rgba(196,181,253,0.55)" />
           <stop offset="100%" stopColor="rgba(196,181,253,0)" />
         </radialGradient>
       </defs>
 
       {/* Faint spark aura */}
-      <circle cx="20" cy="16" r="5.5" fill="url(#cleoSparkGlow)" />
+      <circle cx="20" cy="16" r="5.5" fill={`url(#${glow})`} />
 
       {/* Bold rounded C — thicker stroke, tuned arc with slight
           asymmetry at the opening so it reads as intentional letter. */}
       <path
         d="M24.5 9.5C22.4 6.8 19.4 5 16 5C9.9 5 5 9.9 5 16C5 22.1 9.9 27 16 27C19.4 27 22.4 25.2 24.5 22.5"
-        stroke="url(#cleoBrand)"
+        stroke={`url(#${brand})`}
         strokeWidth="3.75"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -58,7 +66,7 @@ export function LogoMark({
       />
 
       {/* Spark — offset up-right of true center for visual weight */}
-      <circle cx="20" cy="15.5" r="2.6" fill="url(#cleoSpark)" />
+      <circle cx="20" cy="15.5" r="2.6" fill={`url(#${spark})`} />
     </svg>
   );
 }

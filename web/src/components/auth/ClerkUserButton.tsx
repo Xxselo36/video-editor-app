@@ -2,10 +2,12 @@
 import { UserButton } from "@clerk/nextjs";
 
 /** Clerk's avatar menu, plus a link to our account page (the only way
- *  there on phones, where the header's text link is hidden). */
-export default function ClerkUserButton({ accountLabel }: { accountLabel: string }) {
+ *  there on phones, where the header's text link is hidden). `large`:
+ *  the 28 px avatar in a 44 px target (a row's end on a phone). */
+export default function ClerkUserButton({ accountLabel, large = false }: { accountLabel: string; large?: boolean }) {
+  const trigger = large ? { width: 44, height: 44, justifyContent: "center", borderRadius: 9999 } : {};
   return (
-    <UserButton appearance={{ elements: { avatarBox: { width: 28, height: 28 } } }}>
+    <UserButton appearance={{ elements: { avatarBox: { width: 28, height: 28 }, userButtonTrigger: trigger } }}>
       <UserButton.MenuItems>
         <UserButton.Link
           label={accountLabel}

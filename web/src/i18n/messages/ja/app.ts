@@ -7,6 +7,21 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "ベータ",
   "app.header.opening": "開いています…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "メインメニュー",
+  "app.nav.upload": "アップロード",
+  "app.nav.uploadVideo": "動画をアップロード",
+  "app.nav.settings": "設定",
+  "app.nav.skip": "本文へスキップ",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "アプリの言語",
+  "app.settings.manageAccount": "アカウントとプラン",
+  "app.settings.voice": "音声コマンド",
+  "app.settings.voiceTry": "「Cleo cut」を試す",
+  "app.settings.legal": "法的情報",
+  "app.settings.beta": "CleoCuts のベータ版をご利用中です。",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — 動画の準備ができました",
 
@@ -298,7 +313,7 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "順番待ち(#{n})",
   "app.card.queued.titleNoPos": "順番待ち",
-  "app.card.queued.sub": "現在たくさんの動画が処理待ちです — 順番が来たら自動的に始まります。このページを離れても大丈夫です。",
+  "app.card.queued.sub": "現在たくさんの動画が処理待ちです。順番が来たら自動的に始まるので、このページを離れても大丈夫です。",
   "app.card.open": "開く",
   "app.card.remove": "削除",
   "app.card.renderFailedNote": "書き出しに失敗しました。編集内容は保存されています。もう一度お試しください。",
@@ -367,18 +382,20 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "プロジェクト",
   "app.projects.title": "プロジェクト",
-  "app.projects.search": "プロジェクトを検索",
-  "app.projects.filterLabel": "表示",
-  "app.projects.filter.all": "すべて",
-  "app.projects.filter.edit": "編集待ち",
-  "app.projects.filter.exported": "書き出し済み",
-  "app.projects.noResults": "「{q}」に一致するプロジェクトはありません。",
-  "app.projects.noneInFilter": "まだ何もありません。",
+  "app.projects.empty": "まだプロジェクトはありません",
+  "app.projects.emptyBody": "動画をアップロードしてください。Cleo がカットして字幕を付けます。",
+  "app.projects.readyNow": "準備完了",
+  "app.projects.announceReady": "「{name}」の準備ができました",
+  "app.projects.announceFailed": "「{name}」は失敗しました",
+  "app.projects.announceUploadStopped": "「{name}」のアップロードが止まりました",
+  "app.projects.announceExported": "「{name}」の書き出しが終わりました",
+  "app.projects.announceExportFailed": "「{name}」を書き出せませんでした",
+  "app.projects.canClose": "このページは閉じても大丈夫です。",
+  "app.relative.justNow": "たった今",
   "app.projects.expiredGroup": "期限切れ（{count}）",
   "app.projects.expiredNote": "プロジェクトは最後の変更から {days} 日後にファイルごと削除されます。",
   "app.projects.allExpired.title": "プロジェクトは {days} 日後に削除されました",
   "app.projects.allExpired.body": "プロジェクトは最後の変更から {days} 日間保存されます。新しく始めるには動画をアップロードしてください。",
-  "app.projects.badge.uploading": "アップロード中",
   "app.projects.badge.uploadFailed": "アップロード停止",
   "app.projects.badge.checking": "確認中…",
   "app.projects.badge.processing": "処理中",
@@ -404,7 +421,7 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.projects.fromStartConfirm": "{pct}% で停止したアップロードは完全に破棄されます。新しいファイルを最初からアップロードしますか?",
   "app.projects.fromStartYes": "はい、最初から",
   "app.projects.uploadFromStart": "最初からアップロード",
-  "app.projects.resumeAt": "{pct}%で中断 — 続けるには同じ動画を選んでください。",
+  "app.projects.resumeAt": "{pct}で中断しました。続けるには同じ動画を選んでください。",
   "app.projects.resume": "アップロードを再開",
   "app.projects.download": "ダウンロード",
   "app.projects.copyText": "投稿テキストをコピー",
@@ -496,6 +513,9 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "字幕は最初の書き出しの見た目のままです。",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "まだ見られるものはありません",
+  "app.preview.emptyBody": "動画をアップロードすると、ここに表示されます。",
+  "app.preview.uploading": "動画はまだアップロード中です。",
   "app.preview.refine": "微調整",
   "app.preview.more": "この動画のその他の機能",
   "app.preview.pause": "一時停止",

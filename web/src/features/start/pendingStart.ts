@@ -31,6 +31,7 @@ import type { UploadSettings } from "@/features/upload/settings";
 import { cancelUpload, retryUpload } from "@/features/upload/uploadControls";
 import { startUpload, updateUploadSettings, type EndHow, type StartOpts } from "@/features/upload/uploadManager";
 import { getLiveUpload, isAwaitingGo } from "@/features/upload/uploadState";
+import { markArriving } from "@/features/jobs/arrive";
 import type { MessageKey } from "@/i18n/messages/en";
 import type { PresetId } from "@/lib/captions/types";
 import { sameCaptionStyle } from "./captionDefault";
@@ -116,11 +117,13 @@ function callbacks(slot: Slot): Pick<StartOpts, "onCard" | "onSettingsRead" | "o
       void saveLastUsed(lastUsedPrefs(slot.state.choices));
       patch(slot, { sent: true, starting: true });
     },
-    onEnd: (_jobId: string | null, how: EndHow) => {
+    onEnd: (jobId: string | null, how: EndHow) => {
       if (how === "failed") {
         patch(slot, { failed: true, sent: false, starting: false });
         return;
       }
+      // Its row enters on Projekte, where the screen goes now.
+      if (how === "created" && jobId) markArriving(jobId);
       // Created while shown: the screen stays as it is on its way to
       // Projects; the next visit lets the start go (it went).
       if (how === "created" && slot === current && onShownCreated) {

@@ -11,6 +11,21 @@ export const enApp = {
   "app.header.beta": "Beta",
   "app.header.opening": "Opening…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Main menu",
+  "app.nav.upload": "Upload",
+  "app.nav.uploadVideo": "Upload video",
+  "app.nav.settings": "Settings",
+  "app.nav.skip": "Skip to content",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "App language",
+  "app.settings.manageAccount": "Account & plan",
+  "app.settings.voice": "Voice commands",
+  "app.settings.voiceTry": "Try “Cleo cut”",
+  "app.settings.legal": "Legal",
+  "app.settings.beta": "You're using the CleoCuts beta.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — your video is ready",
 
@@ -314,7 +329,7 @@ export const enApp = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "Waiting in line (#{n})",
   "app.card.queued.titleNoPos": "Waiting in line",
-  "app.card.queued.sub": "Lots of videos right now — yours starts automatically. You can leave this page.",
+  "app.card.queued.sub": "Lots of videos right now. Yours starts automatically, so you can leave this page.",
   "app.card.open": "Open",
   "app.card.remove": "Remove",
   "app.card.renderFailedNote": "Exporting didn't work. Your edits are saved. Try again.",
@@ -383,18 +398,20 @@ export const enApp = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Projects",
   "app.projects.title": "Projects",
-  "app.projects.search": "Search projects",
-  "app.projects.filterLabel": "Show",
-  "app.projects.filter.all": "All",
-  "app.projects.filter.edit": "To edit",
-  "app.projects.filter.exported": "Exported",
-  "app.projects.noResults": "No project matches “{q}”.",
-  "app.projects.noneInFilter": "Nothing here yet.",
+  "app.projects.empty": "No projects yet",
+  "app.projects.emptyBody": "Upload a video. Cleo cuts it and adds captions.",
+  "app.projects.readyNow": "Ready",
+  "app.projects.announceReady": "“{name}” is ready",
+  "app.projects.announceFailed": "“{name}” failed",
+  "app.projects.announceUploadStopped": "Upload of “{name}” stopped",
+  "app.projects.announceExported": "“{name}” has been exported",
+  "app.projects.announceExportFailed": "“{name}” couldn't be exported",
+  "app.projects.canClose": "You can close this page.",
+  "app.relative.justNow": "just now",
   "app.projects.expiredGroup": "Expired ({count})",
   "app.projects.expiredNote": "Projects are deleted {days} days after their last change, files included.",
   "app.projects.allExpired.title": "Your projects were deleted after {days} days",
   "app.projects.allExpired.body": "Projects are kept for {days} days after their last change. Upload a video to start a new one.",
-  "app.projects.badge.uploading": "Uploading",
   "app.projects.badge.uploadFailed": "Upload stopped",
   "app.projects.badge.checking": "Checking…",
   "app.projects.badge.processing": "Processing",
@@ -414,13 +431,13 @@ export const enApp = {
   "app.projects.cancel": "Cancel",
   "app.projects.retry": "Try again",
   "app.projects.pickAgain": "Pick the same file again to continue the upload",
-  "app.projects.copyMismatch": "This copy doesn’t match “{name}” — the iPhone may have converted it again. Upload it from the start?",
-  "app.projects.copyMismatchOther": "That isn’t “{name}”. Choose it again to continue — or upload this file from the start.",
+  "app.projects.copyMismatch": "This copy doesn’t match “{name}”. The iPhone may have converted it again. Upload it from the start?",
+  "app.projects.copyMismatchOther": "That isn’t “{name}”. Choose it again to continue, or upload this file from the start.",
   "app.projects.otherUpload": "This is the video of another stopped upload (“{name}”). Continue it on its own tile.",
   "app.projects.fromStartConfirm": "This gives up the stopped upload at {pct}% for good. Upload the new file from the start?",
   "app.projects.fromStartYes": "Yes, from the start",
   "app.projects.uploadFromStart": "Upload from the start",
-  "app.projects.resumeAt": "Stopped at {pct}% — choose the same video to continue.",
+  "app.projects.resumeAt": "Stopped at {pct}. Choose the same video to continue.",
   "app.projects.resume": "Continue upload",
   "app.projects.download": "Download",
   "app.projects.copyText": "Copy post text",
@@ -516,6 +533,9 @@ export const enApp = {
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
   // Opens the editor: fix captions, bring back a cut
+  "app.preview.emptyTitle": "Nothing to watch yet",
+  "app.preview.emptyBody": "Upload a video and you'll see it here.",
+  "app.preview.uploading": "Your video is still uploading.",
   "app.preview.refine": "Fine-tune",
   "app.preview.more": "More for this video",
   // The play button while the video plays

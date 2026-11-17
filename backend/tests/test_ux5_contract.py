@@ -134,6 +134,7 @@ JOB_KEYS = sorted([
     "filmstrip",        # UX7b: {n, interval, tileW, tileH} or None
     "title",            # UX12: the name the user gave the project
     "edit_rev",         # the timeline's revision (/edit-segments base_rev)
+    "output_seconds",   # P3: length of the saved timeline's render (None: unknown)
     "preview_status", "preview_error",   # the cut preview's build (main._preview_fields)
     # UX11: exports (to_dict) + the fair-use numbers of the asker (API)
     "renders_ok", "downloads", "social_caption_edited", "has_captions_file",
@@ -192,7 +193,9 @@ def test_status_rows_snapshot(client):
         # UX12: the Projects tile
         "title", "duration", "created_at", "expires_at",
         # PR2 live test D1: the export's generation (the tile's download link)
-        "renders_ok"])
+        "renders_ok",
+        # P3: the Projects row's picture and the cut's length
+        "has_poster", "output_seconds"])
     assert (rows[job.id]["stage"], rows[job.id]["stage_params"],
             rows[job.id]["message"]) == ("analyze.transcribe", {},
                                          "Transcribing (35%)…")

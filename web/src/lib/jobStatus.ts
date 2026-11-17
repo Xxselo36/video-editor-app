@@ -33,6 +33,19 @@ export type JobStatusRow = {
   preview_version?: number | null;
   /** The export's generation (the tile menu's download link). */
   renders_ok?: number;
+  // What a Projekte row shows (the anonymous page has no GET /jobs list):
+  /** The name given in the app (null: the file's). */
+  title?: string | null;
+  /** Of the source, seconds. */
+  duration?: number | null;
+  /** Of the saved timeline: the length of the video it makes (seconds;
+   *  null until the server knows it). */
+  output_seconds?: number | null;
+  /** GET /jobs/{id}/poster has a frame. */
+  has_poster?: boolean;
+  /** Unix seconds. */
+  created_at?: number | null;
+  expires_at?: number | null;
   /** The full job dict — only on the per-job fallback path. */
   full?: Record<string, unknown>;
 };
@@ -53,6 +66,8 @@ export const STATUS_BATCH_MAX = 50;
 let batchSupported = true;
 
 const num = (v: unknown, dflt: number) => (typeof v === "number" && isFinite(v) ? v : dflt);
+
+const opt = (v: unknown) => (typeof v === "number" && isFinite(v) ? v : null);
 
 const obj = (v: unknown) =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, string | number | boolean | null>) : null;
@@ -75,13 +90,22 @@ function toRow(id: string, raw: Record<string, unknown>): JobStatusRow {
     updated_at: typeof raw.updated_at === "number" ? raw.updated_at : null,
     preview_version: typeof raw.preview_version === "number" ? raw.preview_version : null,
     renders_ok: num(raw.renders_ok, 0),
+    title: typeof raw.title === "string" ? raw.title : null,
+    duration: opt(raw.duration),
+    output_seconds: opt(raw.output_seconds),
+    has_poster: Boolean(raw.has_poster),
+    created_at: opt(raw.created_at),
+    expires_at: opt(raw.expires_at),
   };
 }
 
 /** What a card shows; the change signal for the backoff. */
 function signature(rows: JobStatusRow[], missing: string[]): string {
   return JSON.stringify([
-    rows.map((r) => [r.id, r.status, r.message, r.progress, r.queue_position, r.error, r.error_code, r.refunded, r.stage]),
+    rows.map((r) => [
+      r.id, r.status, r.message, r.progress, r.queue_position, r.error, r.error_code, r.refunded, r.stage,
+      r.title, r.output_seconds, r.has_poster, r.expires_at,
+    ]),
     missing,
   ]);
 }

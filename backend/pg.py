@@ -65,8 +65,8 @@ from psycopg_pool import ConnectionPool
 from backend import db
 from backend.jobs import (
     RUNNING_STATUSES, DuplicateKey, Job, _JSON_FIELDS, _STATUS_FIELDS,
-    gc_backoff_s, gc_clean_entries, gc_store, job_from_dict, job_to_dict,
-    new_job_id, status_defaults,
+    derive_fields, gc_backoff_s, gc_clean_entries, gc_store, job_from_dict,
+    job_to_dict, new_job_id, status_defaults,
 )
 
 STATEMENT_TIMEOUT_MS = 15_000
@@ -696,6 +696,7 @@ class PgJobStore:
         now = time.time()
         job = Job(id=job_id, input_path=input_path, settings=settings,
                   updated_at=now, created_at=now, **extra)
+        derive_fields(job)
         idempotency_key = _text(idempotency_key) or None
         args = (job_id, *_hot(job), idempotency_key, dump_job(job))
         insert = ("INSERT INTO jobs (id, owner_id, status, plan, created_at, "
@@ -797,6 +798,7 @@ class PgJobStore:
             return None
         for k, v in fields_to_update.items():
             setattr(job, k, v)
+        derive_fields(job, fields_to_update)
         if "updated_at" not in fields_to_update:
             job.updated_at = time.time()
         conn.execute(_UPDATE_SQL, (dump_job(job), *_hot(job), job_id))
@@ -808,7 +810,8 @@ class PgJobStore:
         merged into the row (data || patch) while its status is
         `expect` — no read-modify-write of the whole job, so it can't
         undo another process's write, and never after a terminal
-        status."""
+        status. Not for segments / settings: nothing is derived here
+        (jobs.derive_fields runs on the full writes)."""
         if not _is_id(job_id):
             return False
         if isinstance(expect, str):

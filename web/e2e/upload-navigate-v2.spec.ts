@@ -46,7 +46,7 @@ test.describe("an upload while the user moves around the app", { tag: "@editor-v
     const tile = jobCard(page, "wandert.mp4");
     await expect(tile).toHaveAttribute("data-state", "uploading");
     // Back to the start screen and to Projects again.
-    await page.getByTestId("dashboard-new-video").click();
+    await page.getByRole("link", { name: /^Upload( video)?$/ }).click();
     await expect(page.getByTestId("start-screen")).toBeVisible();
     await projectsLink(page).click();
     await expect(page).toHaveURL(`${WEB}/app`);

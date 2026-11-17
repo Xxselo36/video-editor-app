@@ -7,6 +7,21 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "Beta",
   "app.header.opening": "Abrindo…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Menu principal",
+  "app.nav.upload": "Enviar",
+  "app.nav.uploadVideo": "Enviar vídeo",
+  "app.nav.settings": "Ajustes",
+  "app.nav.skip": "Pular para o conteúdo",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "Idioma do app",
+  "app.settings.manageAccount": "Conta e plano",
+  "app.settings.voice": "Comandos de voz",
+  "app.settings.voiceTry": "Testar “Cleo cut”",
+  "app.settings.legal": "Informações legais",
+  "app.settings.beta": "Você está usando a versão beta do CleoCuts.",
+
   // ── app: browser notifications ──
   "app.notify.readyTitle": "CleoCuts — seu vídeo está pronto",
 
@@ -298,8 +313,7 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "Na fila (#{n})",
   "app.card.queued.titleNoPos": "Na fila",
-  "app.card.queued.sub":
-    "Muitos vídeos no momento — o seu começa automaticamente. Você pode sair desta página.",
+  "app.card.queued.sub": "Muitos vídeos no momento. O seu começa automaticamente, então você pode sair desta página.",
   "app.card.open": "Abrir",
   "app.card.remove": "Remover",
   "app.card.renderFailedNote": "A exportação não deu certo. Suas edições estão salvas. Tente de novo.",
@@ -368,18 +382,20 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Projetos",
   "app.projects.title": "Projetos",
-  "app.projects.search": "Buscar projetos",
-  "app.projects.filterLabel": "Mostrar",
-  "app.projects.filter.all": "Todos",
-  "app.projects.filter.edit": "Para editar",
-  "app.projects.filter.exported": "Exportados",
-  "app.projects.noResults": "Nenhum projeto corresponde a “{q}”.",
-  "app.projects.noneInFilter": "Nada aqui ainda.",
+  "app.projects.empty": "Nenhum projeto ainda",
+  "app.projects.emptyBody": "Envie um vídeo. A Cleo corta e coloca as legendas.",
+  "app.projects.readyNow": "Pronto",
+  "app.projects.announceReady": "“{name}” está pronto",
+  "app.projects.announceFailed": "“{name}” falhou",
+  "app.projects.announceUploadStopped": "O envio de “{name}” parou",
+  "app.projects.announceExported": "“{name}” foi exportado",
+  "app.projects.announceExportFailed": "Não foi possível exportar “{name}”",
+  "app.projects.canClose": "Você pode fechar esta página.",
+  "app.relative.justNow": "agora mesmo",
   "app.projects.expiredGroup": "Expirados ({count})",
   "app.projects.expiredNote": "Os projetos são excluídos {days} dias após a última alteração, com os arquivos.",
   "app.projects.allExpired.title": "Seus projetos foram excluídos após {days} dias",
   "app.projects.allExpired.body": "Os projetos ficam guardados por {days} dias após a última alteração. Envie um vídeo para começar um novo.",
-  "app.projects.badge.uploading": "Enviando",
   "app.projects.badge.uploadFailed": "Envio parado",
   "app.projects.badge.checking": "Verificando…",
   "app.projects.badge.processing": "Processando",
@@ -399,13 +415,13 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Cancelar",
   "app.projects.retry": "Tentar de novo",
   "app.projects.pickAgain": "Escolha o mesmo arquivo de novo para continuar o envio",
-  "app.projects.copyMismatch": "Esta cópia não corresponde a “{name}” — o iPhone pode tê-la convertido de novo. Enviar desde o início?",
-  "app.projects.copyMismatchOther": "Isso não é “{name}”. Escolha-o de novo para continuar — ou envie este arquivo desde o início.",
+  "app.projects.copyMismatch": "Esta cópia não corresponde a “{name}”. O iPhone pode tê-la convertido de novo. Enviar desde o início?",
+  "app.projects.copyMismatchOther": "Isso não é “{name}”. Escolha-o de novo para continuar ou envie este arquivo desde o início.",
   "app.projects.otherUpload": "Este é o vídeo de outro envio parado (“{name}”). Continue-o no próprio cartão.",
   "app.projects.fromStartConfirm": "Isso abandona de vez o envio parado em {pct}%. Enviar o novo arquivo desde o início?",
   "app.projects.fromStartYes": "Sim, desde o início",
   "app.projects.uploadFromStart": "Enviar desde o início",
-  "app.projects.resumeAt": "Parou em {pct}% — escolha o mesmo vídeo para continuar.",
+  "app.projects.resumeAt": "Parou em {pct}. Escolha o mesmo vídeo para continuar.",
   "app.projects.resume": "Continuar envio",
   "app.projects.download": "Baixar",
   "app.projects.copyText": "Copiar texto do post",
@@ -497,6 +513,9 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "As legendas mantêm o estilo da primeira exportação.",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "Nada para ver ainda",
+  "app.preview.emptyBody": "Envie um vídeo e ele aparece aqui.",
+  "app.preview.uploading": "Seu vídeo ainda está sendo enviado.",
   "app.preview.refine": "Ajuste fino",
   "app.preview.more": "Mais opções para este vídeo",
   "app.preview.pause": "Pausar",

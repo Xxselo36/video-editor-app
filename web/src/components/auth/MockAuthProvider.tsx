@@ -195,7 +195,7 @@ export function MockSignIn({ mode }: { mode: "sign-in" | "sign-up" }) {
 }
 
 /** The avatar menu of test auth: who is signed in, and sign out. */
-export function MockUserButton() {
+export function MockUserButton({ large = false }: { large?: boolean }) {
   const [user] = useState(() => (typeof window === "undefined" ? null : readTestUser()));
   return (
     <span className="inline-flex items-center gap-2 text-xs" data-testid="mock-user-button">
@@ -210,7 +210,7 @@ export function MockUserButton() {
           setTestUser(null, { silent: true });
           window.location.assign("/");
         }}
-        className="rounded-full px-2 py-1"
+        className={large ? "min-h-11 rounded-full px-3" : "rounded-full px-2 py-1"}
         style={{ ...box, background: "var(--surface-2)" }}
       >
         Sign out

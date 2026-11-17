@@ -104,7 +104,7 @@
 /* A failed video's frame: its first frame, or the film. On phones it is
  * smaller (there is nothing to play): the reason and the way on stay in
  * view. */
-@media (max-width: 959px) {
+@media (max-width: 959.98px) {
   .root[data-state="failed"] .media {
     --fh: clamp(160px, calc(100svh - 560px), 360px);
   }

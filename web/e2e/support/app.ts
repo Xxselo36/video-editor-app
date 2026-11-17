@@ -155,15 +155,10 @@ export async function watchJobPosts(page: Page): Promise<Record<string, unknown>
 
 // ── Projects (/app) ─────────────────────────────────────────────────
 
-/** A project tile (an <article>; its name is the file name until renamed). */
+/** A project's row (an <article>; its name is the file name until renamed). */
 export const jobCard = (page: Page, filename: string): Locator =>
   page.getByTestId("job-card").filter({ hasText: filename });
 
-/** Open a tile's ⋯ menu and pick an item (data-testid job-card-<item>). */
-export async function tileMenu(page: Page, tile: Locator, item: "download" | "copy" | "rename" | "delete") {
-  await tile.getByTestId("job-card-menu").click();
-  await page.getByTestId(`job-card-${item}`).click();
-}
 
 // ── editor ───────────────────────────────────────────────────────────
 
@@ -249,9 +244,11 @@ export async function pause(page: Page) {
   await editorVideo(page).evaluate((v) => (v as HTMLVideoElement).pause());
 }
 
-/** No horizontal page overflow (px beyond the viewport). */
+/** No horizontal page overflow (px beyond the viewport). Against the
+ *  layout viewport (clientWidth): a phone's emulation zooms out to page
+ *  content that is too wide, and window.innerWidth grows along with it. */
 export const horizontalOverflow = (page: Page) =>
-  page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 /**
  * Text of the caption shown over the editor video: the interim engine

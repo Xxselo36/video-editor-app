@@ -22,7 +22,7 @@
  */
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
-import { job as storedJob, jobCard, JOBS, LANG_KEY, openWithStorage } from "./support/app";
+import { job as storedJob, JOBS, LANG_KEY, openWithStorage } from "./support/app";
 import { API } from "./support/env";
 import { holdRequests, openVorschau, TOUR_DONE, vorschau } from "./support/vorschau";
 
@@ -125,8 +125,9 @@ async function menuByKeys(page: Page, item: "rename" | "delete") {
 /** Hold the mouse button down on `el`; its computed scale and transform
  *  while pressed (then released off it: no click). */
 async function pressed(page: Page, el: Locator): Promise<{ scale: string; transform: string }> {
-  const b = (await el.boundingBox())!;
-  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  // (Hover waits until it holds still: a panel that just opened may still
+  // be moving it, and the press would land beside it.)
+  await el.hover();
   await page.mouse.down();
   // the press transition (160 ms) has run
   await page.waitForTimeout(400);
@@ -413,19 +414,12 @@ test.describe("the Vorschau's screen", TAG, () => {
     await expect(page.getByTestId("preview-title")).toHaveText("Morgenroutine");
     await expect(menu, "after a rename").toBeFocused();
 
-    // Projects with this one project: its tile.
+    // Projects with this one project: its row has no menu of its own (PR3:
+    // the ⋯ is the Vorschau's), it leads there.
     await openWithStorage(page, "/app", { ...TOUR_DONE, [JOBS]: [storedJob(job.id, "tiktok_3_mistakes.mp4")] });
-    const tileMenu = page.getByTestId("job-card").getByTestId("job-card-menu");
-    await expect(tileMenu).toBeVisible({ timeout: 30_000 });
-    await tileMenu.click();
-    await page.getByTestId("job-card-rename").click();
-    await expect(page.getByTestId("rename-input")).toBeFocused();
-    await page.keyboard.press("Escape");
-    await expect(tileMenu, "tile: after rename, Escape").toBeFocused();
-    await tileMenu.click();
-    await page.getByTestId("job-card-delete").click();
-    await page.getByTestId("dialog-delete").getByRole("button", { name: "Cancel" }).click();
-    await expect(tileMenu, "tile: after delete, Cancel").toBeFocused();
+    const row = page.getByTestId("job-card");
+    await expect(row.getByTestId("job-card-open")).toHaveAttribute("href", `/app/p/${job.id}`, { timeout: 30_000 });
+    await expect(row.getByTestId("job-card-menu")).toHaveCount(0);
   });
 
   test("⋯, rename and delete name the video as its title does; an unchanged name renames nothing", async ({ page, stub }) => {
@@ -449,7 +443,7 @@ test.describe("the Vorschau's screen", TAG, () => {
     await expect(page.getByTestId("dialog-delete").getByRole("heading")).toHaveText("Delete “tiktok_3_mistakes”?");
   });
 
-  test("an edited project: the Vorschau's ⋯ has no Edit again next to Fine-tune; its tile has", async ({ page, stub }) => {
+  test("an edited project: the Vorschau's ⋯ has no Edit again next to Fine-tune", async ({ page, stub }) => {
     const job = await stub.seed("edited");
     await openVorschau(page, job.id);
     await expect(vorschau(page)).toHaveAttribute("data-state", "edited");
@@ -459,12 +453,7 @@ test.describe("the Vorschau's screen", TAG, () => {
     await expect(list.getByRole("menuitem", { name: "Rename" })).toBeVisible();
     await expect(list.getByRole("menuitem", { name: "Edit again" })).toHaveCount(0);
     await page.keyboard.press("Escape");
-
-    await openWithStorage(page, "/app", { ...TOUR_DONE, [JOBS]: [storedJob(job.id, "tiktok_3_mistakes_v2.mp4")] });
-    const tileMenu = jobCard(page, "tiktok_3_mistakes_v2").getByTestId("job-card-menu");
-    await expect(tileMenu).toBeVisible({ timeout: 30_000 });
-    await tileMenu.click();
-    await expect(list.getByRole("menuitem", { name: "Edit again" })).toBeVisible();
+    await expect(list).toHaveCount(0);
   });
 
   test("phones: ⋯'s items are 44 px tall; a long press selects no control's label", async ({ page, stub }, info) => {
@@ -491,11 +480,9 @@ test.describe("the Vorschau's screen", TAG, () => {
     await page.setViewportSize({ width: 844, height: 390 });
     await openVorschau(page, job.id);
     await expect(vorschau(page)).toHaveAttribute("data-state", "done");
-    const menu = page.getByTestId("job-card-menu");
-    // ⋯ where its menu (four 44 px items) fits neither under nor over it
-    await menu.evaluate((el) => window.scrollTo({ top: window.scrollY + el.getBoundingClientRect().top - 173, behavior: "instant" }));
+    // On phones ⋯ is at the end of the app's top bar (PR3).
+    const menu = page.getByTestId("topbar").getByTestId("job-card-menu");
     const [bx, by, bw, bh] = await box(menu);
-    expect(by).toBe(173);
     await menu.click();
     const list = page.getByTestId("job-card-menu-list");
     await expect(list.getByRole("menuitem")).toHaveCount(4);
@@ -507,6 +494,41 @@ test.describe("the Vorschau's screen", TAG, () => {
     expect(lx).toBeGreaterThanOrEqual(8);
     await page.keyboard.press("Escape");
     await expect(list).toHaveCount(0);
+  });
+
+  test("a short window: ⋯'s menu goes beside ⋯ where it fits neither under nor over it", async ({ page, stub }, info) => {
+    test.skip(info.project.name !== "desktop", "the title row's ⋯ (from 960 px)");
+    const job = await stub.seed("done");
+    await page.setViewportSize({ width: 1024, height: 700 });
+    await openVorschau(page, job.id);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done");
+    const menu = page.getByTestId("job-card-menu");
+    const list = page.getByTestId("job-card-menu-list");
+    await menu.click();
+    await expect(list.getByRole("menuitem")).toHaveCount(4);
+    const height = (await box(list))[3];
+    await page.keyboard.press("Escape");
+    await expect(list).toHaveCount(0);
+    // A window too short for it above or below ⋯ in its middle.
+    const H = Math.round(height * 1.6) + 40;
+    await page.setViewportSize({ width: 1024, height: H });
+    await menu.evaluate((el, h) => {
+      const r = el.getBoundingClientRect();
+      window.scrollTo({ top: window.scrollY + r.top + r.height / 2 - h / 2, behavior: "instant" });
+    }, H);
+    const [bx, by, bw, bh] = await box(menu);
+    expect(by, "⋯ in the window's middle").toBeLessThan(height);
+    expect(H - (by + bh), "⋯ in the window's middle").toBeLessThan(height);
+    await menu.click();
+    await expect(list.getByRole("menuitem")).toHaveCount(4);
+    const [lx, ly, lw, lh] = await box(list);
+    const apart = lx + lw <= bx || bx + bw <= lx || ly + lh <= by || by + bh <= ly;
+    expect(apart, `menu ${[lx, ly, lw, lh]} over ⋯ ${[bx, by, bw, bh]}`).toBe(true);
+    expect(ly).toBeGreaterThanOrEqual(8);
+    expect(ly + lh).toBeLessThanOrEqual(H - 8);
+    expect(lx).toBeGreaterThanOrEqual(8);
+    expect(lx + lw).toBeLessThanOrEqual(1024 - 8);
+    await page.keyboard.press("Escape");
   });
 
   test("phones: the rename and delete dialogs' buttons are 44 px tall", async ({ page, stub }, info) => {
@@ -545,8 +567,7 @@ test.describe("the Vorschau's screen", TAG, () => {
     for (const el of small) await expect(el).toBeVisible();
     /** Held down on a dialog's button: its scale (then released on the dialog's title: no click). */
     const pressedInDialog = async (button: Locator, title: Locator) => {
-      const b = (await button.boundingBox())!;
-      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+      await button.hover();
       await page.mouse.down();
       await page.waitForTimeout(400);
       const scale = await button.evaluate((n) => getComputedStyle(n).scale);

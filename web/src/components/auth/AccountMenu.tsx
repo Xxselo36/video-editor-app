@@ -71,6 +71,15 @@ export function AccountMenu({ returnHere = true }: { returnHere?: boolean }) {
   );
 }
 
+/** The avatar menu alone (Einstellungen: the account's own row), signed
+ *  in only. */
+export function AvatarButton({ large = false }: { large?: boolean }) {
+  const t = useT();
+  const auth = useAuthState();
+  if (!AUTH_ENABLED || auth.failed || !auth.signedIn) return null;
+  return MockUserButton ? <MockUserButton large={large} /> : <ClerkUserButton accountLabel={t("common.auth.account")} large={large} />;
+}
+
 /** "Pricing" — only once the backend reports billing as enabled. */
 export function PricingLink({ className = "", style }: { className?: string; style?: React.CSSProperties }) {
   const t = useT();

@@ -74,6 +74,11 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-move: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* The app shell's bars on phones (components/shell): the top bar and
+   * the tab bar, without the safe areas. */
+  --topbar: 56px;
+  --tabbar: 65px;
 }
 
 @theme inline {
@@ -89,6 +94,12 @@ body {
   color: var(--text-strong);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* No grey flash over a tapped control (iOS, Android): every control has
+ * its own pressed look. */
+html {
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Ambient violet + magenta radial glow — visible on every screen
@@ -167,18 +178,61 @@ html[data-uploading] {
   overscroll-behavior-y: none;
 }
 
+/* The app shell (components/shell) on a page: what the screens keep
+ * clear of its bars. Phones: the sticky top bar (--app-topbar), the fixed
+ * tab bar (--app-tabbar) and both plus what Neues Video puts around its
+ * card (--app-chrome: main's top, the privacy link under the card and a
+ * little air, so the link is clear of the tab bar);
+ * the legal footer stays reachable above the tab bar. From 960 px: the
+ * sidebar's width (--app-side), which the footer leaves free too. Screens
+ * write fallbacks for a page without the shell. On <html>: its scroll
+ * padding (the start screen's) reads them too. */
+@media (max-width: 959.98px) {
+  html:has([data-app-shell]) {
+    --app-topbar: calc(var(--topbar) + env(safe-area-inset-top, 0px));
+    --app-tabbar: calc(var(--tabbar) + env(safe-area-inset-bottom, 0px));
+    --app-chrome: calc(var(--app-topbar) + var(--app-tabbar) + 82px);
+  }
+  /* What in the screen gets the focus or is scrolled to stays clear of
+   * both bars. A margin of the screen's content, not the page's scroll
+   * padding: the bars' own buttons (the top bar's ⋯) are in view where
+   * they are, the page doesn't jump to them. ("Untertitel wählen" keeps
+   * its own scroll padding, below: its sticky strip and go bar too.) */
+  html:has([data-app-shell]):not(:has([data-screen="style"])) #main * {
+    scroll-margin-top: calc(var(--app-topbar) + 8px);
+    scroll-margin-bottom: calc(var(--app-tabbar) + 8px);
+  }
+  html:has([data-app-shell]) [data-site-footer] {
+    padding-bottom: calc(20px + var(--tabbar) + env(safe-area-inset-bottom, 0px));
+  }
+}
+/* Short landscape phones: the top bar scrolls with the page. */
+@media (max-width: 959.98px) and (max-height: 500px) {
+  html:has([data-app-shell]) {
+    --app-topbar: 0px;
+  }
+}
+@media (min-width: 960px) {
+  html:has([data-app-shell]) {
+    --app-side: 240px;
+  }
+  html:has([data-app-shell]) [data-site-footer] {
+    margin-left: var(--app-side);
+  }
+}
+
 /* "Untertitel wählen" on phones (features/start): what gets focus or is
  * scrolled to stays clear of the sticky upload strip and go bar (and the
  * shell's bars). The two bars write their heights (features/start/
  * barHeight.ts): they grow with a paused line, a failure, a label on two
  * lines. On short landscape screens those two don't stick. */
-@media (max-width: 959px) {
+@media (max-width: 959.98px) {
   html:has([data-screen="style"]) {
     scroll-padding-top: calc(var(--app-topbar, 0px) + var(--start-strip-h, 55px) + 9px);
     scroll-padding-bottom: calc(var(--app-tabbar, env(safe-area-inset-bottom, 0px)) + var(--start-go-h, 102px) + 14px);
   }
 }
-@media (max-width: 959px) and (max-height: 500px) {
+@media (max-width: 959.98px) and (max-height: 500px) {
   html:has([data-screen="style"]) {
     scroll-padding-top: var(--app-topbar, 0px);
     scroll-padding-bottom: var(--app-tabbar, 0px);

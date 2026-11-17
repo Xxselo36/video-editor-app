@@ -7,6 +7,21 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "Beta",
   "app.header.opening": "Wordt geopend…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Hoofdmenu",
+  "app.nav.upload": "Uploaden",
+  "app.nav.uploadVideo": "Video uploaden",
+  "app.nav.settings": "Instellingen",
+  "app.nav.skip": "Naar de inhoud",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "App-taal",
+  "app.settings.manageAccount": "Account en abonnement",
+  "app.settings.voice": "Spraakopdrachten",
+  "app.settings.voiceTry": "Probeer „Cleo cut”",
+  "app.settings.legal": "Juridisch",
+  "app.settings.beta": "Je gebruikt de bèta van CleoCuts.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — je video is klaar",
 
@@ -300,8 +315,7 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "In de wachtrij (#{n})",
   "app.card.queued.titleNoPos": "In de wachtrij",
-  "app.card.queued.sub":
-    "Er zijn nu veel video's — die van jou start automatisch. Je kunt deze pagina verlaten.",
+  "app.card.queued.sub": "Er zijn nu veel video's. Die van jou start automatisch, dus je kunt deze pagina verlaten.",
   "app.card.open": "Openen",
   "app.card.remove": "Verwijderen",
   "app.card.renderFailedNote": "Exporteren is niet gelukt. Je bewerkingen zijn opgeslagen. Probeer het opnieuw.",
@@ -370,18 +384,20 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Projecten",
   "app.projects.title": "Projecten",
-  "app.projects.search": "Projecten zoeken",
-  "app.projects.filterLabel": "Toon",
-  "app.projects.filter.all": "Alle",
-  "app.projects.filter.edit": "Te bewerken",
-  "app.projects.filter.exported": "Geëxporteerd",
-  "app.projects.noResults": "Geen project komt overeen met ‘{q}’.",
-  "app.projects.noneInFilter": "Hier staat nog niets.",
+  "app.projects.empty": "Nog geen projecten",
+  "app.projects.emptyBody": "Upload een video. Cleo knipt hem en zet er ondertitels bij.",
+  "app.projects.readyNow": "Klaar",
+  "app.projects.announceReady": "„{name}” is klaar",
+  "app.projects.announceFailed": "„{name}” is mislukt",
+  "app.projects.announceUploadStopped": "Uploaden van „{name}” is gestopt",
+  "app.projects.announceExported": "„{name}” is geëxporteerd",
+  "app.projects.announceExportFailed": "„{name}” kon niet worden geëxporteerd",
+  "app.projects.canClose": "Je kunt deze pagina sluiten.",
+  "app.relative.justNow": "zojuist",
   "app.projects.expiredGroup": "Verlopen ({count})",
   "app.projects.expiredNote": "Projecten worden {days} dagen na de laatste wijziging verwijderd, bestanden inbegrepen.",
   "app.projects.allExpired.title": "Je projecten zijn na {days} dagen verwijderd",
   "app.projects.allExpired.body": "Projecten worden {days} dagen na de laatste wijziging bewaard. Upload een video om een nieuw project te starten.",
-  "app.projects.badge.uploading": "Uploaden",
   "app.projects.badge.uploadFailed": "Upload gestopt",
   "app.projects.badge.checking": "Controleren…",
   "app.projects.badge.processing": "Verwerken",
@@ -401,13 +417,13 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Annuleren",
   "app.projects.retry": "Opnieuw proberen",
   "app.projects.pickAgain": "Kies hetzelfde bestand opnieuw om de upload voort te zetten",
-  "app.projects.copyMismatch": "Deze kopie past niet bij „{name}” — de iPhone heeft hem misschien opnieuw omgezet. Vanaf het begin uploaden?",
-  "app.projects.copyMismatchOther": "Dat is niet „{name}”. Kies het opnieuw om verder te gaan — of upload dit bestand vanaf het begin.",
+  "app.projects.copyMismatch": "Deze kopie past niet bij „{name}”. De iPhone heeft hem misschien opnieuw omgezet. Vanaf het begin uploaden?",
+  "app.projects.copyMismatchOther": "Dat is niet „{name}”. Kies het opnieuw om verder te gaan, of upload dit bestand vanaf het begin.",
   "app.projects.otherUpload": "Dit is de video van een andere gestopte upload („{name}”). Ga daar verder op de eigen tegel.",
   "app.projects.fromStartConfirm": "Hiermee geef je de gestopte upload bij {pct}% definitief op. Het nieuwe bestand vanaf het begin uploaden?",
   "app.projects.fromStartYes": "Ja, vanaf het begin",
   "app.projects.uploadFromStart": "Vanaf het begin uploaden",
-  "app.projects.resumeAt": "Gestopt bij {pct}% — kies dezelfde video om verder te gaan.",
+  "app.projects.resumeAt": "Gestopt bij {pct}. Kies dezelfde video om verder te gaan.",
   "app.projects.resume": "Upload hervatten",
   "app.projects.download": "Downloaden",
   "app.projects.copyText": "Posttekst kopiëren",
@@ -499,6 +515,9 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "De ondertitels behouden de look van de eerste export.",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "Nog niets te zien",
+  "app.preview.emptyBody": "Upload een video, dan zie je hem hier.",
+  "app.preview.uploading": "Je video wordt nog geüpload.",
   "app.preview.refine": "Verfijnen",
   "app.preview.more": "Meer voor deze video",
   "app.preview.pause": "Pauzeren",

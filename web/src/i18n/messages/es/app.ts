@@ -7,6 +7,21 @@ export const esApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "Beta",
   "app.header.opening": "Abriendo…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Menú principal",
+  "app.nav.upload": "Subir",
+  "app.nav.uploadVideo": "Subir video",
+  "app.nav.settings": "Ajustes",
+  "app.nav.skip": "Saltar al contenido",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "Idioma de la app",
+  "app.settings.manageAccount": "Cuenta y plan",
+  "app.settings.voice": "Comandos de voz",
+  "app.settings.voiceTry": "Prueba “Cleo cut”",
+  "app.settings.legal": "Legal",
+  "app.settings.beta": "Estás usando la beta de CleoCuts.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — tu video está listo",
 
@@ -301,8 +316,7 @@ export const esApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "En cola (#{n})",
   "app.card.queued.titleNoPos": "En cola",
-  "app.card.queued.sub":
-    "Hay muchos videos ahora mismo — el tuyo empezará automáticamente. Puedes salir de esta página.",
+  "app.card.queued.sub": "Hay muchos videos ahora mismo. El tuyo empezará automáticamente, así que puedes salir de esta página.",
   "app.card.open": "Abrir",
   "app.card.remove": "Eliminar",
   "app.card.renderFailedNote": "La exportación no funcionó. Tus ediciones están guardadas. Inténtalo de nuevo.",
@@ -371,18 +385,20 @@ export const esApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Proyectos",
   "app.projects.title": "Proyectos",
-  "app.projects.search": "Buscar proyectos",
-  "app.projects.filterLabel": "Mostrar",
-  "app.projects.filter.all": "Todos",
-  "app.projects.filter.edit": "Por editar",
-  "app.projects.filter.exported": "Exportados",
-  "app.projects.noResults": "Ningún proyecto coincide con «{q}».",
-  "app.projects.noneInFilter": "Aquí no hay nada todavía.",
+  "app.projects.empty": "Aún no hay proyectos",
+  "app.projects.emptyBody": "Sube un video. Cleo lo corta y le pone subtítulos.",
+  "app.projects.readyNow": "Listo",
+  "app.projects.announceReady": "«{name}» está listo",
+  "app.projects.announceFailed": "«{name}» falló",
+  "app.projects.announceUploadStopped": "Se detuvo la subida de «{name}»",
+  "app.projects.announceExported": "«{name}» se exportó",
+  "app.projects.announceExportFailed": "No se pudo exportar «{name}»",
+  "app.projects.canClose": "Puedes cerrar esta página.",
+  "app.relative.justNow": "hace un momento",
   "app.projects.expiredGroup": "Caducados ({count})",
   "app.projects.expiredNote": "Los proyectos se eliminan {days} días después de su último cambio, archivos incluidos.",
   "app.projects.allExpired.title": "Tus proyectos se eliminaron tras {days} días",
   "app.projects.allExpired.body": "Los proyectos se guardan {days} días después de su último cambio. Sube un vídeo para empezar uno nuevo.",
-  "app.projects.badge.uploading": "Subiendo",
   "app.projects.badge.uploadFailed": "Subida detenida",
   "app.projects.badge.checking": "Comprobando…",
   "app.projects.badge.processing": "Procesando",
@@ -402,13 +418,13 @@ export const esApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Cancelar",
   "app.projects.retry": "Reintentar",
   "app.projects.pickAgain": "Elige el mismo archivo otra vez para continuar la subida",
-  "app.projects.copyMismatch": "Esta copia no coincide con «{name}»: puede que el iPhone la haya convertido de nuevo. ¿Subirla desde el principio?",
+  "app.projects.copyMismatch": "Esta copia no coincide con «{name}». Puede que el iPhone la haya convertido de nuevo. ¿Subirla desde el principio?",
   "app.projects.copyMismatchOther": "Ese no es «{name}». Vuelve a elegirlo para continuar, o sube este archivo desde el principio.",
   "app.projects.otherUpload": "Este es el vídeo de otra subida detenida («{name}»). Continúala en su propia tarjeta.",
   "app.projects.fromStartConfirm": "Así renuncias para siempre a la subida detenida al {pct} %. ¿Subir el archivo nuevo desde el principio?",
   "app.projects.fromStartYes": "Sí, desde el principio",
   "app.projects.uploadFromStart": "Subir desde el principio",
-  "app.projects.resumeAt": "Detenida en el {pct} % — elige el mismo vídeo para continuar.",
+  "app.projects.resumeAt": "Detenida en {pct}. Elige el mismo video para continuar.",
   "app.projects.resume": "Continuar subida",
   "app.projects.download": "Descargar",
   "app.projects.copyText": "Copiar texto del post",
@@ -500,6 +516,9 @@ export const esApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "Sus subtítulos mantienen el estilo de la primera exportación.",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "Aún no hay nada que ver",
+  "app.preview.emptyBody": "Sube un video y lo verás aquí.",
+  "app.preview.uploading": "Tu video aún se está subiendo.",
   "app.preview.refine": "Ajuste fino",
   "app.preview.more": "Más opciones para este video",
   "app.preview.pause": "Pausar",

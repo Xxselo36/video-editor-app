@@ -55,7 +55,7 @@ export function PickMissedHint({
           type="button"
           data-testid="pick-anyway"
           onClick={onPickAnyway}
-          className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+          className="inline-flex min-h-11 touch-manipulation select-none items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
           style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
         >
           <Icon icon={RotateCw} />

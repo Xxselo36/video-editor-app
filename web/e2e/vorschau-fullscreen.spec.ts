@@ -296,9 +296,13 @@ test.describe("the Vorschau in full screen", TAG, () => {
     await openVorschau(page, job.id, { query: "?captions=v2" });
     await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
     await captionsReady(page);
-    // the page scrolled a little: the frame still covers the screen
-    await page.evaluate(() => window.scrollTo(0, 60));
+    // the page scrolled a little: the frame still covers the screen (the
+    // button in view first, clear of the app's top bar: the tap would
+    // scroll it there and move the page itself)
+    await page.evaluate(() => window.scrollTo(0, 12));
+    await button(page).scrollIntoViewIfNeeded();
     const scrolled = await page.evaluate(() => window.scrollY);
+    expect(scrolled).toBeGreaterThan(0);
     const inline = await box(frame(page));
     const canvas = frame(page).getByTestId("caption-canvas");
     const captionsInline = (await box(canvas)).width;

@@ -115,6 +115,7 @@ from backend.auth import (
 from backend.jobs import (
     DEFAULT_PLAN, EVENTS_KEEP_DAYS, PLAN_RETENTION_DAYS, RUNNING_STATUSES,
     DuplicateKey, Job, expiry_time, new_job_id, retention_days, store,
+    timeline_seconds,
 )
 from backend.pipeline import EXPORT_FORMATS, analyze_only
 from backend.security_headers import SecurityHeadersMiddleware
@@ -1683,15 +1684,9 @@ def _record_event(kind: str, job_id: str | None, **data: Any) -> None:
 
 def _output_seconds(job: Job) -> float:
     """Length of the video a render of `job` makes: its saved timeline,
-    each segment at its speed."""
-    total = 0.0
-    for seg in job.edit_segments():
-        try:
-            speed = max(0.05, float(seg.get("speed") or 1.0))
-            total += max(0.0, float(seg["end"]) - float(seg["start"])) / speed
-        except (TypeError, ValueError, KeyError):
-            continue
-    return total
+    each segment at its speed (unrounded; the stored Job.output_seconds
+    is the same sum to 1 ms)."""
+    return timeline_seconds(job.edit_segments())
 
 
 def _true_up(job_id: str, duration: float) -> None:
@@ -4740,12 +4735,15 @@ def _owner_jobs(owner_id: str) -> list[Job]:
 
 # GET /jobs?fields=summary (UX12): what a Projects tile shows — no
 # outputs or hook clips (the tile's menu asks GET /jobs/{id} for those);
-# renders_ok: the export's generation in the menu's download link.
+# renders_ok: the export's generation in the menu's download link;
+# has_poster: GET /jobs/{id}/poster has the row's picture;
+# output_seconds: the cut's length (None: not stored yet — duration).
 _SUMMARY_FIELDS = (
     "id", "status", "message", "progress", "error_code", "error_params",
     "refunded", "stage", "stage_params", "queue_position", "filename",
     "title", "preset_id", "preset_label", "created_at", "updated_at",
     "expires_at", "has_output", "duration", "renders_ok",
+    "has_poster", "output_seconds",
 )
 
 
@@ -4794,6 +4792,14 @@ def _as_dict(value: Any) -> dict:
         except ValueError:
             return {}
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _as_seconds(value: Any) -> float | None:
+    """A status row's seconds (output_seconds): a finite number as a
+    float, anything else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
 
 
 def _status_rows(ids: list[str], user: User | None) -> dict:
@@ -4851,6 +4857,11 @@ def _status_rows(ids: list[str], user: User | None) -> dict:
             "expires_at": expiry_time(row.get("plan"), row["updated_at"]),
             # The export's generation: the tile menu's download link.
             "renders_ok": int(row.get("renders_ok") or 0),
+            # The Projects row: GET /jobs/{id}/poster has its picture
+            # (told from poster_key, which is never served) ...
+            "has_poster": bool(row.get("poster_key")),
+            # ... and the length of the cut video (None: not stored yet).
+            "output_seconds": _as_seconds(row.get("output_seconds")),
         })
     return {"jobs": jobs, "missing": missing}
 
@@ -4872,10 +4883,14 @@ async def jobs_status(request: Request, ids: str = "",
     `?ids=a,b,c` (at most 50) → {"jobs": [{id, status, message, progress,
     queue_position, error (its code unless admin), error_code,
     error_params, refunded, stage, stage_params, has_output, updated_at,
-    preview_version, title, duration, created_at, expires_at, renders_ok}],
-    "missing": [ids that don't exist or aren't the caller's]}. With a
-    weak ETag: send it back as If-None-Match and an unchanged answer is
-    an empty 304."""
+    preview_version, title, duration, created_at, expires_at, renders_ok,
+    has_poster, output_seconds}], "missing": [ids that don't exist or
+    aren't the caller's]}. has_poster: GET /jobs/{id}/poster has a
+    picture (a row asks for it only then); output_seconds: the length of
+    the video the saved timeline renders to (speeds applied), None until
+    a timeline write stored it — show `duration` (the source's) then.
+    With a weak ETag: send it back as If-None-Match and an unchanged
+    answer is an empty 304."""
     wanted = list(dict.fromkeys(i.strip() for i in ids.split(",")
                                 if i.strip()))
     if len(wanted) > _STATUS_MAX_IDS:
@@ -5266,17 +5281,29 @@ def job_peaks(job_id: str, user: User | None = Depends(media_user)):
 PEAKS_MAX_BYTES = 8 * 1024 * 1024
 
 
+# A poster miss is never kept: the analysis may be making it right now.
+_POSTER_MISS_HEADERS = {"Cache-Control": media.NO_STORE}
+
+
 @app.get("/jobs/{job_id}/poster")
 def job_poster(job_id: str, user: User | None = Depends(media_user)):
     """poster.jpg: the frame at the start of the first kept clip, as the
-    analysis cut it (`has_poster` in GET /jobs/{id}). The editor shows it
-    until its video has a frame of its own (UT5); after the user changes
-    the first clip it may be stale, which the editor knows."""
+    analysis cut it (`has_poster` in GET /jobs/{id}, the summary list and
+    the status rows). The editor shows it until its video has a frame of
+    its own (UT5), the Projects list as the row's picture; after the
+    user changes the first clip it may be stale, which the editor knows.
+
+    No poster (not made yet, or none: an analysis from before UT5 or one
+    whose poster failed): 404 poster_not_ready; its stored file missing:
+    409 poster_not_ready. Both with Cache-Control: no-store, so a browser
+    asks again instead of keeping the miss."""
     job = get_owned_job(job_id, user)
     if not job.poster_key:
-        raise HTTPException(404, "poster_not_ready")
+        raise HTTPException(404, "poster_not_ready",
+                            headers=_POSTER_MISS_HEADERS)
     return _media(job, job.poster_key, "image/jpeg",
-                  "poster_not_ready", cache="private, max-age=604800, immutable")
+                  "poster_not_ready", cache="private, max-age=604800, immutable",
+                  miss_headers=_POSTER_MISS_HEADERS)
 
 
 # ── Filmstrip (UX7b) ─────────────────────────────────────────────────
@@ -5995,15 +6022,17 @@ def _media_store(job: Job) -> str:
 
 def _media(job: Job, key: str, media_type: str, not_ready: str,
            download_name: str | None = None,
-           cache: str | None = None):
-    """`key` of `job`, from the job's store (media.store_of)."""
+           cache: str | None = None,
+           miss_headers: dict[str, str] | None = None):
+    """`key` of `job`, from the job's store (media.store_of). A local
+    object that is missing: 409 `not_ready`, with `miss_headers`."""
     where = _media_store(job)
     try:
         return media.media_response(key, media_type=media_type,
                                     download_name=download_name, cache=cache,
                                     store=where)
     except FileNotFoundError:
-        raise HTTPException(409, not_ready)
+        raise HTTPException(409, not_ready, headers=miss_headers)
 
 
 def _proxy_video_enabled() -> bool:

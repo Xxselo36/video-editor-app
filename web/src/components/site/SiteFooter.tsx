@@ -15,6 +15,8 @@ export function SiteFooter({ className = "" }: { className?: string }) {
   const t = useT();
   return (
     <footer
+      // The app shell lifts it above its tab bar (app/globals.css).
+      data-site-footer=""
       className={`relative z-10 px-4 py-5 text-xs sm:px-6 ${className}`}
       style={{ borderTop: "1px solid var(--border)", color: "var(--text-muted)" }}
     >
