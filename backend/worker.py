@@ -1136,14 +1136,7 @@ def _social_result(job_id: str, future: Any) -> tuple[dict, llm.Observer]:
 
 def output_seconds(job: Any) -> float:
     """backend/main.py _output_seconds."""
-    total = 0.0
-    for seg in job.edit_segments():
-        try:
-            speed = max(0.05, float(seg.get("speed") or 1.0))
-            total += max(0.0, float(seg["end"]) - float(seg["start"])) / speed
-        except (TypeError, ValueError, KeyError):
-            continue
-    return total
+    return jobs.timeline_seconds(job.edit_segments())
 
 
 def render_commit(cur: Any, result: dict, out_prefix: str,

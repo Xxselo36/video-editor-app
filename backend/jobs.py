@@ -133,6 +133,13 @@ class Job:
     # stale_rev: another tab or device saved meanwhile); a save without
     # them (an older client) still overwrites and gets a server rev.
     edit_rev: float = 0
+    # Length of the video a render of the saved timeline makes: Σ (end −
+    # start) / speed over edit_segments(), to 1 ms (output_seconds_of);
+    # None without segments. The stores set it on every write of
+    # `segments` or `settings` (whose segment_effects hold the speeds),
+    # so no call site has to (derive_fields). Rows not written since it
+    # exists keep None — clients show `duration` then.
+    output_seconds: float | None = None
     # Transcript phrases as last edited in review (text fixes, deleted
     # lines). None until the user edits — an empty list means every line
     # was deleted. GET /subtitles returns them so edits survive leaving
@@ -430,6 +437,9 @@ class Job:
             "preview_version": self.preview_version,
             # The timeline's revision (POST /edit-segments base_rev).
             "edit_rev": self.edit_rev,
+            # Seconds of video the saved timeline renders to (speeds
+            # applied); None until stored — `duration` is the source's.
+            "output_seconds": self.output_seconds,
             "caption_preset": (self.settings or {}).get("caption_preset"),
             "filename": self.filename,
             "preset_id": self.preset_id,
@@ -477,6 +487,51 @@ class Job:
         }
 
 
+def timeline_seconds(clips: Iterable[dict[str, Any]]) -> float:
+    """Length of the video a render makes from timeline clips (as
+    Job.edit_segments gives them: {start, end, speed}, source seconds):
+    Σ (end − start) / speed, each speed at least 0.05. A clip that can't
+    be read adds nothing. backend/main.py _output_seconds (the render's
+    settings) and Job.output_seconds both count with this."""
+    total = 0.0
+    for seg in clips:
+        try:
+            speed = max(0.05, float(seg.get("speed") or 1.0))
+            total += max(0.0, float(seg["end"]) - float(seg["start"])) / speed
+        except (TypeError, ValueError, KeyError):
+            continue
+    return total
+
+
+def output_seconds_of(job: Job) -> float | None:
+    """Job.output_seconds for `job` as it is now: its saved timeline's
+    timeline_seconds, rounded to 1 ms. None without segments, or with
+    stored segments / effects that can't be read (a display value must
+    never fail the write that derives it)."""
+    try:
+        clips = job.edit_segments()
+    except Exception:
+        return None
+    if not clips:
+        return None
+    return round(timeline_seconds(clips), 3)
+
+
+# What Job.output_seconds is derived from: the segments, and the settings
+# (their segment_effects: one speed per segment, Job.edit_segments).
+_TIMELINE_FIELDS = frozenset({"segments", "settings"})
+
+
+def derive_fields(job: Job, written: Iterable[str] | None = None) -> None:
+    """Keep the job's derived fields current. Both stores call it on the
+    job they are about to store: create (written=None: a new job) and
+    every update / update_if / modify, also inside a task commit, with
+    the names of the fields written — output_seconds follows any write
+    of segments or settings."""
+    if written is None or not _TIMELINE_FIELDS.isdisjoint(written):
+        job.output_seconds = output_seconds_of(job)
+
+
 def _public_fonts(font_subsets: dict | None) -> dict:
     from backend import font_subset
     return font_subset.public(font_subsets)
@@ -517,7 +572,11 @@ _STATUS_FIELDS = ("id", "status", "message", "progress", "queue_position",
                   # UX12: what a project tile shows (the anonymous
                   # Projects page has no GET /jobs list); renders_ok:
                   # the export's generation in its menu's download link.
-                  "plan", "title", "duration", "created_at", "renders_ok")
+                  "plan", "title", "duration", "created_at", "renders_ok",
+                  # The Projects row: poster_key only to tell has_poster
+                  # (the key itself is never served), the cut's length.
+                  # Scalars only — never segments or settings.
+                  "poster_key", "output_seconds")
 
 
 def status_defaults() -> dict[str, Any]:
@@ -800,6 +859,7 @@ class JobStore:
         now = time.time()
         job = Job(id=job_id, input_path=input_path, settings=settings,
                   updated_at=now, created_at=now, **extra)
+        derive_fields(job)
         with self._lock:
             if idempotency_key:
                 row = self._conn.execute(
@@ -933,6 +993,7 @@ class JobStore:
             return None
         for k, v in fields_to_update.items():
             setattr(job, k, v)
+        derive_fields(job, fields_to_update)
         if "updated_at" not in fields_to_update:
             job.updated_at = time.time()
         if not commit:
