@@ -79,10 +79,11 @@ let refreshed = false;
 
 const subs = new Set<() => void>();
 let version = 0;
-let snapshot: { version: number; ready: boolean; serverLoaded: boolean; projects: Project[] } = {
+let snapshot: ProjectsSnapshot & { version: number } = {
   version: -1,
   ready: false,
   serverLoaded: false,
+  statusFailed: false,
   projects: [],
 };
 
@@ -506,13 +507,25 @@ async function loadServerList(): Promise<boolean> {
   }
 }
 
+/** Ids whose last status request failed (offline, a 5xx): their state is
+ *  unknown because the server didn't answer, not because nobody asked
+ *  yet (a job another tab just made). */
+const failedIds = new Set<string>();
+
 /** Status rows for `ids` (in batches); unknown ids are MISSING. */
 async function loadStatuses(ids: string[], p: JobStatusPoller | null): Promise<boolean> {
   let changed = false;
   for (let i = 0; i < ids.length; i += STATUS_BATCH_MAX) {
     const chunk = ids.slice(i, i + STATUS_BATCH_MAX);
     const res = await (p ?? new JobStatusPoller()).poll(chunk);
-    if (!res) continue;
+    if (!res) {
+      for (const id of chunk) {
+        if (!failedIds.has(id)) changed = true;
+        failedIds.add(id);
+      }
+      continue;
+    }
+    for (const id of chunk) changed = failedIds.delete(id) || changed;
     for (const row of res.rows) changed = setRemote(row as unknown as Record<string, unknown>) || changed;
     for (const id of res.missing) {
       // Accounts on, a job of the account's list can't be "missing".
@@ -645,14 +658,22 @@ export type ProjectsSnapshot = {
   ready: boolean;
   /** Accounts on: the account's list (GET /jobs) was loaded. */
   serverLoaded: boolean;
+  /** The last status request of a project of this device's list failed. */
+  statusFailed: boolean;
   projects: Project[];
 };
 
-const SERVER_SNAPSHOT: ProjectsSnapshot = { ready: false, serverLoaded: false, projects: [] };
+const SERVER_SNAPSHOT: ProjectsSnapshot = { ready: false, serverLoaded: false, statusFailed: false, projects: [] };
 
 function getSnapshot(): ProjectsSnapshot {
   if (snapshot.version !== version) {
-    snapshot = { version, ready: refreshed, serverLoaded: serverIds !== null, projects: projectsNow() };
+    snapshot = {
+      version,
+      ready: refreshed,
+      serverLoaded: serverIds !== null,
+      statusFailed: locals.some((j) => failedIds.has(j.jobId)),
+      projects: projectsNow(),
+    };
   }
   return snapshot;
 }
@@ -683,6 +704,7 @@ export function _resetForTests(): void {
   remotes.clear();
   serverIds = null;
   exportHints.clear();
+  failedIds.clear();
   refreshed = false;
   listEtag = null;
   listBody = null;

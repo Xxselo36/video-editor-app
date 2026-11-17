@@ -15,9 +15,11 @@
  * Watched while in use: Next renders a page's head anew on every
  * navigation between pages (the shell stays mounted from tab to tab), a
  * new viewport meta without the token; it goes back on before the frame
- * is painted.
+ * is painted. Layout effects: leaving for a page without it (Imprint,
+ * Pricing), the watch ends within the commit that brings that page's
+ * meta, so the token never reaches it, not even for a frame.
  */
-import { useEffect } from "react";
+import { useLayoutEffect } from "react";
 
 let users = 0;
 let watcher: MutationObserver | null = null;
@@ -33,7 +35,7 @@ function setFitCover(on: boolean) {
 }
 
 export function useViewportFitCover(): void {
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (users++ === 0) {
       setFitCover(true);
       // (Its own write comes back here once and changes nothing.)

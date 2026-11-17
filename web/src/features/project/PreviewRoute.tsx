@@ -27,7 +27,7 @@ export function PreviewRoute() {
   const t = useT();
   const router = useRouter();
   const v2 = useProjectsV2();
-  const { ready, serverLoaded, projects } = useProjects();
+  const { ready, serverLoaded, statusFailed, projects } = useProjects();
   const awaiting = useAwaitingGoIds();
   const target = useMemo(() => (ready ? pickPreview(projects, readLastPreview()) : null), [ready, projects]);
 
@@ -38,11 +38,12 @@ export function PreviewRoute() {
 
   const title = t("editor.preview");
   const upload = projects.find((p) => p.state === "uploading");
-  // Projects whose state the server hasn't told (no answer yet, offline,
-  // a 5xx): one of them may have something to show.
+  // Projects whose state the server hasn't told yet: one of them may have
+  // something to show. Its request failed (offline, a 5xx): the retry;
+  // not asked yet (a job another tab just made): a moment.
   const unchecked = projects.some((p) => p.state === "unknown");
   let body;
-  if (!v2 || !ready || target) {
+  if (!v2 || !ready || target || (unchecked && !statusFailed)) {
     body = <PreviewSkeleton testId="preview-resolving" />;
   } else if (upload && awaiting.has(upload.id)) {
     // Waiting for "Los geht's" in this page: Continue brings it back.

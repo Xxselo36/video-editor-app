@@ -64,31 +64,6 @@ export function ProjectsSkeleton() {
   );
 }
 
-/**
- * One polite line for screen readers when a video Cleo worked on turns
- * ready or fails while the page is open, with its name. The rows' status
- * lines change without a word: their percents and times would be read
- * out all the time.
- */
-function useAnnouncement(projects: Project[]): string {
-  const t = useT();
-  const key = projects.map((p) => `${p.id}:${p.state}`).join(" ");
-  const [seen, setSeen] = useState(() => ({ key, states: new Map(projects.map((p) => [p.id, p.state])) }));
-  const [say, setSay] = useState("");
-  if (seen.key !== key) {
-    let line = "";
-    for (const p of projects) {
-      if (seen.states.get(p.id) !== "processing") continue;
-      const name = p.name || t("app.library.untitled");
-      if (p.state === "ready" || p.state === "edited") line = t("app.projects.announceReady", { name });
-      else if (p.state === "failed") line = t("app.projects.announceFailed", { name });
-    }
-    setSeen({ key, states: new Map(projects.map((p) => [p.id, p.state])) });
-    if (line) setSay(line);
-  }
-  return say;
-}
-
 function Rows({ list, onOpen }: { list: Project[]; onOpen: (href: string) => void }) {
   return (
     <ul className={s.list}>
@@ -108,7 +83,6 @@ export function ProjectsPage() {
   const emptyAction = AUTH_ENABLED ? emptyListAction({ ready, serverLoaded, count: projects.length }) : "show";
   const [mounted, setMounted] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const announce = useAnnouncement(projects);
 
   useEffect(() => {
     const legacy = legacyJobRedirect(window.location.search);
@@ -197,9 +171,6 @@ export function ProjectsPage() {
       <div className={s.page}>
         <PageTitle bar={title}>{title}</PageTitle>
         {body}
-        <p role="status" className="sr-only" data-testid="projects-announce">
-          {announce}
-        </p>
       </div>
     </AppPage>
   );

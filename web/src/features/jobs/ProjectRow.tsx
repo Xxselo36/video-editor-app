@@ -9,7 +9,7 @@
  * above it. While Cleo works on it the row is grey, its frame blurred,
  * and opens nothing; it keeps its nodes when it turns ready, so the frame
  * clears in place and the status line says "Bereit" for as long as the
- * page stays open (the page tells screen readers: ProjectsPage). The
+ * page stays open (screen readers hear it once: useNews). The
  * menu (rename, delete) is on the
  * Vorschau. An expired row requests no frame.
  *
@@ -20,11 +20,12 @@
  * record says so), without the way back: that start is the other tab's.
  */
 import Link from "next/link";
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent } from "react";
 import { ArrowRight, ChevronRight, RotateCw, X } from "lucide-react";
 import { cx } from "@/components/ui/cx";
 import { Icon } from "@/components/ui/Icon";
 import { useLang, useT } from "@/i18n";
+import type { MessageKey } from "@/i18n/messages/en";
 import { fmtMinutes } from "@/lib/account";
 import { useMediaUrl } from "@/lib/api";
 import { getConfig } from "@/lib/config";
@@ -165,6 +166,32 @@ function Thumb({ p }: { p: Project }) {
   );
 }
 
+/** What a screen reader hears when the row's state changes while the page
+ *  is open (its status line changes without a word: percents, times).
+ *  Any other change clears it, so the same news again is news again. */
+function newsFor(from: ProjectState, to: ProjectState, renderFailed: boolean): MessageKey | null {
+  if (from === "processing") {
+    if (to === "ready" || to === "edited") return "app.projects.announceReady";
+    return to === "failed" ? "app.projects.announceFailed" : null;
+  }
+  if (from === "uploading" && to === "upload_failed") return "app.projects.announceUploadStopped";
+  if (from === "exporting") {
+    if (to === "exported") return "app.projects.announceExported";
+    if ((to === "ready" || to === "edited") && renderFailed) return "app.projects.announceExportFailed";
+  }
+  return null;
+}
+
+function useNews(state: ProjectState, renderFailed: boolean): MessageKey | null {
+  const [seen, setSeen] = useState(state);
+  const [news, setNews] = useState<MessageKey | null>(null);
+  if (seen !== state) {
+    setSeen(state);
+    setNews(newsFor(seen, state, renderFailed));
+  }
+  return news;
+}
+
 /** Turned ready while this row was on screen: "Bereit" (not a time) for
  *  as long as the row stays (plan: fresh until unmount). */
 function useFresh(state: ProjectState): boolean {
@@ -194,6 +221,8 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
   const waits = awaitingGo || (elsewhere && Boolean(p.upload?.awaitingGo));
   const uploadsHere = useUploadsRunning();
   const fresh = useFresh(p.state);
+  const news = useNews(p.state, p.renderFailed);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   // Its start was just created: the row enters once.
   const [arrives] = useState(() => isArriving(p.id));
   useEffect(() => forgetArriving(p.id), [p.id]);
@@ -225,6 +254,14 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
 
   const name = p.name || t("app.library.untitled");
   const shown = displayName(name);
+  // The whole name as the row's tooltip while a mouse is over it, where
+  // the row shortens it (its link lies over the name). No title the rest
+  // of the time: screen readers would hear the name twice.
+  const tipOn = (e: PointerEvent<HTMLElement>) => {
+    const h = titleRef.current;
+    if (e.pointerType === "mouse" && (shown !== name || (h !== null && h.scrollWidth > h.clientWidth + 1))) e.currentTarget.title = name;
+  };
+  const tipOff = (e: PointerEvent<HTMLElement>) => e.currentTarget.removeAttribute("title");
   const href = openHref(p);
   // Cleo works on it: grey, blurred, not a way in.
   const busy = p.state === "processing";
@@ -415,6 +452,8 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
       data-busy={busy || undefined}
       data-arrive={arrives || undefined}
       aria-label={name}
+      onPointerEnter={tipOn}
+      onPointerLeave={tipOff}
       className={s.row}
     >
       {href && (
@@ -423,9 +462,6 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
           prefetch={false}
           data-testid="job-card-open"
           aria-label={t("app.projects.openAria", { name })}
-          // The whole name on hover where the row shortens it (the link
-          // lies over the name's own tooltip).
-          title={shown !== name ? name : undefined}
           className={s.open}
         />
       )}
@@ -433,10 +469,13 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
         <Thumb p={p} />
       </span>
       <div className={s.text}>
-        <h3 className={s.title} title={name}>
+        <h3 ref={titleRef} className={s.title}>
           <span aria-hidden="true">{shown}</span>
           <span className="sr-only">{name}</span>
         </h3>
+        <span role="status" className="sr-only" data-testid="job-card-announce">
+          {news ? t(news, { name }) : ""}
+        </span>
         <p className={s.meta} data-testid="job-card-meta">
           {meta.dot && <span className={s.dot} data-dot={meta.dot} aria-hidden="true" />}
           {meta.word && <span className="sr-only">{meta.word}, </span>}
