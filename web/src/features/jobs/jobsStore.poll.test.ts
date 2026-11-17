@@ -296,3 +296,108 @@ it("not seen running (gone after its retention): an expired row, as before", asy
   expect(rows()).toContain("A:expired:anderswo.mp4");
   expect(stored()).toEqual(["A"]);
 });
+
+// ── another account signs in (Clerk's multi-session switch) ──────────
+
+const RUN_C = { id: "C", owner: "u2", status: "processing", progress: 10, stage: "analyze.transcribe", filename: "zwei.mp4", created_at: NOW - 5, updated_at: NOW };
+/** u1's editor copies of A on this device, and u2's own list. */
+const KEYS = {
+  "cleocuts.editor.title.A": "Mein Titel",
+  "cleocuts.editor.unsaved.v1.A": JSON.stringify({ segments: [[0, 1]] }),
+  "cleocuts.jobs.v2:u2": JSON.stringify([{ jobId: "C", filename: "zwei.mp4", timestamp: Date.now() - 5_000 }]),
+  "cleocuts.jobs.claimed:u2": JSON.stringify(["C"]),
+};
+/** Nothing of u1's A was forgotten (it still exists). */
+function aKept() {
+  expect(server.has("A")).toBe(true);
+  expect(stored("u1")).toContain("A");
+  expect(storage.getItem("cleocuts.editor.title.A")).toBe("Mein Titel");
+  expect(storage.getItem("cleocuts.editor.unsaved.v1.A")).not.toBeNull();
+  expect(JSON.parse(storage.getItem("cleocuts.jobs.v2.deleted:u2") ?? "[]")).toEqual([]);
+}
+/** The next list request goes out as u1; u2 signs in before its answer
+ *  (u1's list, or `fail`) comes. */
+function switchDuringList(fail = 0): () => boolean {
+  const real = globalThis.fetch;
+  let switched = false;
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+    if (switched || !url.includes("/jobs?fields=summary")) return real(url, init);
+    switched = true;
+    const res = fail ? new Response("{}", { status: fail }) : await real(url, init);
+    asUser = "u2";
+    auth.publishAuthState({ userId: "u2" });
+    await vi.advanceTimersByTimeAsync(1);
+    return res;
+  });
+  return () => switched;
+}
+
+it("another account signs in while the list is asked: the first one's list lands nowhere, nothing of it is forgotten", async () => {
+  server.set("C", { ...RUN_C });
+  // D: made while the list was shown, then deleted elsewhere — its
+  // status answer has the list asked again.
+  await open([LOCAL_A], { keys: KEYS });
+  store.addUpload("upl-9", { filename: "neu.mp4" }, {});
+  server.set("D", { ...RUNNING, id: "D", filename: "neu.mp4", created_at: NOW - 1 });
+  store.uploadCreated("upl-9", "D", { filename: "neu.mp4" });
+  await flush();
+  await tick();
+  server.delete("D");
+  const switched = switchDuringList();
+  for (let i = 0; i < 4; i++) await tick();
+  expect(switched()).toBe(true);
+  expect(rows()).toEqual(["C:processing:zwei.mp4"]);
+  aKept();
+});
+
+it("another account signs in while the list fails: nothing carries over to it", async () => {
+  server.set("C", { ...RUN_C });
+  await open([LOCAL_A], { keys: KEYS });
+  await tick();
+  statusHides.add("A");
+  const switched = switchDuringList(503);
+  await tick();
+  statusHides.clear();
+  for (let i = 0; i < 3; i++) await tick();
+  expect(switched()).toBe(true);
+  aKept();
+});
+
+it("left over from a failed list, then another account signs in: nothing of the first one is forgotten", async () => {
+  server.set("C", { ...RUN_C });
+  await open([LOCAL_A], { keys: KEYS });
+  await tick();
+  statusHides.add("A");
+  listFails = 503;
+  await tick();
+  statusHides.clear();
+  listFails = 0;
+  asUser = "u2";
+  auth.publishAuthState({ userId: "u2" });
+  await vi.advanceTimersByTimeAsync(1);
+  await flush();
+  for (let i = 0; i < 3; i++) await tick();
+  aKept();
+});
+
+it("the list keeps failing: after three tries the row is expired and its poll stops", async () => {
+  server.delete("A");
+  await open();
+  store.addUpload("upl-1", { filename: "anderswo.mp4" }, {});
+  server.set("A", { ...RUNNING });
+  store.uploadCreated("upl-1", "A", { filename: "anderswo.mp4" });
+  await flush();
+  await tick();
+  listFails = 500;
+  server.delete("A");
+  const real = globalThis.fetch;
+  const asked = { list: 0, status: 0 };
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+    if (url.includes("/jobs?fields=summary")) asked.list++;
+    if (url.includes("/jobs/status")) asked.status++;
+    return real(url, init);
+  });
+  for (let i = 0; i < 30; i++) await tick();
+  expect(rows()).toContain("A:expired:anderswo.mp4");
+  expect(asked).toEqual({ list: 3, status: 3 });
+});

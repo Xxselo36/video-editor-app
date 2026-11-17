@@ -205,6 +205,7 @@ function ensureLoaded(): void {
     refreshed = false;
     listStale = false;
     goneFromList.clear();
+    listMisses = 0;
   }
   maybeClaim();
   if (switched) {
@@ -471,6 +472,10 @@ let listBody: Record<string, unknown>[] | null = null;
 let listStale = false;
 /** Those ids (the poll asks only for jobs Cleo works on). */
 const goneFromList = new Set<string>();
+/** Ticks in a row whose list didn't answer; at LIST_TRIES the ids are
+ *  decided without it. */
+let listMisses = 0;
+const LIST_TRIES = 3;
 /** Last seen running and not past the expiry the server gave it: it
  *  can't have gone for its age (the server never purges a running job)
  *  — missing now, it was deleted, not expired. Whether or not this
@@ -515,17 +520,22 @@ function setRemote(row: Record<string, unknown>): boolean {
 }
 
 /** Accounts on: the account's list (304 = as before). Whether anything
- *  changed; null: the list didn't answer (serverIds as they were). */
+ *  changed; null: the list didn't answer — or answered for an account
+ *  that isn't signed in any more (another one meanwhile): nothing of it
+ *  is kept (serverIds as they were). */
 async function loadServerList(): Promise<boolean | null> {
+  const asked = storageScope();
   try {
     const headers: Record<string, string> = {};
     if (listEtag && listBody) headers["If-None-Match"] = listEtag;
     const r = await apiFetch("/jobs?fields=summary", { headers, cache: "no-store" });
+    if (storageScope() !== asked) return null;
     let rows: Record<string, unknown>[];
     if (r.status === 304 && listBody) rows = listBody;
     else if (!r.ok) return null;
     else {
       const body = (await r.json()) as unknown;
+      if (storageScope() !== asked) return null;
       rows = Array.isArray(body) ? (body as Record<string, unknown>[]) : [];
       listEtag = r.headers.get("ETag");
       listBody = rows;
@@ -632,10 +642,25 @@ async function tick(): Promise<void> {
         goneFromList.clear();
         const listed = await loadServerList();
         if (listed === null) {
-          // No answer: asked again at the next tick, nothing decided.
-          listStale = true;
-          gone.forEach((id) => goneFromList.add(id));
+          if (storageScope() !== scope) {
+            // Another account meanwhile: nothing of this one carries over.
+          } else if (++listMisses < LIST_TRIES) {
+            // No answer: asked again at the next tick, nothing decided.
+            listStale = true;
+            gone.forEach((id) => goneFromList.add(id));
+          } else {
+            // The list keeps failing: the status answers decide, as
+            // without it — expired rows, no more polls for them.
+            listMisses = 0;
+            for (const id of gone) {
+              if (remotes.get(id) !== MISSING) {
+                remotes.set(id, MISSING);
+                changed = true;
+              }
+            }
+          }
         } else {
+          listMisses = 0;
           changed = listed || changed;
           // Out of the list while Cleo worked on them (a running job
           // never goes for its age): deleted elsewhere, so gone from this
@@ -774,5 +799,6 @@ export function _resetForTests(): void {
   listBody = null;
   listStale = false;
   goneFromList.clear();
+  listMisses = 0;
   version++;
 }
