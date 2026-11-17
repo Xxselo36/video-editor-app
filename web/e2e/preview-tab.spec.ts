@@ -59,6 +59,32 @@ test("nothing to show yet: it says so, with the way to upload", { tag: "@editor-
   await expect(page).toHaveURL(`${WEB}/app/new`);
 });
 
+test("the states didn't load: it says so, with a retry (not 'nothing yet')", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  const done = await stub.seed("done");
+  const down = { on: true };
+  await page.route("**/jobs/status*", (r) => (down.on ? r.fulfill({ status: 503, body: "" }) : r.fallback()));
+  await openWithStorage(page, "/app/preview", { [JOBS]: [job(done.id, "alt.mp4", 3_600_000)] });
+  await expect(page.getByTestId("preview-load-failed")).toContainText("Couldn't load your projects");
+  await expect(page.getByTestId("preview-empty")).toHaveCount(0);
+  down.on = false;
+  await page.getByTestId("preview-retry").click();
+  await expect(page).toHaveURL(`${WEB}/app/p/${done.id}`);
+});
+
+test("a video waiting for Let's go in another tab: it says so, the way back is that tab's", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  await openWithStorage(page, "/app/new");
+  await chooseFile(page, { name: "drueben.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
+  await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
+  const other = await page.context().newPage();
+  await other.goto("/app/preview");
+  const box = other.getByTestId("preview-uploading");
+  await expect(box).toContainText("Waiting for “Let’s go”");
+  await expect(box.getByRole("link", { name: "Continue" })).toHaveCount(0);
+  await box.getByRole("link", { name: "Back to projects" }).click();
+  await expect(other).toHaveURL(`${WEB}/app`);
+  await other.close();
+});
+
 test("a video waiting for Let's go: it says so, Continue brings it back", { tag: "@editor-v2" }, async ({ page, stub }, info) => {
   const mobile = Boolean(info.project.use.isMobile);
   await openWithStorage(page, "/app/new");

@@ -78,8 +78,8 @@ function expectFile(store: Store, d: { hops: Hop[] }, href: string, key: string)
   expect(decodeURIComponent(new URL(hop.location!).pathname).endsWith(`/${key}`), `${hop.location} → ${key}`).toBe(true);
 }
 
-/** ⋯ → Download's link of the menu in `scope` (the Vorschau's, or a tile's). */
-async function menuLink(page: Page, scope: Locator): Promise<string> {
+/** ⋯ → Download's link of the menu in `scope` (the Vorschau's). */
+async function menuLink(page: Page, scope: Page | Locator): Promise<string> {
   await scope.getByTestId("job-card-menu").click();
   const href = await page.getByTestId("job-card-download").getAttribute("href");
   await page.keyboard.press("Escape");
@@ -114,7 +114,7 @@ async function storageOf(stub: Stub, store: Store): Promise<string | null> {
 function saveTests(store: Store) {
   test.skip(({ browserName }) => browserName !== "chromium", "Chromium only (the browser's own record of each request: CDP)");
 
-  test("Download after Fine-tune and a second export: the new export's own link, ⋯'s too, here and on its tile", async ({
+  test("Download after Fine-tune and a second export: the new export's own link, ⋯'s too", async ({
     page,
     stub,
   }) => {
@@ -124,17 +124,17 @@ function saveTests(store: Store) {
     const download = `${API}/jobs/${job.id}/download`;
     // Every download, ⋯'s too: the file named after the project.
     const named = "tiktok_3_mistakes_final_cleocuts_9x16.mp4";
-    // Projects: the tile's ⋯ → Download is the first export's.
+    // Projects: its row leads to the Vorschau (⋯ is there, PR3).
     await openWithStorage(page, "/app", { ...TOUR_DONE, [JOBS]: [listed(job.id, job.filename)] });
-    const tile = jobCard(page, "tiktok_3_mistakes_final");
-    await expect(tile).toHaveAttribute("data-state", "exported", { timeout: 30_000 });
-    const tileFirst = await menuLink(page, tile);
-    await page.goto(`/app/p/${job.id}`);
+    const row = jobCard(page, "tiktok_3_mistakes_final");
+    await expect(row).toHaveAttribute("data-state", "exported", { timeout: 30_000 });
+    await row.getByTestId("job-card-open").click();
     await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 45_000 });
     const save = page.getByTestId("done-download").first();
     const saveFirst = (await save.getAttribute("href"))!;
-    const menuFirst = await menuLink(page, vorschau(page));
-    expect([gen(saveFirst), gen(menuFirst), gen(tileFirst)]).toEqual(["1", "1", "1"]);
+    // (⋯ is in the title row; on phones at the end of the top bar.)
+    const menuFirst = await menuLink(page, page);
+    expect([gen(saveFirst), gen(menuFirst)]).toEqual(["1", "1"]);
     const d1 = await downloadOf(page, download, () => save.click());
     expect(d1.name).toBe(named);
     expectFile(store, d1, saveFirst, first);
@@ -157,24 +157,13 @@ function saveTests(store: Store) {
     const d2 = await downloadOf(page, download, () => save.click());
     expect(d2.name).toBe(named);
     expectFile(store, d2, saveSecond, after.output_keys.primary);
-    const menuSecond = await menuLink(page, vorschau(page));
+    const menuSecond = await menuLink(page, page);
     expect(menuSecond).not.toBe(menuFirst);
     expect(gen(menuSecond)).toBe("2");
-    await vorschau(page).getByTestId("job-card-menu").click();
+    await page.getByTestId("job-card-menu").click();
     const dm = await downloadOf(page, download, () => page.getByTestId("job-card-download").click());
     expect(dm.name).toBe(named);
     expectFile(store, dm, menuSecond, after.output_keys.primary);
-
-    // Projects again: the tile's too.
-    await page.goto("/app");
-    await expect(tile).toHaveAttribute("data-state", "exported", { timeout: 30_000 });
-    const tileSecond = await menuLink(page, tile);
-    expect(tileSecond).not.toBe(tileFirst);
-    expect(gen(tileSecond)).toBe("2");
-    await tile.getByTestId("job-card-menu").click();
-    const dt = await downloadOf(page, download, () => page.getByTestId("job-card-download").click());
-    expect(dt.name).toBe(named);
-    expectFile(store, dt, tileSecond, after.output_keys.primary);
   });
 
   test.describe("on an iPhone", () => {

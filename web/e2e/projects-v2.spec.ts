@@ -210,7 +210,11 @@ test("busy rows don't open, finished rows do; ready during the visit says Ready 
   await expect(page).toHaveURL(`${WEB}/app`);
   await expect(jobCard(page, "alt.mp4").getByTestId("job-card-open")).toHaveAttribute("href", `/app/p/${done.id}`);
   const meta = row.getByTestId("job-card-meta");
-  await expect(meta).toHaveAttribute("aria-live", "polite");
+  // Screen readers hear the change only, not every percent or minute.
+  await expect(meta).not.toHaveAttribute("aria-live", /.+/);
+  const announce = page.getByTestId("projects-announce");
+  await expect(announce).toHaveAttribute("role", "status");
+  await expect(announce).toHaveText("");
   await meta.evaluate((el) => {
     (window as unknown as { __metaNode: Element }).__metaNode = el;
   });
@@ -220,8 +224,9 @@ test("busy rows don't open, finished rows do; ready during the visit says Ready 
   await expect(row).toHaveAttribute("data-fresh", "true");
   await expect(row).not.toHaveAttribute("data-busy", "true");
   await expect(meta).toHaveText(/^Ready · \d+:\d\d$/);
-  // The same line, announced in place (aria-live), not a new row.
+  // The same line, in place, not a new row; the page says which is ready.
   expect(await meta.evaluate((el) => (window as unknown as { __metaNode: Element }).__metaNode === el)).toBe(true);
+  await expect(announce).toHaveText("“frisch.mp4” is ready");
   await row.getByTestId("job-card-open").click();
   await expect(page).toHaveURL(`${WEB}/app/p/${busy.id}`);
 });
@@ -235,6 +240,34 @@ test("only expired projects: an empty state, nothing requested", { tag: "@editor
   await openWithStorage(page, "/app", { [LIBRARY]: [libEntry(gone.id, "alt.mp4", 30 * 86_400_000)] });
   await expect(page.getByTestId("projects-all-expired")).toContainText("deleted after 14 days");
   await expect(page.getByTestId("projects-expired")).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(frames).toEqual([]);
+});
+
+test("past its expiry while the server still lists it: Expired, no frame requested", { tag: "@editor-v2" }, async ({ page, stub }) => {
+  const old = await stub.seed("done");
+  const frames: string[] = [];
+  page.on("request", (r) => {
+    if (/\/(thumbnail|poster)\b/.test(r.url())) frames.push(r.url());
+  });
+  // The server has it, its output and its frame, until the sweep: only
+  // its expiry has passed.
+  await page.route(`${API}/jobs/status*`, async (route: Route) => {
+    const res = await route.fetch();
+    const headers = { ...res.headers() };
+    delete headers.etag;
+    if (res.status() !== 200) return route.fulfill({ response: res, headers });
+    const body = (await res.json()) as { jobs: Record<string, unknown>[] };
+    for (const j of body.jobs) {
+      if (j.id === old.id) Object.assign(j, { expires_at: Math.floor(Date.now() / 1000) - 3600, has_output: true, has_poster: true });
+    }
+    return route.fulfill({ response: res, headers, body: JSON.stringify(body) });
+  });
+  await openWithStorage(page, "/app", { [JOBS]: [job(old.id, "abgelaufen.mp4", 20 * 86_400_000)] });
+  await expect(page.getByTestId("projects-all-expired")).toBeVisible();
+  await page.getByTestId("projects-expired").locator("summary").click();
+  await expect(jobCard(page, "abgelaufen.mp4")).toHaveAttribute("data-state", "expired");
+  await expect(jobCard(page, "abgelaufen.mp4").getByTestId("job-card-open")).toHaveCount(0);
   await page.waitForTimeout(1000);
   expect(frames).toEqual([]);
 });

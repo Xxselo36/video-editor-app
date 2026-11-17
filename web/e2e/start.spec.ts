@@ -336,17 +336,19 @@ test("leaving before Let’s go keeps the video waiting; Continue brings it back
   await page.getByTestId("start-style-neon").click();
   await expect(page.getByTestId("start-style-neon")).toHaveAttribute("aria-checked", "true");
 
-  // Projects in the header: the video waits there. Nothing works on it
-  // until "Let's go": the headline doesn't count it as in progress.
+  // Projects in the menu: the video waits there. Nothing works on it
+  // until "Let's go": its row says so.
   await page.getByRole("link", { name: "Projects", exact: true }).click();
   await expect(page).toHaveURL(`${WEB}/app`);
   const tile = jobCard(page, "wartet.mp4");
   await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
-  await expect(page.getByTestId("dashboard").getByRole("heading", { level: 1 })).toHaveText("Ready when you are");
+  await expect(tile).toHaveAttribute("data-state", "uploading");
   await expect(tile.getByTestId("job-card-cancel")).toBeVisible();
   // Its two actions are big enough to tap.
+  // (Polled: while the screen fades in, the box is measured through its
+  // transform, a hair under its height.)
   for (const id of ["job-card-continue-start", "job-card-cancel"]) {
-    expect((await tile.getByTestId(id).boundingBox())!.height, id).toBeGreaterThanOrEqual(44);
+    await expect.poll(async () => (await tile.getByTestId(id).boundingBox())!.height, { message: id }).toBeGreaterThanOrEqual(44);
   }
   await page.waitForTimeout(1500);
   expect(posts).toEqual([]);
@@ -553,7 +555,8 @@ test("another tab of the browser shows the video waiting for Let’s go (its byt
   const tile = jobCard(other, "zweiter-tab.mp4");
   await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
   await expect(tile.getByTestId("job-card-meta")).toContainText("Uploading");
-  await expect(other.getByTestId("dashboard").getByRole("heading", { level: 1 })).toHaveText("Ready when you are");
+  await expect(other).toHaveURL(`${WEB}/app`);
+  await expect(other.getByRole("heading", { level: 1 })).toHaveText("Projects");
   // Its way back and its Cancel are the first tab's.
   await expect(tile.getByTestId("job-card-continue-start")).toHaveCount(0);
   await expect(tile.getByTestId("job-card-cancel")).toHaveCount(0);
@@ -808,7 +811,10 @@ test("phones: a paused or stopped upload's taller strip and a two-line go button
 
   // A narrow phone in German, waiting: "Startet nach dem Hochladen" on
   // two lines makes the go bar taller.
-  await page.getByTestId("language-switcher").first().selectOption("de");
+  await page.getByTestId("tabbar").locator('a[href="/app/settings"]').click();
+  await page.getByTestId("language-switcher").selectOption("de");
+  await page.getByTestId("tabbar").locator('a[href="/app/new"]').click();
+  await expect(screen(page)).toHaveAttribute("data-screen", "pick");
   await page.setViewportSize({ width: 320, height: 568 });
   const release = await holdUpload(page);
   await chooseFile(page, { name: "schmal.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
@@ -1102,9 +1108,14 @@ test("the start screens fit a phone @editor-v2", async ({ page, stub, isMobile }
   await page.setViewportSize({ width: 320, height: 568 });
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
   const heading = page.locator("#start-captions-h");
+  const tab = (href: string) => page.getByTestId("tabbar").locator(`a[href="${href}"]`);
   for (const lang of LANGS) {
     const before = await heading.textContent();
-    await page.getByTestId("language-switcher").first().selectOption(lang);
+    // The language is in Settings; Upload brings the waiting video back.
+    await tab("/app/settings").click();
+    await page.getByTestId("language-switcher").selectOption(lang);
+    await tab("/app/new").click();
+    await expect(screen(page)).toHaveAttribute("data-screen", "style");
     // (Shown in that language: every language names the screen its way.)
     if (lang !== "en") await expect(heading).not.toHaveText(before!);
     const clipped = await page.evaluate(() => {
@@ -1119,7 +1130,9 @@ test("the start screens fit a phone @editor-v2", async ({ page, stub, isMobile }
     });
     expect(clipped, `${lang}: format labels wider than their buttons`).toEqual([]);
   }
-  await page.getByTestId("language-switcher").first().selectOption("en");
+  await tab("/app/settings").click();
+  await page.getByTestId("language-switcher").selectOption("en");
+  await tab("/app/new").click();
   await page.getByTestId("start-cancel").click();
   await expect(page.getByTestId("upload-dropzone")).toBeVisible();
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);

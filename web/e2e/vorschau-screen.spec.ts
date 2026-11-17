@@ -479,11 +479,9 @@ test.describe("the Vorschau's screen", TAG, () => {
     await page.setViewportSize({ width: 844, height: 390 });
     await openVorschau(page, job.id);
     await expect(vorschau(page)).toHaveAttribute("data-state", "done");
-    const menu = page.getByTestId("job-card-menu");
-    // ⋯ where its menu (four 44 px items) fits neither under nor over it
-    await menu.evaluate((el) => window.scrollTo({ top: window.scrollY + el.getBoundingClientRect().top - 173, behavior: "instant" }));
+    // On phones ⋯ is at the end of the app's top bar (PR3).
+    const menu = page.getByTestId("topbar").getByTestId("job-card-menu");
     const [bx, by, bw, bh] = await box(menu);
-    expect(by).toBe(173);
     await menu.click();
     const list = page.getByTestId("job-card-menu-list");
     await expect(list.getByRole("menuitem")).toHaveCount(4);

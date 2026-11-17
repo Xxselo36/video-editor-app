@@ -50,6 +50,11 @@ test("four places, the current one marked; the legal footer above the tab bar", 
   // The heading of the screen: above it on desktop; for screen readers
   // on phones, where the top bar shows the title.
   await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toHaveCount(1);
+  // The page still reaches the screen's edges (safe areas) after going
+  // from screen to screen: Next renders each screen's viewport anew.
+  await expect
+    .poll(() => page.evaluate(() => [...document.querySelectorAll('meta[name="viewport"]')].map((m) => (m as HTMLMetaElement).content)))
+    .toEqual([expect.stringContaining("viewport-fit=cover")]);
 
   // The imprint link stays reachable: above the tab bar at the page's end.
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
@@ -60,12 +65,18 @@ test("four places, the current one marked; the legal footer above the tab bar", 
     const link = await imprint.boundingBox();
     expect(link!.y + link!.height).toBeLessThanOrEqual(bar!.y);
   }
-  // The skip link is the first thing Tab reaches and leads to the screen.
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.locator("body").press("Tab");
+  // The skip link is the first thing Tab reaches on a screen just opened
+  // (after a click, Tab goes on from there).
+  await page.reload();
+  await expect(page.getByTestId("settings")).toBeVisible();
+  await page.keyboard.press("Tab");
   const skip = page.getByRole("link", { name: "Skip to content" });
   await expect(skip).toBeFocused();
   await expect(skip).toHaveAttribute("href", "#main");
+  // It leads to the screen, with no history entry.
+  await page.keyboard.press("Enter");
+  await expect(page.locator("main#main")).toBeFocused();
+  await expect(page).toHaveURL(`${WEB}/app/settings`);
 });
 
 test("320 px: no sideways scroll in any language (New video, Choose captions, the tab bar, Projects)", { tag: "@editor-v2" }, async ({ page, stub }, info) => {
@@ -143,6 +154,27 @@ test("Upload with a waiting video brings it back; after Let's go it starts anew"
   await expect(jobCard(page, "warte.mp4")).toBeVisible();
   await place(page, mobile, "/app/new").click();
   await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "pick");
+});
+
+test("Upload after Let's go while its upload still goes: a new start, the video goes on", { tag: "@editor-v2" }, async ({ page, stub }, info) => {
+  const mobile = Boolean(info.project.use.isMobile);
+  await openWithStorage(page, "/app/new");
+  // The upload API answers once released: the upload is still going.
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/uploads/**", async (r) => {
+    await held;
+    await r.continue().catch(() => {});
+  });
+  await chooseFile(page, { name: "weiter.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
+  await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
+  await startGo(page);
+  await expect(page.getByTestId("start-go")).toHaveAttribute("data-state", "waiting");
+  await place(page, mobile, "/app/new").click();
+  await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "pick");
+  release();
+  await place(page, mobile, "/app").click();
+  await expect(jobCard(page, "weiter.mp4")).not.toHaveAttribute("data-state", /^upload/, { timeout: 30_000 });
 });
 
 test("short landscape phones: only the tab bar stays", { tag: "@editor-v2" }, async ({ page }, info) => {
