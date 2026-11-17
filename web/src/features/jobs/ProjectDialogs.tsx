@@ -83,19 +83,21 @@ export function RenameDialog({ p, onClose, onRenamed }: { p: Project; onClose: (
   );
 }
 
-/** "busy" (409): it still runs; `onDeleted` after the server removed it. */
+/** Also while Cleo works on it (the server stops that; the dialog says
+ *  so first). `onDeleted` after the server removed it. */
 export function DeleteDialog({ p, onClose, onDeleted }: { p: Project; onClose: () => void; onDeleted?: () => void }) {
   const t = useT();
   const titleId = useId();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<"busy" | "failed" | null>(null);
+  const [failed, setFailed] = useState(false);
   const name = p.name || t("app.library.untitled");
+  const running = p.state === "processing" || p.state === "exporting";
   const remove = async () => {
     setBusy(true);
-    setError(null);
+    setFailed(false);
     const r = await deleteProject(p.id);
     setBusy(false);
-    if (r !== "ok") return setError(r);
+    if (r !== "ok") return setFailed(true);
     onClose();
     onDeleted?.();
   };
@@ -107,12 +109,13 @@ export function DeleteDialog({ p, onClose, onDeleted }: { p: Project; onClose: (
         <h2 id={titleId} className="break-words text-base font-semibold" style={{ color: "var(--text-strong)" }}>
           {t("app.projects.deleteTitle", { name })}
         </h2>
-        <p className="text-sm" style={{ color: "var(--text-body)" }}>
+        <p className="text-sm" style={{ color: "var(--text-body)" }} data-testid="delete-body">
+          {running && `${t("app.projects.deleteStops")} `}
           {t("app.projects.deleteBody")}
         </p>
-        {error && (
+        {failed && (
           <p role="alert" className="text-xs" style={{ color: "var(--danger)" }}>
-            {t(error === "busy" ? "app.projects.deleteBusy" : "library.deleteFailed")}
+            {t("library.deleteFailed")}
           </p>
         )}
         <div className={cx("mt-1", ACTIONS)}>

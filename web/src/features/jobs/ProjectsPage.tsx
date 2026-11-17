@@ -64,17 +64,19 @@ export function ProjectsSkeleton() {
   );
 }
 
-function Rows({ list, onOpen }: { list: Project[]; onOpen: (href: string) => void }) {
+function Rows({ list, onOpen, onDeleted }: { list: Project[]; onOpen: (href: string) => void; onDeleted?: (name: string) => void }) {
   return (
     <ul className={s.list}>
       {list.map((p) => (
         <li key={p.id}>
-          <ProjectRow p={p} onOpen={onOpen} />
+          <ProjectRow p={p} onOpen={onOpen} onDeleted={onDeleted} />
         </li>
       ))}
     </ul>
   );
 }
+
+const TITLE_ID = "projects-title";
 
 export function ProjectsPage() {
   const t = useT();
@@ -83,6 +85,13 @@ export function ProjectsPage() {
   const emptyAction = AUTH_ENABLED ? emptyListAction({ ready, serverLoaded, count: projects.length }) : "show";
   const [mounted, setMounted] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  // A row deleted here: said once, and the focus (its Delete is gone)
+  // goes to the title.
+  const [deleted, setDeleted] = useState<string | null>(null);
+  const onDeleted = (name: string) => {
+    setDeleted(name);
+    document.getElementById(TITLE_ID)?.focus({ preventScroll: true });
+  };
 
   useEffect(() => {
     const legacy = legacyJobRedirect(window.location.search);
@@ -134,7 +143,7 @@ export function ProjectsPage() {
     ) : (
       <div data-testid="dashboard">
         {live.length > 0 ? (
-          <Rows list={live} onOpen={open} />
+          <Rows list={live} onOpen={open} onDeleted={onDeleted} />
         ) : emptyAction === "retry" ? (
           <EmptyState testId="projects-load-failed" alert title={t("app.projects.loadFailed")}>
             <Button size="md" variant="tint" onClick={() => refreshProjects()} data-testid="projects-retry" className={cx(PRESS, CONTROL_TOUCH, "min-h-11")}>
@@ -169,7 +178,12 @@ export function ProjectsPage() {
   return (
     <AppPage width="3xl">
       <div className={s.page}>
-        <PageTitle bar={title}>{title}</PageTitle>
+        <PageTitle bar={title} id={TITLE_ID}>
+          {title}
+        </PageTitle>
+        <p role="status" className="sr-only" data-testid="projects-announce">
+          {deleted ? t("app.projects.announceDeleted", { name: deleted }) : ""}
+        </p>
         {body}
       </div>
     </AppPage>

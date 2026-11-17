@@ -47,7 +47,7 @@ export const ruSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "{count} проект",
   "library.count.other": "{count} проектов",
   "library.confirmDelete": "Удалить проект навсегда? Видео и все правки будут удалены с наших серверов.",
-  "library.deleteFailed": "Сейчас не удалось удалить — если видео ещё обрабатывается, попробуй чуть позже.",
+  "library.deleteFailed": "Сейчас не удалось удалить. Попробуй чуть позже.",
 
   "library.empty.title": "Твоя библиотека пуста",
   "library.empty.body":

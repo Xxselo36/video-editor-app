@@ -46,7 +46,7 @@ export const koSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "프로젝트 {count}개",
   "library.count.other": "프로젝트 {count}개",
   "library.confirmDelete": "이 프로젝트를 영구 삭제할까요? 영상과 모든 편집 내용이 서버에서 삭제돼요.",
-  "library.deleteFailed": "지금은 삭제할 수 없어요. 영상이 아직 처리 중이면 잠시 후 다시 시도해 주세요.",
+  "library.deleteFailed": "지금은 삭제할 수 없어요. 잠시 후 다시 시도해 주세요.",
 
   "library.empty.title": "라이브러리가 비어 있어요",
   "library.empty.body":

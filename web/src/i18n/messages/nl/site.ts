@@ -47,7 +47,7 @@ export const nlSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "{count} project",
   "library.count.other": "{count} projecten",
   "library.confirmDelete": "Dit project definitief verwijderen? De video en alle bewerkingen worden van onze servers verwijderd.",
-  "library.deleteFailed": "Verwijderen lukt nu niet — als de video nog wordt verwerkt, probeer het zo opnieuw.",
+  "library.deleteFailed": "Verwijderen lukt nu niet. Probeer het zo opnieuw.",
 
   "library.empty.title": "Je bibliotheek is leeg",
   "library.empty.body":

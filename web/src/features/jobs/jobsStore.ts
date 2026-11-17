@@ -425,14 +425,13 @@ export async function renameProject(id: string, name: string): Promise<boolean> 
   return true;
 }
 
-/** Delete a project on the server (video, edits, exports) and here.
- *  "busy": it's still processing (409) — try again later. */
-export async function deleteProject(id: string): Promise<"ok" | "busy" | "failed"> {
+/** Delete a project on the server (video, edits, exports) and here, in
+ *  any state: while Cleo still works on it, the server stops that. */
+export async function deleteProject(id: string): Promise<"ok" | "failed"> {
   if (!isUploadId(id)) {
     try {
       const r = await apiFetch(`/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
       // 404: gone already — fine.
-      if (r.status === 409) return "busy";
       if (!r.ok && r.status !== 404) return "failed";
     } catch {
       return "failed";

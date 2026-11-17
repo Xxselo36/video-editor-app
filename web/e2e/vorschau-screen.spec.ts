@@ -641,7 +641,7 @@ test.describe("the Vorschau's screen", TAG, () => {
     );
     await confirm.click();
     await expect(dialog.getByRole("alert")).toHaveText(
-      "Löschen hat gerade nicht geklappt. Wird das Video noch bearbeitet, versuch es gleich noch einmal.",
+      "Löschen hat gerade nicht geklappt. Versuch es gleich noch einmal.",
     );
     expect(await dialog.innerText()).not.toMatch(/Export|verarbeit|[–—]/);
     await dialog.getByRole("button", { name: "Abbrechen" }).click();

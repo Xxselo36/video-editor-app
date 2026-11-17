@@ -48,7 +48,7 @@ export const trSite: Partial<Record<SiteKey, string>> = {
   "library.count.one": "{count} proje",
   "library.count.other": "{count} proje",
   "library.confirmDelete": "Bu proje kalıcı olarak silinsin mi? Video ve tüm düzenlemeler sunucularımızdan kaldırılır.",
-  "library.deleteFailed": "Şu anda silinemedi — video hâlâ işleniyorsa birazdan tekrar dene.",
+  "library.deleteFailed": "Şu anda silinemedi. Birazdan tekrar dene.",
 
   "library.empty.title": "Kütüphanen boş",
   "library.empty.body":
