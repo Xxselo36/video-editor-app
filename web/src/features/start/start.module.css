@@ -932,7 +932,7 @@ button.orow:active:not([aria-disabled="true"]),
  * bars reach the screen's edges (a picked tile's ring reaches into the
  * page's side padding); the go bar's fade stays over the column. Short
  * landscape screens: nothing sticks. */
-@media (max-width: 959px) and (min-height: 501px) {
+@media (max-width: 959.98px) and (min-height: 500.02px) {
   /* (Clipped stuck or not: the shadow fades out after the strip lets go.) */
   .status {
     clip-path: inset(-8px -100vmax -1px);
@@ -962,7 +962,7 @@ button.orow:active:not([aria-disabled="true"]),
     background: linear-gradient(var(--brand-tint), var(--brand-tint)), var(--surface-0);
   }
 }
-@media (max-width: 959px) and (max-height: 500px) {
+@media (max-width: 959.98px) and (max-height: 500px) {
   .status,
   .go {
     position: static;

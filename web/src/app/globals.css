@@ -185,28 +185,32 @@ html[data-uploading] {
  * little air, so the link is clear of the tab bar);
  * the legal footer stays reachable above the tab bar. From 960 px: the
  * sidebar's width (--app-side), which the footer leaves free too. Screens
- * write fallbacks for a page without the shell. */
-@media (max-width: 959px) {
-  body:has([data-app-shell]) {
+ * write fallbacks for a page without the shell. On <html>: its scroll
+ * padding (the start screen's) reads them too. */
+@media (max-width: 959.98px) {
+  html:has([data-app-shell]) {
     --app-topbar: calc(var(--topbar) + env(safe-area-inset-top, 0px));
     --app-tabbar: calc(var(--tabbar) + env(safe-area-inset-bottom, 0px));
     --app-chrome: calc(var(--app-topbar) + var(--app-tabbar) + 82px);
+    /* What gets the focus or is scrolled to stays clear of both bars. */
+    scroll-padding-top: calc(var(--app-topbar) + 8px);
+    scroll-padding-bottom: calc(var(--app-tabbar) + 8px);
   }
-  body:has([data-app-shell]) [data-site-footer] {
+  html:has([data-app-shell]) [data-site-footer] {
     padding-bottom: calc(20px + var(--tabbar) + env(safe-area-inset-bottom, 0px));
   }
 }
 /* Short landscape phones: the top bar scrolls with the page. */
-@media (max-width: 959px) and (max-height: 500px) {
-  body:has([data-app-shell]) {
+@media (max-width: 959.98px) and (max-height: 500px) {
+  html:has([data-app-shell]) {
     --app-topbar: 0px;
   }
 }
 @media (min-width: 960px) {
-  body:has([data-app-shell]) {
+  html:has([data-app-shell]) {
     --app-side: 240px;
   }
-  body:has([data-app-shell]) [data-site-footer] {
+  html:has([data-app-shell]) [data-site-footer] {
     margin-left: var(--app-side);
   }
 }
@@ -216,13 +220,13 @@ html[data-uploading] {
  * shell's bars). The two bars write their heights (features/start/
  * barHeight.ts): they grow with a paused line, a failure, a label on two
  * lines. On short landscape screens those two don't stick. */
-@media (max-width: 959px) {
+@media (max-width: 959.98px) {
   html:has([data-screen="style"]) {
     scroll-padding-top: calc(var(--app-topbar, 0px) + var(--start-strip-h, 55px) + 9px);
     scroll-padding-bottom: calc(var(--app-tabbar, env(safe-area-inset-bottom, 0px)) + var(--start-go-h, 102px) + 14px);
   }
 }
-@media (max-width: 959px) and (max-height: 500px) {
+@media (max-width: 959.98px) and (max-height: 500px) {
   html:has([data-screen="style"]) {
     scroll-padding-top: var(--app-topbar, 0px);
     scroll-padding-bottom: var(--app-tabbar, 0px);

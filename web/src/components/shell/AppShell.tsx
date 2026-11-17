@@ -10,7 +10,7 @@
  * (components/AppHeader, via AppPage). The build's default while the page
  * hydrates (it is prerendered), the browser's own choice after.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { LogoMark } from "@/components/Logo";
 import { useT } from "@/i18n";
@@ -47,7 +47,7 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <ShellContext.Provider value={value}>
       <div className={s.shell} data-app-shell="" data-testid="app-shell">
-        <a href="#main" className={s.skip}>
+        <a href="#main" className={s.skip} onClick={skipToMain}>
           {t("app.nav.skip")}
         </a>
         <Sidebar />
@@ -59,6 +59,15 @@ function Shell({ children }: { children: ReactNode }) {
       </div>
     </ShellContext.Provider>
   );
+}
+
+/** The skip link: the focus to the screen, with no history entry (Next
+ *  ignores one it did not make: Back would stop on it). */
+function skipToMain(e: MouseEvent<HTMLAnchorElement>) {
+  const main = document.getElementById("main");
+  if (!main) return;
+  e.preventDefault();
+  main.focus();
 }
 
 /** The top bar's title until the screen names its own (PageTitle `bar`). */

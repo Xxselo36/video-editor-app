@@ -11,26 +11,41 @@
  * separate mounts whose effects interleave; only the last one out takes
  * the token off again. It is set here and not by a `viewport` export:
  * that one would be stripped by the next user's removal on the way back.
+ *
+ * Watched while in use: Next renders a page's head anew on every
+ * navigation between pages (the shell stays mounted from tab to tab), a
+ * new viewport meta without the token; it goes back on before the frame
+ * is painted.
  */
 import { useEffect } from "react";
 
 let users = 0;
+let watcher: MutationObserver | null = null;
 const FIT_COVER = /,?\s*viewport-fit\s*=\s*cover/;
 
 function setFitCover(on: boolean) {
-  const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
-  if (!meta) return;
-  const c = meta.content;
-  if (on && !/viewport-fit\s*=/.test(c)) meta.content = `${c}${c.trim() ? ", " : ""}viewport-fit=cover`;
-  // our token only, from the meta as it is now (Next may have re-rendered it)
-  else if (!on && FIT_COVER.test(c)) meta.content = c.replace(FIT_COVER, "").trim();
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="viewport"]')) {
+    const c = meta.content;
+    if (on && !/viewport-fit\s*=/.test(c)) meta.content = `${c}${c.trim() ? ", " : ""}viewport-fit=cover`;
+    // our token only, from the meta as it is now (Next may have re-rendered it)
+    else if (!on && FIT_COVER.test(c)) meta.content = c.replace(FIT_COVER, "").trim();
+  }
 }
 
 export function useViewportFitCover(): void {
   useEffect(() => {
-    if (users++ === 0) setFitCover(true);
+    if (users++ === 0) {
+      setFitCover(true);
+      // (Its own write comes back here once and changes nothing.)
+      watcher = new MutationObserver(() => setFitCover(true));
+      watcher.observe(document.head, { childList: true, subtree: true, attributes: true, attributeFilter: ["content", "name"] });
+    }
     return () => {
-      if (--users === 0) setFitCover(false);
+      if (--users === 0) {
+        watcher?.disconnect();
+        watcher = null;
+        setFitCover(false);
+      }
     };
   }, []);
 }

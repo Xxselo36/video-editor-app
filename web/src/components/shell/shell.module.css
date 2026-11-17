@@ -85,6 +85,12 @@
 .trailing:empty {
   display: none;
 }
+.trailing :is(button, a) {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
 
 /* The screen's <h1> (PageTitle): the top bar shows the title on phones,
    so it is for screen readers there; above the screen from 960 px. */
@@ -212,7 +218,7 @@
 
 /* Short landscape phones: the top bar scrolls away, only the tab bar
    stays (app/globals.css sets --app-topbar to 0 there). */
-@media (max-width: 959px) and (max-height: 500px) {
+@media (max-width: 959.98px) and (max-height: 500px) {
   .topbar {
     position: static;
   }
