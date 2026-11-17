@@ -191,7 +191,7 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     await page.goto("/app");
     const tile = jobCard(page, name);
     await expect(tile).toHaveAttribute("data-state", "upload_failed", { timeout: 45_000 });
-    await expect(tile.getByTestId("job-card-resume")).toContainText("choose the same video");
+    await expect(tile.getByTestId("job-card-resume")).toContainText("Choose the same video");
     api.length = 0;
     puts.length = 0;
     return tile;
