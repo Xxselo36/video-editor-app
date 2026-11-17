@@ -254,8 +254,9 @@ test("a row Cleo works on: Delete asks first, says Cleo stops, then it is gone h
   await expect(row).toHaveAttribute("data-state", "processing");
   const del = row.getByTestId("job-card-delete");
   await expect(del).toHaveText("Delete");
-  // 44 px to a finger.
-  expect((await del.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  // 44 px to a finger: its layout height (the box on screen can read
+  // 43.99998 at a phone's device pixel ratio while the page moves in).
+  expect(await del.evaluate((el) => (el as HTMLElement).offsetHeight)).toBeGreaterThanOrEqual(44);
   await del.click();
   const dialog = page.getByTestId("dialog-delete");
   // Named as the row shows it.
