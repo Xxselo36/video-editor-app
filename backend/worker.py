@@ -807,19 +807,21 @@ def _processed_s(ws: Path) -> float | None:
     return None
 
 
-def _taken_away(ctx: Attempt) -> bool:
-    """Before a failure is reported: is the task still ours? Asked once
-    more (a heartbeat) — the job deleted or the task taken over a moment
-    ago, the stopped work's own error (a Modal call cancelled, ffmpeg
-    killed, a workspace the delete removed) is nobody's failure."""
-    return ctx.fenced.is_set() or not ctx.beat()
+def _taken_away(ctx: Attempt, exc: BaseException) -> bool:
+    """Before a failure is reported: is the task still ours? Not when
+    its Modal call was stopped on purpose (taskq.Stopped); else asked
+    once more (a heartbeat) — the job deleted or the task taken over a
+    moment ago, the stopped work's own error (ffmpeg killed, a workspace
+    the delete removed) is nobody's failure."""
+    return (isinstance(exc, taskq.Stopped) or ctx.fenced.is_set()
+            or not ctx.beat())
 
 
 def _ingest_failure(ctx: Attempt, exc: BaseException,
                     ws: Path) -> dict[str, Any]:
     t = ctx.task
     job_id = t.job_id
-    if _taken_away(ctx):
+    if _taken_away(ctx, exc):
         return {"skipped": "fenced"}
     if isinstance(exc, InterruptedError) and ctx.cancelled():
         if ctx.fenced.is_set():
@@ -1264,7 +1266,7 @@ _render_error_code = errors.render_error_code
 def _render_failure(ctx: Attempt, exc: BaseException, gen: int,
                     out_prefix: str, where: str) -> dict[str, Any]:
     t = ctx.task
-    if _taken_away(ctx):
+    if _taken_away(ctx, exc):
         return {"skipped": "fenced"}
     if isinstance(exc, InterruptedError) and ctx.cancelled():
         if ctx.fenced.is_set():

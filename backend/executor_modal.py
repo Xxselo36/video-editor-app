@@ -50,7 +50,7 @@ import os
 import time
 from typing import Any, Callable
 
-from backend import costs, errors, media, modal_analyze, storage
+from backend import costs, errors, media, modal_analyze, storage, taskq
 
 KINDS = ("ingest",)
 APP = "cleocuts-render"
@@ -500,8 +500,10 @@ def analyze(*, job_id: str, source_key: str, settings: dict[str, Any],
         if ch.superseded():
             # What the stopped call raised (cancelled: the job deleted
             # meanwhile, say) is nobody's failure: no alert, no
-            # modal_failed — the caller sees it was taken away.
-            raise InterruptedError("Cancelled: stopped") from e
+            # modal_failed — the caller sees it was taken away (also
+            # before its heartbeat does: the delete stops the call before
+            # its row goes).
+            raise taskq.Stopped("Cancelled: stopped") from e
         no_bill = getattr(e, "started", None) is False
         code, reason = _give_up_reason(e)
         costs.record_event("modal_failed")

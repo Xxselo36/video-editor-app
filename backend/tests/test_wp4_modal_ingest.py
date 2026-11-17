@@ -677,9 +677,26 @@ def test_delete_while_the_modal_analysis_runs_is_quiet(client, modal_on, r2,
     th.start()
     assert _wait_for(lambda: len(modal_on.spawns) == 1)
     caplog.set_level(logging.ERROR)
-    assert client.delete(f"/jobs/{job.id}").status_code == 200
+    # The delete stops the call before its row goes: here the worker
+    # hears of it while the row (and its task) are still there — the
+    # order a slower database shows (CI's Postgres).
+    real_delete = store.delete
+    deleting = threading.Event()
+
+    def held_delete(*a, **kw):
+        assert deleting.wait(20)
+        return real_delete(*a, **kw)
+    monkeypatch.setattr(store, "delete", held_delete)
+    answers: list[int] = []
+    deleter = threading.Thread(target=lambda: answers.append(
+        client.delete(f"/jobs/{job.id}").status_code))
+    deleter.start()
     th.join(20)
     assert not th.is_alive()
+    assert ts().get(tid) is not None           # its row not gone yet
+    deleting.set()
+    deleter.join(20)
+    assert answers == [200]
     assert out == [{"skipped": "fenced"}]
     assert modal_on.cancelled_ids, "the call was stopped"
     assert reports == [] and failed == []
