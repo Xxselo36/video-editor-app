@@ -74,9 +74,13 @@ function LanguageRow() {
       <span className={s.tile} aria-hidden="true">
         <Icon icon={Globe} />
       </span>
-      <Label name={t("app.settings.appLanguage")} />
-      <span className={s.value} aria-hidden="true">
-        {LANGS[lang]}
+      <span className={s.langText}>
+        <span className={s.name} data-testid="settings-language-name">
+          {t("app.settings.appLanguage")}
+        </span>
+        <span className={s.value} aria-hidden="true">
+          {LANGS[lang]}
+        </span>
       </span>
       <Icon icon={ChevronRight} className={s.chev} />
       <select
@@ -113,7 +117,7 @@ function AccountRows() {
       : null;
   return (
     <Group id="settings-account-h" title={t("app.account.title")}>
-      <div className={s.row}>
+      <div className={s.row} data-testid="settings-account-info">
         <span className={s.tile} aria-hidden="true">
           <Icon icon={UserRound} />
         </span>
@@ -121,7 +125,7 @@ function AccountRows() {
           name={email ?? t("app.account.title")}
           sub={[plan, usage].filter(Boolean).join(" · ") || undefined}
         />
-        <AvatarButton />
+        <AvatarButton large />
       </div>
       <Link href="/app/account" className={s.row} data-testid="settings-account">
         <Label name={t("app.settings.manageAccount")} />

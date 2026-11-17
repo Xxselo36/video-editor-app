@@ -118,11 +118,23 @@ a.row:active {
   color: var(--text-faint);
 }
 
-/* App-Sprache: the value and a chevron at the row's end; the select,
-   transparent, takes the taps (16 px: no zoom on iPhone). */
+/* App-Sprache: the value and a chevron at the row's end, the value
+   under the name where both don't fit (narrow phones, long names); the
+   select, transparent, takes the taps (16 px: no zoom on iPhone). */
+.langText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  column-gap: 14px;
+}
+.langText > .name {
+  overflow-wrap: break-word;
+}
 .value {
-  flex: none;
-  max-width: 50%;
+  max-width: 100%;
   overflow: hidden;
   font-size: 15px;
   color: var(--text-body);

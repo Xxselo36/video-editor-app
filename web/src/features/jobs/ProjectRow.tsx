@@ -423,6 +423,9 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
           prefetch={false}
           data-testid="job-card-open"
           aria-label={t("app.projects.openAria", { name })}
+          // The whole name on hover where the row shortens it (the link
+          // lies over the name's own tooltip).
+          title={shown !== name ? name : undefined}
           className={s.open}
         />
       )}

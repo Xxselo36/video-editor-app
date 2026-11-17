@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
 import { AppPage } from "@/components/AppPage";
-import { EMPTY_PRIMARY, EMPTY_TINT, EmptyState } from "@/components/EmptyState";
+import { CONTROL_TOUCH, EMPTY_PRIMARY, EMPTY_TINT, EmptyState } from "@/components/EmptyState";
 import { PageTitle } from "@/components/PageTitle";
 import { Button, PRESS } from "@/components/ui/Button";
 import { cx } from "@/components/ui/cx";
@@ -67,7 +67,7 @@ export function PreviewRoute() {
     // The list or the states didn't load: not "nothing yet".
     body = (
       <EmptyState testId="preview-load-failed" alert title={t("app.projects.loadFailed")}>
-        <Button size="md" variant="tint" onClick={() => refreshProjects()} data-testid="preview-retry" className={cx(PRESS, "min-h-11")}>
+        <Button size="md" variant="tint" onClick={() => refreshProjects()} data-testid="preview-retry" className={cx(PRESS, CONTROL_TOUCH, "min-h-11")}>
           {t("app.projects.retry")}
         </Button>
       </EmptyState>

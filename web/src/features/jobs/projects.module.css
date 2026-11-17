@@ -260,6 +260,7 @@
   color: var(--text-muted);
   list-style: none;
   cursor: pointer;
+  touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
 }

@@ -19,7 +19,7 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.settings.manageAccount": "Compte et abonnement",
   "app.settings.voice": "Commandes vocales",
   "app.settings.voiceTry": "Essayer « Cleo cut »",
-  "app.settings.legal": "Mentions légales",
+  "app.settings.legal": "Informations légales",
   "app.settings.beta": "Tu utilises la bêta de CleoCuts.",
 
   // ── Browser notifications ───────────────────────────────────────────

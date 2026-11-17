@@ -20,7 +20,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AppPage } from "@/components/AppPage";
-import { EMPTY_PRIMARY, EmptyState } from "@/components/EmptyState";
+import { CONTROL_TOUCH, EMPTY_PRIMARY, EmptyState } from "@/components/EmptyState";
 import { PageTitle } from "@/components/PageTitle";
 import { navigatedInApp } from "@/components/shell/useShell";
 import { Button, PRESS } from "@/components/ui/Button";
@@ -163,7 +163,7 @@ export function ProjectsPage() {
           <Rows list={live} onOpen={open} />
         ) : emptyAction === "retry" ? (
           <EmptyState testId="projects-load-failed" alert title={t("app.projects.loadFailed")}>
-            <Button size="md" variant="tint" onClick={() => refreshProjects()} data-testid="projects-retry" className={cx(PRESS, "min-h-11")}>
+            <Button size="md" variant="tint" onClick={() => refreshProjects()} data-testid="projects-retry" className={cx(PRESS, CONTROL_TOUCH, "min-h-11")}>
               {t("app.projects.retry")}
             </Button>
           </EmptyState>

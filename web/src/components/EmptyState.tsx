@@ -7,8 +7,11 @@ import s from "./emptyState.module.css";
 
 /** Its way on as a link: the view's one filled button ("Video
  *  hochladen"), or a tint one. */
-export const EMPTY_PRIMARY = cx(buttonClass("primary", "md"), PRESS, "inline-flex min-h-11 items-center");
-export const EMPTY_TINT = cx(buttonClass("tint", "md"), PRESS, "inline-flex min-h-11 items-center");
+/** A control's touch: no double-tap zoom wait, no selected label or link
+ *  callout on a long press. */
+export const CONTROL_TOUCH = "touch-manipulation select-none [-webkit-touch-callout:none]";
+export const EMPTY_PRIMARY = cx(buttonClass("primary", "md"), PRESS, CONTROL_TOUCH, "inline-flex min-h-11 items-center");
+export const EMPTY_TINT = cx(buttonClass("tint", "md"), PRESS, CONTROL_TOUCH, "inline-flex min-h-11 items-center");
 
 export function EmptyState({
   testId,
