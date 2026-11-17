@@ -193,7 +193,7 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     expect(await storedJobs(page)).toEqual([]);
   });
 
-  test("left while it waits for Let’s go: its tile says Uploaded and waiting; the headline doesn't count it", async ({ page }) => {
+  test("left while it waits for Let’s go: its row says Uploaded and waiting", async ({ page }) => {
     const posts = jobPosts(page);
     await pick(page, fileOf("wartet.mp4", crypto.randomBytes(3 * MIB)));
     await stored(page);
@@ -203,7 +203,7 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     await expect(tile.getByTestId("job-card-meta")).toHaveText("Uploaded");
     await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
     await expect(tile.getByTestId("job-card-continue-start")).toBeVisible();
-    await expect(page.getByTestId("dashboard").getByRole("heading", { level: 1 })).toHaveText("Ready when you are");
+    await expect(tile).toHaveAttribute("data-state", "uploading");
     await page.waitForTimeout(1000);
     expect(posts).toEqual([]);
   });
@@ -400,7 +400,7 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     const tile = jobCard(other, "zwei-tabs.mp4");
     await expect(tile.getByTestId("job-card-status")).toHaveText("Waiting for “Let’s go”");
     await expect(tile.getByTestId("job-card-meta")).toHaveText("Uploaded");
-    await expect(other.getByTestId("dashboard").getByRole("heading", { level: 1 })).toHaveText("Ready when you are");
+    await expect(tile).toHaveAttribute("data-state", "uploading");
     // Its way back and its Cancel are the first tab's.
     await expect(tile.getByTestId("job-card-continue-start")).toHaveCount(0);
     await expect(tile.getByTestId("job-card-cancel")).toHaveCount(0);

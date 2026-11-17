@@ -77,7 +77,9 @@ Notes:
 Fixed UI wording of the upload flow, the same on every screen that shows
 it. A text that names a button quotes the button's own words: "Waiting
 for “Let’s go”" on Projects repeats the start button. The check reads
-only Terms and Avoid.
+only Terms and Avoid. The tab bar's labels (Tab: …) are short on purpose: a phone's tab is
+about 76 px wide at 11 px, two lines at most ("Configuración" or
+"Paramètres" would not fit at 320 px).
 
 | Phrase | en | de | es | fr | pt | it | tr | pl | nl | ru | ja | ko | id | hi |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -87,6 +89,10 @@ only Terms and Avoid.
 | Last used | Last used | Zuletzt benutzt | Último usado | Dernier choix | Último usado | Ultimo usato | Son kullanılan | Ostatnio użyty | Laatst gebruikt | В прошлый раз | 前回使用 | 최근 사용 | Terakhir dipakai | पिछली बार |
 | Your default | Your default | Dein Standard | Predeterminado | Par défaut | Seu padrão | Predefinito | Varsayılan | Twój domyślny | Jouw standaard | По умолчанию | デフォルト | 내 기본값 | Default-mu | आपका डिफ़ॉल्ट |
 | Waiting for go | Waiting for “Let’s go” | Wartet auf „Los geht’s“ | Esperando tu “¡Vamos!” | En attente de « C’est parti » | Aguardando seu “Vamos lá” | In attesa di “Andiamo” | “Başlayalım” bekleniyor | Czeka na „Zaczynamy” | Wacht op “Aan de slag” | Ждёт «Поехали» | 「スタート」待ち | “시작하기” 대기 중 | Menunggu “Ayo mulai” | “चलिए शुरू करें” का इंतज़ार |
+| Tab: Projects | Projects | Projekte | Proyectos | Projets | Projetos | Progetti | Projeler | Projekty | Projecten | Проекты | プロジェクト | 프로젝트 | Proyek | प्रोजेक्ट |
+| Tab: Upload | Upload | Hochladen | Subir | Importer | Enviar | Carica | Yükle | Prześlij | Uploaden | Загрузить | アップロード | 업로드 | Unggah | अपलोड |
+| Tab: Preview | Preview | Vorschau | Vista previa | Aperçu | Prévia | Anteprima | Önizleme | Podgląd | Voorbeeld | Превью | プレビュー | 미리보기 | Pratinjau | प्रीव्यू |
+| Tab: Settings | Settings | Einstellungen | Ajustes | Réglages | Ajustes | Impostazioni | Ayarlar | Ustawienia | Instellingen | Настройки | 設定 | 설정 | Pengaturan | सेटिंग्स |
 
 ## Avoid
 

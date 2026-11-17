@@ -249,7 +249,7 @@ jobs:
           - name: visual-v2
             mode: anon
             browsers: chromium
-            args: e2e/visual/s7-editor-v2.spec.ts e2e/visual/s8-start-flow.spec.ts e2e/visual/s9-vorschau.spec.ts --project=desktop --project=pixel7
+            args: e2e/visual/s7-editor-v2.spec.ts e2e/visual/s8-start-flow.spec.ts e2e/visual/s9-vorschau.spec.ts e2e/visual/s10-shell.spec.ts --project=desktop --project=pixel7
             editor_v2: '1'
     env:
       E2E_MODE: ${{ matrix.mode }}

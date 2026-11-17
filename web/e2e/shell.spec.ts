@@ -81,19 +81,44 @@ test("four places, the current one marked; the legal footer above the tab bar", 
 
 test("320 px: no sideways scroll in any language (New video, Choose captions, the tab bar, Projects)", { tag: "@editor-v2" }, async ({ page, stub }, info) => {
   test.skip(!info.project.use.isMobile, "phones");
-  test.setTimeout(240_000);
+  test.setTimeout(300_000);
   await page.setViewportSize({ width: 320, height: 640 });
   const done = await stub.seed("done");
   await openWithStorage(page, "/app/new", { [JOBS]: [job(done.id, "Mein_sehr_langer_Projektname_ohne_Leerzeichen.mp4")] });
+  /** The app in `lang`, chosen in Settings, its messages loaded. */
+  const speak = async (lang: string) => {
+    await place(page, true, "/app/settings").click();
+    await page.getByTestId("language-switcher").selectOption(lang);
+    await expect(page.locator("html")).toHaveAttribute("lang", lang);
+    if (lang !== "en") await expect(page.locator(`html[data-i18n~="${lang}"]`)).toHaveCount(1);
+  };
+  // New video, before a video is picked.
+  for (const lang of LANGS) {
+    await speak(lang);
+    await place(page, true, "/app/new").click();
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "pick");
+    await expect.poll(() => horizontalOverflow(page), { message: `new video ${lang}` }).toBeLessThanOrEqual(1);
+  }
   await chooseFile(page, { name: "breit.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
   await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
   const tabs = page.getByTestId("tabbar").getByRole("link");
   for (const lang of LANGS) {
     // The language changes in Settings; Upload brings the waiting video back.
-    await place(page, true, "/app/settings").click();
-    await page.getByTestId("language-switcher").selectOption(lang);
-    await expect(page.locator("html")).toHaveAttribute("lang", lang);
+    await speak(lang);
     await expect.poll(() => horizontalOverflow(page), { message: `settings ${lang}` }).toBeLessThanOrEqual(1);
+    // "App language" stays whole words next to (or above) its value.
+    const split = await page.getByTestId("settings-language-name").evaluate((el) => {
+      const text = el.firstChild as Text;
+      return [...text.data.matchAll(/[^\s-]+/g)]
+        .filter((m) => {
+          const r = document.createRange();
+          r.setStart(text, m.index!);
+          r.setEnd(text, m.index! + m[0].length);
+          return r.getClientRects().length > 1;
+        })
+        .map((m) => m[0]);
+    });
+    expect(split, `App language, ${lang}`).toEqual([]);
     await place(page, true, "/app").click();
     await expect(jobCard(page, "Mein_sehr_langer")).toHaveAttribute("data-state", "exported");
     await expect.poll(() => horizontalOverflow(page), { message: `projects ${lang}` }).toBeLessThanOrEqual(1);
@@ -104,15 +129,14 @@ test("320 px: no sideways scroll in any language (New video, Choose captions, th
     for (const tab of await tabs.all()) {
       const fits = await tab.evaluate((el) => {
         const label = el.lastElementChild as HTMLElement;
-        return label.scrollWidth <= label.clientWidth + 1 && label.getClientRects().length > 0;
+        // (Clamped at two lines: a third would be cut off, not overflow.)
+        return label.scrollWidth <= label.clientWidth + 1 && label.scrollHeight <= label.clientHeight + 1 && label.getClientRects().length > 0;
       });
       expect(fits, `${lang}: ${await tab.textContent()}`).toBe(true);
     }
   }
-  // Neues Video in the last language, with the waiting video given up.
   await page.getByTestId("start-cancel").click();
   await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "pick");
-  await expect.poll(() => horizontalOverflow(page), { message: "new video" }).toBeLessThanOrEqual(1);
 });
 
 test("desktop: the sidebar; one document from screen to screen while an upload runs", { tag: "@editor-v2" }, async ({ page, stub }, info) => {

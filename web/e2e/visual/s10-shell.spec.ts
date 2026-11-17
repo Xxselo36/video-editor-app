@@ -1,6 +1,7 @@
 // The app shell and its screens (PR3; the approved mockups
 // docs/mockups/start/3-projekte and settings/S1-S3 for the shell), in
-// German: Projekte with a row in each state (one just turned ready),
+// German (the tab bar in Spanish too, its longest labels): Projekte with
+// a row in each state (one just turned ready),
 // Projekte and the Vorschau tab with nothing to show, the Vorschau tab
 // with a video waiting for "Los geht’s", and Einstellungen, at the sizes
 // the owner checks; phones on the pixel7 project (touch), the rest on
@@ -122,5 +123,17 @@ for (const size of [...PHONES, ...DESKTOPS]) {
     await place(page, size, "/app/preview").click();
     await expect(page.getByTestId("preview-uploading")).toBeVisible();
     await snap(page, size, "7-vorschau-wartet");
+  });
+}
+
+for (const size of PHONES) {
+  test(`the tab bar in Spanish ${size.width}×${size.height}`, TAG, async ({ page }, info) => {
+    skipUnlessOwnProject(size, info.project.name);
+    await page.setViewportSize(size);
+    await openWithStorage(page, "/app/settings", { [LANG_KEY]: "es" });
+    await expect(page.locator('html[data-i18n~="es"]')).toHaveCount(1);
+    await expect(page.getByTestId("settings")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    await snap(page, size, "8-ajustes-es");
   });
 }

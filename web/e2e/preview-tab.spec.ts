@@ -6,7 +6,7 @@
  */
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
-import { chooseFile, job, JOBS, openWithStorage } from "./support/app";
+import { chooseFile, job, JOBS, openWithStorage, startGo } from "./support/app";
 import { WEB } from "./support/env";
 
 const previewTab = (page: Page, mobile: boolean) =>
@@ -83,6 +83,29 @@ test("a video waiting for Let's go in another tab: it says so, the way back is t
   await box.getByRole("link", { name: "Back to projects" }).click();
   await expect(other).toHaveURL(`${WEB}/app`);
   await other.close();
+});
+
+test("Let's go pressed, its upload still going: it says so, the way back to Projects", { tag: "@editor-v2" }, async ({ page, stub }, info) => {
+  const mobile = Boolean(info.project.use.isMobile);
+  await openWithStorage(page, "/app/new");
+  // The upload API answers once released: the upload is still going.
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/uploads/**", async (r) => {
+    await held;
+    await r.continue().catch(() => {});
+  });
+  await chooseFile(page, { name: "laeuft.mp4", mimeType: "video/mp4", buffer: await stub.media("grid.mp4") });
+  await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
+  await startGo(page);
+  await expect(page.getByTestId("start-go")).toHaveAttribute("data-state", "waiting");
+  await previewTab(page, mobile).click();
+  const box = page.getByTestId("preview-uploading");
+  await expect(box).toContainText("Your video is still uploading.");
+  await expect(box.getByRole("link", { name: "Continue" })).toHaveCount(0);
+  await box.getByRole("link", { name: "Back to projects" }).click();
+  await expect(page).toHaveURL(`${WEB}/app`);
+  release();
 });
 
 test("a video waiting for Let's go: it says so, Continue brings it back", { tag: "@editor-v2" }, async ({ page, stub }, info) => {
