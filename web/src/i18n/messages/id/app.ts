@@ -387,6 +387,8 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.projects.empty": "Belum ada proyek",
   "app.projects.emptyBody": "Unggah video. Cleo memotongnya dan menambahkan teks.",
   "app.projects.readyNow": "Siap",
+  "app.projects.announceReady": "“{name}” sudah siap",
+  "app.projects.announceFailed": "“{name}” gagal",
   "app.projects.canClose": "Kamu bisa menutup halaman ini.",
   "app.relative.justNow": "baru saja",
   "app.projects.expiredGroup": "Kedaluwarsa ({count})",

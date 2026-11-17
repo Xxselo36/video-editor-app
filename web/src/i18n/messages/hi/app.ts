@@ -387,6 +387,8 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.projects.empty": "अभी कोई प्रोजेक्ट नहीं",
   "app.projects.emptyBody": "एक वीडियो अपलोड करें। Cleo उसे काटेगा और कैप्शन जोड़ेगा।",
   "app.projects.readyNow": "तैयार",
+  "app.projects.announceReady": "“{name}” तैयार है",
+  "app.projects.announceFailed": "“{name}” विफल रहा",
   "app.projects.canClose": "आप यह पेज बंद कर सकते हैं।",
   "app.relative.justNow": "अभी-अभी",
   "app.projects.expiredGroup": "समाप्त ({count})",

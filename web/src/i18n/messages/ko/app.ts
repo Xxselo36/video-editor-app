@@ -384,6 +384,8 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.projects.empty": "아직 프로젝트가 없어요",
   "app.projects.emptyBody": "동영상을 업로드하세요. Cleo가 컷 편집하고 자막을 넣어 드려요.",
   "app.projects.readyNow": "준비됨",
+  "app.projects.announceReady": "“{name}” 준비가 끝났어요",
+  "app.projects.announceFailed": "“{name}” 처리에 실패했어요",
   "app.projects.canClose": "이 페이지를 닫아도 돼요.",
   "app.relative.justNow": "방금",
   "app.projects.expiredGroup": "만료됨 ({count})",

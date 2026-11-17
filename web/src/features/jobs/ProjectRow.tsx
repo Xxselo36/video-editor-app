@@ -8,8 +8,9 @@
  * through a link stretched over the row (job-card-open); the buttons sit
  * above it. While Cleo works on it the row is grey, its frame blurred,
  * and opens nothing; it keeps its nodes when it turns ready, so the frame
- * clears in place and the status line (aria-live) says "Bereit" for as
- * long as the page stays open. The menu (rename, delete) is on the
+ * clears in place and the status line says "Bereit" for as long as the
+ * page stays open (the page tells screen readers: ProjectsPage). The
+ * menu (rename, delete) is on the
  * Vorschau. An expired row requests no frame.
  *
  * An upload waiting for "Let's go" (D3) says so and leads back to the
@@ -433,7 +434,7 @@ export function ProjectRow({ p: project, onOpen }: { p: Project; onOpen: (href: 
           <span aria-hidden="true">{shown}</span>
           <span className="sr-only">{name}</span>
         </h3>
-        <p className={s.meta} aria-live="polite" data-testid="job-card-meta">
+        <p className={s.meta} data-testid="job-card-meta">
           {meta.dot && <span className={s.dot} data-dot={meta.dot} aria-hidden="true" />}
           {meta.word && <span className="sr-only">{meta.word}, </span>}
           <span className={s.metaText}>{meta.text}</span>

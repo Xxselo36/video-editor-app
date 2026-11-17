@@ -388,6 +388,8 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.projects.empty": "Henüz proje yok",
   "app.projects.emptyBody": "Bir video yükle. Cleo onu keser ve altyazı ekler.",
   "app.projects.readyNow": "Hazır",
+  "app.projects.announceReady": "“{name}” hazır",
+  "app.projects.announceFailed": "“{name}” başarısız oldu",
   "app.projects.canClose": "Bu sayfayı kapatabilirsin.",
   "app.relative.justNow": "az önce",
   "app.projects.expiredGroup": "Süresi dolan ({count})",

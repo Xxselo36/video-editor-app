@@ -387,6 +387,8 @@ export const nlApp: Partial<Record<AppKey, string>> = {
   "app.projects.empty": "Nog geen projecten",
   "app.projects.emptyBody": "Upload een video. Cleo knipt hem en zet er ondertitels bij.",
   "app.projects.readyNow": "Klaar",
+  "app.projects.announceReady": "„{name}” is klaar",
+  "app.projects.announceFailed": "„{name}” is mislukt",
   "app.projects.canClose": "Je kunt deze pagina sluiten.",
   "app.relative.justNow": "zojuist",
   "app.projects.expiredGroup": "Verlopen ({count})",

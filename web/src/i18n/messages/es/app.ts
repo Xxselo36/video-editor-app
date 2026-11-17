@@ -388,6 +388,8 @@ export const esApp: Partial<Record<AppKey, string>> = {
   "app.projects.empty": "Aún no hay proyectos",
   "app.projects.emptyBody": "Sube un video. Cleo lo corta y le pone subtítulos.",
   "app.projects.readyNow": "Listo",
+  "app.projects.announceReady": "«{name}» está listo",
+  "app.projects.announceFailed": "«{name}» falló",
   "app.projects.canClose": "Puedes cerrar esta página.",
   "app.relative.justNow": "hace un momento",
   "app.projects.expiredGroup": "Caducados ({count})",

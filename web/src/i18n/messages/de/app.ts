@@ -387,6 +387,8 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.projects.empty": "Noch keine Projekte",
   "app.projects.emptyBody": "Lade ein Video hoch. Cleo schneidet es und macht die Untertitel.",
   "app.projects.readyNow": "Bereit",
+  "app.projects.announceReady": "„{name}“ ist bereit",
+  "app.projects.announceFailed": "„{name}“ ist fehlgeschlagen",
   "app.projects.canClose": "Du kannst die Seite schließen.",
   "app.relative.justNow": "gerade eben",
   "app.projects.expiredGroup": "Abgelaufen ({count})",

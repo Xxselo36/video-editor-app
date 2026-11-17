@@ -385,6 +385,8 @@ export const ptApp: Partial<Record<AppKey, string>> = {
   "app.projects.empty": "Nenhum projeto ainda",
   "app.projects.emptyBody": "Envie um vídeo. A Cleo corta e coloca as legendas.",
   "app.projects.readyNow": "Pronto",
+  "app.projects.announceReady": "“{name}” está pronto",
+  "app.projects.announceFailed": "“{name}” falhou",
   "app.projects.canClose": "Você pode fechar esta página.",
   "app.relative.justNow": "agora mesmo",
   "app.projects.expiredGroup": "Expirados ({count})",

@@ -385,6 +385,8 @@ export const jaApp: Partial<Record<AppKey, string>> = {
   "app.projects.empty": "まだプロジェクトはありません",
   "app.projects.emptyBody": "動画をアップロードしてください。Cleo がカットして字幕を付けます。",
   "app.projects.readyNow": "準備完了",
+  "app.projects.announceReady": "「{name}」の準備ができました",
+  "app.projects.announceFailed": "「{name}」は失敗しました",
   "app.projects.canClose": "このページは閉じても大丈夫です。",
   "app.relative.justNow": "たった今",
   "app.projects.expiredGroup": "期限切れ（{count}）",

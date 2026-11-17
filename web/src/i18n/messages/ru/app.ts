@@ -386,6 +386,8 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.projects.empty": "Пока нет проектов",
   "app.projects.emptyBody": "Загрузи видео. Cleo его обрежет и добавит субтитры.",
   "app.projects.readyNow": "Готово",
+  "app.projects.announceReady": "«{name}»: готово",
+  "app.projects.announceFailed": "«{name}»: ошибка",
   "app.projects.canClose": "Страницу можно закрыть.",
   "app.relative.justNow": "только что",
   "app.projects.expiredGroup": "Истёкшие ({count})",

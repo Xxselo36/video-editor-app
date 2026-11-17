@@ -401,6 +401,8 @@ export const enApp = {
   "app.projects.empty": "No projects yet",
   "app.projects.emptyBody": "Upload a video. Cleo cuts it and adds captions.",
   "app.projects.readyNow": "Ready",
+  "app.projects.announceReady": "“{name}” is ready",
+  "app.projects.announceFailed": "“{name}” failed",
   "app.projects.canClose": "You can close this page.",
   "app.relative.justNow": "just now",
   "app.projects.expiredGroup": "Expired ({count})",

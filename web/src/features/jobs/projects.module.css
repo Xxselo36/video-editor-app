@@ -34,11 +34,12 @@
   border-top: 1px solid var(--border);
   pointer-events: none;
 }
-/* Its Vorschau: a link stretched over the row, under its buttons. */
+/* Its Vorschau: a link stretched over the whole row (its frame and name
+   too), under its buttons (.above). */
 .open {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: 1;
   border-radius: inherit;
   touch-action: manipulation;
   -webkit-touch-callout: none;
@@ -55,7 +56,7 @@
 }
 .above {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 .thumb {
