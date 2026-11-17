@@ -212,7 +212,7 @@ test("busy rows don't open, finished rows do; ready during the visit says Ready 
   const meta = row.getByTestId("job-card-meta");
   // Screen readers hear the change only, not every percent or minute.
   await expect(meta).not.toHaveAttribute("aria-live", /.+/);
-  const announce = page.getByTestId("projects-announce");
+  const announce = row.getByTestId("job-card-announce");
   await expect(announce).toHaveAttribute("role", "status");
   await expect(announce).toHaveText("");
   await meta.evaluate((el) => {
@@ -224,7 +224,7 @@ test("busy rows don't open, finished rows do; ready during the visit says Ready 
   await expect(row).toHaveAttribute("data-fresh", "true");
   await expect(row).not.toHaveAttribute("data-busy", "true");
   await expect(meta).toHaveText(/^Ready · \d+:\d\d$/);
-  // The same line, in place, not a new row; the page says which is ready.
+  // The same line, in place, not a new row; screen readers hear which.
   expect(await meta.evaluate((el) => (window as unknown as { __metaNode: Element }).__metaNode === el)).toBe(true);
   await expect(announce).toHaveText("“frisch.mp4” is ready");
   await row.getByTestId("job-card-open").click();

@@ -201,6 +201,44 @@ test("Upload after Let's go while its upload still goes: a new start, the video 
   await expect(jobCard(page, "weiter.mp4")).not.toHaveAttribute("data-state", /^upload/, { timeout: 30_000 });
 });
 
+test("phones: the keyboard's focus lands clear of both bars; the bars' own buttons don't move the page", { tag: "@editor-v2" }, async ({ page, stub }, info) => {
+  test.skip(!info.project.use.isMobile, "phones");
+  await page.setViewportSize({ width: 390, height: 600 });
+  // Einstellungen: every row Tab reaches is clear of the top bar and the
+  // tab bar (the page scrolls it there).
+  await openWithStorage(page, "/app/settings");
+  await expect(page.getByTestId("settings")).toBeVisible();
+  const clear = () =>
+    page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el || !el.closest("#main")) return null;
+      const r = el.getBoundingClientRect();
+      const top = document.querySelector("[data-testid=topbar]")!.getBoundingClientRect().bottom;
+      const tabs = document.querySelector("[data-testid=tabbar]")!.getBoundingClientRect().top;
+      return { name: el.textContent?.trim().slice(0, 30) ?? el.tagName, ok: r.top >= top - 1 && r.bottom <= tabs + 1 };
+    });
+  let seen = 0;
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press("Tab");
+    const at = await clear();
+    if (!at) continue;
+    seen++;
+    expect(at.ok, `${at.name} clear of the bars`).toBe(true);
+  }
+  expect(seen).toBeGreaterThanOrEqual(4);
+
+  // A scrolled Vorschau: its ⋯ in the top bar takes the focus where it is.
+  const review = await stub.seed("review");
+  await openWithStorage(page, `/app/p/${review.id}`, { [JOBS]: [job(review.id, "lang.mp4")] });
+  await expect(page.getByTestId("preview")).toHaveAttribute("data-state", "ready");
+  await page.evaluate(() => window.scrollTo(0, 200));
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(0);
+  await page.getByTestId("topbar").getByTestId("job-card-menu").focus();
+  await expect(page.getByTestId("topbar").getByTestId("job-card-menu")).toBeFocused();
+  expect(await page.evaluate(() => window.scrollY)).toBe(before);
+});
+
 test("short landscape phones: only the tab bar stays", { tag: "@editor-v2" }, async ({ page }, info) => {
   test.skip(!info.project.use.isMobile, "phones");
   for (const size of [
