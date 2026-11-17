@@ -3,9 +3,10 @@
    960 px: the sidebar. The bars' heights are the --topbar / --tabbar of
    app/globals.css, which also derives the --app-* offsets the screens use. */
 
+/* No stacking context of its own: its bars stay above the legal footer,
+   which comes after it in the page. */
 .shell {
   position: relative;
-  z-index: 1;
 }
 
 .shell :focus-visible {

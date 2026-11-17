@@ -10,8 +10,7 @@ import {
   capLocal,
   daysLeft,
   displayName,
-  matchesFilter,
-  matchesSearch,
+  formatDuration,
   MAX_LOCAL,
   mergeLocal,
   mergeProjects,
@@ -19,6 +18,7 @@ import {
   migrateLegacy,
   MISSING,
   parseLocal,
+  relativeTime,
   remoteFrom,
   stateOf,
   timelineSeconds,
@@ -162,12 +162,7 @@ describe("emptyListAction", () => {
 });
 
 describe("page helpers", () => {
-  it("filters, searches and shortens names", () => {
-    const p = mergeProjects([local("a", { filename: "Podcast Folge 12.mp4" })], new Map([["a", row({ id: "a", status: "awaiting_review" })]]), null, { now: NOW })[0];
-    expect(matchesFilter(p, "edit")).toBe(true);
-    expect(matchesFilter(p, "exported")).toBe(false);
-    expect(matchesSearch(p, "folge")).toBe(true);
-    expect(matchesSearch(p, "vlog")).toBe(false);
+  it("shortens names", () => {
     expect(middleEllipsis("short.mp4")).toBe("short.mp4");
     const long = middleEllipsis("Mein_Video_Podcast_Folge_12_mit_einem_sehr_langen_Namen.mp4");
     expect(long).toHaveLength(34);
@@ -203,5 +198,44 @@ describe("page helpers", () => {
     expect(timelineSeconds([{ start: 1, end: 4 }, { start: 5, end: 6, speed: 0 }])).toBe(4);
     expect(timelineSeconds([{ start: 3, end: 2 }])).toBe(0);
     expect(timelineSeconds([{ start: 0, end: 3, speed: 1.5 }])).toBeCloseTo(2);
+  });
+});
+
+describe("what a row shows", () => {
+  it("the length of the cut video, else of the source", () => {
+    const at = (o: Record<string, unknown>) =>
+      mergeProjects([local("a")], new Map([["a", row({ id: "a", status: "awaiting_review", ...o })]]), null, { now: NOW })[0];
+    expect(at({ duration: 134, output_seconds: 104.2 }).length).toBe(104.2);
+    // A row from before the server kept it (or one still being analysed).
+    expect(at({ duration: 134 }).length).toBe(134);
+    expect(at({ duration: 134, output_seconds: 0 }).length).toBe(134);
+    expect(at({}).length).toBeNull();
+    // Not asked yet: nothing.
+    expect(mergeProjects([local("a")], new Map(), null, { now: NOW })[0].length).toBeNull();
+  });
+
+  it("whether the analysis made a poster", () => {
+    expect(row({ has_poster: true }).hasPoster).toBe(true);
+    expect(row({}).hasPoster).toBe(false);
+    const p = mergeProjects([local("a")], new Map([["a", row({ id: "a", has_poster: true })]]), null, { now: NOW })[0];
+    expect(p.hasPoster).toBe(true);
+  });
+
+  it("formatDuration: m:ss, h:mm:ss over an hour", () => {
+    expect(formatDuration(0)).toBe("0:00");
+    expect(formatDuration(104.4)).toBe("1:44");
+    expect(formatDuration(59.6)).toBe("1:00");
+    expect(formatDuration(3725)).toBe("1:02:05");
+  });
+
+  it("relativeTime: short, in the language; just now under a minute", () => {
+    const ago = (s: number, lang = "de") => relativeTime(NOW - s * 1000, lang, NOW, "gerade eben");
+    expect(ago(0)).toBe("gerade eben");
+    expect(ago(59)).toBe("gerade eben");
+    expect(ago(5 * 60)).toBe("vor 5 Min.");
+    expect(ago(2 * 3600)).toBe("vor 2 Std.");
+    expect(ago(86_400)).toBe("gestern");
+    expect(ago(3 * 86_400)).toBe("vor 3 Tagen");
+    expect(ago(5 * 60, "en")).toBe("5 min. ago");
   });
 });

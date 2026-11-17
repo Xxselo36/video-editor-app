@@ -22,32 +22,12 @@ import { useT } from "@/i18n";
 import { EDITOR_V2 } from "@/features/editor/v2/flag";
 import { useProjectsV2 } from "@/features/jobs/useProjectsV2";
 import { ErrorView } from "./ErrorView";
+import { PreviewSkeleton } from "./PreviewSkeleton";
 import { useJobPoll, type JobPoll } from "./useJobPoll";
-import s from "./preview.module.css";
-
-/** The Vorschau's shape while it (or its job) loads: frame, title, buttons. */
-function PreviewSkeleton() {
-  return (
-    <div className={s.root} data-testid="project-loading" aria-busy="true">
-      <div className={s.watch} data-shape="tall">
-        <div className={s.media}>
-          <div className={s.frameSkeleton} />
-        </div>
-        <div className={s.info}>
-          <div className={s.titleSkeleton} />
-          <div className={s.acts}>
-            <div className={s.buttonSkeleton} />
-            <div className={s.buttonSkeleton} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // The Vorschau with its players and the caption engine: a chunk of its
 // own (keeps /app/p within its first-load budget).
-const PreviewScreen = dynamic(() => import("./PreviewScreen"), { ssr: false, loading: PreviewSkeleton });
+const PreviewScreen = dynamic(() => import("./PreviewScreen"), { ssr: false, loading: () => <PreviewSkeleton /> });
 
 // v1's project page (its card and Done view): a chunk of its own.
 const LegacyProject = dynamic(() => import("./LegacyProject").then((m) => m.LegacyProject), {

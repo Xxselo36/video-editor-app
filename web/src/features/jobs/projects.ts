@@ -91,6 +91,10 @@ export type RemoteJob = {
   updatedAt: number | null;
   /** The export's generation (renders_ok): in its download link. */
   rendersOk: number;
+  /** GET /jobs/{id}/poster has a frame (the analysis made one). */
+  hasPoster: boolean;
+  /** Length of the video the saved timeline makes (s); null until known. */
+  outputSeconds: number | null;
 };
 
 /** The server doesn't know the job (deleted after its retention, or not
@@ -136,6 +140,11 @@ export type Project = {
   updatedAt: number | null;
   /** RemoteJob.rendersOk (0 until the server said). */
   rendersOk: number;
+  /** RemoteJob.hasPoster. */
+  hasPoster: boolean;
+  /** What a row shows as the length: the cut video's (RemoteJob
+   *  outputSeconds), else the source's (seconds; null: unknown). */
+  length: number | null;
   /** LocalJob.note. */
   note: string | null;
   upload: UploadRecord | null;
@@ -182,6 +191,8 @@ export function remoteFrom(raw: Record<string, unknown> | JobStatusRow): RemoteJ
     renderFailed: status === "awaiting_review" && Boolean(errorCode || str(r.error)),
     updatedAt: toMsTime(r.updated_at),
     rendersOk: num(r.renders_ok) ?? 0,
+    hasPoster: Boolean(r.has_poster),
+    outputSeconds: num(r.output_seconds) && (r.output_seconds as number) > 0 ? (r.output_seconds as number) : null,
   };
 }
 
@@ -256,6 +267,8 @@ export function buildProject(
     renderFailed: r?.renderFailed ?? false,
     updatedAt: r?.updatedAt ?? null,
     rendersOk: r?.rendersOk ?? 0,
+    hasPoster: r?.hasPoster ?? false,
+    length: r?.outputSeconds ?? r?.duration ?? null,
     note: local?.note ?? null,
     upload: local?.upload ?? (local && isUploadId(local.jobId) ? {} : null),
     local: Boolean(local),
@@ -446,20 +459,6 @@ export function emptyListAction(s: {
   return s.serverLoaded ? "redirect" : "retry";
 }
 
-export type Filter = "all" | "edit" | "exported";
-
-export function matchesFilter(p: Project, f: Filter): boolean {
-  if (f === "edit") return p.state === "ready" || p.state === "edited";
-  if (f === "exported") return p.state === "exported";
-  return true;
-}
-
-export function matchesSearch(p: Project, q: string): boolean {
-  const s = q.trim().toLocaleLowerCase();
-  if (!s) return true;
-  return `${p.name} ${p.filename}`.toLocaleLowerCase().includes(s);
-}
-
 /** "Folge_12_mit_einem_sehr_langen_Namen.mp4" → "Folge_12_mit…Namen.mp4"
  *  (the extension stays visible). */
 export function middleEllipsis(name: string, max = 34): string {
@@ -497,4 +496,31 @@ export function daysLeft(expiresAt: number | null, now: number): number | null {
 export function analysisEta(duration: number | null): number | null {
   if (!duration || duration <= 0) return null;
   return Math.max(20, Math.round(duration * 1.2));
+}
+
+/** m:ss (h:mm:ss over an hour). */
+export function formatDuration(s: number): string {
+  const total = Math.round(s);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
+/** "vor 5 Min.", "gestern" in the UI language (Intl.RelativeTimeFormat,
+ *  short); `justNow` under a minute. */
+export function relativeTime(ms: number, lang: string, now: number, justNow: string): string {
+  const s = Math.round((ms - now) / 1000);
+  const abs = Math.abs(s);
+  if (abs < 60) return justNow;
+  const [v, unit]: [number, Intl.RelativeTimeFormatUnit] =
+    abs < 3600 ? [Math.round(s / 60), "minute"]
+      : abs < 86_400 ? [Math.round(s / 3600), "hour"]
+        : abs < 30 * 86_400 ? [Math.round(s / 86_400), "day"]
+          : [Math.round(s / (30 * 86_400)), "month"];
+  try {
+    return new Intl.RelativeTimeFormat(lang, { numeric: "auto", style: "short" }).format(v, unit);
+  } catch {
+    return new Date(ms).toLocaleDateString();
+  }
 }

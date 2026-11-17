@@ -108,6 +108,15 @@ export function useLiveUpload(id: string): LiveUpload | null {
   );
 }
 
+/** Any upload running in this page: closing it would stop them. */
+export function useUploadsRunning(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => live.size > 0,
+    () => false,
+  );
+}
+
 /** Does upload `id` wait for "Let's go"? (Also after it failed.) */
 export function isAwaitingGo(id: string): boolean {
   return awaitingGo.has(id);

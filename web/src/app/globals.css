@@ -180,7 +180,9 @@ html[data-uploading] {
 
 /* The app shell (components/shell) on a page: what the screens keep
  * clear of its bars. Phones: the sticky top bar (--app-topbar), the fixed
- * tab bar (--app-tabbar) and both plus the screen's own top (--app-chrome);
+ * tab bar (--app-tabbar) and both plus what Neues Video puts around its
+ * card (--app-chrome: main's top, the privacy link under the card and a
+ * little air, so the link is clear of the tab bar);
  * the legal footer stays reachable above the tab bar. From 960 px: the
  * sidebar's width (--app-side), which the footer leaves free too. Screens
  * write fallbacks for a page without the shell. */
@@ -188,7 +190,7 @@ html[data-uploading] {
   body:has([data-app-shell]) {
     --app-topbar: calc(var(--topbar) + env(safe-area-inset-top, 0px));
     --app-tabbar: calc(var(--tabbar) + env(safe-area-inset-bottom, 0px));
-    --app-chrome: calc(var(--app-topbar) + var(--app-tabbar) + 59px);
+    --app-chrome: calc(var(--app-topbar) + var(--app-tabbar) + 82px);
   }
   body:has([data-app-shell]) [data-site-footer] {
     padding-bottom: calc(20px + var(--tabbar) + env(safe-area-inset-bottom, 0px));
