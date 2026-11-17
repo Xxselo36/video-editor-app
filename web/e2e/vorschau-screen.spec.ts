@@ -125,8 +125,9 @@ async function menuByKeys(page: Page, item: "rename" | "delete") {
 /** Hold the mouse button down on `el`; its computed scale and transform
  *  while pressed (then released off it: no click). */
 async function pressed(page: Page, el: Locator): Promise<{ scale: string; transform: string }> {
-  const b = (await el.boundingBox())!;
-  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  // (Hover waits until it holds still: a panel that just opened may still
+  // be moving it, and the press would land beside it.)
+  await el.hover();
   await page.mouse.down();
   // the press transition (160 ms) has run
   await page.waitForTimeout(400);
@@ -531,8 +532,7 @@ test.describe("the Vorschau's screen", TAG, () => {
     for (const el of small) await expect(el).toBeVisible();
     /** Held down on a dialog's button: its scale (then released on the dialog's title: no click). */
     const pressedInDialog = async (button: Locator, title: Locator) => {
-      const b = (await button.boundingBox())!;
-      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+      await button.hover();
       await page.mouse.down();
       await page.waitForTimeout(400);
       const scale = await button.evaluate((n) => getComputedStyle(n).scale);
