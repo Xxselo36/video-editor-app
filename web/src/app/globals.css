@@ -196,8 +196,9 @@ html[data-uploading] {
   /* What in the screen gets the focus or is scrolled to stays clear of
    * both bars. A margin of the screen's content, not the page's scroll
    * padding: the bars' own buttons (the top bar's ⋯) are in view where
-   * they are, the page doesn't jump to them. */
-  html:has([data-app-shell]) #main * {
+   * they are, the page doesn't jump to them. ("Untertitel wählen" keeps
+   * its own scroll padding, below: its sticky strip and go bar too.) */
+  html:has([data-app-shell]):not(:has([data-screen="style"])) #main * {
     scroll-margin-top: calc(var(--app-topbar) + 8px);
     scroll-margin-bottom: calc(var(--app-tabbar) + 8px);
   }
@@ -224,24 +225,17 @@ html[data-uploading] {
  * scrolled to stays clear of the sticky upload strip and go bar (and the
  * shell's bars). The two bars write their heights (features/start/
  * barHeight.ts): they grow with a paused line, a failure, a label on two
- * lines. In the shell its content's margins (above) keep the shell's bars
- * clear, the padding adds the strip and the go bar. On short landscape
- * screens those two don't stick. */
+ * lines. On short landscape screens those two don't stick. */
 @media (max-width: 959.98px) {
   html:has([data-screen="style"]) {
-    scroll-padding-top: calc(var(--start-strip-h, 55px) + 9px);
-    scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--start-go-h, 102px) + 14px);
-  }
-  html:has([data-app-shell]):has([data-screen="style"]) {
-    scroll-padding-top: calc(var(--start-strip-h, 55px) + 1px);
-    scroll-padding-bottom: calc(var(--start-go-h, 102px) + 6px);
+    scroll-padding-top: calc(var(--app-topbar, 0px) + var(--start-strip-h, 55px) + 9px);
+    scroll-padding-bottom: calc(var(--app-tabbar, env(safe-area-inset-bottom, 0px)) + var(--start-go-h, 102px) + 14px);
   }
 }
 @media (max-width: 959.98px) and (max-height: 500px) {
-  html:has([data-screen="style"]),
-  html:has([data-app-shell]):has([data-screen="style"]) {
-    scroll-padding-top: 0;
-    scroll-padding-bottom: 0;
+  html:has([data-screen="style"]) {
+    scroll-padding-top: var(--app-topbar, 0px);
+    scroll-padding-bottom: var(--app-tabbar, 0px);
   }
 }
 
