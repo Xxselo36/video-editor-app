@@ -30,6 +30,8 @@ export const BUDGETS = {
   "/app": 200,
   "/app/new": 200,
   "/app/p/[jobId]": 200,
+  "/app/preview": 200,
+  "/app/settings": 200,
   "/app/edit/[jobId]": 250,
 };
 

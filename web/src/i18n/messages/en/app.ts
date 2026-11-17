@@ -11,6 +11,13 @@ export const enApp = {
   "app.header.beta": "Beta",
   "app.header.opening": "Opening…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Main menu",
+  "app.nav.upload": "Upload",
+  "app.nav.uploadVideo": "Upload video",
+  "app.nav.settings": "Settings",
+  "app.nav.skip": "Skip to content",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — your video is ready",
 

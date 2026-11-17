@@ -23,7 +23,7 @@ export function Toast({
       data-testid={testId}
       onClick={onDismiss}
       className={cx(
-        "fixed left-1/2 top-4 z-50 -translate-x-1/2",
+        "fixed left-1/2 top-[calc(16px+env(safe-area-inset-top,0px))] z-50 -translate-x-1/2",
         compact
           ? "rounded-full px-4 py-2 text-xs font-semibold"
           : "w-[min(92vw,420px)] rounded-2xl px-4 py-3 text-sm",

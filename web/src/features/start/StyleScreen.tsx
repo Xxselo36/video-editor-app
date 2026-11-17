@@ -74,7 +74,8 @@ export function StyleScreen() {
   const title = t("app.start.chooseCaptions");
   const choose = (
     <section className={s.choose} aria-labelledby={TITLE_ID}>
-      <PageTitle bar={title} id={TITLE_ID}>
+      {/* The upload strip draws the line under the phone top bar. */}
+      <PageTitle bar={title} id={TITLE_ID} edge="none">
         {title}
       </PageTitle>
       <StylePicker labelledBy={TITLE_ID} frame={frame} />

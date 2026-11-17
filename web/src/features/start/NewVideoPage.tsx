@@ -18,6 +18,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { AppPage } from "@/components/AppPage";
+import { useStartKey } from "@/components/shell/startKey";
 import { EDITOR_V2, readChoice } from "@/features/editor/v2/flag";
 
 const LegacyNewVideoPage = dynamic(() => import("./LegacyNewVideoPage").then((m) => m.LegacyNewVideoPage), {
@@ -37,6 +38,8 @@ const StartScreen = dynamic(() => import("./StartScreen").then((m) => m.StartScr
 
 export function NewVideoPage() {
   const [v2, setV2] = useState(EDITOR_V2);
+  // The upload tab pressed on this screen starts it over (components/shell/startKey).
+  const startKey = useStartKey();
   useEffect(() => {
     // After mount: the server render has no storage.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -45,7 +48,7 @@ export function NewVideoPage() {
   if (!v2) return <LegacyNewVideoPage />;
   return (
     <AppPage width="6xl">
-      <StartScreen />
+      <StartScreen key={startKey} />
     </AppPage>
   );
 }

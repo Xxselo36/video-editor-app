@@ -24,30 +24,10 @@ export const LANDSCAPE_QUERY = "(max-height: 499.98px) and (orientation: landsca
 /**
  * viewport-fit=cover while the editor is open (UX7c): the safe-area
  * insets then reach the CSS (env(safe-area-inset-*): the phone root's
- * padding, the tab bar, the sheets, the iPhone pseudo-fullscreen), and
- * the landscape notch sides are ours instead of letterboxed. The rest of
- * the site keeps its viewport.
+ * padding, the tab bar, the sheets, the iPhone pseudo-fullscreen). The
+ * counter is shared with the app shell (lib/viewportFit).
  */
-export function useViewportFitCover(): void {
-  useEffect(() => {
-    // Counted: the loading editor and the loaded one are separate mounts
-    // whose effects interleave; only the last one out removes the token.
-    if (fitCoverUsers++ === 0) setFitCover(true);
-    return () => {
-      if (--fitCoverUsers === 0) setFitCover(false);
-    };
-  }, []);
-}
-let fitCoverUsers = 0;
-const FIT_COVER = /,?\s*viewport-fit\s*=\s*cover/;
-function setFitCover(on: boolean) {
-  const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
-  if (!meta) return;
-  const c = meta.content;
-  if (on && !/viewport-fit\s*=/.test(c)) meta.content = `${c}${c.trim() ? ", " : ""}viewport-fit=cover`;
-  // our token only, from the meta as it is now (Next may have re-rendered it)
-  else if (!on && FIT_COVER.test(c)) meta.content = c.replace(FIT_COVER, "").trim();
-}
+export { useViewportFitCover } from "@/lib/viewportFit";
 
 /** The keyboard (or anything else) hides more than this of the screen. */
 const KEYBOARD_MIN = 120;

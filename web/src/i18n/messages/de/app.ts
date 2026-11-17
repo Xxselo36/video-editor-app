@@ -7,6 +7,13 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "Beta",
   "app.header.opening": "Wird geöffnet…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Hauptmenü",
+  "app.nav.upload": "Hochladen",
+  "app.nav.uploadVideo": "Video hochladen",
+  "app.nav.settings": "Einstellungen",
+  "app.nav.skip": "Zum Inhalt springen",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — dein Video ist fertig",
 
