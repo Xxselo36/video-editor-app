@@ -7,6 +7,21 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "Beta",
   "app.header.opening": "Açılıyor…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Ana menü",
+  "app.nav.upload": "Yükle",
+  "app.nav.uploadVideo": "Video yükle",
+  "app.nav.settings": "Ayarlar",
+  "app.nav.skip": "İçeriğe geç",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "Uygulama dili",
+  "app.settings.manageAccount": "Hesap ve plan",
+  "app.settings.voice": "Sesli komutlar",
+  "app.settings.voiceTry": "“Cleo cut” komutunu dene",
+  "app.settings.legal": "Yasal",
+  "app.settings.beta": "CleoCuts betasını kullanıyorsun.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — videon hazır",
 
@@ -301,8 +316,7 @@ export const trApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "Sırada bekliyor (#{n})",
   "app.card.queued.titleNoPos": "Sırada bekliyor",
-  "app.card.queued.sub":
-    "Şu an çok fazla video var — seninki otomatik olarak başlayacak. Bu sayfadan ayrılabilirsin.",
+  "app.card.queued.sub": "Şu an çok fazla video var. Seninki otomatik olarak başlayacak, bu sayfadan ayrılabilirsin.",
   "app.card.open": "Aç",
   "app.card.remove": "Kaldır",
   "app.card.renderFailedNote": "Dışa aktarma başarısız oldu. Düzenlemelerin kaydedildi. Tekrar dene.",
@@ -371,6 +385,11 @@ export const trApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Projeler",
   "app.projects.title": "Projeler",
+  "app.projects.empty": "Henüz proje yok",
+  "app.projects.emptyBody": "Bir video yükle. Cleo onu keser ve altyazı ekler.",
+  "app.projects.readyNow": "Hazır",
+  "app.projects.canClose": "Bu sayfayı kapatabilirsin.",
+  "app.relative.justNow": "az önce",
   "app.projects.expiredGroup": "Süresi dolan ({count})",
   "app.projects.expiredNote": "Projeler son değişiklikten {days} gün sonra dosyalarıyla birlikte silinir.",
   "app.projects.allExpired.title": "Projelerin {days} gün sonra silindi",
@@ -394,13 +413,13 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "İptal",
   "app.projects.retry": "Tekrar dene",
   "app.projects.pickAgain": "Yüklemeye devam etmek için aynı dosyayı yeniden seç",
-  "app.projects.copyMismatch": "Bu kopya “{name}” ile eşleşmiyor — iPhone onu yeniden dönüştürmüş olabilir. Baştan yüklensin mi?",
+  "app.projects.copyMismatch": "Bu kopya “{name}” ile eşleşmiyor. iPhone onu yeniden dönüştürmüş olabilir. Baştan yüklensin mi?",
   "app.projects.copyMismatchOther": "Bu “{name}” değil. Devam etmek için onu yeniden seç ya da bu dosyayı baştan yükle.",
   "app.projects.otherUpload": "Bu, durdurulan başka bir yüklemenin (“{name}”) videosu. Onu kendi kutucuğunda sürdür.",
   "app.projects.fromStartConfirm": "Bu, %{pct} noktasında durdurulan yüklemeden tamamen vazgeçer. Yeni dosya baştan yüklensin mi?",
   "app.projects.fromStartYes": "Evet, baştan",
   "app.projects.uploadFromStart": "Baştan yükle",
-  "app.projects.resumeAt": "%{pct} noktasında durdu — devam etmek için aynı videoyu seç.",
+  "app.projects.resumeAt": "{pct} noktasında durdu. Devam etmek için aynı videoyu seç.",
   "app.projects.resume": "Yüklemeye devam et",
   "app.projects.download": "İndir",
   "app.projects.copyText": "Gönderi metnini kopyala",
@@ -492,6 +511,9 @@ export const trApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "Altyazıları ilk dışa aktarmanın görünümünü korur.",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "Henüz izlenecek bir şey yok",
+  "app.preview.emptyBody": "Bir video yükle, burada görürsün.",
+  "app.preview.uploading": "Videon hâlâ yükleniyor.",
   "app.preview.refine": "İnce ayar",
   "app.preview.more": "Bu video için daha fazlası",
   "app.preview.pause": "Duraklat",

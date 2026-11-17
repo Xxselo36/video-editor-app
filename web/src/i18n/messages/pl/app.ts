@@ -7,6 +7,21 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "Beta",
   "app.header.opening": "Otwieranie…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Menu główne",
+  "app.nav.upload": "Prześlij",
+  "app.nav.uploadVideo": "Prześlij film",
+  "app.nav.settings": "Ustawienia",
+  "app.nav.skip": "Przejdź do treści",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "Język aplikacji",
+  "app.settings.manageAccount": "Konto i plan",
+  "app.settings.voice": "Polecenia głosowe",
+  "app.settings.voiceTry": "Wypróbuj „Cleo cut”",
+  "app.settings.legal": "Informacje prawne",
+  "app.settings.beta": "Korzystasz z wersji beta CleoCuts.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — twój film jest gotowy",
 
@@ -300,8 +315,7 @@ export const plApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "W kolejce (#{n})",
   "app.card.queued.titleNoPos": "W kolejce",
-  "app.card.queued.sub":
-    "Teraz jest dużo filmów — twój ruszy automatycznie. Możesz opuścić tę stronę.",
+  "app.card.queued.sub": "Teraz jest dużo filmów. Twój ruszy automatycznie, więc możesz opuścić tę stronę.",
   "app.card.open": "Otwórz",
   "app.card.remove": "Usuń",
   "app.card.renderFailedNote": "Eksport się nie udał. Twoje zmiany są zapisane. Spróbuj ponownie.",
@@ -370,6 +384,11 @@ export const plApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Projekty",
   "app.projects.title": "Projekty",
+  "app.projects.empty": "Nie ma jeszcze projektów",
+  "app.projects.emptyBody": "Prześlij film. Cleo go przytnie i doda napisy.",
+  "app.projects.readyNow": "Gotowe",
+  "app.projects.canClose": "Możesz zamknąć tę stronę.",
+  "app.relative.justNow": "przed chwilą",
   "app.projects.expiredGroup": "Wygasłe ({count})",
   "app.projects.expiredNote": "Projekty są usuwane {days} dni po ostatniej zmianie, razem z plikami.",
   "app.projects.allExpired.title": "Twoje projekty zostały usunięte po {days} dniach",
@@ -393,13 +412,13 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Anuluj",
   "app.projects.retry": "Spróbuj ponownie",
   "app.projects.pickAgain": "Wybierz ten sam plik ponownie, aby kontynuować przesyłanie",
-  "app.projects.copyMismatch": "Ta kopia nie pasuje do „{name}” — iPhone mógł ją ponownie przekonwertować. Przesłać od początku?",
-  "app.projects.copyMismatchOther": "To nie jest „{name}”. Wybierz go ponownie, aby kontynuować — albo prześlij ten plik od początku.",
+  "app.projects.copyMismatch": "Ta kopia nie pasuje do „{name}”. iPhone mógł ją ponownie przekonwertować. Przesłać od początku?",
+  "app.projects.copyMismatchOther": "To nie jest „{name}”. Wybierz go ponownie, aby kontynuować, albo prześlij ten plik od początku.",
   "app.projects.otherUpload": "To film z innego zatrzymanego przesyłania („{name}”). Kontynuuj je na jego własnym kafelku.",
   "app.projects.fromStartConfirm": "To na zawsze porzuci przesyłanie zatrzymane na {pct}%. Przesłać nowy plik od początku?",
   "app.projects.fromStartYes": "Tak, od początku",
   "app.projects.uploadFromStart": "Prześlij od początku",
-  "app.projects.resumeAt": "Zatrzymano na {pct}% — wybierz ten sam film, aby kontynuować.",
+  "app.projects.resumeAt": "Zatrzymano na {pct}. Wybierz ten sam film, aby kontynuować.",
   "app.projects.resume": "Wznów przesyłanie",
   "app.projects.download": "Pobierz",
   "app.projects.copyText": "Kopiuj tekst posta",
@@ -491,6 +510,9 @@ export const plApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "Jego napisy zachowują wygląd pierwszego eksportu.",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "Na razie nie ma nic do obejrzenia",
+  "app.preview.emptyBody": "Prześlij film, a zobaczysz go tutaj.",
+  "app.preview.uploading": "Twój film jest jeszcze przesyłany.",
   "app.preview.refine": "Poprawki",
   "app.preview.more": "Więcej do tego wideo",
   "app.preview.pause": "Wstrzymaj",

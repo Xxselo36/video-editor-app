@@ -53,6 +53,8 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { PageTitle } from "@/components/PageTitle";
+import { useInShell } from "@/components/shell/useShell";
 import { Button, buttonClass } from "@/components/ui/Button";
 import { cx } from "@/components/ui/cx";
 import { Icon } from "@/components/ui/Icon";
@@ -90,6 +92,7 @@ import { costLine, downloadLabel } from "./exportsInfo";
 import ExportedVideo from "./ExportedVideo";
 import { unsavedOnDevice } from "./finish";
 import { markRefine } from "./nav";
+import { rememberPreview } from "./pickPreview";
 import { isWide } from "./player";
 import { ProcessingView } from "./ProcessingView";
 import PreviewVideo from "./PreviewVideo";
@@ -359,9 +362,15 @@ function TitleRow({
   onMenu: (action: "rename" | "delete") => void;
   onOpen: (href: string) => void;
 }) {
+  const t = useT();
   const desktop = useIsDesktop();
+  const shell = useInShell();
+  // Phones in the app shell: the ⋯ sits at the end of the top bar.
+  const inBar = shell && !desktop;
+  const menu = <ProjectMenu p={project} size="lg" onAction={onMenu} onOpen={onOpen} />;
   return (
     <div className={s.trow}>
+      <PageTitle bar={t("editor.preview")} trailing={inBar ? menu : undefined} />
       {/* Named as it reads: breakable()'s separator boxes would add spaces to the name. */}
       <h1 id={TITLE_ID} className={s.title} tabIndex={-1} aria-label={name} data-testid="preview-title">
         {desktop ? breakable(name) : name}
@@ -371,9 +380,7 @@ function TitleRow({
           {fmtClock(seconds)}
         </span>
       )}
-      <span className={s.menu}>
-        <ProjectMenu p={project} size="lg" onAction={onMenu} onOpen={onOpen} />
-      </span>
+      {!inBar && <span className={s.menu}>{menu}</span>}
     </div>
   );
 }
@@ -408,6 +415,8 @@ export default function PreviewScreen({
   // Fertigstellen ran while the page was open (an instant export too).
   const [finishedHere, setFinishedHere] = useState(false);
   if (!finishedHere && (state === "finishing" || finish.starting)) setFinishedHere(true);
+  // The Vorschau tab comes back to this one (pickPreview).
+  useEffect(() => rememberPreview(job.id), [job.id]);
   // The job as last shown, for a rename that answers after a newer poll.
   const latest = useRef(job);
   useEffect(() => {

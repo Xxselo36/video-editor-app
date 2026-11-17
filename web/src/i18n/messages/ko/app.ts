@@ -7,6 +7,21 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "베타",
   "app.header.opening": "여는 중…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "메인 메뉴",
+  "app.nav.upload": "업로드",
+  "app.nav.uploadVideo": "동영상 업로드",
+  "app.nav.settings": "설정",
+  "app.nav.skip": "본문으로 건너뛰기",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "앱 언어",
+  "app.settings.manageAccount": "계정 및 요금제",
+  "app.settings.voice": "음성 명령",
+  "app.settings.voiceTry": "“Cleo cut” 사용해 보기",
+  "app.settings.legal": "법적 고지",
+  "app.settings.beta": "CleoCuts 베타를 사용하고 있어요.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — 영상이 준비됐어요",
 
@@ -297,7 +312,7 @@ export const koApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "대기 중 (#{n})",
   "app.card.queued.titleNoPos": "대기 중",
-  "app.card.queued.sub": "지금 영상이 많아요 — 순서가 되면 자동으로 시작돼요. 이 페이지를 나가도 괜찮아요.",
+  "app.card.queued.sub": "지금 영상이 많아요. 순서가 되면 자동으로 시작되니 이 페이지를 나가도 괜찮아요.",
   "app.card.open": "열기",
   "app.card.remove": "삭제",
   "app.card.renderFailedNote": "내보내기에 실패했어요. 편집 내용은 저장돼 있어요. 다시 시도해 주세요.",
@@ -366,6 +381,11 @@ export const koApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "프로젝트",
   "app.projects.title": "프로젝트",
+  "app.projects.empty": "아직 프로젝트가 없어요",
+  "app.projects.emptyBody": "동영상을 업로드하세요. Cleo가 컷 편집하고 자막을 넣어 드려요.",
+  "app.projects.readyNow": "준비됨",
+  "app.projects.canClose": "이 페이지를 닫아도 돼요.",
+  "app.relative.justNow": "방금",
   "app.projects.expiredGroup": "만료됨 ({count})",
   "app.projects.expiredNote": "프로젝트는 마지막 변경 후 {days}일이 지나면 파일과 함께 삭제돼요.",
   "app.projects.allExpired.title": "프로젝트가 {days}일 후 삭제되었어요",
@@ -395,7 +415,7 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.projects.fromStartConfirm": "{pct}%에서 중단된 업로드를 완전히 포기하게 돼요. 새 파일을 처음부터 업로드할까요?",
   "app.projects.fromStartYes": "네, 처음부터",
   "app.projects.uploadFromStart": "처음부터 업로드",
-  "app.projects.resumeAt": "{pct}%에서 중단됨 — 이어서 하려면 같은 동영상을 선택하세요.",
+  "app.projects.resumeAt": "{pct}에서 중단됨. 이어서 하려면 같은 동영상을 선택하세요.",
   "app.projects.resume": "업로드 이어서 하기",
   "app.projects.download": "다운로드",
   "app.projects.copyText": "게시글 텍스트 복사",
@@ -487,6 +507,9 @@ export const koApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "자막은 첫 내보내기의 모양을 그대로 유지해요.",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "아직 볼 수 있는 게 없어요",
+  "app.preview.emptyBody": "동영상을 업로드하면 여기에서 볼 수 있어요.",
+  "app.preview.uploading": "동영상이 아직 업로드 중이에요.",
   "app.preview.refine": "다듬기",
   "app.preview.more": "이 영상의 추가 기능",
   "app.preview.pause": "일시정지",

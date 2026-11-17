@@ -7,6 +7,21 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "बीटा",
   "app.header.opening": "खुल रहा है…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "मुख्य मेन्यू",
+  "app.nav.upload": "अपलोड",
+  "app.nav.uploadVideo": "वीडियो अपलोड करें",
+  "app.nav.settings": "सेटिंग्स",
+  "app.nav.skip": "कंटेंट पर जाएं",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "ऐप की भाषा",
+  "app.settings.manageAccount": "अकाउंट और प्लान",
+  "app.settings.voice": "वॉइस कमांड",
+  "app.settings.voiceTry": "“Cleo cut” आज़माएं",
+  "app.settings.legal": "कानूनी जानकारी",
+  "app.settings.beta": "आप CleoCuts का बीटा इस्तेमाल कर रहे हैं।",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — आपका वीडियो तैयार है",
 
@@ -300,8 +315,7 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "कतार में (#{n})",
   "app.card.queued.titleNoPos": "कतार में",
-  "app.card.queued.sub":
-    "अभी बहुत सारे वीडियो हैं — आपका वीडियो अपने-आप शुरू हो जाएगा। आप यह पेज छोड़ सकते हैं।",
+  "app.card.queued.sub": "अभी बहुत सारे वीडियो हैं। आपका वीडियो अपने-आप शुरू हो जाएगा, इसलिए आप यह पेज छोड़ सकते हैं।",
   "app.card.open": "खोलें",
   "app.card.remove": "हटाएं",
   "app.card.renderFailedNote": "एक्सपोर्ट नहीं हो पाया। आपके एडिट्स सेव हैं। फिर से कोशिश करें।",
@@ -370,6 +384,11 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "प्रोजेक्ट",
   "app.projects.title": "प्रोजेक्ट",
+  "app.projects.empty": "अभी कोई प्रोजेक्ट नहीं",
+  "app.projects.emptyBody": "एक वीडियो अपलोड करें। Cleo उसे काटेगा और कैप्शन जोड़ेगा।",
+  "app.projects.readyNow": "तैयार",
+  "app.projects.canClose": "आप यह पेज बंद कर सकते हैं।",
+  "app.relative.justNow": "अभी-अभी",
   "app.projects.expiredGroup": "समाप्त ({count})",
   "app.projects.expiredNote": "प्रोजेक्ट आखिरी बदलाव के {days} दिन बाद फ़ाइलों समेत हटा दिए जाते हैं।",
   "app.projects.allExpired.title": "आपके प्रोजेक्ट {days} दिन बाद हटा दिए गए",
@@ -393,13 +412,13 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "रद्द करें",
   "app.projects.retry": "फिर कोशिश करें",
   "app.projects.pickAgain": "अपलोड जारी रखने के लिए वही फ़ाइल दोबारा चुनें",
-  "app.projects.copyMismatch": "यह कॉपी “{name}” से मेल नहीं खाती — हो सकता है iPhone ने इसे फिर से कन्वर्ट किया हो। शुरू से अपलोड करें?",
-  "app.projects.copyMismatchOther": "यह “{name}” नहीं है। जारी रखने के लिए उसे फिर से चुनें — या इस फ़ाइल को शुरू से अपलोड करें।",
+  "app.projects.copyMismatch": "यह कॉपी “{name}” से मेल नहीं खाती। हो सकता है iPhone ने इसे फिर से कन्वर्ट किया हो। शुरू से अपलोड करें?",
+  "app.projects.copyMismatchOther": "यह “{name}” नहीं है। जारी रखने के लिए उसे फिर से चुनें, या इस फ़ाइल को शुरू से अपलोड करें।",
   "app.projects.otherUpload": "यह किसी दूसरे रुके हुए अपलोड (“{name}”) का वीडियो है। उसे उसकी अपनी टाइल पर जारी रखें।",
   "app.projects.fromStartConfirm": "इससे {pct}% पर रुका अपलोड हमेशा के लिए छूट जाएगा। नई फ़ाइल शुरू से अपलोड करें?",
   "app.projects.fromStartYes": "हाँ, शुरू से",
   "app.projects.uploadFromStart": "शुरू से अपलोड करें",
-  "app.projects.resumeAt": "{pct}% पर रुका — जारी रखने के लिए वही वीडियो चुनें।",
+  "app.projects.resumeAt": "{pct} पर रुका। जारी रखने के लिए वही वीडियो चुनें।",
   "app.projects.resume": "अपलोड जारी रखें",
   "app.projects.download": "डाउनलोड करें",
   "app.projects.copyText": "पोस्ट टेक्स्ट कॉपी करें",
@@ -491,6 +510,9 @@ export const hiApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "इसके कैप्शन पहले एक्सपोर्ट जैसे ही दिखते हैं।",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "अभी देखने के लिए कुछ नहीं",
+  "app.preview.emptyBody": "वीडियो अपलोड करें, फिर आप उसे यहां देखेंगे।",
+  "app.preview.uploading": "आपका वीडियो अभी अपलोड हो रहा है।",
   "app.preview.refine": "फ़ाइन-ट्यून",
   "app.preview.more": "इस वीडियो के लिए और भी",
   "app.preview.pause": "रोकें",

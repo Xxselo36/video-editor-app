@@ -14,6 +14,14 @@ export const deApp: Partial<Record<AppKey, string>> = {
   "app.nav.settings": "Einstellungen",
   "app.nav.skip": "Zum Inhalt springen",
 
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "App-Sprache",
+  "app.settings.manageAccount": "Konto & Abo",
+  "app.settings.voice": "Sprachbefehle",
+  "app.settings.voiceTry": "„Cleo cut“ ausprobieren",
+  "app.settings.legal": "Rechtliches",
+  "app.settings.beta": "Du nutzt die Beta von CleoCuts.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — dein Video ist fertig",
 

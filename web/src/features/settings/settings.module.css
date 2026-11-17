@@ -1,0 +1,173 @@
+/* Einstellungen (PR3, plan D16): groups of rows in cards, as the app's
+   other lists (the shell of docs/mockups/settings/S1-S3). Rows 56 px, an
+   icon tile, a label, a line under it, a chevron where they lead on. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 640px;
+}
+.page > h1 {
+  margin-bottom: -8px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.groupTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-1);
+}
+.card > * + * {
+  border-top: 1px solid var(--border);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 16px;
+  color: var(--text-body);
+  text-align: left;
+  text-decoration: none;
+}
+button.row,
+a.row {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background-color 0.15s ease;
+}
+button.row:active,
+a.row:active {
+  background: var(--surface-2);
+}
+.row:focus-visible {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: -2px;
+}
+/* The language row: the native select over the whole row. */
+.row:has(select:focus-visible) {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: -2px;
+}
+
+.tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text-body);
+}
+.tile[data-tone="cut"] {
+  background: color-mix(in srgb, var(--cmd-cut) 14%, transparent);
+  color: var(--cmd-cut);
+}
+.tile svg {
+  width: 18px;
+  height: 18px;
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.sub {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.cmd {
+  color: var(--cmd-cut);
+}
+.chev {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--text-faint);
+}
+
+/* App-Sprache: the value and a chevron at the row's end; the select,
+   transparent, takes the taps (16 px: no zoom on iPhone). */
+.value {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  font-size: 15px;
+  color: var(--text-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  font-size: 16px;
+  cursor: pointer;
+  appearance: none;
+}
+
+.note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+.note a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--brand-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  button.row:hover,
+  a.row:hover,
+  .row:has(select):hover {
+    background: var(--surface-2);
+  }
+  .note a:hover {
+    opacity: 0.8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.row,
+  a.row {
+    transition: none;
+  }
+}

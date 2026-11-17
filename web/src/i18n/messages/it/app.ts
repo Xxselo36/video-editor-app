@@ -7,6 +7,21 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "Beta",
   "app.header.opening": "Apertura…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Menu principale",
+  "app.nav.upload": "Carica",
+  "app.nav.uploadVideo": "Carica video",
+  "app.nav.settings": "Impostazioni",
+  "app.nav.skip": "Vai al contenuto",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "Lingua dell’app",
+  "app.settings.manageAccount": "Account e piano",
+  "app.settings.voice": "Comandi vocali",
+  "app.settings.voiceTry": "Prova “Cleo cut”",
+  "app.settings.legal": "Note legali",
+  "app.settings.beta": "Stai usando la beta di CleoCuts.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — il tuo video è pronto",
 
@@ -300,8 +315,7 @@ export const itApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "In coda (#{n})",
   "app.card.queued.titleNoPos": "In coda",
-  "app.card.queued.sub":
-    "Ci sono molti video in questo momento — il tuo partirà in automatico. Puoi lasciare questa pagina.",
+  "app.card.queued.sub": "Ci sono molti video in questo momento. Il tuo partirà in automatico, puoi lasciare questa pagina.",
   "app.card.open": "Apri",
   "app.card.remove": "Rimuovi",
   "app.card.renderFailedNote": "L'esportazione non è riuscita. Le tue modifiche sono salvate. Riprova.",
@@ -370,6 +384,11 @@ export const itApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Progetti",
   "app.projects.title": "Progetti",
+  "app.projects.empty": "Ancora nessun progetto",
+  "app.projects.emptyBody": "Carica un video. Cleo lo taglia e aggiunge i sottotitoli.",
+  "app.projects.readyNow": "Pronto",
+  "app.projects.canClose": "Puoi chiudere questa pagina.",
+  "app.relative.justNow": "adesso",
   "app.projects.expiredGroup": "Scaduti ({count})",
   "app.projects.expiredNote": "I progetti vengono eliminati {days} giorni dopo l’ultima modifica, file inclusi.",
   "app.projects.allExpired.title": "I tuoi progetti sono stati eliminati dopo {days} giorni",
@@ -393,13 +412,13 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Annulla",
   "app.projects.retry": "Riprova",
   "app.projects.pickAgain": "Scegli di nuovo lo stesso file per continuare il caricamento",
-  "app.projects.copyMismatch": "Questa copia non corrisponde a “{name}”: forse l’iPhone l’ha convertita di nuovo. Caricarla dall’inizio?",
+  "app.projects.copyMismatch": "Questa copia non corrisponde a “{name}”. Forse l’iPhone l’ha convertita di nuovo. Caricarla dall’inizio?",
   "app.projects.copyMismatchOther": "Questo non è “{name}”. Sceglilo di nuovo per continuare, oppure carica questo file dall’inizio.",
   "app.projects.otherUpload": "Questo è il video di un altro caricamento interrotto (“{name}”). Continualo nel suo riquadro.",
   "app.projects.fromStartConfirm": "Così rinunci per sempre al caricamento interrotto al {pct}%. Caricare il nuovo file dall’inizio?",
   "app.projects.fromStartYes": "Sì, dall’inizio",
   "app.projects.uploadFromStart": "Carica dall’inizio",
-  "app.projects.resumeAt": "Interrotto al {pct}% — scegli lo stesso video per continuare.",
+  "app.projects.resumeAt": "Interrotto al {pct}. Scegli lo stesso video per continuare.",
   "app.projects.resume": "Continua il caricamento",
   "app.projects.download": "Scarica",
   "app.projects.copyText": "Copia testo del post",
@@ -491,6 +510,9 @@ export const itApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "I suoi sottotitoli mantengono lo stile della prima esportazione.",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "Ancora niente da vedere",
+  "app.preview.emptyBody": "Carica un video e lo vedrai qui.",
+  "app.preview.uploading": "Il tuo video è ancora in caricamento.",
   "app.preview.refine": "Ritocchi",
   "app.preview.more": "Altro per questo video",
   "app.preview.pause": "Pausa",

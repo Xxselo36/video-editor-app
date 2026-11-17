@@ -7,6 +7,21 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "Bêta",
   "app.header.opening": "Ouverture…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Menu principal",
+  "app.nav.upload": "Importer",
+  "app.nav.uploadVideo": "Importer une vidéo",
+  "app.nav.settings": "Réglages",
+  "app.nav.skip": "Aller au contenu",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "Langue de l’app",
+  "app.settings.manageAccount": "Compte et abonnement",
+  "app.settings.voice": "Commandes vocales",
+  "app.settings.voiceTry": "Essayer « Cleo cut »",
+  "app.settings.legal": "Mentions légales",
+  "app.settings.beta": "Tu utilises la bêta de CleoCuts.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — ta vidéo est prête",
 
@@ -301,8 +316,7 @@ export const frApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "En file d'attente (#{n})",
   "app.card.queued.titleNoPos": "En file d'attente",
-  "app.card.queued.sub":
-    "Beaucoup de vidéos en ce moment — la tienne démarrera automatiquement. Tu peux quitter cette page.",
+  "app.card.queued.sub": "Beaucoup de vidéos en ce moment. La tienne démarrera automatiquement, tu peux quitter cette page.",
   "app.card.open": "Ouvrir",
   "app.card.remove": "Supprimer",
   "app.card.renderFailedNote": "L'export n'a pas fonctionné. Tes modifications sont enregistrées. Réessaie.",
@@ -371,6 +385,11 @@ export const frApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Projets",
   "app.projects.title": "Projets",
+  "app.projects.empty": "Pas encore de projets",
+  "app.projects.emptyBody": "Importe une vidéo. Cleo la coupe et ajoute les sous-titres.",
+  "app.projects.readyNow": "Prêt",
+  "app.projects.canClose": "Tu peux fermer cette page.",
+  "app.relative.justNow": "à l’instant",
   "app.projects.expiredGroup": "Expirés ({count})",
   "app.projects.expiredNote": "Les projets sont supprimés {days} jours après leur dernière modification, fichiers compris.",
   "app.projects.allExpired.title": "Tes projets ont été supprimés après {days} jours",
@@ -394,13 +413,13 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Annuler",
   "app.projects.retry": "Réessayer",
   "app.projects.pickAgain": "Choisis à nouveau le même fichier pour reprendre l’import",
-  "app.projects.copyMismatch": "Cette copie ne correspond pas à « {name} » — l’iPhone l’a peut-être reconvertie. L’importer depuis le début ?",
-  "app.projects.copyMismatchOther": "Ce n’est pas « {name} ». Choisis-le à nouveau pour reprendre — ou importe ce fichier depuis le début.",
+  "app.projects.copyMismatch": "Cette copie ne correspond pas à « {name} ». L’iPhone l’a peut-être reconvertie. L’importer depuis le début ?",
+  "app.projects.copyMismatchOther": "Ce n’est pas « {name} ». Choisis-le à nouveau pour reprendre, ou importe ce fichier depuis le début.",
   "app.projects.otherUpload": "C’est la vidéo d’un autre import arrêté (« {name} »). Reprends-le sur sa propre vignette.",
   "app.projects.fromStartConfirm": "Tu abandonnes ainsi définitivement l’import arrêté à {pct} %. Importer le nouveau fichier depuis le début ?",
   "app.projects.fromStartYes": "Oui, depuis le début",
   "app.projects.uploadFromStart": "Importer depuis le début",
-  "app.projects.resumeAt": "Arrêté à {pct} % — choisis la même vidéo pour continuer.",
+  "app.projects.resumeAt": "Arrêté à {pct}. Choisis la même vidéo pour continuer.",
   "app.projects.resume": "Reprendre l’envoi",
   "app.projects.download": "Télécharger",
   "app.projects.copyText": "Copier le texte du post",
@@ -492,6 +511,9 @@ export const frApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "Ses sous-titres gardent le style du premier export.",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "Rien à regarder pour l’instant",
+  "app.preview.emptyBody": "Importe une vidéo et tu la verras ici.",
+  "app.preview.uploading": "Ta vidéo est encore en cours d’envoi.",
   "app.preview.refine": "Retouches",
   "app.preview.more": "Plus d’options pour cette vidéo",
   "app.preview.pause": "Pause",

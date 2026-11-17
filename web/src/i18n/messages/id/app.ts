@@ -7,6 +7,21 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "Beta",
   "app.header.opening": "Membuka…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Menu utama",
+  "app.nav.upload": "Unggah",
+  "app.nav.uploadVideo": "Unggah video",
+  "app.nav.settings": "Pengaturan",
+  "app.nav.skip": "Lewati ke konten",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "Bahasa aplikasi",
+  "app.settings.manageAccount": "Akun & paket",
+  "app.settings.voice": "Perintah suara",
+  "app.settings.voiceTry": "Coba “Cleo cut”",
+  "app.settings.legal": "Legal",
+  "app.settings.beta": "Kamu memakai versi beta CleoCuts.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — videomu sudah siap",
 
@@ -300,8 +315,7 @@ export const idApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "Dalam antrean (#{n})",
   "app.card.queued.titleNoPos": "Dalam antrean",
-  "app.card.queued.sub":
-    "Sedang banyak video — videomu akan mulai otomatis. Kamu bisa meninggalkan halaman ini.",
+  "app.card.queued.sub": "Sedang banyak video. Videomu akan mulai otomatis, jadi kamu bisa meninggalkan halaman ini.",
   "app.card.open": "Buka",
   "app.card.remove": "Hapus",
   "app.card.renderFailedNote": "Ekspor gagal. Editanmu sudah tersimpan. Coba lagi.",
@@ -370,6 +384,11 @@ export const idApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Proyek",
   "app.projects.title": "Proyek",
+  "app.projects.empty": "Belum ada proyek",
+  "app.projects.emptyBody": "Unggah video. Cleo memotongnya dan menambahkan teks.",
+  "app.projects.readyNow": "Siap",
+  "app.projects.canClose": "Kamu bisa menutup halaman ini.",
+  "app.relative.justNow": "baru saja",
   "app.projects.expiredGroup": "Kedaluwarsa ({count})",
   "app.projects.expiredNote": "Proyek dihapus {days} hari setelah perubahan terakhir, termasuk filenya.",
   "app.projects.allExpired.title": "Proyekmu dihapus setelah {days} hari",
@@ -393,13 +412,13 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Batal",
   "app.projects.retry": "Coba lagi",
   "app.projects.pickAgain": "Pilih file yang sama lagi untuk melanjutkan unggahan",
-  "app.projects.copyMismatch": "Salinan ini tidak cocok dengan “{name}” — mungkin iPhone mengonversinya lagi. Unggah dari awal?",
-  "app.projects.copyMismatchOther": "Itu bukan “{name}”. Pilih lagi untuk melanjutkan — atau unggah file ini dari awal.",
+  "app.projects.copyMismatch": "Salinan ini tidak cocok dengan “{name}”. Mungkin iPhone mengonversinya lagi. Unggah dari awal?",
+  "app.projects.copyMismatchOther": "Itu bukan “{name}”. Pilih lagi untuk melanjutkan, atau unggah file ini dari awal.",
   "app.projects.otherUpload": "Ini video dari unggahan lain yang berhenti (“{name}”). Lanjutkan di kartunya sendiri.",
   "app.projects.fromStartConfirm": "Ini membatalkan unggahan yang berhenti di {pct}% untuk selamanya. Unggah file baru dari awal?",
   "app.projects.fromStartYes": "Ya, dari awal",
   "app.projects.uploadFromStart": "Unggah dari awal",
-  "app.projects.resumeAt": "Berhenti di {pct}% — pilih video yang sama untuk melanjutkan.",
+  "app.projects.resumeAt": "Berhenti di {pct}. Pilih video yang sama untuk melanjutkan.",
   "app.projects.resume": "Lanjutkan unggahan",
   "app.projects.download": "Unduh",
   "app.projects.copyText": "Salin teks postingan",
@@ -491,6 +510,9 @@ export const idApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "Teksnya tetap memakai tampilan ekspor pertama.",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "Belum ada yang bisa ditonton",
+  "app.preview.emptyBody": "Unggah video, lalu kamu akan melihatnya di sini.",
+  "app.preview.uploading": "Videomu masih diunggah.",
   "app.preview.refine": "Sempurnakan",
   "app.preview.more": "Lainnya untuk video ini",
   "app.preview.pause": "Jeda",

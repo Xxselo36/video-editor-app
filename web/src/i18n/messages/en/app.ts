@@ -18,6 +18,14 @@ export const enApp = {
   "app.nav.settings": "Settings",
   "app.nav.skip": "Skip to content",
 
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "App language",
+  "app.settings.manageAccount": "Account & plan",
+  "app.settings.voice": "Voice commands",
+  "app.settings.voiceTry": "Try “Cleo cut”",
+  "app.settings.legal": "Legal",
+  "app.settings.beta": "You're using the CleoCuts beta.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — your video is ready",
 

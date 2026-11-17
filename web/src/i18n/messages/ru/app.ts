@@ -7,6 +7,21 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.header.beta": "Бета",
   "app.header.opening": "Открываем…",
 
+  // ── App shell: the menu (tab bar on phones, sidebar from 960 px) ─────
+  "app.nav.label": "Главное меню",
+  "app.nav.upload": "Загрузить",
+  "app.nav.uploadVideo": "Загрузить видео",
+  "app.nav.settings": "Настройки",
+  "app.nav.skip": "Перейти к содержимому",
+
+  // ── Einstellungen (/app/settings) ─────────────────────────────────
+  "app.settings.appLanguage": "Язык приложения",
+  "app.settings.manageAccount": "Аккаунт и тариф",
+  "app.settings.voice": "Голосовые команды",
+  "app.settings.voiceTry": "Попробовать «Cleo cut»",
+  "app.settings.legal": "Правовая информация",
+  "app.settings.beta": "Ты пользуешься бета-версией CleoCuts.",
+
   // ── Browser notifications ───────────────────────────────────────────
   "app.notify.readyTitle": "CleoCuts — твоё видео готово",
 
@@ -299,8 +314,7 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   // Waiting for a free server slot (status "processing", message "queued")
   "app.card.queued.title": "В очереди (#{n})",
   "app.card.queued.titleNoPos": "В очереди",
-  "app.card.queued.sub":
-    "Сейчас много видео — твоё запустится автоматически. Можешь уйти с этой страницы.",
+  "app.card.queued.sub": "Сейчас много видео. Твоё запустится автоматически, так что можешь уйти с этой страницы.",
   "app.card.open": "Открыть",
   "app.card.remove": "Удалить",
   "app.card.renderFailedNote": "Экспорт не удался. Твои изменения сохранены. Попробуй ещё раз.",
@@ -369,6 +383,11 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   // ── Projects, processing view (UX12) ────────────────────────────────
   "app.header.projects": "Проекты",
   "app.projects.title": "Проекты",
+  "app.projects.empty": "Пока нет проектов",
+  "app.projects.emptyBody": "Загрузи видео. Cleo его обрежет и добавит субтитры.",
+  "app.projects.readyNow": "Готово",
+  "app.projects.canClose": "Страницу можно закрыть.",
+  "app.relative.justNow": "только что",
   "app.projects.expiredGroup": "Истёкшие ({count})",
   "app.projects.expiredNote": "Проекты удаляются через {days} дн. после последнего изменения вместе с файлами.",
   "app.projects.allExpired.title": "Твои проекты удалены через {days} дн.",
@@ -392,13 +411,13 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.projects.cancel": "Отмена",
   "app.projects.retry": "Повторить",
   "app.projects.pickAgain": "Выбери тот же файл ещё раз, чтобы продолжить загрузку",
-  "app.projects.copyMismatch": "Эта копия не совпадает с «{name}» — возможно, iPhone снова её преобразовал. Загрузить с начала?",
-  "app.projects.copyMismatchOther": "Это не «{name}». Выбери его снова, чтобы продолжить, — или загрузи этот файл с начала.",
+  "app.projects.copyMismatch": "Эта копия не совпадает с «{name}». Возможно, iPhone снова её преобразовал. Загрузить с начала?",
+  "app.projects.copyMismatchOther": "Это не «{name}». Выбери его снова, чтобы продолжить, или загрузи этот файл с начала.",
   "app.projects.otherUpload": "Это видео другой остановленной загрузки («{name}»). Продолжи её на её собственной карточке.",
   "app.projects.fromStartConfirm": "Остановленная на {pct}% загрузка будет отменена навсегда. Загрузить новый файл с начала?",
   "app.projects.fromStartYes": "Да, с начала",
   "app.projects.uploadFromStart": "Загрузить с начала",
-  "app.projects.resumeAt": "Остановлено на {pct} % — выбери то же видео, чтобы продолжить.",
+  "app.projects.resumeAt": "Остановлено на {pct}. Выбери то же видео, чтобы продолжить.",
   "app.projects.resume": "Продолжить загрузку",
   "app.projects.download": "Скачать",
   "app.projects.copyText": "Копировать текст поста",
@@ -490,6 +509,9 @@ export const ruApp: Partial<Record<AppKey, string>> = {
   "app.reedit.captionsKept": "Его субтитры сохраняют вид первого экспорта.",
 
   // ── Preview screen (/app/p/[id]) ────────────────────────────────────
+  "app.preview.emptyTitle": "Пока нечего смотреть",
+  "app.preview.emptyBody": "Загрузи видео, и оно появится здесь.",
+  "app.preview.uploading": "Видео ещё загружается.",
   "app.preview.refine": "Доработка",
   "app.preview.more": "Ещё для этого видео",
   "app.preview.pause": "Пауза",
