@@ -136,7 +136,7 @@ export function VideoLayer({
   poster?: string | null;
 }) {
   const t = useT();
-  const { videoRef, fadeRef, videoSrc, mode, onVideoError, togglePlay, previewStale, previewError, retryPreview } = session;
+  const { videoRef, fadeRef, holdRef, videoSrc, mode, onVideoError, togglePlay, previewStale, previewError, retryPreview } = session;
   const buffering = usePlayhead(store, selBuffering);
   // the first frame of the cut, not black, before playback (owner, iPhone)
   const still = useFirstFrame(videoRef, firstFrameTime(mode, session.editSegs), poster);
@@ -160,6 +160,9 @@ export function VideoLayer({
         preload={still.preload}
         aria-label={t("editor.preview")}
       />
+      {/* The frame on screen while a rebuilt preview loads (after a cut):
+          no black between the two files (session/holdFrame). */}
+      <canvas ref={holdRef} aria-hidden className={s.hold} data-testid="ed-hold" />
       <CaptionSlot
         session={session}
         store={store}

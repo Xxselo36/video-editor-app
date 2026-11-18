@@ -407,6 +407,20 @@
   pointer-events: none;
   z-index: 2;
 }
+/* The frame on screen while a rebuilt preview loads (session/holdFrame):
+ * over the video, as it sits there, under the captions. */
+.hold {
+  position: absolute;
+  inset: 0;
+  display: none;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+.hold[data-on] {
+  display: block;
+}
 .stageChip {
   position: absolute;
   right: 8px;

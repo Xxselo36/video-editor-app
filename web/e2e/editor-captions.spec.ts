@@ -4,7 +4,8 @@
  * caption is moved and resized right in the preview, "Nur hier | Überall"
  * and "Zurücksetzen" write the per-caption or the style's position / size,
  * the Text tab marks the row; and the preview shows the first frame of the
- * cut before playback (poster, or a seek without one).
+ * cut before playback (poster, or a seek without one), and keeps the frame
+ * on screen while a cut's rebuilt preview loads (never black).
  * Desktop and pixel7; runs against a v2 build (NEXT_PUBLIC_EDITOR_V2 unset or 1)
  * (E2E_EDITOR_V2=1). The browser opts in to the v2 captions (?captions=v2;
  * the stub runs CLEO_CAPTION_ENGINE=optin, stub_server.py).
@@ -13,6 +14,8 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type { Page } from "@playwright/test";
 import { expect, test, type Stub } from "./support/fixtures";
 import { openWithStorage } from "./support/app";
+import { API } from "./support/env";
+import { cutWords } from "./support/vorschau";
 
 const TAG = { tag: "@editor-v2" };
 const STORAGE = { "cleocuts.editor.tourDone.v1": "1", "cleocuts.captions.engine.v1": "v2" };
@@ -299,5 +302,38 @@ test.describe("editor v2: the first frame before playback", TAG, () => {
         return t !== null && t >= 0 && t < 1.5 / 30 + 0.001;
       }, { timeout: 15_000 })
       .toBe(true);
+  });
+
+  test("a cut on the server's preview: the frame on screen stays while the rebuilt file loads, never black", async ({ page, stub }) => {
+    // No proxy (production): each stored cut swaps in a rebuilt preview file.
+    const job = await stub.seed("review_speech", { proxy: "off" });
+    await openWithStorage(page, `/app/edit/${job.id}`, { "cleocuts.editor.tourDone.v1": "1" });
+    await expect(page.getByTestId("editor-v2")).toBeVisible({ timeout: 45_000 });
+    await expect.poll(() => frameState(page), { timeout: 20_000 }).toMatchObject({ ok: true, paused: true });
+    expect(await luma(page)).toBeGreaterThan(20);
+    // The rebuilt file comes slowly (storage), until released.
+    let release!: () => void;
+    const slow = new Promise<void>((r) => (release = r));
+    let asked = false;
+    await page.route(`${API}/jobs/${job.id}/preview-video*`, async (route) => {
+      if (new URL(route.request().url()).searchParams.get("v") !== "1") {
+        asked = true;
+        await slow;
+      }
+      await route.fallback();
+    });
+    await cutWords(page, "Nobody", "point.");
+    await expect.poll(() => asked, { timeout: 60_000 }).toBe(true);
+    await expect(page.getByTestId("editor-video")).not.toHaveAttribute("src", /[?&]v=1$/);
+    // the frame it had, held over the video while the new file loads
+    await page.waitForTimeout(500);
+    expect(await luma(page)).toBeGreaterThan(20);
+    const hold = page.getByTestId("ed-hold");
+    await expect(hold).toHaveAttribute("data-on", "");
+    // the new file's frame: the hold goes, a picture all along
+    release();
+    await expect.poll(() => frameState(page), { timeout: 20_000 }).toMatchObject({ ok: true });
+    await expect(hold).not.toHaveAttribute("data-on");
+    expect(await luma(page)).toBeGreaterThan(20);
   });
 });
