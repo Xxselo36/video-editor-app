@@ -165,6 +165,35 @@ test.describe("editor v2 layout", TAG, () => {
     if (desktop) await expect.poll(async () => (await box(page, "ed-frame")).height).toBeGreaterThan(frame.height);
     else expect((await box(page, "ed-frame")).height).toBeCloseTo(330, 0);
   });
+
+  test("393×852 (an iPhone 15): the title takes the top bar's free room; only a name longer than that is cut, Export stays whole", async ({
+    page,
+    stub,
+  }) => {
+    await page.setViewportSize({ width: 393, height: 852 });
+    const fits = await stub.seed("review_speech", { filename: "Mein Schreibtisch-Setup.mp4" });
+    const long = await stub.seed("review_speech", { filename: "Interview mit Maria Schneider über nachhaltige Mode – Teil 2.mp4" });
+    const titleCut = () =>
+      page
+        .getByTestId("ed-title")
+        .locator("span")
+        .first()
+        .evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+    const exportInView = async () => {
+      const b = await box(page, "ed-export");
+      expect(b.x + b.width).toBeLessThanOrEqual(393);
+    };
+    await openV2(page, fits.id);
+    await expect(page.getByTestId("ed-title")).toHaveText("Mein Schreibtisch-Setup");
+    expect(await titleCut()).toBe(false);
+    await exportInView();
+    await openV2(page, long.id);
+    await expect(page.getByTestId("ed-title")).toHaveText("Interview mit Maria Schneider über nachhaltige Mode – Teil 2");
+    expect(await titleCut()).toBe(true);
+    await exportInView();
+    await expect(page.getByTestId("ed-save-status")).toBeVisible();
+    expect(await noDocumentScroll(page)).toEqual({ v: 0, h: 0 });
+  });
 });
 
 test.describe("editor v2 on short and sideways phones", TAG, () => {

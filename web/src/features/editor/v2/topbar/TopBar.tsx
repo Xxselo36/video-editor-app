@@ -67,7 +67,9 @@ function TitleField({ title, onRename, phone }: { title: string; onRename: (t: s
     <button
       type="button"
       className={`${phone ? s.mb : s.gb} ${s.title}`}
-      style={phone ? { padding: "0 6px", fontSize: 15, fontWeight: 600, maxWidth: "46vw" } : undefined}
+      // Phone: as wide as its name while the bar has room (the save dot
+      // and Export keep theirs); cut with "…" only once it hasn't.
+      style={phone ? { padding: "0 6px", fontSize: 15, fontWeight: 600, maxWidth: "none", flexShrink: 1 } : undefined}
       title={t("editor.rename")}
       aria-label={`${t("editor.titleLabel")}: ${title}`}
       data-testid="ed-title"
