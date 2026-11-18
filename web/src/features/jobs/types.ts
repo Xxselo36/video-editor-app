@@ -91,6 +91,8 @@ export type JobStatus = {
   title?: string | null;
   /** Created (Unix seconds). */
   created_at?: number | null;
+  /** Last changed (Unix seconds): any write of the job. */
+  updated_at?: number | null;
   /** "Nur Untertitel": the analysis cuts nothing (the Vorschau hides its
    *  cutting step). Missing on servers before PR2. */
   no_cuts?: boolean;

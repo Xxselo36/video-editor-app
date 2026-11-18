@@ -13,7 +13,8 @@
  * v1 Done view; useJobPoll sends a project in review to the editor).
  *
  * The job comes from useJobPoll: GET /jobs/{id}, again every 2 s while it
- * runs, paused while the tab is hidden.
+ * runs, at rest a look at its status row every 45 s (an export made on
+ * another device), paused while the tab is hidden.
  */
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
