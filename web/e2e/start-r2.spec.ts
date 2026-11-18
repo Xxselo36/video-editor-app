@@ -132,14 +132,17 @@ const uploadLocks = (page: Page) =>
     ((await navigator.locks.query()).held ?? []).map((l) => l.name ?? "").filter((n) => n.startsWith("cleocuts-upload")),
   );
 
-/** `page`'s renderer dies without pagehide (an Android tab discard):
- *  nothing marks its records. Resolves with a new page of the browser
- *  once the browser has let the dead page's upload locks go: until then
- *  its uploads still run, as far as any tab can tell. That takes a
- *  while on CI, where the dead renderer stays until its crash is dumped
- *  (its locks with it: the next page found them held 10 s and more), and
- *  it does here too: a stand-in page takes each lock over and holds it
- *  `lingerMs`. */
+/** `page` dies without pagehide (an Android tab discard): nothing marks
+ *  its records. Played as a close with the page's scripts switched off
+ *  first (CDP Emulation.setScriptExecutionDisabled), so none of its
+ *  handlers of pagehide, visibilitychange or unload runs. A renderer
+ *  crash (CDP Page.crash) is not usable: on CI's runners the crashed
+ *  renderer kept its upload locks for more than 90 s, as long as its
+ *  crash took to be dumped. The locks go with the closed page; a
+ *  stand-in page takes each over and holds it `lingerMs`, as a dead tab's
+ *  locks may outlive it a little. Resolves with a new page of the browser
+ *  once they are gone: until then its uploads still run, as far as any
+ *  tab can tell. */
 async function dies(page: Page, lingerMs = 3000): Promise<Page> {
   const names = await uploadLocks(page);
   expect(names.length).toBeGreaterThan(0);
@@ -152,12 +155,11 @@ async function dies(page: Page, lingerMs = 3000): Promise<Page> {
     { names, ms: lingerMs },
   );
   const cdp = await page.context().newCDPSession(page);
-  const crashed = new Promise((r) => page.once("crash", r));
-  void cdp.send("Page.crash").catch(() => {});
-  await Promise.race([crashed, new Promise((r) => setTimeout(r, 5000))]);
-  const next = await page.context().newPage();
+  await cdp.send("Emulation.setScriptExecutionDisabled", { value: true });
+  await page.close({ runBeforeUnload: false });
+  const next = await standIn.context().newPage();
   await next.goto("/imprint");
-  await expect.poll(() => uploadLocks(next), { timeout: 90_000, message: "the dead page's upload locks" }).toEqual([]);
+  await expect.poll(() => uploadLocks(next), { timeout: 30_000, message: "the dead page's upload locks" }).toEqual([]);
   await standIn.close();
   return next;
 }
