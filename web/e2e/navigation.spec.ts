@@ -80,9 +80,13 @@ test("every route survives a reload", async ({ page, stub }) => {
   for (const [route, testId] of routes) {
     await page.goto(route);
     await expect(page.getByTestId(testId).first(), route).toBeVisible({ timeout: 45_000 });
+    // Playwright's Linux WebKit fails a reload or goto that cuts off loads
+    // in flight (an internal error, or the cut poll as a page error).
+    await page.waitForLoadState("networkidle");
     await page.reload();
     await expect(page.getByTestId(testId).first(), `${route} after a reload`).toBeVisible({ timeout: 45_000 });
     expect(path(page.url())).toBe(route);
+    await page.waitForLoadState("networkidle");
   }
 });
 

@@ -9,9 +9,14 @@ import { expect, test } from "./support/fixtures";
 import { ACTIVE_JOBS, card, horizontalOverflow, LANGS, openWithStorage } from "./support/app";
 
 test("the language switcher changes the page and <html lang>; the choice persists", async ({ page }) => {
+  // WebKit hydrates the landing late (its lazy chunks come 0.4-1 s after
+  // the load event): a reload during a chunk's load is a page error, and
+  // a choice before hydration reaches no React.
   await page.goto("/");
+  await page.waitForLoadState("networkidle");
   await page.evaluate(() => localStorage.clear());
   await page.reload();
+  await page.waitForLoadState("networkidle");
   const h1 = page.getByRole("heading", { level: 1 }).first();
   const english = await h1.innerText();
   await page.getByTestId("language-switcher").first().selectOption("de");
