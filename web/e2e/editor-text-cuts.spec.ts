@@ -257,14 +257,11 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
     }
     await expect(word(page, "10")).toHaveCount(1);
     if (!(await isPhone(page))) {
-      // The word menu sits above "10" (it fits in the panel, over the cuts
-      // header): below it, its Cut from video covered "point." on the next
-      // line — a click there cut "10" instead.
-      const menuAbove = async () => {
-        const [bar, w] = await Promise.all([page.getByTestId("ed-wordbar").boundingBox(), word(page, "10").boundingBox()]);
-        return !!bar && !!w && bar.y + bar.height <= w.y;
-      };
-      await expect.poll(menuAbove).toBe(true);
+      // Escape closes the word menu of "10" first, as a user would: where
+      // there's no room above "10" under the header it sits below, over
+      // "point." on the next line (a click there would cut "10").
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("ed-wordbar")).toHaveCount(0);
     }
     // 2 cut: "point."
     await word(page, "point.").click();
@@ -292,6 +289,43 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
     await redo.click();
     await expect(word(page, "waits")).toHaveAttribute("data-hidden", "true");
     await expect.poll(async () => covered(await timeline(stub, job.id), 13.3), SAVED).toBe(false);
+  });
+
+  test("the word menu leaves the header's buttons clear: a click on the cuts button never cuts the selected word", async ({ page, stub }) => {
+    const job = await stub.seed("review_speech");
+    await open(page, job.id);
+    test.skip(await isPhone(page), "phones show the word's actions in the sheet's bar, not over the text");
+    // "ten" → "10" on the panel's 5th line: the menu has little room above
+    await word(page, "ten").dblclick();
+    await page.getByTestId("ed-word-input").fill("10");
+    await page.getByTestId("ed-word-input").press("Enter");
+    await expect(word(page, "10")).toHaveCount(1);
+    const bar = page.getByTestId("ed-wordbar");
+    await expect(bar).toBeVisible();
+    await expect.poll(() => bar.evaluate((el) => getComputedStyle(el).visibility)).toBe("visible");
+    // every point of the header's buttons is theirs, none the menu's (round
+    // 11: over the header, Cut from video covered the cuts button's lower
+    // edge — 5 of the 21 points checked here)
+    const header = page.getByTestId("ed-cuts").locator("xpath=..");
+    const underMenu = await header.evaluate((head) =>
+      [...head.querySelectorAll<HTMLElement>("button")].flatMap((btn) => {
+        const r = btn.getBoundingClientRect();
+        const pts: string[] = [];
+        for (let i = 1; i < 8; i++)
+          for (let j = 1; j < 4; j++) {
+            const [x, y] = [r.left + (r.width * i) / 8, r.top + (r.height * j) / 4];
+            if (!btn.contains(document.elementFromPoint(x, y))) pts.push(`${btn.dataset.testid ?? btn.className} ${Math.round(x)},${Math.round(y)}`);
+          }
+        return pts;
+      }),
+    );
+    expect(underMenu).toEqual([]);
+    // a click on the cuts button's lower edge, inside the menu's span:
+    // the cuts menu opens, "10" stays in the video
+    const [cuts, box] = await Promise.all([page.getByTestId("ed-cuts").boundingBox(), bar.boundingBox()]);
+    await page.mouse.click(Math.min(Math.max(cuts!.x + 10, box!.x + 40), cuts!.x + cuts!.width - 10), cuts!.y + cuts!.height - 3);
+    await expect(page.getByTestId("ed-cuts-menu")).toBeVisible();
+    await expect(word(page, "10")).not.toHaveAttribute("data-rm", "true");
   });
 
   test("extending a clip over a repeat cut and a pause with a word brings their captions back", async ({ page, stub }) => {
