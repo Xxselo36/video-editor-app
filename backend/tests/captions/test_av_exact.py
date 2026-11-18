@@ -158,6 +158,35 @@ def test_v2_per_clip_path_is_frame_exact_and_in_sync(src25, work):
     _assert_streams(out, want, 25)
 
 
+def test_v2_per_clip_frames_stay_inside_their_clips(src2997, work):
+    """Every frame of a per-clip render comes from its own clip. Each
+    input is seeked SEEK_PREROLL_S early, and its -t counts from the
+    first frame after the seek: at 29.97 fps that frame isn't the seek
+    point, so the input also passes the frame at the clip's end. The
+    graph cuts it off (trim's end); sped up 2x, a clip of an odd number
+    of frames showed it as its last frame."""
+    path, src = src2997
+    fps = 30000 / 1001
+    edges = [(45, 41), (100, 43), (160, 45), (250, 40)]   # (first frame, frames)
+    segs = [(a * 1001 / 30000, (a + n) * 1001 / 30000) for a, n in edges]
+    fx = [{"speed": 2.0}, {"speed": 2.0}, {"speed": 2.0}, {"volume": 0.5}]
+    spec = {"v": 1, "engine": "v2", "style": {"presetId": "none", "overrides": {}},
+            "language": "en", "words": [], "fonts": []}
+    out = work / "v2_clip_ends.mp4"
+    info = C.render_primary(str(path), str(out), segs, fx, spec, work / "v2ew")
+    assert info["path"] == "segments"
+    clips = av.plan(segs, fps, fx)
+    assert [c["frames"] for c in clips] == [21, 22, 23, 40]
+    idx = av.frames(out)[1]
+    assert len(idx) == 106
+    for c in clips:
+        got = [int(i) for i in idx[c["out_first"]:c["out_first"] + c["frames"]]]
+        assert all(c["first"] <= i < c["first"] + c["src_frames"] for i in got), (c, got)
+    r = av.check(out, src, clips, fps)
+    assert r["av_points"] >= 4 and r["av_ms_max"] <= 1.0, r
+    _assert_streams(out, 106, fps)
+
+
 def test_v1_local_render_at_29_97(src2997, work):
     """render_only's local path (the Modal volume path's code too) at an
     NTSC rate, landscape, no captions."""
