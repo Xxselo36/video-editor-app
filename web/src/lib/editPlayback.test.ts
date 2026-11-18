@@ -1342,10 +1342,15 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     const small = plan.map((s, i) => (s.id.endsWith("~2") && i + 1 < plan.length ? i : -1)).filter((i) => i >= 0);
     const firstOfSmall = new Set(small.map((i) => ranges[i][0]));
     for (const o of [
-      // (the e2e timing: the rendering update right at the refresh; the
-      // small clip's first frame without a callback, the clock a frame ahead
-      // after the change — fix2-b, desktop: 227, 228 with none, 229, then
-      // 231 — or two frames, all callbacks run: the run under load, pixel7)
+      // (the small clip's first frame without a callback, the clock a frame
+      // ahead after the change — an e2e run's 227, 228 with none, 229, then
+      // 231 — with the e2e timing, the rendering update right at the
+      // refresh, and without: round 11's player shows the cut frame after
+      // 19 of the 20 small clips of 3 frames at 2x. All callbacks run and
+      // the clock two frames ahead — the run under load: 228 → 231 right
+      // after the change — only checks what the jump costs: the fake video
+      // picks before the rendering update, Chromium 0.3–1 ms after its
+      // start.)
       { missCb: (k: number) => firstOfSmall.has(k), speedRace: { frames: 1 }, cbDelay: 0, pickLateMs: 0.4 },
       { speedRace: { frames: 2 }, cbDelay: 0, pickLateMs: 0.4 },
       { missCb: (k: number) => firstOfSmall.has(k), speedRace: { frames: 1 } },
