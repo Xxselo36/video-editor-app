@@ -101,12 +101,15 @@ describe("the next pick of the same visit", () => {
       captionStyle: { presetId: "neon", overrides: { wordsPerPage: 2 } },
       lastStyle: "elegant" as const,
       ready: true,
+      loaded: 2,
     };
+    // (not a read: a start already on screen keeps its choices)
     expect(withLastUsed(before, LAST)).toEqual({
       saved: { targetAspect: "original", removeFillers: false, spokenLanguage: "de" },
       captionStyle: before.captionStyle,
       lastStyle: "karaoke",
       ready: true,
+      loaded: 2,
     });
   });
 });

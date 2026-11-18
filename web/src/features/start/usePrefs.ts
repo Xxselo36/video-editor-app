@@ -27,9 +27,14 @@ export type PrefsState = {
    *  or failed). Prefs that come later apply to choices the user hasn't
    *  touched only. */
   ready: boolean;
+  /** Counts the reads of this browser's copy and the account's answer —
+   *  what the start on screen takes up for its untouched choices. A save
+   *  during this visit (withLastUsed) leaves it as it is: that is for the
+   *  next video picked, never a start already on screen. */
+  loaded: number;
 };
 
-function fromPrefs(v: unknown): Omit<PrefsState, "ready"> {
+function fromPrefs(v: unknown): Omit<PrefsState, "ready" | "loaded"> {
   return { saved: settingsFromPrefs(v), captionStyle: captionDefaultFromPrefs(v), lastStyle: lastStyleFromPrefs(v) };
 }
 
@@ -42,7 +47,7 @@ export function withLastUsed(s: PrefsState, prefs: LastUsedPrefs): PrefsState {
 
 export function usePrefs(): PrefsState {
   const auth = useAuthState();
-  const [state, setState] = useState<PrefsState>({ saved: null, captionStyle: null, lastStyle: null, ready: false });
+  const [state, setState] = useState<PrefsState>({ saved: null, captionStyle: null, lastStyle: null, ready: false, loaded: 0 });
   const signedIn = AUTH_ENABLED && auth.signedIn;
   const authKnown = !AUTH_ENABLED || auth.loaded;
 
@@ -54,11 +59,11 @@ export function usePrefs(): PrefsState {
     const local = fromPrefs(readLocalPrefs());
     // After mount: the server render has no storage.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setState({ ...local, ready: authKnown && !signedIn });
+    setState((s) => ({ ...local, ready: authKnown && !signedIn, loaded: s.loaded + 1 }));
     if (!signedIn) return;
     let alive = true;
     void (async () => {
-      let server: Omit<PrefsState, "ready"> | null = null;
+      let server: Omit<PrefsState, "ready" | "loaded"> | null = null;
       try {
         const r = await apiFetch("/me/prefs");
         if (r.ok) server = fromPrefs(await r.json());
@@ -66,12 +71,13 @@ export function usePrefs(): PrefsState {
         /* offline: this browser's copy */
       }
       if (!alive) return;
-      setState({
+      setState((s) => ({
         saved: server?.saved ? { ...local.saved, ...server.saved } : local.saved,
         captionStyle: server?.captionStyle ?? local.captionStyle,
         lastStyle: server?.lastStyle ?? local.lastStyle,
         ready: true,
-      });
+        loaded: s.loaded + 1,
+      }));
     })();
     return () => {
       alive = false;

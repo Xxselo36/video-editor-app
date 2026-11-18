@@ -40,6 +40,9 @@
  *             say it waits for Let's go (no tab runs it)
  *   refused   POST /jobs refused, then X: the same video picked again
  *             starts with the choices just remembered (D4)
+ *   on screen another upload's POST /jobs goes out while a new start is
+ *             on screen: the choices nobody touched there stay as they
+ *             are (what it remembers is for the next pick)
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -753,6 +756,45 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     const karaoke = page.getByTestId("start-style-karaoke");
     await expect(karaoke).toHaveAttribute("aria-checked", "true");
     await expect(karaoke.getByTestId("start-style-tag")).toHaveText("Last used");
+  });
+
+  test("another upload's POST /jobs goes out while a new start is on screen: the choices nobody touched there stay as they are", async ({ page }) => {
+    const posts = await watchJobPosts(page);
+    // The first video's second (last) part waits.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    await page.route(`${moto}/**`, async (route) => {
+      const n = Number(new URL(route.request().url()).searchParams.get("partNumber"));
+      if (route.request().method() === "PUT" && n === 2) await held;
+      await route.continue().catch(() => {});
+    });
+    await pick(page, fileOf("erst.mp4", crypto.randomBytes(17 * MIB)));
+    await expect.poll(() => puts).toContain(2);
+    await page.getByTestId("start-style-karaoke").click();
+    await startGo(page);
+    await expect(page.getByTestId("start-go")).toHaveAttribute("data-state", "waiting");
+    // The Upload tab: a new start (the first goes on in the background).
+    await page.getByRole("link", { name: /^Upload( video)?$/ }).filter({ visible: true }).first().click();
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "pick");
+    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("upload-dropzone").click()]);
+    await chooser.setFiles(fileOf("zweit.mp4", crypto.randomBytes(3 * MIB)));
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
+    const checked = page.locator("[data-testid^='start-style-'][aria-checked='true']");
+    await expect(checked).toHaveCount(1);
+    const before = await checked.getAttribute("data-testid");
+    expect(before).not.toBe("start-style-karaoke");
+
+    // The first video's last part goes up: its POST /jobs goes out, and
+    // remembers karaoke as the last used.
+    release();
+    await expect.poll(() => createdJobId(page, "erst.mp4"), { timeout: 60_000 }).not.toBeNull();
+    expect(posts).toHaveLength(1);
+    await expect.poll(() => readStorage(page, "cleocuts.prefs.v1")).toMatchObject({ caption_style_last: "karaoke" });
+    await page.waitForTimeout(1000);
+    await expect(page).toHaveURL(`${WEB}/app/new`);
+    await expect(page.getByTestId("start-screen")).toHaveAttribute("data-screen", "style");
+    await expect(checked).toHaveCount(1);
+    expect(await checked.getAttribute("data-testid")).toBe(before);
   });
 
   test("X, then the same file again while the discard hangs here (not on the server): after a while the pick says why", async ({ page }) => {

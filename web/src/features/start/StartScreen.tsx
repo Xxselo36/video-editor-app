@@ -26,7 +26,7 @@
  *   continues with the choices it had (its record keeps them).
  */
 import { useRouter } from "next/navigation";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getLiveUpload, isCancelling, isUploading, loadUploadCode, whenFree } from "@/features/upload/uploadManager";
 import { setPaywall } from "@/features/upload/uploadState";
 import { useLang, useT, type TFn } from "@/i18n";
@@ -134,11 +134,14 @@ export function StartScreen() {
   }, []);
 
   // The account's prefs or the live styles came after the pick: they
-  // decide the choices the user hasn't touched yet.
-  useEffect(() => {
+  // decide the choices the user hasn't touched yet. Not a save during
+  // this visit (another upload's start): that is for the next pick only,
+  // so a start on screen never changes by itself.
+  const offerPrefs = useEffectEvent(() => {
     if (!prefs.ready) return;
     offerChoices(initialChoices({ saved: prefs.saved, standard: prefs.captionStyle, lastStyle: prefs.lastStyle, live }));
-  }, [prefs, live]);
+  });
+  useEffect(() => offerPrefs(), [prefs.loaded, live]);
 
   const screen = start ? "style" : "pick";
   useEffect(() => {
