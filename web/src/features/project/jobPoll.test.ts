@@ -610,6 +610,34 @@ describe("at rest: a look at the job's status row every REST_MS", () => {
     expect(srv.gets).toBe(2);
   });
 
+  it("signed out meanwhile (401, 403 to a look): no more looks; shown again (refresh), the GET decides", async () => {
+    for (const status of [401, 403]) {
+      const srv = backend(ready());
+      const { on } = events();
+      const poll = startJobPoll(`j-s10-${status}`, on);
+      await flush();
+      const answering = apiFetch.getMockImplementation()!;
+      apiFetch.mockImplementation(async (path, init) => {
+        if (path.startsWith("/jobs/status?")) {
+          srv.checks++;
+          return json({ detail: "auth_required" }, status);
+        }
+        return answering(path, init);
+      });
+      await vi.advanceTimersByTimeAsync(10 * REST_MS);
+      expect(srv.checks).toBe(1);
+      expect(srv.gets).toBe(1);
+      // signed in again: the tab shown again asks the whole job, the looks go on
+      apiFetch.mockImplementation(answering);
+      poll.refresh();
+      await flush();
+      expect(srv.gets).toBe(2);
+      await vi.advanceTimersByTimeAsync(REST_MS);
+      expect(srv.checks).toBe(2);
+      poll.stop();
+    }
+  });
+
   it("v1's project page: no looks at rest (it stays as it was)", async () => {
     const srv = backend(ready({ status: "done", renders_ok: 1 }));
     const { on } = events();

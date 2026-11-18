@@ -210,8 +210,9 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
   };
 
   /** GET /jobs/status for this job: its row, "missing" (gone), "unknown"
-   *  (a server without the batch endpoint: 404), null (no answer). */
-  const statusRow = async (): Promise<Record<string, unknown> | "missing" | "unknown" | null> => {
+   *  (a server without the batch endpoint: 404), "denied" (401, 403: not
+   *  signed in, or not this visitor's), null (no answer). */
+  const statusRow = async (): Promise<Record<string, unknown> | "missing" | "unknown" | "denied" | null> => {
     const limit = new AbortController();
     const timer = setTimeout(() => limit.abort(), REQUEST_MS);
     try {
@@ -221,6 +222,7 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
       const r = await apiFetch(`/jobs/status?ids=${encodeURIComponent(jobId)}`, { headers, cache: "no-store", signal: limit.signal });
       if (r.status === 304 && restRow) return restRow;
       if (r.status === 404) return "unknown";
+      if (r.status === 401 || r.status === 403) return "denied";
       if (!r.ok) return null;
       const body = (await r.json()) as { jobs?: unknown; missing?: unknown };
       const rows = Array.isArray(body.jobs) ? (body.jobs as Record<string, unknown>[]) : [];
@@ -245,6 +247,11 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
     const at = epoch;
     const row = await statusRow();
     if (stopped || at !== epoch) return;
+    if (row === "denied") {
+      // As for the GET: sign-in opens (apiFetch); no looks meanwhile.
+      halted = true;
+      return;
+    }
     const changed = row === "missing" || row === "unknown" || (row !== null && shownJob !== null && changedSince(shownJob, row));
     if (changed) void tick();
     else next(false);
