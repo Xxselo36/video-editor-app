@@ -19,8 +19,9 @@
  * by itself far from a landing; those are reported and may be at most two
  * per run. Where the pipeline stood still in a clip after its landing, its
  * join may drop two kept frames (round 11: the frame clock runs ahead of
- * the frames then; at most two such joins per run, not counted with the
- * others). A join mostly shows its clip's last kept frame (round
+ * the frames then), and where the page stood still before a clip's jump,
+ * what that join drops doesn't count (at most two such joins per run, not
+ * counted with the others). A join mostly shows its clip's last kept frame (round
  * 4: the jump is asked on it; the first frames after play or a landing,
  * callbacks running late and seeks that came late go a frame early on
  * purpose; clips of 6 frames or less don't count: the renderer settling
@@ -280,7 +281,20 @@ function check({ frames, raf, seeks = [] }: Run, segs: Seg[], leapBy = 2) {
     if (c < 0 || (segs[c].speed ?? 1) !== 1 || b <= a || b >= range[c][1] || frames[i][1] - frames[i - 1][1] !== 1 || sinceLand(i - 1) < 1) continue;
     if (frames[i][2] - frames[i - 1][2] >= (2.5 * 1000) / FPS) stalledClips.add(c);
   }
-  const stallDrop = (n: number, i: number) => n === 2 && stalledClips.has(endAt[i]);
+  // …and clips whose end the page could not act on: no animation frame for
+  // over 40 ms between the clip's last frame with a callback and the jump
+  // asked at its end (round 11's pixel7 run: 267 ms — the video stood still
+  // too, presentedFrames up 2 in 300 ms, while its clock ran on: eight kept
+  // frames never presented; 4 of 13136 dumped 1x joins had such a stand).
+  // That join's loss doesn't count either, within the same two per run.
+  const pageStalled = (c: number) => {
+    const last = frames.filter(([m]) => kOf(m) >= range[c][0] && kOf(m) < range[c][1]).at(-1);
+    const jump = last && seeks.find(([at]) => at > last[2]);
+    if (!last || !jump) return false;
+    const ticks = [last[2], ...raf.filter((t) => t > last[2] && t < jump[0]), jump[0]];
+    return ticks.some((t, j) => j > 0 && t - ticks[j - 1] > 40);
+  };
+  const stallDrop = (n: number, i: number) => (n === 2 && stalledClips.has(endAt[i])) || (n >= 2 && pageStalled(endAt[i]));
   const drop2 = (n: number, i: number) => n >= 2 && ends[i][1] - ends[i][0] > 2 && !stallDrop(n, i);
   const dropped2 = dropsAt.filter(drop2).length;
   const stallDrops = dropsAt.filter((n, i) => ends[i][1] - ends[i][0] > 2 && stallDrop(n, i)).length;
@@ -362,7 +376,8 @@ test.describe("proxy playback: no cut frame at any join (wordcuts10)", TAG, () =
     // machine (the pipeline skipping frames by itself, a jump that reached
     // it late) makes the player jump a frame earlier on purpose: a little
     // slack then — a late jump's for the joins after it (all at 1x here);
-    // a clip the pipeline stood still in drops two at most (stallDrops).
+    // a clip the pipeline or the page stood still in counts apart
+    // (stallDrops).
     const busy = r.skipped > 3 || r.slowSeeks > 0;
     expect(r.dropped2).toBeLessThanOrEqual(busy ? Math.max(4, Math.ceil(r.skipped / 2), 1 + 8 * r.slowSeeks) : 1);
     expect(r.stallDrops).toBeLessThanOrEqual(2);
