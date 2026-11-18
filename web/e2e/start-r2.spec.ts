@@ -122,6 +122,43 @@ function callsOf(page: Page): string[] {
   return out;
 }
 
+/** The upload locks of the browser as `page` sees them (lib/uploadLock,
+ *  lib/uploadResume): the names held now. */
+const uploadLocks = (page: Page) =>
+  page.evaluate(async () =>
+    ((await navigator.locks.query()).held ?? []).map((l) => l.name ?? "").filter((n) => n.startsWith("cleocuts-upload")),
+  );
+
+/** `page`'s renderer dies without pagehide (an Android tab discard):
+ *  nothing marks its records. Resolves with a new page of the browser
+ *  once the browser has let the dead page's upload locks go: until then
+ *  its uploads still run, as far as any tab can tell. That takes a
+ *  while on CI, where the dead renderer stays until its crash is dumped
+ *  (its locks with it: the next page found them held 10 s and more), and
+ *  it does here too: a stand-in page takes each lock over and holds it
+ *  `lingerMs`. */
+async function dies(page: Page, lingerMs = 3000): Promise<Page> {
+  const names = await uploadLocks(page);
+  expect(names.length).toBeGreaterThan(0);
+  const standIn = await page.context().newPage();
+  await standIn.goto("/imprint");
+  await standIn.evaluate(
+    ({ names, ms }) => {
+      for (const n of names) void navigator.locks.request(n, () => new Promise((r) => setTimeout(r, ms)));
+    },
+    { names, ms: lingerMs },
+  );
+  const cdp = await page.context().newCDPSession(page);
+  const crashed = new Promise((r) => page.once("crash", r));
+  void cdp.send("Page.crash").catch(() => {});
+  await Promise.race([crashed, new Promise((r) => setTimeout(r, 5000))]);
+  const next = await page.context().newPage();
+  await next.goto("/imprint");
+  await expect.poll(() => uploadLocks(next), { timeout: 90_000, message: "the dead page's upload locks" }).toEqual([]);
+  await standIn.close();
+  return next;
+}
+
 /** Answer the upload API's init 429 (too many uploads) while `on()`. */
 async function refuseInit(page: Page, on: () => boolean) {
   await page.route(`${API}/uploads/multipart/init`, (r) =>
@@ -562,13 +599,7 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
     await page.getByTestId("start-fillers").click();
     await page.getByTestId("start-language").selectOption("de");
     await expect.poll(async () => (await recordOf(page, "absturz.mp4"))?.settings?.spoken_language).toBe("de");
-    // The renderer dies: no pagehide, nothing marks the record.
-    const cdp = await page.context().newCDPSession(page);
-    const crashed = new Promise((r) => page.once("crash", r));
-    void cdp.send("Page.crash").catch(() => {});
-    await Promise.race([crashed, new Promise((r) => setTimeout(r, 5000))]);
-
-    const next = await page.context().newPage();
+    const next = await dies(page);
     const posts = await watchJobPosts(next);
     const calls = callsOf(next);
     await next.goto("/app/new");
@@ -601,12 +632,7 @@ test.describe("the start flow on R2", { tag: ["@editor-v2", "@r2"] }, () => {
   test("the page died while it waited for Let’s go: no tab runs it now, so the Vorschau tab doesn't say it waits", async ({ page }) => {
     await pick(page, fileOf("tot.mp4", crypto.randomBytes(3 * MIB)));
     await stored(page);
-    const cdp = await page.context().newCDPSession(page);
-    const crashed = new Promise((r) => page.once("crash", r));
-    void cdp.send("Page.crash").catch(() => {});
-    await Promise.race([crashed, new Promise((r) => setTimeout(r, 5000))]);
-
-    const next = await page.context().newPage();
+    const next = await dies(page);
     // Not "waiting" (its record's old word): an upload until Projects
     // marks it stopped (the Vorschau tab marks nothing).
     await next.goto("/app/preview");
