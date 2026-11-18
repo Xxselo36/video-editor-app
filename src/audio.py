@@ -146,7 +146,13 @@ NOISE_FLOOR_PERCENTILE = 10
 # (an 8 ms decay). So a file of steady noise and clicks alone, of music without
 # rests, or of digital silence around one clap keeps the style
 # threshold: the clicks don't turn into speech, and noise that reads as
-# speech stays speech, as it always did.
+# speech stays speech, as it always did. A file in which Whisper heard
+# nothing (transcribe() ran: no segment with a word or text) has no
+# speech either and keeps the style threshold as is: one sharp sound over
+# quiet room tone (a door slam that holds 7-11 dB under its peak, the room
+# 36-38 dB under it) moved the threshold 5-11 dB down into the room tone,
+# and the web analysis kept all 12 s of such an upload with 'tight'
+# where it kept 0.45 s before.
 SPEECH_OVER_FLOOR_DB = 20.0
 SPEECH_PEAK_MIN_DB = -40.0
 # The threshold stays at least this far above the noise floor, so that
@@ -688,6 +694,14 @@ class AudioAnalyzer:
             marked[int(a / hop_s):int(np.ceil(b / hop_s))] = True
         return marked
 
+    def _heard_nothing(self) -> bool:
+        """transcribe() ran and Whisper heard nothing: no segment with a
+        word or with text."""
+        if self._transcription is None:
+            return False
+        return not any(seg.get("words") or str(seg.get("text") or "").strip()
+                       for seg in self._transcription.get("segments") or [])
+
     def detect_silence(self, silence_threshold: float = 0.02,
                        min_silence_duration: float = 0.5) -> list[SpeechSegment]:
         """
@@ -703,7 +717,8 @@ class AudioAnalyzer:
                 self.silence_threshold_used. Der Rausch-Schutz gilt nur
                 in den Lücken zwischen transkribierten Wörtern (wenn
                 transcribe() vorher lief); überall sonst gilt der Wert
-                davor.
+                davor. Hat Whisper nichts gehört, gilt der Wert des
+                Styles unverändert.
             min_silence_duration: Minimale Dauer für Stille in Sekunden
 
         Returns:
@@ -725,6 +740,12 @@ class AudioAnalyzer:
         threshold, unguarded, levels = silence_threshold_for(
             frame_rms, peak_blocks(audio_data, block), silence_threshold,
             hop_s=hop_s, block_s=block / sample_rate)
+        if self._heard_nothing():
+            # No speech to place the threshold by (SPEECH_OVER_FLOOR_DB).
+            threshold = unguarded = float(silence_threshold)
+            levels.pop("lowered_db", None)
+            levels.pop("noise_guard", None)
+            levels["no_words"] = True
         # The noise guard raised the threshold: it applies only in the
         # gaps between the words Whisper transcribed (when transcribe()
         # ran first, as in analyze_video), and only when those words are

@@ -640,7 +640,8 @@ def _no_speech_clip(path, case: str) -> None:
     (pink, -28 dBFS RMS) with one bang at 6 s (a burst of pink noise
     decaying with an 80 ms time constant, peaking at 0.9); 'car_pass' -
     ambience (pink, -35 dBFS RMS) swelling by 15 dB over 3 s as a car
-    passes (4.5-7.5 s)."""
+    passes (4.5-7.5 s); 'door_slam' - a quiet room (pink, -36 dBFS RMS)
+    with a door slam at 6 s (a 40 ms decay, peaking at 0.9)."""
     sr = 44100
     n = 12 * sr
     rng = np.random.default_rng(21)
@@ -650,10 +651,11 @@ def _no_speech_clip(path, case: str) -> None:
         x[:6 * sr] *= 10 ** (-14 / 20)
         x *= 10 ** (-20 / 20) / np.sqrt(np.mean(x[6 * sr:] ** 2))
         x += _noise(rng, n) * 10 ** (-65 / 20)
-    elif case == "bang":
-        x = _noise(rng, n, "pink") * 10 ** (-28 / 20)
+    elif case in ("bang", "door_slam"):
+        room_db, decay_s = (-28, 0.08) if case == "bang" else (-36, 0.04)
+        x = _noise(rng, n, "pink") * 10 ** (room_db / 20)
         m = int(0.5 * sr)
-        b = _noise(rng, m, "pink") * np.exp(-np.arange(m) / (0.08 * sr))
+        b = _noise(rng, m, "pink") * np.exp(-np.arange(m) / (decay_s * sr))
         x[6 * sr:6 * sr + m] += b / np.max(np.abs(b)) * 0.9
     else:
         swell = np.ones(n)
@@ -721,6 +723,25 @@ def test_an_upload_without_speech_is_cut_as_before(tmp_path, monkeypatch, case):
             _detect_as_before(x, cfg["silence_threshold"], cfg["min_silence_to_cut"], sr), \
             (pace, a.silence_levels)
         assert len(segs) == 1 and _kept(segs, 0.0, dur) > dur - 0.05, (pace, a.silence_levels, segs)
+
+
+def test_a_sharp_sound_without_speech_moves_nothing(tmp_path, monkeypatch):
+    """A quiet room (-36 dBFS) with one door slam and no speech, through
+    the web analysis, Whisper hearing nothing. The slam holds its level
+    long enough to pass for speech 20 dB over the room, so the threshold
+    moved down by 5 dB with it - into the room tone, and 'tight' kept all
+    12 s (the old rule: 0.45 s around the slam). With no word heard there
+    is no speech to place the threshold by: it stays the style's, and
+    every frame reads as the old rule read it."""
+    clip = tmp_path / "clip.mp4"
+    _no_speech_clip(clip, "door_slam")
+    for pace, (_segs, _dur, a) in _web(tmp_path, monkeypatch, clip, []).items():
+        cfg = get_style("smooth" if pace == "none" else "fast")
+        sr, x = a.get_audio_data()
+        assert a.silence_threshold_used == cfg["silence_threshold"], (pace, a.silence_levels)
+        assert [(s.start, s.end, bool(s.has_speech)) for s in a._speech_segments] == \
+            _detect_as_before(x, cfg["silence_threshold"], cfg["min_silence_to_cut"], sr), \
+            (pace, a.silence_levels)
 
 
 # Words Whisper hears in a song or in noise: a few, spread over the upload.
