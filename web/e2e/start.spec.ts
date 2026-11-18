@@ -440,6 +440,20 @@ test("a video over the limits is refused on New video: nothing uploads, nothing 
   expect(await storedJobs(page)).toEqual([]);
 });
 
+test("a refusal on New video follows a switch of the language @editor-v2", async ({ page, stub }) => {
+  await openWithStorage(page, "/app/new", { "cleocuts.lang": "de" });
+  await chooseFile(page, { name: "lang.webm", mimeType: "video/webm", buffer: await stub.media("long.webm") });
+  const error = page.getByTestId("start-pick-error");
+  await expect(error).toHaveText("Dieses Video ist länger als 30 Minuten. Kürze es oder teile es in mehrere Teile auf.");
+  // English picked in Settings, in another tab: this one follows.
+  const other = await page.context().newPage();
+  await other.goto("/app/settings");
+  await other.getByTestId("language-switcher").selectOption("en");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("New video");
+  await expect(error).toHaveText("This video is longer than 30 minutes. Please trim it or split it into parts.");
+  await other.close();
+});
+
 test("a failed upload stays on Choose captions with its reason; Try again starts it @editor-v2", async ({ page, stub }) => {
   await openWithStorage(page, "/app/new");
   const posts = await watchJobPosts(page);
@@ -505,6 +519,35 @@ test("a failure before Let’s go: the go button rests until Try again; Projects
   await expect(go).toHaveAttribute("data-state", "idle");
   await expect(go).toHaveText("Let’s go");
   await expect(retry).toBeFocused();
+  // At the end of the page Try again is in view (on a phone in the strip
+  // stuck at the top): a tap on the button focuses it, and the page stays
+  // where it is (no jump under the finger).
+  await page.getByTestId("start-more").click();
+  // (Measured once the page holds still: the panel at its height — on a
+  // desktop the column beside it sticks only then, and its buttons move
+  // down — and, on a phone, its end brought up.)
+  const clip = page.getByTestId("start-more-panel").locator(":scope > div");
+  await expect.poll(() => clip.evaluate((el) => el.getBoundingClientRect().height >= el.scrollHeight - 1)).toBe(true);
+  let lastY = -1;
+  await expect
+    .poll(
+      async () => {
+        const y = await page.evaluate(() => window.scrollY);
+        const still = y === lastY;
+        lastY = y;
+        return still;
+      },
+      { intervals: [250] },
+    )
+    .toBe(true);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect(retry).toBeInViewport();
+  const scrolled = await page.evaluate(() => window.scrollY);
+  const box = (await go.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(retry).toBeFocused();
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
   // A short landscape phone, where nothing sticks: at the end of the page
   // the button is all there is in view, and the tap brings Try again up.
   const size = page.viewportSize()!;

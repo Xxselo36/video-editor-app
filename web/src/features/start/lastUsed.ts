@@ -21,6 +21,15 @@ export type LastUsedPrefs = {
   caption_style_last: string;
 };
 
+const subs = new Set<(prefs: LastUsedPrefs) => void>();
+
+/** Told of every save (usePrefs: the next pick of the same visit starts
+ *  with them, as the next visit would). Returns the unsubscribe. */
+export function onLastUsed(cb: (prefs: LastUsedPrefs) => void): () => void {
+  subs.add(cb);
+  return () => void subs.delete(cb);
+}
+
 /**
  * Remember `prefs`: this browser's copy at once, the account's when
  * signed in. Never fails: a refused or failed PUT (offline, a server
@@ -28,6 +37,7 @@ export type LastUsedPrefs = {
  */
 export async function saveLastUsed(prefs: LastUsedPrefs): Promise<void> {
   writeLocalPrefsPatch(prefs);
+  subs.forEach((f) => f(prefs));
   if (!(AUTH_ENABLED && getAuthState().signedIn)) return;
   try {
     await apiFetch("/me/prefs", {

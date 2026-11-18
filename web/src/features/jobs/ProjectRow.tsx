@@ -17,7 +17,8 @@
  * start screen ("Continue"), also once it failed (instead of "Try
  * again"). Its bytes all stored, it says "Uploaded": nothing goes on
  * until "Let's go". Another tab of the browser shows it waiting too (its
- * record says so), without the way back: that start is the other tab's.
+ * record says so), without the way back: that start is the other tab's,
+ * also once it failed there (its reason, no "Try again" or "Remove").
  */
 import Link from "next/link";
 import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent } from "react";
@@ -221,12 +222,17 @@ export function ProjectRow({
   // Picked on the start screen, waiting for "Let's go": the way on is
   // back there.
   const awaitingGo = useAwaitingGo(project.id);
-  // Running in another tab: shown as running, nothing to cancel, remove
-  // or upload again here.
+  // Running in another tab, or kept there by its start after a failure
+  // before "Let's go": nothing to cancel, remove or upload again here.
   const elsewhere = useRunsElsewhere(project.id, !liveUpload && (project.state === "uploading" || project.state === "upload_failed"));
+  // That start's failure: stopped, with its reason (a mark of a stale
+  // page, "interrupted", isn't one).
+  const failedThere =
+    elsewhere && project.state === "upload_failed" && Boolean(project.upload?.awaitingGo) && project.errorCode !== "upload_interrupted";
   // Still running in this page (waiting for the connection, say) or in
   // another tab: never a stopped row, whatever the record says.
-  const p: Project = (liveUpload || elsewhere) && project.state === "upload_failed" ? { ...project, state: "uploading" } : project;
+  const p: Project =
+    (liveUpload || (elsewhere && !failedThere)) && project.state === "upload_failed" ? { ...project, state: "uploading" } : project;
   // Waiting for "Let's go" here, or in the tab that uploads it.
   const waits = awaitingGo || (elsewhere && Boolean(p.upload?.awaitingGo));
   const uploadsHere = useUploadsRunning();
@@ -466,8 +472,20 @@ export function ProjectRow({
     if (resumable) void discardResumable(resumable.fp);
     upload(mismatch.file, mismatch.source);
   };
+  // Cancel or Remove of an upload no page runs (a reload stopped it, or
+  // its page died): its interrupted upload goes on the server too, also
+  // one whose bytes were all stored (never one a page still holds: lib/
+  // uploadResume). This page's own upload: cancelUpload does that.
+  const giveUp = () => {
+    const r = liveUpload || canRetryInPlace(p.id) ? null : matchResumable(resumables, getLocalJob(p.id)?.fileSize, p.filename);
+    if (r) void discardResumable(r.fp);
+    void cancelUpload(p.id);
+  };
+  const canCancel = uploading && !elsewhere && (!starting || Boolean(liveUpload?.paused));
+  const canRetry = p.state === "upload_failed" && !awaitingGo && !elsewhere;
+  const canRemove = (p.state === "upload_failed" && !elsewhere) || p.state === "expired";
 
-  const actions = uploading || busy || p.state === "upload_failed" || p.state === "expired";
+  const actions = awaitingGo || canCancel || canRetry || busy || canRemove;
   return (
     <article
       ref={rowRef}
@@ -593,13 +611,13 @@ export function ProjectRow({
                 <Icon icon={ArrowRight} />
               </button>
             )}
-            {uploading && !elsewhere && (!starting || liveUpload?.paused) && (
-              <button type="button" data-testid="job-card-cancel" onClick={() => void cancelUpload(p.id)} className={s.action}>
+            {canCancel && (
+              <button type="button" data-testid="job-card-cancel" onClick={giveUp} className={s.action}>
                 <Icon icon={X} />
                 {t("app.projects.cancel")}
               </button>
             )}
-            {p.state === "upload_failed" && !awaitingGo && (
+            {canRetry && (
               <>
                 <button
                   type="button"
@@ -640,16 +658,11 @@ export function ProjectRow({
                 {t("app.projects.delete")}
               </button>
             )}
-            {(p.state === "upload_failed" || p.state === "expired") && (
+            {canRemove && (
               <button
                 type="button"
                 data-testid="job-card-remove"
-                onClick={() => {
-                  if (p.state === "expired") return removeJob(p.id);
-                  // Given up: the interrupted upload goes on the server too.
-                  if (resumable) void discardResumable(resumable.fp);
-                  void cancelUpload(p.id);
-                }}
+                onClick={() => (p.state === "expired" ? removeJob(p.id) : giveUp())}
                 className={s.action}
               >
                 <Icon icon={X} />

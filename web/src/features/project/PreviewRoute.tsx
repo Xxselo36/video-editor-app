@@ -9,7 +9,7 @@
  */
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppPage } from "@/components/AppPage";
 import { CONTROL_TOUCH, EMPTY_PRIMARY, EMPTY_TINT, EmptyState } from "@/components/EmptyState";
 import { PageTitle } from "@/components/PageTitle";
@@ -17,11 +17,33 @@ import { Button, PRESS } from "@/components/ui/Button";
 import { cx } from "@/components/ui/cx";
 import { useT } from "@/i18n";
 import { AUTH_ENABLED } from "@/lib/auth";
+import { runningUploads } from "@/lib/uploadLock";
 import { refreshProjects, useProjects } from "@/features/jobs/jobsStore";
 import { useProjectsV2 } from "@/features/jobs/useProjectsV2";
 import { useAwaitingGoIds } from "@/features/upload/uploadState";
 import { pickPreview, readLastPreview } from "./pickPreview";
 import { PreviewSkeleton } from "./PreviewSkeleton";
+
+/** The upload records some tab runs now (lib/uploadLock), asked every
+ *  few seconds while `ask`; null: not asked, or this browser can't tell. */
+function useRunningUploads(ask: boolean): Set<string> | null {
+  const [running, setRunning] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!ask) return;
+    let on = true;
+    // (The same set again: no new render of the page.)
+    const same = (a: Set<string> | null, b: Set<string> | null) =>
+      a === b || (!!a && !!b && a.size === b.size && [...a].every((x) => b.has(x)));
+    const check = () => void runningUploads().then((r) => on && setRunning((cur) => (same(cur, r) ? cur : r)));
+    check();
+    const timer = setInterval(check, 5000);
+    return () => {
+      on = false;
+      clearInterval(timer);
+    };
+  }, [ask]);
+  return ask ? running : null;
+}
 
 export function PreviewRoute() {
   const t = useT();
@@ -38,6 +60,12 @@ export function PreviewRoute() {
 
   const title = t("editor.preview");
   const upload = projects.find((p) => p.state === "uploading");
+  // Waiting for "Los geht's" in another tab: its record says so while
+  // that tab runs it. A record whose page died without a word (an
+  // Android tab discard) is an upload until Projekte marks it stopped.
+  const waitingElsewhere = upload?.upload?.awaitingGo && !awaiting.has(upload.id) ? upload.id : null;
+  const running = useRunningUploads(waitingElsewhere !== null);
+  const waitsThere = waitingElsewhere !== null && running?.has(waitingElsewhere) !== false;
   // Projects whose state the server hasn't told yet: one of them may have
   // something to show. Its request failed (offline, a 5xx): the retry;
   // not asked yet (a job another tab just made): a moment.
@@ -58,7 +86,7 @@ export function PreviewRoute() {
     // Uploading, or waiting in the tab that uploads it (its way back is
     // there).
     body = (
-      <EmptyState testId="preview-uploading" title={t(upload.upload?.awaitingGo ? "app.start.waitingForGo" : "app.preview.uploading")}>
+      <EmptyState testId="preview-uploading" title={t(waitsThere ? "app.start.waitingForGo" : "app.preview.uploading")}>
         <Link href="/app" className={EMPTY_TINT}>
           {t("editor.expired.back")}
         </Link>

@@ -62,9 +62,9 @@ export const deApp: Partial<Record<AppKey, string>> = {
     "Diese Videodatei konnten wir nicht lesen. Wandle sie bitte in MP4 oder MOV um und lade sie noch einmal hoch.",
   // Upload limits (413 / 429 from the backend, also checked before uploading)
   "app.errors.fileTooLarge":
-    "Diese Datei ist größer als {max} GB. Kürze das Video oder exportiere es kleiner.",
+    "Diese Datei ist größer als {max}\u00a0GB. Kürze das Video oder exportiere es kleiner.",
   "app.errors.videoTooLong":
-    "Dieses Video ist länger als {max} Minuten. Kürze es oder teile es in mehrere Teile auf.",
+    "Dieses Video ist länger als {max}\u00a0Minuten. Kürze es oder teile es in mehrere Teile auf.",
   "app.errors.tooManyJobs":
     "Du hast schon die maximale Anzahl an Videos in Bearbeitung. Warte, bis eins fertig ist, und versuch's dann erneut.",
 
@@ -352,7 +352,7 @@ export const deApp: Partial<Record<AppKey, string>> = {
 
   // ── Error codes, warnings, stages (UX5, lib/errorKeys.ts) ────────
   "app.errors.noVideoTrack": "Das ist eine Audiodatei. CleoCuts braucht ein Video mit Ton. Wähl bitte eine Videodatei. Es wurde nichts berechnet.",
-  "app.errors.videoTooShort": "Dieses Video ist kürzer als {min} Sekunden und damit zu kurz zum Schneiden. Es wurde nichts berechnet.",
+  "app.errors.videoTooShort": "Dieses Video ist kürzer als {min}\u00a0Sekunden und damit zu kurz zum Schneiden. Es wurde nichts berechnet.",
   "app.errors.processingInterrupted": "Die Bearbeitung wurde unterbrochen. Lade das Video bitte erneut hoch.",
   "app.errors.mediaUnavailable": "Das Originalvideo ist nicht mehr verfügbar, daher lässt sich dieses Projekt nicht mehr bearbeiten.",
   "app.errors.tooManyRenders": "Gerade werden zu viele Videos fertiggestellt. Bitte warte, bis eins fertig ist.",
