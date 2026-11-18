@@ -135,6 +135,36 @@ test.describe("editor v2 layout", TAG, () => {
     await expect(sheet).toBeHidden();
     await expect(page.getByTestId("ed-tab-text")).toBeFocused();
   });
+
+  test("a banner over the stage (the re-edit note): the preview starts under it, the dock in view; closed, the preview takes the room again", async ({
+    page,
+    stub,
+  }, info) => {
+    const desktop = info.project.name === "desktop";
+    if (desktop) await page.setViewportSize({ width: 1440, height: 900 });
+    // Back in review after an export (Fine-tune on a finished video).
+    const job = await stub.seed("edited");
+    await openV2(page, job.id);
+    const note = page.getByTestId("ed-reedit");
+    await expect(note).toBeVisible();
+    const n = await box(page, "ed-reedit");
+    const frame = await box(page, "ed-frame");
+    // never over the picture: the frame starts under the note's foot, with air
+    expect(frame.y).toBeGreaterThanOrEqual(n.y + n.height + 11.5);
+    expect(frame.width / frame.height).toBeCloseTo(9 / 16, 1);
+    expect(frame.height).toBeGreaterThanOrEqual(desktop ? 560 : 330);
+    const vh = page.viewportSize()!.height;
+    const dock = await box(page, "ed-timeline");
+    expect(dock.y + dock.height).toBeLessThanOrEqual(vh);
+    expect(dock.y).toBeGreaterThan(frame.y + frame.height);
+    expect(await noDocumentScroll(page)).toEqual({ v: 0, h: 0 });
+    // Closed: the frame as without a note (desktop: back up and larger).
+    await note.getByRole("button", { name: "Close" }).click();
+    await expect(note).toHaveCount(0);
+    await expect.poll(async () => (await box(page, "ed-frame")).y).toBeLessThan(frame.y);
+    if (desktop) await expect.poll(async () => (await box(page, "ed-frame")).height).toBeGreaterThan(frame.height);
+    else expect((await box(page, "ed-frame")).height).toBeCloseTo(330, 0);
+  });
 });
 
 test.describe("editor v2 on short and sideways phones", TAG, () => {

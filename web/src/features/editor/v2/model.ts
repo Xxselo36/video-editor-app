@@ -128,16 +128,20 @@ export const PHONE_DOCK_MIN = 150;
  *              (54 % of the height) instead, the player row hidden.
  *   landscape  the frame and player row fill the left column between the
  *              top bar and the tab bar.
+ * `banner`: the room a banner over the stage takes above the frame (its
+ * foot plus a gap, PreviewStage) instead of the stage's own top padding;
+ * the frame gets smaller where the screen has no room to spare for it.
  */
 export function phoneFrame(
   rootW: number,
   rootH: number,
-  opts: { landscape: boolean; sheetOpen: boolean; tabH: number },
+  opts: { landscape: boolean; sheetOpen: boolean; tabH: number; banner?: number },
 ): { w: number; h: number } {
+  const banner = opts.banner ?? 0;
   let h: number;
-  if (opts.landscape) h = rootH - 44 - opts.tabH - 8 - 4 - 44 - 8;
-  else if (opts.sheetOpen) h = rootH * 0.46 - 44 - 14;
-  else h = rootH - 44 - opts.tabH - PHONE_DOCK_MIN - (12 + 12 + 44);
+  if (opts.landscape) h = rootH - 44 - opts.tabH - (banner || 8) - 4 - 44 - 8;
+  else if (opts.sheetOpen) h = rootH * 0.46 - 44 - 14 - banner;
+  else h = rootH - 44 - opts.tabH - PHONE_DOCK_MIN - ((banner || 12) + 12 + 44);
   h = Math.max(96, Math.min(PHONE_FRAME_MAX.h, Math.floor(h)));
   let w = Math.min(PHONE_FRAME_MAX.w, Math.round((h * 9) / 16));
   if (!opts.landscape && w > rootW - 32) {

@@ -549,12 +549,16 @@
 .flex1 {
   flex: 1;
 }
-.banner {
+/* The stage's banners: at its top; the frame starts under the one that
+ * shows (PreviewStage pads the stage by its height). */
+.bannerSlot {
   position: absolute;
   left: 16px;
   right: 16px;
   top: 12px;
   z-index: 5;
+}
+.banner {
   display: flex;
   align-items: center;
   gap: 8px;
