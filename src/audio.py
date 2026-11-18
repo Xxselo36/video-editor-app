@@ -178,10 +178,12 @@ def silence_frames(audio: np.ndarray, window: int, hop: int) -> np.ndarray:
 
 
 def peak_blocks(audio: np.ndarray, block: int) -> np.ndarray:
-    """Sample peak of each whole block of `block` samples."""
+    """Sample peak of each whole block of `block` samples (no copy of the
+    audio: an hour of it is 1.3 GB as float)."""
     block = max(1, int(block))
     n = len(audio) // block
-    return np.abs(np.asarray(audio[:n * block], dtype=float)).reshape(n, block).max(axis=1)
+    blocks = np.asarray(audio[:n * block]).reshape(n, block)
+    return np.maximum(blocks.max(axis=1), -blocks.min(axis=1)).astype(float)
 
 
 def held_peak(block_peak: np.ndarray, block_s: float) -> float | None:
