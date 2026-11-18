@@ -280,6 +280,45 @@ def test_without_speech_the_threshold_does_not_move_down(style, case, onset):
         _detect_as_before(x, cfg["silence_threshold"], cfg["min_silence_to_cut"])
 
 
+def _music_bed(rng, n: int) -> np.ndarray:
+    """Chords (three voices of three harmonics, a change every 2 s) with a
+    soft beat every 0.5 s, no rest."""
+    t = np.arange(n) / SR
+    m = np.zeros(n)
+    chords = [(220, 277.2, 329.6), (196, 246.9, 293.7), (174.6, 220, 261.6)]
+    for k in range(int(n / (2 * SR)) + 1):
+        i0, i1 = k * 2 * SR, min(n, (k + 1) * 2 * SR)
+        for f in chords[k % 3]:
+            for h in (1, 2, 3):
+                m[i0:i1] += np.sin(2 * np.pi * f * h * t[i0:i1] + rng.uniform(0, 6.28)) / h
+    return m * (0.6 + 0.4 * np.exp(-(t % 0.5) / 0.08))
+
+
+@pytest.mark.parametrize("style", STYLES)
+@pytest.mark.parametrize("case", ["steady_noise", "wandering_noise", "music_bed"])
+def test_noise_or_music_without_speech_reads_as_before(style, case):
+    """An upload without speech whose noise (a fan; traffic, wandering by
+    +-3 dB) or music bed lies over the style threshold all along: there is
+    no speech to place the threshold by, so it neither moves down nor is
+    raised by the noise guard - the upload reads as speech, as it always
+    did (before: the guard made every frame of it silence, and the web
+    app failed it as 'no speech')."""
+    rng = np.random.default_rng(13)
+    n = 20 * SR
+    if case == "music_bed":
+        x = _music_bed(rng, n)
+    else:
+        wander = 3.0 if case == "wandering_noise" else 0.0
+        x = _noise(rng, n, "pink") * 10 ** (wander * np.sin(2 * np.pi * np.arange(n) / (4 * SR)) / 20)
+    x /= np.max(np.abs(x))
+    a, segs = _detect(x, style)
+    cfg = get_style(style)
+    assert a.silence_threshold_used == cfg["silence_threshold"], a.silence_levels
+    assert [(s.start, s.end, bool(s.has_speech)) for s in segs] == \
+        _detect_as_before(x, cfg["silence_threshold"], cfg["min_silence_to_cut"])
+    assert any(s.has_speech for s in segs)
+
+
 # ── the normal case ──────────────────────────────────────────────────
 
 def _detect_as_before(x, threshold, min_silence):
@@ -537,3 +576,21 @@ def test_soft_words_whisper_heard_stay_in_noise(tmp_path, monkeypatch, noise_db,
     lost = [(w, s, e, round(e - s - _kept(segs, s, e), 3)) for words in phrases
             for w, s, e in words if (e - s) - _kept(segs, s, e) > 0.012]
     assert lost == [], (analyzers[-1].silence_levels, segs)
+
+
+def test_noise_where_whisper_heard_a_phrase_is_kept_whole(tmp_path, monkeypatch):
+    """The real analysis in the fast style on 8 s of pink noise at -30
+    dBFS (a fan, no speech) in which Whisper heard "Thank you." - as it
+    does in noise: the whole upload is kept, as before; the web app
+    doesn't fail it as 'no speech' (it did while the noise guard applied
+    without speech to place the threshold by)."""
+    from src import plugin_api
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    rng = np.random.default_rng(14)
+    sr, dur = 44100, 8.0
+    _mp4(tmp_path / "fan.mp4", _noise(rng, int(dur * sr), "pink") * 10 ** (-30 / 20), sr, dur)
+    analyzers = _mock_whisper(monkeypatch, [[("Thank", 4.0, 4.25), ("you.", 4.25, 4.6)]])
+    res = plugin_api.analyze_video(str(tmp_path / "fan.mp4"), style="fast")
+    segs = [(float(s), float(e)) for s, e in res.segments]
+    assert len(segs) == 1 and _kept(segs, 0.0, float(res.duration)) > float(res.duration) - 0.1, \
+        (analyzers[-1].silence_levels, segs, res.duration)
