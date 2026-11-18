@@ -11,7 +11,15 @@ import { WEB } from "./support/env";
 
 const path = (url: string) => new URL(url).pathname;
 
-test("dashboard → editor → reload → back → new video → back", async ({ page, stub }) => {
+/**
+ * Playwright's WebKit (Linux) dies on the next page load after Back over
+ * entries of history.pushState: its browser process stops on "Assertion
+ * 'this->_M_is_engaged()' failed" (a page of one heading does it: two
+ * pushState, Back, reload). There these tests leave out such a reload.
+ */
+const reloadAfterBack = (browserName: string) => browserName !== "webkit";
+
+test("dashboard → editor → reload → back → new video → back", async ({ page, stub, browserName }) => {
   const job = await stub.seed("review");
   await openWithStorage(page, "/app", { [ACTIVE_JOBS]: [card(job.id, "reviewing", "echt.mp4")] });
   await expect(page.getByTestId("dashboard")).toBeVisible();
@@ -31,8 +39,10 @@ test("dashboard → editor → reload → back → new video → back", async ({
   await page.getByTestId("dashboard-new-video").click();
   await expect(page.getByTestId("picker")).toBeVisible();
   expect(path(page.url())).toBe("/app/new");
-  await page.reload();
-  await expect(page.getByTestId("picker")).toBeVisible();
+  if (reloadAfterBack(browserName)) {
+    await page.reload();
+    await expect(page.getByTestId("picker")).toBeVisible();
+  }
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser", { timeout: 5000 }),
     page.getByTestId("picker-card-tiktok").click(),
@@ -159,7 +169,7 @@ test("/app never paints the picker for a returning user", async ({ page, stub })
   await expect(page.getByTestId("picker")).toHaveCount(0);
 });
 
-test("a first visit goes from /app to the picker; back from its steps stays in the app", async ({ page, stub }) => {
+test("a first visit goes from /app to the picker; back from its steps stays in the app", async ({ page, stub, browserName }) => {
   await openWithStorage(page, "/app");
   await expect(page).toHaveURL(`${WEB}/app/new`);
   await expect(page.getByTestId("picker")).toBeVisible();
@@ -175,6 +185,7 @@ test("a first visit goes from /app to the picker; back from its steps stays in t
   await expect(page.getByTestId("picker")).toBeVisible();
   expect(page.url()).toBe(`${WEB}/app/new`);
   // A reload on a step starts at the picker.
+  if (!reloadAfterBack(browserName)) return;
   const [again] = await Promise.all([page.waitForEvent("filechooser"), page.getByTestId("picker-card-tiktok").click()]);
   expect(again).toBeTruthy();
   await page.reload();
