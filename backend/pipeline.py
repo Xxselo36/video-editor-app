@@ -3449,6 +3449,12 @@ def render_only(
             **web_burn_kwargs(caption_preset),
         )
 
+        # Stopped during the burn (a cancel, or the worker shutting
+        # down): the burn hands back only the clips that finished. An
+        # interruption (the worker retries it for free), not a failed
+        # render ("no output clips", _concat_frame_exact's clip count).
+        if cancel_check and cancel_check():
+            raise InterruptedError("Cancelled")
         if not clip_outputs:
             raise RuntimeError("Render produced no output clips.")
 
@@ -3691,6 +3697,10 @@ def _render_v1_primary(mezz_path, primary: Path, segments, effects,
         caption_preset=caption_preset, output_dir=str(burn_dir),
         cut_style=cut_style, cancel_check=cancel_check, language=language,
         merge_gap=0.0, **extra)
+    # Stopped during the burn: an interruption, not a failed render (as
+    # in render_only).
+    if cancel_check and cancel_check():
+        raise InterruptedError("Cancelled")
     if not clips:
         raise RuntimeError("Render produced no output clips.")
     lap("burn")

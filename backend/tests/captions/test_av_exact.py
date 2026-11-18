@@ -29,6 +29,7 @@ source without B-frames, or at 0, sounded 5-21 ms early.
 from __future__ import annotations
 
 import shutil
+import threading
 from pathlib import Path
 
 import av_media as av
@@ -212,3 +213,49 @@ def test_vfr_source(srcvfr, work):
         assert r["video_err_max"] <= 3 / 60 * fps + 1e-6, (fps, r)
         assert r["av_ms_max"] <= 1000 * 3 / 60 + 1, (fps, r)
         _assert_streams(out, want, fps)
+
+
+@pytest.mark.parametrize("stop_at", [0, 1])
+@pytest.mark.parametrize("entry", ["render_to_dir", "render_only"])
+def test_a_stop_during_the_v1_burn_is_an_interruption(src25, work, monkeypatch,
+                                                       entry, stop_at):
+    """A stop while the clips burn — a cancel, or the worker shutting
+    down (its ctx.cancelled() is the render's cancel_check) — raises
+    InterruptedError, which the worker retries for free; not a
+    RuntimeError, which fails the render for good (RENDER_FAILED, sent to
+    Sentry). The burn hands back only the clips that finished:
+    _concat_frame_exact refused them ("1 clip(s) burned, 3 planned"), and
+    none at all was "Render produced no output clips."."""
+    path, _src = src25
+    segs = [(0.4, 1.4), (2.0, 3.0), (4.0, 5.0)]
+    stop = threading.Event()
+    asked = [0]
+
+    def cancel_check() -> bool:
+        # The burn asks on the render's own thread each time a clip has
+        # finished: the stop comes while clip `stop_at` + 1 burns, after
+        # `stop_at` clips finished.
+        if threading.current_thread() is threading.main_thread() and not stop.is_set():
+            asked[0] += 1
+            if asked[0] > stop_at:
+                stop.set()
+        return stop.is_set()
+
+    burn, burned = pipeline._multi_clip_burn, []
+
+    def spy(**kw):
+        clips = burn(**kw)
+        burned.append(len(clips))
+        return clips
+    monkeypatch.setattr(pipeline, "_multi_clip_burn", spy)
+    out = work / f"stop_{entry}_{stop_at}"
+    with pytest.raises(InterruptedError):
+        if entry == "render_to_dir":     # v1 primary (render_r2's code)
+            pipeline.render_to_dir(str(path), str(out), segs, [], [], "clipper",
+                                   "tight", "en", [], [], parallelism=1,
+                                   cancel_check=cancel_check)
+        else:                            # the local render path
+            pipeline.render_only(str(path), str(out), segs, [],
+                                 {"caption_preset": "classic"}, hooks=[],
+                                 cancel_check=cancel_check, use_modal=False)
+    assert burned == [stop_at]
