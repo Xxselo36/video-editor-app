@@ -637,8 +637,8 @@ class AudioAnalyzer:
                     a, b = float(w["start"]), float(w["end"])
                 except (KeyError, TypeError, ValueError):
                     continue
-                if np.isfinite(a) and np.isfinite(b) and b > a >= 0:
-                    spans.append((a, b))
+                if np.isfinite(a) and np.isfinite(b) and b > max(a, 0.0):
+                    spans.append((max(a, 0.0), b))
         if not spans:
             return None
         marked = np.zeros(n, dtype=bool)
