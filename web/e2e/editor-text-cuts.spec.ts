@@ -256,6 +256,16 @@ test.describe("editor v2: cuts in the text, AI cuts, one undo", TAG, () => {
       await page.getByTestId("ed-word-input").press("Enter");
     }
     await expect(word(page, "10")).toHaveCount(1);
+    if (!(await isPhone(page))) {
+      // The word menu sits above "10" (it fits in the panel, over the cuts
+      // header): below it, its Cut from video covered "point." on the next
+      // line — a click there cut "10" instead.
+      const menuAbove = async () => {
+        const [bar, w] = await Promise.all([page.getByTestId("ed-wordbar").boundingBox(), word(page, "10").boundingBox()]);
+        return !!bar && !!w && bar.y + bar.height <= w.y;
+      };
+      await expect.poll(menuAbove).toBe(true);
+    }
     // 2 cut: "point."
     await word(page, "point.").click();
     await page.getByTestId("ed-word-cut").click();

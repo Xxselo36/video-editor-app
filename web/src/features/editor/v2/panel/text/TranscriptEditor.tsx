@@ -696,8 +696,15 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     const w = bar.offsetWidth;
     const h = bar.offsetHeight;
     const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2 - rr.left, rr.width - w - 8));
+    // Above the selection wherever it fits in the panel — over the cuts
+    // header if need be, never over an open find bar. Below it, it covers
+    // the next lines, and a click meant for one of their words lands on
+    // the menu: Cut from video at its top (a word edited on the panel's
+    // fifth line had the next line under it).
+    const find = root.querySelector<HTMLElement>("[data-testid=ed-find]");
+    const roof = (find ? find.getBoundingClientRect().bottom : rr.top) + 4;
     const above = r.top - h - 8;
-    const top = above >= b.top ? above - rr.top : r.bottom + 8 - rr.top;
+    const top = above >= roof ? above - rr.top : r.bottom + 8 - rr.top;
     bar.style.left = `${Math.round(left)}px`;
     bar.style.top = `${Math.round(top)}px`;
     bar.style.visibility = "visible";
