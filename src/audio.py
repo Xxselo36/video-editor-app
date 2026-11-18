@@ -95,40 +95,55 @@ class Beat:
 # silence_threshold_for() therefore places the style threshold relative
 # to the loudest sample of the speech (estimated so that transients don't
 # count) and keeps it clear of the noise floor. On a recording whose peak
-# is speech and whose noise sits well under the threshold it returns the
-# style threshold unchanged: the normal case cuts exactly as before.
+# is speech and whose pauses' noise sits more than NOISE_MARGIN_DB under
+# the threshold it returns the style threshold unchanged: such a
+# recording cuts exactly as before.
 
 # The analysis frame (the hop is half of it), as detect_silence always used.
 SILENCE_WINDOW_S = 0.1
-# The speech's own peak: the loudest sample peak the audio holds through
-# SPEECH_PEAK_FRAMES frames in a row (0.2 s), plus SPEECH_PEAK_GAP_DB. A
-# clap, click, knock or popped "p" fills at most two frames, so it can't
-# set it, however loud. In 80 synthetic recordings (espeak-ng phrases:
-# clean, under noise, reverberant, after a clap 12 or 20 dB over the
-# speech) the speech's loudest sample lay 0.6-2.8 dB over it; a voice
-# that holds its peaks evenly lies closer. 1 dB, near the low end: after
-# a transient the threshold rather moves a little too far down (keeps a
-# little more) than not far enough.
-SPEECH_PEAK_FRAMES = 3
-SPEECH_PEAK_GAP_DB = 1.0
+# The speech's own peak: the highest level the audio's sample peak holds
+# through SPEECH_PEAK_HOLD_S - every SPEECH_PEAK_BLOCK_S block of such a
+# stretch reaches it - plus SPEECH_PEAK_GAP_DB. The blocks are the
+# estimate's own grid, so it doesn't matter where on the frames' 50 ms
+# hop a transient falls. Claps over quiet speech, at every onset across a
+# hop: a burst decaying with an 8 ms time constant up to 30 dB over the
+# speech (15 ms: up to 20 dB), or followed by a room tail 18 dB under its
+# peak (RT60 0.4 s) up to 20 dB over the speech, leave the estimate where
+# the speech alone puts it; longer, louder ones still lift it (a 15 ms
+# burst 30 dB over the speech: by 9 dB). On clean speech the loudest
+# sample lies 0.2-4.8 dB over the held peak (100 recordings of the tests'
+# synthetic voice 0.2-1.7, 8 of synthetic speech with stressed and
+# unstressed words 0.4-0.9, docs/raw.mp4 1.7, 20 espeak-ng recordings
+# 2.0-4.8). The gap is the low end: after a transient the threshold
+# rather moves a little too far down (keeps a little more) than not far
+# enough. A 100 ms hold resists longer tails, but it lies 0.9-8.3 dB under
+# clean speech: a tolerance wide enough for that leaves claps 8-16 dB
+# over the speech only partly corrected.
+SPEECH_PEAK_BLOCK_S = 0.01
+SPEECH_PEAK_HOLD_S = 0.06
+SPEECH_PEAK_GAP_DB = 0.2
 # When the speech's peak lies less than this far under the file's peak,
 # the peak counts as speech and the style threshold stays exactly as it
-# is (clean speech: at most 1.8 dB under). From twice as far on, the
-# threshold moves down with the speech's peak dB for dB - as if the
-# transient weren't there; in between it ramps linearly, so nearly equal
-# files get nearly equal thresholds. It never moves up.
-PEAK_TOLERANCE_DB = 3.0
+# is (clean speech: at most 4.6 dB under, 1.5 dB on docs/raw.mp4). From
+# twice as far on, the threshold moves down with the speech's peak dB for
+# dB - as if the transient weren't there; in between it ramps linearly,
+# so nearly equal files get nearly equal thresholds. It never moves up.
+PEAK_TOLERANCE_DB = 5.0
 # The noise floor: the 10th percentile of the frames' RMS (the pauses).
 NOISE_FLOOR_PERCENTILE = 10
-# The threshold only moves down when that held peak stands at least
-# SPEECH_OVER_FLOOR_DB over the noise floor and lies no more than
-# SPEECH_PEAK_MIN_DB under the file's peak - when there is speech to place
-# it by. Steady white, pink or brown noise holds its peak 13-14 dB over
-# its own floor (wandering by +-3 dB: 17-19 dB); the speech of the
-# noisiest corpus recordings 26 dB or more. Over digital silence, the
-# decaying tail of a lone transient is all that holds - far under it. So
-# a file of noise and clicks alone, or of digital silence around one
-# clap, keeps the style threshold: the clicks don't turn into speech.
+# There is speech to place the threshold by when the held peak stands at
+# least SPEECH_OVER_FLOOR_DB over the noise floor; only then does it move
+# down - if the held peak lies no more than SPEECH_PEAK_MIN_DB under the
+# file's peak - or up to the noise guard. Noise holds its peak 10-11 dB
+# over its own floor (steady white, pink or brown), 14-16 dB when it
+# wanders by +-3 dB, 18-21 dB by +-6 dB; a music bed without rests 10 dB.
+# Speech holds 21 dB and more over noise 24 dB under its peak (17-20 dB
+# over noise 20 dB under: no move, as before). Over digital silence, a
+# lone clap's tail is all that holds: 45-55 dB under its peak (an 8 ms
+# decay). So a file of steady noise and clicks alone, of music without
+# rests, or of digital silence around one clap keeps the style
+# threshold: the clicks don't turn into speech, and noise that reads as
+# speech stays speech, as it always did.
 SPEECH_OVER_FLOOR_DB = 20.0
 SPEECH_PEAK_MIN_DB = -40.0
 # The threshold stays at least this far above the noise floor, so that
@@ -148,18 +163,32 @@ def _db(x: float) -> float:
     return 20.0 * float(np.log10(max(float(x), 1e-9)))
 
 
-def silence_frames(audio: np.ndarray, window: int,
-                   hop: int) -> tuple[np.ndarray, np.ndarray]:
-    """RMS and sample peak of audio[i:i + window] for i in range(0,
-    len(audio) - window, hop): the frames detect_silence() decides on
-    (the RMS computed exactly as it always was, so the same frames give
-    the same decisions)."""
+def silence_frames(audio: np.ndarray, window: int, hop: int) -> np.ndarray:
+    """RMS of audio[i:i + window] for i in range(0, len(audio) - window,
+    hop): the frames detect_silence() decides on (computed exactly as it
+    always was, so the same frames give the same decisions)."""
     starts = range(0, len(audio) - window, hop)
-    rms = np.array([np.sqrt(np.mean(audio[i:i + window] ** 2)) for i in starts],
-                   dtype=float)
-    peak = np.array([max(audio[i:i + window].max(), -audio[i:i + window].min())
-                     for i in starts], dtype=float)
-    return rms, peak
+    return np.array([np.sqrt(np.mean(audio[i:i + window] ** 2)) for i in starts],
+                    dtype=float)
+
+
+def peak_blocks(audio: np.ndarray, block: int) -> np.ndarray:
+    """Sample peak of each whole block of `block` samples."""
+    block = max(1, int(block))
+    n = len(audio) // block
+    return np.abs(np.asarray(audio[:n * block], dtype=float)).reshape(n, block).max(axis=1)
+
+
+def held_peak(block_peak: np.ndarray, block_s: float) -> float | None:
+    """The highest level that every block of some SPEECH_PEAK_HOLD_S
+    stretch reaches: the blocks' peaks (block_s apart), their minimum over
+    each such stretch, the maximum of those (None: shorter than one)."""
+    k = max(1, round(SPEECH_PEAK_HOLD_S / block_s))
+    peak = np.asarray(block_peak, dtype=float)
+    peak = np.where(np.isfinite(peak), peak, 0.0)
+    if peak.size < k:
+        return None
+    return float(np.lib.stride_tricks.sliding_window_view(peak, k).min(axis=1).max())
 
 
 def _floor_is_pauses(rms: np.ndarray, level: float, hop_s: float) -> bool:
@@ -172,44 +201,46 @@ def _floor_is_pauses(rms: np.ndarray, level: float, hop_s: float) -> bool:
     return bool(runs[runs >= min_run].sum() >= FLOOR_PAUSE_SHARE * low.sum())
 
 
-def silence_threshold_for(frame_rms: np.ndarray, frame_peak: np.ndarray,
+def silence_threshold_for(frame_rms: np.ndarray, block_peak: np.ndarray,
                           threshold: float,
-                          hop_s: float = SILENCE_WINDOW_S / 2) -> tuple[float, dict]:
+                          hop_s: float = SILENCE_WINDOW_S / 2,
+                          block_s: float = SPEECH_PEAK_BLOCK_S,
+                          ) -> tuple[float, dict]:
     """The style's silence threshold, placed for this file.
 
-    frame_rms, frame_peak: detect_silence's 100 ms frames, hop_s apart -
-        RMS and sample peak re the file's peak (the audio normalised to
-        it, as get_audio_data does).
+    frame_rms: detect_silence's 100 ms frames, hop_s apart - RMS re the
+        file's peak (the audio normalised to it, as get_audio_data does).
+    block_peak: the audio's sample peak per block_s block (peak_blocks).
     threshold: the style's threshold (RMS re a peak that is speech).
 
     Returns the threshold to use and the levels it was placed by (dB re
-    the file's peak, for the log): moved down by as far as the speech's
-    loudest sample lies under the file's peak (see PEAK_TOLERANCE_DB) -
-    if there is speech to place it by (SPEECH_OVER_FLOOR_DB) - then kept
-    NOISE_MARGIN_DB above a noise floor made of pauses. A file without
-    usable frames (shorter than one frame, all digital silence) keeps the
-    style threshold.
+    the file's peak, for the log). If there is speech to place it by
+    (SPEECH_OVER_FLOOR_DB), it moves down by as far as the speech's
+    loudest sample lies under the file's peak (see PEAK_TOLERANCE_DB),
+    then stays NOISE_MARGIN_DB above a noise floor made of pauses. A
+    file without speech, or without usable frames (shorter than one
+    frame, all digital silence), keeps the style threshold.
     """
     rms = np.asarray(frame_rms, dtype=float)
-    peak = np.asarray(frame_peak, dtype=float)
-    ok = np.isfinite(rms) & np.isfinite(peak)
-    rms, peak = rms[ok], peak[ok]
+    rms = rms[np.isfinite(rms)]
     used = float(threshold)
     if rms.size == 0 or not np.any(rms > 0):
         return used, {}
     floor = float(np.percentile(rms, NOISE_FLOOR_PERCENTILE))
     levels = {"floor_db": round(_db(floor), 1)}
-    if peak.size >= SPEECH_PEAK_FRAMES:
-        held_db = _db(np.lib.stride_tricks.sliding_window_view(
-            peak, SPEECH_PEAK_FRAMES).min(axis=1).max())
-        levels["speech_peak_db"] = round(held_db + SPEECH_PEAK_GAP_DB, 1)
-        if (held_db - _db(floor) >= SPEECH_OVER_FLOOR_DB
-                and held_db + SPEECH_PEAK_GAP_DB >= SPEECH_PEAK_MIN_DB):
-            under_db = -(held_db + SPEECH_PEAK_GAP_DB)
-            lower_db = min(under_db, 2.0 * (under_db - PEAK_TOLERANCE_DB))
-            if lower_db > 0:
-                used *= 10 ** (-lower_db / 20)
-                levels["lowered_db"] = round(lower_db, 1)
+    held = held_peak(block_peak, block_s)
+    if held is None:
+        return used, levels
+    held_db = _db(held)
+    levels["speech_peak_db"] = round(held_db + SPEECH_PEAK_GAP_DB, 1)
+    if held_db - _db(floor) < SPEECH_OVER_FLOOR_DB:
+        return used, levels
+    if held_db + SPEECH_PEAK_GAP_DB >= SPEECH_PEAK_MIN_DB:
+        under_db = -(held_db + SPEECH_PEAK_GAP_DB)
+        lower_db = min(under_db, 2.0 * (under_db - PEAK_TOLERANCE_DB))
+        if lower_db > 0:
+            used *= 10 ** (-lower_db / 20)
+            levels["lowered_db"] = round(lower_db, 1)
     guard = floor * 10 ** (NOISE_MARGIN_DB / 20)
     if guard > used and _floor_is_pauses(rms, guard, hop_s):
         used = guard
@@ -595,9 +626,11 @@ class AudioAnalyzer:
         # Fenster-Größe für Analyse (100ms)
         window_size = int(sample_rate * SILENCE_WINDOW_S)
         hop_size = window_size // 2
-        frame_rms, frame_peak = silence_frames(audio_data, window_size, hop_size)
+        block = max(1, int(sample_rate * SPEECH_PEAK_BLOCK_S))
+        frame_rms = silence_frames(audio_data, window_size, hop_size)
         threshold, levels = silence_threshold_for(
-            frame_rms, frame_peak, silence_threshold, hop_s=hop_size / sample_rate)
+            frame_rms, peak_blocks(audio_data, block), silence_threshold,
+            hop_s=hop_size / sample_rate, block_s=block / sample_rate)
         self.silence_threshold_used = threshold
         self.silence_levels = levels
         # A log line, not a progress message (those reach the panels).
