@@ -8,9 +8,12 @@ Prueft in dieser Reihenfolge:
 """
 
 import os
+import re
 import sys
 import shutil
 import platform
+import subprocess
+import tempfile
 from pathlib import Path
 from functools import lru_cache
 
@@ -65,6 +68,44 @@ def get_ffmpeg_path() -> str:
 
     # Fallback: hoffen dass es im PATH ist
     return 'ffmpeg'
+
+
+@lru_cache(maxsize=8)
+def ffmpeg_major_version(ffmpeg: str) -> int | None:
+    """Major version of the ffmpeg at `ffmpeg` ("ffmpeg version 7.0.2-
+    static", "… n9.0.2-17-g…", "… 6.1.1-3ubuntu5"); None for a git
+    snapshot ("N-117231-g…") or an ffmpeg that doesn't run."""
+    try:
+        out = subprocess.run([ffmpeg, "-version"], capture_output=True,
+                             text=True, timeout=15, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.match(r"ffmpeg version n?(\d+)\.", out or "")
+    return int(m.group(1)) if m else None
+
+
+# Linux caps one argv string at 128 KiB: a longer filter graph goes to
+# ffmpeg in a file.
+FILTER_GRAPH_ARG_MAX = 100_000
+
+
+def filter_complex_args(graph: str, work_dir=None):
+    """(ffmpeg arguments that give it the filter graph `graph`, path of a
+    file to delete once ffmpeg is done or None). Inline up to
+    FILTER_GRAPH_ARG_MAX characters; longer, from a file, with the option
+    this ffmpeg has: -/filter_complex FILE from ffmpeg 7.0 on (ffmpeg 9
+    has no -filter_complex_script any more), -filter_complex_script FILE
+    before 7.0."""
+    if len(graph) <= FILTER_GRAPH_ARG_MAX:
+        return ["-filter_complex", graph], None
+    fd, path = tempfile.mkstemp(suffix=".ffgraph", text=True,
+                                dir=str(work_dir) if work_dir else None)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(graph)
+    major = ffmpeg_major_version(get_ffmpeg_path())
+    if major is not None and major < 7:
+        return ["-filter_complex_script", path], path
+    return ["-/filter_complex", path], path
 
 
 def ensure_ffmpeg_in_path():

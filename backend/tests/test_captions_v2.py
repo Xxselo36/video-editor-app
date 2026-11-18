@@ -430,7 +430,11 @@ def test_graph_select_path():
     clips = C.clip_plan([(0.0, 1.0), (1.0, 2.0), (3.0, 4.0)], None, 30.0)
     inputs, graph, audio = C.build_graph(clips, SRC, layer={"top": 1200, "height": 300})
     assert audio and inputs == [[]]
-    assert "select='gte(t\\,-0.016667)*lt(t\\,0.983333)+" in graph
+    # the clips' terms summed as a balanced tree (ffmpeg 9's parser
+    # refuses a flat sum of ~300: test_ffmpeg_compat.py)
+    assert ("select='(gte(t\\,-0.016667)*lt(t\\,0.983333)+"
+            "(gte(t\\,0.983333)*lt(t\\,1.983333)+gte(t\\,2.983333)*lt(t\\,3.983333)))'"
+            ) in graph
     assert "setpts=N*1/30/TB[vcat]" in graph
     assert "[0:v]trim" not in graph and "concat=n=3:v=1" not in graph
     assert "asplit=3[as0][as1][as2]" in graph

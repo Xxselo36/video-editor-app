@@ -626,6 +626,17 @@ def _f(x: float) -> str:
     return f"{x:.6f}".rstrip("0").rstrip(".") or "0"
 
 
+def _any_of(terms: list[str]) -> str:
+    """The sum of `terms` as an ffmpeg expression, nested as a balanced
+    tree: ffmpeg 9 refuses a flat a+b+c… of more than ~300 terms (its
+    expression parser's depth limit; "Cannot allocate memory"), ffmpeg 7
+    took any length. One term per clip: a 301-clip timeline."""
+    if len(terms) == 1:
+        return terms[0]
+    mid = len(terms) // 2
+    return f"({_any_of(terms[:mid])}+{_any_of(terms[mid:])})"
+
+
 def build_graph(clips: list[dict], src: dict[str, Any], *,
                 layer: dict[str, Any] | None,
                 loudness: dict[str, Any] | None = None,
@@ -646,9 +657,9 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
     half = 0.5 / fps
     if not seg:
         inputs.append([])
-        terms = "+".join(
+        terms = _any_of([
             f"gte(t\\,{_f(c['start'] - half)})*lt(t\\,{_f(c['end'] - half)})"
-            for c in clips)
+            for c in clips])
         parts.append(f"[0:v]select='{terms}',"
                      f"setpts=N*{rate.denominator}/{rate.numerator}/TB[vcat]")
         if audio:
@@ -898,7 +909,7 @@ def render_primary(
         # CLEO_LOUDNORM of its own, so a loudness in the spec is applied.
         loudness=spec.get("loudness"),
         segment_inputs=seg)
-    from src.ffmpeg_utils import get_ffmpeg_path
+    from src.ffmpeg_utils import filter_complex_args, get_ffmpeg_path
     cmd = [get_ffmpeg_path(), "-y", "-v", "error"]
     if layer_in is None:
         cmd.append("-nostdin")
@@ -909,14 +920,8 @@ def render_primary(
                 "-s", f"{src['W']}x{band['height']}",
                 "-framerate", src["rate"], "-thread_queue_size", "64",
                 "-i", "pipe:0"]
-    script = None
-    if len(graph) > 100_000:
-        fd, script = tempfile.mkstemp(suffix=".ffgraph", dir=str(work), text=True)
-        with os.fdopen(fd, "w") as fh:
-            fh.write(graph)
-        cmd += ["-filter_complex_script", script]
-    else:
-        cmd += ["-filter_complex", graph]
+    graph_args, script = filter_complex_args(graph, work)
+    cmd += graph_args
     cmd += ["-map", "[vout]"]
     if audio:
         cmd += ["-map", "[aout]", "-c:a", "aac", "-b:a", AUDIO_BITRATE]
