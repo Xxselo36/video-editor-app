@@ -15,6 +15,12 @@ test("no shell: the header of before; Preview and Settings lead to /app", async 
   await expect(page.getByTestId("sidebar")).toHaveCount(0);
   for (const path of ["/app/preview", "/app/settings"]) {
     await page.goto(path);
-    await expect(page, path).toHaveURL(new RegExp(`^${WEB}/app(/new)?$`));
+    // To /app, and from there to New video (nothing on this device yet:
+    // DashboardPage): the whole way before the next goto. A redirect the
+    // page still has going when the next goto starts becomes a full
+    // navigation in WebKit (its fetch is refused as the page is left),
+    // which cuts that goto off.
+    await expect(page, path).toHaveURL(`${WEB}/app/new`);
+    await expect(page.getByTestId("picker"), path).toBeVisible();
   }
 });

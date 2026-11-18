@@ -124,6 +124,13 @@ async function sweep(page: Page) {
 }
 
 test.describe("landing: the command rows play with the scroll", () => {
+  // A sweep is some 500 steps of two frames each: about 105 s in
+  // Playwright's WebKit, whose headless frames come slowly (a test with
+  // two of them ran out of its 120 s there).
+  test.beforeEach(({ browserName }) => {
+    test.slow(browserName === "webkit", "WebKit's slow frames: a sweep takes about 105 s");
+  });
+
   test("one row at a time, in order, and backwards when scrolling up", async ({ page, browserName }) => {
     const s = await open(page);
     // Chromium has view timelines and gets them right: the native path

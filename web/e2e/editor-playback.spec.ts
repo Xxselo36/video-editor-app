@@ -473,6 +473,9 @@ test.describe("how the editor picks proxy or preview", () => {
   };
   const probes = (reqs: { url: string; type: string; range?: string }[]) =>
     reqs.filter((r) => /proxy-video/.test(r.url) && r.type === "fetch");
+  /** The <video>'s own loads of the proxy: "media" in Chromium, "other" in WebKit. */
+  const videoLoads = (reqs: { url: string; type: string; range?: string }[]) =>
+    reqs.filter((r) => /proxy-video/.test(r.url) && (r.type === "media" || r.type === "other"));
 
   test("has_proxy: true → proxy at once, no probe", async ({ page, stub }) => {
     const job = await stub.seed("review", { proxy: "on" });
@@ -481,7 +484,7 @@ test.describe("how the editor picks proxy or preview", () => {
     await expect.poll(() => playbackMode(page)).toBe("proxy");
     await page.waitForTimeout(1500);
     expect(probes(reqs)).toEqual([]);
-    expect(reqs.some((r) => /proxy-video/.test(r.url) && r.type === "media")).toBe(true);
+    expect(videoLoads(reqs).length).toBeGreaterThan(0);
   });
 
   test("a proxy that fails to load falls back to the preview", async ({ page, stub }) => {
@@ -511,7 +514,7 @@ test.describe("how the editor picks proxy or preview", () => {
     expect(probes(reqs).length).toBeGreaterThanOrEqual(1);
     expect(probes(reqs).every((r) => r.range === "bytes=0-1")).toBe(true);
     expect(statuses.every((s) => s === 404)).toBe(true);
-    expect(reqs.some((r) => /proxy-video/.test(r.url) && r.type === "media")).toBe(false);
+    expect(videoLoads(reqs)).toEqual([]);
     await expectRebuildSwapsIn(page, stub, job.id);
   });
 
