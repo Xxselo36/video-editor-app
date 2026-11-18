@@ -98,6 +98,7 @@ class Beat:
 # is speech and whose noise sits well under the threshold it returns the
 # style threshold unchanged: the normal case cuts exactly as before.
 
+# The analysis frame (the hop is half of it), as detect_silence always used.
 SILENCE_WINDOW_S = 0.1
 # The speech's own peak: the loudest sample peak the audio holds through
 # SPEECH_PEAK_FRAMES frames in a row (0.2 s), plus SPEECH_PEAK_GAP_DB. A
@@ -183,10 +184,11 @@ def silence_threshold_for(frame_rms: np.ndarray, frame_peak: np.ndarray,
 
     Returns the threshold to use and the levels it was placed by (dB re
     the file's peak, for the log): moved down by as far as the speech's
-    loudest sample lies under the file's peak (see PEAK_TOLERANCE_DB),
-    then kept NOISE_MARGIN_DB above a noise floor made of pauses. A file
-    without usable frames (shorter than one frame, all digital silence)
-    keeps the style threshold.
+    loudest sample lies under the file's peak (see PEAK_TOLERANCE_DB) -
+    if there is speech to place it by (SPEECH_OVER_FLOOR_DB) - then kept
+    NOISE_MARGIN_DB above a noise floor made of pauses. A file without
+    usable frames (shorter than one frame, all digital silence) keeps the
+    style threshold.
     """
     rms = np.asarray(frame_rms, dtype=float)
     peak = np.asarray(frame_peak, dtype=float)
