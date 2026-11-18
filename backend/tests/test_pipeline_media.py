@@ -713,6 +713,30 @@ def test_smartcam_plugin_default_path_unchanged(tmp_path, monkeypatch, private_t
     assert not list(private_tmp.iterdir())
 
 
+def test_smartcam_keeps_the_frame_rate(tmp_path, monkeypatch, private_tmp,
+                                       capsys):
+    """OpenCV reads SmartCam's input frame by frame, so the input is made
+    constant frame rate first (-fps_mode cfr). With -vsync, which ffmpeg 9
+    (imageio-ffmpeg 0.8) no longer has, that step failed and OpenCV read
+    a VFR phone video as if it were CFR: the picture drifted off the
+    sound. The reframed video keeps every frame OpenCV wrote: its last
+    encode (a filter graph without a frame rate) came out at 25 fps with
+    ffmpeg 7, a 30 fps source losing every 6th frame."""
+    import plugins.premiere.video_editor_premiere as plugin
+    monkeypatch.setenv("CLEO_CACHE_DIR", str(tmp_path / "cache"))
+    src = _make_clip(tmp_path / "clip.mp4", "640x360", 2)
+    out = plugin._run_smartcam_preprocess(str(src), "portrait", "720")
+    assert out
+    log = capsys.readouterr().out
+    assert "[SmartCam/plugin] CFR pre-convert OK" in log, log[-1500:]
+    v = _streams(out)["video"]
+    assert v["r_frame_rate"] == "30/1"
+    r = subprocess.run([FP, "-v", "error", "-select_streams", "v:0", "-count_packets",
+                        "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", out],
+                       capture_output=True, text=True, check=True)
+    assert int(r.stdout.strip()) == 60
+
+
 # ── thread cap ───────────────────────────────────────────────────────
 
 

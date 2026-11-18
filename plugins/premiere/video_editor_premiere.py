@@ -2969,9 +2969,11 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
         # uniformer 1/fps-Spacing — der Frame-Inhalt landet dadurch an
         # falschen Zeitpunkten gegenüber dem (real-timed) Audio. Über
         # die Clip-Länge baut sich der Versatz auf ("Bild kommt nach").
-        # Wir transkodieren den Input vor OpenCV mit `-vsync cfr -r fps`
+        # Wir transkodieren den Input vor OpenCV mit `-fps_mode cfr -r fps`
         # zu echtem CFR — danach stimmen Frame-Index und Wallclock-
-        # Position überein, OpenCV's Annahmen passen.
+        # Position überein, OpenCV's Annahmen passen. (`-fps_mode`, nicht
+        # `-vsync`: das gibt es seit ffmpeg 9 nicht mehr, der Schritt
+        # schlug dort still fehl und OpenCV las wieder die VFR-Quelle.)
         cfr_input = crop_input
         try:
             _src_probe = _probe_video(crop_input)
@@ -2989,7 +2991,7 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
             cfr_cmd = [
                 get_ffmpeg_path(), "-y",
                 "-i", crop_input,
-                "-vsync", "cfr",
+                "-fps_mode", "cfr",
                 "-r", f"{_src_fps:.6f}",
                 "-c:v", "h264_videotoolbox", "-b:v", "12M",
                 "-pix_fmt", "yuv420p",
@@ -3005,7 +3007,7 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
                     get_ffmpeg_path(), "-y",
                     *_thr,
                     "-i", crop_input,
-                    "-vsync", "cfr",
+                    "-fps_mode", "cfr",
                     "-r", f"{_src_fps:.6f}",
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
                     *_thr,
@@ -3065,6 +3067,10 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
         #   sample auf pts=0 statt AAC-encoder-priming-Delay von -23ms.
         # - `-avoid_negative_ts make_zero -fflags +genpts`: re-generiert
         #   alle PTS ab 0, fängt evtl. übriggebliebene Offsets ab.
+        # - `-fps_mode passthrough`: jedes Frame von OpenCV, wie es ist.
+        #   Der filter_complex-Ausgang hat keine Framerate; ffmpeg 7 hat
+        #   dann mit 25 fps kodiert (30 → 25: jedes 6. Frame fehlte),
+        #   ffmpeg 9 behält alle Frames.
         # Hardware-Encode via Apple Videotoolbox (5-10× schneller als
         # libx264). Bei iPhone 4K60 reduziert das den Mux-Schritt von
         # mehreren Minuten auf Sekunden. Fallback auf libx264 wenn
@@ -3079,7 +3085,7 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
             "[1:a]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[a]",
             "-map", "[v]", "-map", "[a]",
             "-c:v", "h264_videotoolbox", "-b:v", "12M",
-            "-pix_fmt", "yuv420p",
+            "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
             "-c:a", "aac", "-b:a", "320k",
             "-avoid_negative_ts", "make_zero",
             "-movflags", "+faststart",
@@ -3101,7 +3107,7 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
                 "-map", "[v]", "-map", "[a]",
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
                 *_thr,
-                "-pix_fmt", "yuv420p", "-bf", "0",
+                "-pix_fmt", "yuv420p", "-bf", "0", "-fps_mode", "passthrough",
                 "-c:a", "aac", "-b:a", "320k",
                 "-avoid_negative_ts", "make_zero",
                 "-movflags", "+faststart",
@@ -3121,7 +3127,7 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
                 "-i", video_only,
                 "-c:v", "libx264", "-preset", "fast", "-crf", "18",
                 *_thr,
-                "-pix_fmt", "yuv420p",
+                "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
                 "-movflags", "+faststart",
                 final_path,
             ]
