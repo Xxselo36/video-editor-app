@@ -188,7 +188,8 @@ def sync_report(labels: list[dict], segments: list, units: list[dict],
                                    **web_burn_kwargs("clipper"))
     recognised = {i for i, _ in pairs}
     truth, off = [], 0.0
-    for s, e in segments:
+    # the render's clips (frame-exact: edges on the frame grid)
+    for s, e in sim.kept_segments(segments, **web_burn_kwargs("clipper")):
         for i, w in enumerate(labels):
             if (i in recognised and s <= w["start"] and w["end"] <= e
                     and not _is_vocalisation(norm_word(w["text"]))):

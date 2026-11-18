@@ -85,9 +85,12 @@ def web_burn_kwargs(caption_preset: str | None) -> dict[str, Any]:
     """The keyword arguments every web render passes to _multi_clip_burn:
     assign_by_midpoint (a caption is burned in one clip only, never twice
     across a cut), bounce_anchor="caption" (Clipper's bounce-in no longer
-    moves the text), and the web position of Clean / Classic / Subtle."""
+    moves the text), frame_exact (every clip exactly its frames, video
+    only: _concat_frame_exact adds the audio), and the web position of
+    Clean / Classic / Subtle."""
     kw: dict[str, Any] = {"assign_by_midpoint": True,
-                          "bounce_anchor": "caption"}
+                          "bounce_anchor": "caption",
+                          "frame_exact": True}
     pos = WEB_SUB_POS.get(caption_preset or "")
     if pos is not None:
         kw["sub_pos"] = pos
@@ -1563,114 +1566,87 @@ def _score_frame(image_path: str) -> float:
     return brightness_ok * sharp
 
 
-def _ffmpeg_concat(
+def _has_audio(path: str) -> bool:
+    """Does `path` have an audio stream? (False when ffprobe fails.)"""
+    try:
+        r = subprocess.run(
+            [get_ffprobe_path(), "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and bool(r.stdout.strip())
+
+
+def _concat_list(paths: list[str], list_path: str) -> None:
+    """A concat-demuxer list of `paths` (absolute: the demuxer resolves
+    relative ones against the list's own folder)."""
+    with open(list_path, "w") as f:
+        for p in paths:
+            q = os.path.abspath(p).replace("'", "'\\''")
+            f.write(f"file '{q}'\n")
+
+
+def _concat_frame_exact(
     clip_paths: list[str],
     output_path: str,
-    source_audio_path: str | None = None,
-    audio_segments: list[tuple[float, float]] | None = None,
+    source_path: str,
+    segments: list[tuple[float, float]],
 ) -> None:
-    """Concatenate clips through the concat demuxer, re-encoding video
-    AND rebuilding audio directly from the source.
+    """The v1 render's primary from the clips _multi_clip_burn burned
+    frame-exact (web_burn_kwargs) out of `source_path` for `segments`:
+    one encode, frame-exact and in sync, whichever ffmpeg.
 
-    Audio strategy:
-      - If source_audio_path + audio_segments given, we DISCARD the
-        per-segment burned audio (MoviePy's numpy pipeline was subtly
-        altering it) and rebuild the audio timeline by atrim+concat
-        directly from the source. One AAC re-encode, no numpy round-
-        trip → audio stays character-identical to the recording.
-      - Otherwise falls back to stream-copying the burned audio.
-    """
+    - Video: the clips back to back through the concat demuxer (one
+      input, read in turn: a 10-minute render doesn't open hundreds of
+      decoders), every frame put on the source's frame grid (frame n at
+      n / rate). The burned clips have their exact frame counts, so the
+      output has every frame once and nothing for ffmpeg's constant
+      frame rate output to round. (The clips used to start 21 ms late —
+      AAC priming — and end short of their audio: ffmpeg 7 filled the
+      gaps with a repeated frame, ffmpeg 9 started the video a frame
+      late; either way a frame or two off per clip.)
+    - Audio: cut from the source at the clips' frame times, sample-exact
+      (captions_v2.audio_graph, as the v2 render: every clip exactly as
+      long as its frames, a 15 ms fade on each side of a cut), one AAC
+      encode. (It used to be the source's AAC packets stream-copied per
+      clip: cut on 21 ms packet steps, so each clip came out a little
+      off its video.)
+
+    _frame_plan(segments) gives the same clips here as in the burn.
+    Raises when the clips aren't those (a clip failed to burn: its
+    missing frames would put every later clip's sound early)."""
+    from backend import captions_v2
+    from plugins.premiere.video_editor_premiere import _burn_frame_rate, _frame_plan
+    from src.ffmpeg_utils import filter_complex_args
     if not clip_paths:
         raise ValueError("no clips to concat")
-
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False
-    ) as f:
-        list_path = f.name
-        for p in clip_paths:
-            f.write(f"file '{p}'\n")
-
-    use_source_audio = bool(source_audio_path and audio_segments)
-
-    # Bit-perfect audio path: extract each segment from source AAC with
-    # -c:a copy (no decode, no re-encode), concat via demuxer with copy.
-    # Result byte-matches the source samples in the kept ranges — no
-    # numpy round-trip, no AAC re-encode. Downside: -ss on AAC copy
-    # snaps cuts to the nearest AAC frame (~21ms at 48kHz), which is
-    # below the audibility threshold.
-    audio_only_path: str | None = None
-    if use_source_audio:
-        audio_segs_dir = tempfile.mkdtemp(prefix="cleo_audio_")
-        # Extract to .m4a (MP4 container) instead of raw .aac (ADTS).
-        # iPhone AAC lives natively in MP4 — matching the container
-        # keeps the AAC bitstream bit-identical without ADTS wrapping
-        # that concat demuxer sometimes rejects.
-        m4a_seg_paths: list[str] = []
-        for i, (s, e) in enumerate(audio_segments):
-            m4a_path = str(Path(audio_segs_dir) / f"a_{i:04d}.m4a")
-            extract_cmd = [
-                get_ffmpeg_path(), "-y",
-                "-ss", f"{s:.3f}", "-to", f"{e:.3f}",
-                "-i", source_audio_path,
-                "-vn", "-c:a", "copy",
-                # The input seek lands on the VIDEO keyframe before `s`
-                # (up to 10 s early in a SmartCam mux); stream copy kept
-                # all audio from there, so kept ranges came out too long
-                # and the audio drifted off the picture. Drop it.
-                "-copypriorss", "0",
-                "-avoid_negative_ts", "make_zero",
-                m4a_path,
-            ]
-            r = subprocess.run(extract_cmd, capture_output=True, text=True)
-            if r.returncode == 0 and Path(m4a_path).exists():
-                m4a_seg_paths.append(m4a_path)
-            else:
-                # Surface the failure loudly so we don't silently fall
-                # back to MoviePy's degraded audio.
-                print(f"[audio-extract] seg {i} failed: "
-                      f"{r.stderr[-400:] if r.stderr else '(no stderr)'}",
-                      flush=True)
-        if m4a_seg_paths and len(m4a_seg_paths) == len(audio_segments):
-            audio_list_path = str(Path(audio_segs_dir) / "list.txt")
-            with open(audio_list_path, "w") as f:
-                for p in m4a_seg_paths:
-                    f.write(f"file '{p}'\n")
-            audio_only_path = str(Path(audio_segs_dir) / "concat.m4a")
-            concat_a_cmd = [
-                get_ffmpeg_path(), "-y",
-                "-f", "concat", "-safe", "0",
-                "-i", audio_list_path,
-                "-c:a", "copy",
-                audio_only_path,
-            ]
-            r = subprocess.run(concat_a_cmd, capture_output=True, text=True)
-            if r.returncode != 0:
-                print(f"[audio-concat] failed: "
-                      f"{r.stderr[-400:] if r.stderr else '(no stderr)'}",
-                      flush=True)
-                audio_only_path = None
-            else:
-                print(f"[audio] bit-perfect track built from source "
-                      f"({len(audio_segments)} segments)", flush=True)
-        else:
-            print(f"[audio] source-audio path aborted — "
-                  f"{len(m4a_seg_paths)}/{len(audio_segments)} segments "
-                  "extracted; falling back to MoviePy audio",
-                  flush=True)
-
-    cmd = [
-        get_ffmpeg_path(), "-y",
-        *_threads(),
-        # +genpts on the INPUT parser fills in missing PTS from DTS so
-        # concat-demuxer segments join cleanly without inheriting the
-        # tiny AAC-frame-boundary offsets that stacked as A/V drift.
-        "-fflags", "+genpts",
-        "-f", "concat", "-safe", "0",
-        "-i", list_path,
-    ]
-    if audio_only_path:
-        cmd += ["-i", audio_only_path, "-map", "0:v", "-map", "1:a"]
-
+    rate = _burn_frame_rate(source_path)
+    if rate is None:
+        raise RuntimeError("concat: no frame rate for the source")
+    fps = float(rate)
+    plan = _frame_plan(segments, rate)
+    if len(plan) != len(clip_paths):
+        raise RuntimeError(f"concat: {len(clip_paths)} clip(s) burned, "
+                           f"{len(plan)} planned")
+    clips = captions_v2.clip_plan(
+        [(a / fps, (a + n) / fps) for a, n in plan], None, fps)
+    audio = _has_audio(source_path)
+    graph = (f"[0:v]setpts=N*{rate.denominator}/{rate.numerator}/TB,"
+             "format=yuv420p[vout]")
+    if audio:
+        graph += ";" + ";".join(captions_v2.audio_graph(clips, fps, source=1))
+    work = tempfile.mkdtemp(prefix="cleo_concat_")
+    list_path = os.path.join(work, "list.txt")
+    _concat_list(clip_paths, list_path)
+    graph_args, _script = filter_complex_args(graph, work)
+    cmd = [get_ffmpeg_path(), "-y", *_threads(),
+           "-f", "concat", "-safe", "0", "-i", list_path]
+    if audio:
+        cmd += [*_threads(), "-i", source_path]
+    cmd += [*graph_args, "-map", "[vout]"]
+    if audio:
+        cmd += ["-map", "[aout]", "-c:a", "aac", "-b:a", "320k"]
     cmd += [
         # Final encode — runs once per render. Defaults tuned with a
         # benchmark (CLEO_FINAL_PRESET / CLEO_FINAL_CRF override).
@@ -1679,24 +1655,16 @@ def _ffmpeg_concat(
         "-crf", os.environ.get("CLEO_FINAL_CRF", "20"),
         *_threads(),
         "-pix_fmt", "yuv420p",
-        # -vsync 1 (default) with +genpts on input preserves source fps.
-        # Previous -r 30 forced re-timing which caused drift on 60fps
-        # or 29.97 source. Removed.
-        # Audio: bit-perfect copy of source AAC.
-        "-c:a", "copy",
+        "-r", f"{rate.numerator}/{rate.denominator}",
         "-movflags", "+faststart",
         output_path,
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     finally:
-        if use_source_audio:
-            shutil.rmtree(audio_segs_dir, ignore_errors=True)
-        Path(list_path).unlink(missing_ok=True)
+        shutil.rmtree(work, ignore_errors=True)
     if result.returncode != 0:
-        raise RuntimeError(
-            f"ffmpeg concat failed: {result.stderr[-800:]}"
-        )
+        raise RuntimeError(f"ffmpeg concat failed: {result.stderr[-800:]}")
 
 
 # ── UX6: the start screen's settings ──────────────────────────────────
@@ -2340,133 +2308,89 @@ def _apply_segment_effects(
     segments: list[tuple[float, float] | list[float]],
     effects: list[dict],
 ) -> None:
-    """Apply per-segment speed / fade / volume via ffmpeg filter_complex.
+    """Apply per-segment speed / fade / volume to the v1 primary.
 
-    The concat output is a linear video where segment N runs from
-    `sum(prev durations)` to `sum(prev durations) + segment_N_duration`.
-    We split the video into those slices, apply per-slice filters, and
-    concat back. Effects supported:
-      - speed: setpts (video) + atempo (audio). Chained for >2x / <0.5x.
+    The primary (_concat_frame_exact) has every segment's frames back to
+    back on its frame grid: segment N is frames F..F+n-1, n its frame
+    count (_frame_plan). Each such slice gets its own chain, then they're
+    concatenated again, frame-exact: a sped-up slice is resampled onto
+    the grid and comes out exactly clip_frames() long, its audio exactly
+    as long (captions_v2: the v2 render's rules). Effects supported:
+      - speed: setpts + fps (video) + atempo (audio). Chained for >2x /
+        <0.5x.
       - fadeIn / fadeOut: video fade + afade at slice boundary.
       - volume: audio scale.
     """
+    from backend import captions_v2
+    from plugins.premiere.video_editor_premiere import _burn_frame_rate
+    from src.ffmpeg_utils import filter_complex_args
     if not segments or not effects:
         raise ValueError("nothing to apply")
-    # Compute per-slice bounds in OUTPUT time.
-    durations = [max(0.0, float(s[1]) - float(s[0])) for s in segments]
-    total = sum(durations)
-    if total <= 0:
+    rate = _burn_frame_rate(input_path)
+    if rate is None:
+        raise ValueError("no frame rate")
+    fps = float(rate)
+    clips = captions_v2.clip_plan(segments, effects, fps)
+    if not clips:
         raise ValueError("segments have zero total duration")
-
-    filter_parts: list[str] = []
-    concat_v: list[str] = []
-    concat_a: list[str] = []
-    cursor = 0.0
-    for i, (dur, eff) in enumerate(zip(durations, effects)):
-        s_start = cursor
-        s_end = cursor + dur
-        cursor = s_end
-        # Only a MISSING value means default: `x or 1.0` used to turn
-        # volume 0 (mute) back into full volume.
-        def _num(key: str, default: float) -> float:
-            v = eff.get(key)
-            try:
-                return default if v is None else float(v)
-            except (TypeError, ValueError):
-                return default
-        speed = _num("speed", 1.0)
-        if speed <= 0:
-            speed = 1.0
-        fade_in = max(0.0, _num("fadeIn", 0.0))
-        fade_out = max(0.0, _num("fadeOut", 0.0))
-        volume = max(0.0, _num("volume", 1.0))
-
-        v_chain = [
-            f"[0:v]trim=start={s_start:.3f}:end={s_end:.3f}",
-            "setpts=PTS-STARTPTS",
-        ]
-        a_chain = [
-            f"[0:a]atrim=start={s_start:.3f}:end={s_end:.3f}",
-            "asetpts=PTS-STARTPTS",
-        ]
-        # Speed via setpts + atempo (atempo capped 0.5-2.0 per stage)
-        if abs(speed - 1.0) > 0.001:
-            v_chain.append(f"setpts=PTS/{speed:.4f}")
-            remaining = speed
-            while remaining > 2.0:
-                a_chain.append("atempo=2.0")
-                remaining /= 2.0
-            while remaining < 0.5:
-                a_chain.append("atempo=0.5")
-                remaining /= 0.5
-            if abs(remaining - 1.0) > 0.001:
-                a_chain.append(f"atempo={remaining:.4f}")
-        # Effective slice duration after speed change
-        eff_dur = dur / speed if speed > 0 else dur
-        if fade_in > 0:
-            fi = min(fade_in, eff_dur / 2)
-            v_chain.append(f"fade=t=in:st=0:d={fi:.3f}")
-            a_chain.append(f"afade=t=in:st=0:d={fi:.3f}")
-        if fade_out > 0:
-            fo = min(fade_out, eff_dur / 2)
-            v_chain.append(
-                f"fade=t=out:st={max(0.0, eff_dur - fo):.3f}:d={fo:.3f}",
-            )
-            a_chain.append(
-                f"afade=t=out:st={max(0.0, eff_dur - fo):.3f}:d={fo:.3f}",
-            )
-        if abs(volume - 1.0) > 0.001:
-            a_chain.append(f"volume={volume:.4f}")
-        # Output label goes right after the last filter — a comma
-        # before it ("…,[v0]") is an empty filter and ffmpeg rejects
-        # the whole graph, which silently dropped every effect.
-        filter_parts.append(",".join(v_chain) + f"[v{i}]")
-        filter_parts.append(",".join(a_chain) + f"[a{i}]")
-        concat_v.append(f"[v{i}]")
-        concat_a.append(f"[a{i}]")
-
-    n = len(durations)
-    # concat wants alternating streams: v0,a0,v1,a1,...
-    interleaved = "".join(
-        f"[v{i}][a{i}]" for i in range(n)
-    )
-    filter_parts.append(
-        f"{interleaved}concat=n={n}:v=1:a=1[outv][outa]"
-    )
-    filter_complex = ";".join(filter_parts)
-
-    # Linux caps a single argv string at 128 KiB; long timelines (many
-    # hundreds of clips) exceed that, which used to raise E2BIG and drop
-    # every effect. Hand long graphs to ffmpeg through a file instead.
-    graph_args = ["-filter_complex", filter_complex]
-    script_path = None
-    if len(filter_complex) > 100_000:
-        fd, script_path = tempfile.mkstemp(suffix=".ffgraph", text=True)
-        with os.fdopen(fd, "w") as fh:
-            fh.write(filter_complex)
-        graph_args = ["-filter_complex_script", script_path]
-
+    # The slices in the primary's timeline: the cuts' fades are in it
+    # already (_concat_frame_exact), only the effects are added here.
+    tl, f0 = [], 0
+    for c in clips:
+        n = round((c["end"] - c["start"]) * fps)
+        tl.append({**c, "start": f0 / fps, "end": (f0 + n) / fps,
+                   "first": f0, "frames": n,
+                   "cut_before": False, "cut_after": False})
+        f0 += n
+    k = len(tl)
+    parts = (["[0:v]null[vs0]"] if k == 1 else
+             ["[0:v]split=" + str(k) + "".join(f"[vs{i}]" for i in range(k))])
+    for i, c in enumerate(tl):
+        v = [(f"[vs{i}]trim=start_frame={c['first']}:"
+              f"end_frame={c['first'] + c['frames']}"),
+             "setpts=PTS-STARTPTS"]
+        if abs(c["speed"] - 1.0) > 1e-3:
+            v.append(f"setpts=PTS/{c['speed']:.6f}")
+        m = captions_v2.clip_frames(c, fps)
+        # exactly clip_frames(): onto the grid, one cloned frame of
+        # headroom, then cut
+        v.append(f"fps={rate.numerator}/{rate.denominator},"
+                 f"tpad=stop_mode=clone:stop=1,trim=end_frame={m}")
+        d = m / fps
+        if c["fadeIn"] > 0:
+            v.append(f"fade=t=in:st=0:d={captions_v2._f(min(c['fadeIn'], d / 2))}")
+        if c["fadeOut"] > 0:
+            fo = min(c["fadeOut"], d / 2)
+            v.append(f"fade=t=out:st={captions_v2._f(max(0.0, d - fo))}"
+                     f":d={captions_v2._f(fo)}")
+        parts.append(",".join(v) + f"[v{i}]")
+    parts.append("".join(f"[v{i}]" for i in range(k))
+                 + f"concat=n={k}:v=1:a=0,format=yuv420p[outv]")
+    audio = _has_audio(input_path)
+    if audio:
+        parts += captions_v2.audio_graph(tl, fps, source=0)
+    graph_args, script_path = filter_complex_args(";".join(parts))
     cmd = [
         get_ffmpeg_path(), "-y",
         *_threads(),
         "-i", input_path,
         *graph_args,
-        "-map", "[outv]", "-map", "[outa]",
+        "-map", "[outv]",
+        *(["-map", "[aout]", "-c:a", "aac", "-b:a", "320k"] if audio else []),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         *_threads(),
         "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "320k",
+        "-r", f"{rate.numerator}/{rate.denominator}",
         "-movflags", "+faststart",
         output_path,
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=1800, check=False)
     finally:
         if script_path:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(script_path)
-            except OSError:
-                pass
     if result.returncode != 0:
         raise RuntimeError(
             f"ffmpeg segment-effects failed: {result.stderr[-800:]}"
@@ -3513,16 +3437,11 @@ def render_only(
         clip_paths = [p for (p, _dur) in clip_outputs]
 
         _stage(errors.stage_message("render.encode", "Stitching clips…"), 80)
-        # Pass source audio + original segment times so concat rebuilds
-        # the audio track directly from normalized.mp4 (bit-perfect
-        # source copy) instead of stream-copying MoviePy's numpy-
-        # processed audio out of each burned segment.
+        # The clips are video only: the audio is cut from normalized.mp4
+        # at the same frame times (the burn's own frame plan).
         try:
-            _ffmpeg_concat(
-                clip_paths, primary_path,
-                source_audio_path=normalized_path,
-                audio_segments=segments,
-            )
+            _concat_frame_exact(clip_paths, primary_path, normalized_path,
+                                segments)
         finally:
             # Per-clip burns are only concat input — don't keep them.
             shutil.rmtree(burn_dir, ignore_errors=True)
@@ -3688,7 +3607,6 @@ def render_to_dir(
     hooks: list[dict],
     *,
     parallelism: int | None = None,
-    source_audio: bool = False,
     progress_cb: Callable[[str, float], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
     timings: dict[str, float] | None = None,
@@ -3734,16 +3652,15 @@ def render_to_dir(
     else:
         _render_v1_primary(mezz_path, primary, segments, effects, subtitles,
                            caption_preset, cut_style, language, parallelism,
-                           source_audio, stage, cancel_check, lap)
+                           stage, cancel_check, lap)
     return _finish_render(out, primary, output_formats, hooks, stage, lap)
 
 
 def _render_v1_primary(mezz_path, primary: Path, segments, effects,
                        subtitles, caption_preset, cut_style, language,
-                       parallelism, source_audio, stage, cancel_check,
-                       lap) -> None:
-    """render_to_dir's v1 primary: MoviePy burn per clip → concat →
-    effects pass."""
+                       parallelism, stage, cancel_check, lap) -> None:
+    """render_to_dir's v1 primary: MoviePy burn per clip (video only,
+    frame-exact) → concat with the mezz's audio → effects pass."""
     out = primary.parent
     burn_dir = out / "burn"
     burn_dir.mkdir(exist_ok=True)
@@ -3761,12 +3678,8 @@ def _render_v1_primary(mezz_path, primary: Path, segments, effects,
     lap("burn")
     stage(errors.stage_message("render.encode", "Stitching clips…"), 70)
     try:
-        if source_audio:
-            _ffmpeg_concat([p for p, _d in clips], str(primary),
-                           source_audio_path=str(mezz_path),
-                           audio_segments=segments)
-        else:
-            _ffmpeg_concat([p for p, _d in clips], str(primary))
+        _concat_frame_exact([p for p, _d in clips], str(primary),
+                            str(mezz_path), segments)
     finally:
         shutil.rmtree(burn_dir, ignore_errors=True)
     lap("concat")

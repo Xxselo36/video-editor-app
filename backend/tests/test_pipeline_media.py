@@ -491,10 +491,12 @@ def test_preview_sound_of_a_source_without_audio_is_silence(tmp_path):
 
 
 def test_source_audio_cuts_ignore_sparse_keyframes(tmp_path):
-    """The local render rebuilds the audio from the source by stream-
-    copying each kept range. A source with keyframes only every 10 s (the
-    SmartCam mux) used to give each range all the audio from the keyframe
-    before it: 28 s of audio under 18 s of video."""
+    """The v1 render cuts its audio from the source at the clips' frame
+    times (_concat_frame_exact). A source with keyframes only every 10 s
+    (the SmartCam mux) once gave each range all the audio from the
+    keyframe before it (28 s of audio under 18 s of video); now the audio
+    is exactly as long as the clips' frames."""
+    from plugins.premiere.video_editor_premiere import _frame_plan
     src = tmp_path / "smartcam.mp4"
     _ffmpeg("-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=20",
             "-f", "lavfi", "-i", "sine=frequency=440:duration=20",
@@ -502,19 +504,22 @@ def test_source_audio_cuts_ignore_sparse_keyframes(tmp_path):
             "-sc_threshold", "0", "-force_key_frames", "0,10",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(src))
     segs = [(0.15, 4.6), (5.15, 9.6), (10.15, 14.6), (15.15, 19.6)]
+    plan = _frame_plan(segs, 30)
     clips = []
-    for i, (s, e) in enumerate(segs):
+    for i, (a, n) in enumerate(plan):       # what the burn writes
         clip = tmp_path / f"clip{i}.mp4"
-        _ffmpeg("-ss", f"{s}", "-to", f"{e}", "-i", str(src), "-an",
-                "-c:v", "libx264", "-preset", "ultrafast", str(clip))
+        _ffmpeg("-ss", f"{(a - 0.1) / 30:.6f}", "-i", str(src), "-an",
+                "-frames:v", str(n), "-c:v", "libx264", "-preset", "ultrafast",
+                str(clip))
         clips.append(str(clip))
     out = tmp_path / "out.mp4"
-    pipeline._ffmpeg_concat(clips, str(out), source_audio_path=str(src),
-                            audio_segments=segs)
+    pipeline._concat_frame_exact(clips, str(out), str(src), segs)
     st = _streams(out)
     video, audio = float(st["video"]["duration"]), float(st["audio"]["duration"])
-    assert audio == pytest.approx(17.8, abs=0.1)     # AAC-frame rounding
-    assert abs(audio - video) < 0.25, (audio, video)
+    frames = sum(n for _a, n in plan)
+    assert frames == 536
+    assert video == pytest.approx(frames / 30, abs=1e-3)
+    assert audio == pytest.approx(video, abs=1e-3)
 
 
 # ── proxy ────────────────────────────────────────────────────────────
@@ -757,6 +762,9 @@ def test_ffmpeg_thread_cap(tmp_path, monkeypatch, env, expect):
     monkeypatch.setattr(pipeline, "_probe_hdr", lambda p: False)
     monkeypatch.setattr(pipeline, "_default_streams", lambda p: (0, 1))
     monkeypatch.setattr(pipeline, "_video_size", lambda p: (1, 1))
+    monkeypatch.setattr(pipeline, "_has_audio", lambda p: True)
+    import plugins.premiere.video_editor_premiere as vep
+    monkeypatch.setattr(vep, "_burn_frame_rate", lambda p: 30)
     f = str(tmp_path / "x.mp4")
     pipeline._normalize_orientation(f, f, proxy_path=str(tmp_path / "p.mp4"))
     pipeline._make_proxy(f, str(tmp_path / "p.mp4"))
@@ -766,7 +774,7 @@ def test_ffmpeg_thread_cap(tmp_path, monkeypatch, env, expect):
     pipeline._extract_hook_clip(f, f, 0, 5)
     pipeline._apply_segment_effects(f, f, [(0, 1)], [{"speed": 2.0}])
     pipeline._generate_thumbnail_simple(f, f)
-    pipeline._ffmpeg_concat([f], f)
+    pipeline._concat_frame_exact([f], f, f, [(0, 1)])
     enc = _encodes(cmds)
     assert len(enc) >= 10
     for c in enc:

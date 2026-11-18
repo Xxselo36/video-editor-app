@@ -637,6 +637,66 @@ def _any_of(terms: list[str]) -> str:
     return f"({_any_of(terms[:mid])}+{_any_of(terms[mid:])})"
 
 
+def audio_graph(clips: list[dict], fps: float, *, source: int = 0,
+                per_clip_inputs: bool = False,
+                loudness: dict[str, Any] | None = None) -> list[str]:
+    """The filter graph parts that make [aout] out of the clips' audio:
+    every clip cut at its (frame-grid) times, sped up, exactly as long
+    as its video frames (clip_frames / fps, padded with silence past the
+    end of the source), its own fades or a 15 ms fade on each side of a
+    cut (review C9), then concatenated (+ the linear loudnorm). The
+    audio is input `source`'s, split per clip; with `per_clip_inputs`,
+    inputs 0..n-1's (one per clip, already cut there with -ss/-t). Also
+    the v1 render's audio (pipeline._concat_frame_exact), so a cut list
+    sounds the same in both engines."""
+    n = len(clips)
+    parts: list[str] = []
+    if not per_clip_inputs:
+        if n == 1:
+            parts.append(f"[{source}:a]anull[as0]")
+        else:
+            parts.append(f"[{source}:a]asplit=" + str(n) + "".join(f"[as{i}]" for i in range(n)))
+    for i, c in enumerate(clips):
+        if per_clip_inputs:
+            a = [f"[{i}:a]asetpts=PTS-STARTPTS",
+                 f"atrim=duration={_f(c['end'] - c['start'])}"]
+        else:
+            a = [f"[as{i}]atrim=start={_f(c['start'])}:end={_f(c['end'])}",
+                 "asetpts=PTS-STARTPTS"]
+        a += _atempo(c["speed"])
+        # the clip's audio is exactly as long as its video frames
+        d = clip_frames(c, fps) / fps
+        a.append(f"apad=whole_dur={_f(d)},atrim=duration={_f(d)}")
+        if abs(c["volume"] - 1.0) > 1e-3:
+            a.append(f"volume={c['volume']:.4f}")
+        fi = min(c["fadeIn"], d / 2) if c["fadeIn"] > 0 else 0.0
+        fo = min(c["fadeOut"], d / 2) if c["fadeOut"] > 0 else 0.0
+        if fi > 0:
+            a.append(f"afade=t=in:st=0:d={_f(fi)}")
+        elif c["cut_before"] and d > 4 * CUT_FADE_S:
+            a.append(f"afade=t=in:st=0:d={_f(CUT_FADE_S)}")
+        if fo > 0:
+            a.append(f"afade=t=out:st={_f(max(0.0, d - fo))}:d={_f(fo)}")
+        elif c["cut_after"] and d > 4 * CUT_FADE_S:
+            a.append(f"afade=t=out:st={_f(d - CUT_FADE_S)}:d={_f(CUT_FADE_S)}")
+        parts.append(",".join(a) + f"[a{i}]")
+    tail = ["".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1"]
+    if loudness:
+        try:
+            tail.append(
+                "loudnorm=I=-14:TP=-1:LRA=11:linear=true"
+                f":measured_I={float(loudness['I']):.2f}"
+                f":measured_TP={float(loudness['TP']):.2f}"
+                f":measured_LRA={float(loudness['LRA']):.2f}"
+                f":measured_thresh={float(loudness['thresh']):.2f}"
+                f":offset={float(loudness['offset']):.2f}")
+            tail.append("aresample=48000")
+        except (KeyError, TypeError, ValueError):
+            pass
+    parts.append(",".join(tail) + "[aout]")
+    return parts
+
+
 def build_graph(clips: list[dict], src: dict[str, Any], *,
                 layer: dict[str, Any] | None,
                 loudness: dict[str, Any] | None = None,
@@ -662,11 +722,6 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
             for c in clips])
         parts.append(f"[0:v]select='{terms}',"
                      f"setpts=N*{rate.denominator}/{rate.numerator}/TB[vcat]")
-        if audio:
-            if n == 1:
-                parts.append("[0:a]anull[as0]")
-            else:
-                parts.append("[0:a]asplit=" + str(n) + "".join(f"[as{i}]" for i in range(n)))
     else:
         for i, c in enumerate(clips):
             inputs.append(["-ss", _f(c["start"]), "-t", _f(c["end"] - c["start"])])
@@ -686,44 +741,7 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
         parts.append("".join(f"[v{i}]" for i in range(n))
                      + f"concat=n={n}:v=1:a=0[vcat]")
     if audio:
-        for i, c in enumerate(clips):
-            if seg:
-                a = [f"[{i}:a]asetpts=PTS-STARTPTS",
-                     f"atrim=duration={_f(c['end'] - c['start'])}"]
-            else:
-                a = [f"[as{i}]atrim=start={_f(c['start'])}:end={_f(c['end'])}",
-                     "asetpts=PTS-STARTPTS"]
-            a += _atempo(c["speed"])
-            # the clip's audio is exactly as long as its video frames
-            d = clip_frames(c, fps) / fps
-            a.append(f"apad=whole_dur={_f(d)},atrim=duration={_f(d)}")
-            if abs(c["volume"] - 1.0) > 1e-3:
-                a.append(f"volume={c['volume']:.4f}")
-            fi = min(c["fadeIn"], d / 2) if c["fadeIn"] > 0 else 0.0
-            fo = min(c["fadeOut"], d / 2) if c["fadeOut"] > 0 else 0.0
-            if fi > 0:
-                a.append(f"afade=t=in:st=0:d={_f(fi)}")
-            elif c["cut_before"] and d > 4 * CUT_FADE_S:
-                a.append(f"afade=t=in:st=0:d={_f(CUT_FADE_S)}")
-            if fo > 0:
-                a.append(f"afade=t=out:st={_f(max(0.0, d - fo))}:d={_f(fo)}")
-            elif c["cut_after"] and d > 4 * CUT_FADE_S:
-                a.append(f"afade=t=out:st={_f(d - CUT_FADE_S)}:d={_f(CUT_FADE_S)}")
-            parts.append(",".join(a) + f"[a{i}]")
-        tail = ["".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1"]
-        if loudness:
-            try:
-                tail.append(
-                    "loudnorm=I=-14:TP=-1:LRA=11:linear=true"
-                    f":measured_I={float(loudness['I']):.2f}"
-                    f":measured_TP={float(loudness['TP']):.2f}"
-                    f":measured_LRA={float(loudness['LRA']):.2f}"
-                    f":measured_thresh={float(loudness['thresh']):.2f}"
-                    f":offset={float(loudness['offset']):.2f}")
-                tail.append("aresample=48000")
-            except (KeyError, TypeError, ValueError):
-                pass
-        parts.append(",".join(tail) + "[aout]")
+        parts += audio_graph(clips, fps, per_clip_inputs=seg, loudness=loudness)
     if layer:
         k = len(inputs)
         parts.append(f"[vcat][{k}:v]overlay=0:{int(layer['top'])}:"

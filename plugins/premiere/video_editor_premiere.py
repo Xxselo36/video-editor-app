@@ -1632,6 +1632,7 @@ def _render_segment_with_standalone_captions(
     input_video, output_path, subtitles, cut_style, caption_preset,
     preloaded_clip=None, return_clips_only=False, time_offset=0.0,
     sub_pos=None, sub_size=None, language=None, bounce_anchor="frame",
+    frame_exact=False,
 ):
     """Render a single cut segment with subtitles burned in using the
     SAME MoviePy/PIL renderer the standalone GUI uses. This gives the
@@ -1644,6 +1645,9 @@ def _render_segment_with_standalone_captions(
     `bounce_anchor`: what the highlight styles' bounce-in scales around —
     "frame" (the plugin's look) or "caption" (web; see
     src.effects.create_highlight_phrase_subtitle).
+    `frame_exact` (web, _multi_clip_burn): video only, one frame per
+    frame of the clip at its exact rate — never longer, also when a
+    caption outlasts the clip.
     Returns True on success.
     """
     try:
@@ -1692,6 +1696,9 @@ def _render_segment_with_standalone_captions(
         _out_dir = os.path.dirname(os.path.abspath(output_path)) or "."
         _out_stem = os.path.splitext(os.path.basename(output_path))[0]
         _tmp_audio = os.path.join(_out_dir, f"_tmp_aud_{_out_stem}.m4a")
+        # frame_exact: the clip's own rate (not a caption clip's), no audio.
+        _exact = ({"fps": getattr(clip, "fps", None), "audio": False}
+                  if frame_exact else {})
 
         if not enable_subs or not subtitles:
             if return_clips_only:
@@ -1705,7 +1712,7 @@ def _render_segment_with_standalone_captions(
                 preset=os.environ.get("CLEO_BURN_PRESET", "medium"),
                 temp_audiofile=_tmp_audio, remove_temp=True,
                 ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "17", "-bf", "0", "-avoid_negative_ts", "make_zero"],
-                threads=4, logger=None,
+                threads=4, logger=None, **_exact,
             )
             if _close_base_clip:
                 clip.close()
@@ -1734,7 +1741,7 @@ def _render_segment_with_standalone_captions(
                 preset=os.environ.get("CLEO_BURN_PRESET", "medium"),
                 temp_audiofile=_tmp_audio, remove_temp=True,
                 ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "17", "-bf", "0", "-avoid_negative_ts", "make_zero"],
-                threads=4, logger=None,
+                threads=4, logger=None, **_exact,
             )
             if _close_base_clip:
                 clip.close()
@@ -1966,6 +1973,10 @@ def _render_segment_with_standalone_captions(
 
         if all_clips:
             final = CompositeVideoClip([clip] + all_clips)
+            # A composite lasts until its last caption ends; frame_exact
+            # keeps the clip's own length (no frames of captions on black).
+            if frame_exact and final.duration > clip.duration:
+                final = final.set_duration(clip.duration)
         else:
             final = clip
 
@@ -1976,7 +1987,7 @@ def _render_segment_with_standalone_captions(
             preset=os.environ.get("CLEO_BURN_PRESET", "medium"),
             temp_audiofile=_tmp_audio, remove_temp=True,
             ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "17", "-bf", "0", "-avoid_negative_ts", "make_zero"],
-            threads=4, logger=None,
+            threads=4, logger=None, **_exact,
         )
         try:
             if _close_base_clip:
@@ -2077,12 +2088,107 @@ def _home_segments(subtitles, segments):
     return homes
 
 
+def _burn_frame_rate(input_video):
+    """The frame grid the burn reads `input_video` on, as a Fraction:
+    the rate ffmpeg hands MoviePy's reader its frames at (its image2pipe
+    output is constant-rate at ffmpeg's guess, av_guess_frame_rate — the
+    stream's r_frame_rate, or the average rate when r_frame_rate is a
+    timebase artefact). None when ffprobe can't tell."""
+    from fractions import Fraction
+    try:
+        from src.ffmpeg_utils import get_ffprobe_path
+        ffprobe = get_ffprobe_path()
+    except ImportError:
+        ffprobe = "ffprobe"
+    try:
+        r = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=r_frame_rate,avg_frame_rate",
+             "-of", "json", str(input_video)],
+            capture_output=True, text=True, timeout=30, check=False)
+        st = (json.loads(r.stdout or "{}").get("streams") or [{}])[0]
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+    def _frac(x):
+        try:
+            f = Fraction(str(x))
+        except (ValueError, ZeroDivisionError):
+            return None
+        return f if f > 0 else None
+
+    real = _frac(st.get("r_frame_rate"))
+    avg = _frac(st.get("avg_frame_rate"))
+    if real and avg and avg < 70 and real > 210:
+        return avg
+    return real or avg
+
+
+def _frame_plan(segments, rate, merge=True):
+    """[(first frame, frame count)] of the clips a frame-exact render
+    makes of `segments` on the frame grid `rate`: both edges of every
+    segment on the nearest frame boundary (backend/captions_v2.py
+    clip_plan's rule, so the v1 and v2 renders cut the same frames),
+    segments that leave no frame dropped, and (`merge`) clips that
+    continue each other on the grid (a split) joined into one."""
+    fps = float(rate)
+    out = []
+    for s, e in segments:
+        a = round(float(s) * fps)
+        b = round(float(e) * fps)
+        if b - a < 1:
+            continue
+        if merge and out and out[-1][0] + out[-1][1] == a:
+            out[-1] = (out[-1][0], out[-1][1] + b - a)
+        else:
+            out.append((a, b - a))
+    return out
+
+
+def _seek_reader_to_frame(clip, first, fps):
+    """Put the MoviePy reader of `clip` (a VideoFileClip) on frame
+    `first` of the grid `fps`, so that get_frame(first / fps + k / fps)
+    is frame first + k. MoviePy's own choice disagrees with itself off
+    the grid: int(fps·t + 1e-5) while it reads on, ffmpeg's "first frame
+    at or after t" when it seeks (backend/tests/captions/
+    test_frame_edges.py). Here ffmpeg seeks a tenth of a frame before
+    the frame: its first frame is `first` whatever the µs rounding of
+    the seek time, and the frames keep their places on the reader's
+    constant-rate grid (half a frame off, ffmpeg repeats the first one).
+    The reader's own fps is set to the grid's exact rate (it parses
+    59.94 for 60000/1001)."""
+    clip.fps = fps
+    reader = clip.reader
+    reader.fps = fps
+    reader.initialize(max(0.0, (first - 0.1) / fps) if first > 0 else 0)
+    reader.pos = first + 1
+    reader.lastread = reader.read_frame()
+
+
+def _count_frames(path):
+    """Video frames in `path` (packets; the burn writes no B-frames)."""
+    try:
+        from src.ffmpeg_utils import get_ffprobe_path
+        ffprobe = get_ffprobe_path()
+    except ImportError:
+        ffprobe = "ffprobe"
+    try:
+        r = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-count_packets", "-show_entries", "stream=nb_read_packets",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=60, check=False)
+        return int(r.stdout.strip().split(",")[0])
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
 def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                      output_dir, cut_style="balanced", cancel_check=None,
                      sub_pos=None, sub_size=None, clip_name_prefix=None,
                      language=None, progress_cb=None, parallelism=3,
                      merge_gap=0.3, assign_by_midpoint=False,
-                     bounce_anchor="frame"):
+                     bounce_anchor="frame", frame_exact=False):
     """Per-Segment MoviePy render mit fresh VideoFileClip pro Segment.
 
     Returns list of (file_path, duration) tuples in timeline order.
@@ -2101,6 +2207,14 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
       crossing a cut is burned twice.
     - bounce_anchor: "caption" scales the highlight styles' bounce-in
       around the caption instead of the frame centre.
+    - frame_exact: the clips of _frame_plan(segments, the source's frame
+      rate) instead of merge_gap's: every clip is exactly its frames of
+      the source, from its first one, video only (the caller builds the
+      audio from the source: backend/pipeline.py _concat_frame_exact).
+      By default each clip is rendered 50 ms long and cut to its own
+      stream-copied source audio (-shortest): its first frame is the one
+      MoviePy picks (see _seek_reader_to_frame), and it ends a frame or
+      two early.
     """
     if not segments:
         return []
@@ -2115,9 +2229,22 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
     import threading
 
     original_count = len(segments)
-    # merge_gap=0: the caller already merged (web backend, which must
-    # keep clip boundaries in sync with audio + per-segment effects).
-    segments = _merge_tiny_segments(segments, min_gap=merge_gap)
+    exact_fps = None
+    frame_counts = None
+    if frame_exact:
+        rate = _burn_frame_rate(input_video)
+        if rate is None:
+            print("[multi-clip] no frame rate: can't burn frame-exact",
+                  flush=True)
+            return []
+        exact_fps = float(rate)
+        plan = _frame_plan(segments, rate)
+        segments = [(a / exact_fps, (a + n) / exact_fps) for a, n in plan]
+        frame_counts = [n for _a, n in plan]
+    else:
+        # merge_gap=0: the caller already merged (web backend, which must
+        # keep clip boundaries in sync with audio + per-segment effects).
+        segments = _merge_tiny_segments(segments, min_gap=merge_gap)
     n_segments = len(segments)
     if n_segments < original_count:
         print(f"[multi-clip] merged {original_count} → {n_segments} "
@@ -2162,6 +2289,20 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
     progress_lock = threading.Lock()
     completed_count = [0]
 
+    def _report_progress():
+        # From the worker, so the UI bar moves as each segment finishes
+        # (not in submission order).
+        if progress_cb:
+            with progress_lock:
+                completed_count[0] += 1
+                pct = (completed_count[0] / n_segments) * 70
+                try:
+                    progress_cb(
+                        f"Clip {completed_count[0]}/{n_segments}…", pct,
+                    )
+                except Exception:
+                    pass
+
     def _burn_one(i, s_start, s_end):
         """Run in a worker thread. Returns (i, out_path, duration) or None."""
         if cancel_check and cancel_check():
@@ -2171,17 +2312,31 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
             return None
         clip_subs = _subs_for(s_start, s_end, seg_dur, seg_index=i,
                               assign_by_midpoint=assign_by_midpoint)
-        # Render video 50ms LONGER than the requested segment so the
-        # post-mux -shortest step truncates video (not audio) to match
-        # the AAC-snapped audio duration exactly. Without this padding
-        # each segment lost up to 33ms video and total render length
-        # drifted shorter than intended — noticeable on 10min+ output.
-        # Clamped to source duration for the last segment.
+        full_clip = None
         try:
-            full_clip = VideoFileClip(input_video)
-            _src_dur = float(getattr(full_clip, "duration", 0.0) or 0.0)
-            _s_end_padded = min(s_end + 0.05, _src_dur) if _src_dur else s_end
-            sub_clip = full_clip.subclip(s_start, _s_end_padded)
+            if frame_exact:
+                # Exactly the clip's frames: MoviePy writes one frame per
+                # t in arange(0, duration, 1/fps) — n of them for a
+                # duration half a frame short of n frames, whatever the
+                # float noise. No audio: the caller cuts it from the
+                # source at the same frame times.
+                full_clip = VideoFileClip(input_video, audio=False)
+                _seek_reader_to_frame(full_clip, round(s_start * exact_fps),
+                                      exact_fps)
+                sub_clip = full_clip.subclip(
+                    s_start, s_start + (frame_counts[i] - 0.5) / exact_fps)
+            else:
+                # Render video 50ms LONGER than the requested segment so
+                # the post-mux -shortest step truncates video (not audio)
+                # to match the AAC-snapped audio duration exactly. Without
+                # this padding each segment lost up to 33ms video and
+                # total render length drifted shorter than intended —
+                # noticeable on 10min+ output. Clamped to source duration
+                # for the last segment.
+                full_clip = VideoFileClip(input_video)
+                _src_dur = float(getattr(full_clip, "duration", 0.0) or 0.0)
+                _s_end_padded = min(s_end + 0.05, _src_dur) if _src_dur else s_end
+                sub_clip = full_clip.subclip(s_start, _s_end_padded)
         except Exception as e:
             print(f"[multi-clip] seg {i} open/subclip failed: {e}",
                   flush=True)
@@ -2195,6 +2350,7 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                 caption_preset, preloaded_clip=sub_clip,
                 sub_pos=sub_pos, sub_size=sub_size,
                 language=language, bounce_anchor=bounce_anchor,
+                frame_exact=frame_exact,
             )
         finally:
             try: full_clip.close()
@@ -2202,6 +2358,14 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
         if not ok or not os.path.isfile(out_path):
             print(f"[multi-clip] seg {i} render failed", flush=True)
             return None
+        if frame_exact:
+            got = _count_frames(out_path)
+            if got != frame_counts[i]:
+                print(f"[multi-clip] seg {i}: {got} frames written, "
+                      f"{frame_counts[i]} planned", flush=True)
+                return None
+            _report_progress()
+            return (i, out_path, frame_counts[i] / exact_fps)
 
         # POST-MUX: replace MoviePy's numpy'd audio with source AAC.
         # Reproduced locally why previous attempts failed: -ss BEFORE -i
@@ -2276,18 +2440,7 @@ def _multi_clip_burn(input_video, segments, subtitles, caption_preset,
                 pass
 
         actual_dur = _probe_video(out_path).get("duration", seg_dur)
-        # Report progress from the worker so the UI bar moves as each
-        # segment finishes (not in submission order).
-        if progress_cb:
-            with progress_lock:
-                completed_count[0] += 1
-                pct = (completed_count[0] / n_segments) * 70
-                try:
-                    progress_cb(
-                        f"Clip {completed_count[0]}/{n_segments}…", pct,
-                    )
-                except Exception:
-                    pass
+        _report_progress()
         return (i, out_path, actual_dur)
 
     results: list[tuple[int, str, float] | None] = [None] * n_segments

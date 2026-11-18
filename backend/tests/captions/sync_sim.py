@@ -22,6 +22,7 @@ import json
 import re
 import sys
 import threading
+from fractions import Fraction
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -122,6 +123,25 @@ def expected_units_payload(units: list[dict]) -> list[dict]:
 
 # ── the render side ────────────────────────────────────────────────────
 
+# The frame rate the frame-exact (web) burn is simulated at: the audit
+# clip's renders (test_render_smoke, the v2 tests) are 25 fps.
+SIM_FPS = 25
+
+
+def kept_segments(segments: list, merge_gap: float = 0.0,
+                  frame_exact: bool = False, fps: float = SIM_FPS,
+                  **_burn_kwargs) -> list[tuple[float, float]]:
+    """The clips _multi_clip_burn makes of `segments` (source times), in
+    output order: with frame_exact (the web's) every edge on the nearest
+    frame of `fps`, splits joined (_frame_plan); else merge_gap's merge."""
+    from plugins.premiere import video_editor_premiere as vep
+    segs = [tuple(s) for s in segments]
+    if frame_exact:
+        f = float(fps)
+        return [(a / f, (a + n) / f) for a, n in vep._frame_plan(segs, Fraction(fps))]
+    return vep._merge_tiny_segments(segs, min_gap=merge_gap)
+
+
 def spoken_words(words: list[dict], segments: list) -> list[dict]:
     """Ground truth in OUTPUT time: the non-filler words inside a kept
     segment, segments concatenated."""
@@ -197,9 +217,11 @@ def record_render(monkeypatch, subtitles: list[dict], segments: list,
                         fake_highlight)
     monkeypatch.setattr(vep, "_render_segment_with_standalone_captions",
                         render_segment)
+    # frame_exact: the source is SIM_FPS; nothing to seek in a fake.
+    monkeypatch.setattr(vep, "_burn_frame_rate", lambda path: Fraction(SIM_FPS))
+    monkeypatch.setattr(vep, "_seek_reader_to_frame", lambda clip, first, fps: None)
     merge_gap = burn_kwargs.pop("merge_gap", 0.0)
-    kept = vep._merge_tiny_segments([tuple(s) for s in segments],
-                                    min_gap=merge_gap)
+    kept = kept_segments(segments, merge_gap, **burn_kwargs)
     vep._multi_clip_burn("/nonexistent.mp4", [tuple(s) for s in segments],
                          subtitles, preset, "/nonexistent-dir",
                          merge_gap=merge_gap, parallelism=1, **burn_kwargs)

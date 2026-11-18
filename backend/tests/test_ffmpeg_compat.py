@@ -3,11 +3,14 @@ and 0.8 (9.0), with the renderer's real ffmpeg (src.ffmpeg_utils):
 
 - A filter graph too long for one argv string goes to ffmpeg in a file:
   -/filter_complex FILE from ffmpeg 7 on — ffmpeg 9 no longer has
-  -filter_complex_script (a v2 render of a long timeline failed
-  outright), ffmpeg 6 doesn't have -/filter_complex yet.
+  -filter_complex_script (the effects pass and a v2 render of a long
+  timeline failed outright), ffmpeg 6 doesn't have -/filter_complex yet.
 - ffmpeg 9's expression parser refuses a flat sum of more than ~300
   terms: the v2 render's select of the kept frames (one term per clip)
   is a balanced tree.
+(The thumbnail's colours: test_thumbnail.py; frame-exact renders:
+captions/test_av_exact.py; the mezz's frame rate mode: test_cfr_mezz.py;
+SmartCam's -fps_mode: test_pipeline_media.py.)
 """
 from __future__ import annotations
 
@@ -62,11 +65,17 @@ def test_a_long_graph_goes_in_a_file(monkeypatch, tmp_path, major, option):
 
 
 def test_long_graphs_render(monkeypatch, tmp_path):
-    """The v2 render reads its graph from a file (limit lowered here) —
-    and the file is gone afterwards."""
+    """The effects pass and the v2 render read their graph from a file
+    (limit lowered here) — and the file is gone afterwards."""
     monkeypatch.setattr(fu, "FILTER_GRAPH_ARG_MAX", 10)
     src = _clip(tmp_path / "in.mp4")
-    spec ={"v": 1, "engine": "v2", "style": {"presetId": "none", "overrides": {}},
+    out = tmp_path / "fx.mp4"
+    pipeline._apply_segment_effects(str(src), str(out), [(0.0, 1.0), (1.0, 2.0)],
+                                    [{"speed": 2.0}, {}])
+    frames, v, a = _frames_and_durations(out)
+    assert frames == 15 + 30 and v == pytest.approx(1.5, abs=1e-3)
+    assert a == pytest.approx(v, abs=1e-3)
+    spec = {"v": 1, "engine": "v2", "style": {"presetId": "none", "overrides": {}},
             "language": "en", "words": [], "fonts": []}
     out2 = tmp_path / "v2.mp4"
     work = tmp_path / "w"
