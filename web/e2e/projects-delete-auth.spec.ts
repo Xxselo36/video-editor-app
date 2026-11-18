@@ -10,7 +10,7 @@
  * and shows the empty list — instead of going on to New video as for a
  * visit that starts with nothing.
  */
-import type { Page, TestInfo } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { expect, signedIn, test, type TestUser } from "./support/fixtures";
 import { JOBS, job } from "./support/app";
 import { API, WEB } from "./support/env";
@@ -34,13 +34,6 @@ async function setHidden(page: Page, hidden: boolean): Promise<void> {
   }, hidden);
 }
 
-/** An account of this test alone — per attempt too: the stub's database
- *  lasts the whole run, so a retry (or a repeat) must not find the
- *  projects of the attempt before. */
-function account(info: TestInfo, name: string): string {
-  return `e2e_${info.project.name}_${name}_r${info.retry}_x${info.repeatEachIndex}`;
-}
-
 /** Another device of the same account deletes the job. */
 async function deleteElsewhere(user: TestUser, id: string): Promise<void> {
   const r = await fetch(`${API}/jobs/${id}`, { method: "DELETE", headers: { "X-Test-User": user.header } });
@@ -48,8 +41,8 @@ async function deleteElsewhere(user: TestUser, id: string): Promise<void> {
 }
 
 test.describe("deleting while Cleo works on it, accounts on", { tag: "@auth" }, () => {
-  test("deleted on another device: the row goes here too", async ({ page, stub }, info) => {
-    const user = await signedIn(page, { plan: "pro", id: account(info, "delete_elsewhere") });
+  test("deleted on another device: the row goes here too", async ({ page, stub }) => {
+    const user = await signedIn(page, { plan: "pro", id: "delete_elsewhere" });
     await page.evaluate(() => localStorage.setItem("cleocuts.editor.version.v1", "v2"));
     const gone = await stub.seed("analyzing", { owner: user.id, filename: "anderswo.mp4" });
     await stub.seed("review", { owner: user.id, filename: "bleibt.mp4" });
@@ -68,8 +61,8 @@ test.describe("deleting while Cleo works on it, accounts on", { tag: "@auth" }, 
     await expect(rows.filter({ hasText: "bleibt" })).toBeVisible();
   });
 
-  test("deleted on another device: gone from the device that uploaded it too, not expired", async ({ page, stub }, info) => {
-    const user = await signedIn(page, { plan: "pro", id: account(info, "delete_uploader") });
+  test("deleted on another device: gone from the device that uploaded it too, not expired", async ({ page, stub }) => {
+    const user = await signedIn(page, { plan: "pro", id: "delete_uploader" });
     await page.evaluate(() => localStorage.setItem("cleocuts.editor.version.v1", "v2"));
     const gone = await stub.seed("analyzing", { owner: user.id, filename: "hochgeladen.mp4" });
     await stub.seed("review", { owner: user.id, filename: "bleibt.mp4" });
@@ -89,8 +82,8 @@ test.describe("deleting while Cleo works on it, accounts on", { tag: "@auth" }, 
     await expect(page.getByTestId("projects-expired")).toHaveCount(0);
   });
 
-  test("deleted on another device while this tab was hidden: gone when it comes back, not expired", async ({ page, stub }, info) => {
-    const user = await signedIn(page, { plan: "pro", id: account(info, "delete_hidden") });
+  test("deleted on another device while this tab was hidden: gone when it comes back, not expired", async ({ page, stub }) => {
+    const user = await signedIn(page, { plan: "pro", id: "delete_hidden" });
     await page.evaluate(() => localStorage.setItem("cleocuts.editor.version.v1", "v2"));
     const gone = await stub.seed("analyzing", { owner: user.id, filename: "versteckt.mp4" });
     await stub.seed("review", { owner: user.id, filename: "bleibt.mp4" });
@@ -108,8 +101,8 @@ test.describe("deleting while Cleo works on it, accounts on", { tag: "@auth" }, 
     await expect(page.getByTestId("projects-expired")).toHaveCount(0);
   });
 
-  test("the last one deleted on the visit's first screen: the page stays and says so", async ({ page, stub }, info) => {
-    const user = await signedIn(page, { plan: "pro", id: account(info, "delete_last") });
+  test("the last one deleted on the visit's first screen: the page stays and says so", async ({ page, stub }) => {
+    const user = await signedIn(page, { plan: "pro", id: "delete_last" });
     await page.evaluate(() => localStorage.setItem("cleocuts.editor.version.v1", "v2"));
     await stub.seed("analyzing", { owner: user.id, filename: "einzig.mp4" });
     await page.goto("/app");

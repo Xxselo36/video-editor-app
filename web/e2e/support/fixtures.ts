@@ -8,7 +8,7 @@
  * and run in parallel. See backend/tests/stub_server.py for the seeds and
  * their options.
  */
-import { test as base, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { test as base, expect, type APIRequestContext, type Page, type TestInfo } from "@playwright/test";
 import { API, WEB } from "./env";
 
 export type SeedName =
@@ -210,18 +210,37 @@ export const TEST_USER_KEY = "cleocuts.testUser.v1";
 
 export type TestUser = { id: string; plan: string | null; header: string };
 
+/** What every account of this attempt ends with (testAccount). */
+const attemptSuffix = (info: TestInfo) => `_r${info.retry}_x${info.repeatEachIndex}`;
+
+/**
+ * A test-auth account of this test alone: `name` (default: the test's
+ * own part of its id — its first 16 characters are the file's, shared by
+ * every test in it) for this project, and this attempt. The stub's
+ * database lasts the whole run, so a retry (CI: retries 1) or a
+ * --repeat-each round must not find the projects the attempt before
+ * made.
+ */
+export function testAccount(name?: string, info: TestInfo = base.info()): string {
+  const own = name ?? info.testId.replace(/[^A-Za-z0-9]/g, "").slice(-16);
+  return `e2e_${info.project.name}_${own}${attemptSuffix(info)}`;
+}
+
 /**
  * Sign `page` in with test auth (NEXT_PUBLIC_AUTH_TEST / CLEO_AUTH_TEST):
- * a test user of its own per test and project unless `id` is given;
- * `plan` overrides the user's entitlement. Returns the user and the
- * X-Test-User value the app sends.
+ * an account of its own per test, project and attempt (testAccount);
+ * `id` names one of several in a test, and gets the same suffix — the id
+ * of an account this attempt has signed in already (`user.id`: another
+ * device of it) is taken as it is. `plan` overrides the user's
+ * entitlement. Returns the user and the X-Test-User value the app sends.
  */
 export async function signedIn(
   page: Page,
   opts: { plan?: "starter" | "pro" | "studio" | "none"; id?: string } = {},
 ): Promise<TestUser> {
   const info = base.info();
-  const id = opts.id ?? `e2e_${info.project.name}_${info.testId.replace(/[^A-Za-z0-9]/g, "").slice(0, 16)}`;
+  const own = opts.id?.startsWith(`e2e_${info.project.name}_`) && opts.id.endsWith(attemptSuffix(info));
+  const id = own ? opts.id! : testAccount(opts.id, info);
   const plan = opts.plan ?? null;
   await page.goto("/imprint");
   await page.evaluate(([k, v]) => localStorage.setItem(k, v), [TEST_USER_KEY, JSON.stringify({ id, plan })]);
