@@ -486,6 +486,12 @@
     overflow-wrap: break-word;
     hyphens: auto;
     -webkit-hyphens: auto;
+    /* Safari without hyphenate-limit-chars: 5 letters on each side of
+     * a break, so a word under 10 letters never splits there either.
+     * Before the standard limit: where WebKit has it (as a shorthand of
+     * these two), 10 4 4 wins. */
+    -webkit-hyphenate-limit-before: 5;
+    -webkit-hyphenate-limit-after: 5;
     hyphenate-limit-chars: 10 4 4;
     text-wrap: balance;
     -webkit-box-orient: vertical;

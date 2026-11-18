@@ -341,7 +341,16 @@ test.describe("the Vorschau's screen", TAG, () => {
     await page.evaluate(() => document.fonts.ready);
     expect((await letterTops(title, "Tipps für bessere Präsentationen im Büro")).length).toBeGreaterThan(1);
     expect(await letterTops(title, "bessere")).toHaveLength(1);
-    expect(await title.evaluate((el) => getComputedStyle(el).hyphenateLimitChars)).toBe("10 4 4");
+    // The rule itself (Playwright's WebKit hyphenates nothing): 10 4 4,
+    // and in a Safari without hyphenate-limit-chars its own limits, 5
+    // letters on each side of a break.
+    const limits = await title.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return CSS.supports("hyphenate-limit-chars", "10 4 4")
+        ? { standard: true, value: s.getPropertyValue("hyphenate-limit-chars") }
+        : { standard: false, value: `${s.getPropertyValue("-webkit-hyphenate-limit-before")} ${s.getPropertyValue("-webkit-hyphenate-limit-after")}` };
+    });
+    expect(limits.value, limits.standard ? "hyphenate-limit-chars" : "-webkit-hyphenate-limit-before / -after").toBe(limits.standard ? "10 4 4" : "5 5");
   });
 
   test("desktop: a long word's separator never starts a line of the title", async ({ page, stub }, info) => {
