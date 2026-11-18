@@ -1088,6 +1088,10 @@ test.describe("on an iPhone", () => {
           };
         }),
     );
+    // The page's own loads done first: Playwright's Linux WebKit sometimes
+    // fails a reload that cuts off a burst of them ("WebKit encountered an
+    // internal error"), and logs each fetch it cuts off as a page error.
+    await page.waitForLoadState("networkidle");
     await page.reload();
     const card = page.getByTestId("start-resume");
     await expect(card).toContainText("IMG_0046.MOV");
@@ -1096,7 +1100,8 @@ test.describe("on an iPhone", () => {
   });
 });
 
-test("not on a desktop: video/*, and a late cancel shows no iOS hint @editor-v2", async ({ page }) => {
+test("not on a desktop: video/*, and a late cancel shows no iOS hint @editor-v2", async ({ page, userAgent }) => {
+  test.skip(/iPhone|iPad|iPod/.test(userAgent ?? ""), "an iPhone has its own formats and hint (on an iPhone, above)");
   await page.clock.install();
   await openWithStorage(page, "/app/new");
   await expect(page.getByTestId("upload-input")).toHaveAttribute("accept", "video/*");

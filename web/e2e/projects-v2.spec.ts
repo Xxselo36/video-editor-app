@@ -46,6 +46,12 @@ test("one list: a row per state, an existing customer's projects, 0 console erro
   const edited = await stub.seed("edited");
   const consoleErrors: string[] = [];
   page.on("console", (m) => {
+    // WebKit's notes on the report-only CSP (next.config.ts), on every
+    // page load: it has no report endpoint (on purpose: its violations
+    // show in the console), and its frame-ancestors (a copy of the
+    // enforced policy's) counts only in the enforced one.
+    if (/^The Content Security Policy '.*' was delivered in report-only mode, but does not specify a 'report-(to|uri)'/.test(m.text())) return;
+    if (m.text() === "The Content Security Policy directive 'frame-ancestors' is ignored when delivered in a report-only policy.") return;
     if (m.type() === "error") consoleErrors.push(m.text());
   });
   const frames: string[] = [];
