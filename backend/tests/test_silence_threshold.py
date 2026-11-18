@@ -352,7 +352,7 @@ def test_the_threshold_follows_the_speech_peak_without_jumps():
 def test_no_usable_frames_keep_the_style_threshold():
     for frames in ([], [0.0, 0.0, 0.0], [np.nan, np.nan]):
         f = np.array(frames)
-        assert audio.silence_threshold_for(f, f, 0.03) == (0.03, {})
+        assert audio.silence_threshold_for(f, f, 0.03) == (0.03, 0.03, {})
 
 
 # ── the whole analysis ───────────────────────────────────────────────
@@ -389,6 +389,11 @@ def _clip(path, clap_at) -> None:
         i, m = int(clap_at * sr), int(0.06 * sr)
         c = rng.standard_normal(m) * np.exp(-np.arange(m) / (0.008 * sr))
         a[i:i + m] += c / np.max(np.abs(c)) * 0.9
+    _mp4(path, a, sr, dur)
+
+
+def _mp4(path, a, sr: int, dur: float) -> None:
+    """The audio `a` as AAC in an mp4 with a black 64x64 video."""
     wav = path.with_suffix(".wav")
     with wave.open(str(wav), "wb") as w:
         w.setnchannels(1)
@@ -451,3 +456,84 @@ def test_a_clap_before_quiet_speech_cuts_no_word(tmp_path, monkeypatch, style, o
     lost = [(w, s, e, round(e - s - _kept(segs, s, e), 3)) for w, s, e in WORDS
             if (e - s) - _kept(segs, s, e) > 0.012]
     assert lost == [], (levels, segs)
+
+
+# ── soft words in noise ──────────────────────────────────────────────
+
+# Phrases as people speak them: the stressed words 0..-4 dB, unstressed
+# function words 10-16 dB under them, the last word trailing off.
+DYNAMIC = [
+    [("so", -13), ("the", -15), ("camera", 0), ("is", -12), ("ready", -2), ("now", -8)],
+    [("and", -14), ("then", -11), ("we", -15), ("open", -1), ("the", -13), ("menu", -4),
+     ("again", -10)],
+    [("it", -16), ("looks", -3), ("a", -14), ("lot", -1), ("brighter", -9)],
+    [("but", -12), ("of", -15), ("course", -2), ("the", -13), ("sound", 0), ("is", -11),
+     ("quiet", -7)],
+]
+
+
+def _dynamic_clip(path, noise_db: float, seed: int = 0) -> list:
+    """The DYNAMIC phrases (a word 10 dB or more under the stressed ones
+    has one syllable, the others two), 0.6, 1.0 and 0.4 s apart, white
+    noise at noise_db RMS re the speech's peak; 44.1 kHz. Returns the
+    words [(word, start, end)] per phrase."""
+    sr = 44100
+    rng = np.random.default_rng(seed)
+    t, parts, phrases = 0.7, [], []
+    for k, phrase in enumerate(DYNAMIC):
+        words = []
+        for w, lvl in phrase:
+            start = t
+            syllables = 1 if lvl <= -10 else 2
+            for syl in range(syllables):
+                m = int(rng.uniform(0.12, 0.22) * sr)
+                parts.append((t, _voiced(rng, m, 110 * rng.uniform(0.95, 1.05), sr) * 10 ** (lvl / 20)))
+                t += m / sr + (rng.uniform(0.02, 0.04) if syl < syllables - 1 else 0.0)
+            words.append((w, round(start, 4), round(t, 4)))
+            t += rng.uniform(0.02, 0.06)
+        phrases.append(words)
+        t += (0.6, 1.0, 0.4, 0.0)[k]
+    n = int((t + 0.9) * sr)
+    a = np.zeros(n)
+    for start, p in parts:
+        i = int(start * sr)
+        a[i:i + len(p)] += p[:n - i]
+    a *= 10 ** (-1 / 20) / np.max(np.abs(a))
+    a += rng.standard_normal(n) * 10 ** (-65 / 20)
+    z = rng.standard_normal(n)
+    a += z / np.sqrt(np.mean(z ** 2)) * np.max(np.abs(a)) * 10 ** (noise_db / 20)
+    a *= 0.999 / max(0.999, np.max(np.abs(a)))
+    _mp4(path, a, sr, round(n / sr, 3))
+    return phrases
+
+
+@pytest.mark.parametrize("timing", ["exact", "whisper"])
+@pytest.mark.parametrize("noise_db", [-24, -28])
+def test_soft_words_whisper_heard_stay_in_noise(tmp_path, monkeypatch, noise_db, timing):
+    """Speech with unstressed words 10-16 dB under the stressed ones, in
+    white noise 24 or 28 dB under the speech's peak, through the real
+    analysis in the fast style (the web's cutting pace), Whisper mocked
+    with the true word times - or with Whisper's drift (each phrase's
+    first word starting 30-170 ms early, its last ending 50-170 ms
+    early). The noise guard raises the threshold over the soft words, but
+    not inside the words Whisper heard: every word comes out whole.
+    Without that, 3-9 of the 25 words were cut whole (the speech then
+    started at the next stressed word)."""
+    from src import plugin_api
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    phrases = _dynamic_clip(tmp_path / "clip.mp4", noise_db)
+    rng = np.random.default_rng(77)
+    heard = []
+    for words in phrases:
+        words = [list(w) for w in words]
+        if timing == "whisper":
+            words[0][1] = round(words[0][1] - rng.uniform(0.03, 0.17), 3)
+            words[-1][2] = round(words[-1][2] - rng.uniform(0.05, 0.17), 3)
+        heard.append([tuple(w) for w in words])
+    analyzers = _mock_whisper(monkeypatch, heard)
+    res = plugin_api.analyze_video(str(tmp_path / "clip.mp4"), style="fast")
+    assert analyzers[-1].silence_levels.get("noise_guard"), analyzers[-1].silence_levels
+    segs = [(float(s), float(e)) for s, e in res.segments]
+    lost = [(w, s, e, round(e - s - _kept(segs, s, e), 3)) for words in phrases
+            for w, s, e in words if (e - s) - _kept(segs, s, e) > 0.012]
+    assert lost == [], (analyzers[-1].silence_levels, segs)
