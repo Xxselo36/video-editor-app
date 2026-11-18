@@ -1215,9 +1215,22 @@ def test_analysis_image_has_what_the_api_image_has_for_an_analysis():
             == set(re.findall(r"fonts-[a-z0-9-]+", docker)))
     reqs = (REPO / "backend" / "requirements.txt").read_text()
     for pin in ("fonttools==4.66.0", "brotli==1.2.0", "anthropic==0.111.0",
-                "moviepy==1.0.3", "imageio_ffmpeg>=0.4.9,<0.8"):
+                "moviepy==1.0.3", "imageio_ffmpeg>=0.4.9"):
         assert pin in reqs and f'"{pin}"' in image, pin
     assert '"CLEO_LOCAL_WHISPER": "0"' in image
+
+
+def test_modal_images_take_the_apis_imageio_ffmpeg():
+    """The renders use imageio-ffmpeg's ffmpeg: both Modal images ask for
+    it exactly as backend/requirements.txt does — a lower bound only, as
+    ffmpeg 9 (0.8) renders the frames ffmpeg 7 (0.7) does
+    (captions/test_av_exact.py)."""
+    import re
+    reqs = (REPO / "backend" / "requirements.txt").read_text()
+    [pin] = re.findall(r"^imageio_ffmpeg\S*", reqs, re.MULTILINE)
+    assert pin == "imageio_ffmpeg>=0.4.9"
+    src = (REPO / "backend" / "modal_render.py").read_text()
+    assert re.findall(r'"(imageio_ffmpeg[^"]*)"', src) == [pin, pin]
 
 
 # ── with the capacity fix (#59): length cap, disk guard ──────────────
