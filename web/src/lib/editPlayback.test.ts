@@ -351,6 +351,12 @@ type Presented = { k: number; at: number; seeking: boolean };
  * idle, no frame skipped). `race`: above 1.25x a landed seek's clock, once
  * it runs, gains that many frames within a refresh (the e2e runs at 2x:
  * 458 → 462 → 463 within 34 ms of a landing, 43 → 48 in 50 ms).
+ * `settle`: after the landings `when` says (by the seek's target), from
+ * the `at`-th presentation after the landing frame on (until the next
+ * seek) the frame up is one past the one the clock picks — the renderer
+ * settling after the seek dropped one, the next frame in its slot
+ * (Chromium, the e2e runs: 257 → 259 within 33 ms at the 5th, a frame
+ * ahead of the clock after it; at about 1 landing in 40).
  */
 function framedVideo(
   start: number,
@@ -379,6 +385,7 @@ function framedVideo(
     missCb?: (k: number) => boolean;
     stretchMs?: number;
     race?: { frames: number };
+    settle?: { at: number; when: (to: number) => boolean };
   } = {},
 ) {
   const fps = o.fps ?? 30;
@@ -431,6 +438,11 @@ function framedVideo(
   };
   // (race: from when the landed clock runs)
   let raceFrom: number | null = null;
+  // (settle: the presentation count the landing frame goes up as; the
+  // clock's frame at the latest pick)
+  let landFrame: number | null = null;
+  let clockFrame: number | null = null;
+  const settled = () => !!o.settle && landFrame !== null && presented + 1 - landFrame >= o.settle.at;
   const raceOff = (t: number) =>
     raceFrom !== null && o.race && clockRate > 1.25 ? (Math.min(1, Math.max(0, t - raceFrom) / vsync) * o.race.frames) / fps : 0;
   const clockAt = (t: number) => (paused || frozen || mstalled ? pos : pos + (run(t) / 1000) * clockRate + raceOff(t));
@@ -503,7 +515,11 @@ function framedVideo(
         if (picked !== null) present(picked, v0);
         picked = null;
         if (!paused && !frozen) {
-          const k0 = frameAt(clockAt(v0 + vsync * every));
+          const kc = frameAt(clockAt(v0 + vsync * every));
+          // (settle: a frame further at each of the clock's own steps — the
+          // frame up in the slot of the one dropped, never a refresh early)
+          const k0 = settled() ? (kc !== clockFrame ? kc + 1 : shown) : kc;
+          clockFrame = kc;
           // (a decoder behind never presents a frame older than the one up)
           const k = o.behind ? Math.max(k0 - Math.max(0, Math.round(o.behind(now))), Math.min(k0, shown)) : k0;
           if (k !== shown && !o.drop?.(k)) picked = k;
@@ -585,6 +601,7 @@ function framedVideo(
         raceFrom = paused ? null : since;
         // the decoded target frame goes up at the next refresh
         picked = frameAt(x);
+        landFrame = o.settle?.when(x) ? presented + 1 : null;
         landedAt = Date.now();
         const done = () => {
           if (id !== seekId) return;
@@ -706,6 +723,12 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
       return n;
     });
   };
+  /** A clip of 5 or 6 frames gives up its last kept frame on purpose (round
+   *  10: it comes as the renderer settles after the landing — SETTLE_FRAMES). */
+  const settling = (s: { start: number; end: number }, fps = 30) => {
+    const [a, b] = clipFrames(s, fps);
+    return b - a === 5 || b - a === 6;
+  };
 
   it("frame callbacks: the jump goes on each clip's last frame; no cut frame; the last frames show — the first join of a player finds the seek's reach out a frame early, never again", async () => {
     // A → B → C, then D [8, 9) and E [10, 11): frames [240, 270) [300, 330)
@@ -753,8 +776,10 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
     const drops = droppedAtEnds(frames, many);
     expect(Math.max(...drops)).toBeLessThanOrEqual(1);
-    // and none at all but at the odd join (round 4: every clip's last kept frame shows)
-    expect(drops.filter((n) => n === 0).length / drops.length).toBeGreaterThanOrEqual(0.95);
+    // and none at all but at the odd join (round 4: every clip's last kept
+    // frame shows — but a settling one's)
+    const rest = drops.filter((_, i) => !settling(many[i]));
+    expect(rest.filter((n) => n === 0).length / rest.length).toBeGreaterThanOrEqual(0.95);
   });
 
   it("no frame rate from the job (the v1 editor): measured from the media times (ms, like a webm's) — the joins as exact as with it", async () => {
@@ -765,7 +790,8 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     expect(cutOf(frames, (k) => keptMany(k))).toEqual([]);
     const drops = droppedAtEnds(frames, many);
     expect(Math.max(...drops)).toBeLessThanOrEqual(1);
-    expect(drops.filter((n) => n === 0).length / drops.length).toBeGreaterThanOrEqual(0.95);
+    const rest = drops.filter((_, i) => !settling(many[i]));
+    expect(rest.filter((n) => n === 0).length / rest.length).toBeGreaterThanOrEqual(0.95);
   });
 
   it("a decoder that skips a frame now and then (a busy machine): no cut frame, and the skip is counted once — at most the last kept frame goes at a join", async () => {
@@ -976,7 +1002,7 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     return () => vi.stubGlobal("setTimeout", st);
   };
   const shownShare = (frames: Presented[], plan: { start: number; end: number }[]) => {
-    const d = droppedAtEnds(frames, plan);
+    const d = droppedAtEnds(frames, plan).filter((_, i) => !settling(plan[i]));
     return d.filter((n) => n === 0).length / d.length;
   };
 
@@ -1132,7 +1158,8 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
     const d = droppedAtEnds(frames, plan);
     const at1x = d.filter((_, i) => plan[i].speed === 1 && clipFrames(plan[i], 30)[1] - clipFrames(plan[i], 30)[0] > 3);
     expect(Math.max(...at1x)).toBeLessThanOrEqual(1);
-    expect(at1x.filter((n) => n === 0).length / at1x.length).toBeGreaterThanOrEqual(0.9);
+    const rest = d.filter((_, i) => plan[i].speed === 1 && clipFrames(plan[i], 30)[1] - clipFrames(plan[i], 30)[0] > 3 && !settling(plan[i]));
+    expect(rest.filter((n) => n === 0).length / rest.length).toBeGreaterThanOrEqual(0.9);
   });
 
   it("no frame callbacks (older browsers): the clock jumps one frame early, no cut frame", async () => {
@@ -1207,7 +1234,8 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
       const d = droppedAtEnds(frames, plan);
       const at1x = d.filter((_, i) => plan[i].speed === 1 && clipFrames(plan[i], 30)[1] - clipFrames(plan[i], 30)[0] > 3);
       expect(Math.max(...at1x), at).toBeLessThanOrEqual(1);
-      expect(at1x.filter((n) => n === 0).length / at1x.length, at).toBeGreaterThanOrEqual(0.9);
+      const rest = d.filter((_, i) => plan[i].speed === 1 && clipFrames(plan[i], 30)[1] - clipFrames(plan[i], 30)[0] > 3 && !settling(plan[i]));
+      expect(rest.filter((n) => n === 0).length / rest.length, at).toBeGreaterThanOrEqual(0.9);
       // (the sped-up ones: two frames of output at most)
       d.forEach((n, i) => plan[i].speed > 1 && expect(n, `${at} clip ${i}`).toBeLessThanOrEqual(atSpeed(plan[i].speed)));
     }
@@ -1224,7 +1252,8 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
       const long = (i: number) => clipFrames(plan[i], fps)[1] - clipFrames(plan[i], fps)[0] > 3;
       const at1x = d.filter((_, i) => plan[i].speed === 1 && long(i));
       expect(Math.max(...at1x), at).toBeLessThanOrEqual(1);
-      expect(at1x.filter((n) => n === 0).length / at1x.length, at).toBeGreaterThanOrEqual(0.9);
+      const rest = d.filter((_, i) => plan[i].speed === 1 && long(i) && !settling(plan[i], fps));
+      expect(rest.filter((n) => n === 0).length / rest.length, at).toBeGreaterThanOrEqual(0.9);
       // (a frame of output at 1.25x: two source frames at most)
       d.forEach((n, i) => plan[i].speed > 1 && expect(n, `${at} clip ${i}`).toBeLessThanOrEqual(Math.ceil(plan[i].speed)));
     }
@@ -1521,12 +1550,45 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
           const long = (i: number) => clipFrames(plan[i], fps)[1] - clipFrames(plan[i], fps)[0] > 3;
           const at1x = d.filter((_, i) => plan[i].speed === 1 && long(i));
           expect(Math.max(...at1x), at).toBeLessThanOrEqual(1);
-          expect(at1x.filter((n) => n === 0).length / at1x.length, at).toBeGreaterThanOrEqual(0.9);
+          const rest = d.filter((_, i) => plan[i].speed === 1 && long(i) && !settling(plan[i], fps));
+          expect(rest.filter((n) => n === 0).length / rest.length, at).toBeGreaterThanOrEqual(0.9);
           d.forEach((n, i) => plan[i].speed !== 1 && expect(n, `${at} clip ${i}`).toBeLessThanOrEqual(sp > 1 ? atSpeed(sp) : 1));
           vi.clearAllTimers();
         }
     // (40 runs of 25 simulated seconds)
   }, 240_000);
+
+  // ── round 10 ──
+  it("the renderer settling after a landing drops a frame at its 5th or 6th presentation, the next one in its slot (Chromium; the e2e runs' cut frames 259, 793 and 1009 at 6-frame clips — 257 → 259 within 33 ms): no cut frame, at most the last kept frame at a join; clips of 7 frames or more keep theirs", async () => {
+    // clips of 4–24 frames on the frame grid (30 fps), cuts of 4–9 frames;
+    // every 6th clip is of 5 or 6 frames, and the renderer drops a frame
+    // after landing on it (one landing in six: no load read from it)
+    const lens = [6, 9, 11, 7, 15, 24, 5, 9, 11, 4, 15, 24];
+    const plan: { id: string; start: number; end: number }[] = [];
+    for (let i = 0, a = 15; i < 42; i++) {
+      const b = a + lens[i % lens.length];
+      plan.push({ id: `s${i}`, start: a / 30, end: b / 30 });
+      a = b + 4 + (i % 6);
+    }
+    const len = (i: number) => clipFrames(plan[i], 30)[1] - clipFrames(plan[i], 30)[0];
+    const short = plan.filter((_, i) => len(i) <= 6 && len(i) >= 5).map((s) => s.start);
+    const ok = (k: number) => plan.some((s) => k >= clipFrames(s, 30)[0] && k < clipFrames(s, 30)[1]);
+    for (const at of [4, 5])
+      for (const o of [{}, { earlyCb: chromium }]) {
+        const label = `settle at ${at} ${JSON.stringify(Object.keys(o))}`;
+        const when = (to: number) => short.some((x) => Math.abs(to - x) < 0.02);
+        // (the clock stands on a landing frame 70 ms before it runs: the e2e runs' 50–90)
+        const f = framedVideo(0.5, { settle: { at, when }, landStartMs: 70, ...o });
+        const frames = await playAll(f, 20_000, { plan });
+        expect(cutOf(frames, ok), label).toEqual([]);
+        const d = droppedAtEnds(frames, plan);
+        expect(Math.max(...d), label).toBeLessThanOrEqual(1);
+        // (the first join is play's: the renderer starting up)
+        const long = d.filter((_, i) => i > 0 && len(i) >= 7);
+        expect(long.filter((n) => n === 0).length / long.length, label).toBeGreaterThanOrEqual(0.9);
+        vi.clearAllTimers();
+      }
+  }, 60_000);
 
   it("a 60 fps file (the player's own; the editor plays the cut preview there) on a 90 Hz screen, the page's timers 5 ms late, the seek's reach 4 ms: no cut frame, at most the last kept frame at a join — round 7's seam floor read the screen's refresh as 22 ms there (picks 11 and 22 ms apart, the animation frames' refresh taken as 60 Hz's) and held the seam past the cut frame's pick: 4 cut frames", async () => {
     for (const o of [{}, { earlyCb: chromium }]) {
