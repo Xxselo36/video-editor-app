@@ -23,6 +23,19 @@ export const ANDROID_UA = devices["Pixel 7"].userAgent;
 /** The Vorschau; data-state processing | ready | edited | finishing | done | failed. */
 export const vorschau = (page: Page): Locator => page.getByTestId("preview");
 
+/** The title's hyphenation limits as the browser has them (the wide
+ *  layout's title, preview.module.css): hyphenate-limit-chars where it
+ *  knows it ("10 4 4"), else Safari's own -webkit-hyphenate-limit-before
+ *  and -after ("5 5"). */
+export async function titleHyphenLimits(page: Page): Promise<{ standard: boolean; value: string }> {
+  return page.getByTestId("preview-title").evaluate((el) => {
+    const s = getComputedStyle(el);
+    return CSS.supports("hyphenate-limit-chars", "10 4 4")
+      ? { standard: true, value: s.getPropertyValue("hyphenate-limit-chars") }
+      : { standard: false, value: `${s.getPropertyValue("-webkit-hyphenate-limit-before")} ${s.getPropertyValue("-webkit-hyphenate-limit-after")}` };
+  });
+}
+
 /** Open the Vorschau of `jobId` from /imprint (so Back has somewhere to
  *  go). `query` e.g. "?captions=v2": this browser opts in to the v2
  *  captions (the stub runs CLEO_CAPTION_ENGINE=optin). */

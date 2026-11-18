@@ -24,7 +24,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { job as storedJob, JOBS, LANG_KEY, openWithStorage } from "./support/app";
 import { API } from "./support/env";
-import { holdRequests, openVorschau, TOUR_DONE, vorschau } from "./support/vorschau";
+import { holdRequests, openVorschau, titleHyphenLimits, TOUR_DONE, vorschau } from "./support/vorschau";
 
 const TAG = { tag: "@editor-v2" };
 const DE = { [LANG_KEY]: "de" };
@@ -378,12 +378,7 @@ test.describe("the Vorschau's screen", TAG, () => {
     // The rule itself (Playwright's WebKit hyphenates nothing): 10 4 4,
     // and in a Safari without hyphenate-limit-chars its own limits, 5
     // letters on each side of a break.
-    const limits = await title.evaluate((el) => {
-      const s = getComputedStyle(el);
-      return CSS.supports("hyphenate-limit-chars", "10 4 4")
-        ? { standard: true, value: s.getPropertyValue("hyphenate-limit-chars") }
-        : { standard: false, value: `${s.getPropertyValue("-webkit-hyphenate-limit-before")} ${s.getPropertyValue("-webkit-hyphenate-limit-after")}` };
-    });
+    const limits = await titleHyphenLimits(page);
     expect(limits.value, limits.standard ? "hyphenate-limit-chars" : "-webkit-hyphenate-limit-before / -after").toBe(limits.standard ? "10 4 4" : "5 5");
   });
 
