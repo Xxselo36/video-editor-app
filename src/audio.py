@@ -174,7 +174,16 @@ FLOOR_PAUSE_SHARE = 0.5
 # for 16 s after the last word kept 11.8 of 30 s with 'No cuts' and
 # 10.3 s with 'tight', against 30 and 28.3 s before; fan noise with one
 # bang kept 0.75 of 20 s, ambience with a car passing 2.55 s, chords with
-# a 14 dB softer intro 12.35 s, against 20 s before).
+# a 14 dB softer intro 12.35 s, against 20 s before) ...
+# ... and only when those words are the speech: at least GUARD_WORD_SHARE
+# of the frames over the guarded threshold from the first word to the
+# last lie inside words. In talking clips with noise or a music bed 0.92
+# to 1.0 of them do (the noisy ones of 200 synthetic test recordings,
+# docs/raw.mp4 with noise, a vlog with a music bed); in music or noise in
+# which Whisper heard a few words (lyrics, a phantom "Thank you.") 0.0 to
+# 0.44 - the loud stretches between those words are the upload itself,
+# and the guard made 'tight' keep 0.7-4 s more of 20 s there than before.
+GUARD_WORD_SHARE = 0.5
 
 
 def _db(x: float) -> float:
@@ -211,21 +220,28 @@ def held_peak(block_peak: np.ndarray, block_s: float) -> float | None:
     return float(np.lib.stride_tricks.sliding_window_view(peak, k).min(axis=1).max())
 
 
-def guard_frames(words: np.ndarray | None) -> np.ndarray | None:
-    """The frames the noise guard applies to (speech_frames): the gaps
-    between the transcribed words - `words` marks the frames inside a
-    word (AudioAnalyzer._word_frames) - from the first word to the last.
-    None without a transcribed word."""
+def guard_frames(rms: np.ndarray, threshold: float, words: np.ndarray | None,
+                 ) -> tuple[np.ndarray | None, float | None]:
+    """The frames the noise guard applies to (speech_frames), and the share
+    of the frames over the guarded `threshold` from the first transcribed
+    word to the last that lie inside words (`words` marks the frames
+    inside a word, AudioAnalyzer._word_frames). The frames are the gaps
+    between the words, from the first to the last - when that share is
+    at least GUARD_WORD_SHARE; else none (None), as without a word."""
     if words is None:
-        return None
+        return None, None
     words = np.asarray(words, dtype=bool)
     marked = np.flatnonzero(words)
     if marked.size == 0:
-        return None
+        return None, None
     first, last = marked[0], marked[-1] + 1
+    over = np.asarray(rms, dtype=float)[first:last] > threshold
+    share = float((over & words[first:last]).sum()) / max(1, int(over.sum()))
+    if over.any() and share < GUARD_WORD_SHARE:
+        return None, share
     gaps = np.zeros(len(words), dtype=bool)
     gaps[first:last] = ~words[first:last]
-    return gaps
+    return gaps, share
 
 
 def speech_frames(rms: np.ndarray, threshold: float, unguarded: float,
@@ -711,11 +727,16 @@ class AudioAnalyzer:
             hop_s=hop_s, block_s=block / sample_rate)
         # The noise guard raised the threshold: it applies only in the
         # gaps between the words Whisper transcribed (when transcribe()
-        # ran first, as in analyze_video). Inside a word, before the
-        # first and after the last one, and without a transcript, the
-        # threshold before it holds.
-        gaps = (guard_frames(self._word_frames(len(frame_rms), hop_s))
-                if unguarded < threshold else None)
+        # ran first, as in analyze_video), and only when those words are
+        # the speech (guard_frames). Inside a word, before the first and
+        # after the last one, and without a transcript, the threshold
+        # before it holds.
+        gaps = None
+        if unguarded < threshold:
+            gaps, share = guard_frames(frame_rms, threshold,
+                                       self._word_frames(len(frame_rms), hop_s))
+            if share is not None:
+                levels["in_words"] = round(share, 2)
         is_speech_frame = speech_frames(frame_rms, threshold, unguarded, gaps)
         if gaps is None or not gaps.any():
             threshold = unguarded

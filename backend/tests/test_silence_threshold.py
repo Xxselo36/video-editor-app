@@ -411,11 +411,23 @@ def test_no_usable_frames_keep_the_style_threshold():
 def test_the_guard_applies_only_between_the_words():
     """guard_frames: the frames from the first transcribed word to the
     last that lie in no word - not before the first word, not after the
-    last one, not inside a word; none without a word."""
+    last one, not inside a word; none without a word. And only while
+    most of the frames over the guarded threshold in that stretch lie
+    inside words (the words are the speech)."""
     words = np.array([0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0], dtype=bool)
-    assert audio.guard_frames(words).astype(int).tolist() == [0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0]
-    assert audio.guard_frames(None) is None
-    assert audio.guard_frames(np.zeros(5, dtype=bool)) is None
+    speech = np.array([1, 1, 5, 5, 1, 1, 5, 1, 5, 5, 1, 1], dtype=float)
+    gaps, share = audio.guard_frames(speech, 2.0, words)
+    assert gaps.astype(int).tolist() == [0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0]
+    assert share == 1.0
+    assert audio.guard_frames(speech, 2.0, None) == (None, None)
+    assert audio.guard_frames(speech, 2.0, np.zeros(12, dtype=bool)) == (None, None)
+    # as many loud frames between the first word and the last lie in no
+    # word as inside words: still the speech; more: the words are not
+    music = np.array([5, 5, 5, 5, 5, 5, 5, 5, 1, 1, 5, 5], dtype=float)
+    gaps, share = audio.guard_frames(music, 2.0, words)
+    assert share == 0.5 and gaps is not None
+    music[6] = 1.0
+    assert audio.guard_frames(music, 2.0, words) == (None, 0.4)
 
 
 # ── the whole analysis ───────────────────────────────────────────────
@@ -709,6 +721,33 @@ def test_an_upload_without_speech_is_cut_as_before(tmp_path, monkeypatch, case):
             _detect_as_before(x, cfg["silence_threshold"], cfg["min_silence_to_cut"], sr), \
             (pace, a.silence_levels)
         assert len(segs) == 1 and _kept(segs, 0.0, dur) > dur - 0.05, (pace, a.silence_levels, segs)
+
+
+# Words Whisper hears in a song or in noise: a few, spread over the upload.
+LYRICS = [[("oh", 1.0, 1.4), ("my", 1.4, 1.7), ("love", 1.7, 2.2)],
+          [("come", 8.0, 8.4), ("home", 8.4, 8.8)], [("tonight", 10.0, 11.0)]]
+
+
+@pytest.mark.parametrize("case", ["softer_intro", "bang", "car_pass"])
+def test_words_heard_in_music_or_noise_leave_it_as_it_was(tmp_path, monkeypatch, case):
+    """The uploads without speech of the test above, but Whisper heard a
+    few words in them (as it does in songs and in noise) from 1 s to 11 s.
+    Most of what is loud between those words is the upload itself, not
+    the words, so the noise guard doesn't apply there either: every frame
+    reads as the old rule read it, through the web analysis with 'No
+    cuts' and 'tight', and 'No cuts' keeps the whole upload. With the
+    guard between such words, the quieter music or noise there became
+    silence ('tight' kept 0.7-4 s more of the review's 20 s clips)."""
+    clip = tmp_path / "clip.mp4"
+    _no_speech_clip(clip, case)
+    for pace, (segs, dur, a) in _web(tmp_path, monkeypatch, clip, LYRICS).items():
+        cfg = get_style("smooth" if pace == "none" else "fast")
+        sr, x = a.get_audio_data()
+        assert [(s.start, s.end, bool(s.has_speech)) for s in a._speech_segments] == \
+            _detect_as_before(x, cfg["silence_threshold"], cfg["min_silence_to_cut"], sr), \
+            (pace, a.silence_levels)
+        if pace == "none":
+            assert len(segs) == 1 and _kept(segs, 0.0, dur) > dur - 0.05, (a.silence_levels, segs)
 
 
 def test_music_before_and_after_the_words_reads_as_before(tmp_path, monkeypatch):
