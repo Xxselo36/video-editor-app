@@ -230,6 +230,31 @@ def test_speech_without_pauses_keeps_the_style_threshold(style):
     assert _speech_kept(segs, spans, share=0.99) == [], segs
 
 
+@pytest.mark.parametrize("style", STYLES)
+@pytest.mark.parametrize("case", ["noise_and_clicks", "digital_silence_and_a_clap"])
+def test_without_speech_the_threshold_does_not_move_down(style, case):
+    """No speech: steady noise with single-sample clicks, or digital
+    silence around one clap. Nothing held for 0.2 s stands clear of the
+    floor, so there is no speech peak to move the threshold to: it stays
+    where the style puts it and cuts as the old rule did (the clicks
+    don't turn into speech, the clap's tail doesn't either)."""
+    rng = np.random.default_rng(12)
+    n = 20 * SR
+    if case == "noise_and_clicks":
+        x = _noise(rng, n, "pink") * 10 ** (-40 / 20)
+        x[np.arange(SR // 2, n, int(1.3 * SR))] = 1.0
+    else:
+        x = np.zeros(n)
+        i, m = 3 * SR, int(0.06 * SR)
+        x[i:i + m] = rng.standard_normal(m) * np.exp(-np.arange(m) / (0.008 * SR))
+    x /= np.max(np.abs(x))
+    a, segs = _detect(x, style)
+    cfg = get_style(style)
+    assert a.silence_threshold_used >= cfg["silence_threshold"], a.silence_levels
+    assert [(s.start, s.end, bool(s.has_speech)) for s in segs] == \
+        _detect_as_before(x, cfg["silence_threshold"], cfg["min_silence_to_cut"])
+
+
 # ── the normal case ──────────────────────────────────────────────────
 
 def _detect_as_before(x, threshold, min_silence):

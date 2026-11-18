@@ -119,6 +119,17 @@ SPEECH_PEAK_GAP_DB = 1.0
 PEAK_TOLERANCE_DB = 3.0
 # The noise floor: the 10th percentile of the frames' RMS (the pauses).
 NOISE_FLOOR_PERCENTILE = 10
+# The threshold only moves down when that held peak stands at least
+# SPEECH_OVER_FLOOR_DB over the noise floor and lies no more than
+# SPEECH_PEAK_MIN_DB under the file's peak - when there is speech to place
+# it by. Steady white, pink or brown noise holds its peak 13-14 dB over
+# its own floor (wandering by +-3 dB: 17-19 dB); the speech of the
+# noisiest corpus recordings 26 dB or more. Over digital silence, the
+# decaying tail of a lone transient is all that holds - far under it. So
+# a file of noise and clicks alone, or of digital silence around one
+# clap, keeps the style threshold: the clicks don't turn into speech.
+SPEECH_OVER_FLOOR_DB = 20.0
+SPEECH_PEAK_MIN_DB = -40.0
 # The threshold stays at least this far above the noise floor, so that
 # neither a lowered threshold nor a style threshold under the noise lets
 # steady noise (its 100 ms RMS varies by about 1 dB) read as speech ...
@@ -184,18 +195,19 @@ def silence_threshold_for(frame_rms: np.ndarray, frame_peak: np.ndarray,
     used = float(threshold)
     if rms.size == 0 or not np.any(rms > 0):
         return used, {}
-    if peak.size >= SPEECH_PEAK_FRAMES:
-        held = np.lib.stride_tricks.sliding_window_view(peak, SPEECH_PEAK_FRAMES)
-        under_db = -(_db(held.min(axis=1).max()) + SPEECH_PEAK_GAP_DB)
-        lower_db = min(under_db, 2.0 * (under_db - PEAK_TOLERANCE_DB))
-        if lower_db > 0:
-            used *= 10 ** (-lower_db / 20)
-        levels = {"speech_peak_db": round(-under_db, 1),
-                  "lowered_db": round(max(lower_db, 0.0), 1)}
-    else:
-        levels = {}
     floor = float(np.percentile(rms, NOISE_FLOOR_PERCENTILE))
-    levels["floor_db"] = round(_db(floor), 1)
+    levels = {"floor_db": round(_db(floor), 1)}
+    if peak.size >= SPEECH_PEAK_FRAMES:
+        held_db = _db(np.lib.stride_tricks.sliding_window_view(
+            peak, SPEECH_PEAK_FRAMES).min(axis=1).max())
+        levels["speech_peak_db"] = round(held_db + SPEECH_PEAK_GAP_DB, 1)
+        if (held_db - _db(floor) >= SPEECH_OVER_FLOOR_DB
+                and held_db + SPEECH_PEAK_GAP_DB >= SPEECH_PEAK_MIN_DB):
+            under_db = -(held_db + SPEECH_PEAK_GAP_DB)
+            lower_db = min(under_db, 2.0 * (under_db - PEAK_TOLERANCE_DB))
+            if lower_db > 0:
+                used *= 10 ** (-lower_db / 20)
+                levels["lowered_db"] = round(lower_db, 1)
     guard = floor * 10 ** (NOISE_MARGIN_DB / 20)
     if guard > used and _floor_is_pauses(rms, guard, hop_s):
         used = guard
