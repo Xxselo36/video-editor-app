@@ -383,6 +383,15 @@ _PROXY_SCALE = (
 )
 
 
+# The mezz family (normalize without a cfr_rate, proxy, centre crop):
+# constant frame rate at the source's own rate. Named, not left to the
+# MP4 muxer's default: ffmpeg 7 made a VFR source constant-rate like
+# this, ffmpeg 9 keeps its variable timing — a different mezz (fewer
+# frames), a different mezz_fps / mezz_cfr for the editor's frame grid,
+# another v2 render path. A constant-rate source passes unchanged.
+_CFR_OWN_RATE = ["-fps_mode", "cfr"]
+
+
 def _proxy_video_args() -> list[str]:
     """Encoder settings of the proxy: veryfast crf 26 (a preview source,
     not a mezzanine), same 1 s GOP as the normalized file so the per-
@@ -535,7 +544,9 @@ def _normalize_orientation(
     constant frame rate at that rate (an ffmpeg rate like "30000/1001",
     see cfr_rate_of) — phone recordings are often VFR, and the v2 render
     snaps cuts to the mezz's frame grid. The proxy gets the same frames.
-    None (the default) keeps the source's timing as before.
+    None (the default) keeps the source's timing as before: constant at
+    the stream's own rate (r_frame_rate), every frame at its time, a
+    held frame repeated (_CFR_OWN_RATE).
 
     Video is re-encoded without -noautorotate so rotation metadata
     (iPhone/most mobile cams) is baked into pixels. MoviePy ignores the
@@ -569,7 +580,7 @@ def _normalize_orientation(
         f"{_HDR_TONEMAP_CHAIN},{scale_filter}" if is_hdr else scale_filter
     )
     cut = ["-t", f"{max_seconds:.3f}"] if max_seconds else []
-    cfr = ["-fps_mode", "cfr", "-r", cfr_rate] if cfr_rate else []
+    cfr = ["-fps_mode", "cfr", "-r", cfr_rate] if cfr_rate else _CFR_OWN_RATE
 
     head = [get_ffmpeg_path(), "-y", *_threads(), "-i", input_path]
     main_out = [
@@ -736,6 +747,7 @@ def _make_proxy(source_path: str, proxy_path: str) -> bool:
         "-map", "0:V:0", "-map", "0:a:0?",
         "-vf", _PROXY_SCALE,
         *_proxy_video_args(),
+        *_CFR_OWN_RATE,
         "-c:a", "copy",
         "-movflags", "+faststart",
         tmp_proxy,
@@ -1705,7 +1717,7 @@ def centre_crop(src: str, dst: str, fmt: str) -> bool:
     cmd = [get_ffmpeg_path(), "-y", *_threads(), "-i", src,
            "-map", "0:V:0", "-map", "0:a:0?", "-vf", crop,
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-           "-pix_fmt", "yuv420p", "-c:a", "copy",
+           "-pix_fmt", "yuv420p", *_CFR_OWN_RATE, "-c:a", "copy",
            "-movflags", "+faststart", dst]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0 and Path(dst).is_file():
