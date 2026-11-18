@@ -104,10 +104,16 @@ def _recording(phrases, pauses, *, lead=0.7, tail=0.9, noise_db=None,
     return x / np.max(np.abs(x)), spans, gaps
 
 
-def _detect(x, style: str):
+def _detect(x, style: str, heard=None):
+    """detect_silence on x in the style; `heard`: the (start, end) of the
+    words Whisper transcribed, as transcribe() leaves them (None: it
+    didn't run, as in the desktop app without subtitles)."""
     cfg = get_style(style)
     a = audio.AudioAnalyzer("synthetic.mp4")
     a._sample_rate, a._audio_data = SR, x
+    if heard is not None:
+        a._transcription = {"segments": [{"words": [
+            {"word": " w", "start": s, "end": e} for s, e in heard]}]}
     segs = a.detect_silence(cfg["silence_threshold"], cfg["min_silence_to_cut"])
     return a, segs
 
@@ -231,13 +237,20 @@ def test_noise_at_minus_40_db_is_still_silence(style, case, onset):
 def test_noise_above_the_threshold_no_longer_reads_as_speech(style, noise_db):
     """White noise 28 or 32 dB under the speech peak - at or above the
     style threshold (-30.5 dB for fast, -34 dB for smooth). Before, the
-    noise read as speech and not one pause was found; now the threshold
-    sits 4 dB over the noise floor: the pauses are found and the speech
-    (well over the noise) is kept."""
+    noise read as speech and not one pause was found; now, in the pauses
+    between the words Whisper transcribed, the threshold sits 4 dB over
+    the noise floor: the pauses are found and the speech (well over the
+    noise) is kept. Without a transcript (the desktop app without
+    subtitles) nothing says where the words are, and the noise reads as
+    it always did."""
     x, spans, gaps = _recording(PHRASES, PAUSES, noise_db=noise_db, spread_db=8.0, seed=5)
-    a, segs = _detect(x, style)
+    a, segs = _detect(x, style, heard=spans)
     assert _pauses_found(segs, gaps, style) == [], (a.silence_levels, segs)
     assert _speech_kept(segs, spans, share=0.9) == [], (a.silence_levels, segs)
+    cfg = get_style(style)
+    a, segs = _detect(x, style)
+    assert [(s.start, s.end, bool(s.has_speech)) for s in segs] == \
+        _detect_as_before(x, cfg["silence_threshold"], cfg["min_silence_to_cut"]), a.silence_levels
 
 
 @pytest.mark.parametrize("style", STYLES)
@@ -281,14 +294,14 @@ def test_without_speech_the_threshold_does_not_move_down(style, case, onset):
         _detect_as_before(x, cfg["silence_threshold"], cfg["min_silence_to_cut"])
 
 
-def _music_bed(rng, n: int) -> np.ndarray:
+def _music_bed(rng, n: int, sr: int = SR) -> np.ndarray:
     """Chords (three voices of three harmonics, a change every 2 s) with a
     soft beat every 0.5 s, no rest."""
-    t = np.arange(n) / SR
+    t = np.arange(n) / sr
     m = np.zeros(n)
     chords = [(220, 277.2, 329.6), (196, 246.9, 293.7), (174.6, 220, 261.6)]
-    for k in range(int(n / (2 * SR)) + 1):
-        i0, i1 = k * 2 * SR, min(n, (k + 1) * 2 * SR)
+    for k in range(int(n / (2 * sr)) + 1):
+        i0, i1 = k * 2 * sr, min(n, (k + 1) * 2 * sr)
         for f in chords[k % 3]:
             for h in (1, 2, 3):
                 m[i0:i1] += np.sin(2 * np.pi * f * h * t[i0:i1] + rng.uniform(0, 6.28)) / h
@@ -322,22 +335,22 @@ def test_noise_or_music_without_speech_reads_as_before(style, case):
 
 # ── the normal case ──────────────────────────────────────────────────
 
-def _detect_as_before(x, threshold, min_silence):
+def _detect_as_before(x, threshold, min_silence, sr: int = SR):
     """detect_silence as it was: the style threshold re the peak, as is."""
-    window = int(SR * 0.1)
+    window = int(sr * 0.1)
     hop = window // 2
     segs, cur, start = [], None, 0
     for i in range(0, len(x) - window, hop):
         is_speech = np.sqrt(np.mean(x[i:i + window] ** 2)) > threshold
-        t = i / SR
+        t = i / sr
         if cur is None:
             cur, start = is_speech, t
         elif is_speech != cur:
             if t - start >= min_silence or cur:
                 segs.append((start, t, bool(cur)))
             start, cur = t, is_speech
-    if start < len(x) / SR:
-        segs.append((start, len(x) / SR, bool(cur)))
+    if start < len(x) / sr:
+        segs.append((start, len(x) / sr, bool(cur)))
     return segs
 
 
@@ -393,6 +406,16 @@ def test_no_usable_frames_keep_the_style_threshold():
     for frames in ([], [0.0, 0.0, 0.0], [np.nan, np.nan]):
         f = np.array(frames)
         assert audio.silence_threshold_for(f, f, 0.03) == (0.03, 0.03, {})
+
+
+def test_the_guard_applies_only_between_the_words():
+    """guard_frames: the frames from the first transcribed word to the
+    last that lie in no word - not before the first word, not after the
+    last one, not inside a word; none without a word."""
+    words = np.array([0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0], dtype=bool)
+    assert audio.guard_frames(words).astype(int).tolist() == [0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0]
+    assert audio.guard_frames(None) is None
+    assert audio.guard_frames(np.zeros(5, dtype=bool)) is None
 
 
 # ── the whole analysis ───────────────────────────────────────────────
@@ -595,3 +618,121 @@ def test_noise_where_whisper_heard_a_phrase_is_kept_whole(tmp_path, monkeypatch)
     segs = [(float(s), float(e)) for s, e in res.segments]
     assert len(segs) == 1 and _kept(segs, 0.0, float(res.duration)) > float(res.duration) - 0.1, \
         (analyzers[-1].silence_levels, segs, res.duration)
+
+
+# ── music and ambience outside speech ────────────────────────────────
+
+def _no_speech_clip(path, case: str) -> None:
+    """12 s without speech, 44.1 kHz: 'softer_intro' - chords (_music_bed)
+    at -20 dBFS RMS whose first 6 s are 14 dB softer; 'bang' - fan noise
+    (pink, -28 dBFS RMS) with one bang at 6 s (a burst of pink noise
+    decaying with an 80 ms time constant, peaking at 0.9); 'car_pass' -
+    ambience (pink, -35 dBFS RMS) swelling by 15 dB over 3 s as a car
+    passes (4.5-7.5 s)."""
+    sr = 44100
+    n = 12 * sr
+    rng = np.random.default_rng(21)
+    t = np.arange(n) / sr
+    if case == "softer_intro":
+        x = _music_bed(rng, n, sr)
+        x[:6 * sr] *= 10 ** (-14 / 20)
+        x *= 10 ** (-20 / 20) / np.sqrt(np.mean(x[6 * sr:] ** 2))
+        x += _noise(rng, n) * 10 ** (-65 / 20)
+    elif case == "bang":
+        x = _noise(rng, n, "pink") * 10 ** (-28 / 20)
+        m = int(0.5 * sr)
+        b = _noise(rng, m, "pink") * np.exp(-np.arange(m) / (0.08 * sr))
+        x[6 * sr:6 * sr + m] += b / np.max(np.abs(b)) * 0.9
+    else:
+        swell = np.ones(n)
+        car = (t >= 4.5) & (t < 7.5)
+        swell[car] = 10 ** (15 * np.sin(np.pi * (t[car] - 4.5) / 3) ** 2 / 20)
+        x = _noise(rng, n, "pink") * swell * 10 ** (-35 / 20)
+    _mp4(path, np.clip(x, -0.999, 0.999), sr, 12.0)
+
+
+def _talk_over_music(path, outro_s: float) -> None:
+    """The WORDS voiced as in _clip (word levels 0..-8 dB, the speech
+    peaking 3 dB under full scale) over a music bed (_music_bed) 24 dB
+    RMS under the speech's peak, which plays on for outro_s after the
+    last word; 44.1 kHz."""
+    sr = 44100
+    rng = np.random.default_rng(22)
+    dur = WORDS[-1][2] + outro_s
+    n = int(dur * sr)
+    speech = np.zeros(n)
+    for k, (_w, s, e) in enumerate(WORDS):
+        i0, i1 = int(s * sr), int(e * sr)
+        v = _voiced(rng, i1 - i0, 115 + 10 * (k % 4), sr)
+        speech[i0:i1] += v / np.max(np.abs(v)) * 10 ** (-rng.uniform(0, 8) / 20)
+    speech *= 10 ** (-3 / 20) / np.max(np.abs(speech))
+    bed = _music_bed(rng, n, sr)
+    a = speech + bed / np.sqrt(np.mean(bed ** 2)) * 10 ** ((-3 - 24) / 20)
+    _mp4(path, np.clip(a, -0.999, 0.999), sr, round(dur, 3))
+
+
+def _web(tmp_path, monkeypatch, clip, words_by_segment) -> dict:
+    """The web analysis (backend/pipeline.analyze_only, real; Whisper
+    mocked: it heard `words_by_segment`) of `clip` with 'No cuts' and
+    'tight': {pace: (kept segments, duration, the analyzer that detected
+    the silence)}."""
+    from backend import pipeline
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    analyzers = _mock_whisper(monkeypatch, words_by_segment)
+    runs = {}
+    for pace in ("none", "tight"):
+        res = pipeline.analyze_only(str(clip), str(tmp_path / pace),
+                                    {"style": pace, "target_aspect": "original"})
+        runs[pace] = ([(float(s), float(e)) for s, e in res["segments"]],
+                      float(res["duration"]), analyzers[-1])
+    return runs
+
+
+@pytest.mark.parametrize("case", ["softer_intro", "bang", "car_pass"])
+def test_an_upload_without_speech_is_cut_as_before(tmp_path, monkeypatch, case):
+    """Uploads without speech whose level changes, through the web
+    analysis, Whisper hearing no word: chords with a 14 dB softer intro,
+    fan noise with one bang (an 80 ms decay), ambience with a car
+    passing. All of it lies over both paces' thresholds, so the old rule
+    read all of it as sound. It still does, frame for frame, and 'No
+    cuts' ('smooth') and 'tight' ('fast') keep the whole upload. Before,
+    something held 20 dB over the quiet part, the noise guard put the
+    threshold 4 dB over that part, and only the loudest moments were kept
+    (the review's 20 s clips: 12.35 s of the chords, 0.75 s of the fan
+    noise, 2.55 s of the ambience with 'No cuts')."""
+    clip = tmp_path / "clip.mp4"
+    _no_speech_clip(clip, case)
+    for pace, (segs, dur, a) in _web(tmp_path, monkeypatch, clip, []).items():
+        cfg = get_style("smooth" if pace == "none" else "fast")
+        sr, x = a.get_audio_data()
+        assert [(s.start, s.end, bool(s.has_speech)) for s in a._speech_segments] == \
+            _detect_as_before(x, cfg["silence_threshold"], cfg["min_silence_to_cut"], sr), \
+            (pace, a.silence_levels)
+        assert len(segs) == 1 and _kept(segs, 0.0, dur) > dur - 0.05, (pace, a.silence_levels, segs)
+
+
+def test_music_before_and_after_the_words_reads_as_before(tmp_path, monkeypatch):
+    """A talking clip with a music bed 24 dB under the voice that plays on
+    for 10.5 s after the last word, through the web analysis (Whisper
+    mocked with the true word times). The bed lies over both paces'
+    thresholds, so the old rule read it as sound everywhere. Between the
+    words the noise guard now puts the threshold over the bed, but before
+    the first word and after the last one the bed reads as it always did:
+    'No cuts' keeps the whole upload, and 'tight' keeps the music before
+    the first word and after the last one - and every word. The guard
+    used to apply everywhere: 'No cuts' kept only the stretch from the
+    first word to the last (11.8 of 30 s in the review's clip), and
+    'tight' cut the music after the last word."""
+    clip = tmp_path / "talk.mp4"
+    _talk_over_music(clip, outro_s=10.5)
+    runs = _web(tmp_path, monkeypatch, clip, (WORDS[:5], WORDS[5:10], WORDS[10:]))
+    first, last = WORDS[0][1], WORDS[-1][2]
+    segs, dur, a = runs["none"]
+    assert a.silence_levels.get("noise_guard"), a.silence_levels
+    assert len(segs) == 1 and _kept(segs, 0.0, dur) > dur - 0.05, (a.silence_levels, segs)
+    segs, dur, a = runs["tight"]
+    assert a.silence_levels.get("noise_guard"), a.silence_levels
+    assert _kept(segs, 0.0, first) > first - 0.05, (a.silence_levels, segs)
+    assert _kept(segs, last, dur) > (dur - last) - 0.05, (a.silence_levels, segs)
+    lost = [(w, s, e) for w, s, e in WORDS if (e - s) - _kept(segs, s, e) > 0.012]
+    assert lost == [], (a.silence_levels, segs)

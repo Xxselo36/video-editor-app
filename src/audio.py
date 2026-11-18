@@ -160,12 +160,21 @@ NOISE_MARGIN_DB = 4.0
 # above them would cut soft speech, so there the floor is not used.
 FLOOR_PAUSE_S = 0.3
 FLOOR_PAUSE_SHARE = 0.5
-# Inside a word Whisper transcribed the guard doesn't apply: a frame there
-# is speech over the threshold as it was before the guard raised it
-# (speech_frames). An unstressed word 10-16 dB under the stressed ones
-# lies near the floor of noise 24-28 dB under the speech's peak; the
-# guard alone cut 3 to 9 of 25 words, most of them whole, in the fast
-# style.
+# The guard is for the pauses between words in a noisy recording, where
+# the noise used to read as speech: it applies only in the gaps between
+# the words Whisper transcribed (guard_frames, speech_frames). Inside a
+# word the threshold is the one before the guard raised it: an unstressed
+# word 10-16 dB under the stressed ones lies near the floor of noise
+# 24-28 dB under the speech's peak, and the guard alone cut 3 to 9 of 25
+# words, most of them whole, in the fast style. Before the first word,
+# after the last one and in a file without transcribed words it doesn't
+# apply: music or ambience there reads as it always did. Applied
+# everywhere, it made silence of all but the loudest moments (through the
+# web analysis, Whisper mocked: a talking clip whose music bed plays on
+# for 16 s after the last word kept 11.8 of 30 s with 'No cuts' and
+# 10.3 s with 'tight', against 30 and 28.3 s before; fan noise with one
+# bang kept 0.75 of 20 s, ambience with a car passing 2.55 s, chords with
+# a 14 dB softer intro 12.35 s, against 20 s before).
 
 
 def _db(x: float) -> float:
@@ -202,16 +211,33 @@ def held_peak(block_peak: np.ndarray, block_s: float) -> float | None:
     return float(np.lib.stride_tricks.sliding_window_view(peak, k).min(axis=1).max())
 
 
+def guard_frames(words: np.ndarray | None) -> np.ndarray | None:
+    """The frames the noise guard applies to (speech_frames): the gaps
+    between the transcribed words - `words` marks the frames inside a
+    word (AudioAnalyzer._word_frames) - from the first word to the last.
+    None without a transcribed word."""
+    if words is None:
+        return None
+    words = np.asarray(words, dtype=bool)
+    marked = np.flatnonzero(words)
+    if marked.size == 0:
+        return None
+    first, last = marked[0], marked[-1] + 1
+    gaps = np.zeros(len(words), dtype=bool)
+    gaps[first:last] = ~words[first:last]
+    return gaps
+
+
 def speech_frames(rms: np.ndarray, threshold: float, unguarded: float,
-                  words: np.ndarray | None = None) -> np.ndarray:
-    """Which frames are speech: RMS over `threshold` - or, in a frame that
-    `words` marks as inside a transcribed word, over `unguarded` (the
-    threshold before the noise guard raised it, silence_threshold_for)."""
+                  gaps: np.ndarray | None = None) -> np.ndarray:
+    """Which frames are speech: RMS over `threshold` in a frame that
+    `gaps` marks as lying in a gap between transcribed words, over
+    `unguarded` (the threshold before the noise guard raised it,
+    silence_threshold_for) everywhere else - everywhere without `gaps`."""
     rms = np.asarray(rms, dtype=float)
-    speech = rms > threshold
-    if words is not None and unguarded < threshold:
-        speech |= np.asarray(words, dtype=bool) & (rms > unguarded)
-    return speech
+    if gaps is None:
+        return rms > unguarded
+    return np.where(np.asarray(gaps, dtype=bool), rms > threshold, rms > unguarded)
 
 
 def _floor_is_pauses(rms: np.ndarray, level: float, hop_s: float) -> bool:
@@ -236,13 +262,13 @@ def silence_threshold_for(frame_rms: np.ndarray, block_peak: np.ndarray,
     block_peak: the audio's sample peak per block_s block (peak_blocks).
     threshold: the style's threshold (RMS re a peak that is speech).
 
-    Returns (threshold, unguarded, levels): the threshold to use; the
-    one before the noise guard raised it (the same when it didn't),
-    which detect_silence applies inside the words Whisper transcribed
-    (speech_frames); and the levels they were placed by (dB re the
-    file's peak, for the log). If there is speech to place it by
-    (SPEECH_OVER_FLOOR_DB), the threshold moves down by as far as the
-    speech's loudest sample lies under the file's peak (see
+    Returns (threshold, unguarded, levels): the threshold for the gaps
+    between the words Whisper transcribed; the one before the noise
+    guard raised it (the same when it didn't), which detect_silence
+    applies everywhere else (speech_frames); and the levels they were
+    placed by (dB re the file's peak, for the log). If there is speech
+    to place it by (SPEECH_OVER_FLOOR_DB), the threshold moves down by
+    as far as the speech's loudest sample lies under the file's peak (see
     PEAK_TOLERANCE_DB), then stays NOISE_MARGIN_DB above a noise floor
     made of pauses. A file without speech, or without usable frames
     (shorter than one frame, all digital silence), keeps the style
@@ -658,9 +684,10 @@ class AudioAnalyzer:
                 Spitzenpegel der Sprache (Transienten zählen nicht) und den
                 Rauschboden der Datei angepasst (silence_threshold_for);
                 der verwendete Wert steht danach in
-                self.silence_threshold_used. Innerhalb transkribierter
-                Wörter (wenn transcribe() vorher lief) gilt der Wert vor
-                dem Rausch-Schutz.
+                self.silence_threshold_used. Der Rausch-Schutz gilt nur
+                in den Lücken zwischen transkribierten Wörtern (wenn
+                transcribe() vorher lief); überall sonst gilt der Wert
+                davor.
             min_silence_duration: Minimale Dauer für Stille in Sekunden
 
         Returns:
@@ -682,16 +709,21 @@ class AudioAnalyzer:
         threshold, unguarded, levels = silence_threshold_for(
             frame_rms, peak_blocks(audio_data, block), silence_threshold,
             hop_s=hop_s, block_s=block / sample_rate)
-        # The noise guard raised the threshold: inside the words Whisper
-        # transcribed (when transcribe() ran first, as in analyze_video)
-        # it doesn't apply, so a soft word near the noise floor stays
-        # speech.
-        words = (self._word_frames(len(frame_rms), hop_s)
-                 if unguarded < threshold else None)
-        is_speech_frame = speech_frames(frame_rms, threshold, unguarded, words)
-        if words is not None:
-            levels["words_s"] = round(float(np.sum(is_speech_frame & (frame_rms <= threshold)))
-                                      * hop_s, 2)
+        # The noise guard raised the threshold: it applies only in the
+        # gaps between the words Whisper transcribed (when transcribe()
+        # ran first, as in analyze_video). Inside a word, before the
+        # first and after the last one, and without a transcript, the
+        # threshold before it holds.
+        gaps = (guard_frames(self._word_frames(len(frame_rms), hop_s))
+                if unguarded < threshold else None)
+        is_speech_frame = speech_frames(frame_rms, threshold, unguarded, gaps)
+        if gaps is None or not gaps.any():
+            threshold = unguarded
+            levels.pop("noise_guard", None)
+        else:
+            # Seconds between the words that the guard made silence.
+            levels["guard_s"] = round(float(np.sum(
+                gaps & (frame_rms > unguarded) & ~is_speech_frame)) * hop_s, 2)
         self.silence_threshold_used = threshold
         self.silence_levels = levels
         # A log line, not a progress message (those reach the panels).
