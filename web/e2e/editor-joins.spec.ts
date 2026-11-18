@@ -15,8 +15,9 @@
  * player unless the page could not act (no animation frame for > 40 ms
  * while the jump was due) or the media pipeline itself leapt two or more
  * frames past its cadence (one above 1x, and a sped-up clip of two output
- * frames or less: a CPU-starved machine); those are reported and may be at
- * most two per run. A join mostly shows its clip's last kept frame (round
+ * frames or less: a CPU-starved machine), or dropped the last kept frame
+ * by itself far from a landing; those are reported and may be at most two
+ * per run. A join mostly shows its clip's last kept frame (round
  * 4: the jump is asked on it; the first frames after play or a landing,
  * callbacks running late and seeks that came late go a frame early on
  * purpose; clips of 6 frames or less don't count: the renderer settling
@@ -197,6 +198,12 @@ function check({ frames, raf, seeks = [] }: Run, segs: Seg[], leapBy = 2) {
   // Above 1x a clip of two output frames or less (a 0.13 s clip at 2x)
   // is over before a landing's clock has settled on a starved machine:
   // counted with those, never at 1x.
+  // The landing frames: the first near each jump's target after it was asked.
+  const lands = seeks.map(([at, to]) => frames.findIndex(([x, , pt]) => pt > at && Math.abs(x - to) <= 1.5 / FPS)).filter((j) => j >= 0);
+  const sinceLand = (i: number) => {
+    const j = Math.max(-1, ...lands.filter((x) => x <= i));
+    return j < 0 ? Infinity : i - j;
+  };
   const cut: number[] = [];
   let cutInStall = 0;
   let cutShort = 0;
@@ -210,7 +217,16 @@ function check({ frames, raf, seeks = [] }: Run, segs: Seg[], leapBy = 2) {
     const from = p === undefined ? -1 : range.findIndex(([a, b]) => p >= a && p < b);
     const speed = from >= 0 ? (segs[from].speed ?? 1) : 1;
     const short = from >= 0 && speed > 1 && (range[from][1] - range[from][0]) / speed <= 2;
-    if (stalled(raf, at) || leap) cutInStall++;
+    // …or the pipeline dropped the frame before it (a kept one) by itself,
+    // far from a landing: the cut frame presented in its slot (presentedFrames
+    // one on) after steady steps of one, the 6th frame after the landing or
+    // later — no clock or callback sees that coming (round 10's idle run:
+    // 812 → 814, the 14th). Not sooner: there the renderer settles, and the
+    // player goes a frame early on purpose (LAND_WARM_FRAMES).
+    const steady = prev.length >= 4 && prev.slice(-4).every((x, j, a) => j === 0 || x === a[j - 1] + 1);
+    const lastKept = range.some(([a, b]) => k - 1 >= a && k - 1 < b);
+    const dropped = p !== undefined && k - p === 2 && lastKept && steady && frames[i][1] - frames[i - 1][1] === 1 && sinceLand(i) > 5;
+    if (stalled(raf, at) || leap || dropped) cutInStall++;
     else if (short) cutShort++;
     else cut.push(k);
   });
