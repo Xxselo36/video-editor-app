@@ -362,6 +362,35 @@ test("a mouse over a row whose name is cut shows the whole name; no title otherw
   await expect(jobCard(page, "Kurz")).not.toHaveAttribute("title", /.+/);
 });
 
+test("a file name with dots stays on one line: whole where it fits, else cut with …, never broken after a dot", { tag: "@editor-v2" }, async ({
+  page,
+  stub,
+}) => {
+  // The narrowest phone: the row's name has 188 px.
+  await page.setViewportSize({ width: 320, height: 568 });
+  const short = await stub.seed("review", { filename: "Morgenroutine.final.mp4" });
+  const long = await stub.seed("review", { filename: "Morgenroutine.final.version.zwei.mp4" });
+  await openWithStorage(page, "/app", {
+    [JOBS]: [job(short.id, "Morgenroutine.final.mp4", 60_000), job(long.id, "Morgenroutine.final.version.zwei.mp4", 120_000)],
+  });
+  const rows = page.getByTestId("job-card");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+  const names = await rows.locator("h3").evaluateAll((hs) =>
+    hs.map((h) => ({
+      shown: h.querySelector("[aria-hidden]")?.textContent,
+      lines: Math.round(h.getBoundingClientRect().height / parseFloat(getComputedStyle(h).lineHeight)),
+      cut: h.scrollWidth > h.clientWidth + 1,
+      overflow: getComputedStyle(h).textOverflow,
+    })),
+  );
+  expect(names).toEqual([
+    { shown: "Morgenroutine.final", lines: 1, cut: false, overflow: "ellipsis" },
+    { shown: "Morgenroutine.final.version.zwei", lines: 1, cut: true, overflow: "ellipsis" },
+  ]);
+  expect(await horizontalOverflow(page)).toBe(0);
+});
+
 test("only expired projects: an empty state, nothing requested", { tag: "@editor-v2" }, async ({ page, stub }) => {
   const gone = await stub.seed("projects_all_expired");
   const frames: string[] = [];
