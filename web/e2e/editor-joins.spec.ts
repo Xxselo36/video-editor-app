@@ -17,14 +17,17 @@
  * frames past its cadence (one above 1x, and a sped-up clip of two output
  * frames or less: a CPU-starved machine), or dropped the last kept frame
  * by itself far from a landing; those are reported and may be at most two
- * per run. A join mostly shows its clip's last kept frame (round
+ * per run. Where the pipeline stood still in a clip after its landing, its
+ * join may drop two kept frames (round 11: the frame clock runs ahead of
+ * the frames then; at most two such joins per run, not counted with the
+ * others). A join mostly shows its clip's last kept frame (round
  * 4: the jump is asked on it; the first frames after play or a landing,
  * callbacks running late and seeks that came late go a frame early on
  * purpose; clips of 6 frames or less don't count: the renderer settling
  * after their landing, round 10). Desktop and pixel7, a
  * v2 build (E2E_EDITOR_V2=1); JOINS_DUMP=1 attaches every frame (with the
- * element's clock at its callback), and when the player asked for each
- * jump.
+ * element's clock at its callback), the element's clock at each animation
+ * frame, and when the player asked for each jump.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
@@ -111,7 +114,7 @@ function manyClips(speedAt?: (i: number) => number): Seg[] {
 }
 
 type Frame = [mediaTime: number, presented: number, presentationTime: number, expectedDisplayTime?: number, callbackAt?: number, clock?: number];
-type Run = { frames: Frame[]; raf: number[]; seeks?: [at: number, to: number][] };
+type Run = { frames: Frame[]; raf: number[]; seeks?: [at: number, to: number][]; rafClock?: number[] };
 
 /** Plays the whole edit from its start; every presented frame's mediaTime. */
 async function playThrough(page: Page, segs: Seg[]): Promise<Run> {
@@ -140,10 +143,13 @@ async function playThrough(page: Page, segs: Seg[]): Promise<Run> {
     });
     video.requestVideoFrameCallback(cb);
     // the page's own animation frames: when the main thread ran at all
-    const r = window as unknown as { __raf: number[] };
+    const r = window as unknown as { __raf: number[]; __rafClock: number[] };
     r.__raf = [];
+    r.__rafClock = [];
     const tick = (now: number) => {
       r.__raf.push(now);
+      // (the element's clock at each animation frame, as the player reads it)
+      r.__rafClock.push(video.currentTime);
       if (r.__raf.length < 20_000) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -155,8 +161,8 @@ async function playThrough(page: Page, segs: Seg[]): Promise<Run> {
     .poll(() => v.evaluate((el) => (el as HTMLVideoElement).paused), { timeout: (outDur + 20) * 1000, intervals: [500] })
     .toBe(true);
   const run = await page.evaluate(() => {
-    const w = window as unknown as { __frames: Frame[]; __raf: number[]; __seeks: [number, number][] };
-    return { frames: w.__frames, raf: w.__raf, seeks: w.__seeks };
+    const w = window as unknown as { __frames: Frame[]; __raf: number[]; __seeks: [number, number][]; __rafClock: number[] };
+    return { frames: w.__frames, raf: w.__raf, seeks: w.__seeks, rafClock: w.__rafClock };
   });
   if (process.env.JOINS_DUMP) await test.info().attach("joins.json", { body: JSON.stringify(run), contentType: "application/json" });
   return run;
@@ -257,12 +263,32 @@ function check({ frames, raf, seeks = [] }: Run, segs: Seg[], leapBy = 2) {
   const early = (i: number) => ends[i][1] - ends[i][0] <= 6;
   const longer = dropsAt.filter((_, i) => !early(i));
   const lastShown = longer.filter((n) => n === 0).length;
-  const dropped2 = dropsAt.filter((n, i) => n >= 2 && ends[i][1] - ends[i][0] > 2).length;
+  // Clips at 1x whose frames the media pipeline held up: two presentations
+  // one after the other (presentedFrames one on), after the clip's landing
+  // frame, two and a half frame slots apart or more (round 11's pixel7 run:
+  // 788 → 789 100 ms after a landing, the element's clock 787.83 → 789.03 —
+  // the player's frame clock then runs ahead of the frames, its seam two
+  // frames early at that clip's end; 21 of 142 dumped 1x runs had such a
+  // stand, about 100 ms, all but one right after a landing's first step,
+  // and 3 of them dropped two kept frames there). A join there may drop two
+  // kept frames, at most two such joins per run; three or more count as at
+  // any other join.
+  const stalledClips = new Set<number>();
+  for (let i = 1; i < frames.length; i++) {
+    const [a, b] = [kOf(frames[i - 1][0]), kOf(frames[i][0])];
+    const c = range.findIndex(([s, e]) => a >= s && a < e);
+    if (c < 0 || (segs[c].speed ?? 1) !== 1 || b <= a || b >= range[c][1] || frames[i][1] - frames[i - 1][1] !== 1 || sinceLand(i - 1) < 1) continue;
+    if (frames[i][2] - frames[i - 1][2] >= (2.5 * 1000) / FPS) stalledClips.add(c);
+  }
+  const stallDrop = (n: number, i: number) => n === 2 && stalledClips.has(endAt[i]);
+  const drop2 = (n: number, i: number) => n >= 2 && ends[i][1] - ends[i][0] > 2 && !stallDrop(n, i);
+  const dropped2 = dropsAt.filter(drop2).length;
+  const stallDrops = dropsAt.filter((n, i) => ends[i][1] - ends[i][0] > 2 && stallDrop(n, i)).length;
   // the same at the clips playing at 1x (all of them in a 1x edit)
   const at1x = (i: number) => (segs[endAt[i]].speed ?? 1) === 1;
   const longer1x = dropsAt.filter((_, i) => at1x(i) && !early(i));
   const lastShown1x = longer1x.filter((n) => n === 0).length;
-  const dropped2at1x = dropsAt.filter((n, i) => at1x(i) && n >= 2 && ends[i][1] - ends[i][0] > 2).length;
+  const dropped2at1x = dropsAt.filter((n, i) => at1x(i) && drop2(n, i)).length;
   // frames the pipeline itself skipped inside a clip (a busy machine); and
   // inside the 1x clips only (a sped-up clip steps unevenly, idle: 60–100
   // "skips" in the 1.5x test — no sign of a busy machine)
@@ -292,7 +318,7 @@ function check({ frames, raf, seeks = [] }: Run, segs: Seg[], leapBy = 2) {
       }
     }
   });
-  return { cut, cutInStall, cutShort, joins, lastShown, ends: longer.length, dropped2, skipped, skipped1x, lastShown1x, ends1x: longer1x.length, dropped2at1x, slowSeeks };
+  return { cut, cutInStall, cutShort, joins, lastShown, ends: longer.length, dropped2, stallDrops, skipped, skipped1x, lastShown1x, ends1x: longer1x.length, dropped2at1x, slowSeeks };
 }
 
 async function seedMany(stub: import("./support/fixtures").Stub, segs: Seg[]) {
@@ -335,9 +361,11 @@ test.describe("proxy playback: no cut frame at any join (wordcuts10)", TAG, () =
     // A join drops at most its last kept frame, and mostly none. A busy
     // machine (the pipeline skipping frames by itself, a jump that reached
     // it late) makes the player jump a frame earlier on purpose: a little
-    // slack then — a late jump's for the joins after it (all at 1x here).
+    // slack then — a late jump's for the joins after it (all at 1x here);
+    // a clip the pipeline stood still in drops two at most (stallDrops).
     const busy = r.skipped > 3 || r.slowSeeks > 0;
     expect(r.dropped2).toBeLessThanOrEqual(busy ? Math.max(4, Math.ceil(r.skipped / 2), 1 + 8 * r.slowSeeks) : 1);
+    expect(r.stallDrops).toBeLessThanOrEqual(2);
     expect(r.lastShown / r.ends).toBeGreaterThan(busy ? 0.5 : 0.75);
   });
 
@@ -364,6 +392,7 @@ test.describe("proxy playback: no cut frame at any join (wordcuts10)", TAG, () =
     // — a third of the joins after one are at 1x).
     const busy = r.skipped1x > 3 || r.slowSeeks > 0;
     expect(r.dropped2at1x).toBeLessThanOrEqual(busy ? Math.max(4, Math.ceil(r.skipped1x / 2), 1 + 3 * r.slowSeeks) : 1);
+    expect(r.stallDrops).toBeLessThanOrEqual(2);
     expect(r.lastShown1x / r.ends1x).toBeGreaterThan(busy ? 0.5 : 0.75);
   });
 });
