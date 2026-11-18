@@ -1313,9 +1313,13 @@ export class EditPlayer {
    * (OVERDUE_FROM), nor at 1x (a frame lasts two refreshes: LAND_WARM_FRAMES
    * and the seam cover it). The frame rule takes the frame on screen as
    * that much further: the jump goes once the margin's first frame is on
-   * screen by the cadence and the clock — MAX_EARLY at most (the e2e dumps,
-   * replayed: of 194 such jumps, 179 shown within it by the next callback
-   * or the presentations it counts, 15 unknown, none beyond).
+   * screen by the cadence and the clock — MAX_EARLY at most while the
+   * pipeline keeps its cadence (the e2e dumps, replayed: of 194 such jumps,
+   * 179 shown within it by the next callback or the presentations it
+   * counts, 15 unknown, none beyond). Where the pipeline presents nothing
+   * in the slot counted, the join loses a source frame more, as at the
+   * seam, which goes by the frame clock too (the e2e runs with it: 1 of
+   * 1440 sped-up joins; none showed a cut frame of a race).
    */
   private overdueFrames(): number {
     if (!this.rvfc || this.lastFrameK === null || this.lastPresented === null || this.rate() <= FAST_RATE) return 0;
