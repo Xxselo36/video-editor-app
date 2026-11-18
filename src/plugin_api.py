@@ -291,7 +291,8 @@ def analyze_video(
     )
     speech_only = [s for s in speech_segments if s.has_speech]
     total_speech = sum(s.end - s.start for s in speech_only)
-    print(f"[silence] threshold={silence_threshold} "
+    print(f"[silence] threshold={silence_threshold}"
+          f"→{analyzer.silence_threshold_used:.4f} "
           f"min_gap={min_silence_duration}s → "
           f"{len(speech_only)} speech regions, "
           f"total speech={total_speech:.1f}s", flush=True)

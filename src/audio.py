@@ -82,6 +82,127 @@ class Beat:
     strength: float  # 0-1, wie stark der Beat ist
 
 
+# ── Silence threshold ────────────────────────────────────────────────
+# detect_silence() reads the audio in 100 ms RMS frames (50 ms hop),
+# normalised to the file's loudest sample. The styles' silence_threshold
+# values (0.02-0.035, i.e. -34 to -29 dB re that peak) assume that the
+# loudest moment is speech. Two kinds of recording break that:
+#   * one loud transient (a clap, a door, a knock on the mic) sets the
+#     peak: all the speech sits far below it, so soft speech - or all of
+#     it - falls under the threshold and is cut as silence;
+#   * broadband noise (hiss, fan, room) louder than the threshold reads
+#     as speech, so no pause is ever found.
+# silence_threshold_for() therefore places the style threshold relative
+# to the loudest sample of the speech (estimated so that transients don't
+# count) and keeps it clear of the noise floor. On a recording whose peak
+# is speech and whose noise sits well under the threshold it returns the
+# style threshold unchanged: the normal case cuts exactly as before.
+
+SILENCE_WINDOW_S = 0.1
+# The speech's own peak: the loudest sample peak the audio holds through
+# SPEECH_PEAK_FRAMES frames in a row (0.2 s), plus SPEECH_PEAK_GAP_DB. A
+# clap, click, knock or popped "p" fills at most two frames, so it can't
+# set it, however loud. In 80 synthetic recordings (espeak-ng phrases:
+# clean, under noise, reverberant, after a clap 12 or 20 dB over the
+# speech) the speech's loudest sample lay 0.6-2.8 dB over it; a voice
+# that holds its peaks evenly lies closer. 1 dB, near the low end: after
+# a transient the threshold rather moves a little too far down (keeps a
+# little more) than not far enough.
+SPEECH_PEAK_FRAMES = 3
+SPEECH_PEAK_GAP_DB = 1.0
+# When the speech's peak lies less than this far under the file's peak,
+# the peak counts as speech and the style threshold stays exactly as it
+# is (clean speech: at most 1.8 dB under). From twice as far on, the
+# threshold moves down with the speech's peak dB for dB - as if the
+# transient weren't there; in between it ramps linearly, so nearly equal
+# files get nearly equal thresholds. It never moves up.
+PEAK_TOLERANCE_DB = 3.0
+# The noise floor: the 10th percentile of the frames' RMS (the pauses).
+NOISE_FLOOR_PERCENTILE = 10
+# The threshold stays at least this far above the noise floor, so that
+# neither a lowered threshold nor a style threshold under the noise lets
+# steady noise (its 100 ms RMS varies by about 1 dB) read as speech ...
+NOISE_MARGIN_DB = 4.0
+# ... when the floor is made of pauses: at least FLOOR_PAUSE_SHARE of the
+# frames within NOISE_MARGIN_DB of it lie in stretches of FLOOR_PAUSE_S
+# or more (the shortest pause any style cuts). In speech without real
+# pauses the quietest frames are short dips between words; a threshold
+# above them would cut soft speech, so there the floor is not used.
+FLOOR_PAUSE_S = 0.3
+FLOOR_PAUSE_SHARE = 0.5
+
+
+def _db(x: float) -> float:
+    return 20.0 * float(np.log10(max(float(x), 1e-9)))
+
+
+def silence_frames(audio: np.ndarray, window: int,
+                   hop: int) -> tuple[np.ndarray, np.ndarray]:
+    """RMS and sample peak of audio[i:i + window] for i in range(0,
+    len(audio) - window, hop): the frames detect_silence() decides on
+    (the RMS computed exactly as it always was, so the same frames give
+    the same decisions)."""
+    starts = range(0, len(audio) - window, hop)
+    rms = np.array([np.sqrt(np.mean(audio[i:i + window] ** 2)) for i in starts],
+                   dtype=float)
+    peak = np.array([max(audio[i:i + window].max(), -audio[i:i + window].min())
+                     for i in starts], dtype=float)
+    return rms, peak
+
+
+def _floor_is_pauses(rms: np.ndarray, level: float, hop_s: float) -> bool:
+    """Do the frames at or under `level` mostly lie in stretches of at
+    least FLOOR_PAUSE_S (pauses), rather than in short dips?"""
+    low = rms <= level
+    edges = np.diff(np.concatenate(([0], low.astype(np.int8), [0])))
+    runs = np.flatnonzero(edges == -1) - np.flatnonzero(edges == 1)
+    min_run = max(1, int(np.ceil(FLOOR_PAUSE_S / hop_s - 1e-9)))
+    return bool(runs[runs >= min_run].sum() >= FLOOR_PAUSE_SHARE * low.sum())
+
+
+def silence_threshold_for(frame_rms: np.ndarray, frame_peak: np.ndarray,
+                          threshold: float,
+                          hop_s: float = SILENCE_WINDOW_S / 2) -> tuple[float, dict]:
+    """The style's silence threshold, placed for this file.
+
+    frame_rms, frame_peak: detect_silence's 100 ms frames, hop_s apart -
+        RMS and sample peak re the file's peak (the audio normalised to
+        it, as get_audio_data does).
+    threshold: the style's threshold (RMS re a peak that is speech).
+
+    Returns the threshold to use and the levels it was placed by (dB re
+    the file's peak, for the log): moved down by as far as the speech's
+    loudest sample lies under the file's peak (see PEAK_TOLERANCE_DB),
+    then kept NOISE_MARGIN_DB above a noise floor made of pauses. A file
+    without usable frames (shorter than one frame, all digital silence)
+    keeps the style threshold.
+    """
+    rms = np.asarray(frame_rms, dtype=float)
+    peak = np.asarray(frame_peak, dtype=float)
+    ok = np.isfinite(rms) & np.isfinite(peak)
+    rms, peak = rms[ok], peak[ok]
+    used = float(threshold)
+    if rms.size == 0 or not np.any(rms > 0):
+        return used, {}
+    if peak.size >= SPEECH_PEAK_FRAMES:
+        held = np.lib.stride_tricks.sliding_window_view(peak, SPEECH_PEAK_FRAMES)
+        under_db = -(_db(held.min(axis=1).max()) + SPEECH_PEAK_GAP_DB)
+        lower_db = min(under_db, 2.0 * (under_db - PEAK_TOLERANCE_DB))
+        if lower_db > 0:
+            used *= 10 ** (-lower_db / 20)
+        levels = {"speech_peak_db": round(-under_db, 1),
+                  "lowered_db": round(max(lower_db, 0.0), 1)}
+    else:
+        levels = {}
+    floor = float(np.percentile(rms, NOISE_FLOOR_PERCENTILE))
+    levels["floor_db"] = round(_db(floor), 1)
+    guard = floor * 10 ** (NOISE_MARGIN_DB / 20)
+    if guard > used and _floor_is_pauses(rms, guard, hop_s):
+        used = guard
+        levels["noise_guard"] = True
+    return used, levels
+
+
 class AudioAnalyzer:
     """Analysiert Audio für Schnitte, Untertitel und Beat-Sync."""
 
@@ -100,6 +221,10 @@ class AudioAnalyzer:
         self._transcription = None
         self._subtitles = []
         self._speech_segments = []
+        # What detect_silence used: the style threshold placed for this
+        # file, and the levels it was placed by (dB re peak).
+        self.silence_threshold_used = None
+        self.silence_levels = {}
         self._beats = []
         self._audio_data = None
         self._sample_rate = None
@@ -434,7 +559,13 @@ class AudioAnalyzer:
         Erkennt Stille-Abschnitte im Audio.
 
         Args:
-            silence_threshold: Amplitude-Schwellwert für Stille (0-1)
+            silence_threshold: Amplitude-Schwellwert für Stille (0-1), wie
+                die Styles ihn angeben: RMS re Spitzenpegel einer Aufnahme,
+                deren lautester Moment Sprache ist. Wird an den
+                Spitzenpegel der Sprache (Transienten zählen nicht) und den
+                Rauschboden der Datei angepasst (silence_threshold_for);
+                der verwendete Wert steht danach in
+                self.silence_threshold_used.
             min_silence_duration: Minimale Dauer für Stille in Sekunden
 
         Returns:
@@ -448,17 +579,24 @@ class AudioAnalyzer:
         self._report("Analysiere Audio fuer Stille-Erkennung...")
 
         # Fenster-Größe für Analyse (100ms)
-        window_size = int(sample_rate * 0.1)
+        window_size = int(sample_rate * SILENCE_WINDOW_S)
         hop_size = window_size // 2
+        frame_rms, frame_peak = silence_frames(audio_data, window_size, hop_size)
+        threshold, levels = silence_threshold_for(
+            frame_rms, frame_peak, silence_threshold, hop_s=hop_size / sample_rate)
+        self.silence_threshold_used = threshold
+        self.silence_levels = levels
+        # A log line, not a progress message (those reach the panels).
+        print(f"[silence] style threshold {silence_threshold:.4f} -> "
+              f"{threshold:.4f} (dB re peak: {levels})", flush=True)
 
         segments = []
         current_is_speech = None
         segment_start = 0
 
-        for i in range(0, len(audio_data) - window_size, hop_size):
-            window = audio_data[i:i + window_size]
-            rms = np.sqrt(np.mean(window ** 2))
-            is_speech = rms > silence_threshold
+        for k, rms in enumerate(frame_rms):
+            i = k * hop_size
+            is_speech = rms > threshold
 
             time = i / sample_rate
 
