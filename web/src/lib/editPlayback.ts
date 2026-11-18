@@ -67,7 +67,9 @@
  * drops one now and then (LAND_WARM_FRAMES). Round 11: above FAST_RATE the
  * frame rule counts in the presentations whose callbacks are still to come
  * (overdueFrames: Chromium runs none for two now and then, the pipeline
- * racing meanwhile).
+ * racing meanwhile). Round 12: a split into a clip of a few frames — that
+ * clip's end checked from the split's first part on, at its speed
+ * (dueAfterSplit), and as soon as it is entered.
  * Without frame callbacks the clock is all there is,
  * CLOCK_EARLY_FRAMES before the last kept frame (round 3's clock jumped 3–5
  * frames early on a busy machine: the end of a word lost at every join).
@@ -648,6 +650,9 @@ export class EditPlayer {
    *  screen's refresh); and when the last one ran. */
   private tickGaps: number[] = [];
   private lastTickAt: number | null = null;
+  /** The speed the frame rule counts at while it looks past a split (the
+   *  next clip's: dueAfterSplit); null: the element's. */
+  private rateFor: number | null = null;
 
   constructor(video: HTMLVideoElement, opts: EditPlayerOptions = {}) {
     this.v = video as FrameVideo;
@@ -901,6 +906,7 @@ export class EditPlayer {
   }
 
   private rate(): number {
+    if (this.rateFor !== null) return this.rateFor;
     const r = this.v.playbackRate;
     return r > 0 ? r : 1;
   }
@@ -1526,14 +1532,55 @@ export class EditPlayer {
     const [a, b] = this.framesOf(seg);
     if (k < a - 1) return; // not this clip's footage: tick() finds the place
     if (this.joined(i)) {
-      if (k >= b) this.enter(i + 1, null);
+      // a split: on to the next clip once its frames are up, its end checked
+      // at once; before, the jump at its end may be due already (a clip of a
+      // few frames: dueAfterSplit)
+      if (k < b) {
+        if (this.dueAfterSplit(i, k)) this.boundary(i + 1);
+      } else {
+        this.enter(i + 1, null);
+        this.endCheck(i + 1, k);
+      }
       return;
     }
-    // the frame rule: on the last kept frame (under load the margin's
-    // frames before it); the seam or the clock (a callback come late, a
-    // frame the decoder never presented) — or a timer for their moment
-    if (this.ruleNow(k, b) || this.dueNow(seg)) this.boundary(i);
+    this.endCheck(i, k);
+  }
+
+  /** Clip i's end, frame k on screen: the frame rule (on the last kept
+   *  frame; under load the margin's frames before it), the seam or the clock
+   *  (a callback come late, a frame the decoder never presented) — or a
+   *  timer for their moment. */
+  private endCheck(i: number, k: number): void {
+    const seg = this.plan[i];
+    if (!seg || this.joined(i)) return;
+    if (this.ruleNow(k, this.framesOf(seg)[1]) || this.dueNow(seg)) this.boundary(i);
     else this.armNear(i);
+  }
+
+  /**
+   * Split i's first part is on screen up to frame k (as the frame rule
+   * counts it): is the jump at the end of the clip after the split due
+   * already? The frame rule, at that clip's speed, against its end (round
+   * 12): a clip of a few frames there ends within the margin, and checked
+   * only once entered (on its first frame) its jump came a presentation too
+   * late — the e2e speed test's [228, 231) at 2x after [219, 228) at 1.5x
+   * showed cut frame 231 (the jump asked 0.3–0.4 ms before 231's pick, the
+   * seek's reach more). Never before the first part's last kept frame (k ≥
+   * the next clip's first frame − 1): the jump drops that clip's frames
+   * only, MAX_EARLY of output at most. Not into the timeline's last clip
+   * (its end is a pause, not a jump).
+   */
+  private dueAfterSplit(i: number, k: number): boolean {
+    const next = this.plan[i + 1];
+    if (!this.rvfc || !next || !this.plan[i + 2] || this.joined(i + 1)) return false;
+    const [a, b] = this.framesOf(next);
+    if (k < a - 1) return false;
+    this.rateFor = clamp(next.speed * this.masterRate, 0.0625, 16);
+    try {
+      return this.ruleNow(k, b);
+    } finally {
+      this.rateFor = null;
+    }
   }
 
   // ── internals ────────────────────────────────────────────────────
@@ -1756,9 +1803,22 @@ export class EditPlayer {
     }
     if (!v.paused && !this.seekPending() && !this.atEnd) {
       if (this.joined(i)) {
-        // A split: the next clip continues the same footage — no seek.
+        // A split: the next clip continues the same footage — no seek; its
+        // end checked as soon as it is entered, and before (a clip of a few
+        // frames: dueAfterSplit, the frames whose callbacks are overdue
+        // counted in).
         if (t >= seg.end) {
           this.enter(i + 1, null);
+          const next = plan[i + 1];
+          if (!this.joined(i + 1)) {
+            if (this.dueNow(next)) this.boundary(i + 1);
+            else this.armNear(i + 1);
+          }
+          return;
+        }
+        const k = this.lastFrameK;
+        if (k !== null && this.dueAfterSplit(i, k + this.overdueFrames())) {
+          this.boundary(i + 1);
           return;
         }
       } else {
