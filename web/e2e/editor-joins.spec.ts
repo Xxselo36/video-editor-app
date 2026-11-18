@@ -19,8 +19,8 @@
  * most two per run. A join mostly shows its clip's last kept frame (round
  * 4: the jump is asked on it; the first frames after play or a landing,
  * callbacks running late and seeks that came late go a frame early on
- * purpose; clips of 3 frames or less don't count, nor of 5 or 6: the
- * renderer settling after their landing, round 10). Desktop and pixel7, a
+ * purpose; clips of 6 frames or less don't count: the renderer settling
+ * after their landing, round 10). Desktop and pixel7, a
  * v2 build (E2E_EDITOR_V2=1); JOINS_DUMP=1 attaches every frame (with the
  * element's clock at its callback), and when the player asked for each
  * jump.
@@ -234,11 +234,11 @@ function check({ frames, raf, seeks = [] }: Run, segs: Seg[], leapBy = 2) {
     for (let k = b - 1; k >= a && !shown.has(k); k--) n++;
     return n;
   });
-  // (a clip of 3 frames or less ends on a landing's first frames, and one
-  // of 5 or 6 as the renderer settles after its landing — it drops a frame
+  // (a clip of 6 frames or less ends on a landing's first frames, where
+  // the clock starts again and the renderer settles — it drops a frame
   // there now and then, round 10: the player jumps a frame early on
-  // purpose at both, their last frame may go)
-  const early = (i: number) => ends[i][1] - ends[i][0] <= 3 || [5, 6].includes(ends[i][1] - ends[i][0]);
+  // purpose, its last frame may go)
+  const early = (i: number) => ends[i][1] - ends[i][0] <= 6;
   const longer = dropsAt.filter((_, i) => !early(i));
   const lastShown = longer.filter((n) => n === 0).length;
   const dropped2 = dropsAt.filter((n, i) => n >= 2 && ends[i][1] - ends[i][0] > 2).length;

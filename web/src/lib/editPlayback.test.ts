@@ -723,11 +723,12 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
       return n;
     });
   };
-  /** A clip of 5 or 6 frames gives up its last kept frame on purpose (round
-   *  10: it comes as the renderer settles after the landing — SETTLE_FRAMES). */
+  /** A clip of 6 frames or less gives up its last kept frame on purpose
+   *  (round 10: it comes as the renderer settles after the landing —
+   *  LAND_WARM_FRAMES). */
   const settling = (s: { start: number; end: number }, fps = 30) => {
     const [a, b] = clipFrames(s, fps);
-    return b - a === 5 || b - a === 6;
+    return b - a <= 6;
   };
 
   it("frame callbacks: the jump goes on each clip's last frame; no cut frame; the last frames show — the first join of a player finds the seek's reach out a frame early, never again", async () => {
@@ -1559,11 +1560,11 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
   }, 240_000);
 
   // ── round 10 ──
-  it("the renderer settling after a landing drops a frame at its 5th or 6th presentation, the next one in its slot (Chromium; the e2e runs' cut frames 259, 793 and 1009 at 6-frame clips — 257 → 259 within 33 ms): no cut frame, at most the last kept frame at a join; clips of 7 frames or more keep theirs", async () => {
+  it("the renderer settling after a landing drops a frame at its 4th, 5th or 6th presentation, the next one in its slot (Chromium; the e2e runs' cut frames 259, 793 and 1009 after 6-frame clips — 257 → 259 within 33 ms — and, on a busy machine, 318 and 528 after 4-frame ones): no cut frame, at most the last kept frame at a join; clips of 7 frames or more keep theirs", async () => {
     // clips of 4–24 frames on the frame grid (30 fps), cuts of 4–9 frames;
-    // every 6th clip is of 5 or 6 frames, and the renderer drops a frame
-    // after landing on it (one landing in six: no load read from it)
-    const lens = [6, 9, 11, 7, 15, 24, 5, 9, 11, 4, 15, 24];
+    // every 6th clip is of 4, 5 or 6 frames, and the renderer drops a
+    // frame after landing on it (one landing in six: no load read from it)
+    const lens = [6, 9, 11, 7, 15, 24, 4, 9, 11, 13, 15, 24, 5, 9, 11, 7, 15, 24];
     const plan: { id: string; start: number; end: number }[] = [];
     for (let i = 0, a = 15; i < 42; i++) {
       const b = a + lens[i % lens.length];
@@ -1571,9 +1572,9 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
       a = b + 4 + (i % 6);
     }
     const len = (i: number) => clipFrames(plan[i], 30)[1] - clipFrames(plan[i], 30)[0];
-    const short = plan.filter((_, i) => len(i) <= 6 && len(i) >= 5).map((s) => s.start);
+    const short = plan.filter((_, i) => len(i) <= 6).map((s) => s.start);
     const ok = (k: number) => plan.some((s) => k >= clipFrames(s, 30)[0] && k < clipFrames(s, 30)[1]);
-    for (const at of [4, 5])
+    for (const at of [3, 4, 5])
       for (const o of [{}, { earlyCb: chromium }]) {
         const label = `settle at ${at} ${JSON.stringify(Object.keys(o))}`;
         const when = (to: number) => short.some((x) => Math.abs(to - x) < 0.02);
@@ -1588,7 +1589,7 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
         expect(long.filter((n) => n === 0).length / long.length, label).toBeGreaterThanOrEqual(0.9);
         vi.clearAllTimers();
       }
-  }, 60_000);
+  }, 90_000);
 
   it("a 60 fps file (the player's own; the editor plays the cut preview there) on a 90 Hz screen, the page's timers 5 ms late, the seek's reach 4 ms: no cut frame, at most the last kept frame at a join — round 7's seam floor read the screen's refresh as 22 ms there (picks 11 and 22 ms apart, the animation frames' refresh taken as 60 Hz's) and held the seam past the cut frame's pick: 4 cut frames", async () => {
     for (const o of [{}, { earlyCb: chromium }]) {

@@ -63,8 +63,8 @@
  * cadence (a 30 Hz one: iOS Low Power Mode); the seam never before the
  * last kept frame's pick (50/48 fps); a frame rate the steps can't tell
  * (60 fps at 2x) the frames both candidates keep. Round 10: a frame early
- * on the 4th and 5th frames after a landing, where the renderer settling
- * drops one now and then (SETTLE_FRAMES).
+ * on the first five frames after a landing, where the renderer settling
+ * drops one now and then (LAND_WARM_FRAMES).
  * Without frame callbacks the clock is all there is,
  * CLOCK_EARLY_FRAMES before the last kept frame (round 3's clock jumped 3–5
  * frames early on a busy machine: the end of a word lost at every join).
@@ -271,22 +271,19 @@ const SEAM_LEAD_MS = 16;
  *  two kept frames of a clip ending that soon are skipped. */
 const WARM_FRAMES = 4;
 /** The frames right after a seek landed come while the clock starts again
- *  (late, then a few at once): on the landing frame and the one after it
- *  the next presentation is assumed to leap one frame further. Only a clip
- *  of 3 frames or less ends that soon (its last kept frame may go); the
- *  full e2e run showed the cut frame after such a clip. */
-const LAND_WARM_FRAMES = 2;
-/** …and as the renderer settles after it (round 10): Chromium now and then
- *  drops a frame at the 5th or 6th presentation after a landing (100–135
- *  ms after the clock started again, at 30 fps) — the next frame shown in
- *  the dropped one's slot, a slot before the frame clock has it. The e2e
- *  runs: 17 of the 21 first frames skipped after 944 landings came there,
- *  about 1 in 800 at any other; a 6-frame clip's last kept frame went that
- *  way and its cut frame showed in 1 run in 5. On the 4th and 5th frames
- *  shown since a landing (or play: shownRun) the next presentation is
- *  assumed to leap one frame too — a clip of 5 or 6 frames gives up its
- *  last kept frame. */
-const SETTLE_FRAMES = [4, 5];
+ *  (late, then a few at once) and the renderer settles (round 10: Chromium
+ *  now and then drops a frame there and shows the next one in its slot, a
+ *  slot before the frame clock has it — mostly at the 5th or 6th
+ *  presentation after the landing, 100–135 ms after the clock started
+ *  again at 30 fps: 17 of the 21 first skips after 944 landings in the e2e
+ *  runs, about 1 in 800 at any other presentation; on a busy machine from
+ *  the 3rd on: 9 of 27 at the 3rd and 4th). On the landing frame and the
+ *  four after it (or after play: shownRun) the next presentation is
+ *  assumed to leap one frame further: a clip of 6 frames or less gives up
+ *  its last kept frame. The e2e runs showed the cut frame after clips of
+ *  3 frames, then (round 10) of 6 — 1 run in 5 — and, on a busy machine,
+ *  of 4. */
+const LAND_WARM_FRAMES = 5;
 
 /**
  * A clip's frames on the render's grid (backend captions_v2.clip_plan):
@@ -1002,10 +999,9 @@ export class EditPlayer {
    *  (a slow pipeline; late timers lead the seam timer instead, at most to
    *  the last kept frame's slot); one while the renderer starts up
    *  (play: WARM_FRAMES — on a frame presented since play the margin's
-   *  two) or the clock starts again after a landing (LAND_WARM_FRAMES: the
-   *  next presentation may leap a frame) and the renderer settles
-   *  (SETTLE_FRAMES: it may drop one); one more above FAST_RATE. At most
-   *  MAX_EARLY output frames. */
+   *  two) or the clock starts again and the renderer settles after a
+   *  landing (LAND_WARM_FRAMES: the next presentation may leap a frame);
+   *  one more above FAST_RATE. At most MAX_EARLY output frames. */
   private leap(): number {
     if (!this.rvfc) return 0;
     // (on a frame presented since play, the margin's frames: the next ones
@@ -1013,8 +1009,7 @@ export class EditPlayer {
     // then 16 or 17 with none, the cut frame 18, within 50 ms)
     const u = this.gridUnit();
     const playWarm = this.playFrames < WARM_FRAMES ? (this.framesSince >= 1 ? this.maxEarly() : u) : 0;
-    const landing = (this.shownRun > 0 && this.shownRun <= LAND_WARM_FRAMES) || SETTLE_FRAMES.includes(this.shownRun);
-    const warm = Math.max(playWarm, landing ? u : 0);
+    const warm = Math.max(playWarm, this.shownRun > 0 && this.shownRun <= LAND_WARM_FRAMES ? u : 0);
     const m = this.margin();
     const early = m > 0 ? Math.ceil(m * Math.max(1, this.rate()) * u - 1e-6) : 0;
     const fm = 1000 / (this.fps() * this.rate());
