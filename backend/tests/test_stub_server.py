@@ -9,6 +9,7 @@ Needs ffmpeg (the grid clip); not espeak-ng.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import socket
@@ -68,13 +69,13 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-@pytest.fixture(scope="module")
-def stub(tmp_path_factory):
+@contextlib.contextmanager
+def _running_stub(tmp: Path, *flags: str):
+    """The stub as the browser suites run it, on a free port: its Api."""
     try:
         stub_media.ffmpeg()
     except RuntimeError as e:
         pytest.skip(str(e))
-    tmp = tmp_path_factory.mktemp("stub")
     port = _free_port()
     # The test run's own settings (DB, R2, test mode) are not the stub's.
     env = {k: v for k, v in os.environ.items()
@@ -84,7 +85,7 @@ def stub(tmp_path_factory):
     log = open(tmp / "stub.log", "w+")
     proc = subprocess.Popen(
         [sys.executable, str(HERE / "stub_server.py"), "--port", str(port),
-         "--web-origin", "http://localhost:3999"],
+         "--web-origin", "http://localhost:3999", *flags],
         cwd=str(REPO), env=env, stdout=log, stderr=subprocess.STDOUT)
     api = Api(f"http://127.0.0.1:{port}")
     try:
@@ -111,6 +112,12 @@ def stub(tmp_path_factory):
             proc.kill()
             proc.wait(timeout=5)
         log.close()
+
+
+@pytest.fixture(scope="module")
+def stub(tmp_path_factory):
+    with _running_stub(tmp_path_factory.mktemp("stub")) as api:
+        yield api
 
 
 def test_info(stub):
@@ -294,3 +301,18 @@ def test_filmstrip_seeded_and_made_lazily(stub):
     same = ("interval", "tileW", "tileH")
     assert {k: made[k] for k in same} == {k: meta[k] for k in same}
     assert abs(made["n"] - meta["n"]) <= 1
+
+
+def test_r2_stub_lets_a_whole_run_open_its_uploads(tmp_path):
+    """The R2 suites' pages are all 127.0.0.1, one caller with auth off:
+    a whole run (both projects, CI's retries) opens more multipart
+    uploads than production lets one caller open in an hour
+    (CLEO_UPLOAD_INITS_PER_HOUR, 60). The stub has no such cap: the last
+    suites' uploads were refused (429 too_many_uploads) on CI."""
+    with _running_stub(tmp_path, "--r2") as api:
+        assert api.json("GET", "/_test/info")["r2"] is True
+        for n in range(61):
+            status, _, raw = api.call("POST", "/uploads/multipart/init",
+                                      {"filename": f"clip-{n}.mp4", "content_type": "video/mp4",
+                                       "size": 3 * 1024 * 1024, "duration": 12})
+            assert status == 200, f"init {n + 1}: {status} {raw[:300]!r}"
