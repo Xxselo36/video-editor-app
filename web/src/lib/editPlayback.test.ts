@@ -357,6 +357,18 @@ type Presented = { k: number; at: number; seeking: boolean };
  * settling after the seek dropped one, the next frame in its slot
  * (Chromium, the e2e runs: 257 → 259 within 33 ms at the 5th, a frame
  * ahead of the clock after it; at about 1 landing in 40).
+ * `burst`: above 1.25x, once a frame `at(k, n)` says is on screen (n:
+ * presentations since the landing frame; its callback a refresh after its
+ * pick), the picks run `frames` frames ahead over the next three refreshes
+ * (the pipeline catching up), the callbacks of the next `miss` presentations
+ * never run (coalesced: animation frames on time) and the element's clock
+ * shows the gain two refreshes late — the e2e runs (round 11): 457 → 463 at
+ * 2x, 674 → 679 and 809 → 814 at 1.5x, presentedFrames up 3 between two
+ * callbacks, the frames up to two ahead of the element's clock.
+ * `pickLateMs`: frame metadata's presentationTime comes this long after
+ * the refresh the frame was picked at (Chromium, the e2e dumps: 0.2–0.6 ms
+ * after the animation frames' timestamps; `cbDelay: 0` with it: the
+ * rendering update right at the refresh, as there).
  */
 function framedVideo(
   start: number,
@@ -386,6 +398,8 @@ function framedVideo(
     stretchMs?: number;
     race?: { frames: number };
     settle?: { at: number; when: (to: number) => boolean };
+    burst?: { at: (k: number, n: number) => boolean; frames: number; miss: number };
+    pickLateMs?: number;
   } = {},
 ) {
   const fps = o.fps ?? 30;
@@ -445,8 +459,19 @@ function framedVideo(
   const settled = () => !!o.settle && landFrame !== null && presented + 1 - landFrame >= o.settle.at;
   const raceOff = (t: number) =>
     raceFrom !== null && o.race && clockRate > 1.25 ? (Math.min(1, Math.max(0, t - raceFrom) / vsync) * o.race.frames) / fps : 0;
-  const clockAt = (t: number) => (paused || frozen || mstalled ? pos : pos + (run(t) / 1000) * clockRate + raceOff(t));
+  // (burst: the landing frame's presentation count, when the burst began;
+  // the element's clock shows its gain two refreshes late)
+  let burstLand: number | null = null;
+  let burstFrom: number | null = null;
+  let bursts = 0;
+  const burstOff = (t: number) =>
+    burstFrom !== null && o.burst ? (Math.min(1, Math.max(0, t - burstFrom) / (3 * vsync)) * o.burst.frames) / fps : 0;
+  const clockAt = (t: number) => (paused || frozen || mstalled ? pos : pos + (run(t) / 1000) * clockRate + raceOff(t) + burstOff(t));
   const clock = () => clockAt(Date.now());
+  const shownClock = () => {
+    const t = Date.now();
+    return clockAt(t) - (paused || frozen || mstalled ? 0 : burstOff(t) - burstOff(t - 2 * vsync));
+  };
   const frameAt = (t: number) => Math.floor((t - phase) * fps + 1e-9);
   let pendingMd: Md | null = null;
   let updateDue: number | null = null;
@@ -461,7 +486,7 @@ function framedVideo(
       mediaTime: Math.round((k / fps + phase) * 1000) / 1000,
       presentedFrames: n,
       expectedDisplayTime: shownAt - off,
-      presentationTime: pickedAt - off,
+      presentationTime: pickedAt + (o.pickLateMs ?? 0) - off,
     };
   };
   const present = (k: number, at: number) => {
@@ -501,6 +526,7 @@ function framedVideo(
       if (st && !mstalled) {
         pos = clockAt(now);
         raceFrom = null;
+        burstFrom = null;
         mstalled = true;
       } else if (!st && mstalled) {
         mstalled = false;
@@ -513,6 +539,13 @@ function framedVideo(
       const before = presented;
       if (vsyncs++ % every === 0) {
         if (picked !== null) present(picked, v0);
+        // (burst: once the frame `at` says is up)
+        if (o.burst && burstLand !== null && clockRate > 1.25 && o.burst.at(shown, presented - burstLand)) {
+          burstLand = null;
+          burstFrom = v0;
+          missLeft = o.burst.miss;
+          bursts++;
+        }
         picked = null;
         if (!paused && !frozen) {
           const kc = frameAt(clockAt(v0 + vsync * every));
@@ -524,7 +557,10 @@ function framedVideo(
           const k = o.behind ? Math.max(k0 - Math.max(0, Math.round(o.behind(now))), Math.min(k0, shown)) : k0;
           if (k !== shown && !o.drop?.(k)) picked = k;
         }
-        if (picked !== null && o.earlyCb?.(presented + 1)) {
+        // (burst: the presentation before the race has its callback a
+        // refresh after its pick, like every one in the e2e dumps' races)
+        const preBurst = !!o.burst && burstLand !== null && picked !== null && o.burst.at(picked, presented + 1 - burstLand);
+        if (picked !== null && missLeft === 0 && !preBurst && o.earlyCb?.(presented + 1)) {
           calledBack = picked;
           pendingMd = mdOf(picked, presented + 1, v0, v0 + vsync * every);
         }
@@ -566,6 +602,7 @@ function framedVideo(
         since = Date.now();
         clockRate = r;
         raceFrom = null;
+        burstFrom = null;
       }
       if (o.rateEvents) emit("ratechange");
     },
@@ -579,7 +616,7 @@ function framedVideo(
     muted: false,
     // (while a seek is on its way: its target, as browsers report it)
     get currentTime() {
-      return seeking ? target : clock() - lag();
+      return seeking ? target : shownClock() - lag();
     },
     set currentTime(x: number) {
       seeks.push({ at: Date.now(), to: x, pos: clock() });
@@ -591,6 +628,9 @@ function framedVideo(
       setTimeout(() => {
         pos = clock();
         raceFrom = null;
+        burstFrom = null;
+        // (a race's callbacks still to miss end with it)
+        if (o.burst) missLeft = 0;
         frozen = true;
         clockRate = rate;
       }, lat);
@@ -599,6 +639,8 @@ function framedVideo(
         frozen = false;
         since = Date.now() + (paused ? 0 : (o.landStartMs ?? 0));
         raceFrom = paused ? null : since;
+        burstFrom = null;
+        burstLand = o.burst ? presented + 1 : null;
         // the decoded target frame goes up at the next refresh
         picked = frameAt(x);
         landFrame = o.settle?.when(x) ? presented + 1 : null;
@@ -633,6 +675,7 @@ function framedVideo(
     pause() {
       pos = clock();
       raceFrom = null;
+      burstFrom = null;
       paused = true;
       emit("pause");
     },
@@ -659,7 +702,7 @@ function framedVideo(
     get: () => mutes.at(-1) ?? false,
     set: (x: boolean) => void mutes.push(x),
   });
-  return { v: v as unknown as HTMLVideoElement, frames, seeks, volumes, mutes, fps, phase, busy: busyNow };
+  return { v: v as unknown as HTMLVideoElement, frames, seeks, volumes, mutes, fps, phase, busy: busyNow, bursts: () => bursts };
 }
 
 /** A repeatable pseudo-random sequence (no Math.random in tests). */
@@ -1214,6 +1257,43 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
    *  rendering update right after the frame's pick (the e2e dumps: now −
    *  presentationTime 0–17 ms), else a refresh later. */
   const chromium = (n: number) => n % 3 === 0;
+
+  it("clips at 1.5x and 2x where the pipeline races ahead on the frame before the margin's first while two presentations' callbacks never run (presentedFrames up 3 between two callbacks, animation frames on time, the element's clock two refreshes behind the frames: the e2e runs' 457 → 463 at 2x, 674 → 679 and 809 → 814 at 1.5x — round 11): no cut frame, a join drops two frames of output at most — the frame rule counts the presentations whose callbacks are still to come as far as the cadence and the media clock (less 8 ms of it) say", async () => {
+    // (clips of 9–17 frames at 2x, 8–15 at 1.5x, a 1x one now and then)
+    const plan: { id: string; start: number; end: number; speed: number }[] = [];
+    for (let i = 0, a = 15; i < 54; i++) {
+      const speed = i % 6 === 5 ? 1 : [2, 1.5][i % 2];
+      const n = speed === 2 ? 9 + (i % 9) : speed === 1.5 ? 8 + (i % 8) : 12;
+      plan.push({ id: `b${i}`, start: a / 30, end: (a + n) / 30, speed });
+      a += n + 6;
+    }
+    const ranges = plan.map((x) => clipFrames(x, 30));
+    const ok = (k: number) => ranges.some(([a, b]) => k >= a && k < b);
+    // the race starts on the frame `before` frames before the margin's first
+    // (MAX_EARLY of output before the last kept frame: the frame rule jumps
+    // on it) — the e2e runs': the one before; at 2x the one before that too
+    // (and the refreshes timed as in the e2e dumps: the rendering update
+    // right at the refresh, presentationTime 0.4 ms after it — two
+    // refreshes after a pick the clock has run 1.48 frames at 1.5x: round
+    // 11's first try, half a frame of clock margin, let the race through)
+    for (const before of [1, 2])
+      for (const o of [{}, { earlyCb: chromium }, { cbDelay: 0, pickLateMs: 0.4 }, { cbDelay: 0, pickLateMs: 0.4, earlyCb: chromium }]) {
+        const label = `race from ${before} before the margin ${JSON.stringify(Object.keys(o))}`;
+        const from = new Set(
+          plan.filter((s) => s.speed > 1 && (before === 1 || s.speed === 2)).map((s) => clipFrames(s, 30)[1] - 1 - atSpeed(s.speed) - before),
+        );
+        // (from the 3rd presentation after the landing frame on: the e2e
+        // races came from the 4th on)
+        const f = framedVideo(0.5, { burst: { at: (k, n) => n >= 3 && from.has(k), frames: 3, miss: 2 }, landStartMs: 60, ...o });
+        const got = await playAll(f, 16_000, { plan });
+        // (the race at most of the sped-up clips' ends)
+        expect(f.bursts(), label).toBeGreaterThanOrEqual(before === 1 ? 30 : 15);
+        expect(cutOf(got, ok), label).toEqual([]);
+        const d = droppedAtEnds(got, plan);
+        d.forEach((n, i) => expect(n, `${label} clip ${i}`).toBeLessThanOrEqual(plan[i].speed > 1 ? atSpeed(plan[i].speed) : 1));
+        vi.clearAllTimers();
+      }
+  }, 60_000);
 
   it("clips at 1.5x and 2x between 1x ones, the frame callbacks as Chromium runs them: no cut frame; the 1x clips drop at most their last kept frame, mostly none — round 5 took those callbacks (a refresh after their pick: more than a presentation at 2x) for two frames' load and held it into the 1x clips after (two kept frames at nearly every one)", async () => {
     // (and with the UI's 1.25x preset among them: round 6 still read its
