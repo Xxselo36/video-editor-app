@@ -118,7 +118,10 @@ SILENCE_WINDOW_S = 0.1
 # rather moves a little too far down (keeps a little more) than not far
 # enough. A 100 ms hold resists longer tails, but it lies 0.9-8.3 dB under
 # clean speech: a tolerance wide enough for that leaves claps 8-16 dB
-# over the speech only partly corrected.
+# over the speech only partly corrected. A 10 ms block holds a pitch
+# period of a voice down to 100 Hz: 5 ms blocks lie up to 8.8 dB under
+# clean speech, and with 20 ms blocks (3 per hold) a clap 30 dB over the
+# speech lifts the estimate by 9 dB.
 SPEECH_PEAK_BLOCK_S = 0.01
 SPEECH_PEAK_HOLD_S = 0.06
 SPEECH_PEAK_GAP_DB = 0.2
