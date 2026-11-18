@@ -138,9 +138,9 @@ NOISE_FLOOR_PERCENTILE = 10
 # over its own floor (steady white, pink or brown), 14-16 dB when it
 # wanders by +-3 dB, 18-21 dB by +-6 dB; a music bed without rests 10 dB.
 # Speech holds 21 dB and more over noise 24 dB under its peak (17-20 dB
-# over noise 20 dB under: no move, as before). Over digital silence, a
-# lone clap's tail is all that holds: 45-55 dB under its peak (an 8 ms
-# decay). So a file of steady noise and clicks alone, of music without
+# over noise 20 dB under: mostly no move, as before). Over digital
+# silence, a lone clap's tail is all that holds: 45-55 dB under its peak
+# (an 8 ms decay). So a file of steady noise and clicks alone, of music without
 # rests, or of digital silence around one clap keeps the style
 # threshold: the clicks don't turn into speech, and noise that reads as
 # speech stays speech, as it always did.
@@ -161,7 +161,8 @@ FLOOR_PAUSE_SHARE = 0.5
 # is speech over the threshold as it was before the guard raised it
 # (speech_frames). An unstressed word 10-16 dB under the stressed ones
 # lies near the floor of noise 24-28 dB under the speech's peak; the
-# guard alone cut 3 to 9 of 25 such words whole in the fast style.
+# guard alone cut 3 to 9 of 25 words, most of them whole, in the fast
+# style.
 
 
 def _db(x: float) -> float:

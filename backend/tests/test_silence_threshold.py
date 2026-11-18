@@ -8,9 +8,10 @@ speech far under the threshold and cut soft speech - or all of it - as
 silence, and broadband noise above the threshold read as speech, so no
 pause was found. Now the threshold sits relative to the speech's own
 peak (a transient doesn't count, wherever it falls on the frames' hop)
-and above the noise floor of the pauses; a recording whose peak is
-speech and whose pauses lie more than 4 dB under the threshold cuts
-exactly as before.
+and above the noise floor of the pauses - but not inside the words
+Whisper transcribed, and not in a file without speech. A recording whose
+peak is speech and whose pauses lie more than 4 dB under the threshold
+cuts exactly as before.
 
 The audio is synthetic, made here: speech-like phrases (a glottal pulse
 train through two formant resonators, syllables at varying levels with
@@ -556,8 +557,8 @@ def test_soft_words_whisper_heard_stay_in_noise(tmp_path, monkeypatch, noise_db,
     first word starting 30-170 ms early, its last ending 50-170 ms
     early). The noise guard raises the threshold over the soft words, but
     not inside the words Whisper heard: every word comes out whole.
-    Without that, 3-9 of the 25 words were cut whole (the speech then
-    started at the next stressed word)."""
+    Without that, 3-9 of the 25 words were cut, most of them whole (the
+    speech then started at the next stressed word)."""
     from src import plugin_api
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     phrases = _dynamic_clip(tmp_path / "clip.mp4", noise_db)
