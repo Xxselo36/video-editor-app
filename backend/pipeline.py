@@ -399,6 +399,10 @@ def _proxy_video_args() -> list[str]:
 
 
 POSTER_NAME = "poster.jpg"
+# A video frame on its way to a JPEG (the poster, the thumbnail): RGB
+# from the video's own matrix, then JFIF's YUV — BT.601, full range —
+# named, not left to ffmpeg (see THUMB_WIDTH).
+_TO_JFIF = "format=rgb24,scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p"
 
 
 def make_poster(source_path: str, at: float, poster_path: str,
@@ -412,8 +416,8 @@ def make_poster(source_path: str, at: float, poster_path: str,
     when it can't be made."""
     cmd = [get_ffmpeg_path(), "-y", "-v", "error", "-ss", f"{max(0.0, at):.3f}",
            "-i", source_path, "-frames:v", "1",
-           "-vf", f"scale='min({int(width)},iw)':-2,format=rgb24",
-           "-pix_fmt", "yuvj420p", "-q:v", "5", poster_path]
+           "-vf", f"scale='min({int(width)},iw)':-2,{_TO_JFIF}",
+           "-q:v", "5", poster_path]
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=60)
     except Exception as e:
@@ -1389,6 +1393,9 @@ def _concat_preview(
 # how every decoder reads a JPEG. Straight from the
 # video's YUV to yuvj420p the scaler converts the range but keeps the
 # BT.709 values: saturated colours came out off by up to 35 levels.
+# The RGB -> YUV step names its matrix and range (_TO_JFIF): left to
+# ffmpeg, 7 picks BT.601 but 9 carries the video's BT.709 over to it —
+# the same 35 levels.
 THUMB_WIDTH = 540
 
 
@@ -1443,8 +1450,7 @@ def _grab_thumbnail(input_path: str, output_path: str, at: float) -> str | None:
         "-ss", f"{max(0.0, at):.3f}",
         "-i", input_path,
         "-frames:v", "1",
-        "-vf", f"scale='min({THUMB_WIDTH},iw)':-2,format=rgb24",
-        "-pix_fmt", "yuvj420p",
+        "-vf", f"scale='min({THUMB_WIDTH},iw)':-2,{_TO_JFIF}",
         "-q:v", "3",
         *_threads(),
         output_path,
