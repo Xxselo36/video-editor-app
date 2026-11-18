@@ -3,7 +3,9 @@
  * D21): helpers of its suites (vorschau, processing, export-done) and
  * its screenshots (visual/s9-vorschau).
  */
-import { expect, type Locator, type Page, type Route } from "@playwright/test";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { devices, expect, type Locator, type Page, type Route } from "@playwright/test";
 import { openWithStorage } from "./app";
 import { API, WEB } from "./env";
 
@@ -13,6 +15,10 @@ export const TOUR_DONE = { "cleocuts.editor.tourDone.v1": "1" };
  *  sheet ("Save video"; features/start/ios isIOS). */
 export const IPHONE_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+
+/** Chrome on Android (the pixel7 project's own): what a phone that is no
+ *  iPhone gets, also where the project's device is an iPhone. */
+export const ANDROID_UA = devices["Pixel 7"].userAgent;
 
 /** The Vorschau; data-state processing | ready | edited | finishing | done | failed. */
 export const vorschau = (page: Page): Locator => page.getByTestId("preview");
@@ -75,6 +81,53 @@ export async function tapStillActive(page: Page, isActive: boolean) {
   await page.addInitScript((active) => {
     Object.defineProperty(navigator, "userActivation", { value: { isActive: active, hasBeenActive: true }, configurable: true });
   }, isActive);
+}
+
+/**
+ * Tap a Download link of the export (the API's /jobs/{id}/download):
+ * the name of the file the browser saved. The API answers with
+ * Content-Disposition: attachment (local media; R2: the object it
+ * redirects to), and Safari downloads it. Playwright's WebKit shows a
+ * video/mp4 navigation inline all the same, and reports no download for
+ * a route.fulfill()ed one: there the tap's GET goes through a server of
+ * this test that passes on the API's status, body and
+ * Content-Disposition, as application/octet-stream.
+ */
+export async function tapDownload(page: Page, link: Locator): Promise<string> {
+  if (page.context().browser()?.browserType().name() !== "webkit") {
+    const [file] = await Promise.all([page.waitForEvent("download"), link.click()]);
+    return file.suggestedFilename();
+  }
+  const proxy = http.createServer(async (req, res) => {
+    try {
+      const r = await fetch(new URL(req.url ?? "/", "http://x").searchParams.get("u")!);
+      const body = Buffer.from(await r.arrayBuffer());
+      const disposition = r.headers.get("content-disposition");
+      res.writeHead(r.status, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(body.length),
+        ...(disposition ? { "Content-Disposition": disposition } : {}),
+      });
+      res.end(body);
+    } catch (e) {
+      res.writeHead(502, { "Content-Type": "text/plain" });
+      res.end(String(e));
+    }
+  });
+  await new Promise<void>((ok) => proxy.listen(0, "127.0.0.1", ok));
+  const at = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}/?u=`;
+  const isFile = (u: URL) => /^\/jobs\/[^/]+\/download$/.test(u.pathname) && !u.searchParams.has("as");
+  const handler = (r: Route) =>
+    r.request().resourceType() === "document" ? r.continue({ url: at + encodeURIComponent(r.request().url()) }) : r.fallback();
+  await page.route(isFile, handler);
+  try {
+    const [file] = await Promise.all([page.waitForEvent("download"), link.click()]);
+    return file.suggestedFilename();
+  } finally {
+    await page.unroute(isFile, handler);
+    proxy.closeAllConnections();
+    proxy.close();
+  }
 }
 
 /**

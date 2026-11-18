@@ -38,12 +38,14 @@ import { expect, test, type Stub } from "./support/fixtures";
 import { openWithStorage } from "./support/app";
 import { API, WEB } from "./support/env";
 import {
+  ANDROID_UA,
   fakeShareSheet,
   holdRequests,
   IPHONE_UA,
   openVorschau,
   sharedFiles,
   sharedOnce,
+  tapDownload,
   tapStillActive,
   TOUR_DONE,
   vorschau,
@@ -640,8 +642,7 @@ function doneTests(store: Store) {
       expect(downloads).toEqual([]);
       expect(await sharedFiles(page)).toEqual([]);
       // Download, tapped: the export, named after the project.
-      const [file] = await Promise.all([page.waitForEvent("download"), download.click()]);
-      expect(file.suggestedFilename()).toBe("tiktok_3_mistakes_final_cleocuts_9x16.mp4");
+      expect(await tapDownload(page, download)).toBe("tiktok_3_mistakes_final_cleocuts_9x16.mp4");
     });
 
     test("while the file comes in, the button says how much of it is here", async ({ page, stub }, info) => {
@@ -771,6 +772,10 @@ function doneTests(store: Store) {
   // (NotAllowedError from a real tap): "Save / Share…" did nothing on
   // every tap, with no note and no download.
   test.describe("the editor's Save / Share on Android", () => {
+    // Android also where the phone project is an iPhone (a WebKit run):
+    // an iPhone shares a file over 50 MiB (below).
+    test.use({ userAgent: ANDROID_UA });
+
     test("a share the browser refuses although it counted the tap: Download with a note, nothing downloaded by itself", async ({
       page,
       stub,
@@ -791,8 +796,7 @@ function doneTests(store: Store) {
       await page.waitForTimeout(1_000);
       expect(downloads).toEqual([]);
       // The export's Download is the main action now.
-      const [file] = await Promise.all([page.waitForEvent("download"), sheet.getByTestId("done-download").first().click()]);
-      expect(file.suggestedFilename()).toBe("tiktok_3_mistakes_cleocuts_9x16.mp4");
+      expect(await tapDownload(page, sheet.getByTestId("done-download").first())).toBe("tiktok_3_mistakes_cleocuts_9x16.mp4");
     });
 
     test("a file over 50 MiB: a plain Download, nothing fetched ahead", async ({ page, stub }, info) => {
