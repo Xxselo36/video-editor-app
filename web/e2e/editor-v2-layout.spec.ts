@@ -227,6 +227,49 @@ test.describe("editor v2 on short and sideways phones", TAG, () => {
       expect(await noDocumentScroll(page)).toEqual({ v: 0, h: 0 });
     });
   }
+
+  // Android Chrome sideways with its address bar, a Galaxy S9+ and an
+  // iPhone SE: a banner (offline has no close button) leaves the player
+  // row in the stage; it lies over the frame's top where there is no room.
+  for (const vp of [
+    { width: 740, height: 280 },
+    { width: 640, height: 300 },
+    { width: 568, height: 320 },
+  ]) {
+    test(`${vp.width}×${vp.height} sideways, offline: play, undo and full screen stay in reach`, async ({ page, stub, context }, info) => {
+      test.skip(info.project.name !== "desktop", "viewport set per test");
+      await page.setViewportSize(vp);
+      const job = await stub.seed("review_speech");
+      await openV2(page, job.id);
+      await expect(page.getByTestId("editor-v2")).toHaveAttribute("data-layout", "landscape");
+      await context.setOffline(true);
+      try {
+        await expect(page.getByTestId("ed-offline")).toBeVisible({ timeout: 15_000 });
+        const stage = await box(page, "ed-stage");
+        // the frame keeps its minimum and moves up again: the row fits
+        await expect.poll(async () => (await box(page, "ed-frame")).height).toBeGreaterThanOrEqual(96);
+        await expect
+          .poll(async () => {
+            const bar = await box(page, "ed-playerbar");
+            return bar.y + bar.height;
+          })
+          .toBeLessThanOrEqual(stage.y + stage.height + 0.5);
+        const reach = await page.evaluate(() =>
+          ["ed-play", "ed-fullscreen"].map((id) => {
+            const el = document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+            if (!el) return `${id}: missing`;
+            const b = el.getBoundingClientRect();
+            const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+            return hit && (hit === el || el.contains(hit)) ? "ok" : `${id}: covered`;
+          }),
+        );
+        expect(reach).toEqual(["ok", "ok"]);
+        expect(await noDocumentScroll(page)).toEqual({ v: 0, h: 0 });
+      } finally {
+        await context.setOffline(false);
+      }
+    });
+  }
 });
 
 test.describe("editor v2 behaviour", TAG, () => {

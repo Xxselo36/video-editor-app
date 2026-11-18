@@ -14,7 +14,7 @@ import { Minimize, TriangleAlert, WifiOff, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useT } from "@/i18n";
 import { usePlayhead, type PlayheadState } from "@/features/editor/state/playhead";
-import { fitFrame, phoneFrame, PHONE_FRAME_MAX } from "../model";
+import { fitFrame, phoneBannerRoom, phoneFrame, PHONE_FRAME_MAX } from "../model";
 import { PlayerBar } from "./PlayerBar";
 import { useFullscreen } from "@/lib/useFullscreen";
 import { VideoLayer, type CaptionSlotProps } from "./VideoLayer";
@@ -84,11 +84,12 @@ export function PreviewStage({
         const W = (root?.clientWidth || window.innerWidth) - padX;
         const landscape = root?.dataset.layout === "landscape";
         const tabH = root?.querySelector<HTMLElement>("[data-testid=ed-tabbar]")?.offsetHeight || (landscape ? 48 : 56);
-        // (the phone's 12 px between the banner and the frame)
-        const banner = foot ? foot + 12 : 0;
-        const f = phoneFrame(W, H, { landscape, sheetOpen, tabH, banner });
+        // (the phone's 12 px between the banner and the frame; a short
+        // screen gives it less: the player row stays in the stage)
+        const layout = { landscape, sheetOpen, tabH, banner: foot ? foot + 12 : 0 };
+        const f = phoneFrame(W, H, layout);
         setFrame((old) => (old.w === f.w && old.h === f.h ? old : f));
-        setPad(banner || null);
+        setPad(phoneBannerRoom(H, layout) || null);
         // Landscape sheets open over the dock column, right of the stage.
         root?.style.setProperty("--ed-stage-w", `${el.offsetWidth}px`);
         return;

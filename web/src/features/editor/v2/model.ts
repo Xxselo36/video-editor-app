@@ -120,6 +120,37 @@ export function fitFrame(availW: number, availH: number, aspect: number): { w: n
  *  screen is short, so the dock keeps this much height. */
 export const PHONE_FRAME_MAX = { w: 186, h: 330 };
 export const PHONE_DOCK_MIN = 150;
+/** The phone's preview is never shorter than this. */
+const PHONE_FRAME_MIN_H = 96;
+
+type PhoneLayout = { landscape: boolean; sheetOpen: boolean; tabH: number; banner?: number };
+
+/**
+ * The room above the frame a banner over the stage gets on a phone
+ * (`banner`: its foot plus a gap, PreviewStage), 0 without one: all of
+ * it where the screen has room to spare, else only as much as leaves the
+ * frame its minimum and the player row (play, undo and redo, full
+ * screen) in the stage — the banner then lies over the frame's top, as
+ * before it had room of its own. Never less than the layout's own top
+ * padding.
+ */
+export function phoneBannerRoom(rootH: number, opts: PhoneLayout): number {
+  const banner = opts.banner ?? 0;
+  if (!(banner > 0)) return 0;
+  let own: number;
+  let spare: number;
+  if (opts.landscape) {
+    own = 8;
+    spare = rootH - 44 - opts.tabH - 4 - 44 - 8 - PHONE_FRAME_MIN_H;
+  } else if (opts.sheetOpen) {
+    own = 0;
+    spare = rootH * 0.46 - 44 - 14 - PHONE_FRAME_MIN_H;
+  } else {
+    own = 12;
+    spare = rootH - 44 - opts.tabH - PHONE_DOCK_MIN - 12 - 44 - PHONE_FRAME_MIN_H;
+  }
+  return Math.max(own, Math.min(banner, Math.floor(spare)));
+}
 
 /**
  * Preview frame size of the phone layout from the editor's size.
@@ -128,21 +159,18 @@ export const PHONE_DOCK_MIN = 150;
  *              (54 % of the height) instead, the player row hidden.
  *   landscape  the frame and player row fill the left column between the
  *              top bar and the tab bar.
- * `banner`: the room a banner over the stage takes above the frame (its
- * foot plus a gap, PreviewStage) instead of the stage's own top padding;
- * the frame gets smaller where the screen has no room to spare for it.
+ * `banner`: the room a banner over the stage wants above the frame (its
+ * foot plus a gap, PreviewStage); it gets phoneBannerRoom of it instead of
+ * the stage's own top padding, and the frame gets smaller where the screen
+ * has no room to spare for it.
  */
-export function phoneFrame(
-  rootW: number,
-  rootH: number,
-  opts: { landscape: boolean; sheetOpen: boolean; tabH: number; banner?: number },
-): { w: number; h: number } {
-  const banner = opts.banner ?? 0;
+export function phoneFrame(rootW: number, rootH: number, opts: PhoneLayout): { w: number; h: number } {
+  const banner = phoneBannerRoom(rootH, opts);
   let h: number;
   if (opts.landscape) h = rootH - 44 - opts.tabH - (banner || 8) - 4 - 44 - 8;
   else if (opts.sheetOpen) h = rootH * 0.46 - 44 - 14 - banner;
   else h = rootH - 44 - opts.tabH - PHONE_DOCK_MIN - ((banner || 12) + 12 + 44);
-  h = Math.max(96, Math.min(PHONE_FRAME_MAX.h, Math.floor(h)));
+  h = Math.max(PHONE_FRAME_MIN_H, Math.min(PHONE_FRAME_MAX.h, Math.floor(h)));
   let w = Math.min(PHONE_FRAME_MAX.w, Math.round((h * 9) / 16));
   if (!opts.landscape && w > rootW - 32) {
     w = Math.max(54, rootW - 32);
