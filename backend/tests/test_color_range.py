@@ -124,22 +124,22 @@ def _ramp_y(path: Path) -> tuple[float, float]:
     return float(np.percentile(y, 1)), float(np.percentile(y, 99))
 
 
+# Each source checked where it is made: what the tests take it for.
 @pytest.fixture(scope="module")
 def full(tmp_path_factory):
-    return _source(tmp_path_factory.mktemp("range") / "full.mp4", full=True)
+    path = _source(tmp_path_factory.mktemp("range") / "full.mp4", full=True)
+    assert _tags(path)["color_range"] == "pc"
+    assert _tags(path)["color_space"] == "unknown"
+    assert _ramp_y(path) == (2.0, 253.0)
+    return path
 
 
 @pytest.fixture(scope="module")
 def limited(tmp_path_factory):
-    return _source(tmp_path_factory.mktemp("range") / "limited709.mp4", full=False)
-
-
-def test_the_sources_are_what_they_claim(full, limited):
-    assert _tags(full)["color_range"] == "pc"
-    assert _tags(full)["color_space"] == "unknown"
-    assert _ramp_y(full) == (2.0, 253.0)
-    assert _tags(limited) == TAGS
-    assert _ramp_y(limited) == (18.0, 233.0)
+    path = _source(tmp_path_factory.mktemp("range") / "limited709.mp4", full=False)
+    assert _tags(path) == TAGS
+    assert _ramp_y(path) == (18.0, 233.0)
+    return path
 
 
 def _assert_limited_bt709(out: Path, src_p1: float, src_p99: float) -> None:
