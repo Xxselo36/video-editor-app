@@ -219,6 +219,47 @@ def test_output_pixels_are_the_layer_over_the_source(audit):
     assert min(scores) >= 0.98, scores
 
 
+def test_caption_colours_are_the_layers(tmp_path):
+    """The captions' colours too, not only their shapes: the output's
+    caption pixels against the layer composited over the source in RGB,
+    as the editor draws it. ffmpeg 9 read the layer's alpha (rawvideo,
+    mode unknown) as straight: opaque caption pixels came out about 10
+    RGB levels dark (white about 236 for 255), half-transparent edges
+    darker still; ffmpeg 7 composited them right."""
+    src = tmp_path / "grey709.mp4"
+    subprocess.run([cm.ffmpeg(), "-y", "-v", "error",
+                    "-f", "lavfi", "-i", f"color=c=0x707070:s={W}x{H}:r={FPS}:d=3",
+                    "-f", "lavfi", "-i", "sine=frequency=330:duration=3",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "1",
+                    "-pix_fmt", "yuv420p",
+                    "-bsf:v", ("h264_metadata=video_full_range_flag=0:colour_primaries=1"
+                               ":transfer_characteristics=1:matrix_coefficients=1"),
+                    "-c:a", "aac", "-shortest", str(src)], check=True, timeout=120)
+    spec = _spec(WORDS, preset="clipper")
+    out = tmp_path / "out.mp4"
+    res = C.render_primary(str(src), str(out), [(0.0, 3.0)], None, spec, tmp_path / "w")
+    src_info = C.probe(str(src))
+    mapped = C.output_words(spec, C.clip_plan([(0.0, 3.0)], None, FPS), FPS)
+    band = res["band"]
+    top, h = band["top"], band["height"]
+    opaque, edges = [], []
+    for w in mapped["words"][:6]:
+        n = int((w["start"] + w["end"]) / 2 * FPS)
+        lay = _layer_band(spec, src_info, n, mapped, band)
+        a = lay[..., 3] / 255.0
+        s = np.asarray(cm.frame_at(src, n), np.float64)[top:top + h]
+        o = np.asarray(cm.frame_at(out, n), np.float64)[top:top + h]
+        d = o - (lay[..., :3] + s * (1 - a[..., None]))   # premultiplied
+        opaque.append(d[a >= 0.95])
+        edges.append(d[(a > 0.25) & (a < 0.75)])
+    op, ed = np.concatenate(opaque), np.concatenate(edges)
+    print(f"[v2 caption colours] opaque {len(op)} px mean dRGB {op.mean(0).round(2)}, "
+          f"edges {len(ed)} px mean dRGB {ed.mean(0).round(2)}")
+    assert len(op) > 1000 and len(ed) > 200
+    assert np.abs(op.mean(0)).max() <= 3, op.mean(0)
+    assert np.abs(ed.mean(0)).max() <= 6, ed.mean(0)
+
+
 # ── per-clip path, VFR, A/V ──────────────────────────────────────────
 
 

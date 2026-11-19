@@ -84,6 +84,19 @@ def ffmpeg_major_version(ffmpeg: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+@lru_cache(maxsize=8)
+def knows_alpha_mode(ffmpeg: str) -> bool:
+    """Does the ffmpeg at `ffmpeg` know frames' alpha modes (straight /
+    premultiplied, the -alpha_mode option: ffmpeg 9 does, 7 doesn't)?"""
+    try:
+        out = subprocess.run([ffmpeg, "-hide_banner", "-h", "full"],
+                             capture_output=True, text=True, timeout=30,
+                             check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "\n  -alpha_mode " in (out or "")
+
+
 # Linux caps one argv string at 128 KiB: a longer filter graph goes to
 # ffmpeg in a file.
 FILTER_GRAPH_ARG_MAX = 100_000

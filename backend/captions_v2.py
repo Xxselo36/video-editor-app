@@ -982,14 +982,22 @@ def render_primary(
         # CLEO_LOUDNORM of its own, so a loudness in the spec is applied.
         loudness=spec.get("loudness"),
         segment_inputs=seg)
-    from src.ffmpeg_utils import filter_complex_args, get_ffmpeg_path
+    from src.ffmpeg_utils import filter_complex_args, get_ffmpeg_path, knows_alpha_mode
     cmd = [get_ffmpeg_path(), "-y", "-v", "error"]
     if layer_in is None:
         cmd.append("-nostdin")
     for extra in inputs:
         cmd += [*_ffmpeg_threads(), *extra, "-i", mezz]
     if layer_in is not None:
-        cmd += ["-f", "rawvideo", "-pix_fmt", "rgba",
+        # The layer's alpha is premultiplied (the overlay's alpha= below).
+        # Said so where ffmpeg knows alpha modes: ffmpeg 9 takes the
+        # rawvideo frames' unknown mode for straight and the overlay came
+        # out wrong (measured: opaque white Y 218 for 235, 50 % white over
+        # grey 117 for 181, the captions about 10 RGB levels dark); named,
+        # ffmpeg 9 composites exactly as ffmpeg 7 (235 / 181).
+        alpha = (["-alpha_mode", "premultiplied"]
+                 if knows_alpha_mode(get_ffmpeg_path()) else [])
+        cmd += ["-f", "rawvideo", "-pix_fmt", "rgba", *alpha,
                 "-s", f"{src['W']}x{band['height']}",
                 "-framerate", src["rate"], "-thread_queue_size", "64",
                 "-i", "pipe:0"]
