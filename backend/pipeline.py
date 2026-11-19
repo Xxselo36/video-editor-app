@@ -22,7 +22,7 @@ from typing import Any, Callable, NamedTuple
 from backend import errors
 from src.ffmpeg_utils import (
     BT709_TV_ARGS,
-    TO_BT709_TV,
+    BT709_TV_TAGS,
     get_ffmpeg_path,
     get_ffprobe_path,
     source_colors,
@@ -597,8 +597,11 @@ def _normalize_orientation(
     is_hdr = _probe_hdr(input_path)
     # Then limited-range BT.709 (src/ffmpeg_utils.py), after the resize
     # (fewer pixels): an upload as tagged, an untagged one as a player
-    # reads it; the tonemap's output is BT.709 already (its tags).
-    to_tv = TO_BT709_TV if is_hdr else to_bt709_tv(source_colors(input_path))
+    # reads it. The tonemap's output is limited BT.709 already, on 7 and 9
+    # alike: only tagged (TO_BT709_TV there measured 0.71 mean RGB from
+    # the tonemap's own RGB where it gives 0.66).
+    to_tv = (f"format=yuv420p,{BT709_TV_TAGS}" if is_hdr
+             else to_bt709_tv(source_colors(input_path)))
     vf = (
         f"{_HDR_TONEMAP_CHAIN},{scale_filter}" if is_hdr else scale_filter
     ) + f",{to_tv}"
