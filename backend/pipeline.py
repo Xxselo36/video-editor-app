@@ -20,7 +20,14 @@ from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
 from backend import errors
-from src.ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
+from src.ffmpeg_utils import (
+    BT709_TV_ARGS,
+    TO_BT709_TV,
+    get_ffmpeg_path,
+    get_ffprobe_path,
+    source_colors,
+    to_bt709_tv,
+)
 
 
 def _ffmpeg_threads() -> int:
@@ -42,6 +49,16 @@ def _threads() -> list[str]:
     nothing when uncapped."""
     n = _ffmpeg_threads()
     return ["-threads", str(n)] if n else []
+
+
+def _to_tv(path: str) -> str:
+    """The filter that makes `path`, one of our own files (mezz, proxy,
+    a render), limited-range BT.709 (src/ffmpeg_utils.py): nothing for
+    one made since (tagged so), a full-range one (an ffmpeg 9 encode
+    before) converted exactly. An untagged one keeps its values, as
+    ffmpeg 7 kept them (a matrix conversion goes through RGB and would
+    clip its levels below 16 / above 235)."""
+    return to_bt709_tv(source_colors(path), untagged="bt709")
 
 # Per-clip caption burns are only an intermediate (they get re-encoded
 # by the final concat), so encode them fast. Benchmark (90 s 1080x1920,
@@ -245,9 +262,11 @@ def _extract_hook_clip(
         "-ss", f"{start:.3f}",
         "-i", input_path,
         "-t", f"{duration:.3f}",
+        # limited BT.709 like every export (src/ffmpeg_utils.py)
+        "-vf", _to_tv(input_path),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         *_threads(),
-        "-pix_fmt", "yuv420p",
+        *BT709_TV_ARGS,
         "-c:a", "aac", "-b:a", "320k",
         "-movflags", "+faststart",
         "-avoid_negative_ts", "make_zero",
@@ -293,7 +312,10 @@ def _export_format(
         except OSError:
             shutil.copyfile(input_path, output_path)
         return
+    # limited BT.709 first (at the source's even size: vf_colorspace
+    # takes no odd one), so the pad's bars are that range's black
     vf = (
+        f"{_to_tv(input_path)},"
         f"scale=w={target_w}:h={target_h}:force_original_aspect_ratio=decrease,"
         f"pad=w={target_w}:h={target_h}:x=(ow-iw)/2:y=(oh-ih)/2:color=black"
     )
@@ -304,7 +326,7 @@ def _export_format(
         "-vf", vf,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         *_threads(),
-        "-pix_fmt", "yuv420p",
+        *BT709_TV_ARGS,
         "-c:a", "copy",
         "-movflags", "+faststart",
         output_path,
@@ -400,10 +422,7 @@ def _proxy_video_args() -> list[str]:
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
         *_threads(),
         "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
-        "-pix_fmt", "yuv420p",
-        "-color_primaries", "bt709",
-        "-color_trc", "bt709",
-        "-colorspace", "bt709",
+        *BT709_TV_ARGS,
     ]
 
 
@@ -576,9 +595,13 @@ def _normalize_orientation(
     # anything above SDR peak. Detect via ffprobe; skip on SDR input to
     # avoid unnecessary color-space round-trip on already-Rec709 content.
     is_hdr = _probe_hdr(input_path)
+    # Then limited-range BT.709 (src/ffmpeg_utils.py), after the resize
+    # (fewer pixels): an upload as tagged, an untagged one as a player
+    # reads it; the tonemap's output is BT.709 already (its tags).
+    to_tv = TO_BT709_TV if is_hdr else to_bt709_tv(source_colors(input_path))
     vf = (
         f"{_HDR_TONEMAP_CHAIN},{scale_filter}" if is_hdr else scale_filter
-    )
+    ) + f",{to_tv}"
     cut = ["-t", f"{max_seconds:.3f}"] if max_seconds else []
     cfr = ["-fps_mode", "cfr", "-r", cfr_rate] if cfr_rate else _CFR_OWN_RATE
 
@@ -596,12 +619,9 @@ def _normalize_orientation(
         # (libx264's default ~10s) made the browser buffer for
         # hundreds of ms at every hop → visibly frozen playback.
         "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
-        "-pix_fmt", "yuv420p",
-        # Tag output as BT.709 SDR so downstream players don't re-interpret
-        # our tonemapped pixels as still-HDR.
-        "-color_primaries", "bt709",
-        "-color_trc", "bt709",
-        "-colorspace", "bt709",
+        # Tagged BT.709 SDR, limited range (players don't re-interpret
+        # our tonemapped pixels as still-HDR).
+        *BT709_TV_ARGS,
         *cfr,
         # Bit-perfect audio passthrough — copies the source AAC stream
         # unchanged. No re-encode, no filter, no quality loss.
@@ -745,7 +765,7 @@ def _make_proxy(source_path: str, proxy_path: str) -> bool:
         get_ffmpeg_path(), "-y", *_threads(),
         "-i", source_path,
         "-map", "0:V:0", "-map", "0:a:0?",
-        "-vf", _PROXY_SCALE,
+        "-vf", f"{_PROXY_SCALE},{_to_tv(source_path)}",
         *_proxy_video_args(),
         *_CFR_OWN_RATE,
         "-c:a", "copy",
@@ -936,7 +956,7 @@ def _preview_video_args() -> list[str]:
         # rebuild. Dense keyframes also let currentTime restore snap
         # instantly on src swap.
         "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
-        "-pix_fmt", "yuv420p",
+        *BT709_TV_ARGS,
         "-profile:v", "main",
     ]
 
@@ -948,17 +968,33 @@ def _run_preview_ffmpeg(cmd: list[str]) -> None:
         raise RuntimeError(f"ffmpeg preview-cut failed:\n{tail}")
 
 
-def _start_time(path: str) -> float:
-    """The container's start timestamp (0 for our own encodes)."""
+def _start_time(path: str) -> tuple[float, dict[str, Any] | None]:
+    """(the container's start timestamp (0 for our own encodes), the
+    video's colours as src.ffmpeg_utils.source_colors gives them, or
+    None): one ffprobe - a preview build is that, an audio decode per
+    span and the encode."""
     try:
         r = subprocess.run(
-            [get_ffprobe_path(), "-v", "error", "-show_entries",
-             "format=start_time", "-of", "default=nw=1:nk=1", path],
+            [get_ffprobe_path(), "-v", "error", "-select_streams", "v:0",
+             "-show_entries", ("format=start_time:stream=pix_fmt,color_range,"
+                              "color_space,color_transfer,width,height"),
+             "-of", "json", path],
             capture_output=True, text=True, timeout=15)
-        value = float((r.stdout or "").strip() or 0.0)
+        data = json.loads(r.stdout or "{}")
     except (OSError, ValueError, subprocess.TimeoutExpired):
-        return 0.0
-    return value if math.isfinite(value) else 0.0
+        return 0.0, None
+    st = (data.get("streams") or [None])[0]
+    colors = None
+    if st and st.get("pix_fmt"):
+        colors = {k: st.get(k) or "" for k in ("pix_fmt", "color_range",
+                                               "color_space", "color_transfer")}
+        colors.update(width=int(st.get("width") or 0),
+                      height=int(st.get("height") or 0))
+    try:
+        value = float((data.get("format") or {}).get("start_time") or 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    return (value if math.isfinite(value) else 0.0), colors
 
 
 def _fx(effects: list[dict] | None, n: int) -> list[dict]:
@@ -1351,7 +1387,7 @@ def _concat_preview(
     stdin while it encodes. The work files sit next to the output (the
     job folder, on the work volume)."""
     # inpoints are the container's own timestamps
-    offset = _start_time(input_path)
+    offset, colors = _start_time(input_path)
     source = os.path.abspath(input_path).replace("'", "'\\''")
     out_dir = os.path.dirname(os.path.abspath(output_path))
     work = tempfile.mkdtemp(prefix="cleo_preview_", dir=out_dir)
@@ -1375,7 +1411,10 @@ def _concat_preview(
             "-f", "s16le", "-ar", str(_PREVIEW_SR),
             "-ac", str(_PREVIEW_CHANNELS), "-i", "pipe:0",
             "-map", "0:v:0", "-map", "1:a:0",
+            # limited BT.709 (as _to_tv) before the fades: they fade to
+            # that black
             "-vf", (f"select=concatdec_select,"
+                    f"{to_bt709_tv(colors, untagged='bt709')},"
                     f"{_preview_fades(segments, effects)}{_PREVIEW_SCALE}"),
             # Every frame at its own time: a constant-rate output would
             # shift each segment by up to a frame and a half against
@@ -1651,7 +1690,7 @@ def _concat_frame_exact(
         [(a / fps, (a + n) / fps) for a, n in plan], None, fps)
     audio = _has_audio(source_path)
     graph = (f"[0:v]setpts=N*{rate.denominator}/{rate.numerator}/TB,"
-             "format=yuv420p[vout]")
+             f"{_to_tv(clip_paths[0])}[vout]")
     if audio:
         graph += ";" + ";".join(captions_v2.audio_graph(clips, fps, source=1))
     work = tempfile.mkdtemp(prefix="cleo_concat_")
@@ -1672,7 +1711,7 @@ def _concat_frame_exact(
         "-preset", os.environ.get("CLEO_FINAL_PRESET", "veryfast"),
         "-crf", os.environ.get("CLEO_FINAL_CRF", "20"),
         *_threads(),
-        "-pix_fmt", "yuv420p",
+        *BT709_TV_ARGS,
         "-r", f"{rate.numerator}/{rate.denominator}",
         "-movflags", "+faststart",
         output_path,
@@ -1715,9 +1754,9 @@ def centre_crop(src: str, dst: str, fmt: str) -> bool:
     crop = (f"crop=trunc(min(iw\\,ih*{w}/{h})/2)*2"
             f":trunc(min(ih\\,iw*{h}/{w})/2)*2")
     cmd = [get_ffmpeg_path(), "-y", *_threads(), "-i", src,
-           "-map", "0:V:0", "-map", "0:a:0?", "-vf", crop,
+           "-map", "0:V:0", "-map", "0:a:0?", "-vf", f"{crop},{_to_tv(src)}",
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-           "-pix_fmt", "yuv420p", *_CFR_OWN_RATE, "-c:a", "copy",
+           *BT709_TV_ARGS, *_CFR_OWN_RATE, "-c:a", "copy",
            "-movflags", "+faststart", dst]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0 and Path(dst).is_file():
@@ -2383,7 +2422,7 @@ def _apply_segment_effects(
                      f":d={captions_v2._f(fo)}")
         parts.append(",".join(v) + f"[v{i}]")
     parts.append("".join(f"[v{i}]" for i in range(k))
-                 + f"concat=n={k}:v=1:a=0,format=yuv420p[outv]")
+                 + f"concat=n={k}:v=1:a=0,{_to_tv(input_path)}[outv]")
     audio = _has_audio(input_path)
     if audio:
         parts += captions_v2.audio_graph(tl, fps, source=0)
@@ -2397,7 +2436,7 @@ def _apply_segment_effects(
         *(["-map", "[aout]", "-c:a", "aac", "-b:a", "320k"] if audio else []),
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         *_threads(),
-        "-pix_fmt", "yuv420p",
+        *BT709_TV_ARGS,
         "-r", f"{rate.numerator}/{rate.denominator}",
         "-movflags", "+faststart",
         output_path,

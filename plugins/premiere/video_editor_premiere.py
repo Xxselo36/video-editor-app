@@ -32,6 +32,21 @@ VIDEO_EDITOR_PATH = os.environ.get(
 if VIDEO_EDITOR_PATH not in sys.path:
     sys.path.insert(0, VIDEO_EDITOR_PATH)
 
+# Every video this plugin encodes is limited-range BT.709, tagged so
+# (src/ffmpeg_utils.py: ffmpeg 9 kept full-range sources full range).
+from src.ffmpeg_utils import (
+    BT709_TV_ARGS,
+    TO_BT709_TV,
+    outside_encode,
+    source_colors,
+    to_bt709_tv,
+)
+
+# MoviePy writes RGB frames: to limited BT.709 yuv420p (the burn's clips
+# and the plugin's segments), x264 crf 17, no B-frames.
+_MOVIEPY_PARAMS = ["-vf", TO_BT709_TV, *BT709_TV_ARGS,
+                   "-crf", "17", "-bf", "0", "-avoid_negative_ts", "make_zero"]
+
 # Caption preset configurations — override style subtitle settings
 CAPTION_PRESETS = {
     "classic": {
@@ -1711,7 +1726,7 @@ def _render_segment_with_standalone_captions(
                 audio_bitrate="320k", audio_fps=_audio_fps,
                 preset=os.environ.get("CLEO_BURN_PRESET", "medium"),
                 temp_audiofile=_tmp_audio, remove_temp=True,
-                ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "17", "-bf", "0", "-avoid_negative_ts", "make_zero"],
+                ffmpeg_params=_MOVIEPY_PARAMS,
                 threads=4, logger=None, **_exact,
             )
             if _close_base_clip:
@@ -1740,7 +1755,7 @@ def _render_segment_with_standalone_captions(
                 audio_bitrate="320k", audio_fps=_audio_fps,
                 preset=os.environ.get("CLEO_BURN_PRESET", "medium"),
                 temp_audiofile=_tmp_audio, remove_temp=True,
-                ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "17", "-bf", "0", "-avoid_negative_ts", "make_zero"],
+                ffmpeg_params=_MOVIEPY_PARAMS,
                 threads=4, logger=None, **_exact,
             )
             if _close_base_clip:
@@ -1986,7 +2001,7 @@ def _render_segment_with_standalone_captions(
             audio_bitrate="320k", audio_fps=_audio_fps,
             preset=os.environ.get("CLEO_BURN_PRESET", "medium"),
             temp_audiofile=_tmp_audio, remove_temp=True,
-            ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "17", "-bf", "0", "-avoid_negative_ts", "make_zero"],
+            ffmpeg_params=_MOVIEPY_PARAMS,
             threads=4, logger=None, **_exact,
         )
         try:
@@ -2526,9 +2541,12 @@ def _cut_concat_burn(input_video, segments, srt_path, output_path,
     filter_parts.append(
         f"{''.join(pairs)}concat=n={n}:v=1:a=1[catv][cata]"
     )
-    # Burn subtitles on the concatenated video stream at TIMELINE coords.
+    # Burn subtitles on the concatenated video stream at TIMELINE coords,
+    # after it is limited-range BT.709 (src/ffmpeg_utils.outside_encode).
+    to_tv, tv_args = outside_encode(input_video)
     filter_parts.append(
-        f"[catv]subtitles='{escaped_srt}':force_style='{style}'[outv]"
+        f"[catv]{to_tv},"
+        f"subtitles='{escaped_srt}':force_style='{style}'[outv]"
     )
     filter_complex = ";".join(filter_parts)
 
@@ -2542,7 +2560,7 @@ def _cut_concat_burn(input_video, segments, srt_path, output_path,
         # profile high combo altered GOP + B-frame handling and produced
         # audible A/V drift. Sync stability > slight quality gain.
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-pix_fmt", "yuv420p",
+        *tv_args,
         "-c:a", "aac", "-b:a", "320k",
         "-movflags", "+faststart",
         output_path,
@@ -2606,12 +2624,14 @@ def _burn_subtitles_into_video(input_video, srt_path, output_path,
                    .replace(":", "\\:")
                    .replace("'", "\\'"))
 
+    # limited-range BT.709 first (src/ffmpeg_utils.outside_encode)
+    to_tv, tv_args = outside_encode(input_video)
     cmd = [
         ffmpeg, "-y",
         "-i", input_video,
-        "-vf", f"subtitles='{escaped_srt}':force_style='{style}'",
+        "-vf", f"{to_tv},subtitles='{escaped_srt}':force_style='{style}'",
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-pix_fmt", "yuv420p",
+        *tv_args,
         "-c:a", "copy",
         "-movflags", "+faststart",
         output_path,
@@ -2670,14 +2690,17 @@ def _extract_trim_range(video_path, start_sec, end_sec):
     res = subprocess.run(cmd, capture_output=True, timeout=60, **kwargs)
     if res.returncode != 0 or not os.path.isfile(out_path):
         # Stream-copy can fail on some codec/container combos. Retry
-        # with a re-encode — slower but always works.
+        # with a re-encode — slower but always works (limited-range
+        # BT.709: src/ffmpeg_utils.outside_encode).
+        to_tv, tv_args = outside_encode(video_path)
         cmd_reenc = [
             ffmpeg, "-y",
             "-ss", str(start_sec),
             "-i", video_path,
             "-t", str(duration),
+            "-vf", to_tv,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-            "-pix_fmt", "yuv420p",
+            *tv_args,
             "-c:a", "aac", "-b:a", "320k",
             "-movflags", "+faststart",
             out_path,
@@ -2939,11 +2962,12 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
                 if (_sw and _sh
                         and (cw < _sw * 0.95 or ch < _sh * 0.95)):
                     cropped_path = os.path.join(video_only_dir, "decroped.mp4")
+                    _crop_tv, _crop_args = outside_encode(video_path)
                     crop_cmd = [
                         ff, "-y", *_thr, "-i", video_path,
-                        "-vf", f"crop={cw}:{ch}:{cx}:{cy}",
+                        "-vf", f"crop={cw}:{ch}:{cx}:{cy},{_crop_tv}",
                         "-c:v", "h264_videotoolbox", "-b:v", "12M",
-                        "-pix_fmt", "yuv420p",
+                        *_crop_args,
                         "-c:a", "copy",
                         "-movflags", "+faststart",
                         cropped_path,
@@ -2988,13 +3012,17 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
             # Bei 4K60-iPhone-Material killt libx264 die Bearbeitungs-
             # Zeit (10 min für 90 Sek Material). Videotoolbox encodet
             # in Echtzeit oder schneller.
+            # Limited-range BT.709 (src/ffmpeg_utils.outside_encode);
+            # OpenCV reads it by its tags (measured: BT.709 in, right RGB).
+            _cfr_tv, _cfr_args = outside_encode(crop_input)
             cfr_cmd = [
                 get_ffmpeg_path(), "-y",
                 "-i", crop_input,
                 "-fps_mode", "cfr",
                 "-r", f"{_src_fps:.6f}",
+                "-vf", _cfr_tv,
                 "-c:v", "h264_videotoolbox", "-b:v", "12M",
-                "-pix_fmt", "yuv420p",
+                *_cfr_args,
                 "-c:a", "copy",
                 "-movflags", "+faststart",
                 cfr_path,
@@ -3009,9 +3037,10 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
                     "-i", crop_input,
                     "-fps_mode", "cfr",
                     "-r", f"{_src_fps:.6f}",
+                    "-vf", _cfr_tv,
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
                     *_thr,
-                    "-pix_fmt", "yuv420p", "-bf", "0",
+                    *_cfr_args, "-bf", "0",
                     "-c:a", "copy",
                     "-movflags", "+faststart",
                     cfr_path,
@@ -3075,17 +3104,21 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
         # libx264). Bei iPhone 4K60 reduziert das den Mux-Schritt von
         # mehreren Minuten auf Sekunden. Fallback auf libx264 wenn
         # Videotoolbox auf der Plattform fehlt.
+        # OpenCV writes BT.601 (untagged), whatever it read (measured:
+        # a BT.709 red patch Y/Cb/Cr 63/102/240 came out 81/90/239):
+        # converted to limited BT.709 here, exactly, and tagged so.
+        _sc_tv = to_bt709_tv(source_colors(video_only), untagged="bt601")
         mux_cmd = [
             get_ffmpeg_path(), "-y",
             "-fflags", "+genpts",
             "-i", video_only,
             "-i", cfr_input,
             "-filter_complex",
-            "[0:v]setpts=PTS-STARTPTS[v];"
+            f"[0:v]setpts=PTS-STARTPTS,{_sc_tv}[v];"
             "[1:a]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[a]",
             "-map", "[v]", "-map", "[a]",
             "-c:v", "h264_videotoolbox", "-b:v", "12M",
-            "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
+            *BT709_TV_ARGS, "-fps_mode", "passthrough",
             "-c:a", "aac", "-b:a", "320k",
             "-avoid_negative_ts", "make_zero",
             "-movflags", "+faststart",
@@ -3102,12 +3135,12 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
                 "-i", video_only,
                 "-i", cfr_input,
                 "-filter_complex",
-                "[0:v]setpts=PTS-STARTPTS[v];"
+                f"[0:v]setpts=PTS-STARTPTS,{_sc_tv}[v];"
                 "[1:a]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[a]",
                 "-map", "[v]", "-map", "[a]",
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
                 *_thr,
-                "-pix_fmt", "yuv420p", "-bf", "0", "-fps_mode", "passthrough",
+                *BT709_TV_ARGS, "-bf", "0", "-fps_mode", "passthrough",
                 "-c:a", "aac", "-b:a", "320k",
                 "-avoid_negative_ts", "make_zero",
                 "-movflags", "+faststart",
@@ -3125,9 +3158,10 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
                 get_ffmpeg_path(), "-y",
                 *_thr,
                 "-i", video_only,
+                "-vf", _sc_tv,
                 "-c:v", "libx264", "-preset", "fast", "-crf", "18",
                 *_thr,
-                "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
+                *BT709_TV_ARGS, "-fps_mode", "passthrough",
                 "-movflags", "+faststart",
                 final_path,
             ]
@@ -3289,17 +3323,23 @@ def _normalize_rotation(video_path):
     except Exception:
         ffmpeg = "ffmpeg"
 
-    # Preserve color metadata to prevent brightness shift
+    # SDR: limited-range BT.709 like every encode (src/ffmpeg_utils.py).
+    # HDR (PQ / HLG) stays as recorded, its colour metadata preserved
+    # (no brightness shift; Premiere reads the tags).
     color_args = []
-    if probe.get("color_range"):
-        cr = "tv" if probe["color_range"] == "tv" else "pc"
-        color_args += ["-color_range", cr]
-    if probe.get("color_space"):
-        color_args += ["-colorspace", probe["color_space"]]
-    if probe.get("color_transfer"):
-        color_args += ["-color_trc", probe["color_transfer"]]
-    if probe.get("color_primaries"):
-        color_args += ["-color_primaries", probe["color_primaries"]]
+    if (probe.get("color_transfer") or "") not in ("smpte2084", "arib-std-b67"):
+        to_tv, tv_args = outside_encode(video_path)
+        color_args = ["-vf", to_tv, *tv_args]
+    else:
+        if probe.get("color_range"):
+            cr = "tv" if probe["color_range"] == "tv" else "pc"
+            color_args += ["-color_range", cr]
+        if probe.get("color_space"):
+            color_args += ["-colorspace", probe["color_space"]]
+        if probe.get("color_transfer"):
+            color_args += ["-color_trc", probe["color_transfer"]]
+        if probe.get("color_primaries"):
+            color_args += ["-color_primaries", probe["color_primaries"]]
 
     cmd = [
         ffmpeg, "-i", video_path,

@@ -511,11 +511,13 @@ def prepare_render(store: Any, job_id: str, job: Any,
 
 
 def probe(path: str) -> dict[str, Any]:
-    """{W, H, rate (ffmpeg rate text), fps, cfr, audio, start}."""
+    """{W, H, rate (ffmpeg rate text), fps, cfr, audio, start, colors
+    (src.ffmpeg_utils.source_colors' fields)}."""
     from src.ffmpeg_utils import get_ffprobe_path
     r = subprocess.run(
         [get_ffprobe_path(), "-v", "error", "-show_entries",
-         "stream=codec_type,width,height,r_frame_rate,avg_frame_rate:"
+         "stream=codec_type,width,height,r_frame_rate,avg_frame_rate,"
+         "pix_fmt,color_range,color_space:"
          "format=start_time", "-of", "json", path],
         capture_output=True, text=True, timeout=60)
     data = json.loads(r.stdout or "{}")
@@ -552,7 +554,11 @@ def probe(path: str) -> dict[str, Any]:
     return {"W": int(v["width"]), "H": int(v["height"]), "rate": text,
             "fps": float(Fraction(text)), "cfr": cfr,
             "audio": any(s.get("codec_type") == "audio" for s in streams),
-            "start": start if math.isfinite(start) else 0.0}
+            "start": start if math.isfinite(start) else 0.0,
+            "colors": {"pix_fmt": v.get("pix_fmt") or "",
+                       "color_range": v.get("color_range") or "",
+                       "color_space": v.get("color_space") or "",
+                       "width": int(v["width"]), "height": int(v["height"])}}
 
 
 def _num(eff: dict, key: str, default: float) -> float:
@@ -729,8 +735,17 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
     the mezz (once, or once per clip, seeked SEEK_PREROLL_S before it);
     the caption layer, if any, is the last input (rawvideo on stdin).
     Output pads: [vout] and [aout]."""
+    from src.ffmpeg_utils import to_bt709_tv
     rate = Fraction(src["rate"])
     fps = float(rate)
+    # The mezz to limited-range BT.709 (src/ffmpeg_utils.py), by its
+    # probed colours (probe()): nothing to do for one made since; a
+    # full-range one (an ffmpeg 9 normalize before) converted exactly;
+    # an untagged one (SmartCam's) is BT.601. Only the frames kept,
+    # before any fade (fades end on its black). Not probed: left to the
+    # encoder's -color_range / -colorspace (_encoder_args).
+    colors = src.get("colors")
+    to_tv = [to_bt709_tv(colors, untagged="bt601")] if colors is not None else []
     # ffmpeg starts every input at t = 0 (no -copyts), so filter times
     # and -ss positions are source times as the analysis measured them.
     seg = needs_segment_inputs(clips, src["cfr"]) if segment_inputs is None else segment_inputs
@@ -745,8 +760,9 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
         terms = _any_of([
             f"gte(t\\,{_f(c['start'] - half)})*lt(t\\,{_f(c['end'] - half)})"
             for c in clips])
-        parts.append(f"[0:v]select='{terms}',"
-                     f"setpts=N*{rate.denominator}/{rate.numerator}/TB[vcat]")
+        parts.append(",".join([f"[0:v]select='{terms}'",
+                               f"setpts=N*{rate.denominator}/{rate.numerator}/TB",
+                               *to_tv]) + "[vcat]")
     else:
         leads = []
         for i, c in enumerate(clips):
@@ -763,7 +779,7 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
                           + ["-t", _f(c["end"] - seek)])
             end = lead + c["end"] - c["start"] - half
             v = [f"[{i}:v]trim=start={_f(max(0.0, lead - half))}:end={_f(end)}",
-                 "setpts=PTS-STARTPTS"]
+                 "setpts=PTS-STARTPTS", *to_tv]
             if abs(c["speed"] - 1.0) > 1e-3:
                 v.append(f"setpts=PTS/{c['speed']:.6f}")
             v.append(f"fps={rate.numerator}/{rate.denominator}")
@@ -879,10 +895,11 @@ def _fetch_fonts(spec: dict[str, Any], work: Path,
 
 
 def _encoder_args() -> list[str]:
+    from src.ffmpeg_utils import BT709_TV_ARGS
     return ["-c:v", "libx264",
             "-preset", os.environ.get("CLEO_V2_X264_PRESET", "veryfast"),
             "-crf", os.environ.get("CLEO_V2_CRF", "17"),
-            "-pix_fmt", "yuv420p"]
+            *BT709_TV_ARGS]
 
 
 def _ffmpeg_threads() -> list[str]:
