@@ -70,7 +70,8 @@
  * racing meanwhile). Round 12: a split into a clip of a few frames — that
  * clip's end checked from the split's first part on, at its speed
  * (dueAfterSplit), and as soon as it is entered; the overdue count after a
- * callback in its frame's own rendering update too.
+ * callback in its frame's own rendering update too, and from a speed
+ * change's frame on only as from a landing's.
  * Without frame callbacks the clock is all there is,
  * CLOCK_EARLY_FRAMES before the last kept frame (round 3's clock jumped 3–5
  * frames early on a busy machine: the end of a word lost at every join).
