@@ -319,17 +319,18 @@ const OVERDUE_CLOCK_MS = 8;
  *  clock read a few ms after the refresh. Measured in the e2e runs, by the
  *  probe's clock readings (the player reads the clock before the probe at
  *  its callback and after it at its animation frame: 0.6–1.7 ms of margin
- *  less): the one race after such a callback (995 → 1000 at 1.5x, the
- *  clock 1.34 frames on two refreshes after 995's pick) is caught up to
- *  7.4 ms — the jump asked 16.9 ms before 1000's pick, not 0.2 ms; a join
- *  where the pipeline brought no frame (969 at 2x, the clock 1.21 frames
- *  on a refresh after its pick) is counted up to 3.4 ms — round 12's
- *  first try (4 ms) jumped there in an e2e run: 5 source frames lost,
- *  MAX_EARLY 4. Replayed on 176 dumped speed runs (6210 sped-up joins),
- *  4–7 ms of probe margin catch that race and lose no source frame beyond
- *  MAX_EARLY where round 11's count alone doesn't (2 joins); 2–3 ms lose
- *  one more. */
-const OVERDUE_SAME_CLOCK_MS = 6;
+ *  less there): the one race after such a callback (995 → 1000 at 1.5x,
+ *  the clock 1.34 frames on two refreshes after 995's pick) is caught up
+ *  to 7.4 ms — the jump asked 16.9 ms before 1000's pick, not 0.2 ms;
+ *  joins where the pipeline brought no frame in the slot counted are
+ *  counted up to 3.4–4.5 ms (969 at 2x three times, 995 at 1.5x under
+ *  load) — round 12's first try (4 ms) jumped at the first 969, its second
+ *  (6 ms) at 995 under load: one source frame lost beyond MAX_EARLY. Not
+ *  more than 7.4 less the player's offset, not less than 4.5 plus it.
+ *  Replayed on 228 dumped speed runs (7990 sped-up joins), 5–7 ms of probe
+ *  margin catch that race and lose no source frame beyond MAX_EARLY where
+ *  round 11's count alone doesn't. */
+const OVERDUE_SAME_CLOCK_MS = 7;
 
 /**
  * A clip's frames on the render's grid (backend captions_v2.clip_plan):
