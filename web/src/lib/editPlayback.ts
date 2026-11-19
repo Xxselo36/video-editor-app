@@ -329,7 +329,12 @@ const OVERDUE_CLOCK_MS = 8;
  *  more than 7.4 less the player's offset, not less than 4.5 plus it.
  *  Replayed on 228 dumped speed runs (7990 sped-up joins), 5–7 ms of probe
  *  margin catch that race and lose no source frame beyond MAX_EARLY where
- *  round 11's count alone doesn't. */
+ *  round 11's count alone doesn't. Under heavy load no margin that still
+ *  catches the race clears them all: with two busy loops the animation
+ *  frames run a few ms late and the player reads the clock later still —
+ *  a 969 at 2x counted at 7 ms too (5.9 ms by the probe, its animation
+ *  frame 3.3 ms late), in 1 of 12 runs as at 6 ms; none in 20 runs
+ *  without the load. */
 const OVERDUE_SAME_CLOCK_MS = 7;
 
 /**
