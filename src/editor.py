@@ -84,7 +84,8 @@ from .effects import (
     add_generated_image_overlays,
 )
 from .audio import AudioAnalyzer, Subtitle, AdvancedAudioAnalyzer
-from .ffmpeg_utils import get_ffmpeg_path, get_ffprobe_path
+from .ffmpeg_utils import (BT709_TV_ARGS, TO_BT709_TV, get_ffmpeg_path,
+                           get_ffprobe_path, outside_encode)
 from .platform_utils import get_video_codec, get_codec_params, get_subprocess_kwargs
 
 
@@ -236,7 +237,9 @@ def _process_segment_worker(args):
             bitrate="12M",
             verbose=False,
             logger=None,
-            ffmpeg_params=["-preset", "fast", "-profile:v", "high"]
+            # limited-range BT.709 (src/ffmpeg_utils.py)
+            ffmpeg_params=["-preset", "fast", "-profile:v", "high",
+                           "-vf", TO_BT709_TV, *BT709_TV_ARGS]
         )
 
         segment.close()
@@ -281,12 +284,15 @@ class VideoEditor:
 
         self._report(f"  Normalizing video with FFmpeg...")
 
+        # limited-range BT.709, the source's own colours read
+        # (src/ffmpeg_utils.outside_encode)
+        to_tv, tv_args = outside_encode(str(self.input_path))
         cmd = [
             get_ffmpeg_path(), '-y', '-i', str(self.input_path),
-            '-vf', scale_filter,
+            '-vf', f"{scale_filter},{to_tv}",
             '-c:v', get_video_codec(),
             '-b:v', '12M',
-            ] + get_codec_params() + [
+            ] + get_codec_params() + tv_args + [
             '-c:a', 'aac', '-b:a', '192k',
             normalized_path
         ]
@@ -1737,9 +1743,10 @@ class VideoEditor:
             concat_cmd = [
                 get_ffmpeg_path(), '-y', '-f', 'concat', '-safe', '0',
                 '-i', concat_list,
+                '-vf', TO_BT709_TV,
                 '-c:v', get_video_codec(),
                 '-b:v', '12M',
-                ] + get_codec_params() + [
+                ] + get_codec_params() + BT709_TV_ARGS + [
                 '-c:a', 'aac', '-b:a', '192k',
                 str(out_path)
             ]
@@ -1770,9 +1777,10 @@ class VideoEditor:
                     reframe_temp = os.path.join(temp_dir, "reframed.mp4")
                     reframe_cmd = [
                         get_ffmpeg_path(), '-y', '-i', str(out_path),
-                        '-vf', 'crop=ih*9/16:ih',
+                        '-vf', f'crop=ih*9/16:ih,{TO_BT709_TV}',
                         '-c:v', get_video_codec(),
                         '-b:v', '10M',
+                        *BT709_TV_ARGS,
                         '-c:a', 'copy',
                         reframe_temp
                     ]
@@ -1925,7 +1933,9 @@ class VideoEditor:
             remove_temp=True,
             verbose=False,
             logger=None,
-            ffmpeg_params=get_codec_params()
+            # limited-range BT.709 (src/ffmpeg_utils.py)
+            ffmpeg_params=[*get_codec_params(), "-vf", TO_BT709_TV,
+                           *BT709_TV_ARGS]
         )
 
         reduction = (1 - final.duration / self.duration) * 100
@@ -2131,7 +2141,9 @@ class VideoEditor:
             remove_temp=True,
             verbose=False,
             logger=None,
-            ffmpeg_params=get_codec_params()
+            # limited-range BT.709 (src/ffmpeg_utils.py)
+            ffmpeg_params=[*get_codec_params(), "-vf", TO_BT709_TV,
+                           *BT709_TV_ARGS]
         )
 
         reduction = (1 - final.duration / self.duration) * 100
