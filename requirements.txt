@@ -8,6 +8,6 @@ opencv-python>=4.8.0
 customtkinter>=5.2.0
 torch>=2.0.0
 ultralytics>=8.0.0
-imageio_ffmpeg>=0.4.9
+imageio_ffmpeg>=0.4.9,<0.9
 psutil>=5.9.0
 tkinterdnd2>=0.4.0
