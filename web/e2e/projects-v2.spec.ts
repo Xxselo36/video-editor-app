@@ -344,7 +344,7 @@ test("a mouse over a row whose name is cut shows the whole name; no title otherw
   test.skip(Boolean(info.project.use.isMobile), "a mouse");
   const cut = await stub.seed("done");
   const whole = await stub.seed("done");
-  const long = "Interview mit Maria Schneider über nachhaltige Mode und Upcycling – Teil 2 – die ganz lange Fassung für alle";
+  const long = "Interview mit einer Designerin über nachhaltige Mode und Upcycling – Teil 2 – die ganz lange Fassung für alle";
   await page.setViewportSize({ width: 1024, height: 768 });
   await openWithStorage(page, "/app", {
     [JOBS]: [{ ...job(cut.id, "interview.mp4", 1_000), name: long }, { ...job(whole.id, "kurz", 60_000), name: "Kurz" }],

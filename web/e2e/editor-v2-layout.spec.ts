@@ -172,7 +172,7 @@ test.describe("editor v2 layout", TAG, () => {
   }) => {
     await page.setViewportSize({ width: 393, height: 852 });
     const fits = await stub.seed("review_speech", { filename: "Mein Schreibtisch-Setup.mp4" });
-    const long = await stub.seed("review_speech", { filename: "Interview mit Maria Schneider über nachhaltige Mode – Teil 2.mp4" });
+    const long = await stub.seed("review_speech", { filename: "Interview mit einer Designerin über nachhaltige Mode – Teil 2.mp4" });
     const titleCut = () =>
       page
         .getByTestId("ed-title")
@@ -188,7 +188,7 @@ test.describe("editor v2 layout", TAG, () => {
     expect(await titleCut()).toBe(false);
     await exportInView();
     await openV2(page, long.id);
-    await expect(page.getByTestId("ed-title")).toHaveText("Interview mit Maria Schneider über nachhaltige Mode – Teil 2");
+    await expect(page.getByTestId("ed-title")).toHaveText("Interview mit einer Designerin über nachhaltige Mode – Teil 2");
     expect(await titleCut()).toBe(true);
     await exportInView();
     await expect(page.getByTestId("ed-save-status")).toBeVisible();
