@@ -110,7 +110,10 @@ SILENCE_WINDOW_S = 0.1
 # speech (15 ms: up to 20 dB), or followed by a room tail 18 dB under its
 # peak (RT60 0.4 s) up to 20 dB over the speech, leave the estimate where
 # the speech alone puts it; longer, louder ones still lift it (a 15 ms
-# burst 30 dB over the speech: by 9 dB). On clean speech the loudest
+# burst 30 dB over the speech: by 9 dB; a dry door slam 20-30 dB over
+# quiet speech that decays in 20-40 ms: by 5-19 dB - after one 29 dB
+# over the speech 'tight' still cuts 3 (30 ms) to 10 (40 ms) of 13 words,
+# where it cut nearly all before). On clean speech the loudest
 # sample lies 0.2-4.8 dB over the held peak (100 recordings of the tests'
 # synthetic voice 0.2-1.7, 8 of synthetic speech with stressed and
 # unstressed words 0.4-0.9, docs/raw.mp4 1.7, 20 espeak-ng recordings
@@ -179,7 +182,12 @@ FLOOR_PAUSE_SHARE = 0.5
 # 24-28 dB under the speech's peak, and the guard alone cut 3 to 9 of 25
 # words, most of them whole, in the fast style. Before the first word,
 # after the last one and in a file without transcribed words it doesn't
-# apply: music or ambience there reads as it always did. Applied
+# apply: music or ambience there reads as it always did - unless a sharp
+# sound has moved the threshold itself down (a held peak 20 dB over the
+# floor, above). Without any transcript (transcribe() never ran: the
+# desktop styles without subtitles) nothing tells such a sound from
+# speech: one door slam over room tone 38 dB under it, and nothing else,
+# lets the room tone read as speech (12 of 12 s kept, before: 0.1 s). Applied
 # everywhere, it made silence of all but the loudest moments (through the
 # web analysis, Whisper mocked: a talking clip whose music bed plays on
 # for 16 s after the last word kept 11.8 of 30 s with 'No cuts' and
