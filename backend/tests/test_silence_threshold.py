@@ -665,17 +665,20 @@ def _no_speech_clip(path, case: str) -> None:
     _mp4(path, np.clip(x, -0.999, 0.999), sr, 12.0)
 
 
-def _talk_over_music(path, outro_s: float) -> None:
+def _talk_over_music(path, intro_s: float, outro_s: float) -> list:
     """The WORDS voiced as in _clip (word levels 0..-8 dB, the speech
-    peaking 3 dB under full scale) over a music bed (_music_bed) 24 dB
-    RMS under the speech's peak, which plays on for outro_s after the
-    last word; 44.1 kHz."""
+    peaking 3 dB under full scale), the first one intro_s in, over a
+    music bed (_music_bed) 24 dB RMS under the speech's peak, which plays
+    from the start and on for outro_s after the last word; 44.1 kHz.
+    Returns the words at their times in the clip."""
     sr = 44100
     rng = np.random.default_rng(22)
-    dur = WORDS[-1][2] + outro_s
+    shift = intro_s - WORDS[0][1]
+    words = [(w, round(s + shift, 3), round(e + shift, 3)) for w, s, e in WORDS]
+    dur = words[-1][2] + outro_s
     n = int(dur * sr)
     speech = np.zeros(n)
-    for k, (_w, s, e) in enumerate(WORDS):
+    for k, (_w, s, e) in enumerate(words):
         i0, i1 = int(s * sr), int(e * sr)
         v = _voiced(rng, i1 - i0, 115 + 10 * (k % 4), sr)
         speech[i0:i1] += v / np.max(np.abs(v)) * 10 ** (-rng.uniform(0, 8) / 20)
@@ -683,6 +686,7 @@ def _talk_over_music(path, outro_s: float) -> None:
     bed = _music_bed(rng, n, sr)
     a = speech + bed / np.sqrt(np.mean(bed ** 2)) * 10 ** ((-3 - 24) / 20)
     _mp4(path, np.clip(a, -0.999, 0.999), sr, round(dur, 3))
+    return words
 
 
 def _web(tmp_path, monkeypatch, clip, words_by_segment) -> dict:
@@ -729,8 +733,8 @@ def test_a_sharp_sound_without_speech_moves_nothing(tmp_path, monkeypatch):
     """A quiet room (-36 dBFS) with one door slam and no speech, through
     the web analysis, Whisper hearing nothing. The slam holds its level
     long enough to pass for speech 20 dB over the room, so the threshold
-    moved down by 5 dB with it - into the room tone, and 'tight' kept all
-    12 s (the old rule: 0.45 s around the slam). With no word heard there
+    moved down by 11.6 dB with it - into the room tone, and 'tight' kept
+    all 12 s (the old rule: 0.45 s around the slam). With no word heard there
     is no speech to place the threshold by: it stays the style's, and
     every frame reads as the old rule read it."""
     clip = tmp_path / "clip.mp4"
@@ -757,8 +761,8 @@ def test_words_heard_in_music_or_noise_leave_it_as_it_was(tmp_path, monkeypatch,
     the words, so the noise guard doesn't apply there either: every frame
     reads as the old rule read it, through the web analysis with 'No
     cuts' and 'tight', and 'No cuts' keeps the whole upload. With the
-    guard between such words, the quieter music or noise there became
-    silence ('tight' kept 0.7-4 s more of the review's 20 s clips)."""
+    guard between such words, 'tight' cut the review's 20 s clips
+    differently from the old rule (it kept 0.7-4 s more of them)."""
     clip = tmp_path / "clip.mp4"
     _no_speech_clip(clip, case)
     for pace, (segs, dur, a) in _web(tmp_path, monkeypatch, clip, LYRICS).items():
@@ -772,27 +776,37 @@ def test_words_heard_in_music_or_noise_leave_it_as_it_was(tmp_path, monkeypatch,
 
 
 def test_music_before_and_after_the_words_reads_as_before(tmp_path, monkeypatch):
-    """A talking clip with a music bed 24 dB under the voice that plays on
-    for 10.5 s after the last word, through the web analysis (Whisper
-    mocked with the true word times). The bed lies over both paces'
-    thresholds, so the old rule read it as sound everywhere. Between the
-    words the noise guard now puts the threshold over the bed, but before
-    the first word and after the last one the bed reads as it always did:
-    'No cuts' keeps the whole upload, and 'tight' keeps the music before
-    the first word and after the last one - and every word. The guard
-    used to apply everywhere: 'No cuts' kept only the stretch from the
-    first word to the last (11.8 of 30 s in the review's clip), and
-    'tight' cut the music after the last word."""
+    """A talking clip with a music bed 24 dB under the voice that plays
+    for 2.5 s before the first word and on for 10.5 s after the last one
+    (both longer than the second of silence 'No cuts' leaves at either
+    end), through the web analysis (Whisper mocked with the true word
+    times). The bed lies over both paces' thresholds, so the old rule
+    read it as sound everywhere. Between the words the noise guard now
+    puts the threshold over the bed, but before the first word and after
+    the last one the bed reads as the old rule reads it - all of it as
+    sound: 'No cuts' keeps the whole upload, and 'tight' keeps the music
+    before the first word and after the last one - and every word. The
+    guard used to apply everywhere: 'No cuts' kept only the stretch from
+    the first word to the last (11.8 of 30 s in the review's clip), and
+    'tight' cut the music before the first word and after the last."""
     clip = tmp_path / "talk.mp4"
-    _talk_over_music(clip, outro_s=10.5)
-    runs = _web(tmp_path, monkeypatch, clip, (WORDS[:5], WORDS[5:10], WORDS[10:]))
-    first, last = WORDS[0][1], WORDS[-1][2]
+    words = _talk_over_music(clip, intro_s=2.5, outro_s=10.5)
+    runs = _web(tmp_path, monkeypatch, clip, (words[:5], words[5:10], words[10:]))
+    first, last = words[0][1], words[-1][2]
+    for pace, (_segs, dur, a) in runs.items():
+        assert a.silence_levels.get("noise_guard"), (pace, a.silence_levels)
+        cfg = get_style("smooth" if pace == "none" else "fast")
+        sr, x = a.get_audio_data()
+        old = [(s, e) for s, e, sound in _detect_as_before(
+            x, cfg["silence_threshold"], cfg["min_silence_to_cut"], sr) if sound]
+        new = [(s.start, s.end) for s in a._speech_segments if s.has_speech]
+        for lo, hi in ((0.0, first), (last, dur)):
+            assert _kept(old, lo, hi) > (hi - lo) - 0.05, (pace, lo, hi, old)
+            assert _kept(new, lo, hi) > (hi - lo) - 0.05, (pace, lo, hi, a.silence_levels, new)
     segs, dur, a = runs["none"]
-    assert a.silence_levels.get("noise_guard"), a.silence_levels
     assert len(segs) == 1 and _kept(segs, 0.0, dur) > dur - 0.05, (a.silence_levels, segs)
     segs, dur, a = runs["tight"]
-    assert a.silence_levels.get("noise_guard"), a.silence_levels
     assert _kept(segs, 0.0, first) > first - 0.05, (a.silence_levels, segs)
     assert _kept(segs, last, dur) > (dur - last) - 0.05, (a.silence_levels, segs)
-    lost = [(w, s, e) for w, s, e in WORDS if (e - s) - _kept(segs, s, e) > 0.012]
+    lost = [(w, s, e) for w, s, e in words if (e - s) - _kept(segs, s, e) > 0.012]
     assert lost == [], (a.silence_levels, segs)
