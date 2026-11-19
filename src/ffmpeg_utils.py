@@ -108,6 +108,141 @@ def filter_complex_args(graph: str, work_dir=None):
     return ["-/filter_complex", path], path
 
 
+# ── The colour every video encode writes ──────────────────────────────
+# H.264 as players expect it: 8-bit 4:2:0, limited ("tv") range, BT.709
+# matrix, and tagged so (range, matrix, primaries, transfer) - the
+# pixels converted, not only the tags. Every encode of the web backend,
+# the plugins and the desktop app ends in BT709_TV_ARGS with a filter of
+# this section. Measured on ffmpeg 7.0.2 and 9.0.2 (imageio-ffmpeg 0.7 /
+# 0.8): ffmpeg 9 no longer turns a full-range source (yuvj420p, colour
+# range pc: Android phones, messenger re-encodes) into limited range for
+# -pix_fmt yuv420p or format=yuv420p - the live export of docs/raw.mp4
+# had Y p1/p99 0/255 where ffmpeg 7's had 16/235: crushed blacks and
+# clipped highlights in a player that ignores the range flag - and it
+# ignores -color_primaries / -color_trc for frames that carry none (the
+# exports lost both tags).
+
+# The tags on the frames: both versions encode a frame's tags, ffmpeg 9
+# only those for primaries and transfer.
+BT709_TV_TAGS = ("setparams=range=tv:colorspace=bt709"
+                 ":color_primaries=bt709:color_trc=bt709")
+
+# The encoder's side of it (ffmpeg 7 takes these as the stream's tags,
+# ffmpeg 9 makes a frame that differs in range or matrix agree first).
+BT709_TV_ARGS = ["-pix_fmt", "yuv420p", "-color_range", "tv",
+                 "-colorspace", "bt709", "-color_primaries", "bt709",
+                 "-color_trc", "bt709"]
+
+# Any frame to limited-range BT.709 yuv420p without probing: MoviePy's
+# RGB frames, or a file not probed. A YUV frame is read with its own
+# tags, an untagged one as BT.601 (swscale's default). A limited BT.709
+# frame passes bit-exact on both versions. The flags: without them the
+# matrix conversion came out 1-2 levels dark (mean RGB -1.9/-0.9/-2.0 on
+# docs/raw.mp4, both versions), with them within 0.25 of exact; RGB in,
+# mean RGB error 0.52 (0.57 without).
+_ACCURATE = "accurate_rnd+full_chroma_int+full_chroma_inp"
+TO_BT709_TV = (f"scale=out_color_matrix=bt709:out_range=tv:flags={_ACCURATE},"
+               f"format=yuv420p,{BT709_TV_TAGS}")
+
+# vf_colorspace's name for an input matrix (iall); its "fast" mode
+# converts the matrix and range only (no gamut), as swscale does.
+_COLORSPACE_IALL = {"bt709": "bt709", "bt601": "bt601-6-625",
+                    "smpte240m": "smpte240m", "bt2020": "bt2020"}
+_TAG_MATRIX = {"bt709": "bt709", "bt470bg": "bt601", "smpte170m": "bt601",
+               "bt601": "bt601", "fcc": "bt601", "smpte240m": "smpte240m",
+               "bt2020nc": "bt2020", "bt2020_ncl": "bt2020",
+               "bt2020c": "bt2020", "bt2020_cl": "bt2020"}
+
+
+def untagged_matrix(width: int, height: int) -> str:
+    """The matrix a player reads an untagged video with: BT.601 up to SD
+    (720x576 either way), BT.709 above - Android's guess, and WebKit's
+    (measured: untagged 1280x720 and 720x1280 shown as BT.709, 640x480
+    as BT.601). It keeps an untagged HD upload's colours as ffmpeg 7 did
+    (values kept, tagged BT.709); ffmpeg and Chromium read every
+    untagged video as BT.601, so no single guess fits every player."""
+    sd = (width <= 720 and height <= 576) or (height <= 720 and width <= 576)
+    return "bt601" if sd else "bt709"
+
+
+def source_colors(path) -> dict | None:
+    """{pix_fmt, color_range, color_space, color_transfer, width, height}
+    of the first video stream (to_bt709_tv's input), or None when
+    ffprobe can't tell."""
+    import json
+    try:
+        r = subprocess.run(
+            [get_ffprobe_path(), "-v", "error", "-select_streams", "v:0",
+             "-show_entries", ("stream=pix_fmt,color_range,color_space,"
+                               "color_transfer,width,height"),
+             "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=30, check=False)
+        st = (json.loads(r.stdout or "{}").get("streams") or [None])[0]
+        if not st or not st.get("pix_fmt"):
+            return None
+        return {"pix_fmt": st["pix_fmt"],
+                "color_range": st.get("color_range") or "",
+                "color_space": st.get("color_space") or "",
+                "color_transfer": st.get("color_transfer") or "",
+                "width": int(st.get("width") or 0),
+                "height": int(st.get("height") or 0)}
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return None
+
+
+# PQ (Dolby Vision, HDR10) and HLG: HDR transfers.
+HDR_TRANSFERS = ("smpte2084", "arib-std-b67")
+
+
+def outside_encode(path) -> tuple[str, list[str]]:
+    """(filter, encoder arguments) of an encode that reads a file from
+    outside - the plugin's media, the desktop app's input: limited-range
+    BT.709 (to_bt709_tv, an untagged file read as a player reads it). An
+    HDR file isn't tone-mapped by these encodes (the web normalize does
+    that first): it stays yuv420p with its own tags, as before."""
+    colors = source_colors(path)
+    if colors and colors.get("color_transfer") in HDR_TRANSFERS:
+        return "null", ["-pix_fmt", "yuv420p"]
+    return to_bt709_tv(colors), list(BT709_TV_ARGS)
+
+
+def to_bt709_tv(colors: dict | None, untagged: str | None = None) -> str:
+    """The filter chain that turns a video with these properties
+    (source_colors) into limited-range BT.709 yuv420p, tagged so. An
+    untagged video's matrix: `untagged` when the caller knows it
+    (SmartCam's OpenCV writes BT.601; "bt709" keeps the values, as
+    ffmpeg 7 did), else - a file from outside: an upload, the desktop
+    app's input - as a player reads it (untagged_matrix).
+    Already limited BT.709: no conversion at all. Else vf_colorspace
+    (fast: matrix and range only) with the input named explicitly: the
+    same pixels on both versions. swscale's range conversion on ffmpeg 9
+    puts the chroma half a level high (coded U/V means against the exact
+    conversion, 2 s of docs/raw.mp4 at crf 16: +0.49/+0.33; vf_colorspace
+    on 7 and 9, and swscale on 7: -0.04/+0.15, x264's own). Not probed
+    (None) or a matrix it doesn't take: TO_BT709_TV."""
+    if not colors:
+        return TO_BT709_TV
+    pix_fmt = str(colors.get("pix_fmt") or "")
+    full = pix_fmt.startswith("yuvj") or colors.get("color_range") == "pc"
+    tag = str(colors.get("color_space") or "").lower()
+    if tag in ("", "unknown", "reserved"):
+        matrix = untagged or untagged_matrix(int(colors.get("width") or 0),
+                                             int(colors.get("height") or 0))
+    else:
+        matrix = _TAG_MATRIX.get(tag, "")
+    if matrix == "bt709" and not full:
+        return f"format=yuv420p,{BT709_TV_TAGS}"
+    iall = _COLORSPACE_IALL.get(matrix)
+    if iall is None or not pix_fmt.startswith(("yuv", "nv")):
+        return TO_BT709_TV
+    # 4:2:0 in, as vf_colorspace keeps the subsampling (yuvj stays full:
+    # the explicit irange below names its range)
+    return ("format=yuv420p|yuvj420p|yuv420p10le,"
+            f"colorspace=iall={iall}:irange={'pc' if full else 'tv'}"
+            ":all=bt709:range=tv:fast=1:format=yuv420p,"
+            f"{BT709_TV_TAGS}")
+
+
 def ensure_ffmpeg_in_path():
     """Fuegt das ffmpeg-Verzeichnis zum PATH hinzu, damit auch
     Drittbibliotheken (z.B. whisper) ffmpeg finden koennen."""
