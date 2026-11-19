@@ -149,10 +149,15 @@ NOISE_FLOOR_PERCENTILE = 10
 # speech stays speech, as it always did. A file in which Whisper heard
 # nothing (transcribe() ran: no segment with a word or text) has no
 # speech either and keeps the style threshold as is: one sharp sound over
-# quiet room tone (a door slam that holds 7-11 dB under its peak, the room
-# 36-38 dB under it) moved the threshold 5-11 dB down into the room tone,
+# quiet room tone (a door slam that holds 7-12 dB under its peak, the room
+# 36-38 dB under it) moved the threshold 5-12 dB down into the room tone,
 # and the web analysis kept all 12 s of such an upload with 'tight'
-# where it kept 0.45 s before.
+# where it kept 0.45 s before. A phantom phrase Whisper hears in such an
+# upload ("Thank you.") still lets the threshold move down: 'tight' and
+# 'No cuts' keep all 12 s (before: 0.45 s and 0.7-9.2 s). Keeping the
+# style threshold outside the words would undo that, but it cut the
+# words Whisper missed at the start or end of quiet speech after a clap
+# (1-2 of 13 words by 0.10-0.46 s; now none).
 SPEECH_OVER_FLOOR_DB = 20.0
 SPEECH_PEAK_MIN_DB = -40.0
 # The threshold stays at least this far above the noise floor, so that
@@ -186,9 +191,10 @@ FLOOR_PAUSE_SHARE = 0.5
 # last lie inside words. In talking clips with noise or a music bed 0.92
 # to 1.0 of them do (the noisy ones of 200 synthetic test recordings,
 # docs/raw.mp4 with noise, a vlog with a music bed); in music or noise in
-# which Whisper heard a few words (lyrics, a phantom "Thank you.") 0.0 to
-# 0.44 - the loud stretches between those words are the upload itself,
-# and the guard made 'tight' keep 0.7-4 s more of 20 s there than before.
+# which Whisper heard a few words spread over it (lyrics) 0.0 to 0.44 -
+# the loud stretches between those words are the upload itself, and the
+# guard made 'tight' keep 0.7-4 s more of 20 s there than before. (A lone
+# phantom phrase, "Thank you.", leaves no gap between its words.)
 GUARD_WORD_SHARE = 0.5
 
 
