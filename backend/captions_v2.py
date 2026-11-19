@@ -40,9 +40,11 @@ Worker side (pipeline.render_to_dir with captions=spec):
 - Every clip boundary snaps to the mezz frame grid (review C8). CFR mezz,
   all speeds 1, no fades: one input, `select` of the kept frames +
   `setpts=N/rate/TB`. Otherwise (speed, fades, VFR mezz, clips out of
-  source order) one `-ss -t` input per clip, `fps=rate`, `concat`. Never
+  source order) one `-ss -t` input per clip, seeked SEEK_PREROLL_S early
+  and cut exactly with `trim` / `atrim`, `fps=rate`, `concat`. Never
   N `trim`s of one video input (3.3 GB peak in the lab).
-- Audio: `asplit` → per clip `atrim` + 15 ms `afade` in/out at every cut
+- Audio: per clip `atrim` to the sample (of the one input's `asplit`,
+  or of the clip's own input) + 15 ms `afade` in/out at every cut
   (review C9) + speed / volume / clip fades → `concat`; with
   CLEO_LOUDNORM=1 a linear `loudnorm` to −14 LUFS from the analysis
   measurement (review D10) → AAC 256 kb/s.
@@ -95,6 +97,17 @@ WEB_SUB_POS = {"clean": 0.70, "classic": 0.72, "subtle": 0.76}
 # too short to hear.
 CUT_FADE_S = 0.015
 AUDIO_BITRATE = "256k"
+# The per-clip path seeks each clip's input this much before the clip
+# (on the 10 ms grid: a whole sample at 44.1 and 48 kHz) and cuts the
+# clip out in the graph, so its sound is sample-exact on any ffmpeg.
+# ffmpeg 9 drops the first audio frame after a seek: an input seeked to
+# its clip's start began its sound at the next AAC frame whenever the
+# start lay within an AAC frame after the keyframe the seek lands on
+# (a mezz without B-frames: a clip on a keyframe, one a frame after it
+# at 60 fps, a clip at 0), and the whole clip played up to 21 ms ahead
+# of its picture. 0.2 s also covers HE-AAC's 2048-sample frames and
+# Opus' 80 ms pre-roll.
+SEEK_PREROLL_S = 0.2
 # Matching a payload unit to the doc's words (source seconds).
 _SPAN_EPS = 0.002
 
@@ -608,6 +621,14 @@ def output_frames(clips: list[dict], fps: float) -> int:
     return sum(clip_frames(c, fps) for c in clips)
 
 
+def _seek_point(start: float) -> float:
+    """Where the per-clip path seeks the input of a clip starting at
+    `start`: SEEK_PREROLL_S before it, down to the 10 ms grid; 0 (no
+    seek) near the start of the mezz."""
+    k = math.floor((start - SEEK_PREROLL_S) * 100 + 1e-6)
+    return k / 100 if k > 0 else 0.0
+
+
 def _atempo(speed: float) -> list[str]:
     out = []
     r = speed
@@ -626,14 +647,88 @@ def _f(x: float) -> str:
     return f"{x:.6f}".rstrip("0").rstrip(".") or "0"
 
 
+def _any_of(terms: list[str]) -> str:
+    """The sum of `terms` as an ffmpeg expression, nested as a balanced
+    tree: ffmpeg 9 refuses a flat a+b+c… of more than ~300 terms (its
+    expression parser's depth limit; "Cannot allocate memory"), ffmpeg 7
+    took any length. One term per clip: a 301-clip timeline."""
+    if len(terms) == 1:
+        return terms[0]
+    mid = len(terms) // 2
+    return f"({_any_of(terms[:mid])}+{_any_of(terms[mid:])})"
+
+
+def audio_graph(clips: list[dict], fps: float, *, source: int = 0,
+                leads: list[float] | None = None,
+                loudness: dict[str, Any] | None = None) -> list[str]:
+    """The filter graph parts that make [aout] out of the clips' audio:
+    every clip cut at its (frame-grid) times, sped up, exactly as long
+    as its video frames (clip_frames / fps, padded with silence past the
+    end of the source), its own fades or a 15 ms fade on each side of a
+    cut (review C9), then concatenated (+ the linear loudnorm). The
+    audio is input `source`'s, split per clip; with `leads`, inputs
+    0..n-1's (one per clip, seeked leads[i] s before its clip:
+    build_graph's per-clip path). Also the v1 render's audio
+    (pipeline._concat_frame_exact), so a cut list sounds the same in
+    both engines."""
+    n = len(clips)
+    parts: list[str] = []
+    if leads is None:
+        if n == 1:
+            parts.append(f"[{source}:a]anull[as0]")
+        else:
+            parts.append(f"[{source}:a]asplit=" + str(n) + "".join(f"[as{i}]" for i in range(n)))
+    for i, c in enumerate(clips):
+        if leads is not None:
+            end = leads[i] + c["end"] - c["start"]
+            a = [f"[{i}:a]atrim=start={_f(leads[i])}:end={_f(end)}",
+                 "asetpts=PTS-STARTPTS"]
+        else:
+            a = [f"[as{i}]atrim=start={_f(c['start'])}:end={_f(c['end'])}",
+                 "asetpts=PTS-STARTPTS"]
+        a += _atempo(c["speed"])
+        # the clip's audio is exactly as long as its video frames
+        d = clip_frames(c, fps) / fps
+        a.append(f"apad=whole_dur={_f(d)},atrim=duration={_f(d)}")
+        if abs(c["volume"] - 1.0) > 1e-3:
+            a.append(f"volume={c['volume']:.4f}")
+        fi = min(c["fadeIn"], d / 2) if c["fadeIn"] > 0 else 0.0
+        fo = min(c["fadeOut"], d / 2) if c["fadeOut"] > 0 else 0.0
+        if fi > 0:
+            a.append(f"afade=t=in:st=0:d={_f(fi)}")
+        elif c["cut_before"] and d > 4 * CUT_FADE_S:
+            a.append(f"afade=t=in:st=0:d={_f(CUT_FADE_S)}")
+        if fo > 0:
+            a.append(f"afade=t=out:st={_f(max(0.0, d - fo))}:d={_f(fo)}")
+        elif c["cut_after"] and d > 4 * CUT_FADE_S:
+            a.append(f"afade=t=out:st={_f(d - CUT_FADE_S)}:d={_f(CUT_FADE_S)}")
+        parts.append(",".join(a) + f"[a{i}]")
+    tail = ["".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1"]
+    if loudness:
+        try:
+            tail.append(
+                "loudnorm=I=-14:TP=-1:LRA=11:linear=true"
+                f":measured_I={float(loudness['I']):.2f}"
+                f":measured_TP={float(loudness['TP']):.2f}"
+                f":measured_LRA={float(loudness['LRA']):.2f}"
+                f":measured_thresh={float(loudness['thresh']):.2f}"
+                f":offset={float(loudness['offset']):.2f}")
+            tail.append("aresample=48000")
+        except (KeyError, TypeError, ValueError):
+            pass
+    parts.append(",".join(tail) + "[aout]")
+    return parts
+
+
 def build_graph(clips: list[dict], src: dict[str, Any], *,
                 layer: dict[str, Any] | None,
                 loudness: dict[str, Any] | None = None,
                 segment_inputs: bool | None = None,
                 ) -> tuple[list[list[str]], str, bool]:
     """(per-input ffmpeg args, filter graph, has audio). Input 0..k-1:
-    the mezz (once, or once per clip); the caption layer, if any, is the
-    last input (rawvideo on stdin). Output pads: [vout] and [aout]."""
+    the mezz (once, or once per clip, seeked SEEK_PREROLL_S before it);
+    the caption layer, if any, is the last input (rawvideo on stdin).
+    Output pads: [vout] and [aout]."""
     rate = Fraction(src["rate"])
     fps = float(rate)
     # ffmpeg starts every input at t = 0 (no -copyts), so filter times
@@ -644,22 +739,31 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
     inputs: list[list[str]] = []
     parts: list[str] = []
     half = 0.5 / fps
+    leads: list[float] | None = None
     if not seg:
         inputs.append([])
-        terms = "+".join(
+        terms = _any_of([
             f"gte(t\\,{_f(c['start'] - half)})*lt(t\\,{_f(c['end'] - half)})"
-            for c in clips)
+            for c in clips])
         parts.append(f"[0:v]select='{terms}',"
                      f"setpts=N*{rate.denominator}/{rate.numerator}/TB[vcat]")
-        if audio:
-            if n == 1:
-                parts.append("[0:a]anull[as0]")
-            else:
-                parts.append("[0:a]asplit=" + str(n) + "".join(f"[as{i}]" for i in range(n)))
     else:
+        leads = []
         for i, c in enumerate(clips):
-            inputs.append(["-ss", _f(c["start"]), "-t", _f(c["end"] - c["start"])])
-            v = [f"[{i}:v]setpts=PTS-STARTPTS"]
+            # seeked SEEK_PREROLL_S early (no -ss at all for a clip that
+            # close to 0: ffmpeg 9 drops the first audio frame of -ss 0
+            # too), the clip cut out here: its frames by the select
+            # path's rule (start and end half a frame early: -t counts
+            # from the first frame after the seek, so it may pass the
+            # frame at the clip's end), its samples exactly (audio_graph)
+            seek = _seek_point(c["start"])
+            lead = c["start"] - seek
+            leads.append(lead)
+            inputs.append((["-ss", _f(seek)] if seek > 0 else [])
+                          + ["-t", _f(c["end"] - seek)])
+            end = lead + c["end"] - c["start"] - half
+            v = [f"[{i}:v]trim=start={_f(max(0.0, lead - half))}:end={_f(end)}",
+                 "setpts=PTS-STARTPTS"]
             if abs(c["speed"] - 1.0) > 1e-3:
                 v.append(f"setpts=PTS/{c['speed']:.6f}")
             v.append(f"fps={rate.numerator}/{rate.denominator}")
@@ -675,44 +779,7 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
         parts.append("".join(f"[v{i}]" for i in range(n))
                      + f"concat=n={n}:v=1:a=0[vcat]")
     if audio:
-        for i, c in enumerate(clips):
-            if seg:
-                a = [f"[{i}:a]asetpts=PTS-STARTPTS",
-                     f"atrim=duration={_f(c['end'] - c['start'])}"]
-            else:
-                a = [f"[as{i}]atrim=start={_f(c['start'])}:end={_f(c['end'])}",
-                     "asetpts=PTS-STARTPTS"]
-            a += _atempo(c["speed"])
-            # the clip's audio is exactly as long as its video frames
-            d = clip_frames(c, fps) / fps
-            a.append(f"apad=whole_dur={_f(d)},atrim=duration={_f(d)}")
-            if abs(c["volume"] - 1.0) > 1e-3:
-                a.append(f"volume={c['volume']:.4f}")
-            fi = min(c["fadeIn"], d / 2) if c["fadeIn"] > 0 else 0.0
-            fo = min(c["fadeOut"], d / 2) if c["fadeOut"] > 0 else 0.0
-            if fi > 0:
-                a.append(f"afade=t=in:st=0:d={_f(fi)}")
-            elif c["cut_before"] and d > 4 * CUT_FADE_S:
-                a.append(f"afade=t=in:st=0:d={_f(CUT_FADE_S)}")
-            if fo > 0:
-                a.append(f"afade=t=out:st={_f(max(0.0, d - fo))}:d={_f(fo)}")
-            elif c["cut_after"] and d > 4 * CUT_FADE_S:
-                a.append(f"afade=t=out:st={_f(d - CUT_FADE_S)}:d={_f(CUT_FADE_S)}")
-            parts.append(",".join(a) + f"[a{i}]")
-        tail = ["".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1"]
-        if loudness:
-            try:
-                tail.append(
-                    "loudnorm=I=-14:TP=-1:LRA=11:linear=true"
-                    f":measured_I={float(loudness['I']):.2f}"
-                    f":measured_TP={float(loudness['TP']):.2f}"
-                    f":measured_LRA={float(loudness['LRA']):.2f}"
-                    f":measured_thresh={float(loudness['thresh']):.2f}"
-                    f":offset={float(loudness['offset']):.2f}")
-                tail.append("aresample=48000")
-            except (KeyError, TypeError, ValueError):
-                pass
-        parts.append(",".join(tail) + "[aout]")
+        parts += audio_graph(clips, fps, leads=leads, loudness=loudness)
     if layer:
         k = len(inputs)
         parts.append(f"[vcat][{k}:v]overlay=0:{int(layer['top'])}:"
@@ -898,7 +965,7 @@ def render_primary(
         # CLEO_LOUDNORM of its own, so a loudness in the spec is applied.
         loudness=spec.get("loudness"),
         segment_inputs=seg)
-    from src.ffmpeg_utils import get_ffmpeg_path
+    from src.ffmpeg_utils import filter_complex_args, get_ffmpeg_path
     cmd = [get_ffmpeg_path(), "-y", "-v", "error"]
     if layer_in is None:
         cmd.append("-nostdin")
@@ -909,14 +976,8 @@ def render_primary(
                 "-s", f"{src['W']}x{band['height']}",
                 "-framerate", src["rate"], "-thread_queue_size", "64",
                 "-i", "pipe:0"]
-    script = None
-    if len(graph) > 100_000:
-        fd, script = tempfile.mkstemp(suffix=".ffgraph", dir=str(work), text=True)
-        with os.fdopen(fd, "w") as fh:
-            fh.write(graph)
-        cmd += ["-filter_complex_script", script]
-    else:
-        cmd += ["-filter_complex", graph]
+    graph_args, script = filter_complex_args(graph, work)
+    cmd += graph_args
     cmd += ["-map", "[vout]"]
     if audio:
         cmd += ["-map", "[aout]", "-c:a", "aac", "-b:a", AUDIO_BITRATE]

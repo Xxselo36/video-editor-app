@@ -2,10 +2,11 @@
 /**
  * The job of /app/p/[jobId]: the poll of jobPoll.ts (GET /jobs/{id}
  * while it runs, after the editor's last saves, and until the preview
- * shows the stored timeline), asked again when the tab shows. Starts
- * once useProjectsV2() is known: v1 keeps opening the editor by itself
- * when the analysis is done; the v2 Vorschau shows the job in every
- * state and never redirects.
+ * shows the stored timeline; at rest a look at its status row now and
+ * then, but not while a video of the page plays), asked again when the
+ * tab shows. Starts once useProjectsV2() is known: v1 keeps opening the
+ * editor by itself when the analysis is done; the v2 Vorschau shows the
+ * job in every state and never redirects.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -14,6 +15,9 @@ import { useProjectsV2 } from "@/features/jobs/useProjectsV2";
 import { startJobPoll, type JobPollControl, type Load } from "./jobPoll";
 
 export type { Load } from "./jobPoll";
+
+/** A video of the page plays (the Vorschau's preview or export). */
+const videoPlays = () => Array.from(document.getElementsByTagName("video")).some((v) => !v.paused && !v.ended);
 
 export type JobPoll = {
   load: Load;
@@ -47,6 +51,7 @@ export function useJobPoll(jobId: string): JobPoll {
       settled: () => setSettled((n) => n + 1),
       previewFailed: setPreviewFailed,
       toEditor: () => router.replace(`/app/edit/${jobId}`),
+      playing: videoPlays,
     });
     pollRef.current = poll;
     const onVisible = () => {

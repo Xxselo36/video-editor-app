@@ -8,6 +8,7 @@
  */
 import { expect, test } from "./support/fixtures";
 import { openEditor } from "./support/app";
+import { WEB } from "./support/env";
 import type { Page } from "@playwright/test";
 
 /** The render request's body (answered 409 so nothing renders). */
@@ -29,6 +30,10 @@ async function exportBody(page: Page, jobId: string): Promise<Record<string, unk
 test("?captions=v2 on /app: marker in the editor, the export asks for v2", async ({ page, stub }) => {
   const job = await stub.seed("review");
   await page.goto("/app?captions=v2");
+  // /app stores the opt-in and, with nothing on this device, goes on to
+  // New video in the same pass after hydration: wait for that, or the
+  // next goto runs first (WebKit) and the late redirect cuts it off.
+  await expect(page).toHaveURL(`${WEB}/app/new`);
   await openEditor(page, job.id);
   await expect(page.getByTestId("captions-v2-marker")).toHaveText("New captions (test)");
   const body = await exportBody(page, job.id);
@@ -39,7 +44,9 @@ test("?captions=v2 on /app: marker in the editor, the export asks for v2", async
 test("without the opt-in (or after ?captions=v1): no marker, no field", async ({ page, stub }) => {
   const job = await stub.seed("review");
   await page.goto("/app?captions=v2");
+  await expect(page).toHaveURL(`${WEB}/app/new`);
   await page.goto("/app?captions=v1");
+  await expect(page).toHaveURL(`${WEB}/app/new`);
   await openEditor(page, job.id);
   await expect(page.getByTestId("apply-render")).toBeVisible();
   await expect(page.getByTestId("captions-v2-marker")).toHaveCount(0);

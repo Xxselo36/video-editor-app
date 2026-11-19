@@ -43,10 +43,12 @@ faster-whisper>=1.2.0
 pydub>=0.25.1
 scipy>=1.9.0
 # The renders use this package's ffmpeg (src/ffmpeg_utils.py prefers it to
-# the system one). 0.8 bundles ffmpeg 9 instead of 7, and a render's frame
-# count changes with it (backend/tests/captions/test_render_smoke.py), so
-# it stays below 0.8 until ffmpeg 9 has been checked.
-imageio_ffmpeg>=0.4.9,<0.8
+# the system one). Checked with 0.7 (ffmpeg 7) and 0.8 (ffmpeg 9): both
+# render the same frames, frame-exact and in sync
+# (backend/tests/captions/test_av_exact.py), with the options both have
+# (backend/tests/test_ffmpeg_compat.py) and the thumbnail's colours
+# (backend/tests/test_thumbnail.py).
+imageio_ffmpeg>=0.4.9
 
 # Headless OpenCV (no GUI/X11 deps) keeps the Linux image small. SmartCam's
 # YuNet face detector runs on OpenCV's own DNN module (cv2.FaceDetectorYN).

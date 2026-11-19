@@ -7,7 +7,8 @@ every web render path passes them — while the desktop defaults stay.
 - bounce_anchor="caption": Clipper's bounce-in scales the caption in place;
   the desktop's "frame" scales around the frame centre (captions.md C12).
 - render_only (local), render_to_dir (render_r2) and Modal's
-  render_burn_concat all pass pipeline.web_burn_kwargs.
+  render_burn_concat all pass pipeline.web_burn_kwargs (frame-exact,
+  video-only clips among them: test_av_exact.py).
 - The hook LLM still gets transcript lines, not word units.
 """
 from __future__ import annotations
@@ -32,6 +33,7 @@ def test_web_burn_kwargs(preset):
     kw = pipeline.web_burn_kwargs(preset)
     assert kw["assign_by_midpoint"] is True
     assert kw["bounce_anchor"] == "caption"
+    assert kw["frame_exact"] is True
     assert kw.get("sub_pos") == WEB.get(preset)
 
 
@@ -131,7 +133,7 @@ def test_render_to_dir_passes_the_web_options(tmp_path, monkeypatch):
     assert got["assign_by_midpoint"] is True
     assert got["bounce_anchor"] == "caption"
     assert got["sub_pos"] == 0.70 and got["parallelism"] == 8
-    assert got["merge_gap"] == 0.0
+    assert got["merge_gap"] == 0.0 and got["frame_exact"] is True
 
 
 def test_local_render_passes_the_web_options(tmp_path, monkeypatch):
@@ -144,6 +146,7 @@ def test_local_render_passes_the_web_options(tmp_path, monkeypatch):
                              {"caption_preset": "classic"}, hooks=[])
     assert got["assign_by_midpoint"] is True
     assert got["bounce_anchor"] == "caption" and got["sub_pos"] == 0.72
+    assert got["frame_exact"] is True
 
 
 def test_pipeline_imports_without_modal_and_boto3():

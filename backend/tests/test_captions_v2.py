@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import time
 import types
+from fractions import Fraction
 
 import pytest
 
@@ -430,7 +431,11 @@ def test_graph_select_path():
     clips = C.clip_plan([(0.0, 1.0), (1.0, 2.0), (3.0, 4.0)], None, 30.0)
     inputs, graph, audio = C.build_graph(clips, SRC, layer={"top": 1200, "height": 300})
     assert audio and inputs == [[]]
-    assert "select='gte(t\\,-0.016667)*lt(t\\,0.983333)+" in graph
+    # the clips' terms summed as a balanced tree (ffmpeg 9's parser
+    # refuses a flat sum of ~300: test_ffmpeg_compat.py)
+    assert ("select='(gte(t\\,-0.016667)*lt(t\\,0.983333)+"
+            "(gte(t\\,0.983333)*lt(t\\,1.983333)+gte(t\\,2.983333)*lt(t\\,3.983333)))'"
+            ) in graph
     assert "setpts=N*1/30/TB[vcat]" in graph
     assert "[0:v]trim" not in graph and "concat=n=3:v=1" not in graph
     assert "asplit=3[as0][as1][as2]" in graph
@@ -449,10 +454,18 @@ def test_graph_segment_path_with_effects_and_loudnorm():
     loud = {"I": -20.0, "TP": -2.0, "LRA": 6.0, "thresh": -30.0, "offset": 0.5}
     inputs, graph, _ = C.build_graph(clips, {**SRC, "rate": "30000/1001", "fps": 29.97},
                                      layer=None, loudness=loud)
-    assert inputs == [["-ss", "0", "-t", "2"], ["-ss", "3", "-t", "2"]]
+    # each input seeked SEEK_PREROLL_S before its clip on the 10 ms grid
+    # (not at all at 0), the clip cut out in the graph: its frames as on
+    # the select path (half a frame early at both ends), its samples exactly
+    assert inputs == [["-t", "2"], ["-ss", "2.8", "-t", "2.2"]]
     # 2 s at 1.5x = 39.96 frames at 29.97 → 40, video and audio alike
-    assert ("[0:v]setpts=PTS-STARTPTS,setpts=PTS/1.500000,fps=30000/1001,"
-            "tpad=stop_mode=clone:stop=1,trim=end_frame=40,fade=t=in:st=0:d=0.5[v0]") in graph
+    assert ("[0:v]trim=start=0:end=1.983317,setpts=PTS-STARTPTS,setpts=PTS/1.500000,"
+            "fps=30000/1001,tpad=stop_mode=clone:stop=1,trim=end_frame=40,"
+            "fade=t=in:st=0:d=0.5[v0]") in graph
+    assert ("[1:v]trim=start=0.183317:end=2.183317,setpts=PTS-STARTPTS,"
+            "setpts=PTS/3.000000,") in graph
+    assert "[0:a]atrim=start=0:end=2,asetpts=PTS-STARTPTS," in graph
+    assert "[1:a]atrim=start=0.2:end=2.2,asetpts=PTS-STARTPTS," in graph
     assert "apad=whole_dur=1.334667,atrim=duration=1.334667" in graph   # 40 / 29.97
     assert "concat=n=2:v=1:a=0[vcat]" in graph
     assert "atempo=1.500000" in graph and "atempo=2.0,atempo=1.500000" in graph
@@ -460,6 +473,22 @@ def test_graph_segment_path_with_effects_and_loudnorm():
     assert ("loudnorm=I=-14:TP=-1:LRA=11:linear=true:measured_I=-20.00:"
             "measured_TP=-2.00:measured_LRA=6.00:measured_thresh=-30.00:offset=0.50") in graph
     assert "[vcat]format=yuv420p[vout]" in graph
+
+
+@pytest.mark.parametrize("rate", ["25", "30000/1001", "60000/1001", "24000/1001"])
+def test_per_clip_seeks_come_early_on_the_10_ms_grid(rate):
+    """ffmpeg 9 drops the first audio frame after a seek: every per-clip
+    input starts SEEK_PREROLL_S (+ < 10 ms) before its clip, on the 10 ms
+    grid (a whole sample at 44.1 and 48 kHz), or at 0 without a seek."""
+    fps = float(Fraction(rate))
+    for k in range(0, 2000, 7):
+        start = k / fps
+        seek = C._seek_point(start)
+        if seek == 0:
+            assert start < C.SEEK_PREROLL_S + 0.01
+            continue
+        assert round(seek * 100, 6) == round(seek * 100)
+        assert C.SEEK_PREROLL_S <= start - seek + 1e-9 < C.SEEK_PREROLL_S + 0.01
 
 
 def test_graph_without_audio():

@@ -19,12 +19,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import av_media as av
 import caption_media as cm
 import sync_sim as sim
 
 V = sim.load_vectors()
 SEGS = [tuple(s) for s in V["segments"][2:4]]     # around the "uh," cut
 W, H, FPS = 540, 960, 25
+# The render's clips: edges on the nearest frame (the web burn is
+# frame-exact) — the output timeline the words are checked in.
+KEPT = sim.kept_segments(SEGS, frame_exact=True, fps=FPS)
 
 
 @pytest.fixture(scope="module")
@@ -71,7 +75,7 @@ def rendered(tmp_path_factory):
             "clipper", "tight", "en", [], [], parallelism=2)
     finally:
         mp.undo()
-    offsets = [0.0, SEGS[0][1] - SEGS[0][0]]
+    offsets = [0.0, KEPT[0][1] - KEPT[0][0]]
     for ev in events:
         ev["out_start"] = offsets[ev["seg"]] + ev["start"]
     yield work, files, events
@@ -79,18 +83,26 @@ def rendered(tmp_path_factory):
 
 
 def test_render_outputs(rendered):
+    """Exactly the clips' frames (each edge on the nearest frame: 35 + 94),
+    sound as long as the picture. It was 128 frames with ffmpeg 7 and 127
+    with ffmpeg 9 (imageio-ffmpeg 0.8): see test_av_exact.py."""
     _, files, events = rendered
     primary = Path(files["primary"])
     assert primary.is_file() and primary.stat().st_size > 10_000
-    want = sum(e - s for s, e in SEGS)
-    assert abs(cm.probe_frames(primary) / FPS - want) < 0.1
+    want = sum(round(e * FPS) - round(s * FPS) for s, e in SEGS)
+    assert want == 129
+    assert cm.probe_frames(primary) == want
+    s = av.streams(primary)
+    assert s["v"]["start"] == s["a"]["start"] == 0
+    assert s["v"]["duration"] == pytest.approx(want / FPS, abs=1e-3)
+    assert s["a"]["duration"] == pytest.approx(want / FPS, abs=1e-3)
     assert events and all(ev["kwargs"] == {"bounce_anchor": "caption"}
                           for ev in events)
 
 
 def test_no_caption_burned_twice_and_every_word_in_sync(rendered):
     _, _, events = rendered
-    truth = sim.spoken_words(V["words"], SEGS)
+    truth = sim.spoken_words(V["words"], KEPT)
     assert [w["text"] for w in truth][:6] == [
         "Mistake", "number", "two,", "is", "dead", "air."]
     r = sim.score(events, truth)
@@ -102,7 +114,7 @@ def test_a_caption_is_on_screen_at_every_spoken_word(rendered):
     work, files, _ = rendered
     bg = np.asarray(cm.background(W, H), dtype=np.int16)
     y0, y1 = int(H * 0.70), int(H * 0.80)          # Clipper's band (0.75)
-    for w in sim.spoken_words(V["words"], SEGS):
+    for w in sim.spoken_words(V["words"], KEPT):
         t = (w["t0"] + w["t1"]) / 2
         frame = np.asarray(cm.frame_at(Path(files["primary"]), int(t * FPS)),
                            dtype=np.int16)

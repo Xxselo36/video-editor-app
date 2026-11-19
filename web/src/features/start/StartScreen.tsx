@@ -26,10 +26,10 @@
  *   continues with the choices it had (its record keeps them).
  */
 import { useRouter } from "next/navigation";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getLiveUpload, isCancelling, isUploading, loadUploadCode, whenFree } from "@/features/upload/uploadManager";
 import { setPaywall } from "@/features/upload/uploadState";
-import { useLang, useT } from "@/i18n";
+import { useLang, useT, type TFn } from "@/i18n";
 import { fmtMinutes, useBillingConfig, useMe } from "@/lib/account";
 import { track } from "@/lib/analytics";
 import { useConfig } from "@/lib/config";
@@ -65,6 +65,9 @@ import s from "./start.module.css";
  *  most about 10 s: lib/uploadResume ABORT_TIMEOUT_MS). */
 const CANCEL_WAIT_MS = 15_000;
 
+/** A message in the UI language of the moment. */
+type Wording = (t: TFn, lang: string) => string;
+
 export function StartScreen() {
   const t = useT();
   const lang = useLang();
@@ -86,12 +89,14 @@ export function StartScreen() {
   const { preparing, slow, arm: armPreparing, done: donePreparing } = usePreparing(ios ? null : STALL_MS);
   // The picked file is being checked (the pick-time check).
   const [checking, setChecking] = useState(false);
-  // Why the last "Pick anyway" file wasn't taken (not a video).
-  const [pickError, setPickError] = useState<string | null>(null);
-  // iOS: the original picked is over the upload cap (its message).
-  const [tooBig, setTooBig] = useState<string | null>(null);
-  // The pick-time check said no (its message).
-  const [refusal, setRefusal] = useState<string | null>(null);
+  // What the pick has to say, worded at render (a language switch in the
+  // header rewords it):
+  // why the last "Pick anyway" file wasn't taken (not a video),
+  const [pickError, setPickError] = useState<Wording | null>(null);
+  // iOS: the original picked is over the upload cap,
+  const [tooBig, setTooBig] = useState<Wording | null>(null);
+  // the pick-time check said no.
+  const [refusal, setRefusal] = useState<Wording | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // iOS: "Pick anyway" (no format filter: iOS converts the video).
   const anyRef = useRef<HTMLInputElement>(null);
@@ -129,11 +134,14 @@ export function StartScreen() {
   }, []);
 
   // The account's prefs or the live styles came after the pick: they
-  // decide the choices the user hasn't touched yet.
-  useEffect(() => {
+  // decide the choices the user hasn't touched yet. Not a save during
+  // this visit (another upload's start): that is for the next pick only,
+  // so a start on screen never changes by itself.
+  const offerPrefs = useEffectEvent(() => {
     if (!prefs.ready) return;
     offerChoices(initialChoices({ saved: prefs.saved, standard: prefs.captionStyle, lastStyle: prefs.lastStyle, live }));
-  }, [prefs, live]);
+  });
+  useEffect(() => offerPrefs(), [prefs.loaded, live]);
 
   const screen = start ? "style" : "pick";
   useEffect(() => {
@@ -180,7 +188,7 @@ export function StartScreen() {
       // going after a while (a slow connection): the card again, saying
       // why (picked again a moment later, it starts).
       if (isUploading(f) && !(await whenFree(f, CANCEL_WAIT_MS))) {
-        if (mounted.current) setRefusal(t("app.start.pickBusy"));
+        if (mounted.current) setRefusal(() => (tt: TFn) => tt("app.start.pickBusy"));
         return;
       }
       if (!mounted.current) return;
@@ -191,9 +199,17 @@ export function StartScreen() {
       if (!mounted.current) return;
       if (no) {
         if ("paywall" in no) setPaywall(no.paywall);
-        else setRefusal(describeError(no, t, { v2: true }));
+        else setRefusal(() => (tt: TFn) => describeError(no, tt, { v2: true }));
         return;
       }
+      // These bytes upload in another tab, or wait there for "Los geht's":
+      // that start is the other tab's (Projects shows it), not a second
+      // one of the same video.
+      if (await code.uploadsElsewhere(f)) {
+        if (mounted.current) router.push("/app");
+        return;
+      }
+      if (!mounted.current) return;
       // One 720 px frame: the tiles, the preview and the Projects thumbnail.
       const frame = import("@/features/upload/grabFrame").then((m) => m.grabFrame(f, 6000, 720)).catch(() => null);
       // This video's upload stopped (a reload while it waited for "Los
@@ -216,7 +232,8 @@ export function StartScreen() {
       // The upload code didn't load: offline, or this build's chunk went
       // with a deploy (a reload fixes that).
       if (mounted.current) {
-        setRefusal(describeError({ code: navigator.onLine === false ? "connection_lost" : "app_updated" }, t, { v2: true }));
+        const why = { code: navigator.onLine === false ? "connection_lost" : "app_updated" };
+        setRefusal(() => (tt: TFn) => describeError(why, tt, { v2: true }));
       }
     } finally {
       busy.current = false;
@@ -224,7 +241,6 @@ export function StartScreen() {
     }
   };
 
-  const gb = fmtMinutes(limits.max_upload_bytes / 1e9, lang);
   /** The original-formats input: on iOS an original over the upload cap
    *  isn't uploaded; "Pick anyway" sends the converted copy instead. */
   const takeOriginal = (input: HTMLInputElement) => {
@@ -235,7 +251,9 @@ export function StartScreen() {
       donePreparing();
       watch.arrived();
       setPickError(null);
-      setTooBig(t("app.start.pickTooBig", { size: fmtMinutes(overLimitGb(f.size), lang), max: gb }));
+      const size = overLimitGb(f.size);
+      const max = limits.max_upload_bytes / 1e9;
+      setTooBig(() => (tt: TFn, l: string) => tt("app.start.pickTooBig", { size: fmtMinutes(size, l), max: fmtMinutes(max, l) }));
       return;
     }
     void take(f);
@@ -248,7 +266,7 @@ export function StartScreen() {
     if (kind !== "video") {
       donePreparing();
       watch.closed();
-      setPickError(t(kind === "audio" ? "app.errors.noVideoTrack" : "app.start.notVideo"));
+      setPickError(() => (tt: TFn) => tt(kind === "audio" ? "app.errors.noVideoTrack" : "app.start.notVideo"));
       return;
     }
     void take(f, "any");
@@ -348,9 +366,9 @@ export function StartScreen() {
     slow,
     stalled,
     missed,
-    pickError,
-    tooBig,
-    refusal,
+    pickError: pickError?.(t, lang) ?? null,
+    tooBig: tooBig?.(t, lang) ?? null,
+    refusal: refusal?.(t, lang) ?? null,
   };
 
   return (

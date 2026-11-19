@@ -206,6 +206,13 @@ def _prepare_env(args: argparse.Namespace, tmp: Path) -> None:
     # only in a browser opened with ?captions=v2 (editor-captions.spec).
     # Explicit, since unset is v2 for every job (captions_v2.engine_default).
     os.environ.setdefault("CLEO_CAPTION_ENGINE", "optin")
+    # No cap on the multipart uploads one caller opens per hour (main.py
+    # _check_init_rate; production: 60). With auth off the cap is per
+    # client address, and every e2e page is 127.0.0.1: a whole R2 run
+    # (both projects, the retries of CI) opens more than 60, and the last
+    # suites' uploads were refused (429 too_many_uploads) — no part went
+    # up. The suites that show that refusal answer it themselves.
+    os.environ.setdefault("CLEO_UPLOAD_INITS_PER_HOUR", "0")
     if args.auth:
         os.environ["CLEO_AUTH_TEST"] = "1"
     else:

@@ -3,18 +3,20 @@
  * The v2 editor's keyboard shortcuts (editor.md §4.6): one window
  * listener over the key → action map and the target filter of ./keymap.
  *
- * `handlers` may change every render (they are read through a ref). A
- * handler returns `false` when it did nothing (e.g. Delete without a
- * selection): the key then keeps its default.
+ * `handlers` may change every render (they are read through a ref, set
+ * as the render commits: a key pressed right after a click that changed
+ * the edit — Escape after undo — finds this render's handlers, not the
+ * ones before it). A handler returns `false` when it did nothing (e.g.
+ * Delete without a selection): the key then keeps its default.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { dispatchShortcut, type ShortcutHandlers } from "./keymap";
 
 export type { ShortcutHandlers } from "./keymap";
 
 export function useEditorShortcuts(handlers: ShortcutHandlers, enabled = true): void {
   const ref = useRef(handlers);
-  useEffect(() => {
+  useLayoutEffect(() => {
     ref.current = handlers;
   });
   useEffect(() => {

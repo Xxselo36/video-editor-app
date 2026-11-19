@@ -115,3 +115,57 @@ def test_the_old_rule_started_v1_a_frame_early(source):
     b = round((k + LEN) / FPS - 0.0005, 3)
     assert math.floor(a * FPS + 1e-5) == k - 1
     assert _v1_first_frames(src, [(a, b)], work / "old") == [k - 1]
+
+
+def test_web_burn_starts_every_clip_on_its_nearest_frame(source):
+    """The web's burn (web_burn_kwargs: frame_exact) picks frames like v2:
+    each clip from the frame nearest its edge, exactly its frames long —
+    on the grid and between frames, near the start of the source and
+    further in, where the plugin's burn reads int(fps·t) or ffmpeg's
+    frame at or after t (the control case above)."""
+    from backend.pipeline import web_burn_kwargs
+    from plugins.premiere.video_editor_premiere import _multi_clip_burn
+    src, work = source
+    offs = (-0.3, 0.3, 0.0, 0.45, -0.45)        # of a frame
+    segs = [((k + o) / FPS, (k + LEN + o) / FPS) for k, o in zip(KS, offs)]
+    out = work / "web"
+    out.mkdir(exist_ok=True)
+    res = _multi_clip_burn(str(src), segs, [], "none", str(out), parallelism=2,
+                           **web_burn_kwargs("none"))
+    assert len(res) == len(segs)
+    assert [_frame(cm.frame_at(Path(p), 0)) for p, _ in res] == KS
+    assert [_frame(cm.frame_at(Path(p), LEN - 1)) for p, _ in res] == [
+        k + LEN - 1 for k in KS]
+    assert [cm.probe_frames(Path(p)) for p, _ in res] == [LEN] * len(KS)
+    assert [d for _p, d in res] == [pytest.approx(LEN / FPS)] * len(KS)
+    # v2 takes the same frames
+    assert [round(c["start"] * FPS) for c in C.clip_plan(segs, None, FPS)] == KS
+
+
+@pytest.mark.parametrize("rate", ["25", "30", "30000/1001", "60000/1001",
+                                  "24000/1001"])
+def test_frame_plan_is_clip_plans(rate):
+    """_frame_plan (the v1 burn, _concat_frame_exact) cuts the frames
+    captions_v2.clip_plan (v2) cuts, and joins only splits."""
+    import random
+    from fractions import Fraction
+    from itertools import pairwise
+
+    from plugins.premiere.video_editor_premiere import _frame_plan
+    r = Fraction(rate)
+    fps = float(r)
+    rnd = random.Random(rate)
+    for _ in range(500):
+        segs, t = [], rnd.random()
+        for _k in range(rnd.randint(1, 8)):
+            s = t + rnd.choice([0.0, rnd.random() * 0.3])
+            e = s + rnd.random() * 3
+            segs.append((round(s, 3), round(e, 3)))
+            t = e
+        unmerged = _frame_plan(segs, r, merge=False)
+        assert unmerged == [
+            (round(c["start"] * fps), round((c["end"] - c["start"]) * fps))
+            for c in C.clip_plan(segs, None, fps)]
+        merged = _frame_plan(segs, r)
+        assert sum(n for _a, n in merged) == sum(n for _a, n in unmerged)
+        assert all(a + n != b for (a, n), (b, _m) in pairwise(merged))

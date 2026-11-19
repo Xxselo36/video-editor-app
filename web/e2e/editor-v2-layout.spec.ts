@@ -135,6 +135,65 @@ test.describe("editor v2 layout", TAG, () => {
     await expect(sheet).toBeHidden();
     await expect(page.getByTestId("ed-tab-text")).toBeFocused();
   });
+
+  test("a banner over the stage (the re-edit note): the preview starts under it, the dock in view; closed, the preview takes the room again", async ({
+    page,
+    stub,
+  }, info) => {
+    const desktop = info.project.name === "desktop";
+    if (desktop) await page.setViewportSize({ width: 1440, height: 900 });
+    // Back in review after an export (Fine-tune on a finished video).
+    const job = await stub.seed("edited");
+    await openV2(page, job.id);
+    const note = page.getByTestId("ed-reedit");
+    await expect(note).toBeVisible();
+    const n = await box(page, "ed-reedit");
+    const frame = await box(page, "ed-frame");
+    // never over the picture: the frame starts under the note's foot, with air
+    expect(frame.y).toBeGreaterThanOrEqual(n.y + n.height + 11.5);
+    expect(frame.width / frame.height).toBeCloseTo(9 / 16, 1);
+    expect(frame.height).toBeGreaterThanOrEqual(desktop ? 560 : 330);
+    const vh = page.viewportSize()!.height;
+    const dock = await box(page, "ed-timeline");
+    expect(dock.y + dock.height).toBeLessThanOrEqual(vh);
+    expect(dock.y).toBeGreaterThan(frame.y + frame.height);
+    expect(await noDocumentScroll(page)).toEqual({ v: 0, h: 0 });
+    // Closed: the frame as without a note (desktop: back up and larger).
+    await note.getByRole("button", { name: "Close" }).click();
+    await expect(note).toHaveCount(0);
+    await expect.poll(async () => (await box(page, "ed-frame")).y).toBeLessThan(frame.y);
+    if (desktop) await expect.poll(async () => (await box(page, "ed-frame")).height).toBeGreaterThan(frame.height);
+    else expect((await box(page, "ed-frame")).height).toBeCloseTo(330, 0);
+  });
+
+  test("393×852 (an iPhone 15): the title takes the top bar's free room; only a name longer than that is cut, Export stays whole", async ({
+    page,
+    stub,
+  }) => {
+    await page.setViewportSize({ width: 393, height: 852 });
+    const fits = await stub.seed("review_speech", { filename: "Mein Schreibtisch-Setup.mp4" });
+    const long = await stub.seed("review_speech", { filename: "Interview mit einer Designerin über nachhaltige Mode – Teil 2.mp4" });
+    const titleCut = () =>
+      page
+        .getByTestId("ed-title")
+        .locator("span")
+        .first()
+        .evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+    const exportInView = async () => {
+      const b = await box(page, "ed-export");
+      expect(b.x + b.width).toBeLessThanOrEqual(393);
+    };
+    await openV2(page, fits.id);
+    await expect(page.getByTestId("ed-title")).toHaveText("Mein Schreibtisch-Setup");
+    expect(await titleCut()).toBe(false);
+    await exportInView();
+    await openV2(page, long.id);
+    await expect(page.getByTestId("ed-title")).toHaveText("Interview mit einer Designerin über nachhaltige Mode – Teil 2");
+    expect(await titleCut()).toBe(true);
+    await exportInView();
+    await expect(page.getByTestId("ed-save-status")).toBeVisible();
+    expect(await noDocumentScroll(page)).toEqual({ v: 0, h: 0 });
+  });
 });
 
 test.describe("editor v2 on short and sideways phones", TAG, () => {
@@ -166,6 +225,49 @@ test.describe("editor v2 on short and sideways phones", TAG, () => {
       await clip.click({ position: { x: 6, y: 20 } });
       await expect(page.getByTestId("ed-split")).toBeVisible();
       expect(await noDocumentScroll(page)).toEqual({ v: 0, h: 0 });
+    });
+  }
+
+  // Android Chrome sideways with its address bar, a Galaxy S9+ and an
+  // iPhone SE: a banner (offline has no close button) leaves the player
+  // row in the stage; it lies over the frame's top where there is no room.
+  for (const vp of [
+    { width: 740, height: 280 },
+    { width: 640, height: 300 },
+    { width: 568, height: 320 },
+  ]) {
+    test(`${vp.width}×${vp.height} sideways, offline: play, undo and full screen stay in reach`, async ({ page, stub, context }, info) => {
+      test.skip(info.project.name !== "desktop", "viewport set per test");
+      await page.setViewportSize(vp);
+      const job = await stub.seed("review_speech");
+      await openV2(page, job.id);
+      await expect(page.getByTestId("editor-v2")).toHaveAttribute("data-layout", "landscape");
+      await context.setOffline(true);
+      try {
+        await expect(page.getByTestId("ed-offline")).toBeVisible({ timeout: 15_000 });
+        const stage = await box(page, "ed-stage");
+        // the frame keeps its minimum and moves up again: the row fits
+        await expect.poll(async () => (await box(page, "ed-frame")).height).toBeGreaterThanOrEqual(96);
+        await expect
+          .poll(async () => {
+            const bar = await box(page, "ed-playerbar");
+            return bar.y + bar.height;
+          })
+          .toBeLessThanOrEqual(stage.y + stage.height + 0.5);
+        const reach = await page.evaluate(() =>
+          ["ed-play", "ed-fullscreen"].map((id) => {
+            const el = document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+            if (!el) return `${id}: missing`;
+            const b = el.getBoundingClientRect();
+            const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+            return hit && (hit === el || el.contains(hit)) ? "ok" : `${id}: covered`;
+          }),
+        );
+        expect(reach).toEqual(["ok", "ok"]);
+        expect(await noDocumentScroll(page)).toEqual({ v: 0, h: 0 });
+      } finally {
+        await context.setOffline(false);
+      }
     });
   }
 });

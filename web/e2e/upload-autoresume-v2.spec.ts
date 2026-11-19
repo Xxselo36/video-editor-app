@@ -160,7 +160,7 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     const id = await createdJobId(page, "IMG_0107.mov");
     expect(id).not.toBeNull();
     expect((await stub.job(id!))!.size).toBe(size);
-    expect(okParts()).toEqual([1, 2, 3, 4]);
+    await expect.poll(okParts).toEqual([1, 2, 3, 4]);
     expect(api.filter((c) => c === "init")).toHaveLength(1);
     expect(api).not.toContain("parts");
     expect(await page.evaluate(() => (window as unknown as { __stopped?: boolean }).__stopped ?? false)).toBe(false);
@@ -227,7 +227,7 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     await expect.poll(() => createdJobId(page, "IMG_4711.mp4"), { timeout: 120_000 }).not.toBeNull();
     expect(api).not.toContain("init");
     expect(api[0]).toBe("parts");
-    expect(okParts()).toEqual([3, 4]);
+    await expect.poll(okParts).toEqual([3, 4]);
     await expect(jobCard(page, "urlaub.mp4")).toHaveCount(0);
   });
 
@@ -247,7 +247,7 @@ test.describe("an upload that goes on by itself", { tag: ["@editor-v2", "@r2"] }
     expect(api.filter((c) => c === "init")).toHaveLength(1);
     expect(api).toContain("abort");
     expect(api).not.toContain("parts");
-    expect(okParts()).toEqual([1, 2, 3]);
+    await expect.poll(okParts).toEqual([1, 2, 3]);
     await expect(jobCard(page, "IMG_0200.mov")).toHaveCount(0);
     await page.goto("/app/new");
     await expect(page.getByTestId("upload-dropzone")).toBeVisible();

@@ -46,6 +46,12 @@ test("one list: a row per state, an existing customer's projects, 0 console erro
   const edited = await stub.seed("edited");
   const consoleErrors: string[] = [];
   page.on("console", (m) => {
+    // WebKit's notes on the report-only CSP (next.config.ts), on every
+    // page load: it has no report endpoint (on purpose: its violations
+    // show in the console), and its frame-ancestors (a copy of the
+    // enforced policy's) counts only in the enforced one.
+    if (/^The Content Security Policy '.*' was delivered in report-only mode, but does not specify a 'report-(to|uri)'/.test(m.text())) return;
+    if (m.text() === "The Content Security Policy directive 'frame-ancestors' is ignored when delivered in a report-only policy.") return;
     if (m.type() === "error") consoleErrors.push(m.text());
   });
   const frames: string[] = [];
@@ -338,7 +344,7 @@ test("a mouse over a row whose name is cut shows the whole name; no title otherw
   test.skip(Boolean(info.project.use.isMobile), "a mouse");
   const cut = await stub.seed("done");
   const whole = await stub.seed("done");
-  const long = "Interview mit Maria Schneider über nachhaltige Mode und Upcycling – Teil 2 – die ganz lange Fassung für alle";
+  const long = "Interview mit einer Designerin über nachhaltige Mode und Upcycling – Teil 2 – die ganz lange Fassung für alle";
   await page.setViewportSize({ width: 1024, height: 768 });
   await openWithStorage(page, "/app", {
     [JOBS]: [{ ...job(cut.id, "interview.mp4", 1_000), name: long }, { ...job(whole.id, "kurz", 60_000), name: "Kurz" }],
@@ -354,6 +360,35 @@ test("a mouse over a row whose name is cut shows the whole name; no title otherw
   // A name the row shows whole: no tooltip.
   await jobCard(page, "Kurz").getByTestId("job-card-open").hover();
   await expect(jobCard(page, "Kurz")).not.toHaveAttribute("title", /.+/);
+});
+
+test("a file name with dots stays on one line: whole where it fits, else cut with …, never broken after a dot", { tag: "@editor-v2" }, async ({
+  page,
+  stub,
+}) => {
+  // The narrowest phone: the row's name has 188 px.
+  await page.setViewportSize({ width: 320, height: 568 });
+  const short = await stub.seed("review", { filename: "Morgenroutine.final.mp4" });
+  const long = await stub.seed("review", { filename: "Morgenroutine.final.version.zwei.mp4" });
+  await openWithStorage(page, "/app", {
+    [JOBS]: [job(short.id, "Morgenroutine.final.mp4", 60_000), job(long.id, "Morgenroutine.final.version.zwei.mp4", 120_000)],
+  });
+  const rows = page.getByTestId("job-card");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+  const names = await rows.locator("h3").evaluateAll((hs) =>
+    hs.map((h) => ({
+      shown: h.querySelector("[aria-hidden]")?.textContent,
+      lines: Math.round(h.getBoundingClientRect().height / parseFloat(getComputedStyle(h).lineHeight)),
+      cut: h.scrollWidth > h.clientWidth + 1,
+      overflow: getComputedStyle(h).textOverflow,
+    })),
+  );
+  expect(names).toEqual([
+    { shown: "Morgenroutine.final", lines: 1, cut: false, overflow: "ellipsis" },
+    { shown: "Morgenroutine.final.version.zwei", lines: 1, cut: true, overflow: "ellipsis" },
+  ]);
+  expect(await horizontalOverflow(page)).toBe(0);
 });
 
 test("only expired projects: an empty state, nothing requested", { tag: "@editor-v2" }, async ({ page, stub }) => {

@@ -357,8 +357,11 @@ def test_render_to_dir_order_and_aliases(tmp_path, monkeypatch):
         clip.write_bytes(b"clip")
         return [(str(clip), 1.0)]
 
-    def concat(clips, out, **kw):
+    def concat(clips, out, source, segments):
         calls.append("concat")
+        # the clips are video only: the audio comes from the mezz, cut at
+        # the burn's own segments
+        assert source == str(tmp_path / "mezz.mp4") and segments == [(0.0, 1.0)]
         Path(out).write_bytes(b"primary")
 
     def effects(src, dst, segments, fx):
@@ -378,7 +381,7 @@ def test_render_to_dir_order_and_aliases(tmp_path, monkeypatch):
         calls.append(f"hook {start}")
         Path(dst).write_bytes(b"hook")
     monkeypatch.setattr(pipeline, "_multi_clip_burn", burn)
-    monkeypatch.setattr(pipeline, "_ffmpeg_concat", concat)
+    monkeypatch.setattr(pipeline, "_concat_frame_exact", concat)
     monkeypatch.setattr(pipeline, "_apply_segment_effects", effects)
     monkeypatch.setattr(pipeline, "_generate_thumbnail", thumb)
     monkeypatch.setattr(pipeline, "_export_format", export)

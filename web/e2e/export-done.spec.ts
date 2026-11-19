@@ -21,11 +21,13 @@ import { expect, test } from "./support/fixtures";
 import { ACTIVE_JOBS, card, openWithStorage } from "./support/app";
 import { API, WEB } from "./support/env";
 import {
+  ANDROID_UA,
   fakeShareSheet,
   IPHONE_UA,
   openVorschau,
   sharedFiles,
   sharedOnce,
+  tapDownload,
   tapStillActive,
   TOUR_DONE,
   vorschau,
@@ -212,19 +214,22 @@ test.describe("the Vorschau of a finished video (editor v2)", V2, () => {
     });
   });
 
-  test("Android: Download, no share sheet", async ({ page, stub }, info) => {
-    test.skip(info.project.name !== "pixel7", "phones only");
-    // The browser could share the file: Android still downloads it (D21).
-    await fakeShareSheet(page);
-    const job = await stub.seed("done");
-    await openWithStorage(page, `/app/p/${job.id}`);
-    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
-    const main = page.getByTestId("done-download").first();
-    await expect(main).toHaveText("Download");
-    await expect(page.getByTestId("done-share")).toHaveCount(0);
-    const [file] = await Promise.all([page.waitForEvent("download"), main.click()]);
-    expect(file.suggestedFilename()).toBe("tiktok_3_mistakes_final_cleocuts_9x16.mp4");
-    expect(await sharedFiles(page)).toEqual([]);
+  test.describe(() => {
+    // Android also where the phone project is an iPhone (a WebKit run)
+    test.use({ userAgent: ANDROID_UA });
+    test("Android: Download, no share sheet", async ({ page, stub }, info) => {
+      test.skip(info.project.name !== "pixel7", "phones only");
+      // The browser could share the file: Android still downloads it (D21).
+      await fakeShareSheet(page);
+      const job = await stub.seed("done");
+      await openWithStorage(page, `/app/p/${job.id}`);
+      await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+      const main = page.getByTestId("done-download").first();
+      await expect(main).toHaveText("Download");
+      await expect(page.getByTestId("done-share")).toHaveCount(0);
+      expect(await tapDownload(page, main)).toBe("tiktok_3_mistakes_final_cleocuts_9x16.mp4");
+      expect(await sharedFiles(page)).toEqual([]);
+    });
   });
 });
 

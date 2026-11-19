@@ -696,6 +696,11 @@ export function TranscriptEditor(p: TranscriptEditorProps) {
     const w = bar.offsetWidth;
     const h = bar.offsetHeight;
     const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2 - rr.left, rr.width - w - 8));
+    // Above the selection where it fits under the header (the text's own
+    // box: below the cuts header and an open find bar), else below it.
+    // Never over the header: there its Cut from video covered the cuts
+    // button's lower edge, and a click on the button cut the word (round
+    // 11). Below, it covers the next lines instead — Escape closes it.
     const above = r.top - h - 8;
     const top = above >= b.top ? above - rr.top : r.bottom + 8 - rr.top;
     bar.style.left = `${Math.round(left)}px`;

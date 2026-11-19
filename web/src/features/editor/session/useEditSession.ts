@@ -69,6 +69,7 @@ import {
   type TimelineSaveState,
 } from "./timelineSave";
 import { decideUnsaved, dropUnsaved, readUnsaved, writeUnsaved, type UnsavedDecision } from "./unsaved";
+import { holdFrame } from "./holdFrame";
 
 export type PlaybackMode = "probing" | "proxy" | "preview";
 
@@ -336,6 +337,10 @@ export function useEditSession({
   const wantSourceRef = useRef<number | null>(null);
   /** While a swap loads: the new file's time the playhead shows (not the 0 of the reload). */
   const swapHoldRef = useRef<number | null>(null);
+  /** The canvas over the video that keeps the frame on screen while a
+   *  swapped-in preview loads (holdFrame: no black between the files);
+   *  rendered by the v2 VideoLayer. */
+  const holdRef = useRef<HTMLCanvasElement>(null);
   // the segments of the file on screen, for swaps made between renders
   const videoSegmentsRef = useRef(videoSegments);
   useEffect(() => {
@@ -362,6 +367,7 @@ export function useEditSession({
     const target = swapTime(v.currentTime, oldSegs, newSegs, wantSourceRef.current);
     wantSourceRef.current = null;
     swapHoldRef.current = target;
+    holdFrame(v, holdRef.current);
     v.src = mediaUrl(jobId, "preview-video", { v: version });
     // the playhead keeps the target until the new file is there (no 0 flash)
     let fallback: ReturnType<typeof setTimeout> | null = null;
@@ -1000,6 +1006,7 @@ export function useEditSession({
   return {
     videoRef,
     fadeRef,
+    holdRef,
     videoSrc,
     mode,
     onVideoError,

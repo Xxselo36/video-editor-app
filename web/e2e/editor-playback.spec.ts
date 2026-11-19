@@ -156,8 +156,15 @@ async function proxyEditor(page: Page, jobId: string) {
 }
 
 test.describe("proxy playback follows the edit list", () => {
-  test.beforeEach(({}, info) => {
+  test.beforeEach(({ browserName }, info) => {
     test.skip(info.project.use.isMobile === true, "desktop playback suite (the phone one is below)");
+    // Its bounds are a frame or two and a few hundred ms of the video's
+    // own clock. Playwright's WebKit plays video through GStreamer on
+    // Linux (Safari: AVFoundation), and there a jump over a cut took
+    // 483 ms, requestVideoFrameCallback missed six frames in a row, a
+    // delete's jump was read 1.9 s after it and a play() was aborted:
+    // timings of that player, not of Safari's.
+    test.skip(browserName === "webkit", "frame timing of WebKit's GStreamer playback on Linux, not Safari's");
   });
 
   test("cuts, captions, reorder, speed, volume, fades, ruler, end of timeline", async ({ page, stub }) => {
@@ -473,6 +480,9 @@ test.describe("how the editor picks proxy or preview", () => {
   };
   const probes = (reqs: { url: string; type: string; range?: string }[]) =>
     reqs.filter((r) => /proxy-video/.test(r.url) && r.type === "fetch");
+  /** The <video>'s own loads of the proxy: "media" in Chromium, "other" in WebKit. */
+  const videoLoads = (reqs: { url: string; type: string; range?: string }[]) =>
+    reqs.filter((r) => /proxy-video/.test(r.url) && (r.type === "media" || r.type === "other"));
 
   test("has_proxy: true → proxy at once, no probe", async ({ page, stub }) => {
     const job = await stub.seed("review", { proxy: "on" });
@@ -481,7 +491,7 @@ test.describe("how the editor picks proxy or preview", () => {
     await expect.poll(() => playbackMode(page)).toBe("proxy");
     await page.waitForTimeout(1500);
     expect(probes(reqs)).toEqual([]);
-    expect(reqs.some((r) => /proxy-video/.test(r.url) && r.type === "media")).toBe(true);
+    expect(videoLoads(reqs).length).toBeGreaterThan(0);
   });
 
   test("a proxy that fails to load falls back to the preview", async ({ page, stub }) => {
@@ -511,7 +521,7 @@ test.describe("how the editor picks proxy or preview", () => {
     expect(probes(reqs).length).toBeGreaterThanOrEqual(1);
     expect(probes(reqs).every((r) => r.range === "bytes=0-1")).toBe(true);
     expect(statuses.every((s) => s === 404)).toBe(true);
-    expect(reqs.some((r) => /proxy-video/.test(r.url) && r.type === "media")).toBe(false);
+    expect(videoLoads(reqs)).toEqual([]);
     await expectRebuildSwapsIn(page, stub, job.id);
   });
 

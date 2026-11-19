@@ -5,6 +5,7 @@ import {
   cutTimeOfSource,
   decimalSeparator,
   fitFrame,
+  phoneBannerRoom,
   phoneFrame,
   fmtClock,
   fmtClockTenths,
@@ -111,5 +112,52 @@ describe("phoneFrame", () => {
     const f = phoneFrame(844, 390, { landscape: true, sheetOpen: false, tabH: 48 });
     expect(f.h).toBe(390 - 44 - 48 - 64);
     expect(f.w).toBe(Math.round((f.h * 9) / 16));
+  });
+
+  it("under a banner (the room above the frame it takes): the frame moves down, smaller only where the screen has none to spare", () => {
+    // 390×844: room to spare, still 186×330
+    expect(phoneFrame(390, 844, { landscape: false, sheetOpen: false, tabH: 56, banner: 90 })).toEqual({ w: 186, h: 330 });
+    // a short screen: the dock keeps its 150 px
+    const f = phoneFrame(375, 600, { landscape: false, sheetOpen: false, tabH: 56, banner: 90 });
+    expect(f.h).toBeLessThan(330);
+    expect(600 - 44 - 56 - (90 + f.h + 12 + 44)).toBeGreaterThanOrEqual(150);
+    // above a sheet, and in landscape
+    const g = phoneFrame(390, 844, { landscape: false, sheetOpen: true, tabH: 56, banner: 90 });
+    expect(44 + 90 + g.h + 14).toBeLessThanOrEqual(844 * 0.46 + 0.5);
+    const l = phoneFrame(844, 390, { landscape: true, sheetOpen: false, tabH: 48, banner: 90 });
+    expect(l.h).toBe(390 - 44 - 48 - 90 - 4 - 44 - 8);
+    // no banner: as before
+    expect(phoneFrame(375, 600, { landscape: false, sheetOpen: false, tabH: 56, banner: 0 })).toEqual(
+      phoneFrame(375, 600, { landscape: false, sheetOpen: false, tabH: 56 }),
+    );
+  });
+
+  it("a short screen gives a banner only the room that leaves the frame its minimum and the player row in the stage", () => {
+    for (const [w, h] of [
+      [740, 280],
+      [640, 300],
+      [658, 320],
+      [568, 320],
+    ]) {
+      // landscape: top bar 44, the stage row, tab bar 48
+      const opts = { landscape: true, sheetOpen: false, tabH: 48, banner: 94 };
+      const room = phoneBannerRoom(h, opts);
+      const f = phoneFrame(w, h, opts);
+      expect(f.h, `${w}×${h}`).toBeGreaterThanOrEqual(96);
+      expect(room, `${w}×${h}`).toBeLessThan(94);
+      // padding + frame + 4 + player row 44 + 8 fit the stage row
+      expect(room + f.h + 4 + 44 + 8, `${w}×${h}`).toBeLessThanOrEqual(h - 44 - 48);
+    }
+    // room to spare: all of it
+    expect(phoneBannerRoom(390, { landscape: true, sheetOpen: false, tabH: 48, banner: 94 })).toBe(94);
+    // never less than the layout's own top padding
+    expect(phoneBannerRoom(250, { landscape: true, sheetOpen: false, tabH: 48, banner: 94 })).toBe(8);
+    expect(phoneBannerRoom(480, { landscape: false, sheetOpen: false, tabH: 56, banner: 94 })).toBeGreaterThanOrEqual(12);
+    // portrait: the dock keeps its 150 px, also under a banner
+    const p = { landscape: false, sheetOpen: false, tabH: 56, banner: 94 };
+    const pf = phoneFrame(375, 480, p);
+    expect(480 - 44 - 56 - (phoneBannerRoom(480, p) + pf.h + 12 + 44)).toBeGreaterThanOrEqual(150);
+    // no banner: no room
+    expect(phoneBannerRoom(300, { landscape: true, sheetOpen: false, tabH: 48 })).toBe(0);
   });
 });

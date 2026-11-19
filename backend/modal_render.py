@@ -83,7 +83,7 @@ image = (
         "numpy>=1.21.0",
         "Pillow>=9.0.0",
         "opencv-python-headless>=4.8.0",
-        "imageio_ffmpeg>=0.4.9,<0.8",  # as backend/requirements.txt: ffmpeg 7
+        "imageio_ffmpeg>=0.4.9",  # as backend/requirements.txt
         "scipy>=1.9.0",
         # No faster-whisper / ultralytics (torch): the render path never
         # uses them (src/audio.py imports faster_whisper lazily now;
@@ -127,7 +127,7 @@ image = (
         f"cd {CAPTIONS_ROOT}/backend/captions && node build.mjs "
         "&& npm prune --omit=dev --no-audit --no-fund")
     .env({"CLEO_CAPTION_LAYER_DIR": f"{CAPTIONS_ROOT}/backend/captions"})
-    # Bundle the SmartCut source so _multi_clip_burn + _ffmpeg_concat
+    # Bundle the SmartCut source so _multi_clip_burn + _concat_frame_exact
     # + _export_format can all run inside the Modal container without
     # network round-trips per segment.
     .add_local_dir("src", remote_path="/app/src")
@@ -205,7 +205,7 @@ def render_burn_concat(
     try:
         from plugins.premiere.video_editor_premiere import _multi_clip_burn
         from backend.pipeline import (
-            _ffmpeg_concat,
+            _concat_frame_exact,
             _export_format,
             _generate_thumbnail,
             _video_size,
@@ -233,8 +233,9 @@ def render_burn_concat(
             # effects aligned); don't merge again here.
             merge_gap=0.0,
             # The web's caption options (one clip per caption, bounce
-            # around the caption, web positions); computed here, in the
-            # container, so the spawn signature doesn't change.
+            # around the caption, frame-exact video-only clips, web
+            # positions); computed here, in the container, so the spawn
+            # signature doesn't change.
             **web_burn_kwargs(caption_preset),
         )
 
@@ -245,9 +246,10 @@ def render_burn_concat(
         # Write outputs directly into the volume — backend downloads them
         # via the Volume SDK afterwards, no bytes-through-Python return.
         primary_out = job_dir / "output.mp4"
-        # Old-signature concat call — bit-perfect audio rebuild happens on
-        # Railway's local fallback path only until Modal issue is diagnosed.
-        _ffmpeg_concat(clip_paths, str(primary_out))
+        # The clips are video only: the audio is cut from the input at
+        # the same frame times.
+        _concat_frame_exact(clip_paths, str(primary_out), str(input_path),
+                            seg_tuples)
 
         thumbnail_out = job_dir / "thumbnail.jpg"
         _generate_thumbnail(str(primary_out), str(thumbnail_out))
@@ -380,7 +382,7 @@ analyze_image = (
         "numpy>=1.21.0",
         "Pillow>=9.0.0",
         "opencv-python-headless>=4.8.0",
-        "imageio_ffmpeg>=0.4.9,<0.8",  # as backend/requirements.txt: ffmpeg 7
+        "imageio_ffmpeg>=0.4.9",  # as backend/requirements.txt
         "scipy>=1.9.0",
         "pydub>=0.25.1",
         "anthropic==0.111.0",

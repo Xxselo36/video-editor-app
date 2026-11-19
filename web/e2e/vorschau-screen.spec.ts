@@ -24,7 +24,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
 import { job as storedJob, JOBS, LANG_KEY, openWithStorage } from "./support/app";
 import { API } from "./support/env";
-import { holdRequests, openVorschau, TOUR_DONE, vorschau } from "./support/vorschau";
+import { holdRequests, openVorschau, titleHyphenLimits, TOUR_DONE, vorschau } from "./support/vorschau";
 
 const TAG = { tag: "@editor-v2" };
 const DE = { [LANG_KEY]: "de" };
@@ -122,19 +122,53 @@ async function menuByKeys(page: Page, item: "rename" | "delete") {
   await page.keyboard.press("Enter");
 }
 
+type Pressed = { scale: string; transform: string };
+
 /** Hold the mouse button down on `el`; its computed scale and transform
- *  while pressed (then released off it: no click). */
-async function pressed(page: Page, el: Locator): Promise<{ scale: string; transform: string }> {
+ *  while pressed (then released off it: no click). `settled`: what the
+ *  press comes to; held until then, at most 3 s more (Playwright's WebKit
+ *  can draw its frames far apart under load, and a transition only moves
+ *  on with them). */
+async function pressed(page: Page, el: Locator, settled?: (s: Pressed) => boolean): Promise<Pressed> {
   // (Hover waits until it holds still: a panel that just opened may still
   // be moving it, and the press would land beside it.)
   await el.hover();
   await page.mouse.down();
   // the press transition (160 ms) has run
   await page.waitForTimeout(400);
-  const style = await el.evaluate((n) => ({ scale: getComputedStyle(n).scale, transform: getComputedStyle(n).transform }));
+  const style = () => el.evaluate((n) => ({ scale: getComputedStyle(n).scale, transform: getComputedStyle(n).transform }));
+  if (settled) {
+    await expect
+      .poll(async () => settled(await style()), { timeout: 3000 })
+      .toBe(true)
+      .catch(() => {});
+  }
+  const held = await style();
   await page.mouse.move(2, 2);
   await page.mouse.up();
-  return style;
+  return held;
+}
+
+/** "More for this video", opened at once and in view: with reduced motion
+ *  (PreviewScreen toggleMore). With motion its panel comes up 320 ms after
+ *  the tap with a smooth scroll, and in Playwright's WebKit, whose frames
+ *  can be far apart, that scroll can still be on its way during a press
+ *  (WebKit drops :active from a button the page scrolls away under the
+ *  pointer). The media emulation goes back to the default after. */
+async function openMore(page: Page) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByTestId("preview-more").click();
+  await expect
+    .poll(() =>
+      page.getByTestId("preview-more-panel").evaluate((el) => {
+        const clip = el.firstElementChild as HTMLElement;
+        const body = clip.firstElementChild as HTMLElement;
+        const r = el.getBoundingClientRect();
+        return `open ${clip.clientHeight > 0 && clip.clientHeight >= body.offsetHeight - 1}, in view ${r.bottom <= innerHeight + 1}`;
+      }),
+    )
+    .toBe("open true, in view true");
+  await page.emulateMedia({ reducedMotion: null });
 }
 
 test.describe("the Vorschau's screen", TAG, () => {
@@ -341,7 +375,11 @@ test.describe("the Vorschau's screen", TAG, () => {
     await page.evaluate(() => document.fonts.ready);
     expect((await letterTops(title, "Tipps für bessere Präsentationen im Büro")).length).toBeGreaterThan(1);
     expect(await letterTops(title, "bessere")).toHaveLength(1);
-    expect(await title.evaluate((el) => getComputedStyle(el).hyphenateLimitChars)).toBe("10 4 4");
+    // The rule itself (Playwright's WebKit hyphenates nothing): 10 4 4,
+    // and in a Safari without hyphenate-limit-chars its own limits, 5
+    // letters on each side of a break.
+    const limits = await titleHyphenLimits(page);
+    expect(limits.value, limits.standard ? "hyphenate-limit-chars" : "-webkit-hyphenate-limit-before / -after").toBe(limits.standard ? "10 4 4" : "5 5");
   });
 
   test("desktop: a long word's separator never starts a line of the title", async ({ page, stub }, info) => {
@@ -470,7 +508,9 @@ test.describe("the Vorschau's screen", TAG, () => {
     await page.keyboard.press("Escape");
     await page.getByTestId("preview-more").click();
     for (const id of ["done-copy", "done-srt", "done-vtt", "preview-more", "preview-refine", "job-card-menu"]) {
-      expect(await page.getByTestId(id).first().evaluate((el) => getComputedStyle(el).userSelect), id).toBe("none");
+      // (Safari has only -webkit-user-select; Chromium has both)
+      const select = await page.getByTestId(id).first().evaluate((el) => getComputedStyle(el).webkitUserSelect || getComputedStyle(el).userSelect);
+      expect(select, id).toBe("none");
     }
   });
 
@@ -557,7 +597,7 @@ test.describe("the Vorschau's screen", TAG, () => {
     const job = await stub.seed("done");
     await openVorschau(page, job.id);
     await expect(vorschau(page)).toHaveAttribute("data-state", "done");
-    await page.getByTestId("preview-more").click();
+    await openMore(page);
     const small = [
       page.getByTestId("done-copy"),
       page.getByTestId("done-srt"),
@@ -565,28 +605,36 @@ test.describe("the Vorschau's screen", TAG, () => {
       page.getByTestId("done-hooks").getByRole("link").first(),
     ];
     for (const el of small) await expect(el).toBeVisible();
-    /** Held down on a dialog's button: its scale (then released on the dialog's title: no click). */
-    const pressedInDialog = async (button: Locator, title: Locator) => {
+    // the scale while held: .97 (a frame of its transition may still be on its way), none with reduced motion
+    const given = (scale: string) => (scale === "none" ? "none" : Math.abs(parseFloat(scale) - 0.97) < 0.002 ? "0.97" : scale);
+    /** Held down on a dialog's button: its scale once it is `want`, or
+     *  3 s on (as pressed: the dialog's blurred backdrop can make the
+     *  frames slow); then released on the dialog's title: no click. */
+    const pressedInDialog = async (button: Locator, title: Locator, want: string) => {
       await button.hover();
       await page.mouse.down();
       await page.waitForTimeout(400);
+      await expect
+        .poll(async () => given(await button.evaluate((n) => getComputedStyle(n).scale)), { timeout: 3000 })
+        .toBe(want)
+        .catch(() => {});
       const scale = await button.evaluate((n) => getComputedStyle(n).scale);
       const t = (await title.boundingBox())!;
       await page.mouse.move(t.x + 4, t.y + t.height / 2);
       await page.mouse.up();
       return scale;
     };
-    // the scale while held: .97 (a frame of its transition may still be on its way), none with reduced motion
-    const given = (scale: string) => (scale === "none" ? "none" : Math.abs(parseFloat(scale) - 0.97) < 0.002 ? "0.97" : scale);
     for (const motion of ["no-preference", "reduce"] as const) {
       await page.emulateMedia({ reducedMotion: motion });
       const want = motion === "reduce" ? "none" : "0.97";
-      for (const el of small) expect(given((await pressed(page, el)).scale), `${motion}: ${await el.textContent()}`).toBe(want);
+      for (const el of small) {
+        expect(given((await pressed(page, el, (s) => given(s.scale) === want)).scale), `${motion}: ${await el.textContent()}`).toBe(want);
+      }
       await page.getByTestId("job-card-menu").click();
       await page.getByTestId("job-card-rename").click();
       const dialog = page.getByTestId("dialog-rename");
       for (const name of ["Cancel", "Save"]) {
-        expect(given(await pressedInDialog(dialog.getByRole("button", { name }), dialog.getByRole("heading"))), `${motion}: ${name}`).toBe(want);
+        expect(given(await pressedInDialog(dialog.getByRole("button", { name }), dialog.getByRole("heading"), want)), `${motion}: ${name}`).toBe(want);
       }
       await page.keyboard.press("Escape");
       await expect(dialog).toHaveCount(0);

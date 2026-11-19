@@ -6,12 +6,15 @@
  * The picture is letterboxed ("contain") inside the frame, as the export
  * pads a video that isn't reframed. TODO(UX6/UT3): "cover" for SmartCam
  * jobs once GET /jobs reports the output format (model.ts videoBox).
+ * A banner (the re-edit note, another tab's change, offline, the audio
+ * heads-up) sits at the stage's top and the frame starts under it: it
+ * never covers the picture. Closed, the frame takes the room again.
  */
 import { Minimize, TriangleAlert, WifiOff, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useT } from "@/i18n";
 import { usePlayhead, type PlayheadState } from "@/features/editor/state/playhead";
-import { fitFrame, phoneFrame, PHONE_FRAME_MAX } from "../model";
+import { fitFrame, phoneBannerRoom, phoneFrame, PHONE_FRAME_MAX } from "../model";
 import { PlayerBar } from "./PlayerBar";
 import { useFullscreen } from "@/lib/useFullscreen";
 import { VideoLayer, type CaptionSlotProps } from "./VideoLayer";
@@ -50,6 +53,10 @@ export function PreviewStage({
   const stageRef = useRef<HTMLElement>(null);
   const fsRef = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState<{ w: number; h: number }>(phone ? PHONE_FRAME_MAX : { w: 338, h: 600 });
+  // The banners' slot, and the stage's top padding under a banner (null:
+  // none shows, the layout's own).
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const [pad, setPad] = useState<number | null>(null);
   const fs = useFullscreen(fsRef);
   const paused = usePlayhead(store, selPaused);
   const [warningsClosed, setWarningsClosed] = useState(false);
@@ -62,7 +69,10 @@ export function PreviewStage({
     const el = stageRef.current;
     if (!el) return;
     const root = el.closest<HTMLElement>("[data-editor-root]");
+    const slot = bannerRef.current;
     const measure = () => {
+      // A banner shows: the frame starts under its foot.
+      const foot = slot && slot.offsetHeight > 0 ? slot.offsetTop + slot.offsetHeight : 0;
       if (phone) {
         // 186×330, smaller on short screens (the stage row is as tall as
         // the preview: the dock keeps its minimum, the tab bar fits).
@@ -74,46 +84,62 @@ export function PreviewStage({
         const W = (root?.clientWidth || window.innerWidth) - padX;
         const landscape = root?.dataset.layout === "landscape";
         const tabH = root?.querySelector<HTMLElement>("[data-testid=ed-tabbar]")?.offsetHeight || (landscape ? 48 : 56);
-        const f = phoneFrame(W, H, { landscape, sheetOpen, tabH });
+        // (the phone's 12 px between the banner and the frame; a short
+        // screen gives it less: the player row stays in the stage)
+        const layout = { landscape, sheetOpen, tabH, banner: foot ? foot + 12 : 0 };
+        const f = phoneFrame(W, H, layout);
         setFrame((old) => (old.w === f.w && old.h === f.h ? old : f));
+        setPad(phoneBannerRoom(H, layout) || null);
         // Landscape sheets open over the dock column, right of the stage.
         root?.style.setProperty("--ed-stage-w", `${el.offsetWidth}px`);
         return;
       }
-      // Player bar 32 + gap 16 under the frame, ≥ 20 px air around.
-      const f = fitFrame(el.clientWidth - 48, el.clientHeight - 48 - 40, ASPECT);
+      // Player bar 32 + gap 16 under the frame, ≥ 20 px air around (under
+      // a banner: below its foot).
+      const f = fitFrame(el.clientWidth - 48, el.clientHeight - foot - 48 - 40, ASPECT);
       setFrame((old) => (old.w === f.w && old.h === f.h ? old : f));
+      setPad(foot || null);
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    // a banner that comes, goes or wraps anew
+    if (slot) ro.observe(slot);
     if (root && phone) ro.observe(root);
     return () => ro.disconnect();
   }, [phone, sheetOpen]);
 
   return (
-    <section ref={stageRef} className={s.stage} aria-label={t("editor.preview")} data-testid="ed-stage">
-      {notice}
-      {!notice && !offline && !warningsClosed && warnings.length > 0 && (
-        <div className={s.banner} role="status" data-testid="ed-audio-warning">
-          <TriangleAlert size={16} strokeWidth={1.75} className={s.bannerIcon} aria-hidden />
-          <span style={{ flex: 1 }}>{warnings.join(" ")}</span>
-          <button
-            type="button"
-            className={`${s.gb} ${s.sm}`}
-            aria-label={t("editor.close")}
-            onClick={() => setWarningsClosed(true)}
-          >
-            <X size={14} strokeWidth={1.75} aria-hidden />
-          </button>
-        </div>
-      )}
-      {!notice && offline && (
-        <div className={s.banner} role="status" data-testid="ed-offline">
-          <WifiOff size={16} strokeWidth={1.75} className={s.bannerIcon} aria-hidden />
-          <span>{t("editor.offline")}</span>
-        </div>
-      )}
+    <section
+      ref={stageRef}
+      className={s.stage}
+      style={pad !== null ? { paddingTop: pad } : undefined}
+      aria-label={t("editor.preview")}
+      data-testid="ed-stage"
+    >
+      <div ref={bannerRef} className={s.bannerSlot}>
+        {notice}
+        {!notice && !offline && !warningsClosed && warnings.length > 0 && (
+          <div className={s.banner} role="status" data-testid="ed-audio-warning">
+            <TriangleAlert size={16} strokeWidth={1.75} className={s.bannerIcon} aria-hidden />
+            <span style={{ flex: 1 }}>{warnings.join(" ")}</span>
+            <button
+              type="button"
+              className={`${s.gb} ${s.sm}`}
+              aria-label={t("editor.close")}
+              onClick={() => setWarningsClosed(true)}
+            >
+              <X size={14} strokeWidth={1.75} aria-hidden />
+            </button>
+          </div>
+        )}
+        {!notice && offline && (
+          <div className={s.banner} role="status" data-testid="ed-offline">
+            <WifiOff size={16} strokeWidth={1.75} className={s.bannerIcon} aria-hidden />
+            <span>{t("editor.offline")}</span>
+          </div>
+        )}
+      </div>
       <div
         ref={fsRef}
         tabIndex={-1}

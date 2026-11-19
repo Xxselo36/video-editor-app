@@ -62,7 +62,16 @@
  * refreshes (the UI's 1.25x preset); the lags judged against the rendering
  * cadence (a 30 Hz one: iOS Low Power Mode); the seam never before the
  * last kept frame's pick (50/48 fps); a frame rate the steps can't tell
- * (60 fps at 2x) the frames both candidates keep.
+ * (60 fps at 2x) the frames both candidates keep. Round 10: a frame early
+ * on the first five frames after a landing, where the renderer settling
+ * drops one now and then (LAND_WARM_FRAMES). Round 11: above FAST_RATE the
+ * frame rule counts in the presentations whose callbacks are still to come
+ * (overdueFrames: Chromium runs none for two now and then, the pipeline
+ * racing meanwhile). Round 12: a split into a clip of a few frames — that
+ * clip's end checked from the split's first part on, at its speed
+ * (dueAfterSplit), and as soon as it is entered; the overdue count after a
+ * callback in its frame's own rendering update too, and from a speed
+ * change's frame on only as from a landing's.
  * Without frame callbacks the clock is all there is,
  * CLOCK_EARLY_FRAMES before the last kept frame (round 3's clock jumped 3–5
  * frames early on a busy machine: the end of a word lost at every join).
@@ -269,11 +278,64 @@ const SEAM_LEAD_MS = 16;
  *  two kept frames of a clip ending that soon are skipped. */
 const WARM_FRAMES = 4;
 /** The frames right after a seek landed come while the clock starts again
- *  (late, then a few at once): on the landing frame and the one after it
- *  the next presentation is assumed to leap one frame further. Only a clip
- *  of 3 frames or less ends that soon (its last kept frame may go); the
- *  full e2e run showed the cut frame after such a clip. */
-const LAND_WARM_FRAMES = 2;
+ *  (late, then a few at once) and the renderer settles (round 10: Chromium
+ *  now and then drops a frame there and shows the next one in its slot, a
+ *  slot before the frame clock has it — mostly at the 5th or 6th
+ *  presentation after the landing, 100–135 ms after the clock started
+ *  again at 30 fps: 17 of the 21 first skips after 944 landings in the e2e
+ *  runs, about 1 in 800 at any other presentation; on a busy machine from
+ *  the 3rd on: 9 of 27 at the 3rd and 4th). On the landing frame and the
+ *  four after it (or after play: shownRun) the next presentation is
+ *  assumed to leap one frame further: a clip of 6 frames or less gives up
+ *  its last kept frame. The e2e runs showed the cut frame after clips of
+ *  3 frames, then (round 10) of 6 — 1 run in 5 — and, on a busy machine,
+ *  of 4. */
+const LAND_WARM_FRAMES = 5;
+/** Presentations since a landing or play (shownRun) before a frame whose
+ *  callback is overdue is counted (overdueFrames): before, the clock starts
+ *  again unevenly — the e2e dumps' frames a refresh later than the cadence
+ *  said came at the 2nd and 3rd presentation after the landing; the races
+ *  that showed cut frames from the 4th on. The same from the frame on
+ *  screen at a speed change while playing (a split; round 12): after a
+ *  split's 1.5x → 2x Chromium brings no new frame for a refresh in each of
+ *  the two steps after the split's first frame at 47 % and 48 % of the
+ *  e2e dumps' splits (17 % at the third, 10 % in the middle of a 2x clip)
+ *  while the element's clock runs at the new speed — counted from the
+ *  change on, a frame never presented was taken for one on screen: the
+ *  jump on the 2x clip [359, 365)'s first frame, 5 source frames lost
+ *  (MAX_EARLY there: 4) in 3 of the 72 speed runs with round 12's first
+ *  players. */
+const OVERDUE_FROM = 4;
+/** …and no more of them than the element's clock ran on since that frame's
+ *  pick, less this much of it (ms): a clock read a few ms after the
+ *  refresh, a time-stretched clock's uneven steps. Half a frame (round 11's
+ *  first try) left a 1.5x race uncaught: two refreshes after the pick the
+ *  clock had run 1.48 frames there (674 → 679 within three presentations,
+ *  the cut frame picked a refresh later). */
+const OVERDUE_CLOCK_MS = 8;
+/** …and this much (ms) after a callback that ran in its frame's own
+ *  rendering update (round 12): its clock was read at the pick, not
+ *  extrapolated back a refresh — what is left is the animation frame's
+ *  clock read a few ms after the refresh. Measured in the e2e runs, by the
+ *  probe's clock readings (the player reads the clock before the probe at
+ *  its callback and after it at its animation frame: 0.6–1.7 ms of margin
+ *  less there): the one race after such a callback (995 → 1000 at 1.5x,
+ *  the clock 1.34 frames on two refreshes after 995's pick) is caught up
+ *  to 7.4 ms — the jump asked 16.9 ms before 1000's pick, not 0.2 ms;
+ *  joins where the pipeline brought no frame in the slot counted are
+ *  counted up to 3.4–4.5 ms (969 at 2x three times, 995 at 1.5x under
+ *  load) — round 12's first try (4 ms) jumped at the first 969, its second
+ *  (6 ms) at 995 under load: one source frame lost beyond MAX_EARLY. Not
+ *  more than 7.4 less the player's offset, not less than 4.5 plus it.
+ *  Replayed on 228 dumped speed runs (7990 sped-up joins), 5–7 ms of probe
+ *  margin catch that race and lose no source frame beyond MAX_EARLY where
+ *  round 11's count alone doesn't. Under heavy load no margin that still
+ *  catches the race clears them all: with two busy loops the animation
+ *  frames run a few ms late and the player reads the clock later still —
+ *  a 969 at 2x counted at 7 ms too (5.9 ms by the probe, its animation
+ *  frame 3.3 ms late), in 1 of 12 runs as at 6 ms; none in 20 runs
+ *  without the load. */
+const OVERDUE_SAME_CLOCK_MS = 7;
 
 /**
  * A clip's frames on the render's grid (backend captions_v2.clip_plan):
@@ -556,6 +618,9 @@ export class EditPlayer {
   private lastPresented: number | null = null;
   private lastFrameK: number | null = null;
   private lastFrameM = 0;
+  /** The element's clock (media s) when that frame was picked, as read in
+   *  its callback (overdueFrames). */
+  private lastPickClock = NaN;
   /** Frames presented since play or our last seek. */
   private framesSince = 0;
   /** Frames presented since play started (seeks don't reset it): WARM_FRAMES. */
@@ -587,6 +652,10 @@ export class EditPlayer {
   private landedEarly = false;
   /** Frames presented since the last seek landed (the landing one is 1). */
   private shownRun = 0;
+  /** The presentation count (presentedFrames) of that run's first frame —
+   *  or of the frame on screen when the speed last changed (newSpeed): the
+   *  overdue count's start. */
+  private landPresented = NaN;
   /** Recent wall gaps (ms) between the picks of frames presented one after
    *  the other: the cadence the next ones come at. */
   private slots: number[] = [];
@@ -617,6 +686,9 @@ export class EditPlayer {
    *  screen's refresh); and when the last one ran. */
   private tickGaps: number[] = [];
   private lastTickAt: number | null = null;
+  /** The speed the frame rule counts at while it looks past a split (the
+   *  next clip's: dueAfterSplit); null: the element's. */
+  private rateFor: number | null = null;
 
   constructor(video: HTMLVideoElement, opts: EditPlayerOptions = {}) {
     this.v = video as FrameVideo;
@@ -870,6 +942,7 @@ export class EditPlayer {
   }
 
   private rate(): number {
+    if (this.rateFor !== null) return this.rateFor;
     const r = this.v.playbackRate;
     return r > 0 ? r : 1;
   }
@@ -989,9 +1062,9 @@ export class EditPlayer {
    *  (a slow pipeline; late timers lead the seam timer instead, at most to
    *  the last kept frame's slot); one while the renderer starts up
    *  (play: WARM_FRAMES — on a frame presented since play the margin's
-   *  two) or the clock starts again after a landing (LAND_WARM_FRAMES: the
-   *  next presentation may leap a frame); one more above FAST_RATE. At most
-   *  MAX_EARLY output frames. */
+   *  two) or the clock starts again and the renderer settles after a
+   *  landing (LAND_WARM_FRAMES: the next presentation may leap a frame);
+   *  one more above FAST_RATE. At most MAX_EARLY output frames. */
   private leap(): number {
     if (!this.rvfc) return 0;
     // (on a frame presented since play, the margin's frames: the next ones
@@ -1251,14 +1324,70 @@ export class EditPlayer {
 
   /** The jump at seg's end is due now (animation frames, timers, frame
    *  callbacks): the frame rule for the frame on screen (play starting on
-   *  a clip's last frame: no new frame has come yet), the seam (by the
-   *  frame clock), or the element's clock. */
+   *  a clip's last frame: no new frame has come yet; above FAST_RATE the
+   *  frames whose callbacks are overdue counted in), the seam (by the frame
+   *  clock), or the element's clock. */
   private dueNow(seg: PlaySeg): boolean {
     const [a, b] = this.framesOf(seg);
     const k = this.lastFrameK;
-    if (this.rvfc && k !== null && k >= a - 1 && this.ruleNow(k, b)) return true;
+    if (this.rvfc && k !== null && k >= a - 1 && this.ruleNow(k + this.overdueFrames(), b)) return true;
     if (performance.now() >= this.seamAt(seg)) return true;
     return this.v.currentTime >= this.clockDueOf(seg) - 0.0005;
+  }
+
+  /**
+   * Frames presented since the latest frame callback's whose callbacks are
+   * still to come (round 11): above FAST_RATE Chromium now and then runs no
+   * callback for two presentations while animation frames come on time
+   * (presentedFrames up 3 between two callbacks), and the pipeline catching
+   * up steps two frames a presentation meanwhile — the e2e runs' cut frames
+   * 463 (457 → 463 at 2x) and 679 (674 → 679 at 1.5x), the frame rule left
+   * on the frame before the margin's first (and at 1.5x 809 → 814, 408 →
+   * 413, 995 → 1000: frames the spec took for the pipeline's leaps). Those
+   * came after a callback that ran a refresh after its frame's pick: such a
+   * callback tells a presentation a refresh late, the ones since are
+   * unknown — counted as many as the cadence brings by the latest refresh
+   * since that pick, and no more frames than the element's clock ran on
+   * since then (OVERDUE_CLOCK_MS: the clock standing, or a frame coming a
+   * refresh late while it runs: fewer). After a callback that ran in its
+   * pick's own rendering update (it tells the latest presentation) the
+   * same from the next rendering update on (round 12, OVERDUE_SAME_CLOCK_MS:
+   * round 11 left it out, and with its count the e2e runs showed cut frame
+   * 1000 at 1.5x after such a callback on 995, presentedFrames up 2, the
+   * jump asked in 1000's own update). Not in the first presentations after
+   * a landing, play or a speed change (OVERDUE_FROM), nor at 1x (a frame
+   * lasts two refreshes: LAND_WARM_FRAMES and the seam cover it). The frame
+   * rule takes the frame on screen as that much further: the jump goes once
+   * the margin's first frame is on screen by the cadence and the clock —
+   * MAX_EARLY at most while the pipeline keeps its cadence (the e2e dumps,
+   * replayed: of 194 such jumps, 179 shown within it by the next callback
+   * or the presentations it counts, 15 unknown, none beyond). Where the
+   * pipeline presents nothing in the slot counted, the join loses a source
+   * frame more, as at the seam, which goes by the frame clock too (the e2e
+   * runs with round 11's count: 1 of 1440 sped-up joins). It makes the race
+   * rarer, not impossible: in the e2e speed test round 11 took the race cut
+   * frames from 24 in 76 runs to 1 in 60 (that one the 1000 above); a race
+   * far faster than the cadence (6 frames in 3 presentations at 1.5x) or in
+   * the first presentations after a landing or a speed change still gets
+   * past the margin.
+   */
+  private overdueFrames(): number {
+    if (!this.rvfc || this.lastFrameK === null || this.lastPresented === null || this.rate() <= FAST_RATE) return 0;
+    // (presentations, not callbacks: some of theirs never ran)
+    if (!(this.lastPresented - this.landPresented + 1 >= OVERDUE_FROM)) return 0;
+    if (this.seekPending() || !this.framesLive() || !isFinite(this.lastPickClock)) return 0;
+    const vs = this.vsyncMs();
+    const now = performance.now();
+    // (a rendering update after the latest callback's)
+    if (now - this.lastFrameAt < vs / 2) return 0;
+    // (that callback in its frame's own rendering update: its clock read at
+    // the pick — OVERDUE_SAME_CLOCK_MS; a refresh after it, OVERDUE_CLOCK_MS)
+    const marginMs = this.lastFrameAt - this.lastPickAt < vs / 2 ? OVERDUE_SAME_CLOCK_MS : OVERDUE_CLOCK_MS;
+    // the refreshes since the pick (an animation frame runs just after one)
+    const refreshes = Math.floor((now - this.lastPickAt) / vs + 0.1);
+    const byTime = Math.floor((refreshes * vs) / this.presMs() + 1e-6) * this.screenStride();
+    const ran = (this.v.currentTime - this.lastPickClock - (marginMs / 1000) * this.rate()) * this.fps();
+    return clamp(Math.min(byTime, Math.floor(ran + 1e-6)), 0, this.maxEarly());
   }
 
   /** Media time the jump at seg's end is expected (the gain ramp's aim):
@@ -1430,7 +1559,7 @@ export class EditPlayer {
       const lead = ((m - atPick) / this.rate()) * 1000;
       if (lead > -50 && lead < 200) keep(this.leads, clamp(lead, 0, MAX_LEAD_MS), LEAD_FRAMES);
     }
-    if (this.lastPresented !== presented) this.shownRun++;
+    if (this.lastPresented !== presented && ++this.shownRun === 1) this.landPresented = presented;
     // the frame clock (not from a landing's first frame: the clock stands
     // on it a while)
     if (playing && this.shownRun >= 2 && isFinite(pickAt)) keep(this.anchors, pickAt - (k * 1000) / (f * this.rate()), ANCHOR_FRAMES);
@@ -1439,6 +1568,7 @@ export class EditPlayer {
     this.lastFrameM = m;
     this.lastFrameAt = wall;
     this.lastPickAt = pickAt;
+    this.lastPickClock = v.currentTime - ((wall - pickAt) / 1000) * this.rate();
     if (!this.plan.length || this.scrubbing || v.paused || this.seekPending() || this.atEnd) return;
     this.framesSince++;
     this.playFrames++;
@@ -1448,14 +1578,55 @@ export class EditPlayer {
     const [a, b] = this.framesOf(seg);
     if (k < a - 1) return; // not this clip's footage: tick() finds the place
     if (this.joined(i)) {
-      if (k >= b) this.enter(i + 1, null);
+      // a split: on to the next clip once its frames are up, its end checked
+      // at once; before, the jump at its end may be due already (a clip of a
+      // few frames: dueAfterSplit)
+      if (k < b) {
+        if (this.dueAfterSplit(i, k)) this.boundary(i + 1);
+      } else {
+        this.enter(i + 1, null);
+        this.endCheck(i + 1, k);
+      }
       return;
     }
-    // the frame rule: on the last kept frame (under load the margin's
-    // frames before it); the seam or the clock (a callback come late, a
-    // frame the decoder never presented) — or a timer for their moment
-    if (this.ruleNow(k, b) || this.dueNow(seg)) this.boundary(i);
+    this.endCheck(i, k);
+  }
+
+  /** Clip i's end, frame k on screen: the frame rule (on the last kept
+   *  frame; under load the margin's frames before it), the seam or the clock
+   *  (a callback come late, a frame the decoder never presented) — or a
+   *  timer for their moment. */
+  private endCheck(i: number, k: number): void {
+    const seg = this.plan[i];
+    if (!seg || this.joined(i)) return;
+    if (this.ruleNow(k, this.framesOf(seg)[1]) || this.dueNow(seg)) this.boundary(i);
     else this.armNear(i);
+  }
+
+  /**
+   * Split i's first part is on screen up to frame k (as the frame rule
+   * counts it): is the jump at the end of the clip after the split due
+   * already? The frame rule, at that clip's speed, against its end (round
+   * 12): a clip of a few frames there ends within the margin, and checked
+   * only once entered (on its first frame) its jump came a presentation too
+   * late — the e2e speed test's [228, 231) at 2x after [219, 228) at 1.5x
+   * showed cut frame 231 (the jump asked 0.3–0.4 ms before 231's pick, the
+   * seek's reach more). Never before the first part's last kept frame (k ≥
+   * the next clip's first frame − 1): the jump drops that clip's frames
+   * only, MAX_EARLY of output at most. Not into the timeline's last clip
+   * (its end is a pause, not a jump).
+   */
+  private dueAfterSplit(i: number, k: number): boolean {
+    const next = this.plan[i + 1];
+    if (!this.rvfc || !next || !this.plan[i + 2] || this.joined(i + 1)) return false;
+    const [a, b] = this.framesOf(next);
+    if (k < a - 1) return false;
+    this.rateFor = clamp(next.speed * this.masterRate, 0.0625, 16);
+    try {
+      return this.ruleNow(k, b);
+    } finally {
+      this.rateFor = null;
+    }
   }
 
   // ── internals ────────────────────────────────────────────────────
@@ -1678,9 +1849,22 @@ export class EditPlayer {
     }
     if (!v.paused && !this.seekPending() && !this.atEnd) {
       if (this.joined(i)) {
-        // A split: the next clip continues the same footage — no seek.
+        // A split: the next clip continues the same footage — no seek; its
+        // end checked as soon as it is entered, and before (a clip of a few
+        // frames: dueAfterSplit, the frames whose callbacks are overdue
+        // counted in).
         if (t >= seg.end) {
           this.enter(i + 1, null);
+          const next = plan[i + 1];
+          if (!this.joined(i + 1)) {
+            if (this.dueNow(next)) this.boundary(i + 1);
+            else this.armNear(i + 1);
+          }
+          return;
+        }
+        const k = this.lastFrameK;
+        if (k !== null && this.dueAfterSplit(i, k + this.overdueFrames())) {
+          this.boundary(i + 1);
           return;
         }
       } else {
@@ -1889,12 +2073,15 @@ export class EditPlayer {
   }
 
   /** A new speed: the old frame steps, their cadence and the frame clock
-   *  (its slots a frame at the old speed apart) no longer say anything. */
+   *  (its slots a frame at the old speed apart) no longer say anything —
+   *  nor, for the next presentations, the pace the overdue count assumes
+   *  (OVERDUE_FROM from the frame on screen, as from a landing's first). */
   private newSpeed(): void {
     this.strides = [];
     this.slots = [];
     this.leads = [];
     this.anchors = [];
+    this.landPresented = this.lastPresented ?? NaN;
   }
 
   private applyGain(seg: PlaySeg, t: number): void {

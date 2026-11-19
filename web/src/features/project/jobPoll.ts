@@ -34,6 +34,15 @@
  * REQUEST_MS (a stalled connection: fetch has no limit of its own) is
  * given up and asked again later, so it never holds the poll.
  *
+ * At rest (nothing runs, no save is out, no preview to follow) the v2
+ * Vorschau still learns what another device did (an export started or
+ * finished, Feinschliff, a rename, a delete): every REST_MS it asks for
+ * the job's status row (GET /jobs/status, an empty 304 while nothing
+ * changed), and a row that differs from the job shown brings the whole
+ * job. Not while the tab is hidden (it asks when it shows) nor while a
+ * video of the page plays (`playing`: the next look then), and never for
+ * a job that is gone.
+ *
  * A job seen in review or exported marks this tab's export hint
  * (features/jobs/localJobs): a later queued run of it can only be an
  * export (previewStateOf).
@@ -59,6 +68,8 @@ export const PREVIEW_ERRORS = 5;
 export const BUILD_MAX_MS = 15 * 60_000;
 /** A request without an answer after this long is given up (and asked again later). */
 export const REQUEST_MS = 20_000;
+/** At rest: how often the page looks whether the job changed elsewhere (its status row). */
+export const REST_MS = 45_000;
 // Saves still out after that are waited for this long at a time.
 const SAVES_WATCH_MS = 60_000;
 
@@ -98,6 +109,20 @@ export function previewBehind(job: JobStatus): boolean {
   return job.status === "awaiting_review" && previewOutdated(job);
 }
 
+/**
+ * The status row of GET /jobs/status says the job changed since `job`
+ * was shown: another state, another export (renders_ok), another preview,
+ * another name, or a later write at all (updated_at: any change of the
+ * job; compared only where both have it).
+ */
+export function changedSince(job: JobStatus, row: Record<string, unknown>): boolean {
+  if (row.status !== job.status) return true;
+  if ((Number(row.renders_ok) || 0) !== (job.renders_ok ?? 0)) return true;
+  if ((row.preview_version ?? null) !== (job.preview_version ?? null)) return true;
+  if ((row.title ?? null) !== (job.title ?? null)) return true;
+  return typeof row.updated_at === "number" && typeof job.updated_at === "number" && row.updated_at !== job.updated_at;
+}
+
 export type PollEvents = {
   /** The v2 Vorschau shows every state; v1 opens the editor on review (toEditor). */
   v2: boolean;
@@ -108,6 +133,8 @@ export type PollEvents = {
    *  again); false: a newer timeline, or a preview that shows it. */
   previewFailed(failed: boolean): void;
   toEditor(): void;
+  /** A video of the page plays: the look at rest waits (nothing may change under it). */
+  playing?(): boolean;
 };
 
 export type JobPollControl = {
@@ -151,6 +178,16 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
   });
   let rebuild = forRev(NaN);
   let failedNow = false;
+  // The job on screen (what a look at rest compares with); the job is
+  // gone or not this visitor's (404, 401, 403): no looks at rest.
+  let shownJob: JobStatus | null = null;
+  let halted = false;
+  // Bumped by every GET and setJob: a look at rest that was out
+  // meanwhile schedules nothing.
+  let epoch = 0;
+  // The last status row of a look at rest and its ETag (If-None-Match).
+  let restRow: Record<string, unknown> | null = null;
+  let restTag: string | null = null;
 
   const hidden = () => typeof document !== "undefined" && document.hidden;
   const setFailed = (failed: boolean) => {
@@ -159,13 +196,70 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
     on.previewFailed(failed);
   };
 
+  /** The next GET soon (`again`), else the next look at rest (the v2
+   *  Vorschau's: v1's project page stays as it was). */
   const next = (again: boolean) => {
-    if (!again || stopped || hidden()) return;
+    clearTimeout(timer);
+    if (stopped || hidden()) return;
+    if (!again) {
+      if (!halted && on.v2) timer = setTimeout(() => void rest(), REST_MS);
+      return;
+    }
     const backoff = failures || idle;
     timer = setTimeout(() => void tick(), backoff ? retryDelay(backoff) : POLL_MS);
   };
 
+  /** GET /jobs/status for this job: its row, "missing" (gone), "unknown"
+   *  (a server without the batch endpoint: 404), "denied" (401, 403: not
+   *  signed in, or not this visitor's), null (no answer). */
+  const statusRow = async (): Promise<Record<string, unknown> | "missing" | "unknown" | "denied" | null> => {
+    const limit = new AbortController();
+    const timer = setTimeout(() => limit.abort(), REQUEST_MS);
+    try {
+      const headers: Record<string, string> = {};
+      if (restTag && restRow) headers["If-None-Match"] = restTag;
+      // our own If-None-Match decides: the HTTP cache must not answer
+      const r = await apiFetch(`/jobs/status?ids=${encodeURIComponent(jobId)}`, { headers, cache: "no-store", signal: limit.signal });
+      if (r.status === 304 && restRow) return restRow;
+      if (r.status === 404) return "unknown";
+      if (r.status === 401 || r.status === 403) return "denied";
+      if (!r.ok) return null;
+      const body = (await r.json()) as { jobs?: unknown; missing?: unknown };
+      const rows = Array.isArray(body.jobs) ? (body.jobs as Record<string, unknown>[]) : [];
+      const row = rows.find((x) => x && typeof x === "object" && x.id === jobId);
+      if (!row) return Array.isArray(body.missing) && body.missing.includes(jobId) ? "missing" : null;
+      restRow = row;
+      restTag = r.headers.get("ETag");
+      return row;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  /** A look at rest: the whole job once its status row says it changed
+   *  (or can't say: a server without the batch endpoint), else the next
+   *  look in REST_MS. Not while the tab is hidden, nor while a video plays. */
+  const rest = async () => {
+    if (stopped || hidden()) return;
+    if (on.playing?.()) return next(false);
+    const at = epoch;
+    const row = await statusRow();
+    if (stopped || at !== epoch) return;
+    if (row === "denied") {
+      // As for the GET: sign-in opens (apiFetch); no looks meanwhile.
+      halted = true;
+      return;
+    }
+    const changed = row === "missing" || row === "unknown" || (row !== null && shownJob !== null && changedSince(shownJob, row));
+    if (changed) void tick();
+    else next(false);
+  };
+
   const show = (job: JobStatus, fresh: boolean) => {
+    shownJob = job;
+    halted = false;
     hadJob = true;
     const nothingBuilds = job.preview_status === "stale" || job.preview_status === "failed";
     idle = previewBehind(job) && nothingBuilds ? idle + 1 : 0;
@@ -288,11 +382,13 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
       const r = await apiFetch(`/jobs/${jobId}`, { signal: limit.signal });
       if (stopped || asked !== shown) return null;
       if (r.status === 404) {
+        halted = true;
         on.load({ state: "gone" });
         return false;
       }
       if (r.status === 401 || r.status === 403) {
         // Sign-in opens (apiFetch); nothing to poll meanwhile.
+        halted = true;
         if (!hadJob) on.load({ state: "failed", status: r.status });
         return false;
       }
@@ -333,6 +429,7 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
     // read before the save landed, so it is asked again then.
     if (hasPendingSaves(jobId)) watch();
     busy = true;
+    epoch++;
     let again: boolean | null = null;
     try {
       again = await poll();
@@ -379,6 +476,7 @@ export function startJobPoll(jobId: string, on: PollEvents): JobPollControl {
   return {
     setJob(job) {
       shown++;
+      epoch++;
       clearTimeout(timer);
       failures = 0;
       void settle(job, shown, false).then((again) => {

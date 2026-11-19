@@ -29,6 +29,7 @@ import {
   findRecord,
   findRecordMatch,
   fingerprint,
+  heldElsewhere,
   legacyFingerprint,
   LEGACY_TTL_MS,
   listResumable,
@@ -370,13 +371,61 @@ describe("giving an upload up (X, Cancel, Remove, Discard)", () => {
   });
 });
 
-describe("completed uploads (POST /jobs owns them)", () => {
-  it("aren't offered as interrupted, but a re-pick still finds them", async () => {
+describe("completed uploads (all bytes stored, POST /jobs not answered)", () => {
+  it("without Web Locks aren't offered (nothing tells one a page still holds), but a re-pick still finds them", async () => {
     const bytes = content(MIB + 1, 21);
     const fp = (await fingerprint(fileOf(bytes, "a", 1)))!;
     store.set(fp, record(fp, { size: bytes.length, completed: true, updated_at: Date.now() - 5 * 60_000 }));
     expect(await listResumable()).toEqual([]);
     expect((await findRecord(fileOf(bytes, "renamed", 2)))?.completed).toBe(true);
+  });
+
+  it("(Web Locks) are offered at 100 % once no page holds them; one a start holds (waiting for Let's go) is not, nor given up", async () => {
+    const held = fakeLocks();
+    store.set("stopped", record("stopped", { completed: true }));
+    store.set("waits", record("waits", { completed: true }));
+    held.add("cleocuts-upload:waits"); // another tab's start, waiting for "Let's go"
+    expect(await listResumable()).toEqual([expect.objectContaining({ fp: "stopped", pct: 100, completed: true })]);
+    expect(await discardResumable("waits")).toBe(false);
+    expect(store.has("waits")).toBe(true);
+    expect(calls).toEqual([]);
+    // Held in this page: not offered here either.
+    markUploadActive("stopped", true);
+    expect(await listResumable()).toEqual([]);
+    markUploadActive("stopped", false);
+    // A stopped tile's Remove gives it up: the server deletes the object.
+    answer = () => new Response(null, { status: 204 });
+    expect(await discardResumable("stopped")).toBe(true);
+    expect(calls.map((c) => c.path)).toEqual(["/uploads/multipart/abort"]);
+  });
+});
+
+describe("the same video picked in a second tab", () => {
+  it("(Web Locks) is held there while that tab uploads it or waits for Let's go; not while this page does", async () => {
+    const held = fakeLocks();
+    const f = fileOf(content(MIB + 3, 23), "zwei.mov", 1);
+    const fp = (await fingerprint(f))!;
+    expect(await heldElsewhere(f)).toBe(false);
+    held.add(`cleocuts-upload:${fp}`);
+    expect(await heldElsewhere(fileOf(content(MIB + 3, 23), "IMG_9.MOV", 2))).toBe(true);
+    // Other bytes: not held.
+    expect(await heldElsewhere(fileOf(content(MIB + 3, 24), "zwei.mov", 1))).toBe(false);
+    held.delete(`cleocuts-upload:${fp}`);
+    markUploadActive(fp, true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(held.has(`cleocuts-upload:${fp}`)).toBe(true);
+    expect(await heldElsewhere(f)).toBe(false);
+    markUploadActive(fp, false);
+  });
+
+  it("(no Web Locks) is held there while its heartbeat is fresh", async () => {
+    vi.stubGlobal("navigator", { userAgent: "test" });
+    const f = fileOf(content(MIB + 5, 25), "puls.mov", 1);
+    const fp = (await fingerprint(f))!;
+    store.set(fp, record(fp, { size: f.size, updated_at: Date.now() - 10_000 }));
+    expect(await heldElsewhere(f)).toBe(true);
+    store.set(fp, record(fp, { size: f.size, updated_at: Date.now() - ACTIVE_MS - 1 }));
+    expect(await heldElsewhere(f)).toBe(false);
   });
 });
 

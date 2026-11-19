@@ -15,6 +15,10 @@
  *   loading            the frame's placeholder, the same size
  *   16:9 "Original"    the wide frame, 16:9, as wide as the column
  *
+ * And the title on a wide screen (an iPad, a Mac): Safari has no
+ * hyphenate-limit-chars, so the title sets Safari's own limits too
+ * (preview.module.css), and no word under 10 letters splits there.
+ *
  * CI: the safari-iphone entry runs this file in WebKit as an iPhone
  * (project "iphone"); the editor-v2 entries run it in Chromium too.
  */
@@ -22,7 +26,7 @@ import type { Locator, Page } from "@playwright/test";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { expect, test } from "./support/fixtures";
 import { API } from "./support/env";
-import { holdRequests, openVorschau, vorschau } from "./support/vorschau";
+import { holdRequests, openVorschau, titleHyphenLimits, vorschau } from "./support/vorschau";
 
 const TAG = { tag: ["@editor-v2", "@safari"] };
 
@@ -158,5 +162,19 @@ test.describe("the Vorschau's frame", TAG, () => {
     await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
     await expectFrame(page, 16 / 9);
     await expectPlayButtonOnTop(page);
+  });
+});
+
+test.describe("the Vorschau's title", TAG, () => {
+  test("a wide screen (an iPad): no word under 10 letters splits, also by Safari's own limits", async ({ page, stub }) => {
+    // The wide layout (from 960 px) hyphenates the title. Safari had its
+    // own 2 letters on each side of a break there: hyphenate-limit-chars
+    // is unknown to it, so "bessere" could split.
+    await page.setViewportSize({ width: 1180, height: 820 });
+    const job = await stub.seed("review_speech", { filename: "Tipps für bessere Präsentationen im Büro.mp4" });
+    await openVorschau(page, job.id);
+    await expect(page.getByTestId("preview-title")).toHaveText("Tipps für bessere Präsentationen im Büro");
+    const limits = await titleHyphenLimits(page);
+    expect(limits.value, limits.standard ? "hyphenate-limit-chars" : "-webkit-hyphenate-limit-before / -after").toBe(limits.standard ? "10 4 4" : "5 5");
   });
 });

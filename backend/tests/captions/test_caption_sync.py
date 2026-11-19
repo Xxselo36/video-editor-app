@@ -24,6 +24,12 @@ TRUTH = sim.spoken_words(V["words"], V["segments"])
 SERVER = {"before UX2": {}, "UX2 web": pipeline.web_burn_kwargs("clipper")}
 
 
+def _truth(burn_kwargs: dict) -> list[dict]:
+    """The spoken words in the render's own output time: the web burn's
+    clips have their edges on the frame grid (frame_exact)."""
+    return sim.spoken_words(V["words"], sim.kept_segments(V["segments"], **burn_kwargs))
+
+
 def test_vectors_are_what_the_analysis_code_builds():
     """units / phrases / units_payload in testdata/captions/audit_clip.json
     come from the real analysis code and the editor's buildPhrases."""
@@ -38,7 +44,7 @@ def test_vectors_are_what_the_analysis_code_builds():
 def test_units_payload_highlights_every_spoken_word(monkeypatch, server):
     events = sim.record_render(monkeypatch, V["units_payload"],
                                V["segments"], "clipper", **SERVER[server])
-    r = sim.score(events, TRUTH)
+    r = sim.score(events, _truth(SERVER[server]))
     wrong = [row for row in r["rows"] if row[1] is None
              or sim._norm(row[0]) not in map(sim._norm, row[1].split())]
     assert (r["correct"], r["words"]) == (86, 86), wrong
@@ -73,7 +79,7 @@ def test_stale_client_on_the_new_server_gets_no_duplicates(monkeypatch):
     events = sim.record_render(monkeypatch, sim.legacy_payload(V["phrases"]),
                                V["segments"], "clipper",
                                **SERVER["UX2 web"])
-    r = sim.score(events, TRUTH)
+    r = sim.score(events, _truth(SERVER["UX2 web"]))
     assert r["duplicates"] == {}
     assert r["correct"] < 86
 

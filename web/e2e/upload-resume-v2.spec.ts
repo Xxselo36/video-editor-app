@@ -151,7 +151,7 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
     expect(api).not.toContain("init");
     expect(api[0]).toBe("parts");
     expect(api).toContain("complete");
-    expect(okParts()).toEqual([3, 4]);
+    await expect.poll(okParts).toEqual([3, 4]);
     expect(puts.map(([n]) => n).filter((n) => n <= 2)).toEqual([]);
     expect((await stub.job(id!))!.size).toBe(size);
     // The stopped tile went with the resume; the record is settled.
@@ -190,7 +190,7 @@ test.describe("resume an interrupted upload", { tag: ["@editor-v2", "@r2"] }, ()
     await expect.poll(() => createdJobId(page, "erstes.mp4")).not.toBeNull();
     expect(api).toContain("init");
     expect(api).not.toContain("parts");
-    expect(okParts()).toEqual([1, 2]);
+    await expect.poll(okParts).toEqual([1, 2]);
     expect((await records(page)).map((r) => r.done)).toEqual([[1]]);
 
     await page.goto("/app/new");

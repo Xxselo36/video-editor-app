@@ -8,7 +8,8 @@
  * changes. Fine-tune opens the editor, whose back returns here. Also:
  * an export left in the editor, the previous version of an edited
  * project, failed exports and analyses, rename and delete through ⋯, a
- * preview the server still builds, offline. Back from Fine-tune: the
+ * preview the server still builds, offline, an export made on another
+ * device while the page stays open. Back from Fine-tune: the
  * edit as the server stores it once the editor's last saves are in (its
  * length, its preview, its captions), never the old cut while the new
  * preview is built (the Vorschau asks for it, again when the server lost
@@ -353,6 +354,47 @@ test.describe("the Vorschau", TAG, () => {
     await expect(page.getByTestId("preview-error")).toHaveText("Our servers are busy right now. Please try again in a few minutes.");
     await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
     expect((await stub.job(job.id))!.status).toBe("awaiting_review");
+  });
+
+  test("left open: an export made on another device shows within a look (every 45 s), never while the preview plays", async ({
+    page,
+    stub,
+  }) => {
+    // features/project/jobPoll REST_MS, and a little more
+    const LOOK = 46_000;
+    const job = await stub.seed("review_speech", { render_seconds: 1 });
+    await page.clock.install();
+    await openVorschau(page, job.id);
+    await expect(vorschau(page)).toHaveAttribute("data-state", "ready");
+    const frame = page.getByTestId("preview-frame");
+    await expect(frame).not.toHaveAttribute("aria-busy", "true", { timeout: 15_000 });
+    // What the page asks about the job from here on.
+    const asked: string[] = [];
+    page.on("request", (r) => {
+      const u = new URL(r.url());
+      if (r.method() === "GET" && (u.pathname === "/jobs/status" || u.pathname === `/jobs/${job.id}`)) asked.push(u.pathname);
+    });
+    // While the preview plays: no look.
+    const play = page.getByTestId("preview-play");
+    await play.click();
+    await expect(frame).toHaveAttribute("data-playing", "true");
+    await page.clock.fastForward(LOOK);
+    await page.waitForTimeout(500);
+    expect(asked).toEqual([]);
+    await play.click();
+    await expect(frame).not.toHaveAttribute("data-playing", "true");
+    await expect.poll(() => page.getByTestId("preview-video").evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
+    // Export on another device (its own POST); the server finishes it.
+    const r = await page.request.post(`${API}/jobs/${job.id}/render`, { data: { client: "v2", source: "stored", disabled_cuts: [] } });
+    expect(r.ok()).toBe(true);
+    await expect.poll(async () => (await stub.job(job.id))!.status, { timeout: 30_000 }).toBe("done");
+    // The next look (put off by the playing one): the job's status row says
+    // so, the whole job follows. Two looks' time: after a jump Playwright's
+    // clock can step back to where the page's own time had got to.
+    await page.clock.fastForward(2 * LOOK);
+    await expect.poll(() => asked, { timeout: 30_000 }).toContain(`/jobs/${job.id}`);
+    expect(asked[0]).toBe("/jobs/status");
+    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
   });
 });
 

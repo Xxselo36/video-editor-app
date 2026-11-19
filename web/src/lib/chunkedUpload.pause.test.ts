@@ -12,6 +12,10 @@ type Plan = "ok" | "network" | "abort" | "hang" | "moved" | "403" | "500" | "slo
 /** Outcomes per part number, in order (then "ok"). */
 const plans = new Map<number, Plan[]>();
 const puts: [part: number, plan: Plan, url: string][] = [];
+/** Part numbers, as their PUTs got an answer. */
+const answers: number[] = [];
+/** Parts whose next PUT is answered only once this settles. */
+const holdPutOnce = new Map<number, Promise<void>>();
 const api: string[] = [];
 let completeFails = 0;
 /** API calls (by name) whose next request never answers. */
@@ -88,9 +92,12 @@ class FakeXHR {
     const plan = plans.get(n)?.shift() ?? "ok";
     puts.push([n, plan, this.url]);
     this.pending = true;
-    setTimeout(() => {
+    const hold = holdPutOnce.get(n);
+    holdPutOnce.delete(n);
+    const answer = () => setTimeout(() => {
       if (!this.pending || plan === "hang") return;
       this.pending = false;
+      answers.push(n);
       if (plan === "ok" || plan === "slow" || plan === "403" || plan === "500") {
         this.upload.onprogress?.({ loaded: size });
         this.status = plan === "403" ? 403 : plan === "500" ? 500 : 200;
@@ -101,6 +108,8 @@ class FakeXHR {
       } else if (plan === "network") this.onerror?.();
       else this.onabort?.();
     }, plan === "slow" ? 1500 : 0);
+    if (hold) void hold.then(answer);
+    else answer();
   }
 }
 
@@ -120,6 +129,8 @@ const nav = { userAgent: "Mozilla/5.0 (iPhone)", onLine: true };
 beforeEach(async () => {
   plans.clear();
   puts.length = 0;
+  answers.length = 0;
+  holdPutOnce.clear();
   api.length = 0;
   completeFails = 0;
   hangOnce.clear();
@@ -152,16 +163,27 @@ async function start(signal?: AbortSignal) {
 describe("a part fails with a network error", () => {
   it("pauses, then continues on `online` / visible from the next part, without a new init", async () => {
     plans.set(2, ["network", "network"]);
+    // Part 2's first answer comes once parts 1 and 3 are in. A part that
+    // gets through wakes the other part's retry and ends "waiting" (the
+    // backoff tests below): left to the order in which the two workers'
+    // digests finish, those wakes moved part 2 on between two checks
+    // here (its tries went from 1 to 3). Now only the page events do.
+    let release!: () => void;
+    holdPutOnce.set(2, new Promise<void>((r) => (release = r)));
     const { p, paused } = await start();
-    // The first retry waits its backoff — or less: the connection is back.
-    await vi.waitFor(() => {
-      fire("online");
-      expect(tries(2)).toBe(2);
-    });
-    // Two in a row: "waiting for connection".
+    await vi.waitFor(() => expect(answers).toEqual([1, 3]));
+    release();
+    await vi.waitFor(() => expect(answers).toEqual([1, 3, 2]));
+    // The first retry waits its backoff (1 s) — or less: the connection is back.
+    fire("online");
+    await vi.waitFor(() => expect(tries(2)).toBe(2), { timeout: 500 });
+    // Two in a row: "waiting for connection", until the page is back.
     await vi.waitFor(() => expect(paused).toEqual([true]));
-    // Back from the background (visibilityState is "visible").
+    expect(tries(2)).toBe(2);
+    // Back from the background (visibilityState is "visible"): at once,
+    // not after the 3 s backoff.
     fire("visibilitychange");
+    await vi.waitFor(() => expect(tries(2)).toBe(3), { timeout: 1500 });
     await expect(p).resolves.toMatchObject({ storage_key: "uploads/k1" });
     expect(paused).toEqual([true, false]);
     expect(api.filter((c) => c === "init")).toHaveLength(1);
