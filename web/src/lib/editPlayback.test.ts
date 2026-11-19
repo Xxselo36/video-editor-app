@@ -383,6 +383,13 @@ type Presented = { k: number; at: number; seeking: boolean };
  * in the two steps after the split's first frame at 47 % and 48 % of
  * splits, 10 % in the middle of a 2x clip — 359, then nothing for two
  * refreshes, the clock 359.11 → 360.11).
+ * `pickMs`: the compositor picks the next frame this long after the
+ * refresh, after a rendering update right at it (`cbDelay: 0`) has run —
+ * a speed change there reaches that pick, a jump asked there doesn't
+ * (Chromium: 0.3–1 ms after the update's start; the e2e run under load:
+ * 228's callback a refresh after its pick, the split's 1.5x → 2x in it,
+ * the jump asked 0.8 ms after it and 231 picked 0.3 ms after the jump).
+ * Not with `earlyCb`.
  */
 function framedVideo(
   start: number,
@@ -416,6 +423,7 @@ function framedVideo(
     pickLateMs?: number;
     speedRace?: { frames: number };
     rateHold?: number;
+    pickMs?: number;
   } = {},
 ) {
   const fps = o.fps ?? 30;
@@ -499,6 +507,8 @@ function framedVideo(
   const frameAt = (t: number) => Math.floor((t - phase) * fps + 1e-9);
   let pendingMd: Md | null = null;
   let updateDue: number | null = null;
+  // (pickMs: the refresh whose pick is still to come)
+  let pickDue: number | null = null;
   // (earlyCb: the picked frame whose callback already ran; playStart: the
   // presented frames whose callbacks are yet to be missed)
   let calledBack: number | null = null;
@@ -572,25 +582,8 @@ function framedVideo(
           bursts++;
         }
         picked = null;
-        if (holdLeft > 0 && !paused && !frozen) holdLeft--;
-        else if (!paused && !frozen) {
-          const kc = frameAt(clockAt(v0 + vsync * every));
-          // (settle: a frame further at each of the clock's own steps — the
-          // frame up in the slot of the one dropped, never a refresh early)
-          const k0 = settled() ? (kc !== clockFrame ? kc + 1 : shown) : kc;
-          clockFrame = kc;
-          // (a decoder behind never presents a frame older than the one up)
-          const k = o.behind ? Math.max(k0 - Math.max(0, Math.round(o.behind(now))), Math.min(k0, shown)) : k0;
-          if (k !== shown && !o.drop?.(k)) picked = k;
-        }
-        // (burst: the presentation before the race has its callback a
-        // refresh after its pick, like every one in the e2e dumps' races
-        // round 11 saw — or, `early`, in its pick's own update)
-        const preBurst = !!o.burst && burstLand !== null && picked !== null && o.burst.at(picked, presented + 1 - burstLand);
-        if (picked !== null && missLeft === 0 && (preBurst ? !!o.burst?.early : !!o.earlyCb?.(presented + 1))) {
-          calledBack = picked;
-          pendingMd = mdOf(picked, presented + 1, v0, v0 + vsync * every);
-        }
+        if (o.pickMs === undefined) pick(v0, now);
+        else pickDue = v0;
       }
       if (presented === before && o.rafBusy) {
         const ms = o.rafBusy(idle++);
@@ -602,8 +595,36 @@ function framedVideo(
       updateDue = null;
       update();
     }
+    // (pickMs: the pick after a rendering update right at the refresh)
+    if (pickDue !== null && now >= pickDue + (o.pickMs ?? 0)) {
+      const at = pickDue;
+      pickDue = null;
+      pick(at, now);
+    }
     setTimeout(tick, 1);
   };
+  /** The frame for the refresh after `v0` (picked at the refresh v0). */
+  function pick(v0: number, now: number) {
+    if (holdLeft > 0 && !paused && !frozen) holdLeft--;
+    else if (!paused && !frozen) {
+      const kc = frameAt(clockAt(v0 + vsync * every));
+      // (settle: a frame further at each of the clock's own steps — the
+      // frame up in the slot of the one dropped, never a refresh early)
+      const k0 = settled() ? (kc !== clockFrame ? kc + 1 : shown) : kc;
+      clockFrame = kc;
+      // (a decoder behind never presents a frame older than the one up)
+      const k = o.behind ? Math.max(k0 - Math.max(0, Math.round(o.behind(now))), Math.min(k0, shown)) : k0;
+      if (k !== shown && !o.drop?.(k)) picked = k;
+    }
+    // (burst: the presentation before the race has its callback a
+    // refresh after its pick, like every one in the e2e dumps' races
+    // round 11 saw — or, `early`, in its pick's own update)
+    const preBurst = !!o.burst && burstLand !== null && picked !== null && o.burst.at(picked, presented + 1 - burstLand);
+    if (picked !== null && missLeft === 0 && (preBurst ? !!o.burst?.early : !!o.earlyCb?.(presented + 1))) {
+      calledBack = picked;
+      pendingMd = mdOf(picked, presented + 1, v0, v0 + vsync * every);
+    }
+  }
   setTimeout(tick, 1);
   vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => {
     rafs.set(++handle, cb);
@@ -1364,11 +1385,13 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
       // refresh, and without: round 11's player shows the cut frame after
       // 19 of the 20 small clips of 3 frames at 2x. All callbacks run and
       // the clock two frames ahead — the run under load: 228 → 231 right
-      // after the change — only checks what the jump costs: the fake video
-      // picks before the rendering update, Chromium 0.3–1 ms after its
-      // start.)
+      // after the change — with the pick after the rendering update, as
+      // Chromium's (pickMs): there the speed change reaches the next pick
+      // and the jump in the same update doesn't, round 11's player shows
+      // the cut frame after 19 of the 20 too; picked before it, the clock's
+      // gain comes after the jump — that variant only checks what it costs.)
       { missCb: (k: number) => firstOfSmall.has(k), speedRace: { frames: 1 }, cbDelay: 0, pickLateMs: 0.4 },
-      { speedRace: { frames: 2 }, cbDelay: 0, pickLateMs: 0.4 },
+      { speedRace: { frames: 2 }, cbDelay: 0, pickMs: 1 },
       { missCb: (k: number) => firstOfSmall.has(k), speedRace: { frames: 1 } },
       { speedRace: { frames: 2 }, earlyCb: chromium },
     ]) {
