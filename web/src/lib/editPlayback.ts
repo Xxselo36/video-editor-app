@@ -315,14 +315,20 @@ const OVERDUE_CLOCK_MS = 8;
 /** …and this much (ms) after a callback that ran in its frame's own
  *  rendering update (round 12): its clock was read at the pick, not
  *  extrapolated back a refresh — what is left is the animation frame's
- *  clock read a few ms after the refresh. The e2e dumps replayed (124 speed
- *  runs, 4431 sped-up joins): counting after such callbacks at 4 ms jumps
- *  at 54 joins more, each within MAX_EARLY by what the dump shows was
- *  picked by then (at 0 ms: 120 more, one unknown), and catches the one
- *  race after such a callback (995 → 1000 at 1.5x: two refreshes after
- *  995's pick the clock had run 1.34 frames, 0.98 less OVERDUE_CLOCK_MS —
- *  the jump now asked 16.9 ms before 1000's pick, not 0.2 ms). */
-const OVERDUE_SAME_CLOCK_MS = 4;
+ *  clock read a few ms after the refresh. Measured in the e2e runs, by the
+ *  probe's clock readings (the player reads the clock before the probe at
+ *  its callback and after it at its animation frame: 0.6–1.7 ms of margin
+ *  less): the one race after such a callback (995 → 1000 at 1.5x, the
+ *  clock 1.34 frames on two refreshes after 995's pick) is caught up to
+ *  7.4 ms — the jump asked 16.9 ms before 1000's pick, not 0.2 ms; a join
+ *  where the pipeline brought no frame (969 at 2x, the clock 1.21 frames
+ *  on a refresh after its pick) is counted up to 3.4 ms — round 12's
+ *  first try (4 ms) jumped there in an e2e run: 5 source frames lost,
+ *  MAX_EARLY 4. Replayed on 176 dumped speed runs (6210 sped-up joins),
+ *  4–7 ms of probe margin catch that race and lose no source frame beyond
+ *  MAX_EARLY where round 11's count alone doesn't (2 joins); 2–3 ms lose
+ *  one more. */
+const OVERDUE_SAME_CLOCK_MS = 6;
 
 /**
  * A clip's frames on the render's grid (backend captions_v2.clip_plan):
@@ -1342,10 +1348,10 @@ export class EditPlayer {
    * round 11 left it out, and with its count the e2e runs showed cut frame
    * 1000 at 1.5x after such a callback on 995, presentedFrames up 2, the
    * jump asked in 1000's own update). Not in the first presentations after
-   * a landing or play (OVERDUE_FROM), nor at 1x (a frame lasts two
-   * refreshes: LAND_WARM_FRAMES and the seam cover it). The frame rule takes
-   * the frame on screen as that much further: the jump goes once the
-   * margin's first frame is on screen by the cadence and the clock —
+   * a landing, play or a speed change (OVERDUE_FROM), nor at 1x (a frame
+   * lasts two refreshes: LAND_WARM_FRAMES and the seam cover it). The frame
+   * rule takes the frame on screen as that much further: the jump goes once
+   * the margin's first frame is on screen by the cadence and the clock —
    * MAX_EARLY at most while the pipeline keeps its cadence (the e2e dumps,
    * replayed: of 194 such jumps, 179 shown within it by the next callback
    * or the presentations it counts, 15 unknown, none beyond). Where the
@@ -1355,7 +1361,8 @@ export class EditPlayer {
    * rarer, not impossible: in the e2e speed test round 11 took the race cut
    * frames from 24 in 76 runs to 1 in 60 (that one the 1000 above); a race
    * far faster than the cadence (6 frames in 3 presentations at 1.5x) or in
-   * the first presentations after a landing still gets past the margin.
+   * the first presentations after a landing or a speed change still gets
+   * past the margin.
    */
   private overdueFrames(): number {
     if (!this.rvfc || this.lastFrameK === null || this.lastPresented === null || this.rate() <= FAST_RATE) return 0;
