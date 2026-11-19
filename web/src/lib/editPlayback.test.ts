@@ -376,6 +376,13 @@ type Presented = { k: number; at: number; seeking: boolean };
  * within a refresh (round 12, the e2e speed test: 228 → 231 in one
  * presentation right after a split's 1.5x → 2x, picked 1.1 ms after the
  * change with the element's clock at 228.2).
+ * `rateHold`: a speed change while playing (no seek on its way) brings no
+ * new frame for that many refreshes, the element's clock running at the
+ * new speed meanwhile; then the picks follow the clock again (Chromium
+ * after a split's 1.5x → 2x, the e2e dumps: a refresh without a new frame
+ * in the two steps after the split's first frame at 47 % and 48 % of
+ * splits, 10 % in the middle of a 2x clip — 359, then nothing for two
+ * refreshes, the clock 359.11 → 360.11).
  */
 function framedVideo(
   start: number,
@@ -408,6 +415,7 @@ function framedVideo(
     burst?: { at: (k: number, n: number) => boolean; frames: number; miss: number; early?: boolean };
     pickLateMs?: number;
     speedRace?: { frames: number };
+    rateHold?: number;
   } = {},
 ) {
   const fps = o.fps ?? 30;
@@ -478,6 +486,9 @@ function framedVideo(
   let speedRaceFrom: number | null = null;
   const speedRaceOff = (t: number) =>
     speedRaceFrom !== null && o.speedRace && clockRate > 1.25 ? (Math.min(1, Math.max(0, t - speedRaceFrom) / vsync) * o.speedRace.frames) / fps : 0;
+  // (rateHold: the refreshes still to bring no new frame; how many holds)
+  let holdLeft = 0;
+  let holds = 0;
   const clockAt = (t: number) =>
     paused || frozen || mstalled ? pos : pos + (run(t) / 1000) * clockRate + raceOff(t) + burstOff(t) + speedRaceOff(t);
   const clock = () => clockAt(Date.now());
@@ -561,7 +572,8 @@ function framedVideo(
           bursts++;
         }
         picked = null;
-        if (!paused && !frozen) {
+        if (holdLeft > 0 && !paused && !frozen) holdLeft--;
+        else if (!paused && !frozen) {
           const kc = frameAt(clockAt(v0 + vsync * every));
           // (settle: a frame further at each of the clock's own steps — the
           // frame up in the slot of the one dropped, never a refresh early)
@@ -620,6 +632,8 @@ function framedVideo(
         burstFrom = null;
         // (a speed change while playing, no seek on its way)
         speedRaceFrom = !paused && !seeking ? since : null;
+        holdLeft = !paused && !seeking && o.rateHold ? o.rateHold : 0;
+        if (holdLeft) holds++;
       }
       if (o.rateEvents) emit("ratechange");
     },
@@ -647,6 +661,7 @@ function framedVideo(
         raceFrom = null;
         burstFrom = null;
         speedRaceFrom = null;
+        holdLeft = 0;
         // (a race's callbacks still to miss end with it)
         if (o.burst) missLeft = 0;
         frozen = true;
@@ -696,6 +711,7 @@ function framedVideo(
       raceFrom = null;
       burstFrom = null;
       speedRaceFrom = null;
+      holdLeft = 0;
       paused = true;
       emit("pause");
     },
@@ -722,7 +738,7 @@ function framedVideo(
     get: () => mutes.at(-1) ?? false,
     set: (x: boolean) => void mutes.push(x),
   });
-  return { v: v as unknown as HTMLVideoElement, frames, seeks, volumes, mutes, fps, phase, busy: busyNow, bursts: () => bursts };
+  return { v: v as unknown as HTMLVideoElement, frames, seeks, volumes, mutes, fps, phase, busy: busyNow, bursts: () => bursts, holds: () => holds };
 }
 
 /** A repeatable pseudo-random sequence (no Math.random in tests). */
@@ -1393,6 +1409,38 @@ describe("EditPlayer joins: no cut frame, ever (wordcuts10-flash-frames)", { tim
         d.forEach((n, i) => expect(n, `${label} clip ${i}`).toBeLessThanOrEqual(plan[i].speed > 1 ? atSpeed(plan[i].speed) : 1));
         vi.clearAllTimers();
       }
+  }, 60_000);
+
+  it("a split into a 2x clip of 6 frames (the e2e speed test's [348, 359) at 1.5x, then [359, 365) at 2x), no new frame for two refreshes after the speed change while the element's clock runs at 2x: no cut frame, the 2x clip drops two frames of output at most — the overdue count starts again after a speed change, as after a landing (OVERDUE_FROM). Counted from the change on, it took a frame never presented for one on screen and jumped on the clip's first frame: 5 source frames lost (the e2e runs: 359, nothing for two refreshes, the jump — 2 of 52 speed runs with round 12's first count, 1 of 20 with round 11's)", async () => {
+    // pairs: a 1.5x clip of 12 frames split into a 2x one of 6, cuts of 5
+    // frames, a 1x clip after every third
+    const plan: { id: string; start: number; end: number; speed: number }[] = [];
+    for (let i = 0, a = 15; i < 30; i++) {
+      plan.push({ id: `h${i}`, start: a / 30, end: (a + 12) / 30, speed: 1.5 });
+      plan.push({ id: `h${i}~2`, start: (a + 12) / 30, end: (a + 18) / 30, speed: 2 });
+      a += 18 + 5;
+      if (i % 3 === 2) {
+        plan.push({ id: `w${i}`, start: a / 30, end: (a + 12) / 30, speed: 1 });
+        a += 12 + 5;
+      }
+    }
+    const ranges = plan.map((x) => clipFrames(x, 30));
+    const ok = (k: number) => ranges.some(([a, b]) => k >= a && k < b);
+    // (the 2x clips after the splits, before the timeline's end)
+    const second = plan.map((s, i) => (s.id.endsWith("~2") && i + 1 < plan.length ? i : -1)).filter((i) => i >= 0);
+    // (the callback of the frame the speed changes on a refresh after its
+    // pick — round 11's count — or in its pick's own update — round 12's,
+    // the e2e run's 359 — with the e2e timing and without)
+    for (const o of [{}, { earlyCb: () => true }, { cbDelay: 0, pickLateMs: 0.4 }, { cbDelay: 0, pickLateMs: 0.4, earlyCb: chromium }]) {
+      const label = JSON.stringify(Object.keys(o));
+      const f = framedVideo(0.5, { rateHold: 2, landStartMs: 60, ...o });
+      const got = await playAll(f, 20_000, { plan });
+      expect(f.holds(), label).toBeGreaterThanOrEqual(second.length);
+      expect(cutOf(got, ok), label).toEqual([]);
+      const d = droppedAtEnds(got, plan);
+      second.forEach((i) => expect(d[i], `${label} clip ${i}`).toBeLessThanOrEqual(atSpeed(2)));
+      vi.clearAllTimers();
+    }
   }, 60_000);
 
   it("clips at 1.5x and 2x between 1x ones, the frame callbacks as Chromium runs them: no cut frame; the 1x clips drop at most their last kept frame, mostly none — round 5 took those callbacks (a refresh after their pick: more than a presentation at 2x) for two frames' load and held it into the 1x clips after (two kept frames at nearly every one)", async () => {

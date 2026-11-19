@@ -294,7 +294,16 @@ const LAND_WARM_FRAMES = 5;
  *  callback is overdue is counted (overdueFrames): before, the clock starts
  *  again unevenly — the e2e dumps' frames a refresh later than the cadence
  *  said came at the 2nd and 3rd presentation after the landing; the races
- *  that showed cut frames from the 4th on. */
+ *  that showed cut frames from the 4th on. The same from the frame on
+ *  screen at a speed change while playing (a split; round 12): after a
+ *  split's 1.5x → 2x Chromium brings no new frame for a refresh in each of
+ *  the two steps after the split's first frame at 47 % and 48 % of the
+ *  e2e dumps' splits (17 % at the third, 10 % in the middle of a 2x clip)
+ *  while the element's clock runs at the new speed — counted from the
+ *  change on, a frame never presented was taken for one on screen: the
+ *  jump on the 2x clip [359, 365)'s first frame, 5 source frames lost
+ *  (MAX_EARLY there: 4) in 3 of the 72 speed runs with round 12's first
+ *  players. */
 const OVERDUE_FROM = 4;
 /** …and no more of them than the element's clock ran on since that frame's
  *  pick, less this much of it (ms): a clock read a few ms after the
@@ -630,7 +639,9 @@ export class EditPlayer {
   private landedEarly = false;
   /** Frames presented since the last seek landed (the landing one is 1). */
   private shownRun = 0;
-  /** The presentation count (presentedFrames) of that run's first frame. */
+  /** The presentation count (presentedFrames) of that run's first frame —
+   *  or of the frame on screen when the speed last changed (newSpeed): the
+   *  overdue count's start. */
   private landPresented = NaN;
   /** Recent wall gaps (ms) between the picks of frames presented one after
    *  the other: the cadence the next ones come at. */
@@ -2048,12 +2059,15 @@ export class EditPlayer {
   }
 
   /** A new speed: the old frame steps, their cadence and the frame clock
-   *  (its slots a frame at the old speed apart) no longer say anything. */
+   *  (its slots a frame at the old speed apart) no longer say anything —
+   *  nor, for the next presentations, the pace the overdue count assumes
+   *  (OVERDUE_FROM from the frame on screen, as from a landing's first). */
   private newSpeed(): void {
     this.strides = [];
     this.slots = [];
     this.leads = [];
     this.anchors = [];
+    this.landPresented = this.lastPresented ?? NaN;
   }
 
   private applyGain(seg: PlaySeg, t: number): void {
