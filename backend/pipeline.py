@@ -1441,9 +1441,9 @@ def _concat_preview(
 # every decoder takes. (Given an RGB frame, ffmpeg's mjpeg picks 4:4:4
 # with 1x2 sampling on every component — what the thumbnails were.) The
 # frame goes through RGB on its way (format=rgb24): read with the
-# video's own colour matrix (a v2 export is tagged BT.709; a v1 export
-# is untagged BT.601, which is what ffmpeg assumes for untagged video:
-# keep the input matrix on auto), written as JFIF's (BT.601), which is
+# video's own colour matrix (every export is tagged BT.709; an older v1
+# export is untagged BT.601, which is what ffmpeg assumes for untagged
+# video: keep the input matrix on auto), written as JFIF's (BT.601), which is
 # how every decoder reads a JPEG. Straight from the
 # video's YUV to yuvj420p the scaler converts the range but keeps the
 # BT.709 values: saturated colours came out off by up to 35 levels.
