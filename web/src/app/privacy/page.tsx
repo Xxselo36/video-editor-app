@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { H, LegalPage, LegalTitle, Mail, Ul } from "@/components/legal/LegalPage";
 import {
+  BACKUP_KEEP_DAYS,
   BETA_RETENTION_DAYS,
   EVENTS_KEEP_DAYS,
   OPERATOR,
@@ -165,7 +166,9 @@ const German = (
         : "Welche Projekte deine sind, merkt sich nur dein Browser (lokaler Speicher); löschst du die Websitedaten, ist diese Liste weg – die Projekte selbst bleiben auf unserem Server, bis sie wie oben beschrieben gelöscht werden."}{" "}
       Die Verarbeitungsstatistik und deine Antworten auf die Frage nach dem Export werden nach {EVENTS_KEEP_DAYS}{" "}
       Tagen gelöscht, auch wenn du das Projekt vorher löschst; Server-Logs nach der Aufbewahrungsfrist des
-      jeweiligen Hosting-Anbieters.
+      jeweiligen Hosting-Anbieters. Unsere Datenbank sichern wir jede Nacht. Was wir aus ihr löschen, steht noch bis
+      zu {BACKUP_KEEP_DAYS} Tage in diesen Sicherungskopien und wird dann auch dort gelöscht; Videos sind darin nicht
+      enthalten.
     </p>
 
     <H>5. Stimmtest</H>
@@ -326,7 +329,8 @@ const English = (
         : "Which projects are yours is kept only in your browser (local storage); clearing the site data removes that list, but the projects themselves stay on our server until they are deleted as described above."}{" "}
       The processing statistics and your answers to the question after an export are deleted after{" "}
       {EVENTS_KEEP_DAYS}{" "}days, even if you delete the project before; server logs after the hosting
-      provider&apos;s log retention period.
+      provider&apos;s log retention period. We back up our database every night. Whatever we delete from it stays
+      in these backups for up to {BACKUP_KEEP_DAYS} days and is then deleted there too; they contain no videos.
     </p>
 
     <H>5. Voice test</H>

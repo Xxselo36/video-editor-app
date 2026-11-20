@@ -919,10 +919,11 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
       await p.to(h.x - px, 4);
       // (moving on before an edge held still MAGNIFY_MS magnifies the dock)
       await page.waitForTimeout(220);
-      // where the dock has the edge now (its readout: "17.83 s"), and the
-      // frame on screen: the last one presented, by the file it came from
+      // where the dock has the edge now (its readout's source second,
+      // data-edge: the text reads the ruler's clock), and the frame on
+      // screen: the last one presented, by the file it came from
       const now = await page.evaluate(() => ({
-        readout: document.querySelector("[data-testid=ed-trim-readout]")?.textContent ?? "",
+        readout: document.querySelector("[data-testid=ed-trim-readout]")?.getAttribute("data-edge") ?? "",
         paused: (document.querySelector("[data-testid=editor-video]") as HTMLVideoElement).paused,
         last: (window as unknown as { __scrubFrames: [number, number][] }).__scrubFrames.at(-1) ?? [-1, -1],
       }));
@@ -984,7 +985,7 @@ test.describe("editor v2: the trim flow, round 2", TAG, () => {
     const h = center((await clip.getByTestId("clip-trim-end").boundingBox())!);
     const p = await press(page, h.x, h.y);
     await p.to(h.x - Math.max(14, Math.round(cb.width * 0.3)), 4);
-    const edge = parseFloat(((await page.getByTestId("ed-trim-readout").textContent()) ?? "").replace(",", "."));
+    const edge = Number(await page.getByTestId("ed-trim-readout").getAttribute("data-edge"));
     expect(edge).toBeLessThan(tl[3][1] - 0.05);
     // the new file is in (its metadata loaded), held at the edge
     const srcOf = (t: number, segs: [number, number][]) => {

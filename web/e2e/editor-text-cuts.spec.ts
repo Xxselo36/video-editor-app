@@ -611,12 +611,20 @@ test.describe("editor v2: the timeline (owner's iPhone items)", TAG, () => {
     const h = (await clip.getByTestId("clip-trim-end").boundingBox())!;
     const x = h.x + h.width / 2;
     const y = h.y + h.height / 2;
+    const before = await timeline(stub, job.id);
     const release = await holdAndDrag(page, x, y, x - 6, y, 0);
     const readout = page.getByTestId("ed-trim-readout");
     await expect(readout).toHaveText(/^\d+\.\d{2} s$/);
     // hold still: the magnifier
     await expect(strip).toHaveAttribute("data-magnified", "true", { timeout: 3_000 });
-    const shown = parseFloat((await readout.textContent()) ?? "");
+    // the edge's frame in the source (what the export uses) ...
+    const shown = Number(await readout.getAttribute("data-edge"));
+    // ... read on the ruler's clock: clip 1 ends this far into the edited
+    // video (clip 0, then clip 1 up to its edge), not at its source second
+    // (owner: "29,30 s" above a ruler at 24,0 read as another second)
+    const edited = before[0][1] - before[0][0] + (shown - before[1][0]);
+    expect(Math.abs(parseFloat((await readout.textContent()) ?? "") - edited)).toBeLessThanOrEqual(0.006);
+    expect(Math.abs(edited - shown)).toBeGreaterThan(0.1);
     await expect.poll(() => strip.evaluate((el) => el.scrollWidth), { timeout: 3_000 }).toBeGreaterThan(width0 * 3);
     // 0.1 s marks and the frame grid at this zoom
     await expect(page.locator('[data-testid="timeline-ruler"] [data-kind="tenth"]').first()).toBeAttached();
