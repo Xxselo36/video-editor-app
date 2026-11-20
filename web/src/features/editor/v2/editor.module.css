@@ -2148,6 +2148,13 @@
   box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.45);
   border-radius: 4px;
 }
+/* a finger holds a trim handle: no scroller of the browser's own (iOS
+   Safari kept its position over the magnifier's scroll writes — the zoom
+   showed another second); scripted scrolls work as before, and the
+   handle's touch-action: none scrolled nothing by hand meanwhile anyway */
+.strip[data-touch-trim="true"] {
+  overflow-x: hidden;
+}
 /* phone: a 44 px trim target that reaches only 8 px outside the clip (the
    gap to the neighbour, which stays tappable: review 5) and up to 36 px
    in (--hin, set per clip: never past its middle); a tap that doesn't trim
