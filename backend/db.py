@@ -459,3 +459,127 @@ def _close_pg() -> None:
 def now_iso() -> str:
     return datetime.fromtimestamp(time.time(), tz=timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ")
+
+
+# ── the SQLite file after the cutover ────────────────────────────────
+# The cutover leaves the SQLite file on the volume as it was at that
+# moment, so it keeps projects that were deleted since then. Once the
+# cutover is CLEO_SQLITE_COPY_KEEP_DAYS old, the hourly loop removes it
+# (drop_sqlite_copy). The marker file stays.
+
+_REMOVED_KEY = "sqlite_copy_removed"
+
+
+def sqlite_copy_keep_days() -> float | None:
+    """CLEO_SQLITE_COPY_KEEP_DAYS: how long the SQLite file stays on the
+    volume after a cutover that copied it to Postgres. The default is 14
+    days, like the nightly backups. "off" keeps it."""
+    raw = os.environ.get("CLEO_SQLITE_COPY_KEEP_DAYS", "").strip().lower()
+    if raw in ("off", "keep", "never"):
+        return None
+    try:
+        return max(0.0, float(raw or 14))
+    except ValueError:
+        return 14.0
+
+
+def _sqlite_files(path: str) -> tuple[str, ...]:
+    return (path, f"{path}-wal", f"{path}-shm", f"{path}-journal")
+
+
+def _copied_at(state: dict[str, Any] | None) -> float | None:
+    """When a committed cutover copied this SQLite file to Postgres: the
+    marker's "at". None when there was no such cutover: no marker, a
+    "pending" one, a "fresh" one (Postgres started empty, and this file's
+    data was never copied), or a marker without its counts or a readable
+    time."""
+    if (not state or state.get("pending") or state.get("fresh")
+            or not isinstance(state.get("counts"), dict)):
+        return None
+    try:
+        return datetime.strptime(str(state.get("at")), "%Y-%m-%dT%H:%M:%SZ"
+                                 ).replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def sqlite_copy(now: float | None = None) -> dict[str, Any]:
+    """The SQLite file left on the volume by the cutover, for GET
+    /admin/capacity, as numbers and flags only. It reports whether the file
+    and the marker file exist, whether a cutover copied the file, the file's
+    size and the cutover's age. With Postgres it also reports when
+    drop_sqlite_copy removed the file."""
+    now = time.time() if now is None else now
+    path = _sqlite_path()
+    state = _read_marker(cutover_marker_path(path))
+    at = _copied_at(state)
+    sizes = [os.path.getsize(p) for p in _sqlite_files(path)
+             if os.path.exists(p)]
+    out: dict[str, Any] = {
+        "file": os.path.exists(path),
+        "marker": state is not None,
+        "copied": at is not None,
+        "size_mb": round(sum(sizes) / 1e6, 1) if sizes else None,
+        "cut_over_age_d": None if at is None else round((now - at) / 86400, 1),
+        "keep_days": sqlite_copy_keep_days(),
+    }
+    if active() == "postgres":
+        from backend import pg
+        with pg.database().connection() as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key = %s",
+                               (_REMOVED_KEY,)).fetchone()
+        try:
+            note = json.loads(row[0]) if row and row[0] else None
+            when = datetime.strptime(str(note["at"]), "%Y-%m-%dT%H:%M:%SZ"
+                                     ).replace(tzinfo=timezone.utc)
+            out["removed_age_d"] = round((now - when.timestamp()) / 86400, 1)
+            out["removed_mb"] = note.get("mb")
+        except (TypeError, KeyError, ValueError, AttributeError):
+            pass
+    return out
+
+
+def drop_sqlite_copy(now: float | None = None) -> int | None:
+    """Remove the SQLite file from before the cutover, together with its
+    -wal, -shm and -journal files. This runs only on Postgres, and only when
+    a committed cutover copied the file there at least
+    CLEO_SQLITE_COPY_KEEP_DAYS ago. The rollback in DEPLOY.md 8.3 only makes
+    sense right after the cutover, and the nightly backups in R2 hold the
+    live data. The marker file stays: a boot still refuses a database
+    without the cutover (pg_cutover.StaleImport, "the file is gone now").
+    The removal is noted in meta for the capacity report. Returns the
+    bytes removed, or None when nothing was due."""
+    now = time.time() if now is None else now
+    keep = sqlite_copy_keep_days()
+    if keep is None or not is_postgres():
+        return None
+    path = _sqlite_path()
+    at = _copied_at(_read_marker(cutover_marker_path(path)))
+    if at is None or now - at < keep * 86400:
+        return None
+    removed = 0
+    found = False
+    for p in _sqlite_files(path):
+        try:
+            size = os.path.getsize(p)
+            os.remove(p)
+        except FileNotFoundError:
+            continue
+        found = True
+        removed += size
+    if not found:
+        return None
+    from backend import pg
+    value = json.dumps({
+        "at": datetime.fromtimestamp(now, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
+        "mb": round(removed / 1e6, 1)})
+    with pg.database().connection() as conn:
+        conn.execute("INSERT INTO meta (key, value) VALUES (%s, %s) "
+                     "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                     (_REMOVED_KEY, value))
+    print(f"[db] removed the SQLite file from before the cutover to "
+          f"Postgres ({path}, {removed / 1e6:.1f} MB, cut over "
+          f"{(now - at) / 86400:.0f} days ago); the marker file stays",
+          flush=True)
+    return removed

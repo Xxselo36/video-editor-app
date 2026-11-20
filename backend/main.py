@@ -1636,6 +1636,11 @@ def _hourly() -> None:
     except Exception as e:
         print(f"[backup] Postgres backup FAILED: {e}", flush=True)
     try:
+        db.drop_sqlite_copy()
+    except Exception as e:
+        print(f"[db] removing the SQLite file from before the cutover "
+              f"failed: {e}", flush=True)
+    try:
         n = pipeline.sweep_modal_folders()
         if n:
             print(f"[retention] removed {n} leftover Modal volume "
@@ -6078,12 +6083,18 @@ def capacity_report(now: float | None = None) -> dict[str, Any]:
 
 
 def _database_report(now: float) -> dict[str, Any]:
-    """Which database, and its backups (backend/pg_backup.report)."""
+    """Which database, its backups (backend/pg_backup.report) and the
+    SQLite file from before the cutover (db.sqlite_copy)."""
     from backend import pg_backup
     try:
-        return pg_backup.report(now)
+        out = pg_backup.report(now)
     except Exception as e:  # never fail the capacity report over it
         return {"error": type(e).__name__}
+    try:
+        out["sqlite_copy"] = db.sqlite_copy(now)
+    except Exception as e:
+        out["sqlite_copy"] = {"error": type(e).__name__}
+    return out
 
 
 @app.get("/admin/capacity")
