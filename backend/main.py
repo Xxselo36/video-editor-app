@@ -6073,7 +6073,17 @@ def capacity_report(now: float | None = None) -> dict[str, Any]:
         "init_rate": {"limit_per_hour": _init_limit(), **_INIT_RATE.stats()},
         "limits": {k: f() for k, f in _CAPACITY_LIMITS.items()},
         "refusals": {"by_code": by_code, "recent": recent},
+        "database": _database_report(now),
     }
+
+
+def _database_report(now: float) -> dict[str, Any]:
+    """Which database, and its backups (backend/pg_backup.report)."""
+    from backend import pg_backup
+    try:
+        return pg_backup.report(now)
+    except Exception as e:  # never fail the capacity report over it
+        return {"error": type(e).__name__}
 
 
 @app.get("/admin/capacity")
@@ -6082,8 +6092,9 @@ def admin_capacity(x_admin_token: str = Header(default="")):
     the work root), what the jobs in flight reserve, what a 10-minute
     upload of 0.5–4 GB needs and whether it fits now, the _Inflight
     entries (kind, age, reservation, thread), the multipart-init rate
-    state, the CLEO_* limits in effect and the newest 50 upload_refused
-    events with counts per code. Admin only (see /admin/costs);
+    state, the CLEO_* limits in effect, the newest 50 upload_refused
+    events with counts per code, and the database with its nightly
+    backups (counts and ages). Admin only (see /admin/costs);
     .github/workflows/ops-inspect.yml prints it."""
     _require_admin(x_admin_token)
     return capacity_report()

@@ -210,6 +210,47 @@ def _finish(database: pg.Database, **changes: Any) -> None:
         _save_state(conn, state)
 
 
+def report(now: float | None = None) -> dict[str, Any]:
+    """The database this process uses and its nightly backups in R2, for
+    GET /admin/capacity (ops-inspect prints it; the privacy policy names
+    how long a deleted project stays in them): numbers and codes only —
+    how many dumps, the newest's and the oldest's age in days, the days
+    kept, when the last run finished. {"backend": "sqlite", "backups":
+    null} without Postgres; "backups": {"r2": false} without R2."""
+    from backend import storage
+    now = time.time() if now is None else now
+    backend = db.active()
+    out: dict[str, Any] = {"backend": backend, "backups": None}
+    if backend != "postgres":
+        return out
+    if not storage.r2_available():
+        out["backups"] = {"r2": False}
+        return out
+    info: dict[str, Any] = {"r2": True, "keep_days": keep_days()}
+    try:
+        days = sorted(m.group(1) for o in storage.backup_list(PREFIX)
+                      if (m := _KEY_RE.match(o["key"])))
+    except Exception as e:  # the report must not fail over the listing
+        info["error"] = type(e).__name__
+        days = None
+    if days is not None:
+        def age(day: str) -> float:
+            t = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            return round((now - t.timestamp()) / 86400, 1)
+        info.update(count=len(days),
+                    newest_age_d=age(days[-1]) if days else None,
+                    oldest_age_d=age(days[0]) if days else None)
+    try:
+        with pg.database().connection() as conn:
+            last = _state(conn).get("last_ok")
+        info["last_ok_age_h"] = (round((now - float(last)) / 3600, 1)
+                                 if last else None)
+    except Exception as e:
+        info["state_error"] = type(e).__name__
+    out["backups"] = info
+    return out
+
+
 def backup_key(now: float) -> str:
     day = datetime.fromtimestamp(now, tz=timezone.utc).strftime("%Y-%m-%d")
     return f"{PREFIX}{day}.sql.gz"

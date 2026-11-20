@@ -179,6 +179,60 @@ test.describe("editor v2: the trim flow (owner report)", TAG, () => {
     await p.up();
   });
 
+  test("held still, the magnifier lands on the edge's second even when its first scroll writes are lost", async ({ page, stub }) => {
+    // owner (iPhone): holding a cut zoomed in on another second. The zoom
+    // read its anchor from the strip's scroll each frame, so a scroll write
+    // that didn't land (a busy page, or iOS Safari keeping its own position
+    // of a strip a finger holds) sent the view 6–22 s off.
+    const job = await stub.seed("review_speech");
+    await open(page, job.id, { "cleocuts.test.openSpanS": "8" });
+    const strip = page.getByTestId("timeline-scroll");
+    const clip = await select(page, 4);
+    const view = (await strip.boundingBox())!;
+    const dx0 = (await clip.getByTestId("clip-trim-end").boundingBox())!.x - (view.x + view.width / 2);
+    await strip.evaluate((el, d) => (el.scrollLeft += d), dx0);
+    await page.waitForTimeout(300);
+    const sl0 = await strip.evaluate((el) => el.scrollLeft);
+    // the magnifier's first three scroll writes don't land
+    await strip.evaluate((el) => {
+      const desc = Object.getOwnPropertyDescriptor(Element.prototype, "scrollLeft")!;
+      let lost = 3;
+      Object.defineProperty(el, "scrollLeft", {
+        configurable: true,
+        get() {
+          return desc.get!.call(this);
+        },
+        set(v: number) {
+          if (lost > 0 && (this as HTMLElement).dataset.magnified) {
+            lost--;
+            return;
+          }
+          desc.set!.call(this, v);
+        },
+      });
+    });
+    const edgeX = () => clip.evaluate((el) => el.getBoundingClientRect().right);
+    const x0 = await edgeX();
+    const h = center((await clip.getByTestId("clip-trim-end").boundingBox())!);
+    const p = await press(page, h.x, h.y);
+    if (await isPhone(page)) {
+      // a finger on the handle: the strip has no scroller of the browser's
+      // own meanwhile, and the switch keeps its place
+      await expect(strip).toHaveAttribute("data-touch-trim", "true");
+      expect(await strip.evaluate((el) => getComputedStyle(el).overflowX)).toBe("hidden");
+      expect(Math.abs((await strip.evaluate((el) => el.scrollLeft)) - sl0)).toBeLessThanOrEqual(1);
+    }
+    await expect(strip).toHaveAttribute("data-magnified", "true", { timeout: 3_000 });
+    await page.waitForTimeout(800); // the zoom (180 ms) and its checks after
+    // the edge stayed where it was (it went thousands of px off: 23.9 s
+    // became 1–18 s)
+    expect(Math.abs((await edgeX()) - x0)).toBeLessThanOrEqual(24);
+    await p.up();
+    await expect(strip).not.toHaveAttribute("data-magnified", "true", { timeout: 3_000 });
+    await expect(strip).not.toHaveAttribute("data-touch-trim", "true");
+    expect(await strip.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
+  });
+
   test("zoomed in, a trim at the view's edge scrolls the strip along", async ({ page, stub }) => {
     const job = await stub.seed("review_speech");
     await open(page, job.id, { "cleocuts.test.openSpanS": "8" });

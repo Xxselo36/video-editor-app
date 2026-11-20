@@ -451,6 +451,60 @@ def test_admin_capacity_report(client, r2, auth_on, bearer, monkeypatch):
     assert "total 10 GB" in text and "file_too_large 3" in text
     assert "  4 GB: needs 7.75 GB -> fits" in text
     assert "CLEO_UPLOAD_INITS_PER_HOUR = 60" in text
+    # the database it runs on (SQLite: no nightly dumps; the Postgres job
+    # of CI: its dumps in the test bucket)
+    from backend import db
+    assert body["database"]["backend"] == db.active()
+    assert f"  database: {db.active()}" in text
+    if db.active() == "sqlite":
+        assert body["database"] == {"backend": "sqlite", "backups": None}
+        assert "nightly backups to R2: none (they run with Postgres only)" in text
+
+
+def test_capacity_reports_the_postgres_backups_in_numbers(monkeypatch):
+    """Postgres + R2: how many dumps, how old, the days kept (the privacy
+    policy names how long a deleted project stays in them)."""
+    from datetime import datetime, timezone
+    from backend import db, pg_backup, storage
+    now = datetime(2026, 11, 20, 12, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(db, "active", lambda: "postgres")
+    monkeypatch.setattr(storage, "r2_available", lambda: True)
+    monkeypatch.setattr(storage, "backup_list", lambda prefix: [
+        {"key": f"{prefix}2026-11-{d:02d}.sql.gz"} for d in (7, 20, 12)
+    ] + [{"key": f"{prefix}notes.txt"}])
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class Database:
+        def connection(self):
+            return Conn()
+
+    monkeypatch.setattr(pg_backup.pg, "database", lambda: Database())
+    monkeypatch.setattr(pg_backup, "_state", lambda conn: {"last_ok": now - 3 * 3600})
+    monkeypatch.delenv("CLEO_PG_BACKUP_KEEP_DAYS", raising=False)
+    r = pg_backup.report(now)
+    assert r == {"backend": "postgres", "backups": {
+        "r2": True, "keep_days": 14.0, "count": 3, "newest_age_d": 0.5,
+        "oldest_age_d": 13.5, "last_ok_age_h": 3.0}}
+    text = "\n".join(_ops_inspect().database(r))
+    assert "  database: postgres" in text
+    assert ("nightly backups to R2: 3 dump(s), newest 0.5 d old, oldest "
+            "13.5 d old, kept 14 d; last run finished 3 h ago") in text
+    # without R2 there are none; a listing that fails is a code, not a crash
+    monkeypatch.setattr(storage, "r2_available", lambda: False)
+    assert pg_backup.report(now)["backups"] == {"r2": False}
+    monkeypatch.setattr(storage, "r2_available", lambda: True)
+
+    def broken(prefix):
+        raise TimeoutError("r2")
+
+    monkeypatch.setattr(storage, "backup_list", broken)
+    assert pg_backup.report(now)["backups"]["error"] == "TimeoutError"
 
 
 def _ops_inspect():

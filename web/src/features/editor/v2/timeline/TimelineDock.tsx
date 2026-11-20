@@ -170,6 +170,9 @@ const EDGE_SCROLL_PX = 24;
 export const MAGNIFY_MS = 500;
 /** Zoom of the trim magnifier: 0.01 s = 10 px. */
 const MAGNIFY_PPS = 1000;
+/** Frames after the magnifier's zoom that check the edge is where it was
+ *  zoomed to (holdOnEdge). */
+const MAGNIFY_SETTLE_FRAMES = 30;
 /** The frame grid shows from this many px per frame. */
 const FRAME_GRID_PX = 4;
 /** A released trim edge inside a word goes to the gap next to it within this far on screen (drag-9/13), at most WORD_SNAP_MAX_S. */
@@ -411,6 +414,12 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     end0: number;
     /** The clips at the press: everything but the trimmed clip stays as laid out from them. */
     startSegs: EditorSeg[];
+    /** A finger holds the handle: the strip has no scroller of the
+     *  browser's own meanwhile (data-touch-trim, overflow-x hidden) — iOS Safari
+     *  scrolls one in its own process and may keep its position over the
+     *  page's scroll writes while a finger is on it; the magnifier's zoom
+     *  then showed another second. Scripted scrolls work as before. */
+    touch: boolean;
   } | null>(null);
   /** The drag's clips as last laid out (committed): what a release keeps on screen. */
   const drawnDrag = useRef<EditorSeg[] | null>(null);
@@ -560,8 +569,15 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
 
   // ── the trim magnifier ──────────────────────────────────────────────
   const zoomAnim = useRef(0);
+  /** Zoom to `to` px/s over 180 ms around client x `anchorClientX`. With
+   *  `anchorSec` every frame puts that strip second there — an absolute
+   *  target: a scroll write that didn't land (a busy page, or iOS Safari
+   *  keeping its own position of a strip a finger holds) no longer sends
+   *  the view to another second (owner: "auf eine andere Sekunde
+   *  gezoomt"; read from the scroll each frame, two lost writes put it
+   *  6–22 s off). */
   const animateZoom = useCallback(
-    (to: number, anchorClientX: number, done?: () => void) => {
+    (to: number, anchorClientX: number, done?: () => void, anchorSec?: number) => {
       cancelAnimationFrame(zoomAnim.current);
       const sc = scrollRef.current;
       const from = Math.max(1e-6, (sc?.scrollWidth ?? contentW) / totalDur);
@@ -571,7 +587,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
         const k = Math.min(1, (performance.now() - t0) / 180);
         const e = 1 - (1 - k) * (1 - k);
         const rect = scrollRef.current?.getBoundingClientRect();
-        zoomTo(from * Math.pow(target / from, e), anchorClientX - (rect?.left ?? 0));
+        zoomTo(from * Math.pow(target / from, e), anchorClientX - (rect?.left ?? 0), anchorSec);
         if (k < 1) zoomAnim.current = requestAnimationFrame(step);
         else done?.();
       };
@@ -579,14 +595,40 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     },
     [contentW, totalDur, zoomTo],
   );
-  /** Client x where the strip draws the trimmed edge now (stripLayout). */
-  const drawnEdgeX = (d: NonNullable<typeof dragRef.current>): number => {
-    const rect = geo(d);
+  /** After the magnifier's zoom, while the finger holds still: the edge's
+   *  second at its x, checked for a few frames and written again where a
+   *  write did not land (MAGNIFY_SETTLE_FRAMES; a no-op when it did). A
+   *  move, an edge scroll or the release ends it. */
+  const holdOnEdge = (d: NonNullable<typeof dragRef.current>, sec: number, anchorClientX: number) => {
+    const x0 = d.clientX;
+    let frames = 0;
+    let steady = 0;
+    const check = () => {
+      const el = scrollRef.current;
+      const L = layout.current;
+      if (!el || dragRef.current !== d || d.clientX !== x0 || edgeScroll.current || !(L.contentW > 0)) return;
+      const want = Math.max(0, (sec * L.contentW) / d.total - (anchorClientX - el.getBoundingClientRect().left));
+      if (Math.abs(el.scrollLeft - want) > 1) {
+        el.scrollLeft = want;
+        scrollLeftRef.current = el.scrollLeft;
+        steady = 0;
+      } else steady++;
+      if (steady < 2 && ++frames < MAGNIFY_SETTLE_FRAMES) zoomAnim.current = requestAnimationFrame(check);
+    };
+    zoomAnim.current = requestAnimationFrame(check);
+  };
+  /** Strip seconds where the strip draws the trimmed edge now (stripLayout). */
+  const drawnEdgeSec = (d: NonNullable<typeof dragRef.current>): number | null => {
     const cur = d.last.find((x) => x.id === d.id);
     const s0 = d.startSegs.find((x) => x.id === d.id);
-    if (!cur || !s0) return d.clientX - d.grabPx;
-    const sec =
-      d.mode === "start" ? edgeAt(d.startSegs, d.id, "start") + (cur.start - s0.start) : edgeAt(d.last, d.id, "end");
+    if (!cur || !s0) return null;
+    return d.mode === "start" ? edgeAt(d.startSegs, d.id, "start") + (cur.start - s0.start) : edgeAt(d.last, d.id, "end");
+  };
+  /** Client x where the strip draws the trimmed edge now. */
+  const drawnEdgeX = (d: NonNullable<typeof dragRef.current>): number => {
+    const rect = geo(d);
+    const sec = drawnEdgeSec(d);
+    if (sec === null) return d.clientX - d.grabPx;
     return rect.left + (sec * rect.width) / d.total;
   };
   /** Client x of the trimmed edge as on screen (one read, at the release):
@@ -606,10 +648,14 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     d.prevPps = zoom.pps;
     setBoost(MAGNIFY_PPS);
     // the next frame has the raised cap; zoom around the EDGE, so it stays
-    // put (around the pointer it jumped 140–750 px, review drag-8)
+    // put (around the pointer it jumped 140–750 px, review drag-8) — onto
+    // the edge's own second, frame by frame (animateZoom)
     requestAnimationFrame(() => {
       const cur = dragRef.current;
-      if (cur === d) animateZoom(Math.max(effPps, MAGNIFY_PPS), drawnEdgeX(d));
+      if (cur !== d) return;
+      const sec = drawnEdgeSec(d);
+      const x = drawnEdgeX(d);
+      animateZoom(Math.max(effPps, MAGNIFY_PPS), x, sec === null ? undefined : () => holdOnEdge(d, sec, x), sec ?? undefined);
     });
   };
   const armMagnify = (d: NonNullable<typeof dragRef.current>) => {
@@ -666,7 +712,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     setDragTotal(totalDur);
     setDragSegs(startSegs);
     const s0 = startSegs.find((x) => x.id === id);
-    setTrimming({ id, mode, start0: s0?.start ?? 0, end0: s0?.end ?? 0, startSegs });
+    setTrimming({ id, mode, start0: s0?.start ?? 0, end0: s0?.end ?? 0, startSegs, touch: e.pointerType === "touch" });
   };
   /** The trim at pointer x (the strip as laid out now). The neighbour
    *  snap is a few px on screen (drag-13); the clip may shrink to nothing
@@ -1604,6 +1650,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
       className={s.strip}
       data-testid="timeline-scroll"
       data-magnified={magnified || undefined}
+      data-touch-trim={trimming?.touch || undefined}
       onPointerDownCapture={stripPointerDown}
       onClickCapture={stripClick}
       onScroll={(e) => {

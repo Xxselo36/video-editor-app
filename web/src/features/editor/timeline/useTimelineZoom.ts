@@ -33,7 +33,9 @@ export type TimelineZoom = {
   contentW: number;
   canZoomIn: boolean;
   canZoomOut: boolean;
-  zoomTo: (nextPps: number, anchorX: number) => void;
+  /** Zoom keeping the time under `anchorX` in place — or, given
+   *  `anchorT`, putting strip second `anchorT` there. */
+  zoomTo: (nextPps: number, anchorX: number, anchorT?: number) => void;
   /** Fit, and stay Fit while the edit's length changes. */
   fit: () => void;
   /** Keep this zoom (px/s) as it is, also below Fit, until the next zoom. */
@@ -94,21 +96,29 @@ export function useTimelineZoom(
 
   // Zoom while keeping the time under `anchorX` (px from the left edge
   // of the visible strip) in place. The scroll correction is applied
-  // after the new width has been laid out.
+  // after the new width has been laid out — in the commit right after the
+  // call, also when the width stays (an anchor never waits for a later,
+  // unrelated width change). `anchorT` names the time to put at `anchorX`
+  // instead of reading it from the scroll: an animation that passes it
+  // lands on it even when one of its scroll writes did not (a busy page,
+  // a scroller the browser moves itself), where the time read from that
+  // stale scroll drifted to another second (the trim magnifier, owner).
   const pendingAnchorRef = useRef<{ t: number; x: number } | null>(null);
+  const [anchorTick, setAnchorTick] = useState(0);
   const zoomStateRef = useRef({ effPps, contentW, totalDur, fitPps, maxPps });
   useLayoutEffect(() => {
     zoomStateRef.current = { effPps, contentW, totalDur, fitPps, maxPps };
   });
-  const zoomTo = (nextPps: number, anchorX: number) => {
+  const zoomTo = (nextPps: number, anchorX: number, anchorT?: number) => {
     const sc = scrollRef.current;
     const z = zoomStateRef.current;
     const clamped = Math.min(z.maxPps, Math.max(z.fitPps, nextPps));
     if (sc) {
       pendingAnchorRef.current = {
-        t: ((sc.scrollLeft + anchorX) / z.contentW) * z.totalDur,
+        t: anchorT ?? ((sc.scrollLeft + anchorX) / z.contentW) * z.totalDur,
         x: anchorX,
       };
+      setAnchorTick((n) => n + 1);
     }
     setSpan(null);
     setHeld(null);
@@ -134,7 +144,7 @@ export function useTimelineZoom(
     if (!sc || !a) return;
     pendingAnchorRef.current = null;
     sc.scrollLeft = Math.max(0, (a.t / totalDur) * contentW - a.x);
-  }, [contentW, totalDur, scrollRef]);
+  }, [contentW, totalDur, scrollRef, anchorTick]);
 
   // Mouse wheel scrolls the strip sideways (Ctrl/⌘ + wheel or a
   // trackpad pinch zooms); two-finger pinch zooms on touch screens.
