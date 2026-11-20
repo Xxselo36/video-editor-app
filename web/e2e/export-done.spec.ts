@@ -141,26 +141,34 @@ test.describe("the Vorschau of a finished video (editor v2)", V2, () => {
     await expect(sheet.getByTestId("done-post")).toHaveValue("Mein eigener Text #ux11");
   });
 
-  test("the survey asks from the 2nd export seen in a tab on, once; nothing of it is stored", async ({ page, stub }) => {
+  test("the survey asks from the 2nd export seen in a tab on, once; nothing of it is kept", async ({ page, stub }) => {
     const a = await stub.seed("done", { filename: "erstes.mp4" });
     const b = await stub.seed("done", { filename: "zweites.mp4" });
-    // The log older builds kept on the device: no longer read, removed.
+    const c = await stub.seed("done", { filename: "drittes.mp4" });
+    // The log older builds kept on the device goes.
     await openWithStorage(page, `/app/p/${a.id}`, {
-      [JOBS]: [job(a.id, "erstes.mp4"), job(b.id, "zweites.mp4")],
+      [JOBS]: [job(a.id, "erstes.mp4"), job(b.id, "zweites.mp4"), job(c.id, "drittes.mp4")],
       [OLD_SURVEY_LOG]: { seen: ["earlier:1"], lastSurvey: 0 },
     });
-    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
-    await expect(page.getByTestId("done-survey")).toHaveCount(0);
-    await expect.poll(() => readStorage(page, OLD_SURVEY_LOG)).toBeNull();
-    // The 2nd export seen in this tab: through Projects, no reload.
+    // The tip mounts with the survey and their effects run in one pass:
+    // once the tip shows, the survey has decided.
+    const decided = async () => {
+      await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+      await expect(page.getByTestId("done-tip")).toBeVisible();
+    };
+    // Through Projects, no reload: the same page counts on.
     const openProject = async (filename: string, id: string) => {
       await page.getByRole("navigation", { name: "Main menu" }).locator('a[href="/app"]').click();
       await jobCard(page, filename).getByTestId("job-card-open").click();
       await expect(page).toHaveURL(`${WEB}/app/p/${id}`);
-      await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+      await decided();
     };
+    await decided();
+    await expect(page.getByTestId("done-survey")).toHaveCount(0);
+    await expect.poll(() => readStorage(page, OLD_SURVEY_LOG)).toBeNull();
+    // The 2nd export seen in this tab asks.
     await openProject("zweites.mp4", b.id);
-    await expect(page.getByTestId("done-survey")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("done-survey")).toBeVisible();
     const answers: unknown[] = [];
     page.on("request", (r) => {
       if (r.method() === "POST" && r.url() === `${API}/feedback`) answers.push(r.postDataJSON());
@@ -173,11 +181,21 @@ test.describe("the Vorschau of a finished video (editor v2)", V2, () => {
     // Answered: not again in this tab.
     await openProject("erstes.mp4", a.id);
     await expect(page.getByTestId("done-survey")).toHaveCount(0);
-    // A reload starts over: nothing of the survey was kept.
+    // A reload starts over. The exports seen were not kept: the first one
+    // after it doesn't ask. Nor was the answer, wherever it could live: the
+    // 2nd export seen after the reload asks again.
     await page.reload();
-    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+    await decided();
     await expect(page.getByTestId("done-survey")).toHaveCount(0);
-    expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => /export|survey/i.test(k)))).toEqual([]);
+    await openProject("drittes.mp4", c.id);
+    await expect(page.getByTestId("done-survey-yes")).toBeVisible();
+    const kept = await page.evaluate(() => [
+      ...Object.keys(localStorage).filter((k) => /export|survey/i.test(k)),
+      // (cleocuts.exporting.<id> there is the export a tab started.)
+      ...Object.keys(sessionStorage).filter((k) => /survey|exports\.v1/i.test(k)),
+      ...document.cookie.split(";").filter((kv) => /survey|export/i.test(kv)),
+    ]);
+    expect(kept).toEqual([]);
   });
 
   test.describe("on an iPhone", () => {

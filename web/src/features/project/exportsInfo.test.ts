@@ -85,11 +85,13 @@ describe("survey rhythm", () => {
     return import("./exportsInfo");
   };
   const touched: string[] = [];
-  vi.stubGlobal("localStorage", {
+  const recording = {
     getItem: (k: string) => (touched.push(k), null),
     setItem: (k: string) => void touched.push(k),
     removeItem: (k: string) => void touched.push(k),
-  });
+  };
+  vi.stubGlobal("localStorage", recording);
+  vi.stubGlobal("sessionStorage", recording);
   afterEach(() => {
     touched.length = 0;
   });

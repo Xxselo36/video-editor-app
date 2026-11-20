@@ -9,7 +9,7 @@ import Link from "next/link";
 import { LogoWord } from "@/components/Logo";
 import { LanguageSwitcher } from "@/i18n";
 import { SiteFooter } from "@/components/site/SiteFooter";
-import { LEGAL_UPDATED } from "@/lib/legal";
+import { LEGAL_DRAFT, LEGAL_UPDATED, type LegalDoc } from "@/lib/legal";
 import { LegalLangNote } from "./LegalLangNote";
 
 export function LegalPage({ de, en }: { de: React.ReactNode; en: React.ReactNode }) {
@@ -39,18 +39,20 @@ export function LegalPage({ de, en }: { de: React.ReactNode; en: React.ReactNode
 }
 
 /** Page title, subtitle, "Stand" line and — while the text is a draft —
- *  the draft banner. */
+ *  the draft banner, all of the legal text `doc`. */
 export function LegalTitle({
   lang,
   title,
   subtitle,
-  draft,
+  doc,
 }: {
   lang: "de" | "en";
   title: string;
   subtitle?: string;
-  draft?: boolean;
+  doc: LegalDoc;
 }) {
+  const draft = LEGAL_DRAFT[doc];
+  const updated = LEGAL_UPDATED[doc];
   return (
     <>
       {draft && (
@@ -70,7 +72,7 @@ export function LegalTitle({
       </h1>
       {subtitle && <p style={{ color: "var(--text-muted)" }}>{subtitle}</p>}
       <p className="mb-2 text-xs" style={{ color: "var(--text-muted)" }}>
-        {lang === "de" ? `Stand: ${LEGAL_UPDATED.de}` : `Last updated: ${LEGAL_UPDATED.en}`}
+        {lang === "de" ? `Stand: ${updated.de}` : `Last updated: ${updated.en}`}
       </p>
     </>
   );

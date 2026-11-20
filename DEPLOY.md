@@ -1674,8 +1674,13 @@ bearbeiten/kopieren (beim Export aus dem bearbeiteten Text erzeugt; ein
 v2-Neu-Export mit gleichem Text und Schnitt behält ihn, kein „Neu
 erzeugen“), SRT/VTT (`GET /jobs/{id}/captions.srt|vtt`), Bonus-Clips nur
 bei unveränderter Timeline und ≥ 90 s, „Cleo cut“-Tipp, Umfrage
-„Musstest du woanders schneiden?“ ab dem 2. Export (max. 1×/Woche,
-`POST /feedback` → Job-Event `feedback_post_export`).
+„Musstest du woanders schneiden?“ ab dem 2. fertigen Export, den ein Tab
+zeigt (Fertig-Ansicht des Editors oder Vorschau eines fertigen Projekts,
+auch eines älteren; jeder Export eines Projekts zählt einmal), dann bei
+jedem weiteren, bis sie in diesem Tab beantwortet ist. Gezählt nur im
+Seitenspeicher, nichts auf dem Gerät: Neuladen oder ein neuer Tab zählt
+von vorn, keine Wochenpause. `POST /feedback` → Job-Event
+`feedback_post_export` (90 Tage, auch nach dem Löschen des Projekts).
 
 **Noch nicht drin (eigene Pakete):** Testimonial-Anfrage nach dem 3.
 Export (braucht die versionierte Einwilligung aus UX14), „Jetzt

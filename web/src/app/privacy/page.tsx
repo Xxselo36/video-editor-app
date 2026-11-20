@@ -3,7 +3,6 @@ import { H, LegalPage, LegalTitle, Mail, Ul } from "@/components/legal/LegalPage
 import {
   BETA_RETENTION_DAYS,
   EVENTS_KEEP_DAYS,
-  LEGAL_DRAFT,
   OPERATOR,
   PROCESSORS,
   RETENTION_DAYS,
@@ -61,7 +60,7 @@ const retentionPerPlan = (lang: "de" | "en") =>
 
 const German = (
   <>
-    <LegalTitle lang="de" title="Datenschutzerklärung" draft={LEGAL_DRAFT.privacy} />
+    <LegalTitle lang="de" title="Datenschutzerklärung" doc="privacy" />
 
     <H>1. Verantwortlicher</H>
     <Controller lang="de" />
@@ -73,7 +72,9 @@ const German = (
         erstellen und das fertige Video zu rendern.
       </li>
       <li>
-        <b>Transkript und Bearbeitungen</b>, die du im Editor vornimmst (Schnitte, Effekte, Untertiteltext).
+        <b>Projektdaten und Bearbeitungen</b>: der Dateiname deines Videos, der Name, den du deinem Projekt gibst, das
+        Transkript, deine Bearbeitungen im Editor (Schnitte, Effekte, Untertiteltext) und der Text für deinen Post
+        (unser Vorschlag und deine Änderungen daran).
       </li>
       <li>
         <b>Technische Daten</b>, die für den Betrieb nötig sind: IP-Adresse, Browser, Zeitpunkt der Anfragen
@@ -83,8 +84,8 @@ const German = (
       <li>
         <b>Probleme beim Hochladen</b>: Muss ein Teil eines Uploads wiederholt werden, schlägt er fehl oder wird ein
         Upload fortgesetzt, schickt dein Browser uns technische Angaben dazu (etwa welcher Teil, wie oft versucht,
-        wie lange, wie viel schon hochgeladen war, Fehlercode) samt Browser, Betriebssystem und einer zufälligen
-        Kennung des Uploads. Sie landen{AUTH_ENABLED && " mit deiner Kontokennung"} in den Server-Logs, damit wir
+        wie lange, wie viel schon hochgeladen war, Fehlercode) samt der Browserkennung (Browser und Betriebssystem, je
+        nach Browser oder App auch Gerätemodell) und einer zufälligen Kennung des Uploads. Sie landen{AUTH_ENABLED && " mit deiner Kontokennung"} in den Server-Logs, damit wir
         Upload-Fehler finden.
       </li>
       <li>
@@ -156,12 +157,12 @@ const German = (
     <H>4. Speicherdauer</H>
     <p>
       {PLANS_LIVE
-        ? `Hochgeladene Videos, Vorschauen, fertige Videos und Transkripte werden nach der letzten Änderung an einem Projekt automatisch gelöscht, je nach Tarif nach ${retentionPerPlan("de")}.`
-        : `Während der Beta werden hochgeladene Videos, Vorschauen, fertige Videos und Transkripte ${BETA_RETENTION_DAYS} Tage nach der letzten Änderung an einem Projekt automatisch gelöscht.`}{" "}
+        ? `Hochgeladene Videos, Vorschauen, fertige Videos und Transkripte samt den übrigen Projektdaten (Dateiname, Projektname, Bearbeitungen, Post-Text) werden nach der letzten Änderung an einem Projekt automatisch gelöscht, je nach Tarif nach ${retentionPerPlan("de")}.`
+        : `Während der Beta werden hochgeladene Videos, Vorschauen, fertige Videos und Transkripte samt den übrigen Projektdaten (Dateiname, Projektname, Bearbeitungen, Post-Text) ${BETA_RETENTION_DAYS} Tage nach der letzten Änderung an einem Projekt automatisch gelöscht.`}{" "}
       Du kannst ein Projekt jederzeit selbst löschen; es wird dann sofort von unseren Servern entfernt.{" "}
       {AUTH_ENABLED
         ? "Deine Projektliste liegt mit deinem Konto auf unserem Server und wird mit jedem Projekt gelöscht. Kontodaten bleiben gespeichert, bis du dein Konto löschst; Abo- und Nutzungsdaten, solange sie für die Abrechnung und die gesetzlichen Aufbewahrungsfristen nötig sind."
-        : "Deine Projektliste liegt nur in deinem Browser (lokaler Speicher) und verschwindet, wenn du die Websitedaten löschst."}{" "}
+        : "Welche Projekte deine sind, merkt sich nur dein Browser (lokaler Speicher); löschst du die Websitedaten, ist diese Liste weg – die Projekte selbst bleiben auf unserem Server, bis sie wie oben beschrieben gelöscht werden."}{" "}
       Die Verarbeitungsstatistik und deine Antworten auf die Frage nach dem Export werden nach {EVENTS_KEEP_DAYS}{" "}
       Tagen gelöscht, auch wenn du das Projekt vorher löschst; Server-Logs nach der Aufbewahrungsfrist des
       jeweiligen Hosting-Anbieters.
@@ -221,7 +222,7 @@ const German = (
 
 const English = (
   <>
-    <LegalTitle lang="en" title="Privacy policy" draft={LEGAL_DRAFT.privacy} />
+    <LegalTitle lang="en" title="Privacy policy" doc="privacy" />
 
     <H>1. Controller</H>
     <Controller lang="en" />
@@ -233,7 +234,9 @@ const English = (
         finished video.
       </li>
       <li>
-        <b>Transcript and edits</b> you make in the editor (cuts, effects, caption text).
+        <b>Project data and edits</b>: the file name of your video, the name you give the project, the transcript,
+        the edits you make in the editor (cuts, effects, caption text) and the text for your post (our suggestion and
+        your changes to it).
       </li>
       <li>
         <b>Technical data</b> needed to run the service: IP address, browser and time of requests (server logs),
@@ -243,9 +246,10 @@ const English = (
       <li>
         <b>Upload problems</b>: if part of an upload has to be sent again, fails, or an upload is resumed, your
         browser sends us technical details about it (such as which part, how many tries, how long, how much was
-        uploaded already, the error code) along with the browser and operating system you use and a random id of
-        the upload. They go into the server logs{AUTH_ENABLED && " with your account id"} so we can find upload
-        errors.
+        uploaded already, the error code) along with the user agent of your browser (browser and operating system
+        and, depending on the browser or app, the device model) and a random id of the upload. They go into the
+        server logs
+        {AUTH_ENABLED && " with your account id"} so we can find upload errors.
       </li>
       <li>
         <b>Your answer to the question after an export</b>{" "}(optional): whether you had to edit the video
@@ -314,12 +318,12 @@ const English = (
     <H>4. Storage period</H>
     <p>
       {PLANS_LIVE
-        ? `Uploaded videos, previews, finished videos and transcripts are deleted automatically after the last change to a project, depending on your plan: ${retentionPerPlan("en")}.`
-        : `During the beta, uploaded videos, previews, finished videos and transcripts are deleted automatically ${BETA_RETENTION_DAYS} days after the last change to a project.`}{" "}
+        ? `Uploaded videos, previews, finished videos and transcripts, together with the other project data (file name, project name, edits, post text), are deleted automatically after the last change to a project, depending on your plan: ${retentionPerPlan("en")}.`
+        : `During the beta, uploaded videos, previews, finished videos and transcripts, together with the other project data (file name, project name, edits, post text), are deleted automatically ${BETA_RETENTION_DAYS} days after the last change to a project.`}{" "}
       You can delete a project yourself at any time; it is then removed from our servers immediately.{" "}
       {AUTH_ENABLED
         ? "Your list of projects is stored with your account and removed together with each project. Account data is kept until you delete your account; records of subscriptions and usage are kept as long as needed for billing and the statutory retention periods."
-        : "Your list of projects is stored only in your browser (local storage) and can be removed by clearing the site data."}{" "}
+        : "Which projects are yours is kept only in your browser (local storage); clearing the site data removes that list, but the projects themselves stay on our server until they are deleted as described above."}{" "}
       The processing statistics and your answers to the question after an export are deleted after{" "}
       {EVENTS_KEEP_DAYS}{" "}days, even if you delete the project before; server logs after the hosting
       provider&apos;s log retention period.

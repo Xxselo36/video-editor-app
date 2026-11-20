@@ -301,14 +301,15 @@ async function postJson(path: string, body: unknown, signal?: AbortSignal): Prom
   });
 }
 
-/** Fire-and-forget report of a retry / failure (POST /uploads/telemetry). */
+/** Fire-and-forget report of a retry / failure (POST /uploads/telemetry).
+ *  The server takes browser and OS from the request's User-Agent header:
+ *  no script reads them on the device for a diagnosis (§ 25 TDDDG). */
 function telemetry(ticket: string | null, event: string, fields: Record<string, number | string> = {}): void {
   try {
     const body = {
       ...(ticket ? { ticket } : {}),
       event,
       ...fields,
-      ua: typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 160) : "",
     };
     void apiFetch("/uploads/telemetry", {
       method: "POST",

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { H, LegalPage, LegalTitle, Mail, Ul } from "@/components/legal/LegalPage";
-import { BETA_RETENTION_DAYS, LEGAL_DRAFT, OPERATOR, RETENTION_DAYS } from "@/lib/legal";
+import { BETA_RETENTION_DAYS, OPERATOR, RETENTION_DAYS } from "@/lib/legal";
 import { BILLING_COPY } from "@/lib/auth";
 
 export const metadata: Metadata = {
@@ -31,7 +31,7 @@ const retention = (lang: "de" | "en") =>
 
 const German = (
   <>
-    <LegalTitle lang="de" title="Nutzungsbedingungen" subtitle="Beta-Fassung" draft={LEGAL_DRAFT.terms} />
+    <LegalTitle lang="de" title="Nutzungsbedingungen" subtitle="Beta-Fassung" doc="terms" />
 
     <H>1. Geltungsbereich</H>
     <p>
@@ -165,7 +165,7 @@ const German = (
 
 const English = (
   <>
-    <LegalTitle lang="en" title="Terms of service" subtitle="Beta version" draft={LEGAL_DRAFT.terms} />
+    <LegalTitle lang="en" title="Terms of service" subtitle="Beta version" doc="terms" />
 
     <H>1. Scope</H>
     <p>
