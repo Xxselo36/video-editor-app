@@ -22,7 +22,8 @@
  *   Edit again       POST /reopen; the free-exports counter when billed
  *   tip              "Cleo cut" while recording (E3), dismissible
  *   survey           "Did you have to edit this video anywhere else?"
- *                    from this browser's 2nd export, ≤ once a week (A5)
+ *                    from the 2nd export seen in this tab, until
+ *                    answered there; page memory only (A5)
  */
 import { Check, Download, Pencil, Play, Plus, Share2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";

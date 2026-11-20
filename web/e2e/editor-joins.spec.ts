@@ -41,7 +41,7 @@ import { openWithStorage } from "./support/app";
 const TAG = { tag: "@editor-v2" };
 // A trace screenshots every frame: that load is not what is measured here.
 test.use({ trace: "off" });
-const TOUR_DONE = { "cleocuts.editor.tourDone.v1": "1", "cleocuts.voiceOnboardingSeen.v1": "1" };
+const TOUR_DONE = { "cleocuts.editor.tourDone.v1": "1" };
 const FPS = 30;
 
 /** The frame-numbered proxy (built once per machine; ~2 MB). */

@@ -130,43 +130,23 @@ export function sizeText(bytes: number): string {
 }
 
 // ── the survey "Did you have to edit this video anywhere else?" ─────
-// From this browser's 2nd export on, at most once a week (review A5).
+// From the 2nd export seen in this tab on, until it is answered there
+// (review A5). Counted in page memory only: nothing about the survey is
+// stored on the device — a product question is not the service the user
+// asked for (§ 25 TDDDG) — so a reload or another tab starts over.
+// lib/retiredStorage removes the log older builds kept.
 
-export const SURVEY_KEY = "cleocuts.exports.v1";
-export const SURVEY_EVERY_MS = 7 * 24 * 3600 * 1000;
-
-export type ExportLog = { seen: string[]; lastSurvey: number };
-
-export function readLog(): ExportLog {
-  try {
-    const v = JSON.parse(localStorage.getItem(SURVEY_KEY) ?? "null");
-    if (v && Array.isArray(v.seen)) return { seen: v.seen.slice(-50), lastSurvey: Number(v.lastSurvey) || 0 };
-  } catch {
-    /* none / blocked */
-  }
-  return { seen: [], lastSurvey: 0 };
-}
-
-function writeLog(log: ExportLog): void {
-  try {
-    localStorage.setItem(SURVEY_KEY, JSON.stringify(log));
-  } catch {
-    /* private mode: the survey just shows again */
-  }
-}
+const survey = { seen: new Set<string>(), answered: false };
 
 /** Note an export seen in a Done view; whether the survey is due. */
-export function noteExport(exportId: string, now = Date.now()): boolean {
-  const log = readLog();
-  if (!log.seen.includes(exportId)) {
-    log.seen.push(exportId);
-    writeLog(log);
-  }
-  return log.seen.length >= 2 && now - log.lastSurvey >= SURVEY_EVERY_MS;
+export function noteExport(exportId: string): boolean {
+  survey.seen.add(exportId);
+  return survey.seen.size >= 2 && !survey.answered;
 }
 
-export function surveyAnswered(now = Date.now()): void {
-  writeLog({ ...readLog(), lastSurvey: now });
+/** Answered (yes or no): not asked again in this tab. */
+export function surveyAnswered(): void {
+  survey.answered = true;
 }
 
 // ── the "Cleo cut" tip (review E3) ─────────────────────────────────

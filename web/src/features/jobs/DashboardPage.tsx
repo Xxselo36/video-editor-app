@@ -151,14 +151,7 @@ export function DashboardPage() {
 
   const jobStatuses = useJobStatusPoller(setRecent);
 
-  const closeVoiceTest = () => {
-    setShowVoiceTest(false);
-    try {
-      localStorage.setItem("cleocuts.voiceOnboardingSeen.v1", "1");
-    } catch {
-      // ignore
-    }
-  };
+  const closeVoiceTest = () => setShowVoiceTest(false);
 
   return (
     <AppPage width="2xl">

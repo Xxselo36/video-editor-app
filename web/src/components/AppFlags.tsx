@@ -5,16 +5,19 @@
  * (`?editor=v2` with NEXT_PUBLIC_EDITOR_V2=optin opts it in) and
  * `?captions=v2` opts it in to the v2 export captions of a
  * CLEO_CAPTION_ENGINE=optin backend (both kept in localStorage, read
- * again where they're used). Renders nothing.
+ * again where they're used). It also removes the keys older builds left
+ * that nothing needs any more (lib/retiredStorage). Renders nothing.
  */
 import { useEffect } from "react";
 import { readCaptionsV2 } from "@/features/captions-ui/flag";
 import { readChoice } from "@/features/editor/v2/flag";
+import { dropRetiredKeys } from "@/lib/retiredStorage";
 
 export function AppFlags() {
   useEffect(() => {
     readChoice();
     readCaptionsV2();
+    dropRetiredKeys();
   }, []);
   return null;
 }

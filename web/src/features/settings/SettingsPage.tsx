@@ -28,9 +28,6 @@ const VoiceTestDialog = dynamic(
   { ssr: false },
 );
 
-/** Seen once: the start screens of v1 don't offer it again. */
-const VOICE_SEEN = "cleocuts.voiceOnboardingSeen.v1";
-
 // The voice command in a label, with its quotes: in its own colour.
 const COMMAND = /[„“"«]?Cleo cut[“”"»]?/;
 
@@ -146,14 +143,7 @@ export function SettingsPage() {
     if (v2 === false) router.replace("/app");
   }, [v2, router]);
 
-  const closeVoice = () => {
-    setVoice(false);
-    try {
-      localStorage.setItem(VOICE_SEEN, "1");
-    } catch {
-      // ignore
-    }
-  };
+  const closeVoice = () => setVoice(false);
 
   const title = t("app.nav.settings");
   return (

@@ -1,8 +1,9 @@
 "use client";
 /**
  * "Did you have to edit this video anywhere else?" (UX11, review A5):
- * from this browser's 2nd export on, at most once a week. The editor's
- * Done view and the Vorschau's done state.
+ * from the 2nd export seen in this tab on, until it is answered there
+ * (page memory only, exportsInfo). The editor's Done view and the
+ * Vorschau's done state.
  */
 import { useEffect, useState } from "react";
 import { Button, PRESS } from "@/components/ui/Button";
@@ -20,7 +21,7 @@ export function Survey({ job }: { job: Pick<JobStatus, "id" | "renders_ok"> }) {
   const [survey, setSurvey] = useState<"off" | "ask" | "what" | "thanks">("off");
   const [surveyText, setSurveyText] = useState("");
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage only exists in the browser
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- counts the export once it is shown, never in the server render
     if (noteExport(`${job.id}:${job.renders_ok ?? 0}`)) setSurvey("ask");
   }, [job.id, job.renders_ok]);
   const answer = (a: "yes" | "no") => {

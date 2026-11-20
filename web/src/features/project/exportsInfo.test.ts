@@ -3,17 +3,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadLang, translate, type TFn } from "@/i18n";
 import type { ExportFields } from "@/features/jobs/types";
-import {
-  SURVEY_EVERY_MS,
-  clock,
-  costHelp,
-  costLine,
-  downloadLabel,
-  editAgainNote,
-  noteExport,
-  sizeText,
-  surveyAnswered,
-} from "./exportsInfo";
+import { clock, costHelp, costLine, downloadLabel, editAgainNote, sizeText } from "./exportsInfo";
 
 const tEn: TFn = (key, vars) => translate("en", key, vars);
 const tDe: TFn = (key, vars) => translate("de", key, vars);
@@ -89,21 +79,40 @@ describe("downloadLabel / sizeText", () => {
 });
 
 describe("survey rhythm", () => {
-  const store = new Map<string, string>();
+  // Page memory: every test gets the module afresh, as a new tab would.
+  const fresh = async () => {
+    vi.resetModules();
+    return import("./exportsInfo");
+  };
+  const touched: string[] = [];
   vi.stubGlobal("localStorage", {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => void store.set(k, v),
-    removeItem: (k: string) => void store.delete(k),
+    getItem: (k: string) => (touched.push(k), null),
+    setItem: (k: string) => void touched.push(k),
+    removeItem: (k: string) => void touched.push(k),
   });
-  afterEach(() => store.clear());
+  afterEach(() => {
+    touched.length = 0;
+  });
 
-  it("from the 2nd export on, at most once a week", () => {
-    const t0 = 1_800_000_000_000;
-    expect(noteExport("a:1", t0)).toBe(false); // the first export
-    expect(noteExport("a:1", t0)).toBe(false); // the same one again
-    expect(noteExport("b:1", t0)).toBe(true); // the second
-    surveyAnswered(t0);
-    expect(noteExport("c:1", t0 + 1000)).toBe(false);
-    expect(noteExport("d:1", t0 + SURVEY_EVERY_MS)).toBe(true);
+  it("from the 2nd export seen in this tab on, until it is answered", async () => {
+    const { noteExport, surveyAnswered } = await fresh();
+    expect(noteExport("a:1")).toBe(false); // the first export
+    expect(noteExport("a:1")).toBe(false); // the same one again
+    expect(noteExport("b:1")).toBe(true); // the second
+    expect(noteExport("a:1")).toBe(true); // still due until answered
+    surveyAnswered();
+    expect(noteExport("c:1")).toBe(false);
+    expect(noteExport("a:2")).toBe(false);
+  });
+
+  it("never touches the device's storage: a new tab starts over", async () => {
+    const first = await fresh();
+    first.noteExport("a:1");
+    expect(first.noteExport("b:1")).toBe(true);
+    first.surveyAnswered();
+    const next = await fresh();
+    expect(next.noteExport("c:1")).toBe(false);
+    expect(next.noteExport("d:1")).toBe(true);
+    expect(touched).toEqual([]);
   });
 });

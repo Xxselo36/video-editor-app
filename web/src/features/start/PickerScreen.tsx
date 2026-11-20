@@ -34,14 +34,7 @@ export function PickerScreen({ onPick }: { onPick: (id: PresetId) => void }) {
     setHasDashboard(readChoice() ? readLocalJobs().length > 0 || legacy : legacy);
   }, []);
 
-  const dismissVoiceOnboarding = () => {
-    setShowVoiceOnboarding(false);
-    try {
-      localStorage.setItem("cleocuts.voiceOnboardingSeen.v1", "1");
-    } catch {
-      // ignore
-    }
-  };
+  const dismissVoiceOnboarding = () => setShowVoiceOnboarding(false);
 
   return (
     <>
