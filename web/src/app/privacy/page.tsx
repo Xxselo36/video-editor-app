@@ -248,8 +248,8 @@ const English = (
         errors.
       </li>
       <li>
-        <b>Your answer to the question after an export</b> (optional): whether you had to edit the video anywhere
-        else and, if you like, what you changed (at most 300 characters), together with the project&apos;s id
+        <b>Your answer to the question after an export</b>{" "}(optional): whether you had to edit the video
+        anywhere else and, if you like, what you changed (at most 300 characters), together with the project&apos;s id
         {AUTH_ENABLED && " and your account id"}. It shows us how well our cuts fit.
       </li>
       <li>
@@ -321,7 +321,7 @@ const English = (
         ? "Your list of projects is stored with your account and removed together with each project. Account data is kept until you delete your account; records of subscriptions and usage are kept as long as needed for billing and the statutory retention periods."
         : "Your list of projects is stored only in your browser (local storage) and can be removed by clearing the site data."}{" "}
       The processing statistics and your answers to the question after an export are deleted after{" "}
-      {EVENTS_KEEP_DAYS} days, even if you delete the project before; server logs after the hosting
+      {EVENTS_KEEP_DAYS}{" "}days, even if you delete the project before; server logs after the hosting
       provider&apos;s log retention period.
     </p>
 
@@ -337,7 +337,7 @@ const English = (
     <H>6. Cookies and local storage</H>
     <p>
       We use no advertising or tracking cookies. On your device, your browser&apos;s local storage keeps your list
-      of projects, your language setting (also in the <code>cleo_lang</code> cookie), your last-used upload
+      of projects, your language setting (also in the <code>cleo_lang</code>{" "}cookie), your last-used upload
       settings, the caption style you saved as default, what is needed to resume an interrupted upload and small
       technical details, such as whether you have seen the editor tour. Changes in the editor that our server
       hasn&apos;t confirmed yet are kept there too, so nothing gets lost: they are deleted once the server confirms
