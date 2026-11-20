@@ -11,14 +11,14 @@
  * plan D11, D21) — one download per distinct file (the main one, the
  * others in "More for this video"), SRT / VTT, the post text saved, Save
  * video on an iPhone (Download on Android), the survey from the 2nd
- * export — Fine-tune → export again with the previous export
+ * export seen in a tab (page memory only) — Fine-tune → export again with the previous export
  * downloadable meanwhile; Export stays in the editor (cost, localized
  * stage, Done view, Save / Share on a phone); failures; the instant
  * export.
  */
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
-import { ACTIVE_JOBS, card, openWithStorage } from "./support/app";
+import { ACTIVE_JOBS, card, job, jobCard, JOBS, openWithStorage, readStorage } from "./support/app";
 import { API, WEB } from "./support/env";
 import {
   ANDROID_UA,
@@ -34,6 +34,9 @@ import {
 } from "./support/vorschau";
 
 const V2 = { tag: "@editor-v2" };
+
+// What older builds kept for the survey (lib/retiredStorage removes it).
+const OLD_SURVEY_LOG = "cleocuts.exports.v1";
 
 type Downloads = { downloads: { format: string; bytes: number | null }[] };
 
@@ -138,22 +141,61 @@ test.describe("the Vorschau of a finished video (editor v2)", V2, () => {
     await expect(sheet.getByTestId("done-post")).toHaveValue("Mein eigener Text #ux11");
   });
 
-  test("the survey asks from the 2nd export on, once", async ({ page, stub }) => {
-    const a = await stub.seed("done");
-    const b = await stub.seed("done");
-    await openWithStorage(page, `/app/p/${a.id}`);
-    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+  test("the survey asks from the 2nd export seen in a tab on, once; nothing of it is kept", async ({ page, stub }) => {
+    const a = await stub.seed("done", { filename: "erstes.mp4" });
+    const b = await stub.seed("done", { filename: "zweites.mp4" });
+    const c = await stub.seed("done", { filename: "drittes.mp4" });
+    // The log older builds kept on the device goes.
+    await openWithStorage(page, `/app/p/${a.id}`, {
+      [JOBS]: [job(a.id, "erstes.mp4"), job(b.id, "zweites.mp4"), job(c.id, "drittes.mp4")],
+      [OLD_SURVEY_LOG]: { seen: ["earlier:1"], lastSurvey: 0 },
+    });
+    // The tip mounts with the survey and their effects run in one pass:
+    // once the tip shows, the survey has decided.
+    const decided = async () => {
+      await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+      await expect(page.getByTestId("done-tip")).toBeVisible();
+    };
+    // Through Projects, no reload: the same page counts on.
+    const openProject = async (filename: string, id: string) => {
+      await page.getByRole("navigation", { name: "Main menu" }).locator('a[href="/app"]').click();
+      await jobCard(page, filename).getByTestId("job-card-open").click();
+      await expect(page).toHaveURL(`${WEB}/app/p/${id}`);
+      await decided();
+    };
+    await decided();
     await expect(page.getByTestId("done-survey")).toHaveCount(0);
-    await page.goto(`/app/p/${b.id}`);
-    await expect(page.getByTestId("done-survey")).toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => readStorage(page, OLD_SURVEY_LOG)).toBeNull();
+    // The 2nd export seen in this tab asks.
+    await openProject("zweites.mp4", b.id);
+    await expect(page.getByTestId("done-survey")).toBeVisible();
+    const answers: unknown[] = [];
+    page.on("request", (r) => {
+      if (r.method() === "POST" && r.url() === `${API}/feedback`) answers.push(r.postDataJSON());
+    });
     await page.getByTestId("done-survey-yes").click();
     await page.getByRole("textbox", { name: "What did you change? (optional)" }).fill("music");
     await page.getByTestId("done-survey-send").click();
     await expect(page.getByTestId("done-survey")).toContainText("Thanks");
-    // Answered: not again this week.
-    await page.goto(`/app/p/${a.id}`);
-    await expect(vorschau(page)).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+    await expect.poll(() => answers).toEqual([{ kind: "post_export", job_id: b.id, answer: "yes", text: "music" }]);
+    // Answered: not again in this tab.
+    await openProject("erstes.mp4", a.id);
     await expect(page.getByTestId("done-survey")).toHaveCount(0);
+    // A reload starts over. The exports seen were not kept: the first one
+    // after it doesn't ask. Nor was the answer, wherever it could live: the
+    // 2nd export seen after the reload asks again.
+    await page.reload();
+    await decided();
+    await expect(page.getByTestId("done-survey")).toHaveCount(0);
+    await openProject("drittes.mp4", c.id);
+    await expect(page.getByTestId("done-survey-yes")).toBeVisible();
+    const kept = await page.evaluate(() => [
+      ...Object.keys(localStorage).filter((k) => /export|survey/i.test(k)),
+      // (cleocuts.exporting.<id> there is the export a tab started.)
+      ...Object.keys(sessionStorage).filter((k) => /survey|exports\.v1/i.test(k)),
+      ...document.cookie.split(";").filter((kv) => /survey|export/i.test(kv)),
+    ]);
+    expect(kept).toEqual([]);
   });
 
   test.describe("on an iPhone", () => {

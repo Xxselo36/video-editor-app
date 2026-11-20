@@ -15,7 +15,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { expect, test } from "./support/fixtures";
 import { API } from "./support/env";
-import { ACTIVE_JOBS, editorVideo, LIBRARY, libEntry, openWithStorage, playbackMode, VOICE_SEEN } from "./support/app";
+import { ACTIVE_JOBS, editorVideo, LIBRARY, libEntry, openWithStorage, playbackMode } from "./support/app";
 import type { Page } from "@playwright/test";
 
 const MIB = 1024 * 1024;
@@ -61,7 +61,6 @@ test.describe("R2 uploads and media", { tag: ["@r2", "@nightly"] }, () => {
   async function pick(page: Page, path: string, reload = true) {
     if (reload) {
       await page.goto("/imprint");
-      await page.evaluate((k) => localStorage.setItem(k, "1"), VOICE_SEEN);
       await page.goto("/app");
     }
     await expect(page.getByTestId("picker-card-tiktok")).toBeVisible({ timeout: 60_000 });

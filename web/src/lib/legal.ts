@@ -12,7 +12,9 @@
  *      (DPA / AVV) and whether it is certified under the EU-US Data
  *      Privacy Framework (the text names both bases).
  *   3. After the lawyer's review: set LEGAL_DRAFT.privacy / .terms to
- *      false (removes the "Entwurf" banner) and update LEGAL_UPDATED.
+ *      false (removes the "Entwurf" banner).
+ * Every change to what a legal text says also sets its LEGAL_UPDATED
+ * date (the page's "Stand").
  * A value still in [brackets] is shown as it is, so nothing missing
  * goes unnoticed on the page.
  */
@@ -41,11 +43,18 @@ export function isPlaceholder(value: string): boolean {
   return /^\[.*\]$/.test(value.trim());
 }
 
-/** The legal texts are drafts until a lawyer has reviewed them. */
-export const LEGAL_DRAFT = { imprint: false, privacy: true, terms: true } as const;
+export type LegalDoc = "imprint" | "privacy" | "terms";
 
-/** "Stand" / "Last updated" of the legal texts. */
-export const LEGAL_UPDATED = { de: "30. September 2026", en: "30 September 2026" } as const;
+/** The legal texts are drafts until a lawyer has reviewed them. */
+export const LEGAL_DRAFT: Readonly<Record<LegalDoc, boolean>> = { imprint: false, privacy: true, terms: true };
+
+/** "Stand" / "Last updated" of each legal text: the day what it says last
+ *  changed. */
+export const LEGAL_UPDATED: Readonly<Record<LegalDoc, { de: string; en: string }>> = {
+  imprint: { de: "30. September 2026", en: "30 September 2026" },
+  privacy: { de: "20. November 2026", en: "20 November 2026" },
+  terms: { de: "30. September 2026", en: "30 September 2026" },
+};
 
 export const COPYRIGHT = "© 2026 CleoCuts";
 

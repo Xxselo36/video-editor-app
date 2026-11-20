@@ -25,7 +25,7 @@ import { expect, test, type Stub } from "./support/fixtures";
 import { openWithStorage } from "./support/app";
 
 const TAG = { tag: "@editor-v2" };
-const TOUR_DONE = { "cleocuts.editor.tourDone.v1": "1", "cleocuts.voiceOnboardingSeen.v1": "1" };
+const TOUR_DONE = { "cleocuts.editor.tourDone.v1": "1" };
 const SAVED = { timeout: 15_000 };
 
 const isPhone = (page: Page) => page.getByTestId("editor-v2").evaluate((el) => el.getAttribute("data-layout") !== "desktop");

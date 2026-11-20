@@ -14,7 +14,7 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 import { API } from "../support/env";
-import { LANG_KEY, openWithStorage } from "../support/app";
+import { job as stored, jobCard, JOBS, LANG_KEY, openWithStorage } from "../support/app";
 import {
   fakeShareSheet,
   fixWord,
@@ -35,8 +35,6 @@ const DESKTOP: Size = { width: 1440, height: 900 };
 // The mockups' video.
 const NAME = "Morgenroutine.mp4";
 const DE = { [LANG_KEY]: "de" };
-// This browser saw an export before: the survey asks (done/Survey).
-const SECOND_EXPORT = { "cleocuts.exports.v1": { seen: ["earlier:1"], lastSurvey: 0 } };
 
 /** A screenshot named after the size, the pointer off the controls (no
  *  hover look). */
@@ -215,8 +213,16 @@ for (const size of [PHONE, DESKTOP]) {
     });
 
     test("done: Herunterladen; Mehr zum Video with the survey and the tip; the ⋯ menu", async ({ page, stub }) => {
+      // The survey asks from the 2nd export seen in a tab (page memory
+      // only, done/Survey): an earlier one first, then this one from
+      // Projekte, without a reload.
+      const earlier = await stub.seed("done", { filename: "Wochenplan.mp4" });
       const job = await stub.seed("done", { filename: NAME });
-      await open(page, job.id, { storage: SECOND_EXPORT });
+      await open(page, earlier.id, { storage: { [JOBS]: [stored(earlier.id, "Wochenplan.mp4"), stored(job.id, NAME)] } });
+      await expect(vorschau(page)).toHaveAttribute("data-state", "done");
+      await page.locator("[data-testid=tabbar], [data-testid=sidebar]").filter({ visible: true }).locator('a[href="/app"]').click();
+      await jobCard(page, NAME).getByTestId("job-card-open").click();
+      await expect(page).toHaveURL(new RegExp(`/app/p/${job.id}$`));
       await expect(vorschau(page)).toHaveAttribute("data-state", "done");
       await expect(page.getByTestId("done-download").first()).toHaveText("Herunterladen");
       await snap(page, size, "8-fertig");

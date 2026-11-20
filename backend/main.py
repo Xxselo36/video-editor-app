@@ -4128,18 +4128,22 @@ def _drop_unclaimed_upload(t: dict) -> None:
 
 _TELEMETRY = upl.RateLimit(30, 60.0)
 # redo: parts a resume sends again because the re-picked file's bytes
-# differ there (web lib/chunkedUpload keepParts).
+# differ there (web lib/chunkedUpload keepParts). The browser and OS come
+# from the request's own User-Agent header, not from the body: no script
+# reads them on the device for this (§ 25 TDDDG); a body "ua" of an older
+# page is ignored.
 _TELEMETRY_FIELDS = ("event", "part", "attempt", "elapsed_ms", "loaded",
-                     "redo", "status", "kind", "ua")
+                     "redo", "status", "kind")
 
 
 @app.post("/uploads/telemetry", status_code=204)
 async def upload_telemetry(request: Request,
                            user: User | None = Depends(current_user)):
-    """{ticket?, event, part?, attempt?, elapsed_ms?, loaded?, ua?} → 204:
-    one "[upload] …" log line per call (the user id, never the ticket) —
-    retries and failures of browser uploads, which can't be diagnosed
-    otherwise (iOS). Body ≤ 2 KB, ≤ 30 per minute per user."""
+    """{ticket?, event, part?, attempt?, elapsed_ms?, loaded?} → 204:
+    one "[upload] …" log line per call (the user id, never the ticket;
+    ua= is the request's User-Agent header) — retries and failures of
+    browser uploads, which can't be diagnosed otherwise (iOS). Body
+    ≤ 2 KB, ≤ 30 per minute per user."""
     raw = await request.body()
     if len(raw) > 2048:
         raise ApiRefusal(413, "request_too_large")
@@ -4158,7 +4162,11 @@ async def upload_telemetry(request: Request,
         if isinstance(v, bool) or not isinstance(v, (str, int, float)):
             continue
         text = str(v).replace("\n", " ").replace("\r", " ")[:200]
-        fields.append(f"{k}={text!r}" if k == "ua" else f"{k}={text}")
+        fields.append(f"{k}={text}")
+    ua = request.headers.get("user-agent", "")
+    ua = ua.replace("\n", " ").replace("\r", " ")[:200]
+    if ua:
+        fields.append(f"ua={ua!r}")
     key = ""
     if body.get("ticket"):
         try:

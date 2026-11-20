@@ -591,15 +591,18 @@ def test_init_without_r2_is_503_not_busy(client, no_r2):
 
 def test_telemetry_logs_one_line_without_the_ticket(client, r2, capsys):
     t = _init(client, 10).json()["ticket"]
+    # Browser and OS: the request's User-Agent header; a body "ua" (older
+    # pages read it with a script) is ignored.
     r = client.post("/uploads/telemetry", json={
         "ticket": t, "event": "part_retry", "part": 2, "attempt": 3,
-        "elapsed_ms": 60012, "loaded": 1234, "ua": "Mozilla/5.0 (iPhone)",
-        "junk": "x" * 100})
+        "elapsed_ms": 60012, "loaded": 1234, "ua": "spoofed",
+        "junk": "x" * 100}, headers={"User-Agent": "Mozilla/5.0 (iPhone)"})
     assert r.status_code == 204
     out = capsys.readouterr().out
     line = [ln for ln in out.splitlines() if ln.startswith("[upload]")][-1]
     assert "event=part_retry part=2 attempt=3 elapsed_ms=60012" in line
-    assert "user=-" in line and "iPhone" in line and "obj=" in line
+    assert "user=-" in line and "ua='Mozilla/5.0 (iPhone)'" in line and "obj=" in line
+    assert "spoofed" not in line
     assert t not in out and t.split(".")[1] not in out and "junk" not in line
     r = client.post("/uploads/telemetry", content=b"{" + b" " * 3000 + b"}",
                     headers={"Content-Type": "application/json"})

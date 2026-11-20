@@ -47,7 +47,6 @@ export async function createdJobId(page: Page, filename?: string): Promise<strin
   const all = await storedJobs(page);
   return all.find((j) => !j.jobId.startsWith("upl-") && (!filename || j.filename === filename))?.jobId ?? null;
 }
-export const VOICE_SEEN = "cleocuts.voiceOnboardingSeen.v1";
 export const LANG_KEY = "cleocuts.lang";
 
 export const LANGS = ["en", "de", "es", "fr", "pt", "it", "tr", "pl", "nl", "ru", "ja", "ko", "id", "hi"] as const;
@@ -87,8 +86,8 @@ export function libEntry(jobId: string, filename: string, ageMs = 60_000, extra:
 }
 
 /**
- * Replace localStorage (voice onboarding marked seen) from a light page
- * of the app's origin, then open `path`.
+ * Replace localStorage from a light page of the app's origin, then open
+ * `path`.
  */
 export async function openWithStorage(page: Page, path: string, storage: Record<string, unknown> = {}) {
   await page.goto("/imprint");
@@ -97,7 +96,7 @@ export async function openWithStorage(page: Page, path: string, storage: Record<
       localStorage.clear();
       for (const [k, v] of Object.entries(kv)) localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v));
     },
-    { [VOICE_SEEN]: "1", ...storage },
+    storage,
   );
   await page.goto(path);
 }

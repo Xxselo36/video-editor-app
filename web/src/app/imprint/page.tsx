@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { H, LegalPage, LegalTitle, Mail } from "@/components/legal/LegalPage";
-import { LEGAL_DRAFT, OPERATOR } from "@/lib/legal";
+import { OPERATOR } from "@/lib/legal";
 
 export const metadata: Metadata = {
   title: "Imprint – Impressum",
@@ -45,7 +45,7 @@ function Contact({ lang }: { lang: "de" | "en" }) {
 
 const German = (
   <>
-    <LegalTitle lang="de" title="Impressum" subtitle="Angaben gemäß § 5 DDG" draft={LEGAL_DRAFT.imprint} />
+    <LegalTitle lang="de" title="Impressum" subtitle="Angaben gemäß § 5 DDG" doc="imprint" />
     <H>Anbieter</H>
     <Address lang="de" />
     <H>Kontakt</H>
@@ -78,7 +78,7 @@ const English = (
       lang="en"
       title="Imprint"
       subtitle="Legal notice (Impressum) under § 5 of the German Digital Services Act (DDG)"
-      draft={LEGAL_DRAFT.imprint}
+      doc="imprint"
     />
     <H>Operator</H>
     <Address lang="en" />
