@@ -10,7 +10,8 @@ and 0.8 (9.0), with the renderer's real ffmpeg (src.ffmpeg_utils):
   is a balanced tree.
 (The thumbnail's colours: test_thumbnail.py; frame-exact renders:
 captions/test_av_exact.py; the mezz's frame rate mode: test_cfr_mezz.py;
-SmartCam's -fps_mode: test_pipeline_media.py.)
+SmartCam's -fps_mode: test_pipeline_media.py.) Also: the probes of
+src.ffmpeg_utils open no console window on Windows.
 """
 from __future__ import annotations
 
@@ -49,6 +50,28 @@ def _frames_and_durations(path: Path) -> tuple[int, float, float]:
 def test_the_renderers_ffmpeg_has_a_version():
     assert isinstance(fu.ffmpeg_major_version(FF), int)
     assert fu.ffmpeg_major_version("/nonexistent/ffmpeg") is None
+
+
+@pytest.mark.parametrize("system,flags", [("Windows", 0x08000000), ("Linux", None),
+                                          ("Darwin", None)])
+def test_the_probes_open_no_console_window(monkeypatch, system, flags):
+    """The Windows desktop app has no console (--windows-console-mode=
+    disable): a process started without CREATE_NO_WINDOW flashes one.
+    The version, alpha-mode and colour probes start theirs as every
+    other process of the app (src.platform_utils.get_subprocess_kwargs)."""
+    import platform
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"streams": []}', stderr="")
+
+    monkeypatch.setattr(platform, "system", lambda: system)
+    monkeypatch.setattr(fu.subprocess, "run", run)
+    fu.ffmpeg_major_version.__wrapped__("ffmpeg")    # past the caches
+    fu.knows_alpha_mode.__wrapped__("ffmpeg")
+    fu.source_colors("in.mp4")
+    assert [kw.get("creationflags") for kw in calls] == [flags] * 3
 
 
 @pytest.mark.parametrize("major,option", [(6, "-filter_complex_script"),
