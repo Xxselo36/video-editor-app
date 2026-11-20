@@ -166,8 +166,12 @@ const German = (
     <H>6. Cookies und lokaler Speicher</H>
     <p>
       Wir verwenden keine Werbe- oder Tracking-Cookies. Der lokale Speicher deines Browsers hält deine
-      Projektliste, deine Spracheinstellung und Angaben zum Fortsetzen unterbrochener Uploads auf deinem Gerät;
-      das ist für den von dir genutzten Dienst erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG).
+      Projektliste, deine Spracheinstellung (auch im Cookie <code>cleo_lang</code>) und Angaben zum Fortsetzen
+      unterbrochener Uploads auf deinem Gerät. Änderungen im Editor, die unser Server noch nicht bestätigt hat,
+      hält dein Browser dort ebenfalls fest, damit nichts verloren geht: Sobald der Server sie bestätigt, werden
+      sie gelöscht; älter als eine Woche gelten sie nicht mehr und werden beim nächsten Öffnen des Projekts
+      gelöscht; löschst du das Projekt, verschwinden sie sofort. Das ist für den von dir genutzten Dienst
+      erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG).
     </p>
     {AUTH_ENABLED && (
       <p className="mt-2">
@@ -306,8 +310,11 @@ const English = (
     <H>6. Cookies and local storage</H>
     <p>
       We use no advertising or tracking cookies. Your browser&apos;s local storage keeps your list of projects,
-      your language setting and what is needed to resume an interrupted upload on your device; this is required
-      for the service you use (§ 25(2) no. 2 TDDDG).
+      your language setting (also in the <code>cleo_lang</code> cookie) and what is needed to resume an
+      interrupted upload on your device. Changes in the editor that our server hasn&apos;t confirmed yet are kept
+      there too, so nothing gets lost: they are deleted once the server confirms them; after a week they are no
+      longer used and are deleted the next time you open the project; if you delete the project, they go at once.
+      This is required for the service you use (§ 25(2) no. 2 TDDDG).
     </p>
     {AUTH_ENABLED && (
       <p className="mt-2">
