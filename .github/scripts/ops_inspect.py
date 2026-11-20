@@ -179,8 +179,34 @@ def report(c: dict) -> list[str]:
     lines.append("  " + " | ".join(REFUSAL_COLUMNS))
     for r in recent:
         lines.append("  " + " | ".join(safe(r.get(k)) for k in REFUSAL_COLUMNS))
+    lines.extend(database(c.get("database")))
     lines.append("== diagnosis ==")
     lines.extend(diagnose(c))
+    return lines
+
+
+def database(d) -> list[str]:
+    """The database and its nightly backups in R2 (counts and ages)."""
+    lines = ["== database and backups =="]
+    if not isinstance(d, dict):
+        return lines + ["  not reported (a backend older than this check)"]
+    if d.get("error"):
+        return lines + [f"  report failed: {safe(d.get('error'))}"]
+    lines.append(f"  database: {safe(d.get('backend'))}")
+    b = d.get("backups")
+    if not isinstance(b, dict):
+        lines.append("  nightly backups to R2: none (they run with Postgres only)")
+    elif not b.get("r2"):
+        lines.append("  nightly backups to R2: none (R2 is not configured)")
+    else:
+        lines.append(f"  nightly backups to R2: {safe(b.get('count'))} dump(s), "
+                     f"newest {safe(b.get('newest_age_d'))} d old, oldest "
+                     f"{safe(b.get('oldest_age_d'))} d old, kept "
+                     f"{safe(b.get('keep_days'))} d; last run finished "
+                     f"{safe(b.get('last_ok_age_h'))} h ago")
+        for k in ("error", "state_error"):
+            if b.get(k):
+                lines.append(f"  {k}: {safe(b.get(k))}")
     return lines
 
 
