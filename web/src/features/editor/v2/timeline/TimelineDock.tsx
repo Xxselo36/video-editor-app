@@ -1581,11 +1581,16 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
     const c = clips.find((x) => x.seg.id === trimming.id);
     if (!c) return null;
     const edge = trimming.mode === "start" ? c.seg.start : c.seg.end;
-    const x = (trimming.mode === "start" ? c.left : c.left + c.width) * pps;
-    if (removing) return { x, text: t("editor.trim.remove"), removing: true };
-    // the value the export uses: the edge's frame (the handle itself moves in 0.01 s)
+    const at = trimming.mode === "start" ? c.left : c.left + c.width;
+    const x = at * pps;
+    if (removing) return { x, text: t("editor.trim.remove"), removing: true, edge: undefined };
+    // the edge's frame, which the export uses (the handle itself moves in 0.01 s) ...
     const used = frameEdge(edge, fps);
-    return { x, text: `${used.toFixed(2).replace(".", dec)} s`, removing: false };
+    // ... read on the ruler's clock: the edited video's time where the strip
+    // draws the edge. The source time read as another second (owner: "29,30 s"
+    // above a ruler at 24,0). data-edge keeps the source second.
+    const shown = Math.max(0, at + (used - edge));
+    return { x, text: `${shown.toFixed(2).replace(".", dec)} s`, removing: false, edge: used };
   })();
   const magnified = boost !== undefined;
 
@@ -1711,6 +1716,7 @@ export const TimelineDock = memo(function TimelineDock(p: TimelineDockProps) {
               className={`${s.mono} ${s.trimReadout}`}
               style={{ left: readout.x }}
               data-removing={readout.removing || undefined}
+              data-edge={readout.edge}
               data-testid="ed-trim-readout"
             >
               {readout.text}
