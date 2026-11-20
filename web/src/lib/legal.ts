@@ -69,6 +69,14 @@ export const BETA_RETENTION_DAYS = RETENTION_DAYS.Starter;
 /** Days the backend keeps its processing statistics (backend/jobs.py EVENTS_KEEP_DAYS). */
 export const EVENTS_KEEP_DAYS = 90;
 
+/**
+ * Days a row deleted from the database can stay in its nightly backups.
+ * backend/pg_backup.py writes one dump per night and, after each run,
+ * deletes the dumps dated more than CLEO_PG_BACKUP_KEEP_DAYS (14) days
+ * back, so each dump lives about 15 days (ops-inspect: 15 dumps in R2).
+ */
+export const BACKUP_KEEP_DAYS = 15;
+
 export type Localized = { de: string; en: string };
 
 /** When a provider is used: always, or only with a feature switched on. */
@@ -110,10 +118,13 @@ export const PROCESSORS: Processor[] = [
   {
     name: "Cloudflare R2",
     company: { de: "Cloudflare, Inc., USA", en: "Cloudflare, Inc., USA" },
-    purpose: { de: "Speicherung von Uploads und Ergebnissen", en: "Storage of uploads and results" },
+    purpose: {
+      de: "Speicherung von Uploads, Ergebnissen und Sicherungskopien der Datenbank",
+      en: "Storage of uploads, results and database backups",
+    },
     data: {
-      de: "Hochgeladene Videos, Vorschauen, fertige Videos",
-      en: "Uploaded videos, previews, finished videos",
+      de: "Hochgeladene Videos, Vorschauen, fertige Videos; nächtliche Sicherungskopien der Datenbank (Projekt- und Kontodaten, ohne Videos)",
+      en: "Uploaded videos, previews, finished videos; nightly backups of the database (project and account data, no videos)",
     },
     when: "always",
   },
