@@ -17,6 +17,10 @@ import tempfile
 from pathlib import Path
 from functools import lru_cache
 
+# No console window per ffmpeg / ffprobe call in the windowless Windows
+# build (CREATE_NO_WINDOW), as for every other process the app starts
+from .platform_utils import get_subprocess_kwargs
+
 _IS_WINDOWS = platform.system() == "Windows"
 
 
@@ -77,7 +81,8 @@ def ffmpeg_major_version(ffmpeg: str) -> int | None:
     snapshot ("N-117231-g…") or an ffmpeg that doesn't run."""
     try:
         out = subprocess.run([ffmpeg, "-version"], capture_output=True,
-                             text=True, timeout=15, check=False).stdout
+                             text=True, timeout=15, check=False,
+                             **get_subprocess_kwargs()).stdout
     except (OSError, subprocess.SubprocessError):
         return None
     m = re.match(r"ffmpeg version n?(\d+)\.", out or "")
@@ -91,7 +96,7 @@ def knows_alpha_mode(ffmpeg: str) -> bool:
     try:
         out = subprocess.run([ffmpeg, "-hide_banner", "-h", "full"],
                              capture_output=True, text=True, timeout=30,
-                             check=False).stdout
+                             check=False, **get_subprocess_kwargs()).stdout
     except (OSError, subprocess.SubprocessError):
         return False
     return "\n  -alpha_mode " in (out or "")
@@ -204,7 +209,8 @@ def source_colors(path) -> dict | None:
              "-show_entries", ("stream=pix_fmt,color_range,color_space,"
                                "color_transfer,width,height"),
              "-of", "json", str(path)],
-            capture_output=True, text=True, timeout=30, check=False)
+            capture_output=True, text=True, timeout=30, check=False,
+            **get_subprocess_kwargs())
         st = (json.loads(r.stdout or "{}").get("streams") or [None])[0]
         if not st or not st.get("pix_fmt"):
             return None
