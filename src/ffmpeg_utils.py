@@ -228,15 +228,20 @@ def source_colors(path) -> dict | None:
 HDR_TRANSFERS = ("smpte2084", "arib-std-b67")
 
 
-def outside_encode(path) -> tuple[str, list[str]]:
+def outside_encode(path, hdr_pix_fmt: str | None = "yuv420p"
+                   ) -> tuple[str, list[str]]:
     """(filter, encoder arguments) of an encode that reads a file from
     outside - the plugin's media, the desktop app's input: limited-range
     BT.709 (to_bt709_tv, an untagged file read as a player reads it). An
     HDR file isn't tone-mapped by these encodes (the web normalize does
-    that first): it stays yuv420p with its own tags, as before."""
+    that first): it keeps its own tags, as before, in `hdr_pix_fmt` - the
+    plugin's yuv420p - or, with None (the desktop app), in the encoder's
+    own choice: libx264 keeps a 10-bit HLG/PQ source 10-bit
+    (yuv420p10le), as the desktop app's encodes did before they took this
+    helper (8-bit, a 10-bit HLG ramp kept 127 of 506 codes)."""
     colors = source_colors(path)
     if colors and colors.get("color_transfer") in HDR_TRANSFERS:
-        return "null", ["-pix_fmt", "yuv420p"]
+        return "null", (["-pix_fmt", hdr_pix_fmt] if hdr_pix_fmt else [])
     return to_bt709_tv(colors), list(BT709_TV_ARGS)
 
 

@@ -286,7 +286,7 @@ class VideoEditor:
 
         # limited-range BT.709, the source's own colours read
         # (src/ffmpeg_utils.outside_encode)
-        to_tv, tv_args = outside_encode(str(self.input_path))
+        to_tv, tv_args = outside_encode(str(self.input_path), hdr_pix_fmt=None)
         cmd = [
             get_ffmpeg_path(), '-y', '-i', str(self.input_path),
             '-vf', f"{scale_filter},{to_tv}",

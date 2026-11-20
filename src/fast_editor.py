@@ -744,7 +744,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Erstelle Segment-Clips mit FFmpeg (präzises Cutting mit Re-Encoding)
         # in limited-range BT.709, the source's own colours read
         # (src/ffmpeg_utils.outside_encode)
-        to_tv, tv_args = outside_encode(str(self.input_path))
+        to_tv, tv_args = outside_encode(str(self.input_path), hdr_pix_fmt=None)
         segment_files = []
         for i, (start, end) in enumerate(segments):
             segment_path = os.path.join(temp_dir, f"seg_{i:04d}.mp4")
@@ -823,7 +823,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # The segments' colours kept, read by their own tags as the
         # segment encodes read the input: limited-range BT.709, an HDR
         # source still tagged as recorded (src/ffmpeg_utils.outside_encode)
-        to_tv, tv_args = outside_encode(concat_output)
+        to_tv, tv_args = outside_encode(concat_output, hdr_pix_fmt=None)
 
         # Frame-genaues Rendering mit FFmpeg + ASS-Untertitel
         if subtitles:

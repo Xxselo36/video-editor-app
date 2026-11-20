@@ -404,10 +404,13 @@ def test_the_desktop_app_leaves_hdr_as_recorded(hlg, tmp_path, kind):
     video keeps its own tags and values through the segment cuts and the
     final encode alike (src/ffmpeg_utils.outside_encode). The final
     encode made it SDR BT.709 - so tagged, the matrix converted, no tone
-    mapping: the red bar's Y 83 for 91, on ffmpeg 7 and 9."""
+    mapping: the red bar's Y 83 for 91, on ffmpeg 7 and 9. And in its
+    own bit depth (libx264 here): forced to yuv420p a 10-bit HLG ramp kept
+    127 of its 506 codes."""
     out, = _render(kind, hlg, tmp_path)
     tags = _tags(out)
     assert {k: tags[k] for k in HLG_TAGS} == HLG_TAGS, tags
+    assert tags["pix_fmt"] == "yuv420p10le", tags
     got = _bar_means(out)
     assert _off(got, HLG_BARS) <= 1, (got, HLG_BARS)
 
