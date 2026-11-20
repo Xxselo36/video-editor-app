@@ -146,9 +146,10 @@ BT709_TV_ARGS = ["-pix_fmt", "yuv420p", "-color_range", "tv",
                  "-colorspace", "bt709", "-color_primaries", "bt709",
                  "-color_trc", "bt709"]
 
-# Any frame to limited-range BT.709 yuv420p without probing: MoviePy's
-# RGB frames, or a file not probed. A YUV frame is read with its own
-# tags, an untagged one as BT.601 (swscale's default). A limited BT.709
+# Any frame to limited-range BT.709 yuv420p without probing: RGB
+# (MoviePy's frames, an RGB upload: to_bt709_tv), or a file not probed.
+# A YUV frame is read with its own tags, an untagged one as BT.601
+# (swscale's default); RGB is converted with BT.709. A limited BT.709
 # frame passes bit-exact on both versions. The flags: without them the
 # matrix conversion came out 1-2 levels dark (mean RGB -1.9/-0.9/-2.0 on
 # docs/raw.mp4, both versions), with them within 0.25 of exact; RGB in,
@@ -165,6 +166,12 @@ _TAG_MATRIX = {"bt709": "bt709", "bt470bg": "bt601", "smpte170m": "bt601",
                "bt601": "bt601", "fcc": "bt601", "smpte240m": "smpte240m",
                "bt2020nc": "bt2020", "bt2020_ncl": "bt2020",
                "bt2020c": "bt2020", "bt2020_cl": "bt2020"}
+# Pixel formats that aren't Y'CbCr (names as ffprobe gives them, every
+# one ffmpeg 7 and 9 know): RGB in any order and depth, gray (+ alpha),
+# a palette, monochrome, Bayer, XYZ. Every other one is Y'CbCr (yuv*,
+# nv*, p010, uyvy422, yuyv422, y210, ...).
+_NOT_YCBCR = ("rgb", "bgr", "argb", "abgr", "0rgb", "0bgr", "gbr", "x2rgb",
+              "x2bgr", "gray", "ya", "pal", "mono", "bayer", "xyz")
 
 
 def untagged_matrix(width: int, height: int) -> str:
@@ -232,10 +239,16 @@ def to_bt709_tv(colors: dict | None, untagged: str | None = None) -> str:
     puts the chroma half a level high (coded U/V means against the exact
     conversion, 2 s of docs/raw.mp4 at crf 16: +0.49/+0.33; vf_colorspace
     on 7 and 9, and swscale on 7: -0.04/+0.15, x264's own). Not probed
-    (None) or a matrix it doesn't take: TO_BT709_TV."""
+    (None), not Y'CbCr or a matrix it doesn't take: TO_BT709_TV."""
     if not colors:
         return TO_BT709_TV
     pix_fmt = str(colors.get("pix_fmt") or "")
+    if not pix_fmt or pix_fmt.startswith(_NOT_YCBCR):
+        # RGB (QuickTime Animation, PNG, rawvideo, UtVideo), gray, a
+        # palette: no Y'CbCr matrix to keep, whatever its tags or size.
+        # format=yuv420p alone converted RGB with BT.601 under the BT.709
+        # tags (measured: up to 26 RGB levels off, on 7 and 9).
+        return TO_BT709_TV
     full = pix_fmt.startswith("yuvj") or colors.get("color_range") == "pc"
     tag = str(colors.get("color_space") or "").lower()
     if tag in ("", "unknown", "reserved"):
@@ -246,7 +259,7 @@ def to_bt709_tv(colors: dict | None, untagged: str | None = None) -> str:
     if matrix == "bt709" and not full:
         return f"format=yuv420p,{BT709_TV_TAGS}"
     iall = _COLORSPACE_IALL.get(matrix)
-    if iall is None or not pix_fmt.startswith(("yuv", "nv")):
+    if iall is None:
         return TO_BT709_TV
     # 4:2:0 in, as vf_colorspace keeps the subsampling (yuvj stays full:
     # the explicit irange below names its range)

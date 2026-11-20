@@ -23,6 +23,8 @@ coded values are exactly those written.
 - A limited BT.709 source keeps its levels: Y range and patch colours
   as they came in (the v1 burn used to write them as untagged BT.601).
 - Which matrix an untagged upload is read with (untagged_matrix).
+- An RGB upload (QuickTime Animation, HD, untagged) is converted with
+  BT.709 by the normalize, the desktop app and the plugin.
 """
 from __future__ import annotations
 
@@ -142,6 +144,37 @@ def limited(tmp_path_factory):
     return path
 
 
+# The bars sources: PATCH_RGB side by side, full height, 2 s. HD, so an
+# untagged Y'CbCr video this size is read as BT.709 (untagged_matrix).
+BARS_W, BARS_H = 1280, 720
+# The bars as limited-range BT.709 Y'CbCr: what every encode should write
+BARS_709 = [_ycbcr(rgb, 0.2126, 0.0722, False) for rgb in PATCH_RGB]
+
+
+def _bars_rgb() -> bytes:
+    row = np.repeat(np.array(PATCH_RGB, np.uint8), BARS_W // len(PATCH_RGB), axis=0)
+    return np.ascontiguousarray(np.broadcast_to(row, (BARS_H, BARS_W, 3))).tobytes()
+
+
+@pytest.fixture(scope="module")
+def rgb(tmp_path_factory):
+    """An RGB upload: QuickTime Animation (qtrle, rgb24: screen
+    recordings, motion graphics; PNG, rawvideo and UtVideo are RGB too),
+    lossless, no colour tags."""
+    path = tmp_path_factory.mktemp("range") / "rgb.mov"
+    subprocess.run([FF, "-y", "-v", "error",
+                    "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{BARS_W}x{BARS_H}",
+                    "-r", str(FPS), "-i", "-",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+                    "-vf", f"loop=loop={2 * FPS - 1}:size=1", "-c:v", "qtrle",
+                    "-c:a", "aac", "-shortest", str(path)],
+                   input=_bars_rgb(), check=True)
+    colors = fu.source_colors(path)
+    assert colors["pix_fmt"] == "rgb24"
+    assert colors["color_space"] in ("", "unknown") and colors["color_range"] in ("", "unknown")
+    return path
+
+
 def _assert_limited_bt709(out: Path, src_p1: float, src_p99: float) -> None:
     assert _tags(out) == TAGS, out.name
     p1, p99 = _ramp_y(out)
@@ -201,6 +234,16 @@ def _render(kind: str, src: Path, d: Path) -> list[Path]:
         out = d / "crop.mp4"
         assert pipeline.centre_crop(str(src), str(out), "portrait")
         return [out]
+    if kind == "desktop":                    # the desktop app's fast editor
+        from src.fast_editor import FastVideoEditor
+        editor = FastVideoEditor(str(src), output_dir=str(d / "desktop"))
+        return [Path(editor.edit_fast(remove_silence=False, add_subtitles=False))]
+    if kind == "plugin":                     # the Premiere plugin's caption burn
+        from plugins.premiere import video_editor_premiere as vep
+        srt, out = d / "captions.srt", d / "burn.mp4"
+        srt.write_text("1\n00:00:01,000 --> 00:00:01,500\nHi\n\n")
+        assert vep._burn_subtitles_into_video(str(src), str(srt), str(out), "classic")
+        return [out]
     raise AssertionError(kind)
 
 
@@ -253,6 +296,38 @@ def test_a_limited_bt709_source_keeps_its_levels(limited, tmp_path, kind):
         assert worst <= 1.5, (out.name, got, want)
 
 
+def _bar_means(path: Path) -> list[tuple[float, float, float]]:
+    """Mean Y, U, V of the middle of each bar (the bars sources)."""
+    w, h = _size(path)
+    ys, us, vs = _plane(path, "y"), _plane(path, "u"), _plane(path, "v")
+    pw = w / len(PATCH_RGB)
+    out = []
+    for k in range(len(PATCH_RGB)):
+        x0, x1 = int(k * pw + pw / 4), int((k + 1) * pw - pw / 4)
+        out.append((float(ys[:, h // 4:3 * h // 4, x0:x1].mean()),
+                    float(us[:, h // 8:3 * h // 8, x0 // 2:x1 // 2].mean()),
+                    float(vs[:, h // 8:3 * h // 8, x0 // 2:x1 // 2].mean())))
+    return out
+
+
+def _off(got, want) -> float:
+    return max(abs(a - b) for g, w in zip(got, want) for a, b in zip(g, w))
+
+
+@pytest.mark.parametrize("kind", ["normalize", "desktop", "plugin"])
+def test_an_rgb_upload_is_converted_with_bt709(rgb, tmp_path, kind):
+    """An RGB upload has no matrix to keep: converted with BT.709, as it
+    is tagged - by the web normalize (+ proxy) and by
+    src/ffmpeg_utils.outside_encode (the desktop app, the plugin). Taken
+    for an untagged HD video and passed through (format=yuv420p), it was
+    converted with BT.601 under the BT.709 tags: the bars' Y'CbCr up to
+    17 levels off (the green's Y 133 for 150), on ffmpeg 7 and 9."""
+    for out in _render(kind, rgb, tmp_path):
+        assert _tags(out) == TAGS, out.name
+        got = _bar_means(out)
+        assert _off(got, BARS_709) <= 1.5, (out.name, got, BARS_709)
+
+
 def test_untagged_uploads_are_read_as_players_read_them():
     """Above SD an untagged video counts as BT.709 (WebKit, Android): its
     values kept, as ffmpeg 7 kept them; up to SD (720x576 either way) as
@@ -275,6 +350,25 @@ def test_untagged_uploads_are_read_as_players_read_them():
     assert fu.to_bt709_tv({"pix_fmt": "yuv420p", "color_range": "tv",
                            "color_space": "bt709"}) == f"format=yuv420p,{fu.BT709_TV_TAGS}"
     assert fu.to_bt709_tv(None) == fu.TO_BT709_TV
+
+
+def test_only_ycbcr_is_read_by_its_matrix():
+    """Y'CbCr, planar or packed, is read by its matrix (its tag, else
+    untagged_matrix: an untagged HD one passes as it is). RGB, gray, a
+    palette, Bayer and XYZ have none, whatever their tags say: swscale
+    converts them, RGB with BT.709 (TO_BT709_TV). Every pixel format
+    ffprobe describes, by its descriptor."""
+    r = subprocess.run([pipeline.get_ffprobe_path(), "-v", "error", "-show_pixel_formats",
+                        "-of", "json"], capture_output=True, text=True, check=True)
+    formats = [f for f in json.loads(r.stdout)["pixel_formats"] if not f["flags"]["hwaccel"]]
+    assert len(formats) > 150
+    for f in formats:
+        ycbcr = (not f["flags"]["rgb"] and not f["flags"]["palette"]
+                 and f["nb_components"] >= 3 and not f["name"].startswith("xyz"))
+        for space in ("", "bt709"):          # untagged HD, or tagged BT.709
+            conv = fu.to_bt709_tv({"pix_fmt": f["name"], "color_range": "tv",
+                                   "color_space": space, "width": 1280, "height": 720})
+            assert (conv != fu.TO_BT709_TV) == ycbcr, (f["name"], space, conv)
 
 
 def test_the_v2_graph_converts_the_probed_mezz():
