@@ -456,9 +456,16 @@ def test_admin_capacity_report(client, r2, auth_on, bearer, monkeypatch):
     from backend import db
     assert body["database"]["backend"] == db.active()
     assert f"  database: {db.active()}" in text
+    copy = body["database"]["sqlite_copy"]
+    assert copy["copied"] is False and copy["marker"] is False
+    assert copy["keep_days"] == 14.0 and copy["cut_over_age_d"] is None
     if db.active() == "sqlite":
-        assert body["database"] == {"backend": "sqlite", "backups": None}
+        assert body["database"]["backups"] is None
+        assert copy["file"] is True           # the live database itself
         assert "nightly backups to R2: none (they run with Postgres only)" in text
+        assert "SQLite file from before the cutover" not in text
+    else:
+        assert "  SQLite file from before the cutover: " in text
 
 
 def test_capacity_reports_the_postgres_backups_in_numbers(monkeypatch):
@@ -495,6 +502,29 @@ def test_capacity_reports_the_postgres_backups_in_numbers(monkeypatch):
     assert "  database: postgres" in text
     assert ("nightly backups to R2: 3 dump(s), newest 0.5 d old, oldest "
             "13.5 d old, kept 14 d; last run finished 3 h ago") in text
+    # the SQLite file the cutover left on the volume (db.sqlite_copy)
+    head = "  SQLite file from before the cutover: "
+    assert head + "not reported" in text
+    for copy, line in (
+        ({"file": True, "marker": True, "copied": True, "size_mb": 12.3,
+          "cut_over_age_d": 40.2, "keep_days": 14.0},
+         "present, 12.3 MB, cut over 40.2 d ago, removed after 14 d"),
+        ({"file": True, "marker": True, "copied": False, "size_mb": 0.1,
+          "cut_over_age_d": None, "keep_days": 14.0},
+         "present, 0.1 MB (not copied by a cutover: it stays)"),
+        ({"file": False, "marker": True, "copied": True, "size_mb": None,
+          "cut_over_age_d": 41.0, "keep_days": 14.0, "removed_age_d": 0.1,
+          "removed_mb": 12.3},
+         "removed 0.1 d ago (12.3 MB)"),
+        ({"file": False, "marker": True, "copied": True, "size_mb": None,
+          "cut_over_age_d": 41.0, "keep_days": 14.0},
+         "none (the marker file stays)"),
+        ({"file": False, "marker": False, "copied": False, "size_mb": None,
+          "cut_over_age_d": None, "keep_days": 14.0}, "none"),
+        ({"error": "OperationalError"}, "report failed: OperationalError"),
+    ):
+        text = "\n".join(_ops_inspect().database({**r, "sqlite_copy": copy}))
+        assert head + line in text.split("\n"), (copy, text)
     # without R2 there are none; a listing that fails is a code, not a crash
     monkeypatch.setattr(storage, "r2_available", lambda: False)
     assert pg_backup.report(now)["backups"] == {"r2": False}
@@ -504,7 +534,13 @@ def test_capacity_reports_the_postgres_backups_in_numbers(monkeypatch):
         raise TimeoutError("r2")
 
     monkeypatch.setattr(storage, "backup_list", broken)
-    assert pg_backup.report(now)["backups"]["error"] == "TimeoutError"
+    failed = pg_backup.report(now)
+    assert failed["backups"]["error"] == "TimeoutError"
+    # printed by its class name; anything that is no such name stays "?"
+    text = "\n".join(_ops_inspect().database(failed))
+    assert "  error: TimeoutError" in text.split("\n")
+    assert _ops_inspect().exc("a project name") == "?"
+    assert _ops_inspect().exc("Timeout Error") == "?"
 
 
 def _ops_inspect():

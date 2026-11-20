@@ -27,6 +27,8 @@ import urllib.request
 API = os.environ.get("CLEO_API", "https://api.cleocuts.com").rstrip("/")
 RETRY_WAIT_S = 30
 _CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+# An exception's class name, as the report gives errors (TimeoutError).
+_EXC = re.compile(r"^[A-Z][A-Za-z0-9]{0,63}$")
 # The fields of a refusal that are printed ("who" never is).
 REFUSAL_COLUMNS = ("age_s", "where", "code", "status", "size_gb", "seconds",
                    "free_gb", "reserved_gb", "need_gb", "n_upload",
@@ -44,6 +46,14 @@ def safe(value) -> str:
     if isinstance(value, str) and _CODE.match(value):
         return value
     return "?"
+
+
+def exc(value) -> str:
+    """An error as printed: an exception's class name (TimeoutError), else
+    as safe() prints it."""
+    if isinstance(value, str) and _EXC.match(value):
+        return value
+    return safe(value)
 
 
 def summary(line: str) -> None:
@@ -191,7 +201,7 @@ def database(d) -> list[str]:
     if not isinstance(d, dict):
         return lines + ["  not reported (a backend older than this check)"]
     if d.get("error"):
-        return lines + [f"  report failed: {safe(d.get('error'))}"]
+        return lines + [f"  report failed: {exc(d.get('error'))}"]
     lines.append(f"  database: {safe(d.get('backend'))}")
     b = d.get("backups")
     if not isinstance(b, dict):
@@ -206,8 +216,32 @@ def database(d) -> list[str]:
                      f"{safe(b.get('last_ok_age_h'))} h ago")
         for k in ("error", "state_error"):
             if b.get(k):
-                lines.append(f"  {k}: {safe(b.get(k))}")
+                lines.append(f"  {k}: {exc(b.get(k))}")
+    if d.get("backend") == "postgres":  # on SQLite the file is the database
+        lines.append(sqlite_copy(d.get("sqlite_copy")))
     return lines
+
+
+def sqlite_copy(s) -> str:
+    """The SQLite file the cutover to Postgres left on the volume."""
+    head = "  SQLite file from before the cutover: "
+    if not isinstance(s, dict):
+        return head + "not reported"
+    if s.get("error"):
+        return head + f"report failed: {exc(s.get('error'))}"
+    if s.get("file"):
+        text = f"present, {safe(s.get('size_mb'))} MB"
+        if s.get("copied"):
+            text += (f", cut over {safe(s.get('cut_over_age_d'))} d ago, "
+                     f"removed after {safe(s.get('keep_days'))} d")
+        else:
+            text += " (not copied by a cutover: it stays)"
+        return head + text
+    if s.get("removed_age_d") is not None:
+        return head + (f"removed {safe(s.get('removed_age_d'))} d ago "
+                       f"({safe(s.get('removed_mb'))} MB)")
+    return head + ("none (the marker file stays)" if s.get("marker")
+                   else "none")
 
 
 def main() -> int:

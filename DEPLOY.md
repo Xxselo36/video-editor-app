@@ -481,6 +481,9 @@ CLEO_DB_BOOT_WAIT_S    = optional, Default 180: so lange wartet ein Boot
                          nach dem Umzug auf ein nicht erreichbares Postgres
                          (Retry mit Backoff), bevor er abbricht (8.2)
 CLEO_PG_BACKUP_KEEP_DAYS = optional, Default 14 (Backups in R2, 8.4)
+CLEO_SQLITE_COPY_KEEP_DAYS = optional, Default 14: so lange bleibt die
+                         SQLite-Datei nach dem Umzug liegen, dann löscht
+                         das Backend sie (8.2); "off" = behalten
 ```
 
 Verbindung: Pool (1–`CLEO_DB_POOL_MAX`), 5 s Connect-Timeout,
@@ -535,6 +538,16 @@ Nichts manuell kopieren. Ablauf:
    250 MB); der Healthcheck-Timeout (300 s) reicht.
 4. Die SQLite-Datei wird **nicht** umbenannt oder gelöscht (read-only
    Backup). Daneben entsteht `/data/cleo_jobs.db.migrated-to-postgres`.
+5. **14 Tage nach dem Umzug** (`CLEO_SQLITE_COPY_KEEP_DAYS`) löscht das
+   Backend die SQLite-Datei samt `-wal`/`-shm` (stündliche Prüfung im
+   Retention-Loop). Sie enthält den Stand vom Umzug, also auch Projekte,
+   die seitdem gelöscht wurden; die Datenschutzerklärung nennt nur die
+   Backups in R2 (8.4). Die Marker-Datei bleibt und schützt weiter (siehe
+   "Sicherung gegen Split-Brain"). Gelöscht wird nur eine Datei, deren
+   Daten ein abgeschlossener Umzug kopiert hat — nie die eines Deployments,
+   dessen Postgres leer angefangen hat ("fresh"). Log:
+   `[db] removed the SQLite file from before the cutover to Postgres (…)`;
+   `ops-inspect` zeigt den Stand ("SQLite file from before the cutover").
 
 **Im Log prüfen** (Deployments → Logs):
 
@@ -660,7 +673,9 @@ Postgres …`, Exit 1); der Neustart läuft auf Postgres.
 `/data/cleo_jobs.db` (Log: `[db] !!! WARNING: running on SQLite …`).
 **Nur direkt nach dem Umzug sinnvoll:** alles, was seit dem Umzug in
 Postgres geschrieben wurde (neue Jobs, Abos, Minuten), ist in SQLite
-**nicht** enthalten und wird nicht zurückkopiert. Umgekehrt landet, was
+**nicht** enthalten und wird nicht zurückkopiert. Nach 14 Tagen ist die
+SQLite-Datei gelöscht (8.2, Schritt 5) — danach führt der Weg zurück nur
+über ein Backup (8.4). Umgekehrt landet, was
 während des Rollbacks in SQLite geschrieben wird, beim Zurückschalten
 nicht in Postgres (der Marker ist gesetzt). Für einen zweiten, sauberen
 Umzug: neue leere Postgres-Datenbank, `.migrated-to-postgres`-Datei

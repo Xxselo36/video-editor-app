@@ -854,6 +854,114 @@ def test_sqlite_fallback_stops_when_a_peer_cuts_over(
 # ── import rule ──────────────────────────────────────────────────────
 
 
+DAY = 86400.0
+
+
+def test_sqlite_copy_goes_keep_days_after_the_cutover(isolated, pg_server,
+                                                      tmp_path, monkeypatch,
+                                                      capsys):
+    """The SQLite file keeps the data as of the cutover (projects deleted
+    since included): CLEO_SQLITE_COPY_KEEP_DAYS (14) after it, the hourly
+    loop removes it with its -wal / -shm. The marker file stays, the next
+    boot runs on Postgres as before, and the capacity report names the
+    removal."""
+    path = tmp_path / "cleo_jobs.db"
+    build_sqlite(path, monkeypatch)
+    url = pg_server.fresh()
+    monkeypatch.setenv("DATABASE_URL", url)
+    assert db.startup() == "postgres"
+    marker = Path(db.cutover_marker_path(str(path)))
+    info = marker.read_text()
+    at = datetime_at(json.loads(info)["at"])
+    if not Path(f"{path}-wal").exists():            # whatever SQLite left
+        Path(f"{path}-wal").write_bytes(b"")
+    capsys.readouterr()
+
+    rep = db.sqlite_copy(at + 3600)
+    assert rep["file"] and rep["marker"] and rep["copied"]
+    assert rep["size_mb"] is not None and rep["keep_days"] == 14
+    assert rep["cut_over_age_d"] == 0.0 and "removed_age_d" not in rep
+    assert db.drop_sqlite_copy(at + 13.9 * DAY) is None   # not yet
+    assert path.exists()
+
+    removed = db.drop_sqlite_copy(at + 14 * DAY + 60)
+    assert removed and removed > 10
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        assert not Path(f"{path}{suffix}").exists()
+    assert marker.read_text() == info                 # the marker stays
+    out = capsys.readouterr().out
+    assert "[db] removed the SQLite file from before the cutover" in out
+    assert db.drop_sqlite_copy(at + 15 * DAY) is None     # nothing left
+    rep = db.sqlite_copy(at + 15 * DAY)
+    assert not rep["file"] and rep["marker"] and rep["size_mb"] is None
+    assert rep["removed_age_d"] == 1.0 and rep["removed_mb"] == round(
+        removed / 1e6, 1)
+
+    _reboot()                                         # the next boot
+    assert db.startup() == "postgres"
+    assert jobs._open_store().get("j1").filename == "v1.mp4"
+    assert not path.exists()                          # nothing re-created
+    assert marker.read_text() == info
+
+
+def test_sqlite_copy_stays_without_a_cutover_that_copied_it(
+        isolated, pg_server, tmp_path, monkeypatch):
+    """Only a file whose data a committed cutover copied goes: not on
+    SQLite, not with CLEO_SQLITE_COPY_KEEP_DAYS=off, not behind a pending
+    marker, and not the file of a deployment whose Postgres started empty
+    ("fresh": that file's data is nowhere else)."""
+    late = time.time() + 400 * DAY
+    # SQLite, with a marker as old as can be: never (the rollback switch)
+    path = tmp_path / "cleo_jobs.db"
+    build_sqlite(path, monkeypatch)
+    url = pg_server.fresh()
+    monkeypatch.setenv("DATABASE_URL", url)
+    assert db.startup() == "postgres"
+    monkeypatch.setenv("CLEO_SQLITE_COPY_KEEP_DAYS", "off")
+    assert db.drop_sqlite_copy(late) is None
+    monkeypatch.setenv("CLEO_SQLITE_COPY_KEEP_DAYS", "14")
+    _reboot()
+    monkeypatch.setenv("CLEO_DB_BACKEND", "sqlite")
+    assert db.startup() == "sqlite"
+    assert db.drop_sqlite_copy(late) is None
+    assert db.sqlite_copy(late)["copied"] is True
+    assert path.exists()
+    monkeypatch.delenv("CLEO_DB_BACKEND")
+
+    # a pending marker (a cutover that never committed)
+    _reboot()
+    marker = Path(db.cutover_marker_path(str(path)))
+    good = marker.read_text()
+    marker.write_text(json.dumps({**json.loads(good), "pending": True}))
+    assert db.startup() == "postgres"   # Postgres has the cutover: final again
+    marker.write_text(json.dumps({**json.loads(good), "pending": True}))
+    assert db.drop_sqlite_copy(late) is None
+    assert path.exists()
+
+    # Postgres started empty, the volume turned up later: its file stays
+    _reboot()
+    other = tmp_path / "late.db"
+    monkeypatch.setenv("CLEO_JOB_DB", str(other))
+    monkeypatch.setenv("DATABASE_URL", pg_server.fresh())
+    assert db.startup() == "postgres"                 # fresh
+    sqlite3.connect(str(other)).close()
+    _reboot()
+    assert db.startup() == "postgres"                 # writes a fresh marker
+    state = json.loads(Path(db.cutover_marker_path(str(other))).read_text())
+    assert state["fresh"] is True
+    assert db.drop_sqlite_copy(late) is None
+    assert other.exists()
+    rep = db.sqlite_copy(late)
+    assert rep["file"] and rep["marker"] and not rep["copied"]
+    assert rep["cut_over_age_d"] is None
+
+
+def datetime_at(iso: str) -> float:
+    from datetime import datetime, timezone
+    return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=timezone.utc).timestamp()
+
+
 def test_modules_import_without_psycopg(tmp_path):
     """The desktop app and the Modal image have no psycopg: backend.jobs /
     costs / llm / whisper_groq / pipeline must import (and the SQLite
