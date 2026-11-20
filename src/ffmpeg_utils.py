@@ -174,6 +174,14 @@ _NOT_YCBCR = ("rgb", "bgr", "argb", "abgr", "0rgb", "0bgr", "gbr", "x2rgb",
               "x2bgr", "gray", "ya", "pal", "mono", "bayer", "xyz")
 
 
+# The matrix of an untagged file of our own (a mezz, proxy, render or
+# clip read again): every untagged one we ever wrote is BT.601 - OpenCV
+# writes it so (SmartCam's reframe), MoviePy did (v1 exports, before
+# they were tagged), and what was made from them kept it. Every other
+# encode tags its own.
+OWN_UNTAGGED = "bt601"
+
+
 def untagged_matrix(width: int, height: int) -> str:
     """The matrix a player reads an untagged video with: BT.601 up to SD
     (720x576 either way), BT.709 above - Android's guess, and WebKit's
@@ -229,10 +237,10 @@ def outside_encode(path) -> tuple[str, list[str]]:
 def to_bt709_tv(colors: dict | None, untagged: str | None = None) -> str:
     """The filter chain that turns a video with these properties
     (source_colors) into limited-range BT.709 yuv420p, tagged so. An
-    untagged video's matrix: `untagged` when the caller knows it
-    (SmartCam's OpenCV writes BT.601; "bt709" keeps the values, as
-    ffmpeg 7 did), else - a file from outside: an upload, the desktop
-    app's input - as a player reads it (untagged_matrix).
+    untagged video's matrix: `untagged` when the caller knows it (one
+    of our own files: OWN_UNTAGGED), else - a file from outside: an
+    upload, the desktop app's input - as a player reads it
+    (untagged_matrix).
     Already limited BT.709: no conversion at all. Else vf_colorspace
     (fast: matrix and range only) with the input named explicitly: the
     same pixels on both versions. swscale's range conversion on ffmpeg 9

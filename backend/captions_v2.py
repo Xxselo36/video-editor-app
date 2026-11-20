@@ -735,7 +735,7 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
     the mezz (once, or once per clip, seeked SEEK_PREROLL_S before it);
     the caption layer, if any, is the last input (rawvideo on stdin).
     Output pads: [vout] and [aout]."""
-    from src.ffmpeg_utils import to_bt709_tv
+    from src.ffmpeg_utils import OWN_UNTAGGED, to_bt709_tv
     rate = Fraction(src["rate"])
     fps = float(rate)
     # The mezz to limited-range BT.709 (src/ffmpeg_utils.py), by its
@@ -745,7 +745,7 @@ def build_graph(clips: list[dict], src: dict[str, Any], *,
     # before any fade (fades end on its black). Not probed: left to the
     # encoder's -color_range / -colorspace (_encoder_args).
     colors = src.get("colors")
-    to_tv = [to_bt709_tv(colors, untagged="bt601")] if colors is not None else []
+    to_tv = [to_bt709_tv(colors, untagged=OWN_UNTAGGED)] if colors is not None else []
     # ffmpeg starts every input at t = 0 (no -copyts), so filter times
     # and -ss positions are source times as the analysis measured them.
     seg = needs_segment_inputs(clips, src["cfr"]) if segment_inputs is None else segment_inputs

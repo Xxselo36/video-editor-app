@@ -23,6 +23,7 @@ from backend import errors
 from src.ffmpeg_utils import (
     BT709_TV_ARGS,
     BT709_TV_TAGS,
+    OWN_UNTAGGED,
     get_ffmpeg_path,
     get_ffprobe_path,
     source_colors,
@@ -55,10 +56,11 @@ def _to_tv(path: str) -> str:
     """The filter that makes `path`, one of our own files (mezz, proxy,
     a render), limited-range BT.709 (src/ffmpeg_utils.py): nothing for
     one made since (tagged so), a full-range one (an ffmpeg 9 encode
-    before) converted exactly. An untagged one keeps its values, as
-    ffmpeg 7 kept them (a matrix conversion goes through RGB and would
-    clip its levels below 16 / above 235)."""
-    return to_bt709_tv(source_colors(path), untagged="bt709")
+    before) converted exactly, an untagged one (a SmartCam mezz, a v1
+    export from before) read as the BT.601 it is (OWN_UNTAGGED) and
+    converted. Never an upload: those are read by the normalize, as a
+    player reads them."""
+    return to_bt709_tv(source_colors(path), untagged=OWN_UNTAGGED)
 
 # Per-clip caption burns are only an intermediate (they get re-encoded
 # by the final concat), so encode them fast. Benchmark (90 s 1080x1920,
@@ -1417,7 +1419,7 @@ def _concat_preview(
             # limited BT.709 (as _to_tv) before the fades: they fade to
             # that black
             "-vf", (f"select=concatdec_select,"
-                    f"{to_bt709_tv(colors, untagged='bt709')},"
+                    f"{to_bt709_tv(colors, untagged=OWN_UNTAGGED)},"
                     f"{_preview_fades(segments, effects)}{_PREVIEW_SCALE}"),
             # Every frame at its own time: a constant-rate output would
             # shift each segment by up to a frame and a half against

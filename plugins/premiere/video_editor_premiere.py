@@ -36,6 +36,7 @@ if VIDEO_EDITOR_PATH not in sys.path:
 # (src/ffmpeg_utils.py: ffmpeg 9 kept full-range sources full range).
 from src.ffmpeg_utils import (
     BT709_TV_ARGS,
+    OWN_UNTAGGED,
     TO_BT709_TV,
     outside_encode,
     source_colors,
@@ -3107,7 +3108,7 @@ def _run_smartcam_preprocess(video_path, smartcam_format, resolution_label,
         # OpenCV writes BT.601 (untagged), whatever it read (measured:
         # a BT.709 red patch Y/Cb/Cr 63/102/240 came out 81/90/239):
         # converted to limited BT.709 here, exactly, and tagged so.
-        _sc_tv = to_bt709_tv(source_colors(video_only), untagged="bt601")
+        _sc_tv = to_bt709_tv(source_colors(video_only), untagged=OWN_UNTAGGED)
         mux_cmd = [
             get_ffmpeg_path(), "-y",
             "-fflags", "+genpts",

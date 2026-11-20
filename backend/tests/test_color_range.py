@@ -27,6 +27,9 @@ coded values are exactly those written.
   BT.709 by the normalize, the desktop app and the plugin.
 - The desktop app leaves an HDR (HLG) video as recorded: its tags and
   values.
+- Our own untagged files (OpenCV's, MoviePy's) are read as the BT.601
+  they are wherever they come back; the same file as an upload keeps
+  its values (untagged HD: BT.709).
 """
 from __future__ import annotations
 
@@ -146,8 +149,8 @@ def limited(tmp_path_factory):
     return path
 
 
-# The bars sources: PATCH_RGB side by side, full height, 2 s. HD, so an
-# untagged Y'CbCr video this size is read as BT.709 (untagged_matrix).
+# The bars sources: PATCH_RGB side by side, full height. HD, so an
+# untagged Y'CbCr upload this size is read as BT.709 (untagged_matrix).
 BARS_W, BARS_H = 1280, 720
 # The bars as limited-range BT.709 Y'CbCr: what every encode should write
 BARS_709 = [_ycbcr(rgb, 0.2126, 0.0722, False) for rgb in PATCH_RGB]
@@ -172,13 +175,13 @@ def _bars_yuv(w: int, h: int, kr: float, kb: float, bits: int = 8) -> bytes:
 
 def _bars_video(path: Path, frame: bytes, size: tuple[int, int], pix_fmt: str,
                 codec: list[str]) -> Path:
-    """2 s of the one frame `frame` (rawvideo `pix_fmt`), encoded by
+    """SECONDS of the one frame `frame` (rawvideo `pix_fmt`), encoded by
     `codec`, with a tone."""
     subprocess.run([FF, "-y", "-v", "error",
                     "-f", "rawvideo", "-pix_fmt", pix_fmt, "-s", "x".join(map(str, size)),
                     "-r", str(FPS), "-i", "-",
-                    "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-                    "-vf", f"loop=loop={2 * FPS - 1}:size=1", *codec,
+                    "-f", "lavfi", "-i", f"sine=frequency=440:duration={SECONDS}",
+                    "-vf", f"loop=loop={round(SECONDS * FPS) - 1}:size=1", *codec,
                     "-c:a", "aac", "-shortest", str(path)],
                    input=frame, check=True)
     return path
@@ -216,6 +219,24 @@ def hlg(tmp_path_factory):
     tags = _tags(path)
     assert tags["pix_fmt"] == "yuv420p10le"
     assert {k: tags[k] for k in HLG_TAGS} == HLG_TAGS
+    return path
+
+
+BARS_601 = [_ycbcr(rgb, 0.299, 0.114, False) for rgb in PATCH_RGB]
+
+
+@pytest.fixture(scope="module")
+def legacy(tmp_path_factory):
+    """One of our own untagged files: limited-range BT.601, no colour
+    tags - what OpenCV (SmartCam's reframe) and MoviePy (v1 exports)
+    wrote: an older SmartCam job's mezz. Lossless."""
+    path = _bars_video(tmp_path_factory.mktemp("range") / "legacy.mp4",
+                       _bars_yuv(BARS_W, BARS_H, 0.299, 0.114), (BARS_W, BARS_H), "yuv420p",
+                       ["-c:v", "libx264", "-preset", "ultrafast", "-qp", "0",
+                        "-bsf:v", "h264_metadata=video_full_range_flag=0"])
+    colors = fu.source_colors(path)
+    assert (colors["pix_fmt"], colors["color_range"]) == ("yuv420p", "tv")
+    assert colors["color_space"] in ("", "unknown")
     return path
 
 
@@ -391,6 +412,30 @@ def test_the_desktop_app_leaves_hdr_as_recorded(hlg, tmp_path, kind):
     assert _off(got, HLG_BARS) <= 1, (got, HLG_BARS)
 
 
+@pytest.mark.parametrize("kind", ["proxy", "preview", "effects", "format", "hook",
+                                  "v2_select"])
+def test_our_own_untagged_files_are_read_as_bt601(legacy, tmp_path, kind):
+    """Every untagged file the backend wrote is BT.601 (OWN_UNTAGGED):
+    read so wherever one comes back - an older SmartCam job's proxy
+    (r2_backfill), its edit preview, an export's effects, extra format
+    or hook clip - as its v2 export always read it. Taken for BT.709
+    (its values kept under BT.709 tags) the bars came out up to 17
+    levels off (the green's Y 133 for 150), on ffmpeg 7 and 9."""
+    for out in _render(kind, legacy, tmp_path):
+        assert _tags(out) == TAGS, out.name
+        got = _bar_means(out)
+        assert _off(got, BARS_709) <= 1.5, (out.name, got, BARS_709)
+
+
+def test_an_untagged_hd_upload_still_keeps_its_values(legacy, tmp_path):
+    """The same file as an upload is read as a player reads it: untagged
+    HD as BT.709 (untagged_matrix), its values kept. Only the normalize
+    reads uploads; no _to_tv caller gets one."""
+    for out in _render("normalize", legacy, tmp_path):
+        assert _tags(out) == TAGS, out.name
+        assert _off(_bar_means(out), BARS_601) <= 1, out.name
+
+
 def test_untagged_uploads_are_read_as_players_read_them():
     """Above SD an untagged video counts as BT.709 (WebKit, Android): its
     values kept, as ffmpeg 7 kept them; up to SD (720x576 either way) as
@@ -406,7 +451,8 @@ def test_untagged_uploads_are_read_as_players_read_them():
     assert "iall=bt601-6-625:irange=pc" in fu.to_bt709_tv({**hd, "width": 640,
                                                             "height": 480})
     # our own untagged files (MoviePy's, OpenCV's) are BT.601
-    assert "iall=bt601-6-625" in fu.to_bt709_tv(hd, untagged="bt601")
+    assert fu.OWN_UNTAGGED == "bt601"
+    assert "iall=bt601-6-625" in fu.to_bt709_tv(hd, untagged=fu.OWN_UNTAGGED)
     tagged601 = {**hd, "color_space": "bt470bg"}
     assert "iall=bt601-6-625:irange=pc" in fu.to_bt709_tv(tagged601)
     # limited BT.709 already: nothing converted, only the tags
