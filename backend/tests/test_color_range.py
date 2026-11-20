@@ -17,14 +17,16 @@ coded values are exactly those written.
 
 - A full-range source through every encode (normalize + proxy, the
   SmartCam proxy, v2's select and per-clip paths, the v1 burn, effects,
-  extra format, hook clip, edit preview, centre crop): yuv420p, limited
-  range, BT.709 tags, and the pixels converted (Y = 16 + Y_full * 219 /
-  255 at p1 and p99), not just the tag.
+  extra format, hook clip, edit preview, centre crop, the desktop app's
+  fast editor): yuv420p, limited range, BT.709 tags, and the pixels
+  converted (Y = 16 + Y_full * 219 / 255 at p1 and p99), not just the tag.
 - A limited BT.709 source keeps its levels: Y range and patch colours
   as they came in (the v1 burn used to write them as untagged BT.601).
 - Which matrix an untagged upload is read with (untagged_matrix).
 - An RGB upload (QuickTime Animation, HD, untagged) is converted with
   BT.709 by the normalize, the desktop app and the plugin.
+- The desktop app leaves an HDR (HLG) video as recorded: its tags and
+  values.
 """
 from __future__ import annotations
 
@@ -156,22 +158,64 @@ def _bars_rgb() -> bytes:
     return np.ascontiguousarray(np.broadcast_to(row, (BARS_H, BARS_W, 3))).tobytes()
 
 
+def _bars_yuv(w: int, h: int, kr: float, kb: float, bits: int = 8) -> bytes:
+    """The bars as one limited-range yuv420p frame of matrix kr / kb
+    (10 bits: the 8-bit values x 4)."""
+    pw = w // len(PATCH_RGB)
+    planes = [np.zeros((h, w)), np.zeros((h // 2, w // 2)), np.zeros((h // 2, w // 2))]
+    for k, rgb in enumerate(PATCH_RGB):
+        for plane, value, sub in zip(planes, _ycbcr(rgb, kr, kb, False), (1, 2, 2)):
+            plane[:, k * pw // sub:(k + 1) * pw // sub] = value
+    dt = np.uint16 if bits > 8 else np.uint8
+    return b"".join((p * (1 << (bits - 8))).astype(dt).tobytes() for p in planes)
+
+
+def _bars_video(path: Path, frame: bytes, size: tuple[int, int], pix_fmt: str,
+                codec: list[str]) -> Path:
+    """2 s of the one frame `frame` (rawvideo `pix_fmt`), encoded by
+    `codec`, with a tone."""
+    subprocess.run([FF, "-y", "-v", "error",
+                    "-f", "rawvideo", "-pix_fmt", pix_fmt, "-s", "x".join(map(str, size)),
+                    "-r", str(FPS), "-i", "-",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+                    "-vf", f"loop=loop={2 * FPS - 1}:size=1", *codec,
+                    "-c:a", "aac", "-shortest", str(path)],
+                   input=frame, check=True)
+    return path
+
+
 @pytest.fixture(scope="module")
 def rgb(tmp_path_factory):
     """An RGB upload: QuickTime Animation (qtrle, rgb24: screen
     recordings, motion graphics; PNG, rawvideo and UtVideo are RGB too),
     lossless, no colour tags."""
-    path = tmp_path_factory.mktemp("range") / "rgb.mov"
-    subprocess.run([FF, "-y", "-v", "error",
-                    "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{BARS_W}x{BARS_H}",
-                    "-r", str(FPS), "-i", "-",
-                    "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-                    "-vf", f"loop=loop={2 * FPS - 1}:size=1", "-c:v", "qtrle",
-                    "-c:a", "aac", "-shortest", str(path)],
-                   input=_bars_rgb(), check=True)
+    path = _bars_video(tmp_path_factory.mktemp("range") / "rgb.mov", _bars_rgb(),
+                       (BARS_W, BARS_H), "rgb24", ["-c:v", "qtrle"])
     colors = fu.source_colors(path)
     assert colors["pix_fmt"] == "rgb24"
     assert colors["color_space"] in ("", "unknown") and colors["color_range"] in ("", "unknown")
+    return path
+
+
+# HLG as phones record it: 10-bit, BT.2020, limited range
+HLG_TAGS = {"color_range": "tv", "color_space": "bt2020nc",
+            "color_primaries": "bt2020", "color_transfer": "arib-std-b67"}
+HLG_BARS = [_ycbcr(rgb, 0.2627, 0.0593, False) for rgb in PATCH_RGB]
+
+
+@pytest.fixture(scope="module")
+def hlg(tmp_path_factory):
+    """An HDR upload: 10-bit HLG (an iPhone's, as H.264 here), the bars
+    in BT.2020, lossless, tagged in the bitstream."""
+    vui = ("video_full_range_flag=0:colour_primaries=9:transfer_characteristics=18"
+           ":matrix_coefficients=9")
+    path = _bars_video(tmp_path_factory.mktemp("range") / "hlg.mp4",
+                       _bars_yuv(W, H, 0.2627, 0.0593, bits=10), (W, H), "yuv420p10le",
+                       ["-c:v", "libx264", "-preset", "ultrafast", "-qp", "0",
+                        "-pix_fmt", "yuv420p10le", "-bsf:v", f"h264_metadata={vui}"])
+    tags = _tags(path)
+    assert tags["pix_fmt"] == "yuv420p10le"
+    assert {k: tags[k] for k in HLG_TAGS} == HLG_TAGS
     return path
 
 
@@ -234,10 +278,14 @@ def _render(kind: str, src: Path, d: Path) -> list[Path]:
         out = d / "crop.mp4"
         assert pipeline.centre_crop(str(src), str(out), "portrait")
         return [out]
-    if kind == "desktop":                    # the desktop app's fast editor
+    if kind in ("desktop", "desktop_subtitles"):    # the desktop app's fast editor
+        from src.audio import Subtitle
         from src.fast_editor import FastVideoEditor
         editor = FastVideoEditor(str(src), output_dir=str(d / "desktop"))
-        return [Path(editor.edit_fast(remove_silence=False, add_subtitles=False))]
+        subtitles = kind == "desktop_subtitles"      # burnt in by the final encode
+        if subtitles:
+            editor._subtitles = [Subtitle(1.0, 1.5, "Hi")]
+        return [Path(editor.edit_fast(remove_silence=False, add_subtitles=subtitles))]
     if kind == "plugin":                     # the Premiere plugin's caption burn
         from plugins.premiere import video_editor_premiere as vep
         srt, out = d / "captions.srt", d / "burn.mp4"
@@ -248,7 +296,7 @@ def _render(kind: str, src: Path, d: Path) -> list[Path]:
 
 
 PATHS = ["normalize", "normalize_plain", "proxy", "v2_select", "v2_per_clip", "v1",
-         "effects", "format", "hook", "preview", "centre_crop"]
+         "effects", "format", "hook", "preview", "centre_crop", "desktop"]
 
 
 @pytest.mark.parametrize("kind", PATHS)
@@ -279,7 +327,8 @@ def _patch_means(path: Path) -> list[tuple[float, float, float]]:
     return out
 
 
-@pytest.mark.parametrize("kind", ["normalize", "v2_select", "v2_per_clip", "v1", "preview"])
+@pytest.mark.parametrize("kind", ["normalize", "v2_select", "v2_per_clip", "v1", "preview",
+                                  "desktop_subtitles"])
 def test_a_limited_bt709_source_keeps_its_levels(limited, tmp_path, kind):
     """No range or matrix change for the usual phone video (an iPhone's):
     the ramp's ends and the patches' Y / Cb / Cr as they came in. (The v1
@@ -326,6 +375,20 @@ def test_an_rgb_upload_is_converted_with_bt709(rgb, tmp_path, kind):
         assert _tags(out) == TAGS, out.name
         got = _bar_means(out)
         assert _off(got, BARS_709) <= 1.5, (out.name, got, BARS_709)
+
+
+@pytest.mark.parametrize("kind", ["desktop", "desktop_subtitles"])
+def test_the_desktop_app_leaves_hdr_as_recorded(hlg, tmp_path, kind):
+    """The desktop app doesn't tone-map (the web normalize does): an HDR
+    video keeps its own tags and values through the segment cuts and the
+    final encode alike (src/ffmpeg_utils.outside_encode). The final
+    encode made it SDR BT.709 - so tagged, the matrix converted, no tone
+    mapping: the red bar's Y 83 for 91, on ffmpeg 7 and 9."""
+    out, = _render(kind, hlg, tmp_path)
+    tags = _tags(out)
+    assert {k: tags[k] for k in HLG_TAGS} == HLG_TAGS, tags
+    got = _bar_means(out)
+    assert _off(got, HLG_BARS) <= 1, (got, HLG_BARS)
 
 
 def test_untagged_uploads_are_read_as_players_read_them():

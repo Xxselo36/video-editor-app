@@ -820,6 +820,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             all_filters.append(rotation_filter)
         all_filters.extend(drawtext_filters)
 
+        # The segments' colours kept, read by their own tags as the
+        # segment encodes read the input: limited-range BT.709, an HDR
+        # source still tagged as recorded (src/ffmpeg_utils.outside_encode)
+        to_tv, tv_args = outside_encode(concat_output)
+
         # Frame-genaues Rendering mit FFmpeg + ASS-Untertitel
         if subtitles:
             # ASS-Datei erstellen
@@ -834,10 +839,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             cmd = [
                 get_ffmpeg_path(), '-y',
                 '-i', concat_output,
-                '-vf', f"{TO_BT709_TV},ass='{ass_path_escaped}'",
+                '-vf', f"{to_tv},ass='{ass_path_escaped}'",
                 '-c:v', get_video_codec(),
                 '-b:v', '8M',
-                ] + get_codec_params() + BT709_TV_ARGS + [
+                ] + get_codec_params() + tv_args + [
                 '-c:a', 'aac', '-b:a', '192k',
                 str(out_path)
             ]
@@ -850,10 +855,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             cmd = [
                 get_ffmpeg_path(), '-y',
                 '-i', concat_output,
-                '-vf', TO_BT709_TV,
+                '-vf', to_tv,
                 '-c:v', get_video_codec(),
                 '-b:v', '8M',
-                ] + get_codec_params() + BT709_TV_ARGS + [
+                ] + get_codec_params() + tv_args + [
                 '-c:a', 'aac', '-b:a', '192k',
                 str(out_path)
             ]
